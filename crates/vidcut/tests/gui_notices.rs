@@ -1,6 +1,3 @@
-//! The status bar's notices go away (egui_kittest, no window): an error
-//! fades by itself, and its × dismisses it at once.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -28,13 +25,10 @@ impl live::Renderer for NoRenderer {
     fn quit(&self) {}
 }
 
-/// Whether a notice shows: each has its ×.
 fn shown(harness: &Harness<'_, Workspace>) -> bool {
     harness.query_by_label("Dismiss").is_some()
 }
 
-/// Opens `file` from the GUI, as File > Open Project does, and steps until
-/// its error shows.
 fn open_broken(h: &live::Handle, harness: &mut Harness<'_, Workspace>, file: &std::path::Path) {
     let open = json!({ "method": "project.open", "params": { "path": file } });
     h.send(Envelope::from_json(open).unwrap());
@@ -74,7 +68,6 @@ fn an_error_notice_fades_and_its_cross_dismisses_it() {
         notify: Arc::new(|| {}),
         socket: None,
     });
-    // Each step is a quarter of a second on the GUI's clock.
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1200.0, 800.0))
         .with_step_dt(0.25)
@@ -84,12 +77,10 @@ fn an_error_notice_fades_and_its_cross_dismisses_it() {
         );
     harness.step();
     open_broken(&h, &mut harness, &broken);
-    // 15 seconds on: still there.
     for _ in 0..60 {
         harness.step();
     }
     assert!(shown(&harness), "gone after 15 s");
-    // 25 seconds on: gone.
     for _ in 0..40 {
         harness.step();
     }

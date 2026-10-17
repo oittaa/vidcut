@@ -1,14 +1,3 @@
-//! The audio thread: the plan's lanes mixed, with their faders, into the
-//! ring a tenth of a second ahead of the device, each run of samples marked
-//! with where it is on the timeline.
-//!
-//! Backward the sound plays reversed: the mix is read forward a block at a
-//! time, from further and further back, and each block reversed. At other
-//! speeds, either way, it goes through [`Stretch`], which keeps the pitch
-//! and says where each of its blocks came from: each is marked as it is
-//! queued, so the clock follows what is heard at every speed. Paused,
-//! steps play their frame's sound ([`super::scrub`]).
-
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,54 +11,31 @@ use crate::export::DECLICK_MS;
 use crate::export::audio::AudioMix;
 use crate::stretch::Stretch;
 
-/// Sound kept queued ahead of the device.
 const AHEAD_SECS: f64 = 0.1;
 
-/// Sound mixed at a time.
 const CHUNK_SECS: f64 = 0.01;
 
-/// Room in the ring a chunk needs, with blocks the stretch gives at once.
 const MIN_ROOM_SECS: f64 = 0.1;
 
-/// Sound read at a time going backward, in seconds of play: each block
-/// costs a seek of every lane's stream.
 const BLOCK_SECS: f64 = 0.2;
 
-/// Sound ready to queue: samples, and where they are as stream positions
-/// (frames from the run's start, in the direction of play) when they need
-/// a mark of their own.
 struct Piece {
     samples: Vec<f32>,
-    /// Stream position of the first sample, and stream frames per sample.
     mark: Option<(f64, f64)>,
-    /// Each lane's peaks in the sound these samples are, `channels` a lane,
-    /// for the meters ([`super::Levels`]).
     lanes: Vec<f32>,
 }
 
-/// What is being played.
 struct Run {
     epoch: u64,
     speed: f64,
-    /// The timeline sample at stream position 0: where the run (or its
-    /// restart after an edit) began.
     origin: i64,
-    /// The next timeline sample to mix; backward, the next to play, the mix
-    /// read up to it.
     cursor: i64,
-    /// Other speeds than ±1.
     stretch: Option<Stretch>,
     pending: VecDeque<Piece>,
-    /// All of the run was mixed (and the stretch emptied).
     exhausted: bool,
-    /// The end (or the start, backward) was reached and marked.
     ended: bool,
-    /// When the thread took the play request, and whether any of its sound
-    /// is queued yet, for `VIDCUT_DEBUG`.
     taken: std::time::Instant,
     queued: bool,
-    /// Each lane's peaks in the sound mixed lately, by the stream positions
-    /// it covers (from, to), for the stretch's blocks.
     metered: VecDeque<(f64, f64, Vec<f32>)>,
 }
 
@@ -87,7 +53,6 @@ struct Producer {
     run: Option<Run>,
     trims_gen: Option<u64>,
     muted: bool,
-    /// Paused: the frame's sound waiting for the one playing.
     waiting: Waiting,
 }
 
@@ -108,7 +73,6 @@ pub(crate) fn run(shared: Arc<Shared>) {
     };
     while let Some(snap) = p.shared.audio_snap() {
         p.sync(&snap);
-        // A frame's sound waiting: look again as the one playing ends.
         let wait = if p.waiting.is_some() {
             Duration::from_millis(1)
         } else {
@@ -126,11 +90,8 @@ pub(crate) fn run(shared: Arc<Shared>) {
 }
 
 impl Producer {
-    /// Follows what is wanted: a new plan, a play, a pause, faders.
     fn sync(&mut self, snap: &AudioSnap) {
         if snap.plan_gen != self.plan_gen {
-            // The sound goes on from where the device reads now, in the
-            // new plan.
             let at = match &self.run {
                 Some(r) => self.read_sample(r.epoch).unwrap_or(r.cursor),
                 None => 0,
@@ -164,7 +125,6 @@ impl Producer {
             self.muted = snap.muted;
             self.trims_gen = Some(snap.trims_gen);
         }
-        // A step or a paused seek: its frame's sound, unless muted.
         match snap.scrub {
             None => self.waiting.clear(),
             Some((t, n)) if self.waiting.served != Some(n) => {
@@ -180,14 +140,12 @@ impl Producer {
         }
     }
 
-    /// The timeline sample the device reads next in play request `epoch`.
     fn read_sample(&self, epoch: u64) -> Option<i64> {
         let counter = self.shared.ring.read_position();
         let s = self.shared.markers.sample_at(counter, epoch)?;
         Some((s.round() as i64).clamp(0, self.plan.samples))
     }
 
-    /// Starts play request `epoch` from sample `from`.
     fn start(&mut self, from: i64, speed: f64, epoch: u64) {
         crate::debug!(
             "audio",
@@ -209,14 +167,12 @@ impl Producer {
         self.restart(from);
     }
 
-    /// Mixes the current run from sample `at` on, dropping what was queued.
     fn restart(&mut self, at: i64) {
         let Some(run) = self.run.as_mut() else {
             return;
         };
         let ring = &self.shared.ring;
         ring.discard_all();
-        // What was queued won't be heard: neither are its levels.
         self.shared.forget_levels();
         if run.speed > 0.0 {
             self.mix.seek(at);
@@ -234,8 +190,6 @@ impl Producer {
                 usize::from(self.plan.plan.channels),
             )
         });
-        // At ±1 a stream frame is a timeline sample: one mark does. The
-        // stretch marks each of its blocks.
         if run.stretch.is_none() {
             self.shared.markers.push(Marker {
                 counter: ring.written(),
@@ -246,22 +200,16 @@ impl Producer {
         }
     }
 
-    /// Queues the next sound when the device's queue is short; whether
-    /// there was any.
     fn produce(&mut self) -> Result<bool> {
         let ring = self.shared.ring.clone();
         let rate = self.plan.rate();
         let Some(run) = self.run.as_mut() else {
             return Ok(self.waiting.offer(&ring, rate));
         };
-        // Room for what comes, however much the stretch gives at once: a
-        // device that stopped pulling leaves none, and the thread waits for
-        // it rather than for room.
         let short = ring.queued() as f64 >= AHEAD_SECS * f64::from(rate);
         if run.ended || short || (ring.room() as f64) < MIN_ROOM_SECS * f64::from(rate) {
             return Ok(false);
         }
-        // The stretch gives nothing until it holds a fragment's worth.
         let mut failed = None;
         while self
             .run
@@ -276,7 +224,6 @@ impl Producer {
             return Ok(false);
         };
         let Some(mut piece) = run.pending.pop_front() else {
-            // Nothing more: the end (or the start) heard last.
             let edge = if run.speed > 0.0 {
                 self.plan.samples
             } else {
@@ -301,7 +248,6 @@ impl Producer {
                 epoch: run.epoch,
             });
         } else {
-            // Unmarked sound goes a chunk at a time.
             let chunk = (CHUNK_SECS * f64::from(rate)).round() as usize * channels;
             if piece.samples.len() > chunk {
                 let rest = piece.samples.split_off(chunk);
@@ -312,8 +258,6 @@ impl Producer {
                 });
             }
         }
-        // The mix's meter shows the mix: the monitoring mute silences what
-        // is heard, and the GUI the viewer's meter (spec D28).
         let mut mix = vec![0.0f32; channels];
         for frame in piece.samples.chunks(channels) {
             for (m, s) in mix.iter_mut().zip(frame) {
@@ -347,12 +291,6 @@ impl Producer {
         }
     }
 
-    /// Mixes more of the run into pieces: forward the next chunk, backward
-    /// the next block reversed, through the stretch at other speeds; at the
-    /// end what the stretch still holds. Each piece has its lanes' peaks:
-    /// the mix is read a chunk at a time, backward too, and the stretch's
-    /// blocks take those of the sound they came from. A broken file is
-    /// silent, the clock going on, and its error is given back.
     fn refill(&mut self) -> Option<crate::error::Error> {
         let rate = f64::from(self.plan.rate());
         let total = self.plan.samples;
@@ -360,8 +298,6 @@ impl Producer {
         let channels = usize::from(self.mix.channels()).max(1);
         let chunk = ((CHUNK_SECS * rate).round() as usize).max(1);
         let mut failed = None;
-        // `n` samples on from where the mix stands, a chunk at a time, each
-        // with its lanes' peaks.
         let mut read = |mix: &mut AudioMix, n: usize| -> Vec<(Vec<f32>, Vec<f32>)> {
             (0..n)
                 .step_by(chunk)
@@ -374,8 +310,6 @@ impl Producer {
                 })
                 .collect()
         };
-        // The chunks in the order they play, each with the stream position
-        // of its first sample.
         let mut parts = Vec::new();
         if run.speed > 0.0 {
             let n = ((CHUNK_SECS * rate * run.speed).round() as i64)
@@ -391,9 +325,6 @@ impl Producer {
                 run.cursor += n;
             }
         } else if run.cursor >= 0 {
-            // Samples `lo..=cursor`, read forward, each chunk reversed and
-            // the last played first. Sample `lo` plays at stream position
-            // `origin - lo`, the last of the block.
             let n = ((BLOCK_SECS * rate * run.speed.abs()).round() as i64).max(1);
             let lo = (run.cursor + 1 - n).max(0);
             self.mix.seek(lo);
@@ -429,7 +360,6 @@ impl Producer {
                 for b in blocks {
                     let to = b.at + (b.samples.len() / channels) as f64 * b.rate;
                     let lanes = peaks_over(&run.metered, b.at, to);
-                    // What lies wholly before this block isn't needed again.
                     while run.metered.front().is_some_and(|m| m.1 <= b.at) {
                         run.metered.pop_front();
                     }
@@ -448,8 +378,6 @@ impl Producer {
     }
 }
 
-/// Each lane's peaks over the sound at stream positions `from..to`: the
-/// highest of the chunks `metered` holds that overlap it.
 fn peaks_over(metered: &VecDeque<(f64, f64, Vec<f32>)>, from: f64, to: f64) -> Vec<f32> {
     let mut out: Vec<f32> = Vec::new();
     for (a, b, peaks) in metered {
@@ -465,8 +393,6 @@ fn peaks_over(metered: &VecDeque<(f64, f64, Vec<f32>)>, from: f64, to: f64) -> V
     out
 }
 
-/// Reverses interleaved samples a sample frame at a time: the channels of
-/// each frame stay in their order.
 fn reverse(samples: &mut [f32], channels: usize) {
     let frames = samples.len() / channels.max(1);
     for i in 0..frames / 2 {

@@ -1,16 +1,3 @@
-//! The `vidcut` command line, generated from the protocol: every request
-//! method `group.verb` is the command `vidcut group verb`, and every
-//! parameter is the flag of its name (`--volume-db` for `volume_db`), so the
-//! command line, JSON-RPC, MCP and the docs name everything alike. Each
-//! command builds one [`Request`]; nothing here edits projects directly.
-//!
-//! The rules: dots become spaces and underscores hyphens (`edit.place_on_top`
-//! is `vidcut edit place-on-top`). A true/false parameter that defaults to
-//! false is a bare flag (`--lift`); one that may be left unset takes a value
-//! (`--locked true`). Lists take commas or repeated flags. Objects take JSON,
-//! inline, as `@FILE` or as `-` (stdin). A command's main object (ids, files,
-//! the time to seek to) may be given without its flag: [`POSITIONAL`].
-
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -19,7 +6,6 @@ use clap::{Arg, ArgAction, ArgMatches, Command};
 use serde_json::{Map, Value, json};
 use vidcut_core::{Envelope, Error, Request, Result};
 
-/// Parameters given in order without their flags, per method.
 pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("probe", &["path"]),
     ("schema", &["method"]),
@@ -94,7 +80,6 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("gui.trim_editor", &["at"]),
 ];
 
-/// What the command groups are for, in `--help`.
 const GROUPS: &[(&str, &str)] = &[
     (
         "analyze",
@@ -148,7 +133,6 @@ const GROUPS: &[(&str, &str)] = &[
     ("viewer", "What the viewer shows (running GUI)"),
 ];
 
-/// Examples shown under a command's `--help`.
 const EXAMPLES: &[(&str, &str)] = &[
     (
         "",
@@ -265,37 +249,27 @@ const EXAMPLES: &[(&str, &str)] = &[
     ("mcp", "claude mcp add vidcut -- vidcut mcp -p talk.vidcut"),
 ];
 
-/// How a parameter is given on the command line.
 #[derive(Debug, Clone, PartialEq)]
 enum Kind {
-    /// A true/false parameter that defaults to false: present means true.
     Flag,
-    /// A true/false value.
     Bool,
     Int,
     Float,
-    /// A string: names, times (`10s`), ranges (`1m..2m`), rates.
     Text,
-    /// One of these values.
     Choice(Vec<String>),
-    /// Several, comma-separated or repeated.
     List(Box<Kind>),
-    /// JSON: inline, `@FILE` or `-` for stdin.
     Json,
 }
 
-/// One parameter of a method.
 #[derive(Debug, Clone)]
 struct Param {
     name: String,
     kind: Kind,
     required: bool,
     help: String,
-    /// Its place among the positional arguments, if it has one.
     position: Option<usize>,
 }
 
-/// One request method: its name, what it does, and its parameters.
 #[derive(Debug, Clone)]
 struct Method {
     name: String,
@@ -303,10 +277,8 @@ struct Method {
     params: Vec<Param>,
 }
 
-/// Methods with arguments of their own instead of their parameters.
 const CUSTOM: &[&str] = &["apply", "preferences.set"];
 
-/// The protocol's methods, read from its schema once.
 fn methods() -> &'static [Method] {
     static METHODS: OnceLock<Vec<Method>> = OnceLock::new();
     METHODS.get_or_init(|| {
@@ -364,7 +336,6 @@ fn method(name: &str) -> Option<&'static Method> {
     methods().iter().find(|m| m.name == name)
 }
 
-/// `schema` with references to definitions followed.
 fn resolve(schema: &Value, defs: &Map<String, Value>) -> Value {
     let mut s = schema.clone();
     for _ in 0..8 {
@@ -376,7 +347,6 @@ fn resolve(schema: &Value, defs: &Map<String, Value>) -> Value {
     s
 }
 
-/// `schema` without its "or null".
 fn not_null(schema: &Value) -> Value {
     if let Some(types) = schema["type"].as_array() {
         let rest: Vec<&Value> = types.iter().filter(|t| *t != "null").collect();
@@ -404,7 +374,6 @@ fn nullable(schema: &Value) -> bool {
             .is_some_and(|a| a.iter().any(|a| a["type"] == "null"))
 }
 
-/// How the parameter `schema` is given on the command line.
 fn kind(schema: &Value, defs: &Map<String, Value>) -> Kind {
     let may_be_unset = nullable(schema) || schema.get("default") == Some(&Value::Null);
     let s = resolve(&not_null(schema), defs);
@@ -431,8 +400,6 @@ fn kind(schema: &Value, defs: &Map<String, Value>) -> Kind {
             if let Some(c) = choices(&s) {
                 return Kind::Choice(c);
             }
-            // One of several shapes: a time (frames or a string) is text; one
-            // or many of something is a list of it.
             let alts: Vec<Value> = s["anyOf"]
                 .as_array()
                 .or_else(|| s["oneOf"].as_array())
@@ -458,7 +425,6 @@ fn kind(schema: &Value, defs: &Map<String, Value>) -> Kind {
     }
 }
 
-/// The values a string enum allows, however the schema spells them.
 fn choices(s: &Value) -> Option<Vec<String>> {
     if let Some(e) = s["enum"].as_array() {
         return Some(
@@ -480,8 +446,6 @@ fn choices(s: &Value) -> Option<Vec<String>> {
     Some(out)
 }
 
-/// A parameter's help: its description, and its default when it says
-/// something.
 fn help(schema: &Value) -> String {
     let mut h = schema["description"]
         .as_str()
@@ -501,7 +465,6 @@ fn cli_name(s: &str) -> String {
     s.replace('_', "-")
 }
 
-/// The command line: every method, plus the commands that aren't requests.
 pub fn command() -> Command {
     let mut root = Command::new("vidcut")
         .version(format!(
@@ -573,7 +536,6 @@ pub fn command() -> Command {
                 .value_name("PID|SOCKET")
                 .help("Send to this running GUI instead of choosing one"),
         );
-    // Methods by their first name part, then the rest.
     let mut groups: Vec<(String, Vec<&Method>)> = Vec::new();
     for m in methods() {
         let first = m.name.split('.').next().unwrap_or_default().to_string();
@@ -586,7 +548,6 @@ pub fn command() -> Command {
     for (group, list) in groups {
         root = root.subcommand(subtree(&group, &list, 1));
     }
-    // The commands that aren't requests.
     root.subcommand(
         Command::new("instances")
             .about("List running GUIs (commands for their projects go to them)"),
@@ -610,11 +571,8 @@ pub fn command() -> Command {
     )
 }
 
-/// The command for the methods in `list` that share their first `depth`
-/// name parts, `prefix`.
 fn subtree(prefix: &str, list: &[&Method], depth: usize) -> Command {
     let last = prefix.rsplit('.').next().unwrap_or(prefix);
-    // The method named exactly `prefix` (a method without more parts).
     if let [m] = list
         && m.name == prefix
     {
@@ -648,7 +606,6 @@ fn subtree(prefix: &str, list: &[&Method], depth: usize) -> Command {
     cmd
 }
 
-/// The command for one method.
 fn leaf(name: &str, m: &Method) -> Command {
     let first = m
         .description
@@ -690,7 +647,6 @@ fn leaf(name: &str, m: &Method) -> Command {
     cmd
 }
 
-/// The argument for `p`; `followed` when a positional comes after it.
 fn arg(p: &Param, followed: bool) -> Arg {
     let mut a = Arg::new(p.name.clone()).help(p.help.clone());
     a = match p.position {
@@ -701,8 +657,6 @@ fn arg(p: &Param, followed: bool) -> Arg {
     if p.required && p.kind != Kind::Flag {
         a = a.required(true);
     }
-    // A single value may start with `-` (`--by -12f`, `seek -2s`); a list
-    // may not, or it would take the flags after it as values.
     let one = |a: Arg, k: &Kind, hyphen: bool| match k {
         Kind::Int => a
             .value_parser(clap::value_parser!(i64))
@@ -718,8 +672,6 @@ fn arg(p: &Param, followed: bool) -> Arg {
         Kind::Bool => a
             .value_parser(clap::value_parser!(bool))
             .value_name("true|false"),
-        // A list with a positional after it takes one value (`m1,m2`), so
-        // the next value is that positional's.
         Kind::List(item) if followed && p.position.is_some() => one(a, item, false)
             .value_delimiter(',')
             .action(ArgAction::Set),
@@ -736,19 +688,13 @@ fn examples(method: &str) -> Option<&'static str> {
     EXAMPLES.iter().find(|(m, _)| *m == method).map(|(_, e)| *e)
 }
 
-/// What `main` should do for a parsed command line.
 pub enum Action {
-    /// Serve MCP on stdin/stdout.
     Mcp,
-    /// Run one request.
     Run(Box<Envelope>),
-    /// Start the GUI.
     Gui { project: Option<PathBuf> },
-    /// List running GUIs.
     Instances,
 }
 
-/// A parsed command line.
 pub struct Cli {
     pub project: Option<PathBuf>,
     pub json: bool,
@@ -756,17 +702,14 @@ pub struct Cli {
     pub if_rev: Option<u64>,
     pub headless: bool,
     pub instance: Option<String>,
-    /// The command's names (`["edit", "split"]`) and its own arguments.
     chosen: Option<(Vec<String>, ArgMatches)>,
 }
 
 impl Cli {
-    /// Parses the process's arguments; usage errors exit like clap's.
     pub fn parse() -> Self {
         Self::from_matches(command().get_matches())
     }
 
-    /// Parses `args` (the program name first).
     pub fn try_parse_from<I, T>(args: I) -> std::result::Result<Self, clap::Error>
     where
         I: IntoIterator<Item = T>,
@@ -793,7 +736,6 @@ impl Cli {
         }
     }
 
-    /// Turns the command line into an action: without a command, the GUI.
     pub fn action(&self) -> Result<Option<Action>> {
         let Some((names, m)) = &self.chosen else {
             return Ok(None);
@@ -855,8 +797,6 @@ impl Cli {
         Ok(Some(Action::Run(Box::new(self.envelope(request)?))))
     }
 
-    /// `request` with the global options, its paths made absolute: a running
-    /// GUI may answer from another directory.
     fn envelope(&self, mut request: Request) -> Result<Envelope> {
         for p in request.paths_mut() {
             *p = std::path::absolute(&*p)
@@ -870,7 +810,6 @@ impl Cli {
     }
 }
 
-/// The JSON value of parameter `p` as given, if it was.
 fn value(m: &ArgMatches, p: &Param) -> Result<Option<Value>> {
     let id = p.name.as_str();
     Ok(match &p.kind {
@@ -897,9 +836,6 @@ fn value(m: &ArgMatches, p: &Param) -> Result<Option<Value>> {
     })
 }
 
-/// The command line that sends `method` with `params`, by the same rules
-/// the parser follows: for showing a request as a command (the Export
-/// dialog). `None` for a method without its own arguments.
 pub fn command_line(project: &std::path::Path, method: &str, params: &Value) -> Option<String> {
     if CUSTOM.contains(&method) {
         return None;
@@ -939,7 +875,6 @@ pub fn command_line(project: &std::path::Path, method: &str, params: &Value) -> 
     shlex::try_join(words.iter().map(String::as_str)).ok()
 }
 
-/// A JSON argument given inline, as `@FILE`, or as `-` (stdin).
 fn read_json_arg(arg: &str) -> Result<Value> {
     let text = if arg == "-" {
         let mut s = String::new();
@@ -955,7 +890,6 @@ fn read_json_arg(arg: &str) -> Result<Value> {
     serde_json::from_str(&text).map_err(|e| Error::usage(format!("not JSON: {e}")))
 }
 
-/// Reads requests for `vidcut apply`: JSON Lines or one JSON array.
 fn read_batch(file: &str) -> Result<Vec<Request>> {
     let text = if file == "-" {
         let mut s = String::new();

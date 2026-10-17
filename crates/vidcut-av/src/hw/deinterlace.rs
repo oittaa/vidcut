@@ -1,41 +1,19 @@
-//! FFmpeg's GPU deinterlacers, `bwdif_cuda` for NVDEC's frames and
-//! `bwdif_vulkan` for Vulkan's, trusted with a stream only where they give
-//! `bwdif`'s frames, as a GPU scaler is once it gives a test picture back at
-//! its levels (`vulkan_scale`). The first frame of a layout that would go
-//! through one starts a check: three small interlaced frames, in each field
-//! order, go through it and through `bwdif` on the CPU, and every row of
-//! every component that comes out is compared. The GPU's samples must be
-//! within a level of 8 bits of the CPU's, and none above the bits its
-//! component holds. The verdict holds for the process. Where it fails,
-//! frames of that layout come down to be deinterlaced by `bwdif`.
-
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 use std::time::Instant;
 
 use super::*;
 
-/// The test frames' size: their blocks' rows at the top and bottom edges,
-/// and a few samples across, chroma's too.
 const SIZE: (u32, u32) = (128, 64);
 
-/// The test frames' black, and their blocks' color (8-bit levels: Y, Cb,
-/// Cr): white, with chroma at its ends.
 const BLACK: [u16; 3] = [16, 128, 128];
 const BLOCK: [u16; 3] = [235, 240, 16];
 
-/// Each GPU deinterlacer's verdict on each layout: whether it gives
-/// `bwdif`'s frames.
 static VERDICTS: Mutex<Vec<(&str, format::Pixel, bool)>> = Mutex::new(Vec::new());
 
-/// Whether the GPU's deinterlacer for `f` (`bwdif_cuda` for a CUDA frame,
-/// `bwdif_vulkan` for a Vulkan one) gives `bwdif`'s frames of its layout:
-/// checked the first time, the verdict kept.
 pub(crate) fn gives_bwdifs(f: &frame::Video) -> bool {
     let filter = crate::decode::deinterlacer(f.format());
     let layout = sw_format(f);
-    // Held while checking: a reader that asks meanwhile waits for the
-    // verdict.
     let mut verdicts = VERDICTS.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(&(.., given)) = verdicts.iter().find(|v| (v.0, v.1) == (filter, layout)) {
         return given;
@@ -73,10 +51,6 @@ pub(crate) fn gives_bwdifs(f: &frame::Video) -> bool {
     given
 }
 
-/// The rows of each component (Y, Cb, Cr, alpha) where `f`'s GPU
-/// deinterlacer doesn't give `bwdif`'s frames of the test frames
-/// ([`test_frame`]) in `f`'s layout, each field order, uploaded into frames
-/// like `f`'s ([`frames_like`]): none where it does.
 fn off(f: &frame::Video) -> Result<Vec<BTreeSet<usize>>> {
     let (frames, _) = frames_of(f)?;
     let layout = sw_format(f);
@@ -127,16 +101,8 @@ fn off(f: &frame::Video) -> Result<Vec<BTreeSet<usize>>> {
     Ok(off)
 }
 
-/// Frames of `size` like those of `frames`: on its device, in its layout,
-/// and on Vulkan in images of the same formats, tiling and uses. A filter
-/// reads them as it reads the stream's, nothing past their edges, and
-/// writes into frames like them as it does for the stream.
-///
-/// # Safety
-/// `frames` is a live frames context.
 unsafe fn frames_like(frames: *mut ffi::AVBufferRef, (w, h): (u32, u32)) -> Result<Frames> {
-    // SAFETY: as the caller says; a new frames context on its device, set
-    // up before it starts.
+    // SAFETY: `frames` is live; `like`, made on its device, has a `hwctx` of the same kind.
     unsafe {
         let from = &*((*frames).data as *const ffi::AVHWFramesContext);
         let mut like = ffi::av_hwframe_ctx_alloc(from.device_ref);
@@ -170,12 +136,9 @@ unsafe fn frames_like(frames: *mut ffi::AVBufferRef, (w, h): (u32, u32)) -> Resu
     }
 }
 
-/// `picture` uploaded into a frame of `frames`, with its timestamp and
-/// fields.
 fn upload(frames: &Frames, picture: &frame::Video) -> Result<frame::Video> {
     let mut f = frame::Video::empty();
-    // SAFETY: a frame of the frames' own pool, the picture's size and
-    // layout, uploaded into.
+    // SAFETY: `f` takes a buffer of `frames`' pool, which is the picture's size and layout.
     unsafe {
         let ret = ffi::av_hwframe_get_buffer(frames.0, f.as_mut_ptr(), 0);
         if ret < 0 {
@@ -196,7 +159,6 @@ fn upload(frames: &Frames, picture: &frame::Video) -> Result<frame::Video> {
     Ok(f)
 }
 
-/// `frames` through `graph`, then the end: the frames it gives.
 fn through(mut graph: GpuGraph, frames: Vec<frame::Video>) -> Result<Vec<frame::Video>> {
     let failed = |source| Error::Ffmpeg {
         context: "deinterlacing a test frame".into(),
@@ -223,21 +185,13 @@ fn through(mut graph: GpuGraph, frames: Vec<frame::Video>) -> Result<Vec<frame::
     }
 }
 
-/// Test frame `k` of three in `layout`, its fields in the order `top_first`
-/// says: black, with a block of [`BLOCK`] in the top quarter moving right
-/// and one in the bottom quarter moving left, 12 pixels each field. Along
-/// their edges, at the picture's top and bottom and inside it, `bwdif` takes
-/// its spatial path, as along the interlaced fixture's moving block. `None`
-/// for a layout test pictures don't come in.
 fn test_frame(layout: format::Pixel, k: usize, top_first: bool) -> Option<frame::Video> {
     let desc = described(layout)?;
     let mut f = blank(layout, SIZE);
     for c in 0..i32::from(desc.nb_components) {
         let (w, h) = component_size(desc, c, SIZE);
         for y in 0..h {
-            // The time of the row's field: frame k's first or second.
             let t = 2 * k + usize::from((y % 2 == 1) == top_first);
-            // Where the row and its samples are in luma's.
             let row = y * SIZE.1 as usize / h;
             let line: Vec<u16> = (0..w)
                 .map(|x| {
@@ -262,11 +216,6 @@ fn test_frame(layout: format::Pixel, k: usize, top_first: bool) -> Option<frame:
     Some(f)
 }
 
-/// The rows of `gpu`, a GPU deinterlacer's frame, that aren't `cpu`'s,
-/// `bwdif`'s of the same frame, as (component, row): those with a sample
-/// more than a level of 8 bits from the CPU's, or above the bits its
-/// component holds. Components are compared whatever the layouts, NV12's
-/// chroma with planar chroma. `None` where the two can't be compared.
 fn rows_off(cpu: &frame::Video, gpu: &frame::Video) -> Option<Vec<(usize, usize)>> {
     let little = |f: &frame::Video| {
         described(f.format()).filter(|d| d.flags & ffi::AV_PIX_FMT_FLAG_BE as u64 == 0)
@@ -298,9 +247,6 @@ fn rows_off(cpu: &frame::Video, gpu: &frame::Video) -> Option<Vec<(usize, usize)
     Some(off)
 }
 
-/// The first `w` samples of row `y` of component `c` of `f`, a picture in
-/// `desc`'s layout, little-endian: each its bits shifted down, not cut to
-/// them.
 fn samples(
     f: &frame::Video,
     desc: &ffi::AVPixFmtDescriptor,
@@ -325,7 +271,6 @@ fn samples(
         .collect()
 }
 
-/// The rows `off` names, as ranges: `Y rows 0-1, 62-63; Cb rows 0, 31`.
 fn rows(off: &[BTreeSet<usize>]) -> String {
     let names = ["Y", "Cb", "Cr", "alpha"];
     let mut parts = Vec::new();
@@ -376,7 +321,6 @@ mod tests {
     fn an_edge_row_a_level_off_is_bwdifs() {
         let cpu = test_frame(format::Pixel::NV12, 0, true).unwrap();
         let mut gpu = cpu.clone();
-        // Luma in the bottom row, in the block (235), a level up.
         let stride = gpu.stride(0);
         gpu.data_mut(0)[63 * stride + 100] = 236;
         assert_eq!(rows_off(&cpu, &gpu), Some(vec![]));
@@ -395,8 +339,6 @@ mod tests {
     fn a_sample_above_the_bits_isnt_bwdifs() {
         let mut cpu = test_frame(format::Pixel::YUV422P10LE, 0, true).unwrap();
         let mut gpu = cpu.clone();
-        // Luma in the top row, in the block: bwdif's highest, 1023, and
-        // 1024, which 10 bits don't hold.
         cpu.data_mut(0)[20..22].copy_from_slice(&1023u16.to_le_bytes());
         gpu.data_mut(0)[20..22].copy_from_slice(&1024u16.to_le_bytes());
         assert_eq!(rows_off(&cpu, &gpu), Some(vec![(0, 0)]));

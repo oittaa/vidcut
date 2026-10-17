@@ -1,31 +1,12 @@
-//! Frame-index barcode for test fixtures.
-//!
-//! The frame index is painted as a row of black/white cells across the top half of
-//! the luma plane, most significant bit first, and the bitwise inverse across the
-//! bottom half. The large cells survive lossy codecs and scaling, and the inverse
-//! band lets [`read`] reject frames it cannot decode reliably instead of
-//! guessing, so tests can assert exact frame identity after any decode or encode.
-
-/// Number of bits in the barcode: indices up to 2^20 - 1 (about 9.7 h at 30 fps).
 pub const BITS: usize = 20;
 
-/// Luma for a 0 bit (video-range black).
 const LOW: u8 = 16;
-/// Luma for a 1 bit (video-range white).
 const HIGH: u8 = 235;
-/// Mid-gray for the unused right margin.
 const MID: u8 = 128;
-/// A sampled cell must be at least this far from mid-gray to count as decoded.
 const MIN_CONTRAST: i32 = 40;
 
-/// Largest index that fits in the barcode.
 pub const MAX_INDEX: u32 = (1 << BITS) - 1;
 
-/// Paints `index` into an 8-bit luma plane of `width`×`height` with row `stride`.
-///
-/// # Panics
-/// If `index` exceeds [`MAX_INDEX`], the plane is too small (`width < BITS`,
-/// `height < 2`) or `luma` is shorter than `stride * height`.
 pub fn paint(index: u32, luma: &mut [u8], width: usize, height: usize, stride: usize) {
     assert!(
         index <= MAX_INDEX,
@@ -53,14 +34,10 @@ pub fn paint(index: u32, luma: &mut [u8], width: usize, height: usize, stride: u
     }
 }
 
-/// Reads the index from an 8-bit luma plane, or `None` if the barcode is not
-/// reliably readable (wrong content, too much distortion).
 pub fn read(luma: &[u8], width: usize, height: usize, stride: usize) -> Option<u32> {
     read_with(width, height, |x, y| luma[y * stride + x])
 }
 
-/// Reads the index from a packed RGB-like buffer (RGBA screenshots), using the
-/// green channel at byte `offset` of each `bytes_per_pixel`-sized pixel.
 pub fn read_packed(
     data: &[u8],
     width: usize,
@@ -74,28 +51,21 @@ pub fn read_packed(
     })
 }
 
-/// Shared decoder over any pixel accessor returning 8-bit luma-like values.
 pub fn read_with(width: usize, height: usize, px: impl Fn(usize, usize) -> u8) -> Option<u32> {
     if width < BITS * 4 || height < 8 {
         return None;
     }
-    // The cells as painted (`width / BITS` wide, then a gray margin), or else
-    // spread over the whole width: a scaled picture of a frame whose width is
-    // a multiple of BITS, like a screenshot of the viewer.
     let painted = width / BITS;
     read_cells(height, &px, |quarters| quarters * painted / 4)
         .or_else(|| read_cells(height, &px, |quarters| quarters * width / (BITS * 4)))
 }
 
-/// Reads the bits with cell edges at `x(quarter cells from the left)`.
 fn read_cells(
     height: usize,
     px: &impl Fn(usize, usize) -> u8,
     x: impl Fn(usize) -> usize,
 ) -> Option<u32> {
     let half = height / 2;
-    // Sample the middle half of each cell in both bands to stay clear of
-    // edges blurred by compression or scaling.
     let mean = |x0: usize, x1: usize, y0: usize, y1: usize| -> i32 {
         let (mut sum, mut n) = (0u64, 0u64);
         for y in y0..y1 {
@@ -172,7 +142,7 @@ mod tests {
         let mut buf = vec![0u8; w * h];
         paint(12_345, &mut buf, w, h, w);
         for (i, px) in buf.iter_mut().enumerate() {
-            let noise = ((i * 7919) % 31) as i32 - 15; // deterministic ±15
+            let noise = ((i * 7919) % 31) as i32 - 15;
             *px = (i32::from(*px) + noise).clamp(0, 255) as u8;
         }
         assert_eq!(read(&buf, w, h, w), Some(12_345));

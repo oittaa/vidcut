@@ -1,11 +1,5 @@
-//! The keyboard shortcuts (spec §11), one action each, with a few plain
-//! words where the action isn't obvious. The GUI's Keyboard Shortcuts
-//! window (F1) shows them and `keys.list` returns them. Ctrl and Alt are
-//! Cmd and Option on macOS.
-
 use serde::Serialize;
 
-/// What a shortcut is for, in the order the window lists them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Group {
@@ -39,18 +33,15 @@ impl Group {
     }
 }
 
-/// One action and the keys that do it, pressed together.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Shortcut {
     pub group: Group,
     pub keys: &'static [&'static str],
     pub action: &'static str,
-    /// What it does and why, where the action's name doesn't say.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explanation: Option<&'static str>,
 }
 
-/// A key's name on this system: Ctrl and Alt are Cmd and Option on macOS.
 pub fn key_name(key: &str, mac: bool) -> &str {
     match (key, mac) {
         ("Ctrl", true) => "Cmd",

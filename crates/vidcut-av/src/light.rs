@@ -1,19 +1,3 @@
-//! Light measured in pictures as a PQ export shows them: each frame's
-//! brightest pixel, its average and the distribution of the brightest
-//! channel (maxRGB), in cd/m². For MaxCLL and MaxFALL where the sources say
-//! none, and for HDR10+ made for frames without it (decision D46). What a
-//! piece shows is measured once, every frame, and the result kept with the
-//! rest of its file's (`cache_in`), with the file's origin: the
-//! measurement of another file, or of this one before it changed, is never
-//! read for it.
-//!
-//! Each pixel is read as the export converts it (`color::pq_light`): PQ's
-//! EOTF, HLG's inverse OETF and 1.2 system gamma on a 1000-nit display, SDR
-//! as BT.1886 with its white at 203 cd/m² in BT.2020. The peaks are of
-//! every pixel, a highlight of one too; the average and the distribution
-//! come from a grid of at most half a million pixels in each frame, every
-//! pixel of smaller ones.
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,27 +12,19 @@ use crate::decode::{Input, VideoReader};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{format, frame};
 
-/// The maxRGB percentiles kept per frame, as HDR10+ carries them.
 pub const PERCENTAGES: [u8; 9] = [1, 5, 10, 25, 50, 75, 90, 95, 99];
 
-/// SDR white in PQ output, cd/m² (ITU-R BT.2408).
 const SDR_WHITE: f32 = 203.0;
 
-/// One frame's light in PQ output, cd/m².
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct FrameLight {
-    /// The brightest channel of the brightest pixel.
     pub max: f32,
-    /// maxRGB averaged over the frame.
     pub average: f32,
-    /// Each channel's brightest, red, green, blue (HDR10+'s MaxSCL).
     pub maxscl: [f32; 3],
-    /// maxRGB at [`PERCENTAGES`].
     pub percentiles: [f32; 9],
 }
 
 impl FrameLight {
-    /// As HDR10+, for a frame without it (decision D46).
     pub fn hdr10plus(&self) -> crate::hdr::Hdr10Plus {
         crate::hdr::Hdr10Plus {
             targeted_max_luminance: 0,
@@ -63,31 +39,21 @@ impl FrameLight {
     }
 }
 
-/// What is measured of a file: frames' light in presentation order with
-/// their times (seconds), and the stretches `[from, to)` whose frames are
-/// all there, each with the first frame from `to` on.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LightAnalysis {
     pub frames: Vec<(f64, FrameLight)>,
     pub spans: Vec<(f64, f64)>,
 }
 
-/// Times closer than this are the same.
 const EPS: f64 = 1e-6;
 
 impl LightAnalysis {
-    /// Whether `[from, to)` is measured.
     pub fn covers(&self, from: f64, to: f64) -> bool {
         self.spans
             .iter()
             .any(|&(a, b)| a <= from + EPS && b >= to - EPS)
     }
 
-    /// MaxCLL and MaxFALL of the frames shown at `sampled`, times (seconds)
-    /// in order within what is measured: at each, the first frame from then
-    /// on, or the last (the sampling rule, `export::video`). Frames between
-    /// them, which a lower output rate skips, don't count. `None` without
-    /// frames.
     pub fn level(&self, sampled: impl IntoIterator<Item = f64>) -> Option<LightLevel> {
         let last = self.frames.len().checked_sub(1)?;
         let mut out: Option<(f32, f32)> = None;
@@ -108,17 +74,14 @@ impl LightAnalysis {
         })
     }
 
-    /// The frame shown at `t` (seconds): the last one at or before it.
     pub fn at(&self, t: f64) -> Option<&FrameLight> {
         let i = self.frames.partition_point(|(f, _)| *f <= t + EPS);
         self.frames.get(i.saturating_sub(1)).map(|(_, l)| l)
     }
 
-    /// With `frames`, measured over `[from, to)`.
     fn add(&mut self, from: f64, to: f64, frames: Vec<(f64, FrameLight)>) {
         let mut all = frames;
         all.append(&mut self.frames);
-        // Stable: of two at one time, the new one stays.
         all.sort_by(|a, b| a.0.total_cmp(&b.0));
         all.dedup_by(|b, a| (b.0 - a.0).abs() < EPS);
         self.frames = all;
@@ -135,8 +98,6 @@ impl LightAnalysis {
     }
 }
 
-/// What a piece shows: its pictures and their source times (seconds). A
-/// mix's pictures each have their own (`VideoPiece::layers`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Span {
     pub input: Input,
@@ -145,8 +106,6 @@ pub struct Span {
 }
 
 impl Span {
-    /// What `piece` shows at `fps` (the plan's), by the sampling rule
-    /// (`export::video`); `None` for black. A still shows its one picture.
     pub fn of(piece: &VideoPiece, fps: Rational) -> Option<Self> {
         let VideoPiece::Source {
             path,
@@ -167,7 +126,6 @@ impl Span {
             });
         }
         let target = |pos| crate::export::video::target(fps, *origin, pos);
-        // Its first and last frames, whichever way it walks its source.
         let (a, b) = (piece.position(0), piece.position(frames - 1));
         Some(Self {
             input,
@@ -177,10 +135,6 @@ impl Span {
     }
 }
 
-/// When the frames `piece` shows at `fps` are sampled, in order (the
-/// sampling rule, `export::video`): each shows the first source frame from
-/// then on, or the last. A still shows its one picture; black, none; a mix,
-/// none of its own (its layers have theirs).
 pub fn sampled(piece: &VideoPiece, fps: Rational) -> impl Iterator<Item = f64> + use<> {
     let (origin, n) = match piece {
         VideoPiece::Source {
@@ -198,8 +152,6 @@ pub fn sampled(piece: &VideoPiece, fps: Rational) -> impl Iterator<Item = f64> +
     })
 }
 
-/// A transfer's light per normalized code, cd/m² (SDR: relative to its
-/// white, before the gamut).
 fn table(hdr: Option<Hdr>) -> Arc<Vec<f32>> {
     type Tables = Mutex<HashMap<Option<Hdr>, Arc<Vec<f32>>>>;
     static TABLES: OnceLock<Tables> = OnceLock::new();
@@ -239,12 +191,9 @@ fn table(hdr: Option<Hdr>) -> Arc<Vec<f32>> {
 const LUT: usize = 4096;
 
 fn lut(t: &[f32], c: f64) -> f32 {
-    // Not negative after the clamp: a half added and cut off rounds.
     t[(c.clamp(0.0, 1.0) * (LUT - 1) as f64 + 0.5) as usize]
 }
 
-/// The lowest of `lo..hi` where `f` holds, given that it fails below that
-/// and holds from it on; `hi` when nowhere.
 fn lowest(mut lo: usize, mut hi: usize, f: impl Fn(usize) -> bool) -> usize {
     while lo < hi {
         let m = lo + (hi - lo) / 2;
@@ -257,10 +206,7 @@ fn lowest(mut lo: usize, mut hi: usize, f: impl Fn(usize) -> bool) -> usize {
     lo
 }
 
-/// The histogram bin of `nits`: 0.1 cd/m² wide up to 100 (as fine as
-/// HDR10+ counts), 1 wide above, to 10000.
 fn bin(nits: f32) -> usize {
-    // Not negative: a half added and cut off rounds.
     if nits < 100.0 {
         (nits.max(0.0) * 10.0 + 0.5) as usize
     } else {
@@ -268,7 +214,6 @@ fn bin(nits: f32) -> usize {
     }
 }
 
-/// The light of histogram bin `i`.
 fn bin_nits(i: usize) -> f32 {
     if i < 1000 {
         i as f32 / 10.0
@@ -277,16 +222,11 @@ fn bin_nits(i: usize) -> f32 {
     }
 }
 
-/// A 4:2:0 picture's codes: each pixel's luma and the chroma its 2×2 block
-/// shares.
 struct Samples<'a> {
     w: usize,
     h: usize,
-    /// Y, then Cb and Cr (interleaved in the second with `semi`).
     planes: [&'a [u8]; 3],
-    /// Each plane's row, in samples.
     rows: [usize; 3],
-    /// Two bytes a sample, the code in the top ten bits (P010).
     wide: bool,
     semi: bool,
 }
@@ -305,7 +245,6 @@ impl Samples<'_> {
         self.at(0, y * self.rows[0] + x)
     }
 
-    /// Cb and Cr of block (`cx`, `cy`).
     fn chroma(&self, cx: usize, cy: usize) -> (u16, u16) {
         if self.semi {
             let i = cy * self.rows[1] + 2 * cx;
@@ -318,13 +257,10 @@ impl Samples<'_> {
         }
     }
 
-    /// The brightest luma code of each 2×2 block in block row `cy`, into
-    /// `top` (a block per entry).
     fn tops(&self, cy: usize, top: &mut [u16]) {
         let w = self.w;
         top.fill(0);
         let unit = 1 + usize::from(self.wide);
-        // An odd last row is its blocks' only one.
         for y in [2 * cy, (2 * cy + 1).min(self.h - 1)] {
             let row = &self.planes[0][y * self.rows[0] * unit..][..w * unit];
             if self.wide {
@@ -354,7 +290,6 @@ impl Samples<'_> {
         }
     }
 
-    /// The lowest and highest Cb, then Cr, of block row `cy`.
     fn chroma_range(&self, cy: usize) -> [(u16, u16); 2] {
         let cw = self.w.div_ceil(2);
         let mut out = [(u16::MAX, 0); 2];
@@ -389,19 +324,15 @@ impl Samples<'_> {
     }
 }
 
-/// How a picture's codes read as light in PQ output.
 struct Reading {
     table: Arc<Vec<f32>>,
-    /// SDR's gamut into BT.2020; `None` for HDR, already in it.
     gamut: Option<[[f64; 3]; 3]>,
-    /// Luma's black and scale, chroma's middle and scale.
     y0: f64,
     to_y: f64,
     mid: f64,
     to_c: f64,
     kr: f64,
     kb: f64,
-    /// What Cr adds to R', Cb to B', and G' per what they take.
     cr_r: f64,
     cb_b: f64,
     to_g: f64,
@@ -431,9 +362,6 @@ impl Reading {
         }
     }
 
-    /// R', G', B' of a pixel: its luma's, plus what the chroma adds to
-    /// each. Each rises with the luma; R' with Cr, B' with Cb, G' against
-    /// both.
     fn codes(&self, y: u16, cb: u16, cr: u16) -> [f64; 3] {
         let yv = (f64::from(y) - self.y0) * self.to_y;
         let r = self.cr_r * ((f64::from(cr) - self.mid) * self.to_c);
@@ -441,7 +369,6 @@ impl Reading {
         [yv + r, yv - (self.kr * r + self.kb * b) * self.to_g, yv + b]
     }
 
-    /// The light of each channel, cd/m².
     fn light(&self, [r, g, b]: [f64; 3]) -> [f32; 3] {
         let t = &self.table;
         let mut rgb = [lut(t, r), lut(t, g), lut(t, b)];
@@ -456,22 +383,10 @@ impl Reading {
     }
 }
 
-/// Each channel's brightest in the picture, of every pixel.
-///
-/// Each channel's light rises with its code: the transfers rise, and SDR's
-/// gamut has no negative coefficient (every source's primaries lie within
-/// BT.2020's). So in a 2×2 block, whose chroma is one, the brightest luma
-/// gives the brightest channels; and no block of a row is brighter than
-/// its luma with the row's chroma at its extremes. Only blocks whose luma
-/// could pass what is found are read. Without a gamut (HDR), each
-/// channel's light is of its own code alone: the highest codes are kept,
-/// and their light found at the end.
 fn peak(s: &Samples, r: &Reading) -> [f32; 3] {
     let hdr = r.gamut.is_none();
     let mut most = [f64::NEG_INFINITY; 3];
     let mut maxscl = [0f32; 3];
-    // SDR: the first table entry that, in all three channels, would pass
-    // `maxscl` in one; a block whose every code is short of it can't.
     let first_passing = |maxscl: [f32; 3]| {
         lowest(0, LUT, |e| {
             let l = r.light([e as f64 / (LUT - 1) as f64; 3]);
@@ -523,15 +438,11 @@ fn peak(s: &Samples, r: &Reading) -> [f32; 3] {
     if hdr { r.light(most) } else { maxscl }
 }
 
-/// The layouts [`reading`] reads: 4:2:0 in 8 bits and P010. Pictures in
-/// others are brought to them (`export::normalize::Relayout`).
 fn readable(p: format::Pixel) -> bool {
     use format::Pixel as P;
     matches!(p, P::P010LE | P::NV12 | P::YUV420P | P::YUVJ420P)
 }
 
-/// `f`'s samples and how they read, for a picture in a layout it reads
-/// ([`readable`]).
 fn reading(f: &frame::Video) -> Result<(Samples<'_>, Reading)> {
     let (bits, semi) = match f.format() {
         format::Pixel::P010LE => (10, true),
@@ -563,8 +474,6 @@ fn measure_with(
     let f = relayout.run(f, crate::decode::Reading::Stream)?;
     let (s, r) = reading(&f)?;
     let maxscl = peak(&s, &r);
-    // The average and the distribution, of at most half a million pixels
-    // on the chroma grid.
     let (w, h) = (s.w, s.h);
     let step = (((w * h) as f64 / 500_000.0).sqrt().ceil() as usize).max(1);
     let step = if step > 1 { step + step % 2 } else { 1 };
@@ -600,11 +509,6 @@ fn measure_with(
     })
 }
 
-/// Measures the frames of `span`, decoded on `decoder` where it decodes
-/// the file (copied down whole) or on the CPU, and the first one from its end
-/// on; and whether the file ended before that. `progress` hears the share
-/// decoded. Threads of their own measure the frames while the next ones
-/// decode.
 fn measure(
     span: &Span,
     decoder: Option<&crate::hw::GpuDecoder>,
@@ -635,7 +539,6 @@ fn measure(
                     return Err(Error::Invalid(crate::export::CANCELLED.into()));
                 }
                 let t = f.pts().unwrap_or(0) as f64 * tick;
-                // Measuring failed: its error follows.
                 if !give((t, crate::decode::in_memory(f)?)) {
                     return Ok(false);
                 }
@@ -654,10 +557,6 @@ fn measure(
     Ok((frames, ended))
 }
 
-/// Hands what `feed` gives to `threads` threads, which `work` it, each
-/// with its own `state`. `give` says whether to go on: once a thread
-/// fails, the others take what comes and drop it, so `feed` never waits
-/// for them. What they made and what `feed` returned, or the first error.
 fn on_threads<T: Send, R: Send, S>(
     threads: usize,
     state: impl Fn() -> S + Sync,
@@ -667,7 +566,6 @@ fn on_threads<T: Send, R: Send, S>(
     let (to_work, inbox) = std::sync::mpsc::sync_channel::<T>(threads);
     let inbox = Mutex::new(inbox);
     let failed = AtomicBool::new(false);
-    // They work for whom this thread works ([`crate::first::as_job`]).
     let yields = crate::first::yields();
     std::thread::scope(|scope| {
         let working: Vec<_> = (0..threads)
@@ -708,14 +606,10 @@ fn on_threads<T: Send, R: Send, S>(
 
 static CACHE: OnceLock<PathBuf> = OnceLock::new();
 
-/// Keeps measurements in `dir` (`~/.cache/vidcut/analysis`); without it
-/// they last only the process.
 pub fn cache_in(dir: PathBuf) {
     let _ = CACHE.set(dir);
 }
 
-/// `input` as it is now, as its measurement is kept: its file's (or
-/// sequence pattern's) origin, with a sequence's first number and rate.
 fn origin(input: &Input) -> Origin {
     let path = input.path();
     let meta = std::fs::metadata(path).ok();
@@ -797,10 +691,6 @@ fn from_bytes(b: &[u8]) -> Option<LightAnalysis> {
     Some(LightAnalysis { frames, spans })
 }
 
-/// The measurement of `span`'s file that covers it: kept in memory, or on
-/// disk, or (with `measure_now`) made now on `decoder` and kept. `None`
-/// when it isn't there and `measure_now` is false. `progress` hears the
-/// share of `span` measured.
 pub fn analysis(
     span: &Span,
     measure_now: bool,
@@ -834,8 +724,6 @@ pub fn analysis(
     }
     let (frames, ended) = measure(span, decoder, cancel, progress)?;
     let to = if ended { f64::INFINITY } else { span.to };
-    // Added to what is known now: another measurement may have ended
-    // meanwhile.
     let a = {
         let mut m = memory.lock().unwrap();
         let mut a = m.get(&origin).map(|a| (**a).clone()).unwrap_or_default();
@@ -856,9 +744,6 @@ pub fn analysis(
     Ok(Some(a))
 }
 
-/// MaxCLL and MaxFALL of what `piece` shows at `fps`, from its file's
-/// measurement (made now with `measure_now`); `None` for black or when it
-/// isn't measured.
 pub fn piece_level(
     piece: &VideoPiece,
     fps: Rational,
@@ -874,8 +759,6 @@ pub fn piece_level(
     Ok(a.and_then(|a| a.level(sampled(piece, fps))))
 }
 
-/// Measures single frames as they are decoded, on the CPU or copied down
-/// from the GPU: for HDR10+ made for frames of a file not measured ahead.
 pub(crate) struct Meter(crate::export::normalize::Relayout);
 
 impl Meter {
@@ -883,8 +766,6 @@ impl Meter {
         Self(crate::export::normalize::Relayout::passing(readable))
     }
 
-    /// `f` stays as it is: a layout to convert goes through a filter, which
-    /// takes the frame it is given, so it gets another reference.
     pub(crate) fn measure(&mut self, f: &frame::Video) -> Result<FrameLight> {
         let f = if crate::hw::on_gpu(f) {
             crate::hw::download(f)?

@@ -1,8 +1,3 @@
-//! Exports in the live session. Cancelling one leaves no file. An edit sent
-//! right after one starts doesn't change what it encodes. A second one waits
-//! for the first. Quitting during one leaves no partial file. No player and
-//! no display.
-
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,7 +36,6 @@ fn ok(h: &live::Handle, method: &str, params: Value) -> Value {
         .result
 }
 
-/// Fast, exact settings for small test exports.
 fn quick(out: &Path) -> Value {
     json!({
         "output": out, "encoder": "cpu",
@@ -104,8 +98,6 @@ fn cancel_edit_and_quit_during_exports() {
         json!({ "media": "m1", "range": "60f..90f" }),
     );
 
-    // 1. A slow background export (4K, slowest x264): cancelling ends it
-    // without leaving files.
     let b = dir.join("b.mkv");
     let mut slow = quick(&b);
     slow["set"] = json!([
@@ -125,13 +117,10 @@ fn cancel_edit_and_quit_during_exports() {
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
 
-    // A long timeline keeps the exports below running.
     for _ in 0..10 {
         ok(&h, "edit.append", json!({ "media": "m1" }));
     }
 
-    // 2. An export encodes the project as it was when asked for: an edit
-    // right after it (another client's, say) doesn't change what it encodes.
     let frames = ok(&h, "project.summary", json!({}))["duration"].clone();
     let now = quick(&dir.join("g.mkv"));
     let e = Envelope::from_json(json!({ "method": "export.start", "params": now })).unwrap();
@@ -163,8 +152,6 @@ fn cancel_edit_and_quit_during_exports() {
         frames
     );
 
-    // 3. Exports take turns: a second one waits while the first runs, and
-    // runs once the first ends.
     let mut slow = quick(&dir.join("q1.mkv"));
     slow["set"] = json!([
         "video.width=3840",
@@ -182,7 +169,6 @@ fn cancel_edit_and_quit_during_exports() {
     assert_eq!(done["frames"], done["total"], "{done}");
     assert!(dir.join("q2.mkv").exists());
 
-    // 4. Quitting while an export runs leaves no partial file.
     let mut slow = quick(&dir.join("h.mkv"));
     slow["set"] = json!([
         "video.width=3840",

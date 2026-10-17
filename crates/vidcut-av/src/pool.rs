@@ -1,16 +1,3 @@
-//! The shared pools that run work split into slices (docs/decisions/
-//! threads.md §3): a filter graph's slices and the row loops of
-//! [`crate::color`], instead of threads of their own. And tasks a thread
-//! hands them in order ([`tasks`]): a stream's frames that stand alone,
-//! each decoded on its own (§4.2).
-//!
-//! Two pools, each started on first use with a thread fewer than the
-//! cores, as the thread asking works too: one at normal priority
-//! (`vidcut-cpu-N`) and one at the lowest (`vidcut-cpu-job-N`) for the
-//! threads that work for a job ([`crate::first::as_job`]). A thread on
-//! Linux would hand its priority down to the threads it starts; those on
-//! Windows and macOS don't, so each of the jobs' pool sets its own.
-
 use std::collections::VecDeque;
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -24,10 +11,7 @@ pub(crate) mod tasks;
 
 pub(crate) use tasks::Task;
 
-/// One call's slices, while they run.
 struct Batch {
-    /// The caller's slice function. Valid until every slice is done: the
-    /// caller waits for that.
     job: *const (dyn Fn(usize) + Sync),
     slices: usize,
     next: AtomicUsize,
@@ -42,7 +26,6 @@ unsafe impl Send for Batch {}
 unsafe impl Sync for Batch {}
 
 impl Batch {
-    /// Runs the next slice; `false` once none is left.
     fn run_one(&self) -> bool {
         let i = self.next.fetch_add(1, Ordering::Relaxed);
         if i >= self.slices {
@@ -66,8 +49,6 @@ impl Batch {
     }
 }
 
-/// What a pool thread takes from the queue, oldest first: a call's slices,
-/// which stay at the front until none is left, or a task.
 enum Work {
     Slices(Arc<Batch>),
     Task(Arc<dyn Task>),
@@ -76,8 +57,6 @@ enum Work {
 struct Pool {
     queue: Mutex<VecDeque<Work>>,
     ready: Condvar,
-    /// Its threads. None: every slice and task runs on the thread that
-    /// asks.
     threads: usize,
 }
 
@@ -85,26 +64,16 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The cores: how many slices a call splits into, its own thread and the
-/// pool's together.
 pub fn threads() -> usize {
     std::thread::available_parallelism().map_or(1, |n| n.get())
 }
 
-/// FFmpeg's most frame threads by its automatic count, and the most it
-/// recommends.
 const MOST_FRAME_THREADS: usize = 16;
 
-/// The threads a reader's decoder and each of its graphs work with
-/// (docs/decisions/threads.md §4.2): one for single frames. For a stream,
-/// the cores on an interactive thread and half of them on a job's
-/// ([`crate::first::as_job`]), whose decoder works beside its encoder and
-/// needs no more frames in flight; at most 16 either way.
 pub fn threads_for(reading: Reading) -> usize {
     budget(reading, crate::first::yields(), threads())
 }
 
-/// [`threads_for`] with `cores` cores, on a job's thread or not.
 fn budget(reading: Reading, job: bool, cores: usize) -> usize {
     let n = match reading {
         Reading::Frames => return 1,
@@ -114,10 +83,6 @@ fn budget(reading: Reading, job: bool, cores: usize) -> usize {
     n.clamp(1, MOST_FRAME_THREADS)
 }
 
-/// A pool's threads on `cores` cores: a thread fewer than the workers its
-/// class has, as the thread asking works too. The normal pool's workers
-/// are the cores; the jobs' are the jobs' budget ([`budget`], half the
-/// cores), the most a job's reader hands it at once.
 fn size(job: bool, cores: usize) -> usize {
     let workers = if job {
         budget(Reading::Stream, true, cores)
@@ -127,8 +92,6 @@ fn size(job: bool, cores: usize) -> usize {
     workers.saturating_sub(1)
 }
 
-/// The pool of the calling thread: the jobs' for a thread working for a
-/// job, the other's for the rest. Started on first use.
 fn pool() -> &'static Pool {
     static NORMAL: OnceLock<Pool> = OnceLock::new();
     static JOBS: OnceLock<Pool> = OnceLock::new();
@@ -162,8 +125,6 @@ fn pool() -> &'static Pool {
     pool
 }
 
-/// The oldest work in `queue`: the slices of the oldest call that has some
-/// left, or the oldest task, taken out.
 fn next(queue: &mut VecDeque<Work>) -> Option<Work> {
     while let Some(Work::Slices(b)) = queue.front()
         && b.exhausted()
@@ -176,8 +137,6 @@ fn next(queue: &mut VecDeque<Work>) -> Option<Work> {
     }
 }
 
-/// A pool thread: the oldest work. The decoders it keeps for tasks close
-/// once idle (`decode::standalone`), so it wakes for that too.
 fn work(pool: &Pool) {
     let mut closes: Option<Instant> = None;
     loop {
@@ -212,9 +171,6 @@ fn work(pool: &Pool) {
     }
 }
 
-/// Hands `task` to the calling thread's pool, which runs it once a thread
-/// is free unless it is started elsewhere first. A pool of no threads
-/// never takes it: whoever wants its result runs it.
 pub(crate) fn give(task: Arc<dyn Task>) {
     let pool = pool();
     if pool.threads == 0 {
@@ -224,9 +180,6 @@ pub(crate) fn give(task: Arc<dyn Task>) {
     pool.ready.notify_one();
 }
 
-/// Runs `job(0)` to `job(slices - 1)` on the calling thread's pool and on
-/// the calling thread, returning once all are done. A slice that panicked
-/// panics here.
 pub fn run(slices: usize, job: &(dyn Fn(usize) + Sync)) {
     match slices {
         0 => return,
@@ -237,8 +190,7 @@ pub fn run(slices: usize, job: &(dyn Fn(usize) + Sync)) {
     if pool.threads == 0 {
         return (0..slices).for_each(job);
     }
-    // SAFETY: only the lifetime goes: the batch calls `job` only for slices
-    // not yet done, and this call returns once all are.
+    // SAFETY: only the lifetime goes; `job` runs only for slices not done, and `run` waits for all.
     let job: *const (dyn Fn(usize) + Sync + 'static) = unsafe { std::mem::transmute(job) };
     let batch = Arc::new(Batch {
         job,
@@ -262,10 +214,6 @@ pub fn run(slices: usize, job: &(dyn Fn(usize) + Sync)) {
     );
 }
 
-/// A filter graph whose slices run on the pool, in as many slices as
-/// [`threads_for`] gives: for single frames one, on the thread that runs
-/// the graph. Either way the graph starts no thread of its own; its `scale`
-/// filters hand the count to swscale, which starts that many less one.
 pub fn graph(reading: Reading) -> filter::Graph {
     let mut graph = filter::Graph::new();
     let slices = threads_for(reading);
@@ -278,8 +226,6 @@ pub fn graph(reading: Reading) -> filter::Graph {
     graph
 }
 
-/// FFmpeg's `AVFilterGraph.execute`: a filter's `nb_jobs` slices of
-/// `func`, their results into `ret`.
 unsafe extern "C" fn execute(
     ctx: *mut ffi::AVFilterContext,
     func: ffi::avfilter_action_func,
@@ -290,8 +236,6 @@ unsafe extern "C" fn execute(
     let Some(func) = func else {
         return 0;
     };
-    /// What the slices share: FFmpeg's pointers, each slice writing only
-    /// its own result.
     struct Call {
         func: unsafe extern "C" fn(
             *mut ffi::AVFilterContext,
@@ -308,8 +252,7 @@ unsafe extern "C" fn execute(
     unsafe impl Sync for Call {}
     impl Call {
         fn slice(&self, i: usize) {
-            // SAFETY: FFmpeg's slice function on its own context and
-            // argument, slice `i` of `jobs`, its result in `ret[i]`.
+            // SAFETY: FFmpeg's call for slice `i` of `jobs`; `ret` is null or holds `jobs` results.
             unsafe {
                 let r = (self.func)(self.ctx, self.arg, i as libc::c_int, self.jobs);
                 if !self.ret.is_null() {
@@ -346,7 +289,6 @@ mod tests {
         assert!(ran.iter().all(|r| r.load(Ordering::Relaxed) == 1));
     }
 
-    /// A task that notes its name when it runs.
     struct Noted(&'static str, Arc<Mutex<Vec<&'static str>>>);
 
     impl Task for Noted {

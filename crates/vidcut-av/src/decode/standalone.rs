@@ -1,21 +1,3 @@
-//! Frames that stand alone, decoded on the shared pool instead of frame
-//! threads (docs/decisions/threads.md §4.2): every image sequence, and a
-//! stream of a codec FFmpeg marks intra-only and decodes on frame threads.
-//!
-//! The reader demuxes on its own thread and hands each packet to its pool
-//! as a task ([`crate::pool::tasks`]), at most [`in_flight`] at a time, and
-//! takes the frames back in the stream's order. Each pool thread keeps a
-//! decoder of one thread for each kind of stream it has decoded, which
-//! serves every file of that kind and closes once unused for [`IDLE`]; one
-//! that holds on to the frame it gave closes after it. A task not started
-//! when its frame is wanted decodes on the reader's own thread.
-//!
-//! A decoder lends a frame what an earlier one left in it: its context's
-//! colors and pixel aspect, and its guess of the frame's time
-//! (gotchas.md). So each task gets the stream's colors back first, and the
-//! reader guesses times itself, in the stream's order, as a decoder of its
-//! own would.
-
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,27 +7,17 @@ use crate::error::{Error, Result};
 use crate::ffmpeg::{self, codec, ffi, format, frame};
 use crate::pool::tasks::Ordered;
 
-/// A pool thread's decoder closes once unused for this long.
 const IDLE: Duration = Duration::from_secs(10);
 
-/// Frames a reader has in flight: as many as frame threads would hold on
-/// its thread ([`crate::pool::threads_for`]).
 fn in_flight() -> usize {
     crate::pool::threads_for(Reading::Stream)
 }
 
-/// Whether the frames of a stream of `source` with `params` stand alone:
-/// each file of a sequence is a picture; a file's stream is when its codec
-/// is intra-only and FFmpeg decodes it on frame threads, each frame on a
-/// context that saw only some of those before it. FFmpeg decodes MJPEG and
-/// raw video on one thread: their frames may lean on earlier packets
-/// (gotchas.md).
 fn stands_alone(source: &Input, params: &codec::Parameters) -> bool {
     if matches!(source, Input::Sequence { .. }) {
         return true;
     }
-    // SAFETY: the parameters' own field; FFmpeg's static descriptor and
-    // codec, or null.
+    // SAFETY: the parameters' own field; FFmpeg's static descriptor and codec, or null.
     unsafe {
         let id = (*params.as_ptr()).codec_id;
         let descriptor = ffi::avcodec_descriptor_get(id);
@@ -57,8 +29,6 @@ fn stands_alone(source: &Input, params: &codec::Parameters) -> bool {
     }
 }
 
-/// A kind of stream: what a decoder is opened for. Decoders of one kind
-/// decode any of its frames alike.
 pub(super) struct Kind {
     params: codec::Parameters,
     time_base: ffmpeg::Rational,
@@ -72,8 +42,6 @@ impl Kind {
         Self { params, time_base }
     }
 
-    /// Whether a decoder of `other` decodes this kind: the same parameters
-    /// but the bit rate, and the same time base.
     fn same(&self, other: &Kind) -> bool {
         // SAFETY: both parameters' own fields and data, read only.
         unsafe {
@@ -123,8 +91,6 @@ impl Kind {
         }
     }
 
-    /// A decoder of one thread for it, decoding into buffers of vidcut's
-    /// own, as the reader's own is.
     fn open(&self) -> Result<ffmpeg::decoder::Video> {
         let mut ctx =
             codec::context::Context::from_parameters(self.params.clone()).map_err(|e| {
@@ -140,12 +106,8 @@ impl Kind {
         crate::parts::decoder_opened(ctx.decoder().video(), self.params.id(), "video")
     }
 
-    /// Gives `decoder`'s context the stream's colors and pixel aspect
-    /// again, which a decoder lends a frame whose own header leaves them
-    /// out: those an earlier frame's header left there would.
     fn restore(&self, decoder: &mut ffmpeg::decoder::Video) {
-        // SAFETY: the parameters' own fields, read; the opened context's,
-        // written between packets.
+        // SAFETY: the parameters' fields, read; the opened context's, written between packets.
         unsafe {
             let p = &*self.params.as_ptr();
             let ctx = &mut *decoder.as_mut_ptr();
@@ -159,7 +121,6 @@ impl Kind {
     }
 }
 
-/// One thread, no frame threads.
 pub(super) fn one_thread() -> codec::threading::Config {
     codec::threading::Config {
         kind: codec::threading::Type::Frame,
@@ -167,27 +128,18 @@ pub(super) fn one_thread() -> codec::threading::Config {
     }
 }
 
-/// One packet to decode, and what decodes it.
 struct Job {
     packet: ffmpeg::Packet,
     kind: Arc<Kind>,
 }
 
-/// What a packet decodes to.
 enum Outcome {
     Frame(frame::Video),
-    /// The decoder rejected it as damaged.
     Damaged,
-    /// No frame, and no error.
     Nothing,
     Failed(Error),
 }
 
-/// Decodes `job`'s packet with `decoder`, opened for the job's kind when
-/// there is none, and left empty for the next one. A decoder that still
-/// holds the frame it gave closes (FFmpeg's PNG decoder keeps its last
-/// picture): kept, it would keep the frame's memory once the frame is let
-/// go, and a decoder on each pool thread a frame.
 fn decode(decoder: &mut Option<ffmpeg::decoder::Video>, job: &Job) -> Outcome {
     let d = match decoder {
         Some(d) => d,
@@ -226,7 +178,6 @@ fn decode(decoder: &mut Option<ffmpeg::decoder::Video>, job: &Job) -> Outcome {
     }
 }
 
-/// A pool thread's decoder of a kind, and when it last decoded.
 struct Kept {
     kind: Arc<Kind>,
     decoder: ffmpeg::decoder::Video,
@@ -234,11 +185,9 @@ struct Kept {
 }
 
 thread_local! {
-    /// The decoders a pool thread keeps, one for each kind it has decoded.
     static KEPT: RefCell<Vec<Kept>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Decodes `job` on a pool thread, with its decoder of the job's kind.
 fn on_pool(job: Job) -> Outcome {
     KEPT.with_borrow_mut(|kept| {
         let found = kept
@@ -266,8 +215,6 @@ fn on_pool(job: Job) -> Outcome {
     })
 }
 
-/// Closes the calling pool thread's decoders unused for [`IDLE`], and says
-/// when the next of the others will be.
 pub(crate) fn close_idle() -> Option<Instant> {
     KEPT.with_borrow_mut(|kept| {
         let before = kept.len();
@@ -285,10 +232,6 @@ pub(crate) fn close_idle() -> Option<Instant> {
     })
 }
 
-/// FFmpeg's guess of a frame's time from its packet's (`guess_correct_pts`
-/// in decode.c): the pts, unless more of the pts than of the dts have gone
-/// back so far. Kept for a reader across its frames, as its decoder keeps
-/// it.
 struct Times {
     faulty_pts: u64,
     faulty_dts: u64,
@@ -306,7 +249,6 @@ impl Times {
         }
     }
 
-    /// After a flush, as FFmpeg's flush leaves it.
     fn flushed(&mut self) {
         self.last_pts = i64::MIN;
         self.last_dts = i64::MIN;
@@ -332,25 +274,20 @@ impl Times {
     }
 }
 
-/// A reader's frames that stand alone, in flight on the pool.
 pub(super) struct Standalone {
     kind: Arc<Kind>,
     frames: Ordered<Job, Outcome>,
-    /// What decodes those that come to the reader's own thread.
     own: Option<ffmpeg::decoder::Video>,
     times: Times,
 }
 
 impl Standalone {
-    /// For a stream of `source` read as `reading` on the CPU, when its
-    /// frames stand alone ([`stands_alone`]).
     pub(super) fn for_stream(
         source: &Input,
         stream: &format::stream::Stream<'_>,
         reading: Reading,
     ) -> Option<Self> {
         let params = stream.parameters();
-        // A copy of its own: the stream's keeps the file open.
         (reading == Reading::Stream && stands_alone(source, &params)).then(|| Self {
             kind: Arc::new(Kind::new(params.clone(), stream.time_base())),
             frames: Ordered::new(on_pool),
@@ -359,20 +296,16 @@ impl Standalone {
         })
     }
 
-    /// Drops the frames in flight: the reader's decoder was flushed.
     pub(super) fn flushed(&mut self) {
         self.frames.clear();
         self.times.flushed();
     }
 
-    /// Frames in flight, for `VIDCUT_DEBUG`.
     pub(super) fn note() -> String {
         format!("frames on the pool, {} in flight", in_flight())
     }
 }
 
-/// [`VideoReader::decode_one`] for frames that stand alone: the next frame,
-/// with packets handed to the pool to keep [`in_flight`] of them decoding.
 pub(super) fn decode_one(r: &mut VideoReader) -> Result<Option<frame::Video>> {
     let mut damaged = 0;
     loop {
@@ -408,8 +341,6 @@ pub(super) fn decode_one(r: &mut VideoReader) -> Result<Option<frame::Video>> {
     }
 }
 
-/// Hands the pool the stream's next packets, the one a seek read first,
-/// until [`in_flight`] are, or the stream ends.
 fn fill(r: &mut VideoReader) -> Result<()> {
     let s = r.standalone.as_mut().expect("frames that stand alone");
     while s.frames.len() < in_flight() && !r.draining {

@@ -1,7 +1,3 @@
-//! The Media Pool's view under simulated input (egui_kittest, no window):
-//! its buttons set the session's view, the one `pool.set` sets, and the
-//! pool keeps its width in each.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -39,7 +35,6 @@ fn call(h: &live::Handle, method: &str, params: Value) {
         .unwrap_or_else(|e| panic!("{method}: {e}"));
 }
 
-/// Steps the GUI until `ready` holds (requests answer on another thread).
 fn until(harness: &mut Harness<'_, Workspace>, what: &str, ready: impl Fn() -> bool) {
     let started = Instant::now();
     while !ready() {
@@ -105,7 +100,6 @@ fn the_pools_buttons_set_the_sessions_view() {
             Workspace::new(h.clone()),
         );
     harness.step();
-    // Where the pool's search field ends: the pool's width.
     let pool_width = |harness: &Harness<'_, Workspace>| {
         harness
             .query_all_by_role(egui::accesskit::Role::TextInput)
@@ -124,8 +118,6 @@ fn the_pools_buttons_set_the_sessions_view() {
     ] {
         harness.get_by_label(button).click();
         until(&mut harness, button, || h.snapshot().pool.view == mode);
-        // The List view's columns, wider than the pool, used to widen it
-        // for good.
         for _ in 0..5 {
             harness.step();
         }

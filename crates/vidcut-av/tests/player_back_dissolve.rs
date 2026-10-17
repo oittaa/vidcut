@@ -1,8 +1,3 @@
-//! Playing backward through a dissolve decodes each of its files' frames
-//! about once: its windows start at a keyframe of its first file, and the
-//! other decodes on through them (player.md §3). A test binary of its own,
-//! as it counts every frame the process decodes.
-
 mod player_support;
 
 use std::time::{Duration, Instant};
@@ -14,7 +9,6 @@ use vidcut_core::render::{Over, Ramp, VideoPiece};
 
 #[test]
 fn playing_backward_through_a_dissolve_decodes_each_frame_about_once() {
-    // Keyframes 120 frames apart, decoded on the CPU into memory.
     let spec =
         |frames| FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), frames).gop(120);
     let (a, b) = (src("m1", spec(300)), src("m2", spec(330)));
@@ -46,8 +40,6 @@ fn playing_backward_through_a_dissolve_decodes_each_frame_about_once() {
         assert!(player.wait_ready(t, Duration::from_secs(10)), "frame {t}");
     }
     let decoded = vidcut_av::decode::frames_decoded() - before;
-    // 300 frames of each file, and a GOP more of each at most where
-    // windows start.
     assert!(
         decoded <= 840,
         "{decoded} frames decoded to play 300 of a dissolve backward"

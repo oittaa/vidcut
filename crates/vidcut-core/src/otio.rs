@@ -1,66 +1,3 @@
-//! OpenTimelineIO interchange (deviations.md X9): writes the timeline as
-//! OTIO and reads OTIO back, in the shapes other editors write and read.
-//!
-//! **Writing** ([`export`]):
-//! - Each video track becomes an OTIO video track of clips and gaps.
-//! - The audio of each track's clips becomes an audio track, and each audio
-//!   track one more. Each audio clip covers its clip's audio range, so J/L
-//!   cuts show up as audio edits offset from the video edits, which is what
-//!   other editors expect.
-//! - Tracks carry the names given to them (a track's audio its track's),
-//!   else the ones editors give their own by place: `Video 1`, `Audio 2`.
-//! - Media are named by plain absolute path, as editors write them (not
-//!   every editor reads `file://` URLs), or in a
-//!   bundle by a path relative to it. Image sequences are
-//!   `ImageSequenceReference`s.
-//! - Times are frames at the project rate. Source ranges count from the
-//!   media's own start timecode, as their available ranges do: editors
-//!   place sources by timecode. A still's available range is one frame. An image sequence's available range counts its
-//!   pictures at the sequence's own rate, as OpenTimelineIO counts them.
-//! - Editor metadata besides ([`EDITOR`]): a link group joining each clip's
-//!   video and audio, the stream and channels its audio plays, clip gain as
-//!   a clip volume, track lock and solo, marker notes.
-//! - The clip effects a clip carries from another editor's file, as they
-//!   came ([`effects`]), and the transitions on its edit points that still
-//!   fit there ([`transitions`]). A generator clip's reference, as it came.
-//! - Timeline markers go on the top-level stack, with their lengths.
-//! - Details OTIO has no field for (clip gain, mute and audio stream, track
-//!   settings, marker colors, the In/Out marks) are kept under
-//!   `metadata.vidcut`.
-//!
-//! **Reading** ([`import`]) accepts what other editors and the OTIO library
-//! write:
-//! - `Clip.1` and `Clip.2`; source ranges in the media's own timecode
-//!   (relative to the reference's available range); float rates, snapped to
-//!   exact rationals.
-//! - Media as `file://` URLs (percent-encoded or not), plain paths, Windows
-//!   paths, paths relative to the file, image sequences, and media the
-//!   editor had offline (`MissingReference` with a `Media Url`). Each
-//!   gives the places to look ([`MediaRef::paths`]), including where a
-//!   project folder moved with the timeline file would have put it.
-//! - Track names other than editors' defaults (`Video 1`, `Audio 2`) name
-//!   the tracks, unless vidcut's metadata says otherwise.
-//! - Video tracks become V1, V2, … An audio clip that lines up with a video
-//!   clip of the same media (on any video track, in the same link group if
-//!   it has one) becomes that clip's audio, J/L offsets included.
-//!   Other audio clips go on audio tracks A1, A2, … (files vidcut wrote say
-//!   which track each audio track belongs to). The editor metadata's channel
-//!   map picks the stream, its clip volume the gain.
-//! - Markers on the timeline, on tracks and on clips become timeline
-//!   markers, keeping their lengths.
-//! - Clip effects in use stay on their clips' pictures and sounds
-//!   ([`effects`]), not shown or played, and are written back. So do
-//!   transitions, on their edit points ([`transitions`]): dissolves and
-//!   cross fades play (decision D50), others as cuts.
-//! - Generators and titles (`GeneratorReference`s) become generator clips,
-//!   which play as gaps, and nested `Stack`s (compound clips, nested
-//!   timelines) compound clips, which play the clips they hold: their
-//!   references and stacks kept.
-//! - Speed changes (time effects) stay on their clips, which play and are
-//!   edited at them (decision D48).
-//! - Everything else is left out with a warning: nested tracks (gaps
-//!   instead).
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -76,17 +13,11 @@ pub mod effects;
 mod tests;
 pub mod transitions;
 
-/// Where vidcut keeps its own details in OTIO metadata.
 const VIDCUT: &str = "vidcut";
-/// Where other editors keep their own details: the key and values are
-/// theirs, so that they read what vidcut writes.
 const EDITOR: &str = "Resolve_OTIO";
-/// The import warning naming the compound clips it kept.
 pub const COMPOUNDS_KEPT: &str =
     "compound clips and nested timelines kept as blocks, playing their clips";
 
-/// `small`, an object, with `big` moved in: `json!` serializes what it is
-/// given, so a `Value` put in it is copied whole.
 fn with(mut small: Value, big: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
     for (key, value) in big {
         small[key] = value;
@@ -118,7 +49,6 @@ fn gap(frames: i64, rate: f64) -> Value {
     })
 }
 
-/// OTIO's marker color for one of ours.
 fn otio_color(c: &str) -> &'static str {
     match c {
         "red" | "rose" => "RED",
@@ -132,7 +62,6 @@ fn otio_color(c: &str) -> &'static str {
     }
 }
 
-/// Our marker color for one of OTIO's.
 fn our_color(c: &str) -> &'static str {
     match c.to_ascii_uppercase().as_str() {
         "RED" => "red",
@@ -147,7 +76,6 @@ fn our_color(c: &str) -> &'static str {
     }
 }
 
-/// Clip Color `name` as OTIO writes an item's color.
 fn otio_clip_color(name: &str) -> Option<Value> {
     let (n, [r, g, b]) = crate::ops::CLIP_COLORS.iter().find(|(n, _)| *n == name)?;
     let mut title = n.to_string();
@@ -163,8 +91,6 @@ fn otio_clip_color(name: &str) -> Option<Value> {
     }))
 }
 
-/// The Clip Color of an OTIO item: its color's name if it is one of ours,
-/// else ours nearest to it.
 fn clip_color(item: &Value) -> Option<String> {
     let c = &item["color"];
     let name = c["name"].as_str().unwrap_or("").to_ascii_lowercase();
@@ -185,24 +111,16 @@ fn clip_color(item: &Value) -> Option<String> {
         .map(|(n, _)| n.to_string())
 }
 
-/// Where a written timeline says its media are.
 #[derive(Debug, Clone, Copy)]
 pub enum Locations<'a> {
-    /// At their absolute paths.
     Absolute,
-    /// In a bundle: each media's path relative to the bundle, by media id
-    /// (`media/A001.mov`; an image sequence's is the folder of its pictures,
-    /// `media/renders/`).
     Bundle(&'a HashMap<String, String>),
 }
 
-/// The media's start timecode in whole frames at `fps` (0 without one; a
-/// sound file's time of day to the nearest frame).
 fn start_tc(m: &Media, fps: Rational) -> f64 {
     m.info.timecode.map_or(0.0, |tc| tc.frames_at(fps).round())
 }
 
-/// The OTIO media reference for `m`.
 fn media_reference(p: &Project, m: &Media, locations: Locations, rate: f64) -> Value {
     let fps = p.settings.fps;
     let frames = p.media_frames(m) as f64;
@@ -224,11 +142,6 @@ fn media_reference(p: &Project, m: &Media, locations: Locations, rate: f64) -> V
             dir
         });
         let (prefix, padding, suffix) = s.parts();
-        // OTIO counts a sequence's pictures as `available_range.duration
-        // .to_frames(rate)`, truncated, at the reference's own rate: the
-        // range is the picture count at the sequence rate, not the
-        // timeline length at the project rate (the two differ whenever the
-        // rates do).
         let pictures = m.info.video.as_ref().map_or(fps, |v| v.fps).as_f64();
         return json!({
             "OTIO_SCHEMA": "ImageSequenceReference.1",
@@ -261,8 +174,6 @@ fn media_reference(p: &Project, m: &Media, locations: Locations, rate: f64) -> V
     })
 }
 
-/// Where the file of `m` is, as `locations` names it: in a bundle, its
-/// place there.
 fn written_path(m: &Media, locations: Locations) -> PathBuf {
     match locations {
         Locations::Bundle(names) => match (names.get(&m.id), &m.sequence) {
@@ -274,16 +185,12 @@ fn written_path(m: &Media, locations: Locations) -> PathBuf {
     }
 }
 
-/// The timeline range `[a, b)` of the clip's audio an export of `[a, b)`
-/// writes, if any.
 fn audio_part(c: &crate::model::Clip, a: i64, b: i64) -> Option<(i64, i64)> {
     let (ra, rb) = c.audio_range()?;
     let (s, e) = (ra.max(a), rb.min(b));
     (e > s).then_some((s, e))
 }
 
-/// The media an export of `[a, b)` (default: everything) names, in the
-/// order clips first use them.
 pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     let (a, b) = span.unwrap_or((0, p.end()));
     let mut used: Vec<String> = Vec::new();
@@ -299,7 +206,6 @@ pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     used
 }
 
-/// A speed change: its time `effect`.
 fn speed_of(effect: Option<Value>) -> Option<Speed> {
     effect.map(|effect| Speed {
         effect: effect.into(),
@@ -307,15 +213,10 @@ fn speed_of(effect: Option<Value>) -> Option<Speed> {
     })
 }
 
-/// How fast a speed change goes (1 without one).
 fn scalar(speed: Option<&Speed>) -> f64 {
     speed.and_then(Speed::scalar).unwrap_or(1.0)
 }
 
-/// The first source frame shown by an item whose source range starts at
-/// `start`, `len` frames at `speed`, and how far into its pace it starts:
-/// backward, editors write the bottom of the range it walks down, and its
-/// first frame shows the bottom of its stretch at the top (decision D48).
 fn first_shown(start: i64, len: i64, speed: f64) -> (i64, i64) {
     if speed >= 0.0 {
         return (start, 0);
@@ -329,8 +230,6 @@ fn first_shown(start: i64, len: i64, speed: f64) -> (i64, i64) {
     (first, skip)
 }
 
-/// The source range start written for clip `c`'s part from timeline frame
-/// `s`, `len` frames long: [`first_shown`]'s inverse.
 fn written_start(c: &Clip, s: i64, len: i64) -> i64 {
     let first = c.source_at(s);
     match c.speed() {
@@ -342,9 +241,6 @@ fn written_start(c: &Clip, s: i64, len: i64) -> i64 {
     }
 }
 
-/// The editor's `Media In` for clip `c`'s part from timeline frame `s`
-/// walking backward: the room above its top, in seconds of timeline, which
-/// the editor places it by.
 fn media_in(p: &Project, c: &Clip, m: Option<&Media>, s: i64) -> Option<f64> {
     let x = c.speed();
     if x >= 0.0 {
@@ -355,9 +251,6 @@ fn media_in(p: &Project, c: &Clip, m: Option<&Media>, s: i64) -> Option<f64> {
     Some((frames - top) / -x / p.settings.fps.as_f64())
 }
 
-/// vidcut's own record of where clip `c`'s part from timeline frame `s`
-/// starts in its source and its pace, at another speed: exact where the
-/// source range rounds.
 fn own_pace(meta: &mut Value, c: &Clip, s: i64) {
     if let Some(speed) = &c.speed {
         meta["source_in"] = json!(c.source_at(s));
@@ -365,8 +258,6 @@ fn own_pace(meta: &mut Value, c: &Clip, s: i64) {
     }
 }
 
-/// `effects`, after clip `c`'s speed change if it carries one: editors
-/// write the time effect first.
 fn with_speed(c: &Clip, mut effects: Vec<Value>) -> Vec<Value> {
     if let Some(speed) = &c.speed {
         effects.insert(0, (*speed.effect).clone());
@@ -374,8 +265,6 @@ fn with_speed(c: &Clip, mut effects: Vec<Value>) -> Vec<Value> {
     effects
 }
 
-/// The timeline range `[a, b)` of `p` (default: all of it) as an OTIO
-/// timeline named `name`, its media where `locations` says.
 pub fn export(
     p: &Project,
     name: &str,
@@ -396,8 +285,6 @@ pub fn export(
                 enabled: bool,
                 meta: Value,
                 effects: Vec<Value>| {
-        // Source positions count from the media's start timecode; stills
-        // have one picture. A generator's reference is written as it came.
         let (start, reference) = match m {
             Some(m) if m.is_still() => (0.0, media_reference(p, m, locations, rate)),
             Some(m) if m.sequence.is_some() => {
@@ -447,23 +334,18 @@ pub fn export(
             [("children", Value::Array(children)), ("metadata", meta)],
         )
     };
-    // Each clip's media, found once.
     let media: HashMap<&str, &Media> = p.media.iter().map(|m| (m.id.as_str(), m)).collect();
-    // The Clip Color clip `c` shows: its own, else its media's.
     let shown_color = |c: &Clip| {
         c.color
             .as_deref()
             .or_else(|| media.get(c.media.as_str()).and_then(|m| m.color.as_deref()))
             .and_then(otio_clip_color)
     };
-    // A video track for each video track, and an audio track for each track
-    // that carries audio; vidcut's track settings go in their metadata.
     let (mut video_tracks, mut audio_tracks) = (Vec::new(), Vec::new());
     let mut groups = 0;
     for t in &p.tracks {
         let (mut video, mut audio) = (Vec::new(), Vec::new());
         let (mut tv, mut ta) = (a, a);
-        // The channel counts of the audio on this track.
         let mut channels: Vec<u16> = Vec::new();
         let edits = transitions::Edits::of(p, t);
         for c in &t.clips {
@@ -480,7 +362,6 @@ pub fn export(
             let shows = c.video && e > s;
             let sounds = audio_part(c, a, b).map(|(s, e)| (s.max(ta), e));
             let sounds = sounds.filter(|(s, e)| e > s);
-            // A link group number joins a clip's video and audio.
             let group = (shows && sounds.is_some()).then(|| {
                 groups += 1;
                 groups
@@ -509,8 +390,6 @@ pub fn export(
                 if let Some(x) = media_in(p, c, m, s) {
                     metadata[EDITOR]["Media In"] = json!(x);
                 }
-                // Carried effects, keyframes moved to where the item
-                // starts, fades cut where the export does.
                 let effects = with_speed(
                     c,
                     c.effects.as_ref().map_or_else(Vec::new, |x| {
@@ -590,7 +469,6 @@ pub fn export(
                 }
                 ta = e;
             }
-            // A compound clip's sound, on its audio track.
             if let Some(k) = c.compound.as_ref().filter(|_| !c.video) {
                 let (s, e) = (c.start.max(a).max(ta), c.end().min(b));
                 if e > s {
@@ -634,8 +512,6 @@ pub fn export(
             sound["Audio Type"] = json!(kind);
         }
         let sound = json!({ VIDCUT: meta, EDITOR: sound });
-        // The track's name, else the one editors give their own tracks by
-        // place: `Video 1`, `Audio 2`. A track's audio takes its name too.
         let named = |kind: &str, n: usize| t.name.clone().unwrap_or(format!("{kind} {n}"));
         if t.kind == TrackKind::Video {
             let picture = json!({ VIDCUT: meta, EDITOR: { "Locked": t.locked } });
@@ -653,8 +529,6 @@ pub fn export(
     let markers: Vec<Value> = p
         .markers
         .iter()
-        // A range takes the markers that start in it, cut at its end; the
-        // whole timeline takes them all, each its length (spec D40).
         .filter(|k| span.is_none() || (a..b).contains(&k.at))
         .map(|k| {
             let length = match span {
@@ -687,7 +561,6 @@ pub fn export(
             .map(|o| o - a),
     };
     let mut ours = json!({ "fps": p.settings.fps, "marks": marks });
-    // The whole timeline is the project: the rest of it goes along.
     if span.is_none() {
         ours["project"] = json!(ProjectMeta {
             settings: p.settings.clone(),
@@ -740,10 +613,6 @@ pub fn export(
     ))
 }
 
-/// Nested `Stack` `item` as a compound clip: the stack without its source
-/// range, clip effects and markers (the clip's own) and its link group
-/// (whose number another editor gave); its length, the longest of its
-/// tracks, at `fps`.
 fn compound_of(item: &Value, fps: Rational) -> Compound {
     let frames = item["children"]
         .as_array()
@@ -779,8 +648,6 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
     }
 }
 
-/// Compound clip `c`'s OTIO item: its stack, showing `frames` from
-/// `source`.
 fn compound_item(
     c: &Clip,
     k: &Compound,
@@ -800,8 +667,6 @@ fn compound_item(
     v
 }
 
-/// What compound `k` is, as its stack says: `Compound Clip`, `Timeline
-/// Clip`.
 pub fn compound_kind(k: &Compound) -> String {
     k.stack["metadata"][EDITOR]["Sequence Type"]
         .as_str()
@@ -810,7 +675,6 @@ pub fn compound_kind(k: &Compound) -> String {
         .to_string()
 }
 
-/// What generator `g` makes, as its reference says: `Solid Color`, `Rich`.
 pub fn generator_kind(g: &crate::model::Generator) -> String {
     let r = &g.reference;
     [&r["generator_kind"], &r["name"]]
@@ -821,69 +685,39 @@ pub fn generator_kind(g: &crate::model::Generator) -> String {
         .to_string()
 }
 
-/// A clip's media file as an OTIO file names it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct MediaRef {
-    /// As written: a URL or a path (for an image sequence, its first
-    /// picture's).
     pub url: String,
-    /// The path it names, to show.
     pub shown: String,
-    /// Where to look for it, in order: the path it names (decoded, then as
-    /// written), relative to the timeline file's folder if relative, then
-    /// that folder joined with the path's last parts (a project folder that
-    /// moved with the timeline file).
     pub paths: Vec<PathBuf>,
-    /// Its file name, to look for in other folders.
     pub file_name: String,
-    /// For an image sequence: the rate of its pictures.
     pub sequence: Option<Rational>,
 }
 
-/// A clip read from an OTIO file. Frames are at [`Imported::fps`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedClip {
-    /// Which clip it is, for [`ImportedTransition`]s.
     pub key: usize,
-    /// Its id and its media's in vidcut, when vidcut wrote the file.
     pub id: Option<String>,
     pub media_id: Option<String>,
-    /// The track it goes on: `V<n>` or `A<n>`.
     pub track: String,
     pub media: MediaRef,
     pub name: String,
     pub start: i64,
     pub duration: i64,
-    /// Frames from the media's first frame; with `timecoded`, from
-    /// midnight of its timecode.
     pub source_in: i64,
-    /// No available range says where the media start: the source range
-    /// counts in the media's own timecode.
     pub timecoded: bool,
-    /// False for audio-only clips.
     pub video: bool,
     pub enabled: bool,
-    /// Audio offsets `(head, tail)` as in `ClipAudio`, if the clip has audio.
     pub audio: Option<(i64, i64)>,
     pub stream: u32,
     pub gain_db: f64,
     pub muted: bool,
-    /// The link group joining a clip's video and audio.
     pub link: Option<i64>,
-    /// The clip effects in use on its picture and on its sound
-    /// ([`effects`]), as the file has them.
     pub effects: Vec<Value>,
     pub audio_effects: Vec<Value>,
-    /// A generator or title: its `GeneratorReference`, as the file has
-    /// it. It has no media (`media` is empty).
     pub generator: Option<Value>,
-    /// A compound clip or nested timeline: its `Stack`, frames at
-    /// [`Imported::fps`]. It has no media; on an audio track, no picture.
     pub compound: Option<Compound>,
-    /// Its speed change: a time effect, as the file has it.
     pub speed: Option<Speed>,
-    /// The Clip Color it shows, and its own as vidcut wrote it
-    /// ([`kept_color`]).
     pub color: Option<String>,
     pub own_color: Option<Option<String>>,
 }
@@ -893,7 +727,6 @@ impl ImportedClip {
         self.start + self.duration
     }
 
-    /// Its content moves on `k` frames of its pace, as [`Clip::walk`].
     pub fn walk(&mut self, k: i64) {
         let skip = self.speed.as_ref().map_or(0, |s| s.skip);
         let speed = self.speed.as_ref().and_then(Speed::scalar).unwrap_or(1.0);
@@ -903,13 +736,10 @@ impl ImportedClip {
         }
     }
 
-    /// Whether it is a generator or compound clip, without media.
     pub fn is_block(&self) -> bool {
         self.generator.is_some() || self.compound.is_some()
     }
 
-    /// A block without media (`generator` or `compound` set by the
-    /// caller) for OTIO `item` on `track`, at `start` for `len` frames.
     fn block(
         key: usize,
         track: &str,
@@ -951,23 +781,17 @@ impl ImportedClip {
     }
 }
 
-/// A transition read from an OTIO file, between the clips with these
-/// [`ImportedClip::key`]s (none: a gap). Frames are at [`Imported::fps`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedTransition {
-    /// Its id in vidcut, when vidcut wrote the file.
     pub id: Option<String>,
-    /// Between sounds, not pictures.
     pub sound: bool,
     pub from: Option<usize>,
     pub to: Option<usize>,
     pub before: i64,
     pub after: i64,
-    /// As the file has it.
     pub otio: Value,
 }
 
-/// A track's settings read from an OTIO file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedTrack {
     pub id: String,
@@ -980,8 +804,6 @@ pub struct ImportedTrack {
 }
 
 impl ImportedTrack {
-    /// From vidcut's metadata, else the editor metadata, else the OTIO track's
-    /// `enabled` and `name` (unless an editor's default name).
     fn of(otio: &Value, id: &str, audio: bool) -> Self {
         let meta = &otio["metadata"][VIDCUT];
         let editor = &otio["metadata"][EDITOR];
@@ -1010,8 +832,6 @@ impl ImportedTrack {
     }
 }
 
-/// A name editors give a track by place, not one somebody gave it: `Video 1`,
-/// `Audio 2`, `V1`, `A2`, or none.
 fn default_track_name(name: &str) -> bool {
     let name = name.trim();
     let numbered = |prefix: &str| {
@@ -1024,46 +844,33 @@ fn default_track_name(name: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ImportedMarker {
     pub at: i64,
-    /// Length in frames, at least one.
     pub duration: i64,
     pub name: String,
     pub note: String,
     pub color: String,
-    /// Its id in vidcut, when vidcut wrote the file.
     pub id: Option<String>,
 }
 
-/// What a project holds besides its timeline, as an OTIO file of the
-/// whole timeline keeps it (`metadata.vidcut.project`). Other editors read
-/// the timeline from the file's own items.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProjectMeta {
     pub settings: crate::model::Settings,
-    /// The pool. In a bundle, paths are relative to its folder.
     pub media: Vec<Media>,
     pub bins: Vec<String>,
     pub tape_marks: crate::model::TapeMarks,
     pub next_id: crate::model::NextIds,
 }
 
-/// A timeline read from an OTIO file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Imported {
     pub name: String,
     pub fps: Rational,
-    /// Record timecode of the first frame, in frames.
     pub start_tc: i64,
-    /// Sorted by start; on each track, not overlapping.
     pub clips: Vec<ImportedClip>,
     pub transitions: Vec<ImportedTransition>,
-    /// Settings of the tracks the clips go on.
     pub tracks: Vec<ImportedTrack>,
     pub markers: Vec<ImportedMarker>,
     pub marks: Marks,
-    /// Whether the file has audio tracks. Without any, clips take their
-    /// media's audio.
     pub has_audio_tracks: bool,
-    /// The rest of the project, when vidcut wrote the file.
     pub project: Option<ProjectMeta>,
     pub warnings: Vec<String>,
 }
@@ -1072,15 +879,11 @@ fn schema(v: &Value) -> &str {
     v["OTIO_SCHEMA"].as_str().unwrap_or("")
 }
 
-/// `(value, rate)` of a `RationalTime`.
 fn time(v: &Value) -> Option<(f64, f64)> {
     let (value, rate) = (v["value"].as_f64()?, v["rate"].as_f64()?);
     (value.is_finite() && rate.is_finite() && rate > 0.0).then_some((value, rate))
 }
 
-/// The exact rate for an OTIO rate: whole rates as they are, NTSC rates
-/// written exactly (29.97002997…) or rounded (29.97, 23.976), else whatever
-/// short fraction it is (12.5 = 25/2).
 fn rational(rate: f64) -> Result<Rational> {
     let exact = |den: i64| {
         let num = (rate * den as f64).round();
@@ -1096,8 +899,6 @@ fn rational(rate: f64) -> Result<Rational> {
         .ok_or_else(|| Error::usage(format!("unsupported frame rate {rate}")))
 }
 
-/// Frames at `fps` for an OTIO time. A rate that is `fps` written as a
-/// decimal counts frames as they are, so long timecodes don't drift.
 fn frames(value: f64, rate: f64, fps: Rational) -> i64 {
     match rational(rate) {
         Ok(r) if r == fps => value.round() as i64,
@@ -1105,7 +906,6 @@ fn frames(value: f64, rate: f64, fps: Rational) -> i64 {
     }
 }
 
-/// Frames at `fps` from OTIO time `from` to `to`, rounded once.
 fn between(from: (f64, f64), to: (f64, f64), fps: Rational) -> i64 {
     if from.1 == to.1 {
         frames(to.0 - from.0, to.1, fps)
@@ -1118,7 +918,6 @@ fn find_timeline(v: &Value) -> Option<&Value> {
     if schema(v).starts_with("Timeline.") {
         return Some(v);
     }
-    // A SerializableCollection of timelines: the first one.
     v["children"]
         .as_array()
         .into_iter()
@@ -1130,7 +929,6 @@ fn is_clip(item: &Value) -> bool {
     schema(item).starts_with("Clip.")
 }
 
-/// A clip's active media reference (`Clip.1` has one, `Clip.2` several).
 fn media_reference_of(item: &Value) -> &Value {
     if item.get("media_references").is_some() {
         let key = item["active_media_reference_key"]
@@ -1142,8 +940,6 @@ fn media_reference_of(item: &Value) -> &Value {
     }
 }
 
-/// An item's length in frames: its source range, else (for clips) its
-/// media's available range, else (for compositions) its children's.
 fn item_len(item: &Value, fps: Rational) -> i64 {
     if let Some((v, r)) = time(&item["source_range"]["duration"]) {
         return frames(v, r, fps);
@@ -1168,7 +964,6 @@ fn item_len(item: &Value, fps: Rational) -> i64 {
     }
 }
 
-/// `s` with `%XX` escapes decoded; `None` if that isn't UTF-8.
 fn percent_decoded(s: &str) -> Option<String> {
     let hex = |b: u8| (b as char).to_digit(16);
     let bytes = s.as_bytes();
@@ -1189,8 +984,6 @@ fn percent_decoded(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// An absolute path on this system: `/…`, or on Windows a Windows one (a
-/// server's written `//server/…` too).
 fn is_local_absolute(s: &str) -> bool {
     if cfg!(windows) {
         windows_absolute(s) || s.starts_with("//")
@@ -1199,8 +992,6 @@ fn is_local_absolute(s: &str) -> bool {
     }
 }
 
-/// A path written with `/` (or on Windows either separator) as this system
-/// writes it.
 fn native(s: &str) -> PathBuf {
     if cfg!(windows) {
         PathBuf::from(s.replace('/', "\\"))
@@ -1209,8 +1000,6 @@ fn native(s: &str) -> PathBuf {
     }
 }
 
-/// The first picture's name for an image sequence named by its range
-/// (`frame_[0001-0120].png` → `frame_0001.png`).
 fn bracketed(name: &str) -> Option<String> {
     let open = name.rfind('[')?;
     let close = open + name[open..].find(']')?;
@@ -1220,16 +1009,11 @@ fn bracketed(name: &str) -> Option<String> {
         .then(|| format!("{}{first}{}", &name[..open], &name[close + 1..]))
 }
 
-/// Where the media a URL or path names may be (see [`MediaRef`]); `base`
-/// is the timeline file's folder. `None` for media on another computer.
 fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
     let written = url.trim();
     if written.is_empty() {
         return None;
     }
-    // file:///p, file://localhost/p, file:/p and file:///C:/p are local;
-    // OTIO's Python library leaves them unescaped. Plain paths are usually
-    // not escaped either, but some tools do.
     let (first, second) = match written.strip_prefix("file:") {
         Some(rest) => {
             let path = match rest.strip_prefix("//") {
@@ -1259,7 +1043,6 @@ fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
     let mut shown = forms.first()?.clone();
     let mut file_name = shown.rsplit(['/', '\\']).next().unwrap_or("").to_string();
     let mut sequence = None;
-    // An image sequence named by its range: its first picture.
     if let Some(first) = bracketed(&file_name) {
         for f in &mut forms {
             let dir = f.len() - f.rsplit(['/', '\\']).next().unwrap_or("").len();
@@ -1275,7 +1058,6 @@ fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
     for f in &forms {
         let local = is_local_absolute(f);
         if !local && !absolute_elsewhere(f, cfg!(windows)) {
-            // Relative to the timeline file.
             if let Some(b) = base {
                 paths.push(b.join(native(f)));
                 if !cfg!(windows) && f.contains('\\') {
@@ -1287,10 +1069,8 @@ fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
         if local {
             paths.push(native(f));
         } else if cfg!(windows) {
-            // A Unix path names that folder on the current drive.
             paths.push(PathBuf::from(f));
         }
-        // Moved with the timeline file: its last parts next to the file.
         if let Some(b) = base {
             let parts: Vec<&str> = f
                 .split(['/', '\\'])
@@ -1319,7 +1099,6 @@ fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
     })
 }
 
-/// The media of an `ImageSequenceReference`: its first picture.
 fn sequence_ref(r: &Value, base: Option<&Path>, fps: Rational) -> Result<MediaRef> {
     let bad = |why: &str| Error::media(format!("an image sequence {why}"));
     let url_base = r["target_url_base"]
@@ -1346,10 +1125,6 @@ fn sequence_ref(r: &Value, base: Option<&Path>, fps: Rational) -> Result<MediaRe
     Ok(m)
 }
 
-/// A clip's media and source start, in frames from the media's first
-/// frame. Source ranges count from the available range's start, which
-/// editors set to the media's timecode; without one, from the timecode's
-/// midnight (the flag: the importer subtracts the media's timecode).
 fn clip_source(item: &Value, fps: Rational, base: Option<&Path>) -> Result<(MediaRef, i64, bool)> {
     let reference = media_reference_of(item);
     let name = item["name"].as_str().unwrap_or("");
@@ -1366,7 +1141,6 @@ fn clip_source(item: &Value, fps: Rational, base: Option<&Path>) -> Result<(Medi
         .as_str()
         .filter(|_| s.starts_with("MissingReference"))
     {
-        // Media the editor had offline: they may be here.
         locate(url, base, fps).ok_or_else(|| unsupported(url))?
     } else {
         return Err(Error::media(format!(
@@ -1387,28 +1161,22 @@ fn clip_source(item: &Value, fps: Rational, base: Option<&Path>) -> Result<(Medi
     )
 }
 
-/// The link group of a clip.
 fn link_group(item: &Value) -> Option<i64> {
     item["metadata"][EDITOR]["Link Group ID"].as_i64()
 }
 
-/// The audio stream the channel map plays.
 fn editor_stream(item: &Value) -> Option<u32> {
     let channels = item["metadata"][EDITOR]["Channels"].as_array()?;
     let track = channels.first()?["Source Track ID"].as_u64()?;
     u32::try_from(track).ok()
 }
 
-/// A transition on a track, between the items with these indexes in
-/// [`walk`]'s list.
 struct Between<'a> {
     item: &'a Value,
     prev: Option<usize>,
     next: usize,
 }
 
-/// A track's items that take time, as `(start, length, item)`, and the
-/// transitions between them (which overlap their neighbors instead).
 fn walk<'a>(
     track: &'a Value,
     fps: Rational,
@@ -1439,8 +1207,6 @@ fn walk<'a>(
     (out, between)
 }
 
-/// The transitions `between` items of a track, which became the clips with
-/// `keys` (by item), as read.
 fn transitions_of(
     between: Vec<Between>,
     keys: &[Option<usize>],
@@ -1455,7 +1221,6 @@ fn transitions_of(
             continue;
         }
         let offset = |k: &str| time(&b.item[k]).map_or(0, |(v, r)| frames(v, r, fps));
-        // The id vidcut wrote is kept apart: the rest is as the editor wrote it.
         let mut otio = b.item.clone();
         if let Some(metadata) = otio.get_mut("metadata").and_then(Value::as_object_mut)
             && let Some(ours) = metadata.get_mut(VIDCUT).and_then(Value::as_object_mut)
@@ -1487,8 +1252,6 @@ fn overlaps(a: (i64, i64), b: (i64, i64)) -> bool {
     a.0 < b.1 && b.0 < a.1
 }
 
-/// The timeline's rate: the one most of its items are measured in, else its
-/// start time's.
 fn timeline_rate(tl: &Value, tracks: &[&Value]) -> Option<f64> {
     let mut counts: Vec<(f64, usize)> = Vec::new();
     for item in tracks
@@ -1506,18 +1269,12 @@ fn timeline_rate(tl: &Value, tracks: &[&Value]) -> Option<f64> {
     most.or_else(|| time(&tl["global_start_time"]).map(|(_, r)| r))
 }
 
-/// A clip's own Clip Color in a file vidcut wrote: `Some(None)` when the
-/// clip shows its media's. `None` for other files.
 fn kept_color(item: &Value) -> Option<Option<String>> {
     item["metadata"][VIDCUT]["clip"]
         .is_string()
         .then(|| our_str(item, "color"))
 }
 
-/// `doc`'s timeline as one compound clip named `name`: a timeline that
-/// holds its tracks' stack on a video track for the picture and on an
-/// audio track for the sound, as compound clips with sound are written.
-/// The stack keeps its markers, which an import places on the timeline.
 pub fn as_compound(doc: &Value, name: &str) -> Result<Value> {
     let tl = find_timeline(doc).ok_or_else(|| Error::usage("no Timeline in this OTIO file"))?;
     let tracks: Vec<&Value> = tl["tracks"]["children"]
@@ -1550,8 +1307,6 @@ pub fn as_compound(doc: &Value, name: &str) -> Result<Value> {
     }))
 }
 
-/// The timeline's rate: ours if we wrote the file, else the one most items
-/// have.
 fn file_rate(tl: &Value, tracks: &[&Value]) -> Result<Rational> {
     let ours = tl["metadata"][VIDCUT]["fps"]
         .as_str()
@@ -1565,24 +1320,19 @@ fn file_rate(tl: &Value, tracks: &[&Value]) -> Result<Rational> {
     }
 }
 
-/// Whether `doc` is an OTIO file vidcut wrote of a whole timeline, which
-/// holds the rest of its project too.
 pub fn holds_project(doc: &Value) -> bool {
     doc["metadata"][VIDCUT]["project"].is_object()
 }
 
-/// A string vidcut keeps in `item`'s metadata.
 fn our_str(item: &Value, key: &str) -> Option<String> {
     item["metadata"][VIDCUT][key].as_str().map(String::from)
 }
 
-/// A marker at timeline frame `at`.
 fn marker(k: &Value, at: i64, fps: Rational) -> ImportedMarker {
     let color = match k["metadata"][VIDCUT]["color"].as_str() {
         Some(c) if crate::ops::MARKER_COLORS.contains(&c) => c.to_string(),
         _ => our_color(k["color"].as_str().unwrap_or("")).to_string(),
     };
-    // Marker notes may be in the editor metadata.
     let note = k["comment"]
         .as_str()
         .filter(|c| !c.is_empty())
@@ -1599,8 +1349,6 @@ fn marker(k: &Value, at: i64, fps: Rational) -> ImportedMarker {
     }
 }
 
-/// The markers on a clip that starts at timeline frame `start` and lasts
-/// `len`: their times count like its source range.
 fn clip_markers(item: &Value, start: i64, len: i64, fps: Rational, out: &mut Vec<ImportedMarker>) {
     let source = time(&item["source_range"]["start_time"]);
     for k in item["markers"].as_array().into_iter().flatten() {
@@ -1617,8 +1365,6 @@ fn clip_markers(item: &Value, start: i64, len: i64, fps: Rational, out: &mut Vec
     }
 }
 
-/// Reads an OTIO document (the parsed JSON of an `.otio` file). Relative
-/// media paths are relative to `base`, the file's folder.
 pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     let tl = find_timeline(doc).ok_or_else(|| Error::usage("no Timeline in this OTIO file"))?;
     let tracks: Vec<&Value> = tl["tracks"]["children"]
@@ -1639,7 +1385,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     let start_tc = time(&tl["global_start_time"]).map_or(0, |(v, r)| frames(v, r, fps));
     let mut markers = Vec::new();
 
-    // Video tracks become V1, V2…
     let mut clips: Vec<ImportedClip> = Vec::new();
     let mut found = Vec::new();
     let mut settings: Vec<ImportedTrack> = Vec::new();
@@ -1689,7 +1434,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         name: item["name"].as_str().unwrap_or("").to_string(),
                         start,
                         duration: len,
-                        // A still's, which its source range doesn't keep.
                         source_in: meta["source_in"].as_i64().unwrap_or(first),
                         timecoded: timecoded && meta["source_in"].is_null(),
                         video: true,
@@ -1713,13 +1457,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         }
         transitions_of(between, &keys, false, fps, &mut found);
     }
-    // An audio clip lining up with a video clip of the same media (on the
-    // track vidcut named, else on any; in its link group if both
-    // have one) is that clip's audio. Others are audio-only clips: on the
-    // track vidcut named, else on audio tracks A1, A2… in the file's order.
-    // The video clips of each media in order of start, and the longest:
-    // those an audio clip overlaps are the last that start before it ends,
-    // back to where the longest no longer reaches it.
     let mut pictures: HashMap<String, (Vec<usize>, i64)> = HashMap::new();
     for (i, c) in clips.iter().enumerate().filter(|(_, c)| c.video) {
         let (list, longest) = pictures.entry(c.media.url.clone()).or_default();
@@ -1743,7 +1480,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let (effects, speed) = effects::read(item);
             let mut speed = speed_of(speed);
             let x = scalar(speed.as_ref());
-            // A compound clip's sound: a block on an audio track.
             if stack {
                 clip_markers(item, start, len, fps, &mut markers);
                 let track = match &hint {
@@ -1797,8 +1533,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     && c.audio.is_none()
                     && c.media.url == media.url
                     && c.timecoded == timecoded
-                    // The same source frame at each time, at its speed.
-                    && (c.source_in as f64 - x * c.start as f64 - (source_in as f64 - x * start as f64))
+                    && (c.source_in as f64
+                        - x * c.start as f64
+                        - (source_in as f64 - x * start as f64))
                         .abs()
                         < 1.0
                     && overlaps((c.start, c.end()), span)
@@ -1807,7 +1544,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         _ => true,
                     }
             };
-            // The first of the file's clips that pairs.
             let owner = match &hint {
                 Some(h) if h.starts_with('A') => None,
                 _ => pictures.get(&media.url).and_then(|(list, longest)| {
@@ -1833,7 +1569,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     c.stream = s;
                 }
                 c.audio_effects = effects;
-                // The picture's, which editors write on both.
                 if c.speed.is_none() {
                     c.speed = speed;
                 }
@@ -1884,11 +1619,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             _ => {}
         }
     }
-    // Per track: clips that overlap what is already there lose their audio,
-    // or go if that is all they have.
-    // In order of track and start, the clips kept on a track are the last
-    // ones kept: those that reach a time are the last that start before it,
-    // back to where the longest kept on the track no longer reaches it.
     clips.sort_by(|x, y| x.track.cmp(&y.track).then(x.start.cmp(&y.start)));
     let (mut dropped, mut gone) = (0, 0);
     let mut kept: Vec<ImportedClip> = Vec::new();
@@ -1971,7 +1701,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             made.join(", ")
         ));
     }
-    // Time effects without a speed play at normal speed.
     let mut speeds: Vec<String> = Vec::new();
     for speed in clips
         .iter()
@@ -1998,7 +1727,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     if !nested.is_empty() {
         warnings.push(format!("{COMPOUNDS_KEPT}: {}", nested.join(", ")));
     }
-    // Transitions with a clip still on a side.
     let have: std::collections::HashSet<usize> = clips.iter().map(|c| c.key).collect();
     found.retain(|t| {
         [t.from, t.to]
@@ -2023,7 +1751,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         ));
     }
 
-    // Markers of the timeline and of its tracks (tracks start with it).
     for list in
         std::iter::once(&tl["tracks"]["markers"]).chain(tracks.iter().map(|t| &t["markers"]))
     {
@@ -2034,7 +1761,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         }
     }
     markers.retain(|k| k.at >= 0);
-    // A clip's video and audio may carry the same markers.
     markers.sort();
     markers.dedup();
     let marks: Marks =
@@ -2051,7 +1777,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             }
         })
         .map(|mut meta| {
-            // Relative to the file's folder, as in a bundle.
             if let Some(base) = base {
                 for m in &mut meta.media {
                     if m.path.is_relative() {

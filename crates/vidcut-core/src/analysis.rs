@@ -1,13 +1,3 @@
-//! Measurements of media and the edits made from them: silences (Ripple
-//! Delete Silence), shot changes (Detect Scene Cuts), black
-//! stretches, loudness, and clip lengths (the Boring Detector).
-//!
-//! The media layer measures, through [`Env`](crate::editor::Env); everything
-//! here is arithmetic on those measurements, so it is tested without media.
-//! Positions are project frames: a clip's frame `t` shows source frame
-//! `source_in + (t - start)` (at another speed, through its pace: decision
-//! D48), whose audio starts at raw time `origin + source_frame / fps`.
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -15,30 +5,20 @@ use crate::model::{Clip, Project, TrackKind};
 use crate::render::Pace;
 use crate::time::Rational;
 
-/// Peak levels of one audio stream: the largest absolute sample of any
-/// channel in each `1 / per_second` of a second (linear, 0..1).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AudioLevels {
     pub per_second: u32,
-    /// Raw timestamp (s) where the first bucket starts.
     pub start: f64,
     pub peaks: Vec<f32>,
 }
 
-/// Picture measurements of one video stream, frame by frame.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PictureStats {
-    /// Raw timestamp (s) of each frame, ascending.
     pub pts: Vec<f64>,
-    /// How much each frame differs from the one before, 0..100: FFmpeg's
-    /// scene score (scdet), on luma. The first frame scores 0.
     pub score: Vec<f32>,
-    /// Share of each frame's pixels that are black (luma at most 10% of the
-    /// way from black to white), 0..1.
     pub black: Vec<f32>,
 }
 
-/// Little-endian readers for the cache formats below.
 struct Bytes<'a>(&'a [u8]);
 
 impl Bytes<'_> {
@@ -61,7 +41,6 @@ impl Bytes<'_> {
 impl AudioLevels {
     const TAG: &'static [u8; 4] = b"vcl1";
 
-    /// A compact form for caching measurements on disk.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Self::TAG.to_vec();
         out.extend_from_slice(&u64::from(self.per_second).to_le_bytes());
@@ -90,7 +69,6 @@ impl AudioLevels {
 impl PictureStats {
     const TAG: &'static [u8; 4] = b"vcp1";
 
-    /// A compact form for caching measurements on disk.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Self::TAG.to_vec();
         out.extend_from_slice(&(self.pts.len() as u64).to_le_bytes());
@@ -130,10 +108,6 @@ fn linear(db: f64) -> f64 {
     10f64.powf(db / 20.0)
 }
 
-/// What a stretch of picture or sound is measured over: frames `[start,
-/// end)` on the timeline showing source frames from `source_in` at `pace`,
-/// of media whose source frame 0 is at raw time `origin`. A clip, or a
-/// whole media item (start 0).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Span {
     pub start: i64,
@@ -156,40 +130,27 @@ impl Span {
         }
     }
 
-    /// Raw time of source position `pos` (frames, between frames too).
     fn at(&self, pos: f64) -> f64 {
         self.origin + pos / self.fps.as_f64()
     }
 
-    /// Raw time where the audio is at frame position `t` (between frames
-    /// too): its frame's start at normal speed; at another, through its
-    /// pace, backward from the top of the first frame's stretch.
     fn time(&self, t: f64) -> f64 {
         self.at(self.source_in as f64 + self.pace.sound(t - self.start as f64))
     }
 
-    /// Frame position (fractional) of raw time `x`: [`time`](Self::time)'s
-    /// inverse. Not for a held frame.
     fn frame(&self, x: f64) -> f64 {
         let pos = (x - self.origin) * self.fps.as_f64() - self.source_in as f64;
         self.start as f64 + (pos - self.pace.sound(0.0)) / self.pace.speed
     }
 
-    /// Raw time of the source frame frame `t` shows.
     fn shown_time(&self, t: i64) -> f64 {
         self.at((self.source_in + self.pace.offset(t - self.start)) as f64)
     }
 }
 
-/// A click, a sound shorter than `CLICK` seconds with at least `CLICK_GAP`
-/// seconds of silence on both sides, counts as silence (spec D29).
 const CLICK: f64 = 0.05;
 const CLICK_GAP: f64 = 0.1;
 
-/// Silent stretches of `levels` between raw times `from` and `to`, at least
-/// `min` seconds long: where every peak, after `gain_db`, stays below
-/// `threshold_db` dBFS, clicks aside. Time without audio (before or after
-/// the stream) counts as silent. Raw seconds, clipped to the window.
 pub fn silences(
     levels: &AudioLevels,
     from: f64,
@@ -203,8 +164,6 @@ pub fn silences(
     let bucket = |x: f64| ((x - levels.start) * rate).floor() as i64;
     let time = |i: i64| levels.start + i as f64 / rate;
     let (first, last) = (bucket(from), bucket(to - 1e-9));
-    // The window's buckets, and `CLICK_GAP` more on each side to see what
-    // is around a click at its edge.
     let gap = (CLICK_GAP * rate).round().max(1.0) as usize;
     let lo = first - gap as i64;
     let mut quiet: Vec<bool> = (lo..=last + gap as i64)
@@ -237,8 +196,6 @@ pub fn silences(
     out
 }
 
-/// The runs of sound in `quiet` shorter than `len` buckets with at least
-/// `gap` quiet buckets on both sides, as index ranges.
 fn clicks(quiet: &[bool], len: usize, gap: usize) -> Vec<(usize, usize)> {
     let quiet_at = |r: Option<std::ops::Range<usize>>| {
         r.and_then(|r| quiet.get(r))
@@ -260,37 +217,25 @@ fn clicks(quiet: &[bool], len: usize, gap: usize) -> Vec<(usize, usize)> {
     out
 }
 
-/// Ripple Delete Silence's settings, in frames.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SilenceSettings {
-    /// Audio below this level (dBFS) is silence.
     pub threshold_db: f64,
-    /// Silence kept before each audible part.
     pub pre_head: i64,
-    /// Silence kept after each audible part.
     pub post_tail: i64,
-    /// The shortest silence removed ("minimum to trip").
     pub min: i64,
 }
 
-/// The silent parts of `span` to remove, as frame ranges: each silence at
-/// least `min` long, less `post_tail` after the sound before it and
-/// `pre_head` before the sound after it (none at the span's edges). Only
-/// whole frames are removed.
 pub fn silent_parts(
     span: &Span,
     levels: &AudioLevels,
     gain_db: f64,
     s: &SilenceSettings,
 ) -> Vec<(i64, i64)> {
-    // A held frame is silent: nothing to find.
     if span.pace.speed == 0.0 {
         return Vec::new();
     }
     let f = span.fps.as_f64();
     let (from, to) = (span.time(span.start as f64), span.time(span.end as f64));
-    // At another speed the timeline covers more or less of the source, and
-    // backward it runs down it.
     let quiet = silences(
         levels,
         from.min(to),
@@ -319,23 +264,15 @@ pub fn silent_parts(
             parts.push((p0, p1));
         }
     }
-    // Backward, the source's last silence is the timeline's first.
     parts.sort_unstable();
     parts
 }
 
-/// The source frame shown at frame `t` of `span`: the first one at or after
-/// the frame's time less half a frame (the sampling rule, export.md §2).
 fn shown(span: &Span, stats: &PictureStats, t: i64) -> usize {
     let target = span.shown_time(t) - 0.5 / span.fps.as_f64() - 1e-9;
     stats.pts.partition_point(|&p| p < target)
 }
 
-/// Frames of `span` where a new shot starts, with their scores: the first
-/// frame showing a source frame that scores at least `threshold` against the
-/// one before it (Detect Scene Cuts). Frames skipped between two
-/// shown ones count too, and walking the source backward, the change it
-/// crosses the other way. The span's own first frame never counts.
 pub fn scene_cuts(span: &Span, stats: &PictureStats, threshold: f64) -> Vec<(i64, f32)> {
     let mut cuts = Vec::new();
     let mut prev = shown(span, stats, span.start);
@@ -358,8 +295,6 @@ pub fn scene_cuts(span: &Span, stats: &PictureStats, threshold: f64) -> Vec<(i64
     cuts
 }
 
-/// Stretches of `span` at least `min` frames long whose frames are black:
-/// at least `share` of their pixels.
 pub fn black_parts(span: &Span, stats: &PictureStats, share: f64, min: i64) -> Vec<(i64, i64)> {
     let black = |t: i64| {
         let k = shown(span, stats, t).min(stats.black.len().saturating_sub(1));
@@ -383,9 +318,6 @@ pub fn black_parts(span: &Span, stats: &PictureStats, share: f64, min: i64) -> V
     out
 }
 
-/// The Boring Detector: clips on video tracks longer than
-/// `boring` frames, and clips shorter than `jump` frames (jump cuts and
-/// flash frames).
 pub fn boring(p: &Project, boring: i64, jump: i64) -> (Vec<&Clip>, Vec<&Clip>) {
     let clips = p
         .tracks
@@ -411,7 +343,6 @@ mod tests {
         Rational::new(n, 1).unwrap()
     }
 
-    /// 100 buckets a second: `loud` seconds marked loud (0.5), the rest silent.
     fn levels(secs: f64, loud: &[(f64, f64)]) -> AudioLevels {
         let n = (secs * 100.0) as usize;
         let peaks = (0..n)
@@ -440,9 +371,7 @@ mod tests {
             vec![(0.0, 1.0), (1.5, 3.0)],
             "0.8 s at the end is too short"
         );
-        // Gain makes quiet sound loud enough: -60 dBFS + 30 dB is above -40.
         assert!(silences(&l, 0.0, 4.0, -40.0, 30.0, 0.1).is_empty());
-        // Past the stream's end counts as silent.
         assert_eq!(silences(&l, 3.5, 5.0, -40.0, 0.0, 1.0), vec![(3.5, 5.0)]);
     }
 
@@ -454,7 +383,6 @@ mod tests {
 
     #[test]
     fn a_click_just_after_sound_is_sound() {
-        // 0.05 s after the speech: too little silence before it.
         let l = levels(3.0, &[(1.0, 1.5), (1.55, 1.57)]);
         assert_eq!(
             silences(&l, 0.0, 3.0, -40.0, 0.0, 0.5),
@@ -464,7 +392,6 @@ mod tests {
 
     #[test]
     fn silent_parts_keep_heads_and_tails() {
-        // Speech at 1.0–1.5 s and 3.0–3.2 s of a 4 s clip at 10 fps.
         let l = levels(4.0, &[(1.0, 1.5), (3.0, 3.2)]);
         let span = Span {
             pace: Default::default(),
@@ -480,8 +407,6 @@ mod tests {
             post_tail: 3,
             min: 5,
         };
-        // Leading silence (no tail to keep): 100..108; between: 1.5 s + 3
-        // frames .. 3.0 s - 2 frames = 118..128; trailing 0.8 s: 132+3..140.
         assert_eq!(
             silent_parts(&span, &l, 0.0, &s),
             vec![(100, 108), (118, 128), (135, 140)]

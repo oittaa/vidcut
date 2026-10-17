@@ -1,19 +1,3 @@
-//! The decode thread: pictures for the frame the viewer is at, then ahead of
-//! it in the direction of play.
-//!
-//! Forward, the export's reader decodes on from frame to frame, a piece of
-//! another file opening ahead on its helper thread. Going back there is
-//! nothing to decode on from, so a window renders at once, from a keyframe
-//! up to the frame wanted, and is kept. Playing backwards, two windows wait behind the one
-//! shown where they fit: once one is left, the one before it decodes.
-//!
-//! Paused, frames stay around the playhead. A seek keeps what it decodes
-//! on its way, from the keyframe before; with nothing else to decode, it
-//! decodes the frame prepared of the plan played next (on a reader of its
-//! own made for that picture, so the reader it plays with stays where it
-//! stands), and a window behind the playhead, so the first steps back wait
-//! for nothing.
-
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
@@ -32,52 +16,30 @@ use crate::export::renderer::{at, window};
 use crate::export::video::{Layer, VideoFrames};
 use crate::ffmpeg::format;
 
-/// Frames decoded ahead of a paused viewer, when decoding on is cheap; of
-/// one whose viewer moves it itself, so a run starts from kept frames.
 const PAUSED_AHEAD: i64 = 3;
 const FOLLOWED_AHEAD: i64 = 8;
 
-/// Seconds of pictures decoded ahead of the clock while playing.
 const AHEAD_SECS: f64 = 0.25;
 
-/// Frames past the reader's position it decodes on to rather than seeking
-/// (the export's reader reads on within a second, too).
 const DECODE_ON_SECS: f64 = 1.0;
 
-/// Seconds a window back holds at least, where keyframes are close.
 const WINDOW_SECS: f64 = 2.0;
 
-/// Windows decoded behind the one shown, playing backwards.
 const WINDOWS_BEHIND: usize = 2;
 
-/// Pictures a window behind leaves room for in the budget: the one held
-/// for the plan played next, and one to spare.
 const SPARE: i64 = 2;
 
-/// How far back a decode starts, and what of it is kept.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Reach {
-    /// From the frame (or on from where the reader stands): those from the
-    /// viewer's on are kept.
     Forward,
-    /// From a keyframe, reaching back over more to hold `min` frames, at
-    /// most `max`: all kept.
     Window { min: i64, max: i64 },
-    /// A seek: from its frame's keyframe, keeping what its own pictures
-    /// allow ([`Keep::Seek`]).
     Seek { max: i64 },
 }
 
-/// What a decode keeps on its way to the frame it wants.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Keep {
-    /// The frames from the viewer's on.
     Ahead,
-    /// All of them: a window.
     Window,
-    /// A seek's: as much as a window of pictures like its first holds
-    /// (`chunk`). In video memory that is all of a GOP, in memory its last
-    /// half second.
     Seek,
 }
 
@@ -90,61 +52,33 @@ enum Direction {
 
 struct Decoder {
     shared: Arc<Shared>,
-    /// The reader, for the rate, the size (of black) and the decoding it
-    /// was made for.
     frames: Option<((Rational, u32, u32, bool), VideoFrames)>,
-    /// Decode on the GPU where it can, as last asked.
     hardware: bool,
-    /// The GPU's decoder, once opened (`None` inside: there is none).
     gpu: Option<Option<crate::hw::GpuDecoder>>,
-    /// What the latest picture took, and where: windows and the pictures
-    /// ahead are counted in it, against that kind's budget.
     picture_bytes: usize,
     picture_kind: Kind,
-    /// The timeline frame the reader gives next, when it is known.
     next: Option<i64>,
     plan: Arc<Plan>,
     plan_gen: Option<u64>,
-    /// The paused viewer's previous frame, and whether it last moved back.
     last_focus: Option<i64>,
     back: bool,
-    /// A frame that failed to decode, and the change it failed after: not
-    /// tried again until something changes.
     failed: Option<(u64, i64)>,
-    /// How long a seek took to its first picture lately: how far ahead a
-    /// late player seeks to catch up.
     seek_cost: Duration,
-    /// The frame a late player caught up at, ahead of the clock: decoding
-    /// goes on from there while the clock comes.
     caught_up: Option<i64>,
-    /// The prepared frame failed to decode after this change: not tried
-    /// again until something changes.
     prepared_failed: Option<u64>,
-    /// Playing backwards: the windows decoded (first and last frame), and
-    /// the lowest frame of those kept below the playhead, last looked.
     back_windows: Vec<(i64, i64)>,
     back_low: Option<i64>,
-    /// The window found to decode next playing backwards, by its last
-    /// frame, while it waits for room.
     next_window: Option<(i64, i64)>,
-    /// It decodes a followed player's windows, on their own thread
-    /// ([`run_windows`]).
     windows: bool,
-    /// Pictures other than a paused frame's come down shrunk.
     small: bool,
 }
 
-/// Followed players' windows decode one at a time across them all.
 static WINDOW: Mutex<()> = Mutex::new(());
 
-/// Followed players moving forward now: no window decodes meanwhile.
 static FORWARD: AtomicUsize = AtomicUsize::new(0);
 
-/// The windows threads' cancel flags: a followed player that starts
-/// forward stops the window decoding.
 static WINDOW_FLAGS: Mutex<Vec<Weak<AtomicBool>>> = Mutex::new(Vec::new());
 
-/// A followed player moving forward, counted in [`FORWARD`] while set.
 #[derive(Default)]
 struct Forward(bool);
 
@@ -180,14 +114,10 @@ pub(crate) fn run(shared: Arc<Shared>) {
     let mut forward = Forward::default();
     while let Some(snap) = shared.snap() {
         let dir = d.take(&snap);
-        // A followed player's windows decode on a thread of their own,
-        // made when it is first followed.
         if snap.followed {
             start_windows(&shared);
         }
         forward.set(snap.followed && matches!(dir, Direction::Forward(_)));
-        // The player comes first while it plays, and while its viewer
-        // waits for a picture.
         let waits = !shared.store.contains(&snap.plan.id(snap.focus))
             && d.failed != Some((snap.version, snap.focus));
         claim.set(dir != Direction::Paused || waits);
@@ -197,7 +127,6 @@ pub(crate) fn run(shared: Arc<Shared>) {
             Ok(true) => {}
             Ok(false) => {
                 d.close_left();
-                // Playing, the clock moves on by itself: look again soon.
                 let wait = match snap.mode {
                     Mode::Paused { .. } => Duration::from_secs(1),
                     _ => Duration::from_secs_f64(0.5 / snap.plan.fps().as_f64())
@@ -217,13 +146,11 @@ pub(crate) fn run(shared: Arc<Shared>) {
             }
         }
     }
-    // Jobs decode again while the reader goes.
     drop(forward);
     drop(claim);
     d.end("decode thread");
 }
 
-/// Starts `shared`'s windows thread, once.
 fn start_windows(shared: &Arc<Shared>) {
     let mut thread = lock(&shared.windows);
     if thread.is_none() {
@@ -235,10 +162,6 @@ fn start_windows(shared: &Arc<Shared>) {
     }
 }
 
-/// A followed player's windows thread: every window, behind it at rest and
-/// while it follows back, on a reader of its own, with a cancel flag and a
-/// busy state of its own; one window at a time across all followed
-/// players, and none while any moves forward.
 fn run_windows(shared: Arc<Shared>) {
     let _cancel = crate::cancel::Guard::set(shared.window_interrupt.clone());
     let _counting = crate::copies::Guard::set(shared.copies.clone());
@@ -259,8 +182,6 @@ fn run_windows(shared: Arc<Shared>) {
         }
         let result = {
             let _one = lock(&WINDOW);
-            // Something changed, or the player closed, while it waited its
-            // turn: look again first.
             if shared.window_interrupt.load(Ordering::Relaxed) {
                 continue;
             }
@@ -269,7 +190,6 @@ fn run_windows(shared: Arc<Shared>) {
         shared.set_window_busy(None);
         match result {
             Ok(true) => {}
-            // Another player's run ends without a change here.
             Ok(false) => {
                 d.close_left();
                 shared.wait_change(snap.version, Duration::from_millis(100));
@@ -287,12 +207,6 @@ fn run_windows(shared: Arc<Shared>) {
 }
 
 impl Decoder {
-    /// Ends it, letting its reader go, and says under `VIDCUT_DEBUG` how
-    /// long each part took: the GPU's converters, which shrink the
-    /// pictures, go first, before the frames they took; then the open
-    /// files with their decoders; then the GPU's decoder. Each frees GPU
-    /// memory, which waits its turn on the GPU behind other players ending
-    /// or decoding. `thread` names the thread it ran on.
     fn end(mut self, thread: &str) {
         let started = Instant::now();
         let mut converters = Duration::ZERO;
@@ -348,25 +262,17 @@ impl Decoder {
         }
     }
 
-    /// Takes in what is wanted now: another plan or decoder, which way the
-    /// viewer goes. The way it goes.
     fn take(&mut self, snap: &Snap) -> Direction {
         self.small = snap.small.is_some();
         if self.plan_gen != Some(snap.plan_gen) {
             self.plan = snap.plan.clone();
             self.plan_gen = Some(snap.plan_gen);
-            // The reader keeps its file open; where it stands in the new
-            // plan is found by reading pieces of it again.
             self.next = None;
-            // Frames of another plan say nothing of which way the viewer
-            // goes in this one (a switch to the other thing a viewer
-            // shows): no window behind until it steps back here.
             self.last_focus = None;
             self.back = false;
             self.forget_windows();
         }
         if self.hardware != snap.hardware {
-            // Another decoder: its pictures, from the one shown on.
             self.hardware = snap.hardware;
             if !self.windows {
                 self.shared.store.clear();
@@ -374,7 +280,6 @@ impl Decoder {
             self.failed = None;
         }
         let dir = match snap.mode {
-            // Followed, as if playing that way.
             Mode::Paused { .. } if snap.motion > 0.0 => Direction::Forward(snap.motion),
             Mode::Paused { .. } if snap.motion < 0.0 => Direction::Back,
             Mode::Paused { .. } => Direction::Paused,
@@ -399,8 +304,6 @@ impl Decoder {
         dir
     }
 
-    /// What this decoder is busy with: the windows thread's busy state for
-    /// its own.
     fn busy(&self, busy: Option<Busy>) {
         if self.windows {
             self.shared.set_window_busy(busy);
@@ -409,17 +312,12 @@ impl Decoder {
         }
     }
 
-    /// A followed player's windows: going back, the frame it is at from
-    /// its own keyframe, then those behind; at rest, the frame stepped back
-    /// to past what is kept, then two seconds up to it. Whether there was
-    /// one.
     fn windows_work(&mut self, snap: &Snap, dir: Direction) -> Result<bool> {
         let plan = self.plan.clone();
         let shared = self.shared.clone();
         let missing = |t: i64| !shared.store.contains(&plan.id(t));
         let focus = snap.focus;
         match dir {
-            // Not followed, its decode thread decodes its windows.
             _ if !snap.followed => Ok(false),
             Direction::Forward(_) => Ok(false),
             Direction::Back if missing(focus) => {
@@ -448,22 +346,18 @@ impl Decoder {
         }
     }
 
-    /// Not playing backwards (or another plan): its windows say nothing.
     fn forget_windows(&mut self) {
         self.back_windows.clear();
         self.back_low = None;
         self.next_window = None;
     }
 
-    /// Nothing to decode: the files its reader left that wait no more
-    /// close, on this thread.
     fn close_left(&mut self) {
         if let Some((_, f)) = self.frames.as_mut() {
             f.close_left();
         }
     }
 
-    /// The reader stands anywhere: interrupted, or after an error.
     fn lost_position(&mut self) {
         if let Some((_, f)) = self.frames.as_mut() {
             f.forget_position();
@@ -471,14 +365,11 @@ impl Decoder {
         self.next = None;
     }
 
-    /// Decodes the next picture wanted; whether there was one.
     fn work(&mut self, snap: &Snap, dir: Direction) -> Result<bool> {
         let plan = self.plan.clone();
         let store = &self.shared.store;
         let missing = |t: i64| !store.contains(&plan.id(t));
         let focus = snap.focus;
-        // Playing forward after catching up: the frames between the clock
-        // and the frame caught up at were passed over; on from there.
         let anchor = match (dir, self.caught_up) {
             (Direction::Forward(_), Some(c)) if c > focus && !missing(c) => c,
             _ => {
@@ -486,7 +377,6 @@ impl Decoder {
                 focus
             }
         };
-        // The frame the viewer is at.
         if anchor == focus && missing(focus) {
             if self.failed == Some((snap.version, focus)) {
                 return Ok(false);
@@ -495,10 +385,6 @@ impl Decoder {
             let started = Instant::now();
             let reads_on = self.reads_on(focus);
             let target = match dir {
-                // Late: catch up where the clock will be once a seek is done.
-                // Until the sound of a play request is heard, the clock
-                // stands where play starts (a dragged playhead makes one
-                // request after another): that frame.
                 Direction::Forward(speed) if !reads_on && snap.heard => {
                     let lead = self.seek_cost.as_secs_f64() * plan.fps().as_f64() * speed;
                     plan.clamp(focus + lead.ceil() as i64)
@@ -506,35 +392,19 @@ impl Decoder {
                 _ => focus,
             };
             let reach = match dir {
-                // Playing back with nothing kept here: from this frame's
-                // own keyframe, so it shows after one GOP's decoding, not
-                // two; the windows before come while it is shown.
                 Direction::Back => Reach::Window {
                     min: 1,
                     max: self.windows(2).1,
                 },
-                // A step back past what is kept: a chunk behind, the rest
-                // comes when nothing else is wanted.
                 _ if self.back => Reach::Window {
                     min: 1,
                     max: self.chunk(),
                 },
-                // A seek: the frames from its keyframe are decoded anyway,
-                // and kept they are the first steps back. In video memory
-                // all of them (NVDEC's, for a display that shows them from
-                // there: kept, they cost nothing more); in memory the last
-                // half second, as each kept there takes new memory, and a
-                // 10-bit one a conversion, slowing the seek down. Its own
-                // first picture says which (`Keep::Seek`), not the one
-                // shown before it (black, a still, another clip). The rest
-                // behind comes when nothing else is wanted. It reaches back
-                // no further than the seek's keyframe.
                 Direction::Paused => Reach::Seek {
                     max: self.windows(2).1,
                 },
                 _ => Reach::Forward,
             };
-            // A followed player's windows are its windows thread's.
             if snap.followed && matches!(reach, Reach::Window { .. }) {
                 return Ok(false);
             }
@@ -585,13 +455,6 @@ impl Decoder {
         if dir != Direction::Paused {
             return Ok(false);
         }
-        // Paused, whichever way it last went: at least two seconds up to
-        // the playhead (half the budget at most, as a seek keeps), so the
-        // first steps back wait for nothing. Nearest first: each window
-        // from the keyframe of the latest frame missing up to it, a GOP at
-        // a time, so the frames right behind come soonest. Stepping back,
-        // that first; otherwise the frame the other plan shows (a switch)
-        // first.
         let (min, max) = self.windows(2);
         let behind = (plan.clamp(focus - min + 1)..focus)
             .rev()
@@ -610,20 +473,12 @@ impl Decoder {
         }
     }
 
-    /// Playing backwards: decodes the next window behind those kept below
-    /// the playhead, while fewer than two wait behind the one shown;
-    /// whether it did. The first behind is the nearest, from its own
-    /// keyframe, as the playhead may be close; the second holds at least
-    /// two seconds where keyframes are close, and decodes once it fits
-    /// in the budget beside the frames still to be shown. Those count as
-    /// looked at first, so the frames shown go before them.
     fn window_behind(&mut self, snap: &Snap) -> Result<bool> {
         let plan = self.plan.clone();
         let shared = self.shared.clone();
         let store = &shared.store;
         let focus = snap.focus;
         let (min, max) = self.windows(2);
-        // The frames kept below the playhead, from where they ended last.
         let from = self
             .back_low
             .filter(|&l| l <= focus && store.contains(&plan.id(l)))
@@ -675,10 +530,6 @@ impl Decoder {
         Ok(true)
     }
 
-    /// Decodes a window behind the playhead up to `t`: from `t`'s
-    /// keyframe, at most `max` frames. The viewer stepping back into it
-    /// waits for it (`Busy::Window`) rather than start it again. Its first
-    /// frame.
     fn decode_behind(&mut self, snap: &Snap, t: i64, max: i64) -> Result<i64> {
         self.reader();
         let from = if self.reads_on(t) {
@@ -696,9 +547,6 @@ impl Decoder {
         Ok(first)
     }
 
-    /// Decodes the prepared frame of the plan played next, when it isn't
-    /// kept; whether it did. A failure isn't the viewer's: it is traced,
-    /// and the frame tried again once something changes.
     fn prepare(&mut self, snap: &Snap) -> Result<bool> {
         let Some((plan, t)) = &snap.prepared else {
             return Ok(false);
@@ -718,22 +566,16 @@ impl Decoder {
         })();
         match picture {
             Ok(p) => {
-                // Held whatever the budget, a picture whose surface is a
-                // pool's would hold all of that pool after its reader:
-                // it comes down to memory.
                 let p = if p.holds_a_pool() {
                     p.copied_down().unwrap_or(p)
                 } else {
                     p
                 };
                 self.shared.store.put(id, Arc::new(p));
-                // Its reader is gone: so is the pool it alone decoded into,
-                // and the memory of its decoder.
                 crate::hw::let_unused_frames_go();
                 crate::buffers::give_back();
                 self.shared.prepared();
             }
-            // Something new is wanted: the reader played with didn't move.
             Err(e) if is_cancelled(&e) => {}
             Err(e) => {
                 crate::debug!("player", "preparing {t} failed: {e}");
@@ -743,15 +585,11 @@ impl Decoder {
         Ok(true)
     }
 
-    /// The reader gives `t` by decoding on from where it stands.
     fn reads_on(&self, t: i64) -> bool {
         let limit = (DECODE_ON_SECS * self.plan.fps().as_f64()).ceil() as i64;
         self.next.is_some_and(|r| r <= t && t - r <= limit)
     }
 
-    /// The shortest and longest windows back, in frames, when `parts` of
-    /// them share the budget: at least two seconds where keyframes are
-    /// close, at most what fits.
     fn windows(&self, parts: usize) -> (i64, i64) {
         let budget = self.shared.store.budget(self.picture_kind);
         let max = self.pictures_in(budget / parts.max(1)).max(1);
@@ -759,36 +597,23 @@ impl Decoder {
         (min, max)
     }
 
-    /// Frames a window behind a paused playhead keeps at once. Kept in
-    /// video memory a frame costs nothing more, and the window goes from
-    /// its keyframe up. Kept in memory, each takes new memory (and a 10-bit
-    /// one a conversion): half a second at a time, nearest first, so a step
-    /// back right after a seek waits for half a second's frames, not the
-    /// whole GOP's.
     fn chunk(&self) -> i64 {
         match self.picture_kind {
-            // Shrunk pictures cost next to nothing: a window from its
-            // keyframe at once, not half a second at a time from it.
             Kind::Video => self.windows(2).1,
             Kind::Memory if self.small => self.windows(2).1,
             Kind::Memory => self.memory_chunk(),
         }
     }
 
-    /// Half a second of frames, at least 8: what a window keeps in memory
-    /// at once.
     fn memory_chunk(&self) -> i64 {
         let (_, max) = self.windows(2);
         ((self.plan.fps().as_f64() * 0.5).ceil() as i64).clamp(8, max.max(8))
     }
 
-    /// Pictures like the latest that fit in `bytes`.
     fn pictures_in(&self, bytes: usize) -> i64 {
         (bytes / self.picture_bytes.max(1)) as i64
     }
 
-    /// The reader, made anew when the rate, the size of black or the
-    /// decoding changed.
     fn reader(&mut self) -> &mut VideoFrames {
         let plan = self.plan.clone();
         let p = &plan.plan;
@@ -803,7 +628,6 @@ impl Decoder {
         &mut self.frames.as_mut().expect("just made").1
     }
 
-    /// A reader of `p`'s pictures, decoding as asked last.
     fn new_reader(&mut self, p: &RenderPlan) -> VideoFrames {
         let frames = VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None);
         let decoded = |keep| Output::Decoded { keep };
@@ -825,9 +649,6 @@ impl Decoder {
             return frames.output(decoded(Vec::new()));
         };
         self.shared.decodes_on_cpu(None);
-        // The GPU's pictures may stay in video memory, which then has a
-        // budget of its own: those of the decoders the viewer shows from
-        // there (NVDEC's, say, while Vulkan's ProRes comes down).
         let shows = self.shared.gpu_pictures.clone();
         crate::debug!(
             "player",
@@ -840,9 +661,6 @@ impl Decoder {
         frames.output(decoded(shows)).decode_on(gpu.clone())
     }
 
-    /// Decodes timeline frame `t`, and on the way what is worth keeping:
-    /// for a window, everything from its keyframe up to `t`. The first
-    /// frame decoded.
     fn decode(&mut self, snap: &Snap, t: i64, reach: Reach) -> Result<i64> {
         self.reader();
         let from = if self.reads_on(t) {
@@ -864,9 +682,6 @@ impl Decoder {
         Ok(first)
     }
 
-    /// Decodes up to timeline frame `t`: from `from` (`None`: on from where
-    /// the reader stands), keeping those from the viewer's on and what
-    /// `keep` says of the rest.
     fn decode_from(&mut self, snap: &Snap, from: Option<i64>, t: i64, keep: Keep) -> Result<()> {
         let plan = self.plan.clone();
         if let Some(from) = from {
@@ -885,24 +700,16 @@ impl Decoder {
             }
         );
         let started = Instant::now();
-        // A seek keeps from here on, once its first picture says where its
-        // pictures go.
         let mut seek_keeps: Option<i64> = None;
         for i in r..=t {
-            // Frames before the one wanted: kept going back (they are the
-            // window) and when they are still ahead of the viewer; passed
-            // over otherwise.
             let window = match keep {
                 Keep::Ahead => false,
                 Keep::Window => true,
                 Keep::Seek => seek_keeps.is_none_or(|from| i >= from),
             };
-            // A followed player keeps every frame it decodes: catching up
-            // leaves no holes for a run back.
             let kept = i == t
                 || window
                 || ((i >= snap.focus || snap.followed) && !self.shared.store.contains(&plan.id(i)));
-            // Shrunk, but for a paused frame and those just ahead of it.
             let whole =
                 snap.motion == 0.0 && matches!(snap.mode, Mode::Paused { .. }) && i >= snap.focus;
             let small = snap.small.filter(|_| !whole);
@@ -956,19 +763,11 @@ impl Decoder {
         Ok(())
     }
 
-    /// The first frame of the window to decode up to `t`: from a keyframe,
-    /// so nothing in it decodes twice, holding at least `min` frames where
-    /// keyframes are close and at most `max` (reaching back over another
-    /// keyframe only to hold that GOP whole), never before `t`'s piece. A
-    /// picture at a time for black, stills and image sequences: they stand
-    /// alone.
     fn window_start(&mut self, t: i64, min: i64, max: i64) -> Result<i64> {
         let plan = self.plan.clone();
         let Some((piece, piece_start)) = plan.piece_at(t) else {
             return Ok(t);
         };
-        // A dissolve's window starts at its first video file's keyframe;
-        // the other files decode on through it.
         let first = piece
             .layers()
             .into_iter()
@@ -985,10 +784,6 @@ impl Decoder {
         else {
             return Ok(t);
         };
-        // A piece at another speed (decision D48): two seconds, at least
-        // `min`, at most `max`, read from the keyframe before its first
-        // (the reader makes a backward one's from keyframes itself); a held
-        // one's one picture.
         if !pace.is_normal() {
             if pace.speed == 0.0 {
                 return Ok(t);
@@ -1011,17 +806,13 @@ impl Decoder {
             max,
             true,
         )?;
-        // The reader was moved to find the keyframe.
         self.next = None;
         Ok(t - (pos - start))
     }
 }
 
-/// The picture of a frame whose pictures as decoded are `layers`: the
-/// first, and while a dissolve plays, those over it.
 fn picture(layers: Vec<Layer>) -> Picture {
     let made = |l: Layer| {
-        // What decoded a file's picture; none for black.
         let decoder = l
             .decoding
             .is_some()

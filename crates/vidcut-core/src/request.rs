@@ -1,10 +1,3 @@
-//! The command protocol: every capability as one serializable request.
-//!
-//! The JSON form is `{"method": "...", "params": {...}}`. It is the same for
-//! JSON-RPC, `vidcut apply` batch lines and `vidcut rpc`, and every GUI action
-//! maps onto one of these. The common options `if_rev` and `dry_run` travel
-//! next to the params (see [`Envelope`]).
-
 use std::path::PathBuf;
 
 use schemars::JsonSchema;
@@ -15,14 +8,11 @@ use crate::model::{TrackClip, TrackKind};
 use crate::ops::{Edge, MoveMode};
 use crate::time::{RangeSpec, Rational, TimeSpec};
 
-/// A clip reference: an id like `c17`, or `V1@<TimeSpec>` for the clip under
-/// that frame on a track.
 pub type ClipRef = String;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "method", content = "params")]
 pub enum Request {
-    // ---------------------------------------------------------------- project
     /// The whole project as JSON.
     #[serde(rename = "project.get")]
     ProjectGet {},
@@ -68,7 +58,6 @@ pub enum Request {
         start_tc: Option<TimeSpec>,
     },
 
-    // ---------------------------------------------------------------- media pool
     /// Add files to the media pool (probing them); returns their media ids.
     #[serde(rename = "media.add")]
     MediaAdd {
@@ -122,7 +111,6 @@ pub enum Request {
         /// A color as `clip.set` takes it. Empty string clears it.
         color: String,
     },
-    // Decisions D5, D6.
     /// Set a media item's source In and/or Out (I/O in a source viewer or over
     /// a pool thumbnail). Source time, `out` exclusive. Edits without a `range`
     /// use these marks.
@@ -137,7 +125,6 @@ pub enum Request {
     /// Clear a media item's source In and Out.
     #[serde(rename = "media.marks.clear")]
     MediaMarksClear { media: String },
-    // Decisions D16, D17.
     /// Set Source Tape In and/or Out. `in` and `out` are tape frames of `order`
     /// (the media ids in tape order); `out` is exclusive. A span on one clip is
     /// stored as that clip's source marks. A span across clips is stored as
@@ -164,7 +151,6 @@ pub enum Request {
         media: OneOrMany<String>,
         bin: String,
     },
-    // Decision D41.
     /// Write playback proxies for video and image sequences. With no `media`,
     /// every such item in the pool. Stills and audio-only files are skipped
     /// then; naming one is an error.
@@ -208,7 +194,6 @@ pub enum Request {
     #[serde(rename = "probe")]
     Probe { path: PathBuf },
 
-    // ---------------------------------------------------------------- timeline queries
     /// Tracks with their clips and gaps (frames plus timecodes).
     #[serde(rename = "timeline.get")]
     TimelineGet {
@@ -231,7 +216,6 @@ pub enum Request {
         jump: TimeSpec,
     },
 
-    // ---------------------------------------------------------------- analysis
     /// Silent stretches (as Ripple Delete Silence finds them) in `media`
     /// (source frames), in `clips` (timeline frames), or in every clip with
     /// sound.
@@ -282,7 +266,6 @@ pub enum Request {
         #[serde(default)]
         range: Option<RangeSpec>,
     },
-    // Deviation X9.
     /// Import an OpenTimelineIO timeline: an `.otio` file, an `.otioz` bundle
     /// (its media are unpacked first) or an `.otiod` bundle folder, as other
     /// editors write them. Its media join the pool, and its tracks go on V1,
@@ -314,7 +297,6 @@ pub enum Request {
         flatten: bool,
     },
 
-    // ---------------------------------------------------------------- edit functions (spec §7)
     /// Append after the last clip (Shift+F12).
     #[serde(rename = "edit.append")]
     EditAppend(SourceParams),
@@ -339,7 +321,6 @@ pub enum Request {
         source: SourceParams,
         #[serde(default)]
         at: Option<TimeSpec>,
-        // Spec §7.3.
         /// `false` ignores the timeline In/Out and writes at `at` (drag and
         /// drop places by position).
         #[serde(default = "yes")]
@@ -372,12 +353,10 @@ pub enum Request {
         use_marks: bool,
     },
 
-    // ---------------------------------------------------------------- timeline editing (spec §8)
     /// Split at one or more frames (Ctrl+\).
     #[serde(rename = "edit.split")]
     EditSplit {
         at: OneOrMany<TimeSpec>,
-        // Decision D2.
         /// Only split these clips.
         #[serde(default)]
         clips: Vec<ClipRef>,
@@ -593,7 +572,6 @@ pub enum Request {
         at: Option<TimeSpec>,
     },
 
-    // ---------------------------------------------------------------- tracks, clips, marks, markers
     /// The tracks, with their header and mixer settings and how many clips
     /// each holds.
     #[serde(rename = "track.list")]
@@ -704,7 +682,6 @@ pub enum Request {
     #[serde(rename = "markers.remove")]
     MarkersRemove { marker: String },
 
-    // ---------------------------------------------------------------- export (spec §10)
     /// Plan an export without encoding: settings, encoder, outputs, segments.
     #[serde(rename = "export.plan")]
     ExportPlan(ExportParams),
@@ -801,7 +778,6 @@ pub enum Request {
     #[serde(rename = "keys.list")]
     KeysList {},
 
-    // ---------------------------------------------------------------- history and batches
     #[serde(rename = "history.undo")]
     HistoryUndo {
         #[serde(default = "one")]
@@ -824,7 +800,6 @@ pub enum Request {
         label: Option<String>,
     },
 
-    // ---------------------------------------------------------------- live (a running GUI)
     /// Open (or with `create`, create) a project in the running GUI. An
     /// OpenTimelineIO file opens as a new project file made from it, as
     /// `project.create` with `from` makes it.
@@ -1102,7 +1077,6 @@ pub enum Request {
         timeout: Option<f64>,
     },
 
-    // ---------------------------------------------------------------- meta
     /// JSON Schema of the protocol, or of one method's params.
     #[serde(rename = "schema")]
     Schema {
@@ -1118,7 +1092,6 @@ pub enum Request {
 /// What to export and how.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ExportParams {
-    // Deviation X9.
     /// Output file; for `per_clip`, a directory. A timeline for other editors
     /// instead of media: `.otio` (the edit), `.otioz` (a zip bundle of the edit
     /// and its media) or `.otiod` (the same as a folder).
@@ -1172,7 +1145,6 @@ pub enum ImportMode {
     Media,
 }
 
-// Spec §4.1.
 /// What the single viewer shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1329,8 +1301,6 @@ fn one() -> u32 {
     1
 }
 
-// Defaults for the analysis tools (spec decisions D29 and D30).
-
 fn silence_threshold() -> f64 {
     -40.0
 }
@@ -1377,7 +1347,6 @@ pub struct SourceParams {
     /// Media id (`m1`). Omitted when `tape` is set.
     #[serde(default)]
     pub media: String,
-    // Decision D17.
     /// Edit the Source Tape In–Out span instead of one media item. Both marks
     /// must be set.
     #[serde(default)]
@@ -1392,7 +1361,6 @@ pub struct SourceParams {
     /// Leave the video out (Audio Only).
     #[serde(default)]
     pub audio_only: bool,
-    // Spec §7.
     /// The target track. Default: V1, or A1 for audio-only clips. The next new
     /// track (`V3` when there are two) is made. On an audio track only the
     /// audio is used.
@@ -1421,11 +1389,9 @@ pub struct ProjectSet {
     /// drop-frame).
     #[serde(default)]
     pub start_tc: Option<TimeSpec>,
-    // Decision D38.
     /// How long a still lasts when edited without a range, e.g. `5s`.
     #[serde(default)]
     pub still_duration: Option<TimeSpec>,
-    // Decision D41.
     /// Play fresh proxies in the preview. Export still reads the originals.
     #[serde(default)]
     pub use_proxies: Option<bool>,
@@ -1439,8 +1405,6 @@ pub enum OneOrMany<T> {
     Many(Vec<T>),
 }
 
-// Hand-written so the inner error ("number without a unit...") reaches the
-// user instead of serde's generic "did not match any variant".
 impl<'de, T: serde::de::DeserializeOwned> Deserialize<'de> for OneOrMany<T> {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         use serde::de::Error;
@@ -1465,7 +1429,6 @@ impl<T: Clone> OneOrMany<T> {
 }
 
 impl Request {
-    /// The JSON-RPC method name.
     pub fn method(&self) -> String {
         match serde_json::to_value(self) {
             Ok(serde_json::Value::Object(m)) => m
@@ -1477,8 +1440,6 @@ impl Request {
         }
     }
 
-    /// Builds a request from a method name and optional params (JSON-RPC lets
-    /// clients omit params for methods without required ones).
     pub fn from_parts(method: &str, params: Option<serde_json::Value>) -> Result<Self, String> {
         let params = params.unwrap_or_else(|| serde_json::json!({}));
         let request: Self = serde_json::from_value(
@@ -1491,9 +1452,6 @@ impl Request {
                 format!("invalid params for {method}: {e}")
             }
         })?;
-        // serde can't deny unknown fields next to `flatten`, so compare keys:
-        // a mistyped parameter must fail rather than be silently ignored. A
-        // null is no value: an optional parameter left out on the way back.
         if let (Some(given), Ok(serde_json::Value::Object(parsed))) =
             (params.as_object(), serde_json::to_value(&request))
         {
@@ -1517,8 +1475,6 @@ impl Request {
         Ok(request)
     }
 
-    /// Whether the request only makes sense in a running GUI (viewer, player,
-    /// selection, window). Headless runs reject these with `NO_INSTANCE`.
     pub fn is_live(&self) -> bool {
         matches!(
             self,
@@ -1556,7 +1512,6 @@ impl Request {
         )
     }
 
-    /// Whether the request works without a project (it never needs one open).
     pub fn is_projectless(&self) -> bool {
         matches!(
             self,
@@ -1576,7 +1531,6 @@ impl Request {
         )
     }
 
-    /// Whether the request changes the project (and so takes part in undo).
     pub fn is_mutation(&self) -> bool {
         !self.is_live()
             && !matches!(
@@ -1619,9 +1573,6 @@ impl Request {
             )
     }
 
-    /// The file paths the request names, those of `apply`'s commands too.
-    /// Clients make them absolute before sending: a GUI that answers runs
-    /// in a directory of its own.
     pub fn paths_mut(&mut self) -> Vec<&mut PathBuf> {
         match self {
             Self::MediaAdd { paths, .. } => paths.iter_mut().collect(),
@@ -1655,14 +1606,10 @@ impl Request {
     }
 }
 
-/// A request plus the options every mutation accepts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Envelope {
     pub request: Request,
-    /// Fail with `CONFLICT` unless the project is at this revision: for
-    /// edits, and for what reads the project (queries, exports, frames).
     pub if_rev: Option<u64>,
-    /// Compute the result and changes without committing them.
     pub dry_run: bool,
 }
 
@@ -1675,8 +1622,6 @@ impl Envelope {
         }
     }
 
-    /// The request as it runs: a dry-run `export.start` is `export.plan`,
-    /// the plan without the export, whoever sends it.
     pub fn normalized(mut self) -> Self {
         if self.dry_run
             && let Request::ExportStart(params) = self.request
@@ -1686,8 +1631,6 @@ impl Envelope {
         self
     }
 
-    /// `CONFLICT` if `if_rev` names another revision than `rev`, the
-    /// project's. Requests without a project pass.
     pub fn check_rev(&self, rev: u64) -> crate::Result<()> {
         match self.if_rev {
             Some(want) if want != rev && !self.request.is_projectless() => {
@@ -1699,8 +1642,6 @@ impl Envelope {
         }
     }
 
-    /// Parses `{"method": ..., "params": {..., "if_rev": N, "dry_run": true}}`
-    /// (the options may also sit next to `method`).
     pub fn from_json(value: serde_json::Value) -> Result<Self, String> {
         let serde_json::Value::Object(mut obj) = value else {
             return Err("a request must be a JSON object with \"method\"".into());
@@ -1779,8 +1720,6 @@ mod tests {
     #[test]
     fn every_parameter_given_is_known() {
         use serde_json::json;
-        // What a client may send for leaving things at their defaults: a
-        // flag that is false, an optional parameter that is null.
         for params in [
             json!({ "auto": false }),
             json!({ "media": null, "width": null, "auto": false }),
@@ -1789,7 +1728,6 @@ mod tests {
             Request::from_parts("proxy.generate", Some(params.clone()))
                 .unwrap_or_else(|e| panic!("{params}: {e}"));
         }
-        // A mistyped parameter fails, whatever its value.
         for params in [json!({ "autoo": true }), json!({ "autoo": false })] {
             let e = Request::from_parts("proxy.generate", Some(params)).unwrap_err();
             assert!(e.contains("unknown parameter(s) autoo"), "{e}");

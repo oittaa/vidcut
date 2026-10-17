@@ -1,18 +1,11 @@
-//! Running GUIs announce themselves with `<pid>.json` (and listen on
-//! `<pid>.sock`, on Windows a pipe named after it) in
-//! `$XDG_RUNTIME_DIR/vidcut/instances/`. Entries of processes that are gone
-//! are removed when listed.
-
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// A running GUI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Instance {
     pub pid: u32,
     pub socket: PathBuf,
-    /// The open project (canonical path), if any.
     pub project: Option<PathBuf>,
     pub version: String,
 }
@@ -21,9 +14,6 @@ pub fn dir() -> PathBuf {
     super::runtime_dir().join("instances")
 }
 
-/// Where this process's GUI listens: `<pid>.sock` in [`dir`]. On Windows
-/// the name also holds a number picked at random, as the pipe named after
-/// it is in a namespace every user sees: nobody can take it first.
 pub fn socket_path(pid: u32) -> PathBuf {
     #[cfg(windows)]
     let name = {
@@ -41,7 +31,6 @@ fn entry_path(pid: u32) -> PathBuf {
     dir().join(format!("{pid}.json"))
 }
 
-/// Writes (or rewrites) this instance's entry atomically.
 pub fn register(instance: &Instance) -> std::io::Result<()> {
     let dir = dir();
     super::private_dir(&dir)?;
@@ -52,13 +41,11 @@ pub fn register(instance: &Instance) -> std::io::Result<()> {
     std::fs::rename(&tmp, &path)
 }
 
-/// Removes this instance's entry and socket.
 pub fn unregister(pid: u32) {
     let _ = std::fs::remove_file(entry_path(pid));
     let _ = std::fs::remove_file(socket_path(pid));
 }
 
-/// Whether a process with this pid exists.
 #[cfg(unix)]
 pub(crate) fn alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
@@ -69,7 +56,6 @@ pub(crate) fn alive(pid: u32) -> bool {
     r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
-/// Whether a process with this pid is running.
 #[cfg(windows)]
 pub(crate) fn alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{
@@ -82,7 +68,6 @@ pub(crate) fn alive(pid: u32) -> bool {
     unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if process.is_null() {
-            // Another user's process is there, but not ours to open.
             return GetLastError() == ERROR_ACCESS_DENIED;
         }
         let mut code = 0u32;
@@ -96,7 +81,6 @@ fn read(path: &Path) -> Option<Instance> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
-/// Running GUIs, oldest pid first. Stale entries are cleaned up.
 pub fn list() -> Vec<Instance> {
     let Ok(entries) = std::fs::read_dir(dir()) else {
         return Vec::new();

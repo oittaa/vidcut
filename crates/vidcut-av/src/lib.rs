@@ -1,5 +1,3 @@
-//! vidcut media layer on the FFmpeg libraries (in-process; never the ffmpeg CLI).
-
 pub use ffmpeg_next as ffmpeg;
 
 pub mod analysis;
@@ -34,10 +32,6 @@ pub mod waveform;
 
 pub use error::{Error, Result};
 
-/// Initializes FFmpeg once per process. FFmpeg's own log output is limited to
-/// fatal messages: decoders recovering after a seek log harmless errors, and
-/// real failures surface as vidcut errors anyway. Set `VIDCUT_AV_LOG` to an
-/// FFmpeg level name (`error`, `warning`, `debug`, ...) to see more.
 pub fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
@@ -57,16 +51,11 @@ pub fn init() {
     });
 }
 
-/// Whether `VIDCUT_DEBUG` is set: vidcut then says on stderr what it
-/// decodes, plays and draws, and why ([`debug!`]). Nobody sees it in
-/// normal use, so it says all that helps.
 pub fn debug() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("VIDCUT_DEBUG").is_some())
 }
 
-/// Says a line on stderr under `[area]` while `VIDCUT_DEBUG` is set
-/// ([`debug`]): `debug!("decoding", "{path}: on NVDEC")`.
 #[macro_export]
 macro_rules! debug {
     ($area:literal, $($arg:tt)*) => {
@@ -76,8 +65,6 @@ macro_rules! debug {
     };
 }
 
-/// FFmpeg's version as its build says it: `8.0.1-3ubuntu2` from a
-/// distribution, `N-…-g…` from git.
 pub fn ffmpeg_version() -> String {
     // SAFETY: a static string FFmpeg keeps for the life of the process.
     unsafe { std::ffi::CStr::from_ptr(ffmpeg::ffi::av_version_info()) }
@@ -85,8 +72,6 @@ pub fn ffmpeg_version() -> String {
         .into_owned()
 }
 
-/// The release in [`ffmpeg_version`]: `8.0.1` of `8.0.1-3ubuntu2`; a git
-/// build's whole string.
 pub fn ffmpeg_release() -> String {
     release_of(&ffmpeg_version())
 }
@@ -100,8 +85,6 @@ fn release_of(version: &str) -> String {
     }
 }
 
-/// FFmpeg's version and those of the linked libraries, e.g.
-/// `{"version": "8.0.1-3ubuntu2", "libavcodec": "62.11.100"}`.
 pub fn library_versions() -> std::collections::BTreeMap<&'static str, String> {
     let v = |n: u32| format!("{}.{}.{}", n >> 16, (n >> 8) & 0xff, n & 0xff);
     [
@@ -115,8 +98,6 @@ pub fn library_versions() -> std::collections::BTreeMap<&'static str, String> {
     .collect()
 }
 
-/// Seconds of CPU this process has used, for measurements: how much of the
-/// computer a way of decoding or encoding takes.
 pub fn cpu_seconds() -> f64 {
     #[cfg(unix)]
     // SAFETY: getrusage fills the struct it is given.
@@ -134,7 +115,6 @@ pub fn cpu_seconds() -> f64 {
         let mut times: [FILETIME; 4] = std::mem::zeroed();
         let [created, exited, kernel, user] = &mut times;
         GetProcessTimes(GetCurrentProcess(), created, exited, kernel, user);
-        // Hundreds of nanoseconds.
         let t = |f: &FILETIME| {
             (u64::from(f.dwHighDateTime) << 32 | u64::from(f.dwLowDateTime)) as f64 / 1e7
         };

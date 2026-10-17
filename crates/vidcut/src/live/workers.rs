@@ -1,6 +1,3 @@
-//! Background threads for slow media work (thumbnails, waveforms). Jobs
-//! report back to the session as messages.
-
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 
@@ -16,7 +13,6 @@ impl Workers {
         let rx = Arc::new(Mutex::new(rx));
         for i in 0..threads.max(1) {
             let rx = rx.clone();
-            // Thumbnails, waveforms and the preview's helper files: jobs.
             let _ = crate::threads::spawn(
                 format!("vidcut-worker-{i}"),
                 crate::threads::Work::Job,

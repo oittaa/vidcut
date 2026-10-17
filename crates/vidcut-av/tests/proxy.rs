@@ -1,7 +1,3 @@
-//! A proxy keeps the source frame's barcode and presentation timestamp,
-//! with each encoder proxies can be made with (decision D41), and a 10-bit
-//! proxy an HDR source's colors.
-
 use vidcut_av::decode::{Input, VideoReader, read_barcode};
 use vidcut_av::export::encode::{Availability, detect};
 use vidcut_av::ffmpeg;
@@ -17,8 +13,6 @@ fn secs(pts: i64, tb: ffmpeg::Rational) -> f64 {
     pts as f64 * f64::from(tb.numerator()) / f64::from(tb.denominator())
 }
 
-/// HDR10's static values: a 1000-nit mastering display, MaxCLL 1000 and
-/// MaxFALL 400.
 const HDR10: HdrMeta = HdrMeta {
     max_nits: 1000,
     light: Some((1000, 400)),
@@ -26,8 +20,6 @@ const HDR10: HdrMeta = HdrMeta {
     hdr10plus_frames: None,
 };
 
-/// A source: 8-bit H.264, 10-bit HEVC, 10-bit AV1, 10-bit HEVC in PQ with
-/// HDR10's static values, or ProRes 422 HQ.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Source {
     H264,
@@ -38,7 +30,6 @@ enum Source {
 }
 
 impl Source {
-    /// Its fixture in `container`, `w`×`h`, of `frames` frames.
     fn spec(self, container: Container, (w, h): (u32, u32), frames: u32) -> FixtureSpec {
         let codec = match self {
             Source::H264 => VideoCodec::H264,
@@ -53,9 +44,6 @@ impl Source {
         }
     }
 
-    /// The containers of its fixture and of its copy that starts late:
-    /// FFmpeg finds no video stream in an MPEG-TS file of AV1, and ProRes
-    /// goes in MOV and Matroska.
     fn containers(self) -> (Container, Container) {
         match self {
             Source::Av1 => (Container::Mp4, Container::Mkv),
@@ -65,29 +53,20 @@ impl Source {
     }
 }
 
-/// What a proxy's pictures are, besides the source's barcodes and times.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Pictures {
-    /// As the encoder makes them.
     Any,
-    /// 10-bit.
     TenBit,
-    /// 10-bit 4:2:2, as ProRes is.
     TenBit422,
-    /// 10-bit PQ in BT.2020: the barcode's white at the source's level,
-    /// with its static HDR metadata.
     Pq,
-    /// SDR BT.709.
     Sdr,
 }
 
-/// The first frame of the file at `path`, decoded on the CPU.
 fn first_frame(path: &std::path::Path) -> ffmpeg::frame::Video {
     let mut reader = VideoReader::open_input(&Input::File(path.to_path_buf())).unwrap();
     reader.next_frame().unwrap().expect("a frame")
 }
 
-/// `f`'s primaries, transfer and matrix.
 fn tags(
     f: &ffmpeg::frame::Video,
 ) -> (
@@ -100,8 +79,6 @@ fn tags(
     (raw.color_primaries, raw.color_trc, raw.colorspace)
 }
 
-/// The barcode's white in 10-bit `f`: the middle of its luma levels above
-/// 300, between PQ's black (64) and SDR white in PQ (573).
 fn white(f: &ffmpeg::frame::Video) -> u16 {
     let (stride, data) = (f.stride(0), f.data(0));
     let mut bright = Vec::new();
@@ -118,7 +95,6 @@ fn white(f: &ffmpeg::frame::Video) -> u16 {
     bright[bright.len() / 2]
 }
 
-/// Checks that the proxy at `path`, made with `enc`, has `pictures`.
 fn check_pictures(path: &std::path::Path, enc: &ProxyEncoder, pictures: Pictures) {
     use ffmpeg::ffi::{
         AVColorPrimaries as P, AVColorSpace as S, AVColorTransferCharacteristic as T,
@@ -141,7 +117,6 @@ fn check_pictures(path: &std::path::Path, enc: &ProxyEncoder, pictures: Pictures
                 S::AVCOL_SPC_BT2020_NCL,
             );
             assert_eq!(tags(&first), pq, "{what}");
-            // Not tone-mapped: SDR white stays at 203 nits.
             let level = white(&first);
             assert!(
                 level.abs_diff(fixture::PQ_WHITE) <= 4,
@@ -150,7 +125,6 @@ fn check_pictures(path: &std::path::Path, enc: &ProxyEncoder, pictures: Pictures
             let kept = vidcut_av::hdr::of_frame(&first);
             assert_eq!(kept.light, HDR10.values().light, "{what}");
             let mastering = kept.mastering.expect("a mastering display");
-            // As close as AV1's fixed point codes them.
             let close = |a: f64, b: f64| (a - b).abs() < 1e-4;
             assert!(
                 close(mastering.max_nits, 1000.0) && close(mastering.min_nits, 0.0001),
@@ -165,9 +139,6 @@ fn check_pictures(path: &std::path::Path, enc: &ProxyEncoder, pictures: Pictures
     }
 }
 
-/// The barcode of `f`. An HDR frame's (10-bit on the CPU) is read from
-/// black to the fixtures' white in its transfer, SDR white: 203 nits in PQ,
-/// 75% in HLG.
 fn barcode(f: &ffmpeg::frame::Video) -> Option<u32> {
     let white = match vidcut_av::color::hdr_of(f) {
         Some(Hdr::Pq) => fixture::PQ_WHITE,
@@ -179,12 +150,10 @@ fn barcode(f: &ffmpeg::frame::Video) -> Option<u32> {
     vidcut_av::barcode::read_with(w, h, |x, y| {
         let at = y * stride + 2 * x;
         let level = i32::from(u16::from_le_bytes([data[at], data[at + 1]]));
-        // Black (64) to white, as 8-bit's 16 to 235.
         (16 + (level - 64) * 219 / (i32::from(white) - 64)).clamp(0, 255) as u8
     })
 }
 
-/// `(barcode, timestamp seconds)` of every frame.
 fn frames(input: &Input) -> Vec<(Option<u32>, f64)> {
     let mut reader = VideoReader::open_input(input).unwrap();
     let tb = reader.time_base();
@@ -196,8 +165,6 @@ fn frames(input: &Input) -> Vec<(Option<u32>, f64)> {
     out
 }
 
-/// The software encoders: x264, SVT-AV1 and x265 where this FFmpeg has
-/// them, ProRes and DNxHR.
 fn software() -> Vec<ProxyEncoder> {
     let none = Availability::default();
     [
@@ -212,9 +179,6 @@ fn software() -> Vec<ProxyEncoder> {
     .collect()
 }
 
-/// Each frame's barcode and timestamp match the source's in `out` proxies
-/// of `w`×`h` `source`s, the frames decoded on `decoder` (`None`: the CPU),
-/// and the proxies have `pictures`. What was written for each.
 fn matches_source(
     enc: &ProxyEncoder,
     decoder: Option<&GpuDecoder>,
@@ -260,7 +224,6 @@ fn matches_source(
                 enc.name,
                 path.display()
             );
-            // Matroska stores milliseconds. The half-frame bias absorbs that.
             assert!(
                 (got_t - want_t).abs() <= 1.5e-3,
                 "{} {} frame {n}: proxy at {got_t}, source at {want_t}",
@@ -302,14 +265,11 @@ fn a_proxy_matches_source_frames_and_timestamps() {
     for enc in software() {
         matches_source(&enc, None, Source::H264, small, small, Pictures::Any);
     }
-    // A 10-bit source, with the encoders that take 10 bits: SVT-AV1 and
-    // x265 where this FFmpeg's do, and ProRes.
     for enc in software().into_iter().filter(|e| e.ten_bit) {
         matches_source(&enc, None, Source::Hevc10, small, small, Pictures::TenBit);
     }
 }
 
-/// A PQ source's proxies by those encoders keep its HDR, and x264's is SDR.
 #[test]
 fn a_ten_bit_proxy_keeps_an_hdr_sources_colors() {
     let small = (320, 180);
@@ -323,8 +283,6 @@ fn a_ten_bit_proxy_keeps_an_hdr_sources_colors() {
     }
 }
 
-/// `source`'s frames on `decoder` into `enc`'s proxies at their own size
-/// and at half of 1280×720 ([`matches_source`]). What was written.
 fn on_the_gpu(
     enc: &ProxyEncoder,
     decoder: &GpuDecoder,
@@ -344,14 +302,6 @@ fn on_the_gpu(
     written
 }
 
-/// The frames each GPU decodes, made into H.264 and HEVC proxies by its own
-/// encoders: NVENC from NVDEC, AMF from Direct3D 11 and VideoToolbox from
-/// VideoToolbox take them on the GPU, as VAAPI does from VA-API. A 10-bit
-/// source's and a PQ source's go into AV1, HEVC and ProRes proxies by the
-/// encoders there that take 10 bits, and the PQ source's into an SDR H.264
-/// one too. Untagged 320×180 is read as BT.601, which only NVIDIA's path
-/// converts on the GPU (libplacebo, a picture a frame late), and untagged
-/// 1280×720 as BT.709, which every GPU fits.
 #[test]
 fn a_gpu_proxy_matches_source_frames_and_timestamps() {
     let decoders = GpuDecoder::all();
@@ -360,8 +310,6 @@ fn a_gpu_proxy_matches_source_frames_and_timestamps() {
     }
     let available = detect(false);
     for decoder in &decoders {
-        // The encoders on its GPU: every one where no GPU is listed (a
-        // Mac's).
         let on_it = match decoder.gpu() {
             Some(gpu) => available.on(gpu),
             None => available.clone(),
@@ -389,12 +337,6 @@ fn a_gpu_proxy_matches_source_frames_and_timestamps() {
     }
 }
 
-/// A ProRes proxy made on NVIDIA's GPU: NVDEC's frames of H.264, 10-bit
-/// HEVC and 10-bit AV1 made into its pictures by libplacebo on Vulkan, and
-/// encoded there by Vulkan's ProRes encoder. Nothing comes down or goes up,
-/// and the proxy is 10-bit 4:2:2 with the source's barcodes and
-/// timestamps, a PQ source's in its colors. Skips without an NVIDIA GPU or
-/// Vulkan's ProRes encoder on it.
 #[test]
 fn a_prores_proxy_made_on_nvidias_gpu_copies_nothing() {
     let Some(decoder) = GpuDecoder::all().into_iter().find(|d| d.cuda().is_some()) else {
@@ -425,10 +367,6 @@ fn a_prores_proxy_made_on_nvidias_gpu_copies_nothing() {
     }
 }
 
-/// A ProRes source decoded on Vulkan (NVIDIA's GPU) goes into NVENC's and
-/// Vulkan's ProRes encoder's proxies there: nothing comes down or goes up,
-/// and each frame keeps its barcode and timestamp. Skips where the GPU in
-/// use doesn't decode ProRes on Vulkan.
 #[test]
 fn a_prores_sources_proxies_made_on_nvidias_gpu_copy_nothing() {
     let prores = ffmpeg::codec::Id::PRORES;

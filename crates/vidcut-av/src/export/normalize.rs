@@ -1,7 +1,3 @@
-//! Pictures made in memory: the CPU's fitting of a decoded frame into the
-//! output (`Normalizer`), the layout a display takes (`Relayout`), the
-//! geometry (`fit`), and a GPU frame's way down for them (`down`).
-
 use vidcut_core::model::Hdr;
 
 use super::video::frame_ref;
@@ -9,14 +5,9 @@ use crate::decode::Reading;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, filter, format, frame};
 
-/// Turns pictures upright (the stream's rotation), scales them keeping the
-/// display aspect (honoring the sample aspect ratio), pads to the output
-/// size, and converts them to the output's colors and pixel format.
 pub(crate) struct Normalizer {
     graph: filter::Graph,
-    /// Without `zscale`: its math on the CPU ([`crate::color::split`]).
     cpu: Option<CpuStage>,
-    /// Input parameters the graph was built for, and the rotation.
     input: (
         u32,
         u32,
@@ -27,9 +18,6 @@ pub(crate) struct Normalizer {
     ),
 }
 
-/// `zscale`'s part of a [`Normalizer`] without it: the colors converted on
-/// the CPU, written as planar YUV there (`write`) or not, and the graph from
-/// there into the output's format (`back`).
 struct CpuStage {
     colors: crate::color::CpuColors,
     write: Option<format::Pixel>,
@@ -37,7 +25,6 @@ struct CpuStage {
     back: Option<filter::Graph>,
 }
 
-/// The filters that turn a picture stored with clockwise `rotation` upright.
 fn upright(rotation: u16) -> &'static str {
     match rotation {
         90 => "transpose=clock,",
@@ -47,8 +34,6 @@ fn upright(rotation: u16) -> &'static str {
     }
 }
 
-/// The scaled size of a `w`×`h` picture with sample aspect `sar` fitted inside
-/// `out_w`×`out_h`, rounded to even numbers.
 pub(crate) fn fit(w: u32, h: u32, sar: (i32, i32), out_w: u32, out_h: u32) -> (u32, u32) {
     let sar = if sar.0 > 0 && sar.1 > 0 {
         f64::from(sar.0) / f64::from(sar.1)
@@ -64,9 +49,6 @@ pub(crate) fn fit(w: u32, h: u32, sar: (i32, i32), out_w: u32, out_h: u32) -> (u
     }
 }
 
-/// The size `src` is shown at inside an `out_w`×`out_h` picture, as the
-/// normalizer fits it upright (turned by `rotation`), in the frame's own
-/// orientation.
 pub(crate) fn shown_size(
     src: &frame::Video,
     rotation: u16,
@@ -83,11 +65,6 @@ pub(crate) fn shown_size(
     }
 }
 
-/// A frame in GPU memory brought down for the CPU to normalize into an
-/// `out` picture: scaled on the GPU first to the size it is shown at there
-/// ([`shown_size`], its pixels square) when that is smaller, so a fraction
-/// comes down. The CPU does the rest as for any frame: turning, colors,
-/// HDR.
 pub(crate) fn down(
     shrinker: &mut Option<crate::hw::Shrinker>,
     src: &frame::Video,
@@ -100,7 +77,6 @@ pub(crate) fn down(
         return crate::hw::download(src);
     }
     let mut small = crate::hw::Shrinker::down(shrinker, src, size)?;
-    // Unless it came down whole.
     if (small.width(), small.height()) == size {
         // SAFETY: a plain field of its own frame.
         unsafe {
@@ -111,8 +87,6 @@ pub(crate) fn down(
 }
 
 impl Normalizer {
-    /// `target`: the output's dynamic range (`None`: SDR BT.709). Its
-    /// graphs split their work as `reading` has it ([`crate::pool::graph`]).
     pub(crate) fn new(
         src: &frame::Video,
         rotation: u16,
@@ -134,8 +108,6 @@ impl Normalizer {
         )
     }
 
-    /// [`Normalizer::new`], converting colors with `zscale` or, without
-    /// it, on the CPU.
     fn with(
         src: &frame::Video,
         rotation: u16,
@@ -148,7 +120,6 @@ impl Normalizer {
         let (w, h, fmt) = (src.width(), src.height(), src.format());
         let sar = src.aspect_ratio();
         let sar = (sar.numerator(), sar.denominator());
-        // Fitted as shown: a quarter turn swaps the sides and the pixel aspect.
         let (sw, sh) = if rotation % 180 == 90 {
             fit(h, w, (sar.1, sar.0), out_w, out_h)
         } else {
@@ -167,11 +138,6 @@ impl Normalizer {
             sar.0.max(1),
             sar.1.max(1)
         );
-        // The graph is told the matrix and range the picture is read with,
-        // and so is each frame (`run`). Then a conversion FFmpeg adds by
-        // itself, for a filter that doesn't take the layout (4:2:2 before
-        // `transpose`), keeps them. Told nothing, it converts the picture
-        // to BT.601's matrix.
         if let Some((matrix, range)) = color.yuv_tags() {
             args += &format!(":colorspace={}:range={}", matrix as i32, range as i32);
         }
@@ -190,7 +156,6 @@ impl Normalizer {
                 "",
             )
             .ctx(|| "creating video sink".into())?;
-        // Without zimg the CPU does `zscale`'s part, between two graphs.
         let (conv, cpu) = if crate::color::needs_zscale(color, target) && !zscale {
             let split = crate::color::split(color, out_fmt, target);
             (split.before, Some((split.cpu, split.write, split.back)))
@@ -257,7 +222,6 @@ impl Normalizer {
     pub(crate) fn run(&mut self, src: &frame::Video) -> Result<frame::Video> {
         let mut input = frame_ref(src)?;
         input.set_pts(Some(0));
-        // The matrix and range the graph was told (`with`).
         if let Some((matrix, range)) = self.input.5.yuv_tags() {
             input.set_color_space(matrix.into());
             input.set_color_range(range.into());
@@ -307,8 +271,6 @@ impl Normalizer {
     }
 }
 
-/// A graph of `spec` between a source of `args` and a sink, its work split
-/// as `reading` has it.
 fn simple_graph(args: &str, spec: &str, reading: Reading) -> Result<filter::Graph> {
     let find =
         |name: &str| filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")));
@@ -326,12 +288,6 @@ fn simple_graph(args: &str, spec: &str, reading: Reading) -> Result<filter::Grap
     Ok(graph)
 }
 
-/// The layouts a display takes: 4:2:0 in 8 bits (planar, or NV12 as
-/// hardware decoders give it) and in 10 (P010, or planar as the CPU's
-/// decoders give it), 4:2:2 in 8 and 10 bits planar, and in 10
-/// interleaved (P210, as VideoToolbox gives ProRes), and 4:4:4 in 12 bits
-/// planar (ProRes 4444, its alpha left out) and in 16 interleaved (P416,
-/// as VideoToolbox gives ProRes 4444).
 pub(crate) fn displayable(p: format::Pixel) -> bool {
     use format::Pixel as P;
     matches!(
@@ -351,26 +307,16 @@ pub(crate) fn displayable(p: format::Pixel) -> bool {
     )
 }
 
-/// Brings decoded pictures into a layout a display takes, at their own size
-/// and in their own colors. Pictures in other layouts, such as 4:4:4 in 8
-/// or 10 bits, are resampled to 4:2:0 (8 bits, or P010 for more), keeping
-/// their matrix and range. RGB pictures (images) are coded as BT.709 video
-/// range. Pictures already in such a layout pass as they are, by
-/// reference.
 pub(crate) struct Relayout {
-    /// The layouts that pass.
     passes: fn(format::Pixel) -> bool,
     graph: Option<(filter::Graph, (u32, u32, format::Pixel))>,
 }
 
 impl Relayout {
-    /// Into a layout a display takes ([`displayable`]).
     pub(crate) fn new() -> Self {
         Self::passing(displayable)
     }
 
-    /// Into a layout `passes` takes, which must take 8-bit 4:2:0 and P010:
-    /// what the pictures in other layouts become.
     pub(crate) fn passing(passes: fn(format::Pixel) -> bool) -> Self {
         Self {
             passes,
@@ -378,8 +324,6 @@ impl Relayout {
         }
     }
 
-    /// `src` in a layout it passes; the graph's work split as `reading` has
-    /// it.
     pub(crate) fn run(&mut self, src: &frame::Video, reading: Reading) -> Result<frame::Video> {
         let fmt = src.format();
         if (self.passes)(fmt) {
@@ -419,9 +363,6 @@ impl Relayout {
             )
         };
         let target = if depth > 8 { "p010le" } else { "yuv420p" };
-        // A YUV picture keeps its matrix and range, named on both sides:
-        // told nothing, swscale would convert to BT.601. RGB is converted,
-        // with the flags that round its colors right.
         let spec = if rgb {
             let flags = crate::color::CONVERT;
             format!("scale=out_color_matrix=bt709:out_range=limited:flags={flags},format={target}")
@@ -508,8 +449,6 @@ mod tests {
 
     #[test]
     fn a_picture_brought_to_4_2_0_keeps_its_matrix_and_range() {
-        // An orange in BT.709 video range, 4:4:4. Told nothing, swscale
-        // would convert it to BT.601's numbers.
         let mut f = frame::Video::new(Pixel::YUV444P, 64, 64);
         f.set_color_space(color::Space::BT709);
         f.set_color_range(color::Range::MPEG);
@@ -558,9 +497,6 @@ mod tests {
         assert_eq!(fit(720, 576, (16, 15), 1920, 1080), (1440, 1080), "PAL 4:3");
     }
 
-    /// A flat orange (Y 100, Cb 90, Cr 170 in 8 bits), 64×64 in `pixel`,
-    /// tagged `matrix` and video range, turned a quarter and converted to
-    /// RGB: each pixel's.
     fn turned_orange(pixel: Pixel, matrix: color::Space) -> Vec<[u8; 3]> {
         let mut f = frame::Video::new(pixel, 64, 64);
         f.set_color_space(matrix);
@@ -585,8 +521,6 @@ mod tests {
             .collect()
     }
 
-    /// How far `rgb`'s pixels are from `want` at most, in levels of a
-    /// channel.
     fn farthest(rgb: &[[u8; 3]], want: [u8; 3]) -> u8 {
         rgb.iter()
             .flat_map(|p| (0..3).map(move |c| p[c].abs_diff(want[c])))
@@ -608,7 +542,6 @@ mod tests {
 
     #[test]
     fn a_turned_4_2_2_picture_tagged_smpte_240m_is_read_as_untagged() {
-        // Untagged at this size: BT.601.
         let rgb = turned_orange(Pixel::YUV422P, color::Space::SMPTE240M);
         assert!(farthest(&rgb, [165, 79, 21]) <= 1, "{:?}", rgb[0]);
     }

@@ -1,9 +1,3 @@
-//! The two-up's cells (the Trim Editor's and Dynamic Trim's two frames, of
-//! a copy of the project): a player each (docs/decisions/preview.md §9),
-//! without sound, on the media of the clip the cell shows, told the source
-//! frame as the trim moves. The viewer's shader draws their pictures
-//! ([`Screens`]).
-
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -17,8 +11,6 @@ use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use super::picture::{Drawn, Gpu, Screen};
 
-/// Frames the cells were asked for since the GUI started, and those they
-/// never showed: another was asked for before the frame's picture was there.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Counts {
     pub asked: u64,
@@ -28,8 +20,6 @@ pub struct Counts {
 struct Cell {
     player: Player,
     plan: RenderPlan,
-    /// The frame asked for last, whether it showed, and the speed the
-    /// player follows it at.
     asked: i64,
     shown: bool,
     speed: f64,
@@ -37,7 +27,6 @@ struct Cell {
 
 pub struct Cells {
     ctx: egui::Context,
-    /// The decoders whose pictures the screens show from GPU memory.
     gpu_pictures: Vec<Kind>,
     cells: [Option<Cell>; 2],
     counts: Counts,
@@ -57,12 +46,6 @@ impl Cells {
         self.counts
     }
 
-    /// The two-up closed: the players, their decoders and pictures go, on
-    /// a thread of their own. A player ends once its decoding stops and
-    /// its reader is torn down, with the GPU's decoder and, for a 10-bit
-    /// source, the converter that shrinks its pictures, which takes its
-    /// turn behind the window the other cell is still decoding. The UI
-    /// doesn't wait for that.
     pub fn close(&mut self) {
         if self.cells.iter().all(Option::is_none) {
             return;
@@ -83,10 +66,6 @@ impl Cells {
         );
     }
 
-    /// Cell `i` shows `piece`, a frame of a clip of `p` alone, at `size`
-    /// (physical pixels); `speed` is the trim's run (× real time, 0
-    /// standing still). What it shows now. A run's frames are kept at the
-    /// cell's size, the frame it stands on as decoded.
     pub fn show(
         &mut self,
         i: usize,
@@ -101,7 +80,6 @@ impl Cells {
             .as_ref()
             .is_none_or(|c| format(&c.plan) != format(&plan))
         {
-            // A quarter of the viewer's memory each, half of it together.
             let ctx = self.ctx.clone();
             let config = Config {
                 budget: crate::preferences::player_budget().part(4),
@@ -127,7 +105,6 @@ impl Cells {
             c.plan = plan;
             c.speed = 0.0;
         }
-        // Running, the way its frame moves.
         let speed = match frame - c.asked {
             _ if speed == 0.0 => 0.0,
             0 => c.speed,
@@ -153,14 +130,11 @@ impl Cells {
 }
 
 impl Drop for Cells {
-    /// Quitting with the two-up open: its players go the same way.
     fn drop(&mut self) {
         self.close();
     }
 }
 
-/// The plan a cell plays for `piece` and its frame there: the clip's media
-/// whole, so a run moves along one plan; black for no picture.
 fn plan(p: &Project, piece: &VideoPiece) -> Option<(RenderPlan, i64)> {
     let s = &p.settings;
     let (mut plan, frame) = match piece {
@@ -190,8 +164,6 @@ fn plan(p: &Project, piece: &VideoPiece) -> Option<(RenderPlan, i64)> {
     Some((plan, frame))
 }
 
-/// Draws the cells' pictures with the viewer's shader, each into a target
-/// of its cell's size, which egui shows as a native texture.
 pub struct Screens {
     render: RenderState,
     gpu: Gpu,
@@ -213,8 +185,6 @@ impl Screens {
         self.gpu.gpu_pictures()
     }
 
-    /// Cell `i`'s texture, `picture` drawn into it at `size` (physical
-    /// pixels).
     pub fn draw(
         &mut self,
         i: usize,

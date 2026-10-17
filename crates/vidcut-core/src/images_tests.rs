@@ -1,6 +1,3 @@
-//! Stills and image sequences. Each test cites the spec section or
-//! decision it checks. Media: m1 = 10 s of video with audio (25 fps).
-
 use serde_json::json;
 
 use crate::editor::{Editor, History};
@@ -13,7 +10,6 @@ fn req(method: &str, params: serde_json::Value) -> serde_json::Value {
     json!({ "method": method, "params": params })
 }
 
-/// A fixture with a 4000×3000 still at `/media/photo.png`, added as m2.
 fn with_still() -> Fixture {
     let mut f = Fixture::new(&[(10.0, true)]);
     f.env = std::mem::take(&mut f.env).with("/media/photo.png", still_info(4000, 3000));
@@ -23,7 +19,6 @@ fn with_still() -> Fixture {
 
 #[test]
 fn the_still_duration_is_a_project_setting() {
-    // Decision D38: `project.set still_duration`, here 3 s.
     let mut f = with_still();
     f.ok(req("project.set", json!({"still_duration": "3s"})));
     f.ok(req("edit.append", json!({"media": "m2"})));
@@ -34,8 +29,6 @@ fn the_still_duration_is_a_project_setting() {
 
 #[test]
 fn a_still_leaves_the_project_format_to_video() {
-    // Decision D37: the first video sets the format; a photo has no frame
-    // rate, and its size is a photo's.
     let mut f = Fixture::new(&[]);
     f.editor = Editor::new(Project::new(Settings::default()), History::default());
     f.env = std::mem::take(&mut f.env)

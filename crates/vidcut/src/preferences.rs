@@ -1,6 +1,3 @@
-//! Application preferences on disk (`~/.config/vidcut/preferences.toml`)
-//! and what changing them does to the thumbnail cache.
-
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
@@ -13,8 +10,6 @@ pub fn path() -> PathBuf {
     paths::config_dir().join("preferences.toml")
 }
 
-/// The preferences; defaults for what the file leaves out, or without one.
-/// The GPU they name (`gpu.device`) decodes and encodes from then on.
 pub fn load() -> Result<Preferences> {
     let p = read()?;
     vidcut_av::gpus::choose(&p.gpu.device);
@@ -39,15 +34,10 @@ fn read() -> Result<Preferences> {
     Ok(p)
 }
 
-/// Whether the GPU may do its share (`gpu.acceleration`). A broken
-/// preferences file fails `preferences.get` with the reason; the rest goes
-/// on with the default, on.
 pub fn gpu_acceleration() -> bool {
     load().map_or(true, |p| p.gpu.acceleration)
 }
 
-/// The audio device the player plays on (`player.audio_device`): `None`
-/// for the system's default.
 pub fn audio_device() -> Option<String> {
     load()
         .ok()
@@ -55,25 +45,12 @@ pub fn audio_device() -> Option<String> {
         .filter(|d| !d.is_empty())
 }
 
-/// Where decoding happens, as the preferences say ([`gpu_decoding`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GpuDecoding {
-    /// The GPU decodes the streams it can (`gpu.acceleration` and
-    /// `gpu.decoding` on), the CPU the rest. Off, the CPU decodes
-    /// everything.
     pub on: bool,
-    /// The GPU in use (`gpu.device`, else the best this computer has), by
-    /// its id; `None` where no GPU is listed.
     pub gpu: Option<String>,
 }
 
-/// Where decoding happens now, the one place that says so. The viewer's
-/// and the two-up's players decode on the GPU in use (`GpuDecoder::best`);
-/// exports, proxies, the timeline's tiles, frame renders, storyboards,
-/// the pool's pictures, measurements and probes on a decoder of their own
-/// there ([`GpuDecoding::own_decoder`]). Reading it opens no decoder:
-/// whatever keeps one compares this and makes another when it changes. A
-/// broken preferences file decodes as the defaults do, on the GPU.
 pub fn gpu_decoding() -> GpuDecoding {
     let on = load().map_or(true, |p| p.gpu.acceleration && p.gpu.decoding);
     GpuDecoding {
@@ -82,7 +59,6 @@ pub fn gpu_decoding() -> GpuDecoding {
     }
 }
 
-/// For `VIDCUT_DEBUG`: on or off, and the GPU in use by its name and id.
 impl std::fmt::Display for GpuDecoding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(if self.on {
@@ -102,9 +78,6 @@ impl std::fmt::Display for GpuDecoding {
 }
 
 impl GpuDecoding {
-    /// A decoder of its own on the GPU in use (`GpuDecoder::own`): on the
-    /// viewer's, work beside playback would wait in line with it. `None`
-    /// while the CPU decodes, or where no GPU decodes.
     pub fn own_decoder(&self) -> Option<vidcut_av::hw::GpuDecoder> {
         self.on
             .then(vidcut_av::hw::GpuDecoder::best)
@@ -113,8 +86,6 @@ impl GpuDecoding {
     }
 }
 
-/// The viewer's memory for pictures: `player.memory_mb` and
-/// `player.video_memory_mb`, `0` the automatic sizes (`Budget::automatic`).
 pub fn player_budget() -> vidcut_av::player::Budget {
     let p = load().map(|p| p.player).unwrap_or_default();
     let mb = |n: u64| usize::try_from(n.saturating_mul(1 << 20)).unwrap_or(usize::MAX);
@@ -127,18 +98,11 @@ pub fn player_budget() -> vidcut_av::player::Budget {
     }
 }
 
-/// `preferences.get`: the preferences, where they are kept, and what the
-/// thumbnail cache holds.
 pub fn get() -> Result<Value> {
     Ok(describe(&load()?))
 }
 
-/// `preferences.set`: applies `patch`, saves, and brings the thumbnail
-/// cache in line (emptied when turned off, trimmed to the limit). A theme
-/// given as a file is imported into the themes folder. A dry run only
-/// checks and describes the result.
 pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
-    // One change at a time: each reads the file the one before wrote.
     static SETTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
     let mut patch = patch.clone();
@@ -177,7 +141,6 @@ pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
     Ok(describe(&p))
 }
 
-/// The computer's light or dark mode and accent color (`look.rs`).
 fn system_look() -> Value {
     let look = crate::look::current();
     let [r, g, b, _] = look.accent.base.to_array();
@@ -187,14 +150,10 @@ fn system_look() -> Value {
     })
 }
 
-/// What an automatic `player.memory_mb` comes to.
 fn memory_auto_mb() -> u64 {
     (vidcut_av::player::Budget::automatic().memory >> 20) as u64
 }
 
-/// What an automatic `player.video_memory_mb` comes to: half the memory of
-/// the GPU in use where its driver says (NVIDIA's) and it decodes, else 1 GB.
-/// Where the GPU's memory is the computer's, the memory budget, shared.
 fn video_memory_auto_mb(p: &Preferences) -> u64 {
     if vidcut_av::player::SHARED_MEMORY {
         return match p.player.memory_mb {
@@ -211,8 +170,6 @@ fn video_memory_auto_mb(p: &Preferences) -> u64 {
 fn describe(p: &Preferences) -> Value {
     use vidcut_core::preferences::ProxyCodec;
     let (files, bytes) = thumbcache::usage();
-    // What each proxy codec choice makes proxies with on this machine, and
-    // the GPU decoder that plays them (`null`: the CPU).
     let decoding = p.gpu.acceleration && p.gpu.decoding;
     let played = crate::export::plays(decoding);
     let codecs: Vec<Value> = std::iter::once(ProxyCodec::Auto)
@@ -240,7 +197,6 @@ fn describe(p: &Preferences) -> Value {
         "preferences": p,
         "themes": themes::list(),
         "themes_folder": themes::dir(),
-        // What native themes follow.
         "system_look": system_look(),
         "thumbnail_cache": {
             "path": thumbcache::dir(),
@@ -248,15 +204,9 @@ fn describe(p: &Preferences) -> Value {
             "mb": (bytes as f64 / f64::from(1 << 20) * 10.0).round() / 10.0,
         },
         "proxy_codecs": codecs,
-        // The GPUs `gpu.device` can name; the one it names, as found here;
-        // and the one that works when none is chosen or found.
         "gpus": vidcut_av::gpus::list(),
         "gpu_chosen": vidcut_av::gpus::find(vidcut_av::gpus::list(), &p.gpu.device),
         "gpu_automatic": vidcut_av::gpus::automatic(),
-        // What `player.memory_mb` and `player.video_memory_mb` 0 mean here:
-        // half the computer's memory, at least 1 GB, and half the memory of
-        // the NVIDIA GPU that decodes, else 1 GB. Where the GPU's memory is
-        // the computer's, the second shares the first's budget.
         "player_memory_auto_mb": memory_auto_mb(),
         "player_video_memory_auto_mb": video_memory_auto_mb(p),
         "player_video_memory_shared": vidcut_av::player::SHARED_MEMORY,

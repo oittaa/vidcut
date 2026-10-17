@@ -1,14 +1,7 @@
-//! Seeks to every frame of a barcode fixture, on the CPU and on each GPU
-//! decoder there is, and says where a seek shows other frames than the
-//! file's own from there (three read on).
-//!
-//! `cargo run -p vidcut-av --example seek_check -- FILE...`
-
 use vidcut_av::decode::{Input, VideoReader, read_barcode};
 use vidcut_av::ffmpeg::frame;
 use vidcut_av::hw::GpuDecoder;
 
-/// The barcode of `f`, brought down first when it is on the GPU.
 fn barcode(f: &frame::Video) -> Option<u32> {
     if vidcut_av::hw::on_gpu(f) {
         read_barcode(&vidcut_av::hw::download(f).unwrap()).unwrap()
@@ -17,7 +10,6 @@ fn barcode(f: &frame::Video) -> Option<u32> {
     }
 }
 
-/// Up to `n` frames on from where `reader` is: timestamps and barcodes.
 fn read_on(reader: &mut VideoReader, n: usize) -> Vec<(i64, Option<u32>)> {
     let mut out = Vec::new();
     while out.len() < n {
@@ -37,9 +29,7 @@ fn main() {
     }
 }
 
-/// Every seek into `input` on the CPU and on each GPU decoder.
 fn check(input: &Input) {
-    // The CPU's frames, read through: what every seek should show.
     let truth = read_on(&mut VideoReader::open_input(input).unwrap(), usize::MAX);
     let mut decoders: Vec<(String, Option<GpuDecoder>)> = vec![("CPU".into(), None)];
     for gpu in GpuDecoder::all() {
@@ -57,8 +47,6 @@ fn check(input: &Input) {
                 continue;
             }
         };
-        // The decoder that decodes the file: the GPU's own, or Vulkan's
-        // beside NVDEC.
         let name = match (gpu, reader.gpu()) {
             (Some(g), Some(kind)) => g.labeled(kind),
             _ => name.clone(),

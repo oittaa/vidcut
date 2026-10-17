@@ -1,29 +1,6 @@
-//! Frame-based time: project frame rates, timecode (drop-frame too), and the
-//! `TimeSpec`/`RangeSpec` syntax shared by the CLI, JSON-RPC and the GUI.
-//!
-//! All timeline positions are integer frames at the project frame rate.
-//!
-//! **TimeSpec** strings (JSON integers are plain frames):
-//!
-//! | Form | Meaning |
-//! |---|---|
-//! | `450f` | frames |
-//! | `15s`, `1.5s`, `250ms`, `1m30s`, `1h2m3.5s` | duration, rounded to the nearest frame |
-//! | `00:01:02:03` | timecode `HH:MM:SS:FF`, relative to the project start timecode; drop-frame in a project that counts so (decision D47) |
-//! | `00:01:02;03` | drop-frame timecode `HH:MM:SS;FF` (29.97 and 59.94 only) |
-//! | `00:01:02.500` | clock time `HH:MM:SS.mmm` (or `MM:SS.mmm`) |
-//! | `start`, `end`, `in`, `out`, `playhead` | timeline start/end, timeline marks, playhead (live only) |
-//! | `+10f`, `-2s` | relative to a base given by the command (e.g. the playhead) |
-//!
-//! Bare numbers in strings are rejected: `30` could mean frames or seconds.
-//!
-//! **RangeSpec** strings are half-open: `A..B` (B excluded), `A..+D` (D long),
-//! `in..out`.
-
 use std::fmt;
 use std::str::FromStr;
 
-/// Errors from parsing or resolving times.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TimeError {
     #[error("invalid time {0:?}: {1}")]
@@ -36,14 +13,12 @@ pub enum TimeError {
     Rate(String),
 }
 
-/// A positive rational number of frames per second, e.g. 30000/1001.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Rational {
     num: i64,
     den: i64,
 }
 
-/// Frame rates vidcut snaps measured rates to.
 pub const STANDARD_RATES: [(i64, i64); 13] = [
     (24000, 1001),
     (24, 1),
@@ -65,7 +40,6 @@ fn gcd(a: i64, b: i64) -> i64 {
 }
 
 impl Rational {
-    /// A positive rate `num/den`, reduced.
     pub fn new(num: i64, den: i64) -> Result<Self, TimeError> {
         if num <= 0 || den <= 0 {
             return Err(TimeError::Rate(format!("{num}/{den}")));
@@ -89,19 +63,14 @@ impl Rational {
         self.num as f64 / self.den as f64
     }
 
-    /// Seconds spanned by `frames` frames.
     pub fn frames_to_secs(self, frames: i64) -> f64 {
         frames as f64 * self.den as f64 / self.num as f64
     }
 
-    /// Nearest whole frame to `secs` seconds.
     pub fn secs_to_frames(self, secs: f64) -> i64 {
         (secs * self.num as f64 / self.den as f64).round() as i64
     }
 
-    /// The rate as people write it: `30`, `23.976`, `29.97`, `59.94` (at
-    /// most three decimals, no trailing zeros). It parses back to this rate
-    /// for the standard ones; `to_string` gives the exact `num/den`.
     pub fn decimal(self) -> String {
         if self.den == 1 {
             return self.num.to_string();
@@ -110,18 +79,14 @@ impl Rational {
         s.trim_end_matches('0').trim_end_matches('.').to_string()
     }
 
-    /// Whether the rate is a whole number of frames a second.
     pub fn is_whole(self) -> bool {
         self.den == 1
     }
 
-    /// Whole frames per second used for non-drop-frame timecode (30 for 29.97).
     pub fn timecode_base(self) -> i64 {
         (self.num + self.den / 2) / self.den
     }
 
-    /// The frame numbers drop-frame timecode skips at the start of every
-    /// minute but every tenth: 2 at 29.97, 4 at 59.94, none at other rates.
     pub fn dropped_per_minute(self) -> i64 {
         match (self.den, self.timecode_base()) {
             (1001, b @ (30 | 60)) => b / 15,
@@ -129,12 +94,10 @@ impl Rational {
         }
     }
 
-    /// Whether drop-frame timecode is defined at this rate: 29.97 and 59.94.
     pub fn has_drop_frame(self) -> bool {
         self.dropped_per_minute() > 0
     }
 
-    /// The standard rate within 0.1% of `rate`, if any (e.g. 29.97002 → 30000/1001).
     pub fn snap_standard(rate: f64) -> Option<Self> {
         STANDARD_RATES
             .iter()
@@ -142,8 +105,6 @@ impl Rational {
             .find(|r| ((r.as_f64() - rate) / r.as_f64()).abs() < 0.001)
     }
 
-    /// Sample index (at `sample_rate`) where frame `frame` starts, rounded to
-    /// the nearest sample; exact integer arithmetic.
     pub fn frame_to_sample(self, frame: i64, sample_rate: u32) -> i64 {
         let n = i128::from(frame) * i128::from(sample_rate) * i128::from(self.den);
         let d = i128::from(self.num);
@@ -164,8 +125,6 @@ impl fmt::Display for Rational {
 impl FromStr for Rational {
     type Err = TimeError;
 
-    /// Accepts `30000/1001`, `25`, or a decimal like `29.97` (snapped to a
-    /// standard rate, or kept exact as written).
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let bad = || TimeError::Rate(s.to_string());
         if let Some((n, d)) = s.split_once('/') {
@@ -184,7 +143,6 @@ impl FromStr for Rational {
         if let Some(r) = Self::snap_standard(v) {
             return Ok(r);
         }
-        // Exact decimal: 12.5 -> 125/10.
         let decimals = s
             .trim()
             .split_once('.')
@@ -221,9 +179,6 @@ impl schemars::JsonSchema for Rational {
     }
 }
 
-/// Formats a timeline position as timecode `HH:MM:SS:FF`, offset by the
-/// project start timecode (in frames). With `drop` at 29.97 and 59.94 it is
-/// drop-frame, `HH:MM:SS;FF` (decision D47).
 pub fn format_timecode(frames: i64, fps: Rational, start_tc: i64, drop: bool) -> String {
     let base = fps.timecode_base();
     let total = frames + start_tc;
@@ -233,7 +188,6 @@ pub fn format_timecode(frames: i64, fps: Rational, start_tc: i64, drop: bool) ->
         ("", total)
     };
     let dropped = if drop { fps.dropped_per_minute() } else { 0 };
-    // Drop-frame: the label counts back in the numbers skipped so far.
     let t = if dropped > 0 {
         let (per_ten, per_minute) = (base * 600 - dropped * 9, base * 60 - dropped);
         let (tens, rest) = (t / per_ten, t % per_ten);
@@ -258,9 +212,6 @@ pub fn format_timecode(frames: i64, fps: Rational, start_tc: i64, drop: bool) ->
     )
 }
 
-/// The frame count of timecode `h:m:s:f` at `fps`, counted drop-frame with
-/// `drop` at 29.97 and 59.94; `None` for a field out of range or a label
-/// drop-frame skips (`00:01:00;00`).
 pub fn timecode_frames(h: i64, m: i64, s: i64, f: i64, fps: Rational, drop: bool) -> Option<i64> {
     let base = fps.timecode_base();
     if h < 0 || !(0..60).contains(&m) || !(0..60).contains(&s) || !(0..base).contains(&f) {
@@ -274,11 +225,6 @@ pub fn timecode_frames(h: i64, m: i64, s: i64, f: i64, fps: Rational, drop: bool
     Some((minutes * 60 + s) * base + f - dropped * (minutes - minutes / 10))
 }
 
-/// The frame count of a timecode a media file records (`HH:MM:SS:FF`) at
-/// `fps`. A `;` (or `.`) before the frames marks drop-frame timecode, which
-/// at 29.97 and 59.94 fps skips frame numbers 0 and 1 (0–3 at 59.94) at the
-/// start of every minute but every tenth; at other rates it counts as
-/// written.
 pub fn parse_media_timecode(s: &str, fps: Rational) -> Option<i64> {
     let s = s.trim();
     let drop = s.contains([';', '.']);
@@ -294,13 +240,11 @@ pub fn parse_media_timecode(s: &str, fps: Rational) -> Option<i64> {
         return None;
     }
     let nominal = ((h * 60 + m) * 60 + sec) * base + f;
-    // Drop-frame is defined for 29.97 and 59.94 only.
     let dropped = if drop { fps.dropped_per_minute() } else { 0 };
     let minutes = h * 60 + m;
     Some(nominal - dropped * (minutes - minutes / 10))
 }
 
-/// Named positions a [`TimeSpec`] can refer to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keyword {
     Start,
@@ -310,20 +254,16 @@ pub enum Keyword {
     Playhead,
 }
 
-/// A parsed time; resolve it to frames with [`TimeContext::resolve`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum TimeSpec {
     Frames(i64),
     Seconds(f64),
-    /// Timecode fields (h, m, s, f), and whether written drop-frame (`;`).
     Timecode(i64, i64, i64, i64, bool),
     Keyword(Keyword),
-    /// `+`/`-` offset relative to a command-specific base.
     Relative(i64, Box<TimeSpec>),
 }
 
 impl TimeSpec {
-    /// Parses the string form (see the module docs).
     pub fn parse(s: &str) -> Result<Self, TimeError> {
         let t = s.trim();
         let err = |why| TimeError::Parse(s.to_string(), why);
@@ -350,7 +290,6 @@ impl TimeSpec {
     fn parse_absolute(t: &str, original: &str) -> Result<Self, TimeError> {
         let err = |why| TimeError::Parse(original.to_string(), why);
         if t.contains([':', ';']) {
-            // A `;` marks drop-frame timecode: `01:00:00;00`, `01;00;00;00`.
             let drop = t.contains(';');
             let fields: Vec<&str> = t.split([':', ';']).collect();
             let int = |f: &str| {
@@ -372,7 +311,6 @@ impl TimeSpec {
             if drop {
                 return Err(err("expected drop-frame timecode HH:MM:SS;FF"));
             }
-            // Clock time: [HH:]MM:SS(.fff)
             if fields.len() == 2 || fields.len() == 3 {
                 let secs_field = fields[fields.len() - 1];
                 let secs: f64 = secs_field
@@ -403,7 +341,6 @@ impl TimeSpec {
                 .map_err(|_| err("milliseconds must be a number, like 250ms"))?;
             return Ok(Self::Seconds(v / 1000.0));
         }
-        // Composite duration: 1h2m3.5s, 1m30s, 15s, 2m.
         let mut total = 0.0;
         let mut num = String::new();
         let mut any = false;
@@ -436,7 +373,6 @@ impl TimeSpec {
         Ok(Self::Seconds(total))
     }
 
-    /// Whether this is a `+`/`-` relative time.
     pub fn is_relative(&self) -> bool {
         matches!(self, Self::Relative(..))
     }
@@ -510,7 +446,6 @@ impl schemars::JsonSchema for TimeSpec {
     }
 }
 
-/// A half-open range of timeline frames `[start, end)`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RangeSpec {
     pub start: TimeSpec,
@@ -519,9 +454,7 @@ pub struct RangeSpec {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RangeEnd {
-    /// `A..B`: ends before B.
     At(TimeSpec),
-    /// `A..+D`: D long.
     Length(TimeSpec),
 }
 
@@ -582,16 +515,11 @@ impl schemars::JsonSchema for RangeSpec {
     }
 }
 
-/// Everything needed to turn a [`TimeSpec`] into frames.
 #[derive(Debug, Clone, Copy)]
 pub struct TimeContext {
     pub fps: Rational,
-    /// Project start timecode in frames (timecodes are relative to it).
     pub start_tc: i64,
-    /// Timecodes count drop-frame (the project's setting, decision D47;
-    /// at 29.97 and 59.94 only).
     pub drop_frame: bool,
-    /// End of the timeline (exclusive), for `end`.
     pub end: i64,
     pub mark_in: Option<i64>,
     pub mark_out: Option<i64>,
@@ -599,8 +527,6 @@ pub struct TimeContext {
 }
 
 impl TimeContext {
-    /// Resolves an absolute time to a frame. Relative times need
-    /// [`resolve_from`](Self::resolve_from).
     pub fn resolve(&self, spec: &TimeSpec) -> Result<i64, TimeError> {
         match spec {
             TimeSpec::Relative(..) => Err(TimeError::NoBase(spec.to_string())),
@@ -608,7 +534,6 @@ impl TimeContext {
         }
     }
 
-    /// Resolves `spec`, treating relative times as offsets from `base`.
     pub fn resolve_from(&self, spec: &TimeSpec, base: i64) -> Result<i64, TimeError> {
         match spec {
             TimeSpec::Relative(sign, inner) => Ok(base + sign * self.duration(inner)?),
@@ -616,15 +541,11 @@ impl TimeContext {
         }
     }
 
-    /// A length in frames (e.g. the `D` of `A..+D`, or a trim amount).
     pub fn duration(&self, spec: &TimeSpec) -> Result<i64, TimeError> {
         match spec {
             TimeSpec::Frames(n) => Ok(*n),
             TimeSpec::Seconds(s) => Ok(self.fps.secs_to_frames(*s)),
-            TimeSpec::Timecode(..) => {
-                // A timecode as a length counts from zero, not from start_tc.
-                Ok(self.resolve_inner(spec)? + self.start_tc)
-            }
+            TimeSpec::Timecode(..) => Ok(self.resolve_inner(spec)? + self.start_tc),
             TimeSpec::Relative(sign, inner) => Ok(sign * self.duration(inner)?),
             TimeSpec::Keyword(_) => Err(TimeError::Parse(
                 spec.to_string(),
@@ -664,7 +585,6 @@ impl TimeContext {
         })
     }
 
-    /// Resolves a range to `(start, end)` frames, `end` exclusive.
     pub fn range(&self, r: &RangeSpec) -> Result<(i64, i64), TimeError> {
         let start = self.resolve(&r.start)?;
         let end = match &r.end {
@@ -694,7 +614,6 @@ mod tests {
     #[test]
     fn frame_to_sample_is_exact() {
         let ntsc = Rational::new(30000, 1001).unwrap();
-        // 1001 samples-per-frame cycle at 48 kHz: 1601.6 samples per frame.
         assert_eq!(ntsc.frame_to_sample(5, 48_000), 8008);
         assert_eq!(ntsc.frame_to_sample(30_000, 48_000), 48_048_000);
         let pal = Rational::new(25, 1).unwrap();
@@ -707,16 +626,12 @@ mod tests {
         let tc = parse_media_timecode;
         assert_eq!(tc("01:00:00:00", r(25, 1)), Some(90_000));
         assert_eq!(tc("10:00:00:00", r(24, 1)), Some(864_000));
-        // 23.976 counts 24 frames a second, like 24.
         assert_eq!(tc("00:37:01:00", r(24000, 1001)), Some(53_304));
-        // Non-drop 29.97: an hour of timecode is 108000 frames...
         assert_eq!(tc("01:00:00:00", r(30000, 1001)), Some(108_000));
-        // ...drop-frame skips 2 numbers a minute but every tenth: 107892.
         assert_eq!(tc("01:00:00;00", r(30000, 1001)), Some(107_892));
         assert_eq!(tc("00:01:00;02", r(30000, 1001)), Some(1800));
         assert_eq!(tc("00:10:00;00", r(30000, 1001)), Some(17_982));
         assert_eq!(tc("00:01:00;04", r(60000, 1001)), Some(3600));
-        // Drop-frame means nothing at other rates.
         assert_eq!(tc("00:00:01;05", r(25, 1)), Some(30));
         assert_eq!(tc("00:01:00;00", r(24000, 1001)), Some(1440));
         for bad in ["", "01:00:00", "01:00:00:25", "a:b:c:d", "00:61:00:00"] {

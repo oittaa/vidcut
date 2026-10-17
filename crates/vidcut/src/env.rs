@@ -1,5 +1,3 @@
-//! The real [`Env`]: media facts from the FFmpeg libraries via vidcut-av.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
@@ -16,8 +14,6 @@ use vidcut_core::{Env, Error, ProbedMedia, Result};
 
 use crate::paths;
 
-/// The real [`Env`]. `project_dir` is the folder of the open project file,
-/// when a session has one: proxies are written to `proxies/` beside it.
 #[derive(Clone, Debug, Default)]
 pub struct AvEnv {
     project_dir: Option<PathBuf>,
@@ -28,7 +24,6 @@ impl AvEnv {
         Self::default()
     }
 
-    /// Proxies land in `<project>/proxies`.
     pub fn for_project(project_file: &Path) -> Self {
         Self {
             project_dir: project_file.parent().map(Path::to_path_buf),
@@ -36,25 +31,15 @@ impl AvEnv {
     }
 }
 
-/// Audio levels are measured in 10 ms buckets.
 const LEVELS_PER_SECOND: u32 = 100;
 
-/// Measurements made in this process, by cache file and the origin of what
-/// it measured.
 type Memo<T> = LazyLock<Mutex<HashMap<(PathBuf, Origin), Arc<T>>>>;
 static LEVELS: Memo<AudioLevels> = LazyLock::new(Default::default);
 static PICTURES: Memo<PictureStats> = LazyLock::new(Default::default);
 
-/// How each proxy this process encoded was made, and the frames it copied
-/// between GPU memory and memory, by file, until the edit that records it
-/// answers with it: the encode runs on a copy of the project first, and
-/// that edit finds the file written (decision D41).
 static MADE_WITH: LazyLock<Mutex<HashMap<PathBuf, (String, vidcut_core::editor::Copied)>>> =
     LazyLock::new(Default::default);
 
-/// A measurement of a media file: from this process's memory, from the disk
-/// cache, or measured now and kept in both. Measuring decodes the whole
-/// stream, so the live session measures on a worker first (docs/decisions/agents.md §3).
 fn measured<T>(
     memo: &Memo<T>,
     (file, origin): (PathBuf, Origin),
@@ -89,18 +74,11 @@ fn measured<T>(
     Ok(value)
 }
 
-/// The cache file in `analysis` of `media`'s measurement `what`, and the
-/// origin it holds.
 fn analysis_file(media: &Media, what: &str) -> (PathBuf, Origin) {
     let origin = paths::media_origin(media);
     (paths::media_cache("analysis", &origin, what), origin)
 }
 
-/// How `m`'s pictures are read: its file, or its image sequence.
-///
-/// The sequence's `count` is not given here. image2 reads every numbered
-/// file after the first; filmstrips and picture measurements stop at
-/// `count` themselves.
 pub fn input_of(m: &Media) -> vidcut_av::decode::Input {
     use vidcut_av::decode::Input;
     match (&m.sequence, &m.info.video) {
@@ -119,8 +97,6 @@ impl Env for AvEnv {
             .map_err(|e| Error::media(format!("{}: {e}", path.display())))?;
         let meta = std::fs::metadata(&canonical)
             .map_err(|e| Error::media(format!("{}: {e}", path.display())))?;
-        // Media are files. A device or a pipe (which an imported timeline
-        // could name) might never end, or block the probe for good.
         if !meta.is_file() {
             return Err(Error::media(format!(
                 "{}: not a regular file",
@@ -132,8 +108,6 @@ impl Env for AvEnv {
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_nanos() as i64);
-        // Its first frame decoded on the GPU the viewer decodes on, on a
-        // decoder of its own.
         let decoder = crate::preferences::gpu_decoding().own_decoder();
         let info = vidcut_av::probe::probe(&canonical, decoder.as_ref())
             .map_err(|e| Error::media(e.to_string()))?;
@@ -163,12 +137,8 @@ impl Env for AvEnv {
         .map_err(|e| Error::media(e.to_string()))?;
         probed.info = convert(&info)?;
         if let Some(v) = probed.info.video.as_mut() {
-            // The rate asked for, exactly.
             (v.fps, v.vfr) = (rate, false);
         }
-        // Size and time stand for the whole run, once, here: a render that
-        // rewrites later pictures makes a new proxy name and a stale proxy,
-        // even when the first picture stays as it was.
         (probed.size, probed.mtime_ns) = (0..sequence.count)
             .filter_map(|k| std::fs::metadata(sequence.file(dir, k)).ok())
             .fold((0, 0), |(size, newest), meta| {
@@ -201,8 +171,6 @@ impl Env for AvEnv {
     }
 
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>> {
-        // The count is part of the cache name: a prefix of a longer numbered
-        // run is not the same measurement as that run.
         let pictures = media.sequence.as_ref().map(|s| s.count);
         let key = match pictures {
             Some(n) => format!("pictures-{n}"),
@@ -212,8 +180,6 @@ impl Env for AvEnv {
             &PICTURES,
             analysis_file(media, &key),
             || {
-                // Decoded on the GPU the viewer decodes on, on a decoder of
-                // its own.
                 let decoder = crate::preferences::gpu_decoding().own_decoder();
                 vidcut_av::analysis::picture_stats(&input_of(media), pictures, decoder.as_ref())
             },
@@ -227,8 +193,6 @@ impl Env for AvEnv {
     }
 
     fn proxy_rules(&self) -> vidcut_core::preferences::Proxies {
-        // A broken preferences file fails `preferences.get` with the
-        // reason; proxies go on with the defaults.
         crate::preferences::load()
             .map(|p| p.proxies)
             .unwrap_or_default()
@@ -254,7 +218,6 @@ impl Env for AvEnv {
         let (w, h) = v.display_size();
         let (w, h) = proxy_size(w, h, longest);
         let origin = paths::media_origin(media);
-        // The codec is in the name: changing the preference makes a new file.
         let name = |codec: &str| dir.join(format!("{}-{w}x{h}-{codec}.mkv", origin.name));
         let prefs = crate::preferences::load().unwrap_or_default();
         let encoders = proxy_encoders(
@@ -268,8 +231,6 @@ impl Env for AvEnv {
         let made = || MADE_WITH.lock().unwrap_or_else(PoisonError::into_inner);
         let mut made_with = None;
         let mut copies = None;
-        // A file there made from another file (or another version of this
-        // one) is made again.
         if !dry_run
             && path.is_file()
             && vidcut_av::proxy::origin(&path).as_deref() == Some(&*origin.text)
@@ -279,8 +240,6 @@ impl Env for AvEnv {
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
             let total = Some((v.duration * v.fps.as_f64()).round().max(0.0) as u64);
-            // Decoded on the GPU the viewer decodes on (preview.md §6), on a
-            // decoder of its own.
             let decoder = crate::preferences::gpu_decoding().own_decoder();
             let written = vidcut_av::proxy::write(
                 &input_of(media),
@@ -304,7 +263,6 @@ impl Env for AvEnv {
                     .map_or("CPU".into(), |k| format!("GPU ({})", k.label())),
                 written.encoder.label()
             );
-            // A hardware encoder that wouldn't open gave way to another codec.
             codec = written.encoder.codec;
             if codec != planned {
                 let actual = name(codec);
@@ -340,9 +298,6 @@ impl Env for AvEnv {
     }
 }
 
-/// The encoders proxies are made with here for the `codec` preference, best
-/// first: software ones only without GPU acceleration (`gpu`); automatic's
-/// as the GPU plays them while `decoding` (GPU decoding on).
 pub fn proxy_encoders(
     codec: vidcut_core::preferences::ProxyCodec,
     gpu: bool,
@@ -367,8 +322,6 @@ pub fn proxy_encoders(
     vidcut_av::proxy::encoders(codec, &available, &plays)
 }
 
-/// A measurement's failure. Cancellation uses the same flag as an export, so
-/// it is `CANCELLED` and not a media error.
 fn av_error(e: vidcut_av::error::Error) -> Error {
     if vidcut_av::export::is_cancelled(&e) {
         Error::new(vidcut_core::ErrorCode::Cancelled, "cancelled")
@@ -377,14 +330,6 @@ fn av_error(e: vidcut_av::error::Error) -> Error {
     }
 }
 
-/// A stream's frame rate as a project-usable rational.
-///
-/// `r` (`r_frame_rate`, the rate all timestamps fit) is exact for constant
-/// frame rate video, while the average can be skewed by container timestamp
-/// rounding (Matroska stores milliseconds: 30 fps averages to 1000/33). So: a
-/// standard `r` with an average within 2% wins; otherwise the average snapped
-/// to a standard rate within 1% (variable frame rate around a standard rate);
-/// otherwise the exact average.
 fn frame_rate(avg: (i32, i32), r: (i32, i32)) -> Option<Rational> {
     let rate = |(n, d): (i32, i32)| {
         (n > 0 && d > 0)
@@ -406,7 +351,6 @@ fn frame_rate(avg: (i32, i32), r: (i32, i32)) -> Option<Rational> {
     )
 }
 
-/// The standard rate within `tolerance` (relative) of `rate`.
 fn snap_within(rate: f64, tolerance: f64) -> Option<Rational> {
     vidcut_core::time::STANDARD_RATES
         .iter()
@@ -436,8 +380,6 @@ fn convert(info: &vidcut_av::probe::MediaInfo) -> Result<MediaInfo> {
                 sar: [v.sar.0, v.sar.1],
                 pix_fmt: v.pix_fmt.clone(),
                 fps,
-                // r_frame_rate is the rate all timestamps fit; well above the
-                // average it signals variable frame rate.
                 vfr: matches!((r, avg), (Some(r), Some(avg)) if r > avg * 1.05),
                 first_pts: v.first_frame_time.unwrap_or(0.0),
                 duration: v.duration_secs.or(info.duration).unwrap_or(0.0).max(0.0),
@@ -472,7 +414,6 @@ fn convert(info: &vidcut_av::probe::MediaInfo) -> Result<MediaInfo> {
             codec: a.codec.clone(),
             sample_rate: a.sample_rate,
             channels: a.channels,
-            // Where the content starts: after the encoder's priming.
             first_pts: a.first_secs.or(a.start_secs).unwrap_or(0.0),
             duration: (a.duration_secs.or(info.duration).unwrap_or(0.0)
                 - (a.first_secs.unwrap_or(0.0) - a.start_secs.unwrap_or(0.0)))
@@ -495,8 +436,6 @@ fn convert(info: &vidcut_av::probe::MediaInfo) -> Result<MediaInfo> {
     })
 }
 
-/// The start timecode a file records: its timecode in the video's frames,
-/// else a broadcast WAV's time reference in samples. Stills have none.
 pub fn start_timecode(
     timecode: Option<&str>,
     time_reference: Option<u64>,
@@ -507,9 +446,7 @@ pub fn start_timecode(
         Some(v) if v.still => None,
         Some(v) => {
             let tc = timecode?;
-            // Written `01:00:00;00`: counted drop-frame (decision D47).
             let drop_frame = tc.contains([';', '.']) && v.fps.has_drop_frame();
-            // A start at zero says nothing, but how it counts.
             let count = vidcut_core::time::parse_media_timecode(tc, v.fps)
                 .filter(|&c| c > 0 || drop_frame)?;
             Some(StartTimecode {
@@ -579,7 +516,6 @@ mod tests {
             f((30000, 1001), (30000, 1001)).as_deref(),
             Some("30000/1001")
         );
-        // VFR: the average (29.83) snaps to the nearest standard rate.
         assert_eq!(f((5400, 181), (60, 1)).as_deref(), Some("30000/1001"));
         assert_eq!(
             f((24000, 1001), (24000, 1001)).as_deref(),

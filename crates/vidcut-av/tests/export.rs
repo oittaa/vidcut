@@ -1,6 +1,3 @@
-//! Export engine tests: render real fixtures and verify the output frame by
-//! frame (barcodes) and sample by sample (beep onsets).
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -14,8 +11,6 @@ use vidcut_core::export::{
 use vidcut_core::render::{AudioPiece, Image, Pace, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
-/// A folder for one test's outputs, removed when it drops, also when the
-/// test fails.
 fn out_dir(name: &str) -> tempfile::TempDir {
     tempfile::Builder::new()
         .prefix(&format!("vidcut-export-{name}-"))
@@ -87,7 +82,6 @@ fn plan(
     }
 }
 
-/// Lossless-enough settings so barcodes and beeps survive exactly: FFV1 + PCM in MKV.
 fn lossless() -> ExportSettings {
     ExportSettings {
         container: OutContainer::Mkv,
@@ -133,7 +127,6 @@ fn render(plan: &RenderPlan, settings: &ExportSettings, out: &Path) -> export::R
     .unwrap_or_else(|e| panic!("export: {e}"))
 }
 
-/// Barcodes of every output frame.
 fn barcodes(path: &Path) -> Vec<Option<u32>> {
     let mut r = VideoReader::open(path).unwrap();
     let mut out = Vec::new();
@@ -143,7 +136,6 @@ fn barcodes(path: &Path) -> Vec<Option<u32>> {
     out
 }
 
-/// Decodes the first audio stream to mono f32 at its own rate.
 fn audio_mono(path: &Path) -> Vec<f32> {
     use vidcut_av::ffmpeg::{self, codec, format, frame, media};
     vidcut_av::init();
@@ -156,7 +148,6 @@ fn audio_mono(path: &Path) -> Vec<f32> {
         .audio()
         .unwrap();
     let mut out = Vec::new();
-    // Tests export 48 kHz 16-bit PCM, so no resampling is needed here.
     let take = |dec: &mut ffmpeg::decoder::Audio, out: &mut Vec<f32>| {
         let mut f = frame::Audio::empty();
         while dec.receive_frame(&mut f).is_ok() {
@@ -214,7 +205,6 @@ fn same_rate_cuts_are_frame_and_sample_exact() {
         (30, 1),
         60,
     ));
-    // Segments: a1 10..40, b1 45..75, ts 31..61, black 5, np 3..33.
     let pieces = vec![
         v(&a1, 10, 30),
         v(&b1, 45, 30),
@@ -252,13 +242,9 @@ fn same_rate_cuts_are_frame_and_sample_exact() {
         .collect();
     assert!(bad.is_empty(), "frames differing from the plan: {bad:?}");
 
-    // Audio: exact length; beeps where the sources had them.
     let mono = audio_mono(&out);
     assert_eq!(mono.len() as i64, p.samples(), "sample count");
     let onsets = vidcut_av::beep::onsets(&mono, 0.1, 4800);
-    // a1 10..40 (0.333..1.333 s) has its 1 s beep at output 0.667 s;
-    // b1 45..75 (1.5..2.5 s) has its 2 s beep at output 1.0 + 0.5 = 1.5 s;
-    // np 3..33 (0.1..1.1 s) starts at output 3.1667 s and beeps at 1.0 s -> 4.0667 s.
     let expect = [0.6667, 1.5, 4.0667];
     assert_eq!(onsets.len(), expect.len(), "beeps at {onsets:?}");
     for (got, want) in onsets.iter().zip(expect) {
@@ -272,9 +258,6 @@ fn same_rate_cuts_are_frame_and_sample_exact() {
 
 #[test]
 fn pieces_at_other_speeds_walk_their_source() {
-    // Decision D48: at speed 2 every other frame, at 0.5 each twice, at 0
-    // one held, at -1 backward; a piece cut from inside its clip keeps its
-    // clip's pace.
     let fps = Rational::new(30, 1).unwrap();
     let s = src(FixtureSpec::new(
         VideoCodec::H264,
@@ -314,8 +297,6 @@ fn pieces_at_other_speeds_walk_their_source() {
 
 #[test]
 fn sound_at_other_speeds_keeps_its_time_and_pitch() {
-    // Decision D48: the sound of the frames shown, stretched keeping its
-    // pitch; backward, reversed.
     use vidcut_av::export::audio::AudioMix;
     use vidcut_av::fixture::Sound;
     const RATE: f64 = 48_000.0;
@@ -343,10 +324,6 @@ fn sound_at_other_speeds_keeps_its_time_and_pitch() {
         both.as_chunks::<2>().0.iter().map(|f| f[0]).collect()
     };
 
-    // From 1.5 s twice as fast, the beeps of 2 to 5 s; from 6.5 s at half
-    // speed, the one of 7 s; back from 9.5 s, those of 9 and 8 s, each
-    // heard from its end. A stretched one rises within half a hop of the
-    // stretch's fragments (5 ms).
     let mono = left(vec![
         paced(&beeps, 1.5, 2.0, 2.0),
         paced(&beeps, 6.5, 2.0, 0.5),
@@ -362,7 +339,6 @@ fn sound_at_other_speeds_keeps_its_time_and_pitch() {
         assert!((got - want).abs() < 0.007, "beep at {got:.4}, want {want}");
     }
 
-    // The 1 kHz tone stays 1 kHz at every speed.
     for speed in [2.0, 0.5, -1.0, -2.0] {
         let mono = left(vec![paced(&tone, 5.0, 1.0, speed)]);
         let rises = mono[4800..]
@@ -378,9 +354,6 @@ fn sound_at_other_speeds_keeps_its_time_and_pitch() {
 
 #[test]
 fn pieces_of_one_file_read_on_seek_back_and_open_ahead() {
-    // Export keeps a file open from piece to piece: a piece a little ahead
-    // decodes on, one behind or far ahead seeks, and a piece of another file
-    // was opened while the one before it encoded. Every way lands exactly.
     let fps = Rational::new(30, 1).unwrap();
     let a1 = src(
         FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 300).with_audio(
@@ -397,15 +370,15 @@ fn pieces_of_one_file_read_on_seek_back_and_open_ahead() {
         ),
     );
     let parts: [(&Src, i64, i64); 9] = [
-        (&a1, 100, 30), // opens a1
-        (&a1, 10, 30),  // behind: seeks
-        (&a1, 45, 15),  // 5 frames ahead: decodes on
-        (&a1, 59, 11),  // repeats the frame before
-        (&a1, 0, 5),    // stands for 5 frames of black and silence
-        (&a1, 200, 10), // far ahead: seeks
-        (&b1, 20, 20),  // another file, opened ahead
-        (&a1, 210, 10), // back to a1, opened ahead
-        (&a1, 220, 10), // right after: reads on
+        (&a1, 100, 30),
+        (&a1, 10, 30),
+        (&a1, 45, 15),
+        (&a1, 59, 11),
+        (&a1, 0, 5),
+        (&a1, 200, 10),
+        (&b1, 20, 20),
+        (&a1, 210, 10),
+        (&a1, 220, 10),
     ];
     let mut pieces = Vec::new();
     let mut lane = Vec::new();
@@ -438,10 +411,6 @@ fn pieces_of_one_file_read_on_seek_back_and_open_ahead() {
         .collect();
     assert!(bad.is_empty(), "frames differing from the plan: {bad:?}");
 
-    // The sources beep at every whole second. Output times of the beeps:
-    // a1 100..130 has 4 s at 0.6667; a1 10..40 has 1 s at 1.0 + 0.6667;
-    // a1 59..70 (from 2.5 s) has 2 s at 2.5333; b1 20..40 (from 3.3667 s)
-    // has 1 s at 3.7; a1 210..220 starts on 7 s, at 4.0333.
     let mono = audio_mono(&out);
     assert_eq!(mono.len() as i64, p.samples(), "sample count");
     let onsets = vidcut_av::beep::onsets(&mono, 0.1, 4800);
@@ -458,9 +427,6 @@ fn pieces_of_one_file_read_on_seek_back_and_open_ahead() {
 
 #[test]
 fn rotated_sources_export_upright() {
-    // Phone video stores pictures sideways with a rotation in the display
-    // matrix. The fixtures store the barcode turned against it, so it reads
-    // only where the rotation is applied.
     let fps = Rational::new(30, 1).unwrap();
     let mut pieces = Vec::new();
     let mut want: Vec<Option<u32>> = Vec::new();
@@ -478,7 +444,6 @@ fn rotated_sources_export_upright() {
         let from = 10 * i as i64;
         pieces.push(v(&s, from, 20));
         want.extend((from..from + 20).map(|f| Some(f as u32)));
-        // Pool thumbnails show upright too, at the shown aspect.
         let input = vidcut_av::decode::Input::File(s.path.clone());
         let (images, _) = vidcut_av::thumbs::filmstrip(&input, 4, 192, 108, None).unwrap();
         for img in &images {
@@ -504,9 +469,6 @@ fn rotated_sources_export_upright() {
     assert!(bad.is_empty(), "frames differing from the plan: {bad:?}");
 }
 
-/// Mean difference between each luma row of the top eighth and the average
-/// of its neighbors: near 0 for a progressive picture, large for woven
-/// fields that differ.
 fn combing(f: &vidcut_av::ffmpeg::frame::Video) -> f64 {
     let (w, h, stride) = (f.width() as usize, f.height() as usize / 8, f.stride(0));
     let y = f.data(0);
@@ -526,9 +488,6 @@ fn combing(f: &vidcut_av::ffmpeg::frame::Video) -> f64 {
 
 #[test]
 fn interlaced_sources_are_deinterlaced() {
-    // Both fields of frame k show barcode k, and in the top eighth a block
-    // moves 40 px each field: woven, it combs there. Deinterlaced (bwdif,
-    // one frame per frame), it doesn't, and the frames stay exact.
     let fps = Rational::new(25, 1).unwrap();
     let mut pieces = Vec::new();
     let mut want: Vec<Option<u32>> = Vec::new();
@@ -559,8 +518,6 @@ fn interlaced_sources_are_deinterlaced() {
     assert_eq!(codes, want);
 }
 
-/// The darkest and brightest luma (as 10-bit codes) in the middle of the
-/// barcode's top band: its black and white cells.
 fn cell_levels(f: &vidcut_av::ffmpeg::frame::Video) -> (u16, u16) {
     use vidcut_av::ffmpeg::format::Pixel;
     let (w, h, stride) = (f.width() as usize, f.height() as usize, f.stride(0));
@@ -584,9 +541,6 @@ fn cell_levels(f: &vidcut_av::ffmpeg::frame::Video) -> (u16, u16) {
 #[test]
 fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
     use vidcut_core::model::Hdr;
-    // The fixtures' barcode white is SDR reference white in HDR: 203 nits in
-    // PQ, 75% in HLG. An SDR export tone-maps it to near white (it would be
-    // gray unconverted, and PQ's barcode wouldn't read).
     let fps = Rational::new(30, 1).unwrap();
     let mut pieces = Vec::new();
     let mut want: Vec<Option<u32>> = Vec::new();
@@ -607,7 +561,6 @@ fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
         assert_eq!(info.transfer, transfer);
         pieces.push(v(&s, 5, 10));
         want.extend((5..15).map(Some));
-        // Pool thumbnails are tone-mapped too.
         let input = vidcut_av::decode::Input::File(s.path.clone());
         let (images, _) = vidcut_av::thumbs::filmstrip(&input, 2, 192, 108, None).unwrap();
         for img in &images {
@@ -625,15 +578,12 @@ fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
     let mut codes = Vec::new();
     while let Some(f) = r.next_frame().unwrap() {
         let (lo, hi) = cell_levels(&f);
-        // 95% white (about 220 of 8-bit's 235); black stays black.
         assert!((850..=940).contains(&hi), "white {hi}");
         assert!(lo <= 80, "black {lo}");
         codes.push(read_barcode(&f).unwrap());
     }
     assert_eq!(codes, want);
 
-    // HDR out (PQ, 10-bit HEVC): SDR white lands at the reference white, the
-    // PQ source keeps its level, and the stream says PQ.
     let sdr =
         src(FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 30).no_audio());
     pieces.insert(0, v(&sdr, 5, 10));
@@ -664,9 +614,6 @@ fn hdr_is_tone_mapped_for_sdr_and_kept_for_hdr() {
     assert_eq!(n, 30);
 }
 
-/// HDR colors are read with their own matrix, BT.2020. Read as BT.601,
-/// saturated colors come out tens of levels off. PQ stripes exported to SDR
-/// get the colors below, and kept in PQ they stay as they were.
 #[test]
 fn hdr_colors_keep_their_matrix() {
     use vidcut_av::fixture::Picture;
@@ -680,7 +627,6 @@ fn hdr_colors_keep_their_matrix() {
     );
     let p = plan(fps, 640, 480, vec![v(&colors, 0, 10)], vec![]);
     let dir = out_dir("hdr-colors");
-    // The middle half of each of the four stripes.
     let stripes = |path: &Path| -> Vec<[f64; 3]> {
         let f = frame_at(path, 5);
         (0..4)
@@ -691,9 +637,6 @@ fn hdr_colors_keep_their_matrix() {
         .map(|(y, cb, cr)| (u16::from(y) << 2, u16::from(cb) << 2, u16::from(cr) << 2));
     let sdr = dir.path().join("sdr.mkv");
     render(&p, &lossless(), &sdr);
-    // The stripes tone-mapped into SDR BT.709, within rounding and zimg's
-    // float approximations. Those differ by CPU: on a Mac (ARM) the third
-    // stripe's luma is 1.9 low.
     const SDR: [[f64; 3]; 4] = [
         [62.5, 102.4, 239.8],
         [98.0, 203.9, 74.8],
@@ -726,7 +669,6 @@ fn hdr_colors_keep_their_matrix() {
     }
 }
 
-/// Settings for a target bitrate with `passes` (decision D45), on the CPU.
 fn at_bitrate(codec: VCodec, bitrate: u64, passes: u8) -> ExportSettings {
     let mut s = lossless();
     s.audio = None;
@@ -740,8 +682,6 @@ fn at_bitrate(codec: VCodec, bitrate: u64, passes: u8) -> ExportSettings {
     s
 }
 
-/// Decision D45: cancelling in either pass leaves no file, no partial file
-/// and no statistics.
 #[test]
 fn cancelling_either_pass_leaves_nothing() {
     let fps = Rational::new(30, 1).unwrap();
@@ -779,9 +719,6 @@ fn cancelling_either_pass_leaves_nothing() {
     }
 }
 
-/// An encoder that fails partway through stops the export with its error
-/// and leaves no file: x264's second pass, whose frame-by-frame statistics
-/// (its MB-tree file) are cut in half as it starts.
 #[test]
 fn an_encoder_failing_partway_leaves_nothing() {
     let fps = Rational::new(30, 1).unwrap();
@@ -834,9 +771,6 @@ fn an_encoder_failing_partway_leaves_nothing() {
 
 #[test]
 fn audio_after_a_lost_packet_keeps_its_time() {
-    // An AAC packet before the 2 s beep is gone (damaged files lose some,
-    // and the decoder skips packets it can't read): the beep stays at 2 s,
-    // and the gap is silent.
     let fps = Rational::new(30, 1).unwrap();
     let s = src(
         FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (30, 1), 90).with_audio(
@@ -847,7 +781,6 @@ fn audio_after_a_lost_packet_keeps_its_time() {
     );
     let info = vidcut_av::probe::probe(&s.path, None).unwrap();
     let audio = info.audio[0].index;
-    // AAC packets are 1024 samples: number 80 starts at 1.7 s.
     let dir = out_dir("lost");
     let lossy = dir.path().join("lossy.mkv");
     fixture::spoil(&s.path, &lossy, audio, 80, Spoil::Drop).unwrap();
@@ -873,18 +806,12 @@ fn audio_after_a_lost_packet_keeps_its_time() {
         let t = *got as f64 / 48_000.0;
         assert!((t - want).abs() < 0.001, "beep at {t:.4}, want {want:.4}");
     }
-    // The hole (the packet after the AAC priming one, 79 × 1024 samples in)
-    // is digital silence. A loud sample here fails; the length check above
-    // would not.
     let hole = &mono[79 * 1024..80 * 1024];
     assert!(hole.iter().all(|&x| x == 0.0), "the hole is silent");
 }
 
 #[test]
 fn audio_that_starts_late_keeps_its_time() {
-    // The first FLAC packet is gone, so the audio starts a packet after the
-    // picture (as some recordings do): silence until it starts, and what
-    // follows stays on time.
     let fps = Rational::new(30, 1).unwrap();
     let s = src(
         FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (30, 1), 90).with_audio(
@@ -920,7 +847,6 @@ fn audio_that_starts_late_keeps_its_time() {
         mono[..lead].iter().all(|&x| x == 0.0),
         "silent for the first {first} s"
     );
-    // The 0 s beep was in the lost packet.
     let onsets = vidcut_av::beep::onsets(&mono, 0.1, 4800);
     let expect = [1.0, 2.0];
     assert_eq!(onsets.len(), expect.len(), "beeps at {onsets:?}");
@@ -932,9 +858,6 @@ fn audio_that_starts_late_keeps_its_time() {
 
 #[test]
 fn a_damaged_video_packet_is_skipped() {
-    // A ProRes frame whose data is zeros: the decoder rejects it, and the
-    // export goes on as players do. The next frame shows in its place (the
-    // sampling rule).
     let fps = Rational::new(30, 1).unwrap();
     let s = src(FixtureSpec::new(
         VideoCodec::ProRes422Hq,
@@ -963,9 +886,6 @@ fn a_damaged_video_packet_is_skipped() {
     want[10] = Some(11);
     assert_eq!(barcodes(&out), want);
 
-    // H.264 with a damaged packet in its second second (keyframes every
-    // second, B-frames): what refers to it shows whatever the decoder makes
-    // of it, and the seconds before and after are exact.
     let s = src(FixtureSpec::new(
         VideoCodec::H264,
         Container::Mkv,
@@ -997,7 +917,6 @@ fn a_damaged_video_packet_is_skipped() {
 
 #[test]
 fn other_rates_are_resampled_by_nearest_frame() {
-    // A 25 fps source on a 30 fps timeline: 5 source frames per 6 output frames.
     let fps = Rational::new(30, 1).unwrap();
     let s25 = src(FixtureSpec::new(
         VideoCodec::ProRes422Hq,
@@ -1018,12 +937,9 @@ fn other_rates_are_resampled_by_nearest_frame() {
     assert_eq!(codes, vec![0, 1, 2, 3, 3, 4, 5, 6, 7, 8, 8, 9]);
 }
 
-/// The encoder places its own keyframes: a decoded frame's picture type
-/// (the source's keyframes here) would force itself on it.
 #[test]
 fn the_encoder_chooses_its_own_keyframes() {
     let fps = Rational::new(30, 1).unwrap();
-    // Keyframes every 30 frames.
     let s = src(FixtureSpec::new(
         VideoCodec::H264,
         Container::Mp4,
@@ -1051,7 +967,6 @@ fn the_encoder_chooses_its_own_keyframes() {
         .filter(|(_, (_, p))| p.is_key())
         .map(|(n, _)| n)
         .collect();
-    // x264's own interval (250 frames, ultrafast: no scene cuts) is longer.
     assert_eq!(keys, [0]);
 }
 
@@ -1078,7 +993,6 @@ fn scaling_padding_and_presets() {
         let mut settings = preset.settings.clone();
         if let Some(v) = settings.video.as_mut() {
             v.encoder = EncoderChoice::Cpu;
-            // Keep the test quick: small frames even for the 4K preset.
             if v.width.is_some() {
                 v.width = Some((v.width.unwrap() / 4) & !1);
                 v.height = Some((v.height.unwrap() / 4) & !1);
@@ -1108,7 +1022,6 @@ fn scaling_padding_and_presets() {
                 .unwrap_or_else(|| panic!("{}: no video", preset.name));
             let (w, h) = (vs.width.unwrap_or(320), vs.height.unwrap_or(180));
             assert_eq!((vi.width, vi.height), (w, h), "{}", preset.name);
-            // Decodable, and the barcode survives scaling and lossy coding.
             let codes = barcodes(&out);
             assert_eq!(codes.len(), 60, "{}: frames", preset.name);
             if w * 180 == h * 320 {
@@ -1124,10 +1037,6 @@ fn scaling_padding_and_presets() {
 
 #[test]
 fn normalizing_hot_lanes_keeps_true_peaks_under_the_ceiling() {
-    // Two lanes of the same beeps, each raised to full scale: their mix
-    // peaks near +6 dBFS. Short beeps are loud for their loudness, so
-    // reaching -5 LUFS needs the true-peak cap: the gain stops where peaks
-    // reach -1 dBTP, in the report and in the file as measured again.
     let fps = Rational::new(30, 1).unwrap();
     let s = src(
         FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (30, 1), 300).with_audio(
@@ -1175,7 +1084,6 @@ fn normalizing_hot_lanes_keeps_true_peaks_under_the_ceiling() {
     );
 }
 
-/// A piece of image `path` (a still, or a sequence's first file).
 fn pictures(path: &Path, image: Image, source_frame: i64, frames: i64) -> VideoPiece {
     VideoPiece::Source {
         pace: Default::default(),
@@ -1190,7 +1098,6 @@ fn pictures(path: &Path, image: Image, source_frame: i64, frames: i64) -> VideoP
 
 #[test]
 fn sequences_play_their_pictures_at_their_rate() {
-    // Numbered images at 30 fps on a 30 fps timeline: picture for frame.
     let fps = Rational::new(30, 1).unwrap();
     let files = fixture::ensure_images(&ImageSpec::sequence(1000, 60, 4, 320, 180)).unwrap();
     let sequence = Image::Sequence {
@@ -1213,7 +1120,6 @@ fn sequences_play_their_pictures_at_their_rate() {
     assert_eq!(barcodes(&out), want);
 }
 
-/// Frame `k` of `path`.
 fn frame_at(path: &Path, k: usize) -> vidcut_av::ffmpeg::frame::Video {
     let mut r = VideoReader::open(path).unwrap();
     (0..=k)
@@ -1222,8 +1128,6 @@ fn frame_at(path: &Path, k: usize) -> vidcut_av::ffmpeg::frame::Video {
         .unwrap()
 }
 
-/// The mean (Y, Cb, Cr) in 8-bit units of the columns from `a` to `b` of
-/// `f`, in its middle rows.
 fn region_means(f: &vidcut_av::ffmpeg::frame::Video, (a, b): (usize, usize)) -> [f64; 3] {
     use vidcut_av::ffmpeg::format::Pixel;
     let ten = f.format() == Pixel::YUV420P10LE;

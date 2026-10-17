@@ -1,7 +1,3 @@
-//! Measurements for the analysis tools ([`vidcut_core::analysis`]): the
-//! peak levels of an audio stream, the scene score and black share of every
-//! video frame, and the loudness of a render plan's mix.
-
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -13,9 +9,6 @@ use crate::error::{Context, Error, Result};
 use crate::export::audio::{AudioMix, Resampler, discard_others};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
 
-/// Peak levels of audio stream `ordinal` of `path` (counting audio streams
-/// only): the largest absolute sample of any channel in each
-/// `1 / per_second` of a second.
 pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioLevels> {
     crate::cancel::stop()?;
     crate::init();
@@ -29,7 +22,6 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
     let params = stream.parameters();
     let tick = f64::from(tb);
     discard_others(&input, index);
-    // Same end as export: a past-end timestamp is not a hole in the levels.
     let file_end = crate::decode::container_end(&input, start_pts, tick);
     let id = params.id();
     let mut decoder = crate::parts::decoder_opened(
@@ -61,8 +53,6 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
             ));
         }
         let (r, rate, channels) = resampler.as_mut().expect("set");
-        // A gap lasts as its timestamps say, as in export: not past the
-        // file's end, and not for a far jump when that end is unknown.
         let frame_end = t.map(|t| t + f.samples() as f64 / f64::from(*rate));
         if let (Some(t), Some(next)) = (t, std::mem::replace(&mut next_in, frame_end)) {
             let gap = crate::decode::audio_gap(next, t, file_end);
@@ -100,26 +90,13 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
     })
 }
 
-/// The size pictures are measured at: enough to tell shots apart, small
-/// enough to be cheap.
 const MEASURE: (u32, u32) = (96, 54);
 
-/// Scene score and black share of every frame of `path`'s video. The score
-/// is FFmpeg scdet's: the mean absolute difference from the previous frame
-/// (0..100), or its change from the previous difference if smaller, so a
-/// steady pan doesn't read as a cut.
-///
-/// An image sequence is read by image2, which continues while the file
-/// numbers do. Pass that sequence's own length as `pictures`; frames after
-/// it are not measured and not opened. `None` reads the whole source.
-/// The video decodes on `gpu` where it decodes the stream, else on the CPU.
 pub fn picture_stats(
     source: &crate::decode::Input,
     pictures: Option<u64>,
     gpu: Option<&crate::hw::GpuDecoder>,
 ) -> Result<PictureStats> {
-    // Decoded in memory instead, or not at all: the GPU's decoder wouldn't
-    // take the stream (a profile it lacks), so the CPU's does.
     if gpu.is_some()
         && let Ok(Some(stats)) = stats_on(source, pictures, gpu)
     {
@@ -128,9 +105,6 @@ pub fn picture_stats(
     stats_on(source, pictures, None).map(Option::unwrap_or_default)
 }
 
-/// [`picture_stats`] decoded on `gpu`, or on the CPU without it. `None`
-/// when the first frame comes out in memory though `gpu` was given, or no
-/// frame does.
 fn stats_on(
     source: &crate::decode::Input,
     pictures: Option<u64>,
@@ -160,7 +134,6 @@ fn stats_on(
     let mut decoder =
         match crate::decode::open_video(ctx, id, gpu, || crate::decode::h264_open_gop(source)) {
             Ok(decoder) => decoder,
-            // A decoder this FFmpeg lacks, as `parts::decoder_opened` says.
             Err(Error::Ffmpeg {
                 source: ffmpeg::Error::DecoderNotFound,
                 ..
@@ -173,8 +146,6 @@ fn stats_on(
             Err(e) => return Err(e),
         };
     discard_others(&input, index);
-    // A thread of its own measures each frame (copied down whole, scaled
-    // and scored, in order) while the next ones decode.
     let (to_measure, inbox) = std::sync::mpsc::sync_channel::<frame::Video>(4);
     let (mut told, mut refused) = (false, false);
     let (decoded, stats) = std::thread::scope(|scope| {
@@ -194,7 +165,6 @@ fn stats_on(
                     return Err(Error::Invalid("decoded in memory".into()));
                 }
             }
-            // Measuring stopped: its error follows.
             to_measure
                 .send(crate::export::video::frame_ref(decoded)?)
                 .map_err(|_| Error::Invalid("measuring stopped".into()))
@@ -220,7 +190,6 @@ fn stats_on(
     Ok(Some(stats))
 }
 
-/// Scene scores and black shares, measured a frame at a time in order.
 struct Measuring {
     tick: f64,
     rate: f64,
@@ -245,7 +214,6 @@ impl Measuring {
     fn add(&mut self, decoded: &frame::Video) -> Result<()> {
         let (w, h) = MEASURE;
         let count = (w * h) as usize;
-        // Whole, so the measures are the CPU's to the bit.
         let down;
         let decoded = if crate::hw::on_gpu(decoded) {
             down = crate::hw::download(decoded)?;
@@ -276,7 +244,6 @@ impl Measuring {
         let luma: Vec<u8> = (0..h as usize)
             .flat_map(|y| small.data(0)[y * stride..y * stride + w as usize].to_vec())
             .collect();
-        // Black: luma at most 10% of the way from black to white.
         let full = decoded.color_range() == ffmpeg::color::Range::JPEG;
         let limit = if full { 25 } else { 16 + 22 };
         let black = luma.iter().filter(|&&y| y <= limit).count() as f32 / count as f32;
@@ -308,8 +275,6 @@ impl Measuring {
     }
 }
 
-/// Decodes at most `pictures` frames. The packet after the last one is not
-/// read: for an image sequence that packet is the next numbered file.
 fn decode_pictures(
     input: &mut format::context::Input,
     index: usize,
@@ -371,8 +336,6 @@ fn decode_pictures(
     }
 }
 
-/// Loudness of `plan`'s audio mixed as an export mixes it (FFmpeg's
-/// ebur128 filter: EBU R128 integrated loudness, range and true peak).
 pub fn loudness(plan: &RenderPlan) -> Result<Loudness> {
     mix_loudness(
         &plan.audio,
@@ -384,13 +347,10 @@ pub fn loudness(plan: &RenderPlan) -> Result<Loudness> {
     )
 }
 
-/// The export's own flag, or the one installed on this thread for an analysis.
 fn stopped(cancel: Option<&AtomicBool>) -> bool {
     crate::cancel::cancelled() || cancel.is_some_and(|c| c.load(Ordering::Relaxed))
 }
 
-/// Loudness of `total` samples of `lanes` mixed at `rate` into `channels`
-/// (the export's own mix, before any normalization). `cancel` stops it.
 pub fn mix_loudness(
     lanes: &[Vec<AudioPiece>],
     rate: u32,
@@ -399,8 +359,6 @@ pub fn mix_loudness(
     total: i64,
     cancel: Option<&AtomicBool>,
 ) -> Result<Loudness> {
-    // The export passes its flag; an analysis relies on the thread's guard.
-    // Either one stopping the client stops the measure.
     if stopped(cancel) {
         return Err(Error::Invalid(crate::export::CANCELLED.into()));
     }
@@ -502,7 +460,6 @@ pub fn mix_loudness(
         .flush()
         .ctx(|| "measuring loudness".into())?;
     drain(&mut graph, &mut result);
-    // Below the absolute gate (-70 LUFS), ebur128 reports -70: silence.
     if result.integrated <= -70.0 {
         result.integrated = f64::NEG_INFINITY;
     }

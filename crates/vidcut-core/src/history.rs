@@ -1,20 +1,3 @@
-//! The undo history file, `$XDG_STATE_HOME/vidcut/history/<short digest of
-//! the project path>.jsonl`, a JSON line each ([`Line`]):
-//!
-//! 1. the project file it is of,
-//! 2. the project before its oldest step,
-//! 3. then the steps, undos and redos as they happened. Each step has its
-//!    place on the undo stack (`at`, from 1), and each save ends with a
-//!    [`Tail`]: the digest of the project text it wrote and the stacks'
-//!    sizes.
-//!
-//! A save adds lines at the end. Loading reads only the last [`Tail`].
-//! Undo reads back from the end as far as it needs: the step at place `d`
-//! is the newest step line at `d` before the step above it
-//! ([`HistoryFile::top`]). Past [`HISTORY_CAP`] steps the file is written
-//! again with the newest 90% of the limit ([`HistoryFile::compact`]), its
-//! first project moved forward over the steps that go.
-
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -26,15 +9,11 @@ use serde_json::Value;
 
 use crate::editor::{Entry, HISTORY_CAP, History, Moved};
 
-/// The last line of a save.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Tail {
-    /// The digest of the project text the save wrote ([`text_hash`]).
     pub hash: String,
-    /// The steps there are to undo and to redo.
     pub undo: usize,
     pub redo: usize,
-    /// The step lines in the file.
     pub steps: usize,
 }
 
@@ -49,8 +28,6 @@ enum Line {
     Saved(Tail),
 }
 
-/// A step and its place on the undo stack. `at` comes first, so a line's
-/// place is read without parsing the rest ([`place`]).
 #[derive(Serialize, Deserialize)]
 struct Step {
     at: usize,
@@ -71,15 +48,12 @@ fn step_line(at: usize, entry: &Entry) -> String {
     }))
 }
 
-/// A step line's place on the undo stack; `None` for other lines.
 fn place(line: &str) -> Option<usize> {
     let rest = line.strip_prefix(r#"{"step":{"at":"#)?;
     let digits = rest.find(|c: char| !c.is_ascii_digit())?;
     rest[..digits].parse().ok()
 }
 
-/// A step line's label, read without parsing the rest (its change, which
-/// may be long): it comes right after the step's place.
 fn label_of(line: &str) -> std::io::Result<String> {
     let rest = line
         .strip_prefix(r#"{"step":{"at":"#)
@@ -103,45 +77,33 @@ fn bad(what: &str) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, what.to_string())
 }
 
-/// The digest of a project file's text, as the history keeps it.
 pub(crate) fn text_hash(text: &str) -> String {
     crate::fingerprint::digest(text.as_bytes())
 }
 
-/// Whether a file holds more steps than the limit: its oldest then go.
 pub(crate) fn due(tail: &Tail) -> bool {
     tail.steps > HISTORY_CAP
 }
 
-/// Files being compacted in this process.
 static COMPACTING: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
 
-/// The bytes read at once going back through a file.
 const CHUNK: u64 = 64 * 1024;
 
-/// Calls `each` with the lines before byte `end` of `file`, last first,
-/// and where each starts, until it says to stop. `end` is where a line
-/// ends, after its `\n`.
 fn lines_back(
     file: &mut File,
     end: u64,
     chunk: u64,
     mut each: impl FnMut(u64, &str) -> std::io::Result<bool>,
 ) -> std::io::Result<()> {
-    // Bytes from `pos` to the end of the last line not yet given.
     let mut pending: Vec<u8> = Vec::new();
     let mut pos = end;
     while pos > 0 {
-        // At least as much as is pending: a long line comes in a few
-        // reads that double, not copied again with each chunk.
         let start = pos.saturating_sub(chunk.max(pending.len() as u64));
         let mut read = vec![0; (pos - start) as usize];
         file.seek(SeekFrom::Start(start))?;
         file.read_exact(&mut read)?;
         read.extend_from_slice(&pending);
         pos = start;
-        // Whole lines are those after a `\n`, and the first when at the
-        // file's start.
         let mut stop = read.len();
         while let Some(nl) = read[..stop.saturating_sub(1)]
             .iter()
@@ -163,7 +125,6 @@ fn lines_back(
     Ok(())
 }
 
-/// The history file of one project file.
 #[derive(Debug, Clone)]
 pub(crate) struct HistoryFile {
     path: PathBuf,
@@ -171,7 +132,6 @@ pub(crate) struct HistoryFile {
 }
 
 impl HistoryFile {
-    /// `path`, the history of project file `of`.
     pub(crate) fn new(path: PathBuf, of: PathBuf) -> Self {
         Self { path, of }
     }
@@ -180,8 +140,6 @@ impl HistoryFile {
         &self.path
     }
 
-    /// The last save's [`Tail`] and the byte after it: `None` when there is
-    /// no file of this project, or no save in it.
     pub(crate) fn tail(&self) -> Option<(Tail, u64)> {
         let mut file = File::open(&self.path).ok()?;
         let mut first = String::new();
@@ -196,8 +154,6 @@ impl HistoryFile {
             _ => return None,
         }
         let end = file.metadata().ok()?.len();
-        // A save cut off at its end leaves a part of a line: it is past the
-        // last tail.
         let mut found = None;
         lines_back(&mut file, end, CHUNK, |at, text| {
             if text.ends_with('\n')
@@ -212,8 +168,6 @@ impl HistoryFile {
         found
     }
 
-    /// The newest `n` steps to undo, newest first, and the next `m` to
-    /// redo, next first, as of `tail` ending at byte `end`.
     pub(crate) fn top(
         &self,
         tail: &Tail,
@@ -224,7 +178,6 @@ impl HistoryFile {
         self.top_with(tail, end, n, m, entry_of)
     }
 
-    /// [`top`](Self::top)'s labels, without parsing the steps' changes.
     pub(crate) fn top_labels(
         &self,
         tail: &Tail,
@@ -235,7 +188,6 @@ impl HistoryFile {
         self.top_with(tail, end, n, m, label_of)
     }
 
-    /// [`top`](Self::top), each step line read by `read`.
     fn top_with<T>(
         &self,
         tail: &Tail,
@@ -249,9 +201,6 @@ impl HistoryFile {
         let mut file = File::open(&self.path)?;
         let mut undo = Vec::new();
         let mut target = d;
-        // The next step to redo is the newest at the place above the undo
-        // stack's top, and the ones after it to redo are after it in the
-        // file: those are read until it is.
         let mut next: Option<(u64, String)> = None;
         let mut later: HashMap<usize, Vec<(u64, String)>> = HashMap::new();
         lines_back(&mut file, end, CHUNK, |at, text| {
@@ -277,7 +226,6 @@ impl HistoryFile {
         let mut redo = Vec::new();
         if let Some((mut since, text)) = next {
             redo.push(read(&text)?);
-            // Each one after the next was made after the one before it.
             for p in d + 2..=d + m {
                 let (at, text) = later
                     .get(&p)
@@ -293,8 +241,6 @@ impl HistoryFile {
         Ok((undo, redo))
     }
 
-    /// The whole history up to byte `end`: the project before its oldest
-    /// step, and the stacks.
     pub(crate) fn read_all(&self, end: u64) -> std::io::Result<(Value, History)> {
         let mut text = String::new();
         File::open(&self.path)?
@@ -306,7 +252,6 @@ impl HistoryFile {
         };
         let mut h = History::default();
         for l in lines {
-            // A part of a line a save left: the lines around it stand.
             let Ok(l) = serde_json::from_str::<Line>(l) else {
                 continue;
             };
@@ -324,8 +269,6 @@ impl HistoryFile {
         Ok((base, h))
     }
 
-    /// Writes the file anew: `base`, the project before `history`'s oldest
-    /// step, then the steps, then a tail with `hash`.
     pub(crate) fn write_whole(
         &self,
         base: &Value,
@@ -338,8 +281,6 @@ impl HistoryFile {
         Ok(tail)
     }
 
-    /// Adds `moved` after the save `tail` that ends at byte `end`, and then
-    /// the new tail. Anything after `end`, a save cut off, goes.
     pub(crate) fn append(
         &self,
         tail: &Tail,
@@ -380,11 +321,6 @@ impl HistoryFile {
         Ok(t)
     }
 
-    /// When the file holds more steps than the limit: writes it again with
-    /// the newest 90% of the limit's steps to undo and all those to redo, its first
-    /// project moved forward over the steps that go. The work is done
-    /// without `lock`; it is taken only to add the lines saved meanwhile and
-    /// put the new file in place. One at a time for each file.
     pub(crate) fn compact<L>(
         &self,
         lock: impl FnOnce() -> std::io::Result<L>,
@@ -409,7 +345,6 @@ impl HistoryFile {
         result
     }
 
-    /// [`compact`](Self::compact) past `limit` steps, keeping 90% of it.
     fn compact_to<L>(
         &self,
         limit: usize,
@@ -429,8 +364,6 @@ impl HistoryFile {
         }
         let (mut text, mut kept) = whole(&self.of, &base, &h, &tail.hash);
         let _lock = lock()?;
-        // Saved meanwhile: after `end`, on the stack's places less `gone`.
-        // Unless the file was written anew: `tail` is no longer at `end`.
         let Some((_, now_end)) = self.tail() else {
             return Ok(());
         };
@@ -464,7 +397,6 @@ impl HistoryFile {
 }
 
 impl HistoryFile {
-    /// The tail on the line that ends at byte `end`, if that line is one.
     fn saved_before(&self, end: u64) -> std::io::Result<Option<Tail>> {
         let mut file = File::open(&self.path)?;
         let mut found = None;
@@ -478,7 +410,6 @@ impl HistoryFile {
     }
 }
 
-/// The text of a whole file, and its tail.
 fn whole(of: &Path, base: &Value, h: &History, hash: &str) -> (String, Tail) {
     let mut text = line(&Line::Of(of.to_path_buf()));
     text.push_str(&line(&Line::Base(base.clone())));
@@ -487,7 +418,6 @@ fn whole(of: &Path, base: &Value, h: &History, hash: &str) -> (String, Tail) {
         at += 1;
         text.push_str(&step_line(at, e));
     }
-    // The steps to redo as if made and then undone.
     for e in h.redo.iter().rev() {
         at += 1;
         text.push_str(&step_line(at, e));
@@ -505,8 +435,6 @@ fn whole(of: &Path, base: &Value, h: &History, hash: &str) -> (String, Tail) {
     (text, tail)
 }
 
-/// Moves the newest `n` steps from one stack to the other, as many as there
-/// are.
 fn shift(n: usize, from: &mut Vec<Entry>, to: &mut Vec<Entry>) {
     for _ in 0..n {
         let Some(e) = from.pop() else { return };
@@ -521,7 +449,6 @@ mod tests {
     use super::*;
     use crate::change::Change;
 
-    /// Step `k`: `n` from `k - 1` to `k`.
     fn step(k: i64) -> Entry {
         Entry {
             label: format!("step {k}"),
@@ -529,7 +456,6 @@ mod tests {
         }
     }
 
-    /// A history of steps 1..=`n` on `{"n": 0}`.
     fn history(dir: &Path, n: i64) -> HistoryFile {
         let file = HistoryFile::new(dir.join("h.jsonl"), dir.join("p.vidcut"));
         let h = History {

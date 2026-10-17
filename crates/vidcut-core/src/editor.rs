@@ -1,5 +1,3 @@
-//! Applies requests to a project with snapshot undo, revisions and dry runs.
-
 use crate::validate::GAIN;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
@@ -25,38 +23,26 @@ use crate::request::{
 use crate::time::{Rational, TimeContext, TimeSpec, format_timecode};
 use crate::validate;
 
-/// A probed media file, as the media layer reports it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProbedMedia {
-    /// Canonical absolute path (an image sequence's first file).
     pub path: PathBuf,
     pub size: u64,
     pub mtime_ns: i64,
     pub info: MediaInfo,
-    /// For an image sequence, its files.
     pub sequence: Option<ImageSequence>,
-    /// [`Media::fingerprint`]; none when the file couldn't be read for it.
     pub fingerprint: Option<String>,
 }
 
-/// A proxy file the editor records on a pool item.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeneratedProxy {
     pub path: PathBuf,
     pub width: u32,
     pub height: u32,
     pub codec: String,
-    /// How it was made, when it was made now: where it was decoded and
-    /// with what (`decoded on the GPU (NVDEC), AV1, NVIDIA hardware
-    /// (NVENC)`).
     pub made_with: Option<String>,
-    /// The frames copied between GPU memory and memory to make it, when it
-    /// was made now.
     pub copies: Option<Copied>,
 }
 
-/// Frames copied between GPU memory and memory for a job: how many went
-/// down to memory and up to the GPU, and their bytes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Copied {
     pub down: u64,
@@ -65,18 +51,11 @@ pub struct Copied {
     pub up_bytes: u64,
 }
 
-/// What the editor needs from the outside world.
 pub trait Env {
-    /// Probes a media file.
     fn probe(&self, path: &Path) -> Result<ProbedMedia>;
 
-    /// Probes the numbered image sequence `path` is a file of
-    /// ([`sequence::find`](crate::sequence::find)), its pictures shown at
-    /// `rate`.
     fn probe_sequence(&self, path: &Path, rate: Rational) -> Result<ProbedMedia>;
 
-    /// Files named `name` in `dirs` or their subfolders, nearest first: how
-    /// an import finds media that moved.
     fn find_file(&self, dirs: &[PathBuf], name: &OsStr) -> Vec<PathBuf> {
         let names = HashSet::from([name.to_os_string()]);
         self.find_files(dirs, &names)
@@ -84,8 +63,6 @@ pub trait Env {
             .unwrap_or_default()
     }
 
-    /// The files named any of `names` in `dirs` or their subfolders, by
-    /// name, nearest first: one walk for many files.
     fn find_files(
         &self,
         dirs: &[PathBuf],
@@ -115,31 +92,18 @@ pub trait Env {
         found
     }
 
-    /// Whether `m`'s file is there (an image sequence's first picture). A
-    /// path from another kind of system names none here.
     fn present(&self, m: &Media) -> bool {
         !crate::store::from_another_system(&m.path) && m.path.is_file()
     }
 
-    /// Peak levels of audio stream `stream` of `media`. Measuring decodes
-    /// the whole stream, so the media layer keeps the result.
     fn audio_levels(&self, media: &Media, stream: u32) -> Result<Arc<AudioLevels>>;
 
-    /// Picture measurements of `media`'s video, frame by frame (kept like
-    /// [`audio_levels`](Self::audio_levels)).
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>>;
 
-    /// How loud `plan`'s audio is, mixed as an export would mix it.
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness>;
 
-    /// Directory new proxy files are written into. The real env uses a
-    /// `proxies` folder beside the project when it knows that path, and
-    /// the cache otherwise.
     fn proxy_dir(&self) -> PathBuf;
 
-    /// Writes a playback proxy of `media`'s pictures into `dir` (decision
-    /// D41). `longest` is the longest side in pixels. `dry_run` reports the
-    /// file that would be written and does not encode.
     fn generate_proxy(
         &self,
         media: &Media,
@@ -148,12 +112,10 @@ pub trait Env {
         dry_run: bool,
     ) -> Result<GeneratedProxy>;
 
-    /// The preferences' rules for automatic proxies, and the proxy size.
     fn proxy_rules(&self) -> crate::preferences::Proxies {
         crate::preferences::Proxies::default()
     }
 
-    /// Deletes a proxy file. Missing files are fine.
     fn remove_proxy_file(&self, path: &Path) -> Result<()> {
         match std::fs::remove_file(path) {
             Ok(()) => Ok(()),
@@ -162,10 +124,6 @@ pub trait Env {
         }
     }
 
-    /// Opens a timeline file to import: an `.otio` file, or an `.otiod`
-    /// bundle folder (its `content.otio`). `.otioz` bundles (zip files) need
-    /// the media layer, which unpacks their media into `unpack` (default: a
-    /// folder named after the bundle, next to it) unless `write` is false.
     fn open_timeline(
         &self,
         path: &Path,
@@ -183,36 +141,26 @@ pub trait Env {
     }
 }
 
-/// A timeline file opened for import ([`Env::open_timeline`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimelineFile {
-    /// The OTIO document.
     pub text: String,
-    /// The folder relative media paths count from.
     pub base: PathBuf,
-    /// For an `.otioz` bundle: where its media go.
     pub bundle: Option<Unpacked>,
 }
 
-/// Where an `.otioz` bundle's media are unpacked.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Unpacked {
     pub folder: PathBuf,
-    /// Files and bytes of media in the bundle.
     pub files: usize,
     pub bytes: u64,
-    /// All of them are there (false in a dry run that would unpack).
     pub unpacked: bool,
 }
 
-/// Whether `path` names an `.otioz` bundle.
 pub fn is_otioz(path: &Path) -> bool {
     path.extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("otioz"))
 }
 
-/// Whether `path` names an OpenTimelineIO file: `.otio`, an `.otioz`
-/// bundle or an `.otiod` bundle folder.
 pub fn is_timeline_file(path: &Path) -> bool {
     path.extension().is_some_and(|e| {
         ["otio", "otioz", "otiod"]
@@ -221,7 +169,6 @@ pub fn is_timeline_file(path: &Path) -> bool {
     })
 }
 
-/// Reads an `.otio` file, or the `content.otio` of an `.otiod` folder.
 pub fn read_timeline_file(path: &Path) -> Result<TimelineFile> {
     let (file, base) = if path.is_dir() {
         (path.join("content.otio"), path.to_path_buf())
@@ -243,47 +190,36 @@ pub fn read_timeline_file(path: &Path) -> Result<TimelineFile> {
     })
 }
 
-/// One undo step: what an edit changed, both ways.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Entry {
     pub label: String,
     pub change: Change,
 }
 
-/// Undo and redo stacks (most recent last).
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct History {
     pub undo: Vec<Entry>,
     pub redo: Vec<Entry>,
 }
 
-/// The labels of steps to undo and to redo (most recent last).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Labels {
     pub undo: Vec<String>,
     pub redo: Vec<String>,
 }
 
-/// What happened to the history, for its file to add.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Moved {
-    /// A new step on top. The steps to redo are gone.
     Step(Entry),
-    /// Steps undone.
     Undo(u32),
-    /// Steps redone.
     Redo(u32),
 }
 
-/// Undo steps kept. Past it the oldest 10% go, and 90% of it stay.
 pub const HISTORY_CAP: usize = 1 << 17;
 
-/// Undo and redo labels `history.get` gives, newest first.
 const LABELS: usize = 100;
 
-/// How many of the oldest of `len` undo steps go: past the limit, all but
-/// 90% of it.
 fn over(len: usize) -> usize {
     if len > HISTORY_CAP {
         len - (HISTORY_CAP - HISTORY_CAP / 10)
@@ -294,17 +230,11 @@ fn over(len: usize) -> usize {
 
 pub struct Editor {
     project: Project,
-    /// The steps while the editor holds them: until its first save to a
-    /// history file, and always without one.
     history: History,
-    /// What happened to the history since it was last saved.
     moved: Vec<Moved>,
-    /// The history file the steps are in, and the hash of the project text
-    /// the editor's last save there wrote (or that it read).
     pub(crate) file: Option<(HistoryFile, String)>,
 }
 
-/// Now, in milliseconds since 1970 UTC (`Project::edited`).
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -322,8 +252,6 @@ impl Editor {
         }
     }
 
-    /// An editor whose steps are in `file`, which a save of `hash` (the
-    /// project's text) ends.
     pub(crate) fn on_file(project: Project, file: HistoryFile, hash: String) -> Self {
         Self {
             file: Some((file, hash)),
@@ -335,37 +263,29 @@ impl Editor {
         &self.project
     }
 
-    /// The project, for the store to write: what it changes in it, it puts
-    /// back.
     pub(crate) fn project_mut(&mut self) -> &mut Project {
         &mut self.project
     }
 
-    /// The steps it holds: none once they are in a file.
     pub(crate) fn held(&self) -> &History {
         &self.history
     }
 
-    /// What happened to the history since this was last called.
     pub(crate) fn take_moved(&mut self) -> Vec<Moved> {
         std::mem::take(&mut self.moved)
     }
 
-    /// Its steps are in `file` now, which a save of `hash` ends.
     pub(crate) fn saved_to(&mut self, file: HistoryFile, hash: String) {
         self.history = History::default();
         self.file = Some((file, hash));
     }
 
-    /// Its history file couldn't take the last save: the steps there are
-    /// lost, and the next save writes the file anew.
     pub(crate) fn lost_file(&mut self) {
         if self.file.take().is_some() {
             self.history = History::default();
         }
     }
 
-    /// How many steps there are to undo and to redo.
     pub fn history_counts(&self) -> (usize, usize) {
         let Some((file, _)) = &self.file else {
             return (self.history.undo.len(), self.history.redo.len());
@@ -387,22 +307,16 @@ impl Editor {
         (u, r)
     }
 
-    /// The newest `n` steps to undo and the next `n` to redo (most recent
-    /// last, as in [`History`]).
     pub fn history_view(&self, n: usize) -> Result<History> {
         let (undo, redo) = self.view(n, HistoryFile::top, Entry::clone)?;
         Ok(History { undo, redo })
     }
 
-    /// [`history_view`](Self::history_view)'s labels, without the steps'
-    /// changes, which the file needn't parse then.
     pub fn history_labels(&self, n: usize) -> Result<Labels> {
         let (undo, redo) = self.view(n, HistoryFile::top_labels, |e| e.label.clone())?;
         Ok(Labels { undo, redo })
     }
 
-    /// The newest `n` steps to undo and to redo, each as `of` gives it, the
-    /// file's read by `top`.
     fn view<T: Clone>(
         &self,
         n: usize,
@@ -429,7 +343,6 @@ impl Editor {
                 file.path().display()
             ))
         };
-        // Enough from the file for what happened since it was saved.
         let k = n + self.moved.len();
         let (mut undo, mut redo) = match file.tail() {
             Some((tail, end)) => {
@@ -453,7 +366,6 @@ impl Editor {
         Ok((newest(&undo), newest(&redo)))
     }
 
-    /// Notes a new step on top.
     fn push(&mut self, entry: Entry) {
         self.moved.push(Moved::Step(entry.clone()));
         if self.file.is_none() {
@@ -464,7 +376,6 @@ impl Editor {
         }
     }
 
-    /// Applies one request. `playhead` is the live playhead, if any.
     pub fn apply(
         &mut self,
         envelope: Envelope,
@@ -509,7 +420,6 @@ impl Editor {
         let label = label_of(&request, &self.project);
         let mut working = self.project.clone();
         let result = mutate(&mut working, &request, env, playhead, dry_run)?;
-        // Carried transitions the edit took away from their edit points.
         let mut warnings = Vec::new();
         let dropped = otio::transitions::prune(&mut working);
         if dropped > 0 {
@@ -534,9 +444,6 @@ impl Editor {
                 warnings,
             });
         }
-        // An edit that changes nothing (no shot changes found, a setting set
-        // to what it was) is no undo step and no new revision: an undo would
-        // undo nothing, and the edit before would take two.
         let Some(change) = changed(&mut self.project, &mut working) else {
             return Ok(Response {
                 rev: self.project.rev,
@@ -561,14 +468,11 @@ impl Editor {
         })
     }
 
-    /// Records an external change (e.g. the file was edited by another
-    /// process) as one undoable step.
     pub fn record_external(&mut self, project: Project) {
         let mut project = project;
         let change = changed(&mut self.project, &mut project)
             .unwrap_or_else(|| Change::Fields(Default::default()));
         project.rev = project.rev.max(self.project.rev + 1);
-        // The writer's time, or now for a change made by hand.
         if project.edited == self.project.edited {
             project.edited = Some(now_ms());
         }
@@ -589,10 +493,8 @@ impl Editor {
             )));
         }
         let mut project = self.project.clone();
-        // Tests check it against the whole JSON's.
         let mut json = cfg!(debug_assertions).then(|| to_json(&self.project));
         let fits = |e: String| Error::internal(format!("the undo history doesn't fit: {e}"));
-        // Without a file, all of it; with one, the steps to take.
         let mut history = match self.file {
             None => self.history.clone(),
             Some(_) => self.history_view(steps as usize)?,
@@ -628,7 +530,6 @@ impl Editor {
                 warnings: Vec::new(),
             });
         }
-        // Revisions only grow, even when undoing back to an older state.
         project.rev = self.project.rev + 1;
         project.edited = Some(now_ms());
         self.project = project;
@@ -651,8 +552,6 @@ impl Editor {
     }
 }
 
-/// Moves the newest `n` steps from one stack to the other, as many as there
-/// are.
 fn shift<T>(n: u32, from: &mut Vec<T>, to: &mut Vec<T>) {
     for _ in 0..n {
         let Some(e) = from.pop() else { return };
@@ -660,23 +559,16 @@ fn shift<T>(n: u32, from: &mut Vec<T>, to: &mut Vec<T>) {
     }
 }
 
-/// A project as JSON, which every project turns into.
 fn to_json(p: &Project) -> Value {
     serde_json::to_value(p).expect("a project is JSON")
 }
 
-/// What an edit changed, from `before` to `after`, `None` when nothing did:
-/// what [`Change::between`] their JSON gives, without turning what is the
-/// same on both into JSON. Both are as they were after.
 fn changed(before: &mut Project, after: &mut Project) -> Option<Change> {
     let change = project_change(before, after);
-    // Tests check it against the whole JSON's.
     debug_assert_eq!(change, Change::between(&to_json(before), &to_json(after)));
     change
 }
 
-/// [`changed`]. Its lists of things with ids are taken out of both for a
-/// moment: the rest is small enough to compare as JSON.
 fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
     use std::mem::take;
     let (mut media, mut tracks, mut markers) = (
@@ -710,7 +602,6 @@ fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
     joined(rest, lists)
 }
 
-/// What changed in track `a`, now `b`: its clips and transitions by id.
 fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
     use std::mem::take;
     if a == b {
@@ -721,7 +612,6 @@ fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
         (take(&mut a.transitions), take(&mut b.transitions)),
     );
     let rest = Change::between(&to_value(&*a), &to_value(&*b));
-    // The file leaves out a track's transitions when there are none.
     let transitions_change = match (transitions.0.is_empty(), transitions.1.is_empty()) {
         (true, true) => None,
         (false, true) => Some(Change::Set {
@@ -751,9 +641,6 @@ fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
     joined(rest, lists)
 }
 
-/// Makes `change`, a step of the undo history, in `p` (`forward`), or takes
-/// it back: only the things it names become JSON. Its lists of things with
-/// ids are taken out for a moment, as [`changed`] takes them.
 fn undo_step(p: &mut Project, change: &Change, forward: bool) -> std::result::Result<(), String> {
     use crate::change::{apply_json, shift_json};
     let Change::Fields(fields) = change else {
@@ -796,7 +683,6 @@ fn undo_step(p: &mut Project, change: &Change, forward: bool) -> std::result::Re
     Ok(())
 }
 
-/// [`undo_step`] in track `t`: its clips and transitions by id.
 fn track_step(t: &mut Track, change: &Change, forward: bool) -> std::result::Result<(), String> {
     use crate::change::{apply_json, shift_json};
     let Change::Fields(fields) = change else {
@@ -836,7 +722,6 @@ fn track_step(t: &mut Track, change: &Change, forward: bool) -> std::result::Res
     Ok(())
 }
 
-/// The changes of the fields named in `lists`, and of the others.
 fn split_fields<'a>(
     fields: &'a std::collections::BTreeMap<String, Change>,
     lists: &[&'a str],
@@ -857,9 +742,6 @@ fn split_fields<'a>(
     (named, rest)
 }
 
-/// [`leaf`] for a thing whose whole-number `field` (`at`) may be all that
-/// changed, as a ripple moves clips and markers: that is found without its
-/// JSON.
 fn moved_only<T: serde::Serialize + PartialEq>(
     a: &mut T,
     b: &mut T,
@@ -882,7 +764,6 @@ fn moved_only<T: serde::Serialize + PartialEq>(
     leaf(a, b)
 }
 
-/// What changed in a thing in a list, from its JSON.
 fn leaf<T: serde::Serialize + PartialEq>(a: &mut T, b: &mut T) -> Option<Change> {
     if a == b {
         return None;
@@ -890,7 +771,6 @@ fn leaf<T: serde::Serialize + PartialEq>(a: &mut T, b: &mut T) -> Option<Change>
     Change::between(&to_value(&*a), &to_value(&*b))
 }
 
-/// The change of an object whose fields but the `lists` changed by `rest`.
 fn joined<const N: usize>(
     rest: Option<Change>,
     lists: [(&str, Option<Change>); N],
@@ -912,7 +792,6 @@ fn to_value<T: serde::Serialize + ?Sized>(x: &T) -> Value {
     serde_json::to_value(x).expect("a project is JSON")
 }
 
-/// The undo history's name for an edit: the request in words.
 fn label_of(request: &Request, project: &Project) -> String {
     let json = serde_json::to_value(request).unwrap_or_default();
     let method = json["method"]
@@ -921,9 +800,7 @@ fn label_of(request: &Request, project: &Project) -> String {
     crate::describe::describe(&method, &json["params"], Some(project))
 }
 
-/// Created, modified and deleted ids between two project states.
 fn diff(before: &Project, after: &Project) -> Changes {
-    /// What an id names: a pool item, a clip on its track, a marker.
     #[derive(PartialEq)]
     enum Named<'a> {
         Media(&'a Media),
@@ -974,12 +851,10 @@ fn resolve(p: &Project, t: &TimeSpec, playhead: Option<i64>) -> Result<i64> {
     Ok(ctx(p, playhead).resolve(t)?)
 }
 
-/// Resolves a length given as a TimeSpec, allowing a sign (`-2s`).
 fn length(p: &Project, t: &TimeSpec) -> Result<i64> {
     Ok(ctx(p, None).duration(t)?)
 }
 
-/// Resolves a clip reference (`c17` or `V1@<TimeSpec>`) to a clip id.
 pub fn resolve_clip(p: &Project, r: &ClipRef, playhead: Option<i64>) -> Result<String> {
     if let Some((track, at)) = r.split_once('@') {
         let t = p
@@ -1000,8 +875,6 @@ fn resolve_clips(p: &Project, refs: &[ClipRef], playhead: Option<i64>) -> Result
     refs.iter().map(|r| resolve_clip(p, r, playhead)).collect()
 }
 
-/// Context for source times of `media`: they count from its first frame,
-/// `end` is its end and `in`/`out` are its source marks.
 pub fn media_context(p: &Project, media: &Media, playhead: Option<i64>) -> TimeContext {
     TimeContext {
         fps: p.settings.fps,
@@ -1014,8 +887,6 @@ pub fn media_context(p: &Project, media: &Media, playhead: Option<i64>) -> TimeC
     }
 }
 
-/// Source ranges of an edit. `tape` takes the Source Tape span (decision D17):
-/// the tail of the first clip, the middle clips and the head of the last.
 fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
     if params.tape {
         if !params.media.is_empty() || params.range.is_some() {
@@ -1033,7 +904,6 @@ fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
     Ok(vec![source(p, params)?])
 }
 
-/// Both Source Tape marks, as source ranges in tape order (decision D17).
 fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
     let tm = &p.tape_marks;
     let (Some(mark_in), Some(mark_out)) = (tm.mark_in, tm.mark_out) else {
@@ -1067,8 +937,6 @@ fn clip_ids(ids: &[String]) -> Value {
     v
 }
 
-/// Source Tape marks count frames along a tape that held `media`: once it is
-/// gone, or another length, they no longer say where they are (D17).
 fn forget_tape_marks(p: &mut Project, media: &str) {
     if p.tape_marks.order.iter().any(|m| m == media) {
         p.tape_marks = Default::default();
@@ -1091,9 +959,6 @@ fn tape_marks_json(p: &Project, entries: &[crate::render::TapeEntry]) -> Value {
     })
 }
 
-/// Source range of `params` in source frames. Default: the media's source
-/// marks, with a missing In meaning its first frame and a missing Out its end
-/// (decision D5).
 fn source(p: &Project, params: &SourceParams) -> Result<Source> {
     let media = p
         .media(&params.media)
@@ -1115,8 +980,6 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
     })
 }
 
-/// Runs `f` with the timeline marks hidden when `hide` (they come back
-/// afterwards): edits placed by position rather than by marks.
 fn without_marks<T>(
     p: &mut Project,
     hide: bool,
@@ -1135,9 +998,6 @@ fn need(at: Option<i64>, what: &str) -> Result<i64> {
     at.ok_or_else(|| Error::usage(format!("{what} is required (no live playhead)")))
 }
 
-/// Applies a mutation to `p` and returns its method-specific result.
-/// `dry_run` only keeps it from writing files (an `.otioz` import unpacks
-/// media).
 fn mutate(
     p: &mut Project,
     request: &Request,
@@ -1168,7 +1028,6 @@ fn mutate(
                     true => env.probe_sequence(path, fps.unwrap_or(p.settings.fps))?,
                     false => env.probe(path)?,
                 };
-                // Several files of one sequence make one clip.
                 let id = add_media(p, &mut files, probed);
                 if !ids.contains(&id) {
                     ids.push(id);
@@ -1531,8 +1390,6 @@ fn mutate(
             let mut removed = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A block plays as a gap, and a held frame is silent: no
-                // sound to look at.
                 if c.is_block() || c.speed() == 0.0 {
                     continue;
                 }
@@ -1562,8 +1419,6 @@ fn mutate(
             let mut created = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                // A block plays as a gap: no pictures to look at; a held
-                // frame has no shots.
                 if c.is_block() || c.speed() == 0.0 {
                     continue;
                 }
@@ -1600,7 +1455,6 @@ fn mutate(
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             if matches!(duration, TimeSpec::Keyword(crate::time::Keyword::End)) {
-                // "End": each clip runs to the end of its media.
                 ops::extend_to_media_end(p, &ids, *ripple)?;
             } else {
                 let frames = length(p, duration)?;
@@ -1819,10 +1673,6 @@ fn mutate(
     })
 }
 
-/// Adds probed media to the pool (or finds it there); returns its id.
-/// While the format isn't chosen, the first video sets it, with no prompt
-/// (D37), drop-frame counting too where its timecode counts so (D47). A
-/// still has no frame rate to give, and its size is a photo's.
 fn first_video_sets_format(p: &mut Project, info: &MediaInfo) {
     if p.settings.auto_format
         && let Some(v) = info.video.as_ref().filter(|v| !v.still)
@@ -1836,7 +1686,6 @@ fn first_video_sets_format(p: &mut Project, info: &MediaInfo) {
     }
 }
 
-/// The pool's files by path, found once.
 struct PoolFiles(HashMap<PathBuf, Vec<usize>>);
 
 impl PoolFiles {
@@ -1848,8 +1697,6 @@ impl PoolFiles {
         files
     }
 
-    /// The pool item of the file at `path`: the still, or the sequence it
-    /// starts (`sequence`).
     fn find<'p>(
         &self,
         p: &'p Project,
@@ -1863,15 +1710,12 @@ impl PoolFiles {
             .find(|m| &m.sequence == sequence)
     }
 
-    /// Pool item `i` is there.
     fn note(&mut self, p: &Project, i: usize) {
         self.0.entry(p.media[i].path.clone()).or_default().push(i);
     }
 }
 
 fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> String {
-    // The same file is the same media, unless one is a still and the other
-    // the sequence it starts.
     if let Some(existing) = files.find(p, &probed.path, &probed.sequence) {
         return existing.id.clone();
     }
@@ -1903,8 +1747,6 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
     id
 }
 
-/// `media.relink`: one item to `path`, or the items (all missing ones when
-/// none are named) to their files found by name in `search`.
 fn relink(
     p: &mut Project,
     env: &dyn Env,
@@ -1930,7 +1772,6 @@ fn relink(
                 .ok_or_else(|| Error::not_found(format!("no media {id}")))
         })
         .collect::<Result<_>>()?;
-    // An image sequence is probed as one, at its rate.
     let probe = |m: &Media, path: &Path| match (&m.sequence, &m.info.video) {
         (Some(_), Some(v)) => env.probe_sequence(path, v.fps),
         _ => env.probe(path),
@@ -1959,8 +1800,6 @@ fn relink(
                     .and_then(|n| found.get(&n))
                     .cloned()
                     .unwrap_or_default();
-                // Files named alike (a camera's C0001.MP4 on every card):
-                // those in folders named like the old one's first.
                 candidates.sort_by_key(|c| std::cmp::Reverse(common_tail(&m.path, c)));
                 let mut first_difference = None;
                 let mut matched = None;
@@ -1997,8 +1836,6 @@ fn relink(
     Ok(json!({ "relinked": relinked, "different": different, "not_found": not_found }))
 }
 
-/// Why the probed file isn't `m`'s file, if it isn't: another size,
-/// other streams or another fingerprint.
 fn differs(m: &Media, probed: &ProbedMedia) -> Option<String> {
     let (a, b) = (&m.info, &probed.info);
     match (&m.sequence, &probed.sequence) {
@@ -2037,8 +1874,6 @@ fn differs(m: &Media, probed: &ProbedMedia) -> Option<String> {
     if sound(a) != sound(b) {
         return Some("other audio streams".into());
     }
-    // The same file probes alike; half a frame (or a millisecond) allows
-    // for another FFmpeg rounding otherwise.
     let slack = a.video.as_ref().map_or(0.001, |v| 0.5 / v.fps.as_f64());
     if (a.duration - b.duration).abs() > slack {
         return Some(format!("{:.3} s long, not {:.3}", b.duration, a.duration));
@@ -2052,7 +1887,6 @@ fn differs(m: &Media, probed: &ProbedMedia) -> Option<String> {
     }
 }
 
-/// How many folder names `a` and `b` share at the end of their parents.
 fn common_tail(a: &Path, b: &Path) -> usize {
     let dirs = |p: &Path| -> Vec<OsString> {
         p.parent()
@@ -2069,8 +1903,6 @@ fn common_tail(a: &Path, b: &Path) -> usize {
         .count()
 }
 
-/// Points `id` at the probed file. The proxy stays when it is the same
-/// file (the proxy was made from it), else it goes.
 fn replace_file(
     p: &mut Project,
     env: &dyn Env,
@@ -2112,14 +1944,11 @@ fn replace_file(
     Ok(())
 }
 
-/// Takes the picture size of `v` as shown (square pixels, rotated, even)
-/// and fixes the format.
 fn adopt_size(p: &mut Project, v: &VideoInfo) {
     (p.settings.width, p.settings.height) = v.display_size();
     p.settings.auto_format = false;
 }
 
-/// Frame `f` at rate `from` as the nearest frame at rate `to`.
 fn rescale(f: i64, from: Rational, to: Rational) -> i64 {
     if from == to {
         return f;
@@ -2129,35 +1958,23 @@ fn rescale(f: i64, from: Rational, to: Rational) -> i64 {
     (2 * n + d).div_euclid(2 * d) as i64
 }
 
-/// What `timeline.import` reads, and how.
 struct Import<'a> {
     path: Option<&'a Path>,
     doc: Option<&'a Value>,
     mode: ImportMode,
     search: &'a [PathBuf],
     unpack: Option<&'a Path>,
-    /// False in a dry run: a bundle's media aren't unpacked.
     write: bool,
-    /// Compound clips decomposed into their clips.
     flatten: bool,
-    /// An empty timeline takes the file's frame rate. Otherwise the file is
-    /// converted to the project's.
     adopt_rate: bool,
 }
 
-/// The pool's ids of an imported timeline's media, by [`media_key`].
 type MediaIds = HashMap<(String, bool), String>;
 
-/// How an imported timeline names a media file: an image sequence and a
-/// still of its first picture are named alike.
 fn media_key(m: &otio::MediaRef) -> (String, bool) {
     (m.url.clone(), m.sequence.is_some())
 }
 
-/// The media of imported timeline `t`, added to the pool: each file probed
-/// once where the file says (or near it), else looked for by name in
-/// `dirs` (and subfolders). By [`media_key`], and their ids in order.
-/// `hint`: the error suggests search folders.
 fn find_media<'a>(
     p: &mut Project,
     clips: impl IntoIterator<Item = &'a otio::ImportedClip>,
@@ -2175,7 +1992,6 @@ fn find_media<'a>(
         if ids.contains_key(&media_key(m)) || missing.contains(&m.shown.as_str()) {
             continue;
         }
-        // An image sequence is probed as one, at its rate.
         let probe = |path: &Path| match m.sequence {
             Some(rate) => env.probe_sequence(path, rate),
             None => env.probe(path),
@@ -2219,15 +2035,6 @@ fn find_media<'a>(
     Ok((ids, media))
 }
 
-/// Places the clips, transitions and markers of imported timeline `t` from
-/// timeline frame `offset`, on the tracks `tracks` maps its own to (the
-/// same ids otherwise), its media found as `ids`. The clips' and the
-/// markers' ids.
-/// Imported timeline `t` at the project's frame rate: clip edges, sources
-/// (one in its media's timecode counted from the media's first frame), J/L
-/// offsets, carried effects' times and fade lengths, compound clips'
-/// lengths, transitions, markers and marks. Each edge converts on its own,
-/// so clips that meet still meet. Its media are among `ids`.
 fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
     let pool: HashMap<&str, &Media> = p.media.iter().map(|m| (m.id.as_str(), m)).collect();
     let (from, to) = (t.fps, p.settings.fps);
@@ -2243,8 +2050,6 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
         }
     };
     for c in &mut t.clips {
-        // A source range in the media's timecode (no available range said
-        // where the media start) counts from the media's first frame here.
         let tc = match (c.is_block(), c.timecoded) {
             (false, true) => pool
                 .get(ids[&media_key(&c.media)].as_str())
@@ -2259,8 +2064,6 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
             c.audio = Some((conv(c.start + h) - start, conv(c.end() + tl) - end));
         }
         c.source_in = conv(c.source_in - tc);
-        // A compound clip's length covers what it shows, whatever rounding
-        // did.
         if let Some(k) = c.compound.as_mut() {
             k.frames = conv(k.frames).max(c.source_in + end - start);
         }
@@ -2290,13 +2093,10 @@ fn place_imported(
     warnings: &mut Vec<String>,
     keep_ids: bool,
 ) -> Result<(Vec<String>, Vec<String>)> {
-    // As the file keeps it when `keep_ids` (the file is the project): the
-    // clip's own color, which the color it shows is otherwise.
     let color = |c: &otio::ImportedClip| match (&c.own_color, keep_ids) {
         (Some(own), true) => own.clone(),
         _ => c.color.clone(),
     };
-    // The clip's id from the file when `keep_ids` and no clip has it.
     let mut taken: HashSet<String> = HashSet::new();
     if keep_ids {
         for t in &p.tracks {
@@ -2311,9 +2111,7 @@ fn place_imported(
         Some(id) => id.clone(),
         None => p.alloc_clip_id(),
     };
-    // Sorted once all are placed.
     let mut placed: HashSet<String> = HashSet::new();
-    // The pool's items by id, found once.
     let pool: HashMap<String, usize> = p
         .media
         .iter()
@@ -2322,15 +2120,12 @@ fn place_imported(
         .collect();
     debug_assert_eq!(t.fps, p.settings.fps, "converted first (at_project_rate)");
     let track_of = |id: &str| tracks.get(id).cloned().unwrap_or_else(|| id.to_string());
-    // Carried clip effects count from where their picture or sound starts.
     let carry = |list: &[Value], first: i64| {
         (!list.is_empty()).then(|| Effects {
             from: first,
             list: list.iter().cloned().map(Kept::from).collect(),
         })
     };
-    // Where audio may start on each track without overlapping what is
-    // before `offset`.
     let mut floors: HashMap<String, i64> = p
         .tracks
         .iter()
@@ -2346,11 +2141,8 @@ fn place_imported(
         .collect();
 
     let mut clips = Vec::new();
-    // The clips made, by key: (id, track).
     let mut made: HashMap<usize, (String, String)> = HashMap::new();
     for c in &t.clips {
-        // A generator, title or compound clip: a block of its length, no
-        // media.
         if c.is_block() {
             let (start, end) = (offset + c.start, offset + c.end());
             if end - start < 1 {
@@ -2399,7 +2191,6 @@ fn place_imported(
             warnings.push(format!("{label}: {} has no video; left out", m.name));
             continue;
         }
-        // Keep to the media (rates and rounding may differ by a frame).
         if source_in < 0 {
             warnings.push(format!(
                 "{label}: {} frame(s) before the start of {} were left out",
@@ -2419,14 +2210,11 @@ fn place_imported(
         if duration < 1 {
             continue;
         }
-        // The audio's offsets from the video edges, which keeping to the
-        // media may have moved.
         let audio = match (c.audio, t.has_audio_tracks) {
             (Some((h, tl)), _) => Some((
                 offset + c.start + h - start,
                 offset + c.end() + tl - (start + duration),
             )),
-            // No audio tracks in the file: clips bring their media's audio.
             (None, false) => Some((0, 0)),
             (None, true) => None,
         };
@@ -2491,8 +2279,6 @@ fn place_imported(
             track.sort();
         }
     }
-    // Transitions between clips made, on the track of both; those that don't
-    // fit their edit points here (media too short, a clip moved off it) go.
     for x in &t.transitions {
         let side = |k: Option<usize>| match k {
             None => Some(None),
@@ -2507,7 +2293,6 @@ fn place_imported(
             (Some(f), None) => &f.1,
             (None, None) => continue,
         };
-        // The file's id when `keep_ids` and no transition has it.
         let id = match x
             .id
             .clone()
@@ -2549,8 +2334,6 @@ fn place_imported(
     Ok((clips, markers))
 }
 
-/// The stack of compound `k` as an imported timeline of its video tracks,
-/// pictures only (`video`), or of its audio tracks.
 fn nested(k: &Compound, video: bool) -> Result<otio::Imported> {
     let kind = if video { "Video" } else { "Audio" };
     let tracks: Vec<Value> = k.stack["children"]
@@ -2576,10 +2359,6 @@ fn nested(k: &Compound, video: bool) -> Result<otio::Imported> {
     Ok(t)
 }
 
-/// What compound `k` (a picture block if `video`) plays (deviation X9): the
-/// clips its stack holds placed as an import places them, on tracks of
-/// their own, frames from its first, its media added to the pool, and
-/// what compound clips among them play in turn (`depth` deep).
 fn compound_contents(
     p: &mut Project,
     k: &Compound,
@@ -2598,7 +2377,6 @@ fn compound_contents(
     for id in needed {
         ops::ensure_track(&mut inner, id)?;
     }
-    // The pool, lent for the placing, which only reads it.
     inner.media = std::mem::take(&mut p.media);
     let placed = place_imported(
         &mut inner,
@@ -2632,8 +2410,6 @@ fn compound_contents(
         .collect())
 }
 
-/// Gives each compound clip among `ids` what it plays (deviation X9); one
-/// whose clips aren't found plays as a gap, which `warnings` says.
 fn fill_contents(
     p: &mut Project,
     ids: &[String],
@@ -2675,14 +2451,6 @@ fn fill_contents(
     }
 }
 
-/// Decompose in Place (deviation X9): compound clip `id` becomes the clips
-/// its stack holds, at their times, trimmed to the part it shows, their
-/// media looked for in `dirs` too. A picture block brings the stack's video
-/// tracks, pictures only; a sound block its audio tracks, sound only. The
-/// first goes in the block's place, each other on the next track of the
-/// kind above that is free there, or a new one. The block's own effects
-/// are dropped, which `warnings` says. `import`: a timeline import's own,
-/// which a locked track it made doesn't stop. The clips made.
 fn decompose(
     p: &mut Project,
     id: &str,
@@ -2705,8 +2473,6 @@ fn decompose(
         .clone()
         .ok_or_else(|| Error::invalid(format!("{id} isn't a compound clip")))?;
     let mut t = nested(&k, block.video)?;
-    // What the block shows, in the stack's frames: its clips there, their
-    // media found, at the project's rate.
     let to = p.settings.fps;
     let conv = |f: i64| rescale(f, t.fps, to);
     let (lo, hi) = block.shown();
@@ -2715,8 +2481,6 @@ fn decompose(
     let (ids, _) = find_media(p, &t.clips, env, dirs, false)?;
     at_project_rate(p, &mut t, &ids);
     if block.speed() != 1.0 {
-        // At its speed (decision D48): each clip where the block shows it,
-        // through its pace, at both speeds together.
         t.clips.retain_mut(|c| {
             let Some((k0, k1)) = crate::render::shown_between(&block, c.start, c.end()) else {
                 return false;
@@ -2754,7 +2518,6 @@ fn decompose(
             warnings.push(w.clone());
         }
     }
-    // The block makes way; its tracks, the first in its place.
     p.tracks[ti].clips.remove(ci);
     let (start, end) = (block.start, block.end());
     let track_kind = p.tracks[ti].kind;
@@ -2802,7 +2565,6 @@ fn decompose(
     Ok(made)
 }
 
-/// `timeline.import`: an OpenTimelineIO timeline onto V1 ([`otio`]).
 fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Value> {
     let Import {
         path,
@@ -2836,7 +2598,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     };
     let base = file.as_ref().map(|f| f.base.as_path());
     let mut t = otio::import(&doc, base)?;
-    // Some editors write no timeline name: the file's then.
     let stem = path
         .and_then(Path::file_stem)
         .map(|s| s.to_string_lossy().into_owned());
@@ -2844,7 +2605,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         ("", Some(stem)) => stem.clone(),
         (name, _) => name.to_string(),
     };
-    // The project of a file vidcut wrote: its media come as it has them.
     let meta = t.project.take();
     let wanted = meta
         .as_ref()
@@ -2869,8 +2629,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         )));
     }
     let mut warnings = t.warnings.clone();
-    // A dry run doesn't unpack a bundle, so its media can't be probed: say
-    // what the import would read.
     if let Some(b) = bundle.as_ref().filter(|b| !b.unpacked) {
         warnings.push(format!(
             "the media weren't probed: a dry run doesn't unpack the bundle's {} file(s) into {}",
@@ -2889,16 +2647,12 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         }));
     }
 
-    // Media: each file probed once where the file says (or near it), else
-    // looked for by name in `search` (and subfolders), and in a bundle's
-    // media folder.
     let mut dirs = search.to_vec();
     if let Some(b) = &bundle {
         dirs.push(b.folder.clone());
     }
     let (ids, media) = match (&meta, &wanted) {
         (Some(meta), Some(wanted)) => {
-            // In a bin named after the file, as the file's project has them.
             let bin = stem.as_deref().unwrap_or(&name).trim().replace('/', "-");
             let bin = if bin.is_empty() {
                 "Imported".into()
@@ -2947,8 +2701,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         p.markers.clear();
         p.marks = Default::default();
     }
-    // An empty timeline takes the file's rate and start timecode; otherwise
-    // positions are converted to the project's rate.
     let empty = p.tracks.iter().all(|t| t.clips.is_empty());
     if empty {
         if p.settings.auto_format
@@ -2960,8 +2712,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         {
             adopt_size(p, &v);
         }
-        // A file doesn't say whether its timecode counts drop-frame; its
-        // media may (decision D47).
         let drop = t.clips.iter().filter(|c| !c.is_block()).any(|c| {
             p.media(&ids[&media_key(&c.media)])
                 .and_then(|m| m.info.timecode)
@@ -2973,7 +2723,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             p.settings.drop_frame = true;
         }
         p.settings.start_tc = t.start_tc;
-        // The file's start keeps its label at the project's rate.
         if !adopt_rate {
             p.settings.set_fps(rate);
         }
@@ -2990,7 +2739,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     add_tracks(p, &t, empty)?;
     let (mut clips, markers) =
         place_imported(p, &t, &ids, offset, &HashMap::new(), &mut warnings, false)?;
-    // Flattened: each compound clip made becomes its clips, and theirs.
     let mut pending = compounds_among(p, &clips);
     while flatten && !pending.is_empty() {
         let mut next = Vec::new();
@@ -3002,7 +2750,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         }
         pending = next;
     }
-    // Asked for, or none are left.
     if mode == ImportMode::Compound || flatten && compounds_among(p, &clips).is_empty() {
         warnings.retain(|w| !w.starts_with(otio::COMPOUNDS_KEPT));
     }
@@ -3030,7 +2777,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     Ok(result)
 }
 
-/// The compound clips among `ids`, in their order.
 fn compounds_among(p: &Project, ids: &[String]) -> Vec<String> {
     let all: HashSet<&str> = p
         .tracks
@@ -3045,15 +2791,10 @@ fn compounds_among(p: &Project, ids: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// Whether the file `r` names is `m`'s.
 fn same_file(r: &otio::MediaRef, m: &Media) -> bool {
     r.paths.contains(&m.path) && r.sequence.is_some() == m.sequence.is_some()
 }
 
-/// The ids of the media of the vidcut project `meta` to bring with `t`:
-/// those its clips name, and with `all` the rest of the pool too. OTIO's
-/// own items win, so one is left out when a clip's reference names another
-/// file: that file is probed instead.
 fn wanted_media(meta: &otio::ProjectMeta, t: &otio::Imported, all: bool) -> HashSet<String> {
     let by_id: HashMap<&str, &Media> = meta.media.iter().map(|m| (m.id.as_str(), m)).collect();
     let mut agree: HashMap<&str, bool> = HashMap::new();
@@ -3073,11 +2814,6 @@ fn wanted_media(meta: &otio::ProjectMeta, t: &otio::Imported, all: bool) -> Hash
         .collect()
 }
 
-/// The media of the vidcut project `meta` that `wanted` names, in the
-/// pool: in bin `bin`, with their own bins under it. A file the pool has
-/// keeps its pool item. Others come as the project has them, with new ids,
-/// without proxies (they belong to its folder). Their ids here, by the
-/// project's.
 fn join_pool(
     p: &mut Project,
     meta: &otio::ProjectMeta,
@@ -3112,8 +2848,6 @@ fn join_pool(
     Ok(ids)
 }
 
-/// Adds the media the compound clips among `t`'s clips hold to the pool,
-/// and those they hold in turn, onto `media`.
 fn compound_media(
     p: &mut Project,
     t: &otio::Imported,
@@ -3135,9 +2869,6 @@ fn compound_media(
     Ok(())
 }
 
-/// The tracks `t`'s clips go on, made first: making video tracks moves the
-/// audio tracks' indexes. With `settings`, they take the file's track
-/// settings.
 fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()> {
     let mut needed: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
     needed.extend(t.tracks.iter().map(|t| t.id.as_str()));
@@ -3161,14 +2892,6 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
     Ok(())
 }
 
-/// The project in an OTIO file of a whole timeline that vidcut wrote, and
-/// the import's warnings. `None` for other files.
-///
-/// The pool, settings, marks and ids come from `metadata.vidcut.project`.
-/// The timeline comes from the file's own items. Clips find their media by
-/// the ids the file keeps. Clips another editor added are probed, as an
-/// import probes them. Relative media paths start at `base`, the file's
-/// folder.
 pub fn open_otio(
     doc: &Value,
     base: Option<&Path>,
@@ -3179,17 +2902,13 @@ pub fn open_otio(
         return Ok(None);
     };
     let mut p = Project::new(meta.settings);
-    // Ids given here come after those the file kept.
     p.next_id = meta.next_id;
     p.media = meta.media;
     p.bins = meta.bins;
     p.tape_marks = meta.tape_marks;
-    // The file's own items say where it starts.
     p.settings.start_tc = t.start_tc;
     let mut warnings = t.warnings.clone();
     let mut ids = MediaIds::new();
-    // OTIO's own items win: a clip whose reference names another file
-    // than its media's is probed.
     for c in t.clips.iter().filter(|c| !c.is_block()) {
         let named = c.media_id.as_deref().and_then(|id| p.media(id));
         if let Some(m) = named.filter(|m| same_file(&c.media, m)) {
@@ -3223,12 +2942,6 @@ pub fn open_otio(
     Ok(Some((p, warnings)))
 }
 
-/// The project the OTIO file at `path` makes, and what couldn't be
-/// imported. A file vidcut wrote of its whole timeline gives the project it
-/// holds ([`open_otio`]). Another file's timeline is imported into a new
-/// project of `format`. What `format` doesn't give comes from the file: its
-/// frame rate and start timecode, and its first video's size. `write` is
-/// false in a dry run: a bundle isn't unpacked.
 pub fn project_from_otio(
     path: &Path,
     format: &Format,
@@ -3249,7 +2962,6 @@ pub fn project_from_otio(
             return Ok(opened);
         }
     }
-    // The start counts at the rate the import settles on.
     let first = Format {
         drop_frame: None,
         start_tc: None,
@@ -3325,7 +3037,6 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
     if let Some(r) = set.ripple_on {
         p.settings.ripple_on = r;
     }
-    // Before the start timecode, which then counts so.
     if let Some(d) = set.drop_frame {
         p.settings.set_drop_frame(d)?;
     }
@@ -3351,7 +3062,6 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
     Ok(())
 }
 
-/// Longest side for a proxy: the default, or an even size from 16 to 7680.
 fn proxy_longest(width: Option<u32>, default: u32) -> Result<u32> {
     match width {
         None => Ok(default),
@@ -3407,7 +3117,6 @@ fn proxy_targets(p: &Project, media: Option<&OneOrMany<String>>) -> Result<Vec<S
     Ok(ids)
 }
 
-/// `proxy.generate`: one proxy file per video or image sequence.
 fn proxy_generate(
     p: &mut Project,
     env: &dyn Env,
@@ -3420,7 +3129,6 @@ fn proxy_generate(
     let longest = proxy_longest(width, rules.size)?;
     let mut ids = proxy_targets(p, media)?;
     if auto {
-        // Spec D41: what the rules pick and has no fresh proxy yet.
         ids.retain(|id| {
             p.media(id)
                 .is_some_and(|m| rules.wants(m) && m.fresh_proxy().is_none())
@@ -3464,7 +3172,6 @@ fn proxy_generate(
     Ok(json!({ "proxies": proxies }))
 }
 
-/// `proxy.remove`: delete the files and forget them.
 fn proxy_remove(
     p: &mut Project,
     env: &dyn Env,
@@ -3506,9 +3213,6 @@ fn proxy_remove(
     Ok(json!({ "cleared": cleared }))
 }
 
-// ---------------------------------------------------------------- queries
-
-/// Answers a query request.
 pub fn query(
     p: &Project,
     history: &Labels,
@@ -3752,7 +3456,6 @@ pub fn query(
     })
 }
 
-/// JSON for a level that may be `-inf` (silence): `null` then.
 fn finite(db: f64) -> Value {
     if db.is_finite() {
         json!(db)
@@ -3761,8 +3464,6 @@ fn finite(db: f64) -> Value {
     }
 }
 
-/// What an analysis looks at: a whole media item (positions are source
-/// frames) or a clip (timeline frames).
 enum Target<'a> {
     Media(&'a Media),
     Clip(&'a Clip),
@@ -3799,7 +3500,6 @@ impl Target<'_> {
         })
     }
 
-    /// Timecode of position `f`: source timecode for media, record for clips.
     fn tc(&self, p: &Project, f: i64) -> String {
         match self {
             Target::Media(_) => p.settings.length_timecode(f),
@@ -3819,7 +3519,6 @@ impl Target<'_> {
             .collect()
     }
 
-    /// `extra` with what this is.
     fn json(&self, p: &Project, mut extra: Value) -> Value {
         match self {
             Target::Media(m) => extra["media"] = json!(m.id),
@@ -3836,8 +3535,6 @@ impl Target<'_> {
     }
 }
 
-/// The media or clips an analysis request names, or every clip with sound
-/// (`audio`) or pictures.
 fn targets<'a>(
     p: &'a Project,
     media: &Option<String>,
@@ -3876,7 +3573,6 @@ fn targets<'a>(
     }
 }
 
-/// Ripple Delete Silence's parts of `target`.
 fn silent_parts(
     p: &Project,
     env: &dyn Env,
@@ -3908,7 +3604,6 @@ fn silent_parts(
     ))
 }
 
-/// Detect Scene Cuts' frames in `target`, with their scores.
 fn scene_cuts(
     p: &Project,
     env: &dyn Env,
@@ -3956,7 +3651,6 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env) -> Value {
     if let Some(c) = &m.color {
         v["color"] = json!(c);
     }
-    // A still lasts as long as clips make it; `frames` is the still duration.
     if m.is_still() {
         v["still"] = json!(true);
         v["video"]["fps"] = Value::Null;
@@ -3975,8 +3669,6 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env) -> Value {
             "stale": m.fresh_proxy().is_none(),
         });
     }
-    // The file's own start timecode, as `HH:MM:SS:FF` in its frames (or,
-    // for sound with a time of day, at the project rate).
     if let Some(tc) = m.info.timecode {
         let fps = match &m.info.video {
             Some(v) if v.fps == tc.rate => v.fps,
@@ -3988,7 +3680,6 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env) -> Value {
     v
 }
 
-/// A clip as reported by timeline queries; `media` is its media.
 pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> Value {
     let mut v = json!({
         "type": "clip",
@@ -4002,30 +3693,24 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
         "start_tc": p.settings.timecode(c.start),
         "end_tc": p.settings.timecode(c.end()),
         "source_in": c.source_in,
-        // Where it would show next (decision D48).
         "source_out": c.source_at(c.end()),
         "source_in_tc": p.settings.length_timecode(c.source_in),
         "enabled": c.enabled,
     });
-    // The Clip Color it shows, its own or its media's.
     if let Some(color) = c.shown_color(media) {
         v["color"] = json!(color);
     }
-    // A block from another editor (deviation X9), by kind.
     if let Some(g) = &c.generator {
         v["generator"] = json!(otio::generator_kind(g));
     }
     if let Some(k) = &c.compound {
         v["compound"] = json!(otio::compound_kind(k));
     }
-    // A speed change: how fast (2.0, -1.0 reversed), else what it is.
     if let Some(speed) = &c.speed {
         v["speed"] = speed
             .scalar()
             .map_or_else(|| json!(speed.label()), |x| json!(x));
     }
-    // Carried clip effects by name (deviation X9); `project.get` has them
-    // whole.
     if let Some(e) = &c.effects {
         v["effects"] = json!(e.names());
     }
@@ -4059,7 +3744,6 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                 at = c.end();
             }
             let mut v = json!({ "id": t.id, "kind": t.kind, "locked": t.locked, "muted": t.muted });
-            // Moved in: `json!` would copy them all.
             v["items"] = Value::Array(items);
             if t.solo {
                 v["solo"] = json!(true);
@@ -4073,7 +3757,6 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
             if let Some(n) = &t.name {
                 v["name"] = json!(n);
             }
-            // Carried transitions (deviation X9), at their cuts.
             let cuts = otio::transitions::Cuts::of(p, t);
             let transitions: Vec<Value> = t
                 .transitions
@@ -4105,7 +3788,6 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
     v
 }
 
-/// A fixed rate for tests and tools that need one.
 pub fn rate(num: i64, den: i64) -> Rational {
     Rational::new(num, den).expect("valid rate")
 }

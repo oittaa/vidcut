@@ -1,7 +1,3 @@
-//! The audio of a render plan: sample-exact source reads, de-click fades at
-//! cuts, pieces at other speeds stretched keeping their pitch, and the mix
-//! of all lanes, as interleaved `f32`.
-
 use std::path::{Path, PathBuf};
 
 use vidcut_core::render::AudioPiece;
@@ -11,12 +7,10 @@ use crate::error::{Error, Result};
 use crate::ffmpeg::{self, codec, ffi, format, frame, media};
 use crate::stretch::Stretch;
 
-/// Converts decoded audio of any format, layout and rate to interleaved `f32`
-/// with `channels` channels at `rate` Hz (libswresample).
 pub(crate) struct Resampler {
     swr: *mut ffi::SwrContext,
     channels: usize,
-    input: (i32, i32, i32), // format, rate, channels the context was built for
+    input: (i32, i32, i32),
 }
 
 // SAFETY: the context is only used through `&mut self`.
@@ -77,8 +71,6 @@ impl Resampler {
         self.input == (f.format, f.sample_rate, f.ch_layout.nb_channels)
     }
 
-    /// Appends the converted samples of `src` (or the resampler's remaining
-    /// buffered samples when `src` is `None`) to `out`.
     pub(crate) fn convert(&mut self, src: Option<&frame::Audio>, out: &mut Vec<f32>) -> Result<()> {
         unsafe {
             let (inp, in_count) = match src {
@@ -106,11 +98,8 @@ impl Resampler {
     }
 }
 
-/// Reads one audio stream of a file from a raw time on, for one piece or
-/// several in a row.
 struct SourceAudio {
     path: PathBuf,
-    /// Which of the file's audio streams.
     ordinal: u32,
     input: format::context::Input,
     stream: usize,
@@ -119,32 +108,18 @@ struct SourceAudio {
     resampler: Option<Resampler>,
     rate: u32,
     channels: u16,
-    /// Converted samples not yet consumed, from `cursor` on.
     pending: Vec<f32>,
     cursor: usize,
-    /// Samples still to drop at the start (before the target time).
     skip: usize,
-    /// Raw time (s) of the first sample decoded after the latest seek, and
-    /// the index (in output samples from it) of the next sample `read` gives.
     t0: f64,
     at: i64,
-    /// Raw time (s) where the next decoded frame should start. One that
-    /// starts later follows a gap (a damaged packet, or one the file lacks):
-    /// it waits in `held` while `gap` samples of silence go first, so what
-    /// follows stays where its timestamps put it.
     next_in: Option<f64>,
     gap: usize,
     held: Option<frame::Audio>,
-    /// Where the file ends (s) on the packet clock, if the container says.
-    /// A frame stamped later has a broken timestamp and plays in order.
-    /// Unknown (no positive duration): a jump longer than
-    /// [`crate::decode::AUDIO_GAP_BOUND`] plays in order too.
     end: Option<f64>,
     eof: bool,
 }
 
-/// How far ahead (seconds) a later piece of the same stream may start for
-/// decoding on to it to beat a seek.
 const DECODE_AHEAD: i64 = 1;
 
 impl SourceAudio {
@@ -170,15 +145,10 @@ impl SourceAudio {
             )
         };
         discard_others(&input, index);
-        // Duration is a length on the packet clock, not an end at zero, and
-        // a missing duration does not mean the file goes on forever.
         let end = crate::decode::container_end(&input, stream_start, tick);
         let id = params.id();
         let decoder = crate::parts::decoder_opened(
             codec::context::Context::from_parameters(params).and_then(|mut c| {
-                // Without the packet time base, FFmpeg can't shift a frame's
-                // timestamp past skipped priming samples (Opus pre-skip, AAC
-                // priming), and audio would start that much late.
                 unsafe { (*c.as_mut_ptr()).pkt_timebase = tb.into() };
                 c.decoder().audio()
             }),
@@ -210,8 +180,6 @@ impl SourceAudio {
         Ok(s)
     }
 
-    /// Readies the stream for another piece starting at raw time `start`: a
-    /// piece that starts a little ahead decodes on to it, any other seeks.
     fn reposition(&mut self, start: f64) -> Result<()> {
         let want = ((start - self.t0) * f64::from(self.rate)).round() as i64;
         let ahead = want - self.at;
@@ -224,7 +192,6 @@ impl SourceAudio {
         }
     }
 
-    /// Positions reading at raw time `start` (seconds), sample-exactly.
     fn seek(&mut self, start: f64) -> Result<()> {
         let mut back = 0.25;
         loop {
@@ -260,7 +227,6 @@ impl SourceAudio {
             self.resampler = None;
             (self.next_in, self.gap, self.held) = (None, 0, None);
             let Some(first) = self.decode()? else {
-                // Nothing at all after the seek: silence.
                 self.eof = true;
                 (self.t0, self.at) = (start, 0);
                 return Ok(());
@@ -271,8 +237,6 @@ impl SourceAudio {
                 continue;
             }
             if t0 - start > crate::decode::AUDIO_GAP {
-                // The stream starts later (audio that begins after the
-                // picture, or a first packet lost): silence until it does.
                 (self.t0, self.at) = (start, 0);
                 self.next_in = Some(start);
             } else {
@@ -294,7 +258,6 @@ impl SourceAudio {
                 Err(ffmpeg::Error::Other {
                     errno: ffmpeg::util::error::EAGAIN,
                 }) => {}
-                // A damaged frame: on to the next.
                 Err(ffmpeg::Error::InvalidData) if damaged < crate::decode::DAMAGED_IN_A_ROW => {
                     damaged += 1;
                     continue;
@@ -329,14 +292,12 @@ impl SourceAudio {
         }
     }
 
-    /// Takes a decoded frame: converts it, or holds it back behind a gap.
     fn push(&mut self, f: frame::Audio) -> Result<()> {
         let start = f.timestamp().map(|t| t as f64 * self.tick);
         let frame_end = start.map(|t| t + f.samples() as f64 / f64::from(f.rate().max(1)));
         if let (Some(t), Some(next)) = (start, std::mem::replace(&mut self.next_in, frame_end)) {
             let gap = crate::decode::audio_gap(next, t, self.end);
             if gap > 0.0 {
-                // The samples before the gap first, all of them.
                 if let Some(mut r) = self.resampler.take() {
                     r.convert(None, &mut self.pending)?;
                 }
@@ -361,13 +322,10 @@ impl SourceAudio {
             .convert(Some(f), &mut self.pending)
     }
 
-    /// Appends exactly `n` samples (interleaved) to `out`, padding with
-    /// silence past the end of the stream.
     fn read(&mut self, n: usize, out: &mut Vec<f32>) -> Result<()> {
         let ch = usize::from(self.channels);
         self.at += n as i64;
         loop {
-            // Drop the samples before the start time.
             let available = (self.pending.len() - self.cursor) / ch;
             let drop = self.skip.min(available);
             self.cursor += drop * ch;
@@ -376,7 +334,6 @@ impl SourceAudio {
             if self.skip == 0 && available >= n {
                 out.extend_from_slice(&self.pending[self.cursor..self.cursor + n * ch]);
                 self.cursor += n * ch;
-                // Compact now and then.
                 if self.cursor > 1 << 16 {
                     self.pending.drain(..self.cursor);
                     self.cursor = 0;
@@ -384,7 +341,6 @@ impl SourceAudio {
                 return Ok(());
             }
             if self.gap > 0 {
-                // Silence for a gap, a second at a time however long it is.
                 let fill = self.gap.min(self.rate as usize);
                 self.pending.resize(self.pending.len() + fill * ch, 0.0);
                 self.gap -= fill;
@@ -414,8 +370,6 @@ impl SourceAudio {
     }
 }
 
-/// Tells the demuxer to skip every stream but `keep`: less I/O, and Matroska
-/// otherwise complains about the other tracks' non-keyframes after a seek.
 pub(crate) fn discard_others(input: &format::context::Input, keep: usize) {
     unsafe {
         let ctx = &*input.as_ptr();
@@ -427,30 +381,18 @@ pub(crate) fn discard_others(input: &format::context::Input, keep: usize) {
     }
 }
 
-/// Sound a start inside a piece at another speed begins before, dropped:
-/// the stretch fades its first fragment in.
 const PREROLL_SECS: f64 = 0.02;
 
-/// Source read at a time backward, in seconds: each read seeks.
 const BACK_SECS: f64 = 0.5;
 
-/// The sound of a piece at another speed (decision D48): its source read
-/// forward, or backward half a second at a time and reversed, stretched to
-/// the speed keeping its pitch.
 struct Paced {
     speed: f64,
     stretch: Option<Stretch>,
     origin: f64,
-    /// The source sample read next: forward the first of the next read,
-    /// backward the one after its last.
     next: i64,
-    /// Where the piece's source ends, the way it reads: silence past it,
-    /// where the stretch looks ahead.
     bound: i64,
-    /// Made and not given yet (interleaved), from `cursor` on.
     made: Vec<f32>,
     cursor: usize,
-    /// Samples still to drop at the start.
     drop: usize,
 }
 
@@ -477,7 +419,6 @@ impl Paced {
         }
     }
 
-    /// Raw time (s) its stream opens at: where it reads first.
     fn start(&self, rate: u32) -> f64 {
         let first = if self.speed < 0.0 {
             (self.next - back_samples(rate)).max(self.bound)
@@ -487,8 +428,6 @@ impl Paced {
         self.origin + first.max(0) as f64 / f64::from(rate)
     }
 
-    /// Appends its next `n` samples (interleaved) to `out`, read from
-    /// `source`.
     fn read(&mut self, source: &mut SourceAudio, n: usize, out: &mut Vec<f32>) -> Result<()> {
         let ch = usize::from(source.channels);
         let rate = source.rate;
@@ -538,30 +477,20 @@ impl Paced {
     }
 }
 
-/// Source samples read at a time backward.
 fn back_samples(rate: u32) -> i64 {
     (f64::from(rate) * BACK_SECS).round() as i64
 }
 
-/// One audio lane of a plan, read sequentially. A piece from the same stream
-/// as the one before it reads on with the same decoder; a piece from another
-/// stream is opened while the piece before it plays.
 struct Lane {
     pieces: Vec<AudioPiece>,
     piece: usize,
-    /// Samples of the current piece already produced.
     pos: i64,
-    /// The current piece's stream is ready at `pos`: false at a piece's
-    /// start and after a seek into one.
     started: bool,
     source: Option<SourceAudio>,
-    /// The current piece's sound, when it is at another speed.
     paced: Option<Paced>,
-    /// The next stream, opened ahead; named by where it opens.
     ahead: Ahead<SourceAudio, (PathBuf, u32, u64)>,
     declick: i64,
     scratch: Vec<f32>,
-    /// A gain on top of each piece's own (a fader moved while playing).
     trim: f32,
 }
 
@@ -581,9 +510,6 @@ impl Lane {
         }
     }
 
-    /// Readies the current piece's stream: the open one if it is the same
-    /// stream, the one opened ahead for this piece, or a new one. Then starts
-    /// opening the next stream.
     fn start_piece(
         &mut self,
         path: &Path,
@@ -607,8 +533,6 @@ impl Lane {
         Ok(())
     }
 
-    /// Starts opening the stream of the next source piece, unless it is the
-    /// current one, which that piece then reads on with.
     fn open_next(&mut self, current: &Path, current_stream: u32, rate: u32, channels: u16) {
         let next = self
             .pieces
@@ -639,8 +563,6 @@ impl Lane {
         });
     }
 
-    /// The next samples are the lane's from sample `sample` on. The open
-    /// stream stays open: a piece of it reads on or seeks it.
     fn seek(&mut self, sample: i64) {
         let mut left = sample.max(0);
         self.ahead.forget();
@@ -658,14 +580,13 @@ impl Lane {
         self.pos = 0;
     }
 
-    /// Adds the lane's next `n` samples into `out` (interleaved, `n * ch` long).
     fn mix_into(&mut self, out: &mut [f32], rate: u32, channels: u16) -> Result<()> {
         let ch = usize::from(channels);
         let mut done = 0usize;
         let n = out.len() / ch;
         while done < n {
             let Some(piece) = self.pieces.get(self.piece).cloned() else {
-                return Ok(()); // past the end: silence
+                return Ok(());
             };
             let len = piece.samples();
             let take = ((len - self.pos) as usize).min(n - done);
@@ -680,8 +601,6 @@ impl Lane {
                 ..
             } = &piece
             {
-                // A piece starts at its first sample, or where a seek put
-                // the lane.
                 if take > 0 && (self.pos == 0 || !self.started) {
                     self.paced = None;
                     let start = if *speed == 1.0 {
@@ -707,10 +626,6 @@ impl Lane {
                     None => source.read(take, &mut self.scratch)?,
                 }
                 let gain = 10f32.powf(*gain_db as f32 / 20.0) * self.trim;
-                // De-click fades at cuts inside the lane (not at the plan's
-                // ends): none where the sound plays on into the next piece
-                // or out of the one before, nor where a cross fade is
-                // silent already (decision D50).
                 let fade = self.declick.min(len / 2).max(1);
                 let before = self.piece.checked_sub(1).map(|i| &self.pieces[i]);
                 let after = self.pieces.get(self.piece + 1);
@@ -738,7 +653,6 @@ impl Lane {
             done += take;
             self.pos += take as i64;
             if self.pos >= len {
-                // The stream stays open: a later piece may read it too.
                 self.piece += 1;
                 self.pos = 0;
             }
@@ -747,9 +661,6 @@ impl Lane {
     }
 }
 
-/// Whether `next`'s sound goes on from `piece`'s where a cross fade
-/// starts or ends between them: one clip's sound split at its fade, the
-/// source read on at its pace, within a sample of rounding (decision D50).
 fn plays_on(piece: &AudioPiece, next: &AudioPiece) -> bool {
     match (piece, next) {
         (
@@ -782,17 +693,14 @@ fn plays_on(piece: &AudioPiece, next: &AudioPiece) -> bool {
     }
 }
 
-/// Mixes all lanes of a plan.
 pub struct AudioMix {
     lanes: Vec<Lane>,
     rate: u32,
     channels: u16,
-    /// Applied to the whole mix (loudness normalization).
     gain: f32,
 }
 
 impl AudioMix {
-    /// `declick_ms` > 0 fades `declick_ms` in and out at every cut.
     pub fn new(lanes: &[Vec<AudioPiece>], rate: u32, channels: u16, declick_ms: u32) -> Self {
         let declick = i64::from(rate) * i64::from(declick_ms) / 1000;
         Self {
@@ -807,18 +715,14 @@ impl AudioMix {
         self.channels
     }
 
-    /// How many lanes it mixes.
     pub fn lanes(&self) -> usize {
         self.lanes.len()
     }
 
-    /// Changes the whole mix by `db`.
     pub fn set_gain_db(&mut self, db: f64) {
         self.gain = 10f64.powf(db / 20.0) as f32;
     }
 
-    /// Changes lane `lane` by `db`, on top of the gains in its pieces (a
-    /// fader being moved). Heard from the next [`read`](Self::read) on.
     pub fn set_lane_db(&mut self, lane: usize, db: f64) -> Result<()> {
         let Some(lane) = self.lanes.get_mut(lane) else {
             return Err(Error::Invalid(format!("no audio lane {lane}")));
@@ -827,19 +731,12 @@ impl AudioMix {
         Ok(())
     }
 
-    /// The next reads go on from sample `sample` of the plan (0 is its
-    /// start). Each lane keeps its open stream: reading a piece of it seeks
-    /// it, or decodes on when that is quicker.
     pub fn seek(&mut self, sample: i64) {
         for lane in &mut self.lanes {
             lane.seek(sample);
         }
     }
 
-    /// Makes `lanes` the plan, reading from sample `sample`: an edited
-    /// timeline. Lane `i` keeps the stream lane `i` had open, for a piece
-    /// of the same stream to read on with; lane gains on top
-    /// ([`set_lane_db`](Self::set_lane_db)) start over.
     pub fn replan(&mut self, lanes: &[Vec<AudioPiece>], sample: i64) {
         let declick = self.lanes.first().map_or(0, |l| l.declick);
         let mut old: Vec<Option<SourceAudio>> =
@@ -856,8 +753,6 @@ impl AudioMix {
         self.seek(sample);
     }
 
-    /// [`read`](Self::read), with each lane's peak per channel, before the
-    /// mix's gain: lane by lane, `channels` peaks each.
     pub fn read_metered(&mut self, n: usize) -> Result<(Vec<f32>, Vec<f32>)> {
         let ch = usize::from(self.channels);
         let mut out = vec![0.0f32; n * ch];
@@ -881,7 +776,6 @@ impl AudioMix {
         Ok((out, peaks))
     }
 
-    /// The next `n` mixed samples, interleaved.
     pub fn read(&mut self, n: usize) -> Result<Vec<f32>> {
         let mut out = vec![0.0f32; n * usize::from(self.channels)];
         for lane in &mut self.lanes {

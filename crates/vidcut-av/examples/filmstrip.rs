@@ -1,7 +1,3 @@
-//! Times filmstrip extraction and writes the pictures as PNGs, decoded on
-//! the GPU the viewer decodes on (`VIDCUT_HWDEC` picks another, `none` the
-//! CPU): `cargo run -p vidcut-av --example filmstrip -- FILE OUTDIR [COUNT]`.
-
 fn main() {
     let mut args = std::env::args().skip(1);
     let file = std::path::PathBuf::from(args.next().expect("FILE"));

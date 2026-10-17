@@ -1,9 +1,6 @@
-//! Human-readable output. With `--json` the response object is printed as is.
-
 use serde_json::Value;
 use vidcut_core::Response;
 
-/// Prints a response for `method`.
 pub fn print(method: &str, r: &Response, json: bool) {
     if json {
         println!("{}", serde_json::to_string_pretty(r).unwrap_or_default());
@@ -453,7 +450,6 @@ pub fn print(method: &str, r: &Response, json: bool) {
             for line in lines {
                 println!("{line}");
             }
-            // The themes `appearance.theme` can name.
             for t in r.result["themes"].as_array().into_iter().flatten() {
                 let from = match (t["error"].as_str(), t["path"].as_str()) {
                     (Some(e), _) => format!(", which doesn't load: {e}"),
@@ -477,7 +473,6 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     c["uses"].as_str().unwrap_or("nothing that works here")
                 );
             }
-            // The GPUs `gpu.device` can name, and the one in use.
             let chosen = r.result["preferences"]["gpu"]["device"]
                 .as_str()
                 .unwrap_or_default();
@@ -534,8 +529,6 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 .flatten()
                 .map(|e| {
                     let text = |k: &str| e[k].as_str().unwrap_or_default().to_string();
-                    // A render node; on Windows an adapter's index; NVENC's
-                    // CUDA device's.
                     let device = match e["device"].as_str() {
                         None => "-".to_string(),
                         Some(d) if e["kind"] == "nvenc" => format!("CUDA device {d}"),
@@ -550,7 +543,6 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     [text("encoder"), text("pixel"), device, ok]
                 })
                 .collect();
-            // Each column as wide as its longest.
             let width = |c: usize| rows.iter().map(|r| r[c].len()).max().unwrap_or(0);
             let (w0, w1, w2) = (width(0), width(1), width(2));
             for [encoder, pixel, device, ok] in &rows {
@@ -640,7 +632,6 @@ pub fn print(method: &str, r: &Response, json: bool) {
     }
 }
 
-/// Live (GUI) requests; `None` for everything else.
 fn live(method: &str, r: &Response) -> Option<()> {
     let v = &r.result;
     match method {
@@ -675,7 +666,6 @@ fn live(method: &str, r: &Response) -> Option<()> {
             v["height"]
         ),
         "gui.log" => {
-            // In words; `--json` has each request as sent.
             for e in v.as_array().into_iter().flatten() {
                 let status = match e["error"].as_str() {
                     Some(err) => format!("  ERROR {err}"),
@@ -787,7 +777,6 @@ fn live(method: &str, r: &Response) -> Option<()> {
     Some(())
 }
 
-/// `60 V1 both`, or `-` for none.
 fn edit_point(e: &Value) -> String {
     if e.is_null() {
         return "-".into();
@@ -805,7 +794,6 @@ fn clock(secs: f64) -> String {
     format!("{}:{:02}", s / 60, s % 60)
 }
 
-/// `j1  running    42%  ETA 0:12  out.mp4`
 fn job_line(j: &Value) -> String {
     let state = j["state"].as_str().unwrap_or_default();
     let time = match (state, j["eta"].as_f64()) {
@@ -828,7 +816,6 @@ fn job_line(j: &Value) -> String {
     )
 }
 
-/// `viewer timeline | timeline 00:00:10:00 (300/450) stopped | source ...`
 fn state_line(v: &Value) -> String {
     let player = |p: &Value| {
         let what = if p["playing"].as_bool() == Some(true) {
@@ -881,7 +868,6 @@ fn clip_line(c: &Value) -> String {
         a if a["head"] != 0 || a["tail"] != 0 => format!("audio {:+}/{:+}", a["head"], a["tail"]),
         _ => "audio".to_string(),
     };
-    // At another speed (decision D48): 200%, -100%, freeze.
     let speed = match c["speed"].as_f64() {
         Some(0.0) => ", freeze".to_string(),
         Some(x) => format!(", {}%", (x * 100.0).round()),
@@ -907,8 +893,6 @@ fn clip_line(c: &Value) -> String {
     )
 }
 
-/// A frame rate as people write it (`23.976`); JSON keeps the exact
-/// `24000/1001`.
 fn rate(v: &Value) -> String {
     let text = v.as_str().unwrap_or_default();
     text.parse::<vidcut_core::time::Rational>()
@@ -1035,7 +1019,6 @@ fn summary(s: &Value) {
     );
 }
 
-/// `group.key = value` lines of a JSON object.
 fn flatten(prefix: &str, v: &Value, out: &mut Vec<String>) {
     match v {
         Value::Object(m) => {
@@ -1052,7 +1035,6 @@ fn flatten(prefix: &str, v: &Value, out: &mut Vec<String>) {
     }
 }
 
-/// A byte count for people: `12.3 MB`.
 fn size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["bytes", "kB", "MB", "GB", "TB"];
     let mut v = bytes as f64;
@@ -1068,8 +1050,6 @@ fn size(bytes: u64) -> String {
     }
 }
 
-/// An output's dynamic range and depth and why (decision D44), indented:
-/// the reasons start with what was chosen.
 fn print_color(c: &Value) {
     let why: Vec<&str> = c["why"]
         .as_array()
@@ -1082,8 +1062,6 @@ fn print_color(c: &Value) {
     }
 }
 
-/// An output's HDR metadata and why (decision D46), indented; nothing when
-/// it writes none.
 fn print_metadata(m: &Value) {
     if !m.is_object() || m["mode"].as_str() == Some("none") {
         return;
@@ -1091,8 +1069,6 @@ fn print_metadata(m: &Value) {
     println!("    HDR metadata: {}", crate::export::metadata_words(m));
 }
 
-/// A job's frames copied down from the GPU and up to it, with their bytes;
-/// nothing when it copied none.
 fn print_copies(c: &Value) {
     let n = |key: &str| c[key].as_u64().unwrap_or(0);
     if n("down") + n("up") == 0 {
@@ -1108,7 +1084,6 @@ fn print_copies(c: &Value) {
     );
 }
 
-/// An export's notes, with the overrides each suggests.
 fn print_notes(notes: &Value) {
     for n in notes.as_array().into_iter().flatten() {
         let set: Vec<String> = n["set"]

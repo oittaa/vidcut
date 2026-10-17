@@ -1,15 +1,3 @@
-//! The viewer and its two-up on heavy clips: 4K60 AV1, 10-bit HEVC and VP9
-//! with keyframes 2 s apart and noise around the barcode
-//! (`Picture::Busy`). The GUI (egui_kittest, no window) and a real player
-//! jump, play forward and backward and step a frame at a time both ways:
-//! in the viewer, the Trim Editor and Dynamic Trim. Every picture the
-//! viewer shows as its frame's, and every picture a two-up cell shows as
-//! its frame's, must show that frame: each barcode is read. Nothing here is
-//! timed; `scripts/playback-check.py` counts late and passed-over frames.
-//!
-//! Track 1 holds c1 = m1 0..80 at 0, c2 = m1 100..180 at 80 and c3 = m1
-//! 190..236 at 160, cut from one 240-frame clip at 60 fps.
-
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -28,15 +16,11 @@ use vidcut_core::request::{DynamicTrimMode, TrimSide};
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, Project, Store};
 
-/// The size the viewer's pictures are read at.
 const W: u32 = 320;
 const H: u32 = 180;
 
-/// How long a wait for a picture may take before the test fails.
 const PATIENCE: Duration = Duration::from_secs(60);
 
-/// What the viewer showed: the frame shown exactly now, and each frame it
-/// showed exactly, with the barcode its picture shows.
 #[derive(Default)]
 struct Screen {
     exact: Option<i64>,
@@ -76,11 +60,9 @@ fn picture_code(p: &Picture) -> Option<u32> {
     code(&p.to_rgba(W, H).unwrap())
 }
 
-/// The GUI's state, config and cache, shared by the tests.
 static HOME: LazyLock<TempDir> = LazyLock::new(|| {
     let dir = tempfile::tempdir().unwrap();
-    // SAFETY: each test reads HOME before it starts anything, so this runs
-    // before any session or GUI reads these.
+    // SAFETY: every test forces `HOME` first, so no other thread touches the environment yet.
     unsafe {
         std::env::set_var("XDG_STATE_HOME", dir.path().join("state"));
         std::env::set_var("XDG_CONFIG_HOME", dir.path().join("config"));
@@ -123,8 +105,6 @@ impl Gui {
         .unwrap();
         let port = Arc::new(Port::default());
         let stop = Arc::new(AtomicBool::new(false));
-        // The "render thread": presents the player every 2 ms, as a display
-        // would, and reads the barcode of each picture shown exactly.
         let render = {
             let (port, stop) = (port.clone(), stop.clone());
             std::thread::spawn(move || {
@@ -175,7 +155,6 @@ impl Gui {
         }
         call(&h, "viewer.set", json!({ "mode": "timeline" }));
         let mut ws = Workspace::new(h.clone());
-        // Four pixels a frame from the timeline's left edge.
         ws.timeline_options_mut().snapping = false;
         ws.timeline_options_mut().ppf = 4.0;
         let harness = Harness::builder()
@@ -200,7 +179,6 @@ impl Gui {
         call(&self.h, method, params)
     }
 
-    /// Lets the session catch up with the GUI's requests, then redraws.
     fn settle(&mut self) {
         self.call("player.state", json!({}));
         self.harness.step();
@@ -212,7 +190,6 @@ impl Gui {
         self.settle();
     }
 
-    /// `key` held down while `tap` is pressed: K with J or L.
     fn hold(&mut self, key: Key, tap: Key) {
         let event = |pressed| egui::Event::Key {
             key,
@@ -245,15 +222,12 @@ impl Gui {
         self.settle();
     }
 
-    /// Where `frame` is on `track` in the lower timeline, `dy` pixels below
-    /// the track's top.
     fn at(&self, track: &str, frame: i64, dy: f32) -> Pos2 {
         let l = self.harness.state().timeline_layout().unwrap();
         let row = l.lower.get(track).unwrap().rect.rect;
         pos2(l.lower_scale.xf(frame), row.top() + dy)
     }
 
-    /// Redraws until `done` holds.
     fn wait(&mut self, what: &str, mut done: impl FnMut(&mut Self) -> bool) {
         let started = Instant::now();
         while started.elapsed() < PATIENCE {
@@ -270,7 +244,6 @@ impl Gui {
         self.h.snapshot().timeline.position
     }
 
-    /// Track 1's clips.
     fn clips(&self) -> Vec<Value> {
         let tl = self.call("timeline.get", json!({}));
         let track = tl["tracks"]
@@ -289,7 +262,6 @@ impl Gui {
             .collect()
     }
 
-    /// The source frame Track 1 shows at timeline frame `t`.
     fn source_at(&self, t: i64) -> i64 {
         let n = |c: &Value, k: &str| c[k].as_i64().unwrap();
         let clips = self.clips();
@@ -300,7 +272,6 @@ impl Gui {
         n(clip, "source_in") + t - n(clip, "start")
     }
 
-    /// Where Track 1's clip `id` starts and ends.
     fn clip(&self, id: &str) -> (i64, i64) {
         let c = self
             .clips()
@@ -310,8 +281,6 @@ impl Gui {
         (c["start"].as_i64().unwrap(), c["end"].as_i64().unwrap())
     }
 
-    /// Waits until the viewer shows frame `t` exactly, then checks its
-    /// picture shows the source frame there.
     fn shows(&mut self, t: i64) {
         self.wait(&format!("the viewer to show frame {t}"), |g| {
             g.position() == t && g.port.screen.lock().unwrap().exact == Some(t)
@@ -330,14 +299,10 @@ impl Gui {
         assert_eq!(read, Some(Some(want)), "the picture at frame {t}");
     }
 
-    /// The viewer's log of exact frames from now on.
     fn clear_log(&self) {
         self.port.screen.lock().unwrap().log.clear();
     }
 
-    /// Frames shown exactly since [`clear_log`](Self::clear_log) whose
-    /// picture isn't their frame's, and how many were shown. The log stays:
-    /// the frame shown when playing stops is logged once, as it played.
     fn wrong_since_cleared(&self) -> (Vec<(i64, Option<u32>)>, usize) {
         let log = self.port.screen.lock().unwrap().log.clone();
         let wrong = log
@@ -352,8 +317,6 @@ impl Gui {
         self.harness.state().two_up().cloned()
     }
 
-    /// Waits until the two-up's cells show the source frames `want`, each
-    /// exactly, and checks that their pictures do.
     fn two_up_shows(&mut self, want: [i64; 2]) {
         self.wait(&format!("the two-up to show source frames {want:?}"), |g| {
             g.two_up().is_some_and(|t| {
@@ -370,7 +333,6 @@ impl Gui {
         assert_eq!(read, want.map(|w| Some(w as u32)), "the two-up's pictures");
     }
 
-    /// Cells the two-up shows as their frame's whose picture isn't.
     fn two_up_wrong(&self) -> Vec<(i64, Option<u32>)> {
         let Some(t) = self.two_up() else {
             return Vec::new();
@@ -386,8 +348,6 @@ impl Gui {
             .collect()
     }
 
-    /// Redraws `frames` times, a frame of the project's each, checking the
-    /// two-up's pictures every time.
     fn run_for(&mut self, frames: usize) {
         let mut wrong = Vec::new();
         for _ in 0..frames {
@@ -423,8 +383,6 @@ fn call(h: &live::Handle, method: &str, params: Value) -> Value {
         .result
 }
 
-/// Jumps, Up and Down to the edits, a frame at a time both ways, and
-/// playing forward and backward.
 fn viewer(codec: VideoCodec) {
     let mut gui = Gui::new(codec);
     for at in [130, 20, 170, 85, 5, 200, 119] {
@@ -446,7 +404,6 @@ fn viewer(codec: VideoCodec) {
         gui.key(Key::ArrowLeft);
         gui.shows(at);
     }
-    // K held with J or L: a frame each.
     gui.hold(Key::K, Key::L);
     gui.shows(67);
     gui.hold(Key::K, Key::J);
@@ -481,8 +438,6 @@ fn viewer(codec: VideoCodec) {
     gui.shows(at);
 }
 
-/// Opened with a double-click on the cut; its one-frame trims both ways of
-/// the roll, the Out and the In; another edit and back.
 fn trim_editor(codec: VideoCodec) {
     let mut gui = Gui::new(codec);
     let cut = gui.at("V1", 80, 20.0);
@@ -535,8 +490,6 @@ fn trim_editor(codec: VideoCodec) {
     assert!(gui.two_up().is_none(), "Esc left the Trim Editor open");
 }
 
-/// W on the cut nearest the playhead, a roll: K held with L and J, runs
-/// with L at 1× and 2× and with J, Down to the next edit.
 fn dynamic_trim_roll(codec: VideoCodec) {
     let mut gui = Gui::new(codec);
     gui.call("player.seek", json!({ "at": "78f" }));
@@ -559,8 +512,6 @@ fn dynamic_trim_roll(codec: VideoCodec) {
         gui.two_up_shows([79 + by, 100 + by]);
     }
 
-    // Down moves the playhead to the next edit: the trimmed cut, then
-    // c2's end, and Dynamic Trim with it.
     let by = gui.clip("c1").1 - 80;
     gui.key(Key::ArrowDown);
     gui.two_up_shows([79 + by, 100 + by]);
@@ -574,8 +525,6 @@ fn dynamic_trim_roll(codec: VideoCodec) {
     assert!(gui.two_up().is_none(), "W left Dynamic Trim on");
 }
 
-/// c2 selected, Slip or Slide: K held with L and J, a run with L and one
-/// with J.
 fn dynamic_trim_clip(codec: VideoCodec, slide: bool) {
     let mut gui = Gui::new(codec);
     let mode = if slide {
@@ -596,8 +545,6 @@ fn dynamic_trim_clip(codec: VideoCodec, slide: bool) {
     gui.call("selection.set", json!({ "clips": ["c2"] }));
     gui.settle();
     gui.key(Key::W);
-    // Slip shows the clip's first and last frames, Slide the frames just
-    // outside it.
     let cells = |gui: &Gui| {
         let (start, end) = gui.clip("c2");
         if slide {

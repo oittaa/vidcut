@@ -1,16 +1,3 @@
-//! Audio scrubbing (spec §4.5, decision D42): a frame step, or a seek
-//! while paused, plays that frame's sound.
-//!
-//! A frame's sound is the mix's samples of it (every lane, with clip gains,
-//! faders, mute and solo as the plan has them, lane gains on top), forward
-//! whichever way the step went, faded in and out over a few milliseconds so
-//! it doesn't click. One plays at a time: the newest waits while one plays
-//! out, and a newer one replaces it there, so held keys play frame after
-//! frame and steps never pile up.
-//!
-//! The player does it on its audio thread while paused; [`Scrubber`] does
-//! it alone, for pictures shown by something else.
-
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -25,15 +12,10 @@ use crate::error::{Error, Result};
 use crate::export::DECLICK_MS;
 use crate::export::audio::AudioMix;
 
-/// The fades at a frame's sound's ends.
 const FADE_MS: u32 = 3;
 
-/// A waiting sound goes to the device once this little of the one playing
-/// is left there: frame after frame without a gap.
 const NEXT_SECS: f64 = 0.002;
 
-/// The sound of timeline frame `t`: its samples of the mix, faded in and
-/// out.
 pub(crate) fn snippet(mix: &mut AudioMix, plan: &Plan, t: i64) -> Result<Vec<f32>> {
     let t = plan.clamp(t);
     let (a, b) = (plan.sample(t), plan.sample(t + 1));
@@ -47,7 +29,6 @@ pub(crate) fn snippet(mix: &mut AudioMix, plan: &Plan, t: i64) -> Result<Vec<f32
     Ok(samples)
 }
 
-/// Fades `samples` (interleaved) in and out over `n` sample frames each.
 fn fade(samples: &mut [f32], channels: usize, n: usize) {
     let frames = samples.len() / channels.max(1);
     let n = n.min(frames / 2).max(1);
@@ -60,16 +41,13 @@ fn fade(samples: &mut [f32], channels: usize, n: usize) {
     }
 }
 
-/// The frame's sound waiting for the one playing to end.
 #[derive(Default)]
 pub(crate) struct Waiting {
     sound: Option<Vec<f32>>,
-    /// The request it answers.
     pub served: Option<u64>,
 }
 
 impl Waiting {
-    /// `sound` waits next, replacing one that was waiting.
     pub(crate) fn replace(&mut self, sound: Vec<f32>, request: u64) {
         self.sound = Some(sound);
         self.served = Some(request);
@@ -83,8 +61,6 @@ impl Waiting {
         self.sound.is_some()
     }
 
-    /// Gives the waiting sound to the device once the one playing has (all
-    /// but) played out; whether it did.
     pub(crate) fn offer(&mut self, ring: &Ring, rate: u32) -> bool {
         let Some(sound) = &self.sound else {
             return false;
@@ -100,10 +76,6 @@ impl Waiting {
     }
 }
 
-/// Plays the sound of single frames of a plan, as frame steps and
-/// scrubbing do, without a player: for a viewer whose pictures come from
-/// elsewhere. Requests return at once; mixing runs on a thread of its own,
-/// the sound goes to the output. Dropping it stops both.
 pub struct Scrubber {
     shared: Arc<ScrubShared>,
     thread: Option<JoinHandle<()>>,
@@ -119,7 +91,6 @@ struct ScrubShared {
 struct ScrubState {
     plan: Option<Arc<Plan>>,
     plan_gen: u64,
-    /// The frame asked for, numbered.
     frame: Option<(i64, u64)>,
     trims: Vec<f64>,
     trims_gen: u64,
@@ -128,8 +99,6 @@ struct ScrubState {
 }
 
 impl Scrubber {
-    /// A scrubber whose sound goes to `output`, opened at `rate` Hz in
-    /// `channels` channels: plans given to it must have them.
     pub fn new(rate: u32, channels: u16, mut output: Box<dyn AudioOutput>) -> Result<Self> {
         crate::init();
         let ring = Arc::new(Ring::new(rate as usize, channels));
@@ -164,8 +133,6 @@ impl Scrubber {
         self.shared.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Plays the sound of `plan` from now on: an edit. Lane gains start
-    /// over.
     pub fn set_plan(&self, plan: RenderPlan) {
         let mut s = self.state();
         s.plan = Some(Arc::new(Plan::new(plan)));
@@ -176,9 +143,6 @@ impl Scrubber {
         self.shared.changed.notify_all();
     }
 
-    /// Plays the sound of timeline frame `frame` of the plan: at once when
-    /// nothing plays, else when the sound playing ends, replacing a frame
-    /// still waiting.
     pub fn play(&self, frame: i64) {
         let mut s = self.state();
         let n = s.frame.map_or(0, |(_, n)| n) + 1;
@@ -187,8 +151,6 @@ impl Scrubber {
         self.shared.changed.notify_all();
     }
 
-    /// A gain on top of audio lane `lane`'s own, in dB (a fader being
-    /// moved).
     pub fn set_lane_gain(&self, lane: usize, db: f64) {
         let mut s = self.state();
         if s.trims.len() <= lane {
@@ -200,7 +162,6 @@ impl Scrubber {
         self.shared.changed.notify_all();
     }
 
-    /// The newest failure to mix a frame's sound.
     pub fn error(&self) -> Option<String> {
         self.state().error.clone()
     }
@@ -217,8 +178,6 @@ impl Drop for Scrubber {
     }
 }
 
-/// The scrubber's thread: mixes each frame asked for and hands it to the
-/// device.
 fn run(shared: Arc<ScrubShared>, rate: u32, channels: u16) {
     let mut mix: Option<(u64, AudioMix)> = None;
     let mut trims_gen = None;
@@ -272,7 +231,6 @@ fn run(shared: Arc<ScrubShared>, rate: u32, channels: u16) {
             }
         }
         waiting.offer(&shared.ring, rate);
-        // Waiting sound: look again as the one playing ends.
         let wait = if waiting.is_some() {
             Duration::from_millis(1)
         } else {

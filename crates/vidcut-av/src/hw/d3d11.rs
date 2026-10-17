@@ -1,7 +1,3 @@
-//! Direct3D 11's frames on the GPU (Windows): kept, each copied out of the
-//! decoder's texture array into a texture of its own, which another device
-//! opens by an NT handle; and scaled by the GPU's video processor.
-
 use std::ffi::c_void;
 use std::mem::ManuallyDrop;
 
@@ -34,14 +30,8 @@ use ::windows::core::Interface;
 
 use super::*;
 
-/// The description of the adapter a D3D11VA device is on: its Direct3D
-/// device asked for its DXGI device, that for its adapter.
-///
-/// # Safety
-/// `device` is a D3D11VA device context.
 pub(super) unsafe fn desc(device: &Device) -> Option<DXGI_ADAPTER_DESC> {
-    // SAFETY: a D3D11VA device's context is an AVD3D11VADeviceContext,
-    // whose Direct3D device lives as long as it.
+    // SAFETY: a D3D11VA device's `hwctx` is an `AVD3D11VADeviceContext`, its device alive with it.
     unsafe {
         let ctx = (*device.0).data as *const ffi::AVHWDeviceContext;
         let hw = (*ctx).hwctx as *const ffi::AVD3D11VADeviceContext;
@@ -52,7 +42,6 @@ pub(super) unsafe fn desc(device: &Device) -> Option<DXGI_ADAPTER_DESC> {
     }
 }
 
-/// `AVD3D11VADeviceContext`.
 #[repr(C)]
 pub(crate) struct DeviceContext {
     pub(crate) device: *mut c_void,
@@ -64,7 +53,6 @@ pub(crate) struct DeviceContext {
     lock_ctx: *mut c_void,
 }
 
-/// `AVD3D11VAFramesContext`.
 #[repr(C)]
 struct FramesContext {
     texture: *mut c_void,
@@ -73,24 +61,14 @@ struct FramesContext {
     texture_infos: *mut c_void,
 }
 
-/// The Direct3D 11 device of `frames`, a D3D11 frames context.
-///
-/// # Safety
-/// `frames` is a live D3D11 frames context.
 pub(crate) unsafe fn device_of(frames: *mut ffi::AVBufferRef) -> *const DeviceContext {
-    // SAFETY: a D3D11 frames context's device's context is an
-    // AVD3D11VADeviceContext.
+    // SAFETY: a D3D11 frames context's device `hwctx` is an `AVD3D11VADeviceContext`.
     unsafe {
         let device = (*((*frames).data as *const ffi::AVHWFramesContext)).device_ctx;
         (*device).hwctx as *const DeviceContext
     }
 }
 
-/// `work` on `dev`'s immediate context, under FFmpeg's lock for it, as
-/// its decoders use it.
-///
-/// # Safety
-/// `dev` is a live device context.
 unsafe fn locked<T>(dev: &DeviceContext, work: impl FnOnce() -> T) -> T {
     // SAFETY: the device's own lock.
     unsafe {
@@ -105,11 +83,6 @@ unsafe fn locked<T>(dev: &DeviceContext, work: impl FnOnce() -> T) -> T {
     }
 }
 
-/// A D3D11 frame's texture and its index in it (a decoder's are
-/// arrays).
-///
-/// # Safety
-/// `frame` is a live D3D11 frame.
 unsafe fn texture(frame: &frame::Video) -> Result<(ID3D11Texture2D, u32)> {
     // SAFETY: a D3D11 frame's data are its texture and index.
     unsafe {
@@ -121,11 +94,6 @@ unsafe fn texture(frame: &frame::Video) -> Result<(ID3D11Texture2D, u32)> {
     }
 }
 
-/// Frames on `source`'s device in its layout, at `size`: single
-/// textures bound and flagged so, in a pool that grows.
-///
-/// # Safety
-/// `source` is a live D3D11 frames context.
 unsafe fn own_frames(
     source: *mut ffi::AVBufferRef,
     size: (u32, u32),
@@ -139,11 +107,6 @@ unsafe fn own_frames(
     }
 }
 
-/// Frames on `device`, a D3D11 device, in `layout` at `size`: single
-/// textures bound and flagged so, in a pool that grows.
-///
-/// # Safety
-/// `device` is a live D3D11 device context.
 pub(crate) unsafe fn frames_on(
     device: *mut ffi::AVBufferRef,
     layout: ffi::AVPixelFormat,
@@ -152,8 +115,7 @@ pub(crate) unsafe fn frames_on(
     what: &str,
 ) -> Result<*mut ffi::AVBufferRef> {
     let (w, h) = crate::cuda::frame_sides(w, h)?;
-    // SAFETY: frames made on the device, set up as FFmpeg's D3D11 frames
-    // are before they start; freed on failure.
+    // SAFETY: frames made on the live D3D11 `device` have an `AVD3D11VAFramesContext` as `hwctx`.
     unsafe {
         let mut frames = ffi::av_hwframe_ctx_alloc(device);
         if frames.is_null() {
@@ -180,12 +142,6 @@ pub(crate) unsafe fn frames_on(
     }
 }
 
-/// Frames on `device`, a D3D11 device, in `layout` at `size`, for an
-/// encoder that takes them from the GPU (AMF) and the video processor
-/// that draws them.
-///
-/// # Safety
-/// `device` is a live D3D11 device context.
 pub(crate) unsafe fn encoder_frames(
     device: *mut ffi::AVBufferRef,
     layout: ffi::AVPixelFormat,
@@ -196,10 +152,6 @@ pub(crate) unsafe fn encoder_frames(
     unsafe { frames_on(device, layout, size, flags, "for the encoder") }
 }
 
-/// A frame of `frames`' pool.
-///
-/// # Safety
-/// `frames` is a live frames context.
 unsafe fn pooled(frames: *mut ffi::AVBufferRef) -> Result<frame::Video> {
     let mut out = frame::Video::empty();
     // SAFETY: a fresh frame, given a buffer of the pool.
@@ -213,23 +165,15 @@ unsafe fn pooled(frames: *mut ffi::AVBufferRef) -> Result<frame::Video> {
     Ok(out)
 }
 
-/// Copies Direct3D 11's frames into textures of their own, each in frames
-/// of its own that go with the picture: a pool frees nothing while any of
-/// its frames is kept (gotchas.md).
 pub(crate) struct Keeper {
-    /// The textures' size and flags: shareable.
     size: (u32, u32),
     flags: (i32, i32),
-    /// The decoder's frames it copies out of, held so that another
-    /// context can't come at their address while it is made for them.
     source: *mut ffi::AVBufferRef,
-    /// Signalled once the copy before it is done.
     done: ID3D11Query,
     pub(super) like: super::KeptLike,
 }
 
-// SAFETY: the frames contexts are reference-counted and may be used on
-// any thread; the query is used under the device's lock.
+// SAFETY: `source` is reference-counted, and `done` is used only under the device's lock.
 unsafe impl Send for Keeper {}
 
 impl Drop for Keeper {
@@ -239,9 +183,6 @@ impl Drop for Keeper {
     }
 }
 
-/// How long a copy may take before the keeper gives up on it: far past
-/// any copy (a 2160p frame takes well under a millisecond), short of
-/// holding the decoder for long where the device was lost.
 const COPY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl Keeper {
@@ -250,7 +191,6 @@ impl Keeper {
         source: *mut ffi::AVBufferRef,
         like: super::KeptLike,
     ) -> Result<Self> {
-        // Textures of 4:2:0 frames have even sides.
         let size = (
             f.width().next_multiple_of(2),
             f.height().next_multiple_of(2),
@@ -287,14 +227,8 @@ impl Keeper {
         }
     }
 
-    /// `f` copied into a texture of its own, the copy done when this
-    /// returns: another device reads it next, which can't wait for
-    /// Direct3D 11's work.
     pub(super) fn copy(&mut self, f: &frame::Video) -> Result<frame::Video> {
-        // SAFETY: a frame of frames of its own, which it holds the only
-        // reference of, so its texture goes with it; the device's
-        // immediate context used under its lock; the textures are the
-        // frames' (array and index).
+        // SAFETY: `out` holds its frames' only reference; `context` is used under `dev`'s lock.
         unsafe {
             let mut frames = own_frames(self.source, self.size, self.flags, "to keep")?;
             let out = pooled(frames);
@@ -317,9 +251,6 @@ impl Keeper {
                 context.End(&self.done);
                 context.Flush();
             });
-            // The event's BOOL turns true once the copy is done; until
-            // then the call says not yet (`S_FALSE`). Failing (a device
-            // lost) or past the deadline, the frame isn't kept.
             let started = std::time::Instant::now();
             loop {
                 let mut done = ::windows::core::BOOL(0);
@@ -346,7 +277,6 @@ impl Keeper {
                 std::thread::sleep(std::time::Duration::from_micros(100));
             }
             same_picture(&mut out, f);
-            // The texture is the frame's size, rounded up to even.
             (*out.as_mut_ptr()).width = f.width() as i32;
             (*out.as_mut_ptr()).height = f.height() as i32;
             Ok(out)
@@ -354,40 +284,22 @@ impl Keeper {
     }
 }
 
-/// Whether the video processor fits a frame into the output as `ops` says
-/// ([`super::Fitter`]): into the encoder's own frames, where its colors
-/// stay as they are, but not 8-bit frames into 10-bit ones. AMD's
-/// processor refuses to draw NV12 into P010.
 pub(crate) fn can_fit(ops: &crate::route::Ops) -> bool {
     ops.colors_kept
         && ops.into
         && !(ops.layout == format::Pixel::NV12 && ops.out_layout == format::Pixel::P010LE)
 }
 
-/// Scales Direct3D 11's frames on the GPU's video processor, into
-/// textures of its own in their layout and colors, or into an
-/// encoder's frames, placed on black. FFmpeg's `scale_d3d11` makes its
-/// textures for an encoder as well, which AMD's driver refuses, and
-/// scales the padding of the decoder's textures in.
 pub(crate) struct Scaler {
-    /// Passes that halve the frames first, in turn, where one pass
-    /// changes their levels ([`Scaler::passes`]). Empty where one pass
-    /// keeps them.
     halvings: Vec<Scaler>,
-    /// The frames it draws to: single textures, a pool that grows.
     frames: *mut ffi::AVBufferRef,
     video: ID3D11VideoDevice,
     context: ID3D11VideoContext1,
     enumerator: ID3D11VideoProcessorEnumerator,
     processor: ID3D11VideoProcessor,
-    /// The size of the frames it draws, and where the picture goes in
-    /// them (x, y, width, height); the rest is black.
     size: (u32, u32),
     place: (u32, u32, u32, u32),
-    /// The clockwise turn it gives them, in degrees: 0, 90, 180 or 270.
     rotation: u16,
-    /// The color space the processor is told the frames come in and go
-    /// out in: their own, so they're only scaled.
     space: DXGI_COLOR_SPACE_TYPE,
 }
 
@@ -399,11 +311,6 @@ impl Drop for Scaler {
 }
 
 impl Scaler {
-    /// Scales frames like `f` (of `source`) to `size` (even), keeping
-    /// their levels and colors; an error where the video processor
-    /// doesn't take their layout, or changes a test picture of grays and
-    /// colors (a driver's own processing) in one pass and in halvings
-    /// ([`passes`](Self::passes)).
     pub(super) fn new(
         f: &frame::Video,
         source: *mut ffi::AVBufferRef,
@@ -416,14 +323,6 @@ impl Scaler {
         Ok(scaler)
     }
 
-    /// Turns frames like `f` (of `source`) clockwise by `rotation`,
-    /// scales them to `fitted` and places them in the middle of
-    /// `frames`' (an encoder's), at even offsets as the CPU pads, on
-    /// black, in their layout (10 bits into 8 too); checked as
-    /// [`new`](Self::new) checks, turned as it turns them.
-    ///
-    /// # Safety
-    /// `frames` is a live D3D11 frames context on `source`'s device.
     pub(super) unsafe fn into(
         f: &frame::Video,
         source: *mut ffi::AVBufferRef,
@@ -436,7 +335,6 @@ impl Scaler {
             let fc = &*((*frames).data as *const ffi::AVHWFramesContext);
             (fc.sw_format, (fc.width as u32, fc.height as u32))
         };
-        // The same passes into textures of its own first.
         let (halvings, check) = Self::passes(f, source, layout, fitted, rotation)?;
         drop(check);
         let (fw, fh) = fitted;
@@ -446,7 +344,6 @@ impl Scaler {
         if frames.is_null() {
             return Err(Error::Invalid("no memory for frames".into()));
         }
-        // From the last halving's frames, where it halves them.
         let (from, input) = halvings
             .last()
             .map_or((source, (f.width(), f.height())), |h| (h.frames, h.size));
@@ -456,15 +353,6 @@ impl Scaler {
         Ok(scaler)
     }
 
-    /// The passes that scale frames like `f` (of `source`) to `fitted`,
-    /// turned clockwise by `rotation`, into textures of its own of
-    /// `layout`, each passing the test picture: halvings, then the last.
-    /// A single pass that passes needs none. Where it fails and the frames
-    /// shrink more than twice either way, they are halved first, unturned,
-    /// in their own layout, toward `fitted` as they are stored
-    /// ([`halving_sizes`], [`stored`]). The single pass and the last are
-    /// checked turned, as they are drawn: a driver may keep the levels of a
-    /// turned pass but not of the same shrink unturned (gotchas.md).
     fn passes(
         f: &frame::Video,
         source: *mut ffi::AVBufferRef,
@@ -477,8 +365,6 @@ impl Scaler {
             return Ok((Vec::new(), one));
         }
         let sizes = halving_sizes(input, stored(fitted, rotation));
-        // No halvings for a shrink of at most twice, or a size too small to
-        // test.
         if sizes.is_empty() || !readable(fitted) {
             return Err(Error::Invalid(
                 "the video processor changes the levels".into(),
@@ -509,9 +395,6 @@ impl Scaler {
         Ok((halvings, last))
     }
 
-    /// A scaler of `input` frames of `source` (in `space`) into textures
-    /// of its own of `layout` at `size`, turning them clockwise by
-    /// `rotation`, if it passes the test picture.
     fn tested(
         input: (u32, u32),
         space: DXGI_COLOR_SPACE_TYPE,
@@ -533,8 +416,6 @@ impl Scaler {
         Ok(keeps.then_some(scaler))
     }
 
-    /// Turns its pictures clockwise by `rotation` (0, 90, 180 or 270) from
-    /// now on; an error where the video processor doesn't turn pictures.
     fn turn(&mut self, rotation: u16) -> Result<()> {
         if rotation != 0 {
             let mut caps = D3D11_VIDEO_PROCESSOR_CAPS::default();
@@ -551,9 +432,6 @@ impl Scaler {
         Ok(())
     }
 
-    /// A processor of frames of `source`'s layout at `input` into
-    /// `frames` (its reference, freed on failure too) of `size`, the
-    /// picture at `place`, told they come in and go out in `space`.
     fn made(
         source: *mut ffi::AVBufferRef,
         input: (u32, u32),
@@ -641,12 +519,7 @@ impl Scaler {
         }
     }
 
-    /// Whether a test picture of grays and colors at `input`, in the
-    /// layout of `source`'s frames, comes out of it at the levels it
-    /// went in at, turned as it turns its pictures ([`test_picture`]).
     fn keeps_levels(&mut self, source: *mut ffi::AVBufferRef, input: (u32, u32)) -> Result<bool> {
-        // Too small to read, the scaler isn't trusted and the frames come
-        // down whole.
         if !readable(self.size) {
             return Ok(false);
         }
@@ -657,12 +530,10 @@ impl Scaler {
                 (*((*frames).data as *const ffi::AVHWFramesContext)).sw_format
             })
         };
-        // Textures of 4:2:0 frames have even sides.
         let size = (input.0.next_multiple_of(2), input.1.next_multiple_of(2));
         let picture = test_picture(layout(source), size, self.rotation);
         let bands = BANDS.len();
-        // SAFETY: frames made for the test, their reference let go once
-        // the frame holds its own; a fresh frame uploaded into.
+        // SAFETY: `frame` holds its own reference to the test frames once `frames` is let go.
         let uploaded = unsafe {
             let flags = (D3D11_BIND_DECODER.0, 0);
             let mut frames = own_frames(source, size, flags, "to test with")?;
@@ -678,7 +549,6 @@ impl Scaler {
             }
             frame
         };
-        // Uncounted: the test picture is none of the job's frames.
         let got = downloaded(&self.scale(&uploaded)?)?;
         let wide_out = layout(self.frames) == format::Pixel::P010LE;
         let read = |plane: usize, x: usize, y: usize| {
@@ -689,9 +559,7 @@ impl Scaler {
                 u16::from(data[y * stride + x])
             }
         };
-        // A level either way (in 8 bits), in the middle of each band.
         let (scale, near) = if wide_out { (4, 4) } else { (1, 1) };
-        // Below black and above white only where nothing clips them.
         let checked = if full_range(self.space) {
             bands
         } else {
@@ -712,10 +580,6 @@ impl Scaler {
         }))
     }
 
-    /// `f` scaled into a texture of its frames, placed, through its
-    /// halvings first. The work is queued on the device's immediate
-    /// context, before what reads it next there (the next pass, the copy
-    /// down, the encoder).
     pub(super) fn scale(&mut self, f: &frame::Video) -> Result<frame::Video> {
         let mut halved = None;
         for pass in &mut self.halvings {
@@ -724,7 +588,6 @@ impl Scaler {
         self.draw(halved.as_ref().unwrap_or(f))
     }
 
-    /// `f` drawn into a texture of its frames, placed: one pass.
     fn draw(&mut self, f: &frame::Video) -> Result<frame::Video> {
         let (w, h) = self.size;
         let rect = |x: u32, y: u32, w: u32, h: u32| RECT {
@@ -736,9 +599,7 @@ impl Scaler {
         let failed = |what: &'static str| {
             move |e: ::windows::core::Error| Error::Invalid(format!("{what}: {e}"))
         };
-        // SAFETY: a frame from its own pool; the immediate context used
-        // under its lock; the views are of the frames' textures (array
-        // and index), the input's released after the blit.
+        // SAFETY: the views are of `f`'s and `out`'s textures, used under the device's lock.
         unsafe {
             let out = pooled(self.frames)?;
             let ((src, index), (dst, _)) = (texture(f)?, texture(&out)?);
@@ -776,10 +637,8 @@ impl Scaler {
                 let output = output
                     .ok_or_else(|| Error::Invalid("no view of a texture to scale to".into()))?;
                 let (c, p) = (&self.context, &self.processor);
-                // Their own colors in and out: scaled, not converted.
                 c.VideoProcessorSetStreamColorSpace1(p, 0, self.space);
                 c.VideoProcessorSetOutputColorSpace1(p, self.space);
-                // None of the driver's own enhancing.
                 c.VideoProcessorSetStreamAutoProcessingMode(p, 0, false);
                 let rotation = match self.rotation {
                     90 => D3D11_VIDEO_PROCESSOR_ROTATION_90,
@@ -788,7 +647,6 @@ impl Scaler {
                     _ => D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY,
                 };
                 c.VideoProcessorSetStreamRotation(p, 0, self.rotation != 0, rotation);
-                // The picture alone: the decoder's textures are padded.
                 c.VideoProcessorSetStreamSourceRect(
                     p,
                     0,
@@ -798,10 +656,6 @@ impl Scaler {
                 let (x, y, pw, ph) = self.place;
                 c.VideoProcessorSetStreamDestRect(p, 0, true, Some(&rect(x, y, pw, ph)));
                 c.VideoProcessorSetOutputTargetRect(p, true, Some(&rect(0, 0, w, h)));
-                // Around the picture, video-range black: given as RGB,
-                // which every driver reads (AMD's reads a YCbCr one as
-                // RGB too). The frames are video range told full range
-                // (`color_space`), where black is 16 of RGB's 255.
                 let level = if full_range(self.space) {
                     16.0 / 255.0
                 } else {
@@ -832,20 +686,13 @@ impl Scaler {
     }
 }
 
-/// The last of the test picture's bands (`BANDS`), outside video range.
 const OUTSIDE: usize = 2;
 
-/// The test picture in `pixel` (NV12, P010) at `size` (even): [`BANDS`]
-/// side by side, painted turned back against `rotation` (clockwise, in
-/// degrees), so that once turned they stand left to right, where
-/// [`Scaler::keeps_levels`] reads them.
 fn test_picture(pixel: format::Pixel, size: (u32, u32), rotation: u16) -> frame::Video {
     let wide = pixel == format::Pixel::P010LE;
-    // 10-bit levels in a 16-bit word's top bits.
     let shift = if wide { 8 } else { 0 };
     let (w, h) = (size.0 as usize, size.1 as usize);
     let bands = BANDS.len();
-    // The band of (x, y): where it lands across the turned picture.
     let band = |x: usize, y: usize| match rotation {
         90 => (h - 1 - y) * bands / h,
         180 => (w - 1 - x) * bands / w,
@@ -878,16 +725,10 @@ fn test_picture(pixel: format::Pixel, size: (u32, u32), rotation: u16) -> frame:
     picture
 }
 
-/// `fitted`, the size of a picture turned clockwise by `rotation`, as its
-/// frames are stored, before the turn: its sides swapped for a quarter
-/// turn.
 fn stored((w, h): (u32, u32), rotation: u16) -> (u32, u32) {
     if rotation % 180 == 90 { (h, w) } else { (w, h) }
 }
 
-/// The sizes frames of `from` are halved to, in turn, before the last
-/// pass to `to` (even): while what is left shrinks more than twice either
-/// way, each side that does is halved, to even.
 fn halving_sizes(from: (u32, u32), to: (u32, u32)) -> Vec<(u32, u32)> {
     let half = |side: u32, to: u32| if side > 2 * to { (side / 2) & !1 } else { side };
     let mut at = from;
@@ -899,11 +740,6 @@ fn halving_sizes(from: (u32, u32), to: (u32, u32)) -> Vec<(u32, u32)> {
     sizes
 }
 
-/// The color space the video processor is told `f`'s values are in, and
-/// go out in: its matrix (untagged, as its size implies), in full range
-/// where DXGI has one, as nothing is converted. Told studio range, AMD's
-/// processor clips levels below black and above white (gotchas.md); PQ
-/// has studio range alone.
 fn color_space(f: &frame::Video) -> DXGI_COLOR_SPACE_TYPE {
     use crate::color::Matrix;
     use vidcut_core::model::Hdr;
@@ -917,8 +753,6 @@ fn color_space(f: &frame::Video) -> DXGI_COLOR_SPACE_TYPE {
     }
 }
 
-/// Whether `space` is one of the full-range ones [`color_space`] tells,
-/// which keep every level.
 fn full_range(space: DXGI_COLOR_SPACE_TYPE) -> bool {
     space != DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020
 }
@@ -928,8 +762,6 @@ mod tests {
     use super::*;
     use crate::route::Ops;
 
-    /// An upright NV12 frame into the encoder's NV12 frames, in its own
-    /// colors.
     fn into_frames() -> Ops {
         Ops {
             rotation: 0,
@@ -1019,7 +851,6 @@ mod tests {
         assert!(halving_sizes((3840, 2160), toward).is_empty());
     }
 
-    /// Plane `p` of `picture`'s first `n` bytes of each row, top down.
     fn rows(picture: &frame::Video, p: usize, n: usize) -> Vec<Vec<u8>> {
         let stride = picture.stride(p);
         let data = picture.data(p);
@@ -1030,7 +861,6 @@ mod tests {
 
     #[test]
     fn a_test_picture_turned_clockwise_has_its_first_band_at_the_bottom() {
-        // Turned clockwise, its bottom row lands on the left.
         let picture = test_picture(format::Pixel::NV12, (20, 20), 90);
         let luma: Vec<u8> = rows(&picture, 0, 1).concat();
         assert_eq!(
@@ -1044,7 +874,6 @@ mod tests {
 
     #[test]
     fn a_test_picture_turned_counterclockwise_has_its_first_band_at_the_top() {
-        // Turned counterclockwise, its top row lands on the left.
         let picture = test_picture(format::Pixel::NV12, (20, 20), 270);
         let luma: Vec<u8> = rows(&picture, 0, 1).concat();
         assert_eq!(
@@ -1059,7 +888,6 @@ mod tests {
     #[test]
     fn a_test_picture_turned_clockwise_has_its_colors_turned_too() {
         let picture = test_picture(format::Pixel::NV12, (20, 20), 90);
-        // Cb and Cr of the first chroma sample of each row.
         assert_eq!(
             rows(&picture, 1, 2),
             [

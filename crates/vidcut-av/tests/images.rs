@@ -1,9 +1,3 @@
-//! Image sequences and stills through probe and export.
-//!
-//! A missing first file fails the open. A hole or a run shorter than the
-//! piece fails the export instead of repeating the last picture. A real run
-//! maps picture `k` to file `first + k`. A still repeats its one picture.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -21,8 +15,6 @@ const W: u32 = 320;
 const H: u32 = 180;
 const FPS: i64 = 24;
 
-/// A folder for one test's files, removed when it drops, also when the test
-/// fails.
 fn scratch(name: &str) -> tempfile::TempDir {
     tempfile::Builder::new()
         .prefix(&format!("vidcut-images-{name}-"))
@@ -30,7 +22,6 @@ fn scratch(name: &str) -> tempfile::TempDir {
         .unwrap()
 }
 
-/// Copies `spec` into `dir` and returns image2's pattern plus the files.
 fn place(spec: &ImageSpec, dir: &Path) -> (PathBuf, Vec<PathBuf>) {
     let src = fixture::ensure_images(spec).unwrap();
     let mut files = Vec::new();
@@ -139,8 +130,6 @@ fn assert_fails(plan: &RenderPlan, out: &Path) {
 
 #[test]
 fn missing_first_file_fails_the_open() {
-    // image2's default start_number_range is 5, so a missing img_0010.png
-    // would open img_0011.png as picture 0. The range is 1: the open fails.
     let spec = ImageSpec::sequence(10, 5, 4, W, H);
     let dir = scratch("missing-first");
     let (pattern, files) = place(&spec, dir.path());
@@ -162,8 +151,6 @@ fn missing_first_file_fails_the_open() {
 
 #[test]
 fn a_hole_fails_the_export_instead_of_repeating() {
-    // Files 10..17 with 14 missing. image2 stops at the hole (the search
-    // checks the next number first), so the run is 4 pictures, not 8.
     let spec = ImageSpec::sequence(10, 8, 4, W, H);
     let dir = scratch("hole");
     let (pattern, files) = place(&spec, dir.path());
@@ -188,10 +175,6 @@ fn a_hole_fails_the_export_instead_of_repeating() {
 
 #[test]
 fn a_sequence_slower_than_the_project_ends_on_its_last_picture() {
-    // A project rate above the sequence's samples the last output frames
-    // just past the last picture's time: that picture lasts its frame, as a
-    // video's does. 30 pictures at 30 fps in 60, and 12 at 12 fps in 30:
-    // each one second, each picture shown in turn, the last one at the end.
     for (rate, project) in [(30, 60), (12, 30)] {
         let spec = ImageSpec::sequence(1, rate, 4, W, H);
         let dir = scratch(&format!("slower-{rate}-{project}"));

@@ -1,6 +1,3 @@
-//! Still frames as PNG: what the timeline (or a media file) shows at a frame,
-//! picked by the same sampling rule as export. Lets agents look at a cut.
-
 use std::path::Path;
 
 use vidcut_core::render::VideoPiece;
@@ -9,9 +6,6 @@ use vidcut_core::time::Rational;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, encoder, format};
 
-/// Renders one video piece frame (a single-frame piece) as PNG bytes at
-/// `width`×`height` (the picture fit inside, padded black). The file
-/// decodes on `decoder` where it decodes its stream.
 pub fn png(
     piece: &VideoPiece,
     fps: Rational,
@@ -47,8 +41,6 @@ pub fn png(
     Ok(packet.data().unwrap_or_default().to_vec())
 }
 
-/// Renders one video piece frame (a single-frame piece) as packed RGBA at
-/// `width`×`height` (the picture fit inside, padded black).
 pub fn rgba(
     piece: &VideoPiece,
     fps: Rational,
@@ -58,7 +50,6 @@ pub fn rgba(
     super::renderer::FrameReader::default().rgba(piece, fps, width, height)
 }
 
-/// Encodes a packed RGBA picture (rows top to bottom) as PNG.
 pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
     crate::init();
     if rgba.len() != width as usize * height as usize * 4 || width == 0 || height == 0 {
@@ -94,7 +85,6 @@ pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
     Ok(packet.data().unwrap_or_default().to_vec())
 }
 
-/// Writes a PNG of one piece frame to `path` ([`png`]).
 pub fn write_png(
     piece: &VideoPiece,
     fps: Rational,

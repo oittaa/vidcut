@@ -1,11 +1,5 @@
-//! What the computer is: its system's version and its GPUs with their
-//! drivers, as the system lists them. `doctor` shows them, and the encoder
-//! cache's key holds them, so a new driver tests the encoders again.
-
 use serde_json::{Value, json};
 
-/// The system's version: the kernel's release on Linux, the build on
-/// Windows (with its update revision), the version and build on macOS.
 pub fn version() -> String {
     #[cfg(windows)]
     {
@@ -27,10 +21,6 @@ pub fn version() -> String {
         .to_string()
 }
 
-/// The GPUs: on Linux the render nodes and their kernel drivers, with
-/// NVIDIA's driver version when its module is loaded; on Windows the
-/// display adapters and their drivers' versions; on macOS Metal's devices,
-/// whose drivers come with the system (its version).
 pub fn gpus() -> Vec<Value> {
     #[cfg(windows)]
     {
@@ -68,8 +58,6 @@ mod windows {
         HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW,
     };
 
-    /// The display adapters' class: one numbered key for each adapter
-    /// installed, with its name and driver.
     const DISPLAY: &str =
         r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
 
@@ -77,13 +65,11 @@ mod windows {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    /// A text value of `HKEY_LOCAL_MACHINE\key`.
     pub fn text(key: &str, value: &str) -> Option<String> {
         let (key, value) = (wide(key), wide(value));
         let mut buf = [0u16; 512];
         let mut size = std::mem::size_of_val(&buf) as u32;
-        // SAFETY: NUL-terminated names; the value is written into `buf`,
-        // `size` bytes at most.
+        // SAFETY: NUL-terminated names; `buf` holds the `size` bytes the value may fill.
         let status = unsafe {
             RegGetValueW(
                 HKEY_LOCAL_MACHINE,
@@ -103,7 +89,6 @@ mod windows {
         Some(text.trim_end_matches('\0').to_string())
     }
 
-    /// A number value of `HKEY_LOCAL_MACHINE\key`.
     pub fn number(key: &str, value: &str) -> Option<u32> {
         let (key, value) = (wide(key), wide(value));
         let mut n = 0u32;
@@ -123,7 +108,6 @@ mod windows {
         (status == 0).then_some(n)
     }
 
-    /// The display adapters installed: each one's name and driver version.
     pub fn adapters() -> Vec<(String, String)> {
         (0..64)
             .filter_map(|i| {
@@ -139,12 +123,10 @@ mod windows {
 mod macos {
     use std::ffi::CStr;
 
-    /// A text value of the kernel's, by its name (`kern.osversion`).
     pub fn sysctl(name: &CStr) -> Option<String> {
         let mut buf = [0u8; 256];
         let mut len = buf.len();
-        // SAFETY: a NUL-terminated name; the value is written into `buf`,
-        // `len` bytes at most, and `len` says how many.
+        // SAFETY: `name` is NUL-terminated; `buf` holds the `len` bytes the value may fill.
         let status = unsafe {
             libc::sysctlbyname(
                 name.as_ptr(),

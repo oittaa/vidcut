@@ -1,43 +1,3 @@
-//! vidcut's own player: a render plan played with the FFmpeg libraries, every
-//! picture the one export makes, the sound the clock
-//! (docs/decisions/player.md).
-//!
-//! **Threads.** A player has a decode thread ([`video`]) and an audio
-//! thread ([`audio`]); the audio output has its device's callback. The
-//! caller never decodes: [`Player`]'s requests change what is wanted and
-//! return at once, and [`Player::present`] only looks pictures up.
-//!
-//! **Requests merge.** The threads read the newest wanted state, not a
-//! queue, so seeks that arrive while one decodes collapse into the last.
-//! A decode the newest request no longer needs is cancelled: when it was
-//! only decoding ahead or the clock runs, and otherwise once it has run a
-//! second. A seek otherwise finishes, paused or playing before the sound
-//! from there is heard, so a held key or a dragged playhead moves the
-//! picture at the speed frames decode.
-//!
-//! **Pictures** are picked by the export's reader (the sampling rule) and
-//! kept as decoded, in YUV, for a display's shader to fit and convert
-//! ([`frame`]); kept by what they show within a memory budget ([`store`]):
-//! ahead of the clock in the direction of play, those just shown, and
-//! windows decoded from a keyframe for going back.
-//!
-//! **Clock.** The audio thread mixes the plan's lanes into a ring the
-//! device's callback reads; the callback records which samples it took and
-//! when they are heard ([`clock`]). The position is the sample heard now,
-//! so pictures follow the sound as the listener hears it, output latency
-//! included, and stop when the sound stops. Backward, the sound plays
-//! reversed.
-//!
-//! **Scrubbing.** A frame step, and a seek while paused, play that frame's
-//! sound ([`scrub`]); [`Scrubber`] does it alone, for pictures shown by
-//! something else.
-//!
-//! **The plan played next.** A viewer that shows one thing or another (the
-//! source or the timeline) plays both through one player: the frame it
-//! would show of the other is [`prepare`](Player::prepare)d, decoded while
-//! nothing else is and held whatever the budget, so switching to it
-//! ([`set_plan_at`](Player::set_plan_at)) shows it at once.
-
 mod audio;
 mod clock;
 mod frame;
@@ -68,28 +28,19 @@ use plan::Plan;
 use ring::Ring;
 use store::Store;
 
-/// Memory for kept pictures: in memory, and in video memory (pictures a GPU
-/// decoded for a display that shows them from there).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Budget {
     pub memory: usize,
-    /// `None`: half the memory of the GPU that decodes them (1 GB until it
-    /// is known). Where the GPU's memory is the computer's
-    /// ([`SHARED_MEMORY`]), they count in `memory` instead.
     pub video: Option<usize>,
 }
 
-/// The GPU's memory is the computer's (Apple silicon): an automatic video
-/// budget is the memory budget, both kinds of pictures counted in it.
 pub const SHARED_MEMORY: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
 
-/// 1 GB of each, for players that don't ask for more (tests, tools).
 pub const DEFAULT_BUDGET: Budget = Budget::both(GB);
 
 const GB: usize = 1 << 30;
 
 impl Budget {
-    /// `bytes` of each.
     pub const fn both(bytes: usize) -> Self {
         Self {
             memory: bytes,
@@ -97,10 +48,6 @@ impl Budget {
         }
     }
 
-    /// A `parts`th of it, for each of `parts` players beside the one it is
-    /// for. An automatic video budget becomes that part of half the memory
-    /// of the GPU in use (1 GB where its driver doesn't say), but where it
-    /// is the memory budget ([`SHARED_MEMORY`]).
     pub fn part(self, parts: usize) -> Self {
         let gpu = || {
             crate::gpus::in_use()
@@ -117,10 +64,6 @@ impl Budget {
         }
     }
 
-    /// What a viewer keeps unless told otherwise: memory is there to be
-    /// used, and the more pictures stay around the playhead the less it
-    /// waits. The larger of 1 GB and half the computer's memory, and half
-    /// the GPU's.
     pub fn automatic() -> Self {
         Self {
             memory: system_memory().map_or(GB, |m| (m / 2).max(GB)),
@@ -129,7 +72,6 @@ impl Budget {
     }
 }
 
-/// The computer's memory in bytes, where it can be read.
 pub fn system_memory() -> Option<usize> {
     #[cfg(unix)]
     {
@@ -157,25 +99,12 @@ pub fn system_memory() -> Option<usize> {
     }
 }
 
-/// How a player works.
 #[derive(Clone)]
 pub struct Config {
-    /// Memory for kept pictures.
     pub budget: Budget,
-    /// Frame steps, and seeks while paused, play the frame's sound (spec
-    /// §4.5, decision D42). On unless set otherwise.
     pub audio_scrubbing: bool,
-    /// Called on the decode thread when the picture of the frame the viewer
-    /// is at lands (a display repaints), and when the prepared one does.
     pub on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
-    /// Decode on the GPU the streams it decodes (NVDEC, VA-API, Direct3D
-    /// 11, on the GPU in use: [`crate::hw::GpuDecoder::best`]), the frames
-    /// copied down to memory at their own size
-    /// ([`set_hardware`](Player::set_hardware)).
     pub hardware: bool,
-    /// The decoders whose pictures stay in GPU memory (NV12, P010), for a
-    /// display that shows them from there; kept ones take video memory
-    /// then.
     pub gpu_pictures: Vec<crate::hw::Kind>,
 }
 
@@ -191,106 +120,58 @@ impl Default for Config {
     }
 }
 
-/// What a player does, for a person who wants to know (stats for nerds).
 #[derive(Clone)]
 pub struct Stats {
-    /// The frame the viewer is at, and the picture shown last.
     pub position: i64,
     pub shown: Option<Shown>,
-    /// Frames shown exactly; while playing, frames late and frames passed
-    /// over ([`Status`]).
     pub frames: u64,
     pub late: u64,
     pub skipped: u64,
-    /// Pictures kept right after the frame the viewer is at and right
-    /// before it, a minute each way at most, and all of them.
     pub ahead: usize,
     pub behind: usize,
     pub kept: usize,
-    /// Bytes kept in memory and in video memory, each with the budget it
-    /// counts in.
     pub memory: (usize, usize),
     pub video: (usize, usize),
-    /// Both count in the memory budget ([`SHARED_MEMORY`]).
     pub shared: bool,
-    /// Why the player decodes on the CPU, when it chose so: GPU decoding is
-    /// off, or there is no GPU decoder. (A file a GPU won't decode says why
-    /// in its picture's [`decoding`](Picture::decoding).)
     pub cpu: Option<&'static str>,
-    /// The sound: the device, its rate and channels, and its latency.
     pub plays_on: PlaysOn,
     pub rate: u32,
     pub channels: u16,
     pub latency: Option<Duration>,
-    /// Frames copied between GPU memory and memory since it started: down
-    /// by its decoder and by a viewer showing it, up by the viewer
-    /// ([`Player::copies`]). A switch of decoder keeps counting.
     pub copies: vidcut_core::editor::Copied,
 }
 
-/// What a player is doing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Status {
-    /// The timeline frame the viewer is at: where the clock is while
-    /// playing.
     pub position: i64,
     pub playing: bool,
-    /// Frames of timeline per frame of time; negative backwards, 0 paused.
     pub speed: f64,
-    /// The picture of `position` is decoded: the next
-    /// [`present`](Player::present) shows it.
     pub ready: bool,
-    /// The picture of the frame [`prepare`](Player::prepare)d is decoded
-    /// (false while none is): switching to it shows it at once.
     pub prepared: bool,
-    /// The newest frame [`present`](Player::present) showed exactly.
     pub presented: Option<i64>,
-    /// The plan's timeline frames, `[first, end)`.
     pub range: (i64, i64),
-    /// While the clock runs: frames it reached before their pictures were
-    /// decoded, each counted once.
     pub late: u64,
-    /// While the clock runs at up to normal speed: frames it passed between
-    /// two presents of one play request without being shown.
     pub skipped: u64,
-    /// Pictures kept, and the memory they take.
     pub kept: (usize, usize),
-    /// How long before it is heard the audio device takes the sound: its
-    /// output latency, which the clock makes up for.
     pub latency: Option<Duration>,
-    /// What decoded the picture of a file shown last.
     pub decoder: Option<Decoder>,
-    /// The frame the viewer is at, when its picture failed to decode (it
-    /// isn't tried again until something changes); `error` says why.
     pub failed: Option<i64>,
-    /// The newest decoding or device failure.
     pub error: Option<String>,
 }
 
-/// The peaks of the sound heard now, while playing, linear per channel:
-/// what the meters show of the player.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Levels {
-    /// The mix. The monitoring mute silences only the viewer's meter
-    /// (spec D28), which the GUI does.
     pub mix: Vec<f32>,
-    /// Each of the plan's audio lanes, in order, with its gain on top.
     pub lanes: Vec<Vec<f32>>,
 }
 
-/// What decodes a player's pictures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decoder {
-    /// The CPU, FFmpeg's software decoders.
     Cpu,
-    /// A GPU ([`crate::hw`]): NVIDIA's NVDEC, whose frames may stay in GPU
-    /// memory, or VA-API or Direct3D 11, whose frames come down to memory.
     Gpu(crate::hw::Kind),
 }
 
 impl Decoder {
-    /// A short name: `cpu`, or the GPU decoder's (`nvdec`, `vaapi`,
-    /// `d3d11va`).
     pub fn name(self) -> &'static str {
         match self {
             Self::Cpu => "cpu",
@@ -299,42 +180,28 @@ impl Decoder {
     }
 }
 
-/// What is wanted now, read by the decode and audio threads.
 pub(crate) struct Control {
     pub plan: Arc<Plan>,
-    /// Counts plan changes.
     pub plan_gen: u64,
     pub mode: Mode,
-    /// Counts every change the decode thread cares about.
     pub version: u64,
-    /// Counts play requests, and when the latest was made.
     epoch: u64,
     epoch_at: Instant,
-    /// Lane gains on top of the plan's (faders being moved), dB.
     pub trims: Vec<f64>,
     pub trims_gen: u64,
     pub muted: bool,
-    /// Steps and paused seeks play the frame's sound.
     scrubbing: bool,
-    /// The frame whose sound to play, numbered so each request is new.
     pub scrub: Option<(i64, u64)>,
-    /// Decode on NVDEC where it can.
     pub hardware: bool,
-    /// Paused, the speed the caller moves the position at, and whether it
-    /// moves it itself ([`Player::follow`]).
     pub motion: f64,
     pub followed: bool,
-    /// Pictures other than those of a paused frame and just ahead of it
-    /// come down shrunk to fit this size ([`Player::shrink_to`]).
     pub small: Option<(u32, u32)>,
-    /// The plan played next and the frame of it to keep ready.
     pub prepared: Option<(Arc<Plan>, i64)>,
     pub closed: bool,
     error: Option<String>,
 }
 
 impl Control {
-    /// Asks for the sound of frame `t`, when scrubbing.
     fn scrub(&mut self, t: i64) {
         if self.scrubbing {
             let n = self.scrub.map_or(0, |(_, n)| n) + 1;
@@ -345,49 +212,31 @@ impl Control {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Mode {
-    /// Showing timeline frame `at`.
     Paused { at: i64 },
-    /// Playing from sample `from` (counted from the plan's start) at
-    /// `speed`; `epoch` tells this request's sound from older ones'.
     Playing { from: i64, speed: f64, epoch: u64 },
 }
 
-/// What the decode thread is busy with, and since when.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Busy {
-    /// The picture of the frame the viewer is at.
     Focus,
-    /// Pictures ahead of it.
     Ahead,
-    /// A window behind it, timeline frames `[from, to]` of the plan of
-    /// change `plan_gen`: a step back into it waits for it to land there.
     Window { from: i64, to: i64, plan_gen: u64 },
 }
 
 #[derive(Default)]
 struct Presenter {
     shown: Option<Shown>,
-    /// The latest landing (`Shared::landed`) when the shown picture was
-    /// presented.
     shown_landing: u64,
     presented: Option<i64>,
-    /// The play request whose running clock last showed a frame exactly.
     presented_in: Option<u64>,
-    /// Frames shown exactly, each counted once in a row.
     frames: u64,
-    /// What decoded the picture of a file shown last.
     decoder: Option<Decoder>,
     late: u64,
-    /// The frame counted late last.
     late_at: Option<i64>,
     skipped: u64,
 }
 
 impl Presenter {
-    /// The clock is at `pos`, and its picture is shown. `clock`: the play
-    /// request whose clock runs at up to normal speed. The frames it passed
-    /// since it showed one before were skipped. A seek or a scrub starts
-    /// another request, so its jump isn't.
     fn shows(&mut self, clock: Option<u64>, pos: i64) {
         if let (Some(epoch), Some(before)) = (clock, self.presented)
             && self.presented_in == Some(epoch)
@@ -404,8 +253,6 @@ impl Presenter {
         self.presented_in = clock;
     }
 
-    /// The clock is at `pos`, and its picture isn't decoded. Late once the
-    /// clock runs, each frame once however often the viewer looks.
     fn missed(&mut self, runs: bool, pos: i64) {
         if runs && self.late_at != Some(pos) {
             self.late += 1;
@@ -414,27 +261,20 @@ impl Presenter {
     }
 }
 
-/// The decode thread's view of what is wanted.
 pub(crate) struct Snap {
     pub plan: Arc<Plan>,
     pub plan_gen: u64,
     pub mode: Mode,
     pub version: u64,
-    /// The frame the viewer is at.
     pub focus: i64,
-    /// Playing, the sound of the latest play request is heard, and the
-    /// clock moves. Until it is, the clock stands where play starts.
     pub heard: bool,
-    /// Decode on NVDEC where it can.
     pub hardware: bool,
     pub motion: f64,
     pub followed: bool,
     pub small: Option<(u32, u32)>,
-    /// The plan played next and the frame of it to keep ready.
     pub prepared: Option<(Arc<Plan>, i64)>,
 }
 
-/// The audio thread's view.
 pub(crate) struct AudioSnap {
     pub plan: Arc<Plan>,
     pub plan_gen: u64,
@@ -446,53 +286,33 @@ pub(crate) struct AudioSnap {
 }
 
 pub(crate) struct Shared {
-    /// Counted from 1 in this process: names the player in debug lines.
     pub(crate) id: u64,
     control: Mutex<Control>,
-    /// Something wanted changed.
     changed: Condvar,
     pub(crate) store: Store,
     pub(crate) ring: Arc<Ring>,
     pub(crate) heard: Arc<Heard>,
     pub(crate) markers: Markers,
-    /// The decode thread's cancel flag (`crate::cancel`).
     pub(crate) interrupt: Arc<AtomicBool>,
     busy: Mutex<Option<(Busy, Instant)>>,
-    /// A followed player's windows thread, once started, its cancel flag
-    /// and what it is busy with.
     pub(crate) windows: Mutex<Option<JoinHandle<()>>>,
     pub(crate) window_interrupt: Arc<AtomicBool>,
     window_busy: Mutex<Option<(Busy, Instant)>>,
-    /// The frame whose picture failed to decode last, until one lands.
     failed: Mutex<Option<i64>>,
-    /// The picture of the frame the viewer was at that landed last, by
-    /// the plan's change: the landings counted, the change, its id.
     landed: Mutex<(u64, u64, Option<plan::Id>)>,
-    /// Why the decode thread's reader decodes on the CPU, when it chose so.
     cpu: Mutex<Option<&'static str>>,
     on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
     presenter: Mutex<Presenter>,
-    /// The audio device's failure.
     device: Arc<Mutex<Option<String>>>,
-    /// The sample rate and channels the device was opened for.
     format: (u32, u16),
-    /// The decoders whose pictures stay in GPU memory.
     pub(crate) gpu_pictures: Vec<crate::hw::Kind>,
-    /// The frames copied between GPU memory and memory since it started
-    /// (`Stats::copies`): the decode thread counts here.
     copies: Arc<crate::copies::Copies>,
-    /// The video memory budget is half the GPU's.
     video_auto: AtomicBool,
-    /// The GPU's memory, once the decode thread opened it.
     gpu_memory: std::sync::OnceLock<usize>,
-    /// The latest play request whose sound was heard, for `VIDCUT_DEBUG`.
     heard_epoch: std::sync::atomic::AtomicU64,
-    /// The peaks of the sound queued lately, oldest first ([`Level`]).
     levels: Mutex<std::collections::VecDeque<Level>>,
 }
 
-/// The peaks of a run of sound queued for the device, from ring frame `at`
-/// on: the mix's per channel, and each lane's, `channels` a lane.
 pub(crate) struct Level {
     pub at: u64,
     pub frames: u64,
@@ -500,24 +320,18 @@ pub(crate) struct Level {
     pub lanes: Vec<f32>,
 }
 
-/// Runs of sound whose peaks are kept: well over a second of 10 ms chunks,
-/// more than the device holds queued.
 const LEVELS_KEPT: usize = 160;
 
-/// How far back the levels heard now reach.
 const LEVELS_SECS: f64 = 0.05;
 
-/// A seek that has decoded this long holds a newer one up no more.
 const PATIENCE: Duration = Duration::from_secs(1);
 
-/// Players made in this process, for [`Shared::id`].
 static PLAYERS: AtomicU64 = AtomicU64::new(0);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// `d` in milliseconds, for debug lines.
 pub(crate) fn ms(d: Duration) -> f64 {
     d.as_secs_f64() * 1000.0
 }
@@ -527,14 +341,11 @@ impl Shared {
         lock(&self.control)
     }
 
-    /// The timeline sample heard now in play request `epoch`.
     fn clock_sample(&self, epoch: u64, now: Instant) -> Option<f64> {
         let counter = self.heard.counter_at(now)?;
         self.markers.sample_at(counter, epoch)
     }
 
-    /// The frame the viewer is at. A play that has reached the end of the
-    /// plan (forward) or its start (backward) pauses there.
     fn position(&self, ctl: &mut Control, now: Instant) -> i64 {
         let (t, ended) = self.clock_frame(ctl, now);
         if ended {
@@ -545,8 +356,6 @@ impl Shared {
         t
     }
 
-    /// The frame the clock is at at `at`, and whether a play has reached
-    /// its end (forward) or start (backward) by then.
     fn clock_frame(&self, ctl: &Control, at: Instant) -> (i64, bool) {
         let (from, speed, epoch) = match ctl.mode {
             Mode::Paused { at } => return (at, false),
@@ -562,8 +371,6 @@ impl Shared {
         (ctl.plan.frame_at_sample(s.floor() as i64), ended)
     }
 
-    /// Says once how long the sound of play request `epoch` took to be
-    /// heard, for `VIDCUT_DEBUG`.
     fn heard_first(&self, ctl: &Control, epoch: u64) {
         if self
             .heard_epoch
@@ -579,10 +386,6 @@ impl Shared {
         }
     }
 
-    /// Changes what is wanted; `video` when the decode thread should look
-    /// again. What it decodes is cancelled when the viewer's new frame
-    /// isn't decoded and the decode may hold it up: a picture ahead,
-    /// anything while the clock runs, or a seek that has run a second.
     fn change(&self, video: bool, f: impl FnOnce(&mut Control, i64, Option<f64>)) {
         let mut ctl = self.control();
         let now = Instant::now();
@@ -600,7 +403,6 @@ impl Shared {
                 Mode::Paused { at } => at,
                 Mode::Playing { from, .. } => ctl.plan.frame_at_sample(from),
             };
-            // A frame up to a second ahead is on the way of the decode ahead.
             let on_its_way = (1..=ctl.plan.fps().as_f64().ceil() as i64).contains(&(target - pos));
             let busy = *lock(&self.busy);
             let cancel = match busy {
@@ -616,8 +418,6 @@ impl Shared {
                 self.interrupt
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }
-            // A followed player's window stops once the position moves
-            // forward, or away from it to a frame not kept.
             if let Some((Busy::Window { from, to, plan_gen }, _)) = *lock(&self.window_busy)
                 && (ctl.motion > 0.0
                     || (!kept && (plan_gen != ctl.plan_gen || !(from..=to).contains(&target))))
@@ -630,13 +430,10 @@ impl Shared {
         self.changed.notify_all();
     }
 
-    /// The decode thread's view; `None` once the player closes. Clears the
-    /// cancel flag: whatever it was raised for is in this view.
     pub(crate) fn snap(&self) -> Option<Snap> {
         self.snap_clearing(&self.interrupt)
     }
 
-    /// The windows thread's view, clearing its cancel flag.
     pub(crate) fn snap_windows(&self) -> Option<Snap> {
         self.snap_clearing(&self.window_interrupt)
     }
@@ -668,7 +465,6 @@ impl Shared {
         })
     }
 
-    /// The audio thread's view; `None` once the player closes.
     pub(crate) fn audio_snap(&self) -> Option<AudioSnap> {
         let ctl = self.control();
         if ctl.closed {
@@ -685,7 +481,6 @@ impl Shared {
         })
     }
 
-    /// Waits up to `timeout` for a change after `version`.
     pub(crate) fn wait_change(&self, version: u64, timeout: Duration) {
         let ctl = self.control();
         if ctl.version == version && !ctl.closed {
@@ -693,7 +488,6 @@ impl Shared {
         }
     }
 
-    /// Waits up to `timeout` for any change.
     pub(crate) fn wait_any(&self, timeout: Duration) {
         let ctl = self.control();
         if !ctl.closed {
@@ -722,7 +516,6 @@ impl Shared {
         self.control().error = Some(why);
     }
 
-    /// The picture of the frame the viewer is at, `frame`, failed to decode.
     pub(crate) fn failed(&self, frame: i64) {
         *lock(&self.failed) = Some(frame);
         if let Some(f) = &self.on_picture {
@@ -730,14 +523,10 @@ impl Shared {
         }
     }
 
-    /// The decode thread's new reader decodes on the CPU for `why` (GPU
-    /// decoding off, no GPU decoder), or where it can on the GPU (`None`).
     pub(crate) fn decodes_on_cpu(&self, why: Option<&'static str>) {
         *lock(&self.cpu) = why;
     }
 
-    /// The picture of the frame the viewer is at landed: `id`, of the plan
-    /// of change `plan_gen`.
     pub(crate) fn landed(&self, plan_gen: u64, id: plan::Id) {
         {
             let mut landed = lock(&self.landed);
@@ -749,7 +538,6 @@ impl Shared {
         }
     }
 
-    /// The audio thread queued sound with these peaks.
     pub(crate) fn level(&self, level: Level) {
         let mut levels = lock(&self.levels);
         if levels.len() == LEVELS_KEPT {
@@ -758,13 +546,10 @@ impl Shared {
         levels.push_back(level);
     }
 
-    /// What was queued won't be heard (a new play request, a pause).
     pub(crate) fn forget_levels(&self) {
         lock(&self.levels).clear();
     }
 
-    /// The decode thread decodes on `device`: an automatic video memory
-    /// budget of its own is half its memory from now on.
     pub(crate) fn gpu_found(&self, device: &crate::cuda::CudaDevice) {
         if self.gpu_memory.get().is_none()
             && let Ok(bytes) = device.memory()
@@ -786,7 +571,6 @@ impl Shared {
         }
     }
 
-    /// The prepared picture landed: `Status::prepared` changed.
     pub(crate) fn prepared(&self) {
         if let Some(f) = &self.on_picture {
             f();
@@ -794,21 +578,13 @@ impl Shared {
     }
 }
 
-/// Plays a render plan. Requests return at once; pictures come from
-/// [`present`](Self::present), as the clock says. Dropping it stops the
-/// threads and the audio output.
 pub struct Player {
     shared: Arc<Shared>,
     threads: Vec<JoinHandle<()>>,
-    /// Dropped after the threads end: the device stops last. In a mutex,
-    /// so a player can be shared between threads (the session sends
-    /// requests, the renderer presents).
     output: Mutex<Option<Box<dyn AudioOutput>>>,
 }
 
 impl Player {
-    /// A player paused at the plan's first frame, its sound going to
-    /// `output` (opened at the plan's sample rate and channels).
     pub fn new(plan: RenderPlan, config: Config, mut output: Box<dyn AudioOutput>) -> Result<Self> {
         crate::init();
         if plan.frames <= 0 {
@@ -816,7 +592,6 @@ impl Player {
         }
         let (rate, channels) = (plan.sample_rate, plan.channels);
         let base = Instant::now();
-        // A second of sound: the audio thread keeps a tenth of it queued.
         let ring = Arc::new(Ring::new(rate as usize, channels));
         let heard = Arc::new(Heard::new(base, rate));
         let source = AudioSource::new(ring.clone(), heard.clone(), rate, channels);
@@ -891,20 +666,13 @@ impl Player {
         Ok(player)
     }
 
-    /// Plays `plan` instead: an edit. The position stays (within the new
-    /// plan), and so do open files and kept pictures where the new plan
-    /// shows the same frames. The sample rate and channels must stay.
     pub fn set_plan(&self, plan: RenderPlan) -> Result<()> {
         self.check(&plan)?;
-        // The same plan: nothing changes, nothing is cancelled.
         if self.shared.control().plan.plan == plan {
             return Ok(());
         }
         self.shared.change(true, |ctl, pos, _| {
             replace_plan(ctl, plan);
-            // Paused, the same frame. Playing, the sound goes on from the
-            // same time; at another frame rate, the picture shown stays
-            // until the new plan's is decoded.
             if let Mode::Paused { .. } = ctl.mode {
                 ctl.mode = Mode::Paused {
                     at: ctl.plan.clamp(pos),
@@ -914,12 +682,6 @@ impl Player {
         Ok(())
     }
 
-    /// Plays `plan` from timeline frame `at`, without the frame's sound:
-    /// another thing to show, or an edit seen from elsewhere. Paused, it
-    /// shows `at`; playing, play goes on from there. Until `at`'s picture
-    /// is decoded, the one shown before stays. One change, so nothing is
-    /// decoded for the frame in between. The sample rate and channels must
-    /// stay.
     pub fn set_plan_at(&self, plan: RenderPlan, at: i64) -> Result<()> {
         self.check(&plan)?;
         let same = self.shared.control().plan.plan == plan;
@@ -932,9 +694,6 @@ impl Player {
         Ok(())
     }
 
-    /// Refuses a plan the player can't play: empty, or at another sample
-    /// rate or channel count than the device was opened for. Nothing
-    /// changes then, so nothing is cancelled.
     fn check(&self, plan: &RenderPlan) -> Result<()> {
         if plan.frames <= 0 {
             return Err(Error::Invalid("nothing to play".into()));
@@ -949,12 +708,6 @@ impl Player {
         Ok(())
     }
 
-    /// Keeps timeline frame `at` of `plan` ready: the plan played next
-    /// ([`set_plan_at`](Self::set_plan_at)), such as what a viewer shows
-    /// when it switches. Its picture decodes while the player is paused
-    /// with nothing else to decode, on a reader of its own (the one the
-    /// player reads with stays where it is), and is held whatever the
-    /// budget until another is prepared. `None` lets it go.
     pub fn prepare(&self, next: Option<(RenderPlan, i64)>) {
         let next = next.filter(|(plan, _)| plan.frames > 0).map(|(plan, at)| {
             let plan = Plan::new(plan);
@@ -971,24 +724,14 @@ impl Player {
         self.shared.changed.notify_all();
     }
 
-    /// Shows timeline frame `frame` (within the plan). Playing, play goes
-    /// on from there; paused, the frame's sound plays when scrubbing (a
-    /// drag across the timeline is seeks).
     pub fn seek(&self, frame: i64) {
         self.seek_with(frame, true);
     }
 
-    /// [`seek`](Self::seek) without the frame's sound: a move the viewer
-    /// makes by itself (opening at a remembered frame, after an edit).
     pub fn seek_quietly(&self, frame: i64) {
         self.seek_with(frame, false);
     }
 
-    /// Shows timeline frame `frame` without its sound, while the caller
-    /// moves the position itself at `speed` frames of timeline per frame of
-    /// time (negative backwards, 0 standing still): decoding goes ahead of
-    /// it as playing at that speed does, and the player comes first while
-    /// it moves. A trim's two-up follows a run so (preview.md §9).
     pub fn follow(&self, frame: i64, speed: f64) {
         self.shared.change(true, |ctl, _, _| {
             move_to(ctl, frame, false);
@@ -997,13 +740,6 @@ impl Player {
         });
     }
 
-    /// The pictures of a run and of windows behind come down from the GPU
-    /// shrunk to fit `size` (physical pixels), for a viewer that shows them
-    /// that small; a paused frame and those just ahead of it stay as
-    /// decoded. A size more than an eighth larger or smaller forgets the
-    /// shrunk ones; a nearer one changes nothing, so a size rounded now one
-    /// way, now the other doesn't. `None`, the default: every picture as
-    /// decoded.
     pub fn shrink_to(&self, size: Option<(u32, u32)>) {
         let near = |a: u32, b: u32| a.abs_diff(b) * 8 <= b;
         let mut ctl = self.shared.control();
@@ -1026,9 +762,6 @@ impl Player {
             .change(true, |ctl, _, _| move_to(ctl, frame, sound));
     }
 
-    /// Pauses and moves `frames` frames from where the viewer is (negative
-    /// back), playing the frame's sound when scrubbing: forward, whichever
-    /// way the step went (decision D42).
     pub fn step(&self, frames: i64) {
         self.shared.change(true, |ctl, pos, _| {
             let t = ctl.plan.clamp(pos.saturating_add(frames));
@@ -1039,8 +772,6 @@ impl Player {
         });
     }
 
-    /// Turns audio scrubbing on or off (on by default): whether steps and
-    /// paused seeks play the frame's sound.
     pub fn set_audio_scrubbing(&self, on: bool) {
         self.shared.change(false, |ctl, _, _| {
             ctl.scrubbing = on;
@@ -1050,17 +781,12 @@ impl Player {
         });
     }
 
-    /// Plays at `speed` frames of timeline per frame of time from where the
-    /// viewer is: 1 normal, 2 twice as fast, negative backwards; 0 pauses.
-    /// Playing on from the end of the plan (or backwards from its start)
-    /// starts over from the other end.
     pub fn play(&self, speed: f64) {
         if speed == 0.0 || !speed.is_finite() {
             return self.pause();
         }
         self.shared.change(true, |ctl, pos, sample| {
             let from = match (ctl.mode, sample) {
-                // Playing on at another speed: from the sample heard now.
                 (Mode::Playing { .. }, Some(s)) => s.round() as i64,
                 _ => {
                     let at = match ctl.mode {
@@ -1087,7 +813,6 @@ impl Player {
         });
     }
 
-    /// Stops at the frame the viewer is at.
     pub fn pause(&self) {
         self.shared.change(true, |ctl, pos, _| {
             ctl.mode = Mode::Paused { at: pos };
@@ -1096,9 +821,6 @@ impl Player {
         });
     }
 
-    /// A gain on top of audio lane `lane`'s own, in dB (a fader being
-    /// moved): heard within a tenth of a second plus the device's latency.
-    /// A new plan starts without one.
     pub fn set_lane_gain(&self, lane: usize, db: f64) {
         self.shared.change(false, |ctl, _, _| {
             if ctl.trims.len() <= lane {
@@ -1109,9 +831,6 @@ impl Player {
         });
     }
 
-    /// Decodes on the GPU (NVDEC) the streams it decodes, or everything on
-    /// the CPU. A change decodes the pictures anew, the one shown first, so
-    /// what shows next is the new decoder's.
     pub fn set_hardware(&self, on: bool) {
         if self.shared.control().hardware == on {
             return;
@@ -1119,8 +838,6 @@ impl Player {
         self.shared.change(true, |ctl, _, _| ctl.hardware = on);
     }
 
-    /// Keeps pictures within `budget` from now on: over it, those kept or
-    /// looked at least recently go at once.
     pub fn set_budget(&self, budget: Budget) {
         let store = &self.shared.store;
         store.set_budget(store::Kind::Memory, budget.memory);
@@ -1136,7 +853,6 @@ impl Player {
         }
     }
 
-    /// Silences the sound (the viewer's monitoring mute); the clock runs on.
     pub fn set_muted(&self, muted: bool) {
         self.shared.change(false, |ctl, _, _| {
             ctl.muted = muted;
@@ -1144,16 +860,10 @@ impl Player {
         });
     }
 
-    /// The picture to show at `now`: that of the frame the clock is at, or,
-    /// while it isn't decoded yet, the newest picture a seek landed since
-    /// the one shown, else the picture shown before. So a dragged playhead
-    /// shows each frame a seek decodes, though it has moved on by then.
-    /// `None` before the first picture is decoded.
     pub fn present(&self, now: Instant) -> Option<Shown> {
         let (id, pos, speed, clock, plan_gen) = {
             let mut ctl = self.shared.control();
             let pos = self.shared.position(&mut ctl, now);
-            // The clock runs once the sound of the play request is heard.
             let (speed, clock) = match ctl.mode {
                 Mode::Playing { speed, epoch, .. } => {
                     (speed, self.shared.clock_sample(epoch, now).map(|_| epoch))
@@ -1203,7 +913,6 @@ impl Player {
         }
     }
 
-    /// What it does, for a person who wants to know ([`Stats`]).
     pub fn stats(&self) -> Stats {
         let (plan, position) = {
             let mut ctl = self.shared.control();
@@ -1248,22 +957,16 @@ impl Player {
         }
     }
 
-    /// Where the frames it copies between GPU memory and memory count: a
-    /// viewer showing it installs it on its thread
-    /// ([`copies::Guard`](crate::copies::Guard)) while it draws.
     pub fn copies(&self) -> Arc<crate::copies::Copies> {
         self.shared.copies.clone()
     }
 
-    /// The device its sound plays on ([`AudioOutput::plays_on`]).
     pub fn plays_on(&self) -> PlaysOn {
         lock(&self.output)
             .as_ref()
             .map_or(PlaysOn::Default, |o| o.plays_on())
     }
 
-    /// The peaks of the sound heard at `now`, over the last 50 ms; `None`
-    /// while paused, or before any is heard.
     pub fn levels(&self, now: Instant) -> Option<Levels> {
         if !matches!(self.shared.control().mode, Mode::Playing { .. }) {
             return None;
@@ -1334,8 +1037,6 @@ impl Player {
         }
     }
 
-    /// Waits until the picture of timeline frame `frame` is decoded, up to
-    /// `timeout`; whether it is.
     pub fn wait_ready(&self, frame: i64, timeout: Duration) -> bool {
         let id = self.shared.control().plan.id(frame);
         self.shared
@@ -1344,16 +1045,11 @@ impl Player {
             .is_some()
     }
 
-    /// The timeline frame the clock is at at `at`, changing nothing: now,
-    /// the display's next refresh, or a moment ago (the clock remembers the
-    /// device's last 64 buffers, about half a second).
     pub fn frame_at(&self, at: Instant) -> i64 {
         let ctl = self.shared.control();
         self.shared.clock_frame(&ctl, at).0
     }
 
-    /// How long from `now` until the clock moves to another frame, while
-    /// playing: when a display should look again.
     pub fn next_change(&self, now: Instant) -> Option<Duration> {
         let ctl = self.shared.control();
         let Mode::Playing { speed, epoch, .. } = ctl.mode else {
@@ -1372,8 +1068,6 @@ impl Player {
     }
 }
 
-/// Plays `plan` instead of the plan played now. Lane gains on top go: the
-/// new plan has its own.
 fn replace_plan(ctl: &mut Control, plan: RenderPlan) {
     ctl.plan = Arc::new(Plan::new(plan));
     ctl.plan_gen += 1;
@@ -1381,8 +1075,6 @@ fn replace_plan(ctl: &mut Control, plan: RenderPlan) {
     ctl.trims_gen += 1;
 }
 
-/// Moves to timeline frame `frame` (within the plan). Paused, its sound
-/// plays when `sound` and scrubbing; playing, play goes on from there.
 fn move_to(ctl: &mut Control, frame: i64, sound: bool) {
     let t = ctl.plan.clamp(frame);
     ctl.motion = 0.0;
@@ -1406,8 +1098,6 @@ fn move_to(ctl: &mut Control, frame: i64, sound: bool) {
     };
 }
 
-/// The sample play at `speed` starts from at timeline frame `t`: its first
-/// going forward, its last going back (so it shows for a frame's time).
 fn start_sample(plan: &Plan, t: i64, speed: f64) -> i64 {
     if speed > 0.0 {
         plan.sample(t)
@@ -1417,11 +1107,6 @@ fn start_sample(plan: &Plan, t: i64, speed: f64) -> i64 {
 }
 
 impl Drop for Player {
-    /// Ends it: the decode and audio threads are joined, the kept pictures
-    /// freed and the audio output stopped. Under `VIDCUT_DEBUG` it says
-    /// how long each took, and each thread says the same of its reader's
-    /// parts: freeing GPU memory waits its turn on the GPU behind other
-    /// players ending or decoding, and the lines say which part waited.
     fn drop(&mut self) {
         let started = Instant::now();
         {
@@ -1434,7 +1119,6 @@ impl Drop for Player {
         }
         self.shared.changed.notify_all();
         self.shared.store.wake();
-        // The decode thread, then the audio thread.
         let mut joins = [Duration::ZERO; 2];
         for (i, t) in self.threads.drain(..).enumerate() {
             let at = Instant::now();
@@ -1443,16 +1127,9 @@ impl Drop for Player {
                 *j = at.elapsed();
             }
         }
-        // The windows thread isn't waited for: it may be opening a file,
-        // which no cancel flag reaches, or waiting its turn behind another
-        // player's window. Its flag is raised; it holds the shared state
-        // itself and ends when it next looks, which the process waits for
-        // (`crate::ending`).
         if let Some(windows) = lock(&self.shared.windows).take() {
             crate::ending::leave(windows);
         }
-        // The kept pictures go now, not once the windows thread lets the
-        // shared state go.
         let (pictures, bytes) = self.shared.store.usage();
         let at = Instant::now();
         self.shared.store.clear();

@@ -1,11 +1,3 @@
-//! In-process export: render plans encoded with the FFmpeg libraries.
-//!
-//! One pass, constant memory: for each output frame, the next video frame is
-//! decoded and normalized, and exactly the audio samples that frame spans
-//! are mixed. The encoders encode them on a thread of their own, a few
-//! frames behind ([`worker`]). Output goes to a hidden `.part` file that is
-//! renamed into place only on success.
-
 mod ahead;
 pub mod audio;
 pub mod encode;
@@ -39,25 +31,17 @@ use make::Output;
 use video::VideoFrames;
 use worker::{Inbox, Worker};
 
-/// Progress of a running export.
 #[derive(Debug, Clone, Copy)]
 pub struct Progress {
-    /// Frames done in this pass, of `total`.
     pub frames: i64,
     pub total: i64,
-    /// Since the export started, over all passes.
     pub elapsed: Duration,
-    /// The run over the range (1 or 2), of `passes`: an encoder that makes
-    /// two passes by encoding twice reports both (decision D45).
     pub pass: u8,
     pub passes: u8,
-    /// Measuring the light the HDR metadata needs, before encoding
-    /// (decision D46): `frames` of `total` is the share measured.
     pub measuring: bool,
 }
 
 impl Progress {
-    /// Progress of a single pass.
     pub fn single(frames: i64, total: i64, elapsed: Duration) -> Self {
         Self {
             frames,
@@ -69,7 +53,6 @@ impl Progress {
         }
     }
 
-    /// `share` of the light measured, in thousandths.
     pub fn measuring(share: f64, elapsed: Duration) -> Self {
         Self {
             frames: (share.clamp(0.0, 1.0) * 1000.0) as i64,
@@ -79,15 +62,12 @@ impl Progress {
         }
     }
 
-    /// Frames done over all passes, as frames of one: half the total
-    /// when the first of two is done.
     pub fn done(&self) -> i64 {
         let passes = i64::from(self.passes.max(1));
         (i64::from(self.pass.max(1) - 1) * self.total + self.frames) / passes
     }
 }
 
-/// What an export produced.
 #[derive(Debug, Clone, Serialize)]
 pub struct Report {
     pub output: PathBuf,
@@ -95,41 +75,22 @@ pub struct Report {
     pub samples: i64,
     pub video_encoder: Option<String>,
     pub audio_encoder: Option<String>,
-    /// Passes the video encoder made over each frame (decision D45).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub passes: Option<u8>,
-    /// Video frames decoded and scaled on the GPU on their way to its
-    /// encoder (NVENC, VAAPI, AMF, VideoToolbox), never in memory; the rest
-    /// were made on the CPU.
     pub gpu_frames: i64,
-    /// Video frames whose source frame a GPU decoded (NVDEC, VA-API,
-    /// Direct3D 11, VideoToolbox): those of `gpu_frames`, and those that
-    /// came down to be made on the CPU ([`run_decoding_on`]).
     pub gpu_decoded: i64,
     pub seconds: f64,
-    /// What loudness normalization did (`audio.loudness`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub loudness: Option<Normalized>,
-    /// The output's dynamic range and bit depth, and why (decision D44),
-    /// when the export chose them (`video.hdr = auto`, no `bit_depth`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<ColorChoice>,
-    /// The HDR metadata it writes, and why (decision D46), when the export
-    /// chose it (`video.hdr_metadata = auto`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<MetadataChoice>,
-    /// Frames copied between GPU memory and memory for the export: its
-    /// probes, passes and pieces.
     pub copies: vidcut_core::editor::Copied,
-    /// Why NVIDIA's GPU didn't mix the dissolves for NVENC, which the CPU
-    /// mixed then (decision D50).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mix_failed: Option<String>,
 }
 
-/// What a piece's pictures carry, read from its file: its transfer and HDR
-/// metadata (each file probed once), and its light measured on `decoder`
-/// where output with `v` needs it ([`measured_light`]).
 pub fn probed_metadata<'a>(
     fps: Rational,
     v: &'a VideoSettings,
@@ -144,10 +105,6 @@ pub fn probed_metadata<'a>(
     }
 }
 
-/// Whether the light levels of output with `v` (its dynamic range chosen)
-/// need the light of a piece carrying `m` measured (decision D46): those of
-/// PQ output from the sources, for pieces that say none (PQ without them,
-/// HLG), or for all with `video.max_cll = measure`.
 pub fn needs_light(v: &VideoSettings, m: &PieceMeta) -> bool {
     if v.hdr.transfer() != Some(Hdr::Pq) || v.hdr_metadata == HdrMetadata::None {
         return false;
@@ -163,8 +120,6 @@ pub fn needs_light(v: &VideoSettings, m: &PieceMeta) -> bool {
     }
 }
 
-/// A piece's light levels where [`needs_light`]: measured now on `decoder`
-/// with `measure_now`, else as measured before, or pending.
 pub fn measured_light(
     piece: &VideoPiece,
     fps: Rational,
@@ -180,23 +135,15 @@ pub fn measured_light(
     match crate::light::piece_level(piece, fps, measure_now, decoder, cancel, &mut |_| {}) {
         Ok(Some(l)) => Measured::Known(l),
         Ok(None) if !measure_now => Measured::Pending,
-        // A cancelled export stops after.
         Err(e) if is_cancelled(&e) => Measured::No,
-        // What can't be read (or has no frames) is left out, and said.
         Ok(None) | Err(_) => Measured::Failed,
     }
 }
 
-/// Whether output with `v` (its HDR metadata chosen) makes HDR10+ for the
-/// frames of a piece carrying `m`, from their measured light (decision
-/// D46).
 pub fn makes_hdr10plus(v: &VideoSettings, m: &PieceMeta) -> bool {
     v.hdr.transfer() == Some(Hdr::Pq) && v.hdr_metadata.hdr10plus() && !m.hdr10plus
 }
 
-/// What a piece's pictures carry, read from its file: its transfer and HDR
-/// metadata. Each file is probed once, its first frame decoded on
-/// `decoder`.
 pub fn probed_files(
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> impl FnMut(&VideoPiece) -> PieceMeta + '_ {
@@ -225,8 +172,6 @@ pub fn probed_files(
     }
 }
 
-/// Chooses the HDR metadata of an export of `plan` with `settings`, whose
-/// dynamic range is chosen already (decision D46); `None` without video.
 pub fn choose_metadata(
     plan: &RenderPlan,
     settings: &ExportSettings,
@@ -241,9 +186,6 @@ pub fn choose_metadata(
     ))
 }
 
-/// What a piece's pictures are, read from its file: its HDR transfer and
-/// bit depth. Each file is probed once, its first frame decoded on
-/// `decoder`.
 pub fn probed_kinds(
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> impl FnMut(&VideoPiece) -> PictureKind + '_ {
@@ -268,9 +210,6 @@ pub fn probed_kinds(
     }
 }
 
-/// Chooses the dynamic range and bit depth of an export of `plan` with
-/// `settings` from the pictures it shows (decision D44); `None` without
-/// video. `kind` says what a piece's pictures are.
 pub fn choose_color(
     plan: &RenderPlan,
     settings: &ExportSettings,
@@ -282,25 +221,16 @@ pub fn choose_color(
     Some(color::choose(v, &share, encode::abilities(v, available)))
 }
 
-/// Loudness normalization of an export: the mix was measured, then changed
-/// by one gain.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct Normalized {
-    /// The mix as measured, LUFS (`None`: silent).
     pub measured: Option<f64>,
-    /// The gain applied, dB.
     pub gain_db: f64,
-    /// Integrated loudness after the gain, LUFS.
     pub loudness: Option<f64>,
-    /// Highest true peak after the gain, dBTP.
     pub true_peak: Option<f64>,
 }
 
-/// The ceiling loudness normalization keeps true peaks under, dBTP.
 pub const TRUE_PEAK_CEILING: f64 = -1.0;
 
-/// The gain that brings `measured` to `target`, held so the true peak stays
-/// at or below [`TRUE_PEAK_CEILING`]. Silence gets none.
 pub fn loudness_gain(measured: &vidcut_core::analysis::Loudness, target: f64) -> f64 {
     if !measured.integrated.is_finite() {
         return 0.0;
@@ -313,15 +243,12 @@ pub fn loudness_gain(measured: &vidcut_core::analysis::Loudness, target: f64) ->
     }
 }
 
-/// Raised (as an error) when `cancel` is set during an export.
 pub fn is_cancelled(e: &Error) -> bool {
     matches!(e, Error::Invalid(m) if m == CANCELLED)
 }
 
 pub(crate) const CANCELLED: &str = "export cancelled";
 
-/// The format of frames in GPU memory for `enc`: 10-bit P010 for 10-bit
-/// output, else NV12.
 fn gpu_pixel(enc: &encode::VideoEncoder) -> format::Pixel {
     if enc.pixel == format::Pixel::P010LE {
         format::Pixel::P010LE
@@ -330,8 +257,6 @@ fn gpu_pixel(enc: &encode::VideoEncoder) -> format::Pixel {
     }
 }
 
-/// A CUDA device and frames for NVENC; `None` for other encoders or
-/// without a device.
 fn gpu_output(
     enc: &encode::VideoEncoder,
     w: u32,
@@ -340,7 +265,6 @@ fn gpu_output(
     if enc.kind != EncoderChoice::Nvenc {
         return None;
     }
-    // A stream of its own: its GPU work never waits behind another's.
     let device = crate::cuda::CudaDevice::open()
         .and_then(|d| d.with_own_stream())
         .ok()?;
@@ -348,10 +272,6 @@ fn gpu_output(
     Some((device, frames))
 }
 
-/// Encodes `plan` with `settings` into `output`, decoding on the CPU.
-///
-/// The plan's sample rate must equal the audio encoder's (build the plan at the
-/// export's sample rate). `progress` is called after every frame.
 pub fn run(
     plan: &RenderPlan,
     settings: &ExportSettings,
@@ -363,11 +283,6 @@ pub fn run(
     run_decoding_on(plan, settings, output, available, None, cancel, progress)
 }
 
-/// [`run`], the pieces decoding on `decoder`, a GPU's, where it decodes
-/// their streams ([`VideoFrames::decode_on`]). The frames that don't stay
-/// there for an encoder on it come down to be made on the CPU, shrunk on
-/// the GPU first to the size they are shown at. NVENC's pieces decode on
-/// NVDEC. `None`: all on the CPU, NVENC's too.
 pub fn run_decoding_on(
     plan: &RenderPlan,
     settings: &ExportSettings,
@@ -381,7 +296,6 @@ pub fn run_decoding_on(
     validate(settings).map_err(|e| Error::Invalid(e.message))?;
     let copies = std::sync::Arc::new(crate::copies::Copies::default());
     let _counting = crate::copies::Guard::set(copies.clone());
-    // Settings left to the export choose from the files (decision D44).
     let mut settings = settings.clone();
     let mut chosen = None;
     if let Some(v) = settings.video.as_mut()
@@ -405,8 +319,6 @@ pub fn run_decoding_on(
         metadata_chosen = Some(c);
     }
     let settings = &settings;
-    // Nothing is made once cancelled: a GUI that quit without waiting for
-    // a job removes only the partial files of what it heard was started.
     if cancel.load(Ordering::Relaxed) {
         return Err(Error::Invalid(CANCELLED.into()));
     }
@@ -434,8 +346,6 @@ pub fn run_decoding_on(
     }
 }
 
-/// The hidden folder beside `output` that holds a two-pass export's
-/// statistics while it runs; removed when it ends, however it ends.
 pub fn passes_path(output: &Path) -> PathBuf {
     let name = output
         .file_name()
@@ -443,8 +353,6 @@ pub fn passes_path(output: &Path) -> PathBuf {
     output.with_file_name(format!(".{name}.passes"))
 }
 
-/// A two-pass export's statistics folder ([`passes_path`]), removed when
-/// dropped: after the second pass, or on failure or cancellation.
 struct PassFiles {
     dir: PathBuf,
 }
@@ -452,7 +360,6 @@ struct PassFiles {
 impl PassFiles {
     fn new(output: &Path) -> Result<Self> {
         let dir = passes_path(output);
-        // A run that was killed may have left one.
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir)?;
         Ok(Self { dir })
@@ -469,9 +376,6 @@ impl Drop for PassFiles {
     }
 }
 
-/// The measured light of the files whose frames get HDR10+ made (decision
-/// D46), by path: what the plan shows of each, measured now on `decoder`
-/// unless it was before.
 fn made_hdr10plus_light(
     plan: &RenderPlan,
     enc: &encode::VideoEncoder,
@@ -491,22 +395,16 @@ fn made_hdr10plus_light(
             continue;
         }
         match crate::light::analysis(&span, true, decoder, Some(cancel), &mut |_| {}) {
-            // The latest holds what the ones before did.
             Ok(Some(a)) => {
                 out.insert(span.input.path().to_path_buf(), a);
             }
             Err(e) if is_cancelled(&e) => return Err(e),
-            // Frames of a file that can't be measured get none.
             _ => {}
         }
     }
     Ok(out)
 }
 
-/// The first of two runs (decision D45): every frame of the range through
-/// the encoder opened for it, on a thread of its own, its packets dropped,
-/// so it writes its statistics. Returns the ones it hands back in memory
-/// (libvpx); x264 and x265 finish their files as the encoder closes, there.
 #[allow(clippy::too_many_arguments)]
 fn first_run(
     plan: &RenderPlan,
@@ -539,7 +437,6 @@ fn first_run(
                 .send_eof()
                 .ctx(|| "flushing the first pass".into())?;
             while encoder.receive_packet(&mut p).is_ok() {}
-            // Ours to free; the encoder leaves it when it closes.
             let stats = unsafe {
                 let raw = encoder.as_mut_ptr();
                 let out = (*raw).stats_out;
@@ -580,8 +477,6 @@ fn first_run(
     }
 }
 
-/// The hidden file an export of `output` is written to, renamed into place
-/// once it succeeds.
 pub fn partial_path(output: &Path) -> PathBuf {
     let name = output
         .file_name()
@@ -589,7 +484,6 @@ pub fn partial_path(output: &Path) -> PathBuf {
     output.with_file_name(format!(".{name}.part"))
 }
 
-/// Fade length at cuts when de-clicking (the export setting `declick`).
 pub const DECLICK_MS: u32 = 3;
 
 pub(crate) fn write_packet(
@@ -601,41 +495,28 @@ pub(crate) fn write_packet(
         .ctx(|| "writing packet".into())
 }
 
-/// The video's pictures, made on the export's thread for its encoder.
 struct VideoIn {
     frames: VideoFrames,
-    /// The encoder's own frames on the GPU, which pictures made in memory
-    /// go up into.
     vaapi: Option<Upload>,
     name: String,
     passes: encode::Passes,
-    /// Kept until the export ends: x264 and x265 read their statistics
-    /// as they encode the second pass.
     _pass_files: Option<PassFiles>,
-    /// Static HDR metadata for each frame (VAAPI reads it there).
     metadata: crate::hdr::Static,
-    /// HEVC or AV1 keeping HDR10+, which vidcut puts into the packets.
     hdr10plus: bool,
 }
 
 impl VideoIn {
-    /// Output frame `j`'s picture, ready for the encoder, and the HDR10+
-    /// its packets get.
     fn next(&mut self, j: i64) -> Result<(frame::Video, Option<Vec<u8>>)> {
         let mut f = self
             .frames
             .next_frame()?
             .ok_or_else(|| Error::Invalid("plan has fewer video frames than expected".into()))?;
         f.set_pts(Some(j));
-        // A decoded picture keeps its source's type (I, P, B), which
-        // encoders take as an order; the encoder chooses its own, as in the
-        // ffmpeg command line.
         f.set_kind(ffmpeg::picture::Type::None);
         let t35 = self
             .hdr10plus
             .then(|| crate::hdr::hdr10plus_t35(&f))
             .flatten();
-        // Frames fitted on the GPU are on the encoder's device already.
         let mut f = match &self.vaapi {
             Some(hw) if !crate::hw::on_gpu(&f) => hw.upload(&f)?,
             _ => f,
@@ -647,26 +528,18 @@ impl VideoIn {
     }
 }
 
-/// The video's encoder, on the encoders' thread.
 struct VideoOut {
     encoder: encoder::Video,
     enc_tb: ffmpeg::Rational,
     stream_tb: ffmpeg::Rational,
     name: String,
-    /// Static HDR metadata, put into keyframes that lack it.
     metadata: crate::hdr::Static,
-    /// HEVC or AV1 keeping HDR10+, which vidcut puts into the packets:
-    /// each frame's by pts.
     hdr10plus: Option<(ffmpeg::codec::Id, std::collections::HashMap<i64, Vec<u8>>)>,
-    /// The codec, for static values put into keyframes that lack them.
     codec: ffmpeg::codec::Id,
-    /// The kind of encoder: a GPU's copies frames from memory up itself.
     kind: EncoderChoice,
 }
 
 impl VideoOut {
-    /// Encodes output frame `j`'s picture, whose packets get `t35`
-    /// (HDR10+), and writes the packets ready.
     fn encode(
         &mut self,
         octx: &mut format::context::Output,
@@ -677,8 +550,6 @@ impl VideoOut {
         if let (Some((_, waiting)), Some(t35)) = (self.hdr10plus.as_mut(), t35) {
             waiting.insert(j, t35);
         }
-        // Pieces decode and convert on streams of their own (`gpu_reader`):
-        // the encoder reads a frame once its stream's work is done.
         crate::cuda::share::wait_for(&f)?;
         crate::copies::to_encoder(&f, self.kind);
         self.encoder
@@ -705,7 +576,6 @@ impl VideoOut {
     }
 }
 
-/// The audio's encoder, on the encoders' thread.
 struct AudioOut {
     encoder: encoder::Audio,
     spec: AudioEncoder,
@@ -713,7 +583,6 @@ struct AudioOut {
     stream_tb: ffmpeg::Rational,
     frame_size: usize,
     fifo: Vec<f32>,
-    /// Samples sent to the encoder (its pts).
     sent: i64,
 }
 
@@ -760,7 +629,6 @@ impl AudioOut {
         f
     }
 
-    /// Encodes whole frames from the fifo (and the rest when `last`).
     fn encode(&mut self, octx: &mut format::context::Output, last: bool) -> Result<()> {
         let ch = usize::from(self.spec.channels);
         let mut start = 0;
@@ -791,19 +659,15 @@ impl AudioOut {
     }
 }
 
-/// What the export hands its encoders for each output frame, in order.
 enum Out {
-    /// Output frame `j`'s picture, and the HDR10+ its packets get.
     Picture {
         j: i64,
         picture: frame::Video,
         t35: Option<Vec<u8>>,
     },
-    /// The sound the frame spans.
     Sound(Vec<f32>),
 }
 
-/// The encoders and the file they write, on a thread of their own.
 struct Writer {
     octx: format::context::Output,
     video: Option<VideoOut>,
@@ -811,8 +675,6 @@ struct Writer {
 }
 
 impl Writer {
-    /// Encodes and writes what the export hands over, in order, then
-    /// flushes the encoders and finishes the file after the last.
     fn run(mut self, mut outs: Inbox<Out>) -> Result<()> {
         while let Some(out) = outs.recv()? {
             match out {
@@ -857,7 +719,6 @@ fn encode(
 ) -> Result<Report> {
     let started = Instant::now();
     let fps = ffmpeg::Rational(plan.fps.num() as i32, plan.fps.den() as i32);
-    // The encoder's time base, one tick a frame, and its frame rate.
     let times = (fps.invert(), Some(fps));
     let mut octx = format::output_as(part, settings.container.muxer())
         .ctx(|| format!("creating {}", output.display()))?;
@@ -869,7 +730,6 @@ fn encode(
                 v.width.unwrap_or(plan.width),
                 v.height.unwrap_or(plan.height),
             );
-            // The first encoder that opens; if none does, why each didn't.
             let mut failed: Vec<(Option<String>, Error)> = Vec::new();
             let mut opened = None;
             let mut pass_files = None;
@@ -881,7 +741,6 @@ fn encode(
                         continue;
                     }
                 };
-                // Two runs open it for the first, writing statistics.
                 let stats = match enc.passes {
                     encode::Passes::TwoRuns { .. } => {
                         let files = PassFiles::new(output)?;
@@ -895,8 +754,6 @@ fn encode(
                     Some(stats) => encode::Pass::First { stats },
                     None => encode::Pass::Only,
                 };
-                // NVENC with SDR output takes frames in GPU memory, so pieces
-                // decoded on NVDEC never leave it; frames in memory if not.
                 if decoder.is_some()
                     && let Some((device, frames)) = gpu_output(&enc, w, h)
                     && let Ok(o) = encode::open_video(
@@ -913,10 +770,6 @@ fn encode(
                     opened = Some((enc, o, Some((device, frames)), None));
                     break;
                 }
-                // VAAPI on the decoder's own device, where the decoder is
-                // VA-API on its render node, AMF where it is Direct3D 11 on
-                // its adapter, and VideoToolbox where it is VideoToolbox:
-                // frames fitted on the GPU go to it there.
                 let shared = decoder.filter(|d| encode::shares(enc.kind, enc.device.as_deref(), d));
                 match encode::open_video(&enc, w, h, times, global_header, None, shared, pass) {
                     Ok(o) => {
@@ -943,8 +796,6 @@ fn encode(
                 )));
             };
             let light = made_hdr10plus_light(plan, &enc, decoder, cancel)?;
-            // Two runs: the first measures, then the encoder opens again
-            // for the second with what it wrote.
             let (encoder, vaapi) = match &pass_files {
                 Some(files) if enc.passes.runs() == 2 => {
                     let buffer = first_run(
@@ -984,8 +835,6 @@ fn encode(
             if let Some(d) = decoder {
                 frames = frames.decode_on(d.clone());
             }
-            // HDR10+ goes into HEVC and AV1 packets here; libvpx-vp9 takes
-            // it from the frames, and WebM and Matroska carry it.
             let id = encoder.id();
             let hdr10plus = (enc.dynamic.hdr10plus
                 && matches!(id, ffmpeg::codec::Id::HEVC | ffmpeg::codec::Id::AV1))
@@ -1040,7 +889,6 @@ fn encode(
             if spec.name == "pcm_s24le" || spec.name == "flac" {
                 unsafe { (*ctx.as_mut_ptr()).bits_per_raw_sample = 24 };
             }
-            // FFmpeg's own Opus encoder counts as experimental.
             if spec.name == "opus" {
                 unsafe {
                     (*ctx.as_mut_ptr()).strict_std_compliance =
@@ -1066,7 +914,6 @@ fn encode(
             let declick = if settings.declick { DECLICK_MS } else { 0 };
             let mut mix = AudioMix::new(&plan.audio, plan.sample_rate, spec.channels, declick);
             if let Some(target) = a.loudness {
-                // Measure the mix exactly as it will be encoded, then gain.
                 let measured = crate::analysis::mix_loudness(
                     &plan.audio,
                     plan.sample_rate,
@@ -1102,7 +949,6 @@ fn encode(
     let mut opts = ffmpeg::Dictionary::new();
     if matches!(settings.container.muxer(), "mp4" | "mov" | "ipod") {
         opts.set("movflags", "+faststart");
-        // MP4 and MOV write Dolby Vision's `dvcC`/`dvvC` box only so.
         if settings
             .video
             .as_ref()
@@ -1121,7 +967,6 @@ fn encode(
     }
     let audio_encoder = audio_out.as_ref().map(|a| a.spec.name.clone());
 
-    // A picture and its sound for each frame, three frames ahead at most.
     let holds = worker::AHEAD * (usize::from(video.is_some()) + usize::from(mix.is_some())).max(1);
     let writer = Writer {
         octx,
@@ -1130,7 +975,6 @@ fn encode(
     };
     let mut writing = Worker::spawn(holds, move |outs| writer.run(outs))?;
     let mut produced = 0i64;
-    // This is the last run over the range: the second of two, or the only.
     let runs = video.as_ref().map_or(1, |v| v.passes.runs());
     let made = (|| -> Result<()> {
         for j in 0..plan.frames {

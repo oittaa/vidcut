@@ -1,13 +1,9 @@
-//! End-to-end tests of the `vidcut` binary on generated fixtures.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, Picture, Sound, VideoCodec};
 
-/// A scratch directory with its own XDG state (undo history) dir, removed
-/// when it drops, also when the test fails.
 struct Sandbox {
     dir: tempfile::TempDir,
 }
@@ -29,11 +25,8 @@ impl Sandbox {
         self.cmd_in(&self.project(), args)
     }
 
-    /// A command on another project.
     fn cmd_in(&self, project: &Path, args: &[&str]) -> Command {
         let mut c = Command::new(env!("CARGO_BIN_EXE_vidcut"));
-        // Own runtime and config dirs: a GUI running on this machine must
-        // not answer, and the user's presets stay out of it.
         c.env("XDG_STATE_HOME", self.dir.path().join("state"))
             .env("XDG_RUNTIME_DIR", self.dir.path().join("run"))
             .env("XDG_CONFIG_HOME", self.dir.path().join("config"))
@@ -45,7 +38,6 @@ impl Sandbox {
         c
     }
 
-    /// Runs and expects success; returns the parsed `--json` response.
     fn ok(&self, args: &[&str]) -> Value {
         self.ok_in(&self.project(), args)
     }
@@ -64,7 +56,6 @@ impl Sandbox {
             .unwrap_or_else(|e| panic!("vidcut {args:?}: bad JSON ({e})"))
     }
 
-    /// Runs and expects failure with `code`; returns the JSON error.
     fn fails(&self, code: i32, args: &[&str]) -> Value {
         self.fails_in(&self.project(), code, args)
     }
@@ -82,7 +73,6 @@ impl Sandbox {
         serde_json::from_slice::<Value>(&out.stdout).expect("JSON error")["error"].clone()
     }
 
-    /// V1 as (id, start, duration, source_in).
     fn v1(&self) -> Vec<(String, i64, i64, i64)> {
         let t = self.ok(&["timeline", "get"]);
         t["result"]["tracks"][0]["items"]
@@ -138,7 +128,6 @@ fn builds_and_edits_a_timeline() {
         .arg(sb.project())
         .output()
         .unwrap();
-    // `new` takes the file as an argument; -p is ignored for it.
     assert!(
         out.status.success(),
         "{}",
@@ -157,8 +146,6 @@ fn builds_and_edits_a_timeline() {
     sb.ok(&["edit", "append", "m2"]);
     sb.ok(&["edit", "split", "--at", "1s,70f"]);
     sb.ok(&["edit", "trim", "c3", "--edge", "tail", "--by", "-10f"]);
-    // Splits at 1s (frame 30, inside c1) and 70f (inside c2), then c3 shortened
-    // by 10 with ripple.
     assert_eq!(
         sb.v1(),
         vec![
@@ -169,7 +156,6 @@ fn builds_and_edits_a_timeline() {
         ]
     );
 
-    // Clip refs by position and timecodes.
     sb.ok(&["edit", "delete", "V1@00:00:01:05"]);
     assert_eq!(
         sb.v1(),
@@ -180,12 +166,10 @@ fn builds_and_edits_a_timeline() {
         ]
     );
 
-    // Undo across separate processes.
     sb.ok(&["history", "undo", "2"]);
     assert_eq!(sb.v1().len(), 4);
     sb.ok(&["history", "redo"]);
 
-    // Dry run changes nothing.
     let before = std::fs::read_to_string(sb.project()).unwrap();
     let r = sb.ok(&["--dry-run", "edit", "delete-range", "5f..+10f"]);
     assert_eq!(r["dry_run"], true);
@@ -229,7 +213,6 @@ fn errors_have_stable_exit_codes() {
     );
     assert_eq!(e["code"], "CONFLICT");
     sb.ok(&["--if-rev", &rev.to_string(), "edit", "split", "--at", "1s"]);
-    // What reads the project checks it too: nothing comes of a stale one.
     let stale = rev.to_string();
     let out = sb.dir.path().join("stale.mp4");
     let e = sb.fails(5, &["--if-rev", &stale, "export", "start", s(&out)]);
@@ -267,7 +250,6 @@ fn errors_have_stable_exit_codes() {
     sb.ok(&["--if-rev", &now, "timeline", "get"]);
     let e = sb.fails(7, &["media", "add", "/nonexistent.mp4"]);
     assert_eq!(e["code"], "MEDIA");
-    // No project at all.
     let out = Command::new(env!("CARGO_BIN_EXE_vidcut"))
         .env_remove("VIDCUT_PROJECT")
         .env("XDG_RUNTIME_DIR", sb.dir.path().join("run"))
@@ -308,7 +290,6 @@ fn apply_runs_a_batch_as_one_undo_step() {
     sb.ok(&["history", "undo"]);
     assert!(sb.v1().is_empty(), "the batch was one undo step");
 
-    // A failing batch changes nothing.
     std::fs::write(&batch, "[{\"method\": \"edit.append\", \"params\": {\"media\": \"m1\"}}, {\"method\": \"edit.delete\", \"params\": {\"clips\": \"c42\"}}]").unwrap();
     sb.fails(3, &["apply", s(&batch)]);
     assert!(sb.v1().is_empty());
@@ -361,7 +342,6 @@ fn concurrent_cli_runs_never_corrupt_the_project() {
     assert_eq!(sb.ok(&["project", "summary"])["rev"], 17);
 }
 
-/// Barcodes of every frame of a video file.
 fn barcodes(path: &Path) -> Vec<Option<u32>> {
     let mut r = vidcut_av::decode::VideoReader::open(path).unwrap();
     let mut out = Vec::new();
@@ -371,8 +351,6 @@ fn barcodes(path: &Path) -> Vec<Option<u32>> {
     out
 }
 
-/// A file with a media's proxy name that was made from another file is
-/// made again from the media (decision D41).
 #[test]
 fn a_proxy_made_from_another_file_is_made_again() {
     let sb = Sandbox::new("proxy-origin");
@@ -395,7 +373,6 @@ fn a_proxy_made_from_another_file_is_made_again() {
         PathBuf::from(r["result"]["proxies"][0]["path"].as_str().unwrap())
     };
     let numbered_proxy = proxy("m1");
-    // m1's proxy by name, of the black file.
     std::fs::copy(proxy("m2"), &numbered_proxy).unwrap();
     assert_eq!(proxy("m1"), numbered_proxy);
     assert_eq!(
@@ -433,7 +410,6 @@ fn exports_frames_ranges_and_clips() {
     let out = sb.dir.path().join("out.mkv");
     let o = s(&out);
 
-    // Whole timeline, frame-exact.
     let r = sb.ok(&[
         "export",
         "start",
@@ -449,7 +425,6 @@ fn exports_frames_ranges_and_clips() {
     let want: Vec<Option<u32>> = (10..40).chain(50..80).map(Some).collect();
     assert_eq!(barcodes(&out), want);
 
-    // The In and Out marks set the range.
     sb.ok(&["marks", "set", "--in", "25f", "--out", "35f"]);
     sb.ok(&[
         "export",
@@ -461,14 +436,12 @@ fn exports_frames_ranges_and_clips() {
         "--encoder",
         "cpu",
     ]);
-    // Frames 25..35 straddle the cut at 30: c1's source 35..40, then c2's 50..55.
     assert_eq!(
         barcodes(&out),
         (35..40).chain(50..55).map(Some).collect::<Vec<_>>()
     );
     sb.ok(&["marks", "clear"]);
 
-    // Per clip, with a name template.
     let dir = sb.dir.path().join("clips");
     let r = sb.ok(&[
         "export",
@@ -486,13 +459,11 @@ fn exports_frames_ranges_and_clips() {
         (50..80).map(Some).collect::<Vec<_>>()
     );
 
-    // A still frame of the timeline.
     let png = sb.dir.path().join("f.png");
     sb.ok(&["frame", "render", "--at", "35f", "--out", s(&png)]);
     assert_eq!(barcodes(&png), vec![Some(55)]);
 }
 
-/// `timeline.get` without ids (they differ between projects).
 fn timeline_shape(sb: &Sandbox, project: &Path) -> Value {
     let mut t = sb.ok_in(project, &["timeline", "get"])["result"].clone();
     for item in t["tracks"][0]["items"].as_array_mut().unwrap() {
@@ -506,7 +477,6 @@ fn timeline_shape(sb: &Sandbox, project: &Path) -> Value {
 
 #[test]
 fn otio_round_trips_frame_exactly() {
-    // Export → import reproduces the timeline frame-exactly.
     let sb = Sandbox::new("otio");
     let a = fixture(FixtureSpec::new(
         VideoCodec::H264,
@@ -544,7 +514,6 @@ fn otio_round_trips_frame_exactly() {
     let plan = sb.ok(&["export", "plan", s(&cut)]);
     assert_eq!(plan["result"]["outputs"][0]["clips"], 3);
     assert!(!cut.exists());
-    // The whole timeline, not In–Out: the marks travel inside.
     let r = sb.ok(&["export", "start", s(&cut)]);
     assert_eq!(r["result"]["outputs"][0]["frames"], 110);
 
@@ -556,7 +525,6 @@ fn otio_round_trips_frame_exactly() {
         timeline_shape(&sb, &other),
         timeline_shape(&sb, &sb.project())
     );
-    // Same pictures at the cuts, in the gap and at the end.
     for at in ["0f", "29f", "30f", "59f", "60f", "89f", "90f", "109f"] {
         let (x, y) = (sb.dir.path().join("x.png"), sb.dir.path().join("y.png"));
         sb.ok(&["frame", "render", "--at", at, "--out", s(&x)]);
@@ -568,7 +536,6 @@ fn otio_round_trips_frame_exactly() {
         );
     }
 
-    // Moved media: an error naming the files, unless found by name.
     let fixtures = a.parent().unwrap();
     let moved = sb.dir.path().join("moved.otio");
     let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&cut).unwrap()).unwrap();
@@ -584,7 +551,6 @@ fn otio_round_trips_frame_exactly() {
             .contains("/nonexistent/footage/"),
         "{e}"
     );
-    // Found by name in a subfolder.
     let above = fixtures.parent().unwrap();
     sb.ok_in(
         &third,
@@ -596,7 +562,6 @@ fn otio_round_trips_frame_exactly() {
     );
 }
 
-/// V1's clips in `project` as (start, duration).
 fn clips_in(sb: &Sandbox, project: &Path) -> Vec<(i64, i64)> {
     let t = sb.ok_in(project, &["timeline", "get"]);
     t["result"]["tracks"][0]["items"]
@@ -615,8 +580,6 @@ fn clips_in(sb: &Sandbox, project: &Path) -> Vec<(i64, i64)> {
 
 #[test]
 fn projects_come_from_otio_files() {
-    // Deviation X9: `project create --from` makes a project file of an OTIO
-    // file.
     let sb = Sandbox::new("from-otio");
     let a = fixture(FixtureSpec::new(
         VideoCodec::H264,
@@ -635,7 +598,6 @@ fn projects_come_from_otio_files() {
     sb.ok(&["export", "start", s(&cut)]);
     let path = |name: &str| sb.dir.path().join(name);
 
-    // vidcut's file: the project it holds, ids and all.
     let own = path("own.vidcut");
     let r = sb.ok(&["project", "create", s(&own), "--from", s(&cut)]);
     assert_eq!(r["result"]["warnings"], serde_json::json!([]));
@@ -643,7 +605,6 @@ fn projects_come_from_otio_files() {
         sb.ok_in(&own, &["timeline", "get"])["result"],
         sb.ok(&["timeline", "get"])["result"]
     );
-    // Its format is its own.
     let other = path("other.vidcut");
     sb.fails(
         2,
@@ -657,10 +618,8 @@ fn projects_come_from_otio_files() {
             "25",
         ],
     );
-    // A file is never overwritten.
     sb.fails(4, &["project", "create", s(&own), "--from", s(&cut)]);
 
-    // Another editor's file: the format comes from it and its video.
     let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&cut).unwrap()).unwrap();
     doc["metadata"]["vidcut"]
         .as_object_mut()
@@ -670,7 +629,6 @@ fn projects_come_from_otio_files() {
     std::fs::write(&theirs, doc.to_string()).unwrap();
     let made = path("made.vidcut");
     let r = sb.ok(&["project", "create", s(&made), "--from", s(&theirs)]);
-    // The rate the video probes as, which the project took first.
     let settings = &r["result"]["settings"];
     let rate = sb.ok(&["project", "summary"])["result"]["settings"]["fps"].clone();
     assert_eq!(
@@ -681,8 +639,6 @@ fn projects_come_from_otio_files() {
         timeline_shape(&sb, &made),
         timeline_shape(&sb, &sb.project())
     );
-    // A format given: the timeline is converted to it, and the start counts
-    // at its rate.
     let at25 = path("at25.vidcut");
     let r = sb.ok(&[
         "project",
@@ -705,7 +661,6 @@ fn projects_come_from_otio_files() {
 
 #[test]
 fn a_timeline_imported_as_a_compound_clip_plays_the_same() {
-    // Deviation X9: one compound clip holds the file's timeline.
     let sb = Sandbox::new("compound-import");
     let a = fixture(FixtureSpec::new(
         VideoCodec::H264,
@@ -734,8 +689,6 @@ fn a_timeline_imported_as_a_compound_clip_plays_the_same() {
     same_frames(&sb, &sb.project(), &other, &["0f", "29f", "30f", "59f"]);
 }
 
-/// Moves every media file an OTIO document names to `/nonexistent/footage/`,
-/// keeping its file name.
 fn move_media(doc: &mut Value) {
     match doc {
         Value::Object(fields) => {
@@ -755,7 +708,6 @@ fn move_media(doc: &mut Value) {
     }
 }
 
-/// The same pictures at `frames` in two projects.
 fn same_frames(sb: &Sandbox, a: &Path, b: &Path, frames: &[&str]) {
     for at in frames {
         let (x, y) = (sb.dir.path().join("x.png"), sb.dir.path().join("y.png"));
@@ -771,8 +723,6 @@ fn same_frames(sb: &Sandbox, a: &Path, b: &Path, frames: &[&str]) {
 
 #[test]
 fn otio_bundles_and_timecode() {
-    // Deviation X9: an `.otioz` bundle carries the media along. Source
-    // ranges count from the media's timecode.
     let sb = Sandbox::new("otioz");
     let tc = fixture(
         FixtureSpec::new(VideoCodec::H264, Container::Mov, 320, 180, (25, 1), 75)
@@ -798,7 +748,6 @@ fn otio_bundles_and_timecode() {
     sb.ok(&["edit", "audio-roll", "c1", "--edge", "tail", "--by", "3f"]);
     sb.ok(&["clip", "set", "c2", "--gain-db", "-4"]);
 
-    // .otio: sources from 10:00:00:00.
     let cut = sb.dir.path().join("cut.otio");
     sb.ok(&["export", "start", s(&cut)]);
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(&cut).unwrap()).unwrap();
@@ -810,7 +759,6 @@ fn otio_bundles_and_timecode() {
     );
     assert_eq!(first["source_range"]["start_time"]["value"], 900_010.0);
 
-    // .otioz: written as OpenTimelineIO's adapter lays it out.
     let bundle = sb.dir.path().join("cut.otioz");
     sb.ok(&["export", "start", s(&bundle)]);
     let names = |zip: &Path| -> Vec<String> {
@@ -830,7 +778,6 @@ fn otio_bundles_and_timecode() {
         ]
     );
 
-    // Imported elsewhere: the media unpack next to the bundle.
     let away = sb.dir.path().join("away");
     std::fs::create_dir_all(&away).unwrap();
     let moved = away.join("cut.otioz");
@@ -887,7 +834,6 @@ fn presets_save_and_delete() {
     assert_eq!(p["settings"]["video"]["quality"], 23);
     let list = sb.ok(&["presets", "list"])["result"].clone();
     assert!(list.as_array().unwrap().iter().any(|p| p["name"] == "web"));
-    // Existing names need --overwrite; built-in presets can't be deleted.
     sb.fails(4, &["presets", "save", "web", "--from", "h264-master"]);
     sb.fails(4, &["presets", "save", "h264-master", "--from", "av1"]);
     sb.fails(2, &["presets", "save", "../evil", "--from", "av1"]);
@@ -921,7 +867,6 @@ fn presets_save_and_delete() {
     sb.fails(3, &["presets", "delete", "web"]);
 }
 
-/// The left channel of a 16-bit stereo WAV, as `f32`.
 fn wav_left(path: &Path) -> Vec<f32> {
     let bytes = std::fs::read(path).unwrap();
     let data = bytes.windows(4).position(|w| w == b"data").unwrap() + 8;
@@ -941,9 +886,6 @@ fn peak(samples: &[f32], at: usize) -> f32 {
 
 #[test]
 fn b_roll_and_music_export_correctly() {
-    // B-roll on V2 covers Track 1, music on A1 mixes
-    // with Track 1's audio, and the mixer's fader, solo and mute apply to
-    // export.
     let sb = Sandbox::new("multitrack");
     let a = fixture(FixtureSpec::new(
         VideoCodec::H264,
@@ -1009,7 +951,6 @@ fn b_roll_and_music_export_correctly() {
         sb.ok(&["export", "start", s(&out), "--set", "audio.codec=pcm_s16"]);
         wav_left(&out)
     };
-    // Track 1 beeps at 0, 1 and 2 s; the music (from 0.5 s) at 0.5 and 1.5 s.
     let l = mix("mix.wav");
     let found = vidcut_av::beep::onsets(&l, 0.1, 4800);
     assert_eq!(found.len(), 5, "{found:?}");
@@ -1020,7 +961,6 @@ fn b_roll_and_music_export_correctly() {
         );
     }
     let level = peak(&l, 24_000) / peak(&l, 48_000);
-    // The fader takes the music 6 dB down.
     sb.ok(&["track", "set", "A1", "--volume-db", "-6"]);
     let l = mix("fader.wav");
     let ratio = peak(&l, 24_000) / peak(&l, 48_000) / level;
@@ -1040,7 +980,6 @@ fn b_roll_and_music_export_correctly() {
 
 #[test]
 fn loudness_normalized_exports_meet_their_target() {
-    // A -20 LUFS tone exported at -16 LUFS measures -16 LUFS afterwards.
     let sb = Sandbox::new("loudness");
     let tone = fixture(
         FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 300)
@@ -1075,8 +1014,6 @@ fn loudness_normalized_exports_meet_their_target() {
 
 #[test]
 fn scene_cuts_split_encoded_shots_exactly() {
-    // A clip of five 30-frame shots splits at each shot change;
-    // the fourth shot is black.
     let sb = Sandbox::new("scenes");
     let shots = fixture(
         FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), 150)
@@ -1125,8 +1062,6 @@ fn scene_cuts_split_encoded_shots_exactly() {
 
 #[test]
 fn stills_and_sequences_edit_and_export() {
-    // A still and a numbered image sequence, added, edited and
-    // exported (decisions D38, D39).
     let sb = Sandbox::new("images");
     let still = fixture::ensure_images(&ImageSpec::still(77, 320, 180, "png")).unwrap();
     let seq = fixture::ensure_images(&ImageSpec::sequence(1, 60, 6, 320, 180)).unwrap();
@@ -1134,7 +1069,6 @@ fn stills_and_sequences_edit_and_export() {
         .arg(sb.project())
         .output()
         .unwrap();
-    // The still leaves the format to the sequence, which brings its rate.
     sb.ok(&["media", "add", s(&still[0])]);
     sb.ok(&["media", "add", s(&seq[10]), "--sequence", "--fps", "25"]);
     let info = sb.ok(&["project", "summary"]);
@@ -1171,7 +1105,6 @@ fn stills_and_sequences_edit_and_export() {
     want.extend((10..30).map(Some));
     want.extend([Some(77); 5]);
     assert_eq!(barcodes(&out), want);
-    // A file of the sequence without --sequence is a still of its own.
     let r = sb.ok(&["media", "add", s(&seq[0])]);
     assert_eq!(r["changes"]["created"], serde_json::json!(["m3"]));
 }

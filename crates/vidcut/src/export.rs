@@ -1,5 +1,3 @@
-//! Export as the session runs it: presets, outputs, plans, encoder cache.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -22,7 +20,6 @@ use vidcut_core::{Error, ErrorCode, Project, Result};
 use crate::bundle;
 use crate::paths::{cache_dir, config_dir};
 
-/// Built-in presets plus user presets from `~/.config/vidcut/presets/*.toml`.
 pub fn presets() -> Result<Vec<Preset>> {
     let mut all = builtin_presets();
     let dir = config_dir().join("presets");
@@ -55,19 +52,16 @@ pub fn presets() -> Result<Vec<Preset>> {
             .map_err(|e| Error::usage(format!("{}: {e}", path.display())))?;
         validate(&preset.settings)
             .map_err(|e| Error::usage(format!("{}: {}", path.display(), e.message)))?;
-        // A user preset may replace a built-in one of the same name.
         all.retain(|p| p.name != preset.name);
         all.push(preset);
     }
     Ok(all)
 }
 
-/// Where a user preset lives.
 fn user_preset_path(name: &str) -> PathBuf {
     config_dir().join("presets").join(format!("{name}.toml"))
 }
 
-/// Whether `name` is a user preset (which may shadow a built-in one).
 pub fn is_user_preset(name: &str) -> bool {
     check_preset_name(name).is_ok() && user_preset_path(name).exists()
 }
@@ -88,7 +82,6 @@ fn check_preset_name(name: &str) -> Result<()> {
     }
 }
 
-/// What `presets.save` stores.
 pub struct PresetSave<'a> {
     pub name: &'a str,
     pub title: Option<&'a str>,
@@ -98,11 +91,9 @@ pub struct PresetSave<'a> {
     pub from: Option<&'a str>,
     pub set: &'a [String],
     pub overwrite: bool,
-    /// Check and describe it without writing it.
     pub dry_run: bool,
 }
 
-/// Saves a user preset as TOML (`presets.save`).
 pub fn save_preset(s: &PresetSave<'_>) -> Result<Value> {
     check_preset_name(s.name)?;
     let mut settings = match (s.settings, s.from) {
@@ -145,7 +136,6 @@ pub fn save_preset(s: &PresetSave<'_>) -> Result<Value> {
     Ok(json!({ "preset": preset, "path": path }))
 }
 
-/// Deletes a user preset (`presets.delete`); `dry_run` only checks.
 pub fn delete_preset(name: &str, dry_run: bool) -> Result<Value> {
     check_preset_name(name)?;
     let path = user_preset_path(name);
@@ -163,13 +153,9 @@ pub fn delete_preset(name: &str, dry_run: bool) -> Result<Value> {
     Ok(json!({ "deleted": name, "path": path }))
 }
 
-/// A timeline for other editors (deviation X9), as an output's extension
-/// names one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimelineFormat {
-    /// `.otio`: the edit.
     Otio,
-    /// `.otioz` or `.otiod`: the edit with its media.
     Bundle(bundle::Kind),
 }
 
@@ -182,7 +168,6 @@ impl TimelineFormat {
     }
 }
 
-/// The timeline format `output` names, if it names one.
 pub fn timeline_format(output: &Path) -> Option<TimelineFormat> {
     match bundle::Kind::of(output) {
         Some(kind) => Some(TimelineFormat::Bundle(kind)),
@@ -190,14 +175,12 @@ pub fn timeline_format(output: &Path) -> Option<TimelineFormat> {
     }
 }
 
-/// Whether `output` is an `.otio` file: the edit alone, written at once.
 pub fn is_otio(output: &Path) -> bool {
     output
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("otio"))
 }
 
-/// The name a timeline export gives the timeline: the project file's.
 pub fn timeline_name(project_path: &Path) -> String {
     project_path
         .file_stem()
@@ -205,17 +188,11 @@ pub fn timeline_name(project_path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Cancellation and byte progress for writing a bundle.
 pub struct Writing<'a> {
     pub cancel: &'a AtomicBool,
-    /// Called with bytes written and their total.
     pub progress: &'a mut dyn FnMut(u64, u64),
 }
 
-/// A timeline export (deviation X9): `.otio` (the edit), `.otioz` or
-/// `.otiod` (the edit and its media, in a bundle). Unlike media exports it
-/// covers the whole timeline unless given a range: the In/Out marks travel
-/// inside the file. Without `write` it only describes the export.
 pub fn timeline(
     p: &Project,
     name: &str,
@@ -239,8 +216,6 @@ pub fn timeline(
             format.name()
         )));
     }
-    // As media exports do: checked when planned, so a job doesn't start
-    // only to fail.
     if params.output.exists() && !params.overwrite {
         return Err(Error::invalid(format!(
             "{} exists; pass overwrite to replace it",
@@ -319,7 +294,6 @@ fn preset(name: &str) -> Result<Preset> {
         .ok_or_else(|| Error::not_found(format!("no preset {name:?}; see `vidcut presets list`")))
 }
 
-/// The default preset for an output file extension.
 fn default_preset(output: &Path) -> &'static str {
     match output
         .extension()
@@ -336,27 +310,18 @@ fn default_preset(output: &Path) -> &'static str {
     }
 }
 
-/// One file to write.
 pub struct Output {
     pub plan: RenderPlan,
     pub path: PathBuf,
-    /// What it is encoded with: the export's settings with `video.hdr`
-    /// and an unset bit depth chosen from its pictures ([`choose_colors`]).
     pub settings: ExportSettings,
-    /// What was chosen, and why (decision D44).
     pub color: Option<ColorChoice>,
-    /// The HDR metadata it writes, and why (decision D46).
     pub metadata: Option<vidcut_core::export::metadata::MetadataChoice>,
 }
 
-/// A checked export: settings and the files to write.
 pub struct Prepared {
-    /// The settings as asked for.
     pub settings: ExportSettings,
     pub preset: Option<String>,
     pub outputs: Vec<Output>,
-    /// Why the video encoder asked for isn't the one used
-    /// ([`as_preferred`]).
     pub encoder_changed: Option<String>,
 }
 
@@ -381,7 +346,6 @@ fn file_name(template: &str, index: usize, name: &str, clip: &str, media: &str) 
         .replace("{clip}", clip)
         .replace("{media}", media)
         .replace("{index}", &index.to_string());
-    // {index:0N}
     while let Some(start) = s.find("{index:0") {
         let Some(end) = s[start..].find('}') else {
             break;
@@ -392,7 +356,6 @@ fn file_name(template: &str, index: usize, name: &str, clip: &str, media: &str) 
     sanitize(&s)
 }
 
-/// Resolves settings, range and outputs for an export.
 pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Result<Prepared> {
     let (mut settings, preset_name) = match (&params.settings, &params.preset) {
         (Some(s), None) => (s.clone(), None),
@@ -457,7 +420,6 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         return Err(Error::invalid(format!("nothing to export in {a}..{b}")));
     }
 
-    // Plan at the export's audio rate so sample math matches the encoder.
     let mut proj = p.clone();
     if let Some(audio) = &settings.audio {
         let enc = vidcut_av::export::encode::resolve_audio(
@@ -472,14 +434,11 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     let ext = settings.container.extension();
     let mut outputs = Vec::new();
     if params.per_clip {
-        // The folder is made when the export runs: a plan changes nothing.
         let template = params.name.as_deref().unwrap_or("{index:03}-{name}");
         let clips: Vec<_> = proj
             .tracks
             .iter()
             .flat_map(|t| t.clips.iter())
-            // A block from another editor plays as a gap: no file of its
-            // own (deviation X9).
             .filter(|c| c.start < b && c.end() > a && !c.is_block())
             .map(|c| (c.start, c.id.clone(), c.media.clone()))
             .collect();
@@ -524,8 +483,6 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     })
 }
 
-/// What a media item's pictures are: its HDR transfer and bit depth, as
-/// probed when it was added.
 fn picture_kind(p: &Project, piece: &render::VideoPiece) -> PictureKind {
     let render::VideoPiece::Source { media, .. } = piece else {
         return PictureKind::default();
@@ -538,8 +495,6 @@ fn picture_kind(p: &Project, piece: &render::VideoPiece) -> PictureKind {
         })
 }
 
-/// What a media item's pictures carry: its transfer and HDR metadata, as
-/// probed when it was added (or filled in, [`fill_hdr_metadata`]).
 fn piece_meta(p: &Project, piece: &render::VideoPiece) -> PieceMeta {
     let render::VideoPiece::Source { media, .. } = piece else {
         return PieceMeta::default();
@@ -556,11 +511,7 @@ fn piece_meta(p: &Project, piece: &render::VideoPiece) -> PieceMeta {
         })
 }
 
-/// Probes again the HDR media among `ids` that were probed before vidcut
-/// kept their metadata: those with none of it.
 pub fn fill_hdr_metadata(p: &mut Project, ids: &[String]) {
-    // Their first frames decoded on the GPU the viewer decodes on, on a
-    // decoder of its own, made for the first.
     let mut decoder = None;
     for m in &mut p.media {
         let Some(v) = m.info.video.as_mut() else {
@@ -588,21 +539,12 @@ pub fn fill_hdr_metadata(p: &mut Project, ids: &[String]) {
     }
 }
 
-/// Light measuring for [`choose_colors`] as an export starts: the GPU
-/// decoder it decodes on, its cancel flag, and what hears the share
-/// measured.
 pub struct Measuring<'a> {
     pub decoder: Option<&'a vidcut_av::hw::GpuDecoder>,
     pub cancel: &'a AtomicBool,
     pub progress: &'a mut dyn FnMut(f64),
 }
 
-/// Chooses each output's dynamic range and bit depth from the pictures it
-/// shows, where the settings leave them to the export (decision D44): with
-/// the encoders the export may use (`settings` as the preferences allow).
-/// Then its HDR metadata (decision D46), with the light measured before;
-/// with `measure`, what the metadata needs and isn't measured is measured
-/// first: light levels the sources don't say, frames HDR10+ is made for.
 pub fn choose_colors(
     prepared: &mut Prepared,
     p: &Project,
@@ -619,9 +561,6 @@ pub fn choose_colors(
     Ok(())
 }
 
-/// [`choose_colors`] with the light measured before; returns what the
-/// metadata needs measured and isn't. `measured`: what it needed was just
-/// measured, so light levels still unknown couldn't be.
 fn choose_once(
     prepared: &mut Prepared,
     p: &Project,
@@ -693,9 +632,7 @@ fn choose_once(
     unique
 }
 
-/// Measures `todo`, telling `m` the share done, by length.
 fn measure_spans(todo: &[Span], m: Measuring<'_>) -> Result<()> {
-    // A still is one frame.
     let weight = |s: &Span| {
         let d = s.to - s.from;
         if d.is_finite() { d.max(0.04) } else { 0.04 }
@@ -708,7 +645,6 @@ fn measure_spans(todo: &[Span], m: Measuring<'_>) -> Result<()> {
             vidcut_av::light::analysis(s, true, m.decoder, Some(m.cancel), &mut |share| {
                 (m.progress)((done + share * w) / total)
             });
-        // What can't be read is left out of the metadata, and said.
         if let Err(e) = measured
             && engine::is_cancelled(&e)
         {
@@ -720,12 +656,6 @@ fn measure_spans(todo: &[Span], m: Measuring<'_>) -> Result<()> {
     Ok(())
 }
 
-/// Quiet notes about a prepared export: its video encoder changed for the
-/// GPU in use (`encoder_changed`), and HDR picture tone-mapped into SDR
-/// when SDR wasn't asked for (decision D44, `hdr_tone_mapped`). Each is
-/// `{code, message}`; the HDR one has `set` too, the `--set` overrides
-/// that keep the picture HDR, empty when no encoder `available` allows
-/// writes that.
 pub fn notes(prepared: &Prepared, available: &Availability) -> Vec<Value> {
     let mut notes: Vec<Value> = prepared
         .encoder_changed
@@ -736,8 +666,6 @@ pub fn notes(prepared: &Prepared, available: &Availability) -> Vec<Value> {
     notes
 }
 
-/// The note on HDR pictures tone-mapped to SDR, with the overrides that
-/// keep them HDR.
 fn hdr_notes(prepared: &Prepared, available: &Availability) -> Vec<Value> {
     let noted: Vec<&ColorChoice> = prepared
         .outputs
@@ -765,7 +693,6 @@ fn hdr_notes(prepared: &Prepared, available: &Availability) -> Vec<Value> {
     } else {
         format!("{}:{:02}", (seconds / 60.0) as u64, seconds as u64 % 60)
     };
-    // The reason, when every file has the same one.
     let why = if noted.iter().all(|c| c.why[0] == first.why[0]) {
         format!(" ({})", first.why[0].trim_start_matches("SDR: "))
     } else {
@@ -783,8 +710,6 @@ fn hdr_notes(prepared: &Prepared, available: &Availability) -> Vec<Value> {
     vec![json!({ "code": "hdr_tone_mapped", "message": message, "set": set })]
 }
 
-/// A metadata choice in words: `HDR10: P3 D65, 0.0001–1000 cd/m², MaxCLL
-/// 1000, MaxFALL 400; HDR10+`.
 pub fn metadata_words(m: &Value) -> String {
     let mut parts = Vec::new();
     if let Ok(d) =
@@ -818,10 +743,7 @@ pub fn metadata_words(m: &Value) -> String {
     words
 }
 
-/// A summary of a prepared export (the `export.plan` result).
 pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
-    // The encoder of the first file; with `auto` color, files may differ
-    // in depth (`outputs[].color`).
     let video = prepared
         .outputs
         .first()
@@ -850,14 +772,10 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
     })
 }
 
-/// The encoders exports and proxies may use: those on the GPU in use
-/// (`Availability::in_use`).
 pub fn availability(refresh: bool) -> Availability {
     detected(refresh).in_use()
 }
 
-/// What the GPU tests depend on: FFmpeg, the system and the GPUs' drivers.
-/// A change of any of them tests again.
 fn tested_with() -> String {
     format!(
         "{:?}|{}|{}",
@@ -867,8 +785,6 @@ fn tested_with() -> String {
     )
 }
 
-/// The GPU encoders that work here, on every GPU: tested once, then kept
-/// until something they depend on changes.
 pub fn detected(refresh: bool) -> Availability {
     let key = tested_with();
     let path = cache_dir().join("encoders.json");
@@ -880,9 +796,6 @@ pub fn detected(refresh: bool) -> Availability {
     {
         return a;
     }
-    // A test that takes the process down (a GPU driver's crash) leaves this
-    // file behind, naming a process that is gone: the next test leaves out
-    // Vulkan's encoders, the newest, so it can't happen again and again.
     let testing = cache_dir().join("encoders.testing");
     let crashed = std::fs::read_to_string(&testing)
         .ok()
@@ -900,13 +813,6 @@ pub fn detected(refresh: bool) -> Availability {
     a
 }
 
-/// The proxy codecs the GPU decoder the player uses here plays
-/// (`hw::plays`), each with the decoder that plays it by its name (`NVDEC`,
-/// `Vulkan` for ProRes on NVIDIA's GPU), while `decoding` (GPU decoding
-/// on); `None` where the CPU plays them all. Tested once on each GPU, then
-/// kept as the encoders are, with the codecs tested: a codec an entry
-/// doesn't name is tested then, and so is an entry that doesn't read as
-/// codecs with their decoders.
 pub fn plays(decoding: bool) -> Option<Vec<(String, String)>> {
     if !decoding {
         return None;
@@ -937,7 +843,6 @@ pub fn plays(decoding: bool) -> Option<Vec<(String, String)>> {
             .map(|(codec, kind)| (codec.to_string(), kind.label().to_string()))
             .collect::<Vec<_>>()
     });
-    // Each GPU's, on this FFmpeg, system and drivers.
     cached.retain(|k, _| k.starts_with(&tested));
     cached.insert(key, json!({ "found": found, "codecs": codecs }));
     if std::fs::create_dir_all(cache_dir()).is_ok() {
@@ -946,11 +851,6 @@ pub fn plays(decoding: bool) -> Option<Vec<(String, String)>> {
     found
 }
 
-/// The export as the preferences allow: without GPU acceleration every
-/// video encoder choice is the CPU's, so a preset naming NVENC still
-/// exports, in software; with it, a GPU encoder the GPU in use doesn't
-/// have (`gpus::in_use`) is `auto`, the GPU's own then the CPU's, and a
-/// note says so.
 pub fn as_preferred(prepared: &mut Prepared, gpu: bool) {
     let Some(v) = prepared.settings.video.as_mut() else {
         return;
@@ -969,8 +869,6 @@ pub fn as_preferred(prepared: &mut Prepared, gpu: bool) {
     }
 }
 
-/// Why this machine can't export `settings` (`None`: it can), the GPU's
-/// use as `gpu` says: no encoder for its picture or its sound.
 pub fn unavailable(
     settings: &ExportSettings,
     available: &Availability,
@@ -1002,10 +900,6 @@ fn video_unavailable(
         .map(|e| e.to_string())
 }
 
-/// What this machine encodes, the GPU's use as `gpu` says: for each video
-/// codec and encoder choice, and each audio codec, why not (`null`: it
-/// does), by their names in the settings. An encoder that encodes a codec
-/// only at a bitrate is asked with one.
 pub fn encodable(available: &Availability, gpu: bool) -> Value {
     use vidcut_core::export::{AudioCodec, AudioSettings, VideoCodec, VideoSettings};
     let key = |v: Value| v.as_str().unwrap_or_default().to_string();
@@ -1045,7 +939,6 @@ pub fn encodable(available: &Availability, gpu: bool) -> Value {
     json!({ "video": video, "audio": audio })
 }
 
-/// Whether the settings may pick a GPU encoder (so availability matters).
 pub fn needs_gpu_info(settings: &ExportSettings) -> bool {
     settings
         .video
@@ -1053,8 +946,6 @@ pub fn needs_gpu_info(settings: &ExportSettings) -> bool {
         .is_some_and(|v| v.encoder != EncoderChoice::Cpu)
 }
 
-/// Runs a prepared export, one output after another, its pieces decoding
-/// on `decoder` where it decodes them, else on the CPU (export.md §5).
 pub fn run(
     prepared: &Prepared,
     available: &Availability,
@@ -1094,8 +985,6 @@ pub fn run(
     Ok(reports)
 }
 
-/// What the outputs need of this FFmpeg, before any file is written: an
-/// encoder for the picture.
 fn check(prepared: &Prepared, available: &Availability) -> Result<()> {
     for o in &prepared.outputs {
         if let Some(v) = &o.settings.video {
@@ -1106,8 +995,6 @@ fn check(prepared: &Prepared, available: &Availability) -> Result<()> {
     Ok(())
 }
 
-/// A still render's failure. The cancel flag is the export's, so a client
-/// that left is `CANCELLED`.
 fn from_av(e: vidcut_av::error::Error) -> Error {
     if vidcut_av::export::is_cancelled(&e) {
         Error::new(ErrorCode::Cancelled, "cancelled")
@@ -1116,8 +1003,6 @@ fn from_av(e: vidcut_av::error::Error) -> Error {
     }
 }
 
-/// A media-layer failure as `code`, its message after `prefix`; a part
-/// this FFmpeg lacks is `DEPENDENCY` whatever failed.
 pub fn av_error(e: &vidcut_av::error::Error, code: ErrorCode, prefix: String) -> Error {
     let code = match e {
         vidcut_av::error::Error::Missing(_) => ErrorCode::Dependency,
@@ -1126,7 +1011,6 @@ pub fn av_error(e: &vidcut_av::error::Error, code: ErrorCode, prefix: String) ->
     Error::new(code, format!("{prefix}{e}"))
 }
 
-/// Renders the timeline (or a media item) at `at` to a PNG.
 pub fn frame(
     p: &Project,
     at: &TimeSpec,
@@ -1187,7 +1071,6 @@ pub fn frame(
         ),
         None => (w, h),
     };
-    // Decoded on the GPU the viewer decodes on, on a decoder of its own.
     let decoder = crate::preferences::gpu_decoding().own_decoder();
     vidcut_av::export::still::write_png(&piece, fps, w.max(2), h.max(2), out, decoder.as_ref())
         .map_err(from_av)?;

@@ -1,11 +1,3 @@
-//! Timeline gestures (spec §7.3, §8). A press starts one; while the pointer
-//! moves, [`Drag::update`] says what the release would do (drawn as a
-//! preview); the release turns it into exactly one request, or none.
-//! Scrubbing only moves the playhead.
-//!
-//! Pure: driven by pointer positions, times and the project, so gestures are
-//! tested without a window.
-
 use std::time::{Duration, Instant};
 
 use eframe::egui::{Pos2, Rect};
@@ -15,110 +7,93 @@ use vidcut_core::ops::{Edge, MAIN};
 
 use super::geometry::{Hit, Rows, SNAP_PX, Scale, Snap, clips_in, edit_near, hit_rows};
 
-/// Hovering over a clip this long turns a drop from Replace into Overwrite
-/// (decision D11).
 pub const HOVER: Duration = Duration::from_millis(800);
 
-/// Pushing against a neighbor this long overrides Safe Edit.
 pub const SAFE_EDIT_HOLD: Duration = Duration::from_millis(600);
 
-/// Pixels around an edit point that make a drop an insert.
 const DROP_EDIT_PX: f32 = 6.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Gesture {
-    /// Moving the playhead. With `drag_content` (the lower timeline with a
-    /// fixed playhead) dragging moves the clips under the playhead instead
-    ///.
-    Scrub { drag_content: bool, from: f64 },
-    /// Dragging clips.
+    Scrub {
+        drag_content: bool,
+        from: f64,
+    },
     Move {
         clips: Vec<String>,
-        /// The track of the clip grabbed.
         from: String,
-        /// Frame under the pointer at the press.
         grab: f64,
-        /// The block's first frame and length.
         start: i64,
         len: i64,
     },
-    /// Resizing a clip edge. `ripple` is false with Alt held.
     Trim {
         clip: String,
         edge: Edge,
         from: i64,
         ripple: bool,
     },
-    /// Rolling an edit.
-    Roll { outgoing: String, from: i64 },
-    /// Slipping clips' content.
-    Slip { clips: Vec<String> },
-    /// Moving only the audio edit: a J/L cut.
-    AudioRoll { outgoing: String, from: i64 },
-    /// Selecting clips with a rectangle.
-    Marquee { additive: bool },
-    /// Dragging a marker on the ruler.
-    Marker { id: String, from: i64 },
-    /// Dragging the timeline In or Out on the ruler.
-    Mark { is_in: bool, from: i64 },
-    /// Dragging media from the pool (spec §7.3).
+    Roll {
+        outgoing: String,
+        from: i64,
+    },
+    Slip {
+        clips: Vec<String>,
+    },
+    AudioRoll {
+        outgoing: String,
+        from: i64,
+    },
+    Marquee {
+        additive: bool,
+    },
+    Marker {
+        id: String,
+        from: i64,
+    },
+    Mark {
+        is_in: bool,
+        from: i64,
+    },
     Media {
         media: String,
         range: (i64, i64),
         video_only: bool,
         audio_only: bool,
     },
-    /// Dragging a bin onto another bin in the pool (spec §3). The release
-    /// is decided in the pool, not as a timeline edit.
-    Bin { path: String },
+    Bin {
+        path: String,
+    },
 }
 
-/// Where a drop lands.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum Target {
     #[default]
     None,
-    /// Insert at an edit point (it highlights).
     Insert(i64),
-    /// Replace a clip (the whole clip highlights).
     Replace(String),
-    /// Write over `[a, b)` (the footprint highlights).
     Overwrite(i64, i64),
-    /// After the last clip.
     Append,
 }
 
-/// What releasing now would do, for drawing while dragging.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Preview {
-    /// `{"method", "params"}`, or `None` if the release changes nothing.
     pub request: Option<Value>,
     pub target: Target,
-    /// Frames the moved or incoming block would cover.
     pub ghost: Option<(i64, i64)>,
-    /// A frame being snapped to (the white line).
     pub snapped: Option<i64>,
-    /// Frames moved and the new duration, for the tooltip.
     pub delta: Option<(i64, Option<i64>)>,
-    /// Where the playhead should be (scrubbing).
     pub seek: Option<i64>,
     pub marquee: Option<Rect>,
-    /// Safe Edit stopped the trim at a neighbor.
     pub blocked: bool,
-    /// The track whose row shows the target and ghost (maybe a new one).
     pub row: Option<String>,
 }
 
-/// What a gesture needs to know about the timeline.
 pub struct Ctx<'a> {
     pub project: &'a Project,
     pub scale: Scale,
-    /// The timeline's track rows.
     pub rows: &'a Rows,
-    /// Snap targets, or `None` with snapping off.
     pub snap: Option<&'a Snap>,
     pub safe_edit: bool,
-    /// Clips selected before the gesture (marquee with Ctrl adds to them).
     pub selected: &'a [String],
 }
 
@@ -131,7 +106,6 @@ impl Ctx<'_> {
         self.project.clip(id)
     }
 
-    /// The track a clip is on.
     fn track_of(&self, id: &str) -> Option<&Track> {
         self.project
             .find_clip(id)
@@ -156,10 +130,6 @@ fn request(method: &str, params: Value) -> Option<Value> {
     Some(json!({ "method": method, "params": params }))
 }
 
-/// Where a sideways two-finger swipe of `dx` points takes the playhead from
-/// frame `from`, as dragging the ruler would. With `drag_content` (the
-/// lower timeline with a fixed playhead) the clips follow the fingers, so a
-/// swipe to the left moves on. Otherwise the playhead follows them.
 pub fn swipe(from: f64, dx: f32, ppf: f64, drag_content: bool, end: i64) -> f64 {
     let frames = f64::from(dx) / ppf;
     let to = if drag_content {
@@ -170,14 +140,11 @@ pub fn swipe(from: f64, dx: f32, ppf: f64, drag_content: bool, end: i64) -> f64 
     to.clamp(0.0, end as f64)
 }
 
-/// A gesture in progress.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Drag {
     pub gesture: Gesture,
     pub press: Pos2,
-    /// The clip under the pointer and since when (drop targets, D11).
     hover: Option<(String, Instant)>,
-    /// When Safe Edit first stopped the trim.
     blocked_since: Option<Instant>,
 }
 
@@ -191,9 +158,7 @@ impl Drag {
         }
     }
 
-    /// Tracks the pointer and says what releasing at `pos` would do.
     pub fn update(&mut self, pos: Pos2, now: Instant, ctx: &Ctx) -> Preview {
-        // Hover bookkeeping for drop targets.
         let under = match hit_rows(ctx.project, ctx.rows, &ctx.scale, pos).1 {
             Hit::Clip(id) | Hit::Slip(id) | Hit::Edge(id, _) => Some(id),
             _ => None,
@@ -213,7 +178,6 @@ impl Drag {
             Gesture::Scrub { drag_content, from } => {
                 let end = ctx.project.end();
                 let frame = if *drag_content {
-                    // Content follows the pointer: dragging left moves on.
                     (from + f64::from(self.press.x - pos.x) / ctx.scale.ppf).round() as i64
                 } else {
                     ctx.scale.under(pos.x)
@@ -246,7 +210,6 @@ impl Drag {
                 &under,
                 &hovered,
             ),
-            // The pool finishes this drop (`bins.rename`) before update.
             Gesture::Bin { .. } => Preview::default(),
             Gesture::Trim {
                 clip,
@@ -279,7 +242,6 @@ impl Drag {
             Gesture::Mark { is_in, from } => {
                 let (f, snapped) = ctx.snapped(ctx.scale.boundary(pos.x).max(0));
                 let marks = &ctx.project.marks;
-                // Keep In before Out.
                 let f = if *is_in {
                     marks.mark_out.map_or(f, |o| f.min(o - 1))
                 } else {
@@ -314,7 +276,6 @@ impl Drag {
         let row = Some(t.id.clone());
         let (target, snapped) = ctx.snapped(from + moved(ctx, self.press, pos));
         let mut delta = target - from;
-        // Media limits, at its speed (decision D48).
         let frames = ctx.media_frames(c);
         let (lo, hi) = match edge {
             Edge::Head => (-c.room(false, frames), c.duration - 1),
@@ -324,8 +285,6 @@ impl Drag {
         if edge == Edge::Head && !ripple {
             delta = delta.max(-c.start);
         }
-        // Safe Edit: without ripple, stop at the neighbor until the user has
-        // kept pushing for a moment.
         let mut blocked = false;
         if !ripple && ctx.safe_edit {
             let i = t.clips.iter().position(|x| x.id == c.id).unwrap_or(0);
@@ -379,7 +338,6 @@ impl Drag {
         }
     }
 
-    /// The request releasing at `pos` makes.
     pub fn finish(&mut self, pos: Pos2, now: Instant, ctx: &Ctx) -> Option<Value> {
         self.update(pos, now, ctx).request
     }
@@ -397,7 +355,6 @@ fn move_preview(
     under: &Option<String>,
     hovered: &dyn Fn(&str) -> Duration,
 ) -> Preview {
-    // Dragged away from the timeline: no change (decision D18).
     let Some(dest) = ctx
         .rows
         .target(ctx.project, pos.y)
@@ -405,12 +362,10 @@ fn move_preview(
     else {
         return Preview::default();
     };
-    // Clips from several tracks only move sideways, each on its own track.
     let one_track = clips
         .iter()
         .all(|c| ctx.track_of(c).is_some_and(|t| t.id == from));
     let dest = if one_track { dest } else { from.to_string() };
-    // Only audio goes on audio tracks.
     if dest.starts_with('A') && clips.iter().any(|c| ctx.clip(c).is_some_and(|c| c.video)) {
         return Preview::default();
     }
@@ -435,7 +390,6 @@ fn move_preview(
     if dest == MAIN {
         let own = |f: i64| from == MAIN && (f == start || f == start + len);
         let end = t.end();
-        // Dropping on an edit point inserts there.
         if let Some(e) = edit_near(t, &ctx.scale, pos.x, DROP_EDIT_PX).filter(|&e| !own(e)) {
             return Preview {
                 request: request(
@@ -448,8 +402,6 @@ fn move_preview(
                 ..Preview::default()
             };
         }
-        // Over another Track 1 clip: replace it right away, overwrite after
-        // hovering. Clips from other tracks only overwrite.
         let on_main = under
             .as_ref()
             .filter(|u| !clips.contains(u))
@@ -477,7 +429,6 @@ fn move_preview(
                 ..Preview::default()
             };
         }
-        // Past the end: move to the end.
         if pos.x > ctx.scale.xf(end) + DROP_EDIT_PX && (from != MAIN || start + len < end) {
             return Preview {
                 request: request(
@@ -490,11 +441,8 @@ fn move_preview(
                 ..Preview::default()
             };
         }
-        // Elsewhere (over itself, a gap, or a neighbor's edge without the
-        // pointer reaching it): overwrite at the new position.
         return overwrite_move(clips, ghost, len, snapped, &dest, &elsewhere);
     }
-    // Other tracks don't ripple: the clips go where they are dropped.
     if elsewhere.is_none() && ghost == start {
         return Preview {
             ghost: Some((start, start + len)),
@@ -506,8 +454,6 @@ fn move_preview(
     overwrite_move(clips, ghost, len, snapped, &dest, &elsewhere)
 }
 
-/// Moving `clips` to `ghost` on `dest`, overwriting; `track` names `dest`
-/// when it isn't their own track.
 fn overwrite_move(
     clips: &[String],
     ghost: i64,
@@ -555,7 +501,6 @@ fn media_preview(
             .project
             .media(media)
             .is_some_and(|m| m.info.video.is_some());
-    // Sound alone goes on an audio track.
     if !has_video && dest.starts_with('V') {
         let audio = ctx.project.tracks_of(TrackKind::Audio);
         dest = audio
@@ -577,7 +522,6 @@ fn media_preview(
     };
     let row = Some(dest.clone());
     if dest != MAIN {
-        // Other tracks: written where it is dropped (made if new).
         let raw = ctx.scale.boundary(pos.x).max(0);
         let (at, snapped) = match ctx.snap {
             Some(s) => s.snap_block(raw, len, &ctx.scale, SNAP_PX),
@@ -600,7 +544,6 @@ fn media_preview(
         };
     }
     let end = t.end();
-    // An empty timeline, or past the last clip: append (spec §7.3).
     if t.clips.is_empty() || pos.x > ctx.scale.xf(end) + DROP_EDIT_PX {
         return Preview {
             request: request("edit.append", source),
@@ -610,7 +553,6 @@ fn media_preview(
             ..Preview::default()
         };
     }
-    // Left of the first clip: it becomes the first clip.
     let first = t.clips[0].start;
     if pos.x < ctx.scale.xf(first) - DROP_EDIT_PX {
         return Preview {
@@ -664,7 +606,6 @@ fn media_preview(
             ..Preview::default()
         };
     }
-    // In a gap (Ripple Off timelines): write into it.
     let at = ctx.scale.boundary(pos.x).max(0);
     Preview {
         request: request(
@@ -678,8 +619,6 @@ fn media_preview(
     }
 }
 
-/// Frames the pointer has moved since the press (edges follow the pointer
-/// rather than jumping to it).
 fn moved(ctx: &Ctx, press: Pos2, pos: Pos2) -> i64 {
     (f64::from(pos.x - press.x) / ctx.scale.ppf).round() as i64
 }
@@ -713,7 +652,6 @@ fn roll_preview(ctx: &Ctx, target: i64, outgoing: &str, from: i64) -> Preview {
 }
 
 fn slip_preview(ctx: &Ctx, pos: Pos2, press: Pos2, clips: &[String]) -> Preview {
-    // The content follows the pointer: dragging right shows earlier media.
     let moved = (f64::from(pos.x - press.x) / ctx.scale.ppf).round() as i64;
     let mut by = -moved;
     for id in clips {
@@ -751,7 +689,6 @@ fn audio_roll_preview(ctx: &Ctx, target: i64, outgoing: &str, from: i64) -> Prev
     };
     let tail = a.audio.as_ref().map_or(0, |x| x.tail);
     let (target, snapped) = ctx.snapped(target);
-    // The audio edit stays within the two clips.
     let lo = 1 - a.duration - tail;
     let hi = b.duration - 1 - tail;
     let delta = (target - from).clamp(lo.min(0), hi.max(0));
@@ -884,8 +821,6 @@ mod tests {
         }
     }
 
-    /// 25 fps; m1 has 500 frames. c1 0..100 (src 0), c2 100..150 (src 200),
-    /// c3 150..250 (src 300). Drawn at 2 px per frame, track y 100..200.
     fn project() -> Project {
         let mut p = Project::new(Settings {
             fps: Rational::new(25, 1).unwrap(),
@@ -913,8 +848,6 @@ mod tests {
         rows: Rows,
     }
 
-    /// V1 at y 100..200, V2 above it at 40..90 when there is one, and the
-    /// strip for a new video track above that.
     fn rows(p: &Project) -> Rows {
         let mut rows = vec![super::super::geometry::Row {
             track: "V1".into(),
@@ -953,7 +886,6 @@ mod tests {
             }
         }
 
-        /// With a V2 track holding `clips`.
         fn with_v2(clips: Vec<Clip>) -> Self {
             let mut p = project();
             p.tracks.insert(
@@ -983,8 +915,6 @@ mod tests {
             }
         }
 
-        /// Presses at `from`, moves through `path` (pausing `pause` at the
-        /// last point) and releases there.
         fn drag(
             &self,
             gesture: Gesture,
@@ -1017,7 +947,6 @@ mod tests {
 
     #[test]
     fn dropping_a_clip_on_an_edit_inserts_there() {
-        // The edit highlights; the clip is inserted there.
         let w = World::new();
         let r = w.drag(
             mv(&["c3"], 400.0, 150, 100),
@@ -1035,7 +964,6 @@ mod tests {
 
     #[test]
     fn dropping_on_a_clip_replaces_it_and_hovering_overwrites() {
-        // Decision D11.
         let w = World::new();
         let quick = w.drag(
             mv(&["c3"], 400.0, 150, 100),
@@ -1053,7 +981,6 @@ mod tests {
             &[pos2(120.0, 150.0)],
             HOVER,
         );
-        // The pointer moved 140 frames left: the block lands at 10.
         assert_eq!(
             slow,
             Some(
@@ -1064,7 +991,6 @@ mod tests {
 
     #[test]
     fn moves_snap_to_edges() {
-        // §8.8: c2's head lands 3 frames from c3's end (250) and snaps.
         let mut w = World::new();
         w.snapping = true;
         w.snap = Snap::new(&w.p, None, &["c2".to_string()]);
@@ -1083,8 +1009,6 @@ mod tests {
 
     #[test]
     fn safe_edit_stops_at_the_neighbor_until_pushed() {
-        // With Ripple Off: c2 (100..150) ends where c3 starts, so
-        // extending its tail stops at once; pushing on overrides it.
         let mut w = World::new();
         w.safe_edit = true;
         let g = Gesture::Trim {
@@ -1106,7 +1030,6 @@ mod tests {
 
     #[test]
     fn media_drops_follow_the_cut_page_rules() {
-        // Spec §7.3.
         let w = World::new();
         let g = || Gesture::Media {
             media: "m2".into(),
@@ -1116,28 +1039,22 @@ mod tests {
         };
         let at = |x: f32, pause: Duration| w.drag(g(), pos2(x, 150.0), &[pos2(x, 150.0)], pause);
         let method = |v: Option<Value>| v.map(|v| (v["method"].clone(), v["params"].clone()));
-        // Past the end: append.
         assert_eq!(
             method(at(700.0, Duration::ZERO)).unwrap().0,
             json!("edit.append")
         );
-        // On an edit: insert.
         let (m, p) = method(at(299.0, Duration::ZERO)).unwrap();
         assert_eq!((m, p["at"].clone()), (json!("edit.insert"), json!(150)));
-        // On a clip right away: ripple overwrite of that clip.
         let (m, p) = method(at(400.0, Duration::ZERO)).unwrap();
         assert_eq!(m, json!("edit.ripple_overwrite"));
         assert_eq!(
             (p["at"].clone(), p["use_marks"].clone()),
             (json!(150), json!(false))
         );
-        // After hovering: overwrite at the pointer.
         let (m, p) = method(at(400.0, HOVER)).unwrap();
         assert_eq!((m, p["at"].clone()), (json!("edit.overwrite"), json!(200)));
     }
 
-    /// A clip moved along a track other than Track 1 shows there while it
-    /// is dragged, not on Track 1.
     #[test]
     fn a_moved_clip_shows_on_its_own_track() {
         let w = World::with_v2(vec![clip("b1", 300, 40, 0)]);
@@ -1166,7 +1083,6 @@ mod tests {
 
     #[test]
     fn sound_alone_goes_on_an_audio_track() {
-        // Music dropped on a video track goes to an audio track.
         let mut w = World::new();
         let mut music = media("m3", 500);
         music.info.video = None;

@@ -8,7 +8,9 @@ vidcut is a video cutting tool modeled on DaVinci Resolve's Cut page, in Rust: t
 
 1. **The Cut page is the spec.** Default behavior is whatever Resolve's Cut page does; see [docs/cut-page-spec.md](docs/cut-page-spec.md) (with manual page numbers).
    - Deviate only when you have a clearly better idea, and record it in [docs/deviations.md](docs/deviations.md) with Resolve's behavior and page, our behavior, and the justification.
-2. **The code never names DaVinci Resolve.** Nothing in `crates/`, comments included, mentions Resolve or cites its manual's pages, and neither does anything vidcut shows or prints (GUI text, `--help`, the schema, MCP text, errors). Cite the spec instead (`spec §7`, `decision D41`, `deviation X9`); the spec maps to the manual. The only exception is file-format data other editors need, such as the OTIO metadata keys they read.
+2. **The code never names DaVinci Resolve, and has no comments.** Nothing in `crates/` mentions Resolve or cites its manual's pages, and neither does anything vidcut shows or prints (GUI text, `--help`, the schema, MCP text, errors). The only exception is file-format data other editors need, such as the OTIO metadata keys they read.
+   - No comments in `crates/` except the schema's doc comments (shipped text: `vidcut schema`, `--help`, MCP) and one-line `// SAFETY:` comments. A public unsafe fn also has the `# Safety` section clippy requires, one line under its heading. `scripts/check.sh` enforces it.
+   - Why the code is built the way it is goes in the design docs in `docs/design/`.
 3. **Everything is scriptable:** every GUI action can also be done from the CLI, IPC and MCP.
 4. **No media in git.**
    - Test media, generated fixtures and the manual live in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`), the one place for test data. Test outputs go to temp dirs.

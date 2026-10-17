@@ -1,12 +1,3 @@
-//! The parts of FFmpeg vidcut uses that a build may lack. Encoders and
-//! filters from other libraries (x264, zimg, …) are there as FFmpeg was
-//! configured; FFmpeg's own are in every usual build. `doctor` lists what
-//! this one lacks, and a part missing where it is needed fails as
-//! [`Error::Missing`], named with what it does and where it comes from.
-//!
-//! `VIDCUT_FFMPEG_WITHOUT` (names, comma-separated: `zscale,libx264`) makes
-//! parts count as missing, to try a build without them.
-
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
@@ -15,7 +6,6 @@ use serde::Serialize;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg;
 
-/// What a part is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -32,21 +22,16 @@ impl Kind {
     }
 }
 
-/// One of a part's encoders or filters: its name in FFmpeg and the
-/// library it comes with (`None`: FFmpeg's own).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Name {
     pub name: &'static str,
     pub library: Option<&'static str>,
 }
 
-/// A part of FFmpeg vidcut uses, by what it does: any of its names does
-/// it, the first best.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Part {
     pub kind: Kind,
     pub names: &'static [Name],
-    /// What vidcut does with it.
     pub used_for: &'static str,
 }
 
@@ -104,7 +89,6 @@ pub const OPUS: Part = encoder(&[lib("libopus", "libopus"), own("opus")], "Opus 
 pub const MP3: Part = encoder(&[lib("libmp3lame", "LAME")], "MP3 sound");
 pub const ZSCALE: Part = filter(&[lib("zscale", "zimg")], "faster HDR conversion");
 
-/// The parts vidcut uses.
 pub const PARTS: &[Part] = &[
     H264,
     HEVC,
@@ -140,7 +124,6 @@ pub const PARTS: &[Part] = &[
     filter(&[own("ebur128")], "loudness"),
 ];
 
-/// The names `VIDCUT_FFMPEG_WITHOUT` makes count as missing.
 fn without() -> &'static HashSet<String> {
     static WITHOUT: OnceLock<HashSet<String>> = OnceLock::new();
     WITHOUT.get_or_init(|| {
@@ -154,25 +137,20 @@ fn without() -> &'static HashSet<String> {
     })
 }
 
-/// Whether this FFmpeg has the encoder `name`.
 pub fn has_encoder(name: &str) -> bool {
     !without().contains(name) && ffmpeg::encoder::find_by_name(name).is_some()
 }
 
-/// Whether this FFmpeg has the filter `name`.
 pub fn has_filter(name: &str) -> bool {
     !without().contains(name) && ffmpeg::filter::find(name).is_some()
 }
 
-/// Whether this FFmpeg's filter `name` takes the option `option`: a newer
-/// FFmpeg's filters do more, and say so in their options.
 pub(crate) fn filter_has_option(name: &str, option: &str) -> bool {
     let Some(filter) = ffmpeg::filter::find(name) else {
         return false;
     };
     let option = std::ffi::CString::new(option).expect("an option's name");
-    // SAFETY: the filter's own class, searched without an object as
-    // FFmpeg's option listing searches it.
+    // SAFETY: the filter's static class, not null, searched with `AV_OPT_SEARCH_FAKE_OBJ`.
     unsafe {
         let mut class = (*filter.as_ptr()).priv_class;
         if class.is_null() {
@@ -196,7 +174,6 @@ fn has(kind: Kind, name: &str) -> bool {
     }
 }
 
-/// The first of `part`'s names this FFmpeg has.
 pub fn first(part: &Part) -> Option<&'static str> {
     part.names
         .iter()
@@ -204,7 +181,6 @@ pub fn first(part: &Part) -> Option<&'static str> {
         .find(|n| has(part.kind, n))
 }
 
-/// The parts this FFmpeg lacks.
 pub fn missing() -> Vec<Part> {
     PARTS
         .iter()
@@ -213,8 +189,6 @@ pub fn missing() -> Vec<Part> {
         .collect()
 }
 
-/// The parts this FFmpeg does with other than their first name, and the
-/// name it does each with.
 pub fn stand_ins() -> Vec<(Part, &'static str)> {
     PARTS
         .iter()
@@ -222,8 +196,6 @@ pub fn stand_ins() -> Vec<(Part, &'static str)> {
         .collect()
 }
 
-/// The error for `part`, which this FFmpeg lacks, in words: what it
-/// can't do, and what it was built without.
 pub fn part_missing(part: &Part) -> Error {
     let without = |n: &Name| match n.library {
         Some(library) => format!("{library} ({})", n.name),
@@ -243,8 +215,6 @@ pub fn part_missing(part: &Part) -> Error {
     })
 }
 
-/// The error for a `kind` named `name` this FFmpeg lacks: its part's, when
-/// it is a part's only name.
 pub fn missing_error(kind: Kind, name: &str) -> Error {
     match PARTS
         .iter()
@@ -255,8 +225,6 @@ pub fn missing_error(kind: Kind, name: &str) -> Error {
     }
 }
 
-/// A decoder for a stream of `id` opened, or why not: none for its codec
-/// in this FFmpeg fails as [`Error::Missing`].
 pub(crate) fn decoder_opened<T>(
     opened: std::result::Result<T, ffmpeg::Error>,
     id: ffmpeg::codec::Id,
@@ -271,8 +239,6 @@ pub(crate) fn decoder_opened<T>(
     }
 }
 
-/// Parses `spec` into `graph`, between its `in` and `out`. A filter this
-/// FFmpeg lacks fails as [`Error::Missing`].
 pub(crate) fn parse_filters(graph: &mut ffmpeg::filter::Graph, spec: &str) -> Result<()> {
     if let Some(name) = filter_names(spec).find(|n| without().contains(*n)) {
         return Err(missing_error(Kind::Filter, name));
@@ -281,8 +247,6 @@ pub(crate) fn parse_filters(graph: &mut ffmpeg::filter::Graph, spec: &str) -> Re
         .output("in", 0)
         .and_then(|p| p.input("out", 0))
         .and_then(|p| p.parse(spec));
-    // FFmpeg fails an unknown filter as not found or as an invalid
-    // argument, depending on where its parser meets it.
     if parsed.is_err()
         && let Some(name) = filter_names(spec).find(|n| ffmpeg::filter::find(n).is_none())
     {
@@ -291,7 +255,6 @@ pub(crate) fn parse_filters(graph: &mut ffmpeg::filter::Graph, spec: &str) -> Re
     parsed.ctx(|| format!("building filter {spec}"))
 }
 
-/// The filters `spec` names, in order: `scale` of `[a]scale=w=1:h=2`.
 fn filter_names(spec: &str) -> impl Iterator<Item = &str> {
     spec.split([',', ';']).filter_map(|f| {
         let mut f = f.trim();

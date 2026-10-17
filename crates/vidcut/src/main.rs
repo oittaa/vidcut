@@ -12,15 +12,10 @@ use vidcut::output;
 use vidcut_core::{Envelope, Error, Response, Result};
 
 fn main() -> ExitCode {
-    // SVT-AV1 logs at info level to stderr unless told otherwise. Set it here,
-    // before any threads exist, where changing the environment is sound.
     if std::env::var_os("SVT_LOG").is_none() {
         // SAFETY: single-threaded at this point.
         unsafe { std::env::set_var("SVT_LOG", "2") };
     }
-    // So does libva, four lines each time Intel's QSV runtime opens a
-    // display of its own (FFmpeg's displays log to FFmpeg's log): errors
-    // only.
     if cfg!(target_os = "linux") && std::env::var_os("LIBVA_MESSAGING_LEVEL").is_none() {
         // SAFETY: single-threaded at this point.
         unsafe { std::env::set_var("LIBVA_MESSAGING_LEVEL", "1") };
@@ -29,9 +24,6 @@ fn main() -> ExitCode {
     vidcut_av::cuda::keep_shaders_in(vidcut::paths::cache_dir().join("shaders"));
     vidcut_av::light::cache_in(vidcut::paths::cache_dir().join("analysis"));
     let ran = run(&cli);
-    // The threads players and readers left to end close what they hold
-    // before the process exits: a GPU decoder closing during the exit hangs
-    // it (gotchas.md).
     vidcut_av::ending::join();
     match ran {
         Ok(()) => ExitCode::SUCCESS,
@@ -94,7 +86,6 @@ fn run(cli: &Cli) -> Result<()> {
     }
 }
 
-/// Runs one request in the GUI that has the project open, or headless.
 fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
     let options = RouteOptions {
         headless: cli.headless,
@@ -107,8 +98,6 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
         envelope.request.method().as_str(),
         "export.start" | "proxy.generate"
     ) {
-        // First Ctrl-C cancels a headless export or proxy encode cleanly (no
-        // partial files); a GUI's export stops when this process ends.
         let _ = ctrlc::set_handler(|| CANCEL.store(true, Ordering::Relaxed));
     }
     let live = matches!(
@@ -134,7 +123,6 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
     })
 }
 
-/// Export progress on a terminal.
 struct ProgressBar {
     show: bool,
     last: Instant,
@@ -149,7 +137,6 @@ impl ProgressBar {
     }
 
     #[allow(clippy::too_many_arguments)]
-    /// Shows a progress event.
     fn show(&mut self, v: &Value) {
         let i = v["output"].as_u64().unwrap_or(0) as usize;
         let n = v["outputs"].as_u64().unwrap_or(1) as usize;
@@ -182,7 +169,6 @@ impl ProgressBar {
             }
             return;
         }
-        // Over both runs of a two-pass export (decision D45).
         let passes = i64::from(passes.max(1));
         let done = i64::from(pass.max(1) - 1) * total + frames;
         let pct = done * 100 / (total * passes).max(1);
@@ -209,9 +195,6 @@ impl ProgressBar {
     }
 }
 
-/// On Windows, a program for the console gets a console window of its own
-/// when started from the desktop: the GUI closes it, unless a terminal it
-/// was started from shares it.
 fn leave_own_console() {
     #[cfg(windows)]
     {

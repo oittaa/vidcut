@@ -1,16 +1,3 @@
-//! The viewer's picture (docs/decisions/preview.md §4): a thread of its
-//! own presents the player's engine, drawing the picture its clock is at
-//! with the GPU shader ([`super::picture`]) into a target the size of the
-//! viewer's picture in physical pixels, and answers the session's presents
-//! and screenshots. egui shows the target as a native texture.
-//!
-//! Not on the UI thread: while the window is hidden, presenting the window
-//! may block that thread for as long as it stays hidden (NVIDIA on
-//! Wayland), and a seek must still show its frame and the viewer be
-//! captured. The viewer thread's submissions to the same device go on
-//! meanwhile, kept out of the window's surface configures
-//! ([`super::gate`]).
-
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -28,14 +15,11 @@ use crate::live::{Capture, Presented};
 
 type Engine = Arc<Player>;
 
-/// What the session asks of the viewer thread.
 enum Task {
     Present(Presented),
     Capture(Capture),
 }
 
-/// The viewer's target as the UI shows it: counted anew with each new
-/// target.
 #[derive(Clone)]
 struct Target {
     generation: u64,
@@ -46,12 +30,9 @@ struct Target {
 struct State {
     tasks: Vec<Task>,
     engine: Option<Engine>,
-    /// The size (physical pixels) the viewer shows the picture at.
     want: [i32; 2],
     target: Option<Target>,
-    /// The target holds a picture (not black for want of one).
     has_frame: bool,
-    /// What the viewer tells of itself, for stats for nerds.
     stats: ViewerStats,
     woken: bool,
     stop: bool,
@@ -76,28 +57,21 @@ impl Shared {
     }
 }
 
-/// The viewer thread, and what the UI shows of it.
 pub struct Viewer {
     shared: Arc<Shared>,
-    /// The decoders whose pictures it shows from GPU memory.
     gpu_pictures: Vec<vidcut_av::hw::Kind>,
     thread: Option<JoinHandle<()>>,
-    /// The egui texture of the target, and the target's generation.
     texture: Option<(u64, egui::TextureId)>,
 }
 
-/// Asks things of the viewer thread from anywhere (the session's side).
 #[derive(Clone)]
 pub struct ViewerHandle {
     shared: Arc<Shared>,
 }
 
-/// When the viewer thread looks again without being woken.
 const IDLE: Duration = Duration::from_millis(100);
 
 impl Viewer {
-    /// Starts the viewer thread on eframe's device, submitting through
-    /// `gate`; `repaint` asks the UI to show a changed picture.
     pub fn start(
         render: &RenderState,
         gate: Arc<Gate>,
@@ -145,14 +119,10 @@ impl Viewer {
         }
     }
 
-    /// The decoders whose pictures it shows from GPU memory, so the player
-    /// may keep them there.
     pub fn gpu_pictures(&self) -> Vec<vidcut_av::hw::Kind> {
         self.gpu_pictures.clone()
     }
 
-    /// What the engine shown does, with what the viewer tells of itself
-    /// (stats for nerds); `None` while it shows none.
     pub fn stats(&self) -> Option<PlayerStats> {
         let (engine, viewer) = {
             let s = self.shared.lock();
@@ -169,34 +139,28 @@ impl Viewer {
 }
 
 impl ViewerHandle {
-    /// The engine the viewer shows from now on.
     pub fn attach(&self, engine: Option<Engine>) {
         self.shared.change(|s| s.engine = engine);
     }
 
-    /// Draw the picture now and say which frame it showed.
     pub fn present(&self, done: Presented) {
         self.shared.change(|s| s.tasks.push(Task::Present(done)));
     }
 
-    /// The picture the viewer shows, as drawn.
     pub fn capture(&self, done: Capture) {
         self.shared.change(|s| s.tasks.push(Task::Capture(done)));
     }
 
-    /// Looks again (a picture landed, or the session changed something).
     pub fn wake(&self) {
         self.shared.change(|_| {});
     }
 
-    /// What the viewer tells of itself, for stats for nerds.
     pub fn stats(&self) -> ViewerStats {
         self.shared.lock().stats.clone()
     }
 }
 
 impl Viewer {
-    /// The peaks of the sound the engine shown plays now, while it plays.
     pub fn levels(&self) -> Option<vidcut_av::player::Levels> {
         let engine = self.shared.lock().engine.clone()?;
         engine.levels(Instant::now())
@@ -204,9 +168,6 @@ impl Viewer {
 }
 
 impl Viewer {
-    /// The UI's side, each frame: the size the viewer shows the picture
-    /// at; the picture's egui texture (registered anew with each new
-    /// target) and whether it holds a picture.
     pub fn sync(
         &mut self,
         render: &RenderState,
@@ -223,8 +184,6 @@ impl Viewer {
             (s.target.clone(), s.has_frame)
         };
         if let Some(t) = &target {
-            // Drawn one to one: the viewer's picture rectangle is the
-            // target's size in physical pixels.
             let filter = wgpu::FilterMode::Nearest;
             match self.texture {
                 Some((g, _)) if g == t.generation => {}
@@ -255,13 +214,6 @@ impl Viewer {
 }
 
 impl Drop for Viewer {
-    /// The window closes: the viewer thread ends, and with it the screen,
-    /// whose buffers are the display's device's. The engine shown ends on
-    /// a thread of its own (`vidcut-viewer-close`), as the two-up's
-    /// players do: it holds nothing of the display's device, its pictures
-    /// being its decoder's frames, and freeing their GPU memory waits its
-    /// turn behind the two-up's players ending. The UI doesn't wait for
-    /// that.
     fn drop(&mut self) {
         let started = Instant::now();
         let mut engine = None;
@@ -295,11 +247,8 @@ impl Drop for Viewer {
     }
 }
 
-/// The viewer thread: presents the engine whenever woken, and as its clock
-/// moves while it plays.
 fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
     let mut screen = Screen::new();
-    // Counts new targets: the UI registers each anew.
     let mut generation = 0u64;
     let mut next: Option<Instant> = None;
     loop {
@@ -325,7 +274,6 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
         let now = Instant::now();
         let shown = engine.as_ref().and_then(|e| e.present(now));
         let [w, h] = want;
-        // A picture copied down or uploaded counts for the engine shown.
         let counting = engine
             .as_ref()
             .map(|e| vidcut_av::copies::Guard::set(e.copies()));
@@ -350,7 +298,6 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
         let has_frame = shown.is_some();
         let shown_how = shown.as_ref().map(|s| how(s, &screen));
         let presented = shown.filter(|s| s.exact).map(|s| s.frame);
-        // Playing: look again when the clock moves to the next frame.
         next = engine
             .as_ref()
             .and_then(|e| e.next_change(now))
@@ -382,7 +329,6 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
     }
 }
 
-/// How the picture shown got on screen.
 fn how(shown: &vidcut_av::player::Shown, screen: &Screen) -> &'static str {
     match shown.picture.gpu() {
         None => "uploaded",
@@ -391,7 +337,6 @@ fn how(shown: &vidcut_av::player::Shown, screen: &Screen) -> &'static str {
     }
 }
 
-/// wgpu's backend as people name it: `Vulkan`, `Direct3D 12`.
 fn backend_name(backend: wgpu::Backend) -> String {
     match backend {
         wgpu::Backend::Vulkan => "Vulkan".into(),
@@ -402,9 +347,6 @@ fn backend_name(backend: wgpu::Backend) -> String {
     }
 }
 
-/// What the viewer drew, for `VIDCUT_DEBUG`: the frame, the picture's size,
-/// layout and colors, where it was, what decoded it and how it got on
-/// screen.
 fn drew(shown: Option<&vidcut_av::player::Shown>, screen: &Screen) -> String {
     let Some(s) = shown else {
         return "nothing".into();
