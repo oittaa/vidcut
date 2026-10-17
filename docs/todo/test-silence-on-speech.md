@@ -6,7 +6,7 @@ Two listening tests on `nasa-speech-1979` (`tests/media-manifest.toml`), 29 minu
 - In 20 of the 30 minutes the noise between words peaks above −40 dB.
 - At −40 dB the analysis finds 40 silences (38 s), and Remove cuts 40 parts (25 s). They cover 38 of the pauses: 33 of 95 in the quiet minutes, 5 of 64 in the noisy ones.
 - At −35 dB it finds 98 (82 s), and Remove cuts 98 parts (50 s). They cover 96 of the pauses, 28 of 64 in the noisy minutes, and none lies inside speech.
-- A word rises from the noise to the threshold in at most 50 ms, well inside the Pre Head. A word's end takes up to 150 ms to fall back into the noise at −40 dB, and up to 190 ms at −35 dB. Six cuts at −35 dB start 1 to 29 ms before a word's end has fallen (Test 2 goes to them).
+- A word rises from the noise to the threshold within 50 ms at −40 dB and 100 ms at −35 dB, inside the Pre Head. A word's end takes up to 130 ms to fall back into the noise at −40 dB, and up to 220 ms at −35 dB. Six cuts at −35 dB start 1 to 29 ms before a word's end has fallen (Test 2 goes to them).
 
 **The projects** are in `~/Downloads/vidcut-tmp/silence-speech`: `speech.vidcut` holds the clip alone on V1, and `speech-35.vidcut` holds it already cut at −35 dB with the other settings at their defaults. To make `speech.vidcut` again:
 
