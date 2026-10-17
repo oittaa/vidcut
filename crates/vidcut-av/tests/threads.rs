@@ -191,6 +191,32 @@ fn a_file_left_stays_open_for_a_later_piece_of_it() {
 }
 
 #[test]
+fn a_seek_into_a_file_the_opener_holds_takes_it_back() {
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let (first, second) = (file_of(60), file_of(90));
+    let fps = Rational::new(30, 1).unwrap();
+    // A cutaway, played into its second piece: the first file, left, goes
+    // to the opener for the piece after.
+    let pieces = [
+        piece(&first, 10, 3),
+        piece(&second, 20, 3),
+        piece(&first, 50, 3),
+    ];
+    let mut frames = VideoFrames::new(&pieces, fps, 320, 180, Pixel::YUV420P, None);
+    let before = open_readers();
+    for _ in 0..5 {
+        frames.next_frame().unwrap().unwrap();
+    }
+    // A seek into the first file: taken back, not opened anew.
+    frames.read_piece(&piece(&first, 30, 1));
+    assert_eq!(
+        read_barcode(&frames.next_frame().unwrap().unwrap()).unwrap(),
+        Some(30)
+    );
+    assert_eq!(open_readers(), before + 2);
+}
+
+#[test]
 fn playing_across_a_cutaway_opens_each_file_once() {
     let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
     let (first, second) = (file_of(60), file_of(90));

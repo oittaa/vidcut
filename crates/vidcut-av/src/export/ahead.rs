@@ -146,14 +146,43 @@ impl<T: Send + 'static, K: PartialEq> Ahead<T, K> {
     /// the helper thread.
     pub(crate) fn take(&mut self, piece: usize) -> Option<Result<T>> {
         let (pending, id, _) = self.pending.take()?;
-        let shared = self.shared.as_ref()?;
-        let mut s = lock(&shared.state);
         if pending != piece {
+            let shared = self.shared.as_ref()?;
+            let mut s = lock(&shared.state);
             want(&mut s, shared, None);
             drop(s);
             shared.changed.notify_all();
             return None;
         }
+        self.collect(id)
+    }
+
+    /// The source of the job opening a file `wanted` names, pending or
+    /// forgotten, once it is open: a seek into a file the helper holds
+    /// takes it back rather than opening the file anew. `None` when no
+    /// such job is with the helper.
+    pub(crate) fn reclaim(&mut self, wanted: impl Fn(&K) -> bool) -> Option<Result<T>> {
+        let id = match (&self.pending, &self.forgotten) {
+            (Some((_, id, k)), _) if wanted(k) => {
+                let id = *id;
+                self.pending = None;
+                id
+            }
+            (_, Some((id, k))) if wanted(k) => {
+                let id = *id;
+                self.forgotten = None;
+                id
+            }
+            _ => return None,
+        };
+        self.collect(id)
+    }
+
+    /// Job `id`'s source once it is open; `None` if the job is gone (or
+    /// the helper thread is).
+    fn collect(&mut self, id: u64) -> Option<Result<T>> {
+        let shared = self.shared.as_ref()?;
+        let mut s = lock(&shared.state);
         loop {
             if s.done.as_ref().is_some_and(|(i, _)| *i == id) {
                 let (_, source) = s.done.take().expect("checked");
@@ -308,6 +337,16 @@ mod tests {
         ahead.forget();
         ahead.start(2, "c", || panic!("opened twice"));
         assert_eq!(ahead.take(2).unwrap().unwrap(), 13);
+    }
+
+    #[test]
+    fn a_forgotten_job_of_the_same_file_is_reclaimed() {
+        let mut ahead = Ahead::new();
+        ahead.start(1, ("a", 5), || Ok(11));
+        ahead.forget();
+        assert!(ahead.reclaim(|k| k.0 == "b").is_none());
+        assert_eq!(ahead.reclaim(|k| k.0 == "a").unwrap().unwrap(), 11);
+        assert!(ahead.reclaim(|k| k.0 == "a").is_none(), "taken once");
     }
 
     #[test]
