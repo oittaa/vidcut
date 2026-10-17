@@ -53,6 +53,22 @@ fn files(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+fn automatic_job(h: &live::Handle, seen: &[String]) -> Option<String> {
+    for _ in 0..1000 {
+        let job = h
+            .snapshot()
+            .jobs
+            .iter()
+            .find(|j| j.origin == Origin::Session.name() && !seen.contains(&j.id))
+            .map(|j| j.id.clone());
+        if job.is_some() {
+            return job;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    None
+}
+
 #[test]
 fn cancelled_and_automatic_proxies() {
     let tmp = tempfile::Builder::new()
@@ -123,25 +139,15 @@ fn cancelled_and_automatic_proxies() {
             { "method": "media.add", "params": { "paths": [still[0]] } },
         ] }),
     );
-    let mut job = None;
-    for _ in 0..500 {
-        job = h
-            .snapshot()
-            .jobs
-            .iter()
-            .find(|j| j.origin == Origin::Session.name())
-            .map(|j| j.id.clone());
-        if job.is_some() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    ok(
-        &h,
-        "jobs.wait",
-        json!({ "job": job.expect("an automatic proxy") }),
-    );
-    assert!(ok(&h, "media.get", json!({ "media": "m2" }))["proxy"].is_object());
+    let first = automatic_job(&h, &[]).expect("an automatic proxy");
+    ok(&h, "jobs.wait", json!({ "job": first }));
+    let made = ok(&h, "media.get", json!({ "media": "m2" }))["proxy"]["path"].clone();
+    let made = PathBuf::from(made.as_str().expect("a proxy"));
+
+    std::fs::remove_file(&made).unwrap();
+    let again = automatic_job(&h, &[first]).expect("the lost proxy made again");
+    ok(&h, "jobs.wait", json!({ "job": again }));
+    assert!(made.is_file());
 
     h.shutdown();
     let _ = session.join();

@@ -145,6 +145,7 @@ pub struct Snapshot {
     pub notices: Arc<VecDeque<Notice>>,
     pub thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     pub missing: Arc<HashSet<String>>,
+    pub lost_proxies: Arc<HashMap<String, PathBuf>>,
     pub waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     pub jobs: Arc<Vec<super::JobInfo>>,
     pub audio_scrubbing: bool,

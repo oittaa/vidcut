@@ -96,6 +96,10 @@ pub trait Env {
         !crate::store::from_another_system(&m.path) && m.path.is_file()
     }
 
+    fn proxy_present(&self, proxy: &Proxy) -> bool {
+        !crate::store::from_another_system(&proxy.path) && proxy.path.is_file()
+    }
+
     fn audio_levels(&self, media: &Media, stream: u32) -> Result<Arc<AudioLevels>>;
 
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>>;
@@ -3150,8 +3154,9 @@ fn proxy_generate(
     let mut ids = proxy_targets(p, media)?;
     if auto {
         ids.retain(|id| {
-            p.media(id)
-                .is_some_and(|m| rules.wants(m) && m.fresh_proxy().is_none())
+            p.media(id).is_some_and(|m| {
+                rules.wants(m) && !m.fresh_proxy().is_some_and(|x| env.proxy_present(x))
+            })
         });
     }
     let dir = env.proxy_dir();
@@ -3688,6 +3693,9 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env) -> Value {
             "codec": px.codec,
             "stale": m.fresh_proxy().is_none(),
         });
+        if !env.proxy_present(px) {
+            v["proxy"]["missing"] = json!(true);
+        }
     }
     if let Some(tc) = m.info.timecode {
         let fps = match &m.info.video {

@@ -234,22 +234,42 @@ fn sort_label(s: PoolSort) -> &'static str {
     }
 }
 
-fn proxy_state(m: &Media) -> Option<(&'static str, Color32, String)> {
+struct ProxyState {
+    badge: &'static str,
+    column: String,
+    color: Color32,
+    tip: String,
+}
+
+fn proxy_state(m: &Media, lost: bool) -> Option<ProxyState> {
     let p = m.proxy.as_ref()?;
-    Some(if m.fresh_proxy().is_some() {
-        (
-            "PROXY",
-            theme::colors().ok,
-            format!("Proxy: {}x{} (plays when Proxies is on)", p.width, p.height),
-        )
+    Some(if lost {
+        ProxyState {
+            badge: "LOST PROXY",
+            column: "file gone".into(),
+            color: theme::colors().error,
+            tip: format!(
+                "The proxy file is gone, so the original plays: {}. Generate Proxy makes it \
+                 again.",
+                p.path.display()
+            ),
+        }
+    } else if m.fresh_proxy().is_some() {
+        ProxyState {
+            badge: "PROXY",
+            column: format!("{}x{}", p.width, p.height),
+            color: theme::colors().ok,
+            tip: format!("Proxy: {}x{} (plays when Proxies is on)", p.width, p.height),
+        }
     } else {
-        (
-            "OLD PROXY",
-            theme::colors().error,
-            "The proxy is out of date: the file changed after it was made, so \
-             the original plays. Generate Proxy makes a new one."
-                .to_string(),
-        )
+        ProxyState {
+            badge: "OLD PROXY",
+            column: "out of date".into(),
+            color: theme::colors().error,
+            tip: "The proxy is out of date: the file changed after it was made, so the \
+                  original plays. Generate Proxy makes a new one."
+                .into(),
+        }
     })
 }
 
@@ -955,9 +975,9 @@ impl Workspace {
         if missing {
             badge("MISSING", theme::colors().error, false);
         }
-        let proxy = proxy_state(m);
-        if let Some((text, color, _)) = &proxy {
-            badge(text, *color, true);
+        let proxy = proxy_state(m, self.snap.lost_proxies.contains_key(&m.id));
+        if let Some(px) = &proxy {
+            badge(px.badge, px.color, true);
         }
         format!(
             "{}\n{}\n{}{}{}I/O while hovering marks the clip; double-click opens it",
@@ -968,7 +988,7 @@ impl Workspace {
             } else {
                 ""
             },
-            proxy.map_or(String::new(), |(_, _, tip)| format!("{tip}\n")),
+            proxy.map_or(String::new(), |px| format!("{}\n", px.tip)),
             m.color.as_deref().map_or(String::new(), |c| {
                 format!("Clip Color: {}\n", theme::color_title(c))
             }),
@@ -1159,17 +1179,12 @@ impl Workspace {
                     None => "none".into(),
                 });
             }
-            6 => match (proxy_state(m), &m.proxy) {
-                (Some((_, color, tip)), Some(p)) => {
-                    let text = if m.fresh_proxy().is_some() {
-                        format!("{}x{}", p.width, p.height)
-                    } else {
-                        "out of date".into()
-                    };
-                    ui.label(RichText::new(text).color(color))
-                        .on_hover_text(tip);
+            6 => match proxy_state(m, self.snap.lost_proxies.contains_key(&m.id)) {
+                Some(px) => {
+                    ui.label(RichText::new(px.column).color(px.color))
+                        .on_hover_text(px.tip);
                 }
-                _ => {
+                None => {
                     ui.label("-");
                 }
             },

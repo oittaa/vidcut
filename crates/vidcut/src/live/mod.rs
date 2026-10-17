@@ -190,7 +190,10 @@ pub(crate) struct Job {
 }
 
 pub(crate) enum Msg {
-    Missing(HashSet<String>),
+    Missing {
+        media: HashSet<String>,
+        proxies: HashMap<String, PathBuf>,
+    },
     Request {
         envelope: Envelope,
         origin: Origin,
@@ -407,6 +410,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         notices: Arc::new(VecDeque::new()),
         thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
+        lost_proxies: Arc::new(HashMap::new()),
         waveforms: Arc::new(HashMap::new()),
         jobs: Arc::new(Vec::new()),
         audio_scrubbing: true,
@@ -456,6 +460,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         notice_seq: 0,
         thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
+        lost_proxies: Arc::new(HashMap::new()),
         missing_watch: missing::MissingWatch::start(tx.clone()),
         thumbs_wanted: HashMap::new(),
         waveforms: Arc::new(HashMap::new()),
@@ -656,6 +661,7 @@ struct Live {
     notice_seq: u64,
     thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     missing: Arc<HashSet<String>>,
+    lost_proxies: Arc<HashMap<String, PathBuf>>,
     missing_watch: missing::MissingWatch,
     thumbs_wanted: HashMap<String, String>,
     waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
@@ -864,7 +870,18 @@ impl Live {
                 }
                 Err(e) => self.notice(format!("waveform of {media}: {e}"), true),
             },
-            Msg::Missing(missing) => self.missing = Arc::new(missing),
+            Msg::Missing { media, proxies } => {
+                let lost: Vec<String> = proxies
+                    .iter()
+                    .filter(|(id, path)| self.lost_proxies.get(*id) != Some(*path))
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                self.missing = Arc::new(media);
+                self.lost_proxies = Arc::new(proxies);
+                if !lost.is_empty() {
+                    self.make_proxies(Some(&lost));
+                }
+            }
             Msg::Thumbs { media, wanted, .. }
                 if self.thumbs_wanted.get(&media) != Some(&wanted) =>
             {
@@ -1070,6 +1087,7 @@ impl Live {
             notices: self.notices.clone(),
             thumbs: self.thumbs.clone(),
             missing: self.missing.clone(),
+            lost_proxies: self.lost_proxies.clone(),
             waveforms: self.waveforms.clone(),
             jobs: self.jobs.clone(),
             audio_scrubbing: self.audio_scrubbing,
@@ -1634,19 +1652,16 @@ impl Live {
         let Ok(response) = result else {
             return;
         };
-        let added: Option<Vec<&str>> = match job.method.as_str() {
+        let added = match job.method.as_str() {
             _ if job.dry_run => return,
-            "media.add" | "timeline.import" | "apply" => Some(
-                response
-                    .changes
-                    .created
-                    .iter()
-                    .map(String::as_str)
-                    .collect(),
-            ),
+            "media.add" | "timeline.import" | "apply" => Some(&response.changes.created),
             "project.set" if job.params["use_proxies"] == json!(true) => None,
             _ => return,
         };
+        self.make_proxies(added.map(Vec::as_slice));
+    }
+
+    fn make_proxies(&self, only: Option<&[String]>) {
         let Some(open) = &self.project else {
             return;
         };
@@ -1662,8 +1677,11 @@ impl Live {
         let ids: Vec<&str> = p
             .media
             .iter()
-            .filter(|m| added.as_ref().is_none_or(|a| a.contains(&m.id.as_str())))
-            .filter(|m| rules.wants(m) && m.fresh_proxy().is_none() && !busy.contains(&m.id))
+            .filter(|m| only.is_none_or(|a| a.contains(&m.id)))
+            .filter(|m| {
+                let made = m.fresh_proxy().is_some() && !self.lost_proxies.contains_key(&m.id);
+                rules.wants(m) && !made && !busy.contains(&m.id)
+            })
             .map(|m| m.id.as_str())
             .collect();
         if ids.is_empty() {
@@ -2355,7 +2373,7 @@ impl Live {
     fn project_changed(&mut self, response: Option<&Response>) {
         let Some(open) = &self.project else {
             self.project_snap = None;
-            self.missing_watch.watch(Vec::new());
+            self.missing_watch.watch(Vec::new(), Vec::new());
             return;
         };
         let p = open.project();
@@ -2363,6 +2381,10 @@ impl Live {
             p.media
                 .iter()
                 .map(|m| (m.id.clone(), m.path.clone()))
+                .collect(),
+            p.media
+                .iter()
+                .filter_map(|m| Some((m.id.clone(), m.proxy.as_ref()?.path.clone())))
                 .collect(),
         );
         let history = open.editor.history_labels(1).unwrap_or_default();
