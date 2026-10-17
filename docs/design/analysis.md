@@ -42,7 +42,7 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 | waveforms | `waveforms` | origin, channels |
 | audio levels, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
 | light, for HDR metadata | `analysis` (`light::cache_in`) | origin |
-| proxies | `proxies` beside the project; the cache dir without one | origin, size, codec |
+| proxies | `proxies.folder` (`Proxies::folder_in`): `proxies` beside the project unless set (in the cache dir without a project); an absolute folder is shared by every project | origin, size, codec |
 | GPU encoders that work | `encoders.json` (`export::detected`) | FFmpeg, system and GPUs |
 | proxy codecs the GPU decoder plays | `plays.json` (`export::plays`) | the same, per GPU |
 | clips for decoder tests | `decoder-tests` | none |

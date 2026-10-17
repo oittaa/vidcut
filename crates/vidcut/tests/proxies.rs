@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use vidcut::live::{self, Capture, Origin, Presented, WindowChange};
-use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
+use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, ErrorCode, Project, Store};
@@ -53,7 +54,7 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn a_cancelled_proxy_leaves_nothing() {
+fn cancelled_and_automatic_proxies() {
     let tmp = tempfile::Builder::new()
         .prefix("vidcut-proxies-")
         .tempdir_in(vidcut_av::testdata::temp_dir())
@@ -110,6 +111,37 @@ fn a_cancelled_proxy_leaves_nothing() {
     assert!(ok(&h, "media.get", json!({ "media": "m1" }))["proxy"].is_null());
     let proxies = dir.join("proxies");
     assert!(files(&proxies).is_empty(), "{:?}", files(&proxies));
+
+    let sequence = fixture::ensure_images(&ImageSpec::sequence(1, 30, 6, 320, 180)).unwrap();
+    let still = fixture::ensure_images(&ImageSpec::still(7, 320, 180, "png")).unwrap();
+    ok(&h, "project.set", json!({ "use_proxies": true }));
+    ok(
+        &h,
+        "apply",
+        json!({ "commands": [
+            { "method": "media.add", "params": { "paths": [sequence[0]], "sequence": true } },
+            { "method": "media.add", "params": { "paths": [still[0]] } },
+        ] }),
+    );
+    let mut job = None;
+    for _ in 0..500 {
+        job = h
+            .snapshot()
+            .jobs
+            .iter()
+            .find(|j| j.origin == Origin::Session.name())
+            .map(|j| j.id.clone());
+        if job.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    ok(
+        &h,
+        "jobs.wait",
+        json!({ "job": job.expect("an automatic proxy") }),
+    );
+    assert!(ok(&h, "media.get", json!({ "media": "m2" }))["proxy"].is_object());
 
     h.shutdown();
     let _ = session.join();

@@ -240,7 +240,8 @@ const EXAMPLES: &[(&str, &str)] = &[
         "preferences.set",
         "vidcut preferences set thumbnails.cache_limit_mb=256\n  \
          vidcut preferences set thumbnails.disk_cache=false   # also empties the cache\n  \
-         vidcut preferences set proxies.codec=auto",
+         vidcut preferences set proxies.codec=auto\n  \
+         vidcut preferences set proxies.folder=\"$HOME/proxies\"   # one folder for every project",
     ),
     (
         "player.seek",

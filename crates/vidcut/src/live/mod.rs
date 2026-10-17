@@ -1636,7 +1636,7 @@ impl Live {
         };
         let added: Option<Vec<&str>> = match job.method.as_str() {
             _ if job.dry_run => return,
-            "media.add" | "timeline.import" => Some(
+            "media.add" | "timeline.import" | "apply" => Some(
                 response
                     .changes
                     .created

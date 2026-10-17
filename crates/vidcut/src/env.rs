@@ -199,10 +199,8 @@ impl Env for AvEnv {
     }
 
     fn proxy_dir(&self) -> PathBuf {
-        match &self.project_dir {
-            Some(dir) => dir.join("proxies"),
-            None => paths::cache_dir().join("proxies"),
-        }
+        let dir = self.project_dir.clone().unwrap_or_else(paths::cache_dir);
+        self.proxy_rules().folder_in(&dir)
     }
 
     fn generate_proxy(
