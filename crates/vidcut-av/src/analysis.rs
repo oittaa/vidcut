@@ -114,6 +114,10 @@ fn stats_on(
     if pictures == Some(0) {
         return Ok(Some(PictureStats::default()));
     }
+    let _turn = match gpu {
+        Some(_) => None,
+        None => Some(crate::turns::cpu_analysis()?),
+    };
     let path = source.path();
     let mut input = source.open()?;
     let stream = input
