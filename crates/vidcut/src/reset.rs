@@ -43,6 +43,7 @@ pub fn run(presets_and_themes: bool, dry_run: bool) -> Result<Value> {
     {
         keep.push(p.proxies.folder);
     }
+    let (dirs, keep) = resolved(dirs, keep);
     let (removed, kept) = plan(&dirs, &keep)?;
     if !dry_run {
         for path in &removed {
@@ -50,6 +51,16 @@ pub fn run(presets_and_themes: bool, dry_run: bool) -> Result<Value> {
         }
     }
     Ok(json!({ "removed": removed, "kept": kept }))
+}
+
+fn resolved(dirs: Dirs, keep: Vec<PathBuf>) -> (Dirs, Vec<PathBuf>) {
+    let real = |p: PathBuf| vidcut_core::dirs::canonical(&p).unwrap_or(p);
+    let dirs = Dirs {
+        config: real(dirs.config),
+        cache: real(dirs.cache),
+        state: real(dirs.state),
+    };
+    (dirs, keep.into_iter().map(real).collect())
 }
 
 pub fn plan(dirs: &Dirs, keep: &[PathBuf]) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
@@ -178,6 +189,25 @@ mod tests {
                     "config/presets".to_string(),
                     "state/history/open.jsonl".into()
                 ],
+            )
+        );
+    }
+
+    #[test]
+    fn a_kept_path_written_with_dot_dot_still_stays() {
+        let root = tempfile::tempdir().unwrap();
+        let r = &vidcut_core::dirs::canonical(root.path()).unwrap();
+        tree(r, &["cache/thumbs/a.jpg", "cache/shared/a.mkv"]);
+        let (d, keep) = resolved(
+            dirs(r, "config", "cache", "state"),
+            vec![r.join("cache/thumbs/../shared")],
+        );
+        let (removed, kept) = plan(&d, &keep).unwrap();
+        assert_eq!(
+            (names(r, &removed), names(r, &kept)),
+            (
+                vec!["cache/thumbs".to_string()],
+                vec!["cache/shared".to_string()]
             )
         );
     }

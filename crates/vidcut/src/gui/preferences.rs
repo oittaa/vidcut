@@ -245,7 +245,7 @@ impl Workspace {
                     };
                     return;
                 };
-                let busy = ui_state.ask.is_some();
+                let busy = ui_state.ask.is_some() || ui_state.resetting.is_some();
                 egui::ScrollArea::vertical()
                     .max_height(height)
                     .min_scrolled_height(height)
@@ -313,7 +313,8 @@ impl Workspace {
                  projects), the recent projects, view settings and remembered folders.",
             );
             ui.label(dim(
-                "Projects, media and proxies stay, but proxies in vidcut's cache. This can't be undone.",
+                "Projects, media, a proxy folder you set and the proxies in it stay; proxies \
+                 vidcut made in its own cache go. This can't be undone.",
             ));
             ui.checkbox(
                 &mut ui_state.reset_presets_and_themes,
