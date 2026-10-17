@@ -1,7 +1,3 @@
-//! The timeline's header column fits in every built-in theme (egui_kittest,
-//! no window): the target track button sits within the overview's row,
-//! whatever size the theme gives buttons.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -98,7 +94,6 @@ fn the_target_track_button_fits_beside_the_overview_in_every_theme() {
             std::thread::sleep(Duration::from_millis(5));
             harness.step();
         }
-        // Applied, then laid out in it.
         for _ in 0..3 {
             harness.step();
         }

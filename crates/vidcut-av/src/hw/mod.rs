@@ -1,14 +1,3 @@
-//! The GPU's video decoders, whatever the GPU: FFmpeg's hardware devices.
-//! NVIDIA's NVDEC on CUDA ([`crate::cuda`]), and ProRes, which NVDEC
-//! doesn't decode, on Vulkan on the same GPU; on other GPUs VA-API on Linux
-//! (AMD, Intel) and Direct3D 11 on Windows (AMD, Intel); VideoToolbox on a
-//! Mac. A reader decoding on one gives its frames in that device's memory.
-//!
-//! `VIDCUT_HWDEC` picks one for tests and debugging: `nvdec` (`nvdec:1`
-//! for a CUDA device by its index), `vaapi` (`vaapi:/dev/dri/renderD129`
-//! for a render node), `d3d11va` (`d3d11va:1` for an adapter by its
-//! index), `videotoolbox`, or `none`. Vulkan comes with `nvdec`.
-
 #[cfg(windows)]
 pub(crate) mod d3d11;
 pub(crate) mod deinterlace;
@@ -28,25 +17,16 @@ use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, format, frame};
 use crate::route::{Ops, Place};
 
-/// A kind of GPU decoder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {
-    /// NVIDIA's, on CUDA.
     Nvdec,
-    /// VA-API (Linux): Mesa's for AMD, Intel's own.
     Vaapi,
-    /// Direct3D 11 video decoding (Windows).
     D3d11va,
-    /// VideoToolbox (macOS).
     VideoToolbox,
-    /// FFmpeg's Vulkan decoders on NVIDIA's GPU, for what NVDEC doesn't
-    /// decode: ProRes.
     Vulkan,
 }
 
 impl Kind {
-    /// A short name: `nvdec`, `vaapi`, `d3d11va`, `videotoolbox` or
-    /// `vulkan`.
     pub fn name(self) -> &'static str {
         match self {
             Kind::Nvdec => "nvdec",
@@ -65,26 +45,18 @@ impl Kind {
         Kind::Vulkan,
     ];
 
-    /// The kind a [`name`](Self::name) names.
     pub fn named(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|k| k.name() == name)
     }
 
-    /// The kind a [`label`](Self::label) names.
     pub fn with_label(label: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|k| k.label() == label)
     }
 
-    /// The kind whose GPU memory `f` is in; `None` for a frame in memory.
     pub fn of_frame(f: &frame::Video) -> Option<Self> {
         Self::ALL.into_iter().find(|k| k.pixel() == f.format())
     }
 
-    /// The kind of FFmpeg's hardware device `device` (a codec's
-    /// `hw_device_ctx`), when vidcut decodes on that kind.
-    ///
-    /// # Safety
-    /// `device` is null or a reference to a hardware device context.
     pub(crate) unsafe fn of_device(device: *const ffi::AVBufferRef) -> Option<Self> {
         if device.is_null() {
             return None;
@@ -94,8 +66,6 @@ impl Kind {
         Self::ALL.into_iter().find(|k| k.device_type() == ty)
     }
 
-    /// What it is called, for people: `NVDEC`, `VA-API`, `Direct3D 11`,
-    /// `VideoToolbox`, `Vulkan`.
     pub fn label(self) -> &'static str {
         match self {
             Kind::Nvdec => "NVDEC",
@@ -117,7 +87,6 @@ impl Kind {
         }
     }
 
-    /// Where its frames are.
     pub fn place(self) -> Place {
         match self {
             Kind::Nvdec => Place::Cuda,
@@ -128,7 +97,6 @@ impl Kind {
         }
     }
 
-    /// The format of its frames: where their pictures are.
     pub(crate) fn pixel(self) -> format::Pixel {
         match self {
             Kind::Nvdec => format::Pixel::CUDA,
@@ -140,18 +108,11 @@ impl Kind {
     }
 }
 
-/// The codecs a GPU decoder decodes on Vulkan where its own decoder has
-/// none for them, and FFmpeg has a Vulkan decoder (FFmpeg 8.1 and later
-/// have ProRes's).
 const ON_VULKAN: [ffmpeg::codec::Id; 1] = [ffmpeg::codec::Id::PRORES];
 
-/// A reference to one of FFmpeg's hardware device contexts.
 pub(crate) struct Device(*mut ffi::AVBufferRef);
 
-// SAFETY: FFmpeg counts these references. This owner may move to any
-// thread and be dropped there, and a shared reference may be cloned and
-// used on any thread. `as_ptr` lends the same pointer while this device
-// keeps the reference.
+// SAFETY: FFmpeg counts the references atomically, so any thread may clone, use or drop one.
 unsafe impl Send for Device {}
 unsafe impl Sync for Device {}
 
@@ -162,22 +123,14 @@ impl Drop for Device {
 }
 
 impl Device {
-    /// The device that owns `ptr`, and releases it when dropped.
-    ///
-    /// # Safety
-    /// `ptr` is a reference to a hardware device context that the caller
-    /// hands over, which nothing else releases; or null, for a device that
-    /// is only dropped.
     pub(crate) unsafe fn from_raw(ptr: *mut ffi::AVBufferRef) -> Self {
         Self(ptr)
     }
 
-    /// This device's buffer reference, valid while the device is.
     pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
         self.0
     }
 
-    /// Another reference to this device.
     pub(crate) fn clone(&self) -> Result<Self> {
         let buf = unsafe { ffi::av_buffer_ref(self.0) };
         if buf.is_null() {
@@ -186,17 +139,10 @@ impl Device {
         Ok(Self(buf))
     }
 
-    /// FFmpeg's device of `kind` on `on`: a render node, an adapter's
-    /// index; the default one when empty.
     fn open(kind: Kind, on: &str) -> Result<Self> {
         Self::of_type(kind.device_type(), on)
     }
 
-    /// QSV's device on `on`: a render node (Linux) or an adapter's index
-    /// (Windows), the first Intel GPU when empty. FFmpeg reads QSV's own
-    /// device string as the implementation to load (`1` is the software
-    /// one), so the GPU goes in as the device QSV runs on top of
-    /// (`child_device`): VA-API's on Linux, Direct3D 11's on Windows.
     pub(crate) fn qsv(on: &str) -> Result<Self> {
         crate::init();
         let mut options = ffmpeg::Dictionary::new();
@@ -208,8 +154,7 @@ impl Device {
             options.set("child_device", on);
         }
         let mut device = ptr::null_mut();
-        // SAFETY: the options' dictionary is FFmpeg's to read and is freed
-        // after; FFmpeg makes the device from it.
+        // SAFETY: FFmpeg only reads `raw`, the options' dictionary, which is freed after the call.
         let ret = unsafe {
             let mut raw = options.disown();
             let ret = ffi::av_hwdevice_ctx_create(
@@ -236,8 +181,6 @@ impl Device {
         Ok(Self(device))
     }
 
-    /// FFmpeg's device of type `ty` on `on`, as [`open`](Self::open): for
-    /// an encoder, which runs on one too.
     pub(crate) fn of_type(ty: ffi::AVHWDeviceType, on: &str) -> Result<Self> {
         crate::init();
         let name = std::ffi::CString::new(on)
@@ -271,11 +214,6 @@ impl Device {
         Ok(Self(device))
     }
 
-    /// FFmpeg's Vulkan device on `gpu`, for its Vulkan encoders: on
-    /// NVIDIA's the one made from its CUDA device (FFmpeg matches their
-    /// UUIDs), on Linux one made from its render node (their DRM nodes,
-    /// else their PCI ids through VA-API), on Windows the one with its
-    /// adapter's LUID.
     pub(crate) fn vulkan_on(gpu: &crate::gpus::Gpu) -> Result<Self> {
         if let Some(index) = gpu.cuda {
             return CudaDevice::on(index)?.vulkan();
@@ -294,8 +232,6 @@ impl Device {
         }
         #[cfg(windows)]
         if let Some(luid) = gpu.adapter.and_then(crate::gpus::adapter_luid) {
-            // FFmpeg takes Vulkan's devices by their index, in Vulkan's
-            // order, which isn't DXGI's.
             for index in 0.. {
                 let Ok(device) = Self::of_type(
                     ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VULKAN,
@@ -315,7 +251,6 @@ impl Device {
         )))
     }
 
-    /// FFmpeg's device of type `ty` on the same GPU as this one.
     #[cfg(target_os = "linux")]
     fn derive(&self, ty: ffi::AVHWDeviceType) -> Result<Self> {
         let mut device = ptr::null_mut();
@@ -333,7 +268,6 @@ impl Device {
     }
 }
 
-/// FFmpeg's name for a type of device: `vulkan`, `cuda`.
 fn type_name(ty: ffi::AVHWDeviceType) -> std::borrow::Cow<'static, str> {
     // SAFETY: FFmpeg's static name of a type, or null.
     unsafe {
@@ -346,25 +280,15 @@ fn type_name(ty: ffi::AVHWDeviceType) -> std::borrow::Cow<'static, str> {
     }
 }
 
-/// Held while FFmpeg makes a Vulkan device: the Vulkan loader crashed when
-/// two threads made instances at the same time (two exports at once).
 pub(crate) fn making_vulkan() -> std::sync::MutexGuard<'static, ()> {
     static MAKING: Mutex<()> = Mutex::new(());
     MAKING.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The LUID of the GPU FFmpeg's Vulkan `device` is on, as Windows knows
-/// its adapters.
-///
-/// # Safety
-/// `device` is FFmpeg's Vulkan device.
 #[cfg(windows)]
 unsafe fn vulkan_luid(device: &Device) -> Option<[u8; 8]> {
-    /// `VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2`.
     const PROPERTIES_2: i32 = 1_000_059_001;
-    /// `VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES`.
     const ID_PROPERTIES: i32 = 1_000_071_004;
-    /// `VkPhysicalDeviceIDProperties`.
     #[repr(C)]
     struct IdProperties {
         s_type: i32,
@@ -375,8 +299,6 @@ unsafe fn vulkan_luid(device: &Device) -> Option<[u8; 8]> {
         node_mask: u32,
         luid_valid: u32,
     }
-    /// `VkPhysicalDeviceProperties2`, room for its properties (824 bytes),
-    /// which aren't read.
     #[repr(C)]
     struct Properties2 {
         s_type: i32,
@@ -398,8 +320,7 @@ unsafe fn vulkan_luid(device: &Device) -> Option<[u8; 8]> {
         next: (&raw mut id).cast(),
         properties: [0; 128],
     };
-    // SAFETY: a Vulkan device context, as the caller says; the call as
-    // vulkan.h declares it, looked up through the device's loader.
+    // SAFETY: `device` is a Vulkan device context; `get` is its loader's, typed as vulkan.h has it.
     unsafe {
         let hw = &*((*device.0).data as *const ffi::AVHWDeviceContext);
         let dev = &*(hw.hwctx as *const ffi::AVVulkanDeviceContext);
@@ -410,25 +331,17 @@ unsafe fn vulkan_luid(device: &Device) -> Option<[u8; 8]> {
     (id.luid_valid != 0).then_some(id.device_luid)
 }
 
-/// A device the GPU decodes on.
 #[derive(Clone)]
 pub struct GpuDecoder {
     kind: Kind,
     device: Arc<Device>,
-    /// What it is on: a render node, an adapter's index; empty for the
-    /// default one.
     on: String,
-    /// NVDEC's CUDA device, with what it does besides decoding.
     cuda: Option<CudaDevice>,
-    /// Its GPU's PCI vendor, where known: Direct3D 11's adapter's, and
-    /// NVIDIA for NVDEC.
     vendor: Option<u32>,
-    /// Its GPU, where it was opened for one (`gpus::list`).
     gpu: Option<crate::gpus::Gpu>,
 }
 
 impl GpuDecoder {
-    /// NVDEC, on `cuda`.
     pub fn nvdec(cuda: CudaDevice) -> Result<Self> {
         let device = unsafe { ffi::av_buffer_ref(cuda.as_ptr()) };
         if device.is_null() {
@@ -444,9 +357,6 @@ impl GpuDecoder {
         })
     }
 
-    /// `kind` on `on` (a render node for VA-API, an adapter's index for
-    /// Direct3D 11, a CUDA device's for NVDEC; the first one when empty).
-    /// Vulkan comes with NVDEC, never alone.
     pub fn open(kind: Kind, on: &str) -> Result<Self> {
         if kind == Kind::Nvdec {
             return CudaDevice::on(on.parse().unwrap_or(0)).and_then(Self::nvdec);
@@ -474,13 +384,6 @@ impl GpuDecoder {
         })
     }
 
-    /// One of its own on the same GPU, for work beside the viewer's (an
-    /// export, a proxy, the timeline's pictures): NVDEC on a CUDA stream of
-    /// its own on the same context ([`CudaDevice::with_own_stream`]),
-    /// VA-API and Direct3D 11 on a device of their own on the same render
-    /// node or adapter. On the viewer's, its work would wait in line with
-    /// playback's and hold playback up: CUDA's default stream runs every
-    /// user's work in turn, and a Direct3D 11 device's context is one lock.
     pub fn own(&self) -> Result<Self> {
         match &self.cuda {
             Some(cuda) => Self::nvdec(cuda.with_own_stream()?),
@@ -492,10 +395,6 @@ impl GpuDecoder {
         self.kind
     }
 
-    /// Why it leaves `codec` to the CPU, when it does ([`why_not`]), on the
-    /// kind of decoder that would decode it ([`kind_for`](Self::kind_for)).
-    /// `open_gop` says whether the stream has open GOPs, asked only for
-    /// H.264.
     pub fn why_not(
         &self,
         codec: ffmpeg::codec::Id,
@@ -504,10 +403,6 @@ impl GpuDecoder {
         why_not(self.kind_for(codec)?, self.vendor, codec, open_gop)
     }
 
-    /// The kind of decoder it decodes `codec` with: its own where FFmpeg has
-    /// a decoder for the codec there, else Vulkan for the codecs vidcut
-    /// decodes there ([`ON_VULKAN`]) where FFmpeg has a Vulkan decoder for
-    /// it. `None`: FFmpeg has neither.
     pub fn kind_for(&self, codec: ffmpeg::codec::Id) -> Option<Kind> {
         if crate::decode::gpu_decoder(codec, self.kind).is_some() {
             return Some(self.kind);
@@ -517,10 +412,6 @@ impl GpuDecoder {
         vulkan.then_some(Kind::Vulkan)
     }
 
-    /// The device it decodes on with a decoder of `kind`: its own, or for
-    /// Vulkan the one made from NVIDIA's CUDA device
-    /// ([`CudaDevice::vulkan`]), asked for each time, so one dropped after
-    /// a converter failed isn't used again.
     pub(crate) fn device_for(&self, kind: Kind) -> Result<Device> {
         match (kind, &self.cuda) {
             _ if kind == self.kind => self.device.as_ref().clone(),
@@ -532,18 +423,14 @@ impl GpuDecoder {
         }
     }
 
-    /// The render node or adapter it is on; empty for the default one.
     pub fn on(&self) -> &str {
         &self.on
     }
 
-    /// NVDEC's CUDA device.
     pub fn cuda(&self) -> Option<&CudaDevice> {
         self.cuda.as_ref()
     }
 
-    /// The GPU it was opened for (`gpus::list`); `None` for a Mac's, and
-    /// for one opened by its kind and place, such as [`own`](Self::own)'s.
     pub fn gpu(&self) -> Option<&crate::gpus::Gpu> {
         self.gpu.as_ref()
     }
@@ -552,9 +439,6 @@ impl GpuDecoder {
         self.device.0
     }
 
-    /// The decoder on the GPU in use (`gpus::in_use`: the one the
-    /// preferences chose, else the best this computer has), opened once for
-    /// each; `VIDCUT_HWDEC` says otherwise. `None` without any.
     pub fn best() -> Option<Self> {
         static BEST: Mutex<Option<(String, Option<GpuDecoder>)>> = Mutex::new(None);
         let gpu = crate::gpus::in_use();
@@ -586,8 +470,6 @@ impl GpuDecoder {
         decoder
     }
 
-    /// Every decoder this computer has: one on each GPU (`gpus::list`), or
-    /// a Mac's.
     pub fn all() -> Vec<Self> {
         let listed = crate::gpus::list()
             .iter()
@@ -595,8 +477,6 @@ impl GpuDecoder {
         listed.chain(Self::unlisted().0).collect()
     }
 
-    /// The decoder where no GPU is listed, and how it came: VideoToolbox on
-    /// a Mac, whose one GPU decodes; none elsewhere.
     fn unlisted() -> (Option<Self>, String) {
         if !cfg!(target_os = "macos") {
             return (None, "no GPU is listed here".into());
@@ -607,8 +487,6 @@ impl GpuDecoder {
         }
     }
 
-    /// The decoder on `gpu`: NVDEC on NVIDIA's CUDA device, Direct3D 11 on
-    /// its adapter (Windows), VA-API on its render node (Linux).
     fn on_gpu(gpu: &crate::gpus::Gpu) -> Result<Self> {
         let named = |d: Self| Self {
             gpu: Some(gpu.clone()),
@@ -628,8 +506,6 @@ impl GpuDecoder {
         Err(Error::Invalid(format!("{} decodes nothing here", gpu.name)))
     }
 
-    /// The decoder `VIDCUT_HWDEC` names (`kind[:on]`, or `none`), and how
-    /// it came.
     fn asked(asked: &str) -> (Option<Self>, String) {
         let (kind, on) = asked.split_once(':').unwrap_or((asked, ""));
         match Kind::named(kind).map(|k| Self::open(k, on)) {
@@ -641,8 +517,6 @@ impl GpuDecoder {
 }
 
 impl GpuDecoder {
-    /// A decoder of `kind` on its GPU, for people: `Vulkan on NVIDIA
-    /// GeForce RTX 4080 SUPER`.
     pub fn labeled(&self, kind: Kind) -> String {
         let on = match self.kind {
             _ if self.on.is_empty() => String::new(),
@@ -659,26 +533,12 @@ impl GpuDecoder {
     }
 }
 
-/// Its kind and where: `NVDEC on NVIDIA GeForce RTX 4080 SUPER`,
-/// `Direct3D 11 on AMD Radeon(TM) Graphics (adapter 1)`, `VA-API on
-/// /dev/dri/renderD128` where its GPU's name isn't known.
 impl std::fmt::Display for GpuDecoder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.labeled(self.kind))
     }
 }
 
-/// Why a GPU of `vendor` (its PCI vendor) leaves `codec` to the CPU on a
-/// decoder of `kind`, when it does: it doesn't decode it right, as far as
-/// known.
-/// - AMD's Direct3D 11 decoder and VideoToolbox lose their way in H.264
-///   sought into an open GOP (a keyframe that isn't IDR): AMD's shows one
-///   picture over and over some frames on, VideoToolbox other frames than
-///   the file's, where NVIDIA's and VA-API on Intel decode on. The CPU
-///   decodes such H.264 there: `open_gop` says whether the stream has open
-///   GOPs, asked only then.
-/// - Vulkan decodes on NVIDIA's GPUs only: FFmpeg's ProRes decoder on Vulkan
-///   crashes on AMD's Windows driver, and it is untested on others.
 fn why_not(
     kind: Kind,
     vendor: Option<u32>,
@@ -699,27 +559,15 @@ fn why_not(
     (codec == ffmpeg::codec::Id::H264 && open_gop()).then_some(why)
 }
 
-/// What a GPU decoder does with a test clip of one codec
-/// ([`decoders`]).
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct DecoderStatus {
-    /// The decoder and its GPU: `NVDEC on NVIDIA GeForce RTX 4080 SUPER`,
-    /// `Vulkan on NVIDIA GeForce RTX 4080 SUPER` for ProRes there.
     pub decoder: String,
-    /// Its kind: `nvdec`, `vaapi`, `d3d11va`, `videotoolbox`, `vulkan`.
     pub kind: &'static str,
-    /// The clip's codec, and its bits where they aren't 8: `h264`,
-    /// `hevc 10-bit`.
     pub codec: &'static str,
     pub ok: bool,
-    /// Why not: why vidcut leaves the codec to the CPU there, or what
-    /// failed.
     pub error: Option<String>,
 }
 
-/// What each GPU decoder here ([`GpuDecoder::all`]) decodes: a short clip
-/// of each codec cameras and renders make, made in `dir` once and kept,
-/// decoded through on each.
 pub fn decoders(dir: &std::path::Path) -> Vec<DecoderStatus> {
     use crate::fixture::{Container, FixtureSpec, VideoCodec};
     use ffmpeg::codec::Id;
@@ -753,7 +601,6 @@ pub fn decoders(dir: &std::path::Path) -> Vec<DecoderStatus> {
                 (Ok(_), Some(why)) => Err(format!("left to the CPU: {why}")),
                 (Ok(path), None) => decodes_all(&gpu, path).map_err(|e| e.to_string()),
             };
-            // Its decoder that decodes the codec: its own, or Vulkan.
             let kind = gpu.kind_for(*id).unwrap_or(gpu.kind());
             out.push(DecoderStatus {
                 decoder: gpu.labeled(kind),
@@ -767,8 +614,6 @@ pub fn decoders(dir: &std::path::Path) -> Vec<DecoderStatus> {
     out
 }
 
-/// The clips [`plays`] decodes, one for each proxy codec by its name in the
-/// preferences: [`decoders`]' clips. No GPU decodes DNxHR.
 const PROXY_CLIPS: [(
     &str,
     crate::fixture::VideoCodec,
@@ -790,15 +635,10 @@ const PROXY_CLIPS: [(
     ]
 };
 
-/// The proxy codecs [`plays`] tests: `h264`, `av1`, `hevc`, `prores`.
 pub fn plays_tests() -> Vec<&'static str> {
     PROXY_CLIPS.iter().map(|&(codec, ..)| codec).collect()
 }
 
-/// The proxy codecs `gpu` decodes, of those [`plays_tests`] names, each with
-/// the kind of its decoders that decodes it ([`GpuDecoder::kind_for`]:
-/// Vulkan for ProRes on NVIDIA's GPU): a short clip of each, made in `dir`
-/// once and kept, decoded through on it.
 pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<(&'static str, Kind)> {
     use crate::fixture::FixtureSpec;
     crate::init();
@@ -806,7 +646,6 @@ pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<(&'static str, Kind
         .into_iter()
         .filter(|&(_, video, container, id)| {
             let spec = FixtureSpec::new(video, container, 640, 360, (30, 1), 8).no_audio();
-            // Proxies close their GOPs.
             crate::fixture::ensure_in(dir, &spec).is_ok_and(|clip| {
                 gpu.why_not(id, || false).is_none() && decodes_all(gpu, &clip).is_ok()
             })
@@ -815,7 +654,6 @@ pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<(&'static str, Kind
         .collect()
 }
 
-/// Decodes all 8 frames of the clip at `path` on `gpu`.
 fn decodes_all(gpu: &GpuDecoder, path: &std::path::Path) -> Result<()> {
     let input = crate::decode::Input::File(path.to_path_buf());
     let mut reader = crate::decode::VideoReader::open_on(&input, gpu)?;
@@ -830,11 +668,6 @@ fn decodes_all(gpu: &GpuDecoder, path: &std::path::Path) -> Result<()> {
     }
 }
 
-/// The pool whose surface `frame` is, where its memory is a pool's that
-/// other frames share: VA-API's decoders' ([`vaapi::share_frames`]), and
-/// each Vulkan decoder's own, from which its frames are the images
-/// themselves. Letting such a frame go frees nothing until all of that
-/// pool's frames go. `None` where letting a frame go frees its memory.
 pub(crate) fn pooled(frame: &frame::Video) -> Option<usize> {
     match Kind::of_frame(frame) {
         #[cfg(target_os = "linux")]
@@ -848,9 +681,6 @@ pub(crate) fn pooled(frame: &frame::Video) -> Option<usize> {
     }
 }
 
-/// The bytes `frame`'s surface takes where its driver says: VA-API's by its
-/// DRM export ([`vaapi::surface_bytes`]), Vulkan's by FFmpeg's allocation
-/// of its images ([`vulkan::image_bytes`]); `None` otherwise.
 pub(crate) fn surface_bytes(frame: &frame::Video) -> Option<usize> {
     match Kind::of_frame(frame) {
         #[cfg(target_os = "linux")]
@@ -860,24 +690,18 @@ pub(crate) fn surface_bytes(frame: &frame::Video) -> Option<usize> {
     }
 }
 
-/// Lets the pools of frames go that decoders shared and nothing uses any
-/// more (VA-API's, [`vaapi::share_frames`]).
 pub(crate) fn let_unused_frames_go() {
     #[cfg(target_os = "linux")]
     vaapi::let_unused_frames_go();
 }
 
-/// Whether `frame` is in GPU memory: a hardware frame of any kind.
 pub fn on_gpu(frame: &frame::Video) -> bool {
     // SAFETY: reads the frame's own field.
     unsafe { !(*frame.as_ptr()).hw_frames_ctx.is_null() }
 }
 
-/// The layout of a frame in GPU memory: its frames context's software
-/// format (NV12, P010...); a frame in memory's own.
 pub(crate) fn sw_format(frame: &frame::Video) -> format::Pixel {
-    // SAFETY: a hardware frame holds a reference to its frames context,
-    // whose data is an AVHWFramesContext.
+    // SAFETY: a non-null `hw_frames_ctx` is the frame's reference to an `AVHWFramesContext`.
     unsafe {
         let ctx = (*frame.as_ptr()).hw_frames_ctx;
         if ctx.is_null() {
@@ -889,25 +713,19 @@ pub(crate) fn sw_format(frame: &frame::Video) -> format::Pixel {
     }
 }
 
-/// A frame in GPU memory copied down to memory, in its frames' layout (NV12,
-/// P010) at its own size, keeping its properties: colors, aspect,
-/// timestamp.
 pub fn download(src: &frame::Video) -> Result<frame::Video> {
     let f = downloaded(src)?;
     crate::copies::down(&f);
     Ok(f)
 }
 
-/// [`download`], uncounted.
 fn downloaded(src: &frame::Video) -> Result<frame::Video> {
     vaapi::intel_download(src).unwrap_or_else(|| fetched(src))
 }
 
-/// `src` copied down FFmpeg's way.
 fn fetched(src: &frame::Video) -> Result<frame::Video> {
     let mut dst = frame::Video::empty();
-    // SAFETY: both frames are valid; the destination is allocated by the
-    // transfer, in the source frames' software format.
+    // SAFETY: both frames are valid, and the transfer allocates the empty `dst`.
     unsafe {
         let ret = ffi::av_hwframe_transfer_data(dst.as_mut_ptr(), src.as_ptr(), 0);
         if ret < 0 {
@@ -921,7 +739,6 @@ fn fetched(src: &frame::Video) -> Result<frame::Video> {
     Ok(dst)
 }
 
-/// `src`'s properties onto `dst`.
 fn props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
     // SAFETY: both frames are valid.
     let ret = unsafe { ffi::av_frame_copy_props(dst.as_mut_ptr(), src.as_ptr()) };
@@ -934,32 +751,16 @@ fn props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
     Ok(())
 }
 
-/// Keeps the GPU's frames there without running its decoder out of
-/// surfaces: Direct3D 11's are copied into textures of their own that
-/// another device can open (Windows). NVDEC's, which FFmpeg copies out of
-/// its surfaces into the decoder's pool, are copied on into memory of
-/// their own, so kept pictures don't hold that pool (`cuda::keep`), and
-/// VA-API's into surfaces of their own by the driver's `vaCopy` where it
-/// has one ([`vaapi::Keeper`]). VideoToolbox's and Vulkan's pools grow as
-/// they need. Vulkan's are kept once decoded ([`vulkan::keep`]).
 pub(crate) enum Keeper {
-    /// `None` where CUDA has no stream-ordered allocator: kept as FFmpeg
-    /// gives them.
     Nvdec(Option<crate::cuda::keep::Keeper>),
-    /// `None` where the driver has no `vaCopy`: kept as they come, from
-    /// the pool the decoders share.
     #[cfg(target_os = "linux")]
     Vaapi(Option<vaapi::Keeper>),
     #[cfg(windows)]
     D3d11(d3d11::Keeper),
 }
 
-/// What a keeper or shrinker is made for: the frames context a frame comes
-/// from, its layout, and the frame's size.
 type KeptLike = (usize, format::Pixel, u32, u32);
 
-/// The frames context a hardware frame comes from, and what a keeper made
-/// for it is made for ([`KeptLike`]).
 fn frames_of(f: &frame::Video) -> Result<(*mut ffi::AVBufferRef, KeptLike)> {
     // SAFETY: reads the frame's own field, and a live buffer reference.
     unsafe {
@@ -973,8 +774,6 @@ fn frames_of(f: &frame::Video) -> Result<(*mut ffi::AVBufferRef, KeptLike)> {
 }
 
 impl Keeper {
-    /// `f`, a frame in GPU memory, to keep there, with its timestamp and
-    /// colors; `keeper` made for frames like it first.
     pub(crate) fn keep(keeper: &mut Option<Keeper>, f: &frame::Video) -> Result<frame::Video> {
         match Kind::of_frame(f) {
             Some(Kind::Nvdec) => {
@@ -1012,7 +811,6 @@ impl Keeper {
                     }
                 }
             }
-            // VA-API is Linux's.
             #[cfg(not(target_os = "linux"))]
             Some(Kind::Vaapi) => crate::export::video::frame_ref(f),
             Some(Kind::VideoToolbox) => crate::export::video::frame_ref(f),
@@ -1029,7 +827,6 @@ impl Keeper {
                 k.copy(f)
             }
             _ => {
-                // Only Direct3D 11's take a keeper.
                 let _ = keeper;
                 Err(Error::Invalid(format!(
                     "no keeping {:?} frames",
@@ -1040,9 +837,6 @@ impl Keeper {
     }
 }
 
-/// The timestamp and colors of `from` onto `to`, a copy of its picture:
-/// plain fields, for a frame of its own (`av_frame_copy_props` brings the
-/// decoder's private reference along).
 fn same_picture(to: &mut frame::Video, from: &frame::Video) {
     // SAFETY: both frames are valid; plain fields.
     unsafe {
@@ -1057,8 +851,6 @@ fn same_picture(to: &mut frame::Video, from: &frame::Video) {
     }
 }
 
-/// A filter graph of GPU frames like `f` (format `pixel`, from `frames`)
-/// through `spec`.
 fn gpu_graph(
     f: &frame::Video,
     frames: *mut ffi::AVBufferRef,
@@ -1089,9 +881,7 @@ fn gpu_graph(
     Ok(graph)
 }
 
-/// `f` through `graph`'s one filter: the frame it gives.
 fn run_graph(graph: &mut GpuGraph, f: &frame::Video, doing: &str) -> Result<frame::Video> {
-    // The source takes the frame it is given: another reference.
     let mut given = frame::Video::empty();
     // SAFETY: both frames are valid.
     if unsafe { ffi::av_frame_ref(given.as_mut_ptr(), f.as_ptr()) } < 0 {
@@ -1117,22 +907,13 @@ fn run_graph(graph: &mut GpuGraph, f: &frame::Video, doing: &str) -> Result<fram
     Ok(out)
 }
 
-/// Scales frames down on the GPU (VA-API's, Direct3D 11's, CUDA's,
-/// VideoToolbox's and Vulkan's), so they come down to memory small, in the
-/// frames' own layout (NV12, P010, Vulkan's 10-bit 4:2:2).
 pub(crate) struct Shrinker {
-    /// `None`: the GPU won't scale these frames, so they come down whole.
     scaling: Option<Scaling>,
-    /// The frames context, layout and frame size it was made for, and the
-    /// size it scales to.
     input: (KeptLike, (u32, u32)),
 }
 
 enum Scaling {
-    /// `scale_vaapi`, `scale_vt`, or `scale_cuda` or `scale_vulkan` in
-    /// steps.
     Filters(GpuGraph),
-    /// The GPU's video processor.
     #[cfg(windows)]
     D3d11(d3d11::Scaler),
 }
@@ -1163,10 +944,6 @@ impl Scaling {
     }
 }
 
-/// The test picture's bands, which GPU scalers are checked with (8-bit
-/// levels, Y, Cb, Cr): grays from black to white, BT.709's red, green and
-/// blue, and levels below black and above white with chroma near its ends,
-/// which video keeps and a scaler mustn't clip.
 const BANDS: [[u16; 3]; 10] = [
     [16, 128, 128],
     [64, 128, 128],
@@ -1180,14 +957,10 @@ const BANDS: [[u16; 3]; 10] = [
     [250, 128, 248],
 ];
 
-/// Whether a test picture scaled to `size` has each band's middle there to
-/// read, a few samples across in luma and chroma.
 fn readable((w, h): (u32, u32)) -> bool {
     w as usize >= 4 * BANDS.len() && h >= 8
 }
 
-/// FFmpeg's description of `layout`, where it is one a test picture comes
-/// in: every sample 8 bits or more, no floats, palette or mosaic.
 fn described(layout: format::Pixel) -> Option<&'static ffi::AVPixFmtDescriptor> {
     // SAFETY: FFmpeg's static description, or null.
     let desc = unsafe { ffi::av_pix_fmt_desc_get(layout.into()).as_ref()? };
@@ -1200,8 +973,6 @@ fn described(layout: format::Pixel) -> Option<&'static ffi::AVPixFmtDescriptor> 
     (desc.flags & odd as u64 == 0 && samples.iter().all(|s| s.depth >= 8)).then_some(desc)
 }
 
-/// The samples across and down of component `c` in a picture of `size`:
-/// chroma's are subsampled.
 fn component_size(desc: &ffi::AVPixFmtDescriptor, c: i32, (w, h): (u32, u32)) -> (usize, usize) {
     let rgb = desc.flags & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0;
     let chroma = !rgb && desc.nb_components >= 3 && matches!(c, 1 | 2);
@@ -1210,12 +981,9 @@ fn component_size(desc: &ffi::AVPixFmtDescriptor, c: i32, (w, h): (u32, u32)) ->
     } else {
         (0, 0)
     };
-    // As FFmpeg rounds: up.
     (w.div_ceil(1 << sw) as usize, h.div_ceil(1 << sh) as usize)
 }
 
-/// Component `c`'s level of `color` (8-bit levels: Y, Cb, Cr), in its own
-/// bits. Alpha takes luma's.
 fn level(desc: &ffi::AVPixFmtDescriptor, c: i32, color: [u16; 3]) -> u16 {
     let column = if desc.nb_components >= 3 && c < 3 {
         c as usize
@@ -1225,8 +993,6 @@ fn level(desc: &ffi::AVPixFmtDescriptor, c: i32, color: [u16; 3]) -> u16 {
     color[column] << (desc.comp[c as usize].depth - 8)
 }
 
-/// A picture of `layout` at `size` to write a test picture into, its planes
-/// cleared: FFmpeg writes each component's bits into what is there.
 fn blank(layout: format::Pixel, (w, h): (u32, u32)) -> frame::Video {
     let mut picture = frame::Video::new(layout, w, h);
     for p in 0..picture.planes() {
@@ -1235,11 +1001,6 @@ fn blank(layout: format::Pixel, (w, h): (u32, u32)) -> frame::Video {
     picture
 }
 
-/// Writes `line`, samples of component `c` in its own bits, into row `y` of
-/// `picture` (in a layout test pictures come in) from its left edge.
-///
-/// # Panics
-/// Where the picture has no such component or row, or the line is wider.
 fn write_line(picture: &mut frame::Video, c: i32, y: usize, line: &[u16]) {
     let desc = described(picture.format()).expect("a layout test pictures come in");
     let (w, h) = component_size(desc, c, (picture.width(), picture.height()));
@@ -1248,8 +1009,7 @@ fn write_line(picture: &mut frame::Video, c: i32, y: usize, line: &[u16]) {
         "the picture has no row {y} of {} samples in component {c}",
         line.len()
     );
-    // SAFETY: the picture's own planes, `line.len()` samples of component
-    // `c` on row `y`, both there, from a line of that many 16-bit values.
+    // SAFETY: the assert keeps row `y` and `line.len()` samples of component `c` in the picture.
     unsafe {
         let raw = picture.as_mut_ptr();
         ffi::av_write_image_line2(
@@ -1267,10 +1027,6 @@ fn write_line(picture: &mut frame::Video, c: i32, y: usize, line: &[u16]) {
 }
 
 impl Shrinker {
-    /// `f` scaled to `size` (even) on the GPU and copied down, with its
-    /// timestamp and colors; `shrinker` made for frames like it first. A
-    /// GPU that won't scale them (its driver lacks the layout, or changes
-    /// the levels) copies them down whole.
     pub(crate) fn down(
         shrinker: &mut Option<Shrinker>,
         f: &frame::Video,
@@ -1307,7 +1063,6 @@ impl Shrinker {
                 crate::color::keep_matrix(&mut small, f);
                 Ok(small)
             }
-            // The GPU failed it after all: these frames come down whole.
             Err(e) => {
                 crate::debug!(
                     "decoding",
@@ -1320,18 +1075,12 @@ impl Shrinker {
     }
 }
 
-/// A frames context in GPU memory, counted.
 pub(crate) struct Frames(*mut ffi::AVBufferRef);
 
-// SAFETY: FFmpeg's frames contexts are reference-counted and may be used
-// on any thread.
+// SAFETY: FFmpeg's frames contexts are reference-counted and may be used on any thread.
 unsafe impl Send for Frames {}
 
 impl Frames {
-    /// Another reference to `frames`, a live frames context.
-    ///
-    /// # Safety
-    /// `frames` is a live buffer reference.
     pub(crate) unsafe fn of(frames: *mut ffi::AVBufferRef) -> Result<Self> {
         // SAFETY: as the caller says.
         let frames = unsafe { ffi::av_buffer_ref(frames) };
@@ -1354,18 +1103,8 @@ impl Drop for Frames {
     }
 }
 
-/// Fits frames into an output picture on the GPU, for an encoder on their
-/// device: turned upright, scaled to the size they are shown at, into the
-/// output's layout, and centered on black where their aspect differs, at
-/// even offsets as the CPU pads. VA-API's with `transpose_vaapi`,
-/// `scale_vaapi` and `pad_vaapi`; Direct3D 11's on the video processor,
-/// into the encoder's own frames (AMF takes those alone); VideoToolbox's
-/// with `transpose_vt` and `scale_vt`, which keep their layout and place
-/// nothing on black.
 pub(crate) struct Fitter {
     fitting: Fitting,
-    /// The frames context, layout and frame size it was made for, the size
-    /// it scales to, and the turn.
     input: (KeptLike, (u32, u32), u16),
 }
 
@@ -1375,10 +1114,6 @@ enum Fitting {
     D3d11(d3d11::Scaler),
 }
 
-/// Whether a frame's GPU (`place`) fits it into the output as `ops` says,
-/// for an encoder on its device. Each backend says for its own frames.
-/// Vulkan's fit as libplacebo fits them, as CUDA's do. Frames in memory
-/// never fit.
 pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
     match place {
         Place::Cuda | Place::Vulkan => crate::cuda::can_fit(ops),
@@ -1390,16 +1125,10 @@ pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
     }
 }
 
-/// Whether pictures on `place` are mixed there for a dissolve (decision
-/// D50): CUDA's ([`crate::cuda::mix`]). Others come down to be mixed.
 pub(crate) fn can_mix(place: Place) -> bool {
     place == Place::Cuda
 }
 
-/// Whether a frame's GPU (`from`) hands the picture it fits to an encoder
-/// that takes frames on another place, `to`: CUDA's to Vulkan's encoder,
-/// Vulkan's to NVENC's CUDA frames ([`crate::cuda::reaches`]). No other
-/// GPU's frames leave their place.
 pub(crate) fn reaches(from: Place, to: Place) -> bool {
     match from {
         Place::Cuda | Place::Vulkan => crate::cuda::reaches(from, to),
@@ -1408,13 +1137,6 @@ pub(crate) fn reaches(from: Place, to: Place) -> bool {
 }
 
 impl Fitter {
-    /// `f` turned clockwise by `rotation` (0, 90, 180 or 270), scaled to
-    /// `fitted` and placed in an `out` picture of `layout` (NV12, P010; P210
-    /// and NV16 for Apple's ProRes encoder), on the GPU, with its timestamp
-    /// and colors, its pixels square; `fitter` made for frames like it
-    /// first. Direct3D 11's go into `into`, the encoder's frames.
-    /// VideoToolbox's fit only where they fill the picture in their own
-    /// layout.
     pub(crate) fn fit(
         fitter: &mut Option<Fitter>,
         f: &frame::Video,
@@ -1433,7 +1155,6 @@ impl Fitter {
                     let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
                     Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
                 }
-                // The planner asks for neither (`vt::can_fit`).
                 format::Pixel::VIDEOTOOLBOX => {
                     if fitted != (w, h) {
                         return Err(Error::Invalid(

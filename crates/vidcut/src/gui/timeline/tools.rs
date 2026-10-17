@@ -1,7 +1,3 @@
-//! The timeline's automatic tools: Ripple Delete Silence, the
-//! Boring Detector and Dynamic Trim. Detect Scene
-//! Cuts is one request from the Actions menu.
-
 use eframe::egui::{self, Color32, CornerRadius, Painter, Rect, RichText};
 use serde_json::{Value, json};
 use vidcut_core::model::Project;
@@ -14,32 +10,22 @@ use crate::gui::timeline::geometry::{Rows, Scale};
 use crate::gui::workspace::{Workspace, dim};
 use crate::live::PlayerId;
 
-// ---------------------------------------------------------------- silence
-
-/// The Ripple Delete Silence dialog: its settings, and the parts
-/// the last dry run found, drawn as red stripes while it is open.
 #[derive(Debug)]
 pub struct SilenceDialog {
     pub clips: Vec<String>,
     pub threshold_db: f64,
-    /// Seconds of silence kept before and after each audible part.
     pub pre_head: f64,
     pub post_tail: f64,
-    /// The shortest silence removed, seconds ("minimum to trip").
     pub min: f64,
-    /// What would go: (clip, start, end) in timeline frames.
     pub parts: Vec<(String, i64, i64)>,
     pub frames: i64,
     pub error: Option<String>,
-    /// The dry run in flight and the settings it is for.
     asked: Option<(Value, Ask)>,
-    /// The settings `parts` were found for.
     found_for: Option<Value>,
 }
 
 impl SilenceDialog {
     pub fn new(clips: Vec<String>) -> Self {
-        // The request's defaults (decision D29).
         Self {
             clips,
             threshold_db: -40.0,
@@ -64,15 +50,11 @@ impl SilenceDialog {
         })
     }
 
-    /// Whether `parts` shows the current settings.
     pub fn current(&self) -> bool {
         self.found_for.as_ref() == Some(&self.params())
     }
 }
 
-// ---------------------------------------------------------------- dynamic trim
-
-/// What Dynamic Trim does with selected clips (right-click its button).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum DynamicMode {
     #[default]
@@ -80,41 +62,26 @@ pub enum DynamicMode {
     Slide,
 }
 
-/// Dynamic Trim mode (W): J/K/L trim the selected edit (or
-/// slip/slide the selected clips) instead of playing. The trim shows in the
-/// two-up viewer as it goes and is sent as one request when it stops.
 #[derive(Debug, Default)]
 pub struct Dynamic {
-    /// J/L running: speed (× real time; negative backward), the egui time it
-    /// started at and the frames counted before it.
     run: Option<(f64, f64, i64)>,
-    /// Frames trimmed and not yet sent.
     pub pending: i64,
-    /// Play Around Current Selection (Space) pauses at this frame.
     around_until: Option<i64>,
-    /// Why the last run stopped by itself: the media or a neighbor ran out.
     pub stopped: Option<String>,
 }
 
 impl Dynamic {
-    /// The running trim's speed (× real time; negative backward), 0 while
-    /// it doesn't run.
     pub fn speed(&self) -> f64 {
         self.run.map_or(0.0, |(speed, ..)| speed)
     }
 }
 
-/// What Dynamic Trim works on.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DynamicTarget {
     Edit(EditSel),
     Clips(Vec<String>),
 }
 
-/// Applies `by` frames of Dynamic Trim to `p` (a copy, for the preview);
-/// returns the two frames the two-up shows: an edit's last outgoing and
-/// first incoming frame, or a clip's first and last frame (slip) or the
-/// frames just outside it (slide).
 pub fn dynamic_preview(
     p: &mut Project,
     target: &DynamicTarget,
@@ -156,7 +123,6 @@ pub fn dynamic_preview(
                 }
                 (Side::In | Side::Both, _, Some(i)) => {
                     ops::trim(p, &i, ops::Edge::Head, by, None)?;
-                    // Rippled or not, the incoming clip's start is the edit.
                     p.clip(&i).map_or(e.at, |c| c.start)
                 }
                 _ => return Err(vidcut_core::Error::not_found("no clip at the edit")),
@@ -183,17 +149,12 @@ pub fn dynamic_preview(
 }
 
 impl Workspace {
-    // ------------------------------------------------------------ silence
-
-    /// Opens Ripple Delete Silence for `clips`.
     pub(crate) fn open_silence(&mut self, clips: Vec<String>) {
         if !clips.is_empty() {
             self.timeline.silence = Some(SilenceDialog::new(clips));
         }
     }
 
-    /// The dialog. A dry run finds the parts whenever the settings change;
-    /// Remove sends the edit.
     pub(super) fn silence_window(&mut self, ctx: &egui::Context) {
         let Some(mut d) = self.timeline.silence.take() else {
             return;
@@ -322,7 +283,6 @@ impl Workspace {
         }
     }
 
-    /// The red stripes of the open Ripple Delete Silence dialog.
     pub(super) fn paint_silence(&self, painter: &Painter, rows: &Rows, scale: &Scale, p: &Project) {
         let Some(d) = &self.timeline.silence else {
             return;
@@ -348,10 +308,6 @@ impl Workspace {
         }
     }
 
-    // ------------------------------------------------------------ boring detector
-
-    /// The Boring Detector's highlights on the upper timeline: too
-    /// long in light gray, too short (jump cuts) in red.
     pub(super) fn paint_boring(&self, painter: &Painter, rows: &Rows, scale: &Scale, p: &Project) {
         let o = &self.timeline.options;
         if !o.boring {
@@ -381,7 +337,6 @@ impl Workspace {
         }
     }
 
-    /// Analyze Timeline Edits: the Boring Detector's settings.
     pub(super) fn boring_window(&mut self, ctx: &egui::Context) {
         let Some((mut secs, mut frames)) = self.timeline.boring_dialog else {
             return;
@@ -431,9 +386,6 @@ impl Workspace {
         }
     }
 
-    // ------------------------------------------------------------ dynamic trim
-
-    /// What Dynamic Trim works on: the selected edit, else the selected clips.
     pub(crate) fn dynamic_target(&self) -> Option<DynamicTarget> {
         match self.timeline.edit {
             Some(e) => Some(DynamicTarget::Edit(e)),
@@ -444,8 +396,6 @@ impl Workspace {
         }
     }
 
-    /// W: Dynamic Trim on (picking the edit nearest the playhead if nothing
-    /// is selected) or off (sending what was trimmed).
     pub(crate) fn toggle_dynamic(&mut self) {
         if self.timeline.dynamic.is_some() {
             self.dynamic_commit();
@@ -466,8 +416,6 @@ impl Workspace {
         self.timeline.dynamic = Some(Dynamic::default());
     }
 
-    /// `gui.dynamic_trim`, as W, its button's menu, U and J/K/L do; `now`
-    /// is the input's time a run starts at.
     pub fn dynamic_trim_request(&mut self, r: crate::live::DynamicTrim, now: f64) {
         use vidcut_core::request::DynamicTrimMode;
         if let Some(mode) = r.mode {
@@ -508,8 +456,6 @@ impl Workspace {
         }
     }
 
-    /// The project as the running Dynamic Trim leaves it, and where its
-    /// edit then is; `None` while nothing is trimmed.
     pub(crate) fn dynamic_drawn(&self, p: &Project) -> Option<(Project, Option<i64>)> {
         let pending = self.timeline.dynamic.as_ref()?.pending;
         if pending == 0 {
@@ -528,7 +474,6 @@ impl Workspace {
         Some((trimmed, at))
     }
 
-    /// Sends what Dynamic Trim has trimmed: one request.
     pub(crate) fn dynamic_commit(&mut self) {
         let trimmed = self
             .shown_project()
@@ -572,9 +517,6 @@ impl Workspace {
         }
     }
 
-    /// Keys while Dynamic Trim is on: L/J trim forward/back
-    /// (repeat for speed), K stops and sends, K with L/J trims one frame,
-    /// Space plays around the selection.
     pub(crate) fn dynamic_keys(&mut self, input: &egui::InputState) {
         let now = input.time;
         let pressed = |k: egui::Key| input.key_pressed(k);
@@ -597,7 +539,6 @@ impl Workspace {
                 d.stopped = None;
             }
         }
-        // K applies a run, also one that stopped where the media ran out.
         if pressed(egui::Key::K)
             && self
                 .timeline
@@ -628,8 +569,6 @@ impl Workspace {
         }
     }
 
-    /// Each frame: count a running trim, stop it where the media ends, and
-    /// end Play Around Current Selection.
     pub(crate) fn dynamic_tick(&mut self, ctx: &egui::Context) {
         let fps = self.fps().as_f64();
         let now = ctx.input(|i| i.time);
@@ -644,7 +583,6 @@ impl Workspace {
         };
         if let Some((speed, t0, base)) = d.run {
             let want = base + (speed * fps * (now - t0)).round() as i64;
-            // Stop where the media (or a neighbor) runs out.
             let mut last = d.pending;
             let step = if want > last { 1 } else { -1 };
             while last != want {

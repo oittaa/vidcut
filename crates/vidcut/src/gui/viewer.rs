@@ -1,7 +1,3 @@
-//! The single viewer (spec §4): mode buttons, the picture, the source scroll
-//! bar with In/Out handles, the transport and the timecode and duration
-//! fields.
-
 use std::collections::HashSet;
 
 use eframe::egui::{
@@ -18,12 +14,9 @@ use super::theme;
 use super::workspace::{Drag, TimecodeEntry, Workspace, dim, fit};
 use crate::live::PlayerId;
 
-/// What the viewer's two-up shows: the Trim Editor's or Dynamic Trim's
-/// two frames.
 #[derive(Clone)]
 pub struct TwoUp {
     pub mode: TwoUpMode,
-    /// The left cell and the right; `None` where no clip is.
     pub cells: [Option<TwoUpCell>; 2],
 }
 
@@ -44,17 +37,12 @@ impl std::fmt::Display for TwoUpMode {
 
 #[derive(Clone)]
 pub struct TwoUpCell {
-    /// The timeline frame it shows, and the source frame of its clip there.
     pub frame: i64,
     pub source_frame: i64,
-    /// The picture is that frame's: `false` while it decodes, the cell
-    /// showing the one before.
     pub exact: bool,
-    /// The picture shown, as decoded.
     pub picture: Option<std::sync::Arc<vidcut_av::player::Picture>>,
 }
 
-/// In/Out handles on the source scroll bar.
 enum MarkHandles {
     Clip {
         media: String,
@@ -95,8 +83,6 @@ impl MarkHandles {
     }
 }
 
-/// The media the viewer shows at `position` if its file is missing: the
-/// source's, or the picture on top at the timeline's playhead.
 fn offline_media<'a>(
     p: &'a Project,
     missing: &HashSet<String>,
@@ -178,12 +164,8 @@ impl Workspace {
             });
         });
 
-        // The picture, in the timeline's aspect: sources are fitted inside it
-        // as export will fit them.
         let below = 34.0 + 36.0;
         let avail = ui.available_rect_before_wrap();
-        // The audio meter and monitoring mute on the right: one
-        // bar per project channel.
         let meter_w = self.viewer_meter_width();
         let area = Rect::from_min_max(
             avail.min,
@@ -201,8 +183,6 @@ impl Workspace {
             p.settings.width as f32 / p.settings.height.max(1) as f32
         });
         let ppp = ui.ctx().pixels_per_point();
-        // On whole physical pixels: the player's picture is drawn at this
-        // size and shown one to one.
         let picture = {
             use eframe::emath::GuiRounding;
             fit(area.shrink(2.0), aspect).round_to_pixels(ppp)
@@ -228,7 +208,6 @@ impl Workspace {
             return;
         }
         let area_resp = ui.allocate_rect(area, Sense::click_and_drag());
-        // Dragging the source picture onto the timeline edits it in (spec §7.3).
         if mode.is_source()
             && area_resp.drag_started()
             && let Some((media, _)) = self.snap.source_at()
@@ -323,18 +302,12 @@ impl Workspace {
         self.transport(ui, id);
     }
 
-    /// The Trim Editor: the outgoing clip's last frame beside the
-    /// incoming clip's first frame, with one-frame trims of the Out, the In
-    /// and both (a roll). Esc or Close leaves it.
     fn trim_editor_view(&mut self, ui: &mut egui::Ui, area: Rect) {
         use crate::gui::timeline::Side;
         let (Some(e), Some(p)) = (self.timeline.edit, self.shown_project()) else {
             self.trim_editor = None;
             return;
         };
-        // A trim on its way moves the selection before the cut moves, so a
-        // missing cut doesn't close the editor; a cut that is gone clears the
-        // selection, which does.
         if ui.input(|i| i.key_pressed(Key::Escape)) {
             self.trim_editor = None;
             return;
@@ -376,8 +349,6 @@ impl Workspace {
         });
     }
 
-    /// Dynamic Trim's two-up: the frames on both sides of the
-    /// edit (or of the slipped or sliding clip) as the trim so far leaves them.
     fn dynamic_view(&mut self, ui: &mut egui::Ui, area: Rect) {
         use crate::gui::timeline::tools::{DynamicTarget, dynamic_preview};
         let (Some(target), Some(p)) = (self.dynamic_target(), self.shown_project()) else {
@@ -432,8 +403,6 @@ impl Workspace {
         });
     }
 
-    /// Two exact frames of `p` side by side, labeled: timeline frames that
-    /// show nothing read "no clip".
     fn draw_two_up(
         &mut self,
         ui: &mut egui::Ui,
@@ -449,7 +418,6 @@ impl Workspace {
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
         let half = area.width() / 2.0;
         let ppp = ui.ctx().pixels_per_point();
-        // The trim's run, × real time.
         let speed = match mode {
             TwoUpMode::DynamicTrim => self.timeline.dynamic.as_ref().map_or(0.0, |d| d.speed()),
             TwoUpMode::TrimEditor => 0.0,
@@ -480,7 +448,6 @@ impl Workspace {
                 );
                 continue;
             };
-            // The clip it names, whatever covers it on the tracks above.
             let piece = vidcut_core::render::clip_frame(p, &c.id, frame).ok();
             if let Some(piece) = piece {
                 let size = [picture.width(), picture.height()].map(|x| (x * ppp).round() as u32);
@@ -535,8 +502,6 @@ impl Workspace {
         }
     }
 
-    /// Source Clip and Source Tape: the whole clip or tape, with the playhead
-    /// and draggable In/Out handles.
     fn scroll_bar(&mut self, ui: &mut egui::Ui) {
         let (rect, resp) =
             ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click_and_drag());
@@ -571,8 +536,6 @@ impl Workspace {
                 }
             }
         }
-        // A span across clips is drawn in tape frames (decision D17). One
-        // clip keeps that clip's own marks, offset onto the tape.
         let span = tape.then(|| self.crossing_span()).flatten();
         let shown = self.snap.source_at().map(|(m, _)| m.to_string());
         let mut handles = None;
@@ -653,7 +616,6 @@ impl Workspace {
             Stroke::new(2.0, theme::colors().playhead),
         );
 
-        // Press near a handle drags the mark, elsewhere scrubs.
         if resp.drag_started()
             && let Some(pos) = resp.interact_pointer_pos()
         {
@@ -738,8 +700,6 @@ impl Workspace {
         }
     }
 
-    /// Timeline mode has no scroll bar; it shows when the playhead sits on a
-    /// clip's first or last frame.
     fn clip_edge_hint(&self, ui: &mut egui::Ui) {
         let at = self.snap.timeline.position;
         let text = self
@@ -811,7 +771,6 @@ impl Workspace {
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Clear of the panel's corner.
                 ui.add_space(12.0);
                 self.timecode_field(ui, id);
             });
@@ -837,7 +796,6 @@ impl Workspace {
         self.seek(id, target, false);
     }
 
-    /// The playhead timecode; click, `=`, `+` or `-` to type one.
     fn timecode_field(&mut self, ui: &mut egui::Ui, id: PlayerId) {
         let position = self.snap.player(id).position;
         let current = match self.snap.viewer {
@@ -889,7 +847,6 @@ impl Workspace {
         }
     }
 
-    /// The marked duration; editing it moves the Out mark.
     fn duration_field(&mut self, ui: &mut egui::Ui) {
         let Some(p) = self.project() else { return };
         let (start, end, media) = match self.snap.source_at() {
@@ -938,7 +895,6 @@ impl Workspace {
                     })
                     .filter(|&d| d > 0);
                 if submit && let Some(d) = length {
-                    // Out = In + duration.
                     match media {
                         Some(m) => self.send(
                             "media.marks.set",
@@ -963,9 +919,6 @@ impl Workspace {
     }
 }
 
-/// Stats for nerds over the picture's top left: a group for each part of
-/// the player, a fact on each row. When the picture is too short for all
-/// of them, the groups go on in another column.
 fn stats_panel(painter: &egui::Painter, picture: Rect, stats: &crate::live::stats::PlayerStats) {
     let groups = stats.groups();
     let width = groups
@@ -1018,12 +971,6 @@ fn stats_panel(painter: &egui::Painter, picture: Rect, stats: &crate::live::stat
     }
 }
 
-/// What was typed into a timecode field, as a TimeSpec: digits fill a
-/// timecode from the right ("100" is 00:00:01:00), and where the timecode
-/// counts drop-frame, skipping `dropped` frame numbers at each minute but
-/// every tenth, a label it skips lands on the minute's first frame
-/// (`10000`, a minute, is 00:01:00;02 at 29.97: decision D47); anything
-/// else (`5s`, `1m30s`, `450f`, `00:01:00:00`) is used as is.
 pub(super) fn timecode_input(text: &str, dropped: i64) -> Option<String> {
     let t = text.trim().trim_start_matches(['+', '-', '=']);
     if t.is_empty() {

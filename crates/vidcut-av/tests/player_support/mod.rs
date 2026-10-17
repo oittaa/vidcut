@@ -1,6 +1,4 @@
-//! What the player's tests share: fixtures as plans, barcodes, and what
-//! `frame render` makes of a frame.
-#![allow(dead_code)] // each test binary uses its own part
+#![allow(dead_code)]
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -19,7 +17,6 @@ pub fn fps() -> Rational {
     Rational::new(30, 1).unwrap()
 }
 
-/// A fixture file and its first frame's time.
 #[derive(Clone)]
 pub struct Src {
     pub path: PathBuf,
@@ -42,8 +39,6 @@ pub fn src(media: &str, spec: FixtureSpec) -> Src {
     }
 }
 
-/// A clip of a timeline: source frames `from..from + frames` of `src`, its
-/// own sound with it; black and silence without a source.
 pub struct Clip<'a> {
     pub src: Option<&'a Src>,
     pub from: i64,
@@ -66,8 +61,6 @@ pub fn gap<'a>(frames: i64) -> Clip<'a> {
     }
 }
 
-/// A plan of `clips` end to end from timeline frame `start`, at 30 fps,
-/// 48 kHz stereo: one lane of the clips' own sound.
 pub fn plan(clips: &[Clip], start: i64) -> RenderPlan {
     let fps = fps();
     let sample = |t: i64| fps.frame_to_sample(t, RATE);
@@ -119,7 +112,6 @@ pub fn plan(clips: &[Clip], start: i64) -> RenderPlan {
     }
 }
 
-/// The single-frame piece timeline frame `t` shows.
 pub fn piece_at(plan: &RenderPlan, t: i64) -> VideoPiece {
     let mut k = t - plan.range.0;
     for p in &plan.video {
@@ -131,7 +123,6 @@ pub fn piece_at(plan: &RenderPlan, t: i64) -> VideoPiece {
     panic!("frame {t} is outside the plan");
 }
 
-/// The barcode `frame render` shows at timeline frame `t` (None: black).
 pub fn rendered(plan: &RenderPlan, t: i64) -> Option<u32> {
     let img = vidcut_av::export::still::rgba(&piece_at(plan, t), plan.fps, W, H).unwrap();
     code_rgba(&img.rgba, img.width, img.height)
@@ -148,12 +139,10 @@ pub fn code_rgba(rgba: &[u8], w: u32, h: u32) -> Option<u32> {
     read_barcode(&f).unwrap()
 }
 
-/// The barcode in a player's picture.
 pub fn code(p: &Picture) -> Option<u32> {
     read_barcode(p.frame()).unwrap()
 }
 
-/// What the player shows at `t` once its picture is decoded.
 pub fn shown_at(player: &Player, t: i64) -> Option<u32> {
     assert!(
         player.wait_ready(t, Duration::from_secs(10)),
@@ -166,12 +155,7 @@ pub fn shown_at(player: &Player, t: i64) -> Option<u32> {
     code(&shown.picture)
 }
 
-/// Pulls one buffer of `frames` from a manual output once the player has
-/// that much queued, as a device would, as if it had just been heard: the
-/// clock stands at its end at once, and holds there until the next.
 pub fn pull_full(out: &ManualOutput, frames: usize) -> Vec<f32> {
-    // At the end of the plan less comes: once nothing more has come for a
-    // while, what there is.
     let (mut queued, mut since) = (out.queued(), Instant::now());
     while queued < frames as u64 && since.elapsed() < Duration::from_millis(300) {
         std::thread::sleep(Duration::from_millis(1));
@@ -184,14 +168,10 @@ pub fn pull_full(out: &ManualOutput, frames: usize) -> Vec<f32> {
     out.pull(frames, Instant::now() - length)
 }
 
-/// The first channel of interleaved stereo.
 pub fn left(stereo: &[f32]) -> Vec<f32> {
     stereo.chunks(2).map(|c| c[0]).collect()
 }
 
-/// Where bursts of sound end: the last sample above `threshold` before at
-/// least `min_gap` quiet ones (or the end). A beep played backward ends on
-/// its first sample.
 pub fn burst_ends(mono: &[f32], threshold: f32, min_gap: usize) -> Vec<usize> {
     let reversed: Vec<f32> = mono.iter().rev().copied().collect();
     let mut ends: Vec<usize> = vidcut_av::beep::onsets(&reversed, threshold, min_gap)

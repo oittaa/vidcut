@@ -1,7 +1,3 @@
-//! Thumbnails of the media pool are kept on disk. A project opens with them
-//! even when its media can't be decoded any more. Media in another project
-//! with the same id gets its own thumbnails and sound.
-
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -47,7 +43,6 @@ fn call(h: &live::Handle, method: &str, params: Value) -> Response {
         .unwrap_or_else(|e| panic!("{method}: {e}"))
 }
 
-/// The pool's filmstrip of `media`, once the session has it.
 fn thumbs(h: &live::Handle, media: &str) -> Arc<Filmstrip> {
     let started = Instant::now();
     loop {
@@ -112,7 +107,6 @@ fn thumbnails_come_back_from_the_disk_cache_for_each_project() {
     )
     .unwrap();
 
-    // Decoded the first time, and kept.
     let (h, session) = start(&path);
     call(&h, "media.add", json!({ "paths": [clip] }));
     let decoded = thumbs(&h, "m1");
@@ -122,8 +116,6 @@ fn thumbnails_come_back_from_the_disk_cache_for_each_project() {
     h.shutdown();
     session.join().unwrap();
 
-    // The clip can't be decoded any more (it moved), yet the project opens
-    // with its thumbnails: they come from the cache.
     std::fs::rename(&clip, dir.join("moved.mp4")).unwrap();
     let (h, session) = start(&path);
     let cached = thumbs(&h, "m1");
@@ -142,8 +134,6 @@ fn thumbnails_come_back_from_the_disk_cache_for_each_project() {
         assert!(diff < 4.0, "JPEG kept the pictures: mean difference {diff}");
     }
 
-    // Another project's m1 is another file: its own thumbnails and sound,
-    // never those of the m1 before it. And back again.
     let longer = fixture::ensure(&FixtureSpec::new(
         VideoCodec::H264,
         Container::Mp4,
@@ -160,7 +150,6 @@ fn thumbnails_come_back_from_the_disk_cache_for_each_project() {
     );
     call(&h, "media.add", json!({ "paths": [longer] }));
     let last = |strip: &Filmstrip| strip.times.last().copied().unwrap_or(0.0);
-    // 24 pictures over 10 s; the 3 s clip's end before 3 s.
     let strip = thumbs(&h, "m1");
     assert!(last(&strip) > 5.0, "{:?}", strip.times);
     let started = Instant::now();

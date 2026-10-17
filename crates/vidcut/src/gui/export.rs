@@ -1,9 +1,3 @@
-//! Quick Export, the Export dialog (deviation X3), timeline
-//! interchange (OpenTimelineIO, X9) and the jobs panel. All of it is a view
-//! over requests: `presets.list`, `export.plan`, `export.start`,
-//! `presets.save`, `presets.delete`, `timeline.import` and the session's
-//! jobs (docs/decisions/gui.md §9).
-
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -21,9 +15,6 @@ use super::theme;
 use super::workspace::{Workspace, dim, escape_cancels};
 use crate::live::{self, JobInfo, JobState, Origin};
 
-// ---------------------------------------------------------------- plumbing
-
-/// A request answered on a helper thread, so the UI never waits for it.
 #[derive(Debug)]
 pub(super) struct Ask {
     slot: Arc<Mutex<Option<vidcut_core::Result<Response>>>>,
@@ -49,16 +40,12 @@ impl Ask {
         Self { slot }
     }
 
-    /// The answer, once it is there (only once).
     pub(super) fn take(&self) -> Option<vidcut_core::Result<Response>> {
         self.slot.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 }
 
-/// File dialogs. They run on helper threads (portal dialogs block); tests
-/// replace them.
 pub trait Dialogs: Send + Sync {
-    /// Where to save a file; `None` if cancelled.
     fn save_file(
         &self,
         title: &str,
@@ -68,7 +55,6 @@ pub trait Dialogs: Send + Sync {
     ) -> Option<PathBuf>;
     fn pick_file(&self, title: &str, folder: &Path, extensions: &[&str]) -> Option<PathBuf>;
     fn pick_folder(&self, title: &str, folder: &Path) -> Option<PathBuf>;
-    /// Files to open, under named filters; none if cancelled.
     fn pick_files(
         &self,
         _title: &str,
@@ -79,7 +65,6 @@ pub trait Dialogs: Send + Sync {
     }
 }
 
-/// The desktop's file dialogs (XDG portal).
 pub struct RfdDialogs;
 
 impl Dialogs for RfdDialogs {
@@ -127,7 +112,6 @@ impl Dialogs for RfdDialogs {
     }
 }
 
-/// A file dialog's answer, filled in by its helper thread.
 #[derive(Clone)]
 pub(super) struct Picked(Arc<Mutex<Option<Option<PathBuf>>>>);
 
@@ -150,13 +134,11 @@ impl Picked {
         Self(slot)
     }
 
-    /// `Some(None)`: cancelled.
     pub(super) fn take(&self) -> Option<Option<PathBuf>> {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 }
 
-/// A preset as `presets.list` reports it.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub(super) struct PresetInfo {
     pub name: String,
@@ -168,49 +150,30 @@ pub(super) struct PresetInfo {
     #[serde(default)]
     pub user: bool,
     pub settings: ExportSettings,
-    /// Why this machine can't export it (`presets.list`).
     #[serde(default)]
     pub unavailable: Option<String>,
 }
 
-// ---------------------------------------------------------------- state
-
-/// The export windows' state (view state; the work is the session's).
 #[derive(Default)]
 pub struct ExportUi {
     presets: Vec<PresetInfo>,
     presets_ask: Option<Ask>,
-    /// What this machine encodes (`encoders.list`): the choices it can't
-    /// take are greyed out, with why.
     encodable: Value,
     encodable_ask: Option<Ask>,
-    /// Quick Export is open.
     quick: Option<Quick>,
-    /// The Export dialog is open.
     dialog: Option<Box<Dialog>>,
-    /// Open the Export dialog once the presets are known.
     dialog_wanted: bool,
-    /// An export being started: the file dialog, then `export.start`.
     starting: Option<Starting>,
-    /// Jobs started here whose progress window is showing.
     watching: Vec<String>,
-    /// The jobs window.
     pub show_jobs: bool,
     otio: Option<Otio>,
-    /// The timeline import under way decomposes compound clips (deviation
-    /// X9).
     flatten: bool,
-    /// Import warnings to show.
     warnings: Option<(String, Vec<String>)>,
-    /// Closing was asked for while exports run.
     confirm_quit: bool,
-    /// Closing is fine now (or was asked for by `gui.quit`).
     pub quit_confirmed: bool,
 }
 
 impl ExportUi {
-    /// Whether Quick Export is open, and the Export dialog (or it opens
-    /// once the presets are known).
     pub(super) fn windows(&self) -> (bool, bool) {
         (
             self.quick.is_some(),
@@ -227,8 +190,6 @@ impl ExportUi {
         self.dialog_wanted = false;
     }
 
-    /// A question is up: where an imported timeline goes, where its media
-    /// are, or quitting while jobs run.
     pub(super) fn asking(&self, jobs: &[JobInfo]) -> bool {
         matches!(self.otio, Some(Otio::Choose(_) | Otio::Missing { .. }))
             || (self.confirm_quit && jobs.iter().any(JobInfo::unfinished))
@@ -240,7 +201,6 @@ struct Quick {
     error: Option<String>,
 }
 
-/// Where an export's errors go back to.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum From {
     Quick,
@@ -255,17 +215,13 @@ struct Starting {
 }
 
 enum Otio {
-    /// Asking which file to import.
     PickImport(Picked),
-    /// Where the timeline goes: after the last clip, instead of the
-    /// timeline, as a compound clip, or only its media into the pool?
     Choose(PathBuf),
     Importing {
         ask: Ask,
         path: PathBuf,
         mode: ImportMode,
     },
-    /// Media files weren't where the file says: look in a folder?
     Missing {
         path: PathBuf,
         mode: ImportMode,
@@ -276,7 +232,6 @@ enum Otio {
         path: PathBuf,
         mode: ImportMode,
     },
-    /// Where to write, and the extension it gets if it has none.
     PickExport(Picked, &'static str),
     Exporting(Ask),
 }
@@ -289,12 +244,9 @@ enum RangeChoice {
 }
 
 struct Dialog {
-    /// The preset the settings start from (always one: GUI exports read as
-    /// `--preset NAME --set …` on the command line).
     preset: String,
     base: ExportSettings,
     settings: ExportSettings,
-    /// Video settings while Audio only is on.
     stashed_video: Option<VideoSettings>,
     range: RangeChoice,
     from: String,
@@ -305,7 +257,6 @@ struct Dialog {
     overwrite: bool,
     picking: Option<Picked>,
     plan: Option<Ask>,
-    /// The params of the plan shown (or being made).
     planned: Option<Value>,
     plan_result: Option<std::result::Result<Value, String>>,
     error: Option<String>,
@@ -320,8 +271,6 @@ struct SavePreset {
     ask: Option<Ask>,
     error: Option<String>,
 }
-
-// ---------------------------------------------------------------- helpers
 
 fn video_codecs(c: Container) -> &'static [VideoCodec] {
     use VideoCodec as V;
@@ -370,7 +319,6 @@ fn profiles(c: VideoCodec) -> &'static [&'static str] {
     }
 }
 
-/// The wire name of an enum value (`h264`, `pcm_s24`).
 fn name<T: serde::Serialize>(v: &T) -> String {
     serde_json::to_value(v)
         .ok()
@@ -382,7 +330,6 @@ fn lossy(a: AudioCodec) -> bool {
     matches!(a, AudioCodec::Aac | AudioCodec::Opus | AudioCodec::Mp3)
 }
 
-/// Codecs the container can't hold are swapped for ones it can.
 fn fit_codecs(s: &mut ExportSettings) {
     if s.container.audio_only() {
         s.video = None;
@@ -403,11 +350,9 @@ fn fit_codecs(s: &mut ExportSettings) {
     }
 }
 
-/// `--set` overrides that turn `base` into `settings`, as dotted keys.
 pub(super) fn overrides(base: &ExportSettings, settings: &ExportSettings) -> Vec<String> {
     fn raw(v: &Value) -> String {
         match v {
-            // Plain strings stay plain unless they'd read as JSON ("8").
             Value::String(s) if serde_json::from_str::<Value>(s).is_err() => s.clone(),
             other => other.to_string(),
         }
@@ -446,7 +391,6 @@ pub(super) fn overrides(base: &ExportSettings, settings: &ExportSettings) -> Vec
     out
 }
 
-/// The shell command that makes the same export, in the foreground.
 pub(super) fn command(project: &Path, p: &Value) -> String {
     let mut p = p.clone();
     if let Some(m) = p.as_object_mut() {
@@ -455,8 +399,6 @@ pub(super) fn command(project: &Path, p: &Value) -> String {
     crate::cli::command_line(project, "export.start", &p).unwrap_or_default()
 }
 
-/// Where a window of about `w`×`h` starts so it sits near the middle. Its
-/// top-left stays put afterwards, so it doesn't move as its content changes.
 pub(super) fn near_center(ctx: &egui::Context, w: f32, h: f32) -> egui::Pos2 {
     let r = ctx.content_rect();
     egui::pos2(
@@ -505,7 +447,6 @@ impl Dialog {
         }
     }
 
-    /// Starts from another preset, keeping the output and range.
     fn use_preset(&mut self, preset: &PresetInfo) {
         self.preset = preset.name.clone();
         self.base = preset.settings.clone();
@@ -514,7 +455,6 @@ impl Dialog {
         self.match_output();
     }
 
-    /// The output file's extension follows the container.
     fn match_output(&mut self) {
         if self.per_clip || self.output.trim().is_empty() {
             return;
@@ -526,7 +466,6 @@ impl Dialog {
             .to_string();
     }
 
-    /// The `export.start` / `export.plan` params.
     fn params(&self) -> Value {
         let output = self.output.trim();
         let mut p = json!({ "output": output, "preset": self.preset });
@@ -536,7 +475,6 @@ impl Dialog {
             base.video = None;
             settings.video = None;
         }
-        // A single file's extension sets the container anyway.
         let ext = Path::new(output)
             .extension()
             .and_then(|e| e.to_str())
@@ -564,10 +502,7 @@ impl Dialog {
     }
 }
 
-// ---------------------------------------------------------------- windows
-
 impl Workspace {
-    /// Quick Export, opened from the top bar.
     pub(super) fn open_quick_export(&mut self, ctx: &egui::Context) {
         self.refresh_presets(ctx);
         self.export.quick = Some(Quick {
@@ -576,12 +511,10 @@ impl Workspace {
         });
     }
 
-    /// The Export dialog (deviation X3).
     pub(super) fn open_export(&mut self, ctx: &egui::Context) {
         self.refresh_presets(ctx);
         self.export.dialog = None;
         self.export.quick = None;
-        // Opened once the presets are known (see `export_windows`).
         self.export.starting = None;
         self.export.dialog_wanted = true;
     }
@@ -591,8 +524,6 @@ impl Workspace {
         self.export.encodable_ask = Some(Ask::send(&self.live, ctx, "encoders.list", json!({})));
     }
 
-    /// Where exports go by default: the folder of the last one (this run
-    /// or before), else the project's.
     fn export_folder(&self) -> PathBuf {
         self.folders
             .get(Kind::Exports)
@@ -613,7 +544,6 @@ impl Workspace {
             .is_some_and(|p| p.marks.mark_in.is_some() && p.marks.mark_out.is_some())
     }
 
-    /// Draws the export windows; called once per frame.
     pub(super) fn export_windows(&mut self, ctx: &egui::Context) {
         if let Some(ask) = &self.export.presets_ask
             && let Some(r) = ask.take()
@@ -780,7 +710,6 @@ impl Workspace {
             });
             q.error = None;
             self.export.starting = Some(Starting {
-                // Quick Export semantics: In–Out if set, else everything.
                 params: json!({ "preset": name, "overwrite": true, "background": true }),
                 from: From::Quick,
                 picking: Some(picking),
@@ -792,7 +721,6 @@ impl Workspace {
         }
     }
 
-    /// An export on its way: the file dialog, then `export.start`.
     fn starting(&mut self, ctx: &egui::Context) {
         let Some(mut s) = self.export.starting.take() else {
             return;
@@ -802,7 +730,7 @@ impl Workspace {
         {
             s.picking = None;
             match choice {
-                None => return, // cancelled
+                None => return,
                 Some(path) => {
                     self.folders.remember(Kind::Exports, &path);
                     s.params["output"] = json!(path);
@@ -855,7 +783,6 @@ impl Workspace {
         });
         let marks = self.marks_set();
         let in_out = self.project().map(|p| p.marks.clone()).unwrap_or_default();
-        // Browse… answered.
         if let Some(p) = &d.picking
             && let Some(choice) = p.take()
         {
@@ -879,7 +806,6 @@ impl Workspace {
                 egui::ScrollArea::vertical()
                     .max_height(ctx.content_rect().height() * 0.7)
                     .show(ui, |ui| {
-                        // Preset.
                         ui.horizontal(|ui| {
                             let label = ui.label("Preset");
                             let title = presets
@@ -939,7 +865,6 @@ impl Workspace {
                         let can = &self.export.encodable;
                         settings_form(ui, &mut d, can, (width, height), (rate, channels));
                         ui.separator();
-                        // Range.
                         ui.horizontal(|ui| {
                             ui.label("Range");
                             ui.radio_value(&mut d.range, RangeChoice::All, "Whole timeline");
@@ -972,7 +897,6 @@ impl Workspace {
                             });
                         }
                         ui.separator();
-                        // Output.
                         ui.horizontal(|ui| {
                             ui.label("Output");
                             let before = d.per_clip;
@@ -994,17 +918,16 @@ impl Workspace {
                             let r = ui.add(
                                 egui::TextEdit::singleline(&mut d.output).desired_width(380.0),
                             );
-                            if r.lost_focus() && !d.per_clip {
-                                // A typed extension picks the container.
-                                if let Some(c) = Path::new(d.output.trim())
+                            if r.lost_focus()
+                                && !d.per_clip
+                                && let Some(c) = Path::new(d.output.trim())
                                     .extension()
                                     .and_then(|e| e.to_str())
                                     .and_then(Container::from_extension)
-                                    && c != d.settings.container
-                                {
-                                    d.settings.container = c;
-                                    fit_codecs(&mut d.settings);
-                                }
+                                && c != d.settings.container
+                            {
+                                d.settings.container = c;
+                                fit_codecs(&mut d.settings);
                             }
                             if ui
                                 .add_enabled(d.picking.is_none(), egui::Button::new("Browse…"))
@@ -1029,7 +952,6 @@ impl Workspace {
                             keep_hdr(&mut d, &set);
                         }
                         ui.separator();
-                        // The same export from a shell.
                         let params = d.params();
                         if let Some(project) = &project {
                             let cmd = command(project, &params);
@@ -1044,7 +966,6 @@ impl Workspace {
                             );
                         }
                     });
-                // The actions stay in view below the scrolling settings.
                 ui.separator();
                 if let Some(e) = &d.error {
                     ui.label(RichText::new(e).color(theme::colors().error));
@@ -1092,14 +1013,11 @@ impl Workspace {
                 picking: None,
             });
         }
-        // It closes from its title bar only: a button beside Start Export is
-        // too easily hit instead.
         if open {
             self.export.dialog = Some(d);
         }
     }
 
-    /// Plans the export again when its params change (one plan at a time).
     fn refresh_plan(&mut self, ctx: &egui::Context, d: &mut Dialog) {
         if let Some(ask) = &d.plan
             && let Some(r) = ask.take()
@@ -1114,7 +1032,6 @@ impl Workspace {
         if d.planned.as_ref() == Some(&params) {
             return;
         }
-        // Mistakes the dialog can see itself don't need the session.
         let mut settings = d.settings.clone();
         if !d.per_clip
             && let Some(c) = Path::new(d.output.trim())
@@ -1148,7 +1065,6 @@ impl Workspace {
             s.ask = None;
             match r {
                 Ok(r) => {
-                    // The dialog now starts from the saved preset.
                     if let Ok(p) = serde_json::from_value::<PresetInfo>(r.result["preset"].clone())
                     {
                         d.preset = p.name;
@@ -1222,7 +1138,6 @@ impl Workspace {
         }
     }
 
-    /// A progress window for each export started here.
     fn progress_windows(&mut self, ctx: &egui::Context) {
         let jobs = self.snap.jobs.clone();
         let mut close = Vec::new();
@@ -1277,7 +1192,6 @@ impl Workspace {
                     .show(ui, |ui| {
                         for j in jobs.iter().rev() {
                             ui.group(|ui| {
-                                // Every job's box as wide as the window.
                                 ui.set_min_width(ui.available_width());
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(&j.title).strong());
@@ -1295,9 +1209,6 @@ impl Workspace {
         self.export.show_jobs = open;
     }
 
-    /// File > Import Timeline / Export Timeline (OpenTimelineIO). An
-    /// `.otiod` bundle imports through its `content.otio`. `flatten`: its
-    /// compound clips decomposed.
     pub(super) fn import_timeline(&mut self, ctx: &egui::Context, flatten: bool) {
         self.export.flatten = flatten;
         let (dialogs, folder) = (self.dialogs.clone(), self.export_folder());
@@ -1306,7 +1217,6 @@ impl Workspace {
         })));
     }
 
-    /// The edit alone (`.otio`), or with its media in a bundle (`.otioz`).
     pub(super) fn export_timeline(&mut self, ctx: &egui::Context, bundle: bool) {
         let (dialogs, folder) = (self.dialogs.clone(), self.export_folder());
         let ext = if bundle { "otioz" } else { "otio" };
@@ -1324,7 +1234,6 @@ impl Workspace {
         ));
     }
 
-    /// What an import left out of the timeline from `name`.
     pub(super) fn show_import_warnings(&mut self, name: String, warnings: Vec<String>) {
         self.export.warnings = Some((name, warnings));
     }
@@ -1504,7 +1413,6 @@ impl Workspace {
                         path.set_extension(ext);
                     }
                     self.folders.remember(Kind::Exports, &path);
-                    // A bundle copies media: a job, as media exports are.
                     let background = !crate::export::is_otio(&path);
                     Some(Otio::Exporting(Ask::send(
                         &self.live,
@@ -1542,7 +1450,6 @@ impl Workspace {
         };
     }
 
-    /// Asked to close while exports run.
     fn quit_window(&mut self, ctx: &egui::Context) {
         let running = self.snap.jobs.iter().filter(|j| j.unfinished()).count();
         if ctx.input(|i| i.viewport().close_requested())
@@ -1574,15 +1481,12 @@ impl Workspace {
                 }
             });
         });
-        // Escape keeps them running.
         if self.export.confirm_quit && escape_cancels(ctx, &modal) {
             self.export.confirm_quit = false;
         }
     }
 }
 
-/// One job: progress, time, and what to do with it. With `closable`, an
-/// ended job has a Close button; returns whether it was clicked.
 fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, Value)) -> bool {
     let mut closed = false;
     match j.state {
@@ -1661,8 +1565,6 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, 
     closed
 }
 
-/// What `export.plan` says the export will do. Returns the overrides a
-/// note's action asks for (decision D44: export HDR instead).
 fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
     let mut action = None;
     ui.label(dim("Plan"));
@@ -1716,8 +1618,6 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
             if outputs.len() > 4 {
                 ui.label(dim(format!("… and {} more", outputs.len() - 4)));
             }
-            // A quiet note, never in the way: HDR picture that SDR output
-            // tone-maps, with a way to keep it HDR.
             for note in plan["notes"].as_array().into_iter().flatten() {
                 if note["code"] != "hdr_tone_mapped" {
                     continue;
@@ -1730,7 +1630,6 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
                         .flatten()
                         .filter_map(|s| s.as_str().map(String::from))
                         .collect();
-                    // No button when no encoder allowed here writes HDR.
                     if !set.is_empty()
                         && ui
                             .small_button("Export HDR")
@@ -1746,8 +1645,6 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
     action
 }
 
-/// The outputs' dynamic range and depth in a few words, with the reasons
-/// to hover: one line however many files.
 fn color_line(outputs: &[Value]) -> Option<(String, String)> {
     let mut kinds: Vec<String> = Vec::new();
     let mut why = Vec::new();
@@ -1776,9 +1673,6 @@ fn color_line(outputs: &[Value]) -> Option<(String, String)> {
     (!kinds.is_empty()).then(|| (kinds.join(" / "), why.join("\n")))
 }
 
-/// The HDR metadata the outputs write, in a few words, with the reasons to
-/// hover (decision D46): one line however many files, each kind once;
-/// `None` when they write none.
 fn metadata_line(outputs: &[Value]) -> Option<(String, String)> {
     let mut kinds: Vec<String> = Vec::new();
     let mut why = Vec::new();
@@ -1802,8 +1696,6 @@ fn metadata_line(outputs: &[Value]) -> Option<(String, String)> {
     (!kinds.is_empty()).then(|| (kinds.join(" / "), why.join("\n")))
 }
 
-/// Applies a note's overrides to the dialog's settings: HDR, on a codec
-/// that carries it.
 fn keep_hdr(d: &mut Dialog, set: &[String]) {
     let mut settings = d.settings.clone();
     if apply_overrides(&mut settings, set).is_ok() {
@@ -1812,9 +1704,6 @@ fn keep_hdr(d: &mut Dialog, set: &[String]) {
     }
 }
 
-/// Passes and the settings of the encoder's way of making them (decision
-/// D45): the first run's speed for x264, x265 and VP9; for NVENC its
-/// first look and lookahead.
 fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value) {
     use vidcut_core::export::{FirstPass, Multipass};
     let label = |p: Option<u8>| match p {
@@ -1886,21 +1775,16 @@ fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value) {
     }
 }
 
-/// Container, video and audio settings.
-/// Why this machine can't encode `codec` with `encoder` (`encoders.list`).
 fn why_video(can: &Value, codec: VideoCodec, encoder: EncoderChoice) -> Option<String> {
     can["video"][name(&codec)][name(&encoder)]
         .as_str()
         .map(String::from)
 }
 
-/// Why this machine can't encode sound in `codec`.
 fn why_audio(can: &Value, codec: AudioCodec) -> Option<String> {
     can["audio"][name(&codec)].as_str().map(String::from)
 }
 
-/// A choice in a list, greyed out with `why` where this machine can't take
-/// it.
 fn choice<T: PartialEq>(
     ui: &mut egui::Ui,
     current: &mut T,
@@ -1926,8 +1810,6 @@ fn settings_form(
     size: (u32, u32),
     audio: (u32, u16),
 ) {
-    // The encoder the plan says will run: its passes decide which of their
-    // settings apply (decision D45).
     let planned = d
         .plan_result
         .as_ref()
@@ -2010,7 +1892,6 @@ fn settings_form(
                                 if choice(ui, &mut v.codec, *c, name(c), why).changed() {
                                     v.profile = None;
                                     if matches!(c, VideoCodec::Prores | VideoCodec::Dnxhr) {
-                                        // Their profiles set the depth.
                                         v.bit_depth = None;
                                     }
                                 }
@@ -2020,7 +1901,6 @@ fn settings_form(
                     egui::ComboBox::from_id_salt("export-encoder")
                         .selected_text(name(&v.encoder))
                         .show_ui(ui, |ui| {
-                            // The GPU encoders this system has.
                             let gpus: &[EncoderChoice] = if cfg!(windows) {
                                 &[EncoderChoice::Nvenc, EncoderChoice::Amf, EncoderChoice::Qsv]
                             } else if cfg!(target_os = "macos") {
@@ -2057,7 +1937,6 @@ fn settings_form(
                     if quality.changed() {
                         v.bitrate = None;
                         v.quality = v.quality.or(Some(20));
-                        // Two passes are for a bitrate.
                         v.passes = None;
                     }
                     if ui.radio_value(&mut by_quality, false, "Bitrate").changed() {
@@ -2090,7 +1969,6 @@ fn settings_form(
                 });
                 ui.end_row();
 
-                // Passes: for a bitrate, where the codec has rate control.
                 if v.bitrate.is_some() && !matches!(v.codec, VideoCodec::Prores | VideoCodec::Dnxhr)
                 {
                     ui.label("");
@@ -2140,8 +2018,6 @@ fn settings_form(
                                 }
                             });
                     }
-                    // ProRes and DNxHR take their depth from the profile
-                    // (DNxHR HQ becomes HQX for 10-bit sources: decision D44).
                     if !matches!(v.codec, VideoCodec::Prores | VideoCodec::Dnxhr) {
                         ui.label(dim("bit depth"));
                         egui::ComboBox::from_id_salt("export-depth")
@@ -2157,7 +2033,6 @@ fn settings_form(
                                  bits or more (not in H.264); else 8",
                             );
                     }
-                    // Dynamic range: HDR needs a 10-bit HEVC, AV1 or VP9.
                     if vidcut_core::export::color::carries_hdr(v.codec) {
                         let label = |h: HdrMode| match h {
                             HdrMode::Auto => "auto",
@@ -2182,7 +2057,6 @@ fn settings_form(
                         if v.hdr.transfer().is_some() && v.bit_depth == Some(8) {
                             v.bit_depth = None;
                         }
-                        // HDR metadata (decision D46), when the output may be HDR.
                         if v.hdr != HdrMode::Sdr {
                             use vidcut_core::export::HdrMetadata as M;
                             let label = |m: M| match m {

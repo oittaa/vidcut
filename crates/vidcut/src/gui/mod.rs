@@ -1,7 +1,3 @@
-//! The GUI: eframe on wgpu (Vulkan on Linux, Vulkan or Direct3D 12 on
-//! Windows) on the UI thread; the project, the player and everything else
-//! in the live session (crate::live). See docs/decisions/gui.md.
-
 #[cfg(any(target_os = "linux", windows))]
 mod acquire;
 mod app;
@@ -33,19 +29,12 @@ use std::path::PathBuf;
 use eframe::egui;
 use vidcut_core::{Error, ErrorCode, Result};
 
-/// Runs the GUI until its window closes, optionally opening `project`
-/// (created if it doesn't exist).
 pub fn run(project: Option<PathBuf>) -> Result<()> {
     use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};
     use eframe::wgpu;
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         wgpu_options: WgpuConfiguration {
-            // Mailbox (or Immediate where there is one): a new picture shows
-            // at the next refresh, no frames queued. Presenting a hidden
-            // window can still block the UI thread (NVIDIA on Wayland), so
-            // the viewer presents on a thread of its own
-            // (docs/decisions/preview.md §4).
             surface: eframe::SurfaceConfig {
                 present_mode: wgpu::PresentMode::AutoNoVsync,
                 desired_maximum_frame_latency: Some(1),
@@ -55,8 +44,6 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
                     backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),
                     ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
                 },
-                // 16-bit textures for P010 pictures, and pictures as large
-                // as the GPU takes.
                 device_descriptor: std::sync::Arc::new(|adapter| wgpu::DeviceDescriptor {
                     label: Some("vidcut"),
                     required_features: picture::features(adapter),
@@ -86,14 +73,10 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
                 .map_err(Into::into)
         }),
     );
-    // What the window's close left closing ends before the process does:
-    // CUDA and the GPU drivers tear down as it exits (gotchas.md).
     crate::threads::ending("the closing threads");
     crate::threads::join_closing();
     crate::threads::ending("the process's exit");
     if ran.is_ok() {
-        // Everything of ours has ended: the process ends now, without the
-        // libraries' exit handlers, one of which hangs (gotchas.md).
         crate::threads::exit_now(0);
     }
     ran.map_err(|e| {
@@ -108,9 +91,6 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
     })
 }
 
-/// Shortcuts as this system names its keys: what Linux and Windows call
-/// Ctrl and Alt are Cmd and Option on macOS (the spec's key names). The
-/// keys themselves are egui's `command` and `alt` everywhere.
 pub fn keys(text: &str) -> String {
     keys_on(text, cfg!(target_os = "macos"))
 }

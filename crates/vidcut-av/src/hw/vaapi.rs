@@ -1,18 +1,11 @@
-//! VA-API's frames: Intel's surfaces mapped for the copy down, the filters
-//! that shrink and fit frames on the GPU, and the DRM export the viewer
-//! imports on Linux.
-
 use super::*;
 
-/// A VA-API frame of Intel's driver copied down the quicker way on its
-/// display ([`Ways`]); `None` for any other frame.
 pub(super) fn intel_download(src: &frame::Video) -> Option<Result<frame::Video>> {
     // SAFETY: a valid frame.
     let display = unsafe { intel_va(src) }?;
     Some(quicker_down(src, display))
 }
 
-/// `src` copied down the quicker way on Intel's VA-API `display`.
 fn quicker_down(src: &frame::Video, display: usize) -> Result<frame::Video> {
     if Ways::maps(display) {
         let started = std::time::Instant::now();
@@ -30,38 +23,24 @@ fn quicker_down(src: &frame::Video, display: usize) -> Result<frame::Video> {
     Ok(f)
 }
 
-/// The ways Intel's VA-API frames come down.
 #[derive(Clone, Copy)]
 enum Way {
-    /// The surface mapped itself (`mapped_down`).
     Mapped,
-    /// FFmpeg's copy of it (`fetched`).
     Fetched,
 }
 
-/// Which way Intel's frames come down faster on a VA-API display, timed on
-/// its first frames, each way in turn. Mapped, an N150's take half the time
-/// (gotchas.md); FFmpeg finds Gen7–Gen9's mapped memory uncached, so slow
-/// to read, and a card of its own reads its memory across the bus.
 #[derive(Clone, Copy)]
 struct Ways {
-    /// The display it is for.
     display: usize,
-    /// Each way's quickest time a megabyte, in seconds, and its frames
-    /// timed (mapping that failed counts as never quicker).
     mapped: (f64, u32),
     fetched: (f64, u32),
 }
 
-/// The frames timed each way before one is kept.
 const WAY_TRIALS: u32 = 4;
 
-/// The displays' [`Ways`].
 static WAYS: Mutex<Vec<Ways>> = Mutex::new(Vec::new());
 
 impl Ways {
-    /// Whether the next frame on `display` is mapped: in turn while they
-    /// are timed, then the quicker way.
     fn maps(display: usize) -> bool {
         let ways = WAYS.lock().unwrap_or_else(|e| e.into_inner());
         let Some(w) = ways.iter().find(|w| w.display == display) else {
@@ -74,7 +53,6 @@ impl Ways {
         }
     }
 
-    /// `display`'s, made at the first frame.
     fn of(ways: &mut Vec<Ways>, display: usize) -> &mut Ways {
         let i = match ways.iter().position(|w| w.display == display) {
             Some(i) => i,
@@ -90,7 +68,6 @@ impl Ways {
         &mut ways[i]
     }
 
-    /// A frame `f` came down `way` on `display` in `took`.
     fn took(display: usize, way: Way, took: std::time::Duration, f: &frame::Video) {
         let mb = (0..f.planes()).map(|p| f.data(p).len()).sum::<usize>() as f64 / 1e6;
         let per_mb = took.as_secs_f64() / mb.max(1e-6);
@@ -103,23 +80,16 @@ impl Ways {
         *slot = (slot.0.min(per_mb), slot.1.saturating_add(1));
     }
 
-    /// A frame on `display` wouldn't map: its frames come down FFmpeg's
-    /// way from now on.
     fn unmapped(display: usize) {
         let mut ways = WAYS.lock().unwrap_or_else(|e| e.into_inner());
         Self::of(&mut ways, display).mapped = (f64::INFINITY, WAY_TRIALS);
     }
 }
 
-/// `src` copied out of its surface mapped for reading itself
-/// (`vaDeriveImage`), where FFmpeg's copy-down reads a copy the driver makes
-/// of it (`vaGetImage`): on an Intel N150 in half the time (gotchas.md).
-/// `None` when it doesn't map.
 fn mapped_down(src: &frame::Video) -> Result<Option<frame::Video>> {
     let mut map = frame::Video::empty();
     let flags = ffi::AV_HWFRAME_MAP_READ as i32 | ffi::AV_HWFRAME_MAP_DIRECT as i32;
-    // SAFETY: a fresh frame, mapped in the frames' own layout; unmapped when
-    // it drops.
+    // SAFETY: `map` is a fresh frame, mapped from `src` in its own layout, unmapped when it drops.
     unsafe {
         (*map.as_mut_ptr()).format = ffi::AVPixelFormat::AV_PIX_FMT_NONE as i32;
         if ffi::av_hwframe_map(map.as_mut_ptr(), src.as_ptr(), flags) < 0 {
@@ -127,8 +97,7 @@ fn mapped_down(src: &frame::Video) -> Result<Option<frame::Video>> {
         }
     }
     let mut dst = frame::Video::new(map.format(), src.width(), src.height());
-    // SAFETY: both frames are valid, of one layout, the mapped one no
-    // smaller.
+    // SAFETY: `dst` is allocated in `map`'s layout, at a size the mapping is no smaller than.
     if unsafe { ffi::av_frame_copy(dst.as_mut_ptr(), map.as_ptr()) } < 0 {
         return Ok(None);
     }
@@ -136,35 +105,25 @@ fn mapped_down(src: &frame::Video) -> Result<Option<frame::Video>> {
     Ok(Some(dst))
 }
 
-/// The display of `frame` when it is a VA-API frame of Intel's driver
-/// (iHD), by the vendor string libva gives the display.
-///
-/// # Safety
-/// `frame` is a valid frame.
 #[cfg(target_os = "linux")]
 unsafe fn intel_va(frame: &frame::Video) -> Option<usize> {
     use std::ffi::{CStr, c_char, c_void};
-    /// `AVVAAPIDeviceContext`.
     #[repr(C)]
     struct VaapiDevice {
         display: *mut c_void,
         driver_quirks: std::ffi::c_uint,
     }
     type Query = unsafe extern "C" fn(*mut c_void) -> *const c_char;
-    // libva's, loaded with FFmpeg: looked up rather than linked, so a
-    // build of FFmpeg without VA-API needs no libva.
     static QUERY: std::sync::OnceLock<Option<Query>> = std::sync::OnceLock::new();
     let query = QUERY.get_or_init(|| {
-        // SAFETY: a symbol of the process's, which is libva's function or
-        // nothing.
+        // SAFETY: the process's `vaQueryVendorString`, if any, is libva's, as `Query` types it.
         unsafe {
             let f = libc::dlsym(libc::RTLD_DEFAULT, c"vaQueryVendorString".as_ptr());
             (!f.is_null()).then(|| std::mem::transmute::<*mut c_void, Query>(f))
         }
     });
     let query = (*query)?;
-    // SAFETY: a hardware frame's frames context holds its device's, and a
-    // VA-API device's context is an AVVAAPIDeviceContext with its display.
+    // SAFETY: `frame` holds its frames context; a VA-API `hwctx` is an `AVVAAPIDeviceContext`.
     unsafe {
         let frames = (*frame.as_ptr()).hw_frames_ctx;
         if frames.is_null() {
@@ -184,17 +143,11 @@ unsafe fn intel_va(frame: &frame::Video) -> Option<usize> {
     }
 }
 
-/// VA-API is Linux's.
-///
-/// # Safety
-/// None.
 #[cfg(not(target_os = "linux"))]
 unsafe fn intel_va(_: &frame::Video) -> Option<usize> {
     None
 }
 
-/// A pool VA-API's decoders share ([`share_frames`]): what it is for, and
-/// the frames.
 #[cfg(target_os = "linux")]
 struct Shared {
     device: usize,
@@ -203,17 +156,13 @@ struct Shared {
     size: (i32, i32),
     frames: *mut ffi::AVBufferRef,
 }
-// SAFETY: frames contexts are reference-counted and may be used on any
-// thread.
+// SAFETY: `frames` is a reference-counted frames context, which any thread may use.
 #[cfg(target_os = "linux")]
 unsafe impl Send for Shared {}
 
-/// The pools VA-API's decoders share.
 #[cfg(target_os = "linux")]
 static SHARED: Mutex<Vec<Shared>> = Mutex::new(Vec::new());
 
-/// Lets the shared pools go that nothing else holds: no decoder takes from
-/// them, and no frame of theirs is left. Each frees all its surfaces.
 #[cfg(target_os = "linux")]
 fn let_unused_go(shared: &mut Vec<Shared>) {
     shared.retain_mut(|s| {
@@ -228,8 +177,6 @@ fn let_unused_go(shared: &mut Vec<Shared>) {
     });
 }
 
-/// The shared pool whose surface `f` is, where it is one's: its memory goes
-/// only when all of the pool's frames do.
 #[cfg(target_os = "linux")]
 pub(super) fn pooled(f: &frame::Video) -> Option<usize> {
     // SAFETY: reads the frame's own field.
@@ -246,30 +193,14 @@ pub(super) fn pooled(f: &frame::Video) -> Option<usize> {
     found.then(|| unsafe { (*frames).data as usize })
 }
 
-/// Lets the shared pools go that nothing uses any more ([`let_unused_go`]),
-/// as pictures are kept: a pool goes soon after its last picture does, not
-/// when the next decoder opens.
 #[cfg(target_os = "linux")]
 pub(crate) fn let_unused_frames_go() {
     let_unused_go(&mut SHARED.lock().unwrap_or_else(|e| e.into_inner()));
 }
 
-/// Gives a VA-API decoder, in its `get_format`, the frames every decoder on
-/// its device shares for its codec, layout and size. A decoder's frames come
-/// from a pool that frees nothing while any of its frames is kept
-/// (gotchas.md): a decoder made anew (proxies switched, a cut to another
-/// file and back, FFmpeg 8.0's H.264 decoder at every seek) would start a
-/// pool beside the one the kept pictures hold. Sharing it, the new decoder
-/// takes the surfaces those pictures gave back. Where the decoder's pool
-/// has a fixed size (VA-API before 1.0) or anything fails, it makes its own.
-///
-/// # Safety
-/// `ctx` is a decoder on a VA-API device, in its `get_format`.
 #[cfg(target_os = "linux")]
 pub(crate) unsafe fn share_frames(ctx: *mut ffi::AVCodecContext) {
-    // SAFETY: the decoder's own device; the frames FFmpeg describes for it
-    // are ours until set up or let go, and a shared one is given by a
-    // reference of its own.
+    // SAFETY: `ctx` is a VA-API decoder; `frames` is ours; `ctx` gets the pool by a new reference.
     unsafe {
         let mut frames = ptr::null_mut();
         let ret = ffi::avcodec_get_hw_frames_parameters(
@@ -322,27 +253,16 @@ pub(crate) unsafe fn share_frames(ctx: *mut ffi::AVCodecContext) {
     }
 }
 
-/// VA-API's kept frames copied into surfaces of their own by the driver's
-/// `vaCopy`, where it has one (Intel's: an exact copy): freed with the
-/// picture, where a shared pool keeps its peak while any of its frames is
-/// kept. Where the driver has none (Mesa's, gotchas.md), frames are kept
-/// as they come, from the shared pool ([`share_frames`]). Each copy runs
-/// while the next frame decodes: the frame it reads, and the copy, are held
-/// until the next is kept, and waited for then, so the decoder doesn't
-/// decode into a surface the copy still reads.
 #[cfg(target_os = "linux")]
 pub(crate) struct Keeper {
     va: &'static Va,
     display: *mut std::ffi::c_void,
-    /// The decoder's device.
     device: *mut ffi::AVBufferRef,
     like: Like,
-    /// The frame the last copy reads, and the copy.
     pending: Option<(frame::Video, frame::Video)>,
 }
 
-// SAFETY: libva's display may be used from any thread, and the device and
-// frames are reference-counted.
+// SAFETY: libva's display is usable from any thread; the device and frames are reference-counted.
 #[cfg(target_os = "linux")]
 unsafe impl Send for Keeper {}
 
@@ -350,7 +270,6 @@ unsafe impl Send for Keeper {}
 impl Drop for Keeper {
     fn drop(&mut self) {
         if self.settle().is_err() {
-            // A copy that may still run: its surfaces never go back.
             std::mem::forget(self.pending.take());
         }
         // SAFETY: its own reference.
@@ -358,24 +277,17 @@ impl Drop for Keeper {
     }
 }
 
-/// What a keeper is made for: the decoder's device, and its frames' layout
-/// and size (their surfaces', which a copy's must be).
 #[cfg(target_os = "linux")]
 type Like = (usize, format::Pixel, i32, i32);
 
-/// `VACopyObject` for a surface.
 #[cfg(target_os = "linux")]
 #[repr(C)]
 struct CopyObject {
-    /// `VACopyObjectSurface`.
     kind: u32,
     surface: u32,
     va_reserved: [u32; 8],
 }
 
-/// libva's calls the keeper makes, as `va.h` declares them: libva's, loaded
-/// with FFmpeg, looked up rather than linked, so a build of FFmpeg without
-/// VA-API needs no libva. `vaCopy` came with libva 2.12.
 #[cfg(target_os = "linux")]
 struct Va {
     copy: CopyFn,
@@ -388,16 +300,12 @@ type CopyFn =
 #[cfg(target_os = "linux")]
 type SyncFn = unsafe extern "C" fn(*mut std::ffi::c_void, u32) -> i32;
 
-/// `VACopyOption` with `va_copy_sync` `VA_EXEC_ASYNC`: the call returns
-/// once the copy is queued.
 #[cfg(target_os = "linux")]
 const COPY_ASYNC: u32 = 1;
 
-/// `VA_STATUS_ERROR_UNIMPLEMENTED`: a driver without `vaCopy`.
 #[cfg(target_os = "linux")]
 const UNIMPLEMENTED: i32 = 0x14;
 
-/// The displays whose driver has no `vaCopy`.
 #[cfg(target_os = "linux")]
 static NO_COPY: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
@@ -406,8 +314,7 @@ impl Va {
     fn get() -> Option<&'static Va> {
         static VA: std::sync::OnceLock<Option<Va>> = std::sync::OnceLock::new();
         VA.get_or_init(|| {
-            // SAFETY: the process's symbols, libva's functions or nothing,
-            // taken as `va.h` declares them.
+            // SAFETY: any `vaCopy` and `vaSyncSurface` are libva's, typed as `va.h` declares them.
             unsafe {
                 let copy = libc::dlsym(libc::RTLD_DEFAULT, c"vaCopy".as_ptr());
                 let sync = libc::dlsym(libc::RTLD_DEFAULT, c"vaSyncSurface".as_ptr());
@@ -421,20 +328,16 @@ impl Va {
     }
 }
 
-/// `f`'s VA-API surface.
 #[cfg(target_os = "linux")]
 fn surface(f: &frame::Video) -> u32 {
     // SAFETY: a VA-API frame's surface is in its fourth data pointer.
     unsafe { (*f.as_ptr()).data[3] as usize as u32 }
 }
 
-/// The device reference of `f`'s frames, its display, and what a keeper
-/// for it is made for.
 #[cfg(target_os = "linux")]
 fn like_of(f: &frame::Video) -> Result<(*mut ffi::AVBufferRef, *mut std::ffi::c_void, Like)> {
     let (frames, _) = frames_of(f)?;
-    // SAFETY: a live VA-API frames context; its device's context is an
-    // AVVAAPIDeviceContext, its display first.
+    // SAFETY: `frames` is a live VA-API frames context; its device `hwctx` starts with the display.
     unsafe {
         let fc = (*frames).data as *const ffi::AVHWFramesContext;
         let device = (*fc).device_ref;
@@ -451,8 +354,6 @@ fn like_of(f: &frame::Video) -> Result<(*mut ffi::AVBufferRef, *mut std::ffi::c_
 
 #[cfg(target_os = "linux")]
 impl Keeper {
-    /// A keeper for frames like `f`, a VA-API frame; `None` where its
-    /// driver has no `vaCopy`, and its frames are kept as they come.
     pub(crate) fn new(f: &frame::Video) -> Result<Option<Self>> {
         let (device, display, like) = like_of(f)?;
         let copies = !NO_COPY
@@ -476,15 +377,10 @@ impl Keeper {
         }))
     }
 
-    /// Whether it keeps frames like `f`.
     pub(crate) fn is_for(&self, f: &frame::Video) -> bool {
         like_of(f).is_ok_and(|(_, _, like)| like == self.like)
     }
 
-    /// Waits for the copy before, and lets go of the frame it read. Where
-    /// the wait fails, the copy may still read that frame's surface and
-    /// write its own: both stay held, and the keeper copies nothing more
-    /// until a wait succeeds.
     fn settle(&mut self) -> Result<()> {
         let Some((_, copy)) = &self.pending else {
             return Ok(());
@@ -500,15 +396,10 @@ impl Keeper {
         Ok(())
     }
 
-    /// `f`'s picture in a surface of its own, copied by the driver while
-    /// the next frame decodes; `None` where the driver has no `vaCopy`.
-    /// Its properties are the caller's to copy.
     pub(crate) fn copy(&mut self, f: &frame::Video) -> Result<Option<frame::Video>> {
         self.settle()?;
         let mut out = frame::Video::empty();
-        // SAFETY: frames of one surface on the decoder's device, in its
-        // frames' layout and size; the frame taken from them holds the only
-        // reference left, so the surface goes with it.
+        // SAFETY: `self.device` is a live VA-API device; `out` holds its own reference to `frames`.
         unsafe {
             let mut frames = ffi::av_hwframe_ctx_alloc(self.device);
             if frames.is_null() {
@@ -562,10 +453,6 @@ impl Keeper {
     }
 }
 
-/// The bytes a VA-API surface like `f`'s takes, as its DRM export says (its
-/// objects' sizes): drivers pad and tile a surface past its samples (AMD's
-/// 960×540 P010 took two fifths more). Exported once for each kind of
-/// surface: device, layout and size. `None` where it won't export.
 #[cfg(target_os = "linux")]
 pub(super) fn surface_bytes(f: &frame::Video) -> Option<usize> {
     type Kind = (usize, ffi::AVPixelFormat, i32, i32);
@@ -586,8 +473,7 @@ pub(super) fn surface_bytes(f: &frame::Video) -> Option<usize> {
         return Some(*bytes);
     }
     let exported = DrmFrame::export(f).ok()?;
-    // SAFETY: a DRM PRIME frame's first data pointer is its descriptor,
-    // which lives as long as the mapping.
+    // SAFETY: the DRM PRIME mapping's `data[0]` is its descriptor, alive as long as `exported`.
     let bytes = unsafe {
         let d = &*((*exported.0.as_ptr()).data[0] as *const drm::Frame);
         let objects = d.nb_objects.clamp(0, drm::MAX_PLANES as i32) as usize;
@@ -599,21 +485,14 @@ pub(super) fn surface_bytes(f: &frame::Video) -> Option<usize> {
     })
 }
 
-/// The filter that shrinks VA-API's frames to `w` by `h`.
 pub(super) fn shrink_spec((w, h): (u32, u32)) -> String {
     format!("scale_vaapi=w={w}:h={h}")
 }
 
-/// Whether VA-API fits a frame into the output as `ops` says
-/// ([`super::Fitter`]): where its colors stay as they are, since
-/// `scale_vaapi` only resamples them.
 pub(crate) fn can_fit(ops: &crate::route::Ops) -> bool {
     ops.colors_kept
 }
 
-/// The filters that fit VA-API's frames into a `w` by `h` picture of
-/// `layout` (NV12, P010): turned clockwise by `rotation`, scaled to
-/// `fitted` and centered on black at even offsets where it is smaller.
 pub(super) fn fit_spec(
     rotation: u16,
     fitted: (u32, u32),
@@ -626,7 +505,6 @@ pub(super) fn fit_spec(
     } else {
         "nv12"
     };
-    // As the CPU's `transpose` and flips turn them.
     let turn = match rotation {
         90 => "transpose_vaapi=dir=clock,",
         180 => "transpose_vaapi=dir=reversal,",
@@ -641,29 +519,20 @@ pub(super) fn fit_spec(
     spec
 }
 
-/// A VA-API frame's surface for another device to read: its planes as
-/// DMA-BUF files with their layouts and DRM format modifier
-/// (`AV_PIX_FMT_DRM_PRIME`), mapped once the GPU's work on it is done.
-/// Linux.
 #[cfg(target_os = "linux")]
 pub struct DrmFrame(frame::Video);
 
-/// One plane of a [`DrmFrame`].
 #[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy)]
 pub struct DrmPlane<'a> {
-    /// The file holding it, the frame's.
     pub fd: std::os::fd::BorrowedFd<'a>,
     pub offset: u64,
-    /// Bytes from a row to the next.
     pub pitch: u64,
-    /// How it is laid out in memory (tiled, compressed...).
     pub modifier: u64,
 }
 
 #[cfg(target_os = "linux")]
 mod drm {
-    //! `libavutil/hwcontext_drm.h`.
     pub(super) const MAX_PLANES: usize = 4;
 
     #[repr(C)]
@@ -698,9 +567,6 @@ mod drm {
 
 #[cfg(target_os = "linux")]
 impl DrmFrame {
-    /// `f`, a VA-API frame, mapped for reading: FFmpeg waits for the
-    /// surface's decoding (or copy) to be done, and exports a layer for each
-    /// plane.
     pub fn export(f: &frame::Video) -> Result<Self> {
         let mut map = frame::Video::empty();
         // SAFETY: a fresh frame, mapped as DRM PRIME; unmapped when it drops.
@@ -721,10 +587,8 @@ impl DrmFrame {
         Ok(Self(map))
     }
 
-    /// Its planes: luma, then chroma (each layer's first).
     pub fn planes(&self) -> Vec<DrmPlane<'_>> {
-        // SAFETY: a DRM PRIME frame's first data pointer is its descriptor,
-        // which lives as long as the mapping; its files are open as long.
+        // SAFETY: `data[0]` is the mapping's DRM descriptor; its files stay open as long as `self`.
         unsafe {
             let d = &*((*self.0.as_ptr()).data[0] as *const drm::Frame);
             let layers = d.nb_layers.clamp(0, drm::MAX_PLANES as i32) as usize;
@@ -757,7 +621,6 @@ mod tests {
     }
     use crate::route::Ops;
 
-    /// An upright frame into NV12 pictures in its own colors.
     fn kept() -> Ops {
         Ops {
             rotation: 0,

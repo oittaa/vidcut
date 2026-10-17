@@ -1,7 +1,3 @@
-//! Edit operation tests. Each cites the spec section or decision
-//! (docs/cut-page-spec.md) it checks. Media: m1 = 250 frames with audio, m2 = 100
-//! frames with audio, m3 = 200 frames without audio (25 fps).
-
 use serde_json::json;
 
 use crate::error::ErrorCode;
@@ -11,7 +7,6 @@ fn fixture() -> Fixture {
     Fixture::new(&[(10.0, true), (4.0, true), (8.0, false)])
 }
 
-/// c1 = m1 0..100 at 0, c2 = m2 10..60 at 100, c3 = m1 100..150 at 150.
 fn three_clips() -> Fixture {
     let mut f = fixture();
     f.append("m1", 0, 100);
@@ -26,7 +21,6 @@ fn req(method: &str, params: serde_json::Value) -> serde_json::Value {
 
 #[test]
 fn append_places_clips_back_to_back() {
-    // Append ignores the playhead and goes after the last clip.
     let f = three_clips();
     assert_eq!(
         f.v1(),
@@ -40,25 +34,19 @@ fn append_places_clips_back_to_back() {
 
 #[test]
 fn the_smart_indicator_is_red_without_media_past_the_edit() {
-    // Red where a clip shows its media's first or last frame.
     let mut f = three_clips();
-    f.append("m2", 0, 100); // all of m2, at 200..300
-    f.append("m1", 100, 150); // at 300..350
+    f.append("m2", 0, 100);
+    f.append("m1", 100, 150);
     let p = f.editor.project();
     let red: Vec<i64> = [0, 100, 150, 200, 300, 350]
         .into_iter()
         .filter(|&e| !crate::ops::edit_has_handles(p, e))
         .collect();
-    // 0: c1 starts at m1's first frame; 200: c4 at m2's first; 300: c4 ends
-    // at m2's last, though c5 has media before its start. 100, 150 and 350
-    // have media on both sides.
     assert_eq!(red, vec![0, 200, 300]);
 }
 
 #[test]
 fn smart_insert_uses_the_nearest_edit() {
-    // Smart Insert inserts at the edit point nearest the playhead
-    // and ripples Track 1.
     let mut f = three_clips();
     let r = f.ok(req(
         "edit.smart_insert",
@@ -74,7 +62,6 @@ fn smart_insert_uses_the_nearest_edit() {
             row("c3", 170, 50, 100)
         ]
     );
-    // 145 is equidistant from the edits at 120 and 170: the earlier one wins.
     let r = f.ok(req(
         "edit.smart_insert",
         json!({"media": "m3", "range": "0f..5f", "playhead": "145f"}),
@@ -84,7 +71,6 @@ fn smart_insert_uses_the_nearest_edit() {
 
 #[test]
 fn insert_at_splits_the_clip_under_it() {
-    // Deviation X5: exact-frame insert for scripts.
     let mut f = fixture();
     f.append("m1", 0, 100);
     f.ok(req(
@@ -103,8 +89,6 @@ fn insert_at_splits_the_clip_under_it() {
 
 #[test]
 fn move_inserts_at_an_edit_and_closes_the_gap() {
-    // Dropping on an edit point inserts there; Track 1 closes the
-    // gap the clip leaves.
     let mut f = three_clips();
     f.ok(req("edit.move", json!({"clips": "c3", "to": 0})));
     assert_eq!(
@@ -131,7 +115,6 @@ fn move_inserts_at_an_edit_and_closes_the_gap() {
 
 #[test]
 fn trim_without_ripple_overwrites_neighbors() {
-    // Alt (ripple off) trims in place; extending writes over the neighbor.
     let mut f = three_clips();
     f.ok(req(
         "edit.trim",
@@ -162,8 +145,6 @@ fn trim_without_ripple_overwrites_neighbors() {
 
 #[test]
 fn a_roll_moves_the_cut_and_keeps_the_timeline() {
-    // Spec §8.6: the outgoing clip gets longer by what the incoming one
-    // loses.
     let mut f = three_clips();
     f.ok(req(
         "edit.roll",
@@ -181,7 +162,6 @@ fn a_roll_moves_the_cut_and_keeps_the_timeline() {
 
 #[test]
 fn a_slip_shows_other_frames_in_the_same_place() {
-    // Spec §8.6: the clip stays where it is and plays its media later.
     let mut f = three_clips();
     f.ok(req("edit.slip", json!({"clip": "c2", "by": 5})));
     assert_eq!(
@@ -196,8 +176,6 @@ fn a_slip_shows_other_frames_in_the_same_place() {
 
 #[test]
 fn a_slide_moves_the_clip_between_its_neighbors() {
-    // Spec §8.6: the clip keeps its media and moves; the clip before it
-    // gets longer and the one after it shorter.
     let mut f = three_clips();
     f.ok(req("edit.slide", json!({"clip": "c2", "by": 10})));
     assert_eq!(
@@ -212,10 +190,6 @@ fn a_slide_moves_the_clip_between_its_neighbors() {
 
 #[test]
 fn a_clip_heard_only_past_its_picture_keeps_its_audio() {
-    // Decision D14. c1's L cut covers all of c2's picture, and c2 is heard
-    // only in its own L cut into c3. Deleting c3 resets that cut, which
-    // would leave c2 no audio at all: the cut before it resets too, and c2
-    // is heard over its picture again. (A property test found it.)
     let mut f = three_clips();
     f.ok(req(
         "edit.audio_roll",
@@ -242,7 +216,6 @@ fn a_clip_heard_only_past_its_picture_keeps_its_audio() {
 
 #[test]
 fn a_clip_moved_to_another_track_is_modified() {
-    // c3 is the last clip: the move changes its track only.
     let mut f = three_clips();
     let r = f.ok(req(
         "edit.move",
@@ -264,8 +237,6 @@ fn dry_run_reports_without_committing() {
 
 #[test]
 fn a_portrait_phone_clip_makes_a_portrait_project() {
-    // Phones store portrait video sideways with a rotation: the project takes
-    // the picture as shown.
     let mut info =
         crate::test_support::media_info(2.0, crate::time::Rational::new(30, 1).unwrap(), true);
     info.video.as_mut().unwrap().rotation = 90;
@@ -290,8 +261,6 @@ fn media_remove_needs_force_when_used() {
 
 #[test]
 fn splitting_inside_an_l_cut_resets_it() {
-    // Decision D14 (found by the property test): a split inside the zone where
-    // the previous clip's audio overlaps would leave a piece without audio.
     let mut f = three_clips();
     f.ok(req(
         "edit.audio_roll",
@@ -306,7 +275,6 @@ fn splitting_inside_an_l_cut_resets_it() {
 
 #[test]
 fn joining_at_the_playhead_undoes_a_split() {
-    // Decision D49.
     let mut f = three_clips();
     f.ok(req("edit.split", json!({"at": 40})));
     let r = f.ok(req("edit.join", json!({"at": 40})));
@@ -323,7 +291,6 @@ fn joining_at_the_playhead_undoes_a_split() {
 
 #[test]
 fn a_cut_that_skips_frames_is_not_joined() {
-    // Decision D49: m1 frames 50..60 are missing between the clips.
     let mut f = fixture();
     f.append("m1", 0, 50);
     f.append("m1", 60, 100);
@@ -332,7 +299,6 @@ fn a_cut_that_skips_frames_is_not_joined() {
 
 #[test]
 fn selected_parts_join_into_the_first() {
-    // Decision D49: the cut before c4 stays, as c1 isn't selected.
     let mut f = three_clips();
     f.ok(req("edit.split", json!({"at": [20, 40, 60]})));
     f.ok(req("edit.join", json!({"clips": ["c4", "c5", "c6"]})));
@@ -349,7 +315,6 @@ fn selected_parts_join_into_the_first() {
 
 #[test]
 fn parts_with_an_l_cut_between_them_join() {
-    // Decision D49: the sound plays on through the L cut, so they join.
     let mut f = three_clips();
     f.ok(req("edit.split", json!({"at": 50})));
     f.ok(req(
@@ -367,7 +332,6 @@ fn tape_order() -> serde_json::Value {
 
 #[test]
 fn tape_marks_on_one_clip_mirror_source_marks() {
-    // Decision D17: a span that stays on one clip is that clip's source marks.
     let mut f = fixture();
     let r = f.ok(req(
         "tape.marks.set",
@@ -407,8 +371,6 @@ fn tape_marks_clear() {
     assert!(f.editor.project().tape_marks.is_empty());
 }
 
-/// Tape marks over m1 200..250 and m2 0..50 (100 frames, two pieces) on
-/// the three-clip timeline.
 fn tape_span() -> Fixture {
     let mut f = three_clips();
     f.ok(req(
@@ -420,9 +382,6 @@ fn tape_span() -> Fixture {
 
 #[test]
 fn a_tape_span_placed_on_top_is_one_block() {
-    // D17 with Place On Top: the span lines up once and goes
-    // on one track, its pieces end to end. Piece by piece, the second piece
-    // (at 102) would snap to Track 1's edit at 100 and land on V3.
     let mut f = tape_span();
     let r = f.ok(req("edit.place_on_top", json!({"tape": true, "at": 52})));
     assert_eq!(r.result["track"], "V2");
@@ -435,7 +394,6 @@ fn a_tape_span_placed_on_top_is_one_block() {
 
 #[test]
 fn a_tape_span_inserts_and_ripples_as_one_block() {
-    // D17 with Insert: later clips move by the whole span.
     let mut f = tape_span();
     f.ok(req("edit.insert", json!({"tape": true, "at": 100})));
     assert_eq!(
@@ -452,8 +410,6 @@ fn a_tape_span_inserts_and_ripples_as_one_block() {
 
 #[test]
 fn a_tape_span_ripple_overwrites_a_clip() {
-    // D17 with Ripple Overwrite: the span replaces c2, and what
-    // follows moves by the length difference.
     let mut f = tape_span();
     f.ok(req(
         "edit.ripple_overwrite",
@@ -472,9 +428,6 @@ fn a_tape_span_ripple_overwrites_a_clip() {
 
 #[test]
 fn a_tape_span_fills_the_timeline_marks() {
-    // D17 with D7: both timeline marks make a three-point edit, so the span
-    // is cut to the 70 marked frames: all of the first piece, 20 of the
-    // second.
     let mut f = tape_span();
     f.ok(req("marks.set", json!({"in": 10, "out": 80})));
     let r = f.ok(req("edit.overwrite", json!({"tape": true})));
@@ -490,7 +443,6 @@ fn a_tape_span_fills_the_timeline_marks() {
 
 #[test]
 fn removing_media_on_the_tape_clears_its_marks() {
-    // The marks count frames along a tape that held m3.
     let mut f = tape_span();
     f.ok(req("media.remove", json!({"media": "m3"})));
     assert!(f.editor.project().tape_marks.is_empty());
@@ -512,8 +464,6 @@ fn live_requests_need_a_running_gui() {
 
 #[test]
 fn drag_and_drop_edits_ignore_timeline_marks() {
-    // Spec §7.3: a drop places by position; the timeline In/Out are for the
-    // edit buttons and keys.
     let mut f = three_clips();
     f.ok(req("marks.set", json!({"in": 10, "out": 20})));
     f.ok(req(
@@ -525,7 +475,6 @@ fn drag_and_drop_edits_ignore_timeline_marks() {
         "edit.ripple_overwrite",
         json!({"media": "m3", "range": "0f..30f", "at": 160, "use_marks": false}),
     ));
-    // c3 (150..200) was replaced by 30 frames; the marks were left alone.
     assert_eq!(f.v1().last().unwrap(), &row("c7", 150, 30, 0));
     let marks = &f.editor.project().marks;
     assert_eq!((marks.mark_in, marks.mark_out), (Some(10), Some(20)));
@@ -533,19 +482,15 @@ fn drag_and_drop_edits_ignore_timeline_marks() {
 
 #[test]
 fn change_duration_to_the_end_of_the_media() {
-    // End extends a clip to the end of its media.
     let mut f = three_clips();
     f.ok(req(
         "edit.change_duration",
         json!({"clips": "c2", "duration": "end"}),
     ));
-    // m2 has 100 frames; c2 used 10..60, so it grows by 40 and c3 ripples.
     assert_eq!(f.v1()[1], row("c2", 100, 90, 10));
     assert_eq!(f.v1()[2], row("c3", 190, 50, 100));
 }
 
-/// An edit that changes nothing is no undo step and no new revision: the
-/// next undo takes back the last real change.
 #[test]
 fn an_edit_that_changes_nothing_is_no_undo_step() {
     let mut f = Fixture::new(&[(10.0, true)]);
@@ -564,7 +509,6 @@ fn an_edit_that_changes_nothing_is_no_undo_step() {
 
 #[test]
 fn a_clip_shows_its_media_color_until_it_has_its_own() {
-    // Spec §3, Clip Color.
     let mut f = three_clips();
     f.ok(req("media.set", json!({"media": "m1", "color": "teal"})));
     f.ok(req("clip.set", json!({"clips": "c3", "color": "pink"})));
@@ -578,7 +522,6 @@ fn a_clip_shows_its_media_color_until_it_has_its_own() {
 
 #[test]
 fn an_unknown_clip_color_is_refused() {
-    // Spec §3: red is a marker color, not a clip color.
     let mut f = three_clips();
     f.err(req("clip.set", json!({"clips": "c1", "color": "red"})));
 }

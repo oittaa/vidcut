@@ -1,7 +1,3 @@
-//! Application preferences, kept in `~/.config/vidcut/preferences.toml`, read with
-//! `preferences.get` and changed with `preferences.set`. Project settings
-//! (frame rate, size) belong to the project instead.
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -182,9 +178,6 @@ impl Default for Proxies {
 }
 
 impl Proxies {
-    /// Whether the rules pick `m`: an image sequence, a video with more
-    /// pixels than `larger_than`, or a video file averaging more than
-    /// `above_mbps`. Stills and sound never.
     pub fn wants(&self, m: &Media) -> bool {
         let Some(v) = m.info.video.as_ref().filter(|v| !v.still) else {
             return false;
@@ -284,9 +277,6 @@ pub struct ThumbnailsPatch {
 }
 
 impl PreferencesPatch {
-    /// A patch from `key=value` pairs with dotted keys, such as
-    /// `thumbnails.cache_limit_mb=256`. Values are JSON when they parse as
-    /// JSON, strings otherwise.
     pub fn from_pairs(pairs: &[String]) -> Result<Self> {
         let mut root = Value::Object(Default::default());
         for pair in pairs {
@@ -313,7 +303,6 @@ impl PreferencesPatch {
 }
 
 impl Preferences {
-    /// These preferences with `patch` applied.
     pub fn patched(&self, patch: &PreferencesPatch) -> Result<Self> {
         let mut p = self.clone();
         if let Some(t) = patch.appearance.as_ref().and_then(|a| a.theme.as_ref()) {
@@ -354,7 +343,6 @@ impl Preferences {
         Ok(p)
     }
 
-    /// Fails with `USAGE` for values out of range.
     pub fn check(&self) -> Result<()> {
         for (key, mb) in [
             ("player.memory_mb", self.player.memory_mb),

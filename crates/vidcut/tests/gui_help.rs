@@ -1,7 +1,3 @@
-//! The Keyboard Shortcuts window (egui_kittest, no window): F1, the Help
-//! button and `gui.show help` open it, a row's ? opens its explanation,
-//! the search narrows the rows, and F1 or Esc closes it.
-
 use std::sync::Arc;
 
 use eframe::egui::{self, Key, accesskit};
@@ -92,7 +88,6 @@ fn the_shortcuts_window_opens_explains_and_closes() {
         "its ? didn't open the explanation"
     );
 
-    // The first Esc leaves the search field.
     harness.key_press(Key::Escape);
     harness.run();
     harness.key_press(Key::Escape);
@@ -106,7 +101,6 @@ fn the_shortcuts_window_opens_explains_and_closes() {
     harness.run();
     assert!(!has(&harness, RIPPLE_OVERWRITE), "F1 didn't close it");
 
-    // What `gui.show help` runs in the app.
     let ctx = harness.ctx.clone();
     harness
         .state_mut()

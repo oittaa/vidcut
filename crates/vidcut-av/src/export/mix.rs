@@ -1,22 +1,12 @@
-//! Pictures mixed while a dissolve plays (decision D50): one over another
-//! at a weight, sample by sample, in the output's own samples. A sample
-//! is `(under × (WHOLE − weight) + over × weight + WHOLE / 2) / WHOLE`, on
-//! the CPU here and on NVIDIA's GPU (`cuda::mix`) alike, so both make the
-//! same pictures.
-
 use vidcut_core::render::WHOLE;
 
 use crate::error::{Error, Result};
 use crate::ffmpeg::{ffi, frame};
 
-/// Sample `over` at `weight` over sample `under`.
 pub(crate) fn mixed(under: u32, over: u32, weight: u32) -> u32 {
     (under * (WHOLE - weight) + over * weight + WHOLE / 2) >> 16
 }
 
-/// How a picture format's samples are stored: bytes per row of each plane
-/// at a width, rows of each plane at a height, bytes per sample, and how
-/// far up in them the value is (P010's six bits).
 pub(crate) struct Samples {
     format: ffi::AVPixelFormat,
     pub(crate) bytes: usize,
@@ -50,7 +40,6 @@ impl Samples {
         })
     }
 
-    /// Bytes per row of each plane of a `width` wide picture.
     pub(crate) fn row_bytes(&self, width: u32) -> [usize; 4] {
         let mut lines = [0i32; 4];
         // SAFETY: fills four line sizes for a known format.
@@ -59,8 +48,6 @@ impl Samples {
     }
 }
 
-/// `over` at `weight` over `under`, two memory pictures of the same size
-/// and format, into a picture of their own.
 pub(crate) fn mix(under: &frame::Video, over: &frame::Video, weight: u32) -> Result<frame::Video> {
     let format = under.format();
     if over.format() != format || (over.width(), over.height()) != (under.width(), under.height()) {
@@ -95,8 +82,7 @@ pub(crate) fn mix(under: &frame::Video, over: &frame::Video, weight: u32) -> Res
             }
         }
     }
-    // SAFETY: both are valid frames; the properties (colors, aspect) are
-    // those of the picture under.
+    // SAFETY: `out` and `under` are valid frames.
     unsafe { ffi::av_frame_copy_props(out.as_mut_ptr(), under.as_ptr()) };
     Ok(out)
 }
@@ -126,7 +112,6 @@ mod tests {
             *px = (940u16 << 6).to_le_bytes();
         }
         let out = mix(&black, &white, 1 << 14).unwrap();
-        // 64 + (940 − 64) / 4 = 283, in the high bits.
         assert_eq!(
             u16::from_le_bytes([out.data(0)[0], out.data(0)[1]]),
             283 << 6

@@ -1,22 +1,11 @@
-//! The mixed samples between the player's audio thread and the device's
-//! callback: one writer, one reader, no locks, so the callback never waits.
-//!
-//! Positions are counted in sample frames (one sample per channel) since the
-//! ring was made, and never wrap; the clock maps them to timeline samples.
-
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 pub(crate) struct Ring {
-    /// Interleaved samples, as `f32` bits.
     data: Box<[AtomicU32]>,
     channels: usize,
-    /// Sample frames it holds.
     capacity: u64,
-    /// Frames written and read so far.
     write: AtomicU64,
     read: AtomicU64,
-    /// Frames before this are dropped unread: written for a position the
-    /// player has left (a seek, a pause).
     discard: AtomicU64,
 }
 
@@ -39,17 +28,14 @@ impl Ring {
         self.channels
     }
 
-    /// Frames written so far (the writer's position).
     pub(crate) fn written(&self) -> u64 {
         self.write.load(Ordering::Acquire)
     }
 
-    /// Frames read so far (the reader's position).
     pub(crate) fn read_position(&self) -> u64 {
         self.read.load(Ordering::Acquire)
     }
 
-    /// Frames written and not yet read or dropped.
     pub(crate) fn queued(&self) -> u64 {
         let w = self.written();
         let from = self
@@ -58,14 +44,10 @@ impl Ring {
         w.saturating_sub(from)
     }
 
-    /// Frames the writer can write now. Dropped frames the reader hasn't
-    /// passed yet still take room: it may be reading them.
     pub(crate) fn room(&self) -> u64 {
         self.capacity - (self.written() - self.read_position())
     }
 
-    /// Writes as much of `samples` (interleaved) as there is room for;
-    /// returns the frames written. The writer's side.
     pub(crate) fn push(&self, samples: &[f32]) -> usize {
         let w = self.write.load(Ordering::Relaxed);
         let r = self.read.load(Ordering::Acquire);
@@ -82,15 +64,11 @@ impl Ring {
         n as usize
     }
 
-    /// Drops everything written so far. The writer's side.
     pub(crate) fn discard_all(&self) {
         self.discard
             .store(self.write.load(Ordering::Relaxed), Ordering::Release);
     }
 
-    /// Fills the start of `out` (interleaved) with the next frames; returns
-    /// the position of the first and how many there were. The reader's
-    /// side: no locks, no allocation.
     pub(crate) fn pop(&self, out: &mut [f32]) -> (u64, usize) {
         let mut r = self.read.load(Ordering::Relaxed);
         r = r.max(self.discard.load(Ordering::Acquire));
@@ -119,7 +97,6 @@ mod tests {
         let mut out = [0.0; 4];
         assert_eq!(ring.pop(&mut out), (0, 2));
         assert_eq!(out, [1.0, 1.5, 2.0, 2.5]);
-        // Room for three more: one is still queued.
         assert_eq!(ring.push(&[4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5]), 3);
         let mut out = [0.0; 8];
         assert_eq!(ring.pop(&mut out), (2, 4));

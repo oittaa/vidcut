@@ -1,18 +1,3 @@
-//! ProRes decoded on the GPU in use through FFmpeg's Vulkan decoder
-//! (NVIDIA's, FFmpeg 8.1 and later): its frames are the CPU decoder's,
-//! barcode and timestamp, read through and after seeks, and each comes
-//! down to memory once. Interlaced, its frames are the CPU's deinterlaced
-//! ones within a level, deinterlaced on the GPU where `bwdif_vulkan` gives
-//! `bwdif`'s frames and in memory where it doesn't. An NVENC export of it
-//! makes every frame on the GPU, nothing copied, and a CPU encoder's export
-//! at a smaller size gets each frame shrunk there before it comes down. A
-//! player keeps each decoder's pictures in GPU memory only where its
-//! display shows that decoder's, and counts each picture it brings down:
-//! none where its display shows Vulkan's. A picture kept on Vulkan counts
-//! the memory of its images, and the picture prepared for the plan played
-//! next comes down to memory: held, it would hold its decoder's whole pool.
-//! Skips where the GPU in use doesn't decode ProRes on Vulkan.
-
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
@@ -32,21 +17,17 @@ use vidcut_core::export::{
 use vidcut_core::render::{RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
-/// The GPU decoder in use, where it decodes ProRes on Vulkan.
 fn on_vulkan() -> Option<GpuDecoder> {
     let gpu = GpuDecoder::best()?;
     let vulkan = gpu.kind_for(Id::PRORES) == Some(Kind::Vulkan);
     (vulkan && gpu.why_not(Id::PRORES, || false).is_none()).then_some(gpu)
 }
 
-/// `frames` frames of `codec`'s barcodes at 640×360 and 30 a second.
 fn clip(codec: VideoCodec, container: Container, frames: u32) -> std::path::PathBuf {
     let spec = FixtureSpec::new(codec, container, 640, 360, (30, 1), frames);
     fixture::ensure(&spec).unwrap()
 }
 
-/// Up to `n` frames on from where `reader` is: timestamps and barcodes,
-/// each frame in GPU memory brought down first.
 fn read_on(reader: &mut VideoReader, n: usize) -> Vec<(i64, Option<u32>)> {
     let mut out = Vec::new();
     while out.len() < n {
@@ -63,8 +44,6 @@ fn read_on(reader: &mut VideoReader, n: usize) -> Vec<(i64, Option<u32>)> {
     out
 }
 
-/// A frame a reader gave: the GPU's memory it was in, its timestamp and
-/// barcode, and its picture in memory.
 struct Picture {
     kind: Option<Kind>,
     pts: i64,
@@ -72,8 +51,6 @@ struct Picture {
     picture: frame::Video,
 }
 
-/// Up to `n` frames on from where `reader` is, each frame in GPU memory
-/// brought down.
 fn pictures(reader: &mut VideoReader, n: usize) -> Vec<Picture> {
     let mut out = Vec::new();
     while out.len() < n {
@@ -96,8 +73,6 @@ fn pictures(reader: &mut VideoReader, n: usize) -> Vec<Picture> {
     out
 }
 
-/// The rows of `got`, a 10-bit 4:2:2 picture, with a sample more than a
-/// level of 8 bits (4 codes) from `cpu`'s, as (plane, row).
 fn rows_off(cpu: &frame::Video, got: &frame::Video) -> Vec<(usize, usize)> {
     let mut off = Vec::new();
     for p in 0..cpu.planes() {
@@ -139,8 +114,6 @@ fn interlaced_prores_deinterlaced_on_vulkan_is_the_cpus() {
         assert_eq!(got.len(), truth.len(), "top field first: {top}");
         for (k, (g, t)) in got.iter().zip(&truth).enumerate() {
             let what = format!("top field first: {top}, frame {k}");
-            // Deinterlaced on the GPU, or in memory where bwdif_vulkan
-            // doesn't give bwdif's frames.
             assert!(matches!(g.kind, Some(Kind::Vulkan) | None), "{what}");
             assert_eq!((g.pts, g.code), (t.pts, t.code), "{what}");
             assert_eq!(rows_off(&t.picture, &g.picture), [], "{what}");
@@ -181,7 +154,6 @@ fn prores_decoded_on_vulkan_is_the_cpus() {
     }
 }
 
-/// A piece of `frames` frames of the clip at `path`, from its first.
 fn piece(path: std::path::PathBuf, frames: i64) -> VideoPiece {
     let info = vidcut_av::probe::probe(&path, None).unwrap();
     let origin = info.video.and_then(|v| v.first_frame_time).unwrap_or(0.0);
@@ -208,8 +180,6 @@ fn a_player_keeps_nvdecs_pictures_on_the_gpu_and_brings_vulkans_down() {
         sample_rate: 48_000,
         channels: 2,
         frames: 20,
-        // ProRes first: a Vulkan picture the player failed to keep would
-        // bring every picture after it down too.
         video: vec![
             piece(clip(VideoCodec::ProRes422Hq, Container::Mov, 10), 10),
             piece(clip(VideoCodec::H264, Container::Mp4, 10), 10),
@@ -221,8 +191,6 @@ fn a_player_keeps_nvdecs_pictures_on_the_gpu_and_brings_vulkans_down() {
     let config = Config {
         audio_scrubbing: false,
         hardware: true,
-        // A display that shows NVDEC's pictures from GPU memory, as the
-        // viewer does on NVIDIA.
         gpu_pictures: vec![gpu.kind()],
         ..Config::default()
     };
@@ -239,9 +207,6 @@ fn a_player_keeps_nvdecs_pictures_on_the_gpu_and_brings_vulkans_down() {
     assert_eq!(h264.gpu(), Some(Kind::Nvdec));
 }
 
-/// A player of the 10 frames of the ProRes fixture whose display shows the
-/// pictures of `shows` from GPU memory, each of its frames decoded: shown
-/// once.
 fn played_through(shows: Vec<Kind>) -> Player {
     let plan = RenderPlan {
         fps: Rational::new(30, 1).unwrap(),
@@ -275,7 +240,6 @@ fn a_player_whose_display_takes_no_vulkan_pictures_copies_each_prores_frame_down
         return;
     };
     let player = played_through(vec![gpu.kind()]);
-    // 640×360 at 4:2:2 in 16-bit samples: 921,600 bytes a frame.
     let want = Copied {
         down: 10,
         down_bytes: 9_216_000,
@@ -351,8 +315,6 @@ fn a_prepared_prores_picture_comes_down_to_memory() {
     assert_eq!(prepared.gpu(), None);
 }
 
-/// `encoder`'s H.264 at a quality that keeps barcodes, in Matroska, no
-/// sound.
 fn h264(encoder: EncoderChoice) -> ExportSettings {
     ExportSettings {
         container: OutContainer::Mkv,
@@ -380,7 +342,6 @@ fn h264(encoder: EncoderChoice) -> ExportSettings {
     }
 }
 
-/// The barcodes and timestamps (seconds) of the frames of `path`.
 fn coded(path: &std::path::Path) -> Vec<(Option<u32>, f64)> {
     let mut reader = VideoReader::open_input(&Input::File(path.to_path_buf())).unwrap();
     let tb = reader.time_base();
@@ -395,9 +356,6 @@ fn coded(path: &std::path::Path) -> Vec<(Option<u32>, f64)> {
     out
 }
 
-/// The ProRes fixture's 30 frames exported at `out` with `encoder`'s H.264,
-/// its pieces decoding on `gpu`, each with the source's barcode, timed at
-/// 30 a second: the report.
 fn exported(
     gpu: &GpuDecoder,
     encoder: EncoderChoice,
@@ -450,7 +408,6 @@ fn an_nvenc_export_of_prores_makes_every_frame_on_the_gpu() {
     let Some(gpu) = on_vulkan().filter(|g| g.kind() == Kind::Nvdec) else {
         return;
     };
-    // At its own size, and shrunk and placed on black.
     for out in [(640, 360), (480, 360)] {
         let report = exported(&gpu, EncoderChoice::Nvenc, out);
         assert_eq!(report.gpu_frames, 30, "at {out:?}");
@@ -464,8 +421,6 @@ fn a_cpu_encoders_export_of_prores_gets_its_frames_shrunk_on_the_gpu() {
         return;
     };
     let report = exported(&gpu, EncoderChoice::Cpu, (320, 180));
-    // Each frame came down at 320x180 in 10-bit 4:2:2, as decoded: 230,400
-    // bytes, a quarter of its own.
     let want = Copied {
         down: 30,
         down_bytes: 6_912_000,

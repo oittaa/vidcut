@@ -1,6 +1,3 @@
-//! A proxy encode (decision D41) cancelled partway leaves no file and
-//! records nothing. No player and no display.
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -42,7 +39,6 @@ fn ok(h: &live::Handle, method: &str, params: Value) -> Value {
     .result
 }
 
-/// Files under `dir`, recursively.
 fn files(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -70,7 +66,6 @@ fn a_cancelled_proxy_leaves_nothing() {
         std::env::set_var("XDG_RUNTIME_DIR", dir.join("run"));
         std::env::set_var("XDG_CACHE_HOME", dir.join("cache"));
     }
-    // Big enough that its encode reports progress before it ends.
     let media = fixture::ensure(&FixtureSpec::new(
         VideoCodec::H264,
         Container::Mp4,
@@ -103,7 +98,6 @@ fn a_cancelled_proxy_leaves_nothing() {
     });
     ok(&h, "media.add", json!({ "paths": [media] }));
 
-    // Cancelled at its first progress.
     let e = h
         .call(
             envelope("proxy.generate", json!({ "media": "m1" })),

@@ -1,14 +1,9 @@
-//! A smaller FFmpeg build, as `VIDCUT_FFMPEG_WITHOUT` makes one: an export
-//! that needs a missing part fails as `DEPENDENCY` before it writes anything.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 
-/// A scratch directory with its own XDG dirs and a project, removed when it
-/// drops.
 struct Sandbox {
     dir: tempfile::TempDir,
 }
@@ -26,8 +21,6 @@ impl Sandbox {
         self.dir.path().join(name)
     }
 
-    /// `vidcut --json -p p.vidcut ARGS` with the parts in `without` missing:
-    /// its exit code and JSON.
     fn run(&self, without: &str, args: &[&str]) -> (Option<i32>, Value) {
         let out = Command::new(env!("CARGO_BIN_EXE_vidcut"))
             .env("VIDCUT_FFMPEG_WITHOUT", without)
@@ -53,7 +46,6 @@ impl Sandbox {
         (out.status.code(), json)
     }
 
-    /// A project of `media`, all of it on the timeline.
     fn project(&self, media: &Path) {
         for args in [
             &["project", "create", self.path("p.vidcut").to_str().unwrap()][..],
@@ -65,7 +57,6 @@ impl Sandbox {
         }
     }
 
-    /// `export start OUT` on the CPU, quickly: its exit code and JSON.
     fn export(&self, without: &str, out: &Path) -> (Option<i32>, Value) {
         let args = [
             "export",

@@ -74,13 +74,22 @@ xargs awk -v paths="$tmp/paths" -v anchors="$tmp/anchors" '
 
 if compgen -G 'docs/design/*.md' > /dev/null; then
   awk -v tokens="$tmp/tokens" -v paths="$tmp/paths" '
-    function known(s,   n, segs, i, g, h) {
+    # A name made at run time (vidcut-worker-N) is found by its stem; a
+    # dotted key (gpu.decoding) by its parts.
+    function known(s,   n, segs, i, g, h, k, m, parts, j) {
       n = split(s, segs, "::")
       for (i = 1; i <= n; i++) {
         g = segs[i]
         if (g == "" || g in tok) continue
         h = g; sub(/[0-9.N]+$/, "", h)
         if (h != "" && h in tok) continue
+        k = g; sub(/-[0-9.N]+$/, "", k)
+        if (k != "" && k in tok) continue
+        if (index(g, ".")) {
+          m = split(g, parts, ".")
+          for (j = 1; j <= m; j++) if (!(parts[j] in tok)) return 0
+          continue
+        }
         return 0
       }
       return 1

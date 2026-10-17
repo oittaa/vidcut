@@ -1,10 +1,3 @@
-//! A player dropped on NVDEC while the next file opens ahead: once the
-//! threads it left end (`vidcut_av::ending::join`), no reader is open and,
-//! on Linux, no thread named after the player's remains, so no NVDEC
-//! decoder or its driver thread is left to close while the process exits
-//! (gotchas.md). Runs on the GPU decoder in use when it is NVDEC and skips
-//! otherwise.
-
 mod player_support;
 
 use std::time::{Duration, Instant};
@@ -15,8 +8,6 @@ use vidcut_av::fixture::{Container, FixtureSpec, VideoCodec};
 use vidcut_av::hw::{GpuDecoder, Kind};
 use vidcut_av::player::{Config, ManualOutput, Player};
 
-/// The process's threads named after the player's (`vidcut-play-…`) or
-/// its opener's (`vidcut-open`): theirs, and the driver's they started.
 #[cfg(target_os = "linux")]
 fn players_threads() -> Vec<String> {
     std::fs::read_dir("/proc/self/task")
@@ -34,8 +25,6 @@ fn players_threads() -> Vec<String> {
 
 #[test]
 fn a_player_dropped_on_nvdec_leaves_no_decoder_once_its_threads_end() {
-    // Opened here first, so the CUDA context's own thread is named after
-    // this one.
     if GpuDecoder::best()
         .filter(|g| g.kind() == Kind::Nvdec)
         .is_none()
@@ -56,7 +45,6 @@ fn a_player_dropped_on_nvdec_leaves_no_decoder_once_its_threads_end() {
     let player = Player::new(plan, config, Box::new(ManualOutput::new())).unwrap();
     player.seek(50);
     assert!(player.wait_ready(50, Duration::from_secs(20)));
-    // Decoding ahead, the reader sends the next file to the opener.
     let until = Instant::now() + Duration::from_secs(20);
     while open_readers() < before + 2 && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(5));

@@ -1,8 +1,3 @@
-//! Relink Media (deviation X1): media whose files are missing are looked
-//! for by name in a folder and its subfolders, each file found checked
-//! against what the project knows of it (size, streams, fingerprint); or one
-//! item is pointed at a file picked by hand.
-
 use std::path::PathBuf;
 
 use eframe::egui;
@@ -19,26 +14,21 @@ pub(super) struct RelinkUi {
 }
 
 enum State {
-    /// The folder dialog is open.
     Folder(Picked),
     Searching(Ask, PathBuf),
     Report(Report),
-    /// A file dialog for one item.
     File(Picked, String),
 }
 
-/// What a search found, for the window.
 struct Report {
     folder: PathBuf,
     relinked: usize,
-    /// Files found by name that aren't the item's: id, name, path, why.
     different: Vec<(String, String, PathBuf, String)>,
     not_found: Vec<String>,
     error: Option<String>,
 }
 
 impl Workspace {
-    /// Asks for a folder to look for the missing media in.
     pub(super) fn relink_missing(&mut self, ctx: &egui::Context) {
         let (dialogs, folder) = (self.dialogs.clone(), self.media_folder());
         self.relink.state = Some(State::Folder(Picked::ask(ctx, move || {
@@ -46,7 +36,6 @@ impl Workspace {
         })));
     }
 
-    /// Asks for the file `media` should be.
     pub(super) fn relink_one(&mut self, ctx: &egui::Context, media: &str) {
         let (dialogs, folder) = (self.dialogs.clone(), self.media_folder());
         let types = import::media_types();
@@ -61,7 +50,6 @@ impl Workspace {
             .unwrap_or_default()
     }
 
-    /// The dialogs' answers, the search, and the window with its result.
     pub(super) fn relink_window(&mut self, ctx: &egui::Context) {
         self.relink.state = match self.relink.state.take() {
             Some(State::Folder(picked)) => match picked.take() {
@@ -86,7 +74,6 @@ impl Workspace {
             },
             Some(State::Searching(ask, folder)) => match ask.take() {
                 None => Some(State::Searching(ask, folder)),
-                // One file picked by hand: a word in the status bar.
                 Some(Ok(r)) if folder.as_os_str().is_empty() => {
                     self.say(self.relinked_one(&r.result));
                     None

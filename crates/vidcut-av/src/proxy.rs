@@ -1,22 +1,3 @@
-//! Playback proxies: a small, easy-to-decode copy of a source's pictures,
-//! AV1, HEVC, H.264, ProRes Proxy or DNxHR LB (decision D41).
-//!
-//! Each proxy frame keeps the source frame's presentation timestamp, in the
-//! source time base when that base is ordinary and in microseconds otherwise.
-//! The preview can then swap the file and keep the same EDL `start` math
-//! (decision D41). Audio is not copied: preview audio stays on the original.
-//!
-//! The file is Matroska, written to a temporary name and renamed into place.
-//! Its tag `VIDCUT_ORIGIN` says what it was made from ([`origin`]).
-//! Pictures are turned upright and scaled to `width`×`height` as 4:2:0, 10-bit
-//! from a source of more than 8 bits where the encoder takes them, 8-bit
-//! otherwise (ProRes 10-bit 4:2:2, DNxHR 8-bit 4:2:2, Apple's ProRes hardware
-//! 4:2:2 for a source with that much color: [`ProxyEncoder::pixel`]). A
-//! 10-bit proxy keeps an HDR source's colors, an 8-bit one is SDR. Every
-//! encoder makes a keyframe every 60 frames (ProRes and DNxHR every frame)
-//! and shows frames in the order it codes them: a seek decodes at most 60
-//! frames, and the preview needs no tail patches for a proxy.
-
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -33,38 +14,17 @@ use crate::export::worker::{self, Inbox, Worker};
 use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use crate::route::{Place, Went};
 
-/// Frames between keyframes.
 const KEYFRAMES: u32 = 60;
 
-/// The tag that says what a proxy was made from.
 const ORIGIN: &std::ffi::CStr = c"VIDCUT_ORIGIN";
 
-/// An encoder proxies can be made with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProxyEncoder {
-    /// FFmpeg's encoder: `av1_nvenc`, `av1_vaapi`, `hevc_nvenc`,
-    /// `hevc_amf`, `hevc_vaapi`, `hevc_qsv`, `hevc_videotoolbox`,
-    /// `h264_nvenc`, `h264_amf`, `h264_vaapi`, `h264_qsv`,
-    /// `h264_videotoolbox`, `libsvtav1`, `libx265`, `libx264` (where this
-    /// FFmpeg has none of those three `libopenh264` or `prores_ks`),
-    /// `prores_videotoolbox`, `prores_ks_vulkan`, `prores_ks` or `dnxhd`.
     pub name: String,
-    /// `av1`, `hevc`, `h264`, `prores` or `dnxhr`.
     pub codec: &'static str,
-    /// Hardware (NVENC, AMF, VAAPI, QSV, VideoToolbox), the GPU through
-    /// Vulkan, or software (CPU).
     pub kind: EncoderChoice,
-    /// The GPU it runs on, as the encoder check names it: a VAAPI render
-    /// node, an AMF or QSV adapter or node, Vulkan's GPU by its id.
     pub device: Option<String>,
-    /// It takes 10-bit pictures here: a hardware encoder the encoder check
-    /// found working with P010, SVT-AV1, x265 where this FFmpeg's takes 10
-    /// bits, and ProRes, which is 10-bit.
     pub ten_bit: bool,
-    /// It takes 4:2:2 pictures here, so a source with that much color keeps
-    /// it: FFmpeg's ProRes and DNxHR, Vulkan's ProRes, and Apple's ProRes
-    /// hardware where the encoder check found it working with NV16 and
-    /// P210. AV1, HEVC and H.264 proxies are 4:2:0.
     pub chroma_422: bool,
 }
 
@@ -84,14 +44,10 @@ impl ProxyEncoder {
         }
     }
 
-    /// What it is, for people: `AV1, NVIDIA hardware (NVENC)`. ProRes made
-    /// from 4:2:0 pictures says so: `ProRes Proxy from 4:2:0, Apple hardware
-    /// (VideoToolbox)`.
     pub fn label(&self) -> String {
         let codec = match self.codec {
             "av1" => "AV1",
             "hevc" => "HEVC",
-            // Apple's ProRes hardware where the encoder check found no 4:2:2.
             "prores" if !self.chroma_422 => "ProRes Proxy from 4:2:0",
             "prores" => "ProRes Proxy",
             "dnxhr" => "DNxHR LB",
@@ -117,24 +73,11 @@ impl ProxyEncoder {
         format!("{codec}, {what}")
     }
 
-    /// The layout of its pictures in memory, for a source whose frames are
-    /// in `source` (`hw::sw_format` of a GPU's). Where it takes 10 bits
-    /// ([`ten_bit`](Self::ten_bit)), a source of more than 8 bits gets P010
-    /// for the GPU's video engine and 10-bit 4:2:0 for SVT-AV1 and x265.
-    /// Otherwise 8-bit 4:2:0, NV12 for AMF, QSV, VAAPI and VideoToolbox.
-    /// ProRes is always 10-bit 4:2:2, DNxHR 8-bit 4:2:2, and H.264 8-bit.
-    /// Apple's ProRes hardware, where it takes 4:2:2
-    /// ([`chroma_422`](Self::chroma_422)), takes a source with 4:2:2 color
-    /// or more in 4:2:2: P210, or NV16 from 8 bits. A 4:2:0 source's
-    /// pictures stay 4:2:0 there, which keeps all its color and its frames
-    /// on the GPU: VideoToolbox doesn't change a frame's layout (`hw::vt`).
     fn pixel(&self, source: format::Pixel) -> format::Pixel {
         use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox};
         use format::Pixel::{
             NV12, NV16, P010LE, P210LE, YUV420P, YUV420P10LE, YUV422P, YUV422P10LE,
         };
-        // H.264 and DNxHR LB stay 8-bit whatever the encoder check says:
-        // GPUs don't decode 10-bit H.264, and DNxHR LB is 8-bit.
         let ten = deep(source) && self.ten_bit && !matches!(self.codec, "h264" | "dnxhr");
         let keeps_422 = self.chroma_422 && at_least_422(source);
         match (self.kind, self.codec) {
@@ -149,9 +92,6 @@ impl ProxyEncoder {
         }
     }
 
-    /// Its settings for pictures of more than 8 bits with `ten`: quality like
-    /// the x264 proxies' (`crf 20`), a keyframe every [`KEYFRAMES`] frames,
-    /// and nothing coded ahead of where it shows.
     fn options(&self, ten: bool) -> Vec<(&'static str, String)> {
         let keys = KEYFRAMES.to_string();
         let mut options = match self.name.as_str() {
@@ -163,8 +103,6 @@ impl ProxyEncoder {
                     format!("bframes=0:keyint={keys}:min-keyint={keys}:scenecut=0"),
                 ),
             ],
-            // Keyframes, B-frames and GOPs as x264's, and only errors in its
-            // messages.
             "libx265" => vec![
                 ("preset", "veryfast".into()),
                 ("crf", "20".into()),
@@ -176,9 +114,6 @@ impl ProxyEncoder {
                     ),
                 ),
             ],
-            // The keyframe interval comes from the context's GOP. Preset 8:
-            // faster ones leave blocks of the frame before in low delay
-            // (gotchas.md).
             "libsvtav1" => vec![
                 ("preset", "8".into()),
                 ("crf", "32".into()),
@@ -191,44 +126,31 @@ impl ProxyEncoder {
                 ("cq", if self.codec == "av1" { "32" } else { "20" }.into()),
                 ("b", "0".into()),
             ],
-            // One quantizer for every frame, as x264's CRF 20.
             "h264_amf" | "hevc_amf" => vec![
                 ("rc", "cqp".into()),
                 ("qp_i", "20".into()),
                 ("qp_p", "20".into()),
             ],
             "h264_vaapi" | "hevc_vaapi" => vec![("rc_mode", "CQP".into()), ("qp", "20".into())],
-            // Its intelligent constant quality.
             "h264_qsv" | "hevc_qsv" => vec![("global_quality", "20".into())],
-            // Constant quality on its scale of 0 to 100, the higher the
-            // better: 67 is the exports' for x264's CRF 20.
             "h264_videotoolbox" | "hevc_videotoolbox" => vec![
                 ("flags", "+qscale".into()),
                 ("global_quality", (67 * ffi::FF_QP2LAMBDA).to_string()),
             ],
-            // One quantizer for every frame, near x264's CRF 20.
             "libopenh264" => vec![
                 ("profile", "high".into()),
                 ("rc_mode", "quality".into()),
                 ("qmin", "22".into()),
                 ("qmax", "22".into()),
             ],
-            // ProRes Proxy: every frame a keyframe.
             "prores_ks" | "prores_ks_vulkan" => {
                 vec![("profile", "0".into()), ("vendor", "apl0".into())]
             }
-            // Apple's ProRes hardware only: without it the session won't
-            // open, and FFmpeg's own takes over.
             "prores_videotoolbox" => vec![("profile", "proxy".into()), ("allow_sw", "0".into())],
-            // DNxHR LB, 8-bit 4:2:2: every frame a keyframe.
             "dnxhd" => vec![("profile", "dnxhr_lb".into())],
-            // AV1's quantizer index (0–255) is its global quality: it has
-            // no `qp`.
             "av1_vaapi" => vec![("rc_mode", "CQP".into()), ("global_quality", "128".into())],
             _ => Vec::new(),
         };
-        // HEVC's profile on the GPU's video engine, as exports set it (none
-        // for VAAPI): Main 10 for 10-bit pictures.
         let engine = !matches!(self.kind, EncoderChoice::Cpu | EncoderChoice::Vaapi);
         if self.codec == "hevc" && engine {
             options.push(("profile", if ten { "main10" } else { "main" }.into()));
@@ -236,15 +158,6 @@ impl ProxyEncoder {
         options
     }
 
-    /// The encoder as exports open theirs ([`encode::open_video`]), for a
-    /// source whose first frame is `first`: its settings
-    /// ([`options`](Self::options)), a keyframe every [`KEYFRAMES`] frames,
-    /// no B-frames and closed GOPs, one pass. Its pictures are in the layout
-    /// [`pixel`](Self::pixel) gives the first frame's: 10-bit for a source
-    /// of more than 8 bits where it takes them. A 10-bit proxy keeps an HDR
-    /// source's PQ or HLG in BT.2020, with a PQ source's static HDR metadata
-    /// as exports write theirs (`encode::hdr_metadata`). An 8-bit one is SDR
-    /// BT.709, HDR tone-mapped.
     fn video_encoder(&self, first: Option<&frame::Video>) -> VideoEncoder {
         let pixel = self.pixel(first.map_or(format::Pixel::YUV420P, crate::hw::sw_format));
         let hdr = first.and_then(crate::color::hdr_of).filter(|_| deep(pixel));
@@ -264,10 +177,7 @@ impl ProxyEncoder {
             .map(|(k, v)| (k.to_string(), v))
             .collect();
         options.push(("g".into(), KEYFRAMES.to_string()));
-        // Nothing coded ahead of where it shows.
         options.push(("bf".into(), "0".into()));
-        // Closed GOPs: every keyframe decodes on its own, so a seek can start
-        // there (SVT-AV1 otherwise makes forward keyframes nothing seeks to).
         match options.iter_mut().find(|(k, _)| k == "flags") {
             Some((_, flags)) => *flags = format!("+cgop{flags}"),
             None => options.push(("flags".into(), "+cgop".into())),
@@ -286,10 +196,6 @@ impl ProxyEncoder {
     }
 }
 
-/// The codecs automatic chooses among, in its order. DNxHR LB first, which
-/// makes every frame a keyframe and which no GPU makes or plays. ProRes
-/// Proxy next, every frame a keyframe too: a Mac's GPU and NVIDIA's make it
-/// and show its frames from GPU memory. Then AV1 and HEVC, and H.264 last.
 pub const AUTOMATIC: [ProxyCodec; 5] = [
     ProxyCodec::Dnxhr,
     ProxyCodec::Prores,
@@ -298,22 +204,6 @@ pub const AUTOMATIC: [ProxyCodec; 5] = [
     ProxyCodec::H264,
 ];
 
-/// The encoders `choice` makes proxies with here, best first, where the GPU
-/// in use plays the codecs `plays` names (`av1`, `hevc`, `h264`, `prores`),
-/// each with the kind of its decoders that plays it.
-///
-/// A codec's own: the hardware ones this machine has working (AV1's NVENC,
-/// then VAAPI; HEVC's and H.264's NVENC, AMF, VAAPI, QSV, VideoToolbox;
-/// ProRes's VideoToolbox, then the GPU's through Vulkan), then the first
-/// software one this FFmpeg has: SVT-AV1 for AV1, x265 for HEVC and x264
-/// for H.264 (without those, OpenH264, else ProRes Proxy), FFmpeg's own for
-/// ProRes and DNxHR.
-///
-/// Automatic takes every codec's ([`AUTOMATIC`]) in four rounds, each in
-/// that order: those the GPU makes and plays, those it plays, those the GPU
-/// makes (through Vulkan too), the rest. A proxy takes the first that
-/// opens: NVENC allows a few sessions at a time, and DNxHR's are at least
-/// 256×120.
 pub fn encoders(
     choice: ProxyCodec,
     available: &Availability,
@@ -334,11 +224,6 @@ pub fn encoders(
     all
 }
 
-/// Automatic's round for `e`, the first 0: made on the GPU and played
-/// there, by its video engine, or through Vulkan where the GPU plays the
-/// codec on Vulkan (NVIDIA's ProRes: the decoder's frames go to the encoder
-/// on the GPU); played on it (made in software, or through Vulkan where
-/// another decoder plays the codec); made on it; neither.
 fn round(e: &ProxyEncoder, plays: &[(&str, crate::hw::Kind)]) -> u8 {
     let player = plays.iter().find(|(codec, _)| *codec == e.codec);
     match (e.kind, player.map(|&(_, kind)| kind)) {
@@ -350,7 +235,6 @@ fn round(e: &ProxyEncoder, plays: &[(&str, crate::hw::Kind)]) -> u8 {
     }
 }
 
-/// `codec`'s own encoders here, best first ([`encoders`]).
 fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
     use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox, Vulkan};
     use format::Pixel::{NV12, NV16, P010LE, P210LE, YUV420P, YUV422P10LE};
@@ -388,18 +272,12 @@ fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
                 codec,
                 kind,
                 device: status.device.clone(),
-                // Found working with P010, or 10-bit already (Vulkan's
-                // ProRes).
                 ten_bit: pixel == YUV422P10LE || works(P010LE),
-                // 4:2:2 already (Vulkan's ProRes), or Apple's ProRes found
-                // working with 4:2:2 in 8 and 10 bits.
                 chroma_422: pixel == YUV422P10LE
                     || (codec == "prores" && works(NV16) && works(P210LE)),
             });
         }
     }
-    // The first software encoder this FFmpeg has. ProRes and DNxHR are
-    // FFmpeg's own, in every build.
     let software: &[(&str, &'static str)] = match codec {
         ProxyCodec::Av1 => &[
             ("libsvtav1", "av1"),
@@ -428,45 +306,18 @@ fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
     out
 }
 
-/// What [`write`] produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WrittenProxy {
     pub path: std::path::PathBuf,
     pub width: u32,
     pub height: u32,
-    /// Frames written.
     pub frames: u64,
-    /// The encoder it was made with.
     pub encoder: ProxyEncoder,
-    /// How its frames went from the decoder to the encoder, by the first
-    /// one: they stayed on the GPU, came down, or the CPU decoded them.
-    /// `None` before any frame.
     pub went: Option<Went>,
-    /// The GPU that decoded it; `None`: the CPU.
     pub decoder: Option<crate::hw::Kind>,
-    /// The frames copied between GPU memory and memory to make it, its
-    /// failed attempts too.
     pub copies: vidcut_core::editor::Copied,
 }
 
-/// Encodes `input`'s pictures to `dest` at `width`×`height` (even), with the
-/// first of `encoders` that opens, tagged with what it is made from:
-/// `origin`, which [`origin`] reads back. Each frame is reported to this
-/// thread's [`crate::progress`] guard, out of `total` (the source's frame
-/// count, when known); this thread's [`crate::cancel`] flag stops it,
-/// leaving no file.
-///
-/// The frames decode on `decoder`, a GPU's, where it decodes the stream,
-/// on the CPU otherwise, and their pictures are made as an export makes its
-/// own (`export::make::Maker`). NVENC takes NVDEC's frames deinterlaced,
-/// and Vulkan's (ProRes), turned, converted and scaled on the GPU, never
-/// copied to memory, where the planner leaves them there
-/// ([`plan`](crate::route::plan),
-/// [`CudaPictures`](crate::cuda::CudaPictures)), and so does Vulkan's ProRes
-/// encoder, libplacebo making its pictures on Vulkan. VAAPI, AMF and
-/// VideoToolbox on the decoder's device take its frames fitted there
-/// (`hw::Fitter`). For every other encoder the CPU scales, the GPU's
-/// frames shrunk there before they come down (`hw::Shrinker`).
 #[allow(clippy::too_many_arguments)]
 pub fn write(
     input: &Input,
@@ -517,7 +368,6 @@ pub fn write(
     };
     let mut errors = Vec::new();
     for enc in encoders {
-        // A fresh reader: a failed attempt may have read frames already.
         let mut reader = match decoder {
             Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
             None => VideoReader::open_input(input)?,
@@ -535,7 +385,6 @@ pub fn write(
                 let _ = std::fs::remove_file(&tmp);
                 return Err(e);
             }
-            // An encoder that won't open makes way for the next.
             Err(Failed::Opening(e)) => {
                 let _ = std::fs::remove_file(&tmp);
                 errors.push(e);
@@ -545,14 +394,10 @@ pub fn write(
     Err(errors.remove(0))
 }
 
-/// What the proxy at `path` says it was made from ([`write`]'s `origin`),
-/// read from its header alone; `None` when it says nothing or can't be
-/// read.
 pub fn origin(path: &Path) -> Option<String> {
     crate::init();
     let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
-    // SAFETY: a NUL-terminated name in. The tag's value is copied out
-    // before the context closes.
+    // SAFETY: a NUL-terminated path; the tag's value is copied before the context closes.
     unsafe {
         let mut ctx = std::ptr::null_mut();
         let opened = ffi::avformat_open_input(
@@ -575,9 +420,6 @@ pub fn origin(path: &Path) -> Option<String> {
     }
 }
 
-/// The encoder's time base: the source's, when its denominator is a sane
-/// clock, otherwise microseconds. Either way a frame's timestamp in seconds
-/// matches the source.
 fn encode_time_base(src: ffmpeg::Rational) -> ffmpeg::Rational {
     let (n, d) = (src.numerator(), src.denominator());
     if n > 0 && (1..=1_000_000).contains(&d) {
@@ -596,8 +438,6 @@ fn scale_pts(pts: i64, from: ffmpeg::Rational, to: ffmpeg::Rational) -> i64 {
     (n / d) as i64
 }
 
-/// Where progress goes: the file it is for, out of how many frames, since
-/// when.
 struct Shown<'a> {
     dest: &'a Path,
     total: i64,
@@ -617,24 +457,16 @@ impl Shown<'_> {
     }
 }
 
-/// Why an attempt failed: the encoder wouldn't open (another may), the
-/// source isn't for the GPU (the CPU may do it), or encoding failed.
 enum Failed {
     Opening(Error),
     Encoding(Error),
 }
 
-/// Where the GPU's scaler makes a proxy's pictures, so its encoder opens for
-/// them there: NVDEC's CUDA context for NVENC, libplacebo's Vulkan device
-/// for Vulkan's ProRes encoder.
 enum MadeOn<'a> {
     Cuda(&'a crate::cuda::CudaDevice),
     Vulkan(&'a crate::hw::Device),
 }
 
-/// The proxy file being written: pictures go in in order, each one's
-/// duration known once the next arrives. Its encoder encodes them on a
-/// thread of its own ([`Encoding`]), a few pictures behind.
 struct Writer<'a> {
     writing: Worker<Timed, u64>,
     upload: Option<Upload>,
@@ -642,44 +474,31 @@ struct Writer<'a> {
     enc_tb: ffmpeg::Rational,
     pending: Option<(frame::Video, i64)>,
     last_dur: i64,
-    /// Pictures handed to the encoder.
     frames: u64,
     shown: &'a Shown<'a>,
-    /// HDR kept from the source: the codec and the static metadata, which
-    /// go on each frame and into each keyframe as an export puts them.
     hdr: Option<(ffmpeg::codec::Id, crate::hdr::Static)>,
 }
 
-/// A picture on its way to the encoder, with its timestamp and duration in
-/// the encoder's time base.
 struct Timed {
     picture: frame::Video,
     pts: i64,
     dur: i64,
 }
 
-/// The proxy's encoder and file, on a thread of their own.
 struct Encoding {
     octx: format::context::Output,
     encoder: encoder::Video,
-    /// The kind of encoder: a GPU's copies frames from memory up itself.
     kind: EncoderChoice,
     enc_tb: ffmpeg::Rational,
     durations: HashMap<i64, i64>,
-    /// The codec and an HDR proxy's static metadata, for its keyframes.
     hdr: Option<(ffmpeg::codec::Id, crate::hdr::Static)>,
 }
 
 impl Encoding {
-    /// Encodes and writes the pictures handed over, in order, then flushes
-    /// the encoder and finishes the file after the last. Returns the
-    /// pictures encoded.
     fn run(mut self, mut pictures: Inbox<Timed>) -> Result<u64> {
         let mut frames = 0;
         while let Some(Timed { picture, pts, dur }) = pictures.recv()? {
             self.durations.insert(pts, dur);
-            // The GPU's scaler makes its pictures on the decoder's stream:
-            // the encoder reads one once that work is done.
             crate::cuda::share::wait_for(&picture)?;
             crate::copies::to_encoder(&picture, self.kind);
             self.encoder
@@ -710,14 +529,6 @@ impl Encoding {
 }
 
 impl<'a> Writer<'a> {
-    /// Creates `tmp`, tagged with its `origin`, and opens `video` for
-    /// `width`×`height` pictures timed in `src_tb`, as exports open theirs
-    /// ([`encode::open_video`]), and says what the pictures are made into.
-    /// NVENC takes them in GPU memory on the CUDA context they are `made_on`
-    /// where it opens so, in [`cuda_layout`]'s layout. Vulkan's ProRes
-    /// encoder takes them where it opens on the Vulkan device they are made
-    /// on. VAAPI, AMF and VideoToolbox open on `decoder`'s device where they
-    /// share it ([`encode::shares`]), for the frames fitted there.
     fn new(
         (tmp, origin): (&Path, &str),
         video: &VideoEncoder,
@@ -735,7 +546,6 @@ impl<'a> Writer<'a> {
         tags.set(ORIGIN.to_str().expect("an ASCII name"), origin);
         octx.set_metadata(tags);
         let global = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
-        // FFmpeg's DNxHR takes nothing smaller ("Input dimensions too small").
         if video.name == "dnxhd" && (width < 256 || height < 120) {
             return Err(Failed::Opening(Error::Invalid(format!(
                 "DNxHR proxies are at least 256×120 pixels, and this one would be \
@@ -743,8 +553,6 @@ impl<'a> Writer<'a> {
             ))));
         }
         let times = (enc_tb, rate);
-        // On a stream of its own, as an export's: frames from memory if
-        // that won't open.
         let cuda = match made_on {
             Some(MadeOn::Cuda(cuda)) => Some(cuda),
             _ => None,
@@ -787,10 +595,6 @@ impl<'a> Writer<'a> {
                 .map_err(Failed::Opening)?;
                 let fit_on = shared.map(|d| d.kind().place());
                 let output = match (&made_on, &upload) {
-                    // Its own frames are on the device libplacebo makes the
-                    // pictures on, so it takes them as they are: FFmpeg's
-                    // Vulkan encoders read each frame through the frame's
-                    // own frames context.
                     (Some(MadeOn::Vulkan(device)), Some(up)) if up.is_on(device) => {
                         Ok(Output::Vulkan)
                     }
@@ -836,7 +640,6 @@ impl<'a> Writer<'a> {
         Ok((writer, output))
     }
 
-    /// The next picture, `pts` in the source's time base.
     fn push(&mut self, picture: frame::Video, pts: Option<i64>) -> Result<()> {
         let Some(raw) = pts else {
             return Err(Error::Invalid(
@@ -860,17 +663,13 @@ impl<'a> Writer<'a> {
 
     fn encode(&mut self, mut picture: frame::Video, pts: i64, dur: i64) -> Result<()> {
         picture.set_pts(Some(pts));
-        // The source's picture type would force it on the encoder.
         picture.set_kind(ffmpeg::picture::Type::None);
         unsafe { (*picture.as_mut_ptr()).duration = dur };
-        // Pictures made on the GPU are on the encoder's device already.
         let mut picture = match &self.upload {
             Some(up) if Place::of(&picture) == Place::Memory => up.upload(&picture)?,
             _ => picture,
         };
         picture.set_pts(Some(pts));
-        // An HDR proxy's frames carry its static metadata alone, as an
-        // export's do: the source's HDR10+ and Dolby Vision stay behind.
         if let Some((_, metadata)) = &self.hdr {
             crate::hdr::strip(&mut picture);
             if !metadata.is_empty() {
@@ -883,7 +682,6 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
-    /// The last picture: its duration is the one before's.
     fn last(&mut self, source: &Path) -> Result<()> {
         if let Some((prev, prev_pts)) = self.pending.take() {
             let dur = self.last_dur;
@@ -898,27 +696,15 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
-    /// The end, after the last picture; returns the frames written.
     fn finish(self) -> Result<u64> {
         self.writing.finish()
     }
 
-    /// The proxy failed with `why`: its encoder stops, and the error is the
-    /// first in the order of the pictures ([`Worker::abandon`]).
     fn abandon(self, why: Error) -> Error {
         self.writing.abandon(why)
     }
 }
 
-/// Encodes what `reader` decodes, its pictures made as an export makes its
-/// own (`Maker`): for NVENC, NVDEC's or Vulkan's frames scaled on the GPU
-/// and handed to it there; for Vulkan's ProRes encoder, NVDEC's or Vulkan's
-/// frames made into its pictures by libplacebo on its Vulkan device; for
-/// VAAPI, AMF and
-/// VideoToolbox on `decoder`'s device, its frames fitted there; otherwise
-/// scaled on the CPU, the GPU's frames shrunk there first. Into `tmp`,
-/// tagged with its `origin`.
-/// The frames written, and how the first one went.
 fn encode_into(
     reader: &mut VideoReader,
     enc: &ProxyEncoder,
@@ -931,14 +717,8 @@ fn encode_into(
     let times = (reader.time_base(), reader.frame_rate());
     let size = (width, height);
     let decoded_on_gpu = reader.gpu().is_some();
-    // The proxy's pictures and colors, by the source's first frame.
     let video = enc.video_encoder(reader.peek());
     let (pixel, target) = (video.pixel, video.hdr);
-    // NVDEC's or Vulkan's frames fitted on the GPU for NVENC, or by
-    // libplacebo on Vulkan for Vulkan's ProRes encoder, where the planner
-    // leaves them there and
-    // the scaler builds. A picture may come with the next frame, leaving
-    // the GPU less to do.
     let scaled = match enc.kind {
         EncoderChoice::Nvenc => {
             let layout = cuda_layout(pixel);
@@ -954,8 +734,6 @@ fn encode_into(
     };
     let (mut writer, output) =
         Writer::new((tmp, origin), &video, size, times, made_on, decoder, shown)?;
-    // NVENC and Vulkan's encoder take the scaler's pictures where they
-    // opened for frames in GPU memory.
     let (layout, mut fitting) = match output {
         Output::Cuda { .. } => (cuda_layout(pixel), scaled),
         Output::Vulkan => (pixel, scaled),
@@ -970,16 +748,12 @@ fn encode_into(
     let mut went = None;
     let mut encoding = || -> Result<()> {
         while let Some(src) = reader.next_frame()? {
-            // Read first: the GPU's scaler takes the frame it is given.
             let (pts, frame_size) = (src.pts(), (src.width(), src.height()));
             let Some(picture) = maker.make(&mut fitting, &src, rotation, reader.path())? else {
-                // The scaler holds the picture until the next frame.
                 continue;
             };
             if went.is_none() {
                 went = fitting.went.map(|w| match w {
-                    // A GPU's frames in memory came down whole in the
-                    // reader, which deinterlaces them there.
                     Went::Cpu if decoded_on_gpu => Went::Down {
                         size: frame_size,
                         whole: true,
@@ -987,13 +761,10 @@ fn encode_into(
                     w => w,
                 });
             }
-            // The scaler's pictures keep their frames' timestamps: this one
-            // may be the frame before's.
             let pts = match Place::of(&picture) {
                 Place::Cuda | Place::Vulkan => picture.pts(),
                 _ => pts,
             };
-            // Pictures made in memory go up to NVENC's frames.
             let picture = match maker.output() {
                 Output::Cuda { frames, .. } if Place::of(&picture) == Place::Memory => {
                     frames.upload(&picture)?
@@ -1002,8 +773,6 @@ fn encode_into(
             };
             writer.push(picture, pts)?;
         }
-        // The pictures the scaler still holds: their frames stayed on the
-        // GPU.
         for picture in maker.rest(&mut fitting)? {
             went.get_or_insert(Went::Stayed);
             let pts = picture.pts();
@@ -1018,8 +787,6 @@ fn encode_into(
     Ok((frames, went))
 }
 
-/// The layout of NVENC's frames in GPU memory for pictures of `pixel`: P010
-/// for 10 bits, NV12 for 8.
 fn cuda_layout(pixel: format::Pixel) -> format::Pixel {
     match pixel {
         format::Pixel::P010LE => format::Pixel::P010LE,
@@ -1027,7 +794,6 @@ fn cuda_layout(pixel: format::Pixel) -> format::Pixel {
     }
 }
 
-/// Whether `pixel` has more than 8 bits.
 fn deep(pixel: format::Pixel) -> bool {
     // SAFETY: FFmpeg's static descriptor of the format.
     pixel
@@ -1035,15 +801,10 @@ fn deep(pixel: format::Pixel) -> bool {
         .is_some_and(|d| unsafe { (*d.as_ptr()).comp[0].depth } > 8)
 }
 
-/// Whether `pixel` has 4:2:2 color or more: color on every row (4:2:2,
-/// 4:4:4, RGB).
 fn at_least_422(pixel: format::Pixel) -> bool {
     pixel.descriptor().is_some_and(|d| d.log2_chroma_h() == 0)
 }
 
-/// Writes the packets `enc` has ready, with their durations, and an HDR
-/// proxy's static metadata in each HEVC and AV1 keyframe that lacks it
-/// (`hdr`: the codec and the values), as exports put it there.
 fn drain(
     enc: &mut encoder::Video,
     octx: &mut format::context::Output,
@@ -1074,11 +835,8 @@ mod tests {
     use super::*;
     use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox, Vulkan};
 
-    /// GPU encoders that work: their names, kinds and pixel formats.
     use crate::hw::Kind;
 
-    /// The decoders that play what the tests' GPUs play: NVIDIA's NVDEC,
-    /// AMD's Direct3D 11, a Mac's VideoToolbox.
     const NVDEC: Kind = Kind::Nvdec;
     const AMDS: Kind = Kind::D3d11va;
     const APPLES: Kind = Kind::VideoToolbox;
@@ -1250,7 +1008,6 @@ mod tests {
         assert_eq!(got[0], "dnxhd");
     }
 
-    /// NVENC's AV1, which the encoder check found working with P010.
     fn nvencs_av1() -> ProxyEncoder {
         ProxyEncoder {
             name: "av1_nvenc".into(),
@@ -1348,8 +1105,6 @@ mod tests {
         assert_eq!(profile, ["main10"]);
     }
 
-    /// Apple's ProRes hardware, which the encoder check found working with
-    /// P010, and with NV16 and P210 where `chroma_422`.
     fn apples_prores(chroma_422: bool) -> ProxyEncoder {
         ProxyEncoder {
             name: "prores_videotoolbox".into(),
@@ -1461,8 +1216,6 @@ mod tests {
         assert_eq!(flags, ["+cgop+qscale"]);
     }
 
-    /// A source's first frame of `pixel` in `hdr`'s transfer (`None`: SDR,
-    /// untagged).
     fn first(pixel: format::Pixel, hdr: Option<Hdr>) -> frame::Video {
         use ffi::AVColorTransferCharacteristic as T;
         let mut f = frame::Video::new(pixel, 64, 36);
@@ -1476,8 +1229,6 @@ mod tests {
         f
     }
 
-    /// HDR10's static values: a 1000-nit P3 mastering display, MaxCLL 1000
-    /// and MaxFALL 400.
     fn hdr10() -> crate::hdr::Static {
         crate::hdr::Static {
             mastering: Some(crate::fixture::mastering(1000)),

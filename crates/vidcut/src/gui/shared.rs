@@ -1,14 +1,3 @@
-//! Memory the viewer's graphics device shares with CUDA, so pictures NVDEC
-//! decoded show without leaving the GPU (docs/decisions/preview.md §3): a
-//! buffer of wgpu's Vulkan device, exported as a file descriptor
-//! (`VK_KHR_external_memory_fd`), or on Windows a Win32 handle
-//! (`VK_KHR_external_memory_win32`), and imported by CUDA
-//! (`vidcut_av::cuda::share`). CUDA copies a picture's planes into it, and
-//! wgpu copies them on into the picture's textures.
-//!
-//! Linux and Windows on Vulkan only, and only when the display's GPU is
-//! CUDA's: other pictures are copied down to memory and uploaded.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -17,8 +6,6 @@ use vidcut_av::cuda::share::SharedBuffer;
 use vidcut_av::cuda::{CudaDevice, PlaneCopy};
 use vidcut_av::ffmpeg::frame;
 
-/// Whether `device` can share memory with CUDA: Vulkan, with the extension
-/// for it. Doesn't open CUDA.
 pub fn possible(device: &wgpu::Device) -> bool {
     #[cfg(any(target_os = "linux", windows))]
     {
@@ -33,7 +20,6 @@ pub fn possible(device: &wgpu::Device) -> bool {
     }
 }
 
-/// The UUID of `device`'s GPU, as Vulkan gives it; `None` off Vulkan.
 pub fn uuid(device: &wgpu::Device) -> Option<[u8; 16]> {
     #[cfg(any(target_os = "linux", windows))]
     {
@@ -50,8 +36,6 @@ pub fn uuid(device: &wgpu::Device) -> Option<[u8; 16]> {
     }
 }
 
-/// CUDA's device (the one NVDEC decodes on), when it is on `device`'s GPU:
-/// the same UUID as Vulkan's physical device.
 pub fn cuda_on(device: &wgpu::Device) -> Result<CudaDevice, String> {
     #[cfg(any(target_os = "linux", windows))]
     {
@@ -73,22 +57,15 @@ pub fn cuda_on(device: &wgpu::Device) -> Result<CudaDevice, String> {
     }
 }
 
-/// A buffer of the display's device that CUDA writes pictures into.
 pub struct Shared {
-    /// CUDA's view of it: let go before the memory is.
     #[cfg(any(target_os = "linux", windows))]
     cuda: SharedBuffer,
     buffer: wgpu::Buffer,
     size: u64,
-    /// A submission copying out of it hasn't finished: CUDA mustn't write
-    /// it. The queue clears it once the work is done
-    /// ([`wgpu::Queue::on_submitted_work_done`]), so nothing waits on the
-    /// GPU here: waiting holds the device, and the UI's frames with it.
     busy: Arc<AtomicBool>,
 }
 
 impl Shared {
-    /// A buffer of `size` bytes, shared with `cuda`.
     pub fn new(device: &wgpu::Device, cuda: &CudaDevice, size: u64) -> Result<Self, String> {
         #[cfg(any(target_os = "linux", windows))]
         {
@@ -115,13 +92,10 @@ impl Shared {
         self.size
     }
 
-    /// Free to fill: no copy out of it is in flight.
     pub fn free(&self) -> bool {
         !self.busy.load(Ordering::Acquire)
     }
 
-    /// Copies the planes of `frame` (in CUDA memory) in as `planes` place
-    /// them. Only while it is [`free`](Self::free).
     pub fn fill(&mut self, frame: &frame::Video, planes: &[PlaneCopy]) -> Result<(), String> {
         #[cfg(any(target_os = "linux", windows))]
         {
@@ -136,8 +110,6 @@ impl Shared {
         }
     }
 
-    /// The work `queue` was just given copies out of it: busy until that
-    /// is done.
     pub fn used(&mut self, queue: &wgpu::Queue) {
         self.busy.store(true, Ordering::Release);
         let busy = self.busy.clone();
@@ -145,8 +117,6 @@ impl Shared {
     }
 }
 
-/// Makes the Vulkan buffer, with its own exportable memory, and imports it
-/// into CUDA.
 #[cfg(any(target_os = "linux", windows))]
 fn make(
     device: &wgpu::Device,
@@ -160,10 +130,7 @@ fn make(
     let handle = vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD;
     #[cfg(windows)]
     let handle = vk::ExternalMemoryHandleTypeFlags::OPAQUE_WIN32;
-    // SAFETY: Vulkan objects made on wgpu's device, bound and exported as
-    // the specification has it; each failure frees what was made. wgpu
-    // takes the buffer and its memory over (`from_raw_managed`) once CUDA
-    // has imported the memory.
+    // SAFETY: buffer and memory are `raw`'s, freed on each failure, else handed over to wgpu.
     let (cuda_buffer, hal_buffer) = unsafe {
         let hal = device.as_hal::<Vulkan>().ok_or("not Vulkan")?;
         let raw = hal.raw_device();
@@ -245,17 +212,11 @@ fn make(
     Ok((cuda_buffer, buffer))
 }
 
-/// The extension wgpu's device needs to export memory: for file descriptors,
-/// or on Windows for Win32 handles.
 #[cfg(target_os = "linux")]
 const EXTENSION: &std::ffi::CStr = ash::khr::external_memory_fd::NAME;
 #[cfg(windows)]
 const EXTENSION: &std::ffi::CStr = ash::khr::external_memory_win32::NAME;
 
-/// `memory` exported as a file descriptor.
-///
-/// # Safety
-/// `memory` is `raw`'s, allocated exportable as `handle`.
 #[cfg(target_os = "linux")]
 unsafe fn export_memory(
     instance: &ash::Instance,
@@ -275,10 +236,6 @@ unsafe fn export_memory(
     }
 }
 
-/// `memory` exported as a Win32 handle.
-///
-/// # Safety
-/// `memory` is `raw`'s, allocated exportable as `handle`.
 #[cfg(windows)]
 unsafe fn export_memory(
     instance: &ash::Instance,

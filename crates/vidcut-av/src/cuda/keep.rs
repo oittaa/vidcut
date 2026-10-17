@@ -1,35 +1,19 @@
-//! Pictures NVDEC decoded, kept in memory of their own. FFmpeg copies each
-//! frame out of NVDEC's surfaces into a buffer of a pool the decoder makes.
-//! The pool grows by the frames held at once and gives nothing back until
-//! the last of them is gone, after the decoder (gotchas.md): kept as they
-//! come, a decoder's pictures would hold all of it, and letting some go
-//! would free none. So a kept picture is copied on, on the decoder's
-//! stream, into memory of its own from CUDA's stream-ordered allocator,
-//! freed with the picture, and the pool's buffer goes back at once.
-
 use std::ffi::c_void;
 
 use super::share::{CuDevicePtr, Cuda, check, cuda_context, in_context};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, format, frame};
 
-/// `CU_DEVICE_ATTRIBUTE_MEMORY_POOLS_SUPPORTED`.
 const MEMORY_POOLS_SUPPORTED: i32 = 115;
 
-/// What a keeper is made for: the decoder's device, and its frames' layout
-/// and size.
 type Like = (usize, format::Pixel, i32, i32);
 
-/// Copies NVDEC's frames into memory of their own (`hw::Keeper`).
 pub(crate) struct Keeper {
-    /// Frames as the decoder's are, on its device, for what reads a kept
-    /// frame's layout and device; none of their memory comes from its pool.
     frames: *mut ffi::AVBufferRef,
     like: Like,
 }
 
-// SAFETY: a frames context is reference-counted and may be used on any
-// thread.
+// SAFETY: a frames context is reference-counted and may be used on any thread.
 unsafe impl Send for Keeper {}
 
 impl Drop for Keeper {
@@ -39,7 +23,6 @@ impl Drop for Keeper {
     }
 }
 
-/// The frames context of `f`, a frame in CUDA memory.
 fn frames_of(f: &frame::Video) -> Result<*const ffi::AVHWFramesContext> {
     // SAFETY: reads the frame's own field, and a live buffer reference.
     unsafe {
@@ -51,10 +34,6 @@ fn frames_of(f: &frame::Video) -> Result<*const ffi::AVHWFramesContext> {
     }
 }
 
-/// What a keeper for `frames` is made for.
-///
-/// # Safety
-/// `frames` is a live frames context.
 unsafe fn like(frames: *const ffi::AVHWFramesContext) -> Like {
     // SAFETY: as the caller says.
     unsafe {
@@ -68,9 +47,6 @@ unsafe fn like(frames: *const ffi::AVHWFramesContext) -> Like {
 }
 
 impl Keeper {
-    /// A keeper for frames like `f`, a frame NVDEC decoded; `None` where
-    /// CUDA has no stream-ordered allocator on its device, and its frames
-    /// are kept as FFmpeg gives them.
     pub(crate) fn new(f: &frame::Video) -> Result<Option<Self>> {
         let cuda = Cuda::get()?;
         let source = frames_of(f)?;
@@ -97,9 +73,7 @@ impl Keeper {
         if pools == 0 {
             return Ok(None);
         }
-        // SAFETY: frames on the decoder's device in its layout and size,
-        // set up as FFmpeg's CUDA frames are before they start; freed on
-        // failure. With no initial pool, their pool allocates nothing.
+        // SAFETY: `device` is `f`'s live CUDA device; `frames` is set before init, freed on failure.
         unsafe {
             let mut frames = ffi::av_hwframe_ctx_alloc(device);
             if frames.is_null() {
@@ -123,15 +97,11 @@ impl Keeper {
         }
     }
 
-    /// Whether it keeps frames like `f`, a frame in CUDA memory.
     pub(crate) fn is_for(&self, f: &frame::Video) -> bool {
         // SAFETY: the frame's own frames context.
         frames_of(f).is_ok_and(|source| unsafe { like(source) } == self.like)
     }
 
-    /// `f`'s picture in memory of its own, on the decoder's stream after
-    /// FFmpeg's copy into `f`, with `f`'s rows and their pitch. Its
-    /// properties are the caller's to copy.
     pub(crate) fn copy(&self, f: &frame::Video) -> Result<frame::Video> {
         let cuda = Cuda::get()?;
         let (Some(alloc), Some(free)) = (cuda.alloc_async, cuda.free_async) else {
@@ -141,8 +111,7 @@ impl Keeper {
         };
         let layout = self.like.1;
         let height = f.height() as i32;
-        // SAFETY: a CUDA frame's planes are device pointers, `linesize`
-        // bytes a row apart.
+        // SAFETY: `f` is a CUDA frame: its planes are device pointers, rows `linesize` apart.
         let (data, linesize) = unsafe {
             let raw = &*f.as_ptr();
             (raw.data, raw.linesize)
@@ -179,8 +148,7 @@ impl Keeper {
             let mut at = ptr;
             for (i, &size) in sizes.iter().enumerate().take_while(|(_, s)| **s > 0) {
                 let pitch = linesize[i] as usize;
-                // SAFETY: the plane's rows, in `f` and in the memory just
-                // allocated, on the stream FFmpeg copied `f` on.
+                // SAFETY: plane `i` fits `f` and `ptr`'s memory, on the stream `f` was copied on.
                 let copied = unsafe {
                     cuda.copy_rows(
                         (data[i] as CuDevicePtr, pitch),
@@ -190,8 +158,7 @@ impl Keeper {
                     )
                 };
                 if let Err(e) = check("copying a kept picture", copied) {
-                    // SAFETY: the memory just allocated, freed after the
-                    // copies queued before.
+                    // SAFETY: `ptr` is ours alone; freed on `stream`, after the copies queued on it.
                     unsafe { free(ptr, stream) };
                     return Err(e);
                 }
@@ -199,8 +166,7 @@ impl Keeper {
             }
             Ok(ptr)
         })?;
-        // SAFETY: the memory just allocated, freed by `release` with a
-        // reference of its device, which keeps its context and stream.
+        // SAFETY: `ptr` is ours; `release` frees it with `held`, which keeps its context and stream.
         let buffer = unsafe {
             let held = ffi::av_buffer_ref(device);
             let buffer = if held.is_null() {
@@ -219,8 +185,7 @@ impl Keeper {
             buffer
         };
         let mut out = frame::Video::empty();
-        // SAFETY: a fresh frame, given the buffer, a reference of the
-        // frames, and planes at `f`'s pitches in the buffer's memory.
+        // SAFETY: fresh `out` takes `buffer` and a frames reference; planes at `f`'s pitches in `ptr`.
         unsafe {
             let o = out.as_mut_ptr();
             (*o).format = ffi::AVPixelFormat::AV_PIX_FMT_CUDA as i32;
@@ -241,9 +206,6 @@ impl Keeper {
     }
 }
 
-/// Frees a kept picture's memory (`data`) on the stream of its device
-/// (`opaque`, a reference of it), after the work queued there before, and
-/// lets the device go.
 unsafe extern "C" fn release(opaque: *mut c_void, data: *mut u8) {
     let mut device = opaque as *mut ffi::AVBufferRef;
     if let Ok(cuda) = Cuda::get()

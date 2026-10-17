@@ -1,17 +1,3 @@
-//! Render plans: exactly what an export produces, frame by frame for video and
-//! sample by sample for audio.
-//!
-//! A plan covers a timeline range `[a, b)` at the project frame rate. Video is
-//! one contiguous list of pieces (source frames or black). Audio is one or more
-//! lanes, each a contiguous list of pieces (source samples or silence),
-//! that the engine mixes. Every boundary is computed with exact integer math
-//! (see [`Rational::frame_to_sample`]), so lengths never drift.
-//!
-//! **Sampling rule** (docs/decisions/export.md): output frame `j` of a video
-//! piece shows the first source frame with timestamp ≥
-//! `origin + (source_frame + j) / fps − ½ frame`, i.e. the nearest source
-//! frame, ties to the later one. Frame-exact for sources at the project rate.
-
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -90,12 +76,9 @@ pub struct Ramp {
     pub falling: bool,
 }
 
-/// The weight [`Ramp::weight`] gives a picture shown whole.
 pub const WHOLE: u32 = 1 << 16;
 
 impl Ramp {
-    /// The level at the piece's frame `k`, a fraction: its numerator and
-    /// denominator. Frame `i` of `n` is at `(i + 1/2) / n`.
     pub fn fraction(&self, k: i64) -> (i64, i64) {
         let rising = (2 * (self.at + k) + 1, 2 * self.of);
         if self.falling {
@@ -105,21 +88,17 @@ impl Ramp {
         }
     }
 
-    /// The level at the piece's frame `k`, from 0 to 1.
     pub fn level(&self, k: i64) -> f64 {
         let (n, d) = self.fraction(k);
         n as f64 / d as f64
     }
 
-    /// The level at the piece's frame `k` in sixty-five-thousandths
-    /// ([`WHOLE`] is 1), rounded: what pictures are mixed with.
     pub fn weight(&self, k: i64) -> u32 {
         let (n, d) = self.fraction(k);
         let w = (i128::from(n) * i128::from(WHOLE) * 2 + i128::from(d)) / (2 * i128::from(d));
         w.clamp(0, i128::from(WHOLE)) as u32
     }
 
-    /// The ramp `k` frames on.
     pub fn after(&self, k: i64) -> Self {
         Self {
             at: self.at + k,
@@ -202,7 +181,6 @@ pub enum Curve {
 }
 
 impl Curve {
-    /// The gain at share `x` of the way.
     pub fn gain(self, x: f64) -> f64 {
         match self {
             Self::Plus3Db => x.sqrt(),
@@ -213,19 +191,15 @@ impl Curve {
 }
 
 impl Fade {
-    /// The gain at the piece's sample `s`, 0 to 1: a rising one is silent
-    /// at the fade's first sample, a falling one whole.
     pub fn gain(&self, s: i64) -> f64 {
         let x = ((self.at + s) as f64 / self.of as f64).clamp(0.0, 1.0);
         self.curve.gain(if self.falling { 1.0 - x } else { x })
     }
 
-    /// It starts silent: rising from its first sample.
     pub fn starts_silent(&self) -> bool {
         !self.falling && self.at == 0
     }
 
-    /// A piece of `samples` it is on ends silent: falling to its last.
     pub fn ends_silent(&self, samples: i64) -> bool {
         self.falling && self.at + samples >= self.of
     }
@@ -239,8 +213,6 @@ impl VideoPiece {
         }
     }
 
-    /// The pieces it shows, bottom up, each with the ramp of its level:
-    /// itself, or a mix's `under` and `over`.
     pub fn layers(&self) -> Vec<(&VideoPiece, Option<Ramp>)> {
         match self {
             Self::Mix { under, over } => std::iter::once((under.as_ref(), None))
@@ -250,7 +222,6 @@ impl VideoPiece {
         }
     }
 
-    /// [`layers`](Self::layers), to change.
     pub fn layers_mut(&mut self) -> Vec<&mut VideoPiece> {
         match self {
             Self::Mix { under, over } => std::iter::once(under.as_mut())
@@ -260,7 +231,6 @@ impl VideoPiece {
         }
     }
 
-    /// The piece from its frame `k` on, `frames` long.
     pub fn part(&self, k: i64, frames: i64) -> VideoPiece {
         match self {
             Self::Source {
@@ -271,7 +241,6 @@ impl VideoPiece {
                 pace,
                 ..
             } => {
-                // A still's piece always reads its one picture from the start.
                 let still = matches!(image, Some(Image::Still));
                 Self::Source {
                     media: media.clone(),
@@ -297,7 +266,6 @@ impl VideoPiece {
         }
     }
 
-    /// Whether `next` shows what comes after it, so the two are one piece.
     fn goes_on_as(&self, next: &VideoPiece) -> bool {
         match (self, next) {
             (Self::Black { .. }, Self::Black { .. }) => true,
@@ -337,7 +305,6 @@ impl VideoPiece {
         }
     }
 
-    /// Makes it `more` frames longer.
     fn lengthen(&mut self, more: i64) {
         match self {
             Self::Source { frames, .. } | Self::Black { frames } => *frames += more,
@@ -368,7 +335,6 @@ impl AudioPiece {
 }
 
 impl RenderPlan {
-    /// Total audio samples (per channel).
     pub fn samples(&self) -> i64 {
         self.fps.frame_to_sample(self.frames, self.sample_rate)
     }
@@ -403,26 +369,19 @@ impl Pace {
         self.speed == 1.0
     }
 
-    /// Source frames from the piece's first to its frame `k`.
     pub fn offset(&self, k: i64) -> i64 {
         if self.is_normal() {
             return k;
         }
-        // A billionth over: 3 frames at a third of the speed make one.
         let at = |n: i64| (n as f64 * self.speed + 1e-9).floor() as i64;
-        // Backward, frame k's stretch ends where frame k + 1's starts.
         let back = i64::from(self.speed < 0.0);
         at(self.skip + k + back) - at(self.skip + back)
     }
 
-    /// The pace `k` frames on.
     pub fn after(&self, k: i64) -> Self {
         Self::of(self.speed, self.skip + k)
     }
 
-    /// How far into its first frame's source frame (0 to 1) that frame's
-    /// stretch of the source starts: forward its start, backward its
-    /// bottom.
     pub fn phase(&self) -> f64 {
         if self.is_normal() || self.speed == 0.0 {
             return 0.0;
@@ -432,9 +391,6 @@ impl Pace {
         (x - (x + 1e-9).floor()).max(0.0)
     }
 
-    /// Where its sound is `x` frames into it (between frames too), in source
-    /// frames from its first frame's: forward from where that frame's
-    /// stretch starts, backward from its top.
     pub fn sound(&self, x: f64) -> f64 {
         let top = if self.speed < 0.0 { -self.speed } else { 0.0 };
         self.phase() + top + x * self.speed
@@ -442,8 +398,6 @@ impl Pace {
 }
 
 impl VideoPiece {
-    /// The source frame frame `k` of the piece shows (0 for black; a
-    /// mix's, that of the picture under the others).
     pub fn position(&self, k: i64) -> i64 {
         match self {
             VideoPiece::Source {
@@ -514,18 +468,15 @@ impl Project {
         Ok(origin_of(found(self.media(media), media)?))
     }
 
-    /// How `media`'s pictures are read, if not as a video file's frames.
     pub fn media_image(&self, media: &str) -> Option<Image> {
         image_of(self.media(media)?)
     }
 }
 
-/// Pool item `id`, or that there is none.
 fn found<'a>(m: Option<&'a Media>, id: &str) -> Result<&'a Media> {
     m.ok_or_else(|| Error::not_found(format!("no media {id}")))
 }
 
-/// [`Project::media_origin`] of `m`.
 fn origin_of(m: &Media) -> (PathBuf, f64) {
     let origin = m
         .info
@@ -537,7 +488,6 @@ fn origin_of(m: &Media) -> (PathBuf, f64) {
     (m.path.clone(), origin)
 }
 
-/// [`Project::media_image`] of `m`.
 fn image_of(m: &Media) -> Option<Image> {
     let v = m.info.video.as_ref()?;
     match &m.sequence {
@@ -552,23 +502,16 @@ fn image_of(m: &Media) -> Option<Image> {
     }
 }
 
-/// Whether `c` is a compound clip from another editor whose clips play.
 pub(crate) fn plays_inside(c: &Clip) -> bool {
     c.compound.as_ref().is_some_and(|k| !k.tracks.is_empty())
 }
 
-/// `p` as it plays when it holds compound clips from another editor
-/// (deviation X9): each replaced by the clips it holds, trimmed to the part
-/// it shows, on tracks of their own just above its track with that track's
-/// id, fader, mute and solo; those it holds in turn too. A disabled one
-/// plays nothing.
 fn expanded(p: &Project) -> Option<Project> {
     let holds = |p: &Project| p.tracks.iter().any(|t| t.clips.iter().any(plays_inside));
     if !holds(p) {
         return None;
     }
     let mut out = p.clone();
-    // Compound clips inside compound clips, a few deep.
     for _ in 0..8 {
         if !holds(&out) {
             break;
@@ -589,7 +532,6 @@ fn expanded(p: &Project) -> Option<Project> {
                     v.video_enabled &= t.video_enabled;
                     v.transitions.clear();
                     v.clips = n.clips.iter().filter_map(|x| inside(x, c)).collect();
-                    // Backward, its last clip comes first.
                     v.clips.sort_by_key(|y| y.start);
                     inner.push(v);
                 }
@@ -602,8 +544,6 @@ fn expanded(p: &Project) -> Option<Project> {
     Some(out)
 }
 
-/// Clip `x` of compound clip `c`, trimmed to the part `c` shows and placed
-/// where it shows it; at `c`'s speed (decision D48), through its pace.
 fn inside(x: &Clip, c: &Clip) -> Option<Clip> {
     if c.speed() != 1.0 {
         let (k0, k1) = shown_between(c, x.start, x.end())?;
@@ -635,8 +575,6 @@ fn inside(x: &Clip, c: &Clip) -> Option<Clip> {
     Some(y)
 }
 
-/// The frames of compound clip `c` (from its first) that show its
-/// timeline's frames `[a, b)`, at its speed: none when it shows none of them.
 pub(crate) fn shown_between(c: &Clip, a: i64, b: i64) -> Option<(i64, i64)> {
     let shows = |k: i64| (a..b).contains(&c.source_at(c.start + k));
     let k0 = (0..c.duration).find(|&k| shows(k))?;
@@ -644,9 +582,6 @@ pub(crate) fn shown_between(c: &Clip, a: i64, b: i64) -> Option<(i64, i64)> {
     Some((k0, k1))
 }
 
-/// The speed of a clip held by compound clip `c` at `own` speed, shown from
-/// `c`'s frame `k`: the two speeds together. One at normal speed walks
-/// `c`'s pace exactly.
 pub(crate) fn paced(
     c: &Clip,
     own: Option<&crate::model::Speed>,
@@ -663,21 +598,16 @@ pub(crate) fn paced(
     })
 }
 
-/// Plans the timeline range `[a, b)`.
 pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
     flatten_lanes(p, a, b).map(|(plan, _)| plan)
 }
 
-/// The track an audio lane of [`flatten_lanes`] comes from, and its fader,
-/// which the lane's gains include.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LaneTrack {
     pub track: String,
     pub volume_db: f64,
 }
 
-/// [`flatten`], with the track of each audio lane, in lane order: the
-/// preview controls track faders apart from clip gains.
 pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>)> {
     if a < 0 || b <= a {
         return Err(Error::invalid(format!("nothing to render in {a}..{b}")));
@@ -688,12 +618,6 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
     let s = &p.settings;
     let sample = |t: i64| s.fps.frame_to_sample(t - a, s.sample_rate);
 
-    // Video: at every frame the highest video track with a visible clip
-    // there shows; clips above cover the ones below.
-    // A block from another editor plays as a gap (deviation X9); a compound
-    // clip whose clips were found plays them instead (`expanded`).
-    // A dissolve mixes the clips on each side of its cut; one into or out
-    // of a gap shows what is under it there (decision D50).
     let visible = |t: &crate::model::Track, c: &Clip| {
         t.video_enabled && c.enabled && c.video && !c.is_block()
     };
@@ -722,7 +646,6 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
     }
     cuts.sort_unstable();
     cuts.dedup();
-    // Clip `c`'s picture over `[x, y)`.
     let picture = |c: &Clip, x: i64, y: i64| -> Result<VideoPiece> {
         let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
         let (path, origin) = origin_of(m);
@@ -739,7 +662,6 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
     let mut video = Vec::new();
     for w in cuts.windows(2) {
         let (x, y) = (w[0], w[1]);
-        // Bottom up: the first is shown whole, the others over it.
         let mut stack: Vec<(VideoPiece, Option<Ramp>)> = Vec::new();
         for (t, played) in tracks.iter().zip(&dissolves) {
             let shows = |c: &&Clip| visible(t, c);
@@ -798,9 +720,6 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         );
     }
 
-    // Audio: lanes per heard track (mute, solo), with its fader. A cross
-    // fade plays both clips' sounds through its frames, the one after the
-    // cut on the track's other lane from then on (decision D50).
     let any_solo = p.any_solo();
     let mut audio = Vec::new();
     let mut lanes = Vec::new();
@@ -829,8 +748,6 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
             let end = out_of.map_or(rb, |f| f.frames.1);
             let head = into.map_or(start, |f| f.frames.1).min(end);
             let tail = out_of.map_or(end, |f| f.frames.0).max(head);
-            // Counted from the timeline's start, so a plan starting inside
-            // a fade gives each sample the gain the whole timeline's does.
             let abs = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
             let fade = |f: Option<&transitions::Playing>, x: i64, falling: bool| {
                 f.map(|f| Fade {
@@ -914,9 +831,6 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
     Ok((plan, lanes))
 }
 
-/// Audio of clip `c` from timeline frame `x`, `samples` long. At its speed
-/// (decision D48) the sound of the frames it shows, held frames silent;
-/// backward from the top of the first frame's stretch.
 fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> AudioPiece {
     let audio = c.audio.as_ref().expect("has audio");
     let (path, origin) = origin_of(m);
@@ -945,8 +859,6 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
     }
 }
 
-/// Plans one clip on its own: its video extent with its own audio (J/L
-/// offsets, neighbors and dissolves are left out), for per-clip export.
 pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     let c = p
         .clip(clip)
@@ -972,9 +884,6 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     Ok(plan)
 }
 
-/// Timeline frame `at` of clip `clip` alone, as export samples it, whatever
-/// covers it on the tracks above and without its dissolves (the Trim Editor
-/// shows the clip it names).
 pub fn clip_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
     let mut alone = p.clone();
     for t in &mut alone.tracks {
@@ -988,8 +897,6 @@ pub fn clip_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
         .ok_or_else(|| Error::not_found(format!("no frame {at} of {clip}")))
 }
 
-/// Frame `at` of media item `media` (project frames from its first video
-/// frame), as export samples it; black for media without video.
 pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
     let m = p
         .media(media)
@@ -1017,9 +924,6 @@ pub struct TapeEntry {
     pub frames: i64,
 }
 
-/// Plans whole media items laid end to end: the Source Tape (spec §4.1), or
-/// one item for the Source Clip viewer. Media without video shows black and
-/// media without audio is silent; empty media is left out.
 pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>)> {
     let s = &p.settings;
     let sample = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
@@ -1093,16 +997,12 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
     Ok((plan, entries))
 }
 
-/// One media range covered by a Source Tape span (decision D17).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpanPiece {
     pub media: String,
-    /// Source frames `[start, end)`.
     pub range: (i64, i64),
 }
 
-/// The pieces of a half-open tape span: the tail of the first clip, every
-/// whole clip in between, and the head of the last (decision D17).
 pub fn span_pieces(entries: &[TapeEntry], mark_in: i64, mark_out: i64) -> Vec<SpanPiece> {
     let mut out = Vec::new();
     for e in entries {
@@ -1119,9 +1019,6 @@ pub fn span_pieces(entries: &[TapeEntry], mark_in: i64, mark_out: i64) -> Vec<Sp
     out
 }
 
-/// Where a lone In or Out stays on its own clip (decision D5). Both marks
-/// use the tape range as given, which may cross clips. `None` when neither
-/// mark is set or a lone mark does not fall on a clip.
 pub fn active_span(
     entries: &[TapeEntry],
     mark_in: Option<i64>,
@@ -1148,7 +1045,6 @@ pub fn active_span(
     }
 }
 
-/// Both marks set and covering more than one clip (decision D17).
 pub fn crossing_span(
     entries: &[TapeEntry],
     mark_in: Option<i64>,
@@ -1172,7 +1068,6 @@ mod tests {
     use crate::test_support::Fixture;
 
     fn fixture() -> Fixture {
-        // 25 fps project; m1 10 s with audio, m2 4 s with audio, m3 8 s silent.
         Fixture::new(&[(10.0, true), (4.0, true), (8.0, false)])
     }
 
@@ -1180,8 +1075,6 @@ mod tests {
         f.ok(json!({"method": method, "params": params}));
     }
 
-    /// A dissolve on V1's pictures from clip `from` to clip `to` (`None`:
-    /// a gap), `before` frames before the cut and `after` after it.
     fn dissolve(
         f: &Fixture,
         from: Option<&str>,
@@ -1206,8 +1099,6 @@ mod tests {
         p
     }
 
-    /// A cross fade on V1's sounds from clip `from` to clip `to` (`None`: a
-    /// gap): a Cross Fade +3 dB in the editor metadata.
     fn cross_fade(
         f: &Fixture,
         from: Option<&str>,
@@ -1236,9 +1127,6 @@ mod tests {
         p
     }
 
-    /// The plan's sounds in short, lane by lane: `m1@0+86400` (media, first
-    /// source sample, samples), `silence+86400`, a cross fade's piece with
-    /// its curve and where in the fade it starts.
     fn heard(plan: &RenderPlan) -> Vec<Vec<String>> {
         plan.audio
             .iter()
@@ -1275,7 +1163,6 @@ mod tests {
         f.append("m2", 10, 60);
         let p = cross_fade(&f, Some("c1"), Some("c2"), 5, 5);
         let plan = flatten(&p, 0, 100).unwrap();
-        // 1920 samples a frame.
         assert_eq!(
             heard(&plan),
             [
@@ -1318,7 +1205,6 @@ mod tests {
         f.append("m2", 10, 60);
         let p = cross_fade(&f, Some("c1"), Some("c2"), 2, 2);
         let t = p.track("V1").unwrap();
-        // A quarter of the way through +3 dB: the square root of a quarter.
         let fades = transitions::cross_fades(&p, t);
         assert_eq!(transitions::heard_at(&fades, &t.clips[1], 49), Some(0.5));
     }
@@ -1355,8 +1241,6 @@ mod tests {
         assert_eq!(fade.gain(5), 0.25);
     }
 
-    /// The plan's pictures in short: `m1@45+10` (media, first source
-    /// frame, frames), `black+10`, a mix as its pictures over the one under.
     fn shown(plan: &RenderPlan) -> Vec<String> {
         fn one(p: &VideoPiece) -> String {
             match p {
@@ -1410,7 +1294,6 @@ mod tests {
             of: 3,
             falling: false,
         };
-        // 65536 / 6 = 10922.67.
         assert_eq!(ramp.weight(0), 10923);
     }
 
@@ -1511,7 +1394,6 @@ mod tests {
                 VideoPiece::Mix { .. } => ("mix".into(), v.frames()),
             })
             .collect();
-        // c1 = m1 0..100; the lifted gap and disabled c3 merge into one black piece.
         assert_eq!(kinds, vec![("m1@0".into(), 100), ("black".into(), 100)]);
         assert_eq!(plan.frames, 200);
     }
@@ -1528,8 +1410,6 @@ mod tests {
 
     #[test]
     fn paces_show_where_each_frame_begins() {
-        // Decision D48: forward the frame a stretch starts in, backward the
-        // one it starts in from the top; a piece cut later keeps the pairs.
         let offsets = |speed, skip| {
             (0..6)
                 .map(|k| Pace::of(speed, skip).offset(k))

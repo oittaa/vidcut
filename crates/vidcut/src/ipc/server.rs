@@ -1,7 +1,3 @@
-//! The GUI side of the socket (a pipe on Windows): one thread accepts
-//! connections, one thread per connection reads requests line by line and
-//! answers them in order.
-
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,23 +8,13 @@ use vidcut_core::{Envelope, Error, Response, Result};
 
 use super::transport::{Listener, Stream};
 
-/// Answers one request. `project` is the project the client expects to be
-/// open. `progress(Some(params))` sends a notification and returns false once
-/// the client is gone. `progress(None)` only checks that, so a request that
-/// reports no progress can still be cancelled.
 pub type Handler = dyn Fn(Envelope, Option<PathBuf>, &mut dyn FnMut(Option<Value>) -> bool) -> Result<Response>
     + Send
     + Sync;
 
-/// What a GUI serves at most, so that a runaway client can't take the
-/// memory or the threads of the session a person is working in.
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
-    /// Bytes in one request line. A timeline sent inline as OTIO runs to a
-    /// few MB.
     pub line: u64,
-    /// Connections at once. Each has a thread, and a waiting request (a
-    /// seek, `jobs.wait`) holds its connection.
     pub connections: usize,
 }
 
@@ -41,13 +27,10 @@ impl Default for Limits {
     }
 }
 
-/// Binds `path` (replacing a stale socket file) and serves `handler` on it
-/// from background threads until the process exits.
 pub fn start(path: &Path, handler: Arc<Handler>) -> std::io::Result<()> {
     start_limited(path, handler, Limits::default())
 }
 
-/// [`start`] within `limits`.
 pub fn start_limited(path: &Path, handler: Arc<Handler>, limits: Limits) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         super::private_dir(dir)?;
@@ -57,12 +40,9 @@ pub fn start_limited(path: &Path, handler: Arc<Handler>, limits: Limits) -> std:
     crate::threads::spawn("vidcut-ipc", crate::threads::Work::Interactive, move || {
         loop {
             let Ok(mut stream) = listener.accept() else {
-                // Out of handles, say: a moment for some to free.
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 continue;
             };
-            // Only this thread adds connections, so the count can't
-            // pass the limit between the check and the increment.
             if open.load(Ordering::SeqCst) >= limits.connections {
                 let e = Error::usage(format!(
                     "this vidcut GUI is serving {} connections already; try again later",
@@ -86,8 +66,6 @@ pub fn start_limited(path: &Path, handler: Arc<Handler>, limits: Limits) -> std:
     Ok(())
 }
 
-/// A connection's place among those served; freed when dropped (with its
-/// thread, or with the closure of a thread that never started).
 struct Slot(Arc<AtomicUsize>);
 
 impl Slot {
@@ -122,7 +100,6 @@ fn serve(stream: Stream, handler: &Handler, max_line: u64) {
         }
         let content = buf.strip_suffix(b"\n").unwrap_or(&buf);
         if content.len() as u64 > max_line {
-            // The rest of the line can't be skipped safely: say why, and close.
             let e = Error::usage(format!("a request is limited to {max_line} bytes"));
             let _ = send(&mut writer, &failure(Value::Null, &e));
             return;

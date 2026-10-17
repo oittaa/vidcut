@@ -1,12 +1,3 @@
-//! Interlaced sources decoded on NVIDIA's GPU, H.264 on NVDEC and ProRes on
-//! Vulkan beside it, give the CPU's deinterlaced frames. A reader's are the
-//! CPU reader's, barcode and timestamp, through and after seeks, and within
-//! a level in every sample, deinterlaced on the GPU where its filter gives
-//! `bwdif`'s frames and in memory where it doesn't. NVENC's exports, and the
-//! proxies of Vulkan's ProRes encoder and NVENC, are the frames of the same
-//! jobs decoding on the CPU. Skips where the GPU in use isn't NVIDIA's, and
-//! the ProRes jobs where it doesn't decode ProRes on Vulkan.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -26,17 +17,14 @@ use vidcut_core::preferences::ProxyCodec;
 use vidcut_core::render::{RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
-/// The GPU decoder in use, where it is NVIDIA's.
 fn nvidia() -> Option<GpuDecoder> {
     GpuDecoder::best().filter(|g| g.kind() == Kind::Nvdec)
 }
 
-/// `gpu`, where it decodes ProRes on Vulkan.
 fn on_vulkan(gpu: &GpuDecoder) -> bool {
     gpu.kind_for(Id::PRORES) == Some(Kind::Vulkan) && gpu.why_not(Id::PRORES, || false).is_none()
 }
 
-/// The interlaced H.264 fixture: 320×180, 50 frames at 25 a second.
 fn h264(top: bool) -> PathBuf {
     let spec = FixtureSpec::new(VideoCodec::H264, Container::Mkv, 320, 180, (25, 1), 50)
         .interlaced(top)
@@ -44,7 +32,6 @@ fn h264(top: bool) -> PathBuf {
     fixture::ensure(&spec).unwrap()
 }
 
-/// The interlaced ProRes 422 HQ fixture: 640×360, 30 frames at 30 a second.
 fn prores(top: bool) -> PathBuf {
     let spec = FixtureSpec::new(
         VideoCodec::ProRes422Hq,
@@ -58,8 +45,6 @@ fn prores(top: bool) -> PathBuf {
     fixture::ensure(&spec).unwrap()
 }
 
-/// A frame a reader gave: the GPU's memory it was in, its timestamp and
-/// barcode, and its picture in memory.
 struct Picture {
     kind: Option<Kind>,
     pts: i64,
@@ -67,8 +52,6 @@ struct Picture {
     picture: frame::Video,
 }
 
-/// Up to `n` frames on from where `reader` is, each frame in GPU memory
-/// brought down.
 fn pictures(reader: &mut VideoReader, n: usize) -> Vec<Picture> {
     let mut out = Vec::new();
     while out.len() < n {
@@ -91,7 +74,6 @@ fn pictures(reader: &mut VideoReader, n: usize) -> Vec<Picture> {
     out
 }
 
-/// Whether `f` holds 10-bit samples.
 fn ten_bit(f: &frame::Video) -> bool {
     matches!(
         f.format(),
@@ -99,8 +81,6 @@ fn ten_bit(f: &frame::Video) -> bool {
     )
 }
 
-/// Sample (`x`, `y`) of component `c` (Y, Cb, Cr) of `f`: planar YUV of 8
-/// or 10 bits, or NV12.
 fn sample(f: &frame::Video, c: usize, x: usize, y: usize) -> u16 {
     if c > 0 && f.format() == Pixel::NV12 {
         return u16::from(f.data(1)[y * f.stride(1) + 2 * x + c - 1]);
@@ -114,8 +94,6 @@ fn sample(f: &frame::Video, c: usize, x: usize, y: usize) -> u16 {
     }
 }
 
-/// The rows of `got` with a sample more than a level of 8 bits from
-/// `cpu`'s, a planar picture's, as (component, row).
 fn rows_off(cpu: &frame::Video, got: &frame::Video) -> Vec<(usize, usize)> {
     let level = if ten_bit(cpu) { 4 } else { 1 };
     let mut off = Vec::new();
@@ -130,7 +108,6 @@ fn rows_off(cpu: &frame::Video, got: &frame::Video) -> Vec<(usize, usize)> {
     off
 }
 
-/// The frames of the file at `path`, decoded on the CPU.
 fn decoded(path: &Path) -> Vec<Picture> {
     pictures(
         &mut VideoReader::open_input(&Input::File(path.to_path_buf())).unwrap(),
@@ -138,8 +115,6 @@ fn decoded(path: &Path) -> Vec<Picture> {
     )
 }
 
-/// Checks that `got`, a job's frames, are `want`'s, those of the same job
-/// decoding on the CPU, frame `k` showing barcode `k`.
 fn the_same(got: &[Picture], want: &[Picture], what: &str) {
     assert_eq!(got.len(), want.len(), "{what}");
     for (k, (g, w)) in got.iter().zip(want).enumerate() {
@@ -167,8 +142,6 @@ fn interlaced_h264_deinterlaced_on_nvdec_is_the_cpus() {
         assert_eq!(got.len(), truth.len(), "top field first: {top}");
         for (k, (g, t)) in got.iter().zip(&truth).enumerate() {
             let what = format!("top field first: {top}, frame {k}");
-            // Deinterlaced on the GPU, or in memory where bwdif_cuda
-            // doesn't give bwdif's frames.
             assert!(matches!(g.kind, Some(Kind::Nvdec) | None), "{what}");
             assert_eq!((g.pts, g.code), (t.pts, t.code), "{what}");
             assert_eq!(rows_off(&t.picture, &g.picture), [], "{what}");
@@ -188,7 +161,6 @@ fn interlaced_h264_deinterlaced_on_nvdec_is_the_cpus() {
     }
 }
 
-/// A piece of `frames` frames of the clip at `path`, from its first.
 fn piece(path: &Path, frames: i64) -> VideoPiece {
     let info = vidcut_av::probe::probe(path, None).unwrap();
     let origin = info.video.and_then(|v| v.first_frame_time).unwrap_or(0.0);
@@ -203,7 +175,6 @@ fn piece(path: &Path, frames: i64) -> VideoPiece {
     }
 }
 
-/// NVENC's H.264 at a quality that keeps barcodes, in Matroska, no sound.
 fn nvenc() -> ExportSettings {
     ExportSettings {
         container: OutContainer::Mkv,
@@ -231,9 +202,6 @@ fn nvenc() -> ExportSettings {
     }
 }
 
-/// The frames of an NVENC export of the `frames` frames at `fps` of the
-/// clip at `path`, at its own `size`, its piece decoding on `gpu` (`None`:
-/// the CPU), each decoded on the CPU.
 fn nvenc_export(
     path: &Path,
     frames: i64,
@@ -297,8 +265,6 @@ fn an_nvenc_export_of_interlaced_prores_decoded_on_vulkan_is_the_cpus() {
     }
 }
 
-/// The frames of `enc`'s proxy of the clip at `path`, at its own `size`,
-/// decoding on `gpu` (`None`: the CPU), each decoded on the CPU.
 fn proxy(
     enc: &ProxyEncoder,
     path: &Path,
@@ -330,8 +296,6 @@ fn proxies_of_interlaced_prores_decoded_on_vulkan_are_the_cpus() {
         return;
     };
     let on_it = detect(true).on(gpu.gpu().expect("NVIDIA's GPU"));
-    // Vulkan's ProRes encoder, and NVENC's AV1, or its HEVC on a GPU
-    // without AV1.
     let vulkan = encoders(ProxyCodec::Prores, &on_it, &[])
         .into_iter()
         .find(|e| e.kind == EncoderChoice::Vulkan)

@@ -1,19 +1,8 @@
-//! How fast a file's video decodes on the CPU and on each GPU decoder there
-//! is (NVDEC, Vulkan beside it for ProRes, VA-API, Direct3D 11,
-//! VideoToolbox): frames a second decoding on from the
-//! start, the frames left on the GPU and again copied down to memory (as the
-//! player takes VA-API's and Direct3D 11's), with the CPU it took; and the
-//! time a seek takes to a frame in the middle of a GOP.
-//!
-//! `cargo run -p vidcut-av --example decode_speed -- FILE [FRAMES]`
-
 use std::time::Instant;
 
 use vidcut_av::decode::{Input, VideoReader};
 use vidcut_av::hw::GpuDecoder;
 
-/// Decodes up to `frames` from the start, copying each down when `down`:
-/// the frames, the seconds and the CPU-seconds it took.
 fn decode(reader: &mut VideoReader, frames: usize, down: bool) -> (usize, f64, f64) {
     let (cpu, start) = (vidcut_av::cpu_seconds(), Instant::now());
     let mut n = 0;
@@ -21,9 +10,6 @@ fn decode(reader: &mut VideoReader, frames: usize, down: bool) -> (usize, f64, f
         let Some(f) = reader.next_frame().unwrap() else {
             break;
         };
-        // Interlaced frames of VA-API, Direct3D 11 and VideoToolbox came
-        // down already, for the CPU to deinterlace, and NVDEC's and
-        // Vulkan's where their filter fails its check.
         if down && vidcut_av::hw::on_gpu(&f) {
             vidcut_av::hw::download(&f).unwrap();
         }
@@ -63,8 +49,6 @@ fn main() {
             }
         };
         let opened = started.elapsed();
-        // The decoder that decodes the file: the GPU's own, or Vulkan's
-        // beside NVDEC.
         let name = match (gpu, reader.gpu()) {
             (Some(g), Some(kind)) => name.replacen(g.kind().name(), kind.name(), 1),
             _ => name.clone(),
@@ -86,7 +70,6 @@ fn main() {
         }
         let tb = reader.time_base();
         let tick = f64::from(tb.numerator()) / f64::from(tb.denominator());
-        // Seeks to the middle of each of the first GOPs and decodes to there.
         let mut seeks = Vec::new();
         for k in 1..=6 {
             let t = k as f64 * 2.0 + 1.0;

@@ -1,35 +1,21 @@
-//! Tasks a thread hands its pool in order and takes back in that order: a
-//! stream's frames that stand alone, each decoded on whichever thread is
-//! free (docs/decisions/threads.md §4.2).
-//!
-//! A task the pool hasn't started when its result is wanted runs on the
-//! thread that wants it, as a call's slices do, so taking never waits for
-//! work queued behind other work.
-
 use std::collections::VecDeque;
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
-/// Work for one pool thread.
 pub(crate) trait Task: Send + Sync {
-    /// Runs it, unless it was started elsewhere or dropped.
     fn run(&self);
 }
 
-/// How often a thread waiting for a result looks whether its request was
-/// cancelled.
 const LOOK: Duration = Duration::from_millis(100);
 
 enum State<J, R> {
     Waiting(J),
     Running,
-    /// `None` when it panicked.
     Done(Option<R>),
     Dropped,
 }
 
-/// One task: its job until a thread starts it, then its result.
 struct Slot<J, R> {
     state: Mutex<State<J, R>>,
     done: Condvar,
@@ -41,7 +27,6 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl<J, R> Slot<J, R> {
-    /// Its job, if no thread has started it.
     fn claim(&self) -> Option<J> {
         let mut state = lock(&self.state);
         match std::mem::replace(&mut *state, State::Running) {
@@ -53,8 +38,6 @@ impl<J, R> Slot<J, R> {
         }
     }
 
-    /// Runs `job` with `run`, keeping its result unless it was dropped
-    /// meanwhile.
     fn finish(&self, job: J, run: impl FnOnce(J) -> R) {
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| run(job))).ok();
         let mut state = lock(&self.state);
@@ -73,17 +56,13 @@ impl<J: Send, R: Send> Task for Slot<J, R> {
     }
 }
 
-/// Jobs run by `run` on the pool, their results taken in the order given.
 pub(crate) struct Ordered<J, R> {
     slots: VecDeque<Arc<Slot<J, R>>>,
     run: fn(J) -> R,
-    /// Hands a task to the pool.
     give: fn(Arc<dyn Task>),
 }
 
 impl<J: Send + 'static, R: Send + 'static> Ordered<J, R> {
-    /// Jobs run by `run` on the pool of the thread that gives them
-    /// ([`super::give`]).
     pub(crate) fn new(run: fn(J) -> R) -> Self {
         Self::with(run, super::give)
     }
@@ -96,7 +75,6 @@ impl<J: Send + 'static, R: Send + 'static> Ordered<J, R> {
         }
     }
 
-    /// Tasks given and not taken: waiting, running or done.
     pub(crate) fn len(&self) -> usize {
         self.slots.len()
     }
@@ -111,19 +89,12 @@ impl<J: Send + 'static, R: Send + 'static> Ordered<J, R> {
         self.slots.push_back(slot);
     }
 
-    /// Drops every task: those not started never run, and the results of
-    /// the others are let go as they come.
     pub(crate) fn clear(&mut self) {
         for slot in self.slots.drain(..) {
             *lock(&slot.state) = State::Dropped;
         }
     }
 
-    /// The oldest task's result; `None` when none is left. Not started, it
-    /// runs here with `inline`. Running elsewhere, it is waited for, and
-    /// between looks `stop` may end the wait, the task left running. The
-    /// tasks after it stay the pool's: the taker running one would give
-    /// the pool no new ones meanwhile. A task that panicked panics here.
     pub(crate) fn take<E>(
         &mut self,
         mut inline: impl FnMut(J) -> R,
@@ -169,10 +140,7 @@ mod tests {
     use super::*;
 
     thread_local! {
-        /// The tasks given to the test's pool, which runs them when the
-        /// test says.
         static GIVEN: RefCell<Vec<Arc<dyn Task>>> = const { RefCell::new(Vec::new()) };
-        /// Jobs [`double`] ran.
         static RAN: Cell<usize> = const { Cell::new(0) };
     }
 

@@ -1,12 +1,3 @@
-//! The cancel flag of the long request running on this thread.
-//!
-//! A foreground export stops when its progress write fails: that sets the
-//! call's flag, and the frame loop loads it. A frame, a storyboard, an
-//! analysis and the loudness measure before an export report no progress, so
-//! the same flag is published here and those decoders load it too. A worker
-//! thread does not inherit the slot; it installs a [`Guard`] with a clone of
-//! [`current`].
-
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -19,10 +10,8 @@ thread_local! {
     static CANCEL: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
 }
 
-/// Makes a cancel flag visible to decoding on this thread until dropped.
 pub struct Guard {
     prev: Option<Arc<AtomicBool>>,
-    /// `Rc` is not `Send`: the slot belongs to this thread.
     _unsend: PhantomData<Rc<()>>,
 }
 
@@ -43,7 +32,6 @@ impl Drop for Guard {
     }
 }
 
-/// The flag installed on this thread, if any, for a worker to install too.
 pub fn current() -> Option<Arc<AtomicBool>> {
     CANCEL.with(|slot| slot.borrow().clone())
 }
@@ -56,7 +44,6 @@ pub(crate) fn cancelled() -> bool {
     })
 }
 
-/// The error the export frame loop already returns when its flag is set.
 pub(crate) fn stop() -> Result<()> {
     if cancelled() {
         Err(Error::Invalid(crate::export::CANCELLED.into()))

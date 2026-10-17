@@ -1,60 +1,34 @@
-//! The computer's GPUs, for the preferences to choose one (`gpu.device`).
-//! Each is known by its PCI vendor and device ids and its PCI slot
-//! (`10de:2702@01:00.0`), which the firmware gives it before any system
-//! starts: the same on Linux and Windows on one computer, so one choice
-//! serves both. A card moved to another slot is still found by its ids
-//! while it is the only one of its model.
-//!
-//! The GPU chosen ([`choose`]) decodes (`GpuDecoder::best`), holds the CUDA
-//! device (`CudaDevice::open`) and encodes (`Availability::on`). Without a
-//! choice, or while the chosen one isn't there, the best the computer has
-//! does ([`automatic`]).
-
 use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
 
-/// PCI vendor ids.
 pub const NVIDIA: u32 = 0x10de;
 pub const AMD: u32 = 0x1002;
 pub const INTEL: u32 = 0x8086;
 
-/// A GPU of this computer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Gpu {
-    /// What the preferences name it by: its PCI vendor and device ids and
-    /// its slot (bus, device, function), in hex: `10de:2702@01:00.0`; the
-    /// ids alone where the slot isn't known.
     pub id: String,
-    /// Its name, as its driver gives it.
     pub name: String,
-    /// Its maker: `NVIDIA`, `AMD`, `Intel`, or the PCI vendor id.
     pub vendor: String,
-    /// Its memory in MB, where its driver says (NVIDIA's, through CUDA).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_mb: Option<u64>,
     #[serde(skip)]
     pub(crate) pci_vendor: u32,
     #[serde(skip)]
     pub(crate) slot: Option<Slot>,
-    /// Its CUDA device's index (NVIDIA's).
     #[serde(skip)]
     pub(crate) cuda: Option<i32>,
-    /// Its UUID, as CUDA gives it (NVIDIA's).
     #[serde(skip)]
     pub(crate) uuid: Option<[u8; 16]>,
-    /// Its Direct3D 11 adapter's index (Windows).
     #[serde(skip)]
     pub(crate) adapter: Option<u32>,
-    /// Its render node (Linux).
     #[serde(skip)]
     pub(crate) node: Option<String>,
 }
 
-/// A PCI slot: bus, device, function.
 pub(crate) type Slot = (u32, u32, u32);
 
-/// The id of a GPU with PCI ids `vendor` and `device` in `slot`.
 fn id(vendor: u32, device: u32, slot: Option<Slot>) -> String {
     match slot {
         Some((b, d, f)) => format!("{vendor:04x}:{device:04x}@{b:02x}:{d:02x}.{f:x}"),
@@ -62,7 +36,6 @@ fn id(vendor: u32, device: u32, slot: Option<Slot>) -> String {
     }
 }
 
-/// The maker of PCI vendor `vendor`, for people.
 fn maker(vendor: u32) -> String {
     match vendor {
         NVIDIA => "NVIDIA".into(),
@@ -72,8 +45,6 @@ fn maker(vendor: u32) -> String {
     }
 }
 
-/// The slot in a PCI address as Linux and CUDA write it,
-/// `[domain:]bus:device.function` in hex (`0000:01:00.0`).
 pub(crate) fn parse_slot(address: &str) -> Option<Slot> {
     let mut parts = address.trim().rsplit(':');
     let (device, function) = parts.next()?.split_once('.')?;
@@ -82,9 +53,6 @@ pub(crate) fn parse_slot(address: &str) -> Option<Slot> {
     Some((hex(bus)?, hex(device)?, hex(function)?))
 }
 
-/// The GPU among `gpus` that `id` names: the one with that id, else the
-/// only one of its model (moved to another slot). `None` when it isn't
-/// there, or its model is more than one GPU and none has its slot.
 pub fn find<'a>(gpus: &'a [Gpu], id: &str) -> Option<&'a Gpu> {
     if let Some(g) = gpus.iter().find(|g| g.id == id) {
         return Some(g);
@@ -99,16 +67,11 @@ pub fn find<'a>(gpus: &'a [Gpu], id: &str) -> Option<&'a Gpu> {
     }
 }
 
-/// The computer's GPUs, listed once: in Windows' adapter order, or the
-/// render nodes' on Linux. None listed on macOS, which has no choice.
 pub fn list() -> &'static [Gpu] {
     static LIST: OnceLock<Vec<Gpu>> = OnceLock::new();
     LIST.get_or_init(listed)
 }
 
-/// The GPU that works when none is chosen, or while the chosen one isn't
-/// there: NVIDIA's that CUDA lists first, else the first other one (on
-/// Windows the main display's adapter, as a rule).
 pub fn automatic() -> Option<Gpu> {
     let gpus = list();
     gpus.iter()
@@ -117,11 +80,8 @@ pub fn automatic() -> Option<Gpu> {
         .cloned()
 }
 
-/// The id the preferences chose; empty for none.
 static CHOSEN: Mutex<String> = Mutex::new(String::new());
 
-/// Decodes and encodes on the GPU `id` names ([`Gpu::id`]) from now on;
-/// empty: on the [`automatic`] one.
 pub fn choose(id: &str) {
     let mut chosen = CHOSEN.lock().unwrap_or_else(|e| e.into_inner());
     if *chosen != id {
@@ -129,12 +89,10 @@ pub fn choose(id: &str) {
     }
 }
 
-/// The id chosen ([`choose`]); empty for none.
 pub fn chosen_id() -> String {
     CHOSEN.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
-/// The GPU chosen, while this computer has it.
 pub fn chosen() -> Option<Gpu> {
     let id = chosen_id();
     if id.is_empty() {
@@ -143,22 +101,15 @@ pub fn chosen() -> Option<Gpu> {
     find(list(), &id).cloned()
 }
 
-/// The GPU that works: the chosen one, else the [`automatic`] one.
 pub fn in_use() -> Option<Gpu> {
     chosen().or_else(automatic)
 }
 
 impl Gpu {
-    /// Its UUID, as CUDA gives it: NVIDIA's only. The Vulkan device made
-    /// from its CUDA device has the same.
     pub fn uuid(&self) -> Option<[u8; 16]> {
         self.uuid
     }
 
-    /// Whether it has encoders of `kind`: NVENC on NVIDIA's, AMF on AMD's
-    /// (Windows), QSV on Intel's, VAAPI on the others' render nodes (Linux),
-    /// VideoToolbox on a Mac's; Vulkan on every listed one
-    /// ([`hw::Device::vulkan_on`](crate::hw)).
     pub fn encodes_with(&self, kind: vidcut_core::export::EncoderChoice) -> bool {
         use vidcut_core::export::EncoderChoice as E;
         match kind {
@@ -172,9 +123,6 @@ impl Gpu {
         }
     }
 
-    /// Whether `status`, an encoder detection tested, ran on it: NVENC on
-    /// NVIDIA's, Vulkan's on the GPU its id names, the others on its
-    /// adapter or render node.
     pub(crate) fn ran(&self, status: &crate::export::encode::EncoderStatus) -> bool {
         use vidcut_core::export::EncoderChoice as E;
         let Some(on) = status.device.as_deref() else {
@@ -197,11 +145,9 @@ fn listed() -> Vec<Gpu> {
     use ::windows::Win32::Graphics::Dxgi::{
         CreateDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIFactory1,
     };
-    /// Microsoft's Basic Render Driver: no GPU behind it.
     const MICROSOFT: u32 = 0x1414;
     let cuda = crate::cuda::listed();
-    // SAFETY: DXGI's factory and adapters, as Direct3D 11 is opened on
-    // them by their index (FFmpeg enumerates them the same).
+    // SAFETY: DXGI calls on a factory and adapters this function creates and holds.
     let Ok(factory) = (unsafe { CreateDXGIFactory1::<IDXGIFactory1>() }) else {
         return Vec::new();
     };
@@ -236,9 +182,6 @@ fn listed() -> Vec<Gpu> {
     gpus
 }
 
-/// The LUID of DXGI's adapter `index`, as Vulkan gives a device's
-/// (`VkPhysicalDeviceIDProperties::deviceLUID`): its low part, then its
-/// high part, little-endian.
 #[cfg(windows)]
 pub(crate) fn adapter_luid(index: u32) -> Option<[u8; 8]> {
     use ::windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
@@ -254,7 +197,6 @@ pub(crate) fn adapter_luid(index: u32) -> Option<[u8; 8]> {
     Some(bytes)
 }
 
-/// The PCI slot of the adapter `luid` names, as its kernel driver says.
 #[cfg(windows)]
 fn windows_slot(luid: ::windows::Win32::Foundation::LUID) -> Option<Slot> {
     use ::windows::Wdk::Graphics::Direct3D::{
@@ -266,8 +208,7 @@ fn windows_slot(luid: ::windows::Win32::Foundation::LUID) -> Option<Slot> {
         AdapterLuid: luid,
         hAdapter: 0,
     };
-    // SAFETY: the adapter opened by its LUID, asked for its address into a
-    // structure of the size given, and closed.
+    // SAFETY: the adapter opened by its LUID, queried into a struct of the size given, then closed.
     unsafe {
         if D3DKMTOpenAdapterFromLuid(&mut open).is_err() {
             return None;
@@ -333,8 +274,6 @@ fn listed() -> Vec<Gpu> {
     gpus
 }
 
-/// GPU names from the PCI ids database (`pci.ids`, which most systems
-/// have): its vendor's and device's names, by their ids.
 #[cfg(target_os = "linux")]
 fn pci_names() -> std::collections::HashMap<(u32, u32), String> {
     let mut names = std::collections::HashMap::new();
@@ -344,8 +283,6 @@ fn pci_names() -> std::collections::HashMap<(u32, u32), String> {
     else {
         return names;
     };
-    // Vendor lines (`10de  NVIDIA Corporation`), each followed by its
-    // devices' lines, a tab in (`2702  AD103 [GeForce RTX 4080 SUPER]`).
     let mut vendor = None;
     for line in text.lines() {
         if line.starts_with('#') || line.starts_with("\t\t") || line.is_empty() {
@@ -362,7 +299,6 @@ fn pci_names() -> std::collections::HashMap<(u32, u32), String> {
     names
 }
 
-/// CUDA's GPUs alone, which no Mac has.
 #[cfg(not(any(windows, target_os = "linux")))]
 fn listed() -> Vec<Gpu> {
     let mut gpus = Vec::new();
@@ -370,9 +306,6 @@ fn listed() -> Vec<Gpu> {
     gpus
 }
 
-/// Gives NVIDIA's GPUs their CUDA devices, by their slots, and CUDA's
-/// names for them. Without slots, the one NVIDIA GPU is the one CUDA
-/// device.
 fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
     let nvidia = gpus.iter().filter(|g| g.pci_vendor == NVIDIA).count();
     for g in gpus.iter_mut().filter(|g| g.pci_vendor == NVIDIA) {
@@ -388,7 +321,6 @@ fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
             g.memory_mb = c.memory.map(|b| b as u64 >> 20);
         }
     }
-    // CUDA's GPUs no system lists (compute-only cards).
     for c in cuda {
         if gpus.iter().any(|g| g.cuda == Some(c.index)) {
             continue;
@@ -409,7 +341,6 @@ fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
     }
 }
 
-/// The PCI device id of the card in `slot`, as Linux's sysfs has it.
 fn pci_device((bus, device, function): Slot) -> Option<u32> {
     if !cfg!(target_os = "linux") {
         return None;
@@ -438,8 +369,6 @@ mod tests {
         }
     }
 
-    /// A GPU is found by its id; moved to another slot, by its model while
-    /// it is the only one of it.
     #[test]
     fn a_chosen_gpu_is_found_by_its_slot_or_its_model() {
         let nvidia = gpu(NVIDIA, 0x2702, Some((1, 0, 0)));
@@ -450,7 +379,6 @@ mod tests {
         assert_eq!(find(&gpus, "10de:2702"), Some(&nvidia));
         assert_eq!(find(&gpus, "10de:2704@01:00.0"), None);
         assert_eq!(find(&gpus, ""), None);
-        // Two of a model: only the slot tells them apart.
         let twins = [
             gpu(NVIDIA, 0x2702, Some((1, 0, 0))),
             gpu(NVIDIA, 0x2702, Some((2, 0, 0))),

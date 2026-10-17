@@ -1,9 +1,3 @@
-//! The player engine, headless (docs/decisions/player.md): every picture is
-//! the one `frame render` makes, at seeks, steps both ways and playing
-//! across cuts and files; the sound is the clock, and the pictures stay
-//! with it. No display, no GPU, no audio device: a manual output pulls
-//! the sound when a test says, a paced one in real time.
-
 mod player_support;
 
 use std::time::{Duration, Instant};
@@ -27,7 +21,6 @@ fn hevc() -> Src {
     )
 }
 
-/// PCM sound: beeps exact to the sample.
 fn pcm() -> Src {
     src(
         "m3",
@@ -35,9 +28,6 @@ fn pcm() -> Src {
     )
 }
 
-/// A player on a manual output. Without audio scrubbing: a seek before
-/// play would otherwise queue its frame's sound ahead of the play's, and
-/// the tests that count samples from play's start would hear it first.
 fn manual(plan: vidcut_core::render::RenderPlan) -> (Player, ManualOutput) {
     let out = ManualOutput::new();
     let config = Config {
@@ -51,8 +41,6 @@ fn manual(plan: vidcut_core::render::RenderPlan) -> (Player, ManualOutput) {
 #[test]
 fn seeks_and_steps_show_what_frame_render_shows() {
     let (a, b) = (h264(), hevc());
-    // Cuts within a file, between files and codecs, into and out of black;
-    // the timeline starts at frame 1000.
     let p = plan(
         &[
             clip(&a, 0, 30),
@@ -67,14 +55,12 @@ fn seeks_and_steps_show_what_frame_render_shows() {
     let (player, _out) = manual(p);
     let at = |t: i64| expect[(t - 1000) as usize];
 
-    // Seeks to every boundary, both sides, and between.
     for t in [
         1000, 1029, 1030, 1031, 1059, 1060, 1064, 1065, 1094, 1095, 1104, 1050, 1001,
     ] {
         player.seek(t);
         assert_eq!(shown_at(&player, t), at(t), "seek to {t}");
     }
-    // Steps forward through all of it, and back.
     player.seek(1000);
     for t in 1001..1105 {
         player.step(1);
@@ -84,7 +70,6 @@ fn seeks_and_steps_show_what_frame_render_shows() {
         player.step(-1);
         assert_eq!(shown_at(&player, t), at(t), "step back to {t}");
     }
-    // Past the ends: the first and last frames.
     player.seek(5000);
     assert_eq!(shown_at(&player, 1104), at(1104));
     player.step(-10_000);
@@ -110,7 +95,6 @@ fn stills_and_image_sequences_show_their_pictures() {
         frames,
         image: Some(image),
     };
-    // a 0..20, the still for 15 frames, sequence pictures 5..25, a 40..50.
     let mut p = plan(&[clip(&a, 0, 20), gap(15), gap(20), clip(&a, 40, 10)], 0);
     p.video[1] = picture(&still[0], Image::Still, 0, 15);
     p.video[2] = picture(
@@ -168,7 +152,6 @@ fn playing_shows_every_frame_on_time_across_cuts_and_files() {
     player.seek(5);
     assert!(player.wait_ready(5, Duration::from_secs(10)));
     player.play(1.0);
-    // 10 ms buffers: each frame (33 ms) is presented three or four times.
     let mut shown = Vec::new();
     let mut sound = Vec::new();
     while player.status().playing {
@@ -193,10 +176,6 @@ fn playing_shows_every_frame_on_time_across_cuts_and_files() {
     assert_eq!(shown, (5..63).collect::<Vec<_>>(), "every frame, in order");
     assert_eq!(player.status().position, 62, "paused on the last frame");
 
-    // The sound heard from frame 5 on: the beeps at source seconds 0 and 1
-    // of the PCM file sit where the plan puts them. a's 0..20 holds no
-    // beep after frame 5; a's 50..70 has source frame 60 (a beep) at
-    // timeline 53.
     let mono: Vec<f32> = sound.chunks(2).map(|c| c[0]).collect();
     let onsets = beep::onsets(&mono, 0.1, 4_800);
     let start = fps().frame_to_sample(5, RATE);
@@ -213,8 +192,6 @@ fn playing_shows_every_frame_on_time_across_cuts_and_files() {
 #[test]
 fn speeds_and_reverse_play() {
     let a = h264();
-    // Keyframes 120 frames apart, with B-frames: going back must decode
-    // windows from keyframes.
     let long = src(
         "m4",
         FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), 300)
@@ -225,7 +202,6 @@ fn speeds_and_reverse_play() {
     let expect: Vec<Option<u32>> = (0..390).map(|t| rendered(&p, t)).collect();
     let (player, out) = manual(p);
 
-    // Twice as fast: a second of sound moves the clock two seconds.
     player.seek(10);
     assert!(player.wait_ready(10, Duration::from_secs(10)));
     player.play(2.0);
@@ -238,8 +214,6 @@ fn speeds_and_reverse_play() {
     let s = player.present(Instant::now()).unwrap();
     assert_eq!(code(&s.picture), expect[s.frame as usize]);
 
-    // Backwards at normal speed, across the cut back into the first file:
-    // every frame shown, in order, each the export's.
     player.pause();
     player.seek(200);
     player.play(-1.0);
@@ -263,7 +237,6 @@ fn speeds_and_reverse_play() {
     }
     assert_eq!(shown, (60..=200).rev().collect::<Vec<_>>());
 
-    // Backwards to the start: play stops on the first frame.
     player.seek(5);
     player.play(-4.0);
     let started = Instant::now();
@@ -279,8 +252,6 @@ fn speeds_and_reverse_play() {
 fn pieces_at_other_speeds_show_their_source_frames() {
     use vidcut_core::render::{Pace, VideoPiece};
 
-    // Keyframes 30 frames apart, with B-frames: the reversed piece decodes
-    // from keyframes behind the frames it shows.
     let long = src(
         "m5",
         FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), 300)
@@ -333,7 +304,6 @@ fn pieces_at_other_speeds_show_their_source_frames() {
         assert_eq!(shown_at(&player, t), expect[t as usize], "step back to {t}");
     }
 
-    // Playing both ways: every frame shown, each its source frame.
     for (from, speed) in [(0, 1.0), (n - 1, -1.0)] {
         player.pause();
         player.seek(from);
@@ -369,9 +339,6 @@ fn pieces_at_other_speeds_show_their_source_frames() {
 
 #[test]
 fn a_device_that_stops_pulling_holds_nothing_up() {
-    // Seeks while playing drop what was queued; a device that pulls
-    // nothing leaves the dropped sound in the ring. The player must neither
-    // block on it nor play the sound from before the last seek.
     let a = pcm();
     let (player, out) = manual(plan(&[clip(&a, 0, 90)], 0));
     player.play(1.0);
@@ -380,10 +347,6 @@ fn a_device_that_stops_pulling_holds_nothing_up() {
         std::thread::sleep(Duration::from_millis(5));
     }
     player.seek(60);
-    // The device comes back. Its first buffer passes over the dropped sound
-    // and may find nothing yet: the ring was full of it. Then the sound is
-    // the last seek's, from the beep that starts source second 2, and the
-    // clock waited for it.
     let mut sound = out.pull(480, Instant::now() - Duration::from_millis(10));
     sound.extend(pull_full(&out, 480));
     let mono: Vec<f32> = sound.chunks(2).map(|c| c[0]).collect();

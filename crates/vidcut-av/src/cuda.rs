@@ -1,13 +1,3 @@
-//! The NVIDIA GPU as one pipeline: frames NVDEC decodes stay in GPU memory,
-//! are deinterlaced there by the reader (`bwdif_cuda`, where it gives
-//! `bwdif`'s frames), scaled (`scale_cuda`, then `pad_cuda`) and go to NVENC
-//! as they are. Pictures stored turned (spec D33), in another matrix than
-//! BT.709 (BT.601 SD, VP8), in full range, or in HDR or for HDR output (spec
-//! D35) are turned upright and converted first by libplacebo on Vulkan, on
-//! the same GPU. libplacebo makes every picture of Vulkan's ProRes encoder,
-//! which takes them on that Vulkan device. Proxies (decision D41) and
-//! exports use it: the CPU only reads the file and writes the result.
-
 #![warn(clippy::undocumented_unsafe_blocks)]
 
 pub(crate) mod keep;
@@ -16,9 +6,6 @@ pub mod share;
 
 pub(crate) use share::{Listed, listed};
 
-/// One plane's place in memory a display shares (`share::SharedBuffer`):
-/// where it starts, how far apart its rows are, and how many bytes of how
-/// many rows it has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlaneCopy {
     pub offset: u64,
@@ -41,17 +28,9 @@ use crate::ffmpeg::{self, ffi, filter, format, frame};
 use crate::hw::{Device, GpuGraph};
 use crate::route::Place;
 
-/// A CUDA device: NVDEC, the CUDA filters and NVENC share it.
 pub struct CudaDevice {
     cuda: Device,
-    /// The process's one device ([`CudaDevice::open`]): this one, or the
-    /// one whose context this one shares with a stream of its own
-    /// ([`CudaDevice::with_own_stream`]).
     base: Device,
-    /// The Vulkan device on the same GPU, for libplacebo and Vulkan's
-    /// encoders: made from the base the first time it is needed (that
-    /// takes a quarter of a second), then shared by every clone, until a
-    /// converter on it fails ([`CudaDevice::forget_vulkan`]).
     vulkan: Arc<Mutex<Option<std::result::Result<Device, String>>>>,
 }
 
@@ -62,8 +41,6 @@ impl Clone for CudaDevice {
 }
 
 impl CudaDevice {
-    /// The CUDA device on the GPU in use (`gpus::in_use`), when that is
-    /// NVIDIA's.
     pub fn open() -> Result<Self> {
         match crate::gpus::in_use().and_then(|g| g.cuda) {
             Some(index) => Self::on(index),
@@ -71,9 +48,6 @@ impl CudaDevice {
         }
     }
 
-    /// The CUDA device of index `index`, in CUDA's order: one for each in
-    /// the whole process, shared by every export and proxy, and never
-    /// closed.
     pub(crate) fn on(index: i32) -> Result<Self> {
         static SHARED: Mutex<Vec<(i32, std::result::Result<CudaDevice, String>)>> =
             Mutex::new(Vec::new());
@@ -115,7 +89,6 @@ impl CudaDevice {
         Ok(opened)
     }
 
-    /// Another of this device, its own references to the same contexts.
     pub(crate) fn try_clone(&self) -> Result<Self> {
         Ok(Self {
             cuda: self.cuda.clone()?,
@@ -124,19 +97,9 @@ impl CudaDevice {
         })
     }
 
-    /// A device of its own on the same context: its work goes on a stream of
-    /// its own, so it never waits behind another user's. On the context's
-    /// default stream every user's work runs in one line, and a wait there
-    /// for Vulkan (libplacebo's pictures) holds up everyone's decoding and
-    /// encoding; two users each waiting for Vulkan work queued behind the
-    /// other's would never go on. Frames made on it are done once its
-    /// stream is (`share::wait_for`).
     pub fn with_own_stream(&self) -> Result<Self> {
         let stream = share::Stream::new(self)?;
-        // SAFETY: a CUDA device context FFmpeg allocates, given this
-        // device's context (which the base keeps) and the new stream, which
-        // its `free` destroys once FFmpeg is done with it. The new device
-        // owns it.
+        // SAFETY: a fresh device on the context `base` keeps, owning `stream` until its `free`.
         unsafe {
             let mut device = ffi::av_hwdevice_ctx_alloc(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA);
             if device.is_null() {
@@ -170,8 +133,6 @@ impl CudaDevice {
         self.cuda.as_ptr()
     }
 
-    /// The Vulkan device, made if there is none: libplacebo's, and Vulkan's
-    /// encoders' on this GPU.
     pub(crate) fn vulkan(&self) -> Result<Device> {
         let mut slot = self.vulkan.lock().unwrap_or_else(|e| e.into_inner());
         match slot.get_or_insert_with(|| {
@@ -201,13 +162,9 @@ impl CudaDevice {
         }
     }
 
-    /// Drops `used`, the Vulkan device a converter failed on, if it is
-    /// still the one handed out, so the next converter makes another: a
-    /// device the GPU lost stays lost, and every converter on it would fail.
     fn forget_vulkan(&self, used: &Device) {
         let mut slot = self.vulkan.lock().unwrap_or_else(|e| e.into_inner());
-        // SAFETY: references to device contexts, the same device when they
-        // point to the same data.
+        // SAFETY: `d` and `used` are live device references; the same `data` is the same device.
         let same = |d: &Device| unsafe { (*d.as_ptr()).data == (*used.as_ptr()).data };
         if let Some(Ok(d)) = slot.as_ref()
             && same(d)
@@ -217,8 +174,6 @@ impl CudaDevice {
     }
 }
 
-/// `width`×`height` as FFmpeg stores a frame's sides. A side past `i32`
-/// would become negative, so it is rejected.
 pub(crate) fn frame_sides(width: u32, height: u32) -> Result<(i32, i32)> {
     match (i32::try_from(width), i32::try_from(height)) {
         (Ok(width), Ok(height)) => Ok((width, height)),
@@ -228,15 +183,12 @@ pub(crate) fn frame_sides(width: u32, height: u32) -> Result<(i32, i32)> {
     }
 }
 
-/// Frames in GPU memory of one size and format.
 struct HwFrames(*mut ffi::AVBufferRef);
 
 // SAFETY: as for the device.
 unsafe impl Send for HwFrames {}
 
 impl HwFrames {
-    /// `width`×`height` frames of `sw` laid out as `hw` (CUDA or Vulkan)
-    /// on `device`.
     fn new(
         device: &Device,
         hw: ffi::AVPixelFormat,
@@ -268,7 +220,6 @@ impl HwFrames {
         }
     }
 
-    /// Another reference to the same frames.
     fn share(&self) -> Result<Self> {
         // SAFETY: a reference to this live frames context.
         let frames = unsafe { ffi::av_buffer_ref(self.0) };
@@ -278,8 +229,6 @@ impl HwFrames {
         Ok(Self(frames))
     }
 
-    /// A frame of this pool holding the picture of `src` (in memory, or in
-    /// GPU memory of another kind), no other properties.
     fn copy(&self, src: &frame::Video, what: &str) -> Result<frame::Video> {
         let mut hw = frame::Video::empty();
         // SAFETY: a fresh frame of this live pool, given `src`'s picture.
@@ -310,12 +259,9 @@ impl Drop for HwFrames {
     }
 }
 
-/// GPU frames of one size and format: what NVENC is opened with, and where
-/// pictures made on the CPU go up to the GPU.
 pub struct CudaFrames(HwFrames);
 
 impl CudaFrames {
-    /// `width`×`height` frames of `sw` (NV12 or P010) on `device`.
     pub fn new(device: &CudaDevice, sw: format::Pixel, width: u32, height: u32) -> Result<Self> {
         HwFrames::new(
             &device.cuda,
@@ -331,8 +277,6 @@ impl CudaFrames {
         self.0.0
     }
 
-    /// `src` (in memory, of this pool's format and size) copied into a GPU
-    /// frame, keeping its timestamp.
     pub fn upload(&self, src: &frame::Video) -> Result<frame::Video> {
         let mut hw = self.0.copy(src, "uploading to the GPU")?;
         crate::copies::up(src);
@@ -341,84 +285,40 @@ impl CudaFrames {
     }
 }
 
-/// Where libplacebo keeps the shaders it compiles (`keep_shaders_in`).
 static SHADERS: OnceLock<PathBuf> = OnceLock::new();
 
-/// Keeps libplacebo's compiled shaders in `dir`: compiling them takes a
-/// tenth of a second for each piece of an export it converts, reading them
-/// back a fifth of that. Without it they are compiled every time.
 pub fn keep_shaders_in(dir: PathBuf) {
     let _ = SHADERS.set(dir);
 }
 
-/// The prefix libplacebo names its shader files with, once the folder is
-/// there.
 fn shader_cache() -> Option<String> {
     let dir = SHADERS.get()?;
     std::fs::create_dir_all(dir).ok()?;
     Some(format!("{}/", dir.to_str()?))
 }
 
-/// Pictures for an encoder on the GPU from frames NVDEC decoded (and the
-/// reader deinterlaced, one frame per frame, as the CPU reader does), or
-/// Vulkan decoded (ProRes on NVIDIA's GPU): scaled to fit `width`×`height`
-/// keeping the display aspect and padded with black to it, as the CPU's
-/// normalizer does, as `format` in the output's colors, square pixels, all
-/// in GPU memory. NVENC's are CUDA frames (8-bit NV12 or 10-bit P010).
-/// Vulkan's ProRes encoder's are Vulkan frames (`yuv422p10le`) on the
-/// device libplacebo makes them on. Timestamps stay the source's.
 pub struct CudaPictures {
-    /// The frames it takes: NVDEC's (`CUDA`) or Vulkan's.
     takes: format::Pixel,
-    /// The CUDA filters, for NVENC's pictures.
     graph: Option<GpuGraph>,
     placebo: Option<Placebo>,
-    /// Pictures made on Vulkan, for Vulkan's encoder: libplacebo's.
     ready: VecDeque<frame::Video>,
 }
 
-/// Pictures turned upright and in the output's colors, by libplacebo on
-/// Vulkan (the CUDA filters neither turn pictures nor change their colors):
-/// each CUDA frame is copied to a Vulkan frame, converted and copied back
-/// to a CUDA frame, never leaving the GPU. Vulkan's frames go in as they
-/// are, on their own device.
 struct Placebo {
     graph: GpuGraph,
-    /// The Vulkan frames CUDA's are copied into; `None`: the frames are
-    /// Vulkan's already.
     input: Option<HwFrames>,
-    /// The CUDA frames pictures are copied back into; `None`: they stay
-    /// libplacebo's Vulkan frames.
     output: Option<HwFrames>,
-    /// Black, under each picture placed on a bigger frame
-    /// (`Layout::Placed`).
     background: Option<Blacks>,
-    /// Pushed after each frame when its picture is wanted at once.
-    /// libplacebo gives out a frame's picture only once it has the frame
-    /// after it; the filler's own pictures are dropped. Without it, a
-    /// picture comes a frame late and the GPU renders half as many.
     filler: Option<Blacks>,
-    /// What libplacebo reads the source as (`GpuColor::input`).
     tags: Tags,
-    /// Frames are timed by count, two apart with the filler between, as
-    /// libplacebo wants rising timestamps; their own wait here.
     count: i64,
     pts: VecDeque<(i64, Option<i64>)>,
-    /// The sample aspect of the upright pictures.
     sar: ffi::AVRational,
-    /// The device the converter was made on, and its Vulkan device, dropped
-    /// there when the converter fails ([`Placebo::checked`]).
     device: CudaDevice,
     vulkan: Device,
-    /// The Vulkan frames fed as they are, held until their pictures are
-    /// done: the decoder takes a frame back once it is let go.
     held: VecDeque<frame::Video>,
 }
 
-/// One converter at work at a time in the process: made, fed, read or
-/// torn down. Without this, the Vulkan device was sometimes lost when
-/// converters started at the same time (1 in 76 test runs with NVENC
-/// exports at once). The cause isn't known.
 fn converting() -> std::sync::MutexGuard<'static, ()> {
     static CONVERTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     CONVERTING.lock().unwrap_or_else(|e| e.into_inner())
@@ -431,23 +331,10 @@ impl Drop for Placebo {
     }
 }
 
-/// How long the GPU may take with a frame before it counts as stuck.
 const HANDOFF: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Waits, [`HANDOFF`] at most, until the GPU is done with `f` (a Vulkan
-/// frame): its copy from CUDA, or libplacebo's work on it.
-///
-/// A workaround for a libplacebo bug (fixed upstream in commit 2ba21c07,
-/// not released yet): libplacebo marks an input frame done before it has
-/// read it. If that comes before the CUDA copy into the frame finishes,
-/// libplacebo reads the old picture, and the frame's semaphore ends up one
-/// step behind, so freeing the frame waits forever. So the frame goes to
-/// libplacebo only after its copy is done, and the next copy waits for
-/// libplacebo's output. docs/todo/libplacebo-handback-workaround.md says
-/// when to remove this.
 fn wait_done(f: &frame::Video, what: &str) -> Result<()> {
-    // SAFETY: a Vulkan frame: its frames context's device, its AVVkFrame in
-    // data[0].
+    // SAFETY: `f` is a live Vulkan frame: on a Vulkan device, its `AVVkFrame` in `data[0]`.
     unsafe {
         let fc = (*(*f.as_ptr()).hw_frames_ctx).data as *const ffi::AVHWFramesContext;
         let dev = &*((*(*fc).device_ctx).hwctx as *const ffi::AVVulkanDeviceContext);
@@ -460,11 +347,6 @@ fn wait_done(f: &frame::Video, what: &str) -> Result<()> {
     .map_err(|e| Error::Invalid(format!("{what}: {e}")))
 }
 
-/// Waits, `timeout` at most, until `dev`'s GPU has given its last signal on
-/// each of `frames`, as their semaphores' values say.
-///
-/// # Safety
-/// The frames are `dev`'s, alive.
 pub(crate) unsafe fn wait_signalled(
     dev: &ffi::AVVulkanDeviceContext,
     frames: &[*const ffi::AVVkFrame],
@@ -482,8 +364,7 @@ pub(crate) unsafe fn wait_signalled(
     if sems.is_empty() {
         return Ok(());
     }
-    // SAFETY: the device's calls as vulkan.h declares them, looked up
-    // through its loader.
+    // SAFETY: the device's calls as vulkan.h declares them, looked up through its loader.
     unsafe {
         let none = |what: &str| Error::Invalid(format!("no {what}"));
         let instance_proc = dev.get_proc_addr.ok_or_else(|| none("Vulkan loader"))?;
@@ -508,8 +389,6 @@ pub(crate) unsafe fn wait_signalled(
     }
 }
 
-/// What a wait of `timeout` at most for the GPU says when it ended in
-/// `result` (a `VkResult`).
 fn waiting_failed(result: i32, timeout: std::time::Duration) -> String {
     match result {
         VK_TIMEOUT => format!("the GPU didn't finish in {} s", timeout.as_secs()),
@@ -518,24 +397,18 @@ fn waiting_failed(result: i32, timeout: std::time::Duration) -> String {
     }
 }
 
-/// `VK_TIMEOUT`.
 const VK_TIMEOUT: i32 = 2;
 
-/// `VK_ERROR_DEVICE_LOST`.
 const VK_ERROR_DEVICE_LOST: i32 = -4;
 
-/// `vkGetDeviceProcAddr`.
 type GetDeviceProcAddr =
     unsafe extern "system" fn(ffi::VkDevice, *const std::ffi::c_char) -> ffi::PFN_vkVoidFunction;
 
-/// `vkWaitSemaphores`.
 type WaitSemaphores =
     unsafe extern "system" fn(ffi::VkDevice, *const SemaphoreWaitInfo, u64) -> i32;
 
-/// `VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO`.
 const SEMAPHORE_WAIT_INFO: i32 = 1_000_207_004;
 
-/// `VkSemaphoreWaitInfo`.
 #[repr(C)]
 struct SemaphoreWaitInfo {
     s_type: i32,
@@ -546,17 +419,9 @@ struct SemaphoreWaitInfo {
     values: *const u64,
 }
 
-/// What libplacebo makes of a picture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Layout {
-    /// Upright at its own size, for the CUDA filters to scale and pad.
     Upright,
-    /// Fitted to `fitted` in the middle of `size`, as `format`: pictures
-    /// whose transfer it converts (HDR), as the CPU converts them after
-    /// scaling, and the padding FFmpeg's `pad_cuda` can't do (10 bits).
-    /// libplacebo can't clear a border in FFmpeg's Vulkan frames (it clears
-    /// with a copy they don't allow), so when the picture leaves a border, a
-    /// black frame of the size goes in under it and leaves none to clear.
     Placed {
         size: (u32, u32),
         fitted: (u32, u32),
@@ -564,14 +429,8 @@ enum Layout {
     },
 }
 
-/// The time base of the counted timestamps libplacebo sees: a second
-/// apart, as libplacebo takes a frame within a millisecond of the time it
-/// renders for as that time's frame, and may blend neighbors when pictures
-/// come under a tenth of a second apart.
 const COUNTED: ffi::AVRational = ffi::AVRational { num: 1, den: 1 };
 
-/// The filters from `w`×`h` frames to `width`×`height` NV12 pictures, each
-/// `scale_cuda` given `fixed` ([`scaling`]).
 fn filters(
     (w, h): (u32, u32),
     (fit_w, fit_h): (u32, u32),
@@ -580,7 +439,6 @@ fn filters(
 ) -> String {
     let options = format!(":format={out}");
     let mut steps = scaling_steps((w, h), (fit_w, fit_h), &options, fixed);
-    // Centered on black, as the CPU's normalizer pads.
     if (fit_w, fit_h) != (width, height) {
         let (x, y) = centered((fit_w, fit_h), (width, height));
         steps.push(format!(
@@ -590,19 +448,10 @@ fn filters(
     steps.join(",")
 }
 
-/// `scale_cuda` steps from `w`×`h` frames to `fit_w`×`fit_h` (with
-/// `options` for the last): halvings first, each the rounded average of
-/// four pixels, then one bicubic step to the size. `scale_cuda`'s kernels
-/// sample a fixed few pixels around each output pixel, which aliases when
-/// it shrinks a lot (4K to 960 wide). FFmpeg 9's shrinks with filters
-/// instead (`use_filters`) and truncates twice in each step, its pictures
-/// darker than the CPU's (red and blue 8 levels at 192×108 from 4K): the
-/// kernels are asked for there.
 pub(crate) fn scaling(size: (u32, u32), fit: (u32, u32), options: &str) -> Vec<String> {
     scaling_steps(size, fit, options, fixed_kernels())
 }
 
-/// What asks this FFmpeg's `scale_cuda` for its kernels ([`scaling`]).
 fn fixed_kernels() -> &'static str {
     static FIXED: OnceLock<&str> = OnceLock::new();
     FIXED.get_or_init(|| {
@@ -614,7 +463,6 @@ fn fixed_kernels() -> &'static str {
     })
 }
 
-/// [`scaling`]'s steps, each given `fixed`.
 fn scaling_steps(
     (w, h): (u32, u32),
     (fit_w, fit_h): (u32, u32),
@@ -635,23 +483,10 @@ fn scaling_steps(
     steps
 }
 
-/// Where a `fit_w`×`fit_h` picture goes in a `width`×`height` frame:
-/// centered, at even offsets as the CPU's `pad` rounds them (4:2:0 chroma
-/// covers two rows and columns).
 fn centered((fit_w, fit_h): (u32, u32), (width, height): (u32, u32)) -> (u32, u32) {
     (((width - fit_w) / 2) & !1, ((height - fit_h) / 2) & !1)
 }
 
-/// libplacebo's options for `width`×`height` pictures stored turned by
-/// `rotation` (clockwise), made `out` pictures laid out as `layout` says,
-/// in `color`'s output colors. Where only the matrix and range change, as
-/// swscale converts SDR on the CPU, the input is tagged with the output's
-/// primaries and transfer too; for HDR, `color`'s shader converts them,
-/// after scaling. It scales in the source's gamma like swscale, with the
-/// cubic `scale_cuda` uses, rounds without dithering (its dither leans
-/// bright), and leaves film grain and Dolby Vision metadata alone (the
-/// decoder applied the grain). Peak detection is off: the CPU's tone curve
-/// is fixed.
 fn placebo_options(
     (width, height): (u32, u32),
     rotation: u16,
@@ -664,13 +499,11 @@ fn placebo_options(
             vec![("w", height.to_string()), ("h", width.to_string())]
         }
         Layout::Upright => vec![("w", width.to_string()), ("h", height.to_string())],
-        // The picture fills the frame.
         Layout::Placed {
             size: (w, h),
             fitted,
             ..
         } if fitted == (w, h) => vec![("w", w.to_string()), ("h", h.to_string())],
-        // Input 0 is the black frame, the whole frame; input 1 the picture.
         Layout::Placed {
             size: (w, h),
             fitted: (fw, fh),
@@ -724,7 +557,6 @@ fn placebo_options(
         ("apply_dolbyvision", "0".into()),
     ]);
     if let Some(shader) = &color.shader {
-        // A binary option: hexadecimal.
         let hex: String = shader.bytes().map(|b| format!("{b:02x}")).collect();
         options.push(("custom_shader_bin", hex));
     }
@@ -734,10 +566,6 @@ fn placebo_options(
     options
 }
 
-/// The buffer source `name` of `graph`, for `width`×`height` frames of
-/// `pixel` in GPU memory from `frames`, timed in `time_base`, with sample
-/// aspect `sar`. It needs to know where they are before it starts, so it is
-/// made by hand.
 pub(crate) fn add_source(
     graph: &mut GpuGraph,
     name: &std::ffi::CStr,
@@ -748,8 +576,7 @@ pub(crate) fn add_source(
     color: Option<(ffi::AVColorSpace, ffi::AVColorRange)>,
 ) -> Result<()> {
     let (width, height) = frame_sides(width, height)?;
-    // SAFETY: a buffer source FFmpeg allocates on this graph. `frames` is
-    // the frames context of a frame or a pool the caller holds.
+    // SAFETY: a buffer source on `graph`; `frames` is a live frames context the caller holds.
     unsafe {
         let ctx = ffi::avfilter_graph_alloc_filter(
             graph.as_mut_ptr(),
@@ -771,7 +598,6 @@ pub(crate) fn add_source(
             num: sar.numerator().max(1),
             den: sar.denominator().max(1),
         };
-        // The source takes a reference of its own.
         (*par).hw_frames_ctx = frames;
         if let Some((matrix, range)) = color {
             (*par).color_space = matrix;
@@ -794,7 +620,6 @@ pub(crate) fn add_source(
     Ok(())
 }
 
-/// The buffer sink `out` of `graph`.
 fn add_sink(graph: &mut GpuGraph) -> Result<()> {
     let sink = filter::find("buffersink").ok_or_else(|| Error::Invalid("no buffersink".into()))?;
     graph
@@ -803,7 +628,6 @@ fn add_sink(graph: &mut GpuGraph) -> Result<()> {
     Ok(())
 }
 
-/// The next frame out of `graph`'s sink, if one is ready.
 fn take(graph: &mut GpuGraph, what: &str) -> Result<Option<(frame::Video, ffmpeg::Rational)>> {
     let mut sink = graph.get("out").expect("sink");
     let mut out = frame::Video::empty();
@@ -820,10 +644,6 @@ fn take(graph: &mut GpuGraph, what: &str) -> Result<Option<(frame::Video, ffmpeg
     }
 }
 
-/// Whether libplacebo makes an encoder's pictures on the GPU from a frame
-/// as `ops` says ([`CudaPictures`]): YUV pictures without alpha, turned by
-/// quarter turns. libplacebo blends a picture's alpha onto black, where the
-/// CPU's conversion leaves it out (ProRes 4444's).
 pub(crate) fn can_fit(ops: &crate::route::Ops) -> bool {
     // SAFETY: FFmpeg's static description of the format.
     let alpha = ops
@@ -833,10 +653,6 @@ pub(crate) fn can_fit(ops: &crate::route::Ops) -> bool {
     !ops.rgb && !alpha && matches!(ops.rotation, 0 | 90 | 180 | 270)
 }
 
-/// Whether frames on `from`, CUDA's or Vulkan's, reach an encoder that takes
-/// frames on `to`, on the same GPU ([`CudaPictures`]): CUDA's Vulkan's, as
-/// libplacebo copies them into Vulkan; Vulkan's CUDA's (NVENC's), as
-/// libplacebo's pictures are copied into CUDA.
 pub(crate) fn reaches(from: Place, to: Place) -> bool {
     matches!(
         (from, to),
@@ -845,14 +661,6 @@ pub(crate) fn reaches(from: Place, to: Place) -> bool {
 }
 
 impl CudaPictures {
-    /// The pictures for the frames `reader` decodes on `device` (NVDEC), or
-    /// on Vulkan beside it, shown as its stream says (turned upright), for an
-    /// output of `target`'s dynamic range (`None`: SDR BT.709), for an
-    /// encoder that takes frames on `on`: NVENC's CUDA frames on `device`, or
-    /// Vulkan's on the Vulkan device libplacebo works on. `at_once`: each
-    /// frame's picture is ready as soon as the frame is in, as an export
-    /// picks them one by one; otherwise one may come with the next frame,
-    /// leaving the GPU less to do.
     pub fn new(
         device: &CudaDevice,
         reader: &VideoReader,
@@ -882,7 +690,6 @@ impl CudaPictures {
             format::Pixel::P010LE => "p010le",
             _ => "nv12",
         };
-        // As shown: a quarter turn swaps the sides and the pixel aspect.
         let stored = (first.width(), first.height());
         let sar = first.aspect_ratio();
         let (size, shown_sar) = if rotation % 180 == 90 {
@@ -907,11 +714,6 @@ impl CudaPictures {
                 "decoded frames without a frames context".into(),
             ));
         }
-        // libplacebo converts HDR after scaling, as the CPU does, and places
-        // 10-bit pictures: FFmpeg's `pad_cuda` takes no 10-bit frames. It
-        // makes every picture for Vulkan's encoder, which the CUDA filters
-        // don't reach, and every picture of Vulkan's frames, so the copy
-        // into CUDA is of the small picture.
         let placed = Layout::Placed {
             size: (width, height),
             fitted,
@@ -947,7 +749,6 @@ impl CudaPictures {
                 ready,
             });
         }
-        // Placed pictures are done: the CUDA filters pass them on.
         let (size, spec, sar) = if let Some(Layout::Placed { .. }) = layout {
             ((width, height), "null".to_string(), ffmpeg::Rational(1, 1))
         } else {
@@ -979,14 +780,10 @@ impl CudaPictures {
         })
     }
 
-    /// The Vulkan device libplacebo makes the pictures on, when it does.
     pub(crate) fn vulkan(&self) -> Option<&Device> {
         self.placebo.as_ref().map(|p| &p.vulkan)
     }
 
-    /// Feeds the next decoded frame, or the end of the stream (`None`). A
-    /// frame of another kind than it was made for, one in memory too, is
-    /// an error: its filters would read it as their own.
     pub fn push(&mut self, f: Option<&frame::Video>) -> Result<()> {
         if let Some(f) = f
             && f.format() != self.takes
@@ -1037,7 +834,6 @@ impl CudaPictures {
         Ok(())
     }
 
-    /// The next picture, if one is ready: timed in the source's time base.
     pub fn pull(&mut self) -> Result<Option<frame::Video>> {
         let Some(graph) = &mut self.graph else {
             return Ok(self.ready.pop_front());
@@ -1054,12 +850,6 @@ impl CudaPictures {
 }
 
 impl Placebo {
-    /// The converter for frames of `decoded` (a CUDA or Vulkan frames
-    /// context) of `width`×`height` with sample aspect `sar`, stored turned
-    /// by `rotation`, converted as `color` says, laid out as `layout`, its
-    /// pictures copied into CUDA frames on `device`, or left in Vulkan's
-    /// where `on` is Vulkan. Vulkan's frames are converted on their own
-    /// device.
     fn new(
         device: &CudaDevice,
         decoded: *mut ffi::AVBufferRef,
@@ -1088,7 +878,6 @@ impl Placebo {
             device.vulkan()?
         };
         let turned = rotation % 180 == 90;
-        // Upright at its own size in the source's depth, or placed.
         let (out_size, out_pixel, out_sar) = match layout {
             Layout::Upright => {
                 // SAFETY: FFmpeg's static description of the format.
@@ -1109,16 +898,11 @@ impl Placebo {
             }
             Layout::Placed { size, format, .. } => (size, format, (1, 1)),
         };
-        // 10-bit pictures come out as P016 too (`as_read`) and are copied
-        // into P010 frames as they are: NVENC reads the top 10 bits.
-        // Vulkan's ProRes encoder reads 10 bits in the low bits of 16, as
-        // libplacebo writes them in `yuv422p10le`'s planes.
         let (out, vulkan_out) = match out_pixel {
             format::Pixel::P010LE => ("p016le", format::Pixel::P016LE),
             format::Pixel::YUV422P10LE => ("yuv422p10le", format::Pixel::YUV422P10LE),
             _ => ("nv12", format::Pixel::NV12),
         };
-        // Vulkan's frames go in as they are; CUDA's are copied into these.
         let pool = HwFrames::new(&vulkan, VULKAN, as_read(sw), width, height)?;
         let output = match on {
             Place::Vulkan => None,
@@ -1131,7 +915,6 @@ impl Placebo {
             )?),
         };
         let mut graph = GpuGraph::new();
-        // Black in the output's colors: a shader passes it on as black.
         let black_tags = color.output;
         let background = match layout {
             Layout::Placed {
@@ -1162,8 +945,7 @@ impl Placebo {
         )?;
         add_sink(&mut graph)?;
         let options = placebo_options((width, height), rotation, out, layout, color);
-        // SAFETY: a filter FFmpeg allocates on this graph and links to its
-        // sources and sink, given a reference to the live Vulkan device.
+        // SAFETY: `ctx` lives in `graph` with the filters it links to; `vulkan` is a live device.
         unsafe {
             let ctx = ffi::avfilter_graph_alloc_filter(
                 graph.as_mut_ptr(),
@@ -1173,8 +955,6 @@ impl Placebo {
             if ctx.is_null() {
                 return Err(Error::Invalid("no libplacebo filter".into()));
             }
-            // libplacebo needs the Vulkan device before it starts; given
-            // none, FFmpeg would convert on the CPU in front of it.
             (*ctx).hw_device_ctx = ffi::av_buffer_ref(vulkan.as_ptr());
             if (*ctx).hw_device_ctx.is_null() {
                 return Err(Error::Invalid("no memory for libplacebo's device".into()));
@@ -1192,7 +972,6 @@ impl Placebo {
                     source: ffmpeg::Error::from(ret),
                 });
             }
-            // The black frame is input 0, under the picture.
             let mut sources = Vec::new();
             if background.is_some() {
                 sources.push(graph.get("bg").expect("background").as_mut_ptr());
@@ -1217,7 +996,6 @@ impl Placebo {
         }
         graph.validate().ctx(|| "configuring libplacebo".into())?;
         let filler = if at_once {
-            // Any picture will do: a black one.
             let size = (width, height);
             Some(Blacks::new(
                 pool.share()?,
@@ -1247,9 +1025,6 @@ impl Placebo {
         })
     }
 
-    /// `r`, the Vulkan device dropped first if it is an error: the export
-    /// fails all the same, and the next converter makes another device
-    /// ([`CudaDevice::forget_vulkan`]).
     fn checked<T>(&self, r: Result<T>) -> Result<T> {
         if r.is_err() {
             self.device.forget_vulkan(&self.vulkan);
@@ -1257,7 +1032,6 @@ impl Placebo {
         r
     }
 
-    /// Feeds `f` (a CUDA frame), or the end of the stream (`None`).
     fn push(&mut self, f: Option<&frame::Video>) -> Result<()> {
         let _one = converting();
         let fed = self.feed_frame(f);
@@ -1282,8 +1056,6 @@ impl Placebo {
                 wait_done(&v, "copying to Vulkan")?;
                 v
             }
-            // Decoded, once the decode is done (`wait_done`), held until
-            // its picture is done.
             None => {
                 wait_done(f, "decoding on Vulkan")?;
                 self.held.push_back(crate::export::video::frame_ref(f)?);
@@ -1293,11 +1065,6 @@ impl Placebo {
         copy_props(&mut v, f)?;
         // SAFETY: a frame this function owns.
         unsafe {
-            // No side data: the CPU converts by the tags alone. libplacebo
-            // would tone-map by HDR metadata, read an ICC profile, and turn
-            // pictures by their display matrices: the filter copies each
-            // frame's properties to its picture, and libplacebo turns both,
-            // so the turns cancel. The rotation goes in the options instead.
             let raw = &mut *v.as_mut_ptr();
             ffi::av_frame_side_data_free(&mut raw.side_data, &mut raw.nb_side_data);
         }
@@ -1313,7 +1080,6 @@ impl Placebo {
         Ok(())
     }
 
-    /// `picture` at count `n`, over the black frame when there is one.
     fn feed(&mut self, n: i64, mut picture: frame::Video) -> Result<()> {
         if let Some(background) = self.background.as_mut() {
             let mut black = background.next()?;
@@ -1332,9 +1098,6 @@ impl Placebo {
             .ctx(|| "converting on the GPU".into())
     }
 
-    /// The next converted frame, if one is ready, with its properties and
-    /// timestamp, in a CUDA frame, or in libplacebo's Vulkan frame where it
-    /// stays on Vulkan.
     fn pull(&mut self) -> Result<Option<frame::Video>> {
         let _one = converting();
         let pulled = self.converted();
@@ -1348,7 +1111,6 @@ impl Placebo {
                 .pts()
                 .map_or(-1, |k| unsafe { ffi::av_rescale_q(k, tb.into(), COUNTED) });
             if k % 2 != 0 {
-                // The filler's.
                 continue;
             }
             let mut pts = None;
@@ -1358,9 +1120,6 @@ impl Placebo {
                 self.pts.pop_front();
                 pts = t;
             }
-            // libplacebo has read the input frame once its output is
-            // done, so the next copy can't overwrite it, nor the decoder a
-            // frame let go (`wait_done`).
             wait_done(&out, "converting on the GPU")?;
             self.held.clear();
             let mut c = match &self.output {
@@ -1380,12 +1139,6 @@ impl Placebo {
     }
 }
 
-/// Black pictures fed to libplacebo, each at most once at a time. It takes
-/// a Vulkan frame at the semaphore value the frame says and gives it back at
-/// the next one, so a frame it holds twice at once ends up a step ahead of
-/// anything the GPU signals, and freeing it waits for that forever (an
-/// export hung so on Windows). A frame goes in again once libplacebo let go
-/// of it, its only reference left here; more are made while all are out.
 struct Blacks {
     pool: HwFrames,
     black: frame::Video,
@@ -1394,7 +1147,6 @@ struct Blacks {
 }
 
 impl Blacks {
-    /// Black `size` frames of `format` from `pool`, tagged `tags`.
     fn new(pool: HwFrames, format: format::Pixel, (w, h): (u32, u32), tags: Tags) -> Result<Self> {
         let mut black = frame::Video::new(format, w, h);
         crate::export::video::fill_black(&mut black)?;
@@ -1406,7 +1158,6 @@ impl Blacks {
         })
     }
 
-    /// A reference to a black frame libplacebo doesn't hold.
     fn next(&mut self) -> Result<frame::Video> {
         let free = self.made.iter().position(|f| {
             // SAFETY: a frame of a pool holds its picture in `buf[0]`.
@@ -1425,12 +1176,6 @@ impl Blacks {
     }
 }
 
-/// The layout libplacebo is given frames of `sw` in: P010 as P016, which is
-/// laid out the same with all 16 bits used, so the frames copy as they are.
-/// A Vulkan device made from a CUDA device keeps each plane in its own
-/// image, and libplacebo misses the shift of such P010 planes: it reads
-/// them 64 times too bright, and writes a picture it blends a 64th as
-/// bright.
 fn as_read(sw: ffi::AVPixelFormat) -> ffi::AVPixelFormat {
     match sw {
         ffi::AVPixelFormat::AV_PIX_FMT_P010LE => ffi::AVPixelFormat::AV_PIX_FMT_P016LE,
@@ -1438,7 +1183,6 @@ fn as_read(sw: ffi::AVPixelFormat) -> ffi::AVPixelFormat {
     }
 }
 
-/// `src`'s properties on `dst`.
 fn copy_props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
     // SAFETY: two live frames.
     let ret = unsafe { ffi::av_frame_copy_props(dst.as_mut_ptr(), src.as_ptr()) };
@@ -1451,7 +1195,6 @@ fn copy_props(dst: &mut frame::Video, src: &frame::Video) -> Result<()> {
     Ok(())
 }
 
-/// Tags a frame for libplacebo with `tags`, one count long.
 fn tag(f: &mut frame::Video, tags: Tags) {
     // SAFETY: a frame the caller owns.
     unsafe {
@@ -1471,12 +1214,10 @@ mod tests {
     use crate::ffmpeg::{self, ffi, format::Pixel, frame};
     use crate::route::Ops;
 
-    /// Untagged SD: BT.601, into SDR.
     fn sd() -> GpuColor {
         gpu_color(&frame::Video::new(Pixel::YUV420P, 720, 480), None).unwrap()
     }
 
-    /// An upright YUV frame into NV12 pictures.
     fn upright_yuv() -> Ops {
         Ops {
             rotation: 0,
@@ -1518,7 +1259,6 @@ mod tests {
         }));
     }
 
-    /// The value libplacebo is given for option `key`.
     fn option<'a>(options: &'a [(&str, String)], key: &str) -> Option<&'a str> {
         options
             .iter()
@@ -1538,14 +1278,11 @@ mod tests {
             filters((1280, 720), (960, 540), (960, 540, "nv12"), ""),
             "scale_cuda=w=960:h=540:format=nv12:interp_algo=bicubic"
         );
-        // A 2.4:1 film in 16:9: fitted, then centered on black.
         assert_eq!(
             filters((1920, 800), (1920, 800), (1920, 1080, "nv12"), ""),
             "scale_cuda=w=1920:h=800:format=nv12:interp_algo=bicubic,\
              pad_cuda=w=1920:h=1080:x=0:y=140:color=black"
         );
-        // An odd margin starts a row early, on the chroma grid, as on the
-        // CPU.
         assert_eq!(
             filters((1280, 534), (1280, 534), (1280, 720, "nv12"), ""),
             "scale_cuda=w=1280:h=534:format=nv12:interp_algo=bicubic,\
@@ -1569,7 +1306,6 @@ mod tests {
 
     #[test]
     fn libplacebo_turns_pictures_upright() {
-        // A phone's 1920×1080 frames, stored for a quarter turn clockwise.
         let options = placebo_options((1920, 1080), 90, "nv12", Layout::Upright, &sd());
         let get = |k| option(&options, k);
         assert_eq!((get("w"), get("h")), (Some("1080"), Some("1920")));
@@ -1601,8 +1337,7 @@ mod tests {
 
     #[test]
     fn gpu_frames_reject_a_side_past_i32() {
-        // SAFETY: null, and only dropped: the side is rejected before the
-        // device is read.
+        // SAFETY: null, and only dropped: the side is rejected before the device is read.
         let none = unsafe { super::Device::from_raw(std::ptr::null_mut()) };
         let err = match super::HwFrames::new(
             &none,
@@ -1639,8 +1374,6 @@ mod tests {
 
     #[test]
     fn libplacebo_places_pictures_on_black() {
-        // A 2.4:1 film in 16:9, 10 bits: the black frame is input 0 and
-        // covers everything, the picture is centered over it.
         let placed = Layout::Placed {
             size: (1920, 1080),
             fitted: (1920, 800),
@@ -1654,7 +1387,6 @@ mod tests {
         assert_eq!(get("pos_y"), Some("if(eq(idx,0),0,140)"));
         assert_eq!(get("pos_w"), Some("if(eq(idx,0),1920,1920)"));
         assert_eq!(get("pos_h"), Some("if(eq(idx,0),1080,800)"));
-        // A picture that fills the frame needs no black under it.
         let filled = Layout::Placed {
             size: (1920, 1080),
             fitted: (1920, 1080),

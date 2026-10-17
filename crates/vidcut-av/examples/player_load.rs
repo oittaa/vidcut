@@ -1,21 +1,3 @@
-//! Plays PROJECT's timeline with the real player as the GUI does: a device
-//! paced in real time, and a viewer presenting 60 times a second. First
-//! alone, then beside the load the GUI puts next to it: four filmstrip
-//! workers rendering tiles, and a job reading the timeline at 1280x720 (a
-//! proxy's reading). The load runs on threads at the lowest priority that
-//! yield to players, as the app's jobs do (the idle class on Linux only).
-//!
-//! For each run: the presents that showed the picture before the clock's
-//! frame, the player's late presents and skipped frames and the pictures it
-//! kept, what the load got
-//! done, the process's threads at most (Linux) and its peak memory; and
-//! between them, the load alone for as long: its tiles and frames a second. A
-//! first run, not counted, reads what the others play into the system's
-//! file cache; the filmstrip and the job go round short parts of their own,
-//! so every run reads from memory, not the disk (4K PNG frames are 40 MB).
-//!
-//! `cargo run --release -p vidcut-av --example player_load -- PROJECT [SECONDS] [gpu]`
-
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -28,10 +10,8 @@ use vidcut_av::player::{Config, PacedOutput, Player};
 use vidcut_core::model::Project;
 use vidcut_core::render::flatten_lanes;
 
-/// Where the player starts, and the filmstrip's and the job's parts.
 const PLAY_FROM: i64 = 600;
 const TILES_FROM: i64 = 4000;
-/// Each filmstrip worker's part: four tiles 2 s apart.
 const TILES_EACH: i64 = 480;
 const JOB_FROM: i64 = 8000;
 const JOB_FRAMES: i64 = 200;
@@ -82,8 +62,6 @@ fn main() {
             job(&project, &stop, &job_frames)
         }));
     }
-    // The load once round its parts, read into the file cache, then alone
-    // for as long as the player plays.
     let warming = Instant::now();
     while (tiles.load(Ordering::SeqCst) < 4 * (TILES_EACH / 120) as usize
         || job_frames.load(Ordering::SeqCst) < JOB_FRAMES as usize)
@@ -122,13 +100,11 @@ fn main() {
     println!("        meanwhile the load made {tiles_done} tiles and the job {job_done} frames");
 }
 
-/// What a run showed.
 struct Played {
     presents: usize,
     behind: usize,
     late: u64,
     skipped: u64,
-    /// Pictures the player kept at the end, and their megabytes.
     kept: usize,
     kept_mb: usize,
     threads: usize,
@@ -154,7 +130,6 @@ impl std::fmt::Display for Played {
     }
 }
 
-/// Plays `seconds` from [`PLAY_FROM`], presenting as the viewer does.
 fn play(project: &Project, gpu: bool, seconds: u64) -> Played {
     let fps = flatten_lanes(project, 0, 1).expect("a plan").0.fps;
     let frames = (seconds as f64 * fps.as_f64()).ceil() as i64 + 60;
@@ -194,8 +169,6 @@ fn play(project: &Project, gpu: bool, seconds: u64) -> Played {
     }
 }
 
-/// Filmstrip worker `n`: 160x90 tiles 2 s apart, each worker on a part of
-/// its own, again and again.
 fn filmstrip(project: &Project, n: i64, gpu: bool, stop: &AtomicBool, done: &AtomicUsize) {
     let mut reader = match gpu.then(vidcut_av::hw::GpuDecoder::best).flatten() {
         Some(d) => FrameReader::decoding_on(d),
@@ -219,8 +192,6 @@ fn filmstrip(project: &Project, n: i64, gpu: bool, stop: &AtomicBool, done: &Ato
     }
 }
 
-/// A proxy's reading: [`JOB_FRAMES`] of the timeline from [`JOB_FROM`] at
-/// 1280x720, again and again.
 fn job(project: &Project, stop: &AtomicBool, done: &AtomicUsize) {
     let (plan, _) = flatten_lanes(project, JOB_FROM, JOB_FROM + JOB_FRAMES).expect("a plan");
     while !stop.load(Ordering::SeqCst) {
@@ -236,9 +207,6 @@ fn job(project: &Project, stop: &AtomicBool, done: &AtomicUsize) {
     }
 }
 
-/// This thread as the app's jobs are: the lowest priority (the idle class,
-/// which the threads it starts inherit; Linux only here), its decoding
-/// waiting while a player plays.
 fn as_a_job() {
     #[cfg(target_os = "linux")]
     // SAFETY: a plain system call on this thread's own id.
@@ -249,12 +217,10 @@ fn as_a_job() {
     vidcut_av::first::yield_to_players();
 }
 
-/// The process's threads now (Linux; 0 elsewhere).
 fn threads_now() -> usize {
     std::fs::read_dir("/proc/self/task").map_or(0, |d| d.count())
 }
 
-/// The process's peak resident memory so far (Unix; 0 elsewhere).
 #[cfg(unix)]
 fn peak_memory_mb() -> u64 {
     // SAFETY: getrusage fills the struct given.
@@ -263,7 +229,6 @@ fn peak_memory_mb() -> u64 {
         libc::getrusage(libc::RUSAGE_SELF, &mut usage);
         usage
     };
-    // Kilobytes on Linux, bytes on macOS.
     let peak = usage.ru_maxrss as u64;
     if cfg!(target_os = "macos") {
         peak >> 20

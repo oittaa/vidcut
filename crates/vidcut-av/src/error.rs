@@ -1,9 +1,5 @@
-//! Error type for the media layer.
-
 use crate::ffmpeg;
 
-/// Media-layer error. FFmpeg errors carry a short description of what was
-/// being done, since bare AVERROR codes are rarely actionable on their own.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("{context}: {source}")]
@@ -14,7 +10,6 @@ pub enum Error {
     },
     #[error("{0}")]
     Invalid(String),
-    /// A part this FFmpeg build lacks ([`crate::parts`]).
     #[error("{0}")]
     Missing(String),
     #[error(transparent)]
@@ -23,7 +18,6 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Adds context to FFmpeg results.
 pub trait Context<T> {
     fn ctx(self, context: impl FnOnce() -> String) -> Result<T>;
 }

@@ -1,9 +1,3 @@
-//! Adding, removing and setting tracks (spec §6).
-//!
-//! Track ids are positional: video tracks are `V1…Vn` from the bottom up and
-//! audio tracks `A1…An` from the top down, so removing a track renumbers the
-//! ones above (or below) it.
-
 use crate::error::{Error, Result};
 use crate::model::{Project, Track, TrackKind};
 
@@ -16,8 +10,6 @@ fn prefix(kind: TrackKind) -> char {
     }
 }
 
-/// Adds a track of `kind` (Timeline Actions > Add Track): a video
-/// track above the others, an audio track below them. Returns its id.
 pub fn add_track(p: &mut Project, kind: TrackKind) -> String {
     let n = p.tracks_of(kind).len() + 1;
     let id = format!("{}{n}", prefix(kind));
@@ -32,7 +24,6 @@ pub fn add_track(p: &mut Project, kind: TrackKind) -> String {
     id
 }
 
-/// Index of the `n`th track of `kind` (0: V1 or A1), adding tracks up to it.
 pub(crate) fn nth(p: &mut Project, kind: TrackKind, n: usize) -> usize {
     while p.tracks_of(kind).len() <= n {
         add_track(p, kind);
@@ -40,9 +31,6 @@ pub(crate) fn nth(p: &mut Project, kind: TrackKind, n: usize) -> usize {
     p.tracks_of(kind)[n]
 }
 
-/// The track `id`. One past the last track of its kind (`V3` when there are
-/// two video tracks) is created: that is how edits make new tracks, like
-/// dropping into the gray area above or below the tracks.
 pub(crate) fn resolve(p: &mut Project, id: &str) -> Result<usize> {
     if let Some(i) = p.track_index(id) {
         return Ok(i);
@@ -70,7 +58,6 @@ pub(crate) fn resolve(p: &mut Project, id: &str) -> Result<usize> {
     )))
 }
 
-/// Gives the tracks of each kind their positional ids again.
 fn renumber(p: &mut Project) {
     for kind in [TrackKind::Video, TrackKind::Audio] {
         for (k, i) in p.tracks_of(kind).into_iter().enumerate() {
@@ -79,7 +66,6 @@ fn renumber(p: &mut Project) {
     }
 }
 
-/// Removes a track. Its clips go with it only with `force`; Track 1 stays.
 pub fn remove_track(p: &mut Project, id: &str, force: bool) -> Result<()> {
     if id == MAIN {
         return Err(Error::invalid("Track 1 (V1) can't be removed"));
@@ -102,7 +88,6 @@ pub fn remove_track(p: &mut Project, id: &str, force: bool) -> Result<()> {
     Ok(())
 }
 
-/// What `track.set` changes (track header buttons; mixer).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrackProps {
     pub locked: Option<bool>,
@@ -110,11 +95,9 @@ pub struct TrackProps {
     pub solo: Option<bool>,
     pub volume_db: Option<f64>,
     pub video_enabled: Option<bool>,
-    /// `Some(None)` clears the name.
     pub name: Option<Option<String>>,
 }
 
-/// Track header toggles and mixer controls.
 pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     if let Some(v) = props.volume_db
         && !(-60.0..=24.0).contains(&v)

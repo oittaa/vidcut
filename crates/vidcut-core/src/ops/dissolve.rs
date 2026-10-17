@@ -1,8 +1,3 @@
-//! Dissolves made here (decision D50): the Dissolve button and Ctrl+T put
-//! a Cross Dissolve on an edit, and a Cross Fade +3 dB where the clips'
-//! sounds meet there; the Cut button makes an edit a cut again. They are
-//! written as the editor whose metadata OTIO files carry writes its own.
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -24,7 +19,6 @@ pub enum Align {
     End,
 }
 
-/// Frames a dissolve of `length` takes before its edit and after it.
 pub fn split(length: i64, align: Align) -> (i64, i64) {
     match align {
         Align::Center => (length - length / 2, length / 2),
@@ -33,9 +27,6 @@ pub fn split(length: i64, align: Align) -> (i64, i64) {
     }
 }
 
-/// The OTIO transition a dissolve of `frames` is written as: on pictures a
-/// Cross Dissolve, its curve's key frames over its length; on sounds a
-/// Cross Fade +3 dB.
 fn otio(sound: bool, frames: i64) -> Value {
     if sound {
         return json!({
@@ -87,7 +78,6 @@ fn otio(sound: bool, frames: i64) -> Value {
     })
 }
 
-/// The span of `c`'s picture (or sound).
 fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
     if sound {
         c.audio_range()
@@ -96,8 +86,6 @@ fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
     }
 }
 
-/// The edits of track `ti`'s pictures (or sounds): where a clip's starts
-/// or ends.
 fn edits(p: &Project, ti: usize, sound: bool) -> Vec<i64> {
     let mut points: Vec<i64> = p.tracks[ti]
         .clips
@@ -110,16 +98,12 @@ fn edits(p: &Project, ti: usize, sound: bool) -> Vec<i64> {
     points
 }
 
-/// The edit of track `ti`'s pictures (or sounds) nearest `at`; ties go to
-/// the earlier.
 fn nearest(p: &Project, ti: usize, sound: bool, at: i64) -> Option<i64> {
     edits(p, ti, sound)
         .into_iter()
         .min_by_key(|&e| ((e - at).abs(), e))
 }
 
-/// The clips of track `ti` whose pictures (or sounds) end at `e` and start
-/// there.
 fn sides(p: &Project, ti: usize, sound: bool, e: i64) -> (Option<String>, Option<String>) {
     let clips = &p.tracks[ti].clips;
     let find = |end: bool| {
@@ -131,9 +115,6 @@ fn sides(p: &Project, ti: usize, sound: bool, e: i64) -> (Option<String>, Option
     (find(true), find(false))
 }
 
-/// The compound clip that plays the clips it holds on either side of edit
-/// `e` of track `ti`: its edges take no dissolve, which its clips would
-/// play over.
 fn compound_at(p: &Project, ti: usize, sound: bool, e: i64) -> Option<String> {
     let (from, to) = sides(p, ti, sound, e);
     [from, to].into_iter().flatten().find(|id| {
@@ -144,11 +125,6 @@ fn compound_at(p: &Project, ti: usize, sound: bool, e: i64) -> Option<String> {
     })
 }
 
-/// Frames a dissolve at edit `e` between clips `from` and `to` (`None`: a
-/// gap) may take before the edit and after it: as far as each clip's
-/// picture (or sound) or the gap goes, as far as each clip's media goes
-/// past its edge, and up to the frames of the track's transitions on other
-/// edits.
 fn room(
     p: &Project,
     ti: usize,
@@ -160,7 +136,6 @@ fn room(
     let clips = &p.tracks[ti].clips;
     let clip = |id: Option<&str>| id.and_then(|id| clips.iter().find(|c| c.id == id));
     let (f, g) = (clip(from), clip(to));
-    // What else of the track is there: the nearest edge before and after.
     let spans: Vec<(i64, i64)> = clips.iter().filter_map(|c| span(c, sound)).collect();
     let free_before = e - spans
         .iter()
@@ -193,7 +168,6 @@ fn room(
     for t in transitions::playing(p, &p.tracks[ti], sound, |_| true) {
         let (w0, w1) = t.frames;
         if w0 + t.transition.before == e {
-            // On this edit: it goes.
         } else if w1 <= e {
             before = before.min(e - w1);
         } else if w0 >= e {
@@ -205,22 +179,15 @@ fn room(
     (before.max(0), after.max(0))
 }
 
-/// One transition [`dissolve`] made.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Made {
     pub id: String,
     pub sound: bool,
-    /// Its edit, and its frames before and after it.
     pub cut: i64,
     pub before: i64,
     pub after: i64,
 }
 
-/// Puts a dissolve of `frames` aligned by `align` on edit `e` of track
-/// `ti`'s pictures (or sounds), between the clips that meet there or a
-/// clip and a gap, shortened to the frames there are; none where no clip
-/// starts or ends there, or no frame is free. Transitions already on that
-/// edit go.
 fn put(p: &mut Project, ti: usize, sound: bool, e: i64, frames: i64, align: Align) -> Option<Made> {
     let (from, to) = sides(p, ti, sound, e);
     if from.is_none() && to.is_none() || compound_at(p, ti, sound, e).is_some() {
@@ -266,11 +233,6 @@ fn put(p: &mut Project, ti: usize, sound: bool, e: i64, frames: i64, align: Alig
     })
 }
 
-/// The Dissolve button and Ctrl+T: a dissolve of `frames` aligned by
-/// `align` on the edit of track `track` nearest `at`, on its pictures and
-/// where its clips' sounds meet there (decision D50); `all`: on every edit
-/// between two clips. `picture` or `sound` false leaves that one out. What
-/// it made, or why there was nothing to make.
 #[allow(clippy::too_many_arguments)]
 pub fn dissolve(
     p: &mut Project,
@@ -305,8 +267,6 @@ pub fn dissolve(
         }
         return Ok(made);
     }
-    // The picture's edit nearest `at`; the sounds of the same clips where
-    // they meet, or the nearest sound edit on a track without pictures.
     let mut clips = None;
     if pictures {
         let e = nearest(p, ti, false, at)
@@ -336,9 +296,6 @@ pub fn dissolve(
     Ok(made)
 }
 
-/// Where the sounds of clips `from` and `to` (`None`: a gap) meet on track
-/// `ti`: the first's end and the second's start, when both have sound and
-/// those are one frame; a lone clip's sound's edge otherwise.
 fn sound_edit(p: &Project, ti: usize, from: Option<&str>, to: Option<&str>) -> Option<i64> {
     let clips = &p.tracks[ti].clips;
     let range = |id: Option<&str>| {
@@ -353,10 +310,6 @@ fn sound_edit(p: &Project, ti: usize, from: Option<&str>, to: Option<&str>) -> O
     }
 }
 
-/// The Cut button: the edit of track `track` nearest `at` becomes a cut,
-/// its picture's transitions going and those of its clips' sounds (decision
-/// D50); `all`: every transition of the track. `picture` or `sound` false
-/// keeps those. The ids of those it took away.
 pub fn to_cut(
     p: &mut Project,
     track: &str,
@@ -372,9 +325,6 @@ pub fn to_cut(
     let gone: Vec<bool> = if all {
         p.tracks[ti].transitions.iter().map(|t| !keeps(t)).collect()
     } else {
-        // As the Dissolve button finds them: the picture's edit nearest
-        // `at`, and the sounds of its clips where they meet; or the nearest
-        // sound edit when the picture is left alone.
         let video = p.tracks[ti].kind == TrackKind::Video && picture;
         let e = nearest(p, ti, !video, at)
             .ok_or_else(|| Error::invalid(format!("{track} has no edit")))?;
@@ -423,7 +373,6 @@ mod tests {
     use crate::test_support::Fixture;
 
     fn fixture() -> Fixture {
-        // 25 fps; m1 10 s and m2 4 s with sound.
         Fixture::new(&[(10.0, true), (4.0, true)])
     }
 
@@ -431,7 +380,6 @@ mod tests {
         f.ok(json!({"method": method, "params": params})).result
     }
 
-    /// `(sound, cut, before, after)` of each transition made.
     fn made(r: &Value) -> Vec<(bool, i64, i64, i64)> {
         r["transitions"]
             .as_array()
@@ -453,10 +401,8 @@ mod tests {
     fn a_dissolve_goes_on_the_nearest_edit_as_long_as_the_media_allow() {
         let mut f = fixture();
         f.append("m1", 0, 50);
-        // Ten frames of m2 before its first.
         f.append("m2", 10, 60);
         let r = req(&mut f, "edit.dissolve", json!({"at": 48}));
-        // A second centered on the edit is 13 + 12 frames: 10 before it.
         assert_eq!(made(&r), [(false, 50, 10, 12), (true, 50, 10, 12)]);
     }
 
@@ -475,7 +421,6 @@ mod tests {
         let mut f = fixture();
         f.append("m1", 0, 250);
         f.append("m2", 0, 100);
-        // The project stays as it was.
         f.err(json!({"method": "edit.dissolve", "params": {"at": 250}}));
     }
 
@@ -508,7 +453,6 @@ mod tests {
         let mut f = fixture();
         f.append("m1", 0, 50);
         req(&mut f, "edit.dissolve", json!({"at": 50, "length": "10f"}));
-        // Centered: 5 frames after the clip's end.
         assert_eq!(f.editor.project().end(), 55);
     }
 
@@ -523,7 +467,6 @@ mod tests {
             "edit.dissolve",
             json!({"all": true, "sound": false}),
         );
-        // The first ends at 32: 8 frames before the second's edit at 40.
         assert_eq!(made(&r), [(false, 20, 13, 12), (false, 40, 8, 12)]);
     }
 
@@ -531,7 +474,6 @@ mod tests {
     fn the_cut_button_takes_a_sound_fade_with_the_picture_left_alone() {
         let mut f = Fixture::new(&[(10.0, true), (4.0, true), (8.0, false)]);
         f.append("m1", 0, 50);
-        // Silent: c1's sound fades out into silence at 50.
         f.append("m3", 0, 50);
         req(&mut f, "edit.dissolve", json!({"at": 50, "picture": false}));
         let r = req(

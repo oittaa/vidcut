@@ -1,10 +1,3 @@
-//! Times timeline filmstrip tiles: frames of FILE at a fixed spacing, read
-//! in order as the timeline asks for them; `gpu` decodes on the GPU the
-//! viewer decodes on (`VIDCUT_HWDEC` picks another).
-//!
-//! `cargo run --release -p vidcut-av --example tiles -- FILE [HEIGHT] [gpu]`
-//! (`gpu` may come without a height).
-
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -43,7 +36,6 @@ fn main() {
     );
     for spacing in [0.25, 1.0, 2.0, 4.0, 8.0, 30.0] {
         let step = (spacing * 30.0) as i64;
-        // Twenty tiles from a third of the way in.
         let from = frames / 3;
         let mut reader = gpu
             .clone()

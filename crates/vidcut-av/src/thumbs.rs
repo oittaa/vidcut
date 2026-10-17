@@ -1,16 +1,6 @@
-//! Small pictures for the media pool: frames spread evenly over a clip (a
-//! "filmstrip"), used as the poster and for hover scrubbing (spec §3).
-//!
-//! A picture may be up to half the spacing between pictures early: for long
-//! clips that is usually the keyframe at or before its time (one seek, one
-//! decoded frame), and for short clips with sparse keyframes decoding simply
-//! continues forward from the previous picture. Either way the cost stays
-//! close to decoding one frame per picture or the clip once.
-
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, decoder, encoder, format, frame, media, software::scaling};
 
-/// An RGBA picture, rows top to bottom, no padding.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Image {
     pub width: u32,
@@ -18,15 +8,6 @@ pub struct Image {
     pub rgba: Vec<u8>,
 }
 
-/// `count` pictures at evenly spaced times of `source`'s video (the middle
-/// of each of `count` equal parts), each fitted into `max_w`×`max_h` keeping
-/// the display aspect. Returns the pictures and their times in seconds from
-/// the first frame. A still gives its one picture. The video decodes on
-/// `decoder` where it decodes the stream, else on the CPU.
-///
-/// An image sequence is read by FFmpeg's image2 demuxer, which continues
-/// while the file numbers do. Pass the sequence's own length to
-/// [`filmstrip_pictures`].
 pub fn filmstrip(
     source: &crate::decode::Input,
     count: usize,
@@ -37,13 +18,6 @@ pub fn filmstrip(
     filmstrip_inner(source, count, max_w, max_h, None, decoder)
 }
 
-/// [`filmstrip`] of the first `pictures` frames of `source`.
-///
-/// `pictures` is an image sequence's length. image2 does not take it, so a
-/// sequence that is only the start of a longer numbered run would otherwise
-/// last as long as that run, and the strip would show the later files. A
-/// sample past the last of these pictures stays on the last one: the next
-/// file is not opened, and a missing next file does not fail the strip.
 pub fn filmstrip_pictures(
     source: &crate::decode::Input,
     pictures: u64,
@@ -63,8 +37,6 @@ fn filmstrip_inner(
     pictures: Option<u64>,
     gpu: Option<&crate::hw::GpuDecoder>,
 ) -> Result<(Vec<Image>, Vec<f64>)> {
-    // Decoded in memory instead, or not at all: the GPU's decoder wouldn't
-    // take the stream (a profile it lacks), so the CPU's does.
     if gpu.is_some()
         && let Ok(Some(strip)) = strip_on(source, count, max_w, max_h, pictures, gpu)
     {
@@ -73,9 +45,6 @@ fn filmstrip_inner(
     strip_on(source, count, max_w, max_h, pictures, None).map(Option::unwrap_or_default)
 }
 
-/// The filmstrip decoded on `gpu`, or on the CPU without it. `None` when
-/// the first picture comes out in memory though `gpu` was given, or none
-/// does.
 fn strip_on(
     source: &crate::decode::Input,
     count: usize,
@@ -108,12 +77,9 @@ fn strip_on(
     unsafe {
         let raw = ctx.as_mut_ptr();
         (*raw).pkt_timebase = stream.time_base().into();
-        // Thumbnails don't need B-frames or deblocking; skipping them makes
-        // decoding forward through short clips about twice as fast.
         (*raw).skip_frame = ffmpeg::ffi::AVDiscard::AVDISCARD_NONREF;
         (*raw).skip_loop_filter = ffmpeg::ffi::AVDiscard::AVDISCARD_ALL;
     }
-    // On the GPU where it decodes the stream (it deblocks all the same).
     let mut decoder =
         crate::decode::open_video(ctx, codec_id, gpu, || crate::decode::h264_open_gop(source))?;
     crate::export::audio::discard_others(&input, index);
@@ -123,7 +89,6 @@ fn strip_on(
     let (w, h) = (decoder.width().max(1), decoder.height().max(1));
     let sar = decoder.aspect_ratio();
     let sar = (sar.numerator(), sar.denominator());
-    // Fitted as shown (turned upright, square pixels), as export fits.
     let (tw, th) = if rotation % 180 == 90 {
         crate::export::normalize::fit(h, w, (sar.1, sar.0), max_w, max_h)
     } else {
@@ -131,8 +96,6 @@ fn strip_on(
     };
     let mut fit = Fit::default();
 
-    // image2's duration counts every numbered file after the first. A
-    // sequence is only its own pictures, at `rate`.
     let rate = stream_rate(&input.stream(index).expect("found"));
     let pictures = pictures.filter(|n| *n > 0);
     if let Some(n) = pictures
@@ -146,7 +109,6 @@ fn strip_on(
         };
     }
     let spacing = duration / count.max(1) as f64;
-    // The first picture says where they decode.
     let told = std::cell::Cell::new(false);
     let refused = |f: &frame::Video| {
         if told.replace(true) {
@@ -158,14 +120,10 @@ fn strip_on(
     };
     let mut images = Vec::with_capacity(count);
     let mut times = Vec::with_capacity(count);
-    // Time (from `start`) of the last frame decoded, while decoding forward.
     let mut position: Option<f64> = None;
     for i in 0..count {
         crate::first::wait()?;
         let t = duration * (i as f64 + 0.5) / count as f64;
-        // The picture a sequence sample shows. Seeking by a rounded
-        // timestamp names the next file, which is not part of the sequence
-        // and may not exist; that open fails the whole strip.
         if let Some(n) = pictures
             && rate > 0.0
         {
@@ -197,8 +155,6 @@ fn strip_on(
         }
         let near_ahead = position.is_some_and(|p| p <= t && t - p <= 3.0);
         if !near_ahead {
-            // Keyframe at or before the target; demuxers that can't do that
-            // land somewhere close, which is fine for a thumbnail.
             let ts = ((start + t) * f64::from(ffmpeg::ffi::AV_TIME_BASE)) as i64;
             let _ = input.seek(ts, ..ts);
             decoder.flush();
@@ -235,7 +191,6 @@ fn strip_on(
     Ok(Some((images, times)))
 }
 
-/// Appends one fitted picture and the sample time it stands for.
 fn keep(
     images: &mut Vec<Image>,
     times: &mut Vec<f64>,
@@ -249,9 +204,6 @@ fn keep(
     Ok(())
 }
 
-/// Fits a decoded frame into a thumbnail: a GPU's frame shrinks there to
-/// the size it is shown at before it comes down, then export's normalizer
-/// turns it upright, tone-maps it to SDR and converts it to RGBA.
 #[derive(Default)]
 struct Fit {
     normalizer: Option<crate::export::normalize::Normalizer>,
@@ -259,7 +211,6 @@ struct Fit {
 }
 
 impl Fit {
-    /// `decoded` turned by `rotation` and fitted in `tw`×`th`.
     fn picture(&mut self, decoded: &frame::Video, place: (u16, u32, u32)) -> Result<Image> {
         let (rotation, tw, th) = place;
         let down;
@@ -279,7 +230,6 @@ impl Fit {
                 th,
                 format::Pixel::RGBA,
                 None,
-                // A frame here and there: no slices on other threads.
                 crate::decode::Reading::Frames,
             )?),
         };
@@ -287,7 +237,6 @@ impl Fit {
     }
 }
 
-/// Frames per second of `stream`, from its average rate or its time base.
 fn stream_rate(stream: &format::stream::Stream) -> f64 {
     let avg = f64::from(stream.avg_frame_rate());
     if avg.is_finite() && avg > 0.0 {
@@ -297,14 +246,6 @@ fn stream_rate(stream: &format::stream::Stream) -> f64 {
     if tb > 0.0 { 1.0 / tb } else { 0.0 }
 }
 
-/// Picture `index` of an image sequence (0 is its first file), and nothing
-/// after it.
-///
-/// image2's seek takes a frame index. One packet is that one file: the
-/// packet after it would be the next number, which a sequence does not
-/// include. `None` when the picture is not there — a sample past the
-/// sequence must not fail the strip, and must not open a path it does not
-/// have.
 fn one_sequence_picture(
     input: &mut format::context::Input,
     decoder: &mut ffmpeg::decoder::Video,
@@ -343,7 +284,6 @@ fn one_sequence_picture(
         Err(ffmpeg::Error::Other {
             errno: ffmpeg::util::error::EAGAIN,
         }) => {
-            // A picture decoder can hold its frame until the stream ends.
             if decoder.send_eof().is_err() {
                 return None;
             }
@@ -353,19 +293,10 @@ fn one_sequence_picture(
     }
 }
 
-/// The start of a filmstrip's cache form. `vct1`'s pictures went through
-/// swscale's default rounding, 2 levels green; those are made anew.
 const MAGIC: &[u8; 4] = b"vct2";
 
-/// JPEG quantizer scale for cached filmstrips (2 is best, 31 worst): about
-/// 6 KB a picture, where RGBA takes 83 KB, with no visible loss at
-/// thumbnail size.
 const JPEG_QSCALE: i32 = 4;
 
-/// A filmstrip's cache form: a header (magic; picture width, height and
-/// count; the JPEG's length; the times) followed by the pictures as one
-/// JPEG, stacked top to bottom. The length tells a file cut short, which
-/// JPEG decoders otherwise show half gray.
 pub fn to_bytes(images: &[Image], times: &[f64]) -> Result<Vec<u8>> {
     let first = images
         .first()
@@ -401,8 +332,6 @@ pub fn to_bytes(images: &[Image], times: &[f64]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// The pictures and times of a filmstrip's cache form; `None` if `bytes`
-/// isn't one.
 pub fn from_bytes(bytes: &[u8]) -> Option<(Vec<Image>, Vec<f64>)> {
     let rest = bytes.strip_prefix(MAGIC)?;
     let (head, rest) = rest.split_first_chunk::<16>()?;
@@ -433,7 +362,6 @@ pub fn from_bytes(bytes: &[u8]) -> Option<(Vec<Image>, Vec<f64>)> {
     Some((images, times))
 }
 
-/// Encodes packed RGBA as a full-range 4:2:0 JPEG.
 fn jpeg(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
     crate::init();
     let mut src = frame::Video::new(format::Pixel::RGBA, width, height);
@@ -450,7 +378,6 @@ fn jpeg(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
         format::Pixel::YUVJ420P,
         width,
         height,
-        // Exact rounding: by default white came back 2 levels green.
         scaling::Flags::BICUBIC | scaling::Flags::ACCURATE_RND | scaling::Flags::FULL_CHR_H_INT,
     )
     .and_then(|mut s| s.run(&src, &mut yuv))
@@ -472,7 +399,6 @@ fn jpeg(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
         (*raw).flags |= ffmpeg::ffi::AV_CODEC_FLAG_QSCALE as i32;
         (*raw).global_quality = quality;
         (*raw).color_range = ffmpeg::ffi::AVColorRange::AVCOL_RANGE_JPEG;
-        // A fixed quantizer comes from each frame.
         (*yuv.as_mut_ptr()).quality = quality;
     }
     let mut enc = ctx.open_as(codec).ctx(|| "opening JPEG encoder".into())?;
@@ -484,7 +410,6 @@ fn jpeg(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
     Ok(packet.data().unwrap_or_default().to_vec())
 }
 
-/// Decodes a JPEG of exactly `width`×`height` to packed RGBA.
 fn unjpeg(jpeg: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     crate::init();
     let codec = decoder::find(codec::Id::MJPEG)?;
@@ -499,8 +424,6 @@ fn unjpeg(jpeg: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     if (f.width(), f.height()) != (width, height) {
         return None;
     }
-    // Full-range YUV may come as the plain formats with the range set;
-    // swscale takes the range from the J formats.
     let full = unsafe { (*f.as_ptr()).color_range } == ffmpeg::ffi::AVColorRange::AVCOL_RANGE_JPEG;
     match f.format() {
         format::Pixel::YUV420P if full => f.set_format(format::Pixel::YUVJ420P),
@@ -516,7 +439,6 @@ fn unjpeg(jpeg: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
         format::Pixel::RGBA,
         width,
         height,
-        // Exact rounding: by default white came back 2 levels green.
         scaling::Flags::BICUBIC | scaling::Flags::ACCURATE_RND | scaling::Flags::FULL_CHR_H_INT,
     )
     .and_then(|mut s| s.run(&f, &mut rgba))
@@ -524,7 +446,6 @@ fn unjpeg(jpeg: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     Some(packed(&rgba).rgba)
 }
 
-/// Decodes the next frame (`None` at the end of the stream).
 fn next_frame(
     input: &mut format::context::Input,
     decoder: &mut ffmpeg::decoder::Video,
@@ -540,7 +461,6 @@ fn next_frame(
             Err(ffmpeg::Error::Other {
                 errno: ffmpeg::util::error::EAGAIN,
             }) => {}
-            // Decoders complain about missing references right after a seek.
             Err(_) => {}
         }
         if eof {
@@ -570,7 +490,6 @@ fn next_frame(
     }
 }
 
-/// Copies an RGBA frame into a tightly packed buffer.
 fn packed(f: &frame::Video) -> Image {
     let (w, h) = (f.width(), f.height());
     let stride = f.stride(0);

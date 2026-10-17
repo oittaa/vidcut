@@ -1,6 +1,3 @@
-//! Encoder selection: export settings → a concrete FFmpeg encoder, and which
-//! GPU encoders actually work on this machine (by test-encoding).
-
 use serde::{Deserialize, Serialize};
 use vidcut_core::export::color::Abilities;
 use vidcut_core::export::{
@@ -10,31 +7,19 @@ use vidcut_core::export::{
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, encoder, ffi, format, frame};
 
-/// A resolved video encoder.
 #[derive(Debug, Clone)]
 pub struct VideoEncoder {
-    /// FFmpeg encoder name, e.g. `libx264`, `hevc_nvenc`, `h264_vaapi`,
-    /// `hevc_amf`, `av1_qsv`.
     pub name: String,
     pub kind: EncoderChoice,
-    /// Pixel format of the frames handed over (for VAAPI: the upload format).
     pub pixel: format::Pixel,
-    /// The GPU it encodes on: VAAPI's and QSV's render node on Linux
-    /// (`/dev/dri/renderD129`), AMF's and QSV's adapter index on Windows.
     pub device: Option<String>,
     pub options: Vec<(String, String)>,
-    /// HDR output with this transfer; `None`: SDR BT.709.
     pub hdr: Option<vidcut_core::model::Hdr>,
-    /// How it makes its passes (decision D45).
     pub passes: Passes,
-    /// The static HDR metadata it writes (decision D46).
     pub metadata: crate::hdr::Static,
-    /// The dynamic HDR metadata kept from the sources' frames.
     pub dynamic: crate::hdr::Dynamic,
 }
 
-/// The HDR metadata settings that have chosen already ask an encoder to
-/// write (decision D46): none for SDR.
 pub fn hdr_metadata(v: &VideoSettings) -> (crate::hdr::Static, crate::hdr::Dynamic) {
     use vidcut_core::export::{HdrMetadata, metadata};
     let Some(transfer) = v.hdr.transfer() else {
@@ -63,30 +48,20 @@ pub fn hdr_metadata(v: &VideoSettings) -> (crate::hdr::Static, crate::hdr::Dynam
     (stat, dynamic)
 }
 
-/// Whether an encoder the settings allow writes Dolby Vision: libx265 and
-/// libsvtav1, the CPU's.
 pub fn writes_dolby_vision(v: &VideoSettings) -> bool {
     matches!(v.encoder, EncoderChoice::Auto | EncoderChoice::Cpu)
         && matches!(v.codec, VideoCodec::Hevc | VideoCodec::Av1)
 }
 
-/// How a video encoder makes its passes (decision D45).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum Passes {
     One,
-    /// The range is encoded twice: first to write statistics (nothing is
-    /// muxed), then for real from them. x264, x265, VP9.
-    TwoRuns {
-        /// The first with faster settings (`video.first_pass = fast`).
-        fast_first: bool,
-    },
-    /// Two passes over each frame within one encode: NVENC's `multipass`.
+    TwoRuns { fast_first: bool },
     TwoInside,
 }
 
 impl Passes {
-    /// Passes over each frame.
     pub fn count(self) -> u8 {
         match self {
             Self::One => 1,
@@ -94,7 +69,6 @@ impl Passes {
         }
     }
 
-    /// Times the range is encoded.
     pub fn runs(self) -> u8 {
         match self {
             Self::TwoRuns { .. } => 2,
@@ -103,24 +77,18 @@ impl Passes {
     }
 }
 
-/// Which pass an encoder is opened for.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Pass<'a> {
-    /// The only one.
     Only,
-    /// The first of two runs, writing statistics under `stats` (a file the
-    /// encoder names itself, or nothing: some hand them back in memory).
-    First { stats: &'a std::path::Path },
-    /// The second, reading them: the same file, or the statistics the
-    /// first handed back.
+    First {
+        stats: &'a std::path::Path,
+    },
     Second {
         stats: &'a std::path::Path,
         buffer: Option<&'a str>,
     },
 }
 
-/// The passes `v` asks of an encoder `name`, or why it can't make them:
-/// two with a target bitrate unless `passes` says otherwise.
 fn passes(v: &VideoSettings, name: &str) -> Result<Passes> {
     let two = match v.passes {
         Some(n) => n == 2,
@@ -133,7 +101,6 @@ fn passes(v: &VideoSettings, name: &str) -> Result<Passes> {
     match name {
         "libx264" | "libx265" | "libvpx-vp9" => Ok(Passes::TwoRuns { fast_first }),
         n if n.ends_with("_nvenc") => Ok(Passes::TwoInside),
-        // Unset passes stay one where there's no second.
         _ if v.passes.is_none() => Ok(Passes::One),
         n if ["_vaapi", "_amf", "_qsv", "_videotoolbox"]
             .iter()
@@ -152,7 +119,6 @@ fn passes(v: &VideoSettings, name: &str) -> Result<Passes> {
     }
 }
 
-/// A resolved audio encoder.
 #[derive(Debug, Clone)]
 pub struct AudioEncoder {
     pub name: String,
@@ -162,30 +128,24 @@ pub struct AudioEncoder {
     pub bitrate: Option<u64>,
 }
 
-/// Whether a GPU encoder works, from a test encode.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EncoderStatus {
     pub encoder: String,
     pub kind: EncoderChoice,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
-    /// Pixel format tested (8-bit `yuv420p`/`nv12`, 10-bit `p010le`, and
-    /// 4:2:2 `nv16`/`p210le` for Apple's ProRes).
     pub pixel: String,
     pub ok: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
-/// GPU encoder availability on this machine.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Availability {
     pub encoders: Vec<EncoderStatus>,
 }
 
 impl Availability {
-    /// The encoders on the GPU in use (`gpus::in_use`), the only ones
-    /// exports and proxies take; all of them where no GPU is listed.
     pub fn in_use(&self) -> Self {
         match crate::gpus::in_use() {
             Some(gpu) => self.on(&gpu),
@@ -193,7 +153,6 @@ impl Availability {
         }
     }
 
-    /// The encoders `gpu` has: those detection ran on it.
     pub fn on(&self, gpu: &crate::gpus::Gpu) -> Self {
         Self {
             encoders: self
@@ -213,7 +172,6 @@ impl Availability {
     }
 }
 
-/// FFmpeg's name for a pixel format, e.g. `p010le`.
 pub fn pixel_name(p: format::Pixel) -> String {
     p.descriptor()
         .map(|d| d.name().to_string())
@@ -224,8 +182,6 @@ fn ten_bit(v: &VideoSettings) -> bool {
     v.bit_depth == Some(10) || v.profile.as_deref() == Some("main10") || v.hdr.transfer().is_some()
 }
 
-/// A codec's CPU encoders ([`crate::parts`]): the first this FFmpeg has
-/// encodes.
 fn cpu_part(codec: VideoCodec) -> &'static crate::parts::Part {
     use crate::parts;
     match codec {
@@ -238,7 +194,6 @@ fn cpu_part(codec: VideoCodec) -> &'static crate::parts::Part {
     }
 }
 
-/// Whether this FFmpeg's `name` encoder takes 10-bit pictures.
 pub(crate) fn cpu_ten_bit(name: &str) -> bool {
     use format::Pixel;
     encoder::find_by_name(name)
@@ -247,9 +202,6 @@ pub(crate) fn cpu_ten_bit(name: &str) -> bool {
         .is_some_and(|mut f| f.any(|p| matches!(p, Pixel::YUV420P10LE | Pixel::YUV422P10LE)))
 }
 
-/// The GPU encoders `auto` tries, best first: NVENC, then the other GPUs'
-/// own, AMF and QSV on Windows, VAAPI on Linux (AMD's and Intel's alike;
-/// QSV there is for asking by name); VideoToolbox on macOS.
 const AUTO_GPU: &[EncoderChoice] = if cfg!(windows) {
     &[EncoderChoice::Nvenc, EncoderChoice::Amf, EncoderChoice::Qsv]
 } else if cfg!(target_os = "macos") {
@@ -258,7 +210,6 @@ const AUTO_GPU: &[EncoderChoice] = if cfg!(windows) {
     &[EncoderChoice::Nvenc, EncoderChoice::Vaapi]
 };
 
-/// The encoders `choice` stands for, in the order they are tried.
 fn kinds(choice: EncoderChoice) -> Vec<EncoderChoice> {
     match choice {
         EncoderChoice::Auto => AUTO_GPU
@@ -270,10 +221,6 @@ fn kinds(choice: EncoderChoice) -> Vec<EncoderChoice> {
     }
 }
 
-/// What the encoders `v` may use can write (decision D44): whether any of
-/// them writes 10 bits, and whether the one an 8-bit export starts with
-/// does. For `auto` that is the first working GPU encoder ([`AUTO_GPU`])
-/// and then the CPU's, as [`video_encoders`] tries them.
 pub fn abilities(v: &VideoSettings, available: &Availability) -> Abilities {
     let kinds = kinds(v.encoder);
     let name = |kind: EncoderChoice| match kind {
@@ -293,15 +240,10 @@ pub fn abilities(v: &VideoSettings, available: &Availability) -> Abilities {
     }
 }
 
-/// The `kind` encoder for `v`'s codec, when it takes `v`'s rate control
-/// ([`bitrate_only`]).
 fn gpu_encoder(v: &VideoSettings, kind: EncoderChoice) -> Option<&'static str> {
     gpu_name(v.codec, kind).filter(|_| v.bitrate.is_some() || !bitrate_only(v.codec, kind))
 }
 
-/// Whether the `kind` encoder of `codec` encodes only at a bitrate. Intel's
-/// VP9 has no intelligent constant quality, and FFmpeg holds QSV's constant
-/// quantizer to H.264's 51, where VP9's goes to 255.
 pub fn bitrate_only(codec: VideoCodec, kind: EncoderChoice) -> bool {
     codec == VideoCodec::Vp9 && kind == EncoderChoice::Qsv
 }
@@ -328,9 +270,6 @@ fn gpu_name(codec: VideoCodec, kind: EncoderChoice) -> Option<&'static str> {
     })
 }
 
-/// The frame format a GPU encoder kind takes for 8- or 10-bit output:
-/// P010 for 10 bits; for 8, planar for NVENC and NV12 for the others (all
-/// QSV's H.264 takes).
 fn gpu_pixel(kind: EncoderChoice, ten: bool) -> format::Pixel {
     match (kind, ten) {
         (_, true) => format::Pixel::P010LE,
@@ -339,15 +278,10 @@ fn gpu_pixel(kind: EncoderChoice, ten: bool) -> format::Pixel {
     }
 }
 
-/// AV1's and VP9's quantizer index (0–255), which VAAPI's and AMF's
-/// constant quantizer take, for a quality on the 0–63 scale of SVT-AV1's
-/// and libvpx's CRF and NVENC's CQ.
 fn av1_qindex(q: u32) -> u32 {
     (q.min(63) * 255 + 31) / 63
 }
 
-/// QSV's intelligent constant quality (1–51 for every codec) for `q`: AV1's
-/// 0–63 scaled to it.
 fn icq(codec: VideoCodec, q: u32) -> u32 {
     let q = match codec {
         VideoCodec::Av1 => (q.min(63) * 51 + 31) / 63,
@@ -360,8 +294,6 @@ fn opt(k: &str, v: impl ToString) -> (String, String) {
     (k.to_string(), v.to_string())
 }
 
-/// Resolves video settings to the encoder an export starts with: for
-/// `auto`, a working GPU encoder ([`AUTO_GPU`]), else the CPU encoder.
 pub fn resolve_video(v: &VideoSettings, available: &Availability) -> Result<VideoEncoder> {
     let mut errors = Vec::new();
     for candidate in video_encoders(v, available) {
@@ -373,19 +305,8 @@ pub fn resolve_video(v: &VideoSettings, available: &Availability) -> Result<Vide
     Err(errors.remove(0))
 }
 
-/// The encoders that may encode `v`, in order: the one asked for, or for
-/// `auto` every working GPU encoder ([`AUTO_GPU`]) and then the CPU
-/// encoder; with, in its place, why one can't. An export takes the first
-/// that opens: a GPU encoder can fail to at that moment (NVENC allows a
-/// few sessions at a time, and other exports may hold them).
-///
-/// An explicit `speed` is for the encoder an export starts with. Encoders
-/// don't share speed names (x264's, NVENC's p1–p7, AMF's `speed` to
-/// `quality`, QSV's `veryfast` to `veryslow`, SVT-AV1's numbers), so
-/// one it moves on to uses its own default.
 pub fn video_encoders(v: &VideoSettings, available: &Availability) -> Vec<Result<VideoEncoder>> {
     let kinds = match v.encoder {
-        // Dolby Vision is written by the CPU's encoders only.
         EncoderChoice::Auto if v.hdr_metadata.dolby_vision() => vec![EncoderChoice::Cpu],
         k => kinds(k),
     };
@@ -415,8 +336,6 @@ pub fn video_encoders(v: &VideoSettings, available: &Availability) -> Vec<Result
     found
 }
 
-/// The `kind` encoder for `v`, or `None` when this machine has none that
-/// works and it wasn't `asked` for by name.
 fn video_encoder(
     v: &VideoSettings,
     kind: EncoderChoice,
@@ -457,7 +376,6 @@ fn video_encoder(
         }
         return Ok(None);
     }
-    // The CPU encoders' defaults: SVT-AV1's 30, libvpx's 32.
     let q = v
         .quality
         .unwrap_or(match v.codec {
@@ -488,8 +406,6 @@ fn video_encoder(
     }))
 }
 
-/// NVENC's: constant quality in its VBR or a bitrate it may exceed by half
-/// at peaks, looking ahead, and two passes inside one encode when asked.
 fn nvenc_options(v: &VideoSettings, q: u32, ten: bool, passes: Passes) -> Vec<(String, String)> {
     let mut options = vec![
         opt("preset", v.speed.as_deref().unwrap_or("p5")),
@@ -528,12 +444,9 @@ fn nvenc_options(v: &VideoSettings, q: u32, ten: bool, passes: Passes) -> Vec<(S
     options
 }
 
-/// VAAPI's: one quantizer for every frame, or a bitrate.
 fn vaapi_options(v: &VideoSettings, q: u32) -> Vec<(String, String)> {
     match (v.bitrate, v.codec) {
         (Some(b), _) => vec![opt("rc_mode", "VBR"), opt("b", b)],
-        // AV1's and VP9's have no `qp`: their quantizer index is the global
-        // quality.
         (None, VideoCodec::Av1 | VideoCodec::Vp9) => {
             vec![opt("rc_mode", "CQP"), opt("global_quality", av1_qindex(q))]
         }
@@ -541,12 +454,7 @@ fn vaapi_options(v: &VideoSettings, q: u32) -> Vec<(String, String)> {
     }
 }
 
-/// AMF's (AMD, Windows): one quantizer for every frame as VAAPI's, or a
-/// bitrate it may exceed by half at peaks. (Its quality-led rate control,
-/// `qvbr`, counts the other way and stays under a bitrate.)
 fn amf_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
-    // Its presets: `speed`, `balanced`, `quality`, and `high_quality` on
-    // newer GPUs.
     let mut options = vec![opt("quality", v.speed.as_deref().unwrap_or("quality"))];
     match v.bitrate {
         Some(b) => {
@@ -562,7 +470,6 @@ fn amf_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
             options.push(opt("rc", "cqp"));
             options.push(opt("qp_i", qp));
             options.push(opt("qp_p", qp));
-            // AMF's HEVC has no quantizer for B-frames.
             if v.codec != VideoCodec::Hevc {
                 options.push(opt("qp_b", qp));
             }
@@ -583,14 +490,11 @@ fn amf_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
     options
 }
 
-/// VideoToolbox's (Apple): constant quality, on its scale of 0 to 100 the
-/// higher the better (Apple Silicon has it), or a bitrate.
 fn videotoolbox_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
     let mut options = Vec::new();
     match v.bitrate {
         Some(b) => options.push(opt("b", b)),
         None => {
-            // H.264's and HEVC's 0–51, the lower the better: 20 is 67.
             let percent = 100 - q.min(51) * 100 / 60;
             options.push(opt("flags", "+qscale"));
             options.push(opt("global_quality", percent * ffi::FF_QP2LAMBDA as u32));
@@ -604,8 +508,6 @@ fn videotoolbox_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, St
     options
 }
 
-/// QSV's (Intel): its intelligent constant quality, or a bitrate it may
-/// exceed by half at peaks.
 fn qsv_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
     let mut options = vec![opt("preset", v.speed.as_deref().unwrap_or("medium"))];
     match v.bitrate {
@@ -626,8 +528,6 @@ fn qsv_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
 fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
     use format::Pixel;
     let (metadata, dynamic) = hdr_metadata(v);
-    // HDR10's SEI at every keyframe, not only in the stream's header, and
-    // x265's QP adjustment for PQ.
     let x265 = {
         let mut params = "log-level=error".to_string();
         if !metadata.is_empty() || dynamic.hdr10plus || dynamic.dolby_vision {
@@ -636,9 +536,6 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
         if v.hdr.transfer() == Some(vidcut_core::model::Hdr::Pq) {
             params += ":hdr10-opt=1";
         }
-        // x265 writes Dolby Vision only with a VBV (its HRD): at a target
-        // bitrate, peaks of 1.5 times it; at constant quality, HEVC level
-        // 5.1 High's 160 Mb/s, which it doesn't reach.
         if dynamic.dolby_vision {
             let max = v.bitrate.map_or(160_000, |b| b * 3 / 2 / 1000);
             params += &format!(":vbv-maxrate={max}:vbv-bufsize={}", 2 * max);
@@ -667,10 +564,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
     } else {
         Pixel::YUV420P
     };
-    // The quality on the codec's scale, for the encoders without a
-    // constant rate factor.
     let q = |default: u32| v.quality.unwrap_or(default).min(v.codec.worst_quality());
-    // A speed asked for in the encoder's own numbers, else `default`.
     let numbered = |most: u32, default: &str| {
         v.speed
             .as_deref()
@@ -679,7 +573,6 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
     };
     let (pixel, options) = match name {
         "libx264" => {
-            // Quality 0 is lossless, which only the High 4:4:4 Predictive profile allows.
             let profile = match (ten, v.quality == Some(0) && v.bitrate.is_none()) {
                 (_, true) => "high444",
                 (true, false) => "high10",
@@ -690,8 +583,6 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
                 vec![speed("medium"), quality("crf", 18), opt("profile", profile)],
             )
         }
-        // No constant rate factor: one quantizer for every frame, the
-        // quality as x264 counts it.
         "libopenh264" => {
             let mut o = vec![opt("profile", "high")];
             match v.bitrate {
@@ -715,8 +606,6 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             }
             o
         }),
-        // Kvazaar's one quantizer, the quality as x265 counts it, and its
-        // presets, named as x265's.
         "libkvazaar" => {
             let preset = v.speed.as_deref().unwrap_or("medium");
             let params = match v.bitrate {
@@ -736,7 +625,6 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             }
             o
         }),
-        // Constant quality on SVT-AV1's scale; `cpu-used` 0–8.
         "libaom-av1" => {
             let mut o = vec![opt("cpu-used", numbered(8, "6")), opt("row-mt", 1)];
             match v.bitrate {
@@ -745,7 +633,6 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             }
             (deep, o)
         }
-        // Its quantizer index (0–255) for the quality; `speed` 0–10.
         "librav1e" => {
             let mut o = vec![opt("speed", numbered(10, "6"))];
             match v.bitrate {
@@ -799,14 +686,12 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
     })
 }
 
-/// Resolves audio settings to an encoder at the given default rate/channels.
 pub fn resolve_audio(a: &AudioSettings, rate: u32, channels: u16) -> Result<AudioEncoder> {
     use format::Sample;
     use format::sample::Type::{Packed, Planar};
     let (name, sample, default_kbps) = match a.codec {
         AudioCodec::Aac => ("aac", Sample::F32(Planar), Some(256)),
         AudioCodec::Opus => match crate::parts::first(&crate::parts::OPUS) {
-            // FFmpeg's own, without libopus: planar samples.
             Some("opus") => ("opus", Sample::F32(Planar), Some(160)),
             Some(_) => ("libopus", Sample::F32(Packed), Some(160)),
             None => return Err(crate::parts::part_missing(&crate::parts::OPUS)),
@@ -824,7 +709,7 @@ pub fn resolve_audio(a: &AudioSettings, rate: u32, channels: u16) -> Result<Audi
     }
     let mut rate = a.sample_rate.unwrap_or(rate);
     if a.codec == AudioCodec::Opus {
-        rate = 48_000; // Opus only runs at 48 kHz here.
+        rate = 48_000;
     }
     Ok(AudioEncoder {
         name: name.into(),
@@ -835,9 +720,6 @@ pub fn resolve_audio(a: &AudioSettings, rate: u32, channels: u16) -> Result<Audi
     })
 }
 
-/// A GPU encoder's own frames, on a device, which frames from memory go up
-/// into: VAAPI's, Vulkan's, AMF's on a Direct3D 11 decoder's device, and
-/// VideoToolbox's on a VideoToolbox decoder's.
 pub(crate) struct Upload {
     device: *mut ffi::AVBufferRef,
     pub(crate) frames: *mut ffi::AVBufferRef,
@@ -853,9 +735,6 @@ impl Drop for Upload {
 }
 
 impl Upload {
-    /// VAAPI's frames on `node`, or on `shared`, a device already open
-    /// there (a decoder's, whose frames then go to the encoder as they
-    /// are).
     pub(crate) fn vaapi(
         node: &str,
         sw: format::Pixel,
@@ -914,22 +793,18 @@ impl Upload {
         }
     }
 
-    /// Whether its frames are on `device`.
     pub(crate) fn is_on(&self, device: &crate::hw::Device) -> bool {
-        // SAFETY: references to live device contexts, the same device when
-        // they point to the same data.
+        // SAFETY: `self.device` and `device` are live device references; only their `data` is read.
         unsafe { (*self.device).data == (*device.as_ptr()).data }
     }
 
-    /// Vulkan's frames on the GPU `gpu` names (`gpus::Gpu::id`).
     pub(crate) fn vulkan(gpu: &str, sw: format::Pixel, width: u32, height: u32) -> Result<Self> {
         let found = crate::gpus::list()
             .iter()
             .find(|g| g.id == gpu)
             .ok_or_else(|| Error::Invalid(format!("GPU {gpu} isn't here")))?;
         let device = crate::hw::Device::vulkan_on(found)?;
-        // SAFETY: frames FFmpeg allocates on the device, which they hold a
-        // reference to; ours to free if they don't set up.
+        // SAFETY: `frames` holds its own reference to the live device; ours to unref if init fails.
         unsafe {
             let mut frames = ffi::av_hwframe_ctx_alloc(device.as_ptr());
             if frames.is_null() {
@@ -955,8 +830,6 @@ impl Upload {
         }
     }
 
-    /// Frames on `decoder`'s Direct3D 11 device, which its frames are drawn
-    /// into for AMF, the only frames it takes from the GPU.
     #[cfg(windows)]
     pub(crate) fn d3d11(
         decoder: &crate::hw::GpuDecoder,
@@ -980,16 +853,13 @@ impl Upload {
         }
     }
 
-    /// Frames on `decoder`'s VideoToolbox device, for its encoders, which
-    /// take the decoder's frames as they are.
     pub(crate) fn videotoolbox(
         decoder: &crate::hw::GpuDecoder,
         sw: format::Pixel,
         width: u32,
         height: u32,
     ) -> Result<Self> {
-        // SAFETY: another reference to the decoder's live device, and
-        // frames FFmpeg allocates on it; both ours to free on failure.
+        // SAFETY: a new reference to the decoder's live device and frames on it, freed on failure.
         unsafe {
             let mut device = ffi::av_buffer_ref(decoder.as_ptr());
             if device.is_null() {
@@ -1018,10 +888,6 @@ impl Upload {
         }
     }
 
-    /// Copies a frame in memory into one of these, keeping its timestamp
-    /// and colors, as an encoder given the frame in memory would see them
-    /// (AMF reads HDR10's metadata only off frames whose transfer is PQ;
-    /// `hdr::insert_static` puts it in the file regardless).
     pub(crate) fn upload(&self, src: &frame::Video) -> Result<frame::Video> {
         let mut hw = frame::Video::empty();
         unsafe {
@@ -1056,11 +922,6 @@ impl Upload {
     }
 }
 
-/// Whether an encoder of `kind` on `device` opens on `decoder`'s device,
-/// for the frames fitted there ([`open_video`]'s `shared`): VAAPI on a
-/// VA-API decoder's render node, AMF on a Direct3D 11 decoder's adapter,
-/// VideoToolbox on a VideoToolbox decoder's. A Mac has one VideoToolbox,
-/// and its encoders name no device.
 pub(crate) fn shares(
     kind: EncoderChoice,
     device: Option<&str>,
@@ -1070,8 +931,6 @@ pub(crate) fn shares(
         && (kind == EncoderChoice::VideoToolbox || device == Some(decoder.on()))
 }
 
-/// Whether an encoder of `kind` takes the frames of a `decoder` on its
-/// device.
 fn pairs(kind: EncoderChoice, decoder: crate::hw::Kind) -> bool {
     matches!(
         (kind, decoder),
@@ -1081,15 +940,6 @@ fn pairs(kind: EncoderChoice, decoder: crate::hw::Kind) -> bool {
     )
 }
 
-/// Opens a video encoder for `enc` at `width`×`height`, its frames timed
-/// in `times`' time base and its frame rate set where `times` gives one.
-/// Returns the opened encoder and, for VAAPI (and AMF and VideoToolbox on
-/// `shared`'s device), the frames to upload to. With `gpu_frames`
-/// (NVENC), the encoder takes frames in GPU memory of that frames context.
-/// VAAPI opens on `shared`'s device when given (a VA-API decoder on its
-/// render node), AMF on a Direct3D 11 decoder's on its adapter, and
-/// VideoToolbox on a VideoToolbox decoder's, so that decoder's frames can
-/// go to it without leaving the GPU.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn open_video(
     enc: &VideoEncoder,
@@ -1103,8 +953,6 @@ pub(crate) fn open_video(
 ) -> Result<(encoder::Video, Option<Upload>)> {
     let codec = encoder::find_by_name(&enc.name)
         .ok_or_else(|| Error::Invalid(format!("no {} encoder", enc.name)))?;
-    // Kvazaar, the HEVC encoder of FFmpeg builds without x265, takes no
-    // other sizes (FFmpeg says "Function not implemented").
     if enc.name == "libkvazaar" && !(width.is_multiple_of(8) && height.is_multiple_of(8)) {
         return Err(Error::Invalid(format!(
             "this FFmpeg's HEVC encoder, Kvazaar, only takes sizes in multiples of 8, not {width}×{height}"
@@ -1164,8 +1012,6 @@ pub(crate) fn open_video(
             unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
             Some(up)
         }
-        // AMF on the Direct3D 11 device of a decoder on its adapter, its
-        // frames drawn into the encoder's own.
         #[cfg(windows)]
         Some(_)
             if enc.kind == EncoderChoice::Amf
@@ -1180,9 +1026,6 @@ pub(crate) fn open_video(
             unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
             Some(up)
         }
-        // VideoToolbox on a VideoToolbox decoder's device. The encoder
-        // takes each frame's own pixel buffer (videotoolboxenc.c), in the
-        // layout `sw_pix_fmt` says.
         _ if enc.kind == EncoderChoice::VideoToolbox
             && shared.is_some_and(|d| d.kind() == crate::hw::Kind::VideoToolbox) =>
         {
@@ -1212,14 +1055,11 @@ pub(crate) fn open_video(
     for (k, v) in open_options(enc, pass) {
         dict.set(&k, &v);
     }
-    // NVENC on its GPU's CUDA device, where frames come from memory (on
-    // the GPU, it takes theirs).
     if enc.kind == EncoderChoice::Nvenc
         && let Some(cuda) = &enc.device
     {
         dict.set("gpu", cuda);
     }
-    // The first run's statistics in memory (libvpx), read once opened.
     if let Pass::Second {
         buffer: Some(stats),
         ..
@@ -1242,27 +1082,17 @@ pub(crate) fn open_video(
     let opened = ctx.open_as_with(codec, dict);
     let mut opened = opened.ctx(|| format!("opening {}", enc.name))?;
     unsafe {
-        // Read when the encoder opened; ours to free.
         let raw = opened.as_mut_ptr();
         ffi::av_freep(&mut (*raw).stats_in as *mut *mut std::ffi::c_char as *mut _);
     }
     Ok((opened, vaapi))
 }
 
-/// The options the encoder opens with for `pass`: its own, FFmpeg's
-/// automatic thread count for a CPU encoder (DNxHR's in slices), and the
-/// statistics file and the first run's speed where it has its own.
 fn open_options(enc: &VideoEncoder, pass: Pass<'_>) -> Vec<(String, String)> {
     let mut options = enc.options.clone();
-    // The count the `ffmpeg` command gives every encoder, where a program
-    // using the libraries gets 1, which most CPU encoders take as theirs.
-    // Each makes its own count of 0 (threads.md §2). A GPU encoder's work
-    // is the GPU's.
     if enc.kind == EncoderChoice::Cpu {
         options.push(opt("threads", "auto"));
     }
-    // DNxHR in slices, which share its one rate-control table, where each
-    // frame thread holds a table of its own: 266 MB at 2160p (gotchas.md).
     if enc.name == "dnxhd" {
         options.push(opt("thread_type", "slice"));
     }
@@ -1284,7 +1114,6 @@ fn open_options(enc: &VideoEncoder, pass: Pass<'_>) -> Vec<(String, String)> {
             }
         }
         "libx265" => {
-            // x265 takes its passes in x265-params, `:`-separated `k=v`.
             let escaped: String = stats
                 .display()
                 .to_string()
@@ -1305,7 +1134,6 @@ fn open_options(enc: &VideoEncoder, pass: Pass<'_>) -> Vec<(String, String)> {
             set(&mut options, "x265-params", params);
         }
         "libvpx-vp9" if first && fast => {
-            // libvpx's measuring pass at speed 4, unless the encode is faster.
             let speed = options
                 .iter()
                 .find(|(k, _)| k == "cpu-used")
@@ -1318,10 +1146,6 @@ fn open_options(enc: &VideoEncoder, pass: Pass<'_>) -> Vec<(String, String)> {
     options
 }
 
-/// Puts a QSV or AMF encoder on GPU `on`, for frames from memory: QSV on a
-/// device of its own on top of one there (`hw::Device::qsv`: VA-API's on
-/// Linux, which keeps libva's messages in FFmpeg's log, Direct3D 11's on
-/// Windows), AMF on Direct3D 11's on that adapter.
 pub(crate) fn on_device(
     ctx: &mut encoder::video::Video,
     kind: EncoderChoice,
@@ -1340,7 +1164,6 @@ pub(crate) fn on_device(
     Ok(())
 }
 
-/// Test-encodes a few frames to see whether a GPU encoder works.
 fn try_gpu(
     name: &str,
     kind: EncoderChoice,
@@ -1360,7 +1183,6 @@ fn try_gpu(
     })
 }
 
-/// Encodes three black frames with `enc`: some packet must come out.
 fn test_encode(enc: &VideoEncoder) -> Result<()> {
     let (name, pixel) = (enc.name.as_str(), enc.pixel);
     let (w, h) = (640, 360);
@@ -1400,7 +1222,6 @@ fn test_encode(enc: &VideoEncoder) -> Result<()> {
     Ok(())
 }
 
-/// VAAPI render nodes (`/dev/dri/renderD*`) with their kernel driver names.
 pub fn render_nodes() -> Vec<(String, String)> {
     let mut nodes: Vec<(String, String)> = std::fs::read_dir("/sys/class/drm")
         .into_iter()
@@ -1422,9 +1243,6 @@ pub fn render_nodes() -> Vec<(String, String)> {
     nodes
 }
 
-/// Test-encodes every GPU encoder and pixel format the presets and proxies
-/// can use; Vulkan's only with `vulkan` (vidcut stopped during the last
-/// test, and they are the likeliest to have stopped it).
 pub fn detect(vulkan: bool) -> Availability {
     crate::init();
     let mut encoders = Vec::new();
@@ -1459,17 +1277,11 @@ pub fn detect(vulkan: bool) -> Availability {
         for &p in nv12_p010 {
             check("hevc_videotoolbox", EncoderChoice::VideoToolbox, p, None);
         }
-        // For proxies: it opens only on Apple's ProRes hardware. NV16 and
-        // P210 keep a source's 4:2:2 color.
         let prores = [format::Pixel::NV16, format::Pixel::P210LE];
         for &p in nv12_p010.iter().chain(&prores) {
             check("prores_videotoolbox", EncoderChoice::VideoToolbox, p, None);
         }
     }
-    // Each GPU's own (`gpus::list`): NVENC on NVIDIA's CUDA devices; AMF
-    // on AMD's adapters (Windows: on Linux it takes AMD's closed driver, and
-    // VAAPI serves those GPUs); QSV on Intel's adapters or render nodes;
-    // VAAPI on the other GPUs' render nodes (Linux).
     use crate::gpus::{AMD, INTEL, NVIDIA};
     for gpu in crate::gpus::list() {
         let mut kinds = Vec::new();
@@ -1494,8 +1306,6 @@ pub fn detect(vulkan: bool) -> Availability {
                 EncoderChoice::Qsv => &["h264_qsv", "hevc_qsv", "av1_qsv", "vp9_qsv"],
                 _ => &["h264_vaapi", "hevc_vaapi", "av1_vaapi", "vp9_vaapi"],
             };
-            // NVENC takes frames from memory as YUV 4:2:0, the others as
-            // NV12; H.264 in 8 bits only.
             let pixels: &[format::Pixel] = if kind == EncoderChoice::Nvenc {
                 &[format::Pixel::YUV420P, format::Pixel::P010LE]
             } else {
@@ -1512,7 +1322,6 @@ pub fn detect(vulkan: bool) -> Availability {
                 }
             }
         }
-        // For ProRes proxies (FFmpeg 8.1 and later), on the GPU itself.
         if gpu.encodes_with(EncoderChoice::Vulkan) {
             check(
                 "prores_ks_vulkan",
@@ -1532,7 +1341,6 @@ mod tests {
     use crate::hw::Kind;
     use vidcut_core::export::EncoderChoice;
 
-    /// An encoder of `kind` named `name`, with a preset of its own.
     fn encoder(name: &str, kind: EncoderChoice) -> VideoEncoder {
         VideoEncoder {
             name: name.into(),

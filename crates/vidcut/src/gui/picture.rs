@@ -1,15 +1,3 @@
-//! The viewer's picture on the GPU (docs/decisions/preview.md §4): a
-//! player's decoded YUV picture uploaded as textures at its own size (from
-//! memory, or copied on the GPU from NVDEC's frames, [`super::shared`], and
-//! from VA-API's, their surfaces imported as DMA-BUFs), or drawn from where
-//! it is (Direct3D 11's, VideoToolbox's and Vulkan's imported), and
-//! drawn by one shader pass (`picture.wgsl`) into a target the viewer's
-//! size: fitted as export fits it (`Picture::placement`), turned upright,
-//! scaled in YUV and converted to BT.709 RGB with the export's math
-//! (`vidcut_av::color::shader_colors`, HDR tone-mapped as the export does).
-//! egui shows the target as an image, and a screenshot reads it back: what
-//! the viewer shows, to the pixel.
-
 use std::sync::{Arc, OnceLock};
 
 use vidcut_av::color::shader_colors;
@@ -19,51 +7,30 @@ use vidcut_av::player::{Layout, Picture};
 use vidcut_av::thumbs::Image;
 use vidcut_core::model::Hdr;
 
-/// The GPU and the shader pass the viewer's screen draws with.
 pub struct Gpu {
-    /// Takes VA-API's imported surfaces and Direct3D 11's textures over to
-    /// wgpu's queue, made at the first.
     #[cfg(any(target_os = "linux", windows))]
     acquirer: OnceLock<Result<super::acquire::Acquirer, String>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
-    /// The pass for a picture over others while a dissolve plays: drawn at
-    /// its level, the blend constant, over what the target holds.
     blended: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    /// 16-bit textures, for samples of more than 8 bits as they are.
-    /// Without them those go up as their top 8 bits.
     wide: bool,
-    /// The device can share memory with CUDA ([`super::shared`]).
     shares: bool,
-    /// The device imports DMA-BUFs, VA-API's surfaces among them (Linux).
     dma_buf: bool,
-    /// The device imports Direct3D 11's NV12 textures by their shared
-    /// handles (Windows).
     d3d11: bool,
-    /// The device has P010 textures, for Direct3D 11's 10-bit ones.
     #[cfg(windows)]
     p010: bool,
-    /// The device is Metal's, which makes textures of VideoToolbox's
-    /// IOSurfaces (macOS).
     metal: bool,
-    /// CUDA's device on this GPU, once a picture in CUDA memory came.
     cuda: OnceLock<Result<CudaDevice, String>>,
-    /// What its submissions wait for, off the UI thread ([`super::gate`]).
     gate: Option<Arc<super::gate::Gate>>,
 }
 
-/// Shared buffers a screen keeps at most ([`Screen::copy_on_gpu`]).
 const MAX_SHARED: usize = 4;
 
-/// The format targets are drawn in, which egui shows as it is.
 const TARGET: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-/// The device features the viewer uses where the adapter has them: 16-bit
-/// textures, DMA-BUFs for VA-API's pictures (Linux), and Direct3D 11's
-/// textures with NV12 and P010 for its pictures (Windows).
 pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
     let wanted = wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
     #[cfg(target_os = "linux")]
@@ -149,7 +116,6 @@ impl Gpu {
             })
         };
         let pipeline = pipeline_with(None);
-        // The picture at the constant's level, what is under it at the rest.
         let over = wgpu::BlendComponent {
             src_factor: wgpu::BlendFactor::Constant,
             dst_factor: wgpu::BlendFactor::OneMinusConstant,
@@ -200,7 +166,6 @@ impl Gpu {
         }
     }
 
-    /// Submits only through `gate`: for a thread other than the UI's.
     pub(super) fn behind(mut self, gate: Arc<super::gate::Gate>) -> Self {
         self.gate = Some(gate);
         self
@@ -216,12 +181,7 @@ impl Gpu {
         }
     }
 
-    /// The decoders whose pictures it may show from GPU memory, so a player
-    /// can keep them there for it ([`shown_from_gpu`]). Those it can't take
-    /// after all (NVDEC's on another GPU, a surface it won't import) are
-    /// copied down to be shown.
     pub fn gpu_pictures(&self) -> Vec<Kind> {
-        // Vulkan decodes on the device made from CUDA's on the GPU in use.
         let cudas = vidcut_av::gpus::in_use().and_then(|g| g.uuid());
         shown_from_gpu(&Takes {
             shares: self.shares,
@@ -233,15 +193,6 @@ impl Gpu {
         })
     }
 
-    /// Takes `images` over from the API or device that wrote them
-    /// (`source`), into `layout` for `access` at `stage`, in a command
-    /// buffer of its own for wgpu's queue: work submitted after it finds
-    /// them so ([`super::acquire::Acquirer`]). The draw submits it ahead of
-    /// its own.
-    ///
-    /// # Safety
-    /// The images are this device's, on memory another API wrote. wgpu
-    /// hasn't used them, or left them in `layout`.
     #[cfg(any(target_os = "linux", windows))]
     unsafe fn acquire(
         &self,
@@ -265,9 +216,7 @@ impl Gpu {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("vidcut acquire"),
             });
-        // SAFETY: an encoder of its own, recorded raw and nothing else; the
-        // barrier goes into its open command buffer, which wgpu ends. The
-        // images are as the caller says.
+        // SAFETY: this encoder's open buffer gets only the barrier; images as the caller says.
         let recorded = unsafe {
             encoder.as_hal_mut::<wgpu::hal::api::Vulkan, _, _>(|hal| {
                 hal.map(|hal| {
@@ -279,11 +228,6 @@ impl Gpu {
         Ok(encoder.finish())
     }
 
-    /// Runs `f`, which makes textures or views, the device's validation
-    /// errors in it an error here rather than wgpu's panic (gotchas.md): a
-    /// picture the device won't import comes down instead. Nothing recorded
-    /// for the GPU goes in it: a command it refused would fail its whole
-    /// submission later.
     fn checked<T>(&self, f: impl FnOnce() -> T) -> Result<T, String> {
         let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let made = f();
@@ -301,29 +245,16 @@ impl Gpu {
     }
 }
 
-/// What a display's device does with pictures in GPU memory.
 #[derive(Debug, Default)]
 struct Takes {
-    /// Shares memory with CUDA and imports Vulkan's ([`super::shared`]).
     shares: bool,
-    /// Has 16-bit textures.
     wide: bool,
-    /// Is on the GPU of CUDA's device in use, by their UUIDs.
     on_cudas_gpu: bool,
-    /// Imports DMA-BUFs (Linux).
     dma_buf: bool,
-    /// Imports Direct3D 11's NV12 textures (Windows).
     d3d11: bool,
-    /// Is Metal's (macOS).
     metal: bool,
 }
 
-/// The decoders whose pictures a display's device that `takes` so shows
-/// from GPU memory: NVDEC's where it shares memory with CUDA; Vulkan's
-/// (ProRes's 10-bit planes) where it also is on CUDA's GPU, which Vulkan
-/// decodes on, and has 16-bit textures; VA-API's where it imports
-/// DMA-BUFs, Direct3D 11's where it imports their textures, VideoToolbox's
-/// on Metal.
 fn shown_from_gpu(takes: &Takes) -> Vec<Kind> {
     [
         (Kind::Nvdec, takes.shares),
@@ -340,82 +271,49 @@ fn shown_from_gpu(takes: &Takes) -> Vec<Kind> {
     .collect()
 }
 
-/// A picture's planes on the GPU, for one size and layout.
 struct Planes {
     key: (Layout, u32, u32, bool),
     y: wgpu::Texture,
     u: wgpu::Texture,
-    /// The V plane of planar pictures; a stand-in otherwise.
     v: wgpu::Texture,
 }
 
-/// The target a screen draws into, and what it holds.
 struct Target {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     size: (u32, u32),
 }
 
-/// One viewer's picture on the GPU: the target it is drawn into, what that
-/// target shows now, and the planes of each picture drawn into it (while a
-/// dissolve plays, each of its pictures has its own).
 #[derive(Default)]
 pub struct Screen {
     target: Option<Target>,
-    /// The picture in the target (`None` inside: black).
     drawn: Option<Option<Arc<Picture>>>,
-    /// Each layer's: the first the picture's own, then those over it.
     slots: Vec<Slot>,
-    /// Pictures the slots let go of had imported.
     imports_before: u64,
 }
 
-/// One picture's planes on the GPU and how they got there.
 #[derive(Default)]
 struct Slot {
     planes: Option<Planes>,
     params: Option<wgpu::Buffer>,
-    /// Memory CUDA copies pictures into, for the planes: a few, so one is
-    /// free while copies out of the others are in flight.
     shared: Vec<super::shared::Shared>,
-    /// The one the picture being drawn went through.
     filled: Option<usize>,
-    /// Sharing failed: pictures in CUDA memory are copied down from then on.
     unshared: bool,
-    /// The layouts whose import failed: pictures in VA-API or Direct3D 11
-    /// memory in them are copied down from then on (P010 may fail where
-    /// NV12 imports).
     unimported: Vec<Layout>,
-    /// The picture being drawn, imported: held until the GPU is done with
-    /// its surface, so the surface isn't reused under it.
     imported: Option<Arc<Picture>>,
-    /// The luma and chroma planes of the picture being drawn, imported
-    /// (Direct3D 11's, VideoToolbox's; Vulkan's luma and U): drawn from in
-    /// place of the planes' textures; and the luma texture's size, which is
-    /// even where the picture's isn't.
     views: Option<(wgpu::TextureView, wgpu::TextureView, (u32, u32))>,
-    /// The V plane of the picture being drawn, imported (Vulkan's).
     v_view: Option<wgpu::TextureView>,
-    /// The acquire of the picture being drawn, imported: submitted ahead of
-    /// the draw.
     acquired: Option<wgpu::CommandBuffer>,
-    /// The imports of Vulkan's frames it keeps.
     #[cfg(any(target_os = "linux", windows))]
     kept: super::vulkan::Imports,
-    /// Pictures imported from GPU memory so far.
     imports: u64,
-    /// The last picture in GPU memory was copied on the GPU, not down.
     last_shared: bool,
 }
 
-/// What [`Screen::draw`] changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Drawn {
-    /// The target already showed it.
     Same,
-    /// The picture changed in the target.
     Picture,
-    /// A new target (another size): whoever shows it takes the new one.
     Target,
 }
 
@@ -424,26 +322,18 @@ impl Screen {
         Self::default()
     }
 
-    /// The target's view, once drawn.
     pub fn view(&self) -> Option<&wgpu::TextureView> {
         self.target.as_ref().map(|t| &t.view)
     }
 
-    /// The last picture in GPU memory went into the planes on the GPU, not
-    /// copied down.
     pub fn shared(&self) -> bool {
         self.slots.first().is_some_and(|s| s.last_shared)
     }
 
-    /// How many pictures it has imported from GPU memory: each picture of
-    /// VA-API's, Direct3D 11's or VideoToolbox's drawn, and each frame of
-    /// Vulkan's the first time it is drawn.
     pub fn imports(&self) -> u64 {
         self.imports_before + self.slots.iter().map(|s| s.imports).sum::<u64>()
     }
 
-    /// Draws `picture` (`None`: black) into a `width`×`height` target, as
-    /// the viewer shows it.
     pub fn draw(
         &mut self,
         gpu: &Gpu,
@@ -467,12 +357,9 @@ impl Screen {
                 return Drawn::Same;
             }
         }
-        // A picture larger than the device's textures can't go up (wgpu
-        // would panic): black.
         let limit = gpu.device.limits().max_texture_dimension_2d;
         let fits = |p: &Arc<Picture>| p.width() <= limit && p.height() <= limit;
         let picture = picture.filter(|p| fits(p));
-        // Bottom up, each with its level over those before (`None`: whole).
         let layers: Vec<(&Arc<Picture>, Option<f64>)> = picture
             .into_iter()
             .map(|p| (p, None))
@@ -486,8 +373,6 @@ impl Screen {
         if self.slots.len() < layers.len() {
             self.slots.resize_with(layers.len(), Slot::default);
         }
-        // Vulkan's frames are kept imported while their pictures are drawn:
-        // by each slot, while its picture is Vulkan's.
         #[cfg(any(target_os = "linux", windows))]
         for (i, slot) in self.slots.iter_mut().enumerate() {
             if layers
@@ -544,7 +429,6 @@ impl Screen {
                 pass.draw(0..3, 0..1);
             }
         }
-        // The acquires of the pictures imported go ahead of the draw.
         let acquired: Vec<wgpu::CommandBuffer> = self.slots[..layers.len()]
             .iter_mut()
             .filter_map(|s| s.acquired.take())
@@ -553,8 +437,6 @@ impl Screen {
         for slot in &mut self.slots[..layers.len()] {
             slot.submitted(gpu);
         }
-        // A dissolve's pictures over the first let go of their planes and
-        // buffers once it is over (wgpu keeps what a draw in flight reads).
         let keep = layers.len().max(1);
         self.imports_before += self.slots.iter().skip(keep).map(|s| s.imports).sum::<u64>();
         self.slots.truncate(keep);
@@ -564,8 +446,6 @@ impl Screen {
 }
 
 impl Slot {
-    /// Puts `picture` into its planes (`upload`) and its parameters for a
-    /// `size` target into its buffer: the bind group that draws it.
     fn prepare(
         &mut self,
         gpu: &Gpu,
@@ -583,7 +463,6 @@ impl Slot {
                 mapped_at_creation: false,
             })
         });
-        // How much of an imported texture the picture covers.
         let cover = self.views.as_ref().map_or((1.0, 1.0), |&(_, _, (w, h))| {
             (
                 f64::from(picture.width()) / f64::from(w),
@@ -628,9 +507,6 @@ impl Slot {
         })
     }
 
-    /// The drawing went to the GPU: the shared buffer it was copied out of
-    /// is in use until the GPU is done, and an imported picture is held
-    /// until then, so its surface isn't reused under it.
     fn submitted(&mut self, gpu: &Gpu) {
         if let Some(i) = self.filled.take() {
             self.shared[i].used(&gpu.queue);
@@ -640,12 +516,6 @@ impl Slot {
         }
     }
 
-    /// Puts `picture`'s planes into its textures, making them for its size
-    /// and layout when they changed: from memory, or for a picture in GPU
-    /// memory, copied on the GPU by `encoder` (out of a shared buffer,
-    /// `filled` says which, for CUDA's; out of its own surface, imported,
-    /// for VA-API's). A picture in GPU memory that can't be shared or
-    /// imported is copied down.
     fn upload(&mut self, gpu: &Gpu, picture: &Arc<Picture>, encoder: &mut wgpu::CommandEncoder) {
         self.make_planes(gpu, picture);
         self.last_shared = false;
@@ -688,8 +558,6 @@ impl Slot {
                     self.last_shared = true;
                     return;
                 }
-                // Every shared buffer in flight, or P210: this one comes
-                // down.
                 Ok(false) => {}
                 Err(e) => {
                     eprintln!("vidcut: pictures come down from the GPU to be shown: {e}");
@@ -701,7 +569,6 @@ impl Slot {
         self.copy_down(gpu, picture);
     }
 
-    /// A picture in GPU memory copied down and uploaded.
     fn copy_down(&mut self, gpu: &Gpu, picture: &Picture) {
         match picture.copied_down() {
             Ok(down) => self.write_planes(gpu, &down),
@@ -709,10 +576,6 @@ impl Slot {
         }
     }
 
-    /// Copies a picture in VA-API memory into the planes on the GPU: its
-    /// surface exported as DMA-BUFs, each plane imported as a texture of the
-    /// device's, and copied by `encoder` into the planes' textures. The
-    /// picture is held until those copies are done (`imported`).
     #[cfg(target_os = "linux")]
     fn import_on_gpu(
         &mut self,
@@ -765,8 +628,7 @@ impl Slot {
                 .fd
                 .try_clone_to_owned()
                 .map_err(|e| format!("a surface's file: {e}"))?;
-            // SAFETY: the file holds the plane, at its offset and pitch,
-            // laid out as its modifier says; Vulkan takes the file over.
+            // SAFETY: `fd` is the plane's DMA-BUF, at its modifier, pitch and offset, as described.
             let raw = unsafe {
                 let hal = gpu.device.as_hal::<Vulkan>().ok_or("not Vulkan")?;
                 hal.texture_from_dmabuf_fd(
@@ -790,16 +652,11 @@ impl Slot {
             };
             imports.push((raw, size, format, texture));
         }
-        // wgpu's textures first: one it refuses leaves nothing queued that
-        // names its image, and those it makes it keeps until its work on
-        // them is done.
         let textures = gpu.checked(|| {
             imports
                 .into_iter()
                 .map(|(raw, size, format, texture)| {
-                    // SAFETY: made on this device, as described, and in the
-                    // layout copies read from before wgpu reads it
-                    // (acquired below).
+                    // SAFETY: `raw` is this device's, as described; acquired below into `COPY_SRC`.
                     let imported = unsafe {
                         gpu.device.create_texture_from_hal::<Vulkan>(
                             raw,
@@ -820,10 +677,7 @@ impl Slot {
                 })
                 .collect::<Vec<_>>()
         })?;
-        // Taken over from VA-API with the picture they hold, ready to copy
-        // from.
-        // SAFETY: the images of textures just made on wgpu's device, which
-        // hasn't used them; only their handles are read.
+        // SAFETY: this device's images on memory VA-API wrote, which wgpu hasn't used yet.
         unsafe {
             let images: Vec<_> = textures
                 .iter()
@@ -841,7 +695,6 @@ impl Slot {
             )?);
         }
         for (imported, size, texture) in textures {
-            // wgpu keeps the texture until the copy is done.
             encoder.copy_texture_to_texture(
                 imported.as_image_copy(),
                 texture.as_image_copy(),
@@ -853,11 +706,6 @@ impl Slot {
         Ok(())
     }
 
-    /// Shows a picture in Direct3D 11 memory from there: its texture (one of
-    /// its own, the engine's copy out of the decoder's, done) opened by
-    /// wgpu's Vulkan device through an NT handle, and its planes' views drawn
-    /// from in place of the planes' textures (`views`). The picture is held
-    /// until the drawing is done (`imported`).
     #[cfg(windows)]
     fn import_d3d11(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
         use ::windows::Win32::Foundation::CloseHandle;
@@ -916,8 +764,7 @@ impl Slot {
             unsafe { resource.CreateSharedHandle(None, DXGI_SHARED_RESOURCE_READ.0, None) }
                 .map_err(|e| format!("sharing a Direct3D 11 texture: {e}"))?;
         let label = Some("vidcut Direct3D 11 picture");
-        // SAFETY: the handle is the texture's, as described; Vulkan holds
-        // the texture once it is imported, and the handle is closed after.
+        // SAFETY: `handle` is the texture's, as described, and stays open until the import is done.
         let raw = unsafe {
             let raw = gpu
                 .device
@@ -942,10 +789,8 @@ impl Slot {
             let _ = CloseHandle(handle);
             raw?.map_err(|e| format!("importing a Direct3D 11 texture: {e}"))?
         };
-        // wgpu's texture first, as for VA-API's.
         let (image, y, uv) = gpu.checked(|| {
-            // SAFETY: made on this device, as described, and in the layout
-            // shaders sample before wgpu reads it (acquired below).
+            // SAFETY: `raw` is this device's, as described; acquired below into `RESOURCE`.
             let imported = unsafe {
                 gpu.device.create_texture_from_hal::<Vulkan>(
                     raw,
@@ -978,10 +823,7 @@ impl Slot {
                 plane(two, wgpu::TextureAspect::Plane1),
             )
         })?;
-        // Taken over from Direct3D 11 with the picture it holds, ready to
-        // sample.
-        // SAFETY: the image of a texture just made on wgpu's device, which
-        // hasn't used it.
+        // SAFETY: this device's image on memory Direct3D 11 wrote, which wgpu hasn't used yet.
         unsafe {
             self.acquired = Some(gpu.acquire(
                 &[image.ok_or("not Vulkan")?],
@@ -997,13 +839,6 @@ impl Slot {
         Ok(())
     }
 
-    /// Shows a picture in Vulkan memory (ProRes FFmpeg decoded on NVIDIA's
-    /// GPU) from there: its frame's planes imported by wgpu's device the
-    /// first time it is drawn ([`import_vulkan_frame`]) and kept (`kept`),
-    /// acquired from the layout FFmpeg left the images in, and drawn from in
-    /// place of the planes' textures (`views`, `v_view`). The picture is held
-    /// until the drawing is done (`imported`), so FFmpeg doesn't decode into
-    /// its images under it.
     #[cfg(any(target_os = "linux", windows))]
     fn import_vulkan(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
         if !gpu.shares {
@@ -1027,11 +862,7 @@ impl Slot {
             .kept
             .get_or_import(identity, || import_vulkan_frame(gpu, frame))?;
         let left_in = vidcut_av::hw::vulkan::layout(frame).map_err(|e| e.to_string())?;
-        // Taken over from FFmpeg's device with the picture they hold, ready
-        // to sample.
-        // SAFETY: the images of textures of wgpu's device, on the memory
-        // FFmpeg's device decoded into. wgpu left them as shaders sample
-        // them, if it used them.
+        // SAFETY: this device's images on FFmpeg's memory; wgpu left any it used shader-readable.
         let acquired = unsafe {
             gpu.acquire(
                 &import.images,
@@ -1044,7 +875,6 @@ impl Slot {
                 },
             )?
         };
-        // FFmpeg finds them where wgpu left them, as long as it holds them.
         vidcut_av::hw::vulkan::acquired_outside(
             frame,
             ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -1061,11 +891,6 @@ impl Slot {
         Ok(())
     }
 
-    /// Shows a picture in VideoToolbox memory from there (macOS): each plane
-    /// of its pixel buffer's IOSurface made a Metal texture of wgpu's
-    /// device, whose view is drawn from in place of the planes' textures
-    /// (`views`). Nothing is copied. The picture is held until the drawing
-    /// is done (`imported`), so VideoToolbox doesn't reuse its surface.
     #[cfg(target_os = "macos")]
     fn import_videotoolbox(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
         use objc2_io_surface::IOSurfaceRef;
@@ -1076,7 +901,6 @@ impl Slot {
         use wgpu::hal::api::Metal;
         #[link(name = "CoreVideo", kind = "framework")]
         unsafe extern "C" {
-            /// The IOSurface backing a pixel buffer, or null.
             fn CVPixelBufferGetIOSurface(buffer: *mut std::ffi::c_void) -> *const IOSurfaceRef;
         }
         if !gpu.metal {
@@ -1102,8 +926,7 @@ impl Slot {
                 return Err("planar pictures aren't VideoToolbox's".into());
             }
         };
-        // SAFETY: a VideoToolbox frame holds its pixel buffer in `data[3]`,
-        // alive as long as the frame, and the buffer its IOSurface.
+        // SAFETY: a VideoToolbox frame's `data[3]` is its pixel buffer, alive as long as the frame.
         let surface = unsafe {
             let buffer = (*picture.frame().as_ptr()).data[3].cast();
             CVPixelBufferGetIOSurface(buffer).as_ref()
@@ -1121,8 +944,7 @@ impl Slot {
                 surface.width_of_plane(index),
                 surface.height_of_plane(index),
             );
-            // SAFETY: a texture of the plane in its own size and layout;
-            // Metal checks the descriptor against the surface.
+            // SAFETY: `desc` is the plane's size and format; Metal checks it against `surface`.
             let raw = unsafe {
                 let desc =
                     MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
@@ -1139,8 +961,7 @@ impl Slot {
                 height,
                 depth: 1,
             };
-            // SAFETY: a texture of this device, as described, which only
-            // the shader reads.
+            // SAFETY: `raw` is a texture of this device, as described, which only shaders read.
             let texture = unsafe {
                 let raw = wgpu::hal::metal::Device::texture_from_raw(
                     raw,
@@ -1180,10 +1001,6 @@ impl Slot {
         Ok(())
     }
 
-    /// Copies a picture in CUDA memory into the planes on the GPU: CUDA
-    /// into a free shared buffer, then `encoder` into the textures. False
-    /// when none is free (copies out of all are in flight), and for P210
-    /// (NVDEC's 4:2:2), which no GPU here decodes to test a copy of.
     fn copy_on_gpu(
         &mut self,
         gpu: &Gpu,
@@ -1208,7 +1025,6 @@ impl Slot {
         };
         let (w, h) = (u64::from(picture.width()), u64::from(picture.height()));
         let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
-        // Rows and planes where a copy into a texture may start.
         let align = |n: u64| n.div_ceil(256) * 256;
         let y = PlaneCopy {
             offset: 0,
@@ -1223,21 +1039,16 @@ impl Slot {
             rows: ch,
         };
         let need = uv.offset + uv.pitch * ch;
-        // Too small for these pictures: let go (wgpu keeps what a copy in
-        // flight reads until it is done).
         self.shared.retain(|s| s.size() >= need);
         let free = |shared: &[super::shared::Shared]| shared.iter().position(|s| s.free());
         let i = match free(&self.shared) {
             Some(i) => i,
-            // All in flight: another (a display refreshing at most a few
-            // pictures ahead never needs many).
             None if self.shared.len() < MAX_SHARED => {
                 let made = super::shared::Shared::new(&gpu.device, cuda, need)?;
                 self.shared.push(made);
                 self.shared.len() - 1
             }
             None => {
-                // Work done but not noticed yet: notice it, without waiting.
                 let _ = gpu.device.poll(wgpu::PollType::Poll);
                 match free(&self.shared) {
                     Some(i) => i,
@@ -1270,8 +1081,6 @@ impl Slot {
         Ok(true)
     }
 
-    /// Makes the planes' textures for `picture`'s size and layout, when
-    /// they changed.
     fn make_planes(&mut self, gpu: &Gpu, picture: &Picture) {
         let (w, h) = (picture.width(), picture.height());
         let layout = picture.layout();
@@ -1324,8 +1133,6 @@ impl Slot {
         }
     }
 
-    /// Uploads `picture`'s planes from memory into the planes made for it,
-    /// counted as a frame copied up (`vidcut_av::copies`).
     fn write_planes(&self, gpu: &Gpu, picture: &Picture) {
         let (w, h) = (picture.width(), picture.height());
         let layout = picture.layout();
@@ -1350,8 +1157,6 @@ impl Slot {
                 put(&planes.u, 1, (cw, ch), 2);
                 put(&planes.v, 2, (cw, ch), 2);
             }
-            // Without 16-bit textures: the top 8 of each sample's 10 or 12
-            // bits, which are the low bits of 16.
             (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12, false) => {
                 let shift = if layout == Layout::Yuv444p12 { 4 } else { 2 };
                 for (texture, plane, size) in [
@@ -1383,7 +1188,6 @@ impl Slot {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 4);
             }
-            // Without 16-bit textures: the high byte of each sample.
             (Layout::P010 | Layout::P210 | Layout::P416, false) => {
                 for (texture, plane, size, samples) in
                     [(&planes.y, 0, (w, h), 1), (&planes.u, 1, (cw, ch), 2)]
@@ -1404,7 +1208,6 @@ impl Slot {
 }
 
 impl Screen {
-    /// The target's pixels as RGBA rows, top first: what the viewer shows.
     pub fn read(&self, gpu: &Gpu) -> Option<Image> {
         let target = self.target.as_ref()?;
         let (w, h) = target.size;
@@ -1492,10 +1295,6 @@ fn make_target(device: &wgpu::Device, size: (u32, u32)) -> Target {
     }
 }
 
-/// `frame`, in Vulkan memory, imported by wgpu's device: each plane's
-/// memory, exported by FFmpeg's Vulkan device, imported into an image made
-/// as FFmpeg made its own ([`super::vulkan`]), which a texture of wgpu's
-/// then owns.
 #[cfg(any(target_os = "linux", windows))]
 fn import_vulkan_frame(
     gpu: &Gpu,
@@ -1503,17 +1302,13 @@ fn import_vulkan_frame(
 ) -> Result<super::vulkan::Import, String> {
     use wgpu::hal::api::Vulkan;
     let exported = vidcut_av::hw::vulkan::Exported::of(frame).map_err(|e| e.to_string())?;
-    // Y, U, V, and alpha, which the shader doesn't read. It is imported to
-    // be acquired with the rest: FFmpeg records one layout for all.
     if !(3..=4).contains(&exported.planes.len()) {
         return Err(format!("a picture of {} planes", exported.planes.len()));
     }
     let families = exported.planes[0].families.clone();
     let concurrent = families.len() > 1;
     let label = Some("vidcut Vulkan plane");
-    // SAFETY: wgpu's own device, on the GPU and driver FFmpeg's is on
-    // (checked first); each plane imported into an image made as FFmpeg
-    // made its own, which wgpu then owns.
+    // SAFETY: `hal` is wgpu's live device, on the GPU and driver of FFmpeg's (checked first).
     let raws = unsafe {
         let hal = gpu.device.as_hal::<Vulkan>().ok_or("not Vulkan")?;
         if super::vulkan::uuids(&hal) != (exported.device_uuid, exported.driver_uuid) {
@@ -1532,13 +1327,10 @@ fn import_vulkan_frame(
             .map(|plane| plane.into_hal(&hal, label))
             .collect::<Vec<_>>()
     };
-    // wgpu's textures first, as for VA-API's.
     let textures = gpu.checked(|| {
         raws.into_iter()
             .map(|(raw, size, format)| {
-                // SAFETY: made on this device, as described, and in the
-                // layout shaders sample before wgpu reads it (acquired by
-                // each draw).
+                // SAFETY: `raw` is this device's, as described; draws acquire it into `RESOURCE`.
                 unsafe {
                     gpu.device.create_texture_from_hal::<Vulkan>(
                         raw,
@@ -1581,8 +1373,6 @@ fn import_vulkan_frame(
     })
 }
 
-/// Copies a plane's rows (`stride` bytes apart, `bytes` per sample) into
-/// `texture`.
 fn write_plane(
     queue: &wgpu::Queue,
     texture: &wgpu::Texture,
@@ -1612,10 +1402,8 @@ fn write_plane(
     );
 }
 
-/// The size of the shader's parameters: ten vectors of four.
 const PARAMS: usize = 10 * 16;
 
-/// Its samples take 16 bits.
 fn sixteen(layout: Layout) -> bool {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::Yuv422p => false,
@@ -1628,7 +1416,6 @@ fn sixteen(layout: Layout) -> bool {
     }
 }
 
-/// Its U and V are interleaved in one plane.
 fn interleaved(layout: Layout) -> bool {
     match layout {
         Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => true,
@@ -1640,8 +1427,6 @@ fn interleaved(layout: Layout) -> bool {
     }
 }
 
-/// Luma samples per chroma sample, across and down: 2 and 2 for 4:2:0, 2
-/// and 1 for 4:2:2, 1 and 1 for 4:4:4.
 fn per_chroma(layout: Layout) -> (u32, u32) {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::P010 | Layout::Yuv420p10 => (2, 2),
@@ -1650,26 +1435,17 @@ fn per_chroma(layout: Layout) -> (u32, u32) {
     }
 }
 
-/// The size of its chroma planes in a `w`×`h` picture.
 fn chroma_size(layout: Layout, w: u32, h: u32) -> (u32, u32) {
     let (across, down) = per_chroma(layout);
     (w.div_ceil(across), h.div_ceil(down))
 }
 
-/// The shader's parameters for `picture` in a `size` target. `wide`: samples
-/// of more than 8 bits go up in 16. `cover`: how much of its texture's width
-/// and height the stored picture covers (1 but for a texture rounded up to
-/// even sides).
 fn params_of(picture: &Picture, size: (u32, u32), wide: bool, cover: (f64, f64)) -> Vec<u8> {
     let colors = shader_colors(picture.colors());
     let (x, y, w, h) = picture.placement(size.0, size.1);
     let turns = u32::from(picture.rotation() / 90) % 4;
     let (sw, sh) = (picture.width(), picture.height());
     let upright = if turns % 2 == 1 { (sh, sw) } else { (sw, sh) };
-    // Sample s (0..1) as a code: 8 bits (also the top 8 of more without
-    // 16-bit textures), 10 bits in the high bits of 16 (P010, P210) or in
-    // the low bits (planar), 12 bits in the low bits (planar), or 16 bits
-    // (P416).
     let layout = picture.layout();
     let (code, max): (f64, f64) = match (layout, wide && sixteen(layout)) {
         (Layout::P010 | Layout::P210, true) => (65535.0 / 64.0, 1023.0),
@@ -1743,7 +1519,6 @@ mod tests {
 
     #[test]
     fn the_shader_compiles() {
-        // naga's own check of the WGSL, no GPU needed.
         let module = naga::front::wgsl::parse_str(include_str!("picture.wgsl")).unwrap();
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),

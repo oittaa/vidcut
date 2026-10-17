@@ -1,20 +1,3 @@
-//! `vidcut mcp`: a Model Context Protocol server on stdin/stdout, so AI
-//! agents can use vidcut as tools.
-//!
-//! - **Tools** are the request methods (`edit.split` is `edit_split`), with
-//!   their parameter schemas, plus `use_project`. Each call runs like the
-//!   same CLI command: inside the GUI that has the project open (the person
-//!   at the GUI sees every edit), or headless.
-//! - **Results** are the response JSON (`rev`, `changes`, `result`, and
-//!   `warnings` when the undo history could not be saved) as text
-//!   and as structured content; failures are tool errors with the stable
-//!   error code. Frames, screenshots and storyboards also come back as
-//!   images, so an agent can look at its edit.
-//! - **Exports** report progress when the call carries a progress token,
-//!   and a headless export stops when the call is cancelled.
-//!
-//! Transport: JSON-RPC 2.0, one message per line (MCP's stdio transport).
-
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -30,16 +13,12 @@ use vidcut_core::{Envelope, Error, Project, Request, Result};
 
 use crate::ipc::{self, RouteOptions};
 
-/// Protocol versions this server speaks, newest first.
 const VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
-/// Methods that aren't tools (tools/list already gives every schema).
 const HIDDEN: &[&str] = &["schema"];
 
-/// Methods whose result names a PNG to show the agent.
 const PICTURES: &[&str] = &["frame.render", "gui.screenshot", "storyboard.render"];
 
-/// Pictures larger than this are only named, not attached.
 const MAX_PICTURE: u64 = 8 << 20;
 
 const INSTRUCTIONS: &str = "vidcut edits a video timeline: a media pool, a magnetic Track 1, B-roll \
@@ -51,7 +30,6 @@ and changes take dry_run: true to preview. Look at your edit with frame_render o
 which return images. If a vidcut GUI has the project open, calls run inside it and the person at it \
 sees each edit; viewer_*, player_*, selection_*, gui_*, jobs_* and pool_set need that GUI.";
 
-/// A line-delimited JSON-RPC writer shared by the reader and the calls.
 #[derive(Clone)]
 struct Out(Arc<Mutex<std::io::Stdout>>);
 
@@ -73,9 +51,6 @@ impl Out {
     }
 }
 
-/// Serves MCP on stdin/stdout until stdin closes. `project` is the project
-/// to start with (`use_project` changes it); `options` route like the CLI's
-/// `--headless` and `--instance`.
 pub fn serve(project: Option<PathBuf>, options: RouteOptions) -> Result<()> {
     let tools = tools()?;
     let methods: HashMap<String, String> = tools
@@ -116,7 +91,6 @@ pub fn serve(project: Option<PathBuf>, options: RouteOptions) -> Result<()> {
         };
         let method = message["method"].as_str().unwrap_or_default();
         let Some(id) = message.get("id").cloned() else {
-            // Notifications (and replies, which this server never asks for).
             if method == "notifications/cancelled"
                 && let Some(flag) = state
                     .lock_running()
@@ -154,8 +128,6 @@ pub fn serve(project: Option<PathBuf>, options: RouteOptions) -> Result<()> {
             "tools/call" => {
                 let (out, state) = (out.clone(), state.clone());
                 let params = message["params"].clone();
-                // Registered before the call starts, so a cancel that follows
-                // at once finds it.
                 let cancel = Arc::new(AtomicBool::new(false));
                 state.lock_running().insert(id.to_string(), cancel.clone());
                 let call = crate::threads::spawn(
@@ -164,13 +136,11 @@ pub fn serve(project: Option<PathBuf>, options: RouteOptions) -> Result<()> {
                     move || {
                         let result = state.call(&params, &cancel, &out);
                         state.lock_running().remove(&id.to_string());
-                        // A cancelled request gets no response (MCP: cancellation).
                         if !cancel.load(Ordering::Relaxed) {
                             out.result(&id, result);
                         }
                     },
                 );
-                // As `std::thread::spawn` would, when no thread can start.
                 calls.push(call.expect("starting a thread"));
                 calls.retain(|c| !c.is_finished());
             }
@@ -186,9 +156,7 @@ pub fn serve(project: Option<PathBuf>, options: RouteOptions) -> Result<()> {
 struct State {
     project: Mutex<Option<PathBuf>>,
     options: RouteOptions,
-    /// Calls in progress, by JSON-RPC id (as JSON text): their cancel flags.
     running: Mutex<HashMap<String, Arc<AtomicBool>>>,
-    /// Tool name to request method.
     methods: HashMap<String, String>,
 }
 
@@ -204,7 +172,6 @@ impl State {
             .clone()
     }
 
-    /// Runs one tool call; returns the MCP tool result.
     fn call(&self, params: &Value, cancel: &Arc<AtomicBool>, out: &Out) -> Value {
         let name = params["name"].as_str().unwrap_or_default();
         let args = match params.get("arguments") {
@@ -276,7 +243,6 @@ impl State {
         }
     }
 
-    /// `use_project`: work on `path` from now on (`create` makes it).
     fn use_project(&self, args: &Value) -> Result<Value> {
         let path = args["path"]
             .as_str()
@@ -308,8 +274,6 @@ impl State {
     }
 }
 
-/// A successful tool result: the response as text and structure, and the
-/// picture it names, if any.
 fn success(response: &Value, picture: Option<&Path>) -> Value {
     let mut content = vec![json!({
         "type": "text",
@@ -324,7 +288,6 @@ fn success(response: &Value, picture: Option<&Path>) -> Value {
     json!({ "content": content, "structuredContent": response, "isError": false })
 }
 
-/// A failed call: the stable error code and the message, for the agent.
 fn failure(e: &Error) -> Value {
     let error = serde_json::to_value(e).unwrap_or_default();
     json!({
@@ -334,9 +297,6 @@ fn failure(e: &Error) -> Value {
     })
 }
 
-/// The tools: every request method's parameter schema, made self-contained
-/// (with the definitions it uses), plus `use_project`. `_method` is the
-/// request method (removed before listing).
 pub fn tools() -> Result<Vec<Value>> {
     let root = crate::session::schema(None)?;
     let defs = root["$defs"].as_object().cloned().unwrap_or_default();
@@ -372,7 +332,6 @@ pub fn tools() -> Result<Vec<Value>> {
             .get("params")
             .cloned()
             .unwrap_or_else(|| json!({ "type": "object" }));
-        // A params type that is a definition of its own: inline it.
         if let Some(name) = schema["$ref"]
             .as_str()
             .and_then(|r| r.strip_prefix("#/$defs/"))
@@ -402,7 +361,6 @@ pub fn tools() -> Result<Vec<Value>> {
     Ok(tools)
 }
 
-/// Names of the definitions `v` refers to, directly or through others.
 fn refs(v: &Value, defs: &serde_json::Map<String, Value>, used: &mut Vec<String>) {
     match v {
         Value::Object(o) => {
@@ -426,8 +384,6 @@ fn refs(v: &Value, defs: &serde_json::Map<String, Value>, used: &mut Vec<String>
     }
 }
 
-/// The request's file paths made absolute (from this server's directory),
-/// `apply`'s commands' too: the GUI that may run the call has its own.
 fn absolute_paths(request: &mut Request) {
     for p in request.paths_mut() {
         *p = absolute(std::mem::take(p));
@@ -438,7 +394,6 @@ fn absolute(p: PathBuf) -> PathBuf {
     std::path::absolute(&p).unwrap_or(p)
 }
 
-/// Standard base64 with padding.
 fn base64(bytes: &[u8]) -> String {
     const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);

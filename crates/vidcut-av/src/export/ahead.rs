@@ -1,17 +1,3 @@
-//! Opening the next piece's source while the current piece is read.
-//!
-//! Starting a piece costs opening the file, seeking and decoding up to its
-//! first frame: up to a whole GOP of decoding, and a few round trips on a
-//! network share. Doing that on a helper thread while the piece before it
-//! encodes takes it off the export's path.
-//!
-//! One source at a time (docs/decisions/export.md §1): a newer piece asked
-//! for replaces one not begun, and a source nobody wants any more (the
-//! pieces were made anew by a seek, and the next file is another) stops
-//! opening and closes on the helper thread, as it arrives. Nothing waits in
-//! a queue, so a playhead dragged across cuts leaves no pile of open
-//! decoders behind.
-
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
@@ -20,26 +6,17 @@ use crate::error::Result;
 
 type Job<T> = Box<dyn FnOnce() -> Result<T> + Send>;
 
-/// What the reader and its helper thread share.
 struct State<T> {
-    /// The job to run next, not begun: a newer `start` replaces it.
     queued: Option<(u64, Job<T>)>,
-    /// The job the helper runs now.
     running: Option<u64>,
-    /// A job's source, open, until `take` collects it.
     done: Option<(u64, Result<T>)>,
-    /// The job whose source is wanted: the piece pending, or a forgotten
-    /// one the same key may ask for again. The helper drops any other.
     wanted: Option<u64>,
-    /// The reader is gone: the helper ends.
     closed: bool,
 }
 
 struct Shared<T> {
     state: Mutex<State<T>>,
     changed: Condvar,
-    /// Set while the job running isn't wanted: its decoding stops
-    /// (`crate::cancel`, installed on the helper thread).
     stop: Arc<AtomicBool>,
 }
 
@@ -47,7 +24,6 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Makes `id`'s source the one wanted. A job running for another stops.
 fn want<T>(s: &mut State<T>, shared: &Shared<T>, id: Option<u64>) {
     s.wanted = id;
     if s.running.is_some() && s.running != id {
@@ -55,21 +31,11 @@ fn want<T>(s: &mut State<T>, shared: &Shared<T>, id: Option<u64>) {
     }
 }
 
-/// Opens sources one at a time on a helper thread of its own. One
-/// long-lived thread, not one per piece: the allocator gives every new
-/// thread an arena, and memory spread over many arenas stays resident.
 pub(crate) struct Ahead<T, K = ()> {
     shared: Option<Arc<Shared<T>>>,
-    /// The helper thread, left to end on its own when the reader goes
-    /// (`crate::ending`).
     helper: Option<thread::JoinHandle<()>>,
-    /// The piece being opened, its job's number and what it opens.
     pending: Option<(usize, u64, K)>,
-    /// A job forgotten while it was pending (the pieces were numbered
-    /// anew): a new list asking for the same source takes it up again.
     forgotten: Option<(u64, K)>,
-    /// The next job's number. Results are matched to jobs by it, so a piece
-    /// numbered alike in a new list of pieces never takes an older job's.
     next: u64,
 }
 
@@ -84,18 +50,12 @@ impl<T: Send + 'static, K: PartialEq> Ahead<T, K> {
         }
     }
 
-    /// Forgets the piece being opened: the pieces are numbered anew. Its
-    /// source stays wanted until a piece of the new list asks for another
-    /// file, or for the same one, which takes it up.
     pub(crate) fn forget(&mut self) {
         if let Some((_, id, key)) = self.pending.take() {
             self.forgotten = Some((id, key));
         }
     }
 
-    /// Starts opening `piece`'s source, which `key` names. A job not begun
-    /// is replaced, one running for another source stops, and a source
-    /// open for another closes on the helper thread.
     pub(crate) fn start(
         &mut self,
         piece: usize,
@@ -117,7 +77,7 @@ impl<T: Send + 'static, K: PartialEq> Ahead<T, K> {
                     self.helper = Some(helper);
                     s
                 }
-                None => return, // the piece opens when it starts
+                None => return,
             },
         };
         let id = self.next;
@@ -133,8 +93,6 @@ impl<T: Send + 'static, K: PartialEq> Ahead<T, K> {
         self.pending = Some((piece, id, key));
     }
 
-    /// Whether job `id` is still with the helper: not begun, running or
-    /// done.
     fn alive(&self, id: u64) -> bool {
         let Some(shared) = &self.shared else {
             return false;
@@ -145,10 +103,6 @@ impl<T: Send + 'static, K: PartialEq> Ahead<T, K> {
             || s.done.as_ref().is_some_and(|(i, _)| *i == id)
     }
 
-    /// `piece`'s source if it is being opened ahead, once it is open; `None`
-    /// if it isn't (or the helper thread is gone), to open it now. Asked
-    /// for another piece, the source being opened is nobody's: it closes on
-    /// the helper thread.
     pub(crate) fn take(&mut self, piece: usize) -> Option<Result<T>> {
         let (pending, id, _) = self.pending.take()?;
         if pending != piece {
@@ -162,10 +116,6 @@ impl<T: Send + 'static, K: PartialEq> Ahead<T, K> {
         self.collect(id)
     }
 
-    /// The source of the job opening a file `wanted` names, pending or
-    /// forgotten, once it is open: a seek into a file the helper holds
-    /// takes it back rather than opening the file anew. `None` when no
-    /// such job is with the helper.
     pub(crate) fn reclaim(&mut self, wanted: impl Fn(&K) -> bool) -> Option<Result<T>> {
         let id = match (&self.pending, &self.forgotten) {
             (Some((_, id, k)), _) if wanted(k) => {
@@ -183,8 +133,6 @@ impl<T: Send + 'static, K: PartialEq> Ahead<T, K> {
         self.collect(id)
     }
 
-    /// Job `id`'s source once it is open; `None` if the job is gone (or
-    /// the helper thread is).
     fn collect(&mut self, id: u64) -> Option<Result<T>> {
         let shared = self.shared.as_ref()?;
         let mut s = lock(&shared.state);
@@ -212,20 +160,16 @@ impl<T, K> Drop for Ahead<T, K> {
             s.closed = true;
             s.wanted = None;
             shared.stop.store(true, Ordering::Relaxed);
-            // Not begun: it opened nothing. A file left handed to it
-            // closes here.
             s.queued.take()
         };
         drop(queued);
         shared.changed.notify_all();
-        // It closes what it holds as it ends, which the process waits for.
         if let Some(helper) = self.helper.take() {
             crate::ending::leave(helper);
         }
     }
 }
 
-/// Starts the helper thread; `None` when the system won't give one.
 fn spawn<T: Send + 'static>() -> Option<(Arc<Shared<T>>, thread::JoinHandle<()>)> {
     let shared = Arc::new(Shared {
         state: Mutex::new(State {
@@ -238,7 +182,6 @@ fn spawn<T: Send + 'static>() -> Option<(Arc<Shared<T>>, thread::JoinHandle<()>)
         changed: Condvar::new(),
         stop: Arc::new(AtomicBool::new(false)),
     });
-    // It waits for players as the thread it opens for does.
     let yields = crate::first::yields();
     let copies = crate::copies::current();
     let worker = shared.clone();
@@ -254,8 +197,6 @@ fn spawn<T: Send + 'static>() -> Option<(Arc<Shared<T>>, thread::JoinHandle<()>)
     Some((shared, helper))
 }
 
-/// The helper: one job at a time, and every source nobody wants dropped
-/// here, off the reader's thread.
 fn work<T>(shared: &Shared<T>) {
     loop {
         let (id, job) = {
@@ -304,7 +245,6 @@ mod tests {
 
     use super::*;
 
-    /// Says on which thread it was dropped.
     struct Noted(Arc<Mutex<Option<String>>>);
 
     impl Drop for Noted {
@@ -319,7 +259,6 @@ mod tests {
         (on.clone(), Noted(on))
     }
 
-    /// Whether `what` holds within five seconds.
     fn soon(what: impl Fn() -> bool) -> bool {
         let until = Instant::now() + Duration::from_secs(5);
         while Instant::now() < until {
@@ -333,15 +272,12 @@ mod tests {
 
     #[test]
     fn a_forgotten_job_is_no_new_pieces_source_unless_it_is_the_same() {
-        // Pieces numbered anew: piece 1 of the new list must not take the
-        // source opened for piece 1 of the old one.
         let mut ahead = Ahead::new();
         ahead.start(1, "a", || Ok(11));
         ahead.forget();
         assert!(ahead.take(1).is_none(), "forgotten");
         ahead.start(1, "b", || Ok(12));
         assert_eq!(ahead.take(1).unwrap().unwrap(), 12);
-        // The same source asked for again is taken up, not opened twice.
         ahead.start(3, "c", || Ok(13));
         ahead.forget();
         ahead.start(2, "c", || panic!("opened twice"));
@@ -423,7 +359,6 @@ mod tests {
         begun.recv().unwrap();
         ahead.forget();
         ahead.start(2, "b", || Ok(2));
-        // One job at a time: "b" opens only once "a" stopped.
         assert_eq!(ahead.take(2).unwrap().unwrap(), 2);
     }
 

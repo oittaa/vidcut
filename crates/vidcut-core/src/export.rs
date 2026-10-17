@@ -1,9 +1,3 @@
-//! Export settings and presets (pure data; the encoder engine is in vidcut-av).
-//!
-//! Built-in presets follow the Quick Export set of spec §10, plus a few more
-//! (AV1, VP9, DNxHR and audio-only). User presets are TOML files with the
-//! same fields.
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -43,7 +37,6 @@ impl Container {
         }
     }
 
-    /// FFmpeg muxer name.
     pub fn muxer(self) -> &'static str {
         match self {
             Self::Mp4 => "mp4",
@@ -65,7 +58,6 @@ impl Container {
         )
     }
 
-    /// The container for a file extension.
     pub fn from_extension(ext: &str) -> Option<Self> {
         Some(match ext.to_ascii_lowercase().as_str() {
             "mp4" => Self::Mp4,
@@ -103,7 +95,6 @@ impl VideoCodec {
         Self::Dnxhr,
     ];
 
-    /// Its name for people: `H.264`, `ProRes`.
     pub fn title(self) -> &'static str {
         match self {
             VideoCodec::H264 => "H.264",
@@ -115,9 +106,6 @@ impl VideoCodec {
         }
     }
 
-    /// The worst constant quality (`video.quality`) its encoders take:
-    /// H.264's and HEVC's quantizers end at 51, AV1's and VP9's scales at
-    /// 63. A larger one is taken as that.
     pub fn worst_quality(self) -> u32 {
         match self {
             VideoCodec::H264 | VideoCodec::Hevc => 51,
@@ -165,7 +153,6 @@ pub enum HdrMode {
 }
 
 impl HdrMode {
-    /// The HDR transfer this asks for; `None` for SDR and `auto`.
     pub fn transfer(self) -> Option<crate::model::Hdr> {
         match self {
             Self::Pq => Some(crate::model::Hdr::Pq),
@@ -202,12 +189,10 @@ impl HdrMetadata {
         *self == Self::default()
     }
 
-    /// HDR10+ is kept.
     pub fn hdr10plus(self) -> bool {
         matches!(self, Self::Hdr10plus | Self::All)
     }
 
-    /// Dolby Vision is kept.
     pub fn dolby_vision(self) -> bool {
         matches!(self, Self::DolbyVision | Self::All)
     }
@@ -239,7 +224,6 @@ pub enum EncoderChoice {
 }
 
 impl EncoderChoice {
-    /// The choices exports take.
     pub const ALL: [Self; 7] = [
         Self::Auto,
         Self::Cpu,
@@ -250,7 +234,6 @@ impl EncoderChoice {
         Self::VideoToolbox,
     ];
 
-    /// Its name for people: `NVENC`, `the CPU`.
     pub fn title(self) -> &'static str {
         match self {
             Self::Auto => "auto",
@@ -264,7 +247,6 @@ impl EncoderChoice {
         }
     }
 
-    /// A GPU's encoder, named.
     pub fn gpu(self) -> bool {
         !matches!(self, Self::Auto | Self::Cpu)
     }
@@ -344,9 +326,7 @@ pub struct VideoSettings {
     pub max_cll: Option<String>,
 }
 
-/// The most frames NVENC looks ahead (`video.lookahead`).
 impl VideoSettings {
-    /// `codec` with `encoder`, everything else left to the defaults.
     pub fn new(codec: VideoCodec, encoder: EncoderChoice) -> Self {
         Self {
             codec,
@@ -372,9 +352,6 @@ impl VideoSettings {
 
 pub const MAX_LOOKAHEAD: u32 = 32;
 
-/// Frames NVENC looks ahead unless `video.lookahead` says otherwise: 0.1 to
-/// 0.9 dB more PSNR at the same bitrate, and at constant quality the same
-/// or smaller files, for no time (decision D45).
 pub const DEFAULT_LOOKAHEAD: u32 = 32;
 
 /// The first of two passes (`video.first_pass`).
@@ -525,7 +502,6 @@ fn audio_only(container: Container, a: AudioSettings) -> ExportSettings {
     }
 }
 
-/// The built-in presets.
 pub fn builtin_presets() -> Vec<Preset> {
     use AudioCodec as A;
     use Container as C;
@@ -599,7 +575,6 @@ pub fn builtin_presets() -> Vec<Preset> {
             true,
             av(
                 C::Mp4,
-                // Shown on phones: SDR whatever the sources (decision D44).
                 VideoSettings {
                     hdr: HdrMode::Sdr,
                     ..sized(1080, 1920, 20)
@@ -687,10 +662,6 @@ pub fn builtin_presets() -> Vec<Preset> {
     ]
 }
 
-/// Applies `key=value` overrides with dotted paths into the settings, e.g.
-/// `video.quality=20`, `video.encoder=nvenc`, `audio.bitrate=192000`,
-/// `video=null` (drop video). Values are JSON when they parse as JSON,
-/// strings otherwise.
 pub fn apply_overrides(settings: &mut ExportSettings, sets: &[String]) -> Result<()> {
     let mut v = serde_json::to_value(&*settings).map_err(|e| Error::internal(e.to_string()))?;
     for set in sets {
@@ -714,7 +685,6 @@ pub fn apply_overrides(settings: &mut ExportSettings, sets: &[String]) -> Result
     Ok(())
 }
 
-/// Checks codecs against the container and each other.
 pub fn validate(s: &ExportSettings) -> Result<()> {
     use AudioCodec as A;
     use Container as C;
@@ -771,7 +741,6 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         {
             return Err(Error::usage("bit_depth must be 8 or 10"));
         }
-        // A depth the codec or profile fixes can't be set otherwise.
         let fixed = match (v.codec, v.profile.as_deref()) {
             (V::Prores, _) | (V::Dnxhr, Some("hqx" | "444")) | (V::Hevc, Some("main10")) => {
                 Some(10)

@@ -1,8 +1,3 @@
-//! Change Clip Speed under simulated input (egui_kittest, decision D48): R
-//! and the Edit Actions menu open it with the clip's speed; Reverse
-//! Speed and Freeze Frame send one `edit.change_speed` each, with the
-//! timeline's Ripple setting.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -39,7 +34,6 @@ fn call(h: &live::Handle, method: &str, params: Value) -> Response {
         .unwrap_or_else(|e| panic!("{method}: {e}"))
 }
 
-/// Steps the GUI until `ready` holds (requests answer on another thread).
 fn until(
     harness: &mut Harness<'_, Workspace>,
     what: &str,
@@ -56,7 +50,6 @@ fn until(
     }
 }
 
-/// The speed changes the GUI sent, oldest first.
 fn speed_requests(h: &live::Handle) -> Vec<Value> {
     let log = call(h, "gui.log", json!({ "limit": 1000 })).result;
     log.as_array()
@@ -128,12 +121,10 @@ fn change_clip_speed_sends_one_request() {
         .with_step_dt(1.0 / 60.0)
         .with_max_steps(50)
         .build_ui_state(|ui, ws: &mut Workspace| ws.ui(ui), ws);
-    // The selection reaches the GUI with the next snapshot.
     call(&h, "player.state", json!({}));
     harness.step();
     harness.step();
 
-    // R opens it at the clip's speed; Reverse Speed makes it -100%.
     harness.key_press(egui::Key::R);
     until(&mut harness, "the dialog", |h| has(h, "Reverse Speed"));
     harness.get_by_label("Reverse Speed").click();
@@ -151,7 +142,6 @@ fn change_clip_speed_sends_one_request() {
         !has(h, "Reverse Speed")
     });
 
-    // From the menu, a freeze frame.
     harness.get_by_label("Edit Actions").click();
     harness.step();
     harness.step();

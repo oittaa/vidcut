@@ -1,15 +1,7 @@
-//! Show in Folder: the file manager showing a file, selected in its
-//! folder, or a folder.
-
 use std::path::Path;
 
-/// Shows `path` in the file manager: a folder opened, a file selected in
-/// its folder (Explorer, Finder). On Linux the file's folder is opened:
-/// xdg-open selects nothing.
 pub fn show(path: &Path) {
     let path = path.to_path_buf();
-    // On a thread of its own: the shell's calls wait for Explorer, and a
-    // program started is waited for, so it doesn't stay a zombie.
     let _ = crate::threads::spawn(
         "vidcut-show-in-folder",
         crate::threads::Work::Interactive,
@@ -17,10 +9,6 @@ pub fn show(path: &Path) {
     );
 }
 
-/// Through the shell's own calls, not a program vidcut starts: that would
-/// inherit every inheritable handle vidcut has open, x264's two-pass
-/// statistics files among them, and x264 can't rename a file another
-/// process holds (docs/gotchas.md). What the shell starts inherits none.
 #[cfg(windows)]
 fn show_now(path: &Path) {
     use std::os::windows::ffi::OsStrExt;
@@ -37,8 +25,7 @@ fn show_now(path: &Path) {
     let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain([0]).collect() };
     let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let dir = path.is_dir();
-    // SAFETY: COM for this thread, undone below unless it failed;
-    // NUL-terminated paths in; the item list made here is freed here.
+    // SAFETY: COM is undone only if it started; paths are NUL-terminated; `item` is ILFree'd once.
     unsafe {
         let com = CoInitializeEx(
             null(),
@@ -52,8 +39,6 @@ fn show_now(path: &Path) {
                 ILFree(item);
             }
         }
-        // A folder is opened, and so is the folder of a file that can't be
-        // selected (gone since).
         if !selected {
             let folder = if dir {
                 path.as_path()
@@ -75,10 +60,6 @@ fn show_now(path: &Path) {
     }
 }
 
-/// Through `open` (macOS) or xdg-open. The program inherits the
-/// descriptors vidcut has open without close-on-exec, x264's statistics
-/// files among them: harmless here, where a file another process has open
-/// can still be renamed.
 #[cfg(not(windows))]
 fn show_now(path: &Path) {
     use std::process::Command;

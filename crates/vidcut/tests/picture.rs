@@ -1,17 +1,3 @@
-//! The viewer's shader (`gui::picture`) against the export's conversion: a
-//! picture in each planar layout the CPU's decoders give, drawn on the GPU
-//! at its own size, is within a level of `Picture::to_rgba` where it is
-//! flat. Pictures turned a quarter have chroma that changes down the rows
-//! they are stored in, upright ones along the rows. A picture with alpha is
-//! drawn without it, as the export converts it. A dissolve's pictures are
-//! drawn over each other as `Picture::to_rgba` mixes them. Runs on any
-//! adapter, a software one too. Skips without one. ProRes pictures decoded
-//! on Vulkan and kept in GPU memory are drawn from there, their planes
-//! imported, as closely, and drawn again from the same import; those tests
-//! skip where the GPU in use doesn't decode ProRes on Vulkan. AV1 and H.264
-//! pictures decoded on NVDEC and kept in memory of their own are drawn
-//! from there as closely; those skip without NVDEC.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -23,11 +9,9 @@ use vidcut_av::player::{Config, Layout, ManualOutput, Picture, Player};
 use vidcut_core::render::{Over, Ramp, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
-/// The upright picture's size.
 const W: u32 = 640;
 const H: u32 = 360;
 
-/// A device of its own on the first adapter, without a window.
 fn gpu() -> Option<Gpu> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
@@ -42,9 +26,6 @@ fn gpu() -> Option<Gpu> {
     Some(Gpu::new(&device, &queue))
 }
 
-/// A device of its own on the first Vulkan adapter that shows `kind`'s
-/// pictures from GPU memory: one on the GPU that decodes them. Otherwise
-/// what each adapter said.
 fn gpu_showing(kind: Kind) -> Result<Gpu, String> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::VULKAN,
@@ -73,8 +54,6 @@ fn gpu_showing(kind: Kind) -> Result<Gpu, String> {
     Err(why.join("; "))
 }
 
-/// The player's picture of frame 5 of `codec`'s stripes, decoded on the
-/// CPU and stored turned against `rotation`.
 fn picture(codec: VideoCodec, rotation: u16) -> Arc<Picture> {
     let config = Config {
         audio_scrubbing: false,
@@ -83,18 +62,14 @@ fn picture(codec: VideoCodec, rotation: u16) -> Arc<Picture> {
     picture_with(codec, rotation, config)
 }
 
-/// The player's picture of frame 5 of `codec`'s stripes, stored turned
-/// against `rotation`, decoded and kept as `config` says.
 fn picture_with(codec: VideoCodec, rotation: u16, config: Config) -> Arc<Picture> {
     played_with(clip(codec, rotation, Content::Colors), config)
 }
 
-/// Ten frames of `content` in `codec`, stored turned against `rotation`.
 fn clip(codec: VideoCodec, rotation: u16, content: Content) -> VideoPiece {
     clip_in(Container::Mov, codec, rotation, content)
 }
 
-/// [`clip`] in `container`.
 fn clip_in(container: Container, codec: VideoCodec, rotation: u16, content: Content) -> VideoPiece {
     let spec = FixtureSpec::new(codec, container, W, H, (30, 1), 10)
         .rotation(rotation)
@@ -113,7 +88,6 @@ fn clip_in(container: Container, codec: VideoCodec, rotation: u16, content: Cont
     }
 }
 
-/// `over` rising over `under` through their ten frames.
 fn dissolve(under: VideoPiece, over: VideoPiece) -> VideoPiece {
     VideoPiece::Mix {
         under: Box::new(under),
@@ -128,8 +102,6 @@ fn dissolve(under: VideoPiece, over: VideoPiece) -> VideoPiece {
     }
 }
 
-/// The player's picture of frame 5 of `piece`, ten frames long, decoded on
-/// the CPU.
 fn played(piece: VideoPiece) -> Arc<Picture> {
     let config = Config {
         audio_scrubbing: false,
@@ -138,8 +110,6 @@ fn played(piece: VideoPiece) -> Arc<Picture> {
     played_with(piece, config)
 }
 
-/// The player's picture of frame 5 of `piece`, ten frames long, decoded
-/// and kept as `config` says.
 fn played_with(piece: VideoPiece, config: Config) -> Arc<Picture> {
     let plan = RenderPlan {
         fps: Rational::new(30, 1).unwrap(),
@@ -159,9 +129,6 @@ fn played_with(piece: VideoPiece, config: Config) -> Arc<Picture> {
     player.present(Instant::now()).unwrap().picture
 }
 
-/// How many pixels of `b` (RGBA rows `w` wide) are flat, like those two
-/// away each way, and how far `a` is from `b` there at most, in levels of
-/// a color channel.
 fn flat_diff(a: &[u8], b: &[u8], w: usize) -> (usize, u8) {
     let h = b.len() / 4 / w;
     let px = |x: usize, y: usize| &b[(y * w + x) * 4..(y * w + x) * 4 + 3];
@@ -185,19 +152,12 @@ fn flat_diff(a: &[u8], b: &[u8], w: usize) -> (usize, u8) {
     (flat, most)
 }
 
-/// `codec`'s picture, turned by `rotation` and in `layout`, drawn at its
-/// own size: within a level of the export's conversion in each channel
-/// wherever it is flat. At edges the export repeats each chroma sample
-/// where the shader interpolates.
 fn draws_as_converted(codec: VideoCodec, rotation: u16, layout: Layout) {
     let picture = picture(codec, rotation);
     assert_eq!(picture.layout(), layout);
     draws_as_rgba(&picture);
 }
 
-/// `picture` drawn at its own size: within a level of `Picture::to_rgba`
-/// (the export's conversion, a dissolve's pictures mixed in its RGB) in
-/// each channel wherever it is flat.
 fn draws_as_rgba(picture: &Arc<Picture>) {
     let Some(gpu) = gpu() else {
         eprintln!("skipping: no GPU adapter, not even a software one");
@@ -254,10 +214,6 @@ fn a_12_bit_4_4_4_picture_with_alpha_draws_as_the_export_converts_it() {
     draws_as_converted(VideoCodec::ProRes4444Alpha, 90, Layout::Yuv444p12);
 }
 
-/// A display device on NVIDIA's GPU in use, and the player's picture of
-/// `codec`, a ProRes stored turned against `rotation`, decoded on Vulkan
-/// and kept in GPU memory for it; `None` where the GPU in use doesn't
-/// decode ProRes on Vulkan.
 fn kept_on_vulkan(codec: VideoCodec, rotation: u16) -> Option<(Gpu, Arc<Picture>)> {
     let on_vulkan = GpuDecoder::best().is_some_and(|g| {
         g.kind_for(Id::PRORES) == Some(Kind::Vulkan) && g.why_not(Id::PRORES, || false).is_none()
@@ -279,9 +235,6 @@ fn kept_on_vulkan(codec: VideoCodec, rotation: u16) -> Option<(Gpu, Arc<Picture>
     Some((gpu, picture))
 }
 
-/// `codec`'s picture, turned by `rotation` and in `layout`, kept on Vulkan
-/// and drawn from GPU memory: within a level of the export's conversion
-/// wherever it is flat.
 fn draws_from_vulkan_as_converted(codec: VideoCodec, rotation: u16, layout: Layout) {
     let Some((gpu, picture)) = kept_on_vulkan(codec, rotation) else {
         return;
@@ -289,11 +242,8 @@ fn draws_from_vulkan_as_converted(codec: VideoCodec, rotation: u16, layout: Layo
     draws_from_gpu_as_converted(&gpu, &picture, layout);
 }
 
-/// `picture`, in `layout` and kept in GPU memory, drawn from there: within
-/// a level of the export's conversion wherever it is flat.
 fn draws_from_gpu_as_converted(gpu: &Gpu, picture: &Arc<Picture>, layout: Layout) {
     assert_eq!(picture.layout(), layout);
-    // The same picture, come down and converted by the export's filters.
     let theirs = picture.to_rgba(W, H).unwrap();
     let mut screen = Screen::new();
     screen.draw(gpu, Some(picture), W, H);
@@ -326,7 +276,6 @@ fn a_prores_picture_kept_on_vulkan_draws_from_gpu_memory_again() {
     };
     let mut first = Screen::new();
     first.draw(&gpu, Some(&picture), W, H);
-    // Another screen imports its memory again.
     let mut second = Screen::new();
     second.draw(&gpu, Some(&picture), W, H);
     assert!(second.shared(), "the picture came down when imported again");
@@ -340,7 +289,6 @@ fn a_prores_picture_kept_on_vulkan_and_drawn_again_is_imported_once() {
     let theirs = picture.to_rgba(W, H).unwrap();
     let mut screen = Screen::new();
     screen.draw(&gpu, Some(&picture), W / 2, H / 2);
-    // Another size: drawn again from the same import.
     screen.draw(&gpu, Some(&picture), W, H);
     assert_eq!(screen.imports(), 1);
     let ours = screen.read(&gpu).unwrap();
@@ -349,9 +297,6 @@ fn a_prores_picture_kept_on_vulkan_and_drawn_again_is_imported_once() {
     assert!(most <= 1, "{most} levels apart where the picture is flat");
 }
 
-/// A display device on NVIDIA's GPU in use, and the player's picture of
-/// `codec` (`id`) in Matroska, decoded on NVDEC and kept in GPU memory for
-/// it; `None` where the GPU in use doesn't decode `id` on NVDEC.
 fn kept_on_nvdec(codec: VideoCodec, id: Id) -> Option<(Gpu, Arc<Picture>)> {
     let on_nvdec = GpuDecoder::best()
         .is_some_and(|g| g.kind_for(id) == Some(Kind::Nvdec) && g.why_not(id, || false).is_none());
@@ -393,6 +338,5 @@ fn an_av1_picture_kept_on_nvdec_takes_its_rows_padded_to_cudas_alignment() {
     let Some((_, picture)) = kept_on_nvdec(VideoCodec::Av1, Id::AV1) else {
         return;
     };
-    // 640 samples of 2 bytes in rows of 1536, 360 rows and 180 of chroma.
     assert_eq!(picture.bytes(), 1536 * 540);
 }

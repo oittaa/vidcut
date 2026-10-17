@@ -1,13 +1,7 @@
-//! A request in words, for people: the GUI's command log, the undo history
-//! and `vidcut gui log`. Times read as timecodes when the project is known,
-//! media by their names.
-
 use serde_json::Value;
 
 use crate::model::Project;
 
-/// `method` with `params` (a request's JSON) in words. `project`, as it was
-/// before the request, names media and turns frames into timecodes.
 pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> String {
     let d = Words { params, project };
     match method {
@@ -215,7 +209,6 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
     }
 }
 
-/// What of an edit point `side` selects.
 fn edit_side(side: &Value) -> &'static str {
     match side.as_str() {
         Some("out") => "the Out of the edit",
@@ -225,7 +218,6 @@ fn edit_side(side: &Value) -> &'static str {
     }
 }
 
-/// The parameters as `key value` pairs, nulls left out.
 fn compact(params: &Value) -> String {
     let Some(o) = params.as_object() else {
         return String::new();
@@ -244,7 +236,6 @@ fn db(v: &Value) -> String {
     v.as_f64().map_or("?".into(), |d| format!("{d:+.1} dB"))
 }
 
-/// `n` frames, in words: "1 frame", "-2 frames".
 fn frames(n: i64) -> String {
     if n.abs() == 1 {
         format!("{n} frame")
@@ -271,7 +262,6 @@ impl Words<'_> {
         self.params[key] == true
     }
 
-    /// A string or a list of them.
     fn list(&self, key: &str) -> Vec<String> {
         match &self.params[key] {
             Value::String(s) => vec![s.clone()],
@@ -283,8 +273,6 @@ impl Words<'_> {
         }
     }
 
-    /// A time: frames as a timecode, a spec (`10s`, `end`) as written,
-    /// several joined; none is the playhead.
     fn time(&self, key: &str) -> String {
         let one = |v: &Value| match v {
             Value::Number(n) => match (n.as_i64(), self.project) {
@@ -309,7 +297,6 @@ impl Words<'_> {
         }
     }
 
-    /// Media ids by name.
     fn media(&self, key: &str) -> String {
         let ids = self.list(key);
         if ids.is_empty() {
@@ -351,10 +338,6 @@ impl Words<'_> {
         }
     }
 
-    /// The selected clips a split cuts. A split cuts every clip under the
-    /// point when none of the selected ones is, so a selected clip is named
-    /// only when it lies across a split frame (before the split) or ends at
-    /// one (after it, keeping its id).
     fn split_clips(&self) -> String {
         let frames: Option<Vec<i64>> = match &self.params["at"] {
             Value::Array(a) => a.iter().map(Value::as_i64).collect(),
@@ -415,8 +398,6 @@ impl Words<'_> {
         }
     }
 
-    /// What an edit function takes: a media item and its range, or the
-    /// Source Tape span; and the track it goes to.
     fn source(&self) -> String {
         let what = if self.flag("tape") {
             "the Source Tape span".to_string()

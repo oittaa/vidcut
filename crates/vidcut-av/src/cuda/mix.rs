@@ -1,8 +1,3 @@
-//! Pictures mixed on NVIDIA's GPU while a dissolve plays (decision D50),
-//! for NVENC: a kernel of our own, sample by sample, with the CPU's sums
-//! (`export::mix`), so both make the same pictures. Its PTX is written
-//! here, and the driver compiles it for the GPU once per context.
-
 use std::ffi::c_void;
 use std::sync::Mutex;
 
@@ -12,10 +7,6 @@ use crate::error::{Error, Result};
 use crate::export::mix::Samples;
 use crate::ffmpeg::{ffi, frame};
 
-/// One plane: sample `(x, y)` of `over` at `weight` (65536: all of it)
-/// over that of `under`, into `out`. A source whose pointer is 0 is black,
-/// its sample `*_black`. Samples take `bytes` bytes (1 or 2), their value
-/// `shift` bits up in them.
 const PTX: &str = r#"
 .version 7.0
 .target sm_52
@@ -107,16 +98,13 @@ $L_done:
 }
 "#;
 
-/// Threads of a block across and down.
 const BLOCK: (u32, u32) = (32, 8);
 
-/// The kernel, loaded into a CUDA context.
 struct Kernel {
     ctx: usize,
     function: usize,
 }
 
-/// The kernel of `ctx`, loaded the first time it is asked for there.
 fn kernel(cuda: &Cuda, ctx: CuContext) -> Result<*mut c_void> {
     static LOADED: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
     let mut loaded = LOADED.lock().unwrap_or_else(|e| e.into_inner());
@@ -135,7 +123,6 @@ fn kernel(cuda: &Cuda, ctx: CuContext) -> Result<*mut c_void> {
         check("finding the mixing kernel", unsafe {
             (cuda.module_get_function)(&mut function, module, c"vidcut_mix".as_ptr())
         })?;
-        // The module stays loaded for the context's life.
         Ok(function)
     })?;
     loaded.push(Kernel {
@@ -145,8 +132,6 @@ fn kernel(cuda: &Cuda, ctx: CuContext) -> Result<*mut c_void> {
     Ok(function)
 }
 
-/// A frame's sides as the mix's kernel takes them. A negative side is
-/// rejected.
 fn frame_u32(width: i32, height: i32) -> Result<(u32, u32)> {
     match (u32::try_from(width), u32::try_from(height)) {
         (Ok(width), Ok(height)) => Ok((width, height)),
@@ -156,16 +141,11 @@ fn frame_u32(width: i32, height: i32) -> Result<(u32, u32)> {
     }
 }
 
-/// A plane's stride. A negative stride is rejected.
 fn stride_u64(linesize: i32) -> Result<u64> {
     u64::try_from(linesize)
         .map_err(|_| Error::Invalid(format!("a picture stride of {linesize} doesn't fit")))
 }
 
-/// `over` at `weight` over `under` (`None`: black), frames of `frames`'
-/// size and layout in CUDA memory, into a frame of `frames`. The work goes
-/// on `frames`' device's stream, behind what is queued there; the inputs'
-/// own streams are waited for first.
 pub(crate) fn mix(
     frames: &CudaFrames,
     under: Option<&frame::Video>,
@@ -182,7 +162,6 @@ pub(crate) fn mix(
         (fc, cuda_context(fc.device_ref))
     };
     let sw: crate::ffmpeg::format::Pixel = fc.sw_format.into();
-    // Two planes, the chroma half as tall: anything else the CPU mixes.
     if !matches!(
         sw,
         crate::ffmpeg::format::Pixel::NV12 | crate::ffmpeg::format::Pixel::P010LE
@@ -204,7 +183,6 @@ pub(crate) fn mix(
     let function = kernel(cuda, ctx)?;
     let (w, h) = frame_u32(fc.width, fc.height)?;
     let deep = samples.bytes == 2;
-    // 4:2:0 in two planes (NV12, P010): luma, then chroma half as tall.
     let planes = [
         (0usize, h, if deep { 64 } else { 16 }),
         (1, h.div_ceil(2), if deep { 512 } else { 128 }),
@@ -243,8 +221,7 @@ pub(crate) fn mix(
                 (&raw mut shift).cast(),
                 (&raw mut weight).cast(),
             ];
-            // SAFETY: the context is current; `params` points to the
-            // kernel's 13 parameters, in its order, alive for the call.
+            // SAFETY: the context is current; `params` holds the kernel's 13 parameters, in order.
             check("mixing pictures", unsafe {
                 (cuda.launch_kernel)(
                     function,

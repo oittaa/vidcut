@@ -1,13 +1,3 @@
-//! The mixer and the audio meters: a channel strip
-//! per track with a meter, a fader, mute and solo, and the viewer's meter
-//! with the monitoring mute.
-//!
-//! Each meter is one bar per project channel (spec D28). While the viewer
-//! plays, the bars show the player's sound as it is heard: the mix, and
-//! each track's lane. Paused, they read the cached waveform peaks at the
-//! playhead, with clip gain, faders, mute and solo applied, so they move
-//! while paused and scrubbing too.
-
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -19,35 +9,24 @@ use vidcut_core::request::ViewerMode;
 use super::theme;
 use super::workspace::{Workspace, dim};
 
-/// Meter state: peak holds, and fader positions while they are dragged.
 #[derive(Default)]
 pub struct Mixer {
-    /// The highest level lately and when it was reached, by meter bar.
     holds: HashMap<String, (f32, Instant)>,
-    /// Fader values being dragged (sent on release: one undo step).
     dragging: HashMap<String, f64>,
 }
 
-/// How long a peak hold stays up.
 const HOLD_SECS: f32 = 1.5;
 
-/// Width of one channel bar.
 const BAR_W: f32 = 10.0;
 
-/// A fader's range, dB.
 const FADER_DB: std::ops::RangeInclusive<f64> = -60.0..=24.0;
 
-/// The dB marks beside a fader, in the order they are kept when there
-/// isn't room for all: 0 dB first.
 const FADER_MARKS: [f32; 7] = [0.0, 12.0, -12.0, -24.0, 24.0, -60.0, -40.0];
 
-/// Width of the numbers' column beside a fader.
 const FADER_SCALE_W: f32 = 26.0;
 
-/// Height a strip keeps for its name, value, and mute and solo buttons.
 const STRIP_ROOM: f32 = 106.0;
 
-/// Font of the scales' numbers.
 fn scale_font() -> egui::FontId {
     egui::FontId::proportional(10.0)
 }
@@ -56,7 +35,6 @@ fn linear(db: f64) -> f32 {
     10f64.powf(db / 20.0) as f32
 }
 
-/// dBFS of a linear level (−∞ for silence).
 fn db(level: f32) -> f32 {
     if level <= 0.0 {
         f32::NEG_INFINITY
@@ -65,14 +43,10 @@ fn db(level: f32) -> f32 {
     }
 }
 
-/// Where a level sits on a meter, 0..1 over −60..0 dBFS.
 fn position(level: f32) -> f32 {
     ((db(level) + 60.0) / 60.0).clamp(0.0, 1.0)
 }
 
-/// The marks that fit along a scale, as `(dB, y)`: each at least `gap`
-/// from the ones kept before it, taken in `marks` order (the first always
-/// fits).
 fn fitting_marks(marks: &[f32], y: impl Fn(f32) -> f32, gap: f32) -> Vec<(f32, f32)> {
     let mut kept: Vec<(f32, f32)> = Vec::new();
     for &m in marks {
@@ -84,7 +58,6 @@ fn fitting_marks(marks: &[f32], y: impl Fn(f32) -> f32, gap: f32) -> Vec<(f32, f
     kept
 }
 
-/// A scale's number: `+12`, `0`, `−12`.
 fn mark_text(db: f32) -> String {
     match db {
         d if d > 0.0 => format!("+{d}"),
@@ -93,9 +66,6 @@ fn mark_text(db: f32) -> String {
     }
 }
 
-/// Where `db` sits on a vertical slider over [`FADER_DB`] in `rect`, as
-/// egui places its handle: the travel is the rect less the handle's half
-/// length at each end, the top end the most.
 fn fader_y(db: f32, rect: Rect, handle: egui::style::HandleShape) -> f32 {
     let mut radius = rect.width() / 2.5;
     if let egui::style::HandleShape::Rect { aspect_ratio } = handle {
@@ -107,8 +77,6 @@ fn fader_y(db: f32, rect: Rect, handle: egui::style::HandleShape) -> f32 {
     bottom + (top - bottom) * t
 }
 
-/// A tick across a fader's slider at each mark, to go under its rail and
-/// handle: 0 dB is longer and thicker, in the accent color.
 fn fader_ticks(slider: Rect, marks: &[(f32, f32)]) -> egui::Shape {
     let ticks = marks
         .iter()
@@ -130,8 +98,6 @@ fn fader_ticks(slider: Rect, marks: &[(f32, f32)]) -> egui::Shape {
     egui::Shape::Vec(ticks)
 }
 
-/// The marks' numbers in `column`, right of a fader, each centered on its
-/// level; 0 in the accent color.
 fn fader_numbers(painter: &egui::Painter, column: Rect, marks: &[(f32, f32)]) {
     for &(db, y) in marks {
         let color = if db == 0.0 {
@@ -139,7 +105,6 @@ fn fader_numbers(painter: &egui::Painter, column: Rect, marks: &[(f32, f32)]) {
         } else {
             theme::colors().text_dim
         };
-        // The ends' numbers stay whole inside the column.
         let y = y.clamp(column.top() + 5.0, column.bottom() - 5.0);
         painter.text(
             pos2(column.left() + 4.0, y),
@@ -151,23 +116,15 @@ fn fader_numbers(painter: &egui::Painter, column: Rect, marks: &[(f32, f32)]) {
     }
 }
 
-/// The project's channel count, at least one. Stereo is the usual case.
 fn project_channels(p: &Project) -> usize {
     usize::from(p.settings.channels.max(1))
 }
 
-/// Width of a column of `n` channel bars, including the gaps.
 fn meter_column_width(n: usize) -> f32 {
     let n = n.max(1);
     BAR_W * n as f32 + 2.0 * (n - 1) as f32
 }
 
-/// Place a waveform's channel peaks onto `n` project channels.
-///
-/// Waveforms are measured mixed to the project's channels, as the export
-/// mixes (D28), so the counts match. Until a waveform measured for another
-/// count is measured again, a mono one fills every channel and any other
-/// keeps channel `i`.
 fn map_channels(src: &[f32], n: usize) -> Vec<f32> {
     let mut out = vec![0.0; n.max(1)];
     if src.len() == 1 && out.len() > 1 {
@@ -182,8 +139,6 @@ fn map_channels(src: &[f32], n: usize) -> Vec<f32> {
 
 type Waves = HashMap<String, std::sync::Arc<vidcut_av::waveform::Waveform>>;
 
-/// Linear peaks of `w` over `[a, b)`, one per stored channel. A waveform
-/// with no per-channel data contributes its mono peak as a single channel.
 fn source_peaks(w: &vidcut_av::waveform::Waveform, a: f64, b: f64) -> Vec<f32> {
     if w.channels == 0 {
         let peak = w
@@ -197,14 +152,10 @@ fn source_peaks(w: &vidcut_av::waveform::Waveform, a: f64, b: f64) -> Vec<f32> {
         .collect()
 }
 
-/// The media level of `t` at timeline frame `at`, one linear peak per
-/// project channel, from its clips' waveforms, with clip gain and the fader.
-/// Clips on a track don't overlap, so a frame has one clip's peaks.
 fn track_channels(p: &Project, t: &Track, at: i64, waveforms: &Waves) -> Vec<f32> {
     let n = project_channels(p);
     let fps = p.settings.fps.as_f64();
     let mut level = vec![0.0; n];
-    // Through a cross fade, both clips' sounds at their shares.
     let fades = vidcut_core::otio::transitions::cross_fades(p, t);
     for c in &t.clips {
         let Some(audio) = c.audio.as_ref().filter(|a| !a.muted) else {
@@ -234,7 +185,6 @@ fn track_channels(p: &Project, t: &Track, at: i64, waveforms: &Waves) -> Vec<f32
     level
 }
 
-/// Sum per channel, as the preview's `amix=normalize=0` sums lanes.
 fn sum_channels(tracks: &[Vec<f32>], n: usize) -> Vec<f32> {
     let mut out = vec![0.0; n];
     for t in tracks {
@@ -245,15 +195,11 @@ fn sum_channels(tracks: &[Vec<f32>], n: usize) -> Vec<f32> {
     out
 }
 
-/// One strip's bars and the monitored mix.
 struct TimelineMeters {
     tracks: Vec<(String, Vec<f32>)>,
     mix: Vec<f32>,
 }
 
-/// Levels at timeline frame `at`. Track strips show that track's channels,
-/// silent when mute or solo says it is not heard. The mix sums the audible
-/// tracks per channel, as the preview does.
 fn timeline_meters(p: &Project, at: i64, waveforms: &Waves) -> TimelineMeters {
     let n = project_channels(p);
     let any_solo = p.any_solo();
@@ -275,9 +221,6 @@ fn timeline_meters(p: &Project, at: i64, waveforms: &Waves) -> TimelineMeters {
     TimelineMeters { tracks, mix }
 }
 
-/// The meters from the sound heard while playing: each track shows its
-/// lanes' peaks (`lanes` names each lane's track), silent without one (not
-/// heard), and the mix the mix's.
 fn heard_meters(
     p: &Project,
     levels: &vidcut_av::player::Levels,
@@ -305,13 +248,10 @@ fn heard_meters(
     }
 }
 
-/// The loudest channel, for the number under the mix meter.
 fn loudest(levels: &[f32]) -> f32 {
     levels.iter().copied().fold(0.0, f32::max)
 }
 
-/// Peak hold for one bar. A level at least as high as the held one replaces
-/// it; a lower one waits until `age_secs` reaches [`HOLD_SECS`].
 fn held_level(prev: Option<(f32, f32)>, level: f32) -> f32 {
     match prev {
         Some((h, age)) if h >= level && age < HOLD_SECS => h,
@@ -320,7 +260,6 @@ fn held_level(prev: Option<(f32, f32)>, level: f32) -> f32 {
 }
 
 impl Workspace {
-    /// Levels at the timeline playhead: each track's channels, and the mix.
     fn timeline_levels(&self) -> TimelineMeters {
         let Some(p) = self.project() else {
             return TimelineMeters {
@@ -336,7 +275,6 @@ impl Workspace {
         {
             return heard_meters(p, levels, &timeline.lanes);
         }
-        // A fader being dragged is heard at its new level; so it shows.
         if self.mixer.dragging.is_empty() {
             return timeline_meters(p, self.snap.timeline.position, &self.snap.waveforms);
         }
@@ -349,9 +287,6 @@ impl Workspace {
         timeline_meters(&p, self.snap.timeline.position, &self.snap.waveforms)
     }
 
-    /// The channels the viewer plays: the monitored mix in Timeline mode,
-    /// the source media at the source playhead otherwise (no fader).
-    /// `player.mute` silences it.
     fn viewer_channels(&self) -> Vec<f32> {
         let Some(p) = self.project() else {
             return vec![0.0; 2];
@@ -385,7 +320,6 @@ impl Workspace {
         map_channels(&source_peaks(w, s, s + 1.0 / fps), n)
     }
 
-    /// How wide the viewer's meter column is.
     pub(super) fn viewer_meter_width(&self) -> f32 {
         let n = self
             .project()
@@ -393,7 +327,6 @@ impl Workspace {
         meter_column_width(n)
     }
 
-    /// Updates one bar's peak hold; returns the level to hold.
     fn hold(&mut self, key: &str, level: f32) -> f32 {
         let now = Instant::now();
         let prev = self.mixer.holds.get(key).copied();
@@ -414,9 +347,6 @@ impl Workspace {
             .collect()
     }
 
-    /// How often live meters ask for a frame: they move smoothly at 30 a
-    /// second. Asking for every frame instead redraws as fast as the CPU
-    /// allows, since vsync stays off.
     const METER_FRAME: std::time::Duration = std::time::Duration::from_millis(33);
 
     fn meters_live(&self, levels: &[f32], playing: bool) -> bool {
@@ -425,7 +355,6 @@ impl Workspace {
             || self.mixer.holds.values().any(|(h, _)| *h > 0.0)
     }
 
-    /// The Mixer panel: a strip per track and the mix.
     pub(super) fn mixer_panel(&mut self, ui: &mut egui::Ui) {
         let Some(p) = self.project_shared() else {
             return;
@@ -440,8 +369,6 @@ impl Workspace {
         egui::ScrollArea::horizontal().show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 for t in p.tracks.iter() {
-                    // A strip for every audio track and every video track
-                    // with sound.
                     let has_sound =
                         t.kind == TrackKind::Audio || t.clips.iter().any(|c| c.audio.is_some());
                     if !has_sound {
@@ -472,20 +399,15 @@ impl Workspace {
             ui.label(RichText::new(name).strong()).on_hover_text(&t.id);
             let held = self.hold_channels(&t.id, level);
             let bars = height - STRIP_ROOM;
-            // Top-aligned: the bars, fader and scale share one top and height.
             let value = ui.horizontal_top(|ui| {
                 self.channel_bars(ui, level, &held, bars, "track meter");
-                // The fader: heard at once while dragged (`mixer.preview`),
-                // kept when it is let go (one `track.set`).
                 let mut value = self
                     .mixer
                     .dragging
                     .get(&t.id)
                     .copied()
                     .unwrap_or(t.volume_db);
-                // A vertical slider is `slider_width` long.
                 ui.spacing_mut().slider_width = bars;
-                // The ticks go under the slider's rail and handle.
                 let under = ui.painter().add(egui::Shape::Noop);
                 let r = ui
                     .add(
@@ -554,8 +476,6 @@ impl Workspace {
 
     fn master_strip(&mut self, ui: &mut egui::Ui, level: &[f32], height: f32) {
         ui.vertical(|ui| {
-            // Its own width, as the track strips have: last in the row, it
-            // would otherwise get what is left, a letter wide.
             ui.set_width(meter_column_width(level.len()).max(48.0));
             ui.add(egui::Label::new(RichText::new("Mix").strong()).extend());
             let held = self.hold_channels("mix", level);
@@ -571,7 +491,6 @@ impl Workspace {
         });
     }
 
-    /// One bar per channel. `label` is how tests count the bars.
     fn channel_bars(
         &mut self,
         ui: &mut egui::Ui,
@@ -596,7 +515,6 @@ impl Workspace {
         });
     }
 
-    /// The meter beside the viewer with the monitoring mute.
     pub(super) fn viewer_meter(&mut self, ui: &mut egui::Ui, rect: Rect) {
         let level = self.viewer_channels();
         let held = self.hold_channels("viewer", &level);
@@ -623,8 +541,6 @@ impl Workspace {
     }
 }
 
-/// A vertical meter: green, yellow from −12 dBFS, red from −3 dBFS,
-/// with a peak-hold line.
 fn meter(painter: &egui::Painter, rect: Rect, level: f32, hold: f32) {
     painter.rect_filled(rect, CornerRadius::same(2), theme::colors().panel_dark);
     let h = rect.height();
@@ -663,7 +579,6 @@ fn meter(painter: &egui::Painter, rect: Rect, level: f32, hold: f32) {
     );
 }
 
-/// Several channel bars side by side in `rect` (the viewer meter).
 fn paint_meters(painter: &egui::Painter, rect: Rect, levels: &[f32], held: &[f32]) {
     let n = levels.len().max(1);
     let gap = if n > 1 { 2.0 } else { 0.0 };
@@ -707,7 +622,6 @@ mod tests {
             "a new peak replaces"
         );
         assert_eq!(held_level(Some((0.8, HOLD_SECS)), 0.3), 0.3);
-        // Channels don't share a hold: the right can fall while the left stays.
         let left = held_level(Some((0.9, 0.2)), 0.1);
         let right = held_level(Some((0.2, 0.2)), 0.4);
         assert_eq!((left, right), (0.9, 0.4));

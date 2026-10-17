@@ -1,20 +1,13 @@
-//! Numbered image sequences: the run of files a numbered image
-//! belongs to, as one clip.
-
 use std::collections::HashSet;
 use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::model::ImageSequence;
 
-/// A file name split around its number: the last run of digits before the
-/// extension (`shot1_v2.0001.exr`: `shot1_v2.`, `0001`, `.exr`).
 fn split(name: &str) -> Option<(&str, &str, &str)> {
     let stem_end = name.rfind('.').filter(|&i| i > 0).unwrap_or(name.len());
     let stem = &name[..stem_end];
     let end = stem.rfind(|c: char| c.is_ascii_digit())? + 1;
-    // The index is the character's first byte. Step over the whole character:
-    // the one before the digits may not be ASCII (`写真0001.exr`).
     let start = stem[..end]
         .char_indices()
         .rev()
@@ -23,15 +16,10 @@ fn split(name: &str) -> Option<(&str, &str, &str)> {
     Some((&name[..start], &name[start..end], &name[end..]))
 }
 
-/// `%` as FFmpeg's image2 patterns write it.
 fn escape(s: &str) -> String {
     s.replace('%', "%%")
 }
 
-/// The numbered run `path` belongs to: the files in its folder named like it
-/// with other numbers, with no number missing in between. Numbers are
-/// zero-padded to a width when the name or its neighbours show leading
-/// zeros (`frame_000123.png`), else unpadded (`img_9.png`, `img_10.png`).
 pub fn find(path: &Path) -> Result<ImageSequence> {
     let name = path
         .file_name()
@@ -51,8 +39,6 @@ pub fn find(path: &Path) -> Result<ImageSequence> {
         .flatten()
         .filter_map(|e| e.file_name().into_string().ok())
         .collect();
-    // Padded to the number's width if it, or another file of the same
-    // width, starts with a zero.
     let width = digits.len();
     let padded = width > 1
         && names.iter().any(|other| {
@@ -109,14 +95,10 @@ mod tests {
 
     #[test]
     fn a_non_ascii_character_immediately_before_the_digits() {
-        // The byte after that character's start is still inside it. Stepping
-        // one byte used to slice there and panic; the number is still found.
         assert_eq!(split("写真0001.exr"), Some(("写真", "0001", ".exr")));
         assert_eq!(split("é0001.png"), Some(("é", "0001", ".png")));
     }
 
-    /// A folder of empty files, removed when it drops, also when the test
-    /// fails.
     fn folder(names: &[&str]) -> tempfile::TempDir {
         let dir = tempfile::Builder::new()
             .prefix("vidcut-seq-")
@@ -130,7 +112,6 @@ mod tests {
 
     #[test]
     fn padding_shows_in_the_neighbours() {
-        // 123456 has no leading zero, but its folder's other files do.
         let dir = folder(&["c_099999.exr", "c_100000.exr", "c_100001.exr"]);
         let s = find(&dir.path().join("c_100000.exr")).unwrap();
         assert_eq!(
