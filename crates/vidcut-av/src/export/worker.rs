@@ -65,7 +65,7 @@ pub(crate) struct Worker<T, R> {
 impl<T: Send + 'static, R: Send + 'static> Worker<T, R> {
     /// Starts `work` on a thread of its own, fed through a channel that
     /// holds `holds` items. The copies it makes count for this thread's job
-    /// ([`crate::copies`]).
+    /// ([`crate::copies`]), and it yields to players as this thread does.
     pub(crate) fn spawn(
         holds: usize,
         work: impl FnOnce(Inbox<T>) -> Result<R> + Send + 'static,
@@ -77,9 +77,12 @@ impl<T: Send + 'static, R: Send + 'static> Worker<T, R> {
             stop: stop.clone(),
         };
         let copies = crate::copies::current();
+        // It works for whom this thread works ([`crate::first::as_job`]).
+        let yields = crate::first::yields();
         let thread = std::thread::Builder::new()
             .name("vidcut-encode".into())
             .spawn(move || {
+                crate::first::set_yields(yields);
                 let _counting = crate::copies::Guard::maybe(copies);
                 work(inbox)
             })

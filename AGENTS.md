@@ -49,6 +49,6 @@ These are mandatory.
 - [README.md](README.md): features, requirements, build, CLI basics. Keys: [docs/cut-page-spec.md](docs/cut-page-spec.md) §11.
 - [docs/cli.md](docs/cli.md): every command, JSON output and exit codes, live control of a running GUI.
 - [docs/cut-page-spec.md](docs/cut-page-spec.md): the behavioral spec; [docs/deviations.md](docs/deviations.md): where vidcut differs.
-- [docs/decisions/](docs/decisions/): architecture records (preview, export, GUI, agents, player).
+- [docs/decisions/](docs/decisions/): architecture records (preview, export, GUI, agents, player, threads).
 - [docs/layout.md](docs/layout.md): crates and modules; [docs/tools.md](docs/tools.md): debug and test tools; [docs/gotchas.md](docs/gotchas.md): findings not in the records.
 - [docs/roadmap.md](docs/roadmap.md): what comes next; [docs/todo/](docs/todo/): open work, one file per item.

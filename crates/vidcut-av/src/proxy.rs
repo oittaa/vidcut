@@ -967,7 +967,12 @@ fn encode_into(
         Output::Vulkan => (pixel, scaled),
         _ => (pixel, Fitting::none()),
     };
-    let mut maker = Maker::new((width, height, layout), target, output);
+    let mut maker = Maker::new(
+        (width, height, layout),
+        target,
+        output,
+        crate::decode::Reading::Stream,
+    );
     let mut went = None;
     let mut encoding = || -> Result<()> {
         while let Some(src) = reader.next_frame()? {

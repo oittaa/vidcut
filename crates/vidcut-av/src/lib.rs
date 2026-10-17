@@ -21,6 +21,7 @@ pub mod hw;
 pub mod light;
 pub mod parts;
 pub mod player;
+pub mod pool;
 pub mod probe;
 pub mod progress;
 pub mod proxy;

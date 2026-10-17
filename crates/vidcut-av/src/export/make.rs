@@ -7,6 +7,7 @@ use vidcut_core::export::EncoderChoice;
 use vidcut_core::model::Hdr;
 
 use super::normalize::{Normalizer, Relayout, down, shown_size};
+use crate::decode::Reading;
 use crate::decode::VideoReader;
 use crate::error::Result;
 use crate::ffmpeg::{format, frame};
@@ -187,6 +188,8 @@ pub(crate) struct Maker {
     /// Frames as decoded come down shrunk on the GPU to fit this size
     /// ([`shrink_to`](Self::shrink_to)).
     shrink: Option<(u32, u32)>,
+    /// How the frames are asked for, which splits the graphs' work.
+    reading: Reading,
 }
 
 /// What makes one layer's pictures, kept from frame to frame.
@@ -223,7 +226,12 @@ impl Default for Stage {
 impl Maker {
     /// Makes frames into `output`'s pictures of `out` (width, height and
     /// layout) in `target`'s dynamic range (`None`: SDR BT.709).
-    pub(crate) fn new(out: (u32, u32, format::Pixel), target: Option<Hdr>, output: Output) -> Self {
+    pub(crate) fn new(
+        out: (u32, u32, format::Pixel),
+        target: Option<Hdr>,
+        output: Output,
+        reading: Reading,
+    ) -> Self {
         Self {
             out,
             target,
@@ -231,6 +239,7 @@ impl Maker {
             stages: Vec::new(),
             mixing: false,
             shrink: None,
+            reading,
         }
     }
 
@@ -272,6 +281,17 @@ impl Maker {
     }
 
     /// The output's dynamic range (`None`: SDR BT.709).
+    pub(crate) fn reading(&self) -> Reading {
+        self.reading
+    }
+
+    /// Frames are asked for as `reading` has it from now on: the stages
+    /// are made anew for it.
+    pub(crate) fn read_as(&mut self, reading: Reading) {
+        self.reading = reading;
+        self.stages.clear();
+    }
+
     pub(crate) fn target(&self) -> Option<Hdr> {
         self.target
     }
@@ -441,7 +461,7 @@ impl Maker {
             if let Output::Decoded { .. } = self.output {
                 // Kept by the player: in memory freed with the picture,
                 // not a pool's (a filter graph's, libdav1d's).
-                break crate::buffers::owned(&stage.relayout.run(frame)?)?;
+                break crate::buffers::owned(&stage.relayout.run(frame, self.reading)?)?;
             }
             let rebuild = stage
                 .normalizer
@@ -455,6 +475,7 @@ impl Maker {
                     out_h,
                     out_fmt,
                     self.target,
+                    self.reading,
                 )?);
             }
             break stage.normalizer.as_mut().expect("built").run(frame)?;

@@ -31,45 +31,8 @@ pub fn spawn<T: Send + 'static>(
         .name(name.into())
         .spawn(move || {
             if work == Work::Job {
-                lowest_priority();
-                vidcut_av::first::yield_to_players();
+                vidcut_av::first::as_job();
             }
             f()
         })
-}
-
-/// Gives the calling thread the lowest CPU priority. On Linux that is the
-/// idle scheduling class, below nice 19, which the threads it starts later
-/// inherit. On Windows it is the idle priority, which threads don't
-/// inherit: the threads FFmpeg starts for a job run at the normal one. On
-/// macOS it is the utility QoS class, which threads don't inherit either.
-/// Not the background class below it: that keeps to the efficiency cores
-/// and slows the thread's disk access, so a job wouldn't take the cores and
-/// the disk left idle.
-///
-/// Not nice 19: NVIDIA's driver, opening NVENC, copies the calling thread's
-/// nice value onto the process id, which is the main thread, and nothing
-/// unprivileged raises it again. A job at nice 19 left the GUI there. In the
-/// idle class the nice value stays the process's, so the copy changes
-/// nothing.
-fn lowest_priority() {
-    #[cfg(target_os = "linux")]
-    // SAFETY: plain system calls on this thread's own id.
-    unsafe {
-        let param = libc::sched_param { sched_priority: 0 };
-        libc::sched_setscheduler(libc::gettid(), libc::SCHED_IDLE, &param);
-    }
-    #[cfg(windows)]
-    // SAFETY: sets this thread's own priority.
-    unsafe {
-        use windows_sys::Win32::System::Threading::{
-            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_IDLE,
-        };
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
-    }
-    #[cfg(target_os = "macos")]
-    // SAFETY: sets this thread's own class.
-    unsafe {
-        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
-    }
 }

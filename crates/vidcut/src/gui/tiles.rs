@@ -449,6 +449,17 @@ pub fn tile_height(px: f32) -> u32 {
 /// Disk cache trims: at most one in this long, by any worker.
 const TRIM_EVERY: Duration = Duration::from_secs(30);
 
+/// A worker's reader closes after this long without decoding a tile: it
+/// holds an open file, a decoder (on a GPU, a session in video memory) and
+/// the frame it decoded last. The next tile opens one anew.
+const READER_IDLE: Duration = Duration::from_secs(10);
+
+/// How much longer a worker whose reader last decoded `idle` ago waits for
+/// a job before the reader closes; `None` once it is time.
+fn reader_waits(idle: Duration) -> Option<Duration> {
+    READER_IDLE.checked_sub(idle).filter(|d| !d.is_zero())
+}
+
 /// Tiles kept for a block, as a worker last read or wrote them.
 type Block = Vec<(i64, Image)>;
 
@@ -462,7 +473,9 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
         None => FrameReader::default(),
     };
     let mut decoding = crate::preferences::gpu_decoding();
-    let mut reader = reader_for(&decoding);
+    // Made for a tile to decode, and when it last decoded one.
+    let mut reader: Option<FrameReader> = None;
+    let mut used = Instant::now();
     // Blocks read or written lately (a missing file is an empty block),
     // and tiles made but not yet on disk.
     let mut blocks: Vec<(BlockFile, Block)> = Vec::new();
@@ -486,19 +499,39 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
                     w = queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
                     continue;
                 }
-                w = queue.ready.wait(w).unwrap_or_else(|e| e.into_inner());
+                if reader.is_none() {
+                    w = queue.ready.wait(w).unwrap_or_else(|e| e.into_inner());
+                    continue;
+                }
+                match reader_waits(used.elapsed()) {
+                    Some(left) => {
+                        w = match queue.ready.wait_timeout(w, left) {
+                            Ok((w, _)) => w,
+                            Err(e) => e.into_inner().0,
+                        };
+                    }
+                    None => {
+                        // Idle: its file and decoder close, outside the lock.
+                        drop(w);
+                        reader = None;
+                        w = queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
+                    }
+                }
             }
         };
         let picture = from_disk(&job, &mut blocks, &unwritten).or_else(|| {
             let now = crate::preferences::gpu_decoding();
             if now != decoding {
-                reader = reader_for(&now);
+                reader = None;
                 decoding = now;
             }
+            let reader = reader.get_or_insert_with(|| reader_for(&decoding));
             let made = job
                 .pieces
                 .iter()
-                .find_map(|piece| reader.rgba(piece, job.fps, job.width, job.key.height).ok())?;
+                .find_map(|piece| reader.rgba(piece, job.fps, job.width, job.key.height).ok());
+            used = Instant::now();
+            let made = made?;
             if let Some((file, limit)) = &job.disk {
                 let pending = unwritten
                     .entry(file.clone())
@@ -654,6 +687,15 @@ mod tests {
         assert_eq!(tile_frame(100, 80.0, 64, false, 2.0), 320);
         assert_eq!(tile_frame(500, 80.0, 64, false, -1.0), 384);
         assert_eq!(tile_frame(500, 80.0, 64, false, 0.0), 500);
+    }
+
+    #[test]
+    fn an_idle_reader_closes_ten_seconds_after_its_last_tile() {
+        assert_eq!(
+            reader_waits(Duration::from_secs(4)),
+            Some(Duration::from_secs(6))
+        );
+        assert_eq!(reader_waits(Duration::from_secs(10)), None);
     }
 
     #[test]

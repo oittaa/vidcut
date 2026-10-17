@@ -20,8 +20,13 @@ use crate::ffmpeg::{self, ffi};
 pub(crate) struct GpuGraph(ffmpeg::filter::Graph);
 
 impl GpuGraph {
+    /// A stream's graph, its slices on the shared pool ([`crate::pool::graph`]).
     pub(crate) fn new() -> Self {
-        Self(ffmpeg::filter::Graph::new())
+        Self::for_reading(crate::decode::Reading::Stream)
+    }
+
+    pub(crate) fn for_reading(reading: crate::decode::Reading) -> Self {
+        Self(crate::pool::graph(reading))
     }
 
     pub(crate) fn add(

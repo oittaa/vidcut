@@ -5,6 +5,7 @@
 use vidcut_core::model::Hdr;
 
 use super::video::frame_ref;
+use crate::decode::Reading;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, filter, format, frame};
 
@@ -110,7 +111,8 @@ pub(crate) fn down(
 }
 
 impl Normalizer {
-    /// `target`: the output's dynamic range (`None`: SDR BT.709).
+    /// `target`: the output's dynamic range (`None`: SDR BT.709). Its
+    /// graphs split their work as `reading` has it ([`crate::pool::graph`]).
     pub(crate) fn new(
         src: &frame::Video,
         rotation: u16,
@@ -118,9 +120,18 @@ impl Normalizer {
         out_h: u32,
         out_fmt: format::Pixel,
         target: Option<Hdr>,
+        reading: Reading,
     ) -> Result<Self> {
         let zscale = crate::parts::has_filter("zscale");
-        Self::with(src, rotation, (out_w, out_h), out_fmt, target, zscale)
+        Self::with(
+            src,
+            rotation,
+            (out_w, out_h),
+            out_fmt,
+            target,
+            zscale,
+            reading,
+        )
     }
 
     /// [`Normalizer::new`], converting colors with `zscale` or, without
@@ -132,6 +143,7 @@ impl Normalizer {
         out_fmt: format::Pixel,
         target: Option<Hdr>,
         zscale: bool,
+        reading: Reading,
     ) -> Result<Self> {
         let (w, h, fmt) = (src.width(), src.height(), src.format());
         let sar = src.aspect_ratio();
@@ -148,7 +160,7 @@ impl Normalizer {
                 .unwrap_or_default()
         };
         let color = crate::color::Source::of(src);
-        let mut graph = filter::Graph::new();
+        let mut graph = crate::pool::graph(reading);
         let mut args = format!(
             "video_size={w}x{h}:pix_fmt={}:time_base=1/1000000:pixel_aspect={}/{}",
             ffmpeg::ffi::AVPixelFormat::from(fmt) as i32,
@@ -210,7 +222,7 @@ impl Normalizer {
                     ffmpeg::ffi::AVPixelFormat::from(from) as i32
                 );
                 let back = match back {
-                    Some(spec) => Some(simple_graph(&args, &spec)?),
+                    Some(spec) => Some(simple_graph(&args, &spec, reading)?),
                     None => None,
                 };
                 Some(CpuStage {
@@ -295,11 +307,12 @@ impl Normalizer {
     }
 }
 
-/// A graph of `spec` between a source of `args` and a sink.
-fn simple_graph(args: &str, spec: &str) -> Result<filter::Graph> {
+/// A graph of `spec` between a source of `args` and a sink, its work split
+/// as `reading` has it.
+fn simple_graph(args: &str, spec: &str, reading: Reading) -> Result<filter::Graph> {
     let find =
         |name: &str| filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")));
-    let mut graph = filter::Graph::new();
+    let mut graph = crate::pool::graph(reading);
     graph
         .add(&find("buffer")?, "in", args)
         .ctx(|| "creating video source".into())?;
@@ -365,14 +378,16 @@ impl Relayout {
         }
     }
 
-    pub(crate) fn run(&mut self, src: &frame::Video) -> Result<frame::Video> {
+    /// `src` in a layout it passes; the graph's work split as `reading` has
+    /// it.
+    pub(crate) fn run(&mut self, src: &frame::Video, reading: Reading) -> Result<frame::Video> {
         let fmt = src.format();
         if (self.passes)(fmt) {
             return frame_ref(src);
         }
         let key = (src.width(), src.height(), fmt);
         if self.graph.as_ref().is_none_or(|(_, k)| *k != key) {
-            self.graph = Some((Self::build(src)?, key));
+            self.graph = Some((Self::build(src, reading)?, key));
         }
         let (graph, _) = self.graph.as_mut().expect("built");
         graph
@@ -391,7 +406,7 @@ impl Relayout {
         Ok(out)
     }
 
-    fn build(src: &frame::Video) -> Result<filter::Graph> {
+    fn build(src: &frame::Video, reading: Reading) -> Result<filter::Graph> {
         let desc = src
             .format()
             .descriptor()
@@ -425,7 +440,7 @@ impl Relayout {
         let find = |name: &str| {
             filter::find(name).ok_or_else(|| Error::Invalid(format!("no {name} filter")))
         };
-        let mut graph = filter::Graph::new();
+        let mut graph = crate::pool::graph(reading);
         graph
             .add(&find("buffer")?, "in", &args)
             .ctx(|| "creating video source".into())?;
@@ -443,6 +458,7 @@ impl Relayout {
 #[cfg(test)]
 mod tests {
     use super::{Normalizer, Relayout, displayable, fit, shown_size};
+    use crate::decode::Reading;
     use crate::ffmpeg::{color, format::Pixel, frame};
 
     #[test]
@@ -501,7 +517,7 @@ mod tests {
         for (plane, v) in [(0, 100), (1, 90), (2, 170)] {
             f.data_mut(plane).fill(v);
         }
-        let out = Relayout::new().run(&f).unwrap();
+        let out = Relayout::new().run(&f, Reading::Stream).unwrap();
         let samples = |plane: usize, side: usize| -> Vec<u8> {
             let stride = out.stride(plane);
             (0..side)
@@ -559,7 +575,7 @@ mod tests {
                 f.data_mut(plane).fill(v as u8);
             }
         }
-        let out = Normalizer::new(&f, 90, 64, 64, Pixel::RGBA, None)
+        let out = Normalizer::new(&f, 90, 64, 64, Pixel::RGBA, None, Reading::Stream)
             .and_then(|mut n| n.run(&f))
             .unwrap();
         let (stride, data) = (out.stride(0), out.data(0));

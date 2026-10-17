@@ -7,6 +7,8 @@
 //! them. On the GPU, libplacebo converts with the same math
 //! ([`gpu_color`]), and so does the viewer's shader ([`shader_colors`]).
 
+use std::sync::Mutex;
+
 use vidcut_core::model::Hdr;
 
 use crate::ffmpeg::{ffi, format, frame};
@@ -892,46 +894,43 @@ pub(crate) fn write_yuv(rgb: &frame::Video, out: &mut frame::Video, target: Opti
         [(0, h), (1, ch), (2, ch)]
             .map(|(p, rows)| std::slice::from_raw_parts_mut((*raw).data[p], strides[p] * rows))
     };
-    let threads = std::thread::available_parallelism()
-        .map_or(1, |n| n.get())
-        .min(ch);
-    // Chroma rows per thread, and the luma rows they cover.
-    let rows = ch.div_ceil(threads);
-    std::thread::scope(|scope| {
-        let chunks = y_plane
-            .chunks_mut(strides[0] * (rows << sy))
-            .zip(u_plane.chunks_mut(strides[1] * rows))
-            .zip(v_plane.chunks_mut(strides[2] * rows))
-            .enumerate();
-        for (i, ((ys, us), vs)) in chunks {
-            scope.spawn(move || {
-                let first = i * rows;
-                for (dy, row) in ys.chunks_mut(strides[0]).enumerate() {
-                    let y = (first << sy) + dy;
-                    for x in 0..w {
-                        put(row, x, code(16.0, 219.0, luma(pixel(x, y))));
+    // Chroma rows a slice, and the luma rows they cover: the slices run on
+    // the shared pool.
+    let rows = ch.div_ceil(crate::pool::threads().min(ch).max(1));
+    let chunks: Vec<_> = y_plane
+        .chunks_mut(strides[0] * (rows << sy))
+        .zip(u_plane.chunks_mut(strides[1] * rows))
+        .zip(v_plane.chunks_mut(strides[2] * rows))
+        .map(Mutex::new)
+        .collect();
+    crate::pool::run(chunks.len(), &|i| {
+        let mut chunk = chunks[i].lock().unwrap_or_else(|e| e.into_inner());
+        let ((ys, us), vs) = &mut *chunk;
+        let first = i * rows;
+        for (dy, row) in ys.chunks_mut(strides[0]).enumerate() {
+            let y = (first << sy) + dy;
+            for x in 0..w {
+                put(row, x, code(16.0, 219.0, luma(pixel(x, y))));
+            }
+        }
+        let lines = us.chunks_mut(strides[1]).zip(vs.chunks_mut(strides[2]));
+        for (dy, (u_row, v_row)) in lines.enumerate() {
+            let cy = first + dy;
+            for cx in 0..cw {
+                let mut sum = [0f32; 3];
+                let mut n = 0.0;
+                for y in (cy << sy)..((cy + 1) << sy).min(h) {
+                    for x in (cx << sx)..((cx + 1) << sx).min(w) {
+                        let p = pixel(x, y);
+                        (0..3).for_each(|k| sum[k] += p[k]);
+                        n += 1.0;
                     }
                 }
-                let lines = us.chunks_mut(strides[1]).zip(vs.chunks_mut(strides[2]));
-                for (dy, (u_row, v_row)) in lines.enumerate() {
-                    let cy = first + dy;
-                    for cx in 0..cw {
-                        let mut sum = [0f32; 3];
-                        let mut n = 0.0;
-                        for y in (cy << sy)..((cy + 1) << sy).min(h) {
-                            for x in (cx << sx)..((cx + 1) << sx).min(w) {
-                                let p = pixel(x, y);
-                                (0..3).for_each(|k| sum[k] += p[k]);
-                                n += 1.0;
-                            }
-                        }
-                        let [r, g, b] = sum.map(|s| s / n);
-                        let l = luma([r, g, b]);
-                        put(u_row, cx, code(128.0, 224.0, (b - l) / (2.0 * (1.0 - kb))));
-                        put(v_row, cx, code(128.0, 224.0, (r - l) / (2.0 * (1.0 - kr))));
-                    }
-                }
-            });
+                let [r, g, b] = sum.map(|s| s / n);
+                let l = luma([r, g, b]);
+                put(u_row, cx, code(128.0, 224.0, (b - l) / (2.0 * (1.0 - kb))));
+                put(v_row, cx, code(128.0, 224.0, (r - l) / (2.0 * (1.0 - kr))));
+            }
         }
     });
 }
@@ -998,8 +997,8 @@ impl CpuColors {
         c.map(|v| self.to.at(v))
     }
 
-    /// Converts `f`, planar float RGB (`gbrpf32le`), in place, its rows
-    /// shared among the CPU's cores.
+    /// Converts `f`, planar float RGB (`gbrpf32le`), in place, its rows in
+    /// slices on the shared pool.
     pub(crate) fn run(&self, f: &mut frame::Video) {
         assert_eq!(f.format(), format::Pixel::GBRPF32LE);
         let (width, height) = (f.width() as usize, f.height() as usize);
@@ -1007,10 +1006,7 @@ impl CpuColors {
             return;
         }
         let strides = [f.stride(0), f.stride(1), f.stride(2)];
-        let threads = std::thread::available_parallelism()
-            .map_or(1, |n| n.get())
-            .min(height);
-        let rows = height.div_ceil(threads);
+        let rows = height.div_ceil(crate::pool::threads().min(height));
         // SAFETY: the three planes are apart in memory; each slice covers
         // its plane's rows, `stride` bytes apart.
         let planes = unsafe {
@@ -1018,31 +1014,31 @@ impl CpuColors {
             [0, 1, 2].map(|p| std::slice::from_raw_parts_mut((*raw).data[p], strides[p] * height))
         };
         let [g, b, r] = planes;
-        std::thread::scope(|scope| {
-            let chunks = g
-                .chunks_mut(strides[0] * rows)
-                .zip(b.chunks_mut(strides[1] * rows))
-                .zip(r.chunks_mut(strides[2] * rows));
-            for ((g, b), r) in chunks {
-                scope.spawn(move || {
-                    let lines = g
-                        .chunks_mut(strides[0])
-                        .zip(b.chunks_mut(strides[1]))
-                        .zip(r.chunks_mut(strides[2]));
-                    for ((g, b), r) in lines {
-                        let samples = g[..4 * width]
-                            .as_chunks_mut::<4>()
-                            .0
-                            .iter_mut()
-                            .zip(b[..4 * width].as_chunks_mut::<4>().0)
-                            .zip(r[..4 * width].as_chunks_mut::<4>().0);
-                        for ((g, b), r) in samples {
-                            let rgb = [*r, *g, *b].map(f32::from_le_bytes);
-                            let [rv, gv, bv] = self.pixel(rgb).map(f32::to_le_bytes);
-                            (*r, *g, *b) = (rv, gv, bv);
-                        }
-                    }
-                });
+        let chunks: Vec<_> = g
+            .chunks_mut(strides[0] * rows)
+            .zip(b.chunks_mut(strides[1] * rows))
+            .zip(r.chunks_mut(strides[2] * rows))
+            .map(Mutex::new)
+            .collect();
+        crate::pool::run(chunks.len(), &|i| {
+            let mut chunk = chunks[i].lock().unwrap_or_else(|e| e.into_inner());
+            let ((g, b), r) = &mut *chunk;
+            let lines = g
+                .chunks_mut(strides[0])
+                .zip(b.chunks_mut(strides[1]))
+                .zip(r.chunks_mut(strides[2]));
+            for ((g, b), r) in lines {
+                let samples = g[..4 * width]
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(b[..4 * width].as_chunks_mut::<4>().0)
+                    .zip(r[..4 * width].as_chunks_mut::<4>().0);
+                for ((g, b), r) in samples {
+                    let rgb = [*r, *g, *b].map(f32::from_le_bytes);
+                    let [rv, gv, bv] = self.pixel(rgb).map(f32::to_le_bytes);
+                    (*r, *g, *b) = (rv, gv, bv);
+                }
             }
         });
     }

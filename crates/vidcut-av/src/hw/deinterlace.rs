@@ -96,11 +96,11 @@ fn off(f: &frame::Video) -> Result<Vec<BTreeSet<usize>>> {
             .map(|p| upload(&like, p))
             .collect::<Result<Vec<_>>>()?;
         let gpu = through(
-            crate::decode::deinterlacing(&uploaded[0], time_base)?,
+            crate::decode::deinterlacing(&uploaded[0], time_base, crate::decode::Reading::Stream)?,
             uploaded,
         )?;
         let cpu = through(
-            crate::decode::deinterlacing(&pictures[0], time_base)?,
+            crate::decode::deinterlacing(&pictures[0], time_base, crate::decode::Reading::Stream)?,
             pictures,
         )?;
         if (gpu.len(), cpu.len()) != (3, 3) {

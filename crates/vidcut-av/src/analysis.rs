@@ -154,7 +154,7 @@ fn stats_on(
     unsafe { (*ctx.as_mut_ptr()).pkt_timebase = tb.into() };
     ctx.set_threading(codec::threading::Config {
         kind: codec::threading::Type::Frame,
-        count: 0,
+        count: crate::pool::threads_for(crate::decode::Reading::Stream),
     });
     let id = stream.parameters().id();
     let mut decoder =
@@ -407,7 +407,7 @@ pub fn mix_loudness(
     crate::init();
     let channels = channels.max(1);
     let mut mix = AudioMix::new(lanes, rate, channels, declick_ms);
-    let mut graph = filter::Graph::new();
+    let mut graph = crate::pool::graph(crate::decode::Reading::Stream);
     let layout = match channels {
         1 => "mono",
         2 => "stereo",
