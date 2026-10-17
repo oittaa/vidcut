@@ -2,7 +2,7 @@
 
 **When:** next time on a Windows computer with an AMD or Intel GPU. Direct3D 11 decodes there; NVIDIA's GPUs decode on NVDEC.
 
-Each picture the player keeps from Direct3D 11 is copied into a texture in frames of its own, freed with the picture (preview.md §3). That code is only compiled by CI and has never run on a Windows GPU. Check that pictures still show, and that the GPU's memory stops growing where clips of two sizes take turns.
+Each picture the player keeps from Direct3D 11 is copied into a texture in frames of its own, freed with the picture ([design/gpu.md](../design/gpu.md#each-decoders-frames)). That code is only compiled by CI and has never run on a Windows GPU. Check that pictures still show, and that the GPU's memory stops growing where clips of two sizes take turns.
 
 In a new project with a 4K clip and a 1080p clip (H.264 or HEVC), one after the other on the timeline:
 

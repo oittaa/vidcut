@@ -1,6 +1,6 @@
 # More HDR metadata
 
-**When:** later. What decision D46 (export.md §4, HDR metadata) leaves out.
+**When:** later. What decision D46 ([design/export.md](../design/export.md#preparing)) leaves out.
 
 - **Dolby Vision for pictures without it.** Dolby Vision is written only when every picture has it, and black before the first picture leaves it out. Clips without it would need an RPU made from their measured light (level 1: the minimum, average and peak in PQ); black at the start could take the first picture's.
 - **HDR10+ that stops partway through an HEVC file.** FFmpeg's HEVC decoder puts the last HDR10+ SEI on every frame after it (gotchas), so those frames keep a stale one instead of HDR10+ made from their light, as AV1 decoded by libdav1d gets. Telling them apart needs the packets: which carry an HDR10+ SEI (`hdr::insert_hdr10plus` writes them; a reader would find them), by presentation time, and the decoded frames of the others stripped of it.

@@ -2,7 +2,7 @@
 
 **When:** next, NVIDIA first ([gpu-frames.md](gpu-frames.md)).
 
-**Where it is:** ProRes decodes on NVIDIA's GPU through FFmpeg's Vulkan decoder, the viewer shows it from there (preview.md §3), exports and proxies take its frames on the GPU into NVENC and Vulkan's ProRes encoder (export.md §5, preview.md §6), and automatic proxies are ProRes Proxy there (spec D41). What is open is below.
+**Where it is:** ProRes decodes on NVIDIA's GPU through FFmpeg's Vulkan decoder, the viewer shows it from there ([design/gpu.md](../design/gpu.md)), exports and proxies take its frames on the GPU into NVENC and Vulkan's ProRes encoder ([design/gpu.md](../design/gpu.md#each-decoders-frames)), and automatic proxies are ProRes Proxy there (spec D41). What is open is below.
 
 ## Open
 

@@ -1,0 +1,174 @@
+# The running GUI
+
+With a window open, the UI thread draws egui and turns gestures into requests, and the `vidcut-session` thread, the live core, owns the open project, the viewer's player and all the viewer shows. The UI never waits for the core: it sends messages and reads the latest snapshot. Routing and the editor are in [requests](requests.md), the player and the viewer's drawing in [playback](playback.md), priorities in [threads](threads.md).
+
+The core and the threads around it:
+
+```mermaid
+flowchart LR
+  UI["main thread<br>eframe App, Workspace"]
+  S["vidcut-session<br>Live::run"]
+  ASK["vidcut-ask<br>Ask::send"]
+  IPC["vidcut-ipc<br>accepts clients"]
+  CONN["vidcut-ipc-conn<br>one per connection"]
+  STEP["vidcut-task, vidcut-make,<br>vidcut-measure"]
+  JOB["vidcut-j1, vidcut-j2, …<br>export or proxy jobs"]
+  WORK["vidcut-worker-N<br>filmstrips, waveforms"]
+  MISS["vidcut-missing-media"]
+  WATCH["notify callbacks, vidcut-look<br>project, preferences, themes, OS look"]
+  TILES["vidcut-tiles-N<br>timeline tiles"]
+
+  UI -->|"Msg::Request"| S
+  S -->|"Snapshot, request_repaint"| UI
+  S -->|"UiTask in Port"| UI
+  UI -->|"spawns"| ASK
+  ASK -->|"Msg::Request with a Reply"| S
+  IPC -->|"spawns"| CONN
+  CONN -->|"Msg::Request with a Reply"| S
+  S -->|"ReplyEvent"| CONN
+  S -->|"spawns per Step"| STEP
+  STEP -->|"Msg::TaskDone, Made, Measured"| S
+  S -->|"its turn: gate channel"| JOB
+  JOB -->|"Msg::JobPlanned, JobProgress, JobDone"| S
+  S -->|"Workers::run"| WORK
+  WORK -->|"Msg::Thumbs, Waveform"| S
+  MISS -->|"Msg::Missing"| S
+  WATCH -->|"Msg::FileChanged, PreferencesChanged"| S
+  UI -->|"queue: Mutex, Condvar"| TILES
+  TILES -->|"pictures: mpsc"| UI
+```
+
+The viewer and the players:
+
+```mermaid
+flowchart LR
+  S["vidcut-session<br>live::player::Player"]
+  UI["main thread<br>App::ui, Viewer::sync"]
+  V["vidcut-viewer<br>Screen::draw"]
+  subgraph engine ["engine: vidcut_av::player::Player"]
+    PV["vidcut-play-video<br>decodes pictures"]
+    PA["vidcut-play-audio<br>mixes into the Ring"]
+    AO["vidcut-audio-out<br>holds the cpal stream"]
+  end
+  CELLS["two-up engines<br>vidcut-play-video, -audio, -windows"]
+
+  S -->|"set_plan, seek, play"| engine
+  PV -->|"on_picture: Msg::Picture"| S
+  PV -.->|"on_picture: ViewerHandle::wake"| V
+  S -->|"Renderer::attach, present, capture_viewer (Condvar)"| V
+  V -->|"Msg::Presented, Msg::Captured"| S
+  V -->|"Player::present(now)"| engine
+  PA -->|"Ring, pulled by the cpal callback"| AO
+  V -->|"Gate::pass waits for a UI frame"| UI
+  V -->|"target texture, request_repaint"| UI
+  UI -->|"Cells::show, follow"| CELLS
+  CELLS -->|"on_picture: request_repaint"| UI
+```
+
+## The UI thread
+
+`gui::run` runs eframe with `App` on the main thread. `App::new` starts the viewer thread, the core (`live::start`) with `Port` as its `Renderer`, and the IPC server. Each frame, `App::logic` runs the `UiTask`s the core queued in `Port` (captures, window and GUI changes, trims, quit); `App::ui` takes the viewer's target (`Viewer::sync`) and calls `Workspace::ui`, which reads `Handle::snapshot` once and draws from it. Both hold the `Gate` open for the viewer's GPU submissions. After each frame the UI leaves its `GuiState` in `Port`.
+
+A gesture is one request: `Workspace::send` calls `Handle::request`, a `Msg::Request` with `Origin::Gui` and no reply; a failure comes back as a notice. Where the UI needs the answer (presets, export plans, preferences), `Ask::send` calls `Handle::call` on a `vidcut-ask` thread and leaves the result in a slot.
+
+## The core
+
+`live::start` runs `Live::run` on `vidcut-session`. Everything reaches it as a `Msg` on one channel; `Handle`, cheap to clone, holds the sender and the latest snapshot. Each pass:
+
+1. `Live::tick`: a due timeline reload, a due present, the playhead while playing, the waits.
+2. `Live::publish`: a new immutable `Snapshot` if anything changed, swapped into the `Handle`'s mutex; then `notify` repaints the UI and wakes the viewer.
+3. The pass's answers go out, after the snapshot that shows them.
+4. It waits for messages, at most until the next timer.
+
+**Why:** the project, player and selection change on one thread, so nothing locks them, and the UI only reads finished snapshots. A client that looks right after its answer sees the result.
+
+The `Snapshot` carries the project, players, selection, log, notices, filmstrips, waveforms, missing media and jobs. `Port` passes `Renderer::attach`, `Renderer::present` and `Renderer::capture_viewer` to the viewer thread, the rest to the UI.
+
+## Steps and waits
+
+`Live::request` checks the expected project and `if_rev`, starts media exports as jobs, and calls `Live::dispatch`, which returns a `Step`:
+
+| Step | Runs | Then |
+|---|---|---|
+| `Now` | here: edits (`Live::edit`), queries, play, pause | the answer |
+| `Wait` | nothing: seeks, steps, screenshots, `jobs.wait` join the waits | `Live::tick` finds its `Until` met |
+| `Task` | `vidcut-task`, at its `Work`: plans, frames, storyboards, analyses, project-less requests, screenshots, UI answers | `Msg::TaskDone` |
+| `Make` | `vidcut-make`: a project from an OpenTimelineIO file | `Msg::Made`; the core opens it |
+| `Measure` | `vidcut-measure`, a job: measuring for Ripple Delete Silence or Detect Scene Cuts, unpacking an `.otioz` | `Msg::Measured`; the edit runs here |
+| `Encode` | a job thread: proxies | `Msg::Measured`; the edit records them |
+
+Work off the core uses a copy of the project from the request's arrival.
+
+`Until` names what a request waits for:
+- `Shown`: a seek, step, load or switch is on screen at its frame. A seek elsewhere first fails it with CONFLICT; the GUI's own just ends.
+- `Settled`, then `Capture`: a viewer screenshot waits for the latest motion, then the picture (`Msg::Captured`).
+- `Job`: `jobs.wait`, until the job ends.
+
+All but an untimed `jobs.wait` have a deadline.
+
+## The open project
+
+`OpenProject` keeps the `Store`, the `Editor`, and the file's text and stamp as last read or written. `OpenProject::apply` reads the file again first if its stamp moved; a mutation does that under `Store::lock` and saves with `Store::save` before the reply. History compaction (`Store::compact`) runs on `vidcut-history`. A `notify` watcher on the file's folder sends `Msg::FileChanged`, and `OpenProject::reload` reads the file under the lock. The file is the source of truth ([deviation X1](../deviations.md#x1-projects-are-always-saved-standalone-json-files)); [requests](requests.md) covers outside changes and undo.
+
+## Jobs
+
+`export.start` to a media file and `proxy.generate` are jobs: a `JobInfo` in the snapshot, a cancel flag and a thread (vidcut-j1, vidcut-j2, …). `jobs::Turns` lets one job encode at a time, exports ahead of waiting proxies. A job waits at its gate channel for its turn: an export once its files are planned (`Msg::JobPlanned`), a proxy job before it starts. `jobs.cancel` sets the flag and closes a queued job's gate, so it wakes, cancelled; a client that disconnects cancels its foreground job. A `background` request, as the GUI's are, is answered once the files are planned, others when the job ends. Automatic proxies are the core's own `proxy.generate` (`Origin::Session`).
+
+## Missing media
+
+`MissingWatch` runs `vidcut-missing-media`, which looks at the media's paths after each project change and every few seconds, and sends `Msg::Missing` when the set changes. Missing means absent, or a path from another system. The UI marks them in the pool and timeline, offers Relink Media (`media.relink`) and shows Media Offline ([spec §3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675)).
+
+**Why:** a stalled network drive can hold a file check for long.
+
+## IPC and the registry
+
+`App::new` calls `ipc::server::start` on `ipc::registry::socket_path`. `vidcut-ipc` starts a `vidcut-ipc-conn` thread per connection. Each JSON-RPC line goes to `Handle::call` with `Origin::Ipc`; progress goes back as notifications, and a closed connection cancels. `Live::register` writes this GUI's entry (pid, socket, open project) at start and on each project open; `Live::shutdown` removes it. The CLI and MCP find the GUI there ([requests](requests.md)).
+
+## The command log
+
+`Live::finish` ends every request. Except quiet ones (state queries, the GUI's lookups, dry runs, scrubbing, drags, search as typed), it adds a `LogEntry`: origin, method and params, a summary in words (`vidcut_core::describe::describe`), success or error, the revision, and whether the project changed. The capped log shows in the GUI and in `gui.log`.
+
+## What the GUI computes itself
+
+- **Trims in progress.** The UI runs `vidcut_core::ops` on a clone of the snapshot's project for Dynamic Trim's drawing and two-up frames (`dynamic_preview`), and to try a trim before sending it. `Workspace::trim_sent` shows that copy until the core's revision catches up (`Workspace::shown_project`).
+- **View state.** The edit point selected, the target track, zoom and Timeline Options (in `timeline.json`), the windows open. Requests reach it through `Renderer::gui`.
+- **Timeline tiles**, decoded by `Tiles` on `vidcut-tiles-N`.
+- **The two-up**: `Cells` owns its players on the UI thread; `Screens` draws them.
+
+## From a key press to a frame
+
+Ctrl+B splits at the playhead ([spec §8.5](../cut-page-spec.md#85-split-pp-646-723-950)):
+
+```mermaid
+sequenceDiagram
+  participant UI as main thread (Workspace)
+  participant S as vidcut-session (Live)
+  participant E as engine (vidcut-play-video)
+  participant V as vidcut-viewer
+  UI->>S: Msg::Request edit.split, from Handle::request
+  Note over S: Live::edit, OpenProject::apply<br>Store::lock, Editor::apply, Store::save
+  S->>S: project_changed, then Live::finish logs it
+  S->>S: Live::tick, refresh_timeline, render::flatten_lanes
+  S->>E: set_plan, a new motion
+  S-->>UI: Live::publish Snapshot, request_repaint
+  UI->>UI: Workspace::ui draws the split clip
+  opt the frame's picture isn't kept
+    E-->>S: on_picture, Msg::Picture
+  end
+  S->>V: Renderer::present
+  V->>E: Player::present(now)
+  V->>UI: Gate::pass wakes the UI
+  UI-->>V: App::logic holds the Gate open
+  V->>V: Screen::draw
+  V-->>S: Msg::Presented, the motion is shown
+  V-->>UI: request_repaint
+  UI->>UI: Viewer::sync shows the new target
+```
+
+## Code
+
+- `crates/vidcut/src/gui/app.rs`, `crates/vidcut/src/gui/workspace.rs`, `crates/vidcut/src/gui/export.rs`
+- `crates/vidcut/src/gui/video.rs`, `crates/vidcut/src/gui/gate.rs`, `crates/vidcut/src/gui/cells.rs`, `crates/vidcut/src/gui/tiles.rs`, `crates/vidcut/src/gui/timeline/`
+- `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/snapshot.rs`, `crates/vidcut/src/live/project.rs`, `crates/vidcut/src/live/jobs.rs`
+- `crates/vidcut/src/live/missing.rs`, `crates/vidcut/src/live/workers.rs`, `crates/vidcut/src/live/player.rs`
+- `crates/vidcut/src/ipc/server.rs`, `crates/vidcut/src/ipc/registry.rs`

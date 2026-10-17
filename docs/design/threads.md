@@ -1,0 +1,84 @@
+# Threads
+
+vidcut uses std threads, channels, mutexes, condvars and atomics, and no async runtime or pool crate. Each thread does one thing; all but some scoped helpers are named. The app starts its named threads through `threads::spawn`, setting their priority. How the GUI's threads talk is in [live](live.md).
+
+```mermaid
+flowchart LR
+  SP["threads::spawn<br>Work::Job"] --> AJ["first::as_job"]
+  AJ -->|"CPU class"| LP["first::lowest_priority"]
+  AJ -->|"thread-local flag"| Y["first::yield_to_players"]
+  Y -->|"decoding calls"| W["first::wait<br>between frames"]
+  C["first::Claim<br>vidcut-play-video"] -->|"held: wait blocks"| W
+  Y -->|"picks"| JP["vidcut-cpu-job-N<br>the jobs' pool"]
+```
+
+## The threads
+
+Priority: **interactive** and **job** are the `Work` kinds; **inherited** sets nothing (on Linux, the starter's class); **starter's** also copies the starter's yield flag.
+
+| Thread | Started by | Does | Priority |
+|---|---|---|---|
+| main | the OS | `gui::run`, a CLI request, or `mcp::serve` | default |
+| `vidcut-session` | `live::start` | `Live::run` | interactive |
+| `vidcut-viewer` | `Viewer::start` | draws the viewer | interactive |
+| `vidcut-ipc`, `vidcut-ipc-conn` | `ipc::server::start`; one per connection | accepts; serves one | interactive |
+| `vidcut-mcp-call` | `mcp::serve`, per tool call | one MCP call | interactive |
+| `vidcut-task`, `vidcut-make`, `vidcut-measure` | the core, per `Step` | their step | task: its `Work`; make: interactive; measure: job |
+| vidcut-j1, vidcut-j2, … | `Live::start_export`, `Live::start_encode` | an export or proxy job | job |
+| `vidcut-history` | `OpenProject::apply` | `Store::compact` | job |
+| `vidcut-worker-N`, `vidcut-tiles-N` | `Workers::new`, `Tiles::begin_frame` | filmstrips and waveforms; timeline tiles | job |
+| `vidcut-missing-media`, `vidcut-look` | `MissingWatch::start`, `look::watch` | media files; the OS's look | interactive |
+| `vidcut-ask`, `vidcut-file-dialog`, `vidcut-import-dialog`, `vidcut-project-dialog`, `vidcut-audio-devices`, `vidcut-show-in-folder` | `Ask::send`, `Picked::ask`, `Workspace::import_media`, `Workspace::pick_project`, `Workspace::open_preferences`, `file_manager::show` | UI helpers | interactive |
+| `vidcut-quit`, `vidcut-exit-watch` | `Port::quit`, `threads::end_within` | quit fallback, exit watchdog | interactive |
+| `vidcut-viewer-close`, `vidcut-two-up-close`, `vidcut-frees-imports` | `threads::closing` | drop players, Vulkan imports | interactive |
+| unnamed, scoped | `ipc::client::call`, `session::run_with`, `storyboard::render` | cancel watch, headless proxy encode, storyboard pictures | inherited |
+| `vidcut-play-video`, `vidcut-play-audio`, `vidcut-play-windows` | `Player::new`; windows once followed | an engine's decoding, mix, two-up windows | inherited |
+| `vidcut-audio-out` | `CpalOutput`, `PacedOutput` | the device's stream, or paced silence | inherited |
+| `vidcut-scrub` | `Scrubber::new` (unused by the app) | scrubbed sound | inherited |
+| `vidcut-encode` | `Worker::spawn` | an output's encoders and muxer | starter's |
+| `vidcut-open` | `Ahead::start` | opens sources ahead | starter's |
+| unnamed, scoped | `light::analysis`; `analysis::picture_stats` | HDR light; frame scores | starter's; inherited |
+| `vidcut-cpu-N`, `vidcut-cpu-job-N` | the first `pool::run` or `pool::give` | the two CPU pools | inherited; lowest class |
+| `vidcut-give-back` | `buffers::give_back` | `malloc_trim` (Linux, glibc) | inherited |
+
+Libraries start their own (FFmpeg, GPU drivers, CUDA, cpal, PipeWire, `notify`, zbus, ctrlc).
+
+## `threads::spawn` and `Work`
+
+`threads::spawn(name, work, f)` names the thread and, for `Work::Job`, calls `vidcut_av::first::as_job` first. `Work::Interactive` is work someone waits on; `Work::Job` is media work nobody watches frame by frame (exports, proxies). `threads::closing` keeps the handle for `threads::join_closing`.
+
+## Job priority
+
+`first::as_job` gives the thread the lowest CPU class (the idle class on Linux) and sets its yield flag. Decoding loops call `first::wait` between frames; on a yielding thread it blocks while any `first::Claim` is held, until a cancel. An engine's `vidcut-play-video` claims while it plays or its viewer waits for a picture.
+
+**Why:** jobs and players share the GPU's decoder, which no CPU priority reaches.
+
+## The CPU pools
+
+There are two pools (`crates/vidcut-av/src/pool.rs`). A yielding caller uses the jobs' pool, whose threads set the lowest class themselves, so that work runs at job priority everywhere. Each pool has a thread fewer than its share of cores, as the caller works too.
+
+- `pool::run` splits a call into slices, works on them beside the pool and returns when all are done, oldest work first.
+- `pool::graph` makes every FFmpeg filter graph. It sets the graph's `execute` callback, so a filter's slices go through `pool::run` and the graph starts no threads.
+- Tasks (`crates/vidcut-av/src/pool/tasks.rs`) decode frames that stand alone, such as image sequences (`decode::standalone`), on decoders each pool thread keeps until idle. They come back in order; one not started yet runs on the thread that wants it.
+
+## Decoders belong to their readers
+
+Every video decoder is a `VideoReader`'s: opened with it, used on its thread, closed when it drops (`decode::open_readers` counts them). Readers on a GPU share its `GpuDecoder` device but not their decoders, and a GPU decoder takes one thread. On the CPU, frames that stand alone decode on the pool; other streams take FFmpeg frame threads, as many as `pool::threads_for` gives: fewer on a job's thread, one for single frames.
+
+## How the process ends
+
+The CLI and MCP return from `main`. When the GUI's window closes, `App::on_exit` runs on the UI thread:
+
+1. `threads::end_within` starts `vidcut-exit-watch`; `threads::ending` marks each stage.
+2. `Handle::shutdown` sends `Msg::Shutdown`, and the UI joins `vidcut-session`. `Live::shutdown` cancels the jobs, waits briefly, deletes partial files of any still running, answers waiting clients, and unregisters.
+3. eframe drops the `App`: the viewer thread is joined and its engine dropped on `vidcut-viewer-close`; `Tiles` joins its workers; `Cells` closes the two-up.
+4. `gui::run` calls `threads::join_closing`, then `threads::exit_now`, which flushes output and, on Unix, ends at once, skipping exit handlers.
+
+Threads still running end with the process. If ending takes too long, the watchdog prints the stage and, on Linux, each thread's wait channel, then aborts under `VIDCUT_DEBUG`, else exits with 1. For `gui.quit`, `vidcut-quit` shuts the core down and exits if the window doesn't close in time.
+
+## Code
+
+- `crates/vidcut/src/threads.rs`, `crates/vidcut-av/src/first.rs`, `crates/vidcut-av/src/pool.rs`
+- `crates/vidcut-av/src/decode.rs`, `crates/vidcut-av/src/decode/standalone.rs`
+- `crates/vidcut-av/src/export/worker.rs`, `crates/vidcut-av/src/export/ahead.rs`
+- `crates/vidcut/src/gui/mod.rs`, `crates/vidcut/src/gui/app.rs`

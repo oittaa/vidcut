@@ -30,7 +30,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
   - a live plan (`export.plan`: the encoder that will run, the files and their lengths) before anything is written
   - the same export as a shell command, ready to copy
   - saving the settings as a user preset, optionally added to Quick Export (p. 790)
-  - loudness normalization to a target in LUFS (`audio.loudness`; [decisions/agents.md](decisions/agents.md) §5), like the Deliver page's Normalize Audio (p. 4105)
+  - loudness normalization to a target in LUFS (`audio.loudness`; [design/export.md](design/export.md#sound)), like the Deliver page's Normalize Audio (p. 4105)
 
   Every export is a job: a Jobs window lists them with progress, ETA and Cancel, including exports started from the CLI. Jobs run one at a time, in order, like the Deliver page's render queue (p. 4130). Quitting while exports run asks first.
 - **Why:** vidcut has no Deliver page, and the user requires these export options. The plan and the command make every GUI export reproducible from a script. A short row is quicker to choose from. AV1 makes the smallest files at a given quality, YouTube and other sites take it, and current GPUs encode it in hardware as fast as H.264; H.265 has replaced H.264 for masters.
@@ -43,7 +43,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 ## X5. Scripting additions (no Cut-page behavior changes)
 - **Exact-frame insert and overwrite:** `edit.insert --at` and `edit.overwrite --at` are API-only. The Cut page's Smart Insert can only insert at an existing edit point (p. 697). Scripts need deterministic, frame-exact placement that doesn't depend on a playhead.
 - **Command log panel:** shows every action as the request it sent, from any client (GUI or agent). A click copies it as a `vidcut rpc` command, which teaches the API.
-- **Live control of the running GUI** ([decisions/gui.md](decisions/gui.md)):
+- **Live control of the running GUI** ([design/live.md](design/live.md)):
   - CLI commands for an open project run inside the GUI, so humans and agents edit the same session.
   - Live-only commands drive it: `player.*` (seek, step, play, mute: the viewer's monitoring mute), `viewer.*`, `selection.*` (clips, media and an edit point), `gui.screenshot` (the viewer picture, or the whole window), `gui.window`, `gui.log`, `gui.target`, `gui.timeline` (the zoom and Timeline Options), `gui.state`, and `pool.set` (the bin and sort order the pool shows, which Source Tape follows, its view and its search).
 - **Clipboard as data:** `edit.copy` returns the clips as JSON, and `edit.paste --clips` pastes such JSON into any project. In the GUI, Ctrl+C also puts that JSON on the system clipboard.
@@ -142,7 +142,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X10. An MCP server for AI agents
 - **Resolve:** scripting is a Python/Lua API for Studio (Workspace > Scripts, outside the Cut page chapters).
-- **vidcut:** `vidcut mcp` serves the Model Context Protocol on stdin/stdout, every request method a tool ([decisions/agents.md](decisions/agents.md) §1). [cli.md](cli.md) shows how to connect an agent.
+- **vidcut:** `vidcut mcp` serves the Model Context Protocol on stdin/stdout, every request method a tool ([design/requests.md](design/requests.md)). [cli.md](cli.md) shows how to connect an agent.
 - **Why:** the user wants vidcut drivable by AI agents. MCP is how agents discover and call tools; generating the tools from the request schema keeps them complete and in step with the CLI.
 
 ## X11. Dynamic Trim and Ripple Delete Silence, simplified
@@ -154,7 +154,7 @@ Settling something the manual leaves open is a decision, not a deviation; decisi
 
 ## X12. Preferences hold only what vidcut needs
 - **Resolve:** the Preferences window has System and User panels with many settings: hardware, media storage, playback, the UI (p. 94). Caches and proxies are set up in the project settings and preferences (pp. 191–218).
-- **vidcut:** File > Preferences (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`: GPU acceleration (everything on the CPU when off), GPU decoding (off: the CPU decodes) and the GPU that decodes and encodes (automatic, or one of the computer's), the player's memory for decoded pictures (automatic unless set: [decisions/player.md](decisions/player.md) §3) and its audio device, the thumbnail disk cache and its limit, the timeline's picture memory, and the proxy rules, size and codec. `preferences.get` and `preferences.set` read and change them, from the CLI (`vidcut preferences`), IPC and MCP like everything else.
+- **vidcut:** File > Preferences (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`: GPU acceleration (everything on the CPU when off), GPU decoding (off: the CPU decodes) and the GPU that decodes and encodes (automatic, or one of the computer's), the player's memory for decoded pictures (automatic unless set: [design/playback.md](design/playback.md#the-engine)) and its audio device, the thumbnail disk cache and its limit, the timeline's picture memory, and the proxy rules, size and codec. `preferences.get` and `preferences.set` read and change them, from the CLI (`vidcut preferences`), IPC and MCP like everything else.
 - **Why:** a preference belongs here only once vidcut has a behavior to choose. A plain TOML file can be edited by hand, kept in dotfiles, and changed by agents.
 
 ## X13. Deinterlacing has one quality
