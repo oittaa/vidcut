@@ -11,6 +11,8 @@ use crate::export::DECLICK_MS;
 use crate::export::audio::AudioMix;
 use crate::stretch::Stretch;
 
+const SILENT_WAIT: Duration = Duration::from_secs(1);
+
 const AHEAD_SECS: f64 = 0.1;
 
 const CHUNK_SECS: f64 = 0.01;
@@ -75,15 +77,17 @@ pub(crate) fn run(shared: Arc<Shared>) {
         p.sync(&snap);
         let wait = if p.waiting.is_some() {
             Duration::from_millis(1)
-        } else {
+        } else if p.run.is_some() {
             Duration::from_millis(5)
+        } else {
+            SILENT_WAIT
         };
         match p.produce() {
             Ok(true) => {}
-            Ok(false) => p.shared.wait_any(wait),
+            Ok(false) => p.shared.wait_changes(snap.changes, wait),
             Err(e) => {
                 p.shared.fail(e.to_string());
-                p.shared.wait_any(wait);
+                p.shared.wait_changes(snap.changes, wait);
             }
         }
     }

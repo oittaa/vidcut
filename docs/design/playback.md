@@ -104,7 +104,7 @@ With `gpu.decoding` on, the reader decodes on `hw::GpuDecoder::best` where it ca
 
 ## Sound
 
-`audio::run` reads `export::audio::AudioMix`, the export's mixer: lanes sample-exact, clip gains, cross fades, de-click fades at cuts, and clips at other speeds with their pitch kept (spec D48). Fader gains (`AudioMix::set_lane_db`) and the mute go on top; muted, the clock runs on. Other play speeds go through `Stretch`, which keeps the pitch; backward, blocks are read forward and reversed. The `Ring` holds a short queue, one writer and one reader without locks; a seek, pause or new plan empties it. cpal's callback calls `AudioSource::fill`, which pops it, pads with silence and records `Heard`, never locking or allocating.
+`audio::run` reads `export::audio::AudioMix`, the export's mixer: lanes sample-exact, clip gains, cross fades, de-click fades at cuts, and clips at other speeds with their pitch kept (spec D48). Fader gains (`AudioMix::set_lane_db`) and the mute go on top; muted, the clock runs on. Other play speeds go through `Stretch`, which keeps the pitch; backward, blocks are read forward and reversed. The `Ring` holds a short queue, one writer and one reader without locks; a seek, pause or new plan empties it. cpal's callback calls `AudioSource::fill`, which pops it, pads with silence and records `Heard`, never locking or allocating. So while sound plays, or a scrub snippet waits for room, the audio thread polls the ring; with neither, it sleeps until `Control` changes (`Shared::notify`).
 
 A dragged mixer fader sends `mixer.preview`; `Player::preview_fader` makes it a lane gain (`Player::set_lane_gain`), heard at once with no new plan.
 
