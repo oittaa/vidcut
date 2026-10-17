@@ -46,6 +46,10 @@ impl Folders {
         Self(Arc::new(Mutex::new(saved)))
     }
 
+    pub fn forget(&self) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Saved::default();
+    }
+
     pub fn get(&self, kind: Kind) -> Option<PathBuf> {
         let mut saved = self.0.lock().unwrap_or_else(|e| e.into_inner());
         saved.slot(kind).clone().filter(|d| d.is_dir())

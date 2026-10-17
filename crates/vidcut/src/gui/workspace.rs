@@ -475,6 +475,12 @@ impl Workspace {
         }
     }
 
+    pub(super) fn forget_view_state(&mut self) {
+        self.folders.forget();
+        self.timeline.options = super::timeline::Options::default();
+        self.recent.clear();
+    }
+
     pub(super) fn after_reset(&mut self) {
         self.folders = super::folders::Folders::load();
         self.timeline.options = super::timeline::Options::load();

@@ -1176,3 +1176,40 @@ fn reset_deletes_settings_caches_and_state_but_keeps_presets() {
         [false, true, false, false]
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn reset_refuses_while_another_gui_runs() {
+    let s = Sandbox::new("reset-gui");
+    let d = s.dir.path();
+    let instances = d.join("run/vidcut/instances");
+    std::fs::create_dir_all(&instances).unwrap();
+    let socket = instances.join("gui.sock");
+    std::fs::write(&socket, "").unwrap();
+    let me = std::process::id();
+    std::fs::write(
+        instances.join(format!("{me}.json")),
+        serde_json::json!({ "pid": me, "socket": socket, "project": null, "version": "test" })
+            .to_string(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(d.join("config/vidcut")).unwrap();
+    std::fs::write(d.join("config/vidcut/preferences.toml"), "x").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_vidcut"))
+        .env("XDG_STATE_HOME", d.join("state"))
+        .env("XDG_RUNTIME_DIR", d.join("run"))
+        .env("XDG_CONFIG_HOME", d.join("config"))
+        .env("XDG_CACHE_HOME", d.join("cache"))
+        .env_remove("VIDCUT_SOCKET")
+        .env_remove("VIDCUT_PROJECT")
+        .args(["--json", "reset"])
+        .output()
+        .expect("run vidcut");
+    assert_eq!(
+        (
+            out.status.code(),
+            d.join("config/vidcut/preferences.toml").exists()
+        ),
+        (Some(5), true)
+    );
+}

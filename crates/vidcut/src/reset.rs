@@ -20,13 +20,30 @@ impl Dirs {
 }
 
 pub fn run(presets_and_themes: bool, dry_run: bool) -> Result<Value> {
-    let open: Vec<PathBuf> = crate::ipc::registry::list()
+    let running = crate::ipc::registry::list();
+    if let Some(other) = running.iter().find(|i| i.pid != std::process::id()) {
+        return Err(Error::conflict(format!(
+            "a vidcut GUI is running (pid {}), and it would write its settings back: close it \
+             first, or use Reset vidcut… in its Preferences",
+            other.pid
+        )));
+    }
+    let dirs = Dirs::here();
+    let mut keep: Vec<PathBuf> = running
         .into_iter()
         .filter_map(|i| i.project)
         .filter_map(|p| vidcut_core::store::Store::open(&p).ok())
         .map(|s| s.history_path().to_path_buf())
         .collect();
-    let (removed, kept) = plan(&Dirs::here(), presets_and_themes, &open);
+    if !presets_and_themes {
+        keep.extend([dirs.config.join("presets"), dirs.config.join("themes")]);
+    }
+    if let Ok(p) = crate::preferences::load()
+        && p.proxies.folder.is_absolute()
+    {
+        keep.push(p.proxies.folder);
+    }
+    let (removed, kept) = plan(&dirs, &keep);
     if !dry_run {
         for path in &removed {
             remove(path)?;
@@ -35,41 +52,33 @@ pub fn run(presets_and_themes: bool, dry_run: bool) -> Result<Value> {
     Ok(json!({ "removed": removed, "kept": kept }))
 }
 
-pub fn plan(
-    dirs: &Dirs,
-    presets_and_themes: bool,
-    open_histories: &[PathBuf],
-) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    let (mut removed, mut kept) = (Vec::new(), Vec::new());
-    let holds_another = |e: &Path| dirs.cache.starts_with(e) || dirs.state.starts_with(e);
-    for e in entries(&dirs.config) {
-        if holds_another(&e) {
+pub fn plan(dirs: &Dirs, keep: &[PathBuf]) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let roots = [&dirs.config, &dirs.cache, &dirs.state];
+    let mut found = (Vec::new(), Vec::new());
+    for root in roots {
+        let others: Vec<&Path> = roots
+            .iter()
+            .filter(|r| **r != root)
+            .map(|r| r.as_path())
+            .collect();
+        sweep(root, keep, &others, &mut found);
+    }
+    found
+}
+
+fn sweep(dir: &Path, keep: &[PathBuf], others: &[&Path], found: &mut (Vec<PathBuf>, Vec<PathBuf>)) {
+    for e in entries(dir) {
+        if others.iter().any(|o| o.starts_with(&e)) {
             continue;
         }
-        let user = matches!(name(&e), "presets" | "themes");
-        match user && !presets_and_themes {
-            true => kept.push(e),
-            false => removed.push(e),
+        if keep.contains(&e) {
+            found.1.push(e);
+        } else if keep.iter().any(|k| k.starts_with(&e)) {
+            sweep(&e, keep, others, found);
+        } else {
+            found.0.push(e);
         }
     }
-    removed.extend(
-        entries(&dirs.cache)
-            .into_iter()
-            .filter(|e| !holds_another(e)),
-    );
-    for e in entries(&dirs.state) {
-        if name(&e) != "history" {
-            removed.push(e);
-            continue;
-        }
-        for h in entries(&e) {
-            match open_histories.contains(&h) {
-                true => kept.push(h),
-                false => removed.push(h),
-            }
-        }
-    }
-    (removed, kept)
 }
 
 fn entries(dir: &Path) -> Vec<PathBuf> {
@@ -80,21 +89,16 @@ fn entries(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-fn name(path: &Path) -> &str {
-    path.file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or_default()
-}
-
 fn remove(path: &Path) -> Result<()> {
     let removed = match path.is_dir() {
         true => std::fs::remove_dir_all(path),
         false => std::fs::remove_file(path),
     };
     match removed {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            Err(Error::invalid(format!("removing {}: {e}", path.display())))
-        }
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(Error::conflict(format!(
+            "couldn't remove {}: {e}",
+            path.display()
+        ))),
         _ => Ok(()),
     }
 }
@@ -123,8 +127,16 @@ mod tests {
             .collect()
     }
 
+    fn dirs(r: &Path, config: &str, cache: &str, state: &str) -> Dirs {
+        Dirs {
+            config: r.join(config),
+            cache: r.join(cache),
+            state: r.join(state),
+        }
+    }
+
     #[test]
-    fn presets_and_themes_stay_unless_asked_and_open_histories_stay() {
+    fn kept_folders_and_an_open_history_stay_and_the_rest_goes() {
         let root = tempfile::tempdir().unwrap();
         let r = root.path();
         tree(
@@ -132,19 +144,14 @@ mod tests {
             &[
                 "config/preferences.toml",
                 "config/presets/mine.toml",
-                "config/themes/mine.toml",
                 "cache/thumbs/a.jpg",
                 "state/history/open.jsonl",
                 "state/history/closed.jsonl",
                 "state/recent.json",
             ],
         );
-        let dirs = Dirs {
-            config: r.join("config"),
-            cache: r.join("cache"),
-            state: r.join("state"),
-        };
-        let (removed, kept) = plan(&dirs, false, &[r.join("state/history/open.jsonl")]);
+        let keep = [r.join("config/presets"), r.join("state/history/open.jsonl")];
+        let (removed, kept) = plan(&dirs(r, "config", "cache", "state"), &keep);
         assert_eq!(
             (names(r, &removed), names(r, &kept)),
             (
@@ -156,9 +163,26 @@ mod tests {
                 ],
                 vec![
                     "config/presets".to_string(),
-                    "config/themes".into(),
-                    "state/history/open.jsonl".into(),
+                    "state/history/open.jsonl".into()
                 ],
+            )
+        );
+    }
+
+    #[test]
+    fn a_proxy_folder_set_inside_the_cache_stays() {
+        let root = tempfile::tempdir().unwrap();
+        let r = root.path();
+        tree(r, &["cache/thumbs/a.jpg", "cache/shared/a.mkv"]);
+        let (removed, kept) = plan(
+            &dirs(r, "config", "cache", "state"),
+            &[r.join("cache/shared")],
+        );
+        assert_eq!(
+            (names(r, &removed), names(r, &kept)),
+            (
+                vec!["cache/thumbs".to_string()],
+                vec!["cache/shared".to_string()]
             )
         );
     }
@@ -171,12 +195,8 @@ mod tests {
             r,
             &["vidcut/preferences.toml", "vidcut/state/history/open.jsonl"],
         );
-        let dirs = Dirs {
-            config: r.join("vidcut"),
-            cache: r.join("cache"),
-            state: r.join("vidcut/state"),
-        };
-        let (removed, kept) = plan(&dirs, false, &[r.join("vidcut/state/history/open.jsonl")]);
+        let keep = [r.join("vidcut/state/history/open.jsonl")];
+        let (removed, kept) = plan(&dirs(r, "vidcut", "cache", "vidcut/state"), &keep);
         assert_eq!(
             (names(r, &removed), names(r, &kept)),
             (

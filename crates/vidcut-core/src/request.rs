@@ -1102,7 +1102,9 @@ pub enum Request {
     /// the undo histories (but those of projects a running GUI has open),
     /// the recent projects, view settings and remembered folders. Projects,
     /// media and proxies stay, but proxies made without a project, which
-    /// live in the cache. `--dry-run` lists what would go.
+    /// live in the cache. It refuses while another vidcut GUI runs, which
+    /// would write its settings back: reset from that GUI's Preferences.
+    /// `--dry-run` lists what would go.
     #[serde(rename = "reset")]
     Reset {
         /// Also delete your presets and themes.

@@ -335,9 +335,11 @@ impl Workspace {
         }
         match choice {
             Some(true) => {
+                let presets_and_themes = ui_state.reset_presets_and_themes;
                 ui_state.confirm_reset = false;
-                let params = json!({ "presets_and_themes": ui_state.reset_presets_and_themes });
-                ui_state.resetting = Some(Ask::send(&self.live, ctx, "reset", params));
+                self.forget_view_state();
+                let params = json!({ "presets_and_themes": presets_and_themes });
+                self.preferences.resetting = Some(Ask::send(&self.live, ctx, "reset", params));
             }
             Some(false) => ui_state.confirm_reset = false,
             None => {}
