@@ -148,14 +148,20 @@ fn stats_on(
     discard_others(&input, index);
     let (to_measure, inbox) = std::sync::mpsc::sync_channel::<frame::Video>(4);
     let (mut told, mut refused) = (false, false);
+    let job = crate::first::yields();
     let (decoded, stats) = std::thread::scope(|scope| {
-        let measuring = scope.spawn(move || -> Result<PictureStats> {
-            let mut m = Measuring::new(tick, rate);
-            for f in inbox {
-                m.add(&f)?;
-            }
-            Ok(m.stats)
-        });
+        let measuring = std::thread::Builder::new()
+            .name("vidcut-scenes".into())
+            .spawn_scoped(scope, move || -> Result<PictureStats> {
+                if job {
+                    crate::first::as_job();
+                }
+                let mut m = Measuring::new(tick, rate);
+                for f in inbox {
+                    m.add(&f)?;
+                }
+                Ok(m.stats)
+            })?;
         let handle = |decoded: &frame::Video| -> Result<()> {
             if !std::mem::replace(&mut told, true) {
                 let on = crate::decode::decoded_on(decoded, gpu);
@@ -180,8 +186,8 @@ fn stats_on(
             ),
         };
         drop(to_measure);
-        (decoded, measuring.join().expect("measuring pictures"))
-    });
+        Ok::<_, Error>((decoded, measuring.join().expect("measuring pictures")))
+    })?;
     let stats = stats?;
     if gpu.is_some() && (refused || stats.pts.is_empty()) {
         return Ok(None);

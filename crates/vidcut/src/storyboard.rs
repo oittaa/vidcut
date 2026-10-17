@@ -7,6 +7,8 @@ use vidcut_core::render::{self, VideoPiece};
 use vidcut_core::time::{RangeSpec, TimeSpec};
 use vidcut_core::{Error, ErrorCode, Result};
 
+use crate::threads::Work;
+
 const MAX_CELLS: usize = 200;
 const PAD: usize = 8;
 const SCALE: usize = 2;
@@ -138,12 +140,14 @@ fn pictures(cells: &[Cell], p: &Project, w: usize, h: usize) -> Result<Vec<Vec<u
     let chunk = cells.len().div_ceil(threads);
     let cancel = vidcut_av::cancel::current();
     std::thread::scope(|s| {
-        let handles: Vec<_> = cells
+        let handles = cells
             .chunks(chunk)
-            .map(|part| {
+            .enumerate()
+            .map(|(i, part)| {
                 let cancel = cancel.clone();
                 let decoding = &decoding;
-                s.spawn(move || {
+                let name = format!("vidcut-story-{i}");
+                crate::threads::scoped(s, name, Work::current(), move || {
                     let _guard = cancel.map(vidcut_av::cancel::Guard::set);
                     let mut reader = match decoding.own_decoder() {
                         Some(gpu) => FrameReader::decoding_on(gpu),
@@ -159,7 +163,8 @@ fn pictures(cells: &[Cell], p: &Project, w: usize, h: usize) -> Result<Vec<Vec<u
                         .collect::<Result<Vec<_>>>()
                 })
             })
-            .collect();
+            .collect::<std::io::Result<Vec<_>>>()
+            .map_err(|e| Error::internal(format!("starting a storyboard thread: {e}")))?;
         let mut all = Vec::with_capacity(cells.len());
         for handle in handles {
             let part = handle

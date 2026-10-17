@@ -40,8 +40,6 @@ tempfile = "3"
 # Drives the egui GUI with simulated input in tests (no renderer).
 egui_kittest = { version = "0.36", default-features = false }
 clap = { version = "4.6", features = ["env", "string"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
 # Windows's own calls where the standard library has none: named pipes for
 # live control, thread priorities, memory size, the GPU drivers' versions,

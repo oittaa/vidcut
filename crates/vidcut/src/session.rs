@@ -9,6 +9,7 @@ use vidcut_core::store::{Store, state_dir};
 use vidcut_core::{Editor, Envelope, Error, ErrorCode, Project, Request, Response, Result};
 
 use crate::env::AvEnv;
+use crate::threads::Work;
 
 fn shortcuts() -> Value {
     use vidcut_core::shortcuts::{SHORTCUTS, key_name};
@@ -228,13 +229,14 @@ fn encode_proxies(
     let (tx, rx) = std::sync::mpsc::channel::<(std::path::PathBuf, Progress)>();
     let cancel = hooks.cancel.clone();
     std::thread::scope(|scope| {
-        let work = scope.spawn(move || {
+        let work = crate::threads::scoped(scope, "vidcut-proxies", Work::current(), move || {
             let _cancel = vidcut_av::cancel::Guard::set(cancel);
             let _report = vidcut_av::progress::Guard::set(Box::new(move |out: &Path, p| {
                 let _ = tx.send((out.to_path_buf(), p));
             }));
             copy.apply(envelope.clone(), env, None).map(drop)
-        });
+        })
+        .map_err(|e| Error::internal(format!("starting the proxy encode: {e}")))?;
         for (out, p) in rx {
             (hooks.progress)(0, 1, &out, p);
         }

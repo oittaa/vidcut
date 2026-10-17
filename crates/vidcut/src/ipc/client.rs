@@ -8,6 +8,7 @@ use serde_json::Value;
 use vidcut_core::{Envelope, Error, ErrorCode, Response, Result};
 
 use super::transport::Stream;
+use crate::threads::Work;
 
 pub fn call(
     socket: &Path,
@@ -45,7 +46,7 @@ pub fn call(
     let (answered, waiting) = channel::<()>();
     std::thread::scope(|scope| {
         if let Some((cancel, s)) = &watched {
-            scope.spawn(move || {
+            crate::threads::scoped(scope, "vidcut-cancel", Work::Interactive, move || {
                 loop {
                     if cancel.load(Ordering::Relaxed) {
                         let _ = s.shutdown();
@@ -56,7 +57,8 @@ pub fn call(
                         _ => return,
                     }
                 }
-            });
+            })
+            .map_err(|e| Error::internal(format!("starting the cancel watcher: {e}")))?;
         }
         let answer = read_answer(BufReader::new(stream), progress);
         drop(answered);

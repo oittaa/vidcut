@@ -20,7 +20,6 @@ pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,
 };
-pub use scrub::Scrubber;
 
 use crate::error::{Error, Result};
 use clock::{Heard, Markers};
