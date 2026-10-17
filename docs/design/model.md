@@ -132,7 +132,7 @@ flowchart LR
 | video track | a `Video` track, disabled with its video off, and an `Audio` track of its clips' sound, J/L cuts as audio edits |
 | audio track | an `Audio` track, disabled when muted |
 | clip | `Clip.2`, its source range from the media's start timecode |
-| media | `ExternalReference` by plain path, relative in a bundle; a still one frame long; an image sequence an `ImageSequenceReference` at its rate |
+| media | `ExternalReference` by plain path, relative in a bundle; a still one frame long, its clips from source 0; an image sequence an `ImageSequenceReference` at its rate |
 | Clip Color | the item's `color` |
 | markers | the top-level stack's, with their lengths |
 

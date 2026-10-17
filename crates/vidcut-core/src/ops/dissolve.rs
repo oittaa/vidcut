@@ -149,9 +149,9 @@ fn room(
         .filter(|&a| a >= e)
         .min()
         .map_or(i64::MAX / 4, |a| a - e);
-    let media = |c: &Clip, tail: bool| match p.source_frames(c) {
+    let media = |c: &Clip, tail: bool| match p.source_range(c) {
         _ if c.is_generator() => i64::MAX / 4,
-        Some(frames) => c.room(tail, frames),
+        Some(have) => c.room(tail, have),
         None => 0,
     };
     let before = match f {

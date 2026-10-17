@@ -2209,7 +2209,8 @@ fn place_imported(
             warnings.push(format!("{label}: {} has no video; left out", m.name));
             continue;
         }
-        if source_in < 0 {
+        let still = m.is_still();
+        if source_in < 0 && !still {
             warnings.push(format!(
                 "{label}: {} frame(s) before the start of {} were left out",
                 -source_in, m.name
@@ -2217,7 +2218,7 @@ fn place_imported(
             start -= source_in;
             source_in = 0;
         }
-        let duration = (end - start).min(frames - source_in);
+        let duration = (end - start).min(if still { frames } else { frames - source_in });
         if duration < end - start {
             warnings.push(format!(
                 "{label}: {} frame(s) past the end of {} were left out",

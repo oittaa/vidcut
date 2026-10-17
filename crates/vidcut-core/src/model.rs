@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -853,7 +854,7 @@ impl Clip {
         Some((x.min(y), x.max(y)))
     }
 
-    pub fn room(&self, tail: bool, frames: i64) -> i64 {
+    pub fn room(&self, tail: bool, have: Range<i64>) -> i64 {
         let speed = self.speed();
         if speed == 0.0 {
             return i64::MAX / 4;
@@ -864,9 +865,10 @@ impl Clip {
             } else {
                 self.start - n
             };
-            (0..frames).contains(&self.source_at(t))
+            have.contains(&self.source_at(t))
         };
-        let far = ((frames as f64 + 2.0) / speed.abs()).min((i64::MAX / 4) as f64);
+        let span = (have.end - have.start) as f64;
+        let far = ((span + 2.0) / speed.abs()).min((i64::MAX / 4) as f64);
         let (mut lo, mut hi) = (0, far as i64 + 2);
         if !at(lo) {
             return 0;
@@ -1075,11 +1077,21 @@ impl Project {
         }
     }
 
-    pub fn source_frames(&self, c: &Clip) -> Option<i64> {
+    pub fn media_range(&self, media: &Media, c: &Clip) -> Range<i64> {
+        let frames = self.media_limit(media);
+        if !media.is_still() {
+            return 0..frames;
+        }
+        let (lo, hi) = c.shown();
+        let slack = frames - (hi - lo);
+        lo - slack..hi + slack
+    }
+
+    pub fn source_range(&self, c: &Clip) -> Option<Range<i64>> {
         match (&c.compound, &c.generator) {
-            (Some(k), _) => Some(k.frames),
+            (Some(k), _) => Some(0..k.frames),
             (None, Some(_)) => None,
-            (None, None) => self.media(&c.media).map(|m| self.media_limit(m)),
+            (None, None) => self.media(&c.media).map(|m| self.media_range(m, c)),
         }
     }
 

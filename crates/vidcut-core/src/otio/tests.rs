@@ -1,6 +1,6 @@
 use super::*;
 use crate::model::{AudioInfo, Effects, MediaInfo};
-use crate::test_support::{FakeEnv, Fixture, media_info};
+use crate::test_support::{FakeEnv, Fixture, media_info, still_info};
 
 fn req(method: &str, params: Value) -> Value {
     json!({ "method": method, "params": params })
@@ -405,6 +405,31 @@ fn a_split_before_a_dissolve_changes_only_the_dissolve() {
         track["transitions"],
         json!({"items": {"changed": {"t1": {"fields": {"from": {"set": {"was": "c1", "is": "c3"}}}}}}})
     );
+}
+
+#[test]
+fn a_dissolve_into_a_still_at_its_source_start_comes_in() {
+    let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": v});
+    let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
+    let clip = |file: &str, range: Value, available: Value| {
+        json!({"OTIO_SCHEMA": "Clip.1", "name": file, "source_range": range,
+        "media_reference": {"OTIO_SCHEMA": "ExternalReference.1",
+            "target_url": format!("/media/{file}"), "available_range": available}})
+    };
+    let doc = json!({"OTIO_SCHEMA": "Timeline.1", "tracks": {"OTIO_SCHEMA": "Stack.1", "children": [
+        {"OTIO_SCHEMA": "Track.1", "kind": "Video", "children": [
+            clip("1.mp4", r(0.0, 50.0), r(0.0, 100.0)),
+            {"OTIO_SCHEMA": "Transition.1", "name": "Cross Dissolve",
+             "in_offset": t(15.0), "out_offset": t(15.0), "metadata": {}},
+            clip("photo.png", r(0.0, 75.0), r(0.0, 1.0)),
+        ]},
+    ]}});
+    let mut f = Fixture::new(&[(4.0, false)]);
+    f.env = std::mem::take(&mut f.env).with("/media/photo.png", still_info(4000, 3000));
+    f.ok(req("timeline.import", json!({"otio": doc})));
+    let x = &f.editor.project().tracks[0].transitions;
+    let kept: Vec<(i64, i64)> = x.iter().map(|x| (x.before, x.after)).collect();
+    assert_eq!(kept, [(15, 15)]);
 }
 
 #[test]

@@ -83,10 +83,11 @@ pub fn violations(p: &Project) -> Vec<String> {
                         v.push(format!("{}: video clip of audio-only media {}", c.id, m.id));
                     }
                     let (lo, hi) = c.shown();
-                    if c.video && (lo < 0 || hi > frames) {
+                    let have = p.media_range(m, c);
+                    if c.video && (lo < have.start || hi > have.end) {
                         v.push(format!(
-                            "{}: source {lo}..{hi} outside media {} (0..{frames})",
-                            c.id, m.id
+                            "{}: source {lo}..{hi} outside media {} ({}..{})",
+                            c.id, m.id, have.start, have.end
                         ));
                     }
                     if let Some(a) = &c.audio {
