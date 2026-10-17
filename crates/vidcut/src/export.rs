@@ -247,10 +247,7 @@ pub fn timeline(
         .tracks
         .iter()
         .flat_map(|t| &t.clips)
-        .filter(|c| {
-            (c.video && c.start.max(a) < c.end().min(b))
-                || c.audio_range().is_some_and(|(s, e)| s.max(a) < e.min(b))
-        })
+        .filter(|c| otio::exported(c, a, b))
         .count();
     let mut summary = json!({
         "path": params.output, "format": format.name(), "range": [a, b], "frames": b - a,

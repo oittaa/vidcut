@@ -339,7 +339,14 @@ fn compound_alone() -> Fixture {
 }
 
 fn bundled(p: &Project) -> Value {
-    let names = HashMap::from([("m1".to_string(), "media/1.mp4".to_string())]);
+    let names: HashMap<String, String> = used_media(p, None)
+        .into_iter()
+        .map(|id| {
+            let file = p.media(&id).unwrap().path.file_name().unwrap();
+            let to = format!("media/{}", file.to_string_lossy());
+            (id, to)
+        })
+        .collect();
     export(p, "t", None, Locations::Bundle(&names)).unwrap()
 }
 
@@ -370,6 +377,47 @@ fn a_bundle_points_a_compound_clips_media_into_it() {
     assert_eq!(
         urls(&bundled(compound_alone().editor.project())),
         ["media/1.mp4"]
+    );
+}
+
+#[test]
+fn media_only_in_a_compound_clips_sound_are_bundled() {
+    let mut f = Fixture::new(&[(4.0, false), (4.0, true)]);
+    f.append("m1", 0, 50);
+    f.ok(req(
+        "edit.overwrite",
+        json!({"media": "m2", "range": "0f..50f", "at": 0, "track": "A1"}),
+    ));
+    let fps = Rational::new(25, 1).unwrap();
+    let mut other = Fixture::new(&[]);
+    other.env = FakeEnv::default()
+        .with("/media/1.mp4", media_info(4.0, fps, false))
+        .with("/media/2.mp4", media_info(4.0, fps, true));
+    other.ok(req(
+        "timeline.import",
+        json!({"otio": written(&f), "mode": "compound"}),
+    ));
+    assert_eq!(
+        urls(&bundled(other.editor.project())),
+        ["media/1.mp4", "media/2.mp4"]
+    );
+}
+
+#[test]
+fn a_compound_clips_missing_file_keeps_its_url_beside_a_bundled_namesake() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.append("m1", 0, 50);
+    let mut doc = written(&f);
+    relink(&mut doc, "/media/1.mp4", "/nowhere/1.mp4");
+    let mut other = Fixture::new(&[(4.0, true)]);
+    other.append("m1", 0, 50);
+    other.ok(req(
+        "timeline.import",
+        json!({"otio": doc, "mode": "compound"}),
+    ));
+    assert_eq!(
+        urls(&bundled(other.editor.project())),
+        ["/nowhere/1.mp4", "media/1.mp4"]
     );
 }
 

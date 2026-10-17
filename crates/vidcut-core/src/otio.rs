@@ -211,16 +211,18 @@ pub fn played_by(k: &Compound) -> Vec<String> {
     used
 }
 
+pub fn exported(c: &Clip, a: i64, b: i64) -> bool {
+    let within = c.start.max(a) < c.end().min(b);
+    (within && (c.video || c.compound.is_some())) || audio_part(c, a, b).is_some()
+}
+
 pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     let (a, b) = span.unwrap_or((0, p.end()));
     let mut used: Vec<String> = Vec::new();
     let mut seen: HashSet<&str> = HashSet::new();
-    for t in &p.tracks {
-        for c in &t.clips {
-            let shows = c.video && c.start.max(a) < c.end().min(b);
-            if shows || audio_part(c, a, b).is_some() {
-                played(c, &mut used, &mut seen);
-            }
+    for c in p.tracks.iter().flat_map(|t| &t.clips) {
+        if exported(c, a, b) {
+            played(c, &mut used, &mut seen);
         }
     }
     used
@@ -408,11 +410,20 @@ pub fn export(
         )
     };
     let bundled: Vec<&Media> = match locations {
-        Locations::Bundle(names) => p
-            .media
-            .iter()
-            .filter(|m| names.contains_key(&m.id))
-            .collect(),
+        Locations::Bundle(names) => {
+            let nested: HashSet<String> = p
+                .tracks
+                .iter()
+                .flat_map(|t| &t.clips)
+                .filter(|c| exported(c, a, b))
+                .filter_map(|c| c.compound.as_ref())
+                .flat_map(played_by)
+                .collect();
+            p.media
+                .iter()
+                .filter(|m| names.contains_key(&m.id) && nested.contains(&m.id))
+                .collect()
+        }
         Locations::Absolute => Vec::new(),
     };
     let block =
