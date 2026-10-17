@@ -362,8 +362,13 @@ fn kept_on_vaapi(codec: VideoCodec) -> Option<(Gpu, Arc<Picture>)> {
         eprintln!("skipping: the GPU decoder in use isn't VA-API");
         return None;
     };
-    let gpu =
-        gpu_on_node(decoder.on()).unwrap_or_else(|| panic!("no Vulkan device on {}", decoder.on()));
+    let Some(gpu) = gpu_on_node(decoder.on()) else {
+        eprintln!(
+            "skipping: no Vulkan device found at the PCI address of VA-API's node {:?}",
+            decoder.on()
+        );
+        return None;
+    };
     let config = Config {
         audio_scrubbing: false,
         hardware: true,
