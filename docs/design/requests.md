@@ -32,7 +32,7 @@ Three questions drive the routing:
 
 | Question | True for |
 |---|---|
-| `Request::is_projectless` | needs no project: `schema`, `doctor`, `probe`, `project.create`, presets, encoders, decoders, preferences, keys |
+| `Request::is_projectless` | needs no project: `schema`, `doctor`, `reset`, `probe`, `project.create`, presets, encoders, decoders, preferences, keys |
 | `Request::is_live` | needs a running GUI: `project.open`, the viewer, player, mixer preview, pool view, selection, `gui.*` and `jobs.*` |
 | `Request::is_mutation` | anything that is not live and not a read, render, export, analysis, preset, preference, `project.create`, `probe` or `edit.copy`. The match in `Request::is_mutation` is the list. Undo and redo count, and call `step_history` |
 

@@ -91,7 +91,7 @@ When a GUI has the project open (`vidcut -p FILE` starts one), commands for it r
 
 - Without `-p`, a command goes to the only GUI with a project open; with several, pick one.
 - `vidcut instances` lists running GUIs: pid, project, socket.
-- Requests needing no project (`schema`, `doctor`, `probe`, `project create`, presets, encoders, decoders, preferences, keys) run here.
+- Requests needing no project (`schema`, `doctor`, `reset`, `probe`, `project create`, presets, encoders, decoders, preferences, keys) run here.
 - Live-only requests (`player`, `viewer`, `selection`, `pool`, `mixer preview`, `gui`, `jobs`, `project open`) and `export start --background` fail with `NO_INSTANCE` without a GUI.
 - The CLI makes paths absolute before sending, those in `apply` too.
 - Ctrl-C cancels a headless export or proxy encode, leaving no partial file; ending the CLI cancels its call to a GUI.

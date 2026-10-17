@@ -27,6 +27,10 @@ pub(super) struct PreferencesUi {
         Option<std::sync::mpsc::Receiver<Result<Vec<vidcut_av::player::OutputDevice>, String>>>,
     importing: Option<Picked>,
     choosing_folder: Option<Picked>,
+    confirm_reset: bool,
+    reset_presets_and_themes: bool,
+    resetting: Option<Ask>,
+    forgotten: Option<super::workspace::ViewState>,
 }
 
 const LABEL: f32 = 170.0;
@@ -164,6 +168,8 @@ impl Workspace {
     }
 
     pub(super) fn preferences_window(&mut self, ctx: &egui::Context) {
+        self.reset_answered(ctx);
+        self.reset_window(ctx);
         let project = self.project_folder();
         let ui_state = &mut self.preferences;
         if !ui_state.open {
@@ -239,7 +245,7 @@ impl Workspace {
                     };
                     return;
                 };
-                let busy = ui_state.ask.is_some();
+                let busy = ui_state.ask.is_some() || ui_state.resetting.is_some();
                 egui::ScrollArea::vertical()
                     .max_height(height)
                     .min_scrolled_height(height)
@@ -269,11 +275,102 @@ impl Workspace {
                             }
                             ui.label(dim(path).small());
                         });
+                        ui.add_space(8.0);
+                        if ui
+                            .add_enabled(
+                                ui_state.resetting.is_none(),
+                                egui::Button::new("Reset vidcut…"),
+                            )
+                            .on_hover_text(
+                                "Back to a fresh install: preferences, caches, undo histories, \
+                                 recent projects, view settings",
+                            )
+                            .clicked()
+                        {
+                            ui_state.confirm_reset = true;
+                            ui_state.reset_presets_and_themes = false;
+                        }
                     });
             });
         ui_state.open = open;
         if let Some(p) = patch {
             ui_state.ask = Some(Ask::send(&self.live, ctx, "preferences.set", p));
+        }
+    }
+
+    fn reset_window(&mut self, ctx: &egui::Context) {
+        let ui_state = &mut self.preferences;
+        if !ui_state.confirm_reset {
+            return;
+        }
+        let mut choice = None;
+        let modal = egui::Modal::new(egui::Id::new("reset-vidcut")).show(ctx, |ui| {
+            ui.set_max_width(420.0);
+            ui.label(RichText::new("Reset vidcut?").strong());
+            ui.label(
+                "This deletes the preferences, the thumbnails, waveforms, measurements, \
+                 encoder detection and shaders, the undo histories (but those of open \
+                 projects), the recent projects, view settings and remembered folders.",
+            );
+            ui.label(dim(
+                "Projects, media, a proxy folder you set and the proxies in it stay; proxies \
+                 vidcut made in its own cache go. This can't be undone.",
+            ));
+            ui.checkbox(
+                &mut ui_state.reset_presets_and_themes,
+                "Also delete my presets and themes",
+            );
+            ui.horizontal(|ui| {
+                if ui
+                    .button(RichText::new("Reset").color(theme::colors().error))
+                    .clicked()
+                {
+                    choice = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    choice = Some(false);
+                }
+            });
+        });
+        if choice.is_none() && super::workspace::escape_cancels(ctx, &modal) {
+            choice = Some(false);
+        }
+        match choice {
+            Some(true) => {
+                let presets_and_themes = ui_state.reset_presets_and_themes;
+                ui_state.confirm_reset = false;
+                let forgotten = self.forget_view_state();
+                self.preferences.forgotten = Some(forgotten);
+                let params = json!({ "presets_and_themes": presets_and_themes });
+                self.preferences.resetting = Some(Ask::send(&self.live, ctx, "reset", params));
+            }
+            Some(false) => ui_state.confirm_reset = false,
+            None => {}
+        }
+    }
+
+    fn reset_answered(&mut self, ctx: &egui::Context) {
+        let Some(answer) = self.preferences.resetting.as_ref().and_then(Ask::take) else {
+            return;
+        };
+        self.preferences.resetting = None;
+        match answer {
+            Ok(r) => {
+                let n = r.result["removed"].as_array().map_or(0, Vec::len);
+                self.preferences.forgotten = None;
+                self.after_reset();
+                self.say(format!("Reset: {n} files and folders removed"));
+                if self.preferences.open {
+                    self.preferences.ask =
+                        Some(Ask::send(&self.live, ctx, "preferences.get", json!({})));
+                }
+            }
+            Err(e) => {
+                if let Some(old) = self.preferences.forgotten.take() {
+                    self.restore_view_state(old);
+                }
+                self.preferences.error = Some(e.message);
+            }
         }
     }
 }

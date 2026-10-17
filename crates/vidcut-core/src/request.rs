@@ -1097,6 +1097,20 @@ pub enum Request {
     /// the audio device, GPUs).
     #[serde(rename = "doctor")]
     Doctor {},
+    /// Reset vidcut to a fresh install's state: the preferences, the caches
+    /// (thumbnails, waveforms, measurements, encoder detection, shaders),
+    /// the undo histories (but those of projects a running GUI has open),
+    /// the recent projects, view settings and remembered folders. Projects,
+    /// media and proxies stay, but those in vidcut's cache: made without a
+    /// project, into no proxy folder of your own. It refuses while another vidcut GUI runs, which
+    /// would write its settings back: reset from that GUI's Preferences.
+    /// `--dry-run` lists what would go.
+    #[serde(rename = "reset")]
+    Reset {
+        /// Also delete your presets and themes.
+        #[serde(default)]
+        presets_and_themes: bool,
+    },
 }
 
 /// What to export and how.
@@ -1527,6 +1541,7 @@ impl Request {
             self,
             Self::Schema { .. }
                 | Self::Doctor {}
+                | Self::Reset { .. }
                 | Self::Probe { .. }
                 | Self::ProjectCreate { .. }
                 | Self::PresetsList {}
@@ -1567,6 +1582,7 @@ impl Request {
                     | Self::HistoryGet {}
                     | Self::Schema { .. }
                     | Self::Doctor {}
+                    | Self::Reset { .. }
                     | Self::ExportPlan(_)
                     | Self::ExportStart(_)
                     | Self::FrameRender { .. }

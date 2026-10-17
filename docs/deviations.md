@@ -72,8 +72,8 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 
 ## X12. Preferences hold only what vidcut needs
 - **Resolve:** Preferences has System and User panels with many settings (p. 94). Caches and proxies are set up in project settings and preferences (pp. 191–218).
-- **vidcut:** File > Preferences (Ctrl+,) holds the theme, GPU use, the player's memory and audio device, the thumbnail cache, and the proxy rules and folder, in `preferences.toml` ([design/model.md](design/model.md#preferences)); `preferences get|set` reach them from scripts.
-- **Why:** a preference belongs here only once vidcut has a behavior to choose. A plain TOML file can be edited by hand, kept in dotfiles and changed by agents.
+- **vidcut:** File > Preferences (Ctrl+,) holds the theme, GPU use, the player's memory and audio device, the thumbnail cache, and the proxy rules and folder, in `preferences.toml` ([design/model.md](design/model.md#preferences)); `preferences get|set` reach them from scripts. Reset vidcut… there (and `vidcut reset`) goes back to a fresh install's state: the preferences, caches, undo histories (but those of open projects), recent projects, view settings and remembered folders; presets and themes only when asked, and never a proxy folder you set. A confirmation comes first, and Esc cancels it. It refuses while another vidcut GUI runs, which would write its settings back.
+- **Why:** a preference belongs here only once vidcut has a behavior to choose. A plain TOML file can be edited by hand, kept in dotfiles and changed by agents. A reset makes a clean start, for testing too, one step instead of finding each file.
 
 ## X13. Deinterlacing has one quality
 - **Resolve:** each interlaced clip has a Deinterlace Quality (Normal, High, Neural Engine) in the Inspector; playback always uses Normal (p. 741), and Clip Attributes switch deinterlacing per clip (p. 451).

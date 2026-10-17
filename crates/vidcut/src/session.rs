@@ -68,6 +68,9 @@ pub fn run_with(
     let mut response = match &envelope.request {
         Request::Schema { method } => answer(schema(method.as_deref())?),
         Request::Doctor {} => answer(doctor()),
+        Request::Reset { presets_and_themes } => {
+            answer(crate::reset::run(*presets_and_themes, envelope.dry_run)?)
+        }
         Request::ProjectCreate {
             path,
             from,

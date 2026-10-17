@@ -78,7 +78,7 @@ With Claude Code: `claude mcp add vidcut -- vidcut mcp -p /path/to/talk.vidcut`.
 | `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | `~/Library/Application Support/vidcut/state` | undo history, recent projects |
 | `$XDG_RUNTIME_DIR/vidcut` | `%TEMP%\vidcut` | `$TMPDIR/vidcut-UID` | running GUIs |
 
-`XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and `XDG_RUNTIME_DIR` move them on every system. Preferences are in File > Preferences or `vidcut preferences`; keys in Help (F1); themes are TOML files ([starship.toml](crates/vidcut/themes/starship.toml) explains every key).
+`XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and `XDG_RUNTIME_DIR` move them on every system. `vidcut reset` (or File > Preferences, Reset vidcut…) clears the first three back to a fresh install's state while no other vidcut GUI runs; your presets and themes stay unless you ask (`--presets-and-themes`), and so does a proxy folder you set. `--dry-run` lists what would go. Preferences are in File > Preferences or `vidcut preferences`; keys in Help (F1); themes are TOML files ([starship.toml](crates/vidcut/themes/starship.toml) explains every key).
 
 ## Contributing
 
