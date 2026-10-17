@@ -272,12 +272,6 @@ impl ProxyEncoder {
             Some((_, flags)) => *flags = format!("+cgop{flags}"),
             None => options.push(("flags".into(), "+cgop".into())),
         }
-        // FFmpeg's own ProRes and DNxHR encoders use one core unless told
-        // otherwise.
-        if matches!(self.name.as_str(), "prores_ks" | "dnxhd") {
-            options.push(("threads".into(), "auto".into()));
-            options.push(("thread_type".into(), "frame".into()));
-        }
         VideoEncoder {
             name: self.name.clone(),
             kind: self.kind,
@@ -1465,18 +1459,6 @@ mod tests {
             .map(|(_, v)| v.as_str())
             .collect();
         assert_eq!(flags, ["+cgop+qscale"]);
-    }
-
-    #[test]
-    fn prores_encodes_frames_on_every_core() {
-        let prores = ProxyEncoder::software("prores_ks", "prores");
-        let options = prores.video_encoder(None).options;
-        let threads: Vec<(&str, &str)> = options
-            .iter()
-            .filter(|(k, _)| k.starts_with("thread"))
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
-        assert_eq!(threads, [("threads", "auto"), ("thread_type", "frame")]);
     }
 
     /// A source's first frame of `pixel` in `hdr`'s transfer (`None`: SDR,

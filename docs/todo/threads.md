@@ -16,4 +16,4 @@ A decoder leased by readers and closed when idle, handed back instead of opened 
 
 ## Not this work
 
-The kept-pictures budget: memory in a long play is mostly the player's kept pictures (its budget is 30 GB). The export encoders on one thread: [encoder-threads.md](encoder-threads.md).
+The kept-pictures budget: memory in a long play is mostly the player's kept pictures (its budget is 30 GB).
