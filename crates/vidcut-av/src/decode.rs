@@ -693,6 +693,14 @@ fn on_gpu(
     Ok((kind, gpu.device_for(kind)?, codec))
 }
 
+pub(crate) fn gpu_takes(
+    id: codec::Id,
+    gpu: &crate::hw::GpuDecoder,
+    open_gop: impl FnOnce() -> bool,
+) -> bool {
+    on_gpu(id, gpu, open_gop).is_ok()
+}
+
 pub(crate) fn open_video(
     mut ctx: codec::context::Context,
     id: codec::Id,
