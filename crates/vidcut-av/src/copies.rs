@@ -62,6 +62,15 @@ pub fn current() -> Option<Arc<Copies>> {
     COPIES.with(|slot| slot.borrow().clone())
 }
 
+pub fn counted() -> Copied {
+    COPIES.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|c| c.counted())
+            .unwrap_or_default()
+    })
+}
+
 pub(crate) fn down(f: &frame::Video) {
     count(f, |c| (&c.down, &c.down_bytes));
 }

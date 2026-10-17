@@ -3,7 +3,11 @@ use std::time::{Instant, SystemTime};
 
 use serde::Serialize;
 use serde_json::{Value, json};
+use vidcut_av::export::{AudioNote, Note, Progress, SourceNote, Tried, VideoNote};
 use vidcut_core::Error;
+use vidcut_core::editor::Copied;
+use vidcut_core::export::color::ColorChoice;
+use vidcut_core::export::metadata::MetadataChoice;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,8 +47,68 @@ pub struct JobInfo {
     pub finished: Option<f64>,
     pub result: Option<Value>,
     pub error: Option<Error>,
+    pub details: JobDetails,
     #[serde(skip)]
     pub(crate) clock: Instant,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct JobDetails {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video: Option<VideoNote>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio: Option<AudioNote>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<ColorChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<MetadataChoice>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tried: Vec<Tried>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<SourceNote>,
+    pub gpu_frames: i64,
+    pub gpu_decoded: i64,
+    pub copied: Copied,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fps: Option<f64>,
+    #[serde(skip)]
+    each: Vec<(i64, i64, Copied)>,
+}
+
+impl JobDetails {
+    pub(crate) fn note(&mut self, note: Note) {
+        match note {
+            Note::Video(v) => self.video = Some(v),
+            Note::Audio(a) => self.audio = Some(a),
+            Note::Color { color, metadata } => (self.color, self.metadata) = (color, metadata),
+            Note::Tried(t) => {
+                if !self.tried.contains(&t) {
+                    self.tried.push(t);
+                }
+            }
+            Note::Source(s) => match self.sources.iter_mut().find(|o| o.path == s.path) {
+                Some(o) => *o = s,
+                None => self.sources.push(s),
+            },
+        }
+    }
+
+    fn counted(&mut self, output: usize, p: &Progress) {
+        if self.each.len() <= output {
+            self.each.resize(output + 1, (0, 0, Copied::default()));
+        }
+        self.each[output] = (p.gpu_frames, p.gpu_decoded, p.copied);
+        self.gpu_frames = self.each.iter().map(|e| e.0).sum();
+        self.gpu_decoded = self.each.iter().map(|e| e.1).sum();
+        self.copied = self.each.iter().fold(Copied::default(), |a, e| Copied {
+            down: a.down + e.2.down,
+            down_bytes: a.down_bytes + e.2.down_bytes,
+            up: a.up + e.2.up,
+            up_bytes: a.up_bytes + e.2.up_bytes,
+        });
+        let secs = p.elapsed.as_secs_f64();
+        self.fps = (secs > 0.0 && p.frames > 0).then(|| p.frames as f64 / secs);
+    }
 }
 
 fn now() -> f64 {
@@ -86,6 +150,7 @@ impl JobInfo {
             finished: None,
             result: None,
             error: None,
+            details: JobDetails::default(),
             clock: Instant::now(),
         }
     }
@@ -116,37 +181,22 @@ impl JobInfo {
             .collect();
     }
 
-    pub(crate) fn progressed(
-        &mut self,
-        output: usize,
-        frames: i64,
-        total: i64,
-        (pass, passes): (u8, u8),
-        measuring: bool,
-    ) {
-        self.measuring = measuring;
-        if measuring {
+    pub(crate) fn progressed(&mut self, output: usize, p: Progress) {
+        self.measuring = p.measuring;
+        if p.measuring {
             self.elapsed = self.clock.elapsed().as_secs_f64();
-            self.progress = frames as f64 / total.max(1) as f64;
+            self.progress = p.frames as f64 / p.total.max(1) as f64;
             self.eta = None;
             return;
         }
         let before: i64 = self.outputs.iter().take(output).map(|o| o.frames).sum();
         if self.outputs.is_empty() {
-            self.total = total;
+            self.total = p.total;
         }
         self.output = output;
-        (self.pass, self.passes) = (pass, passes);
-        let done = vidcut_av::export::Progress {
-            frames,
-            total,
-            elapsed: Default::default(),
-            pass,
-            passes,
-            measuring,
-        }
-        .done();
-        self.frames = (before + done).min(self.total);
+        (self.pass, self.passes) = (p.pass, p.passes);
+        self.details.counted(output, &p);
+        self.frames = (before + p.done()).min(self.total);
         self.elapsed = self.clock.elapsed().as_secs_f64();
         self.progress = if self.total > 0 {
             self.frames as f64 / self.total as f64
@@ -220,6 +270,61 @@ impl Turns {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tried(encoder: &str) -> Note {
+        Note::Tried(Tried {
+            encoder: Some(encoder.into()),
+            error: "no free session".into(),
+        })
+    }
+
+    fn source(path: &str, decoder: &str) -> Note {
+        Note::Source(SourceNote {
+            path: path.into(),
+            decoding: vidcut_av::decode::Decoding {
+                decoder: decoder.into(),
+                ..Default::default()
+            },
+        })
+    }
+
+    fn made(gpu_frames: i64) -> Progress {
+        Progress {
+            gpu_frames,
+            ..Progress::default()
+        }
+    }
+
+    #[test]
+    fn an_encoder_that_failed_twice_is_listed_once() {
+        let mut d = JobDetails::default();
+        d.note(tried("h264_nvenc"));
+        d.note(tried("h264_nvenc"));
+        assert_eq!(d.tried.len(), 1);
+    }
+
+    #[test]
+    fn a_file_read_again_keeps_one_entry_with_its_latest_decoder() {
+        let mut d = JobDetails::default();
+        d.note(source("a.mp4", "h264"));
+        d.note(source("a.mp4", "h264_cuvid"));
+        assert_eq!(
+            d.sources
+                .iter()
+                .map(|s| s.decoding.decoder.as_str())
+                .collect::<Vec<_>>(),
+            ["h264_cuvid"]
+        );
+    }
+
+    #[test]
+    fn gpu_frames_add_up_across_the_files_of_a_job() {
+        let mut d = JobDetails::default();
+        d.counted(0, &made(10));
+        d.counted(1, &made(5));
+        d.counted(0, &made(12));
+        assert_eq!(d.gpu_frames, 17);
+    }
 
     #[test]
     fn a_second_export_waits_for_the_first() {

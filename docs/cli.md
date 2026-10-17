@@ -119,8 +119,8 @@ The schema describes parameters, not results. Commonly read:
 | Request | Fields |
 |---|---|
 | `apply` | `results`, in order |
-| `export start` | `outputs[]`: `frames`, `video_encoder`, `gpu_frames` (made on the GPU), `gpu_decoded`, `copies` (GPU frames copied `down` and `up`), `color` and `metadata` (what was chosen, and `why`). `notes[]`: `code`, `message` |
-| `export start --background`, `jobs get` | `id`, `state` (`queued`, `running`, `done`, `failed`, `cancelled`), `progress` (0–1), `result`, `error` |
+| `export start` | `outputs[]`: `frames`, `video_encoder`, `gpu_frames` (made on the GPU), `gpu_decoded`, `copies` (GPU frames copied `down` and `up`), `color` and `metadata` (what was chosen, and `why`), `tried` (video encoders that didn't open, and why), `sources` (each file and how it was decoded). `notes[]`: `code`, `message` |
+| `export start --background`, `jobs get` | `id`, `state` (`queued`, `running`, `done`, `failed`, `cancelled`), `progress` (0–1), `result`, `error`, and `details` as it runs: `video` (`encoder`, `device`, `pixel`, `bits`, `passes`, `gpu_frames_in`), `audio`, `color`, `metadata`, `tried`, `sources`, `gpu_frames`, `gpu_decoded`, `copied`, `fps` |
 | `proxy generate` | `proxies[]`: `media`, `path`, `made_with` (how it was decoded and encoded), `copies` |
 | `media relink` | `relinked`, `different` (with `why`), `not_found` |
 | `player state` | per viewer (`timeline`, `source`): `position`, `playing`, `ready`, `hwdec` (the GPU decoder, or `no`). `late`, `skipped` (frames while playing), `audio_device` (null: the default), `audio_error`, `two_up` (the trim two-up's frames) |

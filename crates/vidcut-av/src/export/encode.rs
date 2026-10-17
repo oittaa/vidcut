@@ -178,6 +178,11 @@ pub fn pixel_name(p: format::Pixel) -> String {
         .unwrap_or_default()
 }
 
+pub fn pixel_bits(p: format::Pixel) -> u8 {
+    // SAFETY: FFmpeg's static description of the format, or null.
+    unsafe { ffi::av_pix_fmt_desc_get(p.into()).as_ref() }.map_or(8, |d| d.comp[0].depth as u8)
+}
+
 fn ten_bit(v: &VideoSettings) -> bool {
     v.bit_depth == Some(10) || v.profile.as_deref() == Some("main10") || v.hdr.transfer().is_some()
 }
@@ -1336,10 +1341,20 @@ pub fn detect(vulkan: bool) -> Availability {
 
 #[cfg(test)]
 mod tests {
-    use super::{Pass, Passes, VideoEncoder, open_options, pairs};
+    use super::{Pass, Passes, VideoEncoder, open_options, pairs, pixel_bits};
     use crate::ffmpeg::format::Pixel;
     use crate::hw::Kind;
     use vidcut_core::export::EncoderChoice;
+
+    #[test]
+    fn an_nv12_picture_has_8_bits() {
+        assert_eq!(pixel_bits(Pixel::NV12), 8);
+    }
+
+    #[test]
+    fn a_p010_picture_has_10_bits() {
+        assert_eq!(pixel_bits(Pixel::P010LE), 10);
+    }
 
     fn encoder(name: &str, kind: EncoderChoice) -> VideoEncoder {
         VideoEncoder {

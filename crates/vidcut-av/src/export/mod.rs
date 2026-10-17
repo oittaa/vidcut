@@ -31,7 +31,7 @@ use make::Output;
 use video::VideoFrames;
 use worker::{Inbox, Worker};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Progress {
     pub frames: i64,
     pub total: i64,
@@ -39,6 +39,66 @@ pub struct Progress {
     pub pass: u8,
     pub passes: u8,
     pub measuring: bool,
+    pub gpu_frames: i64,
+    pub gpu_decoded: i64,
+    pub copied: vidcut_core::editor::Copied,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "note", rename_all = "snake_case")]
+pub enum Note {
+    Video(VideoNote),
+    Audio(AudioNote),
+    Color {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        color: Option<ColorChoice>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<MetadataChoice>,
+    },
+    Tried(Tried),
+    Source(SourceNote),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct VideoNote {
+    pub encoder: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    pub pixel: String,
+    pub bits: u8,
+    pub passes: u8,
+    pub gpu_frames_in: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AudioNote {
+    pub encoder: String,
+    pub rate: u32,
+    pub channels: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bitrate: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loudness: Option<Normalized>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Tried {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encoder: Option<String>,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SourceNote {
+    pub path: PathBuf,
+    pub decoding: crate::decode::Decoding,
+}
+
+fn tried(encoder: Option<&str>, e: &Error) -> Tried {
+    Tried {
+        encoder: encoder.map(String::from),
+        error: e.to_string(),
+    }
 }
 
 impl Progress {
@@ -49,7 +109,7 @@ impl Progress {
             elapsed,
             pass: 1,
             passes: 1,
-            measuring: false,
+            ..Self::default()
         }
     }
 
@@ -89,6 +149,10 @@ pub struct Report {
     pub copies: vidcut_core::editor::Copied,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mix_failed: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tried: Vec<Tried>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<SourceNote>,
 }
 
 pub fn probed_metadata<'a>(
@@ -318,6 +382,12 @@ pub fn run_decoding_on(
         c.apply(settings.video.as_mut().expect("checked"));
         metadata_chosen = Some(c);
     }
+    if chosen.is_some() || metadata_chosen.is_some() {
+        crate::progress::note(Note::Color {
+            color: chosen.clone(),
+            metadata: metadata_chosen.clone(),
+        });
+    }
     let settings = &settings;
     if cancel.load(Ordering::Relaxed) {
         return Err(Error::Invalid(CANCELLED.into()));
@@ -467,6 +537,9 @@ fn first_run(
                 pass: 1,
                 passes: 2,
                 measuring: false,
+                gpu_frames: frames.gpu_frames(),
+                gpu_decoded: frames.gpu_decoded(),
+                copied: crate::copies::counted(),
             });
         }
         Ok(())
@@ -724,6 +797,7 @@ fn encode(
         .ctx(|| format!("creating {}", output.display()))?;
     let global_header = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
 
+    let mut tried_encoders = Vec::new();
     let (mut video, mut video_out) = match &settings.video {
         Some(v) => {
             let (w, h) = (
@@ -737,6 +811,7 @@ fn encode(
                 let enc = match candidate {
                     Ok(enc) => enc,
                     Err(e) => {
+                        crate::progress::note(Note::Tried(tried(None, &e)));
                         failed.push((None, e));
                         continue;
                     }
@@ -776,7 +851,10 @@ fn encode(
                         opened = Some((enc, o, None, shared.map(|d| d.kind().place())));
                         break;
                     }
-                    Err(e) => failed.push((Some(enc.name.clone()), e)),
+                    Err(e) => {
+                        crate::progress::note(Note::Tried(tried(Some(&enc.name), &e)));
+                        failed.push((Some(enc.name.clone()), e));
+                    }
                 }
             }
             let Some((enc, (encoder, vaapi), gpu, fit_on)) = opened else {
@@ -795,6 +873,10 @@ fn encode(
                     why.join("; ")
                 )));
             };
+            tried_encoders = failed
+                .iter()
+                .map(|(name, e)| tried(name.as_deref(), e))
+                .collect();
             let light = made_hdr10plus_light(plan, &enc, decoder, cancel)?;
             let (encoder, vaapi) = match &pass_files {
                 Some(files) if enc.passes.runs() == 2 => {
@@ -828,6 +910,14 @@ fn encode(
                 None => enc.pixel,
             };
             let output = Output::for_encoder(enc.kind, gpu, fit_on, vaapi.as_ref())?;
+            crate::progress::note(Note::Video(VideoNote {
+                encoder: enc.name.clone(),
+                device: enc.device.clone(),
+                pixel: encode::pixel_name(enc.pixel),
+                bits: encode::pixel_bits(enc.pixel),
+                passes: enc.passes.count(),
+                gpu_frames_in: !matches!(output, Output::Fitted),
+            }));
             let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, pixel, enc.hdr)
                 .output(output)
                 .with_dynamic(enc.dynamic)
@@ -932,6 +1022,13 @@ fn encode(
                     true_peak: finite(measured.true_peak + gain),
                 });
             }
+            crate::progress::note(Note::Audio(AudioNote {
+                encoder: spec.name.clone(),
+                rate: spec.rate,
+                channels: spec.channels,
+                bitrate: spec.bitrate,
+                loudness: normalized,
+            }));
             let encoding = AudioOut {
                 encoder,
                 spec,
@@ -998,6 +1095,9 @@ fn encode(
                 pass: runs,
                 passes: runs,
                 measuring: false,
+                gpu_frames: video.as_ref().map_or(0, |v| v.frames.gpu_frames()),
+                gpu_decoded: video.as_ref().map_or(0, |v| v.frames.gpu_decoded()),
+                copied: crate::copies::counted(),
             });
         }
         Ok(())
@@ -1019,6 +1119,10 @@ fn encode(
         mix_failed: video
             .as_ref()
             .and_then(|v| v.frames.mix_failed().map(String::from)),
+        tried: tried_encoders,
+        sources: video
+            .as_ref()
+            .map_or_else(Vec::new, |v| v.frames.sources().to_vec()),
         passes: video.as_ref().map(|v| v.passes.count()),
         video_encoder: video.map(|v| v.name),
         audio_encoder,

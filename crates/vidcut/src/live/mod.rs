@@ -239,11 +239,11 @@ pub(crate) enum Msg {
     JobProgress {
         id: String,
         output: usize,
-        frames: i64,
-        total: i64,
-        pass: u8,
-        passes: u8,
-        measuring: bool,
+        progress: vidcut_av::export::Progress,
+    },
+    JobNote {
+        id: String,
+        note: vidcut_av::export::Note,
     },
     JobDone {
         id: String,
@@ -882,17 +882,22 @@ impl Live {
             Msg::JobProgress {
                 id,
                 output,
-                frames,
-                total,
-                pass,
-                passes,
-                measuring,
+                progress,
             } => {
                 if let Some(j) = Arc::make_mut(&mut self.jobs)
                     .iter_mut()
                     .find(|j| j.id == id)
                 {
-                    j.progressed(output, frames, total, (pass, passes), measuring);
+                    j.progressed(output, progress);
+                }
+            }
+            Msg::JobNote { id, note } => {
+                if let Some(j) = Arc::make_mut(&mut self.jobs)
+                    .iter_mut()
+                    .find(|j| j.id == id)
+                {
+                    j.details.note(note);
+                    self.dirty = true;
                 }
             }
             Msg::JobDone { id, result } => self.job_done(id, result),
@@ -1284,6 +1289,7 @@ impl Live {
         }
         let tx = self.tx.clone();
         let _ = crate::threads::spawn(format!("vidcut-{id}"), Work::Job, move || {
+            let _noting = job_notes(&tx, &id);
             let mut last = Instant::now() - Duration::from_secs(1);
             let mut report = |i: usize, n: usize, out: &Path, p: vidcut_av::export::Progress| {
                 if p.frames != p.total && last.elapsed() < Duration::from_millis(100) {
@@ -1293,11 +1299,7 @@ impl Live {
                 let _ = tx.send(Msg::JobProgress {
                     id: id.clone(),
                     output: i,
-                    frames: p.frames,
-                    total: p.total,
-                    pass: p.pass,
-                    passes: p.passes,
-                    measuring: p.measuring,
+                    progress: p,
                 });
                 if let Some(ptx) = &progress_tx {
                     let _ = ptx.send(ReplyEvent::Progress(json!({
@@ -1370,6 +1372,7 @@ impl Live {
             let _ = gate.recv();
             let stopped = cancel.load(Ordering::Relaxed);
             let _guard = vidcut_av::cancel::Guard::set(cancel);
+            let _noting = job_notes(&tx, &id);
             let _report = {
                 let (tx, id) = (tx.clone(), id.clone());
                 let mut last = Instant::now() - Duration::from_secs(1);
@@ -1392,11 +1395,7 @@ impl Live {
                         let _ = tx.send(Msg::JobProgress {
                             id: id.clone(),
                             output,
-                            frames: p.frames,
-                            total: p.total,
-                            pass: p.pass,
-                            passes: p.passes,
-                            measuring: p.measuring,
+                            progress: p,
                         });
                         if let Some(ptx) = &progress {
                             let _ = ptx.send(ReplyEvent::Progress(json!({
@@ -2958,6 +2957,16 @@ fn selection_json(selection: &Selection, edit: Option<EditPoint>) -> Value {
     let mut v = json!(selection);
     v["edit"] = json!(edit);
     v
+}
+
+fn job_notes(tx: &Sender<Msg>, id: &str) -> vidcut_av::progress::Noting {
+    let (tx, id) = (tx.clone(), id.to_string());
+    vidcut_av::progress::Noting::set(Arc::new(move |note| {
+        let _ = tx.send(Msg::JobNote {
+            id: id.clone(),
+            note,
+        });
+    }))
 }
 
 fn no_project() -> Error {

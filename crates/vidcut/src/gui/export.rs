@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_core::export::{
-    AudioCodec, AudioSettings, Container, EncoderChoice, ExportSettings, HdrMode, VideoCodec,
-    VideoSettings, apply_overrides, validate,
+    AudioCodec, AudioSettings, Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode,
+    VideoCodec, VideoSettings, apply_overrides, validate,
 };
 use vidcut_core::request::ImportMode;
 use vidcut_core::{Envelope, Error, Response};
@@ -164,8 +164,10 @@ pub struct ExportUi {
     dialog: Option<Box<Dialog>>,
     dialog_wanted: bool,
     starting: Option<Starting>,
-    watching: Vec<String>,
     pub show_jobs: bool,
+    jobs_seen: std::collections::HashMap<String, JobState>,
+    jobs_glow_until: f64,
+    jobs_failed_unseen: bool,
     otio: Option<Otio>,
     flatten: bool,
     warnings: Option<(String, Vec<String>)>,
@@ -594,7 +596,6 @@ impl Workspace {
         self.quick_window(ctx);
         self.dialog_window(ctx);
         self.starting(ctx);
-        self.progress_windows(ctx);
         self.jobs_window(ctx);
         self.otio_windows(ctx);
         self.quit_window(ctx);
@@ -742,15 +743,10 @@ impl Workspace {
             && let Some(r) = ask.take()
         {
             match r {
-                Ok(r) => {
-                    if let Some(id) = r.result["id"].as_str() {
-                        self.export.watching.push(id.to_string());
-                    }
-                    match s.from {
-                        From::Quick => self.export.quick = None,
-                        From::Dialog => self.export.dialog = None,
-                    }
-                }
+                Ok(_) => match s.from {
+                    From::Quick => self.export.quick = None,
+                    From::Dialog => self.export.dialog = None,
+                },
                 Err(e) => match s.from {
                     From::Quick => {
                         if let Some(q) = &mut self.export.quick {
@@ -1138,48 +1134,66 @@ impl Workspace {
         }
     }
 
-    fn progress_windows(&mut self, ctx: &egui::Context) {
-        let jobs = self.snap.jobs.clone();
-        let mut close = Vec::new();
-        for id in &self.export.watching {
-            let Some(j) = jobs.iter().find(|j| &j.id == id) else {
-                continue;
-            };
-            let mut open = true;
-            egui::Window::new(format!("Export {}", j.title))
-                .id(egui::Id::new(("export-progress", id)))
-                .collapsible(false)
-                .resizable(false)
-                .default_pos(near_center(ctx, 380.0, 120.0))
-                .open(&mut open)
-                .show(ctx, |ui| {
-                    if job_view(ui, j, true, |method, params| self.send(method, params)) {
-                        close.push(id.clone());
-                    }
-                    if j.unfinished()
-                        && ui
-                            .button("Hide")
-                            .on_hover_text("Keep exporting; Jobs shows it")
-                            .clicked()
-                    {
-                        close.push(id.clone());
-                    }
-                });
-            if !open {
-                close.push(id.clone());
+    pub(super) fn jobs_button(&mut self, ui: &mut egui::Ui) {
+        let now = ui.input(|i| i.time);
+        let mut changed = false;
+        let mut failed = false;
+        for j in self.snap.jobs.iter() {
+            let was = self.export.jobs_seen.insert(j.id.clone(), j.state);
+            if was != Some(j.state) && (was.is_none() || !j.unfinished()) {
+                changed = true;
+                failed |= j.state == JobState::Failed;
             }
         }
-        self.export.watching.retain(|id| !close.contains(id));
+        let jobs = self.snap.jobs.clone();
+        self.export
+            .jobs_seen
+            .retain(|id, _| jobs.iter().any(|j| &j.id == id));
+        if changed {
+            self.export.jobs_glow_until = now + JOBS_GLOW;
+        }
+        if failed && !self.export.show_jobs {
+            self.export.jobs_failed_unseen = true;
+        }
+        let running = jobs.iter().filter(|j| j.unfinished()).count();
+        let label = match running {
+            0 => "Jobs".to_string(),
+            n => format!("Jobs ({n})"),
+        };
+        let label = match self.export.jobs_failed_unseen {
+            true => RichText::new(label).color(theme::colors().error),
+            false => RichText::new(label),
+        };
+        let button = ui
+            .toggle_value(&mut self.export.show_jobs, label)
+            .on_hover_text("Exports and proxy encodes, with progress and details");
+        let left = self.export.jobs_glow_until - now;
+        if left > 0.0 {
+            ui.painter().rect_stroke(
+                button.rect.expand(2.0),
+                egui::CornerRadius::same(4),
+                egui::Stroke::new(
+                    2.0,
+                    theme::colors()
+                        .accent
+                        .gamma_multiply((left / JOBS_GLOW) as f32),
+                ),
+                egui::StrokeKind::Outside,
+            );
+            super::timeline::repaint_in(ui.ctx(), std::time::Duration::from_millis(33));
+        }
     }
 
     fn jobs_window(&mut self, ctx: &egui::Context) {
         if !self.export.show_jobs {
             return;
         }
+        self.export.jobs_failed_unseen = false;
         let jobs = self.snap.jobs.clone();
+        let rate = self.project().map(|p| p.settings.fps.as_f64());
         let mut open = true;
         egui::Window::new("Jobs")
-            .default_width(420.0)
+            .default_width(460.0)
             .open(&mut open)
             .show(ctx, |ui| {
                 if jobs.is_empty() {
@@ -1188,7 +1202,7 @@ impl Workspace {
                     ));
                 }
                 egui::ScrollArea::vertical()
-                    .max_height(420.0)
+                    .max_height(520.0)
                     .show(ui, |ui| {
                         for j in jobs.iter().rev() {
                             ui.group(|ui| {
@@ -1201,7 +1215,11 @@ impl Workspace {
                                     };
                                     ui.label(dim(format!("{} · {from}", j.id)));
                                 });
-                                job_view(ui, j, false, |method, params| self.send(method, params));
+                                job_chips(ui, j);
+                                job_view(ui, j, |method, params| self.send(method, params));
+                                egui::CollapsingHeader::new("Details")
+                                    .id_salt(("job-details", &j.id))
+                                    .show(ui, |ui| job_details(ui, j, rate));
                             });
                         }
                     });
@@ -1430,7 +1448,6 @@ impl Workspace {
                         "Writing {} ({id})",
                         r.result["title"].as_str().unwrap_or("the bundle")
                     ));
-                    self.export.watching.push(id);
                     None
                 }
                 Some(Ok(r)) => {
@@ -1487,8 +1504,7 @@ impl Workspace {
     }
 }
 
-fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, Value)) -> bool {
-    let mut closed = false;
+fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
     match j.state {
         JobState::Queued => {
             ui.label(dim("Waiting for the jobs before it"));
@@ -1546,7 +1562,6 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, 
                     }
                 }
             });
-            closed = closable && ui.button("Close").clicked();
         }
         JobState::Cancelled => {
             ui.label(dim(if j.kind == "proxy" {
@@ -1554,15 +1569,204 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, closable: bool, send: impl Fn(&str, 
             } else {
                 "Cancelled; nothing was written"
             }));
-            closed = closable && ui.button("Close").clicked();
         }
         JobState::Failed => {
             let e = j.error.as_ref().map_or("", |e| e.message.as_str());
             ui.label(RichText::new(format!("Failed: {e}")).color(theme::colors().error));
-            closed = closable && ui.button("Close").clicked();
         }
     }
-    closed
+}
+
+const JOBS_GLOW: f64 = 1.5;
+
+fn job_chips(ui: &mut egui::Ui, j: &JobInfo) {
+    let d = &j.details;
+    let mut chips = Vec::new();
+    if let Some(v) = &d.video {
+        chips.push(format!("{} · {}-bit", v.encoder, v.bits));
+        if v.passes > 1 {
+            chips.push(format!("{} passes", v.passes));
+        }
+        if v.gpu_frames_in {
+            chips.push("frames on the GPU".into());
+        }
+    }
+    if let Some(decode) = decoded_on(&d.sources) {
+        chips.push(decode.into());
+    }
+    if !d.tried.is_empty() {
+        chips.push(match d.tried.len() {
+            1 => "1 encoder failed".into(),
+            n => format!("{n} encoders failed"),
+        });
+    }
+    if chips.is_empty() {
+        return;
+    }
+    ui.horizontal_wrapped(|ui| {
+        for c in chips {
+            egui::Frame::new()
+                .fill(ui.visuals().faint_bg_color)
+                .corner_radius(egui::CornerRadius::same(4))
+                .inner_margin(egui::Margin::symmetric(6, 1))
+                .show(ui, |ui| ui.label(RichText::new(c).small()));
+        }
+    });
+}
+
+fn job_details(ui: &mut egui::Ui, j: &JobInfo, rate: Option<f64>) {
+    let d = &j.details;
+    if d.video.is_none() && d.audio.is_none() && d.sources.is_empty() && j.outputs.is_empty() {
+        ui.label(dim("Known once the job starts"));
+        return;
+    }
+    let row = |ui: &mut egui::Ui, name: &str, text: String| {
+        ui.label(dim(name));
+        ui.label(text);
+        ui.end_row();
+    };
+    let note = |ui: &mut egui::Ui, text: &str| {
+        ui.label("");
+        ui.label(dim(text));
+        ui.end_row();
+    };
+    egui::Grid::new(("job-details-grid", &j.id))
+        .num_columns(2)
+        .spacing([12.0, 3.0])
+        .show(ui, |ui| {
+            for o in &j.outputs {
+                row(ui, "Writes", o.path.display().to_string());
+            }
+            if let Some(v) = &d.video {
+                let mut text = format!("{} · {}", v.encoder, v.pixel);
+                if let Some(device) = &v.device {
+                    text += &format!(" on {device}");
+                }
+                if v.passes > 1 {
+                    text += &format!(" · {} passes", v.passes);
+                }
+                text += match v.gpu_frames_in {
+                    true => " · takes frames on the GPU",
+                    false => " · takes frames from memory",
+                };
+                row(ui, "Video", text);
+            }
+            for t in &d.tried {
+                let text = match &t.encoder {
+                    Some(e) => format!("{e}: {}", t.error),
+                    None => t.error.clone(),
+                };
+                row(ui, "Didn't open", text);
+            }
+            if let Some(a) = &d.audio {
+                let mut text = format!("{} · {} Hz · {} ch", a.encoder, a.rate, a.channels);
+                if let Some(b) = a.bitrate {
+                    text += &format!(" · {} kb/s", b / 1000);
+                }
+                row(ui, "Audio", text);
+                if let Some(l) = &a.loudness {
+                    let mut text = format!("gain {:+.1} dB", l.gain_db);
+                    if let Some(m) = l.measured {
+                        text = format!("measured {m:.1} LUFS, {text}");
+                    }
+                    if let Some(to) = l.loudness {
+                        text += &format!(", now {to:.1} LUFS");
+                    }
+                    row(ui, "Loudness", text);
+                }
+            }
+            if let Some(c) = &d.color {
+                row(
+                    ui,
+                    "Color",
+                    format!("{}, {}-bit", hdr_name(c.hdr), c.bit_depth),
+                );
+                for why in &c.why {
+                    note(ui, why);
+                }
+            }
+            if let Some(m) = &d.metadata {
+                row(ui, "HDR metadata", metadata_name(m.mode).into());
+                for why in &m.why {
+                    note(ui, why);
+                }
+            }
+            if let Some(decode) = decoded_on(&d.sources) {
+                let files = match d.sources.len() {
+                    1 => "1 file".to_string(),
+                    n => format!("{n} files"),
+                };
+                row(ui, "Decoding", format!("{files}: {decode}"));
+                for s in &d.sources {
+                    let name = s.path.file_name().map_or_else(
+                        || s.path.display().to_string(),
+                        |n| n.to_string_lossy().into(),
+                    );
+                    note(ui, &format!("{name}: {}", s.decoding));
+                }
+            }
+            if d.gpu_frames > 0 || d.gpu_decoded > 0 {
+                row(
+                    ui,
+                    "On the GPU",
+                    format!("{} frames decoded, {} made", d.gpu_decoded, d.gpu_frames),
+                );
+            }
+            if d.copied.down > 0 || d.copied.up > 0 {
+                row(
+                    ui,
+                    "Copied",
+                    format!(
+                        "{} frames down ({}), {} up ({})",
+                        d.copied.down,
+                        mib(d.copied.down_bytes),
+                        d.copied.up,
+                        mib(d.copied.up_bytes)
+                    ),
+                );
+            }
+            if let Some(fps) = d.fps {
+                let text = match rate {
+                    Some(r) if r > 0.0 => format!("{fps:.1} fps · {:.2}× real time", fps / r),
+                    _ => format!("{fps:.1} fps"),
+                };
+                row(ui, "Speed", text);
+            }
+        });
+}
+
+fn decoded_on(sources: &[vidcut_av::export::SourceNote]) -> Option<&'static str> {
+    let on_gpu = sources.iter().filter(|s| s.decoding.gpu.is_some()).count();
+    match (on_gpu, sources.len()) {
+        (_, 0) => None,
+        (0, _) => Some("CPU decode"),
+        (g, n) if g == n => Some("GPU decode"),
+        _ => Some("GPU and CPU decode"),
+    }
+}
+
+fn hdr_name(hdr: HdrMode) -> &'static str {
+    match hdr {
+        HdrMode::Auto => "automatic",
+        HdrMode::Sdr => "SDR",
+        HdrMode::Pq => "HDR PQ",
+        HdrMode::Hlg => "HDR HLG",
+    }
+}
+
+fn metadata_name(metadata: HdrMetadata) -> &'static str {
+    match metadata {
+        HdrMetadata::Auto => "automatic",
+        HdrMetadata::Static => "mastering display and light levels",
+        HdrMetadata::Hdr10plus => "static and HDR10+",
+        HdrMetadata::DolbyVision => "static and Dolby Vision",
+        HdrMetadata::All => "static, HDR10+ and Dolby Vision",
+        HdrMetadata::None => "none",
+    }
+}
+
+fn mib(bytes: u64) -> String {
+    format!("{:.0} MiB", bytes as f64 / (1024.0 * 1024.0))
 }
 
 fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
@@ -2216,7 +2420,22 @@ fn settings_form(
 mod tests {
     use serde_json::json;
 
-    use super::metadata_line;
+    use super::{decoded_on, metadata_line};
+
+    #[test]
+    fn files_decoded_on_both_say_so() {
+        let file = |gpu: Option<&str>| vidcut_av::export::SourceNote {
+            path: "a.mp4".into(),
+            decoding: vidcut_av::decode::Decoding {
+                gpu: gpu.map(String::from),
+                ..Default::default()
+            },
+        };
+        assert_eq!(
+            decoded_on(&[file(Some("NVDEC")), file(None)]),
+            Some("GPU and CPU decode")
+        );
+    }
 
     #[test]
     fn the_metadata_line_names_each_kind_once() {

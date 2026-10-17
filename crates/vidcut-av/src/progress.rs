@@ -2,8 +2,9 @@ use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::Arc;
 
-use crate::export::Progress;
+use crate::export::{Note, Progress};
 
 pub type Report = Box<dyn FnMut(&Path, Progress)>;
 
@@ -39,6 +40,44 @@ pub(crate) fn report(path: &Path, progress: Progress) {
             report(path, progress);
         }
     });
+}
+
+pub type Notes = Arc<dyn Fn(Note) + Send + Sync>;
+
+thread_local! {
+    static NOTES: RefCell<Option<Notes>> = const { RefCell::new(None) };
+}
+
+pub struct Noting {
+    prev: Option<Notes>,
+    _unsend: PhantomData<Rc<()>>,
+}
+
+impl Noting {
+    pub fn set(notes: Notes) -> Self {
+        let prev = NOTES.with(|slot| slot.replace(Some(notes)));
+        Self {
+            prev,
+            _unsend: PhantomData,
+        }
+    }
+}
+
+impl Drop for Noting {
+    fn drop(&mut self) {
+        let prev = self.prev.take();
+        NOTES.with(|slot| *slot.borrow_mut() = prev);
+    }
+}
+
+pub fn notes() -> Option<Notes> {
+    NOTES.with(|slot| slot.borrow().clone())
+}
+
+pub(crate) fn note(note: Note) {
+    if let Some(notes) = notes() {
+        notes(note);
+    }
 }
 
 #[cfg(test)]
