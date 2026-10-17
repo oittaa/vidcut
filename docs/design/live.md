@@ -92,7 +92,7 @@ The `Snapshot` carries the project, players, selection, log, notices, filmstrips
 |---|---|---|
 | `Now` | here: edits (`Live::edit`), queries, play, pause | the answer |
 | `Wait` | nothing: seeks, steps, screenshots, `jobs.wait` join the waits | `Live::tick` finds its `Until` met |
-| `Task` | `vidcut-task`, at its `Work`: plans, frames, storyboards, analyses, project-less requests, screenshots, UI answers | `Msg::TaskDone` |
+| `Task` | `vidcut-task`, at its `Work`: plans, frames, storyboards, analyses, project-less requests, UI answers | `Msg::TaskDone` |
 | `Make` | `vidcut-make`: a project from an OpenTimelineIO file | `Msg::Made`; the core opens it |
 | `Measure` | `vidcut-measure`, a job: measuring for Ripple Delete Silence or Detect Scene Cuts, unpacking an `.otioz` | `Msg::Measured`; the edit runs here |
 | `Encode` | a job thread: proxies | `Msg::Measured`; the edit records them |
