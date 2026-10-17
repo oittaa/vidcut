@@ -7,6 +7,7 @@ The GUI's viewer plays through it, one engine for the source and the timeline ([
 - [`tests/player_sound.rs`](../../crates/vidcut-av/tests/player_sound.rs): backward sound reversed to the sample; other speeds both ways keeping the pitch; audio scrubbing: steps play their frame's sound.
 - [`tests/player_decodes.rs`](../../crates/vidcut-av/tests/player_decodes.rs): pictures playing on across an edit, after an edit that moves every frame, and stepping back over a keyframe.
 - [`tests/player_back.rs`](../../crates/vidcut-av/tests/player_back.rs): playing 300 frames backward on the CPU decodes about 300, as the windows behind are kept whole.
+- [`tests/player_ending.rs`](../../crates/vidcut-av/tests/player_ending.rs): a player dropped on NVDEC while the next file opens ahead leaves no reader and no thread named after its own once the threads it left end.
 
 ## 1. Threads
 
@@ -20,7 +21,7 @@ The GUI's viewer plays through it, one engine for the source and the timeline ([
 
 vidcut-av starts them as it starts its other threads (`std::thread::Builder`, named `vidcut-…`). Someone watches what they make, so they keep their priority: the app's own rule (`threads::spawn`, gui.md §9) gives interactive work no other.
 
-**Ending.** Dropping a player joins the decode and audio threads, frees the kept pictures and stops the output; a followed player's windows thread isn't waited for. Each thread's reader goes with it: the GPU's converters first, then the open files with their decoders, then the GPU's decoder. Freeing GPU memory waits its turn on the GPU behind other players ending or decoding, so under `VIDCUT_DEBUG` the player says how long each of these took.
+**Ending.** Dropping a player joins the decode and audio threads, frees the kept pictures and stops the output; a followed player's windows thread isn't waited for: it is left to end on its own, as the reader's opener is (export.md §1), and the process waits for both before it ends (`ending::join`), as a GPU decoder closing during the exit hangs it (gotchas.md). Each thread's reader goes with it: the GPU's converters first, then the open files with their decoders, then the GPU's decoder. Freeing GPU memory waits its turn on the GPU behind other players ending or decoding, so under `VIDCUT_DEBUG` the player says how long each of these took.
 
 **The player comes first** (`vidcut_av::first`). While a player plays, or decodes the picture its viewer waits for, the app's jobs stop decoding between frames: exports, proxies, filmstrips, pool pictures and analyses. They go on when it stops (`tests/first.rs`). They share the GPU's decoder with the player, and no thread priority reaches that. The GUI's two-up is two players more (preview.md §9).
 

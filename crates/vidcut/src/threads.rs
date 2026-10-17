@@ -88,12 +88,15 @@ pub fn closing(
     Ok(())
 }
 
-/// Waits for every closing thread still running: before the process ends.
+/// Waits for every closing thread still running, then for the threads the
+/// players and readers they closed left to end (`vidcut_av::ending`):
+/// before the process ends.
 pub fn join_closing() {
     let handles = std::mem::take(&mut *CLOSING.lock().unwrap_or_else(|e| e.into_inner()));
     for handle in handles {
         let _ = handle.join();
     }
+    vidcut_av::ending::join();
 }
 
 /// The stage the GUI's ending is at: the session, the window, the
@@ -143,9 +146,9 @@ pub fn end_within(patience: std::time::Duration) {
 }
 
 /// Ends the process now with `code`, its output flushed and no library's
-/// exit handler run: libnvcuvid's joins a thread of the driver's that
-/// never ends once a window closed while NVDEC decoded (gotchas.md). For
-/// the GUI once its own threads are joined ([`join_closing`]).
+/// exit handler run: libnvcuvid's hangs if a decoder closes during it
+/// (gotchas.md). For the GUI once its own threads are joined
+/// ([`join_closing`]).
 pub fn exit_now(code: i32) -> ! {
     use std::io::Write;
     let _ = std::io::stdout().flush();

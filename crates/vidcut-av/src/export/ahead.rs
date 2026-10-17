@@ -60,6 +60,9 @@ fn want<T>(s: &mut State<T>, shared: &Shared<T>, id: Option<u64>) {
 /// thread an arena, and memory spread over many arenas stays resident.
 pub(crate) struct Ahead<T, K = ()> {
     shared: Option<Arc<Shared<T>>>,
+    /// The helper thread, left to end on its own when the reader goes
+    /// (`crate::ending`).
+    helper: Option<thread::JoinHandle<()>>,
     /// The piece being opened, its job's number and what it opens.
     pending: Option<(usize, u64, K)>,
     /// A job forgotten while it was pending (the pieces were numbered
@@ -74,6 +77,7 @@ impl<T: Send + 'static, K: PartialEq> Ahead<T, K> {
     pub(crate) fn new() -> Self {
         Self {
             shared: None,
+            helper: None,
             pending: None,
             forgotten: None,
             next: 0,
@@ -108,8 +112,9 @@ impl<T: Send + 'static, K: PartialEq> Ahead<T, K> {
         let shared = match &self.shared {
             Some(s) => s.clone(),
             None => match spawn() {
-                Some(s) => {
+                Some((s, helper)) => {
                     self.shared = Some(s.clone());
+                    self.helper = Some(helper);
                     s
                 }
                 None => return, // the piece opens when it starts
@@ -213,11 +218,15 @@ impl<T, K> Drop for Ahead<T, K> {
         };
         drop(queued);
         shared.changed.notify_all();
+        // It closes what it holds as it ends, which the process waits for.
+        if let Some(helper) = self.helper.take() {
+            crate::ending::leave(helper);
+        }
     }
 }
 
 /// Starts the helper thread; `None` when the system won't give one.
-fn spawn<T: Send + 'static>() -> Option<Arc<Shared<T>>> {
+fn spawn<T: Send + 'static>() -> Option<(Arc<Shared<T>>, thread::JoinHandle<()>)> {
     let shared = Arc::new(Shared {
         state: Mutex::new(State {
             queued: None,
@@ -233,7 +242,7 @@ fn spawn<T: Send + 'static>() -> Option<Arc<Shared<T>>> {
     let yields = crate::first::yields();
     let copies = crate::copies::current();
     let worker = shared.clone();
-    thread::Builder::new()
+    let helper = thread::Builder::new()
         .name("vidcut-open".into())
         .spawn(move || {
             crate::first::set_yields(yields);
@@ -242,7 +251,7 @@ fn spawn<T: Send + 'static>() -> Option<Arc<Shared<T>>> {
             work(&worker);
         })
         .ok()?;
-    Some(shared)
+    Some((shared, helper))
 }
 
 /// The helper: one job at a time, and every source nobody wants dropped
@@ -419,17 +428,18 @@ mod tests {
     }
 
     #[test]
-    fn a_dropped_reader_leaves_its_source_to_the_helper_thread() {
+    fn a_dropped_readers_source_closes_on_the_helper_thread_before_the_threads_left_end() {
         let (dropped, source) = noted();
         let (began, begun) = mpsc::channel();
         let mut ahead = Ahead::new();
         ahead.start(1, "a", move || {
             let _ = began.send(());
+            thread::sleep(Duration::from_millis(50));
             Ok(source)
         });
         begun.recv().unwrap();
         drop(ahead);
-        assert!(soon(|| lock(&dropped).is_some()));
+        crate::ending::join();
         assert_eq!(lock(&dropped).as_deref(), Some("vidcut-open"));
     }
 }
