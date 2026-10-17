@@ -140,10 +140,11 @@ const REVERSED_ON_GPU: i64 = 4;
 /// playhead dragged back across a cut seeks it rather than opening it anew.
 const LEFT_FOR: Duration = Duration::from_secs(10);
 
-/// Files left open at most, each holding its decoder's memory: a dissolve's
-/// two. Of those a GPU decodes, one: an idle GPU decoder holds video memory.
-const LEFT_MOST: usize = 2;
-const LEFT_ON_GPU: usize = 1;
+/// Files left open at most, each holding its decoder's memory: the files
+/// a playhead is dragged across in a moment. Of those a GPU decodes, a
+/// dissolve's two: an idle GPU decoder holds video memory.
+const LEFT_MOST: usize = 4;
+const LEFT_ON_GPU: usize = 2;
 
 /// Which of the files left stay open, each given as the time since it was
 /// left and whether a GPU decodes it: those left less than [`LEFT_FOR`]
@@ -1094,19 +1095,29 @@ impl VideoFrames {
                     s
                 }
                 None => {
-                    let opened = match self.ahead.take(slot(self.piece, i)) {
-                        Some(opened) => opened?,
-                        None => Source::open(
-                            &input,
-                            *origin,
-                            from,
-                            target,
-                            pictures,
-                            self.gpu_side().as_ref(),
-                            self.decoder.as_ref(),
-                            self.maker.reading(),
-                            self.measures(&input),
-                        )?,
+                    // A file left that went to the opener for a later
+                    // piece: taken back, where the opener left it.
+                    let opened = match self.ahead.reclaim(|k| k.0 == input) {
+                        Some(source) => {
+                            let mut source = source?;
+                            source.left = None;
+                            source.reposition(*origin, from, target)?;
+                            source
+                        }
+                        None => match self.ahead.take(slot(self.piece, i)) {
+                            Some(opened) => opened?,
+                            None => Source::open(
+                                &input,
+                                *origin,
+                                from,
+                                target,
+                                pictures,
+                                self.gpu_side().as_ref(),
+                                self.decoder.as_ref(),
+                                self.maker.reading(),
+                                self.measures(&input),
+                            )?,
+                        },
                     };
                     self.open.push(opened);
                     taken.push(false);
@@ -1544,18 +1555,27 @@ mod tests {
     }
 
     #[test]
-    fn past_two_files_left_the_oldest_closes() {
-        assert_eq!(
-            staying(&[(secs(3), false), (secs(1), false), (secs(2), false)]),
-            [false, true, true]
-        );
+    fn past_four_files_left_the_oldest_closes() {
+        let left = [
+            (secs(5), false),
+            (secs(1), false),
+            (secs(2), false),
+            (secs(4), false),
+            (secs(3), false),
+        ];
+        assert_eq!(staying(&left), [false, true, true, true, true]);
     }
 
     #[test]
-    fn one_file_left_a_gpu_decodes_stays() {
+    fn two_files_left_a_gpu_decodes_stay() {
         assert_eq!(
-            staying(&[(secs(2), true), (secs(1), true), (secs(3), false)]),
-            [false, true, true]
+            staying(&[
+                (secs(3), true),
+                (secs(1), true),
+                (secs(2), true),
+                (secs(4), false)
+            ]),
+            [false, true, true, true]
         );
     }
 

@@ -1,6 +1,8 @@
 //! The shared pools that run work split into slices (docs/decisions/
 //! threads.md §3): a filter graph's slices and the row loops of
-//! [`crate::color`], instead of threads of their own.
+//! [`crate::color`], instead of threads of their own. And tasks a thread
+//! hands them in order ([`tasks`]): a stream's frames that stand alone,
+//! each decoded on its own (§4.2).
 //!
 //! Two pools, each started on first use with a thread fewer than the
 //! cores, as the thread asking works too: one at normal priority
@@ -13,9 +15,14 @@ use std::collections::VecDeque;
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
+use std::time::Instant;
 
 use crate::decode::Reading;
 use crate::ffmpeg::{ffi, filter};
+
+pub(crate) mod tasks;
+
+pub(crate) use tasks::Task;
 
 /// One call's slices, while they run.
 struct Batch {
@@ -59,9 +66,19 @@ impl Batch {
     }
 }
 
+/// What a pool thread takes from the queue, oldest first: a call's slices,
+/// which stay at the front until none is left, or a task.
+enum Work {
+    Slices(Arc<Batch>),
+    Task(Arc<dyn Task>),
+}
+
 struct Pool {
-    queue: Mutex<VecDeque<Arc<Batch>>>,
+    queue: Mutex<VecDeque<Work>>,
     ready: Condvar,
+    /// Its threads. None: every slice and task runs on the thread that
+    /// asks.
+    threads: usize,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -97,6 +114,19 @@ fn budget(reading: Reading, job: bool, cores: usize) -> usize {
     n.clamp(1, MOST_FRAME_THREADS)
 }
 
+/// A pool's threads on `cores` cores: a thread fewer than the workers its
+/// class has, as the thread asking works too. The normal pool's workers
+/// are the cores; the jobs' are the jobs' budget ([`budget`], half the
+/// cores), the most a job's reader hands it at once.
+fn size(job: bool, cores: usize) -> usize {
+    let workers = if job {
+        budget(Reading::Stream, true, cores)
+    } else {
+        cores
+    };
+    workers.saturating_sub(1)
+}
+
 /// The pool of the calling thread: the jobs' for a thread working for a
 /// job, the other's for the rest. Started on first use.
 fn pool() -> &'static Pool {
@@ -114,10 +144,11 @@ fn pool() -> &'static Pool {
         Pool {
             queue: Mutex::new(VecDeque::new()),
             ready: Condvar::new(),
+            threads: size(job, threads()),
         }
     });
     if new {
-        for i in 0..threads() - 1 {
+        for i in 0..pool.threads {
             let _ = std::thread::Builder::new()
                 .name(format!("{name}-{i}"))
                 .spawn(move || {
@@ -131,23 +162,66 @@ fn pool() -> &'static Pool {
     pool
 }
 
-/// A pool thread: the slices of the oldest call that has some left.
+/// The oldest work in `queue`: the slices of the oldest call that has some
+/// left, or the oldest task, taken out.
+fn next(queue: &mut VecDeque<Work>) -> Option<Work> {
+    while let Some(Work::Slices(b)) = queue.front()
+        && b.exhausted()
+    {
+        queue.pop_front();
+    }
+    match queue.front()? {
+        Work::Slices(b) => Some(Work::Slices(b.clone())),
+        Work::Task(_) => queue.pop_front(),
+    }
+}
+
+/// A pool thread: the oldest work. The decoders it keeps for tasks close
+/// once idle (`decode::standalone`), so it wakes for that too.
 fn work(pool: &Pool) {
+    let mut closes: Option<Instant> = None;
     loop {
-        let batch = {
+        let work = {
             let mut queue = lock(&pool.queue);
             loop {
-                while queue.front().is_some_and(|b| b.exhausted()) {
-                    queue.pop_front();
+                if let Some(w) = next(&mut queue) {
+                    break Some(w);
                 }
-                if let Some(b) = queue.front() {
-                    break b.clone();
+                match closes {
+                    None => queue = pool.ready.wait(queue).unwrap_or_else(|e| e.into_inner()),
+                    Some(at) => {
+                        let left = at.saturating_duration_since(Instant::now());
+                        if left.is_zero() {
+                            break None;
+                        }
+                        queue = pool
+                            .ready
+                            .wait_timeout(queue, left)
+                            .unwrap_or_else(|e| e.into_inner())
+                            .0;
+                    }
                 }
-                queue = pool.ready.wait(queue).unwrap_or_else(|e| e.into_inner());
             }
         };
-        while batch.run_one() {}
+        match work {
+            Some(Work::Slices(batch)) => while batch.run_one() {},
+            Some(Work::Task(task)) => task.run(),
+            None => {}
+        }
+        closes = crate::decode::standalone::close_idle();
     }
+}
+
+/// Hands `task` to the calling thread's pool, which runs it once a thread
+/// is free unless it is started elsewhere first. A pool of no threads
+/// never takes it: whoever wants its result runs it.
+pub(crate) fn give(task: Arc<dyn Task>) {
+    let pool = pool();
+    if pool.threads == 0 {
+        return;
+    }
+    lock(&pool.queue).push_back(Work::Task(task));
+    pool.ready.notify_one();
 }
 
 /// Runs `job(0)` to `job(slices - 1)` on the calling thread's pool and on
@@ -159,7 +233,8 @@ pub fn run(slices: usize, job: &(dyn Fn(usize) + Sync)) {
         1 => return job(0),
         _ => {}
     }
-    if threads() == 1 {
+    let pool = pool();
+    if pool.threads == 0 {
         return (0..slices).for_each(job);
     }
     // SAFETY: only the lifetime goes: the batch calls `job` only for slices
@@ -173,8 +248,7 @@ pub fn run(slices: usize, job: &(dyn Fn(usize) + Sync)) {
         finished: Condvar::new(),
         panicked: AtomicBool::new(false),
     });
-    let pool = pool();
-    lock(&pool.queue).push_back(batch.clone());
+    lock(&pool.queue).push_back(Work::Slices(batch.clone()));
     pool.ready.notify_all();
     while batch.run_one() {}
     let mut done = lock(&batch.done);
@@ -270,6 +344,60 @@ mod tests {
             ran[i].fetch_add(1, Ordering::Relaxed);
         });
         assert!(ran.iter().all(|r| r.load(Ordering::Relaxed) == 1));
+    }
+
+    /// A task that notes its name when it runs.
+    struct Noted(&'static str, Arc<Mutex<Vec<&'static str>>>);
+
+    impl Task for Noted {
+        fn run(&self) {
+            lock(&self.1).push(self.0);
+        }
+    }
+
+    fn nothing(_: usize) {}
+
+    #[test]
+    fn the_oldest_work_runs_first() {
+        let ran = Arc::new(Mutex::new(Vec::new()));
+        let job: &'static (dyn Fn(usize) + Sync) = &nothing;
+        let mut queue = VecDeque::from([
+            Work::Task(Arc::new(Noted("first task", ran.clone()))),
+            Work::Slices(Arc::new(Batch {
+                job,
+                slices: 2,
+                next: AtomicUsize::new(0),
+                done: Mutex::new(0),
+                finished: Condvar::new(),
+                panicked: AtomicBool::new(false),
+            })),
+            Work::Task(Arc::new(Noted("last task", ran.clone()))),
+        ]);
+        while let Some(work) = next(&mut queue) {
+            match work {
+                Work::Slices(batch) => {
+                    while batch.run_one() {}
+                    lock(&ran).push("slices");
+                }
+                Work::Task(task) => task.run(),
+            }
+        }
+        assert_eq!(*lock(&ran), ["first task", "slices", "last task"]);
+    }
+
+    #[test]
+    fn the_normal_pool_has_a_thread_fewer_than_the_cores() {
+        assert_eq!(size(false, 12), 11);
+    }
+
+    #[test]
+    fn the_jobs_pool_has_a_thread_fewer_than_the_jobs_budget() {
+        assert_eq!(size(true, 12), 5);
+    }
+
+    #[test]
+    fn a_jobs_pool_on_two_cores_has_no_thread() {
+        assert_eq!(size(true, 2), 0);
     }
 
     #[test]

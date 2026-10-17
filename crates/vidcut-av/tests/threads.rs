@@ -1,18 +1,18 @@
 //! The threads FFmpeg's readers and graphs start (docs/decisions/threads.md):
 //! a single-frame reader none, a job's stream decoder half the cores', a
-//! graph none once the shared pool runs; and the readers open, a file left
-//! lately among them. Linux only, which lists a process's threads in
-//! `/proc`.
+//! graph none once the shared pool runs, nor a stream of frames that stand
+//! alone; and the readers open, a file left lately among them. Linux only,
+//! which lists a process's threads in `/proc`.
 #![cfg(target_os = "linux")]
 
 use std::path::Path;
 use std::sync::Mutex;
 
-use vidcut_av::decode::{Reading, VideoReader, open_readers, read_barcode};
+use vidcut_av::decode::{Input, Reading, VideoReader, open_readers, read_barcode};
 use vidcut_av::export::renderer::FrameReader;
 use vidcut_av::export::video::VideoFrames;
 use vidcut_av::ffmpeg::{filter, format::Pixel, frame};
-use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
+use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
 use vidcut_core::render::VideoPiece;
 use vidcut_core::time::Rational;
 
@@ -166,6 +166,47 @@ fn a_graph_runs_its_slices_on_the_pool() {
     );
 }
 
+/// The threads `source` started, read as a stream to its end once the pool
+/// runs, and the frames it gave.
+fn threads_reading(source: &Input) -> (usize, usize) {
+    vidcut_av::init();
+    vidcut_av::pool::run(2, &|_| {});
+    let before = threads();
+    let mut reader = VideoReader::open_input(source).unwrap();
+    let mut frames = 0;
+    while reader.next_frame().unwrap().is_some() {
+        frames += 1;
+    }
+    (threads().saturating_sub(before), frames)
+}
+
+#[test]
+fn a_stream_of_images_starts_no_thread() {
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let files = fixture::ensure_images(&ImageSpec::sequence(0, 30, 3, 320, 180)).unwrap();
+    let source = Input::Sequence {
+        pattern: files[0].with_file_name("img_%03d.png"),
+        first: 0,
+        rate: (30, 1),
+    };
+    assert_eq!(threads_reading(&source), (0, 30));
+}
+
+#[test]
+fn a_stream_of_an_intra_only_codec_starts_no_thread() {
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let spec = FixtureSpec::new(
+        VideoCodec::ProRes422Hq,
+        Container::Mov,
+        320,
+        180,
+        (30, 1),
+        30,
+    );
+    let path = fixture::ensure(&spec).unwrap();
+    assert_eq!(threads_reading(&Input::File(path)), (0, 30));
+}
+
 #[test]
 fn a_file_left_stays_open_for_a_later_piece_of_it() {
     let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
@@ -188,6 +229,32 @@ fn a_file_left_stays_open_for_a_later_piece_of_it() {
     assert_eq!(open_readers(), before + 2);
     drop(frames);
     assert_eq!(open_readers(), before);
+}
+
+#[test]
+fn a_seek_into_a_file_the_opener_holds_takes_it_back() {
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let (first, second) = (file_of(60), file_of(90));
+    let fps = Rational::new(30, 1).unwrap();
+    // A cutaway, played into its second piece: the first file, left, goes
+    // to the opener for the piece after.
+    let pieces = [
+        piece(&first, 10, 3),
+        piece(&second, 20, 3),
+        piece(&first, 50, 3),
+    ];
+    let mut frames = VideoFrames::new(&pieces, fps, 320, 180, Pixel::YUV420P, None);
+    let before = open_readers();
+    for _ in 0..5 {
+        frames.next_frame().unwrap().unwrap();
+    }
+    // A seek into the first file: taken back, not opened anew.
+    frames.read_piece(&piece(&first, 30, 1));
+    assert_eq!(
+        read_barcode(&frames.next_frame().unwrap().unwrap()).unwrap(),
+        Some(30)
+    );
+    assert_eq!(open_readers(), before + 2);
 }
 
 #[test]
