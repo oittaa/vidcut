@@ -129,8 +129,84 @@ pub fn output_devices() -> Result<Vec<OutputDevice>> {
                 .and_then(|desc| desc.extended().nth(1).map(str::to_string)),
         );
     }
+    without_numbered_cards(&mut listed, &mut details);
+    one_for_each_output(&mut listed, &mut details);
     distinct_names(&mut listed, &details);
     Ok(listed)
+}
+
+/// ALSA lists each card's outputs once for each of its plugins (`hw`,
+/// `plughw`, `front`, the `surround` layouts, `iec958`, `dmix` and more),
+/// the same output each time, a hundred entries on a desktop. What is
+/// listed is one entry for each output: the system's own (`default`,
+/// `pipewire`, `pulse`), each card's `sysdefault`, and its `hdmi` outputs,
+/// one for each screen. A card with none of those keeps its `hw` entries.
+/// Other hosts' devices (WASAPI's, Core Audio's) are listed as they are. An
+/// id saved for any plugin still opens: [`output_by_id`] searches every
+/// device.
+fn one_for_each_output(devices: &mut Vec<OutputDevice>, details: &mut Vec<Option<String>>) {
+    fn plugin(id: &str) -> Option<&str> {
+        id.strip_prefix("alsa:")
+            .map(|rest| rest.split(':').next().unwrap_or(rest))
+    }
+    fn card(id: &str) -> Option<String> {
+        id.split("CARD=")
+            .nth(1)
+            .map(|c| c.split(',').next().unwrap_or(c).to_string())
+    }
+    fn listed(id: &str) -> bool {
+        matches!(
+            plugin(id),
+            Some("default" | "sysdefault" | "pipewire" | "pulse" | "hdmi")
+        )
+    }
+    let covered: std::collections::HashSet<String> = devices
+        .iter()
+        .filter(|d| listed(&d.id))
+        .filter_map(|d| card(&d.id))
+        .collect();
+    let keep: Vec<bool> = devices
+        .iter()
+        .map(|d| match plugin(&d.id) {
+            None => true,
+            Some(p) => {
+                listed(&d.id) || (p == "hw" && card(&d.id).is_some_and(|c| !covered.contains(&c)))
+            }
+        })
+        .collect();
+    let mut kept = keep.iter();
+    devices.retain(|_| *kept.next().expect("one for each"));
+    let mut kept = keep.iter();
+    details.retain(|_| *kept.next().expect("one for each"));
+}
+
+/// ALSA lists a card's hardware devices twice, by the card's name
+/// (`hw:CARD=NVidia,DEV=3`) and by its number (`hw:CARD=0,DEV=3`): the same
+/// device, named and described alike, and the number changes between
+/// boots. A numbered one isn't listed where its named twin is. An id saved
+/// so still opens: [`output_by_id`] searches every device.
+fn without_numbered_cards(devices: &mut Vec<OutputDevice>, details: &mut Vec<Option<String>>) {
+    let numbered = |id: &str| {
+        id.split("CARD=")
+            .nth(1)
+            .and_then(|rest| rest.chars().next())
+            .is_some_and(|c| c.is_ascii_digit())
+    };
+    let keep: Vec<bool> = (0..devices.len())
+        .map(|i| {
+            let twin = |j: usize| {
+                j != i
+                    && !numbered(&devices[j].id)
+                    && devices[j].name == devices[i].name
+                    && details[j] == details[i]
+            };
+            !(numbered(&devices[i].id) && (0..devices.len()).any(twin))
+        })
+        .collect();
+    let mut kept = keep.iter();
+    devices.retain(|_| *kept.next().expect("one for each"));
+    let mut kept = keep.iter();
+    details.retain(|_| *kept.next().expect("one for each"));
 }
 
 /// Names that repeat made distinct: ALSA's outputs of one card share the
@@ -468,6 +544,70 @@ mod tests {
     #[test]
     fn a_device_gone_is_a_failure() {
         assert!(fails(cpal::ErrorKind::DeviceNotAvailable));
+    }
+
+    #[test]
+    fn one_entry_is_listed_for_each_output() {
+        let device = |id: &str| OutputDevice {
+            id: id.into(),
+            name: id.into(),
+            default: false,
+        };
+        let ids = [
+            "alsa:null",
+            "alsa:pipewire",
+            "alsa:default",
+            "alsa:hw:CARD=NVidia,DEV=3",
+            "alsa:plughw:CARD=NVidia,DEV=3",
+            "alsa:hdmi:CARD=NVidia,DEV=0",
+            "alsa:dmix:CARD=NVidia,DEV=3",
+            "alsa:hw:CARD=Mic,DEV=0",
+            "alsa:sysdefault:CARD=Mic",
+            "alsa:front:CARD=Mic,DEV=0",
+            "alsa:surround51:CARD=Mic,DEV=0",
+            "alsa:hw:CARD=Raw,DEV=0",
+            "alsa:plughw:CARD=Raw,DEV=0",
+            "wasapi:a",
+        ];
+        let mut devices: Vec<OutputDevice> = ids.iter().map(|id| device(id)).collect();
+        let mut details = vec![None; ids.len()];
+        one_for_each_output(&mut devices, &mut details);
+        let kept: Vec<&str> = devices.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(
+            kept,
+            [
+                "alsa:pipewire",
+                "alsa:default",
+                "alsa:hdmi:CARD=NVidia,DEV=0",
+                "alsa:sysdefault:CARD=Mic",
+                "alsa:hw:CARD=Raw,DEV=0",
+                "wasapi:a",
+            ]
+        );
+        assert_eq!(details.len(), 6);
+    }
+
+    #[test]
+    fn a_card_listed_by_its_number_goes_where_its_named_twin_is() {
+        let device = |id: &str, name: &str| OutputDevice {
+            id: id.into(),
+            name: name.into(),
+            default: false,
+        };
+        let mut devices = vec![
+            device("alsa:hw:CARD=NVidia,DEV=3", "HDA NVidia, MSI MP273QP"),
+            device("alsa:hw:CARD=0,DEV=3", "HDA NVidia, MSI MP273QP"),
+            device("alsa:hw:CARD=1,DEV=3", "HD-Audio Generic, HDMI 0"),
+        ];
+        let mut details = vec![
+            Some("Direct hardware device without any conversions".into()),
+            Some("Direct hardware device without any conversions".into()),
+            Some("Direct hardware device without any conversions".into()),
+        ];
+        without_numbered_cards(&mut devices, &mut details);
+        let ids: Vec<&str> = devices.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(ids, ["alsa:hw:CARD=NVidia,DEV=3", "alsa:hw:CARD=1,DEV=3"]);
+        assert_eq!(details.len(), 2);
     }
 
     #[test]
