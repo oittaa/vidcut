@@ -876,8 +876,17 @@ impl Live {
                     .filter(|(id, path)| self.lost_proxies.get(*id) != Some(*path))
                     .map(|(id, _)| id.clone())
                     .collect();
+                let changed = *self.lost_proxies != proxies;
                 self.missing = Arc::new(media);
                 self.lost_proxies = Arc::new(proxies);
+                let playing = self
+                    .project
+                    .as_ref()
+                    .map(|o| o.project().settings.use_proxies);
+                if changed && playing == Some(true) {
+                    self.schedule_timeline();
+                    self.refresh_source();
+                }
                 if !lost.is_empty() {
                     self.make_proxies(Some(&lost));
                 }
@@ -1510,6 +1519,9 @@ impl Live {
             return;
         };
         j.ended(result);
+        if j.kind == "proxy" {
+            self.missing_watch.look_again();
+        }
         if j.origin != (Origin::Gui { drag: false }).name() && j.origin != Origin::Session.name() {
             return;
         }

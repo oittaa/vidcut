@@ -165,8 +165,9 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         width: Option<u32>,
         /// Only the media the automatic proxy rules pick (preferences
-        /// `proxies`) that have no fresh proxy, of `media` or of the pool;
-        /// none is fine.
+        /// `proxies`) that have no proxy to play (none, an out-of-date one,
+        /// or one whose file is gone), of `media` or of the pool; none is
+        /// fine.
         #[serde(default)]
         auto: bool,
     },

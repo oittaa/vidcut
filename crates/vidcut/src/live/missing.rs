@@ -58,6 +58,10 @@ impl MissingWatch {
         Self { files, wake }
     }
 
+    pub(super) fn look_again(&self) {
+        let _ = self.wake.send(());
+    }
+
     pub(super) fn watch(&self, media: Files, proxies: Files) {
         let mut list = self.files.lock().unwrap_or_else(|e| e.into_inner());
         let files = (media, proxies);
