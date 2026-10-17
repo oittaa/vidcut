@@ -1145,7 +1145,9 @@ impl Workspace {
                 let builder = UiBuilder::new()
                     .max_rect(rect)
                     .layout(egui::Layout::left_to_right(egui::Align::Center));
-                ui.scope_builder(builder, |ui| ui.label(dim(text)));
+                ui.scope_builder(builder, |ui| {
+                    ui.add(egui::Label::new(dim(text)).selectable(false))
+                });
                 if r.clicked() {
                     self.send(
                         "pool.set",
