@@ -4,8 +4,9 @@
 //! still takes every core they leave idle. This is the one way the app
 //! starts threads; a test below fails on any other.
 
+use std::cell::Cell;
 use std::sync::Mutex;
-use std::thread::JoinHandle;
+use std::thread::{JoinHandle, Scope, ScopedJoinHandle};
 
 /// What a thread's work is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +23,16 @@ pub enum Work {
     Interactive,
 }
 
+thread_local! {
+    static WORK: Cell<Work> = const { Cell::new(Work::Interactive) };
+}
+
+impl Work {
+    pub fn current() -> Self {
+        WORK.get()
+    }
+}
+
 /// Starts `f` on a thread named `name`, at the priority its `work` calls for.
 pub fn spawn<T: Send + 'static>(
     name: impl Into<String>,
@@ -31,11 +42,30 @@ pub fn spawn<T: Send + 'static>(
     std::thread::Builder::new()
         .name(name.into())
         .spawn(move || {
-            if work == Work::Job {
-                vidcut_av::first::as_job();
-            }
+            begin(work);
             f()
         })
+}
+
+pub fn scoped<'scope, T: Send + 'scope>(
+    scope: &'scope Scope<'scope, '_>,
+    name: impl Into<String>,
+    work: Work,
+    f: impl FnOnce() -> T + Send + 'scope,
+) -> std::io::Result<ScopedJoinHandle<'scope, T>> {
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn_scoped(scope, move || {
+            begin(work);
+            f()
+        })
+}
+
+fn begin(work: Work) {
+    WORK.set(work);
+    if work == Work::Job {
+        vidcut_av::first::as_job();
+    }
 }
 
 /// Threads that close something and end: a player when the window closes,
@@ -178,5 +208,21 @@ mod tests {
         .unwrap();
         join_closing();
         assert!(done.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_scoped_thread_can_work_as_its_starter_does() {
+        let work = spawn("vidcut-test-job", Work::Job, || {
+            std::thread::scope(|s| {
+                scoped(s, "vidcut-test-part", Work::current(), Work::current)
+                    .unwrap()
+                    .join()
+                    .unwrap()
+            })
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+        assert_eq!(work, Work::Job);
     }
 }
