@@ -333,6 +333,64 @@ fn an_h264_picture_kept_on_nvdec_draws_from_gpu_memory_as_the_export_converts_it
     draws_from_gpu_as_converted(&gpu, &picture, Layout::Nv12);
 }
 
+fn gpu_on_node(node: &str) -> Option<Gpu> {
+    let name = std::path::Path::new(node).file_name()?;
+    let device = std::fs::canonicalize(
+        std::path::Path::new("/sys/class/drm")
+            .join(name)
+            .join("device"),
+    )
+    .ok()?;
+    let slot = device.file_name()?.to_str()?.to_string();
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::VULKAN,
+        ..wgpu::InstanceDescriptor::new_without_display_handle()
+    });
+    let adapter = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::VULKAN))
+        .into_iter()
+        .find(|a| a.get_info().device_pci_bus_id == slot)?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_features: vidcut::gui::picture::features(&adapter),
+        ..Default::default()
+    }))
+    .ok()?;
+    Some(Gpu::new(&device, &queue))
+}
+
+fn kept_on_vaapi(codec: VideoCodec) -> Option<(Gpu, Arc<Picture>)> {
+    let Some(decoder) = GpuDecoder::best().filter(|g| g.kind() == Kind::Vaapi) else {
+        eprintln!("skipping: the GPU decoder in use isn't VA-API");
+        return None;
+    };
+    let gpu =
+        gpu_on_node(decoder.on()).unwrap_or_else(|| panic!("no Vulkan device on {}", decoder.on()));
+    let config = Config {
+        audio_scrubbing: false,
+        hardware: true,
+        gpu_pictures: gpu.gpu_pictures(),
+        ..Config::default()
+    };
+    let picture = played_with(clip_in(Container::Mkv, codec, 0, Content::Colors), config);
+    assert_eq!(picture.gpu(), Some(Kind::Vaapi));
+    Some((gpu, picture))
+}
+
+#[test]
+fn an_h264_picture_kept_on_vaapi_draws_from_gpu_memory_as_the_export_converts_it() {
+    let Some((gpu, picture)) = kept_on_vaapi(VideoCodec::H264) else {
+        return;
+    };
+    draws_from_gpu_as_converted(&gpu, &picture, Layout::Nv12);
+}
+
+#[test]
+fn a_10_bit_hevc_picture_kept_on_vaapi_draws_from_gpu_memory_as_the_export_converts_it() {
+    let Some((gpu, picture)) = kept_on_vaapi(VideoCodec::Hevc10) else {
+        return;
+    };
+    draws_from_gpu_as_converted(&gpu, &picture, Layout::P010);
+}
+
 #[test]
 fn an_av1_picture_kept_on_nvdec_takes_its_rows_padded_to_cudas_alignment() {
     let Some((_, picture)) = kept_on_nvdec(VideoCodec::Av1, Id::AV1) else {
