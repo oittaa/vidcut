@@ -66,6 +66,67 @@ pub fn join_closing() {
     }
 }
 
+/// The stage the GUI's ending is at: the session, the window, the
+/// filmstrip's workers, the closing threads, the process's exit.
+static ENDING: Mutex<&'static str> = Mutex::new("");
+
+/// The GUI's ending reached `stage`: said under `VIDCUT_DEBUG`, and named
+/// by [`end_within`]'s watchdog.
+pub fn ending(stage: &'static str) {
+    *ENDING.lock().unwrap_or_else(|e| e.into_inner()) = stage;
+    vidcut_av::debug!("gui", "ending: {stage}");
+}
+
+/// The stage the GUI's ending is at.
+pub fn ending_at() -> &'static str {
+    *ENDING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Ends the process if the GUI's ending takes longer than `patience`, saying
+/// the stage it hangs at. Started as the window closes; a process that ends
+/// in time takes the watchdog's thread with it.
+pub fn end_within(patience: std::time::Duration) {
+    let _ = spawn("vidcut-exit-watch", Work::Interactive, move || {
+        std::thread::sleep(patience);
+        eprintln!(
+            "vidcut: still ending {} after {} s; quitting",
+            ending_at(),
+            patience.as_secs()
+        );
+        for (name, waits_in) in threads_waiting() {
+            eprintln!("  {name:<16} {waits_in}");
+        }
+        #[cfg(unix)]
+        // SAFETY: ends the process at once, without the exit handlers a
+        // hang may be in.
+        unsafe {
+            libc::_exit(1)
+        }
+        #[cfg(not(unix))]
+        std::process::exit(1)
+    });
+}
+
+/// Every thread of the process with what the kernel has it waiting on
+/// (Linux, from `/proc`; nothing elsewhere), for the watchdog's report.
+fn threads_waiting() -> Vec<(String, String)> {
+    let Ok(tasks) = std::fs::read_dir("/proc/self/task") else {
+        return Vec::new();
+    };
+    let mut threads: Vec<(String, String)> = tasks
+        .filter_map(|t| {
+            let t = t.ok()?.path();
+            let read = |f: &str| std::fs::read_to_string(t.join(f)).ok();
+            Some((
+                read("comm")?.trim().to_string(),
+                read("wchan")?.trim().to_string(),
+            ))
+        })
+        .collect();
+    threads.sort();
+    threads
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -73,6 +134,13 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn the_ending_stage_is_the_last_one_named() {
+        ending("the session");
+        ending("the window");
+        assert_eq!(ending_at(), "the window");
+    }
 
     #[test]
     fn join_closing_waits_for_a_closing_thread() {

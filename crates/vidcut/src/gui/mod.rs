@@ -88,7 +88,9 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
     );
     // What the window's close left closing ends before the process does:
     // CUDA and the GPU drivers tear down as it exits (gotchas.md).
+    crate::threads::ending("the closing threads");
     crate::threads::join_closing();
+    crate::threads::ending("the process's exit");
     ran.map_err(|e| {
         #[cfg(all(unix, not(target_os = "macos")))]
         let hint = " (is a Wayland or X11 display available?)";

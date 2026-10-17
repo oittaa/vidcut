@@ -144,6 +144,10 @@ pub struct App {
 /// ends without it.
 const QUIT_PATIENCE: Duration = Duration::from_secs(5);
 
+/// How long the GUI may take to end once its window closed, before the
+/// process ends anyway, saying the stage it hung at (`threads::end_within`).
+const EXIT_PATIENCE: Duration = Duration::from_secs(10);
+
 /// The player's sound: the device the preferences name, else the system's
 /// default; read whenever the player opens its device.
 fn audio_device() -> Box<dyn vidcut_av::player::AudioOutput> {
@@ -334,6 +338,8 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        crate::threads::end_within(EXIT_PATIENCE);
+        crate::threads::ending("the session");
         self.gate.open();
         let started = std::time::Instant::now();
         self.ws.live.shutdown();
@@ -345,5 +351,8 @@ impl eframe::App for App {
             "the session ended in {:.0} ms",
             started.elapsed().as_secs_f64() * 1000.0
         );
+        // eframe drops the app next, the viewer and the filmstrip's workers
+        // with it, then tears the window down.
+        crate::threads::ending("the window and its app");
     }
 }

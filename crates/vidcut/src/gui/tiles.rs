@@ -416,9 +416,13 @@ impl Drop for Tiles {
             self.queue.ready.notify_all();
         }
         // Each closes its reader as it ends: before the process does.
+        if !self.workers.is_empty() {
+            crate::threads::ending("the filmstrip's workers");
+        }
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
+        crate::threads::ending("the window's teardown");
     }
 }
 
