@@ -37,7 +37,6 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `tiles FILE [HEIGHT] [gpu]`: timeline tiles, timed at spacings from 0.25 to 30 s; `gpu` decodes on the GPU in use.
 - `seek_check FILE...`: seeks to every frame of barcode fixtures on the CPU and on each GPU decoder, and lists the seeks that show other frames.
 - `player_load PROJECT [SECONDS] [gpu]` (release build): plays the timeline with the real player and a paced device, presenting 60 times a second; alone, beside four filmstrip workers and a job that yield to players at the lowest priority, and the load alone. It prints the presents that showed the picture before, the tiles and job frames a second, the threads at most and the peak memory.
-- `nvdec_threads [CASE] [CODEC] [gpu]` (Linux, NVDEC): plays or reads a barcode fixture as CASE says (a player dropped while it plays, idle, sought away, a picture kept, the next file opening ahead; a reader dropped, leaked, its frame kept, closed on another thread before or as `main` returns) and lists the threads and NVIDIA's libraries left, before and after (gotchas.md, libnvcuvid). The cases that close a decoder during the exit hang: run them under `timeout`.
 - `decode_speed FILE [FRAMES]`: decoding speed, cores and seek times on the CPU and on each GPU decoder.
 - `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build): exports a stretch at a bitrate (`qN`: constant quality) with `video.*` settings (`passes=2`), and prints the bitrate reached, the time and the luma PSNR.
 
