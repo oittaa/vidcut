@@ -207,6 +207,7 @@ impl Env for AvEnv {
         &self,
         media: &Media,
         longest: u32,
+        codec: Option<&str>,
         dir: &Path,
         dry_run: bool,
     ) -> Result<GeneratedProxy> {
@@ -215,14 +216,18 @@ impl Env for AvEnv {
         })?;
         let (w, h) = v.display_size();
         let (w, h) = proxy_size(w, h, longest);
-        let origin = paths::media_origin(media);
+        let origin = paths::proxy_origin(media);
         let name = |codec: &str| dir.join(format!("{}-{w}x{h}-{codec}.mkv", origin.name));
         let prefs = crate::preferences::load().unwrap_or_default();
-        let encoders = proxy_encoders(
-            prefs.proxies.codec,
+        let (gpu, decoding) = (
             prefs.gpu.acceleration,
             prefs.gpu.acceleration && prefs.gpu.decoding,
         );
+        let encoders = codec
+            .and_then(proxy_codec)
+            .map(|c| proxy_encoders(c, gpu, decoding))
+            .filter(|e| !e.is_empty())
+            .unwrap_or_else(|| proxy_encoders(prefs.proxies.codec, gpu, decoding));
         let planned = encoders.first().map_or("h264", |e| e.codec);
         let mut path = name(planned);
         let mut codec = planned;
@@ -294,6 +299,12 @@ impl Env for AvEnv {
             vidcut_core::editor::read_timeline_file(path)
         }
     }
+}
+
+fn proxy_codec(codec: &str) -> Option<vidcut_core::preferences::ProxyCodec> {
+    serde_json::from_value(serde_json::Value::String(codec.into()))
+        .ok()
+        .filter(|c| *c != vidcut_core::preferences::ProxyCodec::Auto)
 }
 
 pub fn proxy_encoders(
@@ -467,9 +478,15 @@ pub fn start_timecode(
 
 #[cfg(test)]
 mod tests {
-    use super::{frame_rate, start_timecode};
+    use super::{frame_rate, proxy_codec, start_timecode};
     use vidcut_core::model::{StartTimecode, VideoInfo};
+    use vidcut_core::preferences::ProxyCodec;
     use vidcut_core::time::Rational;
+
+    #[test]
+    fn a_proxy_names_its_codec_as_the_preference_does() {
+        assert_eq!(proxy_codec("dnxhr"), Some(ProxyCodec::Dnxhr));
+    }
 
     #[test]
     fn a_drop_frame_start_at_zero_says_how_it_counts() {

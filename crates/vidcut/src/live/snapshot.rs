@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -146,6 +146,7 @@ pub struct Snapshot {
     pub thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     pub missing: Arc<HashSet<String>>,
     pub lost_proxies: Arc<HashMap<String, PathBuf>>,
+    pub proxy_dir: Arc<Path>,
     pub waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     pub jobs: Arc<Vec<super::JobInfo>>,
     pub audio_scrubbing: bool,

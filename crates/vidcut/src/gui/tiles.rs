@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
@@ -99,6 +99,7 @@ pub struct Tiles {
     asked: RefCell<Vec<Job>>,
     shown: RefCell<Vec<TileKey>>,
     missing: HashSet<TileKey>,
+    pub proxies: Arc<Path>,
     queue: Arc<Queue>,
     results: Receiver<(TileKey, Image)>,
     sender: Sender<(TileKey, Image)>,
@@ -119,6 +120,7 @@ impl Tiles {
             asked: RefCell::default(),
             shown: RefCell::default(),
             missing: HashSet::new(),
+            proxies: Arc::from(Path::new("")),
             queue: Arc::new(Queue {
                 waiting: Mutex::default(),
                 ready: Condvar::new(),
@@ -239,12 +241,13 @@ impl Tiles {
         let m = p.media(&key.media)?;
         let piece = vidcut_core::render::media_frame(p, &key.media, key.frame).ok()?;
         let mut pieces = Vec::new();
-        if let (Some(proxy), VideoPiece::Source { path, image, .. }) = (m.fresh_proxy(), &piece)
-            && (path != &proxy.path || image.is_some())
+        let proxy = m.fresh_proxy().map(|x| x.path_in(&self.proxies));
+        if let (Some(proxy), VideoPiece::Source { path, image, .. }) = (proxy, &piece)
+            && (path != &proxy || image.is_some())
         {
             let mut from_proxy = piece.clone();
             if let VideoPiece::Source { path, image, .. } = &mut from_proxy {
-                *path = proxy.path.clone();
+                *path = proxy;
                 *image = None;
             }
             pieces.push(from_proxy);

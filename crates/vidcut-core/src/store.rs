@@ -234,10 +234,7 @@ fn io(path: &Path, e: std::io::Error) -> Error {
 }
 
 fn files(project: &mut Project) -> impl Iterator<Item = &mut PathBuf> {
-    project
-        .media
-        .iter_mut()
-        .flat_map(|m| std::iter::once(&mut m.path).chain(m.proxy.as_mut().map(|p| &mut p.path)))
+    project.media.iter_mut().map(|m| &mut m.path)
 }
 
 fn to_json(project: &mut Project, dir: &Path) -> Result<String> {

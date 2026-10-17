@@ -96,8 +96,8 @@ pub trait Env {
         !crate::store::from_another_system(&m.path) && m.path.is_file()
     }
 
-    fn proxy_present(&self, proxy: &Proxy) -> bool {
-        !crate::store::from_another_system(&proxy.path) && proxy.path.is_file()
+    fn proxy_present(&self, path: &Path) -> bool {
+        path.is_file()
     }
 
     fn audio_levels(&self, media: &Media, stream: u32) -> Result<Arc<AudioLevels>>;
@@ -112,6 +112,7 @@ pub trait Env {
         &self,
         media: &Media,
         longest: u32,
+        codec: Option<&str>,
         dir: &Path,
         dry_run: bool,
     ) -> Result<GeneratedProxy>;
@@ -1951,7 +1952,7 @@ fn replace_file(
         Some(_) => {
             let old = m.proxy.take().expect("a proxy");
             if !dry_run {
-                env.remove_proxy_file(&old.path)?;
+                env.remove_proxy_file(&old.path_in(&env.proxy_dir()))?;
             }
         }
         None => {}
@@ -3152,20 +3153,34 @@ fn proxy_generate(
     let rules = env.proxy_rules();
     let longest = proxy_longest(width, rules.size)?;
     let mut ids = proxy_targets(p, media)?;
+    let dir = env.proxy_dir();
+    let lost = |m: &Media| {
+        m.fresh_proxy()
+            .filter(|x| !env.proxy_present(&x.path_in(&dir)))
+            .cloned()
+    };
     if auto {
         ids.retain(|id| {
-            p.media(id).is_some_and(|m| {
-                rules.wants(m) && !m.fresh_proxy().is_some_and(|x| env.proxy_present(x))
-            })
+            p.media(id)
+                .is_some_and(|m| rules.wants(m) && (m.fresh_proxy().is_none() || lost(m).is_some()))
         });
     }
-    let dir = env.proxy_dir();
     let mut proxies = Vec::new();
     for id in ids {
         let item = p.media(&id).expect("checked").clone();
-        let made = env.generate_proxy(&item, longest, &dir, dry_run)?;
+        let like = auto.then(|| lost(&item)).flatten();
+        let (size, codec) = match &like {
+            Some(x) => (x.width.max(x.height), Some(x.codec.as_str())),
+            None => (longest, None),
+        };
+        let made = env.generate_proxy(&item, size, codec, &dir, dry_run)?;
+        let file = made
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let entry = Proxy {
-            path: made.path.clone(),
+            file,
             source_size: item.size,
             source_mtime_ns: item.mtime_ns,
             width: made.width,
@@ -3174,10 +3189,10 @@ fn proxy_generate(
         };
         let m = p.media.iter_mut().find(|m| m.id == id).expect("checked");
         if let Some(old) = m.proxy.take()
-            && old.path != entry.path
+            && old.file != entry.file
             && !dry_run
         {
-            env.remove_proxy_file(&old.path)?;
+            env.remove_proxy_file(&old.path_in(&dir))?;
         }
         m.proxy = Some(entry);
         let mut done = json!({
@@ -3225,13 +3240,14 @@ fn proxy_remove(
         }
     };
     let mut cleared = Vec::new();
+    let dir = env.proxy_dir();
     for id in ids {
         let m = p.media.iter_mut().find(|m| m.id == id).expect("checked");
         let Some(old) = m.proxy.take() else {
             continue;
         };
         if !dry_run {
-            env.remove_proxy_file(&old.path)?;
+            env.remove_proxy_file(&old.path_in(&dir))?;
         }
         cleared.push(id);
     }
@@ -3267,7 +3283,7 @@ pub fn query(
             json!(
                 p.media
                     .iter()
-                    .map(|m| media_json(p, m, env))
+                    .map(|m| media_json(p, m, env, &env.proxy_dir()))
                     .collect::<Vec<_>>()
             )
         }
@@ -3275,7 +3291,7 @@ pub fn query(
             let m = p
                 .media(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-            let mut v = media_json(p, m, env);
+            let mut v = media_json(p, m, env, &env.proxy_dir());
             v["info"] = serde_json::to_value(&m.info).unwrap_or_default();
             v["used_by"] = json!(
                 p.tracks
@@ -3649,7 +3665,7 @@ fn scene_cuts(
     Ok(analysis::scene_cuts(&target.span(p)?, &stats, threshold))
 }
 
-fn media_json(p: &Project, m: &Media, env: &dyn Env) -> Value {
+fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
     let frames = p.media_frames(m);
     let mut v = json!({
         "id": m.id,
@@ -3686,14 +3702,16 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env) -> Value {
         });
     }
     if let Some(px) = &m.proxy {
+        let path = px.path_in(proxies);
         v["proxy"] = json!({
-            "path": px.path,
+            "file": px.file,
+            "path": path,
             "width": px.width,
             "height": px.height,
             "codec": px.codec,
             "stale": m.fresh_proxy().is_none(),
         });
-        if !env.proxy_present(px) {
+        if !env.proxy_present(&path) {
             v["proxy"]["missing"] = json!(true);
         }
     }

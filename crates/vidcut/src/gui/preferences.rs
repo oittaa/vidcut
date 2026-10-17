@@ -850,9 +850,10 @@ fn folder(
             )
             .labelled_by(label.id)
             .on_hover_text(
-                "Where new proxies go: a folder in the project's folder, or an absolute path. \
-                 Every project shares an absolute one, so a file used in several projects gets \
-                 one proxy. Proxies already made stay where they are",
+                "Where this computer keeps proxies: a folder in the project's folder, or an \
+                 absolute path. Every project shares an absolute one, so a file used in several \
+                 projects gets one proxy. Proxies are looked for here: after a change, move \
+                 them here or let them be made again",
             );
         let typed = ui_state.folder.trim();
         if r.lost_focus() && !busy && typed != saved {
@@ -891,7 +892,7 @@ fn folder(
     });
     ui.end_row();
     let shown = match folders.project {
-        _ if Path::new(saved).is_absolute() => "Every project's new proxies go here".to_string(),
+        _ if Path::new(saved).is_absolute() => "Every project's proxies are here".to_string(),
         Some(dir) => format!("This project's: {}", dir.join(saved).display()),
         None => "In each project's folder".to_string(),
     };

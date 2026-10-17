@@ -9,7 +9,7 @@ use crate::editor::GeneratedProxy;
 use crate::editor::{Editor, Env, History, ProbedMedia};
 use crate::error::{Error, Result};
 use crate::model::{
-    AudioInfo, ImageSequence, Media, MediaInfo, Project, Proxy, Settings, VideoInfo, proxy_size,
+    AudioInfo, ImageSequence, Media, MediaInfo, Project, Settings, VideoInfo, proxy_size,
 };
 use crate::render::{AudioPiece, RenderPlan};
 use crate::request::{Envelope, Response};
@@ -217,6 +217,7 @@ impl Env for FakeEnv {
         &self,
         media: &Media,
         longest: u32,
+        codec: Option<&str>,
         dir: &Path,
         _dry_run: bool,
     ) -> Result<GeneratedProxy> {
@@ -231,7 +232,7 @@ impl Env for FakeEnv {
             path: dir.join(format!("{}-{}x{h}.mkv", media.id, w)),
             width: w,
             height: h,
-            codec: "h264".into(),
+            codec: codec.unwrap_or("h264").into(),
             made_with: None,
             copies: None,
         })
@@ -262,8 +263,8 @@ impl Env for FakeEnv {
         self.files.contains_key(&m.path) || self.sequences.contains_key(&m.path)
     }
 
-    fn proxy_present(&self, proxy: &Proxy) -> bool {
-        !self.lost_proxies.contains(&proxy.path)
+    fn proxy_present(&self, path: &Path) -> bool {
+        !self.lost_proxies.contains(path)
     }
 }
 

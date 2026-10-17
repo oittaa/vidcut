@@ -133,11 +133,13 @@ pub struct Proxies {
     pub size: u32,
     /// The codec proxies are made with.
     pub codec: ProxyCodec,
-    /// Where new proxies go: a folder in the project's folder (`proxies`,
-    /// the default), or an absolute path. Every project shares an absolute
-    /// one, so a file used in several projects gets one proxy; with a
-    /// project on a network drive, proxies can stay on a local one. Proxies
-    /// already made stay where they are.
+    /// Where this computer keeps proxies: a folder in the project's folder
+    /// (`proxies`, the default), or an absolute path. Every project shares
+    /// an absolute one, so a file used in several projects gets one proxy;
+    /// with a project on a network drive, proxies can stay on a local one.
+    /// A project names its proxies by file, and each computer looks for
+    /// them in its own folder: after a change, move the files there or let
+    /// them be made again.
     pub folder: PathBuf,
 }
 
