@@ -46,3 +46,28 @@ fn a_still_leaves_the_project_format_to_video() {
     assert!(!s.auto_format);
     assert_eq!(s.fps, Rational::new(25, 1).unwrap());
 }
+
+#[test]
+fn a_centered_dissolve_into_a_still_at_its_source_start_is_centered() {
+    let mut f = with_still();
+    f.append("m1", 0, 50);
+    f.ok(req("edit.append", json!({"media": "m2"})));
+    f.ok(req(
+        "edit.dissolve",
+        json!({"at": 50, "length": "30f", "sound": false}),
+    ));
+    let t = &f.editor.project().track("V1").unwrap().transitions[0];
+    assert_eq!((t.before, t.after), (15, 15));
+}
+
+#[test]
+fn a_stills_head_trims_before_its_source_start() {
+    let mut f = with_still();
+    f.append("m1", 0, 50);
+    f.ok(req("edit.append", json!({"media": "m2"})));
+    f.ok(req(
+        "edit.trim",
+        json!({"clip": "c2", "edge": "head", "by": -10, "ripple": true}),
+    ));
+    assert_eq!(f.v1(), vec![row("c1", 0, 50, 0), row("c2", 50, 135, -10)]);
+}

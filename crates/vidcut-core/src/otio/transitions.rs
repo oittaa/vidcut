@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use serde_json::Value;
 
@@ -193,10 +194,10 @@ impl<'a> Cuts<'a> {
     }
 }
 
-fn source_frames(p: &Project, cuts: &Cuts, c: &Clip) -> Option<i64> {
+fn source_range(p: &Project, cuts: &Cuts, c: &Clip) -> Option<Range<i64>> {
     match (&c.compound, &c.generator) {
-        (None, None) => cuts.pool.get(c.media.as_str()).map(|m| p.media_limit(m)),
-        _ => p.source_frames(c),
+        (None, None) => cuts.pool.get(c.media.as_str()).map(|m| p.media_range(m, c)),
+        _ => p.source_range(c),
     }
 }
 
@@ -230,23 +231,23 @@ fn place(p: &Project, cuts: &Cuts, t: &Transition) -> Option<i64> {
     }
     if let Some(g) = to.filter(|g| !g.is_generator())
         && t.before > 0
-        && !shows_media(g, source_frames(p, cuts, g)?, cut - t.before, cut)
+        && !shows_media(g, source_range(p, cuts, g)?, cut - t.before, cut)
     {
         return None;
     }
     if let Some(f) = from.filter(|f| !f.is_generator())
         && t.after > 0
-        && !shows_media(f, source_frames(p, cuts, f)?, cut, cut + t.after)
+        && !shows_media(f, source_range(p, cuts, f)?, cut, cut + t.after)
     {
         return None;
     }
     Some(cut)
 }
 
-fn shows_media(c: &Clip, frames: i64, a: i64, b: i64) -> bool {
+fn shows_media(c: &Clip, have: Range<i64>, a: i64, b: i64) -> bool {
     [a, b - 1]
         .into_iter()
-        .all(|t| (0..frames).contains(&c.source_at(t)))
+        .all(|t| have.contains(&c.source_at(t)))
 }
 
 pub fn prune(p: &mut Project) -> usize {

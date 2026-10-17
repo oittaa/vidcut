@@ -337,7 +337,10 @@ pub fn edit_has_handles(p: &Project, e: i64) -> bool {
         return true;
     };
     !t.clips.iter().filter(|c| !c.is_generator()).any(|c| {
-        let room = |tail| p.source_frames(c).is_some_and(|f| c.room(tail, f) == 0);
+        let room = |tail| {
+            p.source_range(c)
+                .is_some_and(|have| c.room(tail, have) == 0)
+        };
         (c.end() == e && room(true)) || (c.start == e && room(false))
     })
 }
@@ -1129,11 +1132,21 @@ fn check_source(p: &Project, c: &Clip) -> Result<()> {
         .media(&c.media)
         .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
     let frames = p.media_limit(m);
-    if lo < 0 || hi > frames {
-        return Err(Error::invalid(format!(
-            "{} would need source frames {lo}..{hi}, but {} has 0..{frames}",
-            c.id, m.id
-        )));
+    let have = p.media_range(m, c);
+    if lo < have.start || hi > have.end {
+        return Err(Error::invalid(if m.is_still() {
+            format!(
+                "{} would show {} frames of {}, but a still lasts at most {frames}",
+                c.id,
+                hi - lo,
+                m.id
+            )
+        } else {
+            format!(
+                "{} would need source frames {lo}..{hi}, but {} has 0..{frames}",
+                c.id, m.id
+            )
+        }));
     }
     if let Some((a, b)) = c.audio_range() {
         let span = c.sound_span();
@@ -1473,10 +1486,10 @@ pub fn extend_to_media_end(p: &mut Project, ids: &[String], ripple: Option<bool>
         if c.is_generator() || c.speed() == 0.0 {
             continue;
         }
-        let frames = p
-            .source_frames(c)
+        let have = p
+            .source_range(c)
             .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
-        let room = c.room(true, frames);
+        let room = c.room(true, have);
         targets.push((c.start, id.clone(), room));
     }
     targets.sort();
@@ -1889,12 +1902,12 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
             let media = p
                 .media(&c.media)
                 .ok_or_else(|| Error::not_found(format!("no media {} in this project", c.media)))?;
-            let frames = p.media_limit(media);
+            let have = p.media_range(media, &c);
             let (lo, hi) = c.shown();
-            if c.duration <= 0 || lo < 0 || hi > frames {
+            if c.duration <= 0 || lo < have.start || hi > have.end {
                 return Err(Error::invalid(format!(
-                    "pasted clip {} is outside {} (0..{frames} frames)",
-                    c.id, c.media
+                    "pasted clip {} is outside {} ({}..{} frames)",
+                    c.id, c.media, have.start, have.end
                 )));
             }
             if c.audio.as_ref().is_some_and(|a| {

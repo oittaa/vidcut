@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{Pos2, Rect};
@@ -114,10 +115,10 @@ impl Ctx<'_> {
             .map(|(ti, _)| &self.project.tracks[ti])
     }
 
-    fn media_frames(&self, c: &Clip) -> i64 {
+    fn source_range(&self, c: &Clip) -> Range<i64> {
         self.project
             .media(&c.media)
-            .map_or(i64::MAX / 4, |m| self.project.media_frames(m))
+            .map_or(0..i64::MAX / 4, |m| self.project.media_range(m, c))
     }
 
     fn snapped(&self, frame: i64) -> (i64, Option<i64>) {
@@ -278,10 +279,10 @@ impl Drag {
         let row = Some(t.id.clone());
         let (target, snapped) = ctx.snapped(from + moved(ctx, self.press, pos));
         let mut delta = target - from;
-        let frames = ctx.media_frames(c);
+        let have = ctx.source_range(c);
         let (lo, hi) = match edge {
-            Edge::Head => (-c.room(false, frames), c.duration - 1),
-            Edge::Tail => (1 - c.duration, c.room(true, frames)),
+            Edge::Head => (-c.room(false, have), c.duration - 1),
+            Edge::Tail => (1 - c.duration, c.room(true, have)),
         };
         delta = delta.clamp(lo, hi);
         if edge == Edge::Head && !ripple {
@@ -633,8 +634,8 @@ fn roll_preview(ctx: &Ctx, target: i64, outgoing: &str, from: i64) -> Preview {
         return Preview::default();
     };
     let (target, snapped) = ctx.snapped(target);
-    let lo = (1 - a.duration).max(-b.room(false, ctx.media_frames(b)));
-    let hi = (b.duration - 1).min(a.room(true, ctx.media_frames(a)));
+    let lo = (1 - a.duration).max(-b.room(false, ctx.source_range(b)));
+    let hi = (b.duration - 1).min(a.room(true, ctx.source_range(a)));
     let delta = (target - from).clamp(lo.min(0), hi.max(0));
     Preview {
         request: (delta != 0)
@@ -658,9 +659,9 @@ fn slip_preview(ctx: &Ctx, pos: Pos2, press: Pos2, clips: &[String]) -> Preview 
     let mut by = -moved;
     for id in clips {
         if let Some(c) = ctx.clip(id) {
-            let frames = ctx.media_frames(c);
-            let lo = -c.room(false, frames);
-            by = by.clamp(lo, c.room(true, frames).max(lo));
+            let have = ctx.source_range(c);
+            let lo = -c.room(false, have.clone());
+            by = by.clamp(lo, c.room(true, have).max(lo));
         }
     }
     let req = match clips {
