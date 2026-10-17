@@ -1153,3 +1153,66 @@ fn region_means(f: &vidcut_av::ffmpeg::frame::Video, (a, b): (usize, usize)) -> 
     };
     [mean(0), mean(1), mean(2)]
 }
+
+#[test]
+fn an_export_says_which_encoders_it_opened_and_how_each_file_decodes() {
+    let fps = Rational::new(30, 1).unwrap();
+    let spec = |codec| {
+        FixtureSpec::new(codec, Container::Mkv, 320, 180, (30, 1), 30).with_audio(
+            AudioCodec::PcmS16,
+            48_000,
+            2,
+        )
+    };
+    let (one, two) = (src(spec(VideoCodec::H264)), src(spec(VideoCodec::Hevc10)));
+    let p = plan(
+        fps,
+        320,
+        180,
+        vec![v(&one, 0, 10), v(&two, 0, 10)],
+        vec![vec![
+            a(&one, fps, 48_000, 0, 10),
+            a(&two, fps, 48_000, 0, 10),
+        ]],
+    );
+    let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let notes = heard.clone();
+    let _noting = vidcut_av::progress::Noting::set(std::sync::Arc::new(move |n| {
+        notes.lock().unwrap().push(n)
+    }));
+    let dir = out_dir("notes");
+    let report = render(&p, &lossless(), &dir.path().join("out.mkv"));
+    let heard = heard.lock().unwrap();
+    let video: Vec<&str> = heard
+        .iter()
+        .filter_map(|n| match n {
+            export::Note::Video(v) => Some(v.encoder.as_str()),
+            _ => None,
+        })
+        .collect();
+    let audio: Vec<&str> = heard
+        .iter()
+        .filter_map(|n| match n {
+            export::Note::Audio(a) => Some(a.encoder.as_str()),
+            _ => None,
+        })
+        .collect();
+    let read: Vec<&Path> = heard
+        .iter()
+        .filter_map(|n| match n {
+            export::Note::Source(s) => Some(s.path.as_path()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(video, ["libx264"]);
+    assert_eq!(audio, ["pcm_s16le"]);
+    assert_eq!(read, [one.path.as_path(), two.path.as_path()]);
+    assert_eq!(
+        report
+            .sources
+            .iter()
+            .map(|s| s.decoding.codec.as_str())
+            .collect::<Vec<_>>(),
+        ["h264", "hevc"]
+    );
+}

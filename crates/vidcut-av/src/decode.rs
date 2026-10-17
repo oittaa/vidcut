@@ -257,7 +257,7 @@ fn thread_name() -> String {
         .to_string()
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct Decoding {
     pub codec: String,
     pub profile: Option<String>,

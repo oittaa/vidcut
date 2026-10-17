@@ -372,6 +372,12 @@ pub fn write(
             Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
             None => VideoReader::open_input(input)?,
         };
+        if errors.is_empty() {
+            crate::progress::note(crate::export::Note::Source(crate::export::SourceNote {
+                path: input.path().to_path_buf(),
+                decoding: (**reader.decoding()).clone(),
+            }));
+        }
         match encode_into(
             &mut reader,
             enc,
@@ -387,6 +393,10 @@ pub fn write(
             }
             Err(Failed::Opening(e)) => {
                 let _ = std::fs::remove_file(&tmp);
+                crate::progress::note(crate::export::Note::Tried(crate::export::Tried {
+                    encoder: Some(enc.name.clone()),
+                    error: e.to_string(),
+                }));
                 errors.push(e);
             }
         }
@@ -604,6 +614,14 @@ impl<'a> Writer<'a> {
             }
         };
         let output = output.map_err(Failed::Opening)?;
+        crate::progress::note(crate::export::Note::Video(crate::export::VideoNote {
+            encoder: video.name.clone(),
+            device: video.device.clone(),
+            pixel: encode::pixel_name(video.pixel),
+            bits: encode::pixel_bits(video.pixel),
+            passes: 1,
+            gpu_frames_in: !matches!(output, Output::Fitted),
+        }));
         let mut header = || -> Result<()> {
             let mut ost = octx
                 .add_stream(encoder::find_by_name(&video.name))

@@ -387,6 +387,7 @@ pub struct VideoFrames {
         std::collections::HashMap<std::path::PathBuf, std::sync::Arc<crate::light::LightAnalysis>>,
     last_dolby_vision: frame::Video,
     cuda_mix_failed: Option<String>,
+    sources: Vec<super::SourceNote>,
 }
 
 impl VideoFrames {
@@ -423,7 +424,25 @@ impl VideoFrames {
             light: Default::default(),
             last_dolby_vision: frame::Video::empty(),
             cuda_mix_failed: None,
+            sources: Vec::new(),
         }
+    }
+
+    pub fn sources(&self) -> &[super::SourceNote] {
+        &self.sources
+    }
+
+    fn read_from(&mut self, path: &std::path::Path, decoding: &crate::decode::Decoding) {
+        let source = super::SourceNote {
+            path: path.to_path_buf(),
+            decoding: decoding.clone(),
+        };
+        match self.sources.iter_mut().find(|s| s.path == source.path) {
+            Some(s) if *s == source => return,
+            Some(s) => *s = source.clone(),
+            None => self.sources.push(source.clone()),
+        }
+        crate::progress::note(super::Note::Source(source));
     }
 
     pub fn mix_failed(&self) -> Option<&str> {
@@ -537,7 +556,25 @@ impl VideoFrames {
             return Ok(None);
         };
         let layers = layers.expect("a picture was asked for");
-        let shown = &layers[heaviest(&layers)];
+        let heaviest = heaviest(&layers);
+        let shown = &layers[heaviest];
+        let read = shown
+            .decoding
+            .as_ref()
+            .filter(|d| {
+                self.last_decoding
+                    .as_ref()
+                    .is_none_or(|last| !std::sync::Arc::ptr_eq(last, d))
+            })
+            .and_then(
+                |d| match self.pieces.get(self.piece)?.layers().get(heaviest) {
+                    Some((VideoPiece::Source { path, .. }, _)) => Some((path.clone(), d.clone())),
+                    _ => None,
+                },
+            );
+        if let Some((path, d)) = read {
+            self.read_from(&path, &d);
+        }
         self.rotation = shown.rotation;
         self.last_decoder = shown.decoder;
         self.last_decoding = shown.decoding.clone();

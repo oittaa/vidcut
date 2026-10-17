@@ -801,14 +801,7 @@ impl Workspace {
                     ui.toggle_value(&mut self.show_mixer, "Mixer")
                         .on_hover_text("Track faders, mute, solo and meters");
                 }
-                let running = self.snap.jobs.iter().filter(|j| j.unfinished()).count();
-                let jobs = if running > 0 {
-                    format!("Jobs ({running})")
-                } else {
-                    "Jobs".to_string()
-                };
-                ui.toggle_value(&mut self.export.show_jobs, jobs)
-                    .on_hover_text("Exports and proxy encodes, with progress");
+                self.jobs_button(ui);
                 if let Some(e) = &self.snap.preview_error {
                     ui.label(RichText::new("no preview").color(theme::colors().error))
                         .on_hover_text(e);
