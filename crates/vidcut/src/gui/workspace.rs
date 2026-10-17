@@ -475,10 +475,18 @@ impl Workspace {
         }
     }
 
-    pub(super) fn forget_view_state(&mut self) {
-        self.folders.forget();
-        self.timeline.options = super::timeline::Options::default();
-        self.recent.clear();
+    pub(super) fn forget_view_state(&mut self) -> ViewState {
+        ViewState {
+            folders: self.folders.forget(),
+            options: std::mem::take(&mut self.timeline.options),
+            recent: std::mem::take(&mut self.recent),
+        }
+    }
+
+    pub(super) fn restore_view_state(&mut self, old: ViewState) {
+        self.folders.restore(old.folders);
+        self.timeline.options = old.options;
+        self.recent = old.recent;
     }
 
     pub(super) fn after_reset(&mut self) {
@@ -1705,6 +1713,12 @@ pub(super) fn fit(avail: egui::Rect, aspect: f32) -> egui::Rect {
 
 pub(super) fn dim(text: impl Into<String>) -> RichText {
     RichText::new(text.into()).color(theme::colors().text_dim)
+}
+
+pub(super) struct ViewState {
+    folders: super::folders::Folders,
+    options: super::timeline::Options,
+    recent: Vec<PathBuf>,
 }
 
 pub(super) fn escape_cancels<T>(ctx: &egui::Context, modal: &egui::ModalResponse<T>) -> bool {

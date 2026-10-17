@@ -46,8 +46,14 @@ impl Folders {
         Self(Arc::new(Mutex::new(saved)))
     }
 
-    pub fn forget(&self) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Saved::default();
+    pub fn forget(&self) -> Folders {
+        let old = std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()));
+        Self(Arc::new(Mutex::new(old)))
+    }
+
+    pub fn restore(&self, old: Folders) {
+        let old = std::mem::take(&mut *old.0.lock().unwrap_or_else(|e| e.into_inner()));
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = old;
     }
 
     pub fn get(&self, kind: Kind) -> Option<PathBuf> {

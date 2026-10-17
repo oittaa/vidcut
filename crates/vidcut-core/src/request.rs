@@ -1101,8 +1101,8 @@ pub enum Request {
     /// (thumbnails, waveforms, measurements, encoder detection, shaders),
     /// the undo histories (but those of projects a running GUI has open),
     /// the recent projects, view settings and remembered folders. Projects,
-    /// media and proxies stay, but proxies made without a project, which
-    /// live in the cache. It refuses while another vidcut GUI runs, which
+    /// media and proxies stay, but those in vidcut's cache: made without a
+    /// project, into no proxy folder of your own. It refuses while another vidcut GUI runs, which
     /// would write its settings back: reset from that GUI's Preferences.
     /// `--dry-run` lists what would go.
     #[serde(rename = "reset")]

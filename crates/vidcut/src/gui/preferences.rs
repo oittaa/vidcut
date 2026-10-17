@@ -30,6 +30,7 @@ pub(super) struct PreferencesUi {
     confirm_reset: bool,
     reset_presets_and_themes: bool,
     resetting: Option<Ask>,
+    forgotten: Option<super::workspace::ViewState>,
 }
 
 const LABEL: f32 = 170.0;
@@ -312,7 +313,7 @@ impl Workspace {
                  projects), the recent projects, view settings and remembered folders.",
             );
             ui.label(dim(
-                "Projects, media and proxies stay, but proxies made without a project. This can't be undone.",
+                "Projects, media and proxies stay, but proxies in vidcut's cache. This can't be undone.",
             ));
             ui.checkbox(
                 &mut ui_state.reset_presets_and_themes,
@@ -337,7 +338,8 @@ impl Workspace {
             Some(true) => {
                 let presets_and_themes = ui_state.reset_presets_and_themes;
                 ui_state.confirm_reset = false;
-                self.forget_view_state();
+                let forgotten = self.forget_view_state();
+                self.preferences.forgotten = Some(forgotten);
                 let params = json!({ "presets_and_themes": presets_and_themes });
                 self.preferences.resetting = Some(Ask::send(&self.live, ctx, "reset", params));
             }
@@ -354,6 +356,7 @@ impl Workspace {
         match answer {
             Ok(r) => {
                 let n = r.result["removed"].as_array().map_or(0, Vec::len);
+                self.preferences.forgotten = None;
                 self.after_reset();
                 self.say(format!("Reset: {n} files and folders removed"));
                 if self.preferences.open {
@@ -361,7 +364,12 @@ impl Workspace {
                         Some(Ask::send(&self.live, ctx, "preferences.get", json!({})));
                 }
             }
-            Err(e) => self.preferences.error = Some(e.message),
+            Err(e) => {
+                if let Some(old) = self.preferences.forgotten.take() {
+                    self.restore_view_state(old);
+                }
+                self.preferences.error = Some(e.message);
+            }
         }
     }
 }

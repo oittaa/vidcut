@@ -43,7 +43,7 @@ pub fn run(presets_and_themes: bool, dry_run: bool) -> Result<Value> {
     {
         keep.push(p.proxies.folder);
     }
-    let (removed, kept) = plan(&dirs, &keep);
+    let (removed, kept) = plan(&dirs, &keep)?;
     if !dry_run {
         for path in &removed {
             remove(path)?;
@@ -52,7 +52,7 @@ pub fn run(presets_and_themes: bool, dry_run: bool) -> Result<Value> {
     Ok(json!({ "removed": removed, "kept": kept }))
 }
 
-pub fn plan(dirs: &Dirs, keep: &[PathBuf]) -> (Vec<PathBuf>, Vec<PathBuf>) {
+pub fn plan(dirs: &Dirs, keep: &[PathBuf]) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
     let roots = [&dirs.config, &dirs.cache, &dirs.state];
     let mut found = (Vec::new(), Vec::new());
     for root in roots {
@@ -61,32 +61,45 @@ pub fn plan(dirs: &Dirs, keep: &[PathBuf]) -> (Vec<PathBuf>, Vec<PathBuf>) {
             .filter(|r| **r != root)
             .map(|r| r.as_path())
             .collect();
-        sweep(root, keep, &others, &mut found);
+        sweep(root, keep, &others, &mut found)?;
     }
-    found
+    Ok(found)
 }
 
-fn sweep(dir: &Path, keep: &[PathBuf], others: &[&Path], found: &mut (Vec<PathBuf>, Vec<PathBuf>)) {
-    for e in entries(dir) {
+fn sweep(
+    dir: &Path,
+    keep: &[PathBuf],
+    others: &[&Path],
+    found: &mut (Vec<PathBuf>, Vec<PathBuf>),
+) -> Result<()> {
+    for e in entries(dir)? {
         if others.iter().any(|o| o.starts_with(&e)) {
             continue;
         }
         if keep.contains(&e) {
             found.1.push(e);
         } else if keep.iter().any(|k| k.starts_with(&e)) {
-            sweep(&e, keep, others, found);
+            sweep(&e, keep, others, found)?;
         } else {
             found.0.push(e);
         }
     }
+    Ok(())
 }
 
-fn entries(dir: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
-        .map(|r| r.flatten().map(|e| e.path()).collect())
-        .unwrap_or_default();
+fn entries(dir: &Path) -> Result<Vec<PathBuf>> {
+    let unreadable =
+        |e: std::io::Error| Error::conflict(format!("can't read {}: {e}", dir.display()));
+    let listing = match std::fs::read_dir(dir) {
+        Ok(listing) => listing,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(unreadable(e)),
+    };
+    let mut out = listing
+        .map(|e| e.map(|e| e.path()).map_err(unreadable))
+        .collect::<Result<Vec<_>>>()?;
     out.sort();
-    out
+    Ok(out)
 }
 
 fn remove(path: &Path) -> Result<()> {
@@ -151,7 +164,7 @@ mod tests {
             ],
         );
         let keep = [r.join("config/presets"), r.join("state/history/open.jsonl")];
-        let (removed, kept) = plan(&dirs(r, "config", "cache", "state"), &keep);
+        let (removed, kept) = plan(&dirs(r, "config", "cache", "state"), &keep).unwrap();
         assert_eq!(
             (names(r, &removed), names(r, &kept)),
             (
@@ -170,6 +183,14 @@ mod tests {
     }
 
     #[test]
+    fn a_config_dir_that_cant_be_read_fails_the_reset() {
+        let root = tempfile::tempdir().unwrap();
+        let r = root.path();
+        tree(r, &["config"]);
+        assert!(plan(&dirs(r, "config", "cache", "state"), &[]).is_err());
+    }
+
+    #[test]
     fn a_proxy_folder_set_inside_the_cache_stays() {
         let root = tempfile::tempdir().unwrap();
         let r = root.path();
@@ -177,7 +198,8 @@ mod tests {
         let (removed, kept) = plan(
             &dirs(r, "config", "cache", "state"),
             &[r.join("cache/shared")],
-        );
+        )
+        .unwrap();
         assert_eq!(
             (names(r, &removed), names(r, &kept)),
             (
@@ -196,7 +218,7 @@ mod tests {
             &["vidcut/preferences.toml", "vidcut/state/history/open.jsonl"],
         );
         let keep = [r.join("vidcut/state/history/open.jsonl")];
-        let (removed, kept) = plan(&dirs(r, "vidcut", "cache", "vidcut/state"), &keep);
+        let (removed, kept) = plan(&dirs(r, "vidcut", "cache", "vidcut/state"), &keep).unwrap();
         assert_eq!(
             (names(r, &removed), names(r, &kept)),
             (
