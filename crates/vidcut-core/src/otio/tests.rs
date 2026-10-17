@@ -323,6 +323,177 @@ fn a_timeline_imports_as_one_compound_clip() {
     );
 }
 
+fn compound_alone() -> Fixture {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.append("m1", 0, 50);
+    let mut other = Fixture::new(&[]);
+    other.env = FakeEnv::default().with(
+        "/media/1.mp4",
+        media_info(4.0, Rational::new(25, 1).unwrap(), true),
+    );
+    other.ok(req(
+        "timeline.import",
+        json!({"otio": written(&f), "mode": "compound"}),
+    ));
+    other
+}
+
+fn bundled(p: &Project) -> Value {
+    let names: HashMap<String, String> = used_media(p, None)
+        .into_iter()
+        .map(|id| {
+            let file = p.media(&id).unwrap().path.file_name().unwrap();
+            let to = format!("media/{}", file.to_string_lossy());
+            (id, to)
+        })
+        .collect();
+    export(p, "t", None, Locations::Bundle(&names)).unwrap()
+}
+
+fn urls(v: &Value) -> Vec<String> {
+    let mut found: Vec<String> = match v {
+        Value::Object(o) => o
+            .iter()
+            .flat_map(|(k, x)| match (k.as_str(), x.as_str()) {
+                ("target_url", Some(url)) => vec![url.to_string()],
+                _ => urls(x),
+            })
+            .collect(),
+        Value::Array(a) => a.iter().flat_map(urls).collect(),
+        _ => Vec::new(),
+    };
+    found.sort();
+    found.dedup();
+    found
+}
+
+#[test]
+fn media_only_inside_a_compound_clip_are_used() {
+    assert_eq!(used_media(compound_alone().editor.project(), None), ["m1"]);
+}
+
+#[test]
+fn a_bundle_points_a_compound_clips_media_into_it() {
+    assert_eq!(
+        urls(&bundled(compound_alone().editor.project())),
+        ["media/1.mp4"]
+    );
+}
+
+#[test]
+fn media_only_in_a_compound_clips_sound_are_bundled() {
+    let mut f = Fixture::new(&[(4.0, false), (4.0, true)]);
+    f.append("m1", 0, 50);
+    f.ok(req(
+        "edit.overwrite",
+        json!({"media": "m2", "range": "0f..50f", "at": 0, "track": "A1"}),
+    ));
+    let fps = Rational::new(25, 1).unwrap();
+    let mut other = Fixture::new(&[]);
+    other.env = FakeEnv::default()
+        .with("/media/1.mp4", media_info(4.0, fps, false))
+        .with("/media/2.mp4", media_info(4.0, fps, true));
+    other.ok(req(
+        "timeline.import",
+        json!({"otio": written(&f), "mode": "compound"}),
+    ));
+    assert_eq!(
+        urls(&bundled(other.editor.project())),
+        ["media/1.mp4", "media/2.mp4"]
+    );
+}
+
+#[test]
+fn a_compound_clips_missing_file_keeps_its_url_beside_a_bundled_namesake() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.append("m1", 0, 50);
+    let mut doc = written(&f);
+    relink(&mut doc, "/media/1.mp4", "/nowhere/1.mp4");
+    let mut other = Fixture::new(&[(4.0, true)]);
+    other.append("m1", 0, 50);
+    other.ok(req(
+        "timeline.import",
+        json!({"otio": doc, "mode": "compound"}),
+    ));
+    assert_eq!(
+        urls(&bundled(other.editor.project())),
+        ["/nowhere/1.mp4", "media/1.mp4"]
+    );
+}
+
+#[test]
+fn a_plain_file_keeps_a_compound_clips_media_where_they_are() {
+    assert_eq!(urls(&written(&compound_alone())), ["/media/1.mp4"]);
+}
+
+#[test]
+fn a_compound_clip_opened_from_a_bundle_plays_the_bundles_media() {
+    let doc = bundled(compound_alone().editor.project());
+    let env = FakeEnv::default().with(
+        "/away/media/1.mp4",
+        media_info(4.0, Rational::new(25, 1).unwrap(), true),
+    );
+    let (p, _) = crate::editor::open_otio(&doc, Some(Path::new("/away")), &env)
+        .unwrap()
+        .unwrap();
+    let k = p.tracks[0].clips[0].compound.as_ref().unwrap();
+    let played: Vec<&str> = k
+        .tracks
+        .iter()
+        .flat_map(|t| &t.clips)
+        .map(|c| c.media.as_str())
+        .collect();
+    assert_eq!((p.media.len(), played), (1, vec!["m1"]));
+}
+
+fn opened_bundle(f: &Fixture) -> Fixture {
+    let env = FakeEnv::default().with(
+        "/away/media/1.mp4",
+        media_info(4.0, Rational::new(25, 1).unwrap(), true),
+    );
+    let (p, _) =
+        crate::editor::open_otio(&bundled(f.editor.project()), Some(Path::new("/away")), &env)
+            .unwrap()
+            .unwrap();
+    Fixture {
+        editor: crate::editor::Editor::new(p, crate::editor::History::default()),
+        env,
+    }
+}
+
+#[test]
+fn a_compound_clip_opened_from_a_bundle_decomposes_into_the_pools_media() {
+    let mut f = opened_bundle(&compound_alone());
+    let id = f.editor.project().tracks[0].clips[0].id.clone();
+    f.ok(req("edit.decompose", json!({"clips": [id]})));
+    let p = f.editor.project();
+    assert_eq!(
+        (p.media.len(), p.tracks[0].clips[0].media.as_str()),
+        (1, "m1")
+    );
+}
+
+#[test]
+fn a_compound_clip_decomposed_out_of_one_from_a_bundle_still_plays() {
+    let mut outer = Fixture::new(&[]);
+    outer.env = FakeEnv::default().with(
+        "/media/1.mp4",
+        media_info(4.0, Rational::new(25, 1).unwrap(), true),
+    );
+    outer.ok(req(
+        "timeline.import",
+        json!({"otio": written(&compound_alone()), "mode": "compound"}),
+    ));
+    let mut f = opened_bundle(&outer);
+    let id = f.editor.project().tracks[0].clips[0].id.clone();
+    f.ok(req("edit.decompose", json!({"clips": [id]})));
+    let k = f.editor.project().tracks[0].clips[0]
+        .compound
+        .clone()
+        .unwrap();
+    assert_eq!(played_by(&k), ["m1"]);
+}
+
 fn relink(v: &mut Value, from: &str, to: &str) {
     match v {
         Value::Object(o) => {

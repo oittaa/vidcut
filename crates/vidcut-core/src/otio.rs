@@ -191,19 +191,94 @@ fn audio_part(c: &crate::model::Clip, a: i64, b: i64) -> Option<(i64, i64)> {
     (e > s).then_some((s, e))
 }
 
+fn played<'a>(c: &'a Clip, used: &mut Vec<String>, seen: &mut HashSet<&'a str>) {
+    match &c.compound {
+        Some(k) => {
+            for c in k.tracks.iter().flat_map(|t| &t.clips) {
+                played(c, used, seen);
+            }
+        }
+        None if !c.is_block() && seen.insert(&c.media) => used.push(c.media.clone()),
+        None => {}
+    }
+}
+
+pub fn played_by(k: &Compound) -> Vec<String> {
+    let (mut used, mut seen) = (Vec::new(), HashSet::new());
+    for c in k.tracks.iter().flat_map(|t| &t.clips) {
+        played(c, &mut used, &mut seen);
+    }
+    used
+}
+
+pub fn exported(c: &Clip, a: i64, b: i64) -> bool {
+    let within = c.start.max(a) < c.end().min(b);
+    (within && (c.video || c.compound.is_some())) || audio_part(c, a, b).is_some()
+}
+
 pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     let (a, b) = span.unwrap_or((0, p.end()));
     let mut used: Vec<String> = Vec::new();
     let mut seen: HashSet<&str> = HashSet::new();
-    for t in &p.tracks {
-        for c in &t.clips {
-            let shows = c.video && c.start.max(a) < c.end().min(b);
-            if (shows || audio_part(c, a, b).is_some()) && !c.is_block() && seen.insert(&c.media) {
-                used.push(c.media.clone());
-            }
+    for c in p.tracks.iter().flat_map(|t| &t.clips) {
+        if exported(c, a, b) {
+            played(c, &mut used, &mut seen);
         }
     }
     used
+}
+
+pub fn same_media<'a>(r: &MediaRef, among: &[&'a Media]) -> Option<&'a Media> {
+    let kind = || {
+        among
+            .iter()
+            .copied()
+            .filter(|m| m.sequence.is_some() == r.sequence.is_some())
+    };
+    if let Some(m) = kind().find(|m| r.paths.contains(&m.path)) {
+        return Some(m);
+    }
+    let mut named = kind().filter(|m| m.path.file_name().is_some_and(|n| *n == *r.file_name));
+    match (named.next(), named.next()) {
+        (Some(m), None) => Some(m),
+        _ => None,
+    }
+}
+
+fn bundle_nested(
+    v: &mut Value,
+    bundled: &[&Media],
+    names: &HashMap<String, String>,
+    fps: Rational,
+) {
+    let s = schema(v);
+    let found = if s.starts_with("ExternalReference") {
+        v["target_url"]
+            .as_str()
+            .and_then(|url| locate(url, None, fps))
+            .map(|r| ("target_url", r))
+    } else if s.starts_with("ImageSequenceReference") {
+        sequence_ref(v, None, fps)
+            .ok()
+            .map(|r| ("target_url_base", r))
+    } else {
+        None
+    };
+    if let Some((key, r)) = found {
+        if let Some(to) = same_media(&r, bundled).and_then(|m| names.get(&m.id)) {
+            v[key] = json!(to);
+        }
+        return;
+    }
+    match v {
+        Value::Object(o) => o
+            .values_mut()
+            .for_each(|x| bundle_nested(x, bundled, names, fps)),
+        Value::Array(a) => a
+            .iter_mut()
+            .for_each(|x| bundle_nested(x, bundled, names, fps)),
+        _ => {}
+    }
 }
 
 fn speed_of(effect: Option<Value>) -> Option<Speed> {
@@ -334,6 +409,31 @@ pub fn export(
             [("children", Value::Array(children)), ("metadata", meta)],
         )
     };
+    let bundled: Vec<&Media> = match locations {
+        Locations::Bundle(names) => {
+            let nested: HashSet<String> = p
+                .tracks
+                .iter()
+                .flat_map(|t| &t.clips)
+                .filter(|c| exported(c, a, b))
+                .filter_map(|c| c.compound.as_ref())
+                .flat_map(played_by)
+                .collect();
+            p.media
+                .iter()
+                .filter(|m| names.contains_key(&m.id) && nested.contains(&m.id))
+                .collect()
+        }
+        Locations::Absolute => Vec::new(),
+    };
+    let block =
+        |c: &Clip, k: &Compound, label: &str, source: i64, frames: i64, effects: Vec<Value>| {
+            let mut it = compound_item(c, k, label, source, frames, effects, rate);
+            if let Locations::Bundle(names) = locations {
+                bundle_nested(&mut it["children"], &bundled, names, fps);
+            }
+            it
+        };
     let media: HashMap<&str, &Media> = p.media.iter().map(|m| (m.id.as_str(), m)).collect();
     let shown_color = |c: &Clip| {
         c.color
@@ -397,7 +497,7 @@ pub fn export(
                     }),
                 );
                 let mut it = match &c.compound {
-                    Some(k) => compound_item(c, k, &label, c.source_at(s), e - s, effects, rate),
+                    Some(k) => block(c, k, &label, c.source_at(s), e - s, effects),
                     None => item(
                         &label,
                         c,
@@ -481,15 +581,7 @@ pub fn export(
                             x.written(c.source_at(s), s > c.start, e < c.end())
                         }),
                     );
-                    audio.push(compound_item(
-                        c,
-                        k,
-                        &label,
-                        c.source_at(s),
-                        e - s,
-                        effects,
-                        rate,
-                    ));
+                    audio.push(block(c, k, &label, c.source_at(s), e - s, effects));
                     ta = e;
                 }
             }
