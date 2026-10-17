@@ -18,9 +18,10 @@ use crate::live::PoolView;
 const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
 const TILE_FULL: egui::Vec2 = egui::Vec2::new(TILE.x, TILE.y + 30.0);
 const TILE_GAP: f32 = 8.0;
-const LIST_COLUMNS: [&str; 8] = [
+const LIST_COLUMNS: [&str; 9] = [
     "Name",
     "Duration",
+    "Date",
     "Resolution",
     "FPS",
     "Codec",
@@ -67,7 +68,7 @@ impl<'a> ListRow<'a> {
 
 #[derive(Clone, Copy, PartialEq)]
 struct ListSizes {
-    columns: [f32; 8],
+    columns: [f32; LIST_COLUMNS.len()],
     rows: [f32; 3],
 }
 
@@ -75,7 +76,7 @@ impl ListSizes {
     fn least(ui: &egui::Ui) -> Self {
         let size = ui.spacing().interact_size;
         Self {
-            columns: [size.x; 8],
+            columns: [size.x; LIST_COLUMNS.len()],
             rows: [size.y; 3],
         }
     }
@@ -182,6 +183,7 @@ fn header_sort(column: usize, sort: PoolSort, descending: bool) -> Option<(PoolS
     let by = match column {
         0 => PoolSort::Name,
         1 => PoolSort::Duration,
+        2 => PoolSort::Date,
         _ => return None,
     };
     Some((by, by == sort && !descending))
@@ -1076,7 +1078,8 @@ impl Workspace {
                 let y = media_top + i as f32 * (media_height + LIST_GAP.y);
                 (1 + folders.len() + i, y, ListRow::Media(media[i]))
             }));
-        let width = sizes.columns.iter().sum::<f32>() + 7.0 * LIST_GAP.x;
+        let width =
+            sizes.columns.iter().sum::<f32>() + (LIST_COLUMNS.len() - 1) as f32 * LIST_GAP.x;
         let mut measured = ListSizes::least(ui);
         for (r, y, row) in rows {
             let kind = row.kind();
@@ -1192,6 +1195,13 @@ impl Workspace {
                 ui.label(self.src_tc(frames));
             }
             2 => {
+                let date = u64::try_from(m.mtime_ns / 1_000_000)
+                    .ok()
+                    .filter(|&ms| ms > 0)
+                    .and_then(super::workspace::local_time);
+                ui.label(date.map_or_else(|| "-".to_string(), |d| d.minutes()));
+            }
+            3 => {
                 ui.label(video.map_or_else(
                     || "-".to_string(),
                     |v| {
@@ -1200,7 +1210,7 @@ impl Workspace {
                     },
                 ));
             }
-            3 => match video {
+            4 => match video {
                 Some(v) => {
                     let rate = ui.label(v.fps.decimal());
                     if !v.fps.is_whole() {
@@ -1211,16 +1221,16 @@ impl Workspace {
                     ui.label("-");
                 }
             },
-            4 => {
+            5 => {
                 ui.label(video.map_or("-", |v| v.codec.as_str()));
             }
-            5 => {
+            6 => {
                 ui.label(match m.info.audio.first() {
                     Some(a) => format!("{} {} ch", a.codec, a.channels),
                     None => "none".into(),
                 });
             }
-            6 => match proxy_state(
+            7 => match proxy_state(
                 m,
                 self.snap.lost_proxies.contains_key(&m.id),
                 &self.snap.proxy_dir,
@@ -1639,8 +1649,16 @@ mod tests {
     }
 
     #[test]
+    fn a_click_on_the_date_header_sorts_by_the_files_time() {
+        assert_eq!(
+            header_sort(2, PoolSort::Name, false),
+            Some((PoolSort::Date, false))
+        );
+    }
+
+    #[test]
     fn a_click_on_a_header_without_a_sort_does_nothing() {
-        assert_eq!(header_sort(2, PoolSort::Name, false), None);
+        assert_eq!(header_sort(3, PoolSort::Name, false), None);
     }
 
     #[test]

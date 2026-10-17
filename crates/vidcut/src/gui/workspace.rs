@@ -108,7 +108,7 @@ pub struct Workspace {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct LocalTime {
+pub(super) struct LocalTime {
     year: i32,
     month: u32,
     day: u32,
@@ -124,9 +124,16 @@ impl LocalTime {
             self.year, self.month, self.day, self.hour, self.minute, self.second
         )
     }
+
+    pub(super) fn minutes(&self) -> String {
+        format!(
+            "{}-{:02}-{:02} {:02}:{:02}",
+            self.year, self.month, self.day, self.hour, self.minute
+        )
+    }
 }
 
-fn local_time(ms: u64) -> Option<LocalTime> {
+pub(super) fn local_time(ms: u64) -> Option<LocalTime> {
     let secs = libc::time_t::try_from(ms / 1000).ok()?;
     // SAFETY: an all-zero `tm` is valid, and localtime_r (localtime_s) writes only the `tm` given.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
@@ -152,10 +159,7 @@ fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
     if (edited.year, edited.month, edited.day) == (today.year, today.month, today.day) {
         format!("edited {:02}:{:02}", edited.hour, edited.minute)
     } else {
-        format!(
-            "edited {}-{:02}-{:02} {:02}:{:02}",
-            edited.year, edited.month, edited.day, edited.hour, edited.minute
-        )
+        format!("edited {}", edited.minutes())
     }
 }
 
