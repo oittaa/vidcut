@@ -29,8 +29,7 @@
 //! reversed.
 //!
 //! **Scrubbing.** A frame step, and a seek while paused, play that frame's
-//! sound ([`scrub`]); [`Scrubber`] does it alone, for pictures shown by
-//! something else.
+//! sound ([`scrub`]).
 //!
 //! **The plan played next.** A viewer that shows one thing or another (the
 //! source or the timeline) plays both through one player: the frame it
@@ -60,7 +59,6 @@ pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,
 };
-pub use scrub::Scrubber;
 
 use crate::error::{Error, Result};
 use clock::{Heard, Markers};

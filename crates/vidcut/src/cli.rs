@@ -116,6 +116,7 @@ const GROUPS: &[(&str, &str)] = &[
     ),
     ("history", "Undo and redo, across runs"),
     ("jobs", "Export and proxy jobs of the running GUI"),
+    ("keys", "Keyboard shortcuts"),
     ("markers", "Timeline markers"),
     ("marks", "Timeline In and Out marks"),
     ("media", "The Media Pool"),
@@ -995,4 +996,25 @@ fn read_batch(file: &str) -> Result<Vec<Request>> {
             Ok(e.request)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_command_group_says_what_it_is_for() {
+        fn unexplained(cmd: &Command, out: &mut Vec<String>) {
+            for sub in cmd.get_subcommands() {
+                if sub.has_subcommands() && sub.get_about().is_none_or(|a| a.to_string().is_empty())
+                {
+                    out.push(sub.get_name().to_string());
+                }
+                unexplained(sub, out);
+            }
+        }
+        let mut out = Vec::new();
+        unexplained(&command(), &mut out);
+        assert_eq!(out, Vec::<String>::new());
+    }
 }
