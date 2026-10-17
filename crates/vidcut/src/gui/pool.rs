@@ -1391,7 +1391,7 @@ impl Workspace {
             if ui
                 .button("Cut")
                 .on_hover_text(
-                    "Make the edit nearest the playhead a cut again; with clips selected, their edge",
+                    "Make the edit nearest the playhead a cut again, on the selected clips' track, else on Track 1",
                 )
                 .clicked()
             {
@@ -1403,7 +1403,7 @@ impl Workspace {
             if ui
                 .button("Dissolve")
                 .on_hover_text(
-                    "Ctrl+T: a one-second dissolve on the edit nearest the playhead; with clips selected, their edge",
+                    "Ctrl+T: a one-second dissolve on the edit nearest the playhead, on the selected clips' track, else on Track 1",
                 )
                 .clicked()
             {

@@ -389,8 +389,8 @@ pub enum Request {
         /// Default: the track of `clips`, else V1.
         #[serde(default)]
         track: Option<String>,
-        /// The selected clips: without `track`, the edge of these clips
-        /// nearest `at`, on their track.
+        /// The selected clips: without `track`, the track of their edge
+        /// nearest `at`.
         #[serde(default)]
         clips: Vec<ClipRef>,
         #[serde(default)]
@@ -416,8 +416,8 @@ pub enum Request {
         /// Default: the track of `clips`, else V1.
         #[serde(default)]
         track: Option<String>,
-        /// The selected clips: without `track`, the edge of these clips
-        /// nearest `at`, on their track.
+        /// The selected clips: without `track`, the track of their edge
+        /// nearest `at`.
         #[serde(default)]
         clips: Vec<ClipRef>,
         #[serde(default = "yes")]
