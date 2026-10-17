@@ -30,7 +30,7 @@ shadcn-egui-font-geist-mono = "=0.4.0"
 shadcn-egui-font-space-grotesk = "=0.4.0"
 # A font's metrics, to center its capitals in a line (the version epaint
 # lays text out with).
-skrifa = "0.44"
+skrifa = "0.48"
 # The desktop portal's light or dark setting and accent color on Linux.
 # MIT.
 zbus = "5"
