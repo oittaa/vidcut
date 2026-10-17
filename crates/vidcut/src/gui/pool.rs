@@ -1400,7 +1400,7 @@ impl Workspace {
             if ui
                 .button("Dissolve")
                 .on_hover_text(
-                    "A one-second dissolve on Track 1's edit nearest the playhead; Ctrl+T puts it on the selected edit or clips",
+                    "A one-second dissolve on Track 1's edit nearest the playhead; Ctrl+T puts one on the selected edit, else on each edge of the selected clips",
                 )
                 .clicked()
             {
