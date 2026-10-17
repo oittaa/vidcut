@@ -2,6 +2,6 @@
 # (any cargo command in the checkout). When raising `channel`, raise
 # `rust-version` in Cargo.toml with it and fix what the new clippy finds.
 [toolchain]
-channel = "1.99.0"
+channel = "1.99.1"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
