@@ -134,3 +134,8 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Resolve:** Studio 21.1.1 renders a Cross Fade's curve as straight lines between points on it: the first sample, every 1000 from there and from the edit, and the last (at 48 kHz). Early in a +3 dB fade the gain is up to 0.06 off.
 - **vidcut:** each sample's gain is the curve's ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:** the curve is what the transition is named for, and needs no editor's points. The two differ by more than 1% only in the 20 ms where a curve leaves or reaches silence.
+
+## X25. Small additions to the layout
+- **Resolve:** the Import Media button sits in the Media Pool (p. 654); the transport bar has no Clear; Timeline Options (p. 645) and the timeline buttons (p. 649) have no filmstrip, waveform or snap toggles; the pool doesn't sort by duration.
+- **vidcut:** Import in the top bar; Clear in the transport bar clears the marks (Alt+X); Filmstrips and Waveforms in Timeline Options; a Snap button among the timeline buttons; Duration among the pool's sorts. File dialogs for media, projects and exports each start in the folder last used for them.
+- **Why:** each puts one click on something the Cut page hides in a menu or leaves out, and none changes how an edit works.

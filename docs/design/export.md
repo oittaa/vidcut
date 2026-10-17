@@ -65,7 +65,7 @@ The export takes the first that opens; a detected one can still fail (NVENC allo
 
 ## Which source frame
 
-Output frame k of a piece shows the first source frame whose time is at least the piece's position plus k frames, less half a frame (`export::video::target`). At the project's rate that is exact; at other rates it is the nearest frame, ties to the later one. A piece at another speed steps through its source by `render::Pace`. The player reads through the same `VideoFrames`, so the viewer shows the frames an export writes.
+Output frame k of a piece shows the first source frame whose time is at least the piece's position plus k frames, less half a frame (`export::video::target`). At the project's rate that is exact; at other rates it is the nearest frame, ties to the later one. A piece at another speed steps through its source by `render::Pace`. A reader seeks exactly (`VideoReader::seek`): to a keyframe at or before the target, further back while the first frame it decodes lands after the target (MP4 seeks by decode time, and open GOPs show frames from before their keyframe), then it decodes on and drops the frames before the target. The player reads through the same `VideoFrames`, so the viewer shows the frames an export writes.
 
 ```mermaid
 flowchart TD

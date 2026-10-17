@@ -156,6 +156,8 @@ flowchart LR
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 
+Which kept transitions play (`otio::transitions`): on picture, an `SMPTE_Dissolve` whose editor metadata names no effect but a cross dissolve; on sound, a cross fade found by its effect type or name (+3, 0 or −3 dB), or a plain `SMPTE_Dissolve` at 0 dB. One plays only where its two clips cover its frames and no other clip of the track reaches into them; of two that overlap, the first.
+
 ## Preferences
 
 Preferences are not in the project. They live in `preferences.toml` in the config dir (`preferences::path`): a `Preferences` with appearance, GPU, player, thumbnail and proxy sections. `preferences.get` and `preferences.set` are projectless, so every door runs them the same way. `preferences.set` takes a `PreferencesPatch`, applies it (`Preferences::patched`), checks it and replaces the file atomically. Code reads the file when it needs a value (`preferences::load`); a running GUI also watches it (`Msg::PreferencesChanged`) and follows GPU decoding, the audio device, the player's memory budget and the theme.
