@@ -307,11 +307,7 @@ impl Workspace {
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {
         self.hover = None;
         self.bins.targets.clear();
-        if let Some(pos) =
-            ui.input(|i| i.pointer.press_origin().filter(|_| i.pointer.any_pressed()))
-        {
-            self.pool_focus = ui.max_rect().contains(pos);
-        }
+        let press = ui.input(|i| i.pointer.press_origin().filter(|_| i.pointer.any_pressed()));
         let snap = self.snap.clone();
         let project = snap.project();
         let search_id = egui::Id::new("pool-search");
@@ -404,7 +400,7 @@ impl Workspace {
             PoolMode::List => egui::ScrollArea::both(),
             _ => egui::ScrollArea::vertical().horizontal_scroll_offset(0.0),
         };
-        scroll
+        let shown = scroll
             .max_height(height)
             .min_scrolled_height(height)
             .auto_shrink([false, false])
@@ -451,6 +447,9 @@ impl Workspace {
                     PoolMode::List => self.list(ui, viewport, p, &folders, &media),
                 }
             });
+        if let Some(pos) = press {
+            self.pool_focus = shown.inner_rect.contains(pos);
+        }
         let top = ui.cursor().top();
         ui.separator();
         self.edit_buttons(ui);
@@ -1140,9 +1139,13 @@ impl Workspace {
                     (true, false) => format!("{} ⬆", LIST_COLUMNS[c]),
                     (true, true) => format!("{} ⬇", LIST_COLUMNS[c]),
                 };
-                let r = ui
-                    .add(egui::Label::new(dim(text)).sense(Sense::click()))
-                    .on_hover_text("Sort by it; click again to reverse");
+                let size = vec2(ui.available_width(), ui.spacing().interact_size.y);
+                let (rect, r) = ui.allocate_exact_size(size, Sense::click());
+                let r = r.on_hover_text("Sort by it; click again to reverse");
+                let builder = UiBuilder::new()
+                    .max_rect(rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center));
+                ui.scope_builder(builder, |ui| ui.label(dim(text)));
                 if r.clicked() {
                     self.send(
                         "pool.set",
@@ -1435,9 +1438,10 @@ impl Workspace {
             };
             ui.label(RichText::new(format!("Remove {items} from the Media Pool?")).strong());
             if clips > 0 {
+                let it = if ids.len() == 1 { "it" } else { "them" };
                 let clips = match clips {
-                    1 => "The 1 clip on the timeline that uses them goes too.".to_string(),
-                    n => format!("The {n} clips on the timeline that use them go too."),
+                    1 => format!("The 1 clip on the timeline that uses {it} goes too."),
+                    n => format!("The {n} clips on the timeline that use {it} go too."),
                 };
                 ui.label(clips);
             }
