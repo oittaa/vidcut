@@ -595,7 +595,11 @@ impl Workspace {
                 last += step;
             }
             d.pending = last;
-            ctx.request_repaint();
+            if d.run.is_none() {
+                ctx.request_repaint();
+            } else if let Some(wait) = next_step_in(speed, fps, now - t0) {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+            }
         }
         if let Some(until) = d.around_until
             && (!playing || position >= until)
@@ -605,5 +609,34 @@ impl Workspace {
                 self.send("player.pause", json!({}));
             }
         }
+    }
+}
+
+fn next_step_in(speed: f64, fps: f64, elapsed: f64) -> Option<f64> {
+    let rate = speed.abs() * fps;
+    if rate <= 0.0 {
+        return None;
+    }
+    let done = rate * elapsed.max(0.0);
+    Some(((done + 0.5).floor() + 0.5 - done) / rate)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_run_at_25_fps_steps_half_a_frame_after_it_starts() {
+        assert_eq!(next_step_in(1.0, 25.0, 0.0), Some(0.02));
+    }
+
+    #[test]
+    fn a_run_backward_at_twice_the_speed_steps_a_frame_after_its_last_step() {
+        assert_eq!(next_step_in(-2.0, 25.0, 0.01), Some(0.02));
+    }
+
+    #[test]
+    fn a_run_at_no_speed_never_steps() {
+        assert_eq!(next_step_in(0.0, 25.0, 1.0), None);
     }
 }

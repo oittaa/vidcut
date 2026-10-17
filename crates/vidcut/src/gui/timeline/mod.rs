@@ -17,7 +17,7 @@ use crate::gui::workspace::{Workspace, dim};
 use crate::gui::{keys, theme};
 use crate::live::PlayerId;
 use geometry::{Hit, NEW_TRACK_STRIP, Rows, Scale, Snap, hit_rows};
-use gesture::{Ctx, Drag, Gesture, Preview, swipe};
+use gesture::{Ctx, Drag, Gesture, HELD_FRAME, Preview, swipe};
 use paint::{Assets, Look};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1354,7 +1354,7 @@ impl Workspace {
                 self.timeline.snap_flipped = false;
             } else {
                 self.timeline.drag = Some(d);
-                ui.ctx().request_repaint();
+                ui.ctx().request_repaint_after(HELD_FRAME);
             }
             return;
         }
@@ -1411,7 +1411,7 @@ impl Workspace {
             return;
         }
         self.timeline.drag = Some(d);
-        ui.ctx().request_repaint();
+        ui.ctx().request_repaint_after(HELD_FRAME);
     }
 
     fn wheel(

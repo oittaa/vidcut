@@ -11,6 +11,8 @@ pub const HOVER: Duration = Duration::from_millis(800);
 
 pub const SAFE_EDIT_HOLD: Duration = Duration::from_millis(600);
 
+pub const HELD_FRAME: Duration = Duration::from_millis(16);
+
 const DROP_EDIT_PX: f32 = 6.0;
 
 #[derive(Debug, Clone, PartialEq)]

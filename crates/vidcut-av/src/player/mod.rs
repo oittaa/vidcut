@@ -184,6 +184,7 @@ pub(crate) struct Control {
     pub plan_gen: u64,
     pub mode: Mode,
     pub version: u64,
+    changes: u64,
     epoch: u64,
     epoch_at: Instant,
     pub trims: Vec<f64>,
@@ -282,6 +283,7 @@ pub(crate) struct AudioSnap {
     pub trims_gen: u64,
     pub muted: bool,
     pub scrub: Option<(i64, u64)>,
+    pub changes: u64,
 }
 
 pub(crate) struct Shared {
@@ -350,6 +352,7 @@ impl Shared {
         if ended {
             ctl.mode = Mode::Paused { at: t };
             ctl.version += 1;
+            ctl.changes += 1;
             self.changed.notify_all();
         }
         t
@@ -425,6 +428,11 @@ impl Shared {
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }
         }
+        self.notify(ctl);
+    }
+
+    fn notify(&self, mut ctl: MutexGuard<'_, Control>) {
+        ctl.changes += 1;
         drop(ctl);
         self.changed.notify_all();
     }
@@ -477,6 +485,7 @@ impl Shared {
             trims_gen: ctl.trims_gen,
             muted: ctl.muted,
             scrub: ctl.scrub,
+            changes: ctl.changes,
         })
     }
 
@@ -487,9 +496,9 @@ impl Shared {
         }
     }
 
-    pub(crate) fn wait_any(&self, timeout: Duration) {
+    pub(crate) fn wait_changes(&self, changes: u64, timeout: Duration) {
         let ctl = self.control();
-        if !ctl.closed {
+        if ctl.changes == changes && !ctl.closed {
             let _ = self.changed.wait_timeout(ctl, timeout);
         }
     }
@@ -603,6 +612,7 @@ impl Player {
                 plan_gen: 0,
                 mode: Mode::Paused { at },
                 version: 0,
+                changes: 0,
                 epoch: 0,
                 epoch_at: Instant::now(),
                 trims: Vec::new(),
@@ -719,8 +729,7 @@ impl Player {
         let mut ctl = self.shared.control();
         ctl.prepared = next;
         ctl.version += 1;
-        drop(ctl);
-        self.shared.changed.notify_all();
+        self.shared.notify(ctl);
     }
 
     pub fn seek(&self, frame: i64) {
@@ -751,6 +760,7 @@ impl Player {
         }
         ctl.small = size;
         ctl.version += 1;
+        ctl.changes += 1;
         drop(ctl);
         self.shared.store.forget_small();
         self.shared.changed.notify_all();
@@ -1112,6 +1122,7 @@ impl Drop for Player {
             let mut ctl = self.shared.control();
             ctl.closed = true;
             ctl.version += 1;
+            ctl.changes += 1;
         }
         for flag in [&self.shared.interrupt, &self.shared.window_interrupt] {
             flag.store(true, std::sync::atomic::Ordering::Relaxed);
