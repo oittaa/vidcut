@@ -1,6 +1,6 @@
 # Threads: what remains
 
-[threads.md](../decisions/threads.md) records the design that runs: the shared pools, every graph's slices and every frame that stands alone on them, a thread budget for the other decoders by what their thread works for, readers whose decoders close with them and a file left open a moment, one file opened ahead at a time. `scripts/threads.sh` and `VIDCUT_DEBUG`'s `[decoding]` lines measure it (tools.md). The steps below are what is open, in order; each is a pull request of its own, measured with the census before and after.
+[design/threads.md](../design/threads.md) records the design that runs: the shared pools, every graph's slices and every frame that stands alone on them, a thread budget for the other decoders by what their thread works for, readers whose decoders close with them and a file left open a moment, one file opened ahead at a time. `scripts/threads.sh` and `VIDCUT_DEBUG`'s `[decoding]` lines measure it (tools.md). The steps below are what is open, in order; each is a pull request of its own, measured with the census before and after.
 
 ## 1. A cap on CPU long-GOP stream decoders
 
@@ -8,7 +8,7 @@ The interactive decoders are bounded by the players (at most four with the windo
 
 ## 2. A cache of decoders
 
-A decoder leased by readers and closed when idle, handed back instead of opened anew, only if a record still shows opens that cost: the files left open a moment and a seek taking a file back from the opener (threads.md §4.1) cover a dragged playhead.
+A decoder leased by readers and closed when idle, handed back instead of opened anew, only if a record still shows opens that cost: the files left open a moment and a seek taking a file back from the opener ([design/threads.md](../design/threads.md)) cover a dragged playhead.
 
 ## Not this work
 

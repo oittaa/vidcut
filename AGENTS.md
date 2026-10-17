@@ -37,7 +37,7 @@ These are mandatory.
 
 | When | Command | Runs |
 |---|---|---|
-| Before **every commit** that changes more than `.md` files (enforced by `.githooks/pre-commit`) | `make check` (`scripts/check.sh`) | no binary files in git, `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
+| Before **every commit** (enforced by `.githooks/pre-commit`) | `make check` (`scripts/check.sh`); for `.md` files alone, `scripts/check-docs.sh` | no binary files in git, no comments in `crates/` (rule 2), the docs' names and links (`scripts/check-docs.sh`), `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
 | After a **bigger change** | `make check-full` (`scripts/check.sh full`) | the above plus all integration/e2e tests and doc tests |
 
 **Enable the hook once per clone:** `make hooks` (`git config core.hooksPath .githooks`).
@@ -48,9 +48,11 @@ These are mandatory.
 
 ## Docs
 
+Each fact lives in one doc; the others link to it. The design docs name what a reader greps for (types, modules, request methods, thread names), not tunable numbers, and `scripts/check-docs.sh` checks that every name in backticks in them exists in `crates/`.
+
 - [README.md](README.md): features, requirements, build, CLI basics. Keys: [docs/cut-page-spec.md](docs/cut-page-spec.md) §11.
 - [docs/cli.md](docs/cli.md): every command, JSON output and exit codes, live control of a running GUI.
 - [docs/cut-page-spec.md](docs/cut-page-spec.md): the behavioral spec; [docs/deviations.md](docs/deviations.md): where vidcut differs.
-- [docs/decisions/](docs/decisions/): architecture records (preview, export, GUI, agents, player, threads).
-- [docs/layout.md](docs/layout.md): crates and modules; [docs/tools.md](docs/tools.md): debug and test tools; [docs/gotchas.md](docs/gotchas.md): findings not in the records.
+- [docs/design/](docs/design/README.md): how vidcut is built, with charts; start there.
+- [docs/tools.md](docs/tools.md): debug and test tools; [docs/gotchas.md](docs/gotchas.md): FFmpeg, driver and library behavior vidcut works around.
 - [docs/roadmap.md](docs/roadmap.md): what comes next; [docs/todo/](docs/todo/): open work, one file per item.
