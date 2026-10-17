@@ -136,6 +136,6 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Why:** the curve is what the transition is named for, and needs no editor's points. The two differ by more than 1% only in the 20 ms where a curve leaves or reaches silence.
 
 ## X25. Small additions to the layout
-- **Resolve:** the Import Media button sits in the Media Pool (p. 654); the transport bar has no Clear; Timeline Options (p. 645) and the timeline buttons (p. 649) have no filmstrip, waveform or snap toggles; the pool doesn't sort by duration.
-- **vidcut:** Import in the top bar; Clear in the transport bar clears the marks (Alt+X); Filmstrips and Waveforms in Timeline Options; a Snap button among the timeline buttons; Duration among the pool's sorts. File dialogs for media, projects and exports each start in the folder last used for them.
+- **Resolve:** the Import Media button sits in the Media Pool (p. 654); the transport bar has no Clear; Timeline Options (p. 645) have no filmstrip or waveform toggles, and Snap is there, not among the timeline buttons (p. 649); the pool doesn't sort by duration.
+- **vidcut:** Import in the top bar; Clear in the transport bar clears the marks (Alt+X); Filmstrips and Waveforms in Timeline Options; a Snap button among the timeline buttons as well as Snap in Timeline Options; Duration among the pool's sorts. File dialogs for media, projects and exports each start in the folder last used for them.
 - **Why:** each puts one click on something the Cut page hides in a menu or leaves out, and none changes how an edit works.

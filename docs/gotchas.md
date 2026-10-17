@@ -31,6 +31,7 @@ FFmpeg, driver, OS and library behavior vidcut works around: the quirk, what it 
 
 ## FFmpeg: encoding and muxing
 
+- **FFmpeg's Vulkan ProRes encoder works on one frame at a time:** `prores_ks_vulkan` (9.0.2) makes its pool of GPU work with one slot, so `async_depth` changes nothing; vidcut doesn't set it.
 - **Set packet durations when muxing from an encoder with delay** (x264 with B-frames), or MP4's edit list drops the last frame (`VideoOut::drain`).
 - **Clear a decoded frame's picture type before encoding it** (`set_kind(picture::Type::None)`). Encoders take it as an order: the output copies the source's keyframes, and x264 warns of every B-frame it can't make.
 - **FFmpeg drops an option an encoder doesn't have without a word:** `avcodec_open2` leaves it in the dictionary and opens anyway. `av1_vaapi` and `vp9_vaapi` have no `qp`; `encode::vaapi_options` gives them `global_quality`.
