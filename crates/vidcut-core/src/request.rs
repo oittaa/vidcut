@@ -918,6 +918,15 @@ pub enum Request {
         #[serde(default)]
         on: Option<bool>,
     },
+    /// Loop playback (decision D51): play that reaches the end goes on from
+    /// the start, and with both In and Out set, play that reaches the Out
+    /// goes on from the In; backward, the other way round. Off by default;
+    /// not saved with the project. Without `on`, toggles (Ctrl+/).
+    #[serde(rename = "player.loop")]
+    PlayerLoop {
+        #[serde(default)]
+        on: Option<bool>,
+    },
     /// Hear `track`'s fader at `volume_db` in the timeline preview at once,
     /// without changing the project: what the Mixer's fader does while it is
     /// dragged; `track.set` keeps a level. `live: false` in the result:
@@ -1509,6 +1518,7 @@ impl Request {
                 | Self::PlayerMute { .. }
                 | Self::PlayerStats { .. }
                 | Self::PlayerAudioScrubbing { .. }
+                | Self::PlayerLoop { .. }
                 | Self::MixerPreview { .. }
                 | Self::PoolSet { .. }
                 | Self::SelectionGet {}

@@ -83,6 +83,8 @@ pub struct Workspace {
     title: String,
     theme: Option<Arc<crate::themes::Theme>>,
     pub(super) pool_buttons: f32,
+    pub(super) pool_focus: bool,
+    pub(super) removing: Option<Vec<String>>,
     pub(super) video_only: bool,
     pub(super) audio_only: bool,
     pub(super) target: Option<String>,
@@ -205,6 +207,8 @@ impl Workspace {
             title: String::new(),
             theme: None,
             pool_buttons: 84.0,
+            pool_focus: false,
+            removing: None,
             video_only: false,
             audio_only: false,
             target: None,
@@ -1060,7 +1064,7 @@ impl Workspace {
     }
 
     pub fn asking(&self) -> bool {
-        self.import.asking() || self.export.asking(&self.snap.jobs)
+        self.import.asking() || self.export.asking(&self.snap.jobs) || self.removing.is_some()
     }
 
     fn keys(&mut self, ctx: &egui::Context) {
@@ -1153,6 +1157,9 @@ impl Workspace {
         }
         if pressed(Key::S) && m.shift && !m.command && !m.alt {
             self.send("player.audio_scrubbing", json!({}));
+        }
+        if pressed(Key::Slash) && m.command && !m.alt {
+            self.send("player.loop", json!({}));
         }
         if pressed(Key::K) && !dynamic {
             self.send("player.pause", json!({}));
@@ -1300,7 +1307,12 @@ impl Workspace {
             );
         }
         if (pressed(Key::Delete) || pressed(Key::Backspace)) && !m.command {
-            self.delete(m.alt);
+            if self.pool_focus {
+                let selected = self.snap.selection.media.clone();
+                self.removing = (!selected.is_empty()).then_some(selected);
+            } else {
+                self.delete(m.alt);
+            }
         }
         if pressed(Key::Z) && m.command {
             self.send(
@@ -1349,7 +1361,16 @@ impl Workspace {
                 json!({ "clips": self.snap.selection.clips, "enabled": !enabled }),
             );
         }
-        if pressed(Key::A) && m.command {
+        if pressed(Key::A) && m.command && self.pool_focus {
+            let media: Vec<String> = match self.project() {
+                Some(p) if !m.shift => super::pool::shown_media(p, &self.snap.pool, &self.search)
+                    .iter()
+                    .map(|m| m.id.clone())
+                    .collect(),
+                _ => Vec::new(),
+            };
+            self.send("selection.set", json!({ "media": media }));
+        } else if pressed(Key::A) && m.command {
             let clips: Vec<String> = if m.shift {
                 Vec::new()
             } else {
@@ -1608,6 +1629,7 @@ impl Workspace {
         self.project_windows(&ctx);
         self.import_window(&ctx);
         self.relink_window(&ctx);
+        self.remove_media_window(&ctx);
         let panel = theme::colors().panel;
         egui::Panel::top("top").frame(theme::bar()).show(ui, |ui| {
             theme::decorated(ui, Deco::Bar, |ui| self.top_bar(ui))

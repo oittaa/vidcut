@@ -124,4 +124,4 @@ The schema describes parameters, not results. Commonly read:
 | `proxy generate` | `proxies[]`: `media`, `path`, `made_with` (how it was decoded and encoded), `copies` |
 | `media list`, `media get` | `missing` (the file is gone), `proxy`: `file`, `path` (in this computer's proxy folder), `width`, `height`, `codec`, `stale` (made from another version of the file), `missing` (its file is gone) |
 | `media relink` | `relinked`, `different` (with `why`), `not_found` |
-| `player state` | per viewer (`timeline`, `source`): `position`, `playing`, `ready`, `hwdec` (the GPU decoder, or `no`). `late`, `skipped` (frames while playing), `audio_device` (null: the default), `audio_error`, `two_up` (the trim two-up's frames) |
+| `player state` | per viewer (`timeline`, `source`): `position`, `playing`, `ready`, `hwdec` (the GPU decoder, or `no`). `late`, `skipped` (frames while playing), `audio_device` (null: the default), `audio_error`, `loop` (Loop playback is on), `two_up` (the trim two-up's frames) |

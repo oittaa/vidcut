@@ -192,6 +192,7 @@ pub(crate) struct Control {
     pub muted: bool,
     scrubbing: bool,
     pub scrub: Option<(i64, u64)>,
+    pub looping: Option<(i64, i64)>,
     pub hardware: bool,
     pub motion: f64,
     pub followed: bool,
@@ -273,6 +274,7 @@ pub(crate) struct Snap {
     pub followed: bool,
     pub small: Option<(u32, u32)>,
     pub prepared: Option<(Arc<Plan>, i64)>,
+    pub looping: Option<(i64, i64)>,
 }
 
 pub(crate) struct AudioSnap {
@@ -283,6 +285,7 @@ pub(crate) struct AudioSnap {
     pub trims_gen: u64,
     pub muted: bool,
     pub scrub: Option<(i64, u64)>,
+    pub looping: Option<(i64, i64)>,
     pub changes: u64,
 }
 
@@ -369,7 +372,7 @@ impl Shared {
             self.heard_first(ctl, epoch);
         }
         let s = heard.unwrap_or(from as f64).clamp(0.0, end);
-        let ended = if speed > 0.0 { s >= end } else { s <= 0.0 };
+        let ended = ctl.looping.is_none() && if speed > 0.0 { s >= end } else { s <= 0.0 };
         (ctl.plan.frame_at_sample(s.floor() as i64), ended)
     }
 
@@ -469,6 +472,7 @@ impl Shared {
             followed: ctl.followed,
             small: ctl.small,
             prepared: ctl.prepared.clone(),
+            looping: ctl.looping,
         })
     }
 
@@ -485,6 +489,7 @@ impl Shared {
             trims_gen: ctl.trims_gen,
             muted: ctl.muted,
             scrub: ctl.scrub,
+            looping: ctl.looping,
             changes: ctl.changes,
         })
     }
@@ -620,6 +625,7 @@ impl Player {
                 muted: false,
                 scrubbing: config.audio_scrubbing,
                 scrub: None,
+                looping: None,
                 hardware: config.hardware,
                 motion: 0.0,
                 followed: false,
@@ -788,6 +794,14 @@ impl Player {
                 ctl.scrub = None;
             }
         });
+    }
+
+    pub fn set_loop(&self, range: Option<(i64, i64)>) {
+        let range = range.filter(|(a, b)| b > a);
+        if self.shared.control().looping == range {
+            return;
+        }
+        self.shared.change(false, |ctl, _, _| ctl.looping = range);
     }
 
     pub fn play(&self, speed: f64) {

@@ -13,6 +13,7 @@ use vidcut_core::request::{PoolMode, PoolSort, ViewerMode};
 use super::theme;
 use super::timeline::gesture::Gesture;
 use super::workspace::{Workspace, dim, fit};
+use crate::live::PoolView;
 
 const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
 const TILE_FULL: egui::Vec2 = egui::Vec2::new(TILE.x, TILE.y + 30.0);
@@ -84,6 +85,7 @@ struct ListLayout {
     project: Arc<Project>,
     bin: String,
     search: String,
+    sort: (PoolSort, bool),
     scale: f32,
     sizes: ListSizes,
 }
@@ -158,6 +160,31 @@ fn bin_list(p: &Project) -> Vec<(String, usize)> {
                 .map(|b| (b.clone(), b.matches('/').count() + 1)),
         )
         .collect()
+}
+
+pub(super) fn shown_media<'a>(p: &'a Project, view: &PoolView, search: &str) -> Vec<&'a Media> {
+    let needle = search.to_lowercase();
+    let pool = p.pool();
+    view.media(p)
+        .iter()
+        .filter_map(|id| pool.get(id.as_str()).copied())
+        .filter(|m| {
+            if needle.is_empty() {
+                m.bin == view.bin
+            } else {
+                m.name.to_lowercase().contains(&needle)
+            }
+        })
+        .collect()
+}
+
+fn header_sort(column: usize, sort: PoolSort, descending: bool) -> Option<(PoolSort, bool)> {
+    let by = match column {
+        0 => PoolSort::Name,
+        1 => PoolSort::Duration,
+        _ => return None,
+    };
+    Some((by, by == sort && !descending))
 }
 
 fn bin_name(path: &str) -> &str {
@@ -278,6 +305,11 @@ impl Workspace {
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {
         self.hover = None;
         self.bins.targets.clear();
+        if let Some(pos) =
+            ui.input(|i| i.pointer.press_origin().filter(|_| i.pointer.any_pressed()))
+        {
+            self.pool_focus = ui.max_rect().contains(pos);
+        }
         let snap = self.snap.clone();
         let project = snap.project();
         let search_id = egui::Id::new("pool-search");
@@ -352,30 +384,16 @@ impl Workspace {
         }
         ui.separator();
         let view = &snap.pool;
-        let needle = self.search.to_lowercase();
-        let searching = !needle.is_empty();
+        let searching = !self.search.is_empty();
         let (folders, media): (Vec<String>, Vec<&Media>) = match project {
-            Some(p) => {
-                let pool = p.pool();
-                (
-                    p.bins
-                        .iter()
-                        .filter(|b| !searching && parent(b) == view.bin)
-                        .cloned()
-                        .collect(),
-                    view.media(p)
-                        .iter()
-                        .filter_map(|id| pool.get(id.as_str()).copied())
-                        .filter(|m| {
-                            if searching {
-                                m.name.to_lowercase().contains(&needle)
-                            } else {
-                                m.bin == view.bin
-                            }
-                        })
-                        .collect(),
-                )
-            }
+            Some(p) => (
+                p.bins
+                    .iter()
+                    .filter(|b| !searching && parent(b) == view.bin)
+                    .cloned()
+                    .collect(),
+                shown_media(p, view, &self.search),
+            ),
             None => Default::default(),
         };
         self.bins.order = media.iter().map(|m| m.id.clone()).collect();
@@ -1009,11 +1027,13 @@ impl Workspace {
             return;
         };
         let (bin, search) = (self.snap.pool.bin.clone(), self.search.clone());
+        let sort = (self.snap.pool.sort, self.snap.pool.descending);
         let scale = ui.ctx().pixels_per_point();
         let measured_for = |l: &&ListLayout| {
             Arc::ptr_eq(&l.project, &project)
                 && l.bin == bin
                 && l.search == search
+                && l.sort == sort
                 && l.scale == scale
         };
         let fresh = self
@@ -1092,6 +1112,7 @@ impl Workspace {
                 project,
                 bin,
                 search,
+                sort,
                 scale,
                 sizes: measured,
             });
@@ -1106,7 +1127,25 @@ impl Workspace {
     fn list_cell(&mut self, ui: &mut egui::Ui, p: &Project, row: ListRow, c: usize) {
         match row {
             ListRow::Header => {
-                ui.label(dim(LIST_COLUMNS[c]));
+                let view = &self.snap.pool;
+                let Some((sort, descending)) = header_sort(c, view.sort, view.descending) else {
+                    ui.label(dim(LIST_COLUMNS[c]));
+                    return;
+                };
+                let text = match (sort == view.sort, view.descending) {
+                    (false, _) => LIST_COLUMNS[c].to_string(),
+                    (true, false) => format!("{} ⬆", LIST_COLUMNS[c]),
+                    (true, true) => format!("{} ⬇", LIST_COLUMNS[c]),
+                };
+                let r = ui
+                    .add(egui::Label::new(dim(text)).sense(Sense::click()))
+                    .on_hover_text("Sort by it; click again to reverse");
+                if r.clicked() {
+                    self.send(
+                        "pool.set",
+                        json!({ "sort": sort, "descending": descending }),
+                    );
+                }
             }
             ListRow::Bin(b) => match c {
                 0 => {
@@ -1366,6 +1405,67 @@ impl Workspace {
         });
     }
 
+    pub(super) fn remove_media_window(&mut self, ctx: &egui::Context) {
+        let Some(ids) = self.removing.clone() else {
+            return;
+        };
+        let clips = self.project().map_or(0, |p| {
+            p.tracks
+                .iter()
+                .flat_map(|t| &t.clips)
+                .filter(|c| ids.contains(&c.media))
+                .count()
+        });
+        let mut done = None;
+        let modal = egui::Modal::new(egui::Id::new("remove-media")).show(ctx, |ui| {
+            ui.set_max_width(420.0);
+            let items = match ids.len() {
+                1 => "1 item".to_string(),
+                n => format!("{n} items"),
+            };
+            ui.label(RichText::new(format!("Remove {items} from the Media Pool?")).strong());
+            if clips > 0 {
+                let clips = match clips {
+                    1 => "The 1 clip on the timeline that uses them goes too.".to_string(),
+                    n => format!("The {n} clips on the timeline that use them go too."),
+                };
+                ui.label(clips);
+            }
+            ui.label(dim("The files stay on disk."));
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Remove").clicked() {
+                    done = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    done = Some(false);
+                }
+            });
+        });
+        if done.is_none() && super::workspace::escape_cancels(ctx, &modal) {
+            done = Some(false);
+        }
+        if done == Some(true) {
+            let remove = |id: &String| json!({ "media": id, "force": true });
+            match ids.as_slice() {
+                [id] => self.send("media.remove", remove(id)),
+                _ => self.send(
+                    "apply",
+                    json!({
+                        "label": format!("Remove {} items from the Media Pool", ids.len()),
+                        "commands": ids
+                            .iter()
+                            .map(|id| json!({ "method": "media.remove", "params": remove(id) }))
+                            .collect::<Vec<_>>(),
+                    }),
+                ),
+            }
+        }
+        if done.is_some() {
+            self.removing = None;
+        }
+    }
+
     fn edit_buttons(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             let buttons = [
@@ -1469,6 +1569,79 @@ pub(super) fn elide(s: &str, n: usize) -> String {
 mod tests {
 
     use super::*;
+    use vidcut_core::model::Settings;
+
+    fn media(id: &str, name: &str, bin: &str) -> Media {
+        serde_json::from_value(json!({
+            "id": id,
+            "path": format!("/{id}.mp4"),
+            "name": name,
+            "size": 0,
+            "mtime_ns": 0,
+            "info": { "format": "mov", "duration": 1.0, "start_time": 0.0, "video": null, "audio": [] },
+            "bin": bin,
+        }))
+        .unwrap()
+    }
+
+    fn pool() -> Project {
+        let mut p = Project::new(Settings::default());
+        p.bins = vec!["Day 1".into(), "Day 1/Noon".into()];
+        p.media = vec![
+            media("m1", "Beach", ""),
+            media("m2", "Beach walk", "Day 1/Noon"),
+            media("m3", "Forest", "Day 1"),
+        ];
+        p
+    }
+
+    fn day_1() -> PoolView {
+        PoolView {
+            bin: "Day 1".into(),
+            ..PoolView::default()
+        }
+    }
+
+    #[test]
+    fn select_all_takes_what_a_search_finds_in_the_bin_and_the_bins_inside_it() {
+        let p = pool();
+        let ids: Vec<&str> = shown_media(&p, &day_1(), "beach")
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect();
+        assert_eq!(ids, ["m2"]);
+    }
+
+    #[test]
+    fn select_all_without_a_search_takes_the_open_bins_own_media() {
+        let p = pool();
+        let ids: Vec<&str> = shown_media(&p, &day_1(), "")
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect();
+        assert_eq!(ids, ["m3"]);
+    }
+
+    #[test]
+    fn a_click_on_the_sorted_columns_header_reverses_the_order() {
+        assert_eq!(
+            header_sort(0, PoolSort::Name, false),
+            Some((PoolSort::Name, true))
+        );
+    }
+
+    #[test]
+    fn a_click_on_another_columns_header_sorts_by_it_ascending() {
+        assert_eq!(
+            header_sort(1, PoolSort::Name, true),
+            Some((PoolSort::Duration, false))
+        );
+    }
+
+    #[test]
+    fn a_click_on_a_header_without_a_sort_does_nothing() {
+        assert_eq!(header_sort(2, PoolSort::Name, false), None);
+    }
 
     #[test]
     fn each_place_on_a_filmstrip_shows_the_frame_at_its_middle() {

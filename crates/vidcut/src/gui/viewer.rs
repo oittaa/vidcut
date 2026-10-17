@@ -751,6 +751,16 @@ impl Workspace {
             {
                 self.jump_edit(id, true);
             }
+            let looping = self.snap.looping;
+            if ui
+                .selectable_label(looping, big(egui_phosphor::regular::REPEAT))
+                .on_hover_text(super::keys(
+                    "Loop (Ctrl+/): from the end back to the start, or from Out back to In",
+                ))
+                .clicked()
+            {
+                self.send("player.loop", json!({ "on": !looping }));
+            }
             ui.separator();
             if ui.button("Mark In").on_hover_text("I").clicked() {
                 self.mark(true);

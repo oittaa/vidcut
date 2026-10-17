@@ -415,6 +415,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         waveforms: Arc::new(HashMap::new()),
         jobs: Arc::new(Vec::new()),
         audio_scrubbing: true,
+        looping: false,
         stats: false,
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
@@ -475,6 +476,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         job_replies: HashMap::new(),
         next_job: 1,
         audio_scrubbing: true,
+        looping: false,
         stats: false,
         audio_noticed: None,
         playing: false,
@@ -677,6 +679,7 @@ struct Live {
     job_replies: HashMap<String, (Job, bool)>,
     next_job: u64,
     audio_scrubbing: bool,
+    looping: bool,
     stats: bool,
     audio_noticed: Option<String>,
     playing: bool,
@@ -989,6 +992,7 @@ impl Live {
             self.audio_noticed = audio;
         }
         self.sync_tape_selection();
+        self.sync_loop();
         let mut i = 0;
         while i < self.waits.len() {
             if matches!(self.waits[i].until, Until::Settled { .. }) && self.settled() {
@@ -1107,6 +1111,7 @@ impl Live {
             waveforms: self.waveforms.clone(),
             jobs: self.jobs.clone(),
             audio_scrubbing: self.audio_scrubbing,
+            looping: self.looping,
             stats: self.stats,
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
@@ -1904,6 +1909,11 @@ impl Live {
             Request::PlayerAudioScrubbing { on } => {
                 self.audio_scrubbing = on.unwrap_or(!self.audio_scrubbing);
                 self.player.set_scrubbing(self.audio_scrubbing);
+                Step::Now(Ok(self.state_response()))
+            }
+            Request::PlayerLoop { on } => {
+                self.looping = on.unwrap_or(!self.looping);
+                self.sync_loop();
                 Step::Now(Ok(self.state_response()))
             }
             Request::PlayerStats { show } => {
@@ -2705,6 +2715,28 @@ impl Live {
         })
     }
 
+    fn sync_loop(&mut self) {
+        let marks = self.looping.then(|| self.loop_marks()).flatten();
+        self.player.set_loop(self.looping, marks);
+    }
+
+    fn loop_marks(&self) -> Option<(i64, i64)> {
+        let p = self.project.as_ref()?.project();
+        let tm = &p.tape_marks;
+        let span = (self.viewer == ViewerMode::SourceTape
+            && tm.order.iter().eq(self.tape.iter().map(|e| &e.media)))
+        .then(|| render::crossing_span(&self.tape, tm.mark_in, tm.mark_out))
+        .flatten();
+        let (a, b) = match span {
+            Some(span) => span,
+            None => {
+                let c = self.viewer_context().ok()?;
+                (c.mark_in?, c.mark_out?)
+            }
+        };
+        (b > a).then_some((a, b))
+    }
+
     fn source_frame_of(&self, media: &str) -> Option<i64> {
         let position = self.player.position(SOURCE);
         match (&self.source_content, self.viewer) {
@@ -2909,6 +2941,7 @@ impl Live {
             "audio_device": self.player.audio_device(),
             "audio_error": self.player.audio_error,
             "audio_scrubbing": self.audio_scrubbing,
+            "loop": self.looping,
             "stats": self.player.stats(self.renderer.viewer_stats()),
             "stats_shown": self.stats,
             "two_up": self.renderer.two_up(),
