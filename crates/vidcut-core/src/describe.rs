@@ -171,6 +171,11 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
             Some(false) => "Audio scrubbing off".into(),
             None => "Audio scrubbing on or off".into(),
         },
+        "player.loop" => match params["on"].as_bool() {
+            Some(true) => "Loop playback on".into(),
+            Some(false) => "Loop playback off".into(),
+            None => "Loop playback on or off".into(),
+        },
         "mixer.preview" => format!(
             "{} fader at {} (heard, not kept)",
             d.text("track"),

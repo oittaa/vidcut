@@ -294,7 +294,12 @@ impl Decoder {
                     self.back = snap.focus < last;
                 }
             }
-            Direction::Forward(_) => self.back = false,
+            Direction::Forward(_) => {
+                if self.last_focus.is_some_and(|l| snap.focus < l) {
+                    self.caught_up = None;
+                }
+                self.back = false;
+            }
             Direction::Back => self.back = true,
         }
         if dir != Direction::Back {
@@ -387,7 +392,7 @@ impl Decoder {
             let target = match dir {
                 Direction::Forward(speed) if !reads_on && snap.heard => {
                     let lead = self.seek_cost.as_secs_f64() * plan.fps().as_f64() * speed;
-                    plan.clamp(focus + lead.ceil() as i64)
+                    after(&plan, snap.looping, focus, lead.ceil() as i64)
                 }
                 _ => focus,
             };
@@ -429,8 +434,9 @@ impl Decoder {
                 let ahead = ((AHEAD_SECS * fps * speed).ceil() as i64).max(2);
                 let budget = store.budget(self.picture_kind);
                 let ahead = ahead.min(self.pictures_in(budget / 4).max(2));
-                (anchor + 1..=plan.clamp(anchor + ahead))
-                    .find(|&t| missing(t))
+                (1..=ahead)
+                    .map(|k| after(&plan, snap.looping, anchor, k))
+                    .find(|&t| t != anchor && missing(t))
                     .map(|t| (t, Reach::Forward))
             }
             Direction::Back if snap.followed => return Ok(false),
@@ -809,6 +815,15 @@ impl Decoder {
         self.next = None;
         Ok(t - (pos - start))
     }
+}
+
+fn after(plan: &Plan, looping: Option<(i64, i64)>, from: i64, k: i64) -> i64 {
+    let t = from + k;
+    plan.clamp(match looping {
+        Some((a, b)) if from < b && t >= b => a + (t - b) % (b - a),
+        Some((a, b)) if t > plan.last() => a + (t - plan.last() - 1) % (b - a),
+        _ => t,
+    })
 }
 
 fn picture(layers: Vec<Layer>) -> Picture {

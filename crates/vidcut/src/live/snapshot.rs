@@ -150,6 +150,7 @@ pub struct Snapshot {
     pub waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     pub jobs: Arc<Vec<super::JobInfo>>,
     pub audio_scrubbing: bool,
+    pub looping: bool,
     pub stats: bool,
     pub preview_error: Option<String>,
     pub theme: Arc<crate::themes::Theme>,
