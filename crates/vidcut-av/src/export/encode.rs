@@ -1209,7 +1209,7 @@ pub(crate) fn open_video(
         }
     };
     let mut dict = ffmpeg::Dictionary::new();
-    for (k, v) in pass_options(enc, pass) {
+    for (k, v) in open_options(enc, pass) {
         dict.set(&k, &v);
     }
     // NVENC on its GPU's CUDA device, where frames come from memory (on
@@ -1249,10 +1249,23 @@ pub(crate) fn open_video(
     Ok((opened, vaapi))
 }
 
-/// The encoder's options for `pass`: the statistics file and the first
-/// run's speed where it has its own.
-fn pass_options(enc: &VideoEncoder, pass: Pass<'_>) -> Vec<(String, String)> {
+/// The options the encoder opens with for `pass`: its own, FFmpeg's
+/// automatic thread count for a CPU encoder (DNxHR's in slices), and the
+/// statistics file and the first run's speed where it has its own.
+fn open_options(enc: &VideoEncoder, pass: Pass<'_>) -> Vec<(String, String)> {
     let mut options = enc.options.clone();
+    // The count the `ffmpeg` command gives every encoder, where a program
+    // using the libraries gets 1, which most CPU encoders take as theirs.
+    // Each makes its own count of 0 (threads.md §2). A GPU encoder's work
+    // is the GPU's.
+    if enc.kind == EncoderChoice::Cpu {
+        options.push(opt("threads", "auto"));
+    }
+    // DNxHR in slices, which share its one rate-control table, where each
+    // frame thread holds a table of its own: 266 MB at 2160p (gotchas.md).
+    if enc.name == "dnxhd" {
+        options.push(opt("thread_type", "slice"));
+    }
     let fast = matches!(enc.passes, Passes::TwoRuns { fast_first: true });
     let set = |options: &mut Vec<(String, String)>, k: &str, v: String| {
         options.retain(|(key, _)| key != k);
@@ -1514,9 +1527,59 @@ pub fn detect(vulkan: bool) -> Availability {
 
 #[cfg(test)]
 mod tests {
-    use super::pairs;
+    use super::{Pass, Passes, VideoEncoder, open_options, pairs};
+    use crate::ffmpeg::format::Pixel;
     use crate::hw::Kind;
     use vidcut_core::export::EncoderChoice;
+
+    /// An encoder of `kind` named `name`, with a preset of its own.
+    fn encoder(name: &str, kind: EncoderChoice) -> VideoEncoder {
+        VideoEncoder {
+            name: name.into(),
+            kind,
+            pixel: Pixel::YUV420P,
+            device: None,
+            options: vec![("preset".into(), "medium".into())],
+            hdr: None,
+            passes: Passes::One,
+            metadata: Default::default(),
+            dynamic: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_cpu_encoder_opens_with_the_automatic_thread_count() {
+        let x265 = encoder("libx265", EncoderChoice::Cpu);
+        assert_eq!(
+            open_options(&x265, Pass::Only),
+            [
+                ("preset".to_string(), "medium".to_string()),
+                ("threads".to_string(), "auto".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn dnxhr_opens_with_slice_threads() {
+        let dnxhd = encoder("dnxhd", EncoderChoice::Cpu);
+        assert_eq!(
+            open_options(&dnxhd, Pass::Only),
+            [
+                ("preset".to_string(), "medium".to_string()),
+                ("threads".to_string(), "auto".to_string()),
+                ("thread_type".to_string(), "slice".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_gpu_encoder_opens_with_no_thread_count() {
+        let nvenc = encoder("hevc_nvenc", EncoderChoice::Nvenc);
+        assert_eq!(
+            open_options(&nvenc, Pass::Only),
+            [("preset".to_string(), "medium".to_string())]
+        );
+    }
 
     #[test]
     fn vaapi_pairs_with_va_api() {

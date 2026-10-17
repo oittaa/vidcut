@@ -7,7 +7,7 @@ Every thread of a vidcut process: what starts it and why, and how the CPU's work
 - **A thread waits for one thing or runs one stage.** The UI, the viewer, the session, a request, a player's pictures and its sound, a filmstrip worker, a pipeline's stage (opening the next piece, an export's encoding, measured light's measuring): each is a thread of its own, named after its work, that blocks while it has none. An idle thread costs its stack.
 - **The CPU's work split into slices runs on the shared pools (§3).** Nothing starts threads for one call, one frame or one file.
 - **A decoder is its reader's (§4):** opened with it, closed with it, counted while it is open.
-- **Frame threads only where nothing else can split the work:** a stream decoded on the CPU (§4.2). FFmpeg runs a decoder's frame threads on threads of that decoder's own, and no outside pool can run them.
+- **Frame threads only where nothing else can split the work:** a stream decoded on the CPU (§4.2), and FFmpeg's ProRes encoders (`prores_aw` has no slices, and `prores_ks`'s split only its quantizer search, gotchas.md). FFmpeg runs a codec's frame threads on threads of that codec's own, and no outside pool can run them.
 - **Jobs come last.** A job runs at the lowest priority, and its decoding waits while a player plays (gui.md §9, player.md §1). Its work on the pools runs at that priority too.
 - **Named.** The app starts its threads through `threads::spawn` (gui.md §9). vidcut-av names each thread it starts `vidcut-…`. FFmpeg 8 names its frame threads itself (`av:png:df0`), so a census by name (`scripts/threads.sh`, tools.md) shows their codec, not their reader; the `[decoding]` lines show the reader.
 
@@ -31,7 +31,9 @@ The GUI with a project open on Linux (an NVIDIA GPU, an AMD iGPU beside it):
 | FFmpeg | frame threads for each stream decoder on the CPU (`av:…:dfN`): one a core, half that for a job's, at most 16 | the readers' decoders | §4.2 |
 | | swscale's, one fewer than its decoder's frame threads for each stream converted on the CPU | a stream's conversion | §5 |
 
-Threads that come and go: one for each IPC connection (`vidcut-ipc-conn`) and each task (gui.md §1); a player's `vidcut-play-windows` while it follows another, `vidcut-scrub` while a viewer scrubs without one; the opener of a reader that reads pieces (`vidcut-open`) and an export's `vidcut-encode` (with its encoder's own threads); measured light's measuring threads.
+Threads that come and go: one for each IPC connection (`vidcut-ipc-conn`) and each task (gui.md §1); a player's `vidcut-play-windows` while it follows another, `vidcut-scrub` while a viewer scrubs without one; the opener of a reader that reads pieces (`vidcut-open`); an export's or a proxy's `vidcut-encode`, and its encoder's own threads (below); measured light's measuring threads.
+
+**An encoder's threads:** a CPU encoder opens with FFmpeg's automatic thread count, as the `ffmpeg` command opens it, and makes its own count of it (gotchas.md). On 16 cores: x264 29 threads, x265 20, libvpx and libaom 15 beside the thread that encodes, rav1e 16, `prores_ks` 16 frame threads, `dnxhd` 15 slice threads beside the thread that encodes, SVT-AV1 74 whatever the count. Most start as the encoder opens, on the export's or proxy's thread, whose name they carry; rav1e's start on `vidcut-encode`. They run at a job's priority on Linux, where threads inherit it, and not on Windows and macOS (§3). A GPU encoder opens with one thread, so FFmpeg starts none for it.
 
 So the threads a project holds are its readers': each reader's decoder closes with it, and one file at a time opens ahead (export.md §1). Playing a 4K PNG sequence holds the rows above, the player's decoder's frame threads and swscale's for its conversion to YUV (§5); the filmstrip's four workers read single frames, one thread each.
 

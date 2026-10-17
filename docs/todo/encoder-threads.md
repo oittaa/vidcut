@@ -1,7 +1,0 @@
-# Export encoders on one thread
-
-vidcut's CPU exports to x265, VP9 (libvpx), AV1 through libaom or rav1e, ProRes and DNxHR encode on one thread: `export/encode.rs` sets no thread count, FFmpeg's default `thread_count` is 1 for a program using the libraries, and each of those encoders takes it as its own count (gotchas.md, "FFmpeg's encoders use one thread unless given more"). x264 ignores it for an automatic count of its own; SVT-AV1 and Kvazaar run their own pools regardless. Proxies already set `threads=auto` and frame threads for ProRes and DNxHR (`proxy.rs`).
-
-**What to do:** every CPU encoder vidcut opens gets FFmpeg's automatic count explicitly, `thread_count` 0, the same the `ffmpeg` command sets: each encoder maps it to its own best count (x264 its own automatic, libvpx and libaom all cores, x265 its frame threads), and ProRes and DNxHR take frame threads with it, as proxies give them. Set on every CPU encoder, those that ignore it today too, so the intent is explicit and an encoder that starts honoring the value in a later FFmpeg gets it. GPU encoders run no CPU threads of their own and stay as they are. No setting of the user's is touched: the export settings, presets and `--set` have no `threads` key (AGENTS.md rule 10 would otherwise apply).
-
-**Measure** each encoder's export wall time before and after with `passes` (tools.md) on a 4K fixture, and the threads at most during an export with `scripts/threads.sh`; put every run in the pull request. threads.md §2's export row and gotchas.md say what encoders get afterwards.
