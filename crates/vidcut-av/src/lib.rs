@@ -11,6 +11,7 @@ pub mod color;
 pub mod copies;
 pub mod cuda;
 pub mod decode;
+pub mod ending;
 pub mod error;
 pub mod export;
 pub mod first;
