@@ -1,11 +1,3 @@
-//! The project model: settings, media pool, tracks and clips.
-//!
-//! The track model (spec §6): numbered tracks `V1…Vn`
-//! hold combined video+audio clips, `A1…An` hold audio-only clips, and V1 is
-//! magnetic while Ripple On is set. All positions and lengths are integer
-//! frames at the project frame rate; `source_in` counts project frames from the
-//! media's first video frame.
-
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -16,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::time::{Rational, TimeContext, TimeSpec, format_timecode};
 
-/// How long a still may last in the timeline, seconds: 17 h 40 min.
 pub const STILL_LIMIT_SECS: f64 = 63_600.0;
 
 /// A whole project: one timeline (deviation X2) plus its media pool.
@@ -94,11 +85,8 @@ impl Default for Settings {
     }
 }
 
-/// The format a new project is given (decision D37). What isn't given
-/// comes from the first video added, or from the timeline it is made from.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Format {
-    /// Like `25`, `29.97` or `30000/1001`.
     pub fps: Option<String>,
     pub size: Option<(u32, u32)>,
     pub drop_frame: Option<bool>,
@@ -112,7 +100,6 @@ impl Format {
         *self == Self::default()
     }
 
-    /// A new project's settings in this format.
     pub fn settings(&self) -> crate::error::Result<Settings> {
         let mut s = Settings::with_format(self.fps.as_deref(), self.size)?;
         if let Some(d) = self.drop_frame {
@@ -132,10 +119,6 @@ impl Format {
 }
 
 impl Settings {
-    /// A new project's settings with the frame rate (`25`, `29.97`,
-    /// `30000/1001`, any positive rate) and the picture size given. Either
-    /// one fixes the format: the first video added then sets neither
-    /// (decision D37).
     pub fn with_format(fps: Option<&str>, size: Option<(u32, u32)>) -> crate::error::Result<Self> {
         let mut s = Self::default();
         if let Some(f) = fps {
@@ -153,8 +136,6 @@ impl Settings {
         Ok(s)
     }
 
-    /// Counts record timecode drop-frame, or not (decision D47): only at
-    /// 29.97 and 59.94. The start keeps its label.
     pub fn set_drop_frame(&mut self, on: bool) -> crate::error::Result<()> {
         if on && !self.fps.has_drop_frame() {
             return Err(crate::error::Error::invalid(format!(
@@ -166,8 +147,6 @@ impl Settings {
         Ok(())
     }
 
-    /// Changes the frame rate; drop-frame counting stays only where the
-    /// new rate has it. The start keeps its label.
     pub fn set_fps(&mut self, fps: Rational) {
         self.relabel(|s| {
             s.fps = fps;
@@ -175,21 +154,15 @@ impl Settings {
         });
     }
 
-    /// Makes `change` keeping the start timecode's label (deviation X7):
-    /// `01:00:00:00` stays so, another frame count at another rate or
-    /// counting. A label the new rate hasn't (frame 29 at 25 fps) keeps its
-    /// time instead.
     fn relabel(&mut self, change: impl FnOnce(&mut Self)) {
         let (label, secs) = (self.timecode(0), self.fps.frames_to_secs(self.start_tc));
         change(self);
-        // Read as the project counts now: `;` would count drop-frame still.
         self.start_tc = TimeSpec::parse(&label.replace(';', ":"))
             .ok()
             .and_then(|t| self.start_context().resolve(&t).ok())
             .unwrap_or_else(|| self.fps.secs_to_frames(secs));
     }
 
-    /// How a start timecode is read: as the project counts timecode.
     fn start_context(&self) -> TimeContext {
         TimeContext {
             fps: self.fps,
@@ -202,8 +175,6 @@ impl Settings {
         }
     }
 
-    /// Sets the record timecode of the first frame: `01:00:00:00`, or
-    /// drop-frame `01:00:00;00` (deviation X7, decision D47).
     pub fn set_start_tc(&mut self, tc: &TimeSpec) -> crate::error::Result<()> {
         let frames = self.start_context().resolve(tc)?;
         if frames < 0 {
@@ -215,23 +186,19 @@ impl Settings {
         Ok(())
     }
 
-    /// Whether timecodes count drop-frame: set, at a rate that has it.
     pub fn counts_drop_frame(&self) -> bool {
         self.drop_frame && self.fps.has_drop_frame()
     }
 
-    /// Timeline frame `frame` as record timecode (drop-frame when counted so).
     pub fn timecode(&self, frame: i64) -> String {
         format_timecode(frame, self.fps, self.start_tc, self.counts_drop_frame())
     }
 
-    /// A length, or a source position, as timecode counted from zero.
     pub fn length_timecode(&self, frames: i64) -> String {
         format_timecode(frames, self.fps, 0, self.counts_drop_frame())
     }
 }
 
-/// A picture side the encoders take: even, at least 16 pixels.
 pub fn check_side(name: &str, px: u32) -> crate::error::Result<()> {
     if px < 16 || !px.is_multiple_of(2) {
         return Err(crate::error::Error::invalid(format!(
@@ -241,11 +208,8 @@ pub fn check_side(name: &str, px: u32) -> crate::error::Result<()> {
     Ok(())
 }
 
-/// Default longest side of a generated proxy, in pixels (decision D41).
 pub const PROXY_LONGEST: u32 = 960;
 
-/// Even picture size that fits inside a square of side `longest` without
-/// getting larger. `width` and `height` are the size as shown.
 pub fn proxy_size(width: u32, height: u32, longest: u32) -> (u32, u32) {
     let longest = longest.max(2) & !1;
     let (w, h) = (width.max(2) & !1, height.max(2) & !1);
@@ -316,19 +280,15 @@ pub struct Proxy {
 }
 
 impl Media {
-    /// A single picture, shown for as long as its clips last.
     pub fn is_still(&self) -> bool {
         self.info.video.as_ref().is_some_and(|v| v.still)
     }
 
-    /// The file of picture `k` of an image sequence.
     pub fn sequence_file(&self, k: u64) -> Option<PathBuf> {
         let s = self.sequence.as_ref()?;
         Some(s.file(self.path.parent().unwrap_or(Path::new("")), k))
     }
 
-    /// The proxy, when one is stored and it was made from this file as
-    /// probed (same size and modification time).
     pub fn fresh_proxy(&self) -> Option<&Proxy> {
         self.proxy
             .as_ref()
@@ -350,8 +310,6 @@ pub struct ImageSequence {
 }
 
 impl ImageSequence {
-    /// The pattern with its number written by `number` (given the padded
-    /// width, 0 for none).
     fn fill(&self, mut number: impl FnMut(usize) -> String) -> String {
         let mut out = String::with_capacity(self.pattern.len() + 16);
         let mut rest = self.pattern.as_str();
@@ -371,9 +329,6 @@ impl ImageSequence {
         out
     }
 
-    /// The name around the number, and the width it is zero-padded to (0:
-    /// not padded): OpenTimelineIO's `name_prefix`, `frame_zero_padding`
-    /// and `name_suffix`.
     pub fn parts(&self) -> (String, usize, String) {
         let mut width = None;
         let marked = self.fill(|w| {
@@ -384,18 +339,15 @@ impl ImageSequence {
         (prefix.to_string(), width.unwrap_or(0), suffix.to_string())
     }
 
-    /// The name of the file numbered `n`.
     pub fn name(&self, n: u64) -> String {
         self.fill(|w| format!("{n:0w$}"))
     }
 
-    /// The pool's name for it: `frame_[000-119].png`.
     pub fn display(&self) -> String {
         let last = self.first + self.count.saturating_sub(1);
         self.fill(|w| format!("[{:0w$}-{last:0w$}]", self.first))
     }
 
-    /// Picture `k`'s file, in `dir`.
     pub fn file(&self, dir: &Path, k: u64) -> PathBuf {
         dir.join(self.name(self.first + k))
     }
@@ -434,7 +386,6 @@ pub struct StartTimecode {
 }
 
 impl StartTimecode {
-    /// The start as a (possibly fractional) frame count at `fps`.
     pub fn frames_at(&self, fps: Rational) -> f64 {
         if self.rate == fps {
             return self.count as f64;
@@ -516,8 +467,6 @@ pub struct DolbyVision {
 }
 
 impl VideoInfo {
-    /// The picture size as shown: square pixels (the sample aspect ratio
-    /// applied to the width), rotated, even.
     pub fn display_size(&self) -> (u32, u32) {
         let sar = if self.sar[0] > 0 && self.sar[1] > 0 {
             f64::from(self.sar[0]) / f64::from(self.sar[1])
@@ -674,19 +623,14 @@ pub struct Clip {
     pub color: Option<String>,
 }
 
-/// OTIO data kept as another editor wrote it (deviation X9). Copies of a
-/// project share it, so a copy costs nothing, and copies that weren't
-/// changed compare equal at once. It is written as the JSON it holds.
 #[derive(Debug, Clone, Default)]
 pub struct Kept(Arc<serde_json::Value>);
 
 impl Kept {
-    /// The data to change: a copy of its own when others share it.
     pub fn make_mut(&mut self) -> &mut serde_json::Value {
         Arc::make_mut(&mut self.0)
     }
 
-    /// The data, copied only when others share it.
     pub fn into_value(self) -> serde_json::Value {
         Arc::try_unwrap(self.0).unwrap_or_else(|shared| (*shared).clone())
     }
@@ -755,13 +699,10 @@ fn is_zero_frames(n: &i64) -> bool {
 }
 
 impl Speed {
-    /// How fast: 2.0 twice, -1.0 reversed, 0 frozen; none for a time effect
-    /// without a scalar.
     pub fn scalar(&self) -> Option<f64> {
         self.effect["time_scalar"].as_f64()
     }
 
-    /// As shown: `200%`, `-100%`, `freeze`, or the effect's name.
     pub fn label(&self) -> String {
         match self.scalar() {
             Some(0.0) => "freeze".to_string(),
@@ -841,59 +782,42 @@ pub struct ClipAudio {
 }
 
 impl Clip {
-    /// The Clip Color it shows: its own, else that of `media`, its media.
     pub fn shown_color<'a>(&'a self, media: Option<&'a Media>) -> Option<&'a str> {
         self.color
             .as_deref()
             .or_else(|| media.and_then(|m| m.color.as_deref()))
     }
 
-    /// Whether it is a generator or title from another editor, without
-    /// media.
     pub fn is_generator(&self) -> bool {
         self.generator.is_some()
     }
 
-    /// Whether it is a block from another editor without media: a
-    /// generator or a compound clip.
     pub fn is_block(&self) -> bool {
         self.generator.is_some() || self.compound.is_some()
     }
 
-    /// First frame after the clip.
     pub fn end(&self) -> i64 {
         self.start + self.duration
     }
 
-    /// Timeline range `[start, end)` of the clip's audio, if any.
     pub fn audio_range(&self) -> Option<(i64, i64)> {
         self.audio
             .as_ref()
             .map(|a| (self.start + a.head, self.end() + a.tail))
     }
 
-    /// How it walks its source (decision D48): its speed, from where in its
-    /// pace it starts.
     pub fn pace(&self) -> crate::render::Pace {
         crate::render::Pace::of(self.speed(), self.speed.as_ref().map_or(0, |s| s.skip))
     }
 
-    /// Source frame shown at timeline frame `t`: at its speed (decision
-    /// D48), the one its stretch of the source starts in.
     pub fn source_at(&self, t: i64) -> i64 {
         self.source_in + self.pace().offset(t - self.start)
     }
 
-    /// Where its sound is in its source at timeline frame `t` (frames,
-    /// between frames too), at its speed (decision D48).
     pub fn sound_at(&self, t: f64) -> f64 {
         self.source_in as f64 + self.pace().sound(t - self.start as f64)
     }
 
-    /// Its content moves on `k` frames of its pace (back when negative):
-    /// each frame shows what the one `k` later showed. A slip; with its
-    /// start and length (`move_head`), a head trim, a split's second part,
-    /// a roll's or slide's incoming clip.
     pub fn walk(&mut self, k: i64) {
         self.source_in += self.pace().offset(k);
         if let Some(s) = self.speed.as_mut() {
@@ -901,23 +825,17 @@ impl Clip {
         }
     }
 
-    /// Its head moves `k` frames later (earlier when negative), every frame
-    /// after it showing what it showed.
     pub fn move_head(&mut self, k: i64) {
         self.start += k;
         self.duration -= k;
         self.walk(k);
     }
 
-    /// The source frames its picture shows: the lowest, and one past the
-    /// highest.
     pub fn shown(&self) -> (i64, i64) {
         let (a, b) = (self.source_at(self.start), self.source_at(self.end() - 1));
         (a.min(b), a.max(b) + 1)
     }
 
-    /// The source its sound plays (frames, low and high): none without
-    /// sound, or held.
     pub fn sound_span(&self) -> Option<(f64, f64)> {
         let (a, b) = self.audio_range()?;
         if self.speed() == 0.0 {
@@ -927,8 +845,6 @@ impl Clip {
         Some((x.min(y), x.max(y)))
     }
 
-    /// Frames its head can move earlier, or its tail later (`tail`), with
-    /// its picture inside source frames `0..frames`; unbounded held.
     pub fn room(&self, tail: bool, frames: i64) -> i64 {
         let speed = self.speed();
         if speed == 0.0 {
@@ -942,7 +858,6 @@ impl Clip {
             };
             (0..frames).contains(&self.source_at(t))
         };
-        // The last that fits, found between two that bracket it.
         let far = ((frames as f64 + 2.0) / speed.abs()).min((i64::MAX / 4) as f64);
         let (mut lo, mut hi) = (0, far as i64 + 2);
         if !at(lo) {
@@ -959,9 +874,6 @@ impl Clip {
         lo
     }
 
-    /// Where timeline frame `t` falls in its content: source frames at
-    /// normal speed, else frames of its pace (decision D48), which the
-    /// parts a split or trim leaves agree on.
     pub fn content_at(&self, t: i64) -> i64 {
         match &self.speed {
             None => self.source_in + t - self.start,
@@ -969,8 +881,6 @@ impl Clip {
         }
     }
 
-    /// Whether `other` walks the same source as it does, the same way, and
-    /// in step: a part of it after splits and trims.
     pub fn in_step(&self, other: &Clip) -> bool {
         match (&self.speed, &other.speed) {
             (None, None) => true,
@@ -982,8 +892,6 @@ impl Clip {
         }
     }
 
-    /// Source frames per timeline frame: its speed change's (2.0 twice as
-    /// fast, -1.0 backward, 0 a held frame), else 1.
     pub fn speed(&self) -> f64 {
         self.speed.as_ref().and_then(Speed::scalar).unwrap_or(1.0)
     }
@@ -1057,7 +965,6 @@ pub struct NextIds {
 }
 
 impl Project {
-    /// An empty project with the given settings and one track, V1.
     pub fn new(settings: Settings) -> Self {
         Self {
             rev: 0,
@@ -1078,19 +985,16 @@ impl Project {
         }
     }
 
-    /// Index of track `id` in [`Project::tracks`].
     pub fn track_index(&self, id: &str) -> Option<usize> {
         self.tracks.iter().position(|t| t.id == id)
     }
 
-    /// Indexes of the tracks of `kind`, bottom (V1, A1) first.
     pub fn tracks_of(&self, kind: TrackKind) -> Vec<usize> {
         (0..self.tracks.len())
             .filter(|&i| self.tracks[i].kind == kind)
             .collect()
     }
 
-    /// Whether any track is soloed (then only soloed tracks are heard).
     pub fn any_solo(&self) -> bool {
         self.tracks.iter().any(|t| t.solo)
     }
@@ -1107,12 +1011,10 @@ impl Project {
         self.media.iter().find(|m| m.id == id)
     }
 
-    /// The pool's items by id, for finding many of them.
     pub fn pool(&self) -> HashMap<&str, &Media> {
         self.media.iter().map(|m| (m.id.as_str(), m)).collect()
     }
 
-    /// Finds a clip by id: (track index, clip index).
     pub fn find_clip(&self, id: &str) -> Option<(usize, usize)> {
         self.tracks
             .iter()
@@ -1124,14 +1026,10 @@ impl Project {
         self.find_clip(id).map(|(t, c)| &self.tracks[t].clips[c])
     }
 
-    /// The Clip Color clip `c` shows: its own, else its media's.
     pub fn clip_color<'a>(&'a self, c: &'a Clip) -> Option<&'a str> {
         c.shown_color(self.media(&c.media))
     }
 
-    /// End of the program: the latest clip end (video or audio) on any
-    /// track, or the end of a transition into the gap after a clip (a fade
-    /// to black, decision D50).
     pub fn end(&self) -> i64 {
         let clips = self
             .tracks
@@ -1151,13 +1049,6 @@ impl Project {
         clips.chain(fades).max().unwrap_or(0)
     }
 
-    /// Frames of `media` available from its first video frame (or first audio
-    /// sample for audio-only media), at the project frame rate: what an edit
-    /// takes without a range or marks, and what the viewer shows. A frame
-    /// counts if it is at least 95% present, so container timestamp rounding
-    /// (1 ms in Matroska) doesn't lose the last frame. A still lasts the
-    /// project's still duration here, though a clip may make it
-    /// longer ([`media_limit`](Self::media_limit)).
     pub fn media_frames(&self, media: &Media) -> i64 {
         let secs = match (&media.info.video, media.info.audio.first()) {
             (Some(v), _) if v.still => self.settings.still_secs,
@@ -1168,8 +1059,6 @@ impl Project {
         self.frames_in(secs)
     }
 
-    /// The source frames clips of `media` may use: [`media_frames`]
-    /// (Self::media_frames), or for a still up to 17 h 40 min.
     pub fn media_limit(&self, media: &Media) -> i64 {
         if media.is_still() {
             self.frames_in(STILL_LIMIT_SECS)
@@ -1178,9 +1067,6 @@ impl Project {
         }
     }
 
-    /// The source frames clip `c` may use: its media's, a compound's
-    /// length; none for a generator, which has any length, or a clip whose
-    /// media is gone.
     pub fn source_frames(&self, c: &Clip) -> Option<i64> {
         match (&c.compound, &c.generator) {
             (Some(k), _) => Some(k.frames),
@@ -1189,12 +1075,10 @@ impl Project {
         }
     }
 
-    /// Whole frames in `secs` at the project rate (95% of a frame counts).
     fn frames_in(&self, secs: f64) -> i64 {
         (secs * self.settings.fps.as_f64() + 0.05).floor().max(0.0) as i64
     }
 
-    /// Context for resolving TimeSpecs against this project.
     pub fn time_context(&self, playhead: Option<i64>) -> TimeContext {
         TimeContext {
             fps: self.settings.fps,
@@ -1233,7 +1117,6 @@ impl Project {
 }
 
 impl Track {
-    /// An empty track.
     pub fn new(id: impl Into<String>, kind: TrackKind) -> Self {
         Self {
             id: id.into(),
@@ -1249,28 +1132,23 @@ impl Track {
         }
     }
 
-    /// Whether the track's audio is heard, given whether any track is soloed.
     pub fn audible(&self, any_solo: bool) -> bool {
         !self.muted && (self.solo || !any_solo)
     }
 
-    /// Index of the clip covering frame `t`, by binary search.
     pub fn clip_covering(&self, t: i64) -> Option<usize> {
         let i = self.clips.partition_point(|c| c.start <= t);
         (i > 0 && t < self.clips[i - 1].end()).then(|| i - 1)
     }
 
-    /// End of the last clip (video extent).
     pub fn end(&self) -> i64 {
         self.clips.last().map_or(0, Clip::end)
     }
 
-    /// Index of the clip covering frame `t`.
     pub fn clip_at(&self, t: i64) -> Option<usize> {
         self.clips.iter().position(|c| c.start <= t && t < c.end())
     }
 
-    /// Sorted, de-duplicated edit points: clip starts and ends, plus 0.
     pub fn edit_points(&self) -> Vec<i64> {
         let mut points: Vec<i64> = std::iter::once(0)
             .chain(self.clips.iter().flat_map(|c| [c.start, c.end()]))
@@ -1280,7 +1158,6 @@ impl Track {
         points
     }
 
-    /// Restores start order after edits.
     pub fn sort(&mut self) {
         self.clips.sort_by_key(|c| c.start);
     }

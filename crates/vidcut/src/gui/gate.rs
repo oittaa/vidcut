@@ -1,37 +1,19 @@
-//! Keeps other threads' submissions out of the window's surface configures
-//! (gotchas.md): wgpu 30's `Surface::configure` waits for the device to go
-//! idle, and fails, with the default error handler's panic, when another
-//! thread submits meanwhile. eframe configures only outside the app's
-//! `logic` and `ui` (a resize, a surface found outdated), so the UI opens
-//! the gate for those and closes it after. The viewer thread submits while
-//! it is open, and wakes the UI to open it.
-//!
-//! A UI away for longer than [`AWAY`] is taken to be blocked presenting a
-//! hidden window (preview.md §2), which no resize reaches: submissions go
-//! on until it is back.
-
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-/// How long a submission waits for the UI before going on without it.
 pub const AWAY: Duration = Duration::from_millis(500);
 
 pub struct Gate {
     state: Mutex<State>,
     changed: Condvar,
-    /// Asks the UI for a frame, which opens the gate.
     wake: Box<dyn Fn() + Send + Sync>,
 }
 
 struct State {
-    /// When the UI closed it; `None` while it is open.
     closed: Option<Instant>,
-    /// Submissions waiting for it or going on, which the UI lets through
-    /// before it closes the gate.
     passing: usize,
 }
 
-/// The gate held open by the UI.
 pub struct Open<'a>(&'a Gate);
 
 impl Drop for Open<'_> {
@@ -44,7 +26,6 @@ impl Drop for Open<'_> {
     }
 }
 
-/// Counts a submission out once it is done, or panicked.
 struct Passing<'a>(&'a Gate);
 
 impl Drop for Passing<'_> {
@@ -55,7 +36,6 @@ impl Drop for Passing<'_> {
 }
 
 impl Gate {
-    /// Closed: the UI holds it until its first frame.
     pub fn new(wake: impl Fn() + Send + Sync + 'static) -> Self {
         Self::closed_at(Instant::now(), wake)
     }
@@ -75,22 +55,16 @@ impl Gate {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The UI's side: opens it while its `logic` or `ui` runs. Dropped,
-    /// it closes the gate once the submissions it let through are done.
     pub fn opened(&self) -> Open<'_> {
         self.open();
         Open(self)
     }
 
-    /// Opens it for good: the window is gone, and nothing configures it
-    /// any more.
     pub fn open(&self) {
         self.lock().closed = None;
         self.changed.notify_all();
     }
 
-    /// Another thread's side: runs `f` (a submission) while the gate is
-    /// open, or once the UI has been away for [`AWAY`].
     pub fn pass<T>(&self, f: impl FnOnce() -> T) -> T {
         let mut s = self.lock();
         s.passing += 1;

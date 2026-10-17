@@ -1,13 +1,9 @@
-//! Project invariants. Checked after every edit in debug builds and tests.
-
 use std::collections::HashSet;
 
 use crate::model::{Project, TrackKind};
 
-/// Clip gain and track volume in dB (decision D12).
 pub const GAIN: std::ops::RangeInclusive<f64> = -60.0..=24.0;
 
-/// Returns every invariant violation found (empty when the project is valid).
 pub fn violations(p: &Project) -> Vec<String> {
     let mut v = Vec::new();
     let pool = p.pool();
@@ -59,9 +55,6 @@ pub fn violations(p: &Project) -> Vec<String> {
                 v.push(format!("{} overlaps the previous clip on {}", c.id, t.id));
             }
             prev_end = Some(c.end());
-            // A block from another editor (deviation X9): no media, no
-            // audio; a generator shows a picture, a compound clip shows one
-            // on a video track and stands for sound on an audio track.
             if c.is_block() {
                 let video = c.is_generator() || t.kind == TrackKind::Video;
                 if !c.media.is_empty()
@@ -89,7 +82,6 @@ pub fn violations(p: &Project) -> Vec<String> {
                     if c.video && m.info.video.is_none() {
                         v.push(format!("{}: video clip of audio-only media {}", c.id, m.id));
                     }
-                    // At its speed (decision D48).
                     let (lo, hi) = c.shown();
                     if c.video && (lo < 0 || hi > frames) {
                         v.push(format!(
@@ -177,8 +169,6 @@ pub fn violations(p: &Project) -> Vec<String> {
     v
 }
 
-/// Whether track V1 has no gaps between its clips (it may start after 0 only
-/// if it is empty).
 pub fn v1_gapless(p: &Project) -> bool {
     let Some(t) = p.track("V1") else { return true };
     let mut at = 0;
@@ -198,7 +188,6 @@ mod tests {
 
     #[test]
     fn gains_out_of_range_make_a_project_inconsistent() {
-        // A hand-edited file can hold any number; loading checks it (D12).
         let mut f = Fixture::new(&[(10.0, true)]);
         f.append("m1", 0, 25);
         let mut p = f.editor.project().clone();

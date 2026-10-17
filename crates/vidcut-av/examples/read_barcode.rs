@@ -1,7 +1,3 @@
-//! Prints the barcode frame index in each image or video frame file:
-//! `cargo run -p vidcut-av --example read_barcode -- FILE...`
-//! (e.g. to compare `vidcut gui screenshot` with `vidcut frame render`).
-
 fn main() {
     for path in std::env::args().skip(1) {
         let index = vidcut_av::decode::VideoReader::open(std::path::Path::new(&path))

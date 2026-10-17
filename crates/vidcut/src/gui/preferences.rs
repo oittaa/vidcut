@@ -1,7 +1,3 @@
-//! File > Preferences (Ctrl+,): application preferences, holding only what
-//! vidcut needs. Each change is one `preferences.set`, sent when it is made.
-//! One page of cards, a section each, their labels in one column.
-
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 
@@ -12,61 +8,41 @@ use super::workspace::Workspace;
 #[derive(Default)]
 pub(super) struct PreferencesUi {
     pub(super) open: bool,
-    /// The request in flight (`preferences.get` or `preferences.set`).
     ask: Option<Ask>,
-    /// The latest answer (`preferences.get`'s result).
     state: Option<Value>,
     error: Option<String>,
-    /// The number fields as typed: the thumbnail cache limit (MB), the proxy
-    /// rules' picture size and bitrate, and the proxy size.
     limit: String,
     larger_w: String,
     larger_h: String,
     mbps: String,
     size: String,
-    /// The player's memory and video memory as typed (GB): the custom size,
-    /// or the automatic one to start a custom size from.
     player_memory: String,
     video_memory: String,
-    /// The system's audio devices, listed on a thread as the window opens
-    /// (it can take a while), or why they couldn't be.
     audio_outputs: Option<Result<Vec<vidcut_av::player::OutputDevice>, String>>,
     listing:
         Option<std::sync::mpsc::Receiver<Result<Vec<vidcut_av::player::OutputDevice>, String>>>,
-    /// Import Theme's file dialog, while it is open.
     importing: Option<Picked>,
 }
 
-/// The label column's width, the same in every card.
 const LABEL: f32 = 170.0;
 
-/// How a number field reads what is typed.
 #[derive(Clone, Copy, PartialEq)]
 enum Unit {
-    /// Whole numbers.
     Plain,
-    /// GB, decimals allowed, as MB.
     Gb,
 }
 
-/// A number typed into a field, sent on Enter or when the field loses
-/// focus.
 struct NumberField<'a> {
-    /// The label it is read by (accessibility, tests).
     label: egui::Id,
-    /// The value in the preferences now (MB for [`Unit::Gb`]).
     saved: u64,
     range: std::ops::RangeInclusive<u64>,
     unit: Unit,
     enabled: bool,
     tip: &'a str,
-    /// Shown when the number is outside `range`.
     refusal: &'a str,
 }
 
 impl NumberField<'_> {
-    /// The number once it is sent and differs from `saved`. A number outside
-    /// `range` is refused with `refusal`, and the field goes back to `saved`.
     fn show(self, ui: &mut egui::Ui, text: &mut String, error: &mut Option<String>) -> Option<u64> {
         let r = ui
             .add_enabled(
@@ -83,8 +59,6 @@ impl NumberField<'_> {
         if !r.lost_focus() {
             return None;
         }
-        // egui reports a focus given up mid-frame (Enter, a click elsewhere)
-        // in that frame and the next one: the number goes once.
         let frame = ui.ctx().cumulative_frame_nr();
         let key = r.id.with("lost focus");
         let before = ui.data_mut(|d| d.get_temp::<u64>(key));
@@ -114,7 +88,6 @@ impl NumberField<'_> {
     }
 }
 
-/// `mb` in GB, without trailing zeros: `8`, `1.5`.
 fn gb(mb: u64) -> String {
     if mb.is_multiple_of(1024) {
         (mb / 1024).to_string()
@@ -124,7 +97,6 @@ fn gb(mb: u64) -> String {
     }
 }
 
-/// `mb` in GB to read at a glance: whole from 10 GB up, else to a tenth.
 fn about_gb(mb: u64) -> String {
     let gb = mb as f64 / 1024.0;
     if gb >= 10.0 {
@@ -135,13 +107,11 @@ fn about_gb(mb: u64) -> String {
     }
 }
 
-/// GB typed as text, in MB: `1.5` or `1,5` is 1536.
 fn mb_of(text: &str) -> Option<u64> {
     let gb: f64 = text.replace(',', ".").parse().ok()?;
     (gb.is_finite() && gb >= 0.0).then(|| (gb * 1024.0).round() as u64)
 }
 
-/// A card: its title, a line on what it is for, and its settings.
 fn card(ui: &mut egui::Ui, title: &str, about: &str, add: impl FnOnce(&mut egui::Ui)) {
     let c = theme::colors();
     egui::Frame::new()
@@ -159,7 +129,6 @@ fn card(ui: &mut egui::Ui, title: &str, about: &str, add: impl FnOnce(&mut egui:
     ui.add_space(10.0);
 }
 
-/// A card's settings: labels in the shared column, controls beside them.
 fn grid(ui: &mut egui::Ui, id: &str, add: impl FnOnce(&mut egui::Ui)) {
     egui::Grid::new(id)
         .num_columns(2)
@@ -201,7 +170,6 @@ impl Workspace {
                     let p = &r.result["preferences"];
                     let n = |v: &Value| v.as_u64().unwrap_or(0).to_string();
                     ui_state.limit = n(&p["thumbnails"]["cache_limit_mb"]);
-                    // A custom size starts from the automatic one.
                     let size = |key: &str, auto: &str| match p["player"][key].as_u64().unwrap_or(0)
                     {
                         0 => gb(r.result[auto].as_u64().unwrap_or(1024)),
@@ -209,7 +177,6 @@ impl Workspace {
                     };
                     ui_state.player_memory = size("memory_mb", "player_memory_auto_mb");
                     ui_state.video_memory = size("video_memory_mb", "player_video_memory_auto_mb");
-                    // The timeline's pictures follow at once.
                     if let (Some(tiles), Ok(t)) = (
                         &mut self.tiles,
                         serde_json::from_value(p["thumbnails"].clone()),
@@ -228,7 +195,6 @@ impl Workspace {
         }
         let mut open = true;
         let mut patch = None;
-        // A theme file picked: imported, and shown.
         if let Some(picked) = ui_state.importing.as_ref().and_then(Picked::take) {
             ui_state.importing = None;
             if let Some(path) = picked {
@@ -240,7 +206,6 @@ impl Workspace {
             ui_state.listing = None;
         }
         let dialogs = self.dialogs.clone();
-        // The GPU the window draws on: the one in use where none is listed.
         let display = self.display.clone();
         let height = ctx.content_rect().height() * 0.85;
         egui::Window::new("Preferences")
@@ -249,7 +214,6 @@ impl Workspace {
             .default_pos(near_center(ctx, 640.0, height))
             .open(&mut open)
             .show(ctx, |ui| {
-                // A copy: the cards change the window's other fields.
                 let Some(state) = ui_state.state.clone() else {
                     match &ui_state.error {
                         Some(e) => ui.label(RichText::new(e).color(theme::colors().error)),
@@ -421,7 +385,6 @@ fn gpu(
                 } else if let Some(g) = gpus.first() {
                     ui.label(name(g));
                 } else {
-                    // macOS lists none: the one the window draws on.
                     ui.label(display.unwrap_or("This computer's GPU"));
                 }
                 ui.end_row();
@@ -430,7 +393,6 @@ fn gpu(
     );
 }
 
-/// The GPU to use, where there are several.
 fn gpu_choice(
     ui: &mut egui::Ui,
     state: &Value,
@@ -447,8 +409,6 @@ fn gpu_choice(
         .as_str()
         .unwrap_or_default()
         .to_string();
-    // A card moved to another slot is found by its model: picking it again
-    // saves its new slot.
     let found = state["gpu_chosen"]["id"].as_str().map(String::from);
     let shown = match &found {
         _ if chosen.is_empty() => automatic.clone(),
@@ -515,9 +475,6 @@ fn memory(
                     .unwrap_or(1024);
                 let gpu = &state["preferences"]["gpu"];
                 let gpu_decodes = gpu["acceleration"] != false && gpu["decoding"] != false;
-                // Half the GPU's where its memory is known, as
-                // `preferences.get` works it out, or the viewer's where the
-                // GPU's memory is the computer's.
                 let video = match in_use["memory_mb"].as_u64() {
                     _ if state["player_video_memory_shared"] == true => {
                         format!("Shares the {} GB above", about_gb(video_auto))
@@ -564,11 +521,9 @@ fn memory(
                             .add_enabled(!busy, egui::Button::selectable(custom, "Custom"))
                             .clicked()
                             && !custom
+                            && let Some(mb) = mb_of(text)
                         {
-                            // From the automatic size, which the field shows.
-                            if let Some(mb) = mb_of(text) {
-                                *patch = Some(json!({ "player": { key: mb.max(64) } }));
-                            }
+                            *patch = Some(json!({ "player": { key: mb.max(64) } }));
                         }
                         if custom {
                             let field = NumberField {
@@ -771,7 +726,6 @@ fn proxies(
                     *patch = Some(json!({ "proxies": { "auto": auto } }));
                 }
                 ui.end_row();
-                // The rules, under the checkbox's text.
                 let indent = ui.spacing().icon_width + ui.spacing().icon_spacing;
                 let mut seq = proxies["image_sequences"] == true;
                 ui.label("");
@@ -837,8 +791,6 @@ fn proxies(
     );
 }
 
-/// The proxies' codec: its name in the choice, and how it makes and plays
-/// them on a line under it.
 fn codec(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>) {
     let current = state["preferences"]["proxies"]["codec"]
         .as_str()
@@ -847,8 +799,6 @@ fn codec(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>
         .as_array()
         .cloned()
         .unwrap_or_default();
-    // `uses` is the codec, then what makes it: "ProRes Proxy, Apple
-    // hardware (VideoToolbox)".
     let made = |c: &Value| {
         let uses = c["uses"].as_str().unwrap_or_default();
         let (codec, by) = uses.split_once(", ").unwrap_or((uses, ""));

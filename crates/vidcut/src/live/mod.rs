@@ -1,21 +1,3 @@
-//! The live session: the running GUI's core thread.
-//!
-//! One thread owns the open project, the viewer's player and everything the
-//! viewer shows. The GUI, IPC clients and background jobs reach it only
-//! through messages ([`Handle`]). After every change it publishes an
-//! immutable [`Snapshot`], which the UI thread reads without waiting: the UI
-//! never blocks on the session. The player is vidcut's own engine
-//! (`vidcut_av::player`), one for the source and the timeline: the session
-//! sends it requests, which return at once, and the renderer presents its
-//! pictures.
-//!
-//! Requests are the same [`Request`]s the CLI runs headless. Project edits go
-//! through the project's [`Editor`](vidcut_core::Editor) and are saved before
-//! the reply; live-only requests (viewer, player, selection, screenshots)
-//! act on the session. Requests that wait for something (a seek waits until
-//! its frame is on screen, a screenshot for the picture, an export for the
-//! encoder) reply later, without blocking other requests.
-
 mod jobs;
 mod missing;
 mod player;
@@ -54,15 +36,9 @@ use player::Player;
 use project::OpenProject;
 use workers::Workers;
 
-/// Where a request came from (shown in the command log).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
-    /// The GUI. `drag`: the request ends a drag on the timeline. A media
-    /// drop is an edit but not an edit function, so the playhead stays
-    /// (decision D15).
-    Gui {
-        drag: bool,
-    },
+    Gui { drag: bool },
     Ipc,
     Session,
 }
@@ -77,19 +53,12 @@ impl Origin {
     }
 }
 
-/// Called with a captured picture (or why there is none).
 pub type Capture = Box<dyn FnOnce(Result<Image>) + Send>;
 
-/// Called once a player was presented, with the frame it showed exactly
-/// (`None`: the frame's picture wasn't decoded yet).
 pub type Presented = Box<dyn FnOnce(Option<i64>) + Send>;
 
-/// What `gui.trim_editor` asks of the GUI.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TrimEditor {
-    /// Open it on the edit of `track` nearest `at` (`None`: the edit it
-    /// shows, else the one nearest the playhead), then trim that edit by
-    /// `by` as its buttons do.
     Open {
         at: Option<i64>,
         track: String,
@@ -99,39 +68,28 @@ pub enum TrimEditor {
     Close,
 }
 
-/// A change a request makes to what only the GUI keeps.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GuiChange {
-    /// Select the edit of `track` nearest `near` (`selection.set`).
     SelectEdit {
         near: i64,
         track: String,
         side: TrimSide,
     },
-    /// Select this part of the selected edit, as U does.
     EditSide(TrimSide),
-    /// Deselect the edit (Ctrl+Shift+A).
     Deselect,
-    /// Edit functions put clips on this track (`gui.target`).
     Target(String),
-    /// The timeline's zoom and options (`gui.timeline`).
     Timeline(TimelineOptions),
-    /// Open a window (`gui.show`).
     Show(GuiPanel),
-    /// Close one (`gui.close`).
     Close(GuiPanel),
 }
 
-/// An edit point selected in the GUI.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct EditPoint {
-    /// Its frame: for `audio`, where the outgoing clip's sound ends.
     pub at: i64,
     pub track: String,
     pub side: TrimSide,
 }
 
-/// The timeline's zoom and Timeline Options, as `gui.timeline` names them.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct TimelineState {
     pub zoom: f64,
@@ -148,22 +106,16 @@ pub struct TimelineState {
     pub jump_frames: i64,
 }
 
-/// What only the GUI keeps (`gui.state`).
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct GuiState {
     pub edit: Option<EditPoint>,
-    /// The target track.
     pub target: String,
     pub timeline: TimelineState,
-    /// The windows open, of those `gui.show` opens.
     pub windows: Vec<GuiPanel>,
 }
 
-/// Called with the GUI's state after [`GuiChange`]s, or why one couldn't
-/// be made.
 pub type GuiDone = Box<dyn FnOnce(std::result::Result<GuiState, String>) + Send>;
 
-/// What `gui.dynamic_trim` asks of the GUI, as its request says.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicTrim {
     pub on: Option<bool>,
@@ -173,47 +125,27 @@ pub struct DynamicTrim {
     pub step: Option<i64>,
 }
 
-/// What the session needs from whoever renders the viewer: the GUI, or a
-/// test harness.
 pub trait Renderer: Send + Sync {
-    /// The engine the viewer shows from now on (`None`: nothing, black).
-    /// The renderer presents it: draws the picture `present` gives as the
-    /// clock moves.
     fn attach(&self, _engine: Option<Arc<vidcut_av::player::Player>>) {}
-    /// Draw the engine's current picture now, then call `done` with the
-    /// frame shown. The session asks once a seek or load has its picture:
-    /// the viewer then shows its frame (docs/decisions/gui.md §4).
     fn present(&self, done: Presented);
-    /// The picture the viewer shows, as displayed.
     fn capture_viewer(&self, done: Capture);
-    /// The whole window.
     fn capture_window(&self, done: Capture);
-    /// Change the window.
     fn window(&self, change: WindowChange);
-    /// Close the window (and so the session).
     fn quit(&self);
-    /// Make `changes` to what only the GUI keeps, in order, then call
-    /// `done`. Without a GUI, `done` is dropped unanswered.
     fn gui(&self, _changes: Vec<GuiChange>, _done: GuiDone) {}
-    /// What only the GUI keeps, as its last frame left it.
     fn gui_state(&self) -> Option<GuiState> {
         None
     }
-    /// Open, trim with or close the Trim Editor.
     fn trim_editor(&self, _: TrimEditor) {}
-    /// Drive Dynamic Trim.
     fn dynamic_trim(&self, _: DynamicTrim) {}
-    /// What the two-up shows, for `player.state`.
     fn two_up(&self) -> Option<stats::TwoUpStats> {
         None
     }
-    /// What the viewer tells of itself, for stats for nerds.
     fn viewer_stats(&self) -> Option<stats::ViewerStats> {
         None
     }
 }
 
-/// A `gui.window` request.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WindowChange {
     pub size: Option<[f32; 2]>,
@@ -224,32 +156,20 @@ pub struct WindowChange {
 
 pub struct Config {
     pub project: Option<PathBuf>,
-    /// Create the project file if it doesn't exist.
     pub create: bool,
-    /// The viewer's player; `None` runs without preview.
     pub player: Option<PlayerConfig>,
-    /// Why there is no preview, if so.
     pub preview_error: Option<String>,
     pub renderer: Arc<dyn Renderer>,
-    /// Asks the GUI to repaint (a new snapshot is ready).
     pub notify: Arc<dyn Fn() + Send + Sync>,
-    /// The IPC socket this instance serves, for the instance registry.
     pub socket: Option<PathBuf>,
 }
 
-/// What the viewer's player needs.
 pub struct PlayerConfig {
-    /// Makes its audio output: the system's device in the GUI (a silent
-    /// stand-in when it won't open), a stand-in in tests.
     pub audio: MakeOutput,
-    /// Memory for its pictures: what is shown, and the frame of what isn't.
     pub budget: vidcut_av::player::Budget,
-    /// The decoders whose pictures the renderer shows from GPU memory:
-    /// they stay on the GPU (and kept ones in video memory).
     pub gpu_pictures: Vec<vidcut_av::hw::Kind>,
 }
 
-/// Progress and the final answer of one request.
 pub(crate) enum ReplyEvent {
     Progress(Value),
     Done(Result<Response>),
@@ -257,37 +177,27 @@ pub(crate) enum ReplyEvent {
 
 pub(crate) struct Reply {
     tx: Sender<ReplyEvent>,
-    /// Set when the client went away; long requests cancel.
     cancel: Arc<AtomicBool>,
 }
 
-/// A request being answered.
 pub(crate) struct Job {
     method: String,
     params: Value,
     origin: Origin,
     reply: Option<Reply>,
-    /// The project's revision when a request answered at once started: a
-    /// different one at the end means it changed the project.
     rev: Option<u64>,
-    /// A dry run: it changes nothing whatever it reports.
     dry_run: bool,
 }
 
 pub(crate) enum Msg {
-    /// The media whose files are missing now ([`missing`]).
     Missing(HashSet<String>),
     Request {
         envelope: Envelope,
         origin: Origin,
-        /// The project the client expects to be open.
         project: Option<PathBuf>,
         reply: Option<Reply>,
     },
-    /// The picture the viewer is at landed (or failed).
     Picture,
-    /// The renderer presented the engine after `motion` was asked, showing
-    /// `frame` exactly.
     Presented {
         motion: u64,
         frame: Option<i64>,
@@ -300,13 +210,10 @@ pub(crate) enum Msg {
         job: Job,
         result: Result<Response>,
     },
-    /// A project file is made: open it. What couldn't be imported.
     Made {
         job: Job,
         result: Result<(PathBuf, Vec<String>)>,
     },
-    /// What a request needed is measured: now it runs. `encode` is the job
-    /// a proxy encode ran as.
     Measured {
         job: Job,
         envelope: Envelope,
@@ -314,10 +221,7 @@ pub(crate) enum Msg {
         encode: Option<String>,
     },
     FileChanged,
-    /// The preferences file changed.
     PreferencesChanged,
-    /// `wanted`: what it was made for (`media_version`), so a late answer
-    /// for another file is dropped.
     Thumbs {
         media: String,
         wanted: String,
@@ -328,7 +232,6 @@ pub(crate) enum Msg {
         wanted: String,
         result: std::result::Result<vidcut_av::waveform::Waveform, String>,
     },
-    /// An export job planned its files: paths and lengths in frames.
     JobPlanned {
         id: String,
         outputs: Vec<(PathBuf, i64)>,
@@ -338,10 +241,8 @@ pub(crate) enum Msg {
         output: usize,
         frames: i64,
         total: i64,
-        /// The run over the range, of `passes` (decision D45).
         pass: u8,
         passes: u8,
-        /// Measuring light, before encoding (decision D46).
         measuring: bool,
     },
     JobDone {
@@ -351,7 +252,6 @@ pub(crate) enum Msg {
     Shutdown,
 }
 
-/// Talks to the session thread; cheap to clone.
 #[derive(Clone)]
 pub struct Handle {
     tx: Sender<Msg>,
@@ -359,7 +259,6 @@ pub struct Handle {
 }
 
 impl Handle {
-    /// The latest snapshot.
     pub fn snapshot(&self) -> Arc<Snapshot> {
         self.shared
             .lock()
@@ -367,7 +266,6 @@ impl Handle {
             .clone()
     }
 
-    /// Sends a request from the GUI; errors show up as notices.
     pub fn send(&self, envelope: Envelope) {
         self.send_from(envelope, false);
     }
@@ -381,12 +279,10 @@ impl Handle {
         });
     }
 
-    /// Builds and sends a GUI request from a method name and params.
     pub fn request(&self, method: &str, params: Value) {
         self.request_from(method, params, false);
     }
 
-    /// [`request`](Self::request) for the request that ends a timeline drag.
     pub fn request_drag(&self, method: &str, params: Value) {
         self.request_from(method, params, true);
     }
@@ -395,7 +291,6 @@ impl Handle {
         match Envelope::from_json(json!({ "method": method, "params": params })) {
             Ok(e) => self.send_from(e, drag),
             Err(e) => {
-                // A GUI bug: report it like any other failure.
                 let _ = self.tx.send(Msg::TaskDone {
                     job: Job {
                         method: method.into(),
@@ -411,12 +306,6 @@ impl Handle {
         }
     }
 
-    /// Runs a request and waits for its answer. `progress` receives progress
-    /// notifications (`Some`) and returns false to cancel. `None` only asks
-    /// whether the client is still there: a closed connection then sets the
-    /// same flag a failed progress write sets, so work that never reports
-    /// progress (a frame, a storyboard, an analysis, the loudness measure
-    /// before an export) stops too.
     pub fn call(
         &self,
         envelope: Envelope,
@@ -426,7 +315,6 @@ impl Handle {
     ) -> Result<Response> {
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        // Already gone: the worker sees the flag before it starts.
         if !progress(None) {
             cancel.store(true, Ordering::Relaxed);
         }
@@ -461,13 +349,10 @@ impl Handle {
         }
     }
 
-    /// Stops the session thread.
     pub fn shutdown(&self) {
         let _ = self.tx.send(Msg::Shutdown);
     }
 
-    /// Stops the session thread and waits until it has ended (jobs
-    /// cancelled, the instance unregistered), up to `timeout`.
     pub fn shutdown_and_wait(&self, timeout: Duration) {
         let deadline = Instant::now() + timeout;
         while self.tx.send(Msg::Shutdown).is_ok() && Instant::now() < deadline {
@@ -476,7 +361,6 @@ impl Handle {
     }
 }
 
-/// Starts the session thread.
 pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let (tx, rx) = channel();
     let pid = std::process::id();
@@ -503,7 +387,6 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         project: None,
         version: env!("CARGO_PKG_VERSION").into(),
     });
-    // Loaded before the first frame, so it doesn't start in another.
     let (theme, theme_error) = chosen_theme();
     let theme = Arc::new(theme);
     let empty = Snapshot {
@@ -532,14 +415,12 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         theme: theme.clone(),
     };
     let shared = Arc::new(Mutex::new(Arc::new(empty)));
-    // The folder must be there to be watched.
     let preferences = crate::preferences::path();
     if let Some(dir) = preferences.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     let themes = crate::themes::dir();
     let _ = std::fs::create_dir_all(&themes);
-    // Native themes follow the computer's light or dark mode and accent.
     let look_changed = tx.clone();
     crate::look::watch(std::sync::Arc::new(move || {
         let _ = look_changed.send(Msg::PreferencesChanged);
@@ -621,28 +502,23 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     (Handle { tx, shared }, thread)
 }
 
-/// What the source has loaded.
 #[derive(Debug, Clone, PartialEq)]
 enum SourceContent {
     Clip(String),
     Tape,
 }
 
-/// What a request waits for before replying.
 enum Until {
-    /// Motion `motion` is on screen, showing the player's `target` as it
-    /// was then. If a later seek or switch asks for another frame first
-    /// (another client, a person scrubbing), that frame won't show: the
-    /// request fails with CONFLICT. Playback moving on from it doesn't
-    /// count.
-    Shown { motion: u64, at: i64 },
-    /// Job `id` ended (`jobs.wait`).
-    Job { id: String },
-    /// The viewer shows its latest motion (after an edit's reload, say);
-    /// then it is captured to `out`.
-    Settled { out: PathBuf },
-    /// Capture `id` arrives; then it is written to `out`. For a viewer
-    /// capture, `player` is what the viewer shows.
+    Shown {
+        motion: u64,
+        at: i64,
+    },
+    Job {
+        id: String,
+    },
+    Settled {
+        out: PathBuf,
+    },
     Capture {
         id: u64,
         out: PathBuf,
@@ -653,33 +529,23 @@ enum Until {
 struct Wait {
     job: Job,
     until: Until,
-    /// When to give up (none: `jobs.wait` without a timeout).
     deadline: Option<Instant>,
 }
 
-/// How long a request may wait for frames or captures.
 const WAIT_LIMIT: Duration = Duration::from_secs(10);
 
-/// How often an IPC call checks that its client is still connected, when the
-/// work itself is not sending progress.
 const CLIENT_POLL: Duration = Duration::from_millis(50);
 
-/// Finished jobs kept for `jobs.list` and the jobs panel.
 const JOBS_KEPT: usize = 50;
 
-/// Entries kept in the command log and notices.
 const LOG_CAP: usize = 500;
 const NOTICE_CAP: usize = 20;
 
-/// Waveform buckets per second (10 ms).
 const WAVEFORM_RATE: u32 = 100;
 
-/// Thumbnails per pool item and their maximum size.
 const THUMBS: usize = 24;
 const THUMB_SIZE: (u32, u32) = (192, 108);
 
-/// What a media item's thumbnails and waveform are made from: its file
-/// (path, size, modification time) and, for a sequence, its count.
 fn media_version(m: &vidcut_core::model::Media) -> String {
     format!(
         "{}|{}|{}|{}",
@@ -690,8 +556,6 @@ fn media_version(m: &vidcut_core::model::Media) -> String {
     )
 }
 
-/// The pool's filmstrip of `media`: from the thumbnail cache when the
-/// preferences keep one, decoded (and then kept) otherwise.
 fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip, String> {
     let prefs = crate::preferences::load().unwrap_or_default().thumbnails;
     let cached = prefs
@@ -702,12 +566,8 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
         Some(strip) => strip,
         None => {
             let input = crate::env::input_of(media);
-            // Decoded on the GPU the viewer decodes on, on a decoder of its
-            // own.
             let decoder = crate::preferences::gpu_decoding().own_decoder();
             let decoder = decoder.as_ref();
-            // image2 would read every numbered file after the first. A
-            // sequence is only its own count, even when more files follow.
             let strip = match media.sequence.as_ref().map(|s| s.count) {
                 Some(pictures) => vidcut_av::thumbs::filmstrip_pictures(
                     &input,
@@ -746,7 +606,6 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
     })
 }
 
-/// The theme the preferences choose, or the default one and why not.
 fn chosen_theme() -> (crate::themes::Theme, Option<String>) {
     let name = crate::preferences::load()
         .map(|p| p.appearance.theme)
@@ -764,19 +623,14 @@ fn chosen_theme() -> (crate::themes::Theme, Option<String>) {
     }
 }
 
-/// Minimum time between timeline reloads while edits keep coming.
 const RELOAD_EVERY: Duration = Duration::from_millis(100);
 
 struct Live {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
-    /// Watches the preferences file: GPU acceleration reaches the player
-    /// at once, whoever changes it.
     _preferences: Option<notify::RecommendedWatcher>,
-    /// Watches the themes folder: an edited theme shows at once.
     _themes: Option<notify::RecommendedWatcher>,
     theme: Arc<crate::themes::Theme>,
-    /// Why the chosen theme doesn't load, said once.
     theme_error: Option<String>,
     shared: Arc<Mutex<Arc<Snapshot>>>,
     notify: Arc<dyn Fn() + Send + Sync>,
@@ -791,9 +645,7 @@ struct Live {
     source_positions: HashMap<String, i64>,
     tape_position: i64,
     tape: Arc<Vec<TapeEntry>>,
-    /// The media under the Source Tape playhead (selection sync).
     tape_media: Option<String>,
-    /// The viewer's player: the source and the timeline.
     player: Player,
     selection: Selection,
     pool: PoolView,
@@ -803,35 +655,21 @@ struct Live {
     notices: Arc<VecDeque<Notice>>,
     notice_seq: u64,
     thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
-    /// Media whose files are missing, and what looks.
     missing: Arc<HashSet<String>>,
     missing_watch: missing::MissingWatch,
-    /// What each media's thumbnails and waveform are being made, or were
-    /// made, for: its file as `media_version` gives it (the waveform's with
-    /// the channel count). Media ids are only a project's: another project,
-    /// or a relinked or changed file, makes them again.
     thumbs_wanted: HashMap<String, String>,
     waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     waveforms_wanted: HashMap<String, String>,
     workers: Workers,
-    /// Export jobs, oldest first.
     jobs: Arc<Vec<JobInfo>>,
     job_cancels: HashMap<String, Arc<AtomicBool>>,
-    /// Whose turn it is to encode, and the gates of the jobs waiting for
-    /// theirs: each job waits at its gate once its files are planned.
     turns: jobs::Turns,
     gates: HashMap<String, Sender<()>>,
-    /// Requests answered when their job is planned (`background`) or done.
     job_replies: HashMap<String, (Job, bool)>,
     next_job: u64,
-    /// Steps and paused seeks play their frame's sound (decision D42).
     audio_scrubbing: bool,
-    /// The viewer shows its stats for nerds.
     stats: bool,
-    /// What was last told about the sound ([`player::Player::audio_notice`]),
-    /// so each new reason is told once.
     audio_noticed: Option<String>,
-    /// Whether the viewer played when last looked at.
     playing: bool,
     waits: Vec<Wait>,
     next_capture: u64,
@@ -839,8 +677,6 @@ struct Live {
     timeline_loaded_at: Option<Instant>,
     seq: u64,
     dirty: bool,
-    /// Answers held until the snapshot shows what they answer, so a client
-    /// that looks once it hears back (the GUI, a test stepping it) sees it.
     answers: Vec<(Reply, Result<Response>)>,
     preview_error: Option<String>,
 }
@@ -849,12 +685,8 @@ const SOURCE: PlayerId = PlayerId::Source;
 const TIMELINE: PlayerId = PlayerId::Timeline;
 
 impl Live {
-    // ---------------------------------------------------------------- loop
-
     fn run(&mut self) {
         loop {
-            // Timers may finish requests too; then everyone hears back with
-            // the snapshot showing it, before the session waits again.
             let wake = self.tick(Instant::now());
             self.publish();
             for (r, result) in self.answers.drain(..) {
@@ -881,7 +713,6 @@ impl Live {
             {
                 break;
             }
-            // Take whatever else is already queued before publishing.
             while let Ok(msg) = self.rx.try_recv() {
                 if !self.handle(msg) {
                     self.shutdown();
@@ -893,8 +724,6 @@ impl Live {
     }
 
     fn shutdown(&mut self) {
-        // Running exports cancel, removing their partial files. Waiting
-        // ones wake, cancelled.
         for c in self.job_cancels.values() {
             c.store(true, Ordering::Relaxed);
         }
@@ -906,7 +735,6 @@ impl Live {
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
             {
                 Ok(Msg::JobDone { id, result }) => self.job_done(id, result),
-                // A proxy encode stopped: nothing is recorded.
                 Ok(Msg::Measured {
                     job,
                     encode: Some(id),
@@ -915,8 +743,6 @@ impl Live {
                     self.job_cancels.remove(&id);
                     reply(job.reply, Err(Error::no_instance("the vidcut GUI closed")));
                 }
-                // Only noted (the files of a job that gets stuck): its
-                // client hears that the GUI closed, not that it started.
                 Ok(Msg::JobPlanned { id, outputs }) => {
                     if let Some(j) = Arc::make_mut(&mut self.jobs)
                         .iter_mut()
@@ -929,16 +755,10 @@ impl Live {
                 Err(_) => break,
             }
         }
-        // A job still running is stuck in a decoder or an encoder, and the
-        // process won't wait for it: its partial files go now. A job plans
-        // its files before it writes them, and once cancelled starts none,
-        // so this misses only a file whose creation began before the cancel
-        // and is still blocked (on a hung network share, say).
         for job in self.jobs.iter() {
             if self.job_cancels.contains_key(&job.id) {
                 for o in &job.outputs {
                     let part = vidcut_av::export::partial_path(&o.path);
-                    // An .otiod bundle is written as a folder.
                     let _ = std::fs::remove_file(&part).or_else(|_| std::fs::remove_dir_all(&part));
                 }
             }
@@ -960,10 +780,7 @@ impl Live {
         }
     }
 
-    /// Handles one message; false ends the session.
     fn handle(&mut self, msg: Msg) -> bool {
-        // Most messages change what the GUI shows; the frequent no-ops below
-        // say so, and never clear a change made by an earlier message.
         let mut changed = true;
         match msg {
             Msg::Request {
@@ -973,8 +790,6 @@ impl Live {
                 reply,
             } => self.request(envelope, origin, project, reply),
             Msg::Picture => {
-                // Waits look again in `tick`; a present may be due. The
-                // snapshot changes when the picture kept ready landed.
                 self.player.picture_landed();
                 self.present_due();
                 changed = self.ready_changed();
@@ -1003,8 +818,6 @@ impl Live {
                 let (job, result) = match result {
                     Err(e) => (job, Err(e)),
                     Ok(()) => {
-                        // The project may have changed meanwhile; this
-                        // request's change is measured from now.
                         let rev = self.project.as_ref().map(|p| p.project().rev);
                         let job = Job { rev, ..job };
                         let result = self.edit(envelope, job.origin);
@@ -1089,8 +902,6 @@ impl Live {
         true
     }
 
-    /// Asks the renderer to present when a motion waits for its picture
-    /// and the engine has it.
     fn present_due(&mut self) {
         let Some(motion) = self.player.present_due(Instant::now()) else {
             return;
@@ -1106,7 +917,6 @@ impl Live {
         }));
     }
 
-    /// Timed work; returns when it next needs to run.
     fn tick(&mut self, now: Instant) -> Option<Instant> {
         let mut next: Option<Instant> = None;
         let mut soonest = |t: Instant| next = Some(next.map_or(t, |n| n.min(t)));
@@ -1120,14 +930,9 @@ impl Live {
         }
         self.present_due();
         let p = &self.player;
-        // A motion not on screen yet: look again soon (its picture may be
-        // decoding, or the renderer busy).
         if p.shown < p.motion {
             soonest(now + Duration::from_millis(5));
         }
-        // Playing: the playhead moves with the clock; the snapshot follows
-        // it frame by frame, and shows when play stops by itself (at the
-        // end).
         let playing = p.playing();
         if playing != self.playing {
             self.playing = playing;
@@ -1139,7 +944,6 @@ impl Live {
         } else if playing {
             soonest(now + Duration::from_millis(10));
         }
-        // Each new reason, once.
         let audio = self.player.audio_notice();
         if audio != self.audio_noticed {
             if let Some(n) = &audio {
@@ -1148,7 +952,6 @@ impl Live {
             self.audio_noticed = audio;
         }
         self.sync_tape_selection();
-        // Requests waiting for frames or captures.
         let mut i = 0;
         while i < self.waits.len() {
             if matches!(self.waits[i].until, Until::Settled { .. }) && self.settled() {
@@ -1165,13 +968,9 @@ impl Live {
             let w = &self.waits[i];
             let outcome = match w.until {
                 Until::Shown { motion, at } => {
-                    // The latest motion counts too: a reload after an edit
-                    // replaces what was asked for, at the same frame.
                     let p = &self.player;
                     let overtaken = p.target != at;
                     if overtaken && matches!(w.job.origin, Origin::Gui { .. }) {
-                        // The GUI's steps and seeks overtake each other as a
-                        // key repeats or a drag goes on: not an error there.
                         Some(Ok(self.state_response()))
                     } else if overtaken {
                         Some(Err(Error::conflict(format!(
@@ -1212,7 +1011,6 @@ impl Live {
                     Until::Settled { .. } => Err(Error::internal(
                         "timed out waiting for the viewer to settle",
                     )),
-                    // Time is up: the job as it is now (still running).
                     Until::Job { id } => self.job_json(id).map(answer),
                 }),
                 None => None,
@@ -1233,8 +1031,6 @@ impl Live {
         next
     }
 
-    /// Whether the published snapshot's `ready` is out of date: the
-    /// picture there landed.
     fn ready_changed(&self) -> bool {
         let snap = self
             .shared
@@ -1280,8 +1076,6 @@ impl Live {
         (self.notify)();
     }
 
-    /// Loads the theme the preferences choose again. One that doesn't load
-    /// shows the default one, and a notice says why.
     fn follow_theme(&mut self) {
         let (theme, error) = chosen_theme();
         if *self.theme != theme {
@@ -1319,8 +1113,6 @@ impl Live {
             }
         }
     }
-
-    // ---------------------------------------------------------------- requests
 
     fn request(
         &mut self,
@@ -1361,9 +1153,6 @@ impl Live {
                 );
             }
         }
-        // `if_rev` holds for every request on the project, live ones (seeks,
-        // selections, screenshots) too; exports and measurements then work
-        // on the project as it is now.
         if let Some(open) = &self.project
             && let Err(e) = envelope.check_rev(open.project().rev)
         {
@@ -1389,7 +1178,6 @@ impl Live {
         let result = self.dispatch(envelope, &job);
         match result {
             Step::Now(r) => self.finish(job, r),
-            // Other changes may come before these end.
             Step::Wait(until) => self.waits.push(Wait {
                 job: Job { rev: None, ..job },
                 until,
@@ -1408,15 +1196,11 @@ impl Live {
             }
             Step::Measure(measure, then) => {
                 let tx = self.tx.clone();
-                // The same flag a closed connection sets. Measuring is the
-                // slow part of an edit that analyzes; it stops with the client.
                 let cancel = job
                     .reply
                     .as_ref()
                     .map(|r| r.cancel.clone())
                     .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
-                // Decoding whole files (Detect Scene Cuts, Ripple Delete
-                // Silence): a job.
                 let _ = crate::threads::spawn("vidcut-measure", Work::Job, move || {
                     let _guard = vidcut_av::cancel::Guard::set(cancel);
                     let result = measure();
@@ -1432,8 +1216,6 @@ impl Live {
         }
     }
 
-    /// The measuring a request needs before it runs: the sound or pictures
-    /// of the clips it names, whose measurements the media layer then keeps.
     fn measuring(&self, envelope: &Envelope) -> Option<Measure> {
         let p = self.project.as_ref()?.project();
         let playhead = Some(self.player.position(TIMELINE));
@@ -1466,17 +1248,10 @@ impl Live {
         }))
     }
 
-    // ---------------------------------------------------------------- jobs
-
-    /// `export.start` (media): a job on its own thread. A background request
-    /// is answered with the job once its files are planned; otherwise when
-    /// it ends, with progress on the way.
     fn start_export(&mut self, envelope: Envelope, job: Job) {
         let Some(open) = &self.project else {
             return self.finish(job, Err(no_project()));
         };
-        // The job encodes the project as it is now (its `if_rev` checked),
-        // whatever edits follow.
         let project = open.project().clone();
         let project_path = open.store.path().to_path_buf();
         let context = open
@@ -1489,7 +1264,6 @@ impl Live {
         params.background = false;
         let id = format!("j{}", self.next_job);
         self.next_job += 1;
-        // The client going away cancels a foreground export.
         let cancel = match (&job.reply, background) {
             (Some(r), false) => r.cancel.clone(),
             _ => Arc::new(AtomicBool::new(false)),
@@ -1506,7 +1280,6 @@ impl Live {
         if job.reply.is_some() {
             self.job_replies.insert(id.clone(), (job, background));
         } else {
-            // GUI requests: logged now, the job shows the rest.
             self.finish(job, Ok(answer(json!({ "job": id }))));
         }
         let tx = self.tx.clone();
@@ -1548,7 +1321,6 @@ impl Live {
                         id: id.clone(),
                         outputs,
                     });
-                    // Its turn to encode.
                     let _ = gate.recv();
                     if cancel.load(Ordering::Relaxed) {
                         return Err(cancelled());
@@ -1560,8 +1332,6 @@ impl Live {
         });
     }
 
-    /// Lists a new job, keeping running jobs and the most recent finished
-    /// ones; `cancel` stops it.
     fn add_job(&mut self, info: JobInfo, cancel: Arc<AtomicBool>) {
         self.job_cancels.insert(info.id.clone(), cancel);
         let jobs = Arc::make_mut(&mut self.jobs);
@@ -1578,12 +1348,6 @@ impl Live {
         self.dirty = true;
     }
 
-    /// `proxy.generate`: the encode runs on its own thread as a job, so the
-    /// Jobs window and `jobs.*` show its progress and can cancel it, as they
-    /// do an export's (decision D41). A client is answered when it ends,
-    /// with progress on the way, and leaving cancels it; the GUI's own
-    /// request is logged when it ends. The edit that records the proxies
-    /// runs here once the files are written.
     fn start_encode(&mut self, job: Job, encode: Measure, then: Envelope, title: String) {
         let id = format!("j{}", self.next_job);
         self.next_job += 1;
@@ -1603,15 +1367,12 @@ impl Live {
         let gate = self.take_turn(&id, false, &title, progress.as_ref());
         let tx = self.tx.clone();
         let _ = crate::threads::spawn(format!("vidcut-{id}"), Work::Job, move || {
-            // Its turn to encode.
             let _ = gate.recv();
             let stopped = cancel.load(Ordering::Relaxed);
             let _guard = vidcut_av::cancel::Guard::set(cancel);
             let _report = {
                 let (tx, id) = (tx.clone(), id.clone());
                 let mut last = Instant::now() - Duration::from_secs(1);
-                // Each proxy file reports its own frames; the job shows
-                // the one being written.
                 let mut file: Option<PathBuf> = None;
                 let mut output = 0;
                 vidcut_av::progress::Guard::set(Box::new(
@@ -1657,9 +1418,6 @@ impl Live {
         });
     }
 
-    /// Job `id` (an export, or a proxy encode) asks for its turn to
-    /// encode. Returns its gate: open when its turn comes. A job that has
-    /// to wait shows as queued, and its client hears so.
     fn take_turn(
         &mut self,
         id: &str,
@@ -1687,7 +1445,6 @@ impl Live {
         gate
     }
 
-    /// It is job `id`'s turn: its gate opens.
     fn start_turn(&mut self, id: &str) {
         if let Some(go) = self.gates.remove(id) {
             let _ = go.send(());
@@ -1722,8 +1479,6 @@ impl Live {
         }
     }
 
-    /// A job ended: its state, and a notice when the GUI started it or the
-    /// session did (automatic proxies).
     fn job_ended(&mut self, id: &str, result: &Result<Response>) {
         self.job_cancels.remove(id);
         self.gates.remove(id);
@@ -1759,15 +1514,12 @@ impl Live {
             .ok_or_else(|| Error::not_found(format!("no job {id}")))
     }
 
-    /// Logs and answers a finished request.
     fn finish(&mut self, job: Job, result: Result<Response>) {
         let result = result.map(|mut r| {
             r.via = format!("gui:{}", std::process::id());
             r
         });
         let rev = self.project.as_ref().map_or(0, |p| p.project().rev);
-        // Queries of live state, the GUI's own lookups and scrubbing seeks
-        // would drown the log.
         let quiet = matches!(
             job.method.as_str(),
             "player.state" | "selection.get" | "gui.log" | "gui.state"
@@ -1782,13 +1534,10 @@ impl Live {
                     | "preferences.get"
             ))
             || (job.method == "player.seek" && job.params["fast"] == json!(true))
-            // A fader's drag: the level it ends at is a track.set.
             || (job.method == "mixer.preview" && matches!(job.origin, Origin::Gui { .. }))
-            // The pool's search as it is typed: a request a key.
             || (job.method == "pool.set"
                 && matches!(job.origin, Origin::Gui { .. })
                 && job.params.get("search").is_some())
-            // Previews the GUI asks for (Ripple Delete Silence's stripes).
             || (matches!(job.origin, Origin::Gui { .. }) && job.dry_run);
         if !quiet {
             self.log_seq += 1;
@@ -1804,8 +1553,6 @@ impl Live {
                 ok: result.is_ok(),
                 error: result.as_ref().err().map(|e| e.message.clone()),
                 rev,
-                // Track settings, bins and marks change the project without
-                // touching media, clips or markers.
                 changed: !job.dry_run
                     && (result.as_ref().is_ok_and(|r| !r.changes.is_empty())
                         || (result.is_ok()
@@ -1818,8 +1565,6 @@ impl Live {
                 log.pop_front();
             }
         }
-        // The GUI shows failures of what it doesn't wait for itself, except
-        // its own seeks overtaken by the next click or scrub.
         if let (Err(e), Origin::Gui { .. }, None) = (&result, job.origin, &job.reply)
             && e.code != vidcut_core::ErrorCode::Conflict
         {
@@ -1833,8 +1578,6 @@ impl Live {
         }
     }
 
-    /// A log entry's words: the request described, and for an undo or
-    /// redo, the steps it took.
     fn summary(&self, job: &Job, result: &Result<Response>) -> String {
         let project = self.project.as_ref().map(|o| o.project());
         let said = vidcut_core::describe::describe(&job.method, &job.params, project);
@@ -1858,8 +1601,6 @@ impl Live {
         }
     }
 
-    /// What an automatic tool started from the GUI did, in the status bar:
-    /// it may find nothing, and then nothing on screen changes.
     fn tool_notice(&mut self, job: &Job, result: &Result<Response>) {
         let Ok(r) = result else {
             return;
@@ -1890,11 +1631,6 @@ impl Live {
         self.notice(text, false);
     }
 
-    /// While the project plays proxies, media the automatic rules pick get
-    /// one without being asked (decision D41): those an import just added,
-    /// and the pool's when proxies are turned on. The encode is the
-    /// session's own `proxy.generate`, a job like any other; media already
-    /// being encoded are left out.
     fn auto_proxies(&mut self, job: &Job, result: &Result<Response>) {
         let Ok(response) = result else {
             return;
@@ -1946,7 +1682,6 @@ impl Live {
         }
     }
 
-    /// The media running proxy jobs are encoding.
     fn proxies_encoding(&self, p: &Project) -> HashSet<String> {
         let mut ids = HashSet::new();
         for j in self
@@ -1961,14 +1696,12 @@ impl Live {
                 Value::Array(list) => {
                     ids.extend(list.iter().filter_map(|v| v.as_str().map(String::from)));
                 }
-                // No media named: every video in the pool.
                 _ => ids.extend(p.media.iter().map(|m| m.id.clone())),
             }
         }
         ids
     }
 
-    /// Runs `task` on its own thread; it reports back with `Msg::TaskDone`.
     fn spawn_task(&mut self, mut job: Job, work: Work, task: Task) {
         let tx = self.tx.clone();
         let reply = job.reply.take();
@@ -1982,10 +1715,6 @@ impl Live {
 
     fn dispatch(&mut self, envelope: Envelope, job: &Job) -> Step {
         let request = envelope.request.clone();
-        // Live requests look at or move the player: they see the timeline
-        // as edited, not as last loaded (a reload after edits waits up to
-        // RELOAD_EVERY to coalesce them). Seeks and steps load at their
-        // target themselves; opening a project replaces it.
         let loads = matches!(
             request,
             Request::PlayerSeek { .. } | Request::PlayerStep { .. } | Request::ProjectOpen { .. }
@@ -2017,14 +1746,11 @@ impl Live {
                     ..Format::default()
                 });
                 if vidcut_core::editor::is_timeline_file(&path) {
-                    // Made on a worker (media are probed, a bundle is
-                    // unpacked), then opened here.
                     let target = save_as.unwrap_or_else(|| path.with_extension("vidcut"));
                     let format = match format {
                         Ok(format) => format,
                         Err(e) => return Step::Now(Err(e)),
                     };
-                    // A dry run says what it would make.
                     if envelope.dry_run {
                         return Step::Task(
                             Work::Interactive,
@@ -2153,7 +1879,6 @@ impl Live {
                 view,
                 search,
             } => {
-                // The bin and the order are Source Tape's too.
                 let tape = bin.is_some() || sort.is_some() || descending.is_some();
                 if let Some(b) = bin {
                     let known = b.is_empty()
@@ -2247,8 +1972,6 @@ impl Live {
                 self.gui_change(changes, move |s| selection_json(&selection, s.edit))
             }
             Request::GuiScreenshot { out, target } => match target {
-                // The picture as shown once the player has settled (a seek
-                // already waited for that; a reload may still be on its way).
                 ScreenshotTarget::Viewer => {
                     if self.settled() {
                         let id = self.capture_viewer();
@@ -2398,7 +2121,6 @@ impl Live {
                 if let Some(c) = self.job_cancels.get(&job) {
                     c.store(true, Ordering::Relaxed);
                 }
-                // A waiting job leaves the queue and wakes, cancelled.
                 if self.gates.remove(&job).is_some() {
                     self.turns.ended(&job);
                 }
@@ -2408,8 +2130,6 @@ impl Live {
                 Ok(_) => Step::Wait(Until::Job { id: job }),
                 Err(e) => Step::Now(Err(e)),
             },
-            // Decoding work runs on a worker, on a copy of the project as it
-            // is now.
             Request::ExportStart(_)
             | Request::ExportPlan(_)
             | Request::FrameRender { .. }
@@ -2424,9 +2144,6 @@ impl Live {
                     None => Step::Now(self.edit(envelope, job.origin)),
                 }
             }
-            // Proxies are encoded on a worker, by the same request on a copy
-            // of the project; the edit then finds the files and records them
-            // at once (decision D41).
             Request::ProxyGenerate { .. } if !envelope.dry_run => {
                 let Some(open) = &self.project else {
                     return Step::Now(Err(no_project()));
@@ -2442,8 +2159,6 @@ impl Live {
                 };
                 Step::Encode(Box::new(encode), Box::new(envelope), title)
             }
-            // An `.otioz` bundle's media are unpacked on a worker first; the
-            // edit then finds them there.
             Request::TimelineImport {
                 path: Some(path),
                 unpack,
@@ -2461,7 +2176,6 @@ impl Live {
         }
     }
 
-    /// Replies once `motion` is on screen.
     fn shown(&mut self, motion: Option<u64>) -> Step {
         match motion {
             Some(m) => Step::Wait(Until::Shown {
@@ -2472,9 +2186,6 @@ impl Live {
         }
     }
 
-    /// Exports, frame renders and measurements run on their own thread, on
-    /// a copy of the project as it is now (whatever edits follow), reusing
-    /// the headless session code.
     fn project_task(&mut self, envelope: Envelope, _job: &Job) -> Step {
         let Some(open) = &self.project else {
             return Step::Now(Err(no_project()));
@@ -2485,8 +2196,6 @@ impl Live {
             .project()
             .time_context(Some(self.player.position(TIMELINE)));
         let envelope = bind_playhead(envelope, &context);
-        // Measurements decode whole files: jobs. Frames and plans are quick,
-        // and someone waits for them.
         let work = match envelope.request {
             Request::AnalyzeSilence { .. }
             | Request::AnalyzeScenes { .. }
@@ -2530,7 +2239,6 @@ impl Live {
         )
     }
 
-    /// Project requests: edits and queries through the editor.
     fn edit(&mut self, mut envelope: Envelope, origin: Origin) -> Result<Response> {
         let playhead = self.player.position(TIMELINE);
         match &mut envelope.request {
@@ -2545,8 +2253,6 @@ impl Live {
                 mark_in,
                 out,
             } => {
-                // `playhead` and relative times in source marks refer to the
-                // source playhead when the viewer shows that media.
                 let base = self.source_frame_of(media);
                 for spec in [mark_in, out].into_iter().flatten() {
                     if let Some(frame) = base
@@ -2591,7 +2297,6 @@ impl Live {
             && let Some(rest) = self.pool.bin.strip_prefix(path.as_str())
             && (rest.is_empty() || rest.starts_with('/'))
         {
-            // The pool keeps showing the bin under its new name.
             self.pool.bin = format!("{to}{rest}");
         }
         if changed {
@@ -2606,8 +2311,6 @@ impl Live {
                 }
                 _ => {}
             }
-            // Decision D15, for edit functions: a media dropped on the
-            // timeline leaves the playhead where it was.
             if !r.dry_run && is_edit_function(&request) && origin != (Origin::Gui { drag: true }) {
                 self.playhead_after_edit(r);
             }
@@ -2615,9 +2318,6 @@ impl Live {
         result
     }
 
-    // ---------------------------------------------------------------- project
-
-    /// Opens `path`, first making `create` there.
     fn open_project(&mut self, path: &Path, create: Option<project::New>) -> Result<()> {
         let open = OpenProject::open(path, create, self.tx.clone())?;
         self.project = Some(open);
@@ -2628,8 +2328,6 @@ impl Live {
         self.tape_position = 0;
         self.player.unload(SOURCE);
         self.player.unload(TIMELINE);
-        // The last project's pictures and sounds: its media ids name other
-        // files here.
         self.thumbs = Arc::new(HashMap::new());
         self.thumbs_wanted.clear();
         self.waveforms = Arc::new(HashMap::new());
@@ -2655,7 +2353,6 @@ impl Live {
         }
     }
 
-    /// After any change to the project (ours or from outside).
     fn project_changed(&mut self, response: Option<&Response>) {
         let Some(open) = &self.project else {
             self.project_snap = None;
@@ -2669,7 +2366,6 @@ impl Live {
                 .map(|m| (m.id.clone(), m.path.clone()))
                 .collect(),
         );
-        // The Edit menu names the next step to undo and to redo.
         let history = open.editor.history_labels(1).unwrap_or_default();
         self.project_snap = Some(ProjectSnap {
             path: open.store.path().to_path_buf(),
@@ -2677,7 +2373,6 @@ impl Live {
             undo: history.undo.iter().rev().cloned().collect(),
             redo: history.redo.iter().rev().cloned().collect(),
         });
-        // Forget what no longer exists.
         let media: HashSet<String> = p.media.iter().map(|m| m.id.clone()).collect();
         self.selection.media.retain(|m| media.contains(m));
         self.selection.clips.retain(|c| p.clip(c).is_some());
@@ -2695,18 +2390,14 @@ impl Live {
         self.dirty = true;
     }
 
-    /// Starts thumbnails and waveforms for new media.
     fn check_media(&mut self) {
         let Some(open) = &self.project else { return };
         let media: Vec<_> = open.project().media.clone();
-        // The meters' envelopes are mixed to the project's channels, so a
-        // change of those measures again.
         let channels = open.project().settings.channels;
         for m in media {
             let version = media_version(&m);
             if m.info.video.is_some() && self.thumbs_wanted.get(&m.id) != Some(&version) {
                 self.thumbs_wanted.insert(m.id.clone(), version.clone());
-                // The pictures of the file it was are not this one's.
                 if self.thumbs.contains_key(&m.id) {
                     let mut map = (*self.thumbs).clone();
                     map.remove(&m.id);
@@ -2761,10 +2452,6 @@ impl Live {
         }
     }
 
-    // ---------------------------------------------------------------- previews
-
-    /// What a player plays of `plan`: fresh proxies' pictures where the
-    /// project plays proxies (decision D41); export plans never do this.
     fn preview_plan(&self, mut plan: RenderPlan) -> RenderPlan {
         if let Some(open) = &self.project {
             vidcut_core::preview::apply_proxies(&mut plan, open.project(), |path| path.is_file());
@@ -2772,9 +2459,6 @@ impl Live {
         plan
     }
 
-    /// Reloads the timeline soon: at once if the last reload was a while
-    /// ago, otherwise when [`RELOAD_EVERY`] has passed (edits in quick
-    /// succession coalesce).
     fn schedule_timeline(&mut self) {
         let now = Instant::now();
         let due = match self.timeline_loaded_at {
@@ -2788,8 +2472,6 @@ impl Live {
         self.refresh_timeline_at(None)
     }
 
-    /// Reloads the timeline. `at` is a seek loading at its own frame;
-    /// otherwise the player stays where it is, playing on if it plays.
     fn refresh_timeline_at(&mut self, at: Option<i64>) -> Option<u64> {
         let p = self.project.as_ref()?.project().clone();
         let end = p.end();
@@ -2809,13 +2491,8 @@ impl Live {
         self.player.load(TIMELINE, plan, lanes, at)
     }
 
-    /// Loads what the current source mode wants as the source (nothing
-    /// happens if that is already loaded). Shown or not: the frame of what
-    /// isn't shown is kept ready.
     fn refresh_source(&mut self) -> Option<u64> {
         let p = self.project.as_ref()?.project().clone();
-        // Source Tape: the pool view's bin, in its order. A removed
-        // bin's media went to its parent, so the pool shows that.
         while !self.pool.bin.is_empty() && !p.bins.contains(&self.pool.bin) {
             let parent = self.pool.bin.rsplit_once('/').map_or("", |(a, _)| a);
             self.pool.bin = parent.to_string();
@@ -2844,8 +2521,6 @@ impl Live {
             self.player.unload(SOURCE);
             return None;
         };
-        // Same content (perhaps changed media): stay where it is, playing
-        // on if it plays. Other content opens where it was left.
         let at = if self.source_content.as_ref() == Some(&want) {
             None
         } else {
@@ -2860,7 +2535,6 @@ impl Live {
         self.player.load(SOURCE, plan, Vec::new(), at)
     }
 
-    /// Remembers the source playhead of the content being replaced.
     fn stash_source_position(&mut self) {
         let pos = self.player.position(SOURCE);
         match &self.source_content {
@@ -2872,8 +2546,6 @@ impl Live {
         }
     }
 
-    /// In Source Tape mode the clip under the playhead is selected in the
-    /// pool (spec §4.1).
     fn sync_tape_selection(&mut self) {
         if self.viewer != ViewerMode::SourceTape || self.source_content != Some(SourceContent::Tape)
         {
@@ -2890,10 +2562,6 @@ impl Live {
         }
     }
 
-    // ---------------------------------------------------------------- viewer
-
-    /// Shows `mode`. Switching between the source and the timeline pauses
-    /// the one left and shows the other where its playhead is.
     fn set_viewer(&mut self, mode: ViewerMode) -> Option<u64> {
         if mode == self.viewer && (!mode.is_source() || mode == self.last_source) {
             return None;
@@ -2901,14 +2569,12 @@ impl Live {
         self.viewer = mode;
         if mode.is_source() {
             self.last_source = mode;
-            // Loaded first: switching then plays it.
             let loaded = self.refresh_source();
             return self.player.show(SOURCE).or(loaded);
         }
         self.player.show(TIMELINE)
     }
 
-    /// Opens `media` as Source Clip (double-click in the pool).
     fn load_source(&mut self, media: &str, at: Option<&TimeSpec>) -> Result<Option<u64>> {
         let open = self.project.as_ref().ok_or_else(no_project)?;
         let p = open.project();
@@ -2933,28 +2599,21 @@ impl Live {
         let motion = self.player.show(SOURCE).or(loaded);
         Ok(match (motion, position) {
             (Some(m), _) => Some(m),
-            // Same clip already shown: just move to the requested frame.
             (None, Some(pos)) => self.seek(SOURCE, pos, true),
             (None, None) => None,
         })
     }
 
-    /// Moves `id`'s playhead to `frame`; `sound`: a seek someone asked for,
-    /// which plays its frame's sound while paused (audio scrubbing), where
-    /// the viewer's own moves (after an edit) play none. The motion, when
-    /// the viewer shows `id`.
     fn seek(&mut self, id: PlayerId, frame: i64, sound: bool) -> Option<u64> {
-        if id == TIMELINE && self.timeline_due.take().is_some() {
-            // A reload is pending: do it now, loading at the new position.
-            if let Some(motion) = self.refresh_timeline_at(Some(frame.max(0))) {
-                return Some(motion);
-            }
+        if id == TIMELINE
+            && self.timeline_due.take().is_some()
+            && let Some(motion) = self.refresh_timeline_at(Some(frame.max(0)))
+        {
+            return Some(motion);
         }
         self.player.seek(id, frame, sound)
     }
 
-    /// The context for times typed at the viewer: timeline times, or source
-    /// times of the shown clip or tape.
     fn viewer_context(&self) -> Result<TimeContext> {
         let open = self.project.as_ref().ok_or_else(no_project)?;
         let p = open.project();
@@ -2992,8 +2651,6 @@ impl Live {
         })
     }
 
-    /// The source frame of `media` under the source playhead, if the viewer
-    /// shows that media.
     fn source_frame_of(&self, media: &str) -> Option<i64> {
         let position = self.player.position(SOURCE);
         match (&self.source_content, self.viewer) {
@@ -3005,10 +2662,6 @@ impl Live {
         }
     }
 
-    /// Decision D15: after an edit function the timeline playhead moves to
-    /// the frame after the new clip(s), ready for the next edit. Those are
-    /// the clips its result names: `changes.created` also has what is left
-    /// of a clip the edit cut into, after the new ones.
     fn playhead_after_edit(&mut self, r: &Response) {
         let Some(open) = &self.project else { return };
         let p = open.project();
@@ -3058,8 +2711,6 @@ impl Live {
         Ok(())
     }
 
-    /// Makes `changes` in the GUI and answers, once it has, with `reply` of
-    /// its state after them: what the answer says is what the GUI shows.
     fn gui_change(
         &self,
         changes: Vec<GuiChange>,
@@ -3087,22 +2738,18 @@ impl Live {
         )
     }
 
-    // ---------------------------------------------------------------- captures
-
     fn captured(&mut self, id: u64, result: Result<Image>) {
         let Some(i) = self
             .waits
             .iter()
             .position(|w| matches!(w.until, Until::Capture { id: c, .. } if c == id))
         else {
-            return; // timed out already
+            return;
         };
         let w = self.waits.swap_remove(i);
         let Until::Capture { out, player, .. } = w.until else {
             return;
         };
-        // The viewer shows black when its player has nothing loaded (the
-        // render target may still hold an older picture).
         let blank = player.is_some_and(|p| !self.player.is_loaded(p));
         let result = result.map(|mut image| {
             if blank {
@@ -3111,7 +2758,6 @@ impl Live {
             image
         });
         let state = self.state_response();
-        // A screenshot someone waits for.
         self.spawn_task(
             w.job,
             Work::Interactive,
@@ -3134,15 +2780,11 @@ impl Live {
         );
     }
 
-    /// Whether the viewer shows its latest motion (a seek, a step, an
-    /// edit's reload, a switch).
     fn settled(&self) -> bool {
         let p = &self.player;
         p.shown >= p.motion || p.failure().is_some()
     }
 
-    /// Asks the renderer for the viewer's picture; the answer comes as
-    /// `Msg::Captured` with the returned id.
     fn capture_viewer(&mut self) -> u64 {
         let id = self.next_capture;
         self.next_capture += 1;
@@ -3152,8 +2794,6 @@ impl Live {
         }));
         id
     }
-
-    // ---------------------------------------------------------------- state
 
     fn state_response(&self) -> Response {
         let rev = self.project.as_ref().map_or(0, |p| p.project().rev);
@@ -3207,24 +2847,16 @@ impl Live {
             "source_media": self.source_media,
             "source": source,
             "timeline": player(TIMELINE, p.map_or(0, |p| p.settings.start_tc)),
-            // The viewer's: whichever it played.
             "late": late,
             "skipped": skipped,
             "selection": self.selection,
             "pool": self.pool,
             "muted": self.player.muted(),
-            // The audio device the sound plays on (the id of the one
-            // `player.audio_device` chose), null for the system's default,
-            // and why it isn't the one chosen.
             "audio_device": self.player.audio_device(),
             "audio_error": self.player.audio_error,
             "audio_scrubbing": self.audio_scrubbing,
-            // What the viewer's player does (stats for nerds), and whether
-            // the viewer shows them.
             "stats": self.player.stats(self.renderer.viewer_stats()),
             "stats_shown": self.stats,
-            // The Trim Editor's or Dynamic Trim's two-up (null without a
-            // GUI).
             "two_up": self.renderer.two_up(),
             "clipboard": self.clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),
@@ -3232,30 +2864,20 @@ impl Live {
     }
 }
 
-/// A background task; gets the client's progress channel and cancel flag.
 type Task =
     Box<dyn FnOnce(Option<(Sender<ReplyEvent>, Arc<AtomicBool>)>) -> Result<Response> + Send>;
 
 enum Step {
     Now(Result<Response>),
     Wait(Until),
-    /// A task on a thread of its own, at the priority its work calls for.
     Task(Work, Task),
-    /// Make a project file on a worker, then open it here.
     Make(Make),
-    /// Measure media (or unpack a bundle's) on a worker, then run the
-    /// request here (docs/decisions/agents.md §3).
     Measure(Measure, Box<Envelope>),
-    /// Encode proxies on a worker as a job titled so (gui.md §9), then run
-    /// the request here.
     Encode(Measure, Box<Envelope>, String),
 }
 
-/// Slow work on media that a request needs, done before it runs:
-/// measuring, unpacking.
 type Measure = Box<dyn FnOnce() -> Result<()> + Send>;
 
-/// Makes a project file: its path, and what couldn't be imported.
 type Make = Box<dyn FnOnce() -> Result<(PathBuf, Vec<String>)> + Send>;
 
 fn reply(reply: Option<Reply>, result: Result<Response>) {
@@ -3264,8 +2886,6 @@ fn reply(reply: Option<Reply>, result: Result<Response>) {
     }
 }
 
-/// What a `proxy.generate` job is titled: the pool item's name, or how
-/// many it names.
 fn proxies_title(project: &Project, request: &Request) -> String {
     let Request::ProxyGenerate { media, .. } = request else {
         return String::new();
@@ -3295,7 +2915,6 @@ fn answer(result: Value) -> Response {
     }
 }
 
-/// `jobs.wait`'s answer for an ended job: the job, or how it failed.
 fn job_answer(j: &JobInfo) -> Result<Response> {
     match &j.error {
         Some(e) => Err(Error::new(e.code, format!("job {}: {}", j.id, e.message))),
@@ -3303,9 +2922,6 @@ fn job_answer(j: &JobInfo) -> Result<Response> {
     }
 }
 
-/// What `project.open` makes at `path` before opening it: nothing without
-/// `create`, nor when the file is there (it opens) unless `force` replaces
-/// it. A format needs `create`, and no file there or `force`.
 fn to_make(
     path: &Path,
     create: bool,
@@ -3338,7 +2954,6 @@ fn to_make(
     }))
 }
 
-/// The selection, with the edit point the GUI has selected.
 fn selection_json(selection: &Selection, edit: Option<EditPoint>) -> Value {
     let mut v = json!(selection);
     v["edit"] = json!(edit);
@@ -3349,12 +2964,10 @@ fn no_project() -> Error {
     Error::usage("no project is open in this vidcut GUI (project.open opens one)")
 }
 
-/// A job cancelled before its turn came.
 fn cancelled() -> Error {
     Error::new(vidcut_core::ErrorCode::Cancelled, "cancelled")
 }
 
-/// Edit functions that place new clips (spec §7).
 fn is_edit_function(r: &Request) -> bool {
     matches!(
         r,
@@ -3367,8 +2980,6 @@ fn is_edit_function(r: &Request) -> bool {
     )
 }
 
-/// Resolves playhead-based times of timeline frame renders against the live
-/// playhead (the headless session code has none).
 fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
     if let Request::FrameRender {
         at, media: None, ..

@@ -1,7 +1,3 @@
-//! Dissolves (decision D50): each frame of a fade from black and of a cross
-//! dissolve at its level, exported on the CPU and on NVIDIA's GPU for
-//! NVENC; a sound's cross fade along its curve.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -19,7 +15,6 @@ fn fps() -> Rational {
     Rational::new(25, 1).unwrap()
 }
 
-/// A 320×180 clip of `picture`, 40 frames at 25 a second, no sound.
 fn clip(codec: VideoCodec, picture: Picture) -> PathBuf {
     let spec = FixtureSpec::new(codec, Container::Mkv, 320, 180, (25, 1), 40)
         .picture(picture)
@@ -44,7 +39,6 @@ fn piece(path: &Path, source_frame: i64, frames: i64) -> VideoPiece {
     }
 }
 
-/// `over` rising over `under` across all of their frames.
 fn mix(under: VideoPiece, over: VideoPiece) -> VideoPiece {
     let of = under.frames();
     VideoPiece::Mix {
@@ -76,7 +70,6 @@ fn plan(video: Vec<VideoPiece>) -> RenderPlan {
     }
 }
 
-/// H.264 without audio on `encoder`, lossless on the CPU.
 fn settings(encoder: EncoderChoice) -> ExportSettings {
     ExportSettings {
         container: OutContainer::Mkv,
@@ -127,8 +120,6 @@ fn export_on(
     .unwrap_or_else(|e| panic!("export: {e}"));
 }
 
-/// The mean (Y, Cb, Cr) of the first stripe of [`Picture::Colors`] in
-/// each frame of `path`, in its middle rows.
 fn first_stripe(path: &Path) -> Vec<[f64; 3]> {
     let mut r = VideoReader::open(path).unwrap();
     let mut out = Vec::new();
@@ -175,7 +166,6 @@ fn a_fade_from_black_shows_each_frame_at_its_level() {
         &out,
     );
     let luma: Vec<f64> = first_stripe(&out).iter().map(|m| m[0]).collect();
-    // The stripe's BT.709 luma is 96: 16 + (96 − 16) × (k + ½) / 10, then 96.
     assert_eq!(
         luma,
         [
@@ -202,7 +192,6 @@ fn a_fade_from_black_takes_the_chroma_from_its_middle() {
         &out,
     );
     let cb: Vec<f64> = first_stripe(&out).iter().map(|m| m[1]).collect();
-    // The stripe's BT.709 Cb is 94: 128 + (94 − 128) × (k + ½) / 10.
     assert_eq!(
         cb,
         [
@@ -230,7 +219,6 @@ fn a_cross_dissolve_mixes_two_files_frame_by_frame() {
         &out,
     );
     let luma: Vec<f64> = first_stripe(&out).iter().map(|m| m[0]).collect();
-    // 96 − (96 − 16) × (k + ½) / 10 between the stripe's 96 and black.
     assert_eq!(
         luma,
         [
@@ -266,8 +254,6 @@ fn a_dissolve_inside_one_file_reads_it_twice_and_reads_on() {
     assert_eq!(plain, want);
 }
 
-/// The largest sample in each 1 ms (a period of the fixture's 1 kHz tone)
-/// of the first channel of `path`'s 16-bit sound.
 fn envelope(path: &Path) -> Vec<f32> {
     use vidcut_av::ffmpeg::{codec, format, frame, media};
     vidcut_av::init();
@@ -351,18 +337,14 @@ fn a_cross_fade_to_silence_follows_its_curve() {
     export_on(&p, &settings, &Default::default(), None, &out);
     let peaks = envelope(&out);
     let whole = vidcut_av::fixture::TONE_AMPLITUDE;
-    // No de-click dip where the fade starts: 200 ms in.
     assert!(peaks[199] > whole * 0.98, "before the fade: {}", peaks[199]);
     assert!(peaks[200] > whole * 0.98, "as it starts: {}", peaks[200]);
-    // 0 dB: straight down over its 400 ms.
     for (ms, gain) in [(300, 0.75), (400, 0.5), (500, 0.25)] {
         let got = peaks[ms] / whole;
         assert!((got - gain).abs() < 0.01, "{ms} ms: {got}, want {gain}");
     }
 }
 
-/// NVENC's pictures come from NVDEC's frames mixed on the GPU, and match
-/// the CPU's within a level. Skips without NVIDIA's encoder and decoder.
 #[test]
 fn nvenc_fades_as_the_cpu_does() {
     let Some(gpu) = vidcut_av::hw::GpuDecoder::best().filter(|g| g.cuda().is_some()) else {

@@ -1,27 +1,13 @@
-//! Color: SDR (BT.709) and HDR (BT.2100: PQ and HLG) pictures, the filters
-//! that convert between them, and the tags an encoder writes.
-//!
-//! HDR into SDR is tone-mapped. SDR into HDR puts SDR white at 203 nits,
-//! the reference white of ITU-R BT.2408. Untagged pictures are BT.709 when
-//! HD (1280 wide, or over 576 lines), else BT.601, as players commonly take
-//! them. On the GPU, libplacebo converts with the same math
-//! ([`gpu_color`]), and so does the viewer's shader ([`shader_colors`]).
-
 use std::sync::Mutex;
 
 use vidcut_core::model::Hdr;
 
 use crate::ffmpeg::{ffi, format, frame};
 
-/// Luminance (nits) that SDR white maps to in HDR; while converting, linear
-/// light 1.0 stands for it.
 pub const REFERENCE_WHITE: f64 = 203.0;
 
-/// The brightest HDR highlight the tone curve keeps apart (nits): what most
-/// HDR video is mastered for. Brighter ones clip to white.
 const PEAK: f64 = 1000.0;
 
-/// The HDR transfer of `f`, or `None` for SDR.
 pub fn hdr_of(f: &frame::Video) -> Option<Hdr> {
     hdr_of_transfer(unsafe { (*f.as_ptr()).color_trc })
 }
@@ -35,7 +21,6 @@ pub fn hdr_of_transfer(trc: ffi::AVColorTransferCharacteristic) -> Option<Hdr> {
     }
 }
 
-/// What a picture's colors are, from its tags or else assumed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Source {
     pub hdr: Option<Hdr>,
@@ -44,7 +29,6 @@ pub(crate) struct Source {
     rgb: bool,
 }
 
-/// A YUV picture's matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Matrix {
     Bt601,
@@ -52,43 +36,24 @@ pub enum Matrix {
     Bt2020,
 }
 
-/// How a decoded picture's samples are read to get BT.709 RGB, as the
-/// export reads them: what a display's shader converts from. Untagged
-/// pictures get the export's assumptions (BT.709 when HD, else BT.601;
-/// BT.2020 when HDR).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Colors {
     pub matrix: Matrix,
-    /// Full range (0–255) rather than video range (16–235).
     pub full_range: bool,
-    /// PQ or HLG: tone-mapped into SDR (`conversion`'s curve).
     pub hdr: Option<Hdr>,
 }
 
-/// The numbers a display's shader converts a picture's YUV to BT.709 RGB
-/// with, as the export does (`conversion`): the matrix and range for SDR,
-/// and for HDR the transfer to linear light, the gamut to BT.709, the tone
-/// curve on the brightest channel and BT.709's transfer, the math of the
-/// GPU export's shader ([`gpu_color`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShaderColors {
-    /// Kr and Kb of the YUV matrix.
     pub kr: f64,
     pub kb: f64,
     pub full_range: bool,
-    /// PQ or HLG: tone-mapped into SDR.
     pub hdr: Option<Hdr>,
-    /// What linear light is multiplied by so that the reference white is
-    /// 1.0: PQ's 10,000 nits or HLG's 1,000-nit display over 203.
     pub linear_scale: f64,
-    /// Linear BT.2020 to BT.709, by rows (HDR only; the identity for SDR).
     pub gamut: [[f64; 3]; 3],
-    /// The tone curve: the knee, then `scale`, `a` and `b` of
-    /// `scale * (x + a) / (x + b)` above it.
     pub tone: [f64; 4],
 }
 
-/// The shader's numbers for pictures read as `colors`.
 pub fn shader_colors(colors: Colors) -> ShaderColors {
     let (kr, kb) = match colors.matrix {
         Matrix::Bt601 => (0.299, 0.114),
@@ -116,7 +81,6 @@ pub fn shader_colors(colors: Colors) -> ShaderColors {
     }
 }
 
-/// How `f`'s samples are read (see [`Colors`]).
 pub fn colors_of(f: &frame::Video) -> Colors {
     let s = Source::of(f);
     Colors {
@@ -126,9 +90,6 @@ pub fn colors_of(f: &frame::Video) -> Colors {
     }
 }
 
-/// Whether `src` goes into output of `target`'s dynamic range (`None`:
-/// SDR BT.709) as it is: video-range YUV in the output's matrix and
-/// transfer, which a scaler only resamples.
 pub(crate) fn kept(src: Source, target: Option<Hdr>) -> bool {
     !src.rgb
         && !src.full_range
@@ -139,8 +100,6 @@ pub(crate) fn kept(src: Source, target: Option<Hdr>) -> bool {
         }
 }
 
-/// `scaled`, a copy of `f` at another size, tagged with the matrix `f` is
-/// read with: an untagged picture's follows from its size.
 pub(crate) fn keep_matrix(scaled: &mut frame::Video, f: &frame::Video) {
     use ffi::AVColorSpace as S;
     let matrix = match Source::of(f).matrix {
@@ -152,15 +111,11 @@ pub(crate) fn keep_matrix(scaled: &mut frame::Video, f: &frame::Video) {
     unsafe { (*scaled.as_mut_ptr()).colorspace = matrix };
 }
 
-/// How to read `f`'s samples as the light they have in PQ output, as the
-/// export converts them: the YUV matrix and range, the transfer, and the
-/// gamut to BT.2020 in linear light (the identity for HDR).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PqLight {
     pub kr: f64,
     pub kb: f64,
     pub full_range: bool,
-    /// Already RGB (images): no matrix.
     pub rgb: bool,
     pub hdr: Option<Hdr>,
     pub gamut: [[f64; 3]; 3],
@@ -188,10 +143,6 @@ fn is_rgb(p: format::Pixel) -> bool {
         .is_some_and(|d| unsafe { (*d.as_ptr()).flags } & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0)
 }
 
-/// The matrix an untagged SDR picture of `width`×`height` is taken to use:
-/// players' common guess (BT.709 from 1280 wide or over 576 lines, else
-/// BT.601), which the viewer reads them with too. A 1280×534 widescreen
-/// film is HD this way, though it has fewer than 720 lines.
 fn untagged_matrix(width: u32, height: u32) -> Matrix {
     if width >= 1280 || height > 576 {
         Matrix::Bt709
@@ -200,8 +151,6 @@ fn untagged_matrix(width: u32, height: u32) -> Matrix {
     }
 }
 
-/// The colors a picture is tagged with for libplacebo: how its YUV is read
-/// (matrix, range) and what its RGB is (primaries, transfer).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Tags {
     pub matrix: ffi::AVColorSpace,
@@ -211,7 +160,6 @@ pub(crate) struct Tags {
 }
 
 impl Tags {
-    /// What an encoder writes for `hdr` (`None`: SDR BT.709), video range.
     pub(crate) fn output(hdr: Option<Hdr>) -> Self {
         use ffi::AVColorPrimaries as P;
         use ffi::AVColorSpace as S;
@@ -238,41 +186,24 @@ impl Tags {
     }
 }
 
-/// How libplacebo, on the GPU, is to treat a YUV picture so that it comes
-/// out as [`conversion`] makes it on the CPU.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GpuColor {
-    /// What libplacebo reads the picture as: the matrix and range the CPU
-    /// reads it with, and the primaries and transfer it has once `shader`
-    /// has run (the output's), or its own when only the matrix changes.
     pub input: Tags,
-    /// What it writes: the output's colors.
     pub output: Tags,
-    /// A user shader (mpv's hook format) doing the CPU's math on the RGB:
-    /// the transfer to linear light, the primaries, the tone curve and the
-    /// output's transfer. `None` when only the matrix and range change, as
-    /// swscale converts SDR. libplacebo's own HDR conversion differs: it
-    /// lifts black for the SDR display's contrast, maps the tone curve on
-    /// intensity instead of the brightest channel, and leaves colors outside
-    /// BT.709 outside the range.
     pub shader: Option<String>,
 }
 
 impl GpuColor {
-    /// The CPU leaves the colors as they are.
     pub(crate) fn unchanged(&self) -> bool {
         self.shader.is_none() && self.input == self.output
     }
 }
 
-/// How the GPU converts YUV picture `f` to an output of `target`'s dynamic
-/// range (`None`: SDR BT.709) as the CPU does. `None` for RGB pictures.
 pub(crate) fn gpu_color(f: &frame::Video, target: Option<Hdr>) -> Option<GpuColor> {
     let src = Source::of(f);
     let (matrix, range) = src.yuv_tags()?;
     let output = Tags::output(target);
     Some(match (src.hdr, target) {
-        // swscale converts the matrix and range only.
         (None, None) => GpuColor {
             input: Tags {
                 matrix,
@@ -282,7 +213,6 @@ pub(crate) fn gpu_color(f: &frame::Video, target: Option<Hdr>) -> Option<GpuColo
             output,
             shader: None,
         },
-        // The same HDR transfer: nothing to convert.
         (Some(s), Some(t)) if s == t && src.matrix == Matrix::Bt2020 => GpuColor {
             input: output,
             output,
@@ -300,8 +230,6 @@ pub(crate) fn gpu_color(f: &frame::Video, target: Option<Hdr>) -> Option<GpuColo
     })
 }
 
-/// Linear light's primaries while converting, as [`Source::primaries`]
-/// names them for `zscale`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Primaries {
     Bt709,
@@ -318,7 +246,6 @@ impl Primaries {
         }
     }
 
-    /// CIE xy of red, green and blue.
     fn xy(self) -> [(f64, f64); 3] {
         match self {
             Self::Bt709 => [(0.640, 0.330), (0.300, 0.600), (0.150, 0.060)],
@@ -327,13 +254,10 @@ impl Primaries {
         }
     }
 
-    /// The matrix from linear RGB in these primaries to CIE XYZ, white
-    /// (D65) at Y = 1.
     fn to_xyz(self) -> [[f64; 3]; 3] {
         const WHITE: (f64, f64) = (0.3127, 0.3290);
         let xyz = |(x, y): (f64, f64)| [x / y, 1.0, (1.0 - x - y) / y];
         let p = self.xy().map(xyz);
-        // Columns are the primaries, scaled so that they add up to white.
         let m = [
             [p[0][0], p[1][0], p[2][0]],
             [p[0][1], p[1][1], p[2][1]],
@@ -351,7 +275,6 @@ fn invert(m: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
         m[r1][k1] * m[r2][k2] - m[r1][k2] * m[r2][k1]
     };
     let det = m[0][0] * c(0, 0) + m[0][1] * c(0, 1) + m[0][2] * c(0, 2);
-    // The adjugate is the transposed cofactors.
     std::array::from_fn(|r| std::array::from_fn(|k| c(k, r) / det))
 }
 
@@ -363,8 +286,6 @@ fn mat_mul(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
     std::array::from_fn(|r| std::array::from_fn(|k| (0..3).map(|i| a[r][i] * b[i][k]).sum()))
 }
 
-/// The matrix taking linear RGB in `from` primaries to `to`: the identity
-/// itself for the same, not one off by rounding.
 fn gamut(from: Primaries, to: Primaries) -> [[f64; 3]; 3] {
     if from == to {
         return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
@@ -372,9 +293,6 @@ fn gamut(from: Primaries, to: Primaries) -> [[f64; 3]; 3] {
     mat_mul(invert(to.to_xyz()), from.to_xyz())
 }
 
-/// The tone curve `tonemap=mobius` applies to the brightest channel: the
-/// identity up to `KNEE`, rolling off to 1.0 at the peak. Returns the
-/// curve's `(scale, a, b)` above the knee: `scale * (x + a) / (x + b)`.
 fn mobius() -> (f64, f64, f64) {
     let j = KNEE;
     let peak = mobius_peak();
@@ -383,19 +301,12 @@ fn mobius() -> (f64, f64, f64) {
     ((b * b + 2.0 * b * j + j * j) / (b - a), a, b)
 }
 
-/// Where the tone curve leaves the identity, in reference whites.
 const KNEE: f64 = 0.8;
 
-/// The peak the tone curve rolls off to, in reference whites, as the CPU's
-/// filter is given it (to four decimals).
 fn mobius_peak() -> f64 {
     (PEAK / REFERENCE_WHITE * 1e4).round() / 1e4
 }
 
-/// GLSL: `c` (the RGB in `hdr`'s transfer) to linear light, the reference
-/// white at 1.0, as `zscale` (zimg) computes it: PQ's EOTF, HLG's inverse
-/// OETF and 1.2 system gamma channel by channel on a 1000-nit display (zimg's
-/// approximate path, which FFmpeg's `zscale` takes), BT.1886 as a 2.4 power.
 fn glsl_to_linear(hdr: Option<Hdr>) -> String {
     match hdr {
         Some(Hdr::Pq) => format!(
@@ -416,10 +327,6 @@ fn glsl_to_linear(hdr: Option<Hdr>) -> String {
     }
 }
 
-/// GLSL: linear light `c` (reference white at 1.0) to `hdr`'s transfer, as
-/// zimg computes it. Negative values (colors outside the primaries) are
-/// black; values above white stay above it, for the integer conversion to
-/// clip, as on the CPU.
 fn glsl_from_linear(hdr: Option<Hdr>) -> String {
     match hdr {
         Some(Hdr::Pq) => format!(
@@ -444,8 +351,6 @@ fn glsl_float(v: f64) -> String {
     format!("{v:.10}")
 }
 
-/// A GLSL `mat3` that multiplies a column vector as `m` does (GLSL takes
-/// the columns in order).
 fn glsl_mat3(m: [[f64; 3]; 3]) -> String {
     let cols: Vec<String> = (0..3)
         .flat_map(|k| (0..3).map(move |r| (r, k)))
@@ -454,11 +359,6 @@ fn glsl_mat3(m: [[f64; 3]; 3]) -> String {
     format!("mat3({})", cols.join(", "))
 }
 
-/// The libplacebo user shader converting `src` pictures' RGB to an output of
-/// `target`'s dynamic range as [`conversion`] does on the CPU: linear light
-/// with the reference white at 1.0, the output's primaries, the tone curve
-/// on the brightest channel (HDR into SDR), the output's transfer. It hooks
-/// the scaled picture, as the CPU scales before converting.
 fn shader(src: Source, target: Option<Hdr>) -> String {
     let (from, to) = (
         Primaries::of(src),
@@ -501,12 +401,6 @@ fn shader(src: Source, target: Option<Hdr>) -> String {
     )
 }
 
-/// libplacebo keeps a picture between passes in half floats, and the
-/// NVIDIA GPU stores them rounded toward zero: up to a whole step low (on
-/// PQ, almost half a 10-bit code), half a step on average, which left the
-/// GPU's pictures half a level darker than the CPU's. The shader takes the
-/// middle of the step a value it reads came from, and moves a value it
-/// writes half a step up, so that it is stored rounded to the nearest.
 const HALF_STEP: &str = "vec3 vidcut_half_step(vec3 v)\n\
      {\n\
      \x20   return sign(v) * exp2(floor(log2(max(abs(v), vec3(1e-20)))) - 11.0);\n\
@@ -534,13 +428,10 @@ impl Source {
         }
     }
 
-    /// An RGB picture (an image), not YUV.
     pub(crate) fn rgb(self) -> bool {
         self.rgb
     }
 
-    /// The matrix and range a YUV picture is read with, as FFmpeg tags
-    /// them. `None` for RGB.
     pub(crate) fn yuv_tags(self) -> Option<(ffi::AVColorSpace, ffi::AVColorRange)> {
         use ffi::AVColorSpace as S;
         if self.rgb {
@@ -559,7 +450,6 @@ impl Source {
         Some((matrix, range))
     }
 
-    /// `zscale`'s primaries of the input.
     fn primaries(self) -> &'static str {
         match (self.hdr, self.matrix) {
             (Some(_), _) | (None, Matrix::Bt2020) => "2020",
@@ -568,9 +458,6 @@ impl Source {
         }
     }
 
-    /// `zscale`'s description of the input and of the linear light it is
-    /// converted to, in the same primaries (zimg otherwise takes the output
-    /// primaries from the frame, which may have none).
     fn to_linear(self) -> String {
         format!(
             "{}:t=linear:p={}:npl={REFERENCE_WHITE}",
@@ -579,7 +466,6 @@ impl Source {
         )
     }
 
-    /// `zscale`'s description of the input.
     fn zscale_input(self) -> String {
         let matrix = match self.matrix {
             Matrix::Bt601 => "170m",
@@ -597,7 +483,6 @@ impl Source {
     }
 }
 
-/// `zscale`'s name for a transfer.
 fn transfer(hdr: Option<Hdr>) -> &'static str {
     match hdr {
         Some(Hdr::Pq) => "smpte2084",
@@ -606,26 +491,16 @@ fn transfer(hdr: Option<Hdr>) -> &'static str {
     }
 }
 
-/// How a normalizer brings a source to its output: flags and options for
-/// the `scale` filter, and filters to run after padding (which happens in
-/// the source's format), before the final `format`.
 pub(crate) struct Conversion {
     pub flags: &'static str,
     pub scale: String,
     pub after: String,
 }
 
-/// swscale's flags for a picture it only resamples.
 const RESAMPLE: &str = "bicubic";
 
-/// swscale's flags for a picture whose colors it converts too (YUV to RGB
-/// or back, another matrix or range): left to its defaults, it rounds them
-/// low (export.md §4).
 pub(crate) const CONVERT: &str = "bicubic+accurate_rnd+full_chroma_int";
 
-/// `scale` options that keep a YUV picture's matrix and range (its tags,
-/// or what is assumed without them) while it is resampled: told nothing,
-/// swscale converts to BT.601. Empty for RGB pictures.
 pub(crate) fn keep(f: &frame::Video) -> String {
     let src = Source::of(f);
     if src.rgb {
@@ -640,8 +515,6 @@ pub(crate) fn keep(f: &frame::Video) -> String {
     format!("in_color_matrix={matrix}:in_range={range}:out_color_matrix={matrix}:out_range={range}")
 }
 
-/// The conversion from `src` to an `out` picture of `target`'s dynamic
-/// range (`None`: SDR BT.709).
 pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -> Conversion {
     let rgb_out = is_rgb(out);
     let in_matrix = match src.matrix {
@@ -655,9 +528,6 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
         scale: String::new(),
         after: String::new(),
     };
-    // swscale only scales YUV that `zscale` converts, or that stays as it
-    // is: told the matrix and range on both sides, it keeps them whatever
-    // the graph's links say.
     let keep = if src.rgb {
         String::new()
     } else {
@@ -667,7 +537,6 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
         )
     };
     match (src.hdr, target) {
-        // SDR to SDR: swscale converts the matrix and range as it scales.
         (None, None) if src.rgb && rgb_out => none(),
         (None, None) if src.rgb => Conversion {
             flags: CONVERT,
@@ -693,14 +562,11 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
             ),
             after: String::new(),
         },
-        // The same HDR transfer: nothing to convert.
         (Some(s), Some(t)) if s == t && !src.rgb && src.matrix == Matrix::Bt2020 => Conversion {
             flags: RESAMPLE,
             scale: keep,
             after: String::new(),
         },
-        // HDR into SDR: linear light with the reference white at 1.0, BT.709
-        // primaries, the tone curve, BT.709's transfer.
         (Some(_), None) => {
             let back = if rgb_out {
                 "zscale=t=709:p=709:r=full,format=gbrp16le".to_string()
@@ -718,7 +584,6 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
                 ),
             }
         }
-        // Into HDR: linear light with SDR white at the reference white.
         (_, Some(t)) => Conversion {
             flags: RESAMPLE,
             scale: keep,
@@ -733,10 +598,6 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
     }
 }
 
-/// The format `zscale` is to write YUV for `out` in: NV12 and P010 (frames
-/// for NVENC), which it can't write, as their planar layouts, which swscale
-/// only interleaves. Left to choose, it wrote RGB, and swscale's conversion
-/// to YUV came out over half a level brighter than zimg's.
 fn zscale_writes(out: format::Pixel) -> &'static str {
     match out {
         format::Pixel::NV12 => ",format=yuv420p",
@@ -745,8 +606,6 @@ fn zscale_writes(out: format::Pixel) -> &'static str {
     }
 }
 
-/// Whether [`conversion`] takes `zscale` from `src` into `target`'s
-/// dynamic range: a change of transfer or primaries.
 pub(crate) fn needs_zscale(src: Source, target: Option<Hdr>) -> bool {
     match (src.hdr, target) {
         (None, None) => false,
@@ -755,19 +614,10 @@ pub(crate) fn needs_zscale(src: Source, target: Option<Hdr>) -> bool {
     }
 }
 
-/// [`conversion`] for an FFmpeg without `zscale` (zimg), slower: swscale
-/// scales, pads and reads the picture as float RGB in its own transfer and
-/// primaries (`before`, the `scale` and `after` of a [`Conversion`]); the
-/// CPU does `zscale`'s math on it ([`CpuColors`]) and writes planar YUV as
-/// zimg does ([`write_yuv`]); swscale repacks that, or writes the float RGB
-/// as RGB or as YUV the CPU doesn't write (`back`, a graph of its own).
 pub(crate) struct Split {
     pub before: Conversion,
     pub cpu: CpuColors,
-    /// The planar YUV the CPU writes; `None`: `back` takes the float RGB.
     pub write: Option<format::Pixel>,
-    /// The filters from there into the output's format; `None`: `write` is
-    /// it.
     pub back: Option<String>,
 }
 
@@ -778,7 +628,6 @@ pub(crate) fn split(src: Source, out: format::Pixel, target: Option<Hdr>) -> Spl
         Matrix::Bt2020 => "bt2020",
     };
     let in_range = if src.full_range { "full" } else { "limited" };
-    // Scaled and padded in its own colors, as for `zscale`, then read as RGB.
     let (scale, to_rgb) = if src.rgb {
         (String::new(), String::new())
     } else {
@@ -798,7 +647,6 @@ pub(crate) fn split(src: Source, out: format::Pixel, target: Option<Hdr>) -> Spl
             (planar != out).then(|| format!("format={}", name(out))),
         )
     } else {
-        // swscale clips the RGB it reads at white, which zimg keeps above.
         let matrix = if target.is_some() { "bt2020" } else { "bt709" };
         let yuv = format!(
             "scale=flags={CONVERT}:out_color_matrix={matrix}:out_range=limited,format={}",
@@ -818,9 +666,6 @@ pub(crate) fn split(src: Source, out: format::Pixel, target: Option<Hdr>) -> Spl
     }
 }
 
-/// The planar YUV [`write_yuv`] writes for `out`: itself, or for NV12 and
-/// P010 the planar layout they interleave. `None` for others (alpha, big
-/// endian, other subsampling).
 fn planar_yuv(out: format::Pixel) -> Option<format::Pixel> {
     use format::Pixel as P;
     match out {
@@ -843,11 +688,6 @@ fn planar_yuv(out: format::Pixel) -> Option<format::Pixel> {
     fits.then_some(out)
 }
 
-/// Writes `rgb`, planar float RGB (`gbrpf32le`) in an output's transfer and
-/// primaries, into `out`'s planar YUV ([`planar_yuv`]) as zimg writes it:
-/// `target`'s matrix (BT.709 for SDR, BT.2020 for HDR), video range, each
-/// subsampled block's chroma from its average, codes rounded and clipped
-/// only to the format's (light above white stays above it).
 pub(crate) fn write_yuv(rgb: &frame::Video, out: &mut frame::Video, target: Option<Hdr>) {
     let (kr, kb) = if target.is_some() {
         (0.2627f32, 0.0593f32)
@@ -870,7 +710,6 @@ pub(crate) fn write_yuv(rgb: &frame::Video, out: &mut frame::Video, target: Opti
     let unit = (1u32 << (depth - 8)) as f32;
     let max = ((1u32 << depth) - 1) as f32;
     let code = |base: f32, span: f32, v: f32| (unit * (base + span * v)).round().clamp(0.0, max);
-    // The float planes: G, B, R.
     let read = |plane: usize, x: usize, y: usize| {
         let at = y * rgb.stride(plane) + 4 * x;
         let d = rgb.data(plane);
@@ -887,15 +726,12 @@ pub(crate) fn write_yuv(rgb: &frame::Video, out: &mut frame::Video, target: Opti
             row[x] = v as u8;
         }
     };
-    // SAFETY: the three planes are apart in memory; each slice covers its
-    // plane's rows, `stride` bytes apart.
+    // SAFETY: `out`'s three planes don't overlap; each slice is its plane's rows at its `stride`.
     let [y_plane, u_plane, v_plane] = unsafe {
         let raw = out.as_mut_ptr();
         [(0, h), (1, ch), (2, ch)]
             .map(|(p, rows)| std::slice::from_raw_parts_mut((*raw).data[p], strides[p] * rows))
     };
-    // Chroma rows a slice, and the luma rows they cover: the slices run on
-    // the shared pool.
     let rows = ch.div_ceil(crate::pool::threads().min(ch).max(1));
     let chunks: Vec<_> = y_plane
         .chunks_mut(strides[0] * (rows << sy))
@@ -935,18 +771,11 @@ pub(crate) fn write_yuv(rgb: &frame::Video, out: &mut frame::Video, target: Opti
     });
 }
 
-/// `zscale`'s math, as the GPU's shader does it ([`shader`]), on the CPU:
-/// float RGB in a source's transfer and primaries to linear light (the
-/// reference white at 1.0), the output's primaries, the tone curve on the
-/// brightest channel (HDR into SDR), the output's transfer.
 #[derive(Debug, Clone)]
 pub(crate) struct CpuColors {
-    /// The source's transfer to linear light, and linear light to the
-    /// output's.
     from: Curve,
     to: Curve,
     gamut: Option<[[f32; 3]; 3]>,
-    /// The knee, then `scale`, `a` and `b` of the curve above it.
     tone: Option<[f32; 4]>,
 }
 
@@ -959,8 +788,6 @@ impl CpuColors {
             Primaries::Bt709
         };
         let (scale, a, b) = mobius();
-        // Light up to the output's brightest: PQ's 10,000 nits, HLG's
-        // 1,000-nit display; SDR's white, which the tone curve keeps it to.
         let top = match target {
             Some(Hdr::Pq) => 10000.0 / REFERENCE_WHITE as f32,
             Some(Hdr::Hlg) => 1000.0 / REFERENCE_WHITE as f32,
@@ -979,7 +806,6 @@ impl CpuColors {
         }
     }
 
-    /// One pixel's RGB.
     fn pixel(&self, rgb: [f32; 3]) -> [f32; 3] {
         let mut c = rgb.map(|v| self.from.at(v));
         if let Some(m) = self.gamut {
@@ -997,8 +823,6 @@ impl CpuColors {
         c.map(|v| self.to.at(v))
     }
 
-    /// Converts `f`, planar float RGB (`gbrpf32le`), in place, its rows in
-    /// slices on the shared pool.
     pub(crate) fn run(&self, f: &mut frame::Video) {
         assert_eq!(f.format(), format::Pixel::GBRPF32LE);
         let (width, height) = (f.width() as usize, f.height() as usize);
@@ -1007,8 +831,7 @@ impl CpuColors {
         }
         let strides = [f.stride(0), f.stride(1), f.stride(2)];
         let rows = height.div_ceil(crate::pool::threads().min(height));
-        // SAFETY: the three planes are apart in memory; each slice covers
-        // its plane's rows, `stride` bytes apart.
+        // SAFETY: `f`'s three planes don't overlap; each slice is its plane's rows at its `stride`.
         let planes = unsafe {
             let raw = f.as_mut_ptr();
             [0, 1, 2].map(|p| std::slice::from_raw_parts_mut((*raw).data[p], strides[p] * height))
@@ -1044,9 +867,6 @@ impl CpuColors {
     }
 }
 
-/// A transfer function `f` for `hdr`, as a table of its values from 0 to
-/// `top` in [`Curve::STEPS`] steps, interpolated: of the input, or of its
-/// fourth root (`root`) where `f` is steep near black. Computed outside it.
 #[derive(Clone)]
 struct Curve {
     f: fn(Option<Hdr>, f32) -> f32,
@@ -1082,7 +902,6 @@ impl Curve {
     }
 
     fn at(&self, x: f32) -> f32 {
-        // Below 0, above the top and NaN: computed.
         if !(x >= 0.0 && x < self.top) {
             return (self.f)(self.hdr, x);
         }
@@ -1095,8 +914,6 @@ impl Curve {
     }
 }
 
-/// `v` in `hdr`'s transfer to linear light, the reference white at 1.0
-/// ([`glsl_to_linear`]).
 fn to_linear(hdr: Option<Hdr>, v: f32) -> f32 {
     let v = v.max(0.0);
     match hdr {
@@ -1118,8 +935,6 @@ fn to_linear(hdr: Option<Hdr>, v: f32) -> f32 {
     }
 }
 
-/// Linear light `v` (the reference white at 1.0) to `hdr`'s transfer
-/// ([`glsl_from_linear`]).
 fn from_linear(hdr: Option<Hdr>, v: f32) -> f32 {
     match hdr {
         Some(Hdr::Pq) => {
@@ -1150,8 +965,6 @@ fn name(p: format::Pixel) -> String {
         .unwrap_or_default()
 }
 
-/// Tags an encoder's output as SDR BT.709 (`None`) or BT.2100 with `hdr`'s
-/// transfer; limited range.
 pub(crate) fn tag(ctx: *mut ffi::AVCodecContext, hdr: Option<Hdr>) {
     use ffi::AVColorPrimaries as P;
     use ffi::AVColorSpace as S;
@@ -1181,7 +994,6 @@ pub(crate) fn tag(ctx: *mut ffi::AVCodecContext, hdr: Option<Hdr>) {
 mod tests {
     use super::*;
 
-    /// A 4:2:0 picture of `w`×`h` in `hdr`'s transfer (`None`: untagged).
     fn picture(w: u32, h: u32, hdr: Option<Hdr>) -> frame::Video {
         use ffi::AVColorTransferCharacteristic as T;
         let mut f = frame::Video::new(format::Pixel::YUV420P10LE, w, h);
@@ -1195,9 +1007,6 @@ mod tests {
         f
     }
 
-    /// A picture shrunk from an untagged one is read with the matrix the
-    /// untagged one is read with (its size says which), not the one its
-    /// own size would say; a tagged picture's tag goes along.
     #[test]
     fn shrunk_pictures_keep_their_sources_matrix() {
         use ffi::AVColorSpace as S;
@@ -1208,13 +1017,10 @@ mod tests {
             keep_matrix(&mut small, &f);
             Source::of(&small).matrix
         };
-        // Untagged: HD is BT.709, SD BT.601, though 320x180 alone is SD.
         assert_eq!(shrunk(1920, 1080, S::AVCOL_SPC_UNSPECIFIED), Matrix::Bt709);
         assert_eq!(shrunk(720, 480, S::AVCOL_SPC_UNSPECIFIED), Matrix::Bt601);
-        // Tagged, whatever the size.
         assert_eq!(shrunk(720, 480, S::AVCOL_SPC_BT709), Matrix::Bt709);
         assert_eq!(shrunk(3840, 2160, S::AVCOL_SPC_BT2020_NCL), Matrix::Bt2020);
-        // Untouched, the small one alone would be read as SD.
         assert_eq!(Source::of(&picture(320, 180, None)).matrix, Matrix::Bt601);
     }
 
@@ -1227,7 +1033,6 @@ mod tests {
             [-0.0182, -0.1006, 1.1187],
         ];
         for r in 0..3 {
-            // White stays white.
             assert!((m[r].iter().sum::<f64>() - 1.0).abs() < 1e-9);
             for c in 0..3 {
                 assert!((m[r][c] - want[r][c]).abs() < 1e-4, "{m:?}");
@@ -1238,12 +1043,12 @@ mod tests {
     #[test]
     fn untagged_pictures_are_guessed_as_players_guess() {
         for (w, h, hd) in [
-            (1280, 534, true), // a widescreen film in HD
+            (1280, 534, true),
             (1920, 800, true),
             (1920, 1080, true),
-            (720, 1280, true), // portrait HD
-            (720, 576, false), // PAL
-            (720, 480, false), // NTSC
+            (720, 1280, true),
+            (720, 576, false),
+            (720, 480, false),
             (1024, 576, false),
             (640, 360, false),
         ] {

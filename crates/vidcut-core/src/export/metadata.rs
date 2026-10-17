@@ -1,17 +1,3 @@
-//! The HDR metadata an export writes, chosen from the pictures it shows
-//! (decision D46).
-//!
-//! PQ output gets a mastering display and content light levels, given
-//! (`video.mastering_display`, `video.max_cll`) or from the sources: the
-//! widest color volume and the highest light levels of what it shows. HLG
-//! and SDR output get none; light levels a source doesn't say are measured
-//! from its frames. HDR10+ and Dolby Vision describe each frame's own
-//! picture, kept as it was (the same transfer): HDR10+ is kept when some
-//! shown picture has it, and frames without it get it made from their
-//! measured light; Dolby Vision only when every shown picture has it, black
-//! frames after one taking its RPU. What is decided is pure: the facts
-//! about each piece come from the caller.
-
 use serde::Serialize;
 
 use super::{HdrMetadata, VideoCodec, VideoSettings};
@@ -19,49 +5,36 @@ use crate::error::{Error, Result};
 use crate::model::{DolbyVision, Hdr, LightLevel, MasteringDisplay};
 use crate::render::VideoPiece;
 
-/// What a source piece's pictures carry.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PieceMeta {
-    /// The HDR transfer; `None` for SDR.
     pub hdr: Option<Hdr>,
     pub mastering: Option<MasteringDisplay>,
     pub light: Option<LightLevel>,
     pub hdr10plus: bool,
     pub dolby_vision: Option<DolbyVision>,
-    /// Its light levels in PQ output, measured from its frames.
     pub measured: Measured,
 }
 
-/// A piece's measured light levels.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Measured {
-    /// Not measured, nor to be.
     #[default]
     No,
-    /// Measured when the export starts: a plan doesn't measure.
     Pending,
     Known(LightLevel),
-    /// Measuring failed: its frames couldn't be read.
     Failed,
 }
 
-/// Why light levels aren't known.
 enum Unknown {
     Pending,
     Missing(&'static str),
 }
 
-/// The metadata an output writes, and why.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MetadataChoice {
-    /// What it keeps: `static`, `hdr10plus`, `dolby_vision`, `all` or `none`.
     pub mode: HdrMetadata,
     pub mastering: Option<MasteringDisplay>,
     pub light: Option<LightLevel>,
-    /// What was asked for (`video.hdr_metadata`).
     pub asked: HdrMetadata,
-    /// Why, in words: the mastering display, the light levels, HDR10+ and
-    /// Dolby Vision.
     pub why: Vec<String>,
 }
 
@@ -70,11 +43,8 @@ const P3: [[f64; 2]; 3] = [[0.68, 0.32], [0.265, 0.69], [0.15, 0.06]];
 const BT2020: [[f64; 2]; 3] = [[0.708, 0.292], [0.170, 0.797], [0.131, 0.046]];
 const D65: [f64; 2] = [0.3127, 0.3290];
 
-/// SDR white in HDR, cd/m² (ITU-R BT.2408): SDR pictures' light level.
 const SDR_WHITE: u32 = 203;
 
-/// The color volume a piece's pictures fill in PQ output, and whether the
-/// file said so.
 fn volume(m: &PieceMeta) -> (MasteringDisplay, bool) {
     let assumed = |primaries, min_nits, max_nits| MasteringDisplay {
         primaries,
@@ -84,9 +54,7 @@ fn volume(m: &PieceMeta) -> (MasteringDisplay, bool) {
     };
     match (m.hdr, m.mastering) {
         (Some(Hdr::Pq), Some(given)) => (given, true),
-        // The peak vidcut's own tone mapping assumes of PQ (export.md §4).
         (Some(Hdr::Pq), None) => (assumed(BT2020, 0.0001, 1000.0), false),
-        // HLG's reference display (ITU-R BT.2100).
         (Some(Hdr::Hlg), _) => (assumed(BT2020, 0.005, 1000.0), false),
         (None, _) => (assumed(BT709, 0.1, f64::from(SDR_WHITE)), false),
     }
@@ -105,7 +73,6 @@ fn area(p: &[[f64; 2]; 3]) -> f64 {
     ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])).abs() / 2.0
 }
 
-/// Whether point `q` lies in triangle `t` (with a little slack).
 fn inside(t: &[[f64; 2]; 3], q: [f64; 2]) -> bool {
     let sign =
         |a: [f64; 2], b: [f64; 2]| (b[0] - a[0]) * (q[1] - a[1]) - (q[0] - a[0]) * (b[1] - a[1]);
@@ -114,9 +81,6 @@ fn inside(t: &[[f64; 2]; 3], q: [f64; 2]) -> bool {
     d.iter().all(|&x| x >= -eps) || d.iter().all(|&x| x <= eps)
 }
 
-/// The smallest volume holding them all: the primaries of the one whose
-/// triangle holds the others' (BT.2020's otherwise), the highest peak and
-/// the lowest black.
 fn widest(volumes: &[MasteringDisplay]) -> MasteringDisplay {
     let first = volumes[0];
     let primaries = if volumes
@@ -155,9 +119,6 @@ fn widest(volumes: &[MasteringDisplay]) -> MasteringDisplay {
     }
 }
 
-/// The light levels of what `metas` show in PQ output: the highest of
-/// theirs (measured where they say none, or for all with `measure_all`),
-/// SDR at its white; or why there are none.
 fn light_levels(
     metas: &[PieceMeta],
     measure_all: bool,
@@ -189,7 +150,6 @@ fn light_levels(
     Ok(out)
 }
 
-/// A volume in words: `P3 D65, 0.0001–1000 cd/m²`.
 pub fn describe_mastering(m: &MasteringDisplay) -> String {
     let gamut = [(BT709, "BT.709"), (P3, "P3"), (BT2020, "BT.2020")]
         .iter()
@@ -208,9 +168,6 @@ fn trim(v: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-/// The mastering display as x265 writes it:
-/// `G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min)`, chromaticity in 1/50000,
-/// luminance in 1/10000 cd/m².
 pub fn format_mastering(m: &MasteringDisplay) -> String {
     let c = |v: f64| (v * 50_000.0).round() as u64;
     let l = |v: f64| (v * 10_000.0).round() as u64;
@@ -230,7 +187,6 @@ pub fn format_mastering(m: &MasteringDisplay) -> String {
     )
 }
 
-/// Reads [`format_mastering`]'s form.
 pub fn parse_mastering(s: &str) -> Result<MasteringDisplay> {
     let bad = || {
         Error::usage(format!(
@@ -265,15 +221,12 @@ pub fn parse_mastering(s: &str) -> Result<MasteringDisplay> {
     })
 }
 
-/// `video.max_cll` for light levels measured from every picture shown.
 pub const MEASURE: &str = "measure";
 
-/// MaxCLL and MaxFALL as `video.max_cll` writes them: `1000,400`.
 pub fn format_light(l: &LightLevel) -> String {
     format!("{},{}", l.max_cll, l.max_fall)
 }
 
-/// Reads [`format_light`]'s form.
 pub fn parse_light(s: &str) -> Result<LightLevel> {
     let bad = || {
         Error::usage(format!(
@@ -292,7 +245,6 @@ pub fn parse_light(s: &str) -> Result<LightLevel> {
     Ok(l)
 }
 
-/// The share of `n` of `total` frames in words.
 fn percent(n: i64, total: i64) -> String {
     let p = n as f64 * 100.0 / total.max(1) as f64;
     match p {
@@ -302,10 +254,6 @@ fn percent(n: i64, total: i64) -> String {
     }
 }
 
-/// Chooses the metadata of an output of `video` with settings `v`, whose
-/// dynamic range is chosen already (`v.hdr` isn't `auto`). `dv_writer`:
-/// an encoder the export may use writes Dolby Vision (libx265,
-/// libsvtav1).
 pub fn choose(
     v: &VideoSettings,
     video: &[VideoPiece],
@@ -339,8 +287,6 @@ pub fn choose(
         .collect();
     let total: i64 = shown.iter().map(|(n, _)| n).sum();
     let metas: Vec<PieceMeta> = shown.iter().map(|(_, m)| *m).collect();
-    // Black frames (gaps) show no source: they don't count for the values,
-    // but an encoder writing Dolby Vision needs an RPU on every frame.
     let black_in = |pieces: &mut dyn Iterator<Item = &VideoPiece>| -> i64 {
         pieces
             .map(|p| match p {
@@ -356,7 +302,6 @@ pub fn choose(
             .take_while(|p| matches!(p, VideoPiece::Black { .. })),
     );
 
-    // The static values, PQ only.
     if out == Hdr::Pq {
         choice.mastering = match &v.mastering_display {
             Some(s) => {
@@ -430,7 +375,6 @@ pub fn choose(
             .push("No mastering display or light levels: HLG is scene-referred".into());
     }
 
-    // Dynamic metadata, kept as it was.
     let auto = asked == HdrMetadata::Auto;
     let kept_as_is = |m: &PieceMeta| m.hdr == Some(out);
     let mut hdr10plus = false;
@@ -445,7 +389,6 @@ pub fn choose(
                 choice.why.push("No HDR10+: it needs PQ".into());
             }
         } else if with > 0 || asked.hdr10plus() {
-            // Frames without it get it made from their measured light.
             hdr10plus = true;
             let all = total + black;
             choice.why.push(if with == 0 {
@@ -487,8 +430,6 @@ pub fn choose(
                 "{} of the picture has none (or another profile)",
                 percent(total - with, total)
             )),
-            // Black after a picture takes its RPU; before the first there
-            // is none to take.
             Some(_) if leading_black > 0 => Some(format!(
                 "the black frames at the start ({}) have none, and every frame needs it",
                 percent(leading_black, total + black)
@@ -526,8 +467,6 @@ pub fn choose(
 }
 
 impl MetadataChoice {
-    /// The settings with this choice in place of `auto` and unset values:
-    /// what the encoder runs with.
     pub fn apply(&self, v: &mut VideoSettings) {
         v.hdr_metadata = self.mode;
         v.mastering_display = self.mastering.as_ref().map(format_mastering);
@@ -612,7 +551,6 @@ mod tests {
         let video = vec![piece(30, "m0"), VideoPiece::Black { frames: 10 }];
         let c = choose(&v, &video, |_| dv, true);
         assert_eq!(c.mode, HdrMetadata::All, "{:?}", c.why);
-        // Before the first picture there is none to take.
         let video = vec![VideoPiece::Black { frames: 10 }, piece(30, "m0")];
         let c = choose(&v, &video, |_| dv, true);
         assert_eq!(c.mode, HdrMetadata::Hdr10plus, "{:?}", c.why);
@@ -646,7 +584,6 @@ mod tests {
                 max_fall: 500
             })
         );
-        // P3 PQ and SDR: P3 holds BT.709; SDR counts at 203 cd/m².
         let c = run(&v, &[(10, pq(1000.0, Some((150, 100)))), (10, sdr)], false);
         assert_eq!(c.mastering.unwrap().primaries, P3);
         assert_eq!(
@@ -670,7 +607,6 @@ mod tests {
         assert_eq!((m.primaries, m.max_nits), (BT2020, 1000.0));
         assert_eq!(c.light, None, "{:?}", c.why);
         assert!(c.why[1].contains("a PQ source has none"), "{:?}", c.why);
-        // Given values win.
         let mut given = v.clone();
         given.max_cll = Some("500,100".into());
         let c = run(&given, &[(10, bare)], false);

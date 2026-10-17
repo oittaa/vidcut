@@ -1,17 +1,5 @@
-//! Vulkan's frames shrunk on the GPU before they come down to memory
-//! ([`super::Shrinker`]): FFmpeg's `scale_vulkan` in halving steps, in the
-//! frames' own layout. Its sampler is bilinear: it reads the four pixels
-//! nearest each one it writes. Shrunk to less than half in one step, it
-//! skips the pixels between and the picture aliases. Halved, it reads the
-//! four pixels each one covers, their average. So frames are halved first,
-//! as CUDA's are (export.md §5). A scaler is used once a test picture of
-//! grays and colors comes back from it at the levels it went in at, as
-//! Direct3D 11's video processor is (`d3d11::Scaler`).
-
 use super::*;
 
-/// The scaler of frames like `f` (of `frames`) to `size` (even): its passes
-/// ([`passes`]), once they have given the test picture back at its levels.
 pub(super) fn scaler(
     f: &frame::Video,
     frames: *mut ffi::AVBufferRef,
@@ -30,9 +18,6 @@ pub(super) fn scaler(
     Ok(graph)
 }
 
-/// The sizes of the passes that shrink frames of `from` to `to` (even):
-/// halvings to even sides while both sides shrink at least twice, then one
-/// to `to` where they don't reach it.
 fn passes(from: (u32, u32), to: (u32, u32)) -> Vec<(u32, u32)> {
     let mut at = from;
     let mut sizes = Vec::new();
@@ -46,10 +31,6 @@ fn passes(from: (u32, u32), to: (u32, u32)) -> Vec<(u32, u32)> {
     sizes
 }
 
-/// Whether `graph` gives back the test picture ([`test_picture`]) in the
-/// layout of `f`'s frames, uploaded into a frame of `frames`, at the levels
-/// it went in at ([`bands_kept`]). Too small to read at `size`, or in a
-/// layout the test picture doesn't come in, the scaler isn't trusted.
 fn keeps_levels(
     graph: &mut GpuGraph,
     f: &frame::Video,
@@ -63,8 +44,7 @@ fn keeps_levels(
         return Ok(false);
     };
     let mut uploaded = frame::Video::empty();
-    // SAFETY: a frame of the frames' own pool, the picture's size, uploaded
-    // into.
+    // SAFETY: `uploaded` is a frame of `frames`' pool, sized to the picture uploaded into it.
     unsafe {
         let ret = ffi::av_hwframe_get_buffer(frames, uploaded.as_mut_ptr(), 0);
         if ret < 0 {
@@ -87,10 +67,6 @@ fn keeps_levels(
     Ok(bands_kept(&downloaded(&scaled)?))
 }
 
-/// The test picture in `layout` at `size`: [`BANDS`] side by side, each
-/// component at its levels in its own bits. Luma (or red, green and blue)
-/// and chroma take the bands' columns, alpha luma's. `None` for a layout of
-/// samples under 8 bits, floats, a palette or a mosaic.
 fn test_picture(layout: format::Pixel, size: (u32, u32)) -> Option<frame::Video> {
     let desc = described(layout)?;
     let mut picture = blank(layout, size);
@@ -106,9 +82,6 @@ fn test_picture(layout: format::Pixel, size: (u32, u32)) -> Option<frame::Video>
     Some(picture)
 }
 
-/// Whether `got`, the test picture scaled, has each band's levels in the
-/// middle of each band in each component, two samples across in its middle
-/// rows, within a level of 8 bits.
 fn bands_kept(got: &frame::Video) -> bool {
     let Some(desc) = described(got.format()) else {
         return false;
@@ -118,8 +91,7 @@ fn bands_kept(got: &frame::Video) -> bool {
         let near = level(desc, c, [1; 3]);
         let mut line = vec![0u16; w];
         (h / 4..h * 3 / 4).all(|y| {
-            // SAFETY: the frame's own planes, `w` samples of component `c`
-            // on row `y`, into a line of `w` 16-bit values.
+            // SAFETY: `got` has row `y` of `w` samples in component `c`; `line` holds `w` values.
             unsafe {
                 let raw = got.as_ptr();
                 ffi::av_read_image_line2(
@@ -189,7 +161,6 @@ mod tests {
     #[test]
     fn a_band_a_level_off_is_kept() {
         let mut picture = test_picture(format::Pixel::YUV420P, (640, 360)).unwrap();
-        // Luma in the middle of the first band, black (16), a level up.
         let stride = picture.stride(0);
         picture.data_mut(0)[180 * stride + 31] = 17;
         assert!(bands_kept(&picture));
@@ -206,8 +177,6 @@ mod tests {
     #[test]
     fn chroma_two_levels_off_is_changed() {
         let mut picture = test_picture(format::Pixel::YUV422P10LE, (640, 360)).unwrap();
-        // Cb in the middle of the last band, 128 at 10 bits (512), two
-        // 8-bit levels up.
         let stride = picture.stride(1);
         let at = 180 * stride + 2 * 303;
         picture.data_mut(1)[at..at + 2].copy_from_slice(&520u16.to_le_bytes());

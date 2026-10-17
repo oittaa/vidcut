@@ -1,29 +1,12 @@
-//! Audio scrubbing (spec §4.5, decision D42): a frame step, or a seek
-//! while paused, plays that frame's sound.
-//!
-//! A frame's sound is the mix's samples of it (every lane, with clip gains,
-//! faders, mute and solo as the plan has them, lane gains on top), forward
-//! whichever way the step went, faded in and out over a few milliseconds so
-//! it doesn't click. One plays at a time: the newest waits while one plays
-//! out, and a newer one replaces it there, so held keys play frame after
-//! frame and steps never pile up.
-//!
-//! The player does it on its audio thread while paused.
-
 use super::plan::Plan;
 use super::ring::Ring;
 use crate::error::Result;
 use crate::export::audio::AudioMix;
 
-/// The fades at a frame's sound's ends.
 const FADE_MS: u32 = 3;
 
-/// A waiting sound goes to the device once this little of the one playing
-/// is left there: frame after frame without a gap.
 const NEXT_SECS: f64 = 0.002;
 
-/// The sound of timeline frame `t`: its samples of the mix, faded in and
-/// out.
 pub(crate) fn snippet(mix: &mut AudioMix, plan: &Plan, t: i64) -> Result<Vec<f32>> {
     let t = plan.clamp(t);
     let (a, b) = (plan.sample(t), plan.sample(t + 1));
@@ -37,7 +20,6 @@ pub(crate) fn snippet(mix: &mut AudioMix, plan: &Plan, t: i64) -> Result<Vec<f32
     Ok(samples)
 }
 
-/// Fades `samples` (interleaved) in and out over `n` sample frames each.
 fn fade(samples: &mut [f32], channels: usize, n: usize) {
     let frames = samples.len() / channels.max(1);
     let n = n.min(frames / 2).max(1);
@@ -50,16 +32,13 @@ fn fade(samples: &mut [f32], channels: usize, n: usize) {
     }
 }
 
-/// The frame's sound waiting for the one playing to end.
 #[derive(Default)]
 pub(crate) struct Waiting {
     sound: Option<Vec<f32>>,
-    /// The request it answers.
     pub served: Option<u64>,
 }
 
 impl Waiting {
-    /// `sound` waits next, replacing one that was waiting.
     pub(crate) fn replace(&mut self, sound: Vec<f32>, request: u64) {
         self.sound = Some(sound);
         self.served = Some(request);
@@ -73,8 +52,6 @@ impl Waiting {
         self.sound.is_some()
     }
 
-    /// Gives the waiting sound to the device once the one playing has (all
-    /// but) played out; whether it did.
     pub(crate) fn offer(&mut self, ring: &Ring, rate: u32) -> bool {
         let Some(sound) = &self.sound else {
             return false;

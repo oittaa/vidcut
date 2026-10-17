@@ -1,11 +1,3 @@
-//! Bugs the GUI had, each checked with one gesture under simulated input
-//! (egui_kittest, no window), and requests that change what only the GUI
-//! keeps. The tests click by position and press keys, and check the
-//! project the gesture left. None looks for a button's or a window's text.
-//!
-//! Every project starts with Track 1 holding c1 at 0..60, c2 at 60..120
-//! and c3 at 120..180, cut from one 300-frame clip (m1) at 30 fps.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -24,8 +16,6 @@ use vidcut_core::model::Settings;
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, Project, Store};
 
-/// The changes to the GUI's own state the session asks for, held until
-/// the test makes them on its workspace, as the app's UI thread does.
 #[derive(Default)]
 struct Port {
     changes: Mutex<Vec<(Vec<GuiChange>, GuiDone)>>,
@@ -48,11 +38,9 @@ impl live::Renderer for Port {
     }
 }
 
-/// File dialogs that answer at once with `files`.
 #[derive(Default)]
 struct FakeDialogs {
     files: Mutex<Vec<PathBuf>>,
-    /// How many times a file dialog was opened.
     picks: AtomicUsize,
 }
 
@@ -72,11 +60,9 @@ impl Dialogs for FakeDialogs {
     }
 }
 
-/// The GUI's state, config and cache, shared by the tests.
 static HOME: LazyLock<TempDir> = LazyLock::new(|| {
     let dir = tempfile::tempdir().unwrap();
-    // SAFETY: each test reads HOME before it starts anything, so this runs
-    // before any session or GUI reads these.
+    // SAFETY: every test forces `HOME` first, so no other thread touches the environment yet.
     unsafe {
         std::env::set_var("XDG_STATE_HOME", dir.path().join("state"));
         std::env::set_var("XDG_CONFIG_HOME", dir.path().join("config"));
@@ -136,7 +122,6 @@ impl Gui {
         let dialogs = Arc::new(FakeDialogs::default());
         let mut ws = Workspace::new(h.clone());
         ws.set_dialogs(dialogs.clone());
-        // Four pixels a frame from the timeline's left edge.
         ws.timeline_options_mut().snapping = false;
         ws.timeline_options_mut().ppf = 4.0;
         let harness = Harness::builder()
@@ -160,8 +145,6 @@ impl Gui {
         call(&self.h, method, params)
     }
 
-    /// A request that changes what only the GUI keeps: the GUI makes the
-    /// change while the request waits for it.
     fn ask(&mut self, method: &str, params: Value) -> Result<Value, String> {
         let e = Envelope::from_json(json!({ "method": method, "params": params })).unwrap();
         let h = self.h.clone();
@@ -185,7 +168,6 @@ impl Gui {
         asked.join().unwrap()
     }
 
-    /// Lets the session catch up with the GUI's requests, then redraws.
     fn settle(&mut self) {
         self.call("player.state", json!({}));
         self.harness.step();
@@ -214,15 +196,12 @@ impl Gui {
         }
     }
 
-    /// Where `frame` is on `track` in the lower timeline, `dy` pixels below
-    /// the track's top.
     fn at(&self, track: &str, frame: i64, dy: f32) -> Pos2 {
         let l = self.harness.state().timeline_layout().unwrap();
         let row = l.lower.get(track).unwrap().rect.rect;
         pos2(l.lower_scale.xf(frame), row.top() + dy)
     }
 
-    /// The clips on `track` as (id, start, duration).
     fn clips(&self, track: &str) -> Vec<(String, i64, i64)> {
         let tl = self.call("timeline.get", json!({}));
         let t = tl["tracks"]
@@ -246,7 +225,6 @@ impl Gui {
             .collect()
     }
 
-    /// How many requests from the GUI changed the project.
     fn gui_changes(&self) -> usize {
         let log = self.call("gui.log", json!({ "limit": 1000 }));
         log.as_array()
@@ -278,8 +256,6 @@ fn track_one() -> Vec<(String, i64, i64)> {
     ]
 }
 
-/// Clicking the target track's name a second time used to make Track 1 the
-/// target again.
 #[test]
 fn a_second_click_keeps_the_target_track() {
     let mut gui = Gui::new();
@@ -298,7 +274,6 @@ fn a_second_click_keeps_the_target_track() {
     gui.call("player.seek", json!({ "at": 90, "viewer": "timeline" }));
     gui.settle();
 
-    // F10 overwrites on the target track.
     gui.key(Key::F10);
     gui.settle();
     assert_eq!(gui.clips("V2"), [("c4".into(), 90, 30)]);
@@ -306,8 +281,6 @@ fn a_second_click_keeps_the_target_track() {
     gui.quit();
 }
 
-/// Ctrl+wheel over the lower timeline used to do nothing: egui gives a
-/// wheel turned with Ctrl as a zoom, and the timeline read only its scroll.
 #[test]
 fn ctrl_wheel_zooms_the_lower_timeline() {
     let mut gui = Gui::new();
@@ -329,7 +302,6 @@ fn ctrl_wheel_zooms_the_lower_timeline() {
     gui.quit();
 }
 
-/// A second roll sent before the first one landed used to be lost.
 #[test]
 fn two_quick_rolls_add_up() {
     let mut gui = Gui::new();
@@ -349,8 +321,6 @@ fn two_quick_rolls_add_up() {
     gui.quit();
 }
 
-/// A cut clicked on V2 used to be rolled on Track 1, which has a cut at the
-/// same frame.
 #[test]
 fn a_cut_clicked_on_v2_rolls_on_v2() {
     let mut gui = Gui::new();
@@ -373,8 +343,6 @@ fn a_cut_clicked_on_v2_rolls_on_v2() {
     gui.quit();
 }
 
-/// A click on the J/L handle, the audio edit drawn 8 frames after the
-/// picture cut, used to select the picture cut: `.` then rolled the picture.
 #[test]
 fn a_click_on_the_jl_handle_moves_the_audio_edit() {
     let mut gui = Gui::new();
@@ -400,8 +368,6 @@ fn a_click_on_the_jl_handle_moves_the_audio_edit() {
     gui.quit();
 }
 
-/// While the question about numbered images was up, I still set a mark and
-/// Ctrl+I opened another file dialog. Escape now cancels the import.
 #[test]
 fn the_numbered_images_question_takes_the_keys() {
     let mut gui = Gui::new();
@@ -419,7 +385,6 @@ fn the_numbered_images_question_takes_the_keys() {
     gui.key(Key::I);
     gui.harness.key_press_modifiers(Modifiers::COMMAND, Key::I);
     gui.harness.step();
-    // A dialog opens on a thread of its own.
     std::thread::sleep(Duration::from_millis(100));
     gui.settle();
     assert!(gui.harness.state().asking());
@@ -436,15 +401,12 @@ fn the_numbered_images_question_takes_the_keys() {
     gui.quit();
 }
 
-/// A Dynamic Trim run that stopped where the media ran out used to keep its
-/// trim: K, which the viewer said applies it, did nothing.
 #[test]
 fn k_applies_a_dynamic_trim_run_that_stopped() {
     let mut gui = Gui::new();
     gui.call("selection.set", json!({ "clips": ["c3"] }));
     gui.settle();
     gui.key(Key::W);
-    // L four times: 8× a slip of c3, whose media ends 40 frames after it.
     for _ in 0..4 {
         gui.key(Key::L);
     }
@@ -460,7 +422,6 @@ fn k_applies_a_dynamic_trim_run_that_stopped() {
     gui.quit();
 }
 
-/// A clip's right-click menu used to close the frame after it opened.
 #[test]
 fn a_clips_menu_stays_open() {
     let mut gui = Gui::new();
@@ -472,7 +433,6 @@ fn a_clips_menu_stays_open() {
     gui.quit();
 }
 
-/// The edit `selection.set` selects is the one `.` rolls.
 #[test]
 fn period_rolls_the_edit_a_request_selected() {
     let mut gui = Gui::new();
@@ -490,8 +450,6 @@ fn period_rolls_the_edit_a_request_selected() {
     gui.quit();
 }
 
-/// `selection.set` selects the audio edit of a J/L cut, the one the J/L
-/// handle selects: `.` moves the sound, not the picture.
 #[test]
 fn period_moves_the_audio_edit_a_request_selected() {
     let mut gui = Gui::new();
@@ -515,8 +473,6 @@ fn period_moves_the_audio_edit_a_request_selected() {
     gui.quit();
 }
 
-/// A side asked for without an edit changes the selected edit's, as U
-/// does: from the picture cut to its audio edit.
 #[test]
 fn a_side_alone_moves_the_selection_to_the_audio_edit() {
     let mut gui = Gui::new();
@@ -536,7 +492,6 @@ fn a_side_alone_moves_the_selection_to_the_audio_edit() {
     gui.quit();
 }
 
-/// F10 overwrites on the track `gui.target` picked.
 #[test]
 fn f10_overwrites_on_the_target_a_request_picked() {
     let mut gui = Gui::new();
@@ -555,8 +510,6 @@ fn f10_overwrites_on_the_target_a_request_picked() {
     gui.quit();
 }
 
-/// `gui.timeline`'s zoom is how many pixels a frame takes in the lower
-/// timeline.
 #[test]
 fn gui_timeline_zooms_the_lower_timeline() {
     let mut gui = Gui::new();
@@ -567,7 +520,6 @@ fn gui_timeline_zooms_the_lower_timeline() {
     gui.quit();
 }
 
-/// A zoom the timeline can't show is refused, not changed into one it can.
 #[test]
 fn gui_timeline_refuses_a_zoom_out_of_range() {
     let mut gui = Gui::new();
@@ -576,7 +528,6 @@ fn gui_timeline_refuses_a_zoom_out_of_range() {
     gui.quit();
 }
 
-/// `gui.close` closes what `gui.show` opened.
 #[test]
 fn gui_close_closes_the_mixer() {
     let mut gui = Gui::new();
@@ -586,7 +537,6 @@ fn gui_close_closes_the_mixer() {
     gui.quit();
 }
 
-/// The pool's search field shows the search `pool.set` sets.
 #[test]
 fn the_pools_search_field_follows_pool_set() {
     let mut gui = Gui::new();

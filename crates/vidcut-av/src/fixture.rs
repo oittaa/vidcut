@@ -1,11 +1,3 @@
-//! Synthetic test fixtures: barcode video (frame index in luma, see
-//! [`barcode`](crate::barcode)) plus an optional [`beep`](crate::beep) audio track,
-//! encoded with real encoders into real containers.
-//!
-//! Fixtures are cached in [`testdata::fixtures_dir`](crate::testdata::fixtures_dir)
-//! under a descriptive file name that encodes the whole spec, so tests can share
-//! them across runs. Delete them when generated output changes.
-
 use std::path::{Path, PathBuf};
 
 use crate::error::{Context, Error, Result};
@@ -44,23 +36,14 @@ impl Container {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VideoCodec {
-    /// libx264, 8-bit 4:2:0.
     H264,
-    /// libx265, 10-bit 4:2:0.
     Hevc10,
-    /// prores_ks HQ, 10-bit 4:2:2, intra-only.
     ProRes422Hq,
-    /// prores_ks 4444 from 10-bit 4:4:4, intra-only: decoded as 12 bits.
     ProRes4444,
-    /// [`VideoCodec::ProRes4444`] with an alpha of a half everywhere.
     ProRes4444Alpha,
-    /// dnxhd as DNxHR HQ, 8-bit 4:2:2, intra-only.
     DnxHrHq,
-    /// libvpx-vp9, 8-bit 4:2:0.
     Vp9,
-    /// FFV1, lossless 8-bit 4:2:0, intra-only.
     Ffv1,
-    /// libsvtav1, 10-bit 4:2:0, as cameras and renders make AV1.
     Av1,
 }
 
@@ -158,37 +141,18 @@ pub struct AudioSpec {
     pub channels: u16,
 }
 
-/// What the video frames show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Picture {
-    /// The frame index as a [`barcode`](crate::barcode).
     Barcode,
-    /// Video-range black (filler for gaps).
     Black,
-    /// A new shot every `frames` frames (for scene detection): a flat level
-    /// per shot with a slowly moving bar; every fourth shot is black.
     Shots { frames: u32 },
-    /// Four upright stripes of [`Picture::COLORS`], left to right, in every
-    /// frame (for color conversion tests).
     Colors,
-    /// Luma noise, new in every frame: as hard to compress as a picture
-    /// gets (for rate control tests).
     Noise,
-    /// The barcode where the reader samples it, and luma noise, new in
-    /// every frame, in the bands it doesn't: the top and bottom eighths and
-    /// the middle quarter. Heavy to decode, as camera footage is, and each
-    /// frame still tells which it is.
     Busy,
-    /// Black but for a highlight of two white pixels side by side (SDR
-    /// white in HDR), at [`Picture::highlight`]: between the points of any
-    /// grid of every other pixel or fewer (for measured light).
     Highlight,
 }
 
 impl Picture {
-    /// The (Y, Cb, Cr) of the stripes of [`Picture::Colors`], 8-bit video
-    /// range: an orange, a light blue, a green and a purple, well inside
-    /// the gamut of BT.601 and BT.709.
     pub const COLORS: [(u8, u8, u8); 4] = [
         (100, 90, 170),
         (150, 160, 100),
@@ -196,21 +160,15 @@ impl Picture {
         (80, 150, 150),
     ];
 
-    /// The left pixel of [`Picture::Highlight`] in a `w`×`h` picture: an
-    /// odd column on an odd row, near the middle.
     pub fn highlight(w: u32, h: u32) -> (u32, u32) {
         ((w / 2) | 1, (h / 2) | 1)
     }
 
-    /// Luma of shot `s` of [`Picture::Shots`]: 16 (black) for every fourth.
     pub fn shot_level(s: u32) -> u8 {
         [70, 190, 120, 16][(s % 4) as usize]
     }
 }
 
-/// Chroma plane `p` (1: Cb, 2: Cr) of `f` painted with the stripes of
-/// [`Picture::Colors`], stored turned against `rotation` as the luma is,
-/// each sample written as `bytes` gives it.
 fn paint_chroma<const N: usize>(
     f: &mut frame::Video,
     p: usize,
@@ -223,12 +181,10 @@ fn paint_chroma<const N: usize>(
         f.plane_height(p) as usize,
         f.stride(p),
     );
-    // The upright picture's width: a quarter turn swaps the sides.
     let upright = if rotation % 180 == 90 { lh } else { lw };
     let data = f.data_mut(p);
     for y in 0..h {
         for x in 0..w {
-            // The first luma sample this one covers, and where it shows.
             let (sx, sy) = (x * lw.div_ceil(w), y * lh.div_ceil(h));
             let shown = match rotation {
                 90 => upright - 1 - sy,
@@ -243,80 +199,47 @@ fn paint_chroma<const N: usize>(
     }
 }
 
-/// What the audio track carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Sound {
-    /// A [`beep`](crate::beep) at the start of every second.
     Beep,
-    /// Digital silence (filler for gaps and no-audio clips).
     Silence,
-    /// A steady 1 kHz sine at -20 dBFS in every channel: -20 LUFS in
-    /// stereo (ITU-R BS.1770).
     Tone,
 }
 
-/// Peak amplitude of [`Sound::Tone`].
 pub const TONE_AMPLITUDE: f32 = 0.1;
 
-/// Everything that determines a fixture file.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FixtureSpec {
     pub container: Container,
     pub video: VideoCodec,
     pub width: u32,
     pub height: u32,
-    /// Nominal frame rate as (numerator, denominator), e.g. (30000, 1001).
     pub fps: (u32, u32),
     pub frames: u32,
-    /// Keyframe interval in frames (ignored for intra-only codecs).
     pub gop: u32,
-    /// Maximum consecutive B-frames (H.264/HEVC only).
     pub bframes: u32,
-    /// Variable frame rate: frame durations cycle through ½, 1½, 1, 1 nominal frames.
     pub vfr: bool,
     pub audio: Option<AudioSpec>,
-    /// Added to every timestamp, e.g. to emulate MPEG-TS start offsets.
     pub start_offset_ms: u32,
-    /// Write a video stream; `false` makes an audio-only file of the same duration.
     pub video_enabled: bool,
     pub picture: Picture,
     pub sound: Sound,
-    /// Clockwise rotation in the stream's display matrix (MP4 and MOV). The
-    /// pictures are stored turned the other way, so they show upright only
-    /// when a player applies it; `width`×`height` is the upright size.
     pub rotation: u16,
-    /// Interlaced H.264 or ProRes (coded by field, `+ildct`) with the top
-    /// field first (`Some(true)`) or the bottom one. Both fields of frame
-    /// `k` show barcode `k`; in the top eighth, which the barcode reader
-    /// doesn't sample, a white block moves 40 px each field, as a camera
-    /// would see it. Not deinterlaced, it combs.
     pub top_field_first: Option<bool>,
-    /// HDR (10-bit HEVC or AV1 tagged BT.2100 with this transfer): the barcode's
-    /// white is SDR reference white (203 nits in PQ, 75% in HLG), which an
-    /// SDR player that doesn't convert shows gray.
     pub hdr: Option<vidcut_core::model::Hdr>,
-    /// A start timecode (`HH:MM:SS:FF`, `;` for drop-frame) as a camera
-    /// records it: MP4 and MOV get a `tmcd` track.
     pub timecode: Option<String>,
-    /// HDR metadata (with `hdr`), in the bitstream and the container.
     pub hdr_meta: Option<HdrMeta>,
 }
 
-/// The HDR metadata a fixture carries: the mastering display of
-/// [`mastering`] at `max_nits`, content light levels, and HDR10+ on every
-/// frame ([`hdr10plus_t35`], an HEVC SEI or AV1 metadata OBU), or on the
-/// first `hdr10plus_frames`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HdrMeta {
     pub max_nits: u32,
-    /// MaxCLL and MaxFALL.
     pub light: Option<(u32, u32)>,
     pub hdr10plus: bool,
     pub hdr10plus_frames: Option<u32>,
 }
 
 impl HdrMeta {
-    /// Its static values.
     pub fn values(&self) -> crate::hdr::Static {
         crate::hdr::Static {
             mastering: Some(mastering(self.max_nits)),
@@ -327,8 +250,6 @@ impl HdrMeta {
     }
 }
 
-/// A P3 mastering display (D65 white) from 0.0001 to `max_nits` cd/m²: what
-/// HDR10 is mostly mastered on.
 pub fn mastering(max_nits: u32) -> vidcut_core::model::MasteringDisplay {
     vidcut_core::model::MasteringDisplay {
         primaries: [[0.68, 0.32], [0.265, 0.69], [0.15, 0.06]],
@@ -338,9 +259,6 @@ pub fn mastering(max_nits: u32) -> vidcut_core::model::MasteringDisplay {
     }
 }
 
-/// Frame `k`'s HDR10+ (SMPTE ST 2094-40) as an ITU-T T.35 payload: one
-/// window, MaxSCL and the average MaxRGB counting up with `k`, so each frame's
-/// is its own.
 pub fn hdr10plus_t35(k: u32) -> Vec<u8> {
     let light = |raw: u32| f64::from(raw) / 10.0;
     crate::hdr::Hdr10Plus {
@@ -352,17 +270,12 @@ pub fn hdr10plus_t35(k: u32) -> Vec<u8> {
     .t35()
 }
 
-/// 10-bit codes (limited range) of SDR reference white in HDR: 203 nits in
-/// PQ, 75% in HLG (ITU-R BT.2408).
 pub const PQ_WHITE: u16 = 573;
 pub const HLG_WHITE: u16 = 721;
 
-/// VFR frame durations in quarter-frame ticks (average 4 = one nominal frame).
 const VFR_PATTERN: [i64; 4] = [2, 6, 4, 4];
 
 impl FixtureSpec {
-    /// A spec with sensible defaults: GOP of about one second, two B-frames for
-    /// inter codecs, 48 kHz stereo AAC (PCM for MOV, Opus for WebM), CFR.
     pub fn new(
         video: VideoCodec,
         container: Container,
@@ -411,38 +324,31 @@ impl FixtureSpec {
         }
     }
 
-    /// HDR metadata (needs [`hdr`](Self::hdr)).
     pub fn hdr_meta(mut self, meta: HdrMeta) -> Self {
         self.hdr_meta = Some(meta);
         self
     }
 
-    /// Records `tc` as the start timecode (`01:00:00:00`).
     pub fn timecode(mut self, tc: &str) -> Self {
         self.timecode = Some(tc.to_string());
         self
     }
 
-    /// 10-bit HDR with this transfer (needs [`VideoCodec::Hevc10`]).
     pub fn hdr(mut self, hdr: vidcut_core::model::Hdr) -> Self {
         self.hdr = Some(hdr);
         self
     }
 
-    /// Interlaced fields, the top (`true`) or the bottom one first.
     pub fn interlaced(mut self, top_first: bool) -> Self {
         self.top_field_first = Some(top_first);
         self
     }
 
-    /// Stores the pictures turned against `degrees` (clockwise: 90, 180 or
-    /// 270) with that rotation in the display matrix, like phone video.
     pub fn rotation(mut self, degrees: u16) -> Self {
         self.rotation = degrees;
         self
     }
 
-    /// The stored (coded) picture size.
     pub fn coded_size(&self) -> (u32, u32) {
         if self.rotation % 180 == 90 {
             (self.height, self.width)
@@ -451,7 +357,6 @@ impl FixtureSpec {
         }
     }
 
-    /// Audio-only file (the video settings still define the duration).
     pub fn audio_only(mut self) -> Self {
         self.video_enabled = false;
         self
@@ -501,7 +406,6 @@ impl FixtureSpec {
         self
     }
 
-    /// Descriptive, unique file name for this spec.
     pub fn file_name(&self) -> String {
         let audio = match self.audio {
             Some(a) => format!(
@@ -575,7 +479,6 @@ impl FixtureSpec {
         )
     }
 
-    /// Time base of the video timestamps this generator writes.
     pub fn video_time_base(&self) -> ffmpeg::Rational {
         let (n, d) = (self.fps.0 as i32, self.fps.1 as i32);
         if self.vfr {
@@ -585,8 +488,6 @@ impl FixtureSpec {
         }
     }
 
-    /// Presentation timestamp of frame `k` in [`video_time_base`](Self::video_time_base),
-    /// excluding the start offset.
     pub fn frame_pts(&self, k: u32) -> i64 {
         if !self.vfr {
             return i64::from(k);
@@ -596,32 +497,24 @@ impl FixtureSpec {
         (k / 4) * cycle + VFR_PATTERN[..(k % 4) as usize].iter().sum::<i64>()
     }
 
-    /// Presentation time of frame `k` in seconds, excluding the start offset.
     pub fn frame_time(&self, k: u32) -> f64 {
         let tb = self.video_time_base();
         self.frame_pts(k) as f64 * f64::from(tb.numerator()) / f64::from(tb.denominator())
     }
 
-    /// Total duration in seconds (end of the last frame).
     pub fn duration(&self) -> f64 {
         self.frame_time(self.frames)
     }
 }
 
-/// Returns the path of the fixture for `spec`, generating it first if needed.
 pub fn ensure(spec: &FixtureSpec) -> Result<PathBuf> {
     ensure_in(&crate::testdata::fixtures_dir()?, spec)
 }
 
-/// Like [`ensure`], caching in `dir`.
 pub fn ensure_in(dir: &Path, spec: &FixtureSpec) -> Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let path = dir.join(spec.file_name());
     if !path.exists() {
-        // Generate under a temporary name so an interrupted run never leaves a
-        // truncated fixture that later runs would trust.
-        // Unique per thread: tests generate fixtures concurrently within one
-        // process, and two writers sharing a temp file corrupt it.
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let tmp = dir.join(format!(
@@ -636,8 +529,6 @@ pub fn ensure_in(dir: &Path, spec: &FixtureSpec) -> Result<PathBuf> {
         result?;
         match std::fs::rename(&tmp, &path) {
             Ok(()) => {}
-            // Another test made it meanwhile, and on Windows has it open,
-            // so it can't be replaced.
             Err(_) if path.exists() => {
                 let _ = std::fs::remove_file(&tmp);
             }
@@ -647,25 +538,18 @@ pub fn ensure_in(dir: &Path, spec: &FixtureSpec) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Barcode pictures as image files: a still (one file) or a numbered
-/// sequence, in a folder of their own under the fixture cache.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ImageSpec {
     pub width: u32,
     pub height: u32,
-    /// Picture `k` shows the barcode `barcode + k`.
     pub barcode: u32,
     pub count: u32,
-    /// The first file's number, and the width numbers are zero-padded to
-    /// (0: not padded).
     pub first: u64,
     pub digits: usize,
-    /// `png` or `jpg`.
     pub ext: &'static str,
 }
 
 impl ImageSpec {
-    /// One picture showing `barcode`.
     pub fn still(barcode: u32, width: u32, height: u32, ext: &'static str) -> Self {
         Self {
             width,
@@ -678,7 +562,6 @@ impl ImageSpec {
         }
     }
 
-    /// `count` pictures numbered from `first`, showing barcodes `0..count`.
     pub fn sequence(first: u64, count: u32, digits: usize, width: u32, height: u32) -> Self {
         Self {
             width,
@@ -691,7 +574,6 @@ impl ImageSpec {
         }
     }
 
-    /// The name of picture `k`'s file: `img_<number>.<ext>`.
     pub fn file_name(&self, k: u32) -> String {
         let n = self.first + u64::from(k);
         format!("img_{n:0width$}.{}", self.ext, width = self.digits)
@@ -705,7 +587,6 @@ impl ImageSpec {
     }
 }
 
-/// Generates `spec`'s images (once; cached), returning their files in order.
 pub fn ensure_images(spec: &ImageSpec) -> Result<Vec<PathBuf>> {
     crate::init();
     let dir = crate::testdata::fixtures_dir()?.join(spec.folder_name());
@@ -717,8 +598,6 @@ pub fn ensure_images(spec: &ImageSpec) -> Result<Vec<PathBuf>> {
     if dir.exists() {
         return Ok(files(&dir));
     }
-    // Into a folder of its own first, so an interrupted run leaves no
-    // half-made fixture that later runs would trust.
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = dir.with_file_name(format!(
@@ -742,7 +621,6 @@ pub fn ensure_images(spec: &ImageSpec) -> Result<Vec<PathBuf>> {
     }
     match std::fs::rename(&tmp, &dir) {
         Ok(()) => {}
-        // Another test made it meanwhile.
         Err(_) if dir.exists() => {
             let _ = std::fs::remove_dir_all(&tmp);
         }
@@ -751,7 +629,6 @@ pub fn ensure_images(spec: &ImageSpec) -> Result<Vec<PathBuf>> {
     Ok(files(&dir))
 }
 
-/// A gray picture as a high-quality JPEG.
 fn jpeg_gray(width: u32, height: u32, luma: &[u8]) -> Result<Vec<u8>> {
     let mut f = frame::Video::new(format::Pixel::YUVJ420P, width, height);
     let (w, h) = (width as usize, height as usize);
@@ -773,7 +650,6 @@ fn jpeg_gray(width: u32, height: u32, luma: &[u8]) -> Result<Vec<u8>> {
     ctx.set_height(height);
     ctx.set_format(format::Pixel::YUVJ420P);
     ctx.set_time_base(ffmpeg::Rational(1, 25));
-    // Fixed quality 2 (of 31): fine enough for every barcode cell.
     ctx.set_flags(codec::Flags::QSCALE);
     unsafe { (*ctx.as_mut_ptr()).global_quality = 2 * ffmpeg::ffi::FF_QP2LAMBDA };
     let mut enc = ctx.open_as(codec).ctx(|| "opening JPEG encoder".into())?;
@@ -785,18 +661,12 @@ fn jpeg_gray(width: u32, height: u32, luma: &[u8]) -> Result<Vec<u8>> {
     Ok(packet.data().unwrap_or_default().to_vec())
 }
 
-/// What [`spoil`] does to a packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Spoil {
-    /// Leaves it out, as a file that lost it.
     Drop,
-    /// Overwrites its data with zeros, as a damaged file.
     Zero,
 }
 
-/// Copies `src` to `out` (the container from `out`'s extension, packets
-/// and timestamps unchanged) with packet `n` of stream `index`, counting
-/// from 0 in file order, spoiled.
 pub fn spoil(src: &Path, out: &Path, index: usize, n: usize, how: Spoil) -> Result<()> {
     crate::init();
     let mut input = format::input(src).ctx(|| format!("opening {}", src.display()))?;
@@ -841,7 +711,6 @@ pub fn spoil(src: &Path, out: &Path, index: usize, n: usize, how: Spoil) -> Resu
     Ok(())
 }
 
-/// Writes the fixture for `spec` to `path`.
 pub fn generate(spec: &FixtureSpec, path: &Path) -> Result<()> {
     crate::init();
     if spec.width < 80 || spec.height < 8 {
@@ -906,7 +775,6 @@ pub fn generate(spec: &FixtureSpec, path: &Path) -> Result<()> {
             v.encode_frame(spec, k, &mut octx)?;
         }
         if let (Some(a), Some(total)) = (audio.as_mut(), total_samples) {
-            // Keep audio roughly level with video for sane interleaving.
             let until = ((spec.frame_time(k + 1)) * f64::from(a.spec.rate)).round() as u64;
             a.encode_until(until.min(total), false, &mut octx)?;
         }
@@ -927,14 +795,9 @@ struct VideoTrack {
     enc_tb: ffmpeg::Rational,
     stream_tb: ffmpeg::Rational,
     offset: i64,
-    /// The upright picture, and the same turned for storage.
     luma8: Vec<u8>,
     stored: Vec<u8>,
-    /// Duration of each submitted frame by pts. Delayed encoders (x264 with
-    /// B-frames) don't reliably carry frame durations onto packets; without them
-    /// the MP4 muxer gives the last sample duration 0 and its edit list drops it.
     durations: std::collections::HashMap<i64, i64>,
-    /// HDR10+ of each submitted frame by pts, put into its packet.
     hdr10plus: std::collections::HashMap<i64, Vec<u8>>,
 }
 
@@ -998,7 +861,6 @@ impl VideoTrack {
             VideoCodec::Hevc10 => {
                 opts.set("preset", "ultrafast");
                 if spec.picture == Picture::Busy {
-                    // Keeps the grain, as a camera's high bitrate does.
                     opts.set("crf", "14");
                 }
                 opts.set(
@@ -1007,7 +869,6 @@ impl VideoTrack {
                         "log-level=error:scenecut=0:open-gop=0:keyint={g}:min-keyint={g}:bframes={b}{r}",
                         g = spec.gop,
                         b = spec.bframes,
-                        // The HDR SEI at every keyframe, not only in hvcC.
                         r = if spec.hdr_meta.is_some() {
                             ":repeat-headers=1"
                         } else {
@@ -1028,8 +889,6 @@ impl VideoTrack {
             }
             VideoCodec::Ffv1 => {}
             VideoCodec::Av1 => {
-                // Temporal filtering blends neighbors: barcodes stay sharp
-                // without it.
                 opts.set("preset", "10");
                 opts.set("crf", "18");
                 opts.set("svtav1-params", "scd=0:enable-tf=0");
@@ -1041,7 +900,6 @@ impl VideoTrack {
         ost.set_parameters(&encoder);
         ost.set_time_base(tb);
         if spec.timecode.is_some() {
-            // The MOV muxer counts a timecode track's frames at this rate.
             ost.set_avg_frame_rate(ffmpeg::Rational(spec.fps.0 as i32, spec.fps.1 as i32));
         }
         if spec.rotation != 0 {
@@ -1057,8 +915,6 @@ impl VideoTrack {
                 if sd.is_null() {
                     return Err(Error::Invalid("no memory for the display matrix".into()));
                 }
-                // Setting takes the clockwise angle (reading gives the
-                // counterclockwise one).
                 ffmpeg::ffi::av_display_rotation_set(
                     (*sd).data as *mut i32,
                     f64::from(spec.rotation),
@@ -1092,7 +948,6 @@ impl VideoTrack {
         match spec.picture {
             Picture::Barcode if spec.top_field_first.is_some() => {
                 crate::barcode::paint(k, &mut self.luma8, w, h, w);
-                // The moving block, at its place in each field's time.
                 let first_even = spec.top_field_first == Some(true);
                 let block = w / 8;
                 for y in 0..h / 8 {
@@ -1123,7 +978,6 @@ impl VideoTrack {
                 let level = Picture::shot_level(k / frames.max(1));
                 self.luma8.fill(level);
                 if level != 16 {
-                    // A bar a tenth of the width moving 2 px a frame.
                     let bar = (w / 10).max(1);
                     let x0 = (2 * (k % frames.max(1)) as usize) % (w - bar).max(1);
                     for y in 0..h {
@@ -1132,8 +986,6 @@ impl VideoTrack {
                 }
             }
         }
-        // Store the picture turned against the rotation the display matrix
-        // applies: stored (sx, sy) shows at upright (x, y).
         let (cw, ch) = (coded_w as usize, coded_h as usize);
         for sy in 0..ch {
             for sx in 0..cw {
@@ -1173,7 +1025,6 @@ impl VideoTrack {
                 }
             }
             for p in 1..frame.planes() {
-                // Chroma at its middle, and alpha, the fourth plane, at a half.
                 for px in frame.data_mut(p).as_chunks_mut::<2>().0 {
                     *px = 512u16.to_le_bytes();
                 }
@@ -1310,9 +1161,6 @@ impl AudioTrack {
         })
     }
 
-    /// Encodes beep audio up to (not including) absolute sample `until`. Only
-    /// whole encoder frames are written unless `last` is set, because fixed
-    /// frame-size codecs (AAC, Opus) accept a short frame only at the end.
     fn encode_until(
         &mut self,
         until: u64,
@@ -1400,8 +1248,6 @@ impl AudioTrack {
     }
 }
 
-/// Luma noise for frame `k`: xorshift, seeded by the frame, so the same
-/// file every time.
 fn noise(k: u32, luma: &mut [u8]) {
     let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ u64::from(k).wrapping_mul(0x2545_F491);
     for px in luma.iter_mut() {
@@ -1412,9 +1258,6 @@ fn noise(k: u32, luma: &mut [u8]) {
     }
 }
 
-/// [`Picture::Busy`] for frame `k` in a `width`×`height` luma plane: a
-/// textured picture panning 8 pixels a frame, with faint noise, new in
-/// every frame, on it, about what a camera's 4K60 takes.
 fn paint_busy(k: u32, luma: &mut [u8], width: usize, height: usize) {
     crate::barcode::paint(k, luma, width, height, width);
     let mut texture = vec![0; 2 * width];

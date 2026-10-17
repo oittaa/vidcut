@@ -1,17 +1,3 @@
-//! Transitions on edit points, from other editors (deviation X9) or made
-//! here (decision D50): kept while they fit, written back. Dissolves and
-//! cross fades play; any other plays as a cut.
-//!
-//! - A transition sits on a cut between two clips' pictures, or their
-//!   sounds, or between a clip and a gap (a fade from or to black). It
-//!   names the clip on each side; a split of the clip before the cut hands
-//!   it to the part that ends there.
-//! - It fits while those clips still meet at the cut (or the gap is still
-//!   there), the clip after the cut has `before` frames of media before its
-//!   first one and the clip before the cut `after` frames after its last:
-//!   during a transition each clip shows frames past its edge.
-//! - An edit after which one no longer fits drops it, and says so.
-
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
@@ -20,12 +6,10 @@ use super::{EDITOR, VIDCUT, gap, rt, schema};
 use crate::model::{Clip, Media, Project, Track, Transition};
 use crate::render::Curve;
 
-/// The name transition `t` goes by: `Cross Dissolve`, `Cross Fade +3 dB`.
 pub fn name(t: &Transition) -> String {
     otio_name(&t.otio)
 }
 
-/// The name of OTIO transition `o`.
 pub(super) fn otio_name(o: &Value) -> String {
     [
         &o["name"],
@@ -39,22 +23,16 @@ pub(super) fn otio_name(o: &Value) -> String {
     .to_string()
 }
 
-/// Whether transition `t` plays as a dissolve (decision D50): OTIO's
-/// `SMPTE_Dissolve`, but not one whose effect the editor metadata names
-/// otherwise (another kind of dissolve). Any other plays as a cut.
 pub fn dissolves(t: &Transition) -> bool {
     dissolves_in(&t.otio)
 }
 
-/// [`dissolves`] of OTIO transition `o`.
 fn dissolves_in(o: &Value) -> bool {
     let effect = &o["metadata"][EDITOR]["Effects"]["Effect Name"];
     o["transition_type"] == "SMPTE_Dissolve"
         && effect.as_str().is_none_or(|n| n == "Cross Dissolve")
 }
 
-/// Whether OTIO transition `o`, on sounds or not, plays: as a dissolve, or
-/// a cross fade ([`dissolves`], [`cross_fade`]).
 pub(super) fn plays_in(o: &Value, sound: bool) -> bool {
     if sound {
         cross_fade_in(o).is_some()
@@ -63,15 +41,10 @@ pub(super) fn plays_in(o: &Value, sound: bool) -> bool {
     }
 }
 
-/// The curve transition `t` cross fades sounds with (decision D50): a
-/// Cross Fade by its effect's type in the editor metadata (41 +3 dB, 40
-/// 0 dB, 26 -3 dB, the one that editor's import goes by) or name, else an
-/// `SMPTE_Dissolve` at 0 dB. `None`: it plays as a cut.
 pub fn cross_fade(t: &Transition) -> Option<Curve> {
     cross_fade_in(&t.otio)
 }
 
-/// [`cross_fade`] of OTIO transition `o`.
 fn cross_fade_in(o: &Value) -> Option<Curve> {
     let meta = &o["metadata"][EDITOR];
     match meta["Effects"]["Type"].as_i64() {
@@ -89,22 +62,14 @@ fn cross_fade_in(o: &Value) -> Option<Curve> {
     }
 }
 
-/// A transition that plays on a track ([`playing`]).
 #[derive(Debug, Clone, Copy)]
 pub struct Playing<'a> {
     pub transition: &'a Transition,
-    /// Its frames on the timeline, `[from, to)`.
     pub frames: (i64, i64),
-    /// The clip before its cut and the clip after it; none for a gap.
     pub before: Option<&'a Clip>,
     pub after: Option<&'a Clip>,
 }
 
-/// The transitions of `track` that play on its pictures (or its sounds,
-/// `sound`), in order (decision D50): those that fit and that
-/// `plays` takes, whose frames hold nothing of the track but the clip
-/// before the cut until it and the clip after it from it, and that start
-/// after the one before ends.
 pub fn playing<'a>(
     p: &'a Project,
     track: &'a Track,
@@ -153,7 +118,6 @@ pub fn playing<'a>(
     out
 }
 
-/// The cross fades that play on `track`'s sounds ([`playing`]).
 pub fn cross_fades<'a>(p: &'a Project, track: &'a Track) -> Vec<Playing<'a>> {
     if !track.transitions.iter().any(|t| t.sound) {
         return Vec::new();
@@ -161,10 +125,6 @@ pub fn cross_fades<'a>(p: &'a Project, track: &'a Track) -> Vec<Playing<'a>> {
     playing(p, track, true, |t| cross_fade(t).is_some())
 }
 
-/// Whether clip `c` is heard at timeline frame `at`, its sound running on
-/// through the cross fades out of it and starting with those into it
-/// (`fades`, its track's [`cross_fades`]), and the share of its gain they
-/// give it there (decision D50): 1 outside them.
 pub fn heard_at(fades: &[Playing], c: &Clip, at: i64) -> Option<f64> {
     let (a, b) = c.audio_range()?;
     let side = |into: bool| {
@@ -193,7 +153,6 @@ pub fn heard_at(fades: &[Playing], c: &Clip, at: i64) -> Option<f64> {
     })
 }
 
-/// The span of `c`'s picture (or sound) on the timeline.
 fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
     if sound {
         c.audio_range()
@@ -202,9 +161,6 @@ fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
     }
 }
 
-/// A track of `p`, found once to place its transitions: its clips by id,
-/// the times where a picture or a sound starts or ends (`true`: a sound),
-/// and the pool's items by id.
 pub struct Cuts<'a> {
     clips: HashMap<&'a str, &'a Clip>,
     starts: HashSet<(bool, i64)>,
@@ -232,13 +188,11 @@ impl<'a> Cuts<'a> {
         cuts
     }
 
-    /// The cut transition `t` on the track is on, if it still fits there.
     pub fn place(&self, p: &Project, t: &Transition) -> Option<i64> {
         place(p, self, t)
     }
 }
 
-/// [`Project::source_frames`], its media found in `cuts`.
 fn source_frames(p: &Project, cuts: &Cuts, c: &Clip) -> Option<i64> {
     match (&c.compound, &c.generator) {
         (None, None) => cuts.pool.get(c.media.as_str()).map(|m| p.media_limit(m)),
@@ -263,7 +217,6 @@ fn place(p: &Project, cuts: &Cuts, t: &Transition) -> Option<i64> {
         (None, Some(g)) => span(g, t.sound)?.0,
         (None, None) => return None,
     };
-    // A gap side: nothing of the track there.
     let meets = |end: bool| {
         let at = (t.sound, cut);
         if end {
@@ -275,8 +228,6 @@ fn place(p: &Project, cuts: &Cuts, t: &Transition) -> Option<i64> {
     if (from.is_none() && meets(true)) || (to.is_none() && meets(false)) {
         return None;
     }
-    // Media past the edges (a generator has any), at each clip's speed and
-    // either way.
     if let Some(g) = to.filter(|g| !g.is_generator())
         && t.before > 0
         && !shows_media(g, source_frames(p, cuts, g)?, cut - t.before, cut)
@@ -292,15 +243,12 @@ fn place(p: &Project, cuts: &Cuts, t: &Transition) -> Option<i64> {
     Some(cut)
 }
 
-/// Whether clip `c` shows its media in timeline frames `[a, b)`: the source
-/// frames there, at its speed and either way, inside `0..frames`.
 fn shows_media(c: &Clip, frames: i64, a: i64, b: i64) -> bool {
     [a, b - 1]
         .into_iter()
         .all(|t| (0..frames).contains(&c.source_at(t)))
 }
 
-/// Drops the transitions that no longer fit their edit points; how many.
 pub fn prune(p: &mut Project) -> usize {
     let mut dropped = 0;
     for ti in 0..p.tracks.len() {
@@ -321,12 +269,10 @@ pub fn prune(p: &mut Project) -> usize {
     dropped
 }
 
-/// What an edit that dropped `n` transitions says.
 pub fn dropped(n: usize) -> String {
     format!("{n} transition(s) no longer fit their edit points and were dropped")
 }
 
-/// Transition `t` as written at `rate`.
 fn written(t: &Transition, rate: f64) -> Value {
     let mut v = (*t.otio).clone();
     v["in_offset"] = rt(t.before as f64, rate);
@@ -335,9 +281,6 @@ fn written(t: &Transition, rate: f64) -> Value {
     v
 }
 
-/// A track's transitions found once for an export: by the clip after each
-/// and, for those into a gap, by the clip before (`true`: on the sound).
-/// The first of each.
 pub(super) struct Edits<'a> {
     cuts: Cuts<'a>,
     into: HashMap<(bool, &'a str), &'a Transition>,
@@ -366,10 +309,6 @@ impl<'a> Edits<'a> {
     }
 }
 
-/// The transition to write before the item of clip `c`'s picture (or
-/// sound), which starts at `s` in the export, after `items`: one at the
-/// clip's first frame, from the clip or gap just written, or from nothing
-/// at the track's start.
 pub(super) fn head(
     p: &Project,
     edits: &Edits,
@@ -392,8 +331,6 @@ pub(super) fn head(
     follows.then(|| written(t, rate))
 }
 
-/// The transition to write after the item of clip `c`'s picture (or
-/// sound), which ends at `e` in the export: one into a gap at its end.
 pub(super) fn tail(
     p: &Project,
     edits: &Edits,
@@ -406,13 +343,10 @@ pub(super) fn tail(
     (edits.cuts.place(p, t)? == e).then(|| written(t, rate))
 }
 
-/// Whether OTIO item `item` is one vidcut wrote for clip `id`.
 fn is_clip_of(item: &Value, id: &str) -> bool {
     item["metadata"][VIDCUT]["clip"] == id
 }
 
-/// Ends a written track: a transition into a gap with frames after its cut
-/// needs the gap after it; one ending on its cut ends the track.
 pub(super) fn close(items: &mut Vec<Value>, rate: f64) {
     if let Some(last) = items.last()
         && schema(last).starts_with("Transition")
@@ -434,7 +368,6 @@ mod tests {
 
     #[test]
     fn a_dissolve_needing_media_past_a_fast_clips_end_is_dropped() {
-        // m1 is 115 frames.
         let mut f = Fixture::new(&[(4.6, true), (4.0, true)]);
         f.append("m1", 0, 100);
         f.ok(json!({"method": "edit.change_speed", "params": {"clips": "c1", "speed": 2.0}}));
@@ -450,8 +383,6 @@ mod tests {
             otio: json!({"OTIO_SCHEMA": "Transition.1", "transition_type": "SMPTE_Dissolve"})
                 .into(),
         });
-        // At twice the speed, 12 frames past c1's end show source frames
-        // 100 to 123.
         assert_eq!(prune(&mut p), 1);
     }
 }

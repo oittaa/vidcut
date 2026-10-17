@@ -1,7 +1,3 @@
-//! Storyboards (`storyboard.render`): one PNG with a labeled picture of
-//! every shot of the program, or of every N frames, so a whole edit can be
-//! looked at at once (by an agent as much as a person).
-
 use std::path::Path;
 
 use serde_json::{Value, json};
@@ -13,10 +9,8 @@ use vidcut_core::{Error, ErrorCode, Result};
 
 use crate::threads::Work;
 
-/// The most pictures one storyboard holds.
 const MAX_CELLS: usize = 200;
 const PAD: usize = 8;
-/// Label glyphs are 5×7 pixels drawn at this scale.
 const SCALE: usize = 2;
 const LABEL: usize = 7 * SCALE + 6;
 const BACKGROUND: [u8; 4] = [28, 28, 30, 255];
@@ -27,9 +21,6 @@ struct Cell {
     piece: VideoPiece,
 }
 
-/// Renders the storyboard of `p` into `out` (PNG): `columns` pictures per
-/// row, each `width` wide. One picture per shot (the middle frame of each
-/// stretch from one source), or one every `every` frames.
 pub fn render(
     p: &Project,
     out: &Path,
@@ -142,15 +133,11 @@ pub fn render(
     }))
 }
 
-/// The cells' pictures, rendered on a few threads. Each reads its cells in
-/// order, the file kept open between them, decoding on the GPU the viewer
-/// decodes on, on a decoder of its own.
 fn pictures(cells: &[Cell], p: &Project, w: usize, h: usize) -> Result<Vec<Vec<u8>>> {
     let fps = p.settings.fps;
     let decoding = crate::preferences::gpu_decoding();
     let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(6));
     let chunk = cells.len().div_ceil(threads);
-    // The render thread's cancel flag: workers don't inherit the slot.
     let cancel = vidcut_av::cancel::current();
     std::thread::scope(|s| {
         let handles = cells
@@ -197,8 +184,6 @@ fn from_av(e: vidcut_av::error::Error) -> Error {
     }
 }
 
-/// The clip whose picture shows at `frame`, and its track: the highest
-/// visible one (top-wins, as export renders).
 fn shown_clip(p: &Project, frame: i64) -> Option<(String, String)> {
     p.tracks
         .iter()
@@ -212,8 +197,6 @@ fn shown_clip(p: &Project, frame: i64) -> Option<(String, String)> {
         })
 }
 
-/// Rows of a 5×7 glyph, high bit on the left; `None` for characters the
-/// labels never use.
 fn glyph(c: char) -> Option<[u8; 7]> {
     Some(match c {
         '0' => [0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e],
@@ -235,8 +218,6 @@ fn glyph(c: char) -> Option<[u8; 7]> {
     })
 }
 
-/// Draws `s` at (`x`, `y`) on an RGBA canvas `cw` pixels wide, at most
-/// `max_w` pixels long.
 fn text(canvas: &mut [u8], cw: usize, x: usize, y: usize, s: &str, max_w: usize) {
     let advance = 6 * SCALE;
     for (i, c) in s.chars().enumerate() {

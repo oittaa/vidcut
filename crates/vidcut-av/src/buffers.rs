@@ -1,22 +1,3 @@
-//! Memory for the frames the CPU's decoders decode: each plane a buffer of
-//! its own, laid out as FFmpeg's default lays them out, freed with the
-//! frame. FFmpeg's default takes them from pools of the decoder's, which
-//! never shrink and live as long as their last frame (gotchas.md): a
-//! picture the player keeps would hold its decoder's whole pool, and a
-//! decoder closed while its pictures are kept would keep its peak beside
-//! the next one's.
-//!
-//! On Unix a plane is mapped of its own, so what is freed goes back to the
-//! system: glibc's allocator would keep it (gotchas.md). Memory mapped anew
-//! for each frame costs a fifth more CPU to decode, its pages faulted in,
-//! so the planes let go last, up to [`SPARE`] bytes, are kept for the next
-//! frames of their size, whichever decoder asks.
-//!
-//! Frames that come from pools all the same (libdav1d's, which takes no
-//! buffers but its own; a filter graph's, the deinterlacer's and the
-//! relayout's) are copied into such buffers when the player keeps them
-//! ([`owned`]).
-
 use std::collections::{HashSet, VecDeque};
 use std::ffi::{c_int, c_void};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -24,9 +5,6 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, codec, ffi, frame};
 
-/// Bytes of planes let go kept for the next frames: a decoder lets its
-/// frames go about as fast as it takes new ones. A 4K 10-bit frame's
-/// planes take 25 MB; a plane larger than this is freed at once.
 const SPARE: usize = 64 << 20;
 
 static SPARES: Mutex<Spares> = Mutex::new(Spares::new());
@@ -35,27 +13,17 @@ fn spares() -> MutexGuard<'static, Spares> {
     SPARES.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Frames `ctx` decodes in memory get buffers of their own
-/// ([`get_buffer`]).
 pub(crate) fn own(ctx: &mut codec::context::Context) {
     // SAFETY: the context isn't opened yet.
     unsafe { (*ctx.as_mut_ptr()).get_buffer2 = Some(get_buffer) };
 }
 
-/// `get_buffer2`: each plane of a frame decoded in memory gets a buffer of
-/// its own ([`plane`]), laid out as FFmpeg's default lays them out
-/// ([`layout`]). Frames in GPU memory, decoders that take no buffers but
-/// FFmpeg's (without `AV_CODEC_CAP_DR1`, such as libdav1d), and layouts
-/// FFmpeg can't tell get FFmpeg's default.
 unsafe extern "C" fn get_buffer(
     ctx: *mut ffi::AVCodecContext,
     frame: *mut ffi::AVFrame,
     flags: c_int,
 ) -> c_int {
-    // SAFETY: FFmpeg's open context, and the frame it asks buffers for, its
-    // format and size set and its planes empty. Each buffer is the frame's
-    // own reference; FFmpeg frees them with the frame, or with
-    // `av_frame_unref` when one can't be had.
+    // SAFETY: FFmpeg's open context and empty frame of set size; the frame owns each buffer.
     unsafe {
         let dr1 = (*ctx)
             .codec
@@ -89,11 +57,6 @@ unsafe extern "C" fn get_buffer(
     }
 }
 
-/// `f`, a frame in memory, in buffers that are freed with it: itself, by
-/// reference, where they are ([`plane`]'s, or plain memory of FFmpeg's,
-/// which keeps no pool behind them), else a copy into buffers of its own,
-/// with its properties. A buffer from a pool (a decoder's of its own, a
-/// filter graph's) would keep that pool whole.
 pub(crate) fn owned(f: &frame::Video) -> Result<frame::Video> {
     if freed_with(f) {
         return crate::export::video::frame_ref(f);
@@ -103,9 +66,7 @@ pub(crate) fn owned(f: &frame::Video) -> Result<frame::Video> {
         source: ffmpeg::Error::from(ret),
     };
     let mut out = frame::Video::empty();
-    // SAFETY: a fresh frame given planes of its own, laid out as
-    // `av_frame_get_buffer` lays them out (rows 64-byte aligned), then the
-    // picture and properties of `f`, a frame in memory of that layout.
+    // SAFETY: `out` is fresh, given planes sized for `f`'s format and size; `f` is in memory.
     unsafe {
         let (src, dst) = (f.as_ptr(), out.as_mut_ptr());
         let format = std::mem::transmute::<c_int, ffi::AVPixelFormat>((*src).format);
@@ -147,23 +108,16 @@ pub(crate) fn owned(f: &frame::Video) -> Result<frame::Video> {
     Ok(out)
 }
 
-/// Gives what glibc keeps of the memory freed back to the system, on a
-/// thread of its own, at most once a second. A closed decoder's own pools
-/// (libdav1d's) and its threads' memory come from glibc's heaps, which
-/// keep what is freed (gotchas.md): two AV1 clips swapped under a 500 MB
-/// budget grew 300 MB in 8 swaps without it, 110 MB with it.
 pub(crate) fn give_back() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     trim::ask();
 }
 
-/// glibc's `malloc_trim`, on a thread of its own.
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 mod trim {
     use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
     use std::time::Duration;
 
-    /// A trim is asked for.
     static ASKED: Mutex<bool> = Mutex::new(false);
     static WAKE: Condvar = Condvar::new();
     static THREAD: OnceLock<()> = OnceLock::new();
@@ -193,9 +147,6 @@ mod trim {
     }
 }
 
-/// Whether every buffer of `f` is freed with its last frame: [`plane`]'s,
-/// or plain memory of FFmpeg's (`av_buffer_alloc`, with no opaque). A
-/// pool's buffer has the pool's entry for its opaque.
 fn freed_with(f: &frame::Video) -> bool {
     // SAFETY: reads the frame's own buffer references.
     unsafe {
@@ -207,17 +158,6 @@ fn freed_with(f: &frame::Video) -> bool {
     }
 }
 
-/// The rows (bytes) and sizes of the planes of a `width`×`height` frame
-/// `ctx` decodes, and the padding after each, as FFmpeg's default lays them
-/// out (8.0, get_buffer.c `update_frame_pool`): the picture grown to the
-/// codec's alignment, rows past it that decoders read (H.264's two), each
-/// plane's rows a multiple of the CPU's alignment, and FFmpeg's padding.
-/// `None` where FFmpeg knows no such layout, or a plane doesn't fit its
-/// `int`.
-///
-/// # Safety
-///
-/// `ctx` is a live codec context with its pixel format set.
 unsafe fn layout(
     ctx: *mut ffi::AVCodecContext,
     width: c_int,
@@ -231,9 +171,6 @@ unsafe fn layout(
     if w <= 0 || align[..4].iter().any(|&a| a <= 0) {
         return None;
     }
-    // Wider by its lowest set bit until every plane's rows are aligned: the
-    // planes widen together, as some decoders take one plane's rows to be
-    // twice another's.
     let mut linesize = [0; 4];
     loop {
         // SAFETY: room for four.
@@ -258,16 +195,13 @@ unsafe fn layout(
     Some((linesize, size, padding))
 }
 
-/// A buffer of `size` bytes for a plane: a spare one let go last, or new
-/// memory. Null when there is none.
 fn plane(size: usize) -> *mut ffi::AVBufferRef {
     let spare = spares().take(size);
     let data = spare.map_or_else(|| alloc(size), |p| p as *mut u8);
     if data.is_null() {
         return std::ptr::null_mut();
     }
-    // SAFETY: `size` bytes of memory of the buffer's own, given back by
-    // `let_go` with its size.
+    // SAFETY: the buffer owns `size` bytes at `data`, given back by `let_go` with `size` as opaque.
     let buf = unsafe { ffi::av_buffer_create(data, size, Some(let_go), size as *mut c_void, 0) };
     if buf.is_null() {
         // SAFETY: memory nothing refers to.
@@ -278,8 +212,6 @@ fn plane(size: usize) -> *mut ffi::AVBufferRef {
     buf
 }
 
-/// A plane's buffer of `size` bytes freed: its memory becomes a spare, and
-/// the oldest spares past [`SPARE`] bytes are freed.
 unsafe extern "C" fn let_go(size: *mut c_void, data: *mut u8) {
     let size = size as usize;
     let gone = {
@@ -293,8 +225,6 @@ unsafe extern "C" fn let_go(size: *mut c_void, data: *mut u8) {
     }
 }
 
-/// `size` bytes of new memory, zeroed, aligned for the CPU; null when there
-/// is none. Mapped on Unix.
 fn alloc(size: usize) -> *mut u8 {
     #[cfg(unix)]
     // SAFETY: a new private mapping.
@@ -322,11 +252,6 @@ fn alloc(size: usize) -> *mut u8 {
     }
 }
 
-/// Frees memory of `size` bytes from [`alloc`].
-///
-/// # Safety
-///
-/// `p` is [`alloc`]'s, and nothing refers to it.
 unsafe fn free(p: *mut u8, size: usize) {
     #[cfg(unix)]
     // SAFETY: the caller's mapping of `size` bytes.
@@ -341,12 +266,9 @@ unsafe fn free(p: *mut u8, size: usize) {
     }
 }
 
-/// Planes' memory let go, kept for frames to come: each one's size and
-/// address, oldest first.
 struct Spares {
     bytes: usize,
     planes: VecDeque<(usize, usize)>,
-    /// The planes given out and not let go, by address.
     live: Option<HashSet<usize>>,
 }
 
@@ -363,7 +285,6 @@ impl Spares {
         self.live.get_or_insert_with(HashSet::new)
     }
 
-    /// The spare of `size` bytes let go last.
     fn take(&mut self, size: usize) -> Option<usize> {
         let i = self.planes.iter().rposition(|&(s, _)| s == size)?;
         let (_, p) = self.planes.remove(i)?;
@@ -371,9 +292,6 @@ impl Spares {
         Some(p)
     }
 
-    /// Keeps the plane at `p`, `size` bytes, as a spare, and lets the
-    /// oldest go past `most` bytes: those to free (`p` itself when it is
-    /// larger).
     fn give(&mut self, size: usize, p: usize, most: usize) -> Vec<(usize, usize)> {
         if size > most {
             return vec![(size, p)];
@@ -397,12 +315,9 @@ mod tests {
     use super::{Spares, layout, owned};
     use crate::ffmpeg::{codec, decoder, ffi, format::Pixel, frame};
 
-    /// A 4×4 8-bit 4:2:0 frame whose planes are in one buffer of a pool,
-    /// luma 1 to 16 row by row, chroma 128.
     fn pooled() -> frame::Video {
         let mut f = frame::Video::empty();
-        // SAFETY: a fresh frame given one buffer of a pool of its size; the
-        // pool goes once that buffer does.
+        // SAFETY: a fresh frame owns a pool buffer of its size; the pool goes with that buffer.
         unsafe {
             let raw = f.as_mut_ptr();
             let pix = ffi::AVPixelFormat::AV_PIX_FMT_YUV420P;
@@ -472,7 +387,6 @@ mod tests {
         };
         let (linesize, size, _) = planes.unwrap();
         assert_eq!(linesize, [1920, 960, 960, 0]);
-        // 1088 rows and 2 more, and half of that for U and V.
         assert_eq!(size, [2_092_800, 523_200, 523_200, 0]);
     }
 

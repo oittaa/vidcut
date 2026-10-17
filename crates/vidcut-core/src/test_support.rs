@@ -1,5 +1,3 @@
-//! Test helpers: fake media and an editor driven by JSON requests.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,7 +15,6 @@ use crate::render::{AudioPiece, RenderPlan};
 use crate::request::{Envelope, Response};
 use crate::time::Rational;
 
-/// Media facts for a fake file: `secs` long at `fps`, optionally with stereo audio.
 pub fn media_info(secs: f64, fps: Rational, audio: bool) -> MediaInfo {
     MediaInfo {
         format: "mov,mp4,m4a,3gp,3g2,mj2".into(),
@@ -58,7 +55,6 @@ pub fn media_info(secs: f64, fps: Rational, audio: bool) -> MediaInfo {
     }
 }
 
-/// Media facts for a fake still image (a photo, a title card).
 pub fn still_info(width: u32, height: u32) -> MediaInfo {
     let mut info = media_info(0.04, Rational::new(25, 1).unwrap(), false);
     info.format = "png_pipe".into();
@@ -67,27 +63,17 @@ pub fn still_info(width: u32, height: u32) -> MediaInfo {
     info
 }
 
-/// An Env whose files are fake media keyed by path, with made-up
-/// measurements: sound and pictures as tests describe them.
 #[derive(Default)]
 pub struct FakeEnv {
     pub files: HashMap<PathBuf, MediaInfo>,
-    /// Image sequences by their first file: the files (in that file's
-    /// folder) and the picture size.
     pub sequences: HashMap<PathBuf, (ImageSequence, u32, u32)>,
-    /// Peak levels by media path (stream 0); missing ones are loud.
     pub levels: HashMap<PathBuf, AudioLevels>,
     pub pictures: HashMap<PathBuf, PictureStats>,
-    /// The preferences' proxy rules.
     pub proxy_rules: crate::preferences::Proxies,
-    /// File sizes by path; others are 1 byte.
     pub sizes: HashMap<PathBuf, u64>,
-    /// Fingerprints by path; others have none.
     pub fingerprints: HashMap<PathBuf, String>,
 }
 
-/// Levels at 100 per second: loud (0.5) during `loud` seconds, otherwise
-/// near silent (-60 dBFS).
 pub fn levels(secs: f64, loud: &[(f64, f64)]) -> AudioLevels {
     let peaks = (0..(secs * 100.0).round() as usize)
         .map(|i| {
@@ -106,8 +92,6 @@ pub fn levels(secs: f64, loud: &[(f64, f64)]) -> AudioLevels {
     }
 }
 
-/// Pictures at `fps` for `secs`: a new shot at each of `shots` (seconds),
-/// black during `black` seconds.
 pub fn pictures(secs: f64, fps: f64, shots: &[f64], black: &[(f64, f64)]) -> PictureStats {
     let n = (secs * fps).round() as usize;
     let pts: Vec<f64> = (0..n).map(|k| k as f64 / fps).collect();
@@ -199,7 +183,6 @@ impl Env for FakeEnv {
         ))
     }
 
-    /// As if every source were -20 LUFS: the loudest piece's gain decides.
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
         let gains: Vec<f64> = plan
             .audio
@@ -279,7 +262,6 @@ impl Env for FakeEnv {
     }
 }
 
-/// An editor at 25 fps with media `m1`..: each `(secs, audio)` becomes `/media/<n>.mp4`.
 pub struct Fixture {
     pub editor: Editor,
     pub env: FakeEnv,
@@ -335,7 +317,6 @@ impl Fixture {
         e
     }
 
-    /// V1 as `(id, start, duration, source_in)`.
     pub fn v1(&self) -> Vec<(String, i64, i64, i64)> {
         self.editor
             .project()
@@ -347,7 +328,6 @@ impl Fixture {
             .collect()
     }
 
-    /// A track's clips as `(id, start, duration, source_in)`.
     pub fn track(&self, id: &str) -> Vec<(String, i64, i64, i64)> {
         self.editor
             .project()
@@ -361,7 +341,6 @@ impl Fixture {
             .unwrap_or_default()
     }
 
-    /// Shorthand: append `media` frames `a..b`.
     pub fn append(&mut self, media: &str, a: i64, b: i64) -> String {
         let r = self.ok(json!({"method": "edit.append", "params": {"media": media, "range": format!("{a}f..{b}f")}}));
         r.result["clip"].as_str().unwrap().to_string()

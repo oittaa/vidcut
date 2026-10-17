@@ -1,6 +1,3 @@
-//! Fixture matrix: the generator writes what we expect, and the decoder returns
-//! exactly the requested frame after any seek.
-
 use vidcut_av::decode::{VideoReader, read_barcode};
 use vidcut_av::fixture::{self, AudioCodec, Container, FixtureSpec, VideoCodec};
 use vidcut_av::probe;
@@ -52,7 +49,6 @@ fn fixtures_decode_frame_exact() {
             );
         }
 
-        // Sequential decode: every frame present, in order, with expected timing.
         let mut reader = VideoReader::open(&path).unwrap();
         let tb = reader.time_base();
         let mut first_pts = None;
@@ -67,7 +63,6 @@ fn fixtures_decode_frame_exact() {
             );
             let got = secs(pts - o, tb);
             let want = spec.frame_time(k);
-            // Containers quantize timestamps (Matroska to 1 ms), so allow one tick.
             let tolerance = secs(1, tb).max(0.5e-3) + 1e-9;
             assert!(
                 (got - want).abs() <= tolerance,
@@ -78,7 +73,6 @@ fn fixtures_decode_frame_exact() {
         assert_eq!(k, spec.frames, "{name}: frame count");
         let o = first_pts.unwrap();
 
-        // Exact seeks, forward and backward, around keyframes and the ends.
         let last = spec.frames - 1;
         let mut targets = vec![
             last,
@@ -96,8 +90,6 @@ fn fixtures_decode_frame_exact() {
         let to_ticks =
             |s: f64| (s * f64::from(tb.denominator()) / f64::from(tb.numerator())).round() as i64;
         for &k in targets.iter().filter(|&&k| k <= last) {
-            // The time map's rule: the first frame with pts >= o + t - b, where b
-            // is half a frame. For VFR, aim half-way into the gap before frame k.
             let t = spec.frame_time(k);
             let aim = match (spec.vfr, k) {
                 (true, 1..) => (t + spec.frame_time(k - 1)) / 2.0,
@@ -118,9 +110,6 @@ fn fixtures_decode_frame_exact() {
     }
 }
 
-/// A seek cancelled before it lands leaves no frame from before to read
-/// on from: the player's next read seeks again rather than taking it for
-/// the frame the seek landed on.
 #[test]
 fn a_cancelled_seek_leaves_no_frame_behind() {
     use std::sync::Arc;
@@ -158,10 +147,6 @@ fn probe_reports_first_frame_and_duration() {
 
 #[test]
 fn probe_finds_where_primed_audio_starts() {
-    // AAC (in MP4 an edit list, in Matroska a codec delay) and Opus (WebM,
-    // pre-skip) put priming samples before the sound. Matroska's codec delay
-    // is skipped by some FFmpeg versions and decoded by others; either way
-    // the sound of an audio-only file starts at 0, its first beep included.
     use Container::*;
     for container in [Mp4, Mkv, Webm] {
         let spec =
@@ -169,7 +154,6 @@ fn probe_finds_where_primed_audio_starts() {
         let path = fixture::ensure(&spec).unwrap();
         let a = probe::probe(&path, None).unwrap().audio.remove(0);
         let first = a.first_secs.expect("start");
-        // Matroska and WebM count milliseconds.
         assert!(
             first.abs() < 1.5e-3,
             "{}: sound starts at {first} s (start {:?}, padding {})",
@@ -182,9 +166,6 @@ fn probe_finds_where_primed_audio_starts() {
 
 #[test]
 fn probe_reads_start_timecodes() {
-    // A camera's start timecode, from a QuickTime/MP4 `tmcd` track
-    // (deviation X9: timeline interchange counts sources from it). The
-    // timecode track doesn't disturb decoding.
     use Container::*;
     use VideoCodec::*;
     for (spec, tc) in [
@@ -217,9 +198,6 @@ fn probe_reads_start_timecodes() {
     assert_eq!(probe::probe(&plain, None).unwrap().timecode, None);
 }
 
-/// x264 through FFmpeg makes open GOPs with B-frames (the keyframes after
-/// the first aren't IDR) and IDR keyframes without. MPEG-TS holds the
-/// NAL units after start codes.
 #[test]
 fn open_gops_are_told_from_closed_ones() {
     use vidcut_av::decode::{Input, h264_open_gop};
@@ -231,8 +209,6 @@ fn open_gops_are_told_from_closed_ones() {
     assert!(open(spec(Container::MpegTs)));
 }
 
-/// A recording's timestamps may start hours in: the points looked at count
-/// from there.
 #[test]
 fn open_gops_are_found_in_a_file_that_starts_late() {
     use vidcut_av::decode::{Input, h264_open_gop};
@@ -242,8 +218,6 @@ fn open_gops_are_found_in_a_file_that_starts_late() {
     assert!(h264_open_gop(&Input::File(fixture::ensure(&late).unwrap())));
 }
 
-/// The video of `src` as a raw H.264 stream at `out`: it has no
-/// timestamps, and FFmpeg finds no duration in it.
 fn raw_h264(src: &std::path::Path, out: &std::path::Path) {
     use vidcut_av::ffmpeg::{codec, encoder, format, media};
     vidcut_av::init();
@@ -265,8 +239,6 @@ fn raw_h264(src: &std::path::Path, out: &std::path::Path) {
     output.write_trailer().unwrap();
 }
 
-/// The open GOPs of the MPEG-TS fixture are found in its raw H.264 stream,
-/// which has no duration: the first keyframe is IDR, the next ones aren't.
 #[test]
 fn open_gops_are_found_in_raw_h264() {
     use vidcut_av::decode::{Input, h264_open_gop};
@@ -283,8 +255,6 @@ fn open_gops_are_found_in_raw_h264() {
     assert!(h264_open_gop(&Input::File(raw)));
 }
 
-/// A raw H.264 stream is looked at by bytes: its closed GOPs stay closed,
-/// and open GOPs after them are found.
 #[test]
 fn raw_h264_is_looked_at_by_bytes() {
     use vidcut_av::decode::{Input, h264_open_gop};

@@ -1,8 +1,3 @@
-//! Importing media (Ctrl+I). Numbered images among the files are
-//! asked about: one clip per numbered run (an image sequence, decision D39)
-//! or separate stills (deviation X17). Either way the import is one
-//! request.
-
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -13,24 +8,17 @@ use vidcut_core::time::Rational;
 
 use super::workspace::{Workspace, dim, escape_cancels};
 
-/// Video and audio files.
 const MEDIA_TYPES: &[&str] = &[
     "mp4", "mov", "mkv", "webm", "avi", "mxf", "m4v", "ts", "mts", "m2ts", "mpg", "wav", "flac",
     "mp3", "m4a", "aac", "ogg", "opus",
 ];
 
-/// Image files: stills, or the frames of a sequence.
 const IMAGE_TYPES: &[&str] = &[
     "png", "jpg", "jpeg", "tif", "tiff", "exr", "dpx", "tga", "bmp", "webp",
 ];
 
-/// Image types that are frames of renders and scans: numbered ones are
-/// offered as sequences first. (Numbered JPEGs are usually photos.)
 const FRAME_TYPES: &[&str] = &["png", "tif", "tiff", "exr", "dpx", "tga", "bmp"];
 
-/// The file dialog's filters. The first one, which the dialog opens with,
-/// shows everything vidcut imports: pictures hidden behind a second filter
-/// made a folder of frames look empty.
 fn filters() -> [(&'static str, Vec<&'static str>); 3] {
     [
         ("all media", [MEDIA_TYPES, IMAGE_TYPES].concat()),
@@ -39,7 +27,6 @@ fn filters() -> [(&'static str, Vec<&'static str>); 3] {
     ]
 }
 
-/// Every file type vidcut imports, for a file dialog.
 pub(super) fn media_types() -> Vec<&'static str> {
     [MEDIA_TYPES, IMAGE_TYPES].concat()
 }
@@ -52,29 +39,22 @@ fn extension(path: &Path) -> String {
 
 #[derive(Default)]
 pub(super) struct ImportUi {
-    /// The UI's context, so the file dialog's thread can wake it.
     pub(super) ctx: Option<egui::Context>,
-    /// The dialog's answer, filled in by its thread.
     picked: Arc<Mutex<Option<Picked>>>,
     choice: Option<Choice>,
 }
 
 impl ImportUi {
-    /// The question about numbered images is up.
     pub(super) fn asking(&self) -> bool {
         self.choice.is_some()
     }
 }
 
-/// The files picked, and the bin to put them in.
 type Picked = (Vec<PathBuf>, Option<String>);
 
-/// Numbered images among the files picked: how to bring them in.
 struct Choice {
     runs: Vec<Run>,
-    /// The other files picked.
     others: Vec<PathBuf>,
-    /// All of them, for separate stills.
     files: Vec<PathBuf>,
     bin: Option<String>,
     sequences: bool,
@@ -82,18 +62,13 @@ struct Choice {
     error: Option<String>,
 }
 
-/// A run of two or more numbered images on disk with one of them picked.
 #[derive(Debug, Clone, PartialEq)]
 struct Run {
-    /// The pool's name for it: `frame_[0001-0120].png`.
     name: String,
     count: u64,
-    /// A file of it, picked.
     file: PathBuf,
 }
 
-/// The numbered runs among `files` (each counted on disk, picked or not),
-/// and the files that aren't in one. Whether any run is of a frame type.
 fn runs(files: &[PathBuf]) -> (Vec<Run>, Vec<PathBuf>, bool) {
     let (mut runs, mut others, mut frames) = (Vec::new(), Vec::new(), false);
     let mut taken: HashSet<&Path> = HashSet::new();
@@ -130,11 +105,6 @@ fn runs(files: &[PathBuf]) -> (Vec<Run>, Vec<PathBuf>, bool) {
     (runs, others, frames)
 }
 
-/// The one request that imports `choice` as it stands.
-///
-/// Separate stills ignore the rate, so a cleared or invalid field still
-/// imports. The rate is parsed only when the numbered runs come in as
-/// sequences.
 fn request(choice: &Choice) -> Result<(&'static str, Value), String> {
     let bin = &choice.bin;
     if !choice.sequences {
@@ -162,9 +132,6 @@ fn request(choice: &Choice) -> Result<(&'static str, Value), String> {
 }
 
 impl Workspace {
-    /// Ctrl+I: pick media files to import, into the bin the pool
-    /// shows. The dialog starts where media were last imported from, else in
-    /// the project's folder.
     pub(super) fn import_media(&self) {
         if self.project().is_none() {
             return;
@@ -198,7 +165,6 @@ impl Workspace {
         );
     }
 
-    /// The import's answer, and the window asking about numbered images.
     pub(super) fn import_window(&mut self, ctx: &egui::Context) {
         self.import.ctx = Some(ctx.clone());
         let picked = self
@@ -261,7 +227,6 @@ impl Workspace {
                 }
             });
         });
-        // Escape cancels like Cancel: import nothing.
         if done.is_none() && escape_cancels(ctx, &modal) {
             done = Some(false);
         }

@@ -1,49 +1,28 @@
-//! The output's dynamic range and bit depth, chosen from the pictures an
-//! export shows (decision D44).
-//!
-//! `video.hdr = auto` makes HDR when most of the shown picture is HDR and
-//! the codec can carry it; an unset `video.bit_depth` keeps 10 bits when
-//! most of the picture has them and the codec's 10 bits play widely.
-//! Explicit values win. What is decided is pure: the facts about each
-//! piece's pictures and what the encoders here can write come from the
-//! caller.
-
 use serde::Serialize;
 
 use super::{HdrMode, VideoCodec, VideoSettings};
 use crate::model::Hdr;
 use crate::render::VideoPiece;
 
-/// What a source piece's pictures are.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PictureKind {
-    /// The HDR transfer; `None` for SDR.
     pub hdr: Option<Hdr>,
-    /// Bits per sample of the decoded pictures.
     pub depth: u8,
 }
 
-/// How much of an output's picture is HDR and how much has 10 bits or more,
-/// in frames. Black (gaps, black pieces) shows no source and isn't counted.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct PictureShare {
-    /// Frames that show a source picture.
     pub frames: i64,
-    /// Of them, frames in HDR with PQ.
     pub pq: i64,
-    /// Frames in HDR with HLG.
     pub hlg: i64,
-    /// Frames with 10 bits or more.
     pub deep: i64,
 }
 
 impl PictureShare {
-    /// HDR frames.
     pub fn hdr(&self) -> i64 {
         self.pq + self.hlg
     }
 
-    /// Adds another output's picture.
     pub fn add(&mut self, other: &PictureShare) {
         self.frames += other.frames;
         self.pq += other.pq;
@@ -51,12 +30,10 @@ impl PictureShare {
         self.deep += other.deep;
     }
 
-    /// More than half of the shown picture.
     fn most(&self, n: i64) -> bool {
         n * 2 > self.frames
     }
 
-    /// `n` frames as a share of the shown picture, in words.
     fn percent(&self, n: i64) -> String {
         if self.frames == 0 {
             return "0%".into();
@@ -69,7 +46,6 @@ impl PictureShare {
         }
     }
 
-    /// The HDR transfer to keep: HLG when all HDR frames are HLG, else PQ.
     pub fn transfer(&self) -> Hdr {
         if self.pq == 0 && self.hlg > 0 {
             Hdr::Hlg
@@ -79,7 +55,6 @@ impl PictureShare {
     }
 }
 
-/// Adds up what `video`'s source pieces show, a mix's each.
 pub fn picture_share(
     video: &[VideoPiece],
     mut kind: impl FnMut(&VideoPiece) -> PictureKind,
@@ -103,43 +78,29 @@ pub fn picture_share(
     share
 }
 
-/// What the encoders an export may use can write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Abilities {
-    /// Some encoder of the codec, among those `video.encoder` allows, writes
-    /// 10 bits (HDR needs it).
     pub ten_bit: bool,
-    /// The encoder an 8-bit export would start with writes 10 bits too:
-    /// SDR takes 10 bits only from it, rather than moving to a slower one.
     pub ten_bit_first: bool,
-    /// That encoder's name, for the reasons (`hevc_nvenc`).
     pub first: Option<&'static str>,
 }
 
-/// An output's dynamic range and bit depth, and why.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ColorChoice {
-    /// `sdr`, `pq` or `hlg`.
     pub hdr: HdrMode,
     pub bit_depth: u8,
-    /// What was asked for: `video.hdr` and `video.bit_depth`.
     pub asked: Asked,
-    /// The shown picture it was chosen from.
     pub picture: PictureShare,
-    /// Why, in words: the dynamic range, then the depth.
     pub why: Vec<String>,
-    /// HDR frames tone-mapped into SDR.
     pub tone_mapped: i64,
 }
 
-/// The settings a [`ColorChoice`] was made for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Asked {
     pub hdr: HdrMode,
     pub bit_depth: Option<u8>,
 }
 
-/// The codecs that carry HDR (BT.2100 in 10 bits).
 pub fn carries_hdr(codec: VideoCodec) -> bool {
     matches!(codec, VideoCodec::Hevc | VideoCodec::Av1 | VideoCodec::Vp9)
 }
@@ -155,7 +116,6 @@ fn transfer_name(h: Hdr) -> &'static str {
     }
 }
 
-/// A depth the codec and profile fix, and why.
 fn fixed_depth(v: &VideoSettings) -> Option<(u8, &'static str)> {
     match (v.codec, v.profile.as_deref()) {
         (VideoCodec::Prores, _) => Some((10, "ProRes is 10-bit")),
@@ -169,8 +129,6 @@ fn fixed_depth(v: &VideoSettings) -> Option<(u8, &'static str)> {
     }
 }
 
-/// Chooses `v`'s dynamic range and bit depth for an output showing `share`
-/// (decision D44).
 pub fn choose(v: &VideoSettings, share: &PictureShare, can: Abilities) -> ColorChoice {
     let asked_depth = v
         .bit_depth
@@ -257,9 +215,6 @@ pub fn choose(v: &VideoSettings, share: &PictureShare, can: Abilities) -> ColorC
 }
 
 impl ColorChoice {
-    /// The settings with this choice in place of `auto` and an unset depth:
-    /// what the encoder runs with. DNxHR HQ in 10 bits is HQX, its 10-bit
-    /// form at the same data rate.
     pub fn apply(&self, v: &mut VideoSettings) {
         v.hdr = self.hdr;
         v.bit_depth = Some(self.bit_depth);
@@ -271,26 +226,19 @@ impl ColorChoice {
         }
     }
 
-    /// HDR picture is tone-mapped although SDR wasn't asked for: worth a
-    /// quiet note (decision D44).
     pub fn worth_a_note(&self) -> bool {
         self.tone_mapped > 0 && self.asked.hdr != HdrMode::Sdr
     }
 
-    /// The `--set` overrides that would keep the HDR picture HDR.
     pub fn keep_hdr(&self, v: &VideoSettings) -> Vec<String> {
         keep_hdr(v, self.picture.transfer())
     }
 }
 
-/// The `--set` overrides that make `v` export HDR with `transfer`: the
-/// transfer, a codec that carries it when `v`'s can't (HEVC), and no
-/// profile or depth that rules out 10 bits.
 pub fn keep_hdr(v: &VideoSettings, transfer: Hdr) -> Vec<String> {
     keep_hdr_settings(v, transfer).0
 }
 
-/// [`keep_hdr`]'s overrides, and the settings they make of `v`.
 pub fn keep_hdr_settings(v: &VideoSettings, transfer: Hdr) -> (Vec<String>, VideoSettings) {
     let mut set = Vec::new();
     let mut out = v.clone();
@@ -337,7 +285,6 @@ mod tests {
         }
     }
 
-    /// `m` pieces: `pq…`, `hlg…`, `deep…` (10-bit SDR), anything else 8-bit SDR.
     fn kind(p: &VideoPiece) -> PictureKind {
         let VideoPiece::Source { media, .. } = p else {
             unreachable!()
@@ -415,8 +362,6 @@ mod tests {
     #[test]
     fn what_the_encoders_can_write_limits_it() {
         let v = video(VideoCodec::Hevc);
-        // The encoder an 8-bit export starts with can't write 10 bits: SDR
-        // stays 8 rather than move to a slower encoder.
         let first_only_8 = Abilities {
             ten_bit: true,
             ten_bit_first: false,
@@ -429,10 +374,8 @@ mod tests {
             "{:?}",
             c.why
         );
-        // HDR takes any encoder that writes 10 bits.
         let c = choose(&v, &share(&[("pq", 100)]), first_only_8);
         assert_eq!((c.hdr, c.bit_depth), (HdrMode::Pq, 10));
-        // None does: SDR.
         let none = Abilities {
             ten_bit: false,
             ten_bit_first: false,

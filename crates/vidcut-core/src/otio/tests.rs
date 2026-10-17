@@ -1,5 +1,3 @@
-//! OTIO interchange tests (deviation X9).
-
 use super::*;
 use crate::model::{AudioInfo, Effects, MediaInfo};
 use crate::test_support::{FakeEnv, Fixture, media_info};
@@ -8,9 +6,6 @@ fn req(method: &str, params: Value) -> Value {
     json!({ "method": method, "params": params })
 }
 
-/// A file as editors write one: `Clip.1`, source ranges in the media's
-/// timecode relative to its available range, float rates, a transition,
-/// music on the audio track.
 fn editor_style() -> Value {
     let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 24.0, "value": v});
     let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
@@ -71,7 +66,6 @@ fn files_without_audio_tracks_bring_media_audio() {
 
 #[test]
 fn a_clip_color_comes_back_from_the_file() {
-    // Spec §3: the color a clip shows travels as OTIO's item color.
     let mut f = Fixture::new(&[(4.0, true)]);
     f.append("m1", 0, 50);
     f.ok(req("media.set", json!({"media": "m1", "color": "teal"})));
@@ -86,7 +80,6 @@ fn a_clip_color_comes_back_from_the_file() {
 
 #[test]
 fn a_marker_past_the_last_clip_keeps_its_length() {
-    // Spec D40: a marker keeps its length, and the whole timeline takes it.
     let mut f = Fixture::new(&[(4.0, true)]);
     f.append("m1", 0, 50);
     f.ok(req("markers.add", json!({"at": "40f", "duration": "30f"})));
@@ -112,11 +105,9 @@ fn rates_become_exact() {
     assert_eq!(rational(59.94).unwrap(), r(60000, 1001));
     assert_eq!(rational(25.0).unwrap(), r(25, 1));
     assert_eq!(rational(12.5).unwrap(), r(25, 2));
-    // Ten hours of 23.976 timecode doesn't drift.
     assert_eq!(frames(863_136.0, 23.976, r(24000, 1001)), 863_136);
 }
 
-/// Picture effects with a fade-in and a fade-out, in frames.
 fn faded(fade_in: f64, fade_out: f64) -> Option<Effects> {
     let fades = json!([
         {"Parameter ID": "videoFaderIn", "Parameter Value": fade_in},
@@ -136,7 +127,6 @@ fn faded(fade_in: f64, fade_out: f64) -> Option<Effects> {
 
 #[test]
 fn joined_parts_get_both_fades_back() {
-    // Decision D49: the first part's fade-in and the second's fade-out.
     let whole = faded(10.0, 20.0);
     let (mut first, mut second) = (whole.clone(), whole.clone());
     effects::cut(&mut first, false, true);
@@ -146,19 +136,15 @@ fn joined_parts_get_both_fades_back() {
 
 #[test]
 fn a_fade_where_parts_meet_keeps_them_apart() {
-    // Decision D49: joining would lose the fade-out in the middle.
     assert_eq!(effects::join(&faded(0.0, 20.0), &None), None);
 }
 
-/// `f`'s project written as an OTIO file of its whole timeline and opened
-/// again, with no media files to probe.
 fn reopened(f: &Fixture) -> Project {
     let doc = export(f.editor.project(), "t", None, Locations::Absolute).unwrap();
     let opened = crate::editor::open_otio(&doc, None, &FakeEnv::default()).unwrap();
     opened.expect("vidcut's own file").0
 }
 
-/// The project as an opened file has it: its revision and time start anew.
 fn as_saved(p: &Project) -> Project {
     let mut p = p.clone();
     p.rev = 0;
@@ -273,7 +259,6 @@ fn a_timeline_comes_back_from_an_otio_file() {
     assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
 }
 
-/// `f`'s whole timeline as vidcut writes it, named `t`.
 fn written(f: &Fixture) -> Value {
     export(f.editor.project(), "t", None, Locations::Absolute).unwrap()
 }
@@ -338,7 +323,6 @@ fn a_timeline_imports_as_one_compound_clip() {
     );
 }
 
-/// Points every media reference in `v` that names `from` at `to`.
 fn relink(v: &mut Value, from: &str, to: &str) {
     match v {
         Value::Object(o) => {
@@ -354,7 +338,6 @@ fn relink(v: &mut Value, from: &str, to: &str) {
 
 #[test]
 fn a_clip_relinked_in_the_file_takes_the_files_media() {
-    // OTIO's own items win over the project the file holds.
     let mut f = Fixture::new(&[(4.0, true)]);
     f.append("m1", 0, 50);
     let mut doc = written(&f);
@@ -374,7 +357,6 @@ fn a_clip_that_overlaps_another_on_its_track_is_left_out() {
     let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
     let music = json!({"OTIO_SCHEMA": "Clip.1", "name": "Music", "source_range": r(0.0, 48.0),
         "media_reference": {"OTIO_SCHEMA": "ExternalReference.1", "target_url": "file:///media/music.wav"}});
-    // Both tracks are A1 in vidcut: the second's clip starts inside the first's.
     let a1 = |children: Value| {
         json!({"OTIO_SCHEMA": "Track.1", "kind": "Audio",
         "metadata": {"vidcut": {"track": "A1"}}, "children": children})
@@ -395,7 +377,6 @@ fn a_clip_that_overlaps_another_on_its_track_is_left_out() {
     assert_eq!(starts, [0]);
 }
 
-/// Two clips of `/media/1.mp4` with a dissolve on the cut, at 25 fps.
 fn dissolve() -> Value {
     let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": v});
     let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
@@ -418,8 +399,6 @@ fn a_split_before_a_dissolve_changes_only_the_dissolve() {
     let mut f = Fixture::new(&[(4.0, true)]);
     f.ok(req("timeline.import", json!({"otio": dissolve()})));
     f.ok(req("edit.split", json!({"at": "20f"})));
-    // The part that ends at the cut takes the dissolve: that is all the
-    // step keeps of the transitions.
     let step = serde_json::to_value(&f.editor.held().undo.last().unwrap().change).unwrap();
     let track = &step["fields"]["tracks"]["items"]["changed"]["V1"]["fields"];
     assert_eq!(

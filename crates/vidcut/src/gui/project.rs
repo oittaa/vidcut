@@ -1,10 +1,3 @@
-//! New Project and File > Project Settings: the picture size, frame rate
-//! (decision D37), drop-frame timecode (decision D47) and start timecode
-//! (deviation X7). New Project sends one `project.open` with `create` and
-//! the format, Project Settings one `project.set` with what changed.
-//! Opening an OpenTimelineIO file makes a project file next to it
-//! (deviation X9): another editor's file asks for the format first.
-
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -18,7 +11,6 @@ use super::export::{Ask, Picked, near_center};
 use super::theme;
 use super::workspace::Workspace;
 
-/// Picture sizes to pick from; any even size from 16 up can be typed.
 const SIZES: [(&str, u32, u32); 7] = [
     ("UHD", 3840, 2160),
     ("DCI 4K", 4096, 2160),
@@ -29,23 +21,16 @@ const SIZES: [(&str, u32, u32); 7] = [
     ("Square", 1080, 1080),
 ];
 
-/// The largest side a project can have here.
 const MAX_SIDE: u32 = 16384;
 
-/// The start timecodes offered, besides any other typed: zero, an hour
-/// (where programmes start, with leader before it) and ten hours.
 const START_HOURS: [i64; 3] = [0, 1, 10];
 
-/// The picture size, frame rate and timecode being chosen.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Format {
     width: u32,
     height: u32,
-    /// The frame rate as typed: `25`, `29.97`, `30000/1001`, `12.5`.
     rate: String,
-    /// Timecode counts drop-frame, where the rate has it.
     drop_frame: bool,
-    /// The start timecode as typed: `01:00:00:00`, `01:00:00;00`.
     start: String,
 }
 
@@ -72,29 +57,24 @@ impl Format {
         }
     }
 
-    /// The typed rate, if it is one.
     fn fps(&self) -> Option<Rational> {
         self.rate.trim().parse().ok()
     }
 
-    /// Drop-frame counting as chosen, at a rate that has it.
     fn drop_frame(&self) -> bool {
         self.drop_frame && self.fps().is_some_and(Rational::has_drop_frame)
     }
 
-    /// The typed start timecode, if it is one.
     fn start(&self) -> Option<&str> {
         let t = self.start.trim();
         matches!(TimeSpec::parse(t), Ok(TimeSpec::Timecode(..))).then_some(t)
     }
 
-    /// Whether the typed start is the zero one.
     fn starts_at_zero(&self) -> bool {
         self.start()
             .is_some_and(|t| t.replace(';', ":") == "00:00:00:00")
     }
 
-    /// The start timecode: an offered one, or any other typed.
     fn edit_start(&mut self, ui: &mut egui::Ui) {
         egui::Grid::new(ui.id().with("start"))
             .num_columns(2)
@@ -107,7 +87,6 @@ impl Format {
                         .iter()
                         .map(|h| format!("{h:02}:00:00{sep}00"))
                         .collect();
-                    // `;` and `:` name the same preset.
                     let same = |a: &str, b: &str| a.trim().replace(';', ":") == b.replace(';', ":");
                     let named = offered
                         .iter()
@@ -147,7 +126,6 @@ impl Format {
             });
     }
 
-    /// The size and rate fields, `rate_enabled` or not.
     fn edit(&mut self, ui: &mut egui::Ui, rate_enabled: bool) {
         egui::Grid::new(ui.id().with("format"))
             .num_columns(2)
@@ -184,7 +162,6 @@ impl Format {
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, name)
                         });
-                        // Encoders take even sizes.
                         *side += *side % 2;
                         if name == "Width" {
                             ui.label("×");
@@ -234,8 +211,6 @@ impl Format {
                     });
                 });
                 ui.end_row();
-                // At 29.97 and 59.94 only: timecode counted drop-frame
-                // (`01:00:00;00`), which keeps to the clock.
                 if self.fps().is_some_and(Rational::has_drop_frame) {
                     ui.label("Timecode");
                     ui.checkbox(&mut self.drop_frame, "Drop-frame")
@@ -254,8 +229,6 @@ fn is_standard(f: Rational) -> bool {
     STANDARD_RATES.contains(&(f.num(), f.den()))
 }
 
-/// How a rate is written in the field: as people write it when that reads
-/// back as the same rate, else exactly.
 fn rate_text(f: Rational) -> String {
     let d = f.decimal();
     if d.parse::<Rational>() == Ok(f) {
@@ -265,30 +238,22 @@ fn rate_text(f: Rational) -> String {
     }
 }
 
-/// New Project's choice.
 #[derive(Debug, Clone, Default)]
 pub(super) struct NewProject {
-    /// Set the format now rather than by the first video.
     choose: bool,
     format: Format,
-    /// The OpenTimelineIO file the project is made from.
     from: Option<OtioFile>,
 }
 
-/// An OpenTimelineIO file to open, and the project file made from it.
 #[derive(Debug, Clone)]
 pub(super) struct OtioFile {
     otio: PathBuf,
-    /// The `.vidcut` file to make.
     target: PathBuf,
-    /// vidcut wrote it of a whole project, format and all.
     ours: bool,
-    /// The file's frame rate and start timecode.
     format: Format,
 }
 
 impl OtioFile {
-    /// Reads the file at `otio`: a helper thread's work.
     pub(super) fn read(otio: PathBuf) -> Result<Self, String> {
         use vidcut_core::Env;
         let file = crate::env::AvEnv::new()
@@ -315,26 +280,18 @@ impl OtioFile {
     }
 }
 
-/// What Open Project's helper thread found in an OpenTimelineIO file.
 pub(super) type Found = Arc<Mutex<Option<Result<OtioFile, String>>>>;
 
-/// Opening an OpenTimelineIO file, after its dialog.
 enum OpenOtio {
-    /// The project file's name is taken.
     Taken(OtioFile),
-    /// Another name for it, being picked.
     SaveAs(OtioFile, Picked),
-    /// `project.open` is making and opening it.
     Opening(OtioFile, Ask),
 }
 
 #[derive(Default)]
 pub(super) struct ProjectUi {
     new: Option<NewProject>,
-    /// Project Settings while open: the fields, and what the project had
-    /// when it opened.
     settings: Option<(Format, Format)>,
-    /// An OpenTimelineIO file from Open Project's dialog.
     pub(super) found: Found,
     otio: Option<OpenOtio>,
 }
@@ -349,8 +306,6 @@ impl Workspace {
         self.project_ui.new = Some(NewProject::default());
     }
 
-    /// The next question for `f`: a name that is taken, then the format of
-    /// another editor's file.
     fn otio_next(&mut self, ctx: &egui::Context, f: OtioFile) {
         if f.target.exists() {
             self.project_ui.otio = Some(OpenOtio::Taken(f));
@@ -365,7 +320,6 @@ impl Workspace {
         }
     }
 
-    /// Makes the project file from `f` in `format` and opens it.
     fn open_otio(&mut self, ctx: &egui::Context, f: OtioFile, format: Value) {
         let mut params = json!({ "path": f.otio, "save_as": f.target });
         if let (Some(p), Some(more)) = (params.as_object_mut(), format.as_object()) {
@@ -526,7 +480,6 @@ impl Workspace {
                 ui.horizontal(|ui| {
                     let ok = (!new.choose || new.format.fps().is_some())
                         && new.format.start().is_some();
-                    // A project from a file goes next to it: no dialog.
                     let button = if new.from.is_some() {
                         "Create"
                     } else {
@@ -547,7 +500,6 @@ impl Workspace {
                         } else {
                             json!({})
                         };
-                        // From a file, the field shows the file's start.
                         let start = match new.from {
                             Some(_) => new.choose,
                             None => !new.format.starts_at_zero(),
@@ -622,7 +574,6 @@ impl Workspace {
     }
 }
 
-/// `project.set`'s params for what `now` changes from `was`.
 fn changes(now: &Format, was: &Format) -> Value {
     let mut set = serde_json::Map::new();
     if (now.width, now.height) != (was.width, was.height) {
@@ -635,7 +586,6 @@ fn changes(now: &Format, was: &Format) -> Value {
     if now.drop_frame() != was.drop_frame() {
         set.insert("drop_frame".into(), json!(now.drop_frame()));
     }
-    // After drop-frame, which keeps the start's label (deviation X7).
     if let Some(start) = now.start().filter(|&s| Some(s) != was.start()) {
         set.insert("start_tc".into(), json!(start));
     }

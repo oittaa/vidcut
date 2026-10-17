@@ -1,6 +1,3 @@
-//! Audio peak envelopes for drawing waveforms (spec §5: clips show their
-//! audio as a waveform band).
-
 use std::path::Path;
 
 use crate::decode::decode_stream;
@@ -8,27 +5,16 @@ use crate::error::{Context, Error, Result};
 use crate::export::audio::{Resampler, discard_others};
 use crate::ffmpeg::{codec, frame, media};
 
-/// Peaks of one audio stream: a mono downmix for drawing, and one envelope
-/// per meter channel (spec D28), the stream mixed to that many channels as
-/// the export mixes it.
-///
-/// For each bucket of `1 / per_second` seconds, the lowest and highest
-/// sample, scaled to ±127.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Waveform {
     pub per_second: u32,
-    /// Raw timestamp (s) of the first bucket's start.
     pub start: f64,
-    /// Mono downmix, one `(min, max)` per bucket. The timeline draws this.
     pub peaks: Vec<(i8, i8)>,
-    /// Channels stored in `channel_peaks`.
     pub channels: u16,
-    /// Per-channel peaks, bucket-major: index `bucket * channels + channel`.
     pub channel_peaks: Vec<(i8, i8)>,
 }
 
 impl Waveform {
-    /// Peak range over `[a, b)` seconds (raw time), as fractions of full scale.
     pub fn range(&self, a: f64, b: f64) -> Option<(f32, f32)> {
         let (i, j) = self.buckets(a, b, self.peaks.len());
         if i >= j {
@@ -42,9 +28,6 @@ impl Waveform {
         Some((f32::from(lo) / 127.0, f32::from(hi) / 127.0))
     }
 
-    /// `(min, max)` of one channel over `[a, b)` seconds, as fractions of
-    /// full scale. `None` when `channel` is out of range or the span holds
-    /// no buckets.
     pub fn channel_range(&self, channel: usize, a: f64, b: f64) -> Option<(f32, f32)> {
         let ch = usize::from(self.channels);
         if ch == 0 || channel >= ch {
@@ -62,8 +45,6 @@ impl Waveform {
         Some((f32::from(lo) / 127.0, f32::from(hi) / 127.0))
     }
 
-    /// Linear peak (0..1) of one channel over `[a, b)`. Silence when that
-    /// span has no buckets.
     pub fn channel_peak(&self, channel: usize, a: f64, b: f64) -> f32 {
         self.channel_range(channel, a, b)
             .map(|(lo, hi)| lo.abs().max(hi.abs()))
@@ -77,8 +58,6 @@ impl Waveform {
         (i, j)
     }
 
-    /// A compact binary form for caching. A leading `VCW2` marks per-channel
-    /// peaks; older mono caches fail here and are measured again.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(20 + (self.peaks.len() + self.channel_peaks.len()) * 2);
         out.extend_from_slice(b"VCW2");
@@ -121,12 +100,7 @@ impl Waveform {
     }
 }
 
-/// Decodes audio stream `ordinal` of `path` (counting audio streams only)
-/// and returns its peaks at `per_second` buckets per second, with an
-/// envelope for each of `channels` (the project's; at most 8).
 pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Result<Waveform> {
-    // The export's resampler, so a 5.1 source's centre and surrounds land in
-    // a stereo meter's left and right as they do in the export.
     let want = channels.clamp(1, 8);
     crate::init();
     let mut input = crate::decode::open_file(path)?;
@@ -139,7 +113,6 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Re
     let params = stream.parameters();
     let tick = f64::from(tb);
     discard_others(&input, index);
-    // Same end as export: a past-end timestamp does not stretch the peaks.
     let file_end = crate::decode::container_end(&input, start_pts, tick);
     let mut decoder = codec::context::Context::from_parameters(params)
         .and_then(|mut c| {
@@ -171,8 +144,6 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Re
             }
             ch_acc.as_mut().expect("set").rate = f.rate();
         }
-        // A gap lasts as its timestamps say, as in export: not past the
-        // file's end, and not for a far jump when that end is unknown.
         let frame_end = t.map(|t| t + f.samples() as f64 / f64::from(f.rate().max(1)));
         if let (Some(t), Some(next)) = (t, std::mem::replace(&mut next_in, frame_end)) {
             let gap = crate::decode::audio_gap(next, t, file_end);
@@ -206,8 +177,6 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Re
     let channels = want;
     let peaks = acc.finish();
     let mut channel_peaks = ch_acc.map(|c| c.finish()).unwrap_or_default();
-    // The two resamplers can disagree by a bucket at the tail. The cache
-    // format stores `channels` envelopes of the same length as the mono one.
     let need = peaks.len() * usize::from(channels);
     channel_peaks.resize(need, (0, 0));
     Ok(Waveform {
@@ -222,7 +191,6 @@ pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Re
 struct Accumulator {
     per_second: u32,
     rate: u32,
-    /// Samples taken so far.
     n: u64,
     lo: f32,
     hi: f32,
@@ -272,7 +240,6 @@ impl Accumulator {
     }
 }
 
-/// Per-channel peaks, bucketed on the same sample clock as [`Accumulator`].
 struct ChannelAccum {
     channels: usize,
     per_second: u32,

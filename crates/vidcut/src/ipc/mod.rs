@@ -1,25 +1,3 @@
-//! Live control of a running GUI: JSON-RPC 2.0 over a Unix socket (a named
-//! pipe on Windows, [`transport`]).
-//!
-//! Each running GUI registers itself in [`registry`] and serves [`server`] on
-//! `$XDG_RUNTIME_DIR/vidcut/instances/<pid>.sock`. The CLI's [`route`] sends a
-//! command to the GUI that has its project open (so humans and agents edit
-//! the same live session), and runs it headless otherwise.
-//!
-//! **Wire format:** one JSON object per line, in both directions.
-//! - Request: `{"jsonrpc":"2.0","id":1,"method":"edit.split","params":{"at":"1m"}}`.
-//!   `params` may carry `if_rev` and `dry_run` like everywhere else. An
-//!   optional top-level `"project": "/abs/path.vidcut"` makes the GUI refuse
-//!   the request unless it has that project open.
-//! - Response: `{"jsonrpc":"2.0","id":1,"result":{...}}`, where `result` is the
-//!   same [`Response`](vidcut_core::Response) object `vidcut --json` prints.
-//! - Error: `{"jsonrpc":"2.0","id":1,"error":{"code":4,"message":"...","data":{"code":"INVALID_EDIT"}}}`.
-//!   `code` is the CLI exit code; `data.code` the stable error name.
-//! - Long requests (`export.start`) first send notifications:
-//!   `{"jsonrpc":"2.0","method":"progress","params":{...}}`. Closing the
-//!   connection cancels them, and also a frame, a storyboard, an analysis
-//!   or the loudness measure before an export, which send no progress.
-
 pub mod client;
 pub mod registry;
 pub mod server;
@@ -32,27 +10,18 @@ use vidcut_core::{Envelope, Error, ErrorCode, Request, Result};
 
 pub use registry::Instance;
 
-/// Where a command runs.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Route {
     Headless,
     Instance(Instance),
 }
 
-/// How the user asked to route (`--headless`, `--instance`, `VIDCUT_SOCKET`).
 #[derive(Debug, Clone, Default)]
 pub struct RouteOptions {
     pub headless: bool,
-    /// A pid or a socket path.
     pub instance: Option<String>,
 }
 
-/// Runs `envelope` where [`route`] says: in the GUI that has `project` open,
-/// or headless. `progress` gets export progress as
-/// `{"output", "outputs", "path", "frames", "total", "elapsed"}`. `cancel`
-/// stops a headless export, frame, storyboard or analysis. For a GUI it
-/// closes the connection, which ends the wait and stops that work there
-/// (a background export job keeps going; `jobs.cancel` stops it).
 pub fn run(
     project: Option<&Path>,
     options: &RouteOptions,
@@ -89,12 +58,6 @@ pub fn run(
     }
 }
 
-/// Picks where `request` runs:
-/// - project-less requests (`schema`, `probe`, ...) always run here;
-/// - `--headless` runs here (live-only requests then fail with `NO_INSTANCE`);
-/// - `--instance` / `VIDCUT_SOCKET` pick a GUI explicitly;
-/// - otherwise a GUI that has `project` open, or with no `project`, the only
-///   GUI that has a project open. Live-only requests need a GUI.
 pub fn route(project: Option<&Path>, options: &RouteOptions, request: &Request) -> Result<Route> {
     if request.is_projectless() {
         return Ok(Route::Headless);
@@ -124,7 +87,6 @@ pub fn route(project: Option<&Path>, options: &RouteOptions, request: &Request) 
         }
         return Ok(Route::Headless);
     }
-    // No project given: a lone GUI is the obvious target.
     let candidates: Vec<&Instance> = if live {
         instances.iter().collect()
     } else {
@@ -155,7 +117,6 @@ fn find_explicit(which: &str) -> Result<Instance> {
             .find(|i| i.pid == pid)
             .ok_or_else(|| Error::no_instance(format!("no running vidcut GUI with pid {pid}")));
     }
-    // A socket path: the registry entry if there is one, else just the socket.
     let socket = PathBuf::from(which);
     Ok(registry::list()
         .into_iter()
@@ -168,7 +129,6 @@ fn find_explicit(which: &str) -> Result<Instance> {
         }))
 }
 
-/// The JSON-RPC request object for `envelope`.
 pub fn request_json(id: u64, envelope: &Envelope, project: Option<&Path>) -> Result<Value> {
     let Value::Object(mut m) =
         serde_json::to_value(&envelope.request).map_err(|e| Error::internal(e.to_string()))?
@@ -192,12 +152,10 @@ pub fn request_json(id: u64, envelope: &Envelope, project: Option<&Path>) -> Res
     Ok(v)
 }
 
-/// The JSON-RPC error object for `e`.
 pub fn error_json(e: &Error) -> Value {
     json!({ "code": e.code.exit_code(), "message": e.message, "data": { "code": e.code } })
 }
 
-/// Turns a JSON-RPC error object back into an [`Error`].
 pub fn error_from_json(v: &Value) -> Error {
     let code = v
         .get("data")
@@ -212,8 +170,6 @@ pub fn error_from_json(v: &Value) -> Error {
     Error::new(code, message)
 }
 
-/// `$XDG_RUNTIME_DIR/vidcut`, or a private directory under the temp dir
-/// (on Windows the user's own temporary folder).
 pub fn runtime_dir() -> PathBuf {
     match std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
         Some(dir) => PathBuf::from(dir).join("vidcut"),
@@ -224,9 +180,6 @@ pub fn runtime_dir() -> PathBuf {
     }
 }
 
-/// Creates `dir` (and parents) readable only by this user. On Windows the
-/// folders it is made in (the user's profile, its temporary folder) are the
-/// user's own already, and a new folder inherits that.
 pub fn private_dir(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {

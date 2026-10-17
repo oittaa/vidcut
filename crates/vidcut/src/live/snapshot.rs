@@ -1,6 +1,3 @@
-//! What the live session publishes for the GUI: an immutable snapshot the UI
-//! thread reads without ever waiting on the session.
-
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,12 +8,9 @@ use vidcut_core::Project;
 use vidcut_core::render::TapeEntry;
 use vidcut_core::request::ViewerMode;
 
-/// What the single viewer shows (spec §4.1), each with its own playhead:
-/// the source or the timeline. One player plays both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PlayerId {
-    /// Source Clip and Source Tape.
     Source,
     Timeline,
 }
@@ -28,7 +22,6 @@ impl PlayerId {
         self as usize
     }
 
-    /// The one not shown when this one is.
     pub fn other(self) -> Self {
         match self {
             Self::Source => Self::Timeline,
@@ -45,29 +38,17 @@ impl PlayerId {
     }
 }
 
-/// The state of the source or the timeline, in frames of its content.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct PlayerSnap {
-    /// Something is loaded (otherwise the viewer shows black).
     pub loaded: bool,
-    /// The monitoring mute is on.
     pub muted: bool,
-    /// Length of the content in frames.
     pub frames: i64,
-    /// The playhead frame.
     pub position: i64,
-    /// The picture there is decoded: shown, or kept ready while the other
-    /// is shown, so switching shows it at once.
     pub ready: bool,
     pub playing: bool,
-    /// Shuttle speed (negative: backwards); 0 when stopped.
     pub speed: f64,
-    /// What decodes the picture shown: the GPU's decoder (`nvdec`, `vaapi`,
-    /// `d3d11va`) or `no` (the CPU); empty before any.
     pub hwdec: String,
     pub error: Option<String>,
-    /// The track each of its plan's audio lanes plays, in lane order (the
-    /// timeline's; none for a source).
     pub lanes: Vec<String>,
 }
 
@@ -75,27 +56,20 @@ pub struct PlayerSnap {
 pub struct ProjectSnap {
     pub path: PathBuf,
     pub project: Arc<Project>,
-    /// The next step to undo and to redo, by label.
     pub undo: Vec<String>,
     pub redo: Vec<String>,
 }
 
-/// The Media Pool view: the bin shown, the order of its media and how it
-/// shows them. Source Tape strings together that bin's media, and its
-/// bins', in that order.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct PoolView {
-    /// A bin path; empty: the top level (all media).
     pub bin: String,
     pub sort: vidcut_core::request::PoolSort,
     pub descending: bool,
     pub view: vidcut_core::request::PoolMode,
-    /// The search typed in the pool.
     pub search: String,
 }
 
 impl PoolView {
-    /// The media shown, in order: those in the bin or bins inside it.
     pub fn media(&self, p: &Project) -> Vec<String> {
         let inside = |b: &str| {
             self.bin.is_empty() || b == self.bin || b.starts_with(&format!("{}/", self.bin))
@@ -118,34 +92,25 @@ impl PoolView {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Selection {
-    /// Selected timeline clips.
     pub clips: Vec<String>,
-    /// Selected pool media.
     pub media: Vec<String>,
 }
 
-/// One request in the command log.
 #[derive(Debug, Clone, Serialize)]
 pub struct LogEntry {
     pub seq: u64,
-    /// Unix time in seconds.
     pub time: f64,
-    /// `gui`, `ipc` or `session`.
     pub origin: String,
     pub method: String,
     pub params: Value,
-    /// The request in words; an undo or redo names the steps it took.
     pub summary: String,
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// Project revision after the request.
     pub rev: u64,
-    /// Whether the request changed the project.
     pub changed: bool,
 }
 
-/// A message for the status bar.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Notice {
     pub seq: u64,
@@ -153,54 +118,38 @@ pub struct Notice {
     pub error: bool,
 }
 
-/// Pool thumbnails of one media item.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Filmstrip {
     pub width: u32,
     pub height: u32,
-    /// RGBA pictures, evenly spread over the media.
     pub frames: Vec<Vec<u8>>,
-    /// Source time (s) of each picture.
     pub times: Vec<f64>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Snapshot {
-    /// Increases with every publication.
     pub seq: u64,
     pub pid: u32,
     pub socket: Option<PathBuf>,
     pub project: Option<ProjectSnap>,
     pub viewer: ViewerMode,
-    /// The source mode Q returns to.
     pub last_source: ViewerMode,
     pub source: PlayerSnap,
     pub timeline: PlayerSnap,
-    /// Media shown in Source Clip mode.
     pub source_media: Option<String>,
-    /// Media layout of the Source Tape.
     pub tape: Arc<Vec<TapeEntry>>,
     pub selection: Selection,
     pub pool: PoolView,
-    /// Clips on the clipboard.
     pub clipboard: usize,
     pub log: Arc<VecDeque<LogEntry>>,
     pub notices: Arc<VecDeque<Notice>>,
     pub thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
-    /// Media whose files are missing (an image sequence's first picture).
     pub missing: Arc<HashSet<String>>,
-    /// Audio peaks of media (their first audio stream).
     pub waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
-    /// Export jobs, oldest first.
     pub jobs: Arc<Vec<super::JobInfo>>,
-    /// Steps and paused seeks play their frame's sound (decision D42).
     pub audio_scrubbing: bool,
-    /// The viewer shows its stats for nerds (`player.stats`).
     pub stats: bool,
-    /// Why there is no preview, if so.
     pub preview_error: Option<String>,
-    /// The GUI's theme (`appearance.theme`), loaded again when the
-    /// preferences or a theme file change.
     pub theme: Arc<crate::themes::Theme>,
 }
 
@@ -212,7 +161,6 @@ impl Snapshot {
         }
     }
 
-    /// The player the viewer shows.
     pub fn active(&self) -> &PlayerSnap {
         self.player(PlayerId::of(self.viewer))
     }
@@ -221,8 +169,6 @@ impl Snapshot {
         self.project.as_ref().map(|p| &*p.project)
     }
 
-    /// The media whose source the viewer shows: the Source Clip, or the clip
-    /// under the Source Tape playhead, with the source frame there.
     pub fn source_at(&self) -> Option<(&str, i64)> {
         match self.viewer {
             ViewerMode::SourceClip => self
@@ -236,7 +182,6 @@ impl Snapshot {
     }
 }
 
-/// The tape entry under `position` (the last one at or past the end).
 pub fn tape_at(tape: &[TapeEntry], position: i64) -> Option<&TapeEntry> {
     tape.iter()
         .find(|e| position < e.start + e.frames)

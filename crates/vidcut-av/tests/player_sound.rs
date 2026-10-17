@@ -1,10 +1,3 @@
-//! The player's sound beyond playing forward (docs/decisions/player.md):
-//! backward it plays reversed, still the clock; frame steps and paused
-//! seeks play the frame's sound (spec §4.5, decision D42), as does the
-//! scrubber alone. Headless: the fixtures' beeps (a 1 kHz tone for the
-//! first 10 ms of every source second, PCM so exact to the sample) through
-//! a manual or recording output.
-
 mod player_support;
 
 use std::time::{Duration, Instant};
@@ -15,7 +8,6 @@ use vidcut_av::fixture::{Container, FixtureSpec, VideoCodec};
 use vidcut_av::player::{Config, ManualOutput, Player};
 use vidcut_core::render::RenderPlan;
 
-/// Four seconds of PCM beeps: source frames 0, 30, 60 and 90 start one.
 fn beeps() -> Src {
     src(
         "m1",
@@ -33,7 +25,6 @@ fn player(plan: RenderPlan, scrubbing: bool) -> (Player, ManualOutput) {
     (player, out)
 }
 
-/// Pulls until play stops, every buffer full but the last.
 fn play_out(player: &Player, out: &ManualOutput) -> Vec<f32> {
     let mut sound = Vec::new();
     let started = Instant::now();
@@ -44,13 +35,10 @@ fn play_out(player: &Player, out: &ManualOutput) -> Vec<f32> {
     sound
 }
 
-/// The first sample of timeline frame `t`.
 fn sample(t: i64) -> i64 {
     fps().frame_to_sample(t, RATE)
 }
 
-/// A frame's sound that starts with a beep: one, loud within the 3 ms
-/// fade-in.
 fn starts_with_beep(s: &[f32]) -> bool {
     matches!(beep::onsets(s, 0.1, 100).as_slice(), [i] if *i < 144)
 }
@@ -64,21 +52,15 @@ fn backward_the_sound_plays_reversed_sample_for_sample() {
     player.play(-1.0);
     let sound = play_out(&player, &out);
     assert_eq!(player.status().position, 0, "back to the start");
-    // Output sample i is timeline sample `from - i`: frame 110's last
-    // sample first.
     let from = sample(111) - 1;
     let mono = left(&sound);
     assert!(mono.len() as i64 > from, "all of it played");
-    // Each beep comes out reversed: its first sample last, at the place of
-    // its first sample backward.
     let ends: Vec<i64> = burst_ends(&mono, 0.1, 4_800)
         .into_iter()
         .map(|i| i as i64)
         .collect();
     let want: Vec<i64> = [90, 60, 30, 0].iter().map(|&f| from - sample(f)).collect();
     assert_eq!(ends, want, "the beeps where reversed play puts them");
-    // And it is the beep itself, reversed, to the sample: nothing dropped
-    // or doubled on the way.
     for &end in &want[..3] {
         let start = 48_000 * (3 - want.iter().position(|&e| e == end).unwrap() as u64);
         for k in 0..480u64 {
@@ -91,8 +73,6 @@ fn backward_the_sound_plays_reversed_sample_for_sample() {
 
 #[test]
 fn other_speeds_keep_the_pitch_both_ways() {
-    // A steady 1 kHz tone stays 1 kHz, every beep is heard, and the sound
-    // lasts as long as the speed makes it.
     let a = beeps();
     let tone = src(
         "m2",
@@ -137,7 +117,6 @@ fn a_step_plays_the_sound_of_its_frame() {
     let (player, out) = player(plan(&[clip(&a, 0, 120)], 0), true);
     let one = sample(1) as usize;
     let take = |out: &ManualOutput| {
-        // A frame's sound arrives whole, or nothing within a while.
         let start = Instant::now();
         while out.queued() < one as u64 && start.elapsed() < Duration::from_millis(300) {
             std::thread::sleep(Duration::from_millis(1));
@@ -146,13 +125,10 @@ fn a_step_plays_the_sound_of_its_frame() {
         left(&out.pull(queued, Instant::now()))
     };
     let silent = |s: &[f32]| s.iter().all(|v| v.abs() < 1e-3);
-    // A paused seek plays its frame: 29 has no beep.
     player.seek(29);
     let s = take(&out);
     assert_eq!(s.len(), one, "one frame's sound");
     assert!(silent(&s), "frame 29 is silent");
-    // A step onto frame 30 plays the beep from its first sample, faded in
-    // and out over its first and last 3 ms.
     player.step(1);
     let s = take(&out);
     assert_eq!(s.len(), one);
@@ -161,13 +137,11 @@ fn a_step_plays_the_sound_of_its_frame() {
         let want = beep::sample_at(RATE, 48_000 + i as u64);
         assert!((v - want).abs() < 1e-3, "sample {i}: {v} for {want}");
     }
-    // Stepping back onto 30 plays it forward too (D42).
     player.step(1);
     assert!(silent(&take(&out)), "frame 31");
     player.step(-1);
     let s = take(&out);
     assert!(starts_with_beep(&s), "the beep from its start");
-    // Mute and scrubbing off: steps are silent.
     player.set_muted(true);
     player.step(-30);
     assert!(take(&out).is_empty(), "muted");
@@ -184,7 +158,6 @@ fn the_levels_are_the_peaks_of_the_sound_heard() {
     let (player, out) = player(plan(&[clip(&a, 0, 120)], 0), false);
     assert!(player.wait_ready(0, Duration::from_secs(10)));
     player.play(1.0);
-    // 20 ms heard: the first beep's 10 ms, then silence.
     let heard = [pull_full(&out, 480), pull_full(&out, 480)].concat();
     let mut peaks = vec![0.0f32; 2];
     for frame in heard.chunks(2) {
@@ -196,7 +169,6 @@ fn the_levels_are_the_peaks_of_the_sound_heard() {
     let levels = player.levels(Instant::now()).expect("playing");
     assert_eq!(levels.mix, peaks);
     assert_eq!(levels.lanes, vec![peaks]);
-    // 100 ms more of silence: the last 50 ms heard are silent.
     for _ in 0..10 {
         pull_full(&out, 480);
     }
@@ -208,8 +180,6 @@ fn the_levels_are_the_peaks_of_the_sound_heard() {
 
 #[test]
 fn backward_the_lanes_show_the_sound_heard() {
-    // Back from frame 35, the first 200 ms read hold the beep at 1 s, heard
-    // only at their end: the first 20 ms heard are silent.
     let a = beeps();
     let (player, out) = player(plan(&[clip(&a, 0, 120)], 0), false);
     player.seek(35);
@@ -223,8 +193,6 @@ fn backward_the_lanes_show_the_sound_heard() {
 
 #[test]
 fn muted_the_mix_meter_still_shows_the_sound() {
-    // The monitoring mute silences what is heard, and in the GUI the
-    // viewer's meter, not the mix's (spec D28).
     let a = beeps();
     let (player, out) = player(plan(&[clip(&a, 0, 120)], 0), false);
     assert!(player.wait_ready(0, Duration::from_secs(10)));

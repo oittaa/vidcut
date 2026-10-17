@@ -1,6 +1,3 @@
-//! HDR metadata in files: the fixtures carry it as encoders and muxers
-//! write it (the bitstream and the container), and the probe reads it.
-
 use vidcut_av::fixture::{self, Container, FixtureSpec, HdrMeta, Picture, VideoCodec};
 use vidcut_av::hdr;
 use vidcut_av::light::{self, Span};
@@ -9,8 +6,6 @@ use vidcut_core::model::Hdr;
 fn close(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-4
 }
-
-// ---------------------------------------------------------------- exports
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -151,7 +146,6 @@ fn pq_exports_keep_hdr10_values_and_each_frames_hdr10plus() {
         let r = render(&p, &settings(codec, container, HdrMode::Auto), &out);
         let m = r.metadata.expect("chosen");
         assert_eq!(m.mode, HdrMetadata::Hdr10plus, "{what}: {:?}", m.why);
-        // The container's boxes.
         let boxes = stream_values(&out);
         assert_eq!(boxes.light, want.light, "{what}");
         let got = boxes
@@ -161,7 +155,6 @@ fn pq_exports_keep_hdr10_values_and_each_frames_hdr10plus() {
             close(got.max_nits, 1000.0) && close(got.min_nits, 0.0001),
             "{what}"
         );
-        // The bitstream: HEVC's SEI, AV1's metadata OBUs.
         let alone = hdr::read_frames(&out, false, usize::MAX).unwrap();
         assert_eq!(alone.len(), 20, "{what}");
         if in_band {
@@ -170,7 +163,6 @@ fn pq_exports_keep_hdr10_values_and_each_frames_hdr10plus() {
                 assert!(f.metadata.mastering.is_some(), "{what}: frame {}", f.pts);
             }
         }
-        // Each frame's own HDR10+, from the source frame it shows.
         let frames = hdr::read_frames(&out, true, usize::MAX).unwrap();
         for (i, f) in frames.iter().enumerate() {
             assert_eq!(
@@ -182,13 +174,8 @@ fn pq_exports_keep_hdr10_values_and_each_frames_hdr10plus() {
     }
 }
 
-// ---------------------------------------------------------------- measured light
-
 #[test]
 fn light_is_measured_as_a_pq_export_shows_it() {
-    // The barcodes' white is SDR white in each: 203 cd/m² in PQ output,
-    // whatever the source's transfer. 33 frames: no other test measures
-    // these files.
     vidcut_av::init();
     for (what, spec) in [
         (
@@ -218,20 +205,15 @@ fn light_is_measured_as_a_pq_export_shows_it() {
         assert_eq!(a.frames.len(), 33, "{what}");
         let level = a.level((0..30).map(|k| f64::from(k) / 30.0)).unwrap();
         let f = a.at(0.5).unwrap();
-        // The white at the 99th percentile; the encode overshoots a little
-        // at the barcode's edges, which the peak shows. How much is x265's
-        // build: Homebrew's rings most (HLG: 213 here, a peak of 288).
         assert!((195.0..=215.0).contains(&f.percentiles[8]), "{what}: {f:?}");
         assert!(f.percentiles[0] < 1.0, "{what}: black, {f:?}");
         assert!((200..=300).contains(&level.max_cll), "{what}: {level:?}");
-        // Half of the picture is white.
         assert!((90..=115).contains(&level.max_fall), "{what}: {level:?}");
     }
 }
 
 #[test]
 fn light_levels_asked_to_be_measured_are_measured() {
-    // The source says its own levels (1000, 400); `measure` measures.
     vidcut_av::init();
     let dir = tempfile::tempdir().unwrap();
     let pq = hdr10_source(1000, (1000, 400), false);
@@ -240,8 +222,6 @@ fn light_levels_asked_to_be_measured_are_measured() {
     let out = dir.path().join("measure.mkv");
     let r = render(&plan(vec![piece(&pq, 0, 20)]), &measure, &out);
     let m = r.metadata.unwrap();
-    // The barcode's white, SDR white in PQ output, and a little
-    // overshoot at its edges (up to 288 with Homebrew's x265).
     let l = m.light.expect("measured");
     assert!((200..=300).contains(&l.max_cll), "{l:?}");
     assert!((90..=115).contains(&l.max_fall), "{l:?}");
@@ -250,10 +230,6 @@ fn light_levels_asked_to_be_measured_are_measured() {
 
 #[test]
 fn a_highlight_of_two_pixels_is_the_peak() {
-    // Big enough for the average and the distribution to read every
-    // fourth pixel; the highlight is between those. Lossless, the SDR one
-    // is white exactly; the encode softens PQ's, far above the black
-    // around it still (a sampled peak read 0.07 cd/m²).
     vidcut_av::init();
     for (what, spec, peak) in [
         (
@@ -279,12 +255,10 @@ fn a_highlight_of_two_pixels_is_the_peak() {
             .unwrap();
         assert_eq!(a.frames.len(), 3, "{what}");
         for (t, f) in &a.frames {
-            // White: each channel's peak, as HDR10+ made from it says.
             assert!(peak.contains(&f.max), "{what} at {t}: {f:?}");
             for v in f.hdr10plus().maxscl {
                 assert!(peak.contains(&(v as f32)), "{what} at {t}: {f:?}");
             }
-            // The rest is black.
             assert!(
                 f.average < 0.1 && f.percentiles[8] < 0.1,
                 "{what} at {t}: {f:?}"

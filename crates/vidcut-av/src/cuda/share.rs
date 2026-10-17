@@ -1,16 +1,3 @@
-//! Pictures NVDEC decodes, shown without leaving the GPU: a display's
-//! graphics device (Vulkan) exports memory, CUDA imports it, and a picture's
-//! planes are copied into it on the GPU, from where the display copies them
-//! into its textures. Nothing goes through memory or the CPU.
-//!
-//! CUDA's driver library is loaded when first needed (`libcuda.so.1`, or
-//! `nvcuda.dll` on Windows, which the NVIDIA driver installs and FFmpeg's
-//! CUDA device already uses); the few calls here are declared as its
-//! `cuda.h` has them. Memory comes as a file descriptor on Linux and as a
-//! Win32 handle on Windows. NVDEC's library (`libnvcuvid.so.1`,
-//! `nvcuvid.dll`, which FFmpeg's NVDEC decoding uses) says what NVDEC
-//! decodes.
-
 use std::ffi::c_void;
 use std::sync::OnceLock;
 
@@ -18,8 +5,6 @@ use super::{CudaDevice, PlaneCopy};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{ffi, format, frame};
 
-/// Memory a Vulkan device exported, in the form this system passes it
-/// (`VK_KHR_external_memory_fd`, `VK_KHR_external_memory_win32`).
 #[cfg(unix)]
 pub type Exported = std::os::fd::OwnedFd;
 #[cfg(windows)]
@@ -31,18 +16,15 @@ pub(super) type CuContext = *mut c_void;
 pub(super) type CuStream = *mut c_void;
 type CuExternalMemory = *mut c_void;
 
-/// `CUDA_EXTERNAL_MEMORY_HANDLE_DESC`.
 #[repr(C)]
 struct HandleDesc {
     kind: u32,
-    /// The union of an fd, a Win32 handle and name, and an NvSciBuf object.
     handle: [u64; 2],
     size: u64,
     flags: u32,
     reserved: [u32; 16],
 }
 
-/// `CUDA_EXTERNAL_MEMORY_BUFFER_DESC`.
 #[repr(C)]
 struct BufferDesc {
     offset: u64,
@@ -51,7 +33,6 @@ struct BufferDesc {
     reserved: [u32; 16],
 }
 
-/// `CUDA_MEMCPY2D`.
 #[repr(C)]
 struct Memcpy2d {
     src_x_in_bytes: usize,
@@ -72,17 +53,14 @@ struct Memcpy2d {
     height: usize,
 }
 
-/// `CU_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD`, `_OPAQUE_WIN32`.
 #[cfg(unix)]
 const HANDLE_TYPE: u32 = 1;
 #[cfg(windows)]
 const HANDLE_TYPE: u32 = 2;
 const DEDICATED: u32 = 1;
 const MEMORY_TYPE_DEVICE: u32 = 2;
-/// `CU_STREAM_NON_BLOCKING`: no implicit waits for the default stream.
 const STREAM_NON_BLOCKING: u32 = 1;
 
-/// The driver's calls used here and by `cuda::mix`.
 pub(super) struct Cuda {
     _lib: libloading::Library,
     init: unsafe extern "C" fn(u32) -> CuResult,
@@ -105,7 +83,6 @@ pub(super) struct Cuda {
     synchronize: unsafe extern "C" fn(CuStream) -> CuResult,
     stream_create: unsafe extern "C" fn(*mut CuStream, u32) -> CuResult,
     stream_destroy: unsafe extern "C" fn(CuStream) -> CuResult,
-    /// The stream-ordered allocator's (CUDA 11.2), where the driver has it.
     pub(super) alloc_async:
         Option<unsafe extern "C" fn(*mut CuDevicePtr, usize, CuStream) -> CuResult>,
     pub(super) free_async: Option<unsafe extern "C" fn(CuDevicePtr, CuStream) -> CuResult>,
@@ -137,12 +114,8 @@ impl Cuda {
             .map_err(|e| Error::Invalid(e.clone()))
     }
 
-    /// # Safety
-    /// Loads the driver library and takes its calls as `cuda.h` declares
-    /// them.
     unsafe fn load() -> std::result::Result<Self, libloading::Error> {
-        // SAFETY: the driver's calls as `cuda.h` declares them; `_lib` keeps
-        // them loaded.
+        // SAFETY: the driver's calls as `cuda.h` declares them; `_lib` keeps them loaded.
         unsafe {
             #[cfg(unix)]
             let lib = libloading::Library::new("libcuda.so.1")?;
@@ -185,11 +158,6 @@ impl Cuda {
 }
 
 impl Cuda {
-    /// Queues a copy of `rows` rows of `row_bytes` bytes on `stream`, from
-    /// and to device memory `pitch` bytes a row apart.
-    ///
-    /// # Safety
-    /// The current context's memory, holding those rows, both of it.
     pub(super) unsafe fn copy_rows(
         &self,
         (from, from_pitch): (CuDevicePtr, usize),
@@ -230,7 +198,6 @@ pub(super) fn check(what: &str, result: CuResult) -> Result<()> {
     }
 }
 
-/// `work`, then `next`: either failure, or both joined.
 fn both<T>(work: Result<T>, next: Result<()>) -> Result<T> {
     match (work, next) {
         (Ok(value), Ok(())) => Ok(value),
@@ -239,20 +206,14 @@ fn both<T>(work: Result<T>, next: Result<()>) -> Result<T> {
     }
 }
 
-/// Says `result` when debugging, where the caller cannot return it.
 fn debug_status(result: Result<()>) {
     if let Err(error) = result {
         crate::debug!("decoding", "{error}");
     }
 }
 
-/// FFmpeg's CUDA device context behind a hardware device reference.
-///
-/// # Safety
-/// `device` is a reference to a CUDA hardware device context.
 pub(super) unsafe fn cuda_context(device: *mut ffi::AVBufferRef) -> (CuContext, CuStream) {
-    // SAFETY: as the caller says. A CUDA device's `data` is an
-    // `AVHWDeviceContext` and its `hwctx` is an `AVCUDADeviceContext`.
+    // SAFETY: a CUDA device, as the caller says, whose `hwctx` is an `AVCUDADeviceContext`.
     unsafe {
         let ctx = (*device).data as *const ffi::AVHWDeviceContext;
         let hw = (*ctx).hwctx as *const ffi::AVCUDADeviceContext;
@@ -260,14 +221,11 @@ pub(super) unsafe fn cuda_context(device: *mut ffi::AVBufferRef) -> (CuContext, 
     }
 }
 
-/// The context [`in_context`] pushed onto this thread. Dropped, it pops
-/// that context, including when the work panics.
 struct PushedContext {
     pop: unsafe extern "C" fn(*mut CuContext) -> CuResult,
 }
 
 impl PushedContext {
-    /// Pops the context, with CUDA's status.
     fn leave(self) -> Result<()> {
         let mut popped = std::ptr::null_mut();
         // SAFETY: as in `drop`, which the guard then skips: it pops once.
@@ -280,13 +238,11 @@ impl PushedContext {
 impl Drop for PushedContext {
     fn drop(&mut self) {
         let mut popped = std::ptr::null_mut();
-        // SAFETY: `pop` is `cuCtxPopCurrent_v2`, and this thread has that
-        // context pushed: `in_context` pushes before the guard exists.
+        // SAFETY: `pop` is `cuCtxPopCurrent_v2`; `in_context` pushed the context on this thread.
         unsafe { (self.pop)(&mut popped) };
     }
 }
 
-/// Runs `f` with `ctx` current on this thread.
 pub(super) fn in_context<T>(
     cuda: &Cuda,
     ctx: CuContext,
@@ -302,8 +258,6 @@ pub(super) fn in_context<T>(
 }
 
 impl CudaDevice {
-    /// The GPU's UUID, as Vulkan reports it too (`deviceUUID`): a display
-    /// on the same GPU can share memory with it.
     pub fn uuid(&self) -> Result<[u8; 16]> {
         let cuda = Cuda::get()?;
         // SAFETY: a CUDA device, as `cuda_context` asks.
@@ -323,7 +277,6 @@ impl CudaDevice {
         })
     }
 
-    /// The GPU's memory in bytes.
     pub fn memory(&self) -> Result<usize> {
         let cuda = Cuda::get()?;
         // SAFETY: a CUDA device, as `cuda_context` asks.
@@ -344,31 +297,25 @@ impl CudaDevice {
     }
 }
 
-/// A CUDA device: its index, which FFmpeg opens it by, its name, its PCI
-/// slot and its UUID.
 pub(crate) struct Listed {
     pub index: i32,
     pub name: String,
     pub slot: Option<crate::gpus::Slot>,
     pub uuid: Option<[u8; 16]>,
-    /// Its memory in bytes.
     pub memory: Option<usize>,
 }
 
-/// The CUDA devices, in CUDA's order; none without NVIDIA's driver.
 pub(crate) fn listed() -> Vec<Listed> {
     let Ok(cuda) = Cuda::get() else {
         return Vec::new();
     };
     let text = |buf: &[std::ffi::c_char]| {
-        // SAFETY: the driver wrote a NUL-terminated string into `buf`,
-        // which holds a NUL at its end anyway.
+        // SAFETY: `buf` ends in a NUL the driver is never given, so the string ends within it.
         unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }
             .to_string_lossy()
             .into_owned()
     };
-    // SAFETY: the driver's calls as `cuda.h` declares them, each writing
-    // into what it is given, of the length given.
+    // SAFETY: the driver's calls as `cuda.h` declares them, each writing within the length given.
     unsafe {
         let mut count = 0;
         if (cuda.init)(0) != 0 || (cuda.device_get_count)(&mut count) != 0 {
@@ -404,8 +351,6 @@ pub(crate) fn listed() -> Vec<Listed> {
     }
 }
 
-/// Waits until the work queued on the stream of `frame`'s device is done,
-/// for a frame in CUDA memory.
 pub(crate) fn wait_for(frame: &frame::Video) -> Result<()> {
     if frame.format() != format::Pixel::CUDA {
         return Ok(());
@@ -420,13 +365,11 @@ pub(crate) fn wait_for(frame: &frame::Video) -> Result<()> {
         cuda_context((*((*frames).data as *const ffi::AVHWFramesContext)).device_ref)
     };
     in_context(cuda, ctx, || {
-        // SAFETY: the context is current; `stream` is its device's (null:
-        // the default one).
+        // SAFETY: the context is current; `stream` is its device's (null: the default one).
         check("waiting for the GPU", unsafe { (cuda.synchronize)(stream) })
     })
 }
 
-/// A stream of a CUDA device's context, destroyed when dropped.
 pub(crate) struct Stream {
     cuda: &'static Cuda,
     ctx: CuContext,
@@ -434,8 +377,6 @@ pub(crate) struct Stream {
 }
 
 impl Stream {
-    /// A new stream on `device`'s context, which doesn't wait for the
-    /// context's default stream.
     pub(crate) fn new(device: &CudaDevice) -> Result<Self> {
         let cuda = Cuda::get()?;
         // SAFETY: a CUDA device, as `cuda_context` asks.
@@ -455,7 +396,6 @@ impl Stream {
         self.raw
     }
 
-    /// Lets go of it, for [`destroy_stream`] to destroy.
     pub(crate) fn into_raw(self) -> *mut c_void {
         let raw = self.raw;
         std::mem::forget(self);
@@ -474,11 +414,6 @@ impl Drop for Stream {
     }
 }
 
-/// Destroys the stream a device of `CudaDevice::with_own_stream` keeps in
-/// its `user_opaque`: FFmpeg calls it as the device goes.
-///
-/// # Safety
-/// `device` is such a device, its context still there.
 pub(crate) unsafe extern "C" fn destroy_stream(device: *mut ffi::AVHWDeviceContext) {
     let Ok(cuda) = Cuda::get() else { return };
     // SAFETY: the device's CUDA context, and the stream made with it.
@@ -497,19 +432,15 @@ pub(crate) unsafe extern "C" fn destroy_stream(device: *mut ffi::AVHWDeviceConte
     }));
 }
 
-/// `n` as a copy's length. A value `usize` can't hold is rejected.
 fn copy_len(n: u64) -> Result<usize> {
     usize::try_from(n).map_err(|_| Error::Invalid(format!("{n} doesn't fit a copy")))
 }
 
-/// A source stride as a copy's length. A negative stride is rejected.
 fn source_pitch(pitch: i32) -> Result<usize> {
     usize::try_from(pitch)
         .map_err(|_| Error::Invalid(format!("a picture stride of {pitch} doesn't fit")))
 }
 
-/// Memory a display's Vulkan device exported, as CUDA sees it: pictures
-/// NVDEC decoded are copied into it on the GPU.
 pub struct SharedBuffer {
     cuda: &'static Cuda,
     ctx: CuContext,
@@ -517,27 +448,15 @@ pub struct SharedBuffer {
     memory: CuExternalMemory,
     ptr: CuDevicePtr,
     size: u64,
-    /// Keeps the CUDA context alive.
     _device: CudaDevice,
 }
 
-// SAFETY: CUDA's handles may be used from any thread with their context
-// made current, which every call here does.
+// SAFETY: CUDA's handles may be used on any thread; every call here makes their context current.
 unsafe impl Send for SharedBuffer {}
 
 impl SharedBuffer {
-    /// Imports `size` bytes of memory a Vulkan device exported as an opaque
-    /// file descriptor (`VK_KHR_external_memory_fd`), or on Windows an
-    /// opaque Win32 handle (`VK_KHR_external_memory_win32`), into
-    /// `device`'s context. CUDA owns a descriptor from then on; a Win32
-    /// handle stays the caller's, and is closed here once CUDA holds the
-    /// memory.
-    ///
     /// # Safety
-    /// `exported` must be memory of at least `size` bytes, exported by a
-    /// Vulkan device on `device`'s GPU (see [`CudaDevice::uuid`]), from a
-    /// dedicated allocation when `dedicated`. The memory must stay allocated
-    /// while this lives.
+    /// `exported`: `size`+ bytes from Vulkan on `device`'s GPU, dedicated if `dedicated`, kept while this lives.
     pub unsafe fn import(
         device: &CudaDevice,
         exported: Exported,
@@ -566,14 +485,10 @@ impl SharedBuffer {
                 reserved: [0; 16],
             };
             let mut memory = std::ptr::null_mut();
-            // Not taken, the descriptor is still ours to close: dropped.
-            // SAFETY: the context is current; `desc` is laid out as
-            // `CUDA_EXTERNAL_MEMORY_HANDLE_DESC`.
+            // SAFETY: the context is current; `desc` has `CUDA_EXTERNAL_MEMORY_HANDLE_DESC`'s layout.
             check("importing shared memory", unsafe {
                 (cuda.import)(&mut memory, &desc)
             })?;
-            // Taken: a descriptor is CUDA's now. A Win32 handle isn't, and
-            // CUDA keeps a reference of its own.
             #[cfg(unix)]
             std::mem::forget(exported);
             #[cfg(windows)]
@@ -609,23 +524,16 @@ impl SharedBuffer {
         })
     }
 
-    /// Bytes it holds.
     pub fn size(&self) -> u64 {
         self.size
     }
 
-    /// Copies the planes of `frame`, a frame in CUDA memory, into the
-    /// buffer as `planes` place them (`planes[i]` for the frame's plane
-    /// `i`), and waits until the copy is done: the display may read them
-    /// from then on. A plane that does not fit in the buffer, or a row
-    /// count past that plane's height, is rejected.
     pub fn copy_planes(&self, frame: &frame::Video, planes: &[PlaneCopy]) -> Result<()> {
         if frame.format() != format::Pixel::CUDA {
             return Err(Error::Invalid("the picture isn't in CUDA memory".into()));
         }
         planes_fit(self.size, frame, planes)?;
-        // SAFETY: a CUDA frame's planes are device pointers, `linesize`
-        // bytes apart.
+        // SAFETY: `frame` is a CUDA frame: its planes are device pointers, rows `linesize` apart.
         let (data, linesize) = unsafe {
             let f = &*frame.as_ptr();
             (f.data, f.linesize)
@@ -641,9 +549,7 @@ impl SharedBuffer {
                 let dst_pitch = copy_len(p.pitch)?;
                 let row_bytes = copy_len(p.row_bytes)?;
                 let rows = copy_len(p.rows)?;
-                // On FFmpeg's stream: after NVDEC's own copy into the frame.
-                // SAFETY: the context is current; the frame's plane, into the
-                // buffer as checked above.
+                // SAFETY: the context is current; plane `i` fits `frame` and the buffer, as checked.
                 check("copying a plane", unsafe {
                     self.cuda.copy_rows(
                         (src as CuDevicePtr, src_pitch),
@@ -661,11 +567,6 @@ impl SharedBuffer {
     }
 }
 
-/// `planes` copied into `size` bytes of `frame`. Each plane's last byte
-/// stays inside the buffer, and its row count stays within that plane.
-/// A plane's height follows the picture's layout: planes 1 and 2 are the
-/// chroma planes, shortened by its vertical subsampling, and the rest are
-/// the picture's height.
 fn planes_fit(size: u64, frame: &frame::Video, planes: &[PlaneCopy]) -> Result<()> {
     let layout = crate::hw::sw_format(frame);
     let height = frame.height();
@@ -692,7 +593,6 @@ fn planes_fit(size: u64, frame: &frame::Video, planes: &[PlaneCopy]) -> Result<(
     Ok(())
 }
 
-/// Rows of plane `index` in a `height`-line picture of `layout`.
 fn plane_rows(layout: format::Pixel, height: u32, index: usize) -> u32 {
     if index != 1 && index != 2 {
         return height;
@@ -724,14 +624,12 @@ mod tests {
 
     use super::*;
 
-    /// A CUDA frame whose picture layout is `layout`, `height` lines tall.
     fn picture(height: u32, layout: format::Pixel) -> frame::Video {
         let mut frame = frame::Video::empty();
         frame.set_format(format::Pixel::CUDA);
         frame.set_width(16);
         frame.set_height(height);
-        // SAFETY: a zeroed frames context this frame owns. The check reads
-        // its software format and nothing else.
+        // SAFETY: `frame` owns this zeroed frames context; `planes_fit` reads only its `sw_format`.
         unsafe {
             let ctx = ffi::av_buffer_allocz(std::mem::size_of::<ffi::AVHWFramesContext>());
             assert!(!ctx.is_null());

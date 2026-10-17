@@ -1,7 +1,3 @@
-//! The theme shown (`crate::themes`, deviation X22): egui's style and
-//! fonts, the panels' frames and what is painted behind them, and the
-//! colors everything else paints with.
-
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -15,11 +11,8 @@ use eframe::egui::{
 use crate::themes::{Buttons, Colors, Fonts, Style, Theme};
 
 thread_local! {
-    /// The theme shown. The GUI paints on one thread.
     static CURRENT: RefCell<Rc<Theme>> =
         RefCell::new(Rc::new(crate::themes::default_theme().clone()));
-    /// The fonts in egui's font atlas, so a theme with the same ones
-    /// doesn't build it again.
     static FONTS: RefCell<Option<Fonts>> = const { RefCell::new(None) };
 }
 
@@ -27,25 +20,20 @@ fn current() -> Rc<Theme> {
     CURRENT.with(|t| t.borrow().clone())
 }
 
-/// The colors of the theme shown.
 pub fn colors() -> Colors {
     CURRENT.with(|t| t.borrow().colors)
 }
 
-/// The corners of the timeline's clips.
 pub fn clip_corners() -> CornerRadius {
     CornerRadius::same(current().shape.clips)
 }
 
-/// Shows `theme` from the next frame on.
 pub fn apply(ctx: &egui::Context, theme: &Theme) {
     CURRENT.with(|t| *t.borrow_mut() = Rc::new(theme.clone()));
     if FONTS.with(|f| f.borrow().as_ref() != Some(&theme.fonts)) {
         ctx.set_fonts(font_definitions(&theme.fonts));
         FONTS.with(|f| *f.borrow_mut() = Some(theme.fonts.clone()));
     }
-    // Both of egui's styles: the computer's light or dark setting doesn't
-    // pick one.
     let style = Arc::new(style(theme));
     ctx.set_style_of(egui::Theme::Dark, style.clone());
     ctx.set_style_of(egui::Theme::Light, style);
@@ -122,7 +110,6 @@ fn visuals(t: &Theme) -> Visuals {
         state.fg_stroke = Stroke::new(1.0, c.text);
         state.corner_radius = CornerRadius::same(s.corners);
     }
-    // Check boxes keep `bg_fill`: they show a box in every style.
     match s.buttons {
         Buttons::Filled => w.inactive.bg_stroke = Stroke::NONE,
         Buttons::Outlined => w.inactive.weak_bg_fill = Color32::TRANSPARENT,
@@ -134,7 +121,6 @@ fn visuals(t: &Theme) -> Visuals {
     v
 }
 
-/// The computer's own UI fonts, looked for in this order.
 const SYSTEM_UI: &[&str] = if cfg!(windows) {
     &["Segoe UI Variable", "Segoe UI"]
 } else if cfg!(target_os = "macos") {
@@ -155,7 +141,6 @@ const SYSTEM_UI: &[&str] = if cfg!(windows) {
     ]
 };
 
-/// The computer's own monospace fonts, looked for in this order.
 const SYSTEM_MONO: &[&str] = if cfg!(windows) {
     &["Cascadia Mono", "Consolas"]
 } else if cfg!(target_os = "macos") {
@@ -170,9 +155,6 @@ const SYSTEM_MONO: &[&str] = if cfg!(windows) {
     ]
 };
 
-/// egui's fonts with the theme's in front, and Phosphor's icons mixed into
-/// ordinary text. A theme that names fonts gets Geist or Geist Mono where
-/// none of them is there. One that names none keeps egui's.
 fn font_definitions(f: &Fonts) -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();
     egui_phosphor::add_to_fonts(&mut defs, egui_phosphor::Variant::Regular);
@@ -199,9 +181,6 @@ fn font_definitions(f: &Fonts) -> egui::FontDefinitions {
     defs
 }
 
-/// The font family `name`: one built into vidcut, else an installed one.
-/// Its capitals sit in the middle of its lines, and a variable font shows
-/// its regular weight.
 fn font(name: &str) -> Option<egui::FontData> {
     let (data, index) = match built_in_font(name) {
         Some(data) => (Cow::Borrowed(data), 0),
@@ -219,7 +198,6 @@ fn font(name: &str) -> Option<egui::FontData> {
     })
 }
 
-/// The fonts vidcut carries (OFL-1.1): the same on every computer.
 fn built_in_font(name: &str) -> Option<&'static [u8]> {
     let files = match name {
         "Geist" => &shadcn_egui_font_geist::FONT,
@@ -230,7 +208,6 @@ fn built_in_font(name: &str) -> Option<&'static [u8]> {
     Some(files.face(400).data)
 }
 
-/// An installed font family's file and the face's index in it.
 fn installed_font(name: &str) -> Option<(Cow<'static, [u8]>, u32)> {
     static DATABASE: OnceLock<fontdb::Database> = OnceLock::new();
     let db = DATABASE.get_or_init(|| {
@@ -245,10 +222,6 @@ fn installed_font(name: &str) -> Option<(Cow<'static, [u8]>, u32)> {
     db.with_face_data(id, |data, index| (Cow::Owned(data.to_vec()), index))
 }
 
-/// How far down, in ems, a font's text moves for its capitals to sit in
-/// the middle of its line: check boxes and buttons center the line, and
-/// fonts place their capitals in it differently. Zero for a font that
-/// doesn't say how tall its capitals are.
 fn centering(data: &[u8], index: u32) -> f32 {
     use skrifa::MetadataProvider;
     let Ok(font) = skrifa::FontRef::from_index(data, index) else {
@@ -270,15 +243,12 @@ fn centering(data: &[u8], index: u32) -> f32 {
     }
 }
 
-/// The line holds `ascent` above the baseline, `descent` (negative) and the
-/// gap below it. Capitals stand `cap` tall on the baseline.
 fn capitals_down(ascent: f32, descent: f32, gap: f32, cap: f32, em: f32) -> f32 {
     let line_middle = (ascent - descent + gap) / 2.0;
     let capitals_middle = ascent - cap / 2.0;
     (line_middle - capitals_middle) / em
 }
 
-/// The top and status bars' frame.
 pub fn bar() -> egui::Frame {
     let t = current();
     let [x, y] = t.shape.bar_padding;
@@ -287,7 +257,6 @@ pub fn bar() -> egui::Frame {
         .inner_margin(egui::Margin::symmetric(x, y))
 }
 
-/// A panel's frame, filled with `fill`. Cut corners paint their own.
 pub fn card(fill: Color32) -> egui::Frame {
     let t = current();
     let s = &t.shape;
@@ -307,25 +276,19 @@ pub fn card(fill: Color32) -> egui::Frame {
         })
 }
 
-/// What a decoration is painted behind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Deco {
-    /// The top bar.
     Bar,
     Status,
-    /// A panel in a [`card`] frame.
     Card,
-    /// The viewer's panel.
     Viewer,
 }
 
-/// Shows `add` in `ui`, with the theme's decoration painted behind it.
 pub fn decorated<R>(ui: &mut egui::Ui, deco: Deco, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let t = current();
     if t.decoration.style == Style::None {
         return add(ui);
     }
-    // A place under what `add` paints, filled once its size is known.
     let slot = ui.painter().add(Shape::Noop);
     let max = ui.max_rect();
     let r = add(ui);
@@ -342,8 +305,6 @@ pub fn decorated<R>(ui: &mut egui::Ui, deco: Deco, add: impl FnOnce(&mut egui::U
     r
 }
 
-/// Paints a glow in `color` along the playhead's `line`, where the theme
-/// has one.
 pub fn playhead_glow(painter: &egui::Painter, line: [Pos2; 2], color: Color32) {
     if current().decoration.style == Style::None {
         return;
@@ -363,8 +324,6 @@ fn decoration(t: &Theme, r: Rect, deco: Deco) -> Vec<Shape> {
     let mut out = Vec::new();
     match (d.style, deco) {
         (Style::None, _) => {}
-        // Neon: glowing panels, a gradient under the top bar, a grid
-        // behind the viewer's controls.
         (Style::Glow, Deco::Card) => glow(r, f32::from(t.shape.panels), d.color, &mut out),
         (Style::Glow, Deco::Viewer) => {
             grid(r.shrink(2.0), d.color, d.color2, &mut out);
@@ -391,8 +350,6 @@ fn decoration(t: &Theme, r: Rect, deco: Deco) -> Vec<Shape> {
             with_alpha(d.color2, 140),
             with_alpha(d.color, 140),
         )),
-        // Starship: glass panels with two corners cut and brackets on the
-        // others, marks behind the picture, a ruler under the top bar.
         (Style::Hud, Deco::Card | Deco::Viewer) => {
             let viewer = deco == Deco::Viewer;
             let fill = if viewer {
@@ -464,7 +421,6 @@ fn decoration(t: &Theme, r: Rect, deco: Deco) -> Vec<Shape> {
             [r.left_top(), r.right_top()],
             Stroke::new(1.0, with_alpha(d.color, 80)),
         )),
-        // Cybertruck: brushed steel slabs under a light bar.
         (Style::Steel, Deco::Card) => {
             let points = chamfer(r, d.cut, [true; 4]);
             out.push(shaded(&points, d.top, d.bottom));
@@ -492,8 +448,6 @@ fn decoration(t: &Theme, r: Rect, deco: Deco) -> Vec<Shape> {
     out
 }
 
-/// `r` with its corners cut at 45°: top left, top right, bottom right,
-/// bottom left.
 fn chamfer(r: Rect, cut: f32, corners: [bool; 4]) -> Vec<Pos2> {
     let (l, t, rr, b) = (r.left(), r.top(), r.right(), r.bottom());
     let mut p = Vec::with_capacity(8);
@@ -521,7 +475,6 @@ fn chamfer(r: Rect, cut: f32, corners: [bool; 4]) -> Vec<Pos2> {
     p
 }
 
-/// A convex polygon shaded from `top` at its top to `bottom` at its bottom.
 fn shaded(points: &[Pos2], top: Color32, bottom: Color32) -> Shape {
     let mut mesh = egui::Mesh::default();
     let (y0, y1) = points
@@ -540,8 +493,6 @@ fn shaded(points: &[Pos2], top: Color32, bottom: Color32) -> Shape {
     Shape::mesh(mesh)
 }
 
-/// Faint lines across a slab with four cut corners, lighter and darker by
-/// turns: brushed metal.
 fn brushed(r: Rect, cut: f32, out: &mut Vec<Shape>) {
     let mut y = r.top() + 2.0;
     let mut i = 0u32;
@@ -563,8 +514,6 @@ fn brushed(r: Rect, cut: f32, out: &mut Vec<Shape>) {
     }
 }
 
-/// A band across from `x0` to `x1` at `y`, `width` tall, shaded from `a`
-/// on the left to `b` on the right.
 fn band(y: f32, x0: f32, x1: f32, width: f32, a: Color32, b: Color32) -> Shape {
     let mut mesh = egui::Mesh::default();
     let h = width / 2.0;
@@ -577,7 +526,6 @@ fn band(y: f32, x0: f32, x1: f32, width: f32, a: Color32, b: Color32) -> Shape {
     Shape::mesh(mesh)
 }
 
-/// Strokes around `r`, wider and fainter outward.
 fn glow(r: Rect, radius: f32, color: Color32, out: &mut Vec<Shape>) {
     for (width, alpha) in [(10.0, 12), (6.0, 30), (3.0, 70), (1.2, 230)] {
         out.push(Shape::rect_stroke(
@@ -589,8 +537,6 @@ fn glow(r: Rect, radius: f32, color: Color32, out: &mut Vec<Shape>) {
     }
 }
 
-/// A floor of lines in perspective in the lower part of `r`, under a
-/// horizon shaded from `a` to `b`.
 fn grid(r: Rect, a: Color32, b: Color32, out: &mut Vec<Shape>) {
     let horizon = r.top() + r.height() * 0.58;
     for i in 1..=12 {
@@ -619,8 +565,6 @@ fn grid(r: Rect, a: Color32, b: Color32, out: &mut Vec<Shape>) {
     ));
 }
 
-/// L-shaped marks at the corners of `r` that `which` picks: top left, top
-/// right, bottom right, bottom left.
 fn brackets(r: Rect, len: f32, color: Color32, which: [bool; 4], out: &mut Vec<Shape>) {
     let s = Stroke::new(2.0, color);
     let corners = [
@@ -639,7 +583,6 @@ fn brackets(r: Rect, len: f32, color: Color32, which: [bool; 4], out: &mut Vec<S
     }
 }
 
-/// Small crosses on a grid over `r`.
 fn marks(r: Rect, color: Color32, out: &mut Vec<Shape>) {
     let s = Stroke::new(1.0, color);
     let step = 48.0;
@@ -655,7 +598,6 @@ fn marks(r: Rect, color: Color32, out: &mut Vec<Shape>) {
     }
 }
 
-/// How Clip Color `name` looks (spec §3); none for a name it doesn't know.
 pub fn clip_color(name: &str) -> Option<Color32> {
     vidcut_core::ops::CLIP_COLORS
         .iter()
@@ -663,7 +605,6 @@ pub fn clip_color(name: &str) -> Option<Color32> {
         .map(|(_, [r, g, b])| Color32::from_rgb(*r, *g, *b))
 }
 
-/// A Clip Color's name as shown: `Teal`.
 pub fn color_title(name: &str) -> String {
     let mut title = name.to_string();
     if let Some(first) = title.get_mut(..1) {
@@ -672,15 +613,11 @@ pub fn color_title(name: &str) -> String {
     title
 }
 
-/// The color all of `colors` have, if they have the same one.
 pub fn same_color<'a>(mut colors: impl Iterator<Item = Option<&'a str>>) -> Option<&'a str> {
     let first = colors.next()??;
     colors.all(|c| c == Some(first)).then_some(first)
 }
 
-/// The Clip Color submenu (spec §3): each color, the `current` one
-/// selected, then Clear Color. Returns the one picked, empty for Clear
-/// Color.
 pub fn clip_color_menu(ui: &mut egui::Ui, current: Option<&str>) -> Option<String> {
     let mut picked = None;
     for (name, [r, g, b]) in vidcut_core::ops::CLIP_COLORS {
@@ -728,8 +665,6 @@ mod tests {
 
     #[test]
     fn capitals_low_in_their_line_move_up() {
-        // A line 2500 tall with its baseline 2000 down: capitals 1400 tall
-        // have their middle at 1300, 50 below the line's.
         assert_eq!(capitals_down(2000.0, -500.0, 0.0, 1400.0, 1000.0), -0.05);
     }
 

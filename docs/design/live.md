@@ -92,7 +92,7 @@ The `Snapshot` carries the project, players, selection, log, notices, filmstrips
 |---|---|---|
 | `Now` | here: edits (`Live::edit`), queries, play, pause | the answer |
 | `Wait` | nothing: seeks, steps, screenshots, `jobs.wait` join the waits | `Live::tick` finds its `Until` met |
-| `Task` | `vidcut-task`, at its `Work`: plans, frames, storyboards, analyses, project-less requests, screenshots, UI answers | `Msg::TaskDone` |
+| `Task` | `vidcut-task`, at its `Work`: plans, frames, storyboards, analyses, project-less requests, UI answers | `Msg::TaskDone` |
 | `Make` | `vidcut-make`: a project from an OpenTimelineIO file | `Msg::Made`; the core opens it |
 | `Measure` | `vidcut-measure`, a job: measuring for Ripple Delete Silence or Detect Scene Cuts, unpacking an `.otioz` | `Msg::Measured`; the edit runs here |
 | `Encode` | a job thread: proxies | `Msg::Measured`; the edit records them |
@@ -134,6 +134,12 @@ All but an untimed `jobs.wait` have a deadline.
 - **View state.** The edit point selected, the target track, zoom and Timeline Options (in `timeline.json`), the windows open. Requests reach it through `Renderer::gui`.
 - **Timeline tiles**, decoded by `Tiles` on `vidcut-tiles-N`.
 - **The two-up**: `Cells` owns its players on the UI thread; `Screens` draws them.
+
+## Themes and keys
+
+A theme is a TOML file: the built-in ones are compiled in from `crates/vidcut/themes/`, and the user's live in the config dir's `themes` folder (`themes::dir`), where one named like a built-in replaces it. A theme's `light_mode` table applies while the system is in light mode (`look::current`, watched on `vidcut-look`). The core loads the theme `appearance.theme` names into the snapshot, and loads it again when the preferences, the themes folder or the system's look change (`Msg::PreferencesChanged`); one that doesn't load shows the default, with a notice. The UI applies a new theme at its next frame.
+
+The keys are one table, `vidcut_core::shortcuts`: the Help window (`crates/vidcut/src/gui/help.rs`) and `keys.list` both read it.
 
 ## From a key press to a frame
 

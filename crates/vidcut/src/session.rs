@@ -1,5 +1,3 @@
-//! Runs requests: headless against a project file, live in the GUI.
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,7 +11,6 @@ use vidcut_core::{Editor, Envelope, Error, ErrorCode, Project, Request, Response
 use crate::env::AvEnv;
 use crate::threads::Work;
 
-/// `keys.list`: the shortcuts, their keys named as on this system.
 fn shortcuts() -> Value {
     use vidcut_core::shortcuts::{SHORTCUTS, key_name};
     let mac = cfg!(target_os = "macos");
@@ -33,14 +30,11 @@ fn shortcuts() -> Value {
 }
 use crate::export;
 
-/// Cancellation and progress for long-running requests (exports).
 pub struct Hooks<'a> {
     pub cancel: &'a Arc<AtomicBool>,
-    /// Called as `(output index, output count, output path, progress)`.
     pub progress: &'a mut dyn FnMut(usize, usize, &Path, Progress),
 }
 
-/// Runs one request headless with no progress reporting.
 pub fn run(project: Option<&Path>, envelope: Envelope) -> Result<Response> {
     let cancel = Arc::new(AtomicBool::new(false));
     run_with(
@@ -53,8 +47,6 @@ pub fn run(project: Option<&Path>, envelope: Envelope) -> Result<Response> {
     )
 }
 
-/// Runs one request headless. Project-less requests (`schema`, `doctor`,
-/// `probe`, `presets.*`, `encoders.list`, `preferences.*`) ignore `project`.
 pub fn run_with(
     project: Option<&Path>,
     envelope: Envelope,
@@ -199,7 +191,6 @@ pub fn run_with(
             render(editor.project(), store.path(), &envelope, hooks)?
         }
         Request::Probe { .. } => {
-            // Probing needs no project; an empty editor answers it.
             let mut editor = vidcut_core::Editor::new(
                 vidcut_core::Project::new(Default::default()),
                 Default::default(),
@@ -228,11 +219,6 @@ pub fn run_with(
     Ok(response)
 }
 
-/// Encodes the proxies `envelope` (`proxy.generate`) asks for, by the same
-/// request on a copy of the project, before the edit takes the project's
-/// lock: the edit then finds the files and records them at once, and other
-/// runs aren't held up for the encode (decision D41). Progress goes to
-/// `hooks`; its cancel flag stops the encode, leaving no file.
 fn encode_proxies(
     store: &Store,
     envelope: &Envelope,
@@ -251,7 +237,6 @@ fn encode_proxies(
             copy.apply(envelope.clone(), env, None).map(drop)
         })
         .map_err(|e| Error::internal(format!("starting the proxy encode: {e}")))?;
-        // Ends when the encode does: its guard holds the only sender.
         for (out, p) in rx {
             (hooks.progress)(0, 1, &out, p);
         }
@@ -260,18 +245,12 @@ fn encode_proxies(
     })
 }
 
-/// Runs a request that reads `project` (saved at `path`) without changing
-/// it, against the project as given: exports, export plans, frames,
-/// storyboards and measurements. The caller has checked `if_rev`.
 pub fn render(
     project: &Project,
     path: &Path,
     envelope: &Envelope,
     hooks: &mut Hooks<'_>,
 ) -> Result<Response> {
-    // Publishing the flag lets decoders on this thread (and storyboard
-    // workers, which copy it) stop when the client leaves, the way the
-    // export frame loop loads the same flag.
     let _guard = vidcut_av::cancel::Guard::set(hooks.cancel.clone());
     if watches_cancel(&envelope.request) && hooks.cancel.load(Ordering::Relaxed) {
         return Err(Error::new(ErrorCode::Cancelled, "cancelled"));
@@ -326,10 +305,6 @@ pub fn render(
             range.as_ref(),
             None,
         )?),
-        // Measurements: queries, on a copy. Keep `if_rev`. A mutation that
-        // lands here later must not apply on this throwaway editor and come
-        // back as success: the copy is discarded, and `r.rev` below would
-        // still report the snapshot revision.
         _ => {
             if envelope.request.is_mutation() {
                 return Err(Error::internal(format!(
@@ -348,9 +323,6 @@ pub fn render(
     Ok(r)
 }
 
-/// Exports media, or a timeline bundle with its media, from `p` (saved at
-/// `path`): prepares the export, tells `started` the files it will write
-/// and their lengths in frames, then encodes (or copies) them.
 pub fn export_media(
     p: &Project,
     path: &Path,
@@ -360,7 +332,6 @@ pub fn export_media(
 ) -> Result<Response> {
     if export::timeline_format(&params.output).is_some() {
         let name = export::timeline_name(path);
-        // Planned (and checked) first; bytes copied count as frames done.
         let plan = export::timeline(p, &name, params, None, None)?;
         let frames = plan["outputs"][0]["frames"].as_i64().unwrap_or(0);
         started(vec![(params.output.clone(), frames)])?;
@@ -412,7 +383,6 @@ pub fn export_media(
     let clock = std::time::Instant::now();
     let first = prepared.outputs[0].path.clone();
     let progress = &mut *hooks.progress;
-    // Decoded on the GPU the viewer decodes on, on a decoder of its own.
     let decoder = crate::preferences::gpu_decoding().own_decoder();
     export::choose_colors(
         &mut prepared,
@@ -444,7 +414,6 @@ pub fn export_media(
     Ok(r)
 }
 
-/// Says that the undo history wasn't saved with an edit, and what follows.
 pub fn history_unsaved(error: &str) -> String {
     format!(
         "the edit is saved, but its undo history isn't ({error}). The edits before it may \
@@ -452,9 +421,6 @@ pub fn history_unsaved(error: &str) -> String {
     )
 }
 
-/// Work that keeps running after the client is gone unless it loads the
-/// cancel flag: it reports no progress, so a failed progress write never
-/// happens. A foreground export watches the same flag in its frame loop.
 fn watches_cancel(request: &Request) -> bool {
     matches!(
         request,
@@ -467,18 +433,12 @@ fn watches_cancel(request: &Request) -> bool {
     )
 }
 
-/// A new project's picture size from `width` and `height`: both or neither.
-/// `project.create` with `from`: makes the project file `path` from the
-/// OpenTimelineIO file `from`, with `format` if another editor wrote it.
-/// The project, its file and what couldn't be imported. A dry run makes no
-/// file and unpacks no bundle.
 pub fn create_from_otio(
     path: &Path,
     from: &Path,
     format: &Format,
     dry_run: bool,
 ) -> Result<(Project, PathBuf, Vec<String>)> {
-    // Before the work of reading the file.
     if path.exists() {
         return Err(Error::invalid(format!("{} already exists", path.display())));
     }
@@ -511,7 +471,6 @@ fn answer(result: Value) -> Response {
     }
 }
 
-/// JSON Schema of the whole protocol, or of one method's params.
 pub fn schema(method: Option<&str>) -> Result<Value> {
     let root = serde_json::to_value(schemars::schema_for!(Request))
         .map_err(|e| Error::internal(e.to_string()))?;
@@ -549,14 +508,12 @@ pub fn schema(method: Option<&str>) -> Result<Value> {
     }))
 }
 
-/// The GPUs the GUI can draw on (wgpu's Vulkan, Metal or DX12 adapters).
 fn display_gpus() -> Vec<String> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     pollster::block_on(instance.enumerate_adapters(wgpu::Backends::PRIMARY))
         .iter()
         .map(|a| {
             let info = a.get_info();
-            // Metal names no driver.
             match info.driver.as_str() {
                 "" => format!("{} ({:?})", info.name, info.backend),
                 driver => format!("{} ({:?}, {driver})", info.name, info.backend),
@@ -565,21 +522,16 @@ fn display_gpus() -> Vec<String> {
         .collect()
 }
 
-/// Dependencies and environment, for humans and agents debugging setups.
 pub fn doctor() -> Value {
     json!({
         "vidcut": env!("CARGO_PKG_VERSION"),
         "system": crate::system::version(),
         "ffmpeg": vidcut_av::library_versions(),
-        // What this FFmpeg build lacks of the parts vidcut uses, and what
-        // each is for.
         "ffmpeg_missing": vidcut_av::parts::missing(),
-        // The parts it does with another than the usual name.
         "ffmpeg_stand_ins": vidcut_av::parts::stand_ins().iter().map(|(p, name)| json!({
             "used_for": p.used_for, "name": name, "instead_of": p.names[0].name,
         })).collect::<Vec<_>>(),
         "audio_output": match vidcut_av::player::output_device() { Ok(d) => json!(d), Err(e) => json!(e.to_string()) },
-        // What `player.audio_device` takes.
         "audio_outputs": match vidcut_av::player::output_devices() { Ok(d) => json!(d), Err(e) => json!(e.to_string()) },
         "gpus": crate::system::gpus(),
         "display_gpus": display_gpus(),

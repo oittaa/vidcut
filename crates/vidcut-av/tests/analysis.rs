@@ -1,7 +1,3 @@
-//! Media measurements on generated fixtures: the beeps in the audio
-//! levels, scene scores and black shares of shots, and the loudness of a
-//! tone whose level BS.1770 defines.
-
 use std::path::Path;
 
 use vidcut_av::analysis;
@@ -15,8 +11,6 @@ fn spec(frames: u32) -> FixtureSpec {
 
 #[test]
 fn levels_keep_time_across_a_lost_packet() {
-    // An AAC packet before the 2 s beep is missing (1024 samples, 21 ms):
-    // the beep stays at 2 s, as export keeps it.
     let path = fixture::ensure(&FixtureSpec::new(
         VideoCodec::H264,
         Container::Mkv,
@@ -43,7 +37,6 @@ fn levels_keep_time_across_a_lost_packet() {
     }
 }
 
-/// A plan that plays `path`'s audio from its start, `secs` long.
 fn plan(path: &Path, secs: i64, gain_db: f64) -> RenderPlan {
     let info = vidcut_av::probe::probe(path, None).unwrap();
     let origin = info.video.and_then(|v| v.first_frame_time).unwrap_or(0.0);
@@ -74,19 +67,16 @@ fn plan(path: &Path, secs: i64, gain_db: f64) -> RenderPlan {
 
 #[test]
 fn a_tone_at_minus_20_dbfs_measures_minus_20_lufs() {
-    // BS.1770: a 1 kHz sine in both channels reads its level in LUFS.
     let path = fixture::ensure(&spec(300).sound(Sound::Tone)).unwrap();
     let l = analysis::loudness(&plan(&path, 10, 0.0)).unwrap();
     assert!((l.integrated + 20.0).abs() < 0.3, "{l:?}");
     assert!((l.true_peak + 20.0).abs() < 0.5, "{l:?}");
     assert!(l.range < 1.0, "a steady tone has no range: {l:?}");
-    // Gain moves it one for one.
     let louder = analysis::loudness(&plan(&path, 10, 6.0)).unwrap();
     assert!(
         (louder.integrated - l.integrated - 6.0).abs() < 0.1,
         "{louder:?}"
     );
-    // Silence is -inf.
     let quiet = fixture::ensure(&spec(90).sound(Sound::Silence)).unwrap();
     let s = analysis::loudness(&plan(&quiet, 3, 0.0)).unwrap();
     assert_eq!(s.integrated, f64::NEG_INFINITY, "{s:?}");

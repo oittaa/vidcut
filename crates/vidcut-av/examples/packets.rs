@@ -1,6 +1,3 @@
-//! Prints a file's video packets in decode order (pts, dts, keyframe):
-//! `cargo run -p vidcut-av --example packets -- FILE [FROM_S TO_S]`.
-
 use vidcut_av::ffmpeg;
 
 fn main() {

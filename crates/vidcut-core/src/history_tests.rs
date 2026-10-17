@@ -1,6 +1,3 @@
-//! Undo and redo through steps that keep only what changed: every state
-//! the edits went through comes back exactly.
-
 use serde_json::{Value, json};
 
 use crate::model::Project;
@@ -10,7 +7,6 @@ fn req(method: &str, params: Value) -> Value {
     json!({ "method": method, "params": params })
 }
 
-/// The project, without what undo moves on: its revision and time.
 fn state(f: &Fixture) -> Project {
     let mut p = f.editor.project().clone();
     p.rev = 0;

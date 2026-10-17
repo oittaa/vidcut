@@ -1,7 +1,3 @@
-//! The export's dynamic range and bit depth chosen from the pictures it
-//! shows (decision D44), through the `vidcut` binary: plans, exports and
-//! explicit values.
-
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -9,7 +5,6 @@ use serde_json::{Value, json};
 use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
 use vidcut_core::model::Hdr;
 
-/// A scratch directory with its own XDG dirs, removed when it drops.
 struct Sandbox {
     dir: tempfile::TempDir,
 }
@@ -27,7 +22,6 @@ impl Sandbox {
         self.dir.path().join(name)
     }
 
-    /// Runs `vidcut --json ARGS` on the sandbox's project; expects success.
     fn ok(&self, args: &[&str]) -> Value {
         let out = Command::new(env!("CARGO_BIN_EXE_vidcut"))
             .env("XDG_STATE_HOME", self.path("state"))
@@ -51,7 +45,6 @@ impl Sandbox {
         serde_json::from_slice(&out.stdout).expect("JSON")
     }
 
-    /// `export plan OUT ARGS…` on the CPU encoders: the result.
     fn plan(&self, out: &str, args: &[&str]) -> Value {
         let out = self.path(out);
         let mut all = vec!["export", "plan", out.to_str().unwrap(), "--encoder", "cpu"];
@@ -68,7 +61,6 @@ fn fixture(spec: FixtureSpec) -> String {
         .to_string()
 }
 
-/// `hdr` and `bit_depth` of each output's color.
 fn colors(plan: &Value) -> Vec<(String, u64)> {
     plan["outputs"]
         .as_array()
@@ -106,16 +98,13 @@ fn auto_color_follows_the_shown_picture() {
     ));
     sb.ok(&["project", "create", sb.path("p.vidcut").to_str().unwrap()]);
     sb.ok(&["media", "add", &pq, &sdr]);
-    // c1 PQ 2 s, c2 SDR 1 s: mostly HDR.
     sb.ok(&["edit", "append", "m1"]);
     sb.ok(&["edit", "append", "m2", "--range", "0f..30f"]);
 
-    // H.264 can't carry HDR: the plan tone-maps it into SDR in 8 bits.
     let plan = sb.plan("web.mp4", &[]);
     assert_eq!(color(&plan), pair("sdr", 8));
     assert_eq!(plan["outputs"][0]["color"]["tone_mapped"], 60);
 
-    // H.265 Master exports PQ in 10 bits.
     let out = sb.path("master.mkv");
     sb.ok(&[
         "export",
@@ -132,7 +121,6 @@ fn auto_color_follows_the_shown_picture() {
     assert_eq!(info.transfer, "smpte2084");
     assert_eq!(info.pix_fmt, "yuv420p10le");
 
-    // Explicit values win.
     let plan = sb.plan(
         "master.mov",
         &["--preset", "h265-master", "--set", "video.hdr=sdr"],
@@ -142,9 +130,6 @@ fn auto_color_follows_the_shown_picture() {
 
 #[test]
 fn hdr_metadata_follows_the_sources() {
-    // Decision D46, through the binary: the plan says what an export writes,
-    // the export writes it, and media probed before vidcut kept the values
-    // are probed again.
     use vidcut_av::fixture::HdrMeta;
     let sb = Sandbox::new("metadata");
     let plus = fixture(
@@ -173,7 +158,6 @@ fn hdr_metadata_follows_the_sources() {
     let m = &plan["outputs"][0]["metadata"];
     assert_eq!(m["mode"], "hdr10plus", "{m}");
     assert_eq!(m["light"], json!({"max_cll": 1000, "max_fall": 400}));
-    // The settings the encoder runs with, and none asked for.
     let plan = sb.plan(
         "plain.mkv",
         &[

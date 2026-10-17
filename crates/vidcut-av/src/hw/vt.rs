@@ -1,28 +1,14 @@
-//! VideoToolbox's frames on a Mac: the filters that shrink and fit them on
-//! the GPU, `scale_vt` and `transpose_vt`, which keep the frames' layout
-//! and place nothing on black.
-
 use crate::route::Ops;
 
-/// Whether VideoToolbox fits a frame into the output as `ops` says
-/// ([`super::Fitter`]): where its colors stay, its picture fills the
-/// output and its layout is the output's. `scale_vt` keeps the input's
-/// layout (vf_scale_vt.c), and neither filter places a picture on black.
-/// `scale_vt` can convert colors, but no test compares that with the
-/// CPU's math.
 pub(crate) fn can_fit(ops: &Ops) -> bool {
     ops.colors_kept && !ops.pads && ops.layout == ops.out_layout
 }
 
-/// The filter that shrinks VideoToolbox's frames to `w` by `h`.
 pub(super) fn shrink_spec((w, h): (u32, u32)) -> String {
     format!("scale_vt=w={w}:h={h}")
 }
 
-/// The filters that fit VideoToolbox's frames into the output: turned
-/// clockwise by `rotation` and scaled to `fw` by `fh`, the output's size.
 pub(super) fn fit_spec(rotation: u16, (fw, fh): (u32, u32)) -> String {
-    // As the CPU's `transpose` and flips turn them.
     let turn = match rotation {
         90 => "transpose_vt=dir=clock,",
         180 => "transpose_vt=dir=reversal,",
@@ -37,7 +23,6 @@ mod tests {
     use super::*;
     use crate::ffmpeg::format;
 
-    /// An upright NV12 frame into NV12 pictures in its own colors.
     fn kept() -> Ops {
         Ops {
             rotation: 0,

@@ -1,8 +1,3 @@
-//! The threads FFmpeg's readers and graphs start (docs/decisions/threads.md):
-//! a single-frame reader none, a job's stream decoder half the cores', a
-//! graph none once the shared pool runs, nor a stream of frames that stand
-//! alone, nor a still in a plan; and the readers open, a file left lately
-//! among them. Linux only, which lists a process's threads in `/proc`.
 #![cfg(target_os = "linux")]
 
 use std::path::Path;
@@ -16,14 +11,12 @@ use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
 use vidcut_core::render::{Image, VideoPiece};
 use vidcut_core::time::Rational;
 
-/// The tests count the process's threads: one at a time.
 static ONE: Mutex<()> = Mutex::new(());
 
 fn threads() -> usize {
     std::fs::read_dir("/proc/self/task").unwrap().count()
 }
 
-/// The names of the process's threads FFmpeg named (`av:h264:df0`).
 fn ffmpegs_threads() -> Vec<String> {
     std::fs::read_dir("/proc/self/task")
         .unwrap()
@@ -33,14 +26,11 @@ fn ffmpegs_threads() -> Vec<String> {
         .collect()
 }
 
-/// A 320×180 H.264 file of `frames` frames at 30 fps, each with its number
-/// as a barcode.
 fn file_of(frames: u32) -> std::path::PathBuf {
     let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 320, 180, (30, 1), frames);
     fixture::ensure(&spec).unwrap()
 }
 
-/// `frames` frames of `path` from its frame `source_frame`.
 fn piece(path: &Path, source_frame: i64, frames: i64) -> VideoPiece {
     let origin = vidcut_av::probe::probe(path, None)
         .unwrap()
@@ -93,7 +83,6 @@ fn a_single_frame_reader_starts_no_thread() {
     let before = threads();
     let mut reader = FrameReader::default();
     reader.rgba(&piece, fps, 160, 90).unwrap();
-    // The reader stays open with its decoder and graph.
     assert!(
         threads() <= before,
         "{} threads, {before} before",
@@ -107,7 +96,6 @@ fn a_jobs_stream_decoder_takes_half_the_cores() {
     let spec = FixtureSpec::new(VideoCodec::H264, Container::Mp4, 1280, 720, (30, 1), 60);
     let path = fixture::ensure(&spec).unwrap();
     let cores = std::thread::available_parallelism().unwrap().get();
-    // At most 16, FFmpeg's automatic most; one thread starts none.
     let expected = match (cores / 2).clamp(1, 16) {
         1 => 0,
         n => n,
@@ -144,7 +132,6 @@ fn a_graph_runs_its_slices_on_the_pool() {
     graph
         .add(&filter::find("buffersink").unwrap(), "out", "")
         .unwrap();
-    // `transpose` cuts its work into slices.
     graph
         .output("in", 0)
         .unwrap()
@@ -166,8 +153,6 @@ fn a_graph_runs_its_slices_on_the_pool() {
     );
 }
 
-/// The threads `source` started, read as a stream to its end once the pool
-/// runs, and the frames it gave.
 fn threads_reading(source: &Input) -> (usize, usize) {
     vidcut_av::init();
     vidcut_av::pool::run(2, &|_| {});
@@ -227,8 +212,6 @@ fn a_still_in_a_plan_starts_no_thread() {
     let mut frames = VideoFrames::new(&[piece], fps, 320, 180, Pixel::YUV420P, None);
     let first = frames.next_frame().unwrap().unwrap();
     assert_eq!(read_barcode(&first).unwrap(), Some(7));
-    // The reader stays open with its decoder and graphs for the piece's
-    // other frames.
     assert!(
         threads() <= before,
         "{} threads, {before} before: {:?}",
@@ -244,7 +227,6 @@ fn a_file_left_stays_open_for_a_later_piece_of_it() {
     let fps = Rational::new(30, 1).unwrap();
     let mut frames = VideoFrames::new(&[], fps, 320, 180, Pixel::YUV420P, None);
     let before = open_readers();
-    // A playhead dragged across a cut and back: a frame at a time.
     let mut show = |path: &Path, f| {
         frames.read_piece(&piece(path, f, 1));
         read_barcode(&frames.next_frame().unwrap().unwrap()).unwrap()
@@ -252,10 +234,8 @@ fn a_file_left_stays_open_for_a_later_piece_of_it() {
     assert_eq!(show(&first, 10), Some(10));
     assert_eq!(open_readers(), before + 1);
     assert_eq!(show(&second, 20), Some(20));
-    // The first file waits, open.
     assert_eq!(open_readers(), before + 2);
     assert_eq!(show(&first, 40), Some(40));
-    // Taken back: no reader opened for it.
     assert_eq!(open_readers(), before + 2);
     drop(frames);
     assert_eq!(open_readers(), before);
@@ -266,8 +246,6 @@ fn a_seek_into_a_file_the_opener_holds_takes_it_back() {
     let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
     let (first, second) = (file_of(60), file_of(90));
     let fps = Rational::new(30, 1).unwrap();
-    // A cutaway, played into its second piece: the first file, left, goes
-    // to the opener for the piece after.
     let pieces = [
         piece(&first, 10, 3),
         piece(&second, 20, 3),
@@ -278,7 +256,6 @@ fn a_seek_into_a_file_the_opener_holds_takes_it_back() {
     for _ in 0..5 {
         frames.next_frame().unwrap().unwrap();
     }
-    // A seek into the first file: taken back, not opened anew.
     frames.read_piece(&piece(&first, 30, 1));
     assert_eq!(
         read_barcode(&frames.next_frame().unwrap().unwrap()).unwrap(),
@@ -292,9 +269,6 @@ fn a_cutaway_back_to_the_next_frames_reads_on_to_them() {
     let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
     let (first, second) = (file_of(60), file_of(90));
     let fps = Rational::new(30, 1).unwrap();
-    // Back within a second of where the first file stands: it reads on,
-    // sought ahead, and shows the frames there, not the picture it made
-    // last.
     let pieces = [
         piece(&first, 10, 3),
         piece(&second, 20, 3),
@@ -313,7 +287,6 @@ fn playing_across_a_cutaway_opens_each_file_once() {
     let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
     let (first, second) = (file_of(60), file_of(90));
     let fps = Rational::new(30, 1).unwrap();
-    // A cutaway: the first file, the second, the first again further on.
     let pieces = [
         piece(&first, 10, 3),
         piece(&second, 20, 3),
@@ -326,7 +299,5 @@ fn playing_across_a_cutaway_opens_each_file_once() {
         codes.push(read_barcode(&f).unwrap());
     }
     assert_eq!(codes, [10, 11, 12, 20, 21, 22, 50, 51, 52].map(Some));
-    // The first file, sought ahead rather than opened again, and the
-    // second, left.
     assert_eq!(open_readers(), before + 2);
 }

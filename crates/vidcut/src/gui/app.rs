@@ -1,7 +1,3 @@
-//! The eframe app on wgpu: the [`Workspace`], window commands and window
-//! captures. The viewer's picture is presented by a thread of its own
-//! ([`Viewer`]); the UI only shows it (docs/decisions/preview.md §4).
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -16,7 +12,6 @@ use super::video::{Viewer, ViewerHandle};
 use super::workspace::{Picture, Workspace};
 use crate::live::{self, Capture, Image, Presented};
 
-/// Work the session asks of the UI thread.
 enum UiTask {
     CaptureWindow(Capture),
     Window(live::WindowChange),
@@ -26,18 +21,12 @@ enum UiTask {
     Quit,
 }
 
-/// The session's view of the GUI ([`live::Renderer`]): pictures go to the
-/// viewer thread, the rest to the UI thread.
 pub struct Port {
     ctx: egui::Context,
     viewer: ViewerHandle,
     tasks: Mutex<Vec<UiTask>>,
-    /// The session, once started (for `gui.quit` when the window can't
-    /// close).
     session: std::sync::OnceLock<live::Handle>,
-    /// What the two-up showed in the frame drawn last.
     two_up: Mutex<live::stats::TwoUpStats>,
-    /// What only the GUI keeps, as the last frame or task left it.
     gui: Mutex<Option<live::GuiState>>,
 }
 
@@ -82,10 +71,6 @@ impl live::Renderer for Port {
 
     fn quit(&self) {
         self.push(UiTask::Quit);
-        // A window that can't paint never gets to close: presenting it can
-        // block the UI thread for as long as it is hidden (NVIDIA on
-        // Wayland, which has no way to show a minimized window again).
-        // Then the session ends and the process with it anyway.
         if let Some(session) = self.session.get().cloned() {
             let _ = crate::threads::spawn(
                 "vidcut-quit",
@@ -95,7 +80,7 @@ impl live::Renderer for Port {
                     eprintln!("vidcut: the window didn't close; quitting without it");
                     session.shutdown_and_wait(Duration::from_secs(5));
                     crate::threads::join_closing();
-                    std::process::exit(0);
+                    crate::threads::exit_now(0);
                 },
             );
         }
@@ -132,24 +117,16 @@ pub struct App {
     port: Arc<Port>,
     render: RenderState,
     viewer: Viewer,
-    /// Open while `logic` and `ui` run, for the viewer thread's
-    /// submissions.
     gate: Arc<Gate>,
     session: Option<std::thread::JoinHandle<()>>,
     window_captures: HashMap<u64, Capture>,
     next_capture: u64,
 }
 
-/// How long `gui.quit` waits for the window to close before the process
-/// ends without it.
 const QUIT_PATIENCE: Duration = Duration::from_secs(5);
 
-/// How long the GUI may take to end once its window closed, before the
-/// process ends anyway, saying the stage it hung at (`threads::end_within`).
 const EXIT_PATIENCE: Duration = Duration::from_secs(10);
 
-/// The player's sound: the device the preferences name, else the system's
-/// default; read whenever the player opens its device.
 fn audio_device() -> Box<dyn vidcut_av::player::AudioOutput> {
     Box::new(vidcut_av::player::CpalOutput::on(
         crate::preferences::audio_device(),
@@ -181,8 +158,6 @@ impl App {
         let create = project.as_ref().is_some_and(|p| !p.exists());
         let notify = {
             let (ctx, viewer) = (cc.egui_ctx.clone(), viewer.handle());
-            // A new snapshot, or a picture landed: the UI repaints, the
-            // viewer looks again.
             Arc::new(move || {
                 ctx.request_repaint();
                 viewer.wake();
@@ -231,7 +206,6 @@ impl App {
         })
     }
 
-    /// Tells the session what only the GUI keeps.
     fn publish(&self) {
         *self.port.gui.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.ws.gui_state());
     }
@@ -306,7 +280,6 @@ impl eframe::App for App {
                 UiTask::TrimEditor(r) => self.ws.trim_editor_request(r),
                 UiTask::DynamicTrim(r) => self.ws.dynamic_trim_request(r, ctx.input(|i| i.time)),
                 UiTask::Quit => {
-                    // `gui.quit` doesn't ask about running exports.
                     self.ws.export.quit_confirmed = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
@@ -321,7 +294,6 @@ impl eframe::App for App {
         self.ws.picture = Picture { texture, has_frame };
         self.ws.levels = self.viewer.levels();
         let ctx = ui.ctx().clone();
-        // Stats for nerds, looked at again four times a second while shown.
         self.ws.stats = self.ws.snap.stats.then(|| self.viewer.stats()).flatten();
         if self.ws.stats.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
@@ -351,8 +323,6 @@ impl eframe::App for App {
             "the session ended in {:.0} ms",
             started.elapsed().as_secs_f64() * 1000.0
         );
-        // eframe drops the app next, the viewer and the filmstrip's workers
-        // with it, then tears the window down.
         crate::threads::ending("the window and its app");
     }
 }

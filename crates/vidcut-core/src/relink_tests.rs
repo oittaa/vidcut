@@ -1,6 +1,3 @@
-//! Relinking (deviation X1): missing media found by name in folders, each
-//! file found checked against what the project knows of it.
-
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
@@ -12,7 +9,6 @@ fn req(method: &str, params: Value) -> Value {
     json!({ "method": method, "params": params })
 }
 
-/// Moves the fake file at `from` to `to`.
 fn mv(f: &mut Fixture, from: &str, to: &str) {
     let (from, to) = (PathBuf::from(from), PathBuf::from(to));
     let info = f.env.files.remove(&from).unwrap();
@@ -27,7 +23,6 @@ fn mv(f: &mut Fixture, from: &str, to: &str) {
 
 #[test]
 fn files_named_alike_pick_the_folder_named_like_the_old_one() {
-    // Every camera card has a C0001.MP4.
     let mut f = Fixture::new(&[]);
     let fps = Rational::new(25, 1).unwrap();
     f.env

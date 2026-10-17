@@ -1,8 +1,3 @@
-//! Progress of the long request running on this thread, for work that
-//! doesn't take a callback of its own: proxy encodes, reached through the
-//! editor. Like [`crate::cancel`], the caller installs a [`Guard`] and the
-//! work reports to it.
-
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -10,17 +5,14 @@ use std::rc::Rc;
 
 use crate::export::Progress;
 
-/// Receives `(file being written, progress)`.
 pub type Report = Box<dyn FnMut(&Path, Progress)>;
 
 thread_local! {
     static REPORT: RefCell<Option<Report>> = const { RefCell::new(None) };
 }
 
-/// Sends this thread's progress to `report` until dropped.
 pub struct Guard {
     prev: Option<Report>,
-    /// `Rc` is not `Send`: the slot belongs to this thread.
     _unsend: PhantomData<Rc<()>>,
 }
 
@@ -41,7 +33,6 @@ impl Drop for Guard {
     }
 }
 
-/// Reports `progress` on `path` to this thread's [`Guard`], if any.
 pub(crate) fn report(path: &Path, progress: Progress) {
     REPORT.with(|slot| {
         if let Some(report) = slot.borrow_mut().as_mut() {
