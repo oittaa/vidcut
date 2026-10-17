@@ -6,7 +6,7 @@
 cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 60 600
 ```
 
-`g=GOP` and `b=BFRAMES` set the keyframe spacing and B-frames (H.264 with B-frames has open GOPs). `busy` adds noise around the barcode, new in every frame: at 4K60, 260 to 400 Mbit/s, as heavy to decode as camera footage.
+`g=GOP` and `b=BFRAMES` set the keyframe spacing and B-frames (H.264 with B-frames has open GOPs). `rot=90` (MP4 and MOV) stores the pictures turned, with the rotation in the display matrix, as phones do. `hdr=pq` or `hdr=hlg` tags 10-bit HEVC or AV1 as BT.2100 HDR. SDR fixtures are untagged, so SD sizes are read as BT.601 (spec D35). `busy` adds noise around the barcode, new in every frame: at 4K60, 260 to 400 Mbit/s, as heavy to decode as camera footage.
 
 **Project speed:** `scripts/history-speed.sh [EDITS]` (release builds) makes a project of 300 media and 2000 clips in a temporary folder, with `FILL` undo steps (100). It then times EDITS edits, each followed by a command that only reads, and prints the history's size after each.
 

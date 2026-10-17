@@ -1,18 +1,21 @@
 //! Generates (or finds cached) a barcode test fixture and prints its path.
 //!
 //! ```text
-//! cargo run -p vidcut-av --example make_fixture -- CODEC CONTAINER WIDTHxHEIGHT FPS FRAMES [no-audio] [busy] [tc=HH:MM:SS:FF] [g=GOP] [b=BFRAMES]
+//! cargo run -p vidcut-av --example make_fixture -- CODEC CONTAINER WIDTHxHEIGHT FPS FRAMES [no-audio] [busy] [tc=HH:MM:SS:FF] [g=GOP] [b=BFRAMES] [rot=DEGREES] [hdr=pq|hlg]
 //! cargo run -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 60 600
 //! cargo run -p vidcut-av --example make_fixture -- h264 mov 320x180 25 50 tc=10:00:00:00
 //! ```
 //! CODEC: h264 hevc10 prores dnxhr vp9 ffv1 av1; CONTAINER: mp4 mov mkv ts webm; FPS like 30 or 30000/1001.
 //! `busy` adds noise around the barcode, new in every frame: heavy to decode.
+//! `rot=90` stores the pictures turned, with that rotation in the display
+//! matrix (MP4 and MOV); `hdr=pq` tags 10-bit HEVC or AV1 as BT.2100 PQ.
 
 use vidcut_av::fixture::{self, Container, FixtureSpec, Picture, VideoCodec};
+use vidcut_core::model::Hdr;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "usage: make_fixture CODEC CONTAINER WIDTHxHEIGHT FPS FRAMES [no-audio] [busy] [tc=HH:MM:SS:FF] [g=GOP] [b=BFRAMES]";
+    let usage = "usage: make_fixture CODEC CONTAINER WIDTHxHEIGHT FPS FRAMES [no-audio] [busy] [tc=HH:MM:SS:FF] [g=GOP] [b=BFRAMES] [rot=DEGREES] [hdr=pq|hlg]";
     let [codec, container, size, fps, frames, rest @ ..] = args.as_slice() else {
         panic!("{usage}")
     };
@@ -60,6 +63,16 @@ fn main() {
     }
     if let Some(b) = rest.iter().find_map(|a| a.strip_prefix("b=")) {
         spec = spec.bframes(b.parse().expect(usage));
+    }
+    if let Some(r) = rest.iter().find_map(|a| a.strip_prefix("rot=")) {
+        spec = spec.rotation(r.parse().expect(usage));
+    }
+    if let Some(hdr) = rest.iter().find_map(|a| a.strip_prefix("hdr=")) {
+        spec = spec.hdr(match hdr {
+            "pq" => Hdr::Pq,
+            "hlg" => Hdr::Hlg,
+            other => panic!("unknown hdr {other}; {usage}"),
+        });
     }
     let started = std::time::Instant::now();
     let path = fixture::ensure(&spec).expect("generating fixture");
