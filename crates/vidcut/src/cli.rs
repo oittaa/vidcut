@@ -73,6 +73,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("player.mute", &["mute"]),
     ("player.stats", &["show"]),
     ("player.audio_scrubbing", &["on"]),
+    ("player.loop", &["on"]),
     ("mixer.preview", &["track", "volume_db"]),
     ("gui.show", &["panel"]),
     ("gui.close", &["panel"]),

@@ -644,6 +644,7 @@ fn live(method: &str, r: &Response) -> Option<()> {
         | "player.step"
         | "player.mute"
         | "player.audio_scrubbing"
+        | "player.loop"
         | "viewer.set"
         | "viewer.load"
         | "project.open" => {
@@ -848,8 +849,13 @@ fn state_line(v: &Value) -> String {
         None => "source -".to_string(),
     };
     format!(
-        "viewer {} | timeline {} | {} {}",
+        "viewer {}{} | timeline {} | {} {}",
         v["viewer"].as_str().unwrap_or("-"),
+        if v["loop"].as_bool() == Some(true) {
+            ", looping"
+        } else {
+            ""
+        },
         player(&v["timeline"]),
         source_text,
         if source["loaded"].as_bool() == Some(true) {

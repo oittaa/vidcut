@@ -337,6 +337,61 @@ fn pieces_at_other_speeds_show_their_source_frames() {
     assert_eq!(player.status().error, None);
 }
 
+fn play_looped(
+    player: &Player,
+    out: &ManualOutput,
+    from: i64,
+    frames: usize,
+) -> (Vec<i64>, Vec<usize>) {
+    player.seek(from);
+    assert!(player.wait_ready(from, Duration::from_secs(10)));
+    player.play(1.0);
+    let (mut shown, mut sound) = (Vec::new(), Vec::new());
+    while shown.len() < frames {
+        sound.extend(pull_full(out, 400));
+        let t = player.status().position;
+        assert!(player.wait_ready(t, Duration::from_secs(10)), "frame {t}");
+        let s = player.present(Instant::now()).unwrap();
+        if shown.last() != Some(&s.frame) {
+            shown.push(s.frame);
+        }
+    }
+    player.pause();
+    (shown, beep::onsets(&left(&sound), 0.1, 4_800))
+}
+
+#[test]
+fn a_looped_play_goes_on_from_the_start_at_the_end() {
+    let a = pcm();
+    let (player, out) = manual(plan(&[clip(&a, 20, 20)], 0));
+    player.set_loop(Some((0, 20)));
+    let (shown, beeps) = play_looped(&player, &out, 15, 40);
+    assert_eq!(
+        shown,
+        [(15..20), (0..20), (0..15)]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(beeps, [24_000, 56_000], "frame 10's beep, unbroken");
+}
+
+#[test]
+fn a_looped_play_with_in_and_out_plays_their_range_again() {
+    let a = pcm();
+    let (player, out) = manual(plan(&[clip(&a, 0, 90)], 0));
+    player.set_loop(Some((50, 70)));
+    let (shown, beeps) = play_looped(&player, &out, 45, 50);
+    assert_eq!(
+        shown,
+        [(45..70), (50..70), (50..55)]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(beeps, [24_000, 56_000], "frame 60's beep, unbroken");
+}
+
 #[test]
 fn a_device_that_stops_pulling_holds_nothing_up() {
     let a = pcm();

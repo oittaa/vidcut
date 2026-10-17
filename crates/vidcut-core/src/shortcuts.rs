@@ -151,6 +151,15 @@ pub const SHORTCUTS: &[Shortcut] = &[
         ),
     ),
     key(
+        Play,
+        &["Ctrl", "/"],
+        "Loop on or off",
+        Some(
+            "Playing past the end goes on from the start. With both In and Out marked, the \
+             part between them plays over and over.",
+        ),
+    ),
+    key(
         Mark,
         &["I"],
         "Mark In",
@@ -236,7 +245,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Delete",
         Some(
             "Removes the selected clips. On Track 1 the gap closes: Track 1 holds the main \
-             story and never has holes. Backspace does the same.",
+             story and never has holes. Backspace does the same. After a click in the Media \
+             Pool, it removes the selected media from the pool instead, after asking.",
         ),
     ),
     key(
@@ -271,7 +281,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Change speed",
         Some("A speed in percent, played backward, or one frame held still."),
     ),
-    key(Trim, &["Ctrl", "A"], "Select all", None),
+    key(
+        Trim,
+        &["Ctrl", "A"],
+        "Select all",
+        Some("Every clip on the timeline. After a click in the Media Pool, all it shows."),
+    ),
     key(Trim, &["Ctrl", "Shift", "A"], "Select nothing", None),
     key(
         Trim,

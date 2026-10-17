@@ -32,6 +32,9 @@ struct Run {
     speed: f64,
     origin: i64,
     cursor: i64,
+    fed: i64,
+    base: (f64, i64),
+    wraps: VecDeque<(f64, i64)>,
     stretch: Option<Stretch>,
     pending: VecDeque<Piece>,
     exhausted: bool,
@@ -45,6 +48,13 @@ impl Run {
     fn dir(&self) -> f64 {
         self.speed.signum()
     }
+
+    fn sample_at(&mut self, at: f64) -> i64 {
+        while self.wraps.front().is_some_and(|&(w, _)| w <= at) {
+            self.base = self.wraps.pop_front().expect("just seen");
+        }
+        (self.base.1 as f64 + self.dir() * (at - self.base.0)).round() as i64
+    }
 }
 
 struct Producer {
@@ -55,6 +65,7 @@ struct Producer {
     run: Option<Run>,
     trims_gen: Option<u64>,
     muted: bool,
+    looping: Option<(i64, i64)>,
     waiting: Waiting,
 }
 
@@ -70,6 +81,7 @@ pub(crate) fn run(shared: Arc<Shared>) {
         run: None,
         trims_gen: None,
         muted: false,
+        looping: None,
         waiting: Waiting::default(),
         shared,
     };
@@ -129,6 +141,22 @@ impl Producer {
             self.muted = snap.muted;
             self.trims_gen = Some(snap.trims_gen);
         }
+        let plan = &self.plan;
+        let looping = snap
+            .looping
+            .map(|(a, b)| {
+                let (first, end) = (plan.first(), plan.first() + plan.plan.frames);
+                (
+                    plan.sample(a.clamp(first, end)),
+                    plan.sample(b.clamp(first, end)),
+                )
+            })
+            .filter(|(a, b)| b > a);
+        let resume = looping.is_some() && self.looping.is_none();
+        self.looping = looping;
+        if resume && let Some(at) = self.run.as_ref().filter(|r| r.exhausted).map(|r| r.cursor) {
+            self.restart(at);
+        }
         match snap.scrub {
             None => self.waiting.clear(),
             Some((t, n)) if self.waiting.served != Some(n) => {
@@ -160,6 +188,9 @@ impl Producer {
             speed,
             origin: from,
             cursor: from,
+            fed: 0,
+            base: (0.0, from),
+            wraps: VecDeque::new(),
             stretch: None,
             pending: VecDeque::new(),
             exhausted: false,
@@ -183,6 +214,9 @@ impl Producer {
         }
         run.origin = at;
         run.cursor = at;
+        run.fed = 0;
+        run.base = (0.0, at);
+        run.wraps.clear();
         run.ended = false;
         run.exhausted = false;
         run.pending.clear();
@@ -218,7 +252,7 @@ impl Producer {
         while self
             .run
             .as_ref()
-            .is_some_and(|r| r.pending.is_empty() && !r.exhausted)
+            .is_some_and(|r| r.pending.len() < 2 && !r.exhausted)
         {
             if let Some(e) = self.refill() {
                 failed = Some(e);
@@ -247,7 +281,7 @@ impl Producer {
             let dir = run.dir();
             self.shared.markers.push(Marker {
                 counter: ring.written(),
-                sample: (run.origin as f64 + dir * at).round() as i64,
+                sample: run.sample_at(at),
                 speed: dir * per,
                 epoch: run.epoch,
             });
@@ -270,6 +304,15 @@ impl Producer {
         }
         if self.muted {
             piece.samples.fill(0.0);
+        }
+        if let Some((at, per)) = run.pending.front_mut().and_then(|p| p.mark.take()) {
+            let sample = run.sample_at(at);
+            self.shared.markers.push(Marker {
+                counter: ring.written() + (piece.samples.len() / channels) as u64,
+                sample,
+                speed: run.dir() * per,
+                epoch: run.epoch,
+            });
         }
         let at = ring.written();
         let pushed = ring.push(&piece.samples) * channels;
@@ -315,42 +358,70 @@ impl Producer {
                 .collect()
         };
         let mut parts = Vec::new();
+        let mut wrapped = false;
         if run.speed > 0.0 {
+            let end = |cursor: i64, fed: i64| match self.looping {
+                Some((_, b)) if cursor < b || (cursor == b && fed > 0) => b,
+                _ => total,
+            };
+            if let Some((a, _)) = self.looping
+                && run.cursor >= end(run.cursor, run.fed)
+            {
+                run.wraps.push_back((run.fed as f64, a));
+                run.cursor = a;
+                self.mix.seek(a);
+                wrapped = true;
+            }
             let n = ((CHUNK_SECS * rate * run.speed).round() as i64)
                 .max(1)
-                .min(total - run.cursor);
+                .min(end(run.cursor, run.fed) - run.cursor);
             if n > 0 {
-                let mut at = (run.cursor - run.origin) as f64;
+                let mut at = run.fed as f64;
                 for (s, lanes) in read(&mut self.mix, n as usize) {
                     let frames = (s.len() / channels) as f64;
                     parts.push((at, s, lanes));
                     at += frames;
                 }
                 run.cursor += n;
+                run.fed += n;
             }
-        } else if run.cursor >= 0 {
-            let n = ((BLOCK_SECS * rate * run.speed.abs()).round() as i64).max(1);
-            let lo = (run.cursor + 1 - n).max(0);
-            self.mix.seek(lo);
-            let n = (run.cursor + 1 - lo) as usize;
-            let mut end = (run.origin - lo + 1) as f64;
-            for (mut s, lanes) in read(&mut self.mix, n) {
-                reverse(&mut s, channels);
-                end -= (s.len() / channels) as f64;
-                parts.push((end, s, lanes));
+        } else {
+            let floor = |cursor: i64, fed: i64| match self.looping {
+                Some((a, _)) if cursor >= a || (cursor == a - 1 && fed > 0) => a,
+                _ => 0,
+            };
+            if let Some((_, b)) = self.looping
+                && run.cursor < floor(run.cursor, run.fed)
+            {
+                run.wraps.push_back((run.fed as f64, b - 1));
+                run.cursor = b - 1;
+                wrapped = true;
             }
-            parts.reverse();
-            run.cursor = lo - 1;
+            if run.cursor >= 0 {
+                let n = ((BLOCK_SECS * rate * run.speed.abs()).round() as i64).max(1);
+                let lo = (run.cursor + 1 - n).max(floor(run.cursor, run.fed));
+                self.mix.seek(lo);
+                let n = (run.cursor + 1 - lo) as usize;
+                let mut end = (run.fed + run.cursor - lo + 1) as f64;
+                for (mut s, lanes) in read(&mut self.mix, n) {
+                    reverse(&mut s, channels);
+                    end -= (s.len() / channels) as f64;
+                    parts.push((end, s, lanes));
+                }
+                parts.reverse();
+                run.fed += run.cursor + 1 - lo;
+                run.cursor = lo - 1;
+            }
         }
         let exhausted = parts.is_empty();
         match run.stretch.as_mut() {
-            None => run
-                .pending
-                .extend(parts.into_iter().map(|(_, samples, lanes)| Piece {
+            None => run.pending.extend(parts.into_iter().enumerate().map(
+                |(i, (at, samples, lanes))| Piece {
                     samples,
-                    mark: None,
+                    mark: (wrapped && i == 0).then_some((at, 1.0)),
                     lanes,
-                })),
+                },
+            )),
             Some(stretch) => {
                 let mut blocks = Vec::new();
                 for (at, s, lanes) in parts {
@@ -362,14 +433,32 @@ impl Producer {
                     blocks.extend(stretch.finish());
                 }
                 for b in blocks {
-                    let to = b.at + (b.samples.len() / channels) as f64 * b.rate;
+                    let frames = b.samples.len() / channels;
+                    let to = b.at + frames as f64 * b.rate;
                     let lanes = peaks_over(&run.metered, b.at, to);
                     while run.metered.front().is_some_and(|m| m.1 <= b.at) {
                         run.metered.pop_front();
                     }
+                    let mut samples = b.samples;
+                    let cut = run
+                        .wraps
+                        .iter()
+                        .find(|&&(w, _)| w > b.at && w < to)
+                        .map(|&(w, _)| ((w - b.at) / b.rate).ceil() as usize)
+                        .filter(|&k| k < frames);
+                    if let Some(k) = cut {
+                        let rest = samples.split_off(k * channels);
+                        run.pending.push_back(Piece {
+                            samples,
+                            mark: Some((b.at, b.rate)),
+                            lanes: lanes.clone(),
+                        });
+                        samples = rest;
+                    }
+                    let at = b.at + cut.unwrap_or(0) as f64 * b.rate;
                     run.pending.push_back(Piece {
-                        samples: b.samples,
-                        mark: Some((b.at, b.rate)),
+                        samples,
+                        mark: Some((at, b.rate)),
                         lanes,
                     });
                 }

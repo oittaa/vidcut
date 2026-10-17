@@ -361,6 +361,13 @@ impl Player {
         }
     }
 
+    pub fn set_loop(&self, on: bool, marks: Option<(i64, i64)>) {
+        if let Some(e) = self.shown_engine() {
+            let frames = self.contents[self.active.index()].frames;
+            e.set_loop(on.then(|| marks.unwrap_or((0, frames))));
+        }
+    }
+
     pub fn set_muted(&mut self, muted: bool) {
         self.muted = muted;
         if let Some(e) = &self.engine {
