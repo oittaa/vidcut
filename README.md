@@ -1,26 +1,19 @@
 # vidcut
 
-A simple, fully scriptable video cutting tool for Linux, Windows and macOS. Behavior follows the Cut page ([docs/cut-page-spec.md](docs/cut-page-spec.md)).
+A simple, fully scriptable video cutting tool for Linux, Windows and macOS. It behaves like a Cut page ([spec](docs/cut-page-spec.md)), and everything you can do in its window you can also do from a script or an AI agent.
 
 **Status:** early development. It works, but expect rough edges.
 
 ## What it does
 
-- **Cut-page editing:**
-  - a media pool with bins, and a source/timeline viewer (Source Clip, Source Tape, Timeline)
-  - a dual timeline: an overview of the whole program plus a detail view
-  - Smart Insert, Append, Ripple Overwrite, Overwrite, Place On Top
-  - split, ripple delete, trimming (resize, roll, slip, slide, J/L cuts), the Trim Editor and Dynamic Trim
-  - Change Clip Speed: slow, fast, reversed or frozen, the pitch kept (spec D48)
-  - dissolves: cross dissolves, fades to and from black and audio cross fades (spec D50)
-  - several tracks: B-roll that follows the main story on Track 1, music on audio tracks
-  - a mixer with faders, mute, solo and meters
-  - snapping, markers, undo
-- **Export:** Quick Export and an Export dialog (deviation X3), including GPU encoding (NVIDIA, AMD, Intel, Apple) and background jobs. Dynamic range, bit depth and HDR metadata follow the footage (spec D44, D46), and a loudness target can be set ([docs/design/export.md](docs/design/export.md#sound)).
-- **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts and the Boring Detector (spec D29–D31).
-- **Interchange:** OpenTimelineIO, `.otio` and `.otioz`, which also open as projects (deviation X9).
-- **Everything scriptable.** Every action in the GUI is also a CLI command and a JSON-RPC call on the running app, so scripts and AI agents can edit with you. `vidcut mcp` offers it all to AI agents over the Model Context Protocol.
-- **Deliberately not included:** effects, other transitions, titles or color grading. Clip effects, transitions, generators, titles and compound clips from another editor's OTIO file are kept and written back (deviation X9).
+- **Editing:** a media pool with bins; a source and timeline viewer; the dual timeline; Smart Insert, Append, Ripple Overwrite, Overwrite, Place On Top; split, ripple delete, trimming, the Trim Editor and Dynamic Trim; clip speed; dissolves and fades; several video and audio tracks; a mixer; snapping, markers and undo.
+- **Export:** Quick Export and an Export dialog, GPU encoding (NVIDIA, AMD, Intel, Apple), background jobs, HDR that follows the footage, loudness normalization.
+- **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts, the Boring Detector.
+- **Interchange:** OpenTimelineIO (`.otio`, `.otioz`, `.otiod`), which also open as projects.
+- **Scriptable:** every action is a CLI command, a JSON-RPC call on the running app and an MCP tool.
+- **Not included:** effects, titles, color grading, transitions other than dissolves. Those in another editor's OTIO file are kept and written back.
+
+Where vidcut differs from the Cut page: [docs/deviations.md](docs/deviations.md).
 
 ## Requirements
 
@@ -30,9 +23,7 @@ A simple, fully scriptable video cutting tool for Linux, Windows and macOS. Beha
 sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev rustup
 ```
 
-The GUI draws with Vulkan (the driver any desktop has: Mesa's for AMD and Intel, NVIDIA's own) and plays sound through ALSA, which PipeWire and PulseAudio serve.
-
-**Windows 10 or 11:** Visual Studio 2022 or its Build Tools with the C++ workload, LLVM (for libclang), and an FFmpeg build with its headers and import libraries, such as BtbN's shared GPL build:
+**Windows 10 or 11:** Visual Studio 2022 or its Build Tools with the C++ workload, LLVM, and an FFmpeg build with headers and import libraries, such as BtbN's shared GPL build:
 
 ```bash
 winget install BtbN.FFmpeg.GPL.Shared.9.0
@@ -41,7 +32,7 @@ winget install BtbN.FFmpeg.GPL.Shared.9.0
 winget install LLVM.LLVM
 ```
 
-Set `FFMPEG_DIR` to the FFmpeg folder (the one with `bin`, `include` and `lib`) before building, and put its `bin` folder on `PATH`: vidcut loads FFmpeg's DLLs from there. If the build doesn't find libclang, set `LIBCLANG_PATH` to `C:\Program Files\LLVM\bin`. The GUI draws with Vulkan or Direct3D 12 and plays sound through WASAPI. `scripts/check.sh` runs from Git Bash.
+Set `FFMPEG_DIR` to the FFmpeg folder (with `bin`, `include` and `lib`) and put its `bin` on `PATH`. If the build doesn't find libclang, set `LIBCLANG_PATH` to `C:\Program Files\LLVM\bin`.
 
 **macOS:** with `$(brew --prefix rustup)/bin` on `PATH` and `$(brew --prefix ffmpeg-full)/lib/pkgconfig` on `PKG_CONFIG_PATH`:
 
@@ -49,54 +40,21 @@ Set `FFMPEG_DIR` to the FFmpeg folder (the one with `bin`, `include` and `lib`) 
 brew install ffmpeg-full rustup
 ```
 
-The GUI draws with Metal and plays sound through Core Audio.
+On a Mac the full test gate and an app bundle are still open ([todo](docs/todo/macos.md)).
 
-Nothing else is needed at run time. vidcut decodes H.264, HEVC, AV1 and VP9 on the GPU where it can: NVDEC on NVIDIA GPUs, VA-API on AMD and Intel GPUs on Linux, Direct3D 11 on Windows, and VideoToolbox on a Mac.
-
-vidcut works with FFmpeg 8.0 (Ubuntu 26.04 LTS) up to the newest release, 9.0. Both ends are tested.
-
-Rust comes from [rustup](https://rustup.rs). The repository pins its Rust version in `rust-toolchain.toml`, and rustup downloads that toolchain the first time you build.
+vidcut works with FFmpeg 8.0 up to 9.0, decodes on the GPU where it can (NVDEC, VA-API, Direct3D 11, VideoToolbox), and needs nothing else at run time. The GUI draws with Vulkan, Direct3D 12 or Metal and plays sound through ALSA (served by PipeWire or PulseAudio), WASAPI or Core Audio. `rust-toolchain.toml` pins the Rust version; rustup fetches it on the first build.
 
 ## Build and run
-
-On Linux and macOS, `make help` lists the common tasks:
 
 ```bash
 make doctor                 # what a build still needs, then the GPUs and encoders
 make                        # build
-make run                    # the GUI (start screen: new or open a project)
+make run                    # the GUI
 make run P=talk.vidcut      # the GUI with a project (created if missing)
 make install                # vidcut into ~/.local/bin
 ```
 
-The program is `target/release/vidcut`, and `vidcut --help` shows the CLI. On Windows, without make, `cargo build --release` builds `target\release\vidcut.exe`.
-
-## Where vidcut keeps its files
-
-The docs name the Linux places; Windows and macOS have their own:
-
-| Linux | Windows | macOS | Holds |
-|---|---|---|---|
-| `~/.config/vidcut` | `%APPDATA%\vidcut` | `~/Library/Application Support/vidcut` | preferences, user presets and themes |
-| `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | `~/Library/Caches/vidcut` | thumbnails, waveforms, measurements, encoder detection, shaders |
-| `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | `~/Library/Application Support/vidcut/state` | undo history, recent projects |
-| `$XDG_RUNTIME_DIR/vidcut` | `%TEMP%\vidcut` | `$TMPDIR/vidcut-UID` | running GUIs (live control) |
-
-The `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and `XDG_RUNTIME_DIR` variables move them on every system.
-
-## The GUI
-
-Media Pool on the left, with the edit buttons below it; the Viewer on the right; the timeline across the bottom. Editing, tracks, bins and the automatic tools are in the spec.
-
-The **Command log** (top right) lists what you, scripts and agents did, in words. Hover an entry for the request; click it to copy a shell command (deviation X5).
-
-**Preferences** (File > Preferences, Ctrl+, or Cmd+, on a Mac) live in `~/.config/vidcut/preferences.toml` (deviation X12). `vidcut preferences` reads and changes them.
-
-**Themes:** Native by default, light or dark as your computer is set, eight more built in, or your own (File > Preferences: Theme, Import…). A theme is a TOML file. [starship.toml](crates/vidcut/themes/starship.toml) explains every key.
-
-**Keys:** F1 or Help lists them, with a few words on what the less obvious ones do. They're in [spec §11](docs/cut-page-spec.md#11-keyboard-shortcuts) too.
-
-While a GUI has the project open, `vidcut` commands for that project run inside it ([docs/cli.md](docs/cli.md), Live control).
+`make help` lists the rest. On Windows, `cargo build --release` builds `target\release\vidcut.exe`.
 
 ## Try the CLI
 
@@ -107,28 +65,25 @@ vidcut -p talk.vidcut edit append m1 --range 10s..2m
 vidcut -p talk.vidcut export start talk.mp4 --preset youtube-1080p
 ```
 
-Every command, flag and exit code is in [docs/cli.md](docs/cli.md). `vidcut schema` prints the protocol. `--json` is machine-readable output; `--headless` edits the file directly even while a GUI has it open.
+`vidcut --help` lists every command, and `vidcut <command> --help` its flags. While a GUI has the project open, these commands run inside it. [docs/cli.md](docs/cli.md) covers times, JSON output, exit codes and scripting.
 
-## Moving a project
+With Claude Code: `claude mcp add vidcut -- vidcut mcp -p /path/to/talk.vidcut`.
 
-Media kept in the project's folder is stored relative to it, and missing files relink by name and fingerprint (deviation X1). Timelines move as OpenTimelineIO (deviation X9). The commands are in [docs/cli.md](docs/cli.md).
+## Files
 
-## Use with AI agents
+| Linux | Windows | macOS | Holds |
+|---|---|---|---|
+| `~/.config/vidcut` | `%APPDATA%\vidcut` | `~/Library/Application Support/vidcut` | preferences, presets, themes |
+| `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | `~/Library/Caches/vidcut` | thumbnails, waveforms, measurements, encoder detection, shaders |
+| `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | `~/Library/Application Support/vidcut/state` | undo history, recent projects |
+| `$XDG_RUNTIME_DIR/vidcut` | `%TEMP%\vidcut` | `$TMPDIR/vidcut-UID` | running GUIs |
 
-`vidcut mcp` serves every command over the Model Context Protocol (deviation X10, [docs/design/requests.md](docs/design/requests.md)). With Claude Code: `claude mcp add vidcut -- vidcut mcp -p /path/to/talk.vidcut`. Connecting, and getting frames back as images, is in [docs/cli.md](docs/cli.md).
-
-## What's next
-
-The use cases vidcut is for, and what comes next, are in [docs/roadmap.md](docs/roadmap.md). Open items are in [docs/todo/](docs/todo/), one file each.
+`XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and `XDG_RUNTIME_DIR` move them on every system. Preferences are in File > Preferences or `vidcut preferences`; keys in Help (F1); themes are TOML files ([starship.toml](crates/vidcut/themes/starship.toml) explains every key).
 
 ## Contributing
 
-Read [AGENTS.md](AGENTS.md) first; it's written for AI agents but applies to humans too. Behavior follows [docs/cut-page-spec.md](docs/cut-page-spec.md), and intentional differences are recorded in [docs/deviations.md](docs/deviations.md).
+Read [AGENTS.md](AGENTS.md) first: the rules, the quality gates and the docs. How vidcut is built is in [docs/design/](docs/design/README.md). What comes next is in [docs/roadmap.md](docs/roadmap.md) and [docs/todo/](docs/todo/).
 
 ## License
 
-vidcut's source code is released under the [MIT License](LICENSE).
-
-The fonts vidcut carries, Geist, Geist Mono and Space Grotesk, are under the SIL Open Font License 1.1.
-
-vidcut links the FFmpeg libraries, which are LGPL or GPL depending on how they were built; Ubuntu's builds are GPL. Binaries you distribute together with them must comply with their licenses.
+vidcut's source code is MIT ([LICENSE](LICENSE)). The fonts it carries, Geist, Geist Mono and Space Grotesk, are under the SIL Open Font License 1.1. vidcut links the FFmpeg libraries, which are LGPL or GPL depending on how they were built; binaries distributed with them must follow their licenses.

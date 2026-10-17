@@ -53,7 +53,7 @@ The CLI and MCP make paths absolute first (`Request::paths_mut`), since the GUI 
 
 1. Projectless requests, and the `headless` option, run here.
 2. The `instance` option (a pid or a socket, also `VIDCUT_SOCKET`) picks a GUI.
-3. With a project, the GUI that has it open, else here; a live request then fails with `NO_INSTANCE`.
+3. With a project, the GUI that has it open, else here; a live request then fails with NO_INSTANCE (`ErrorCode::NoInstance`).
 4. Without one, the only GUI with a project open (any GUI, for a live request). None: here. Several: a usage error.
 
 The registry (`ipc::registry`) is a folder in the user's runtime dir: each GUI writes an `Instance` entry (pid, socket, open project) and listens on that socket; `registry::list` removes dead ones. `ipc::client::call` sends one JSON-RPC line and reads progress notifications until the answer; closing the connection cancels the call.

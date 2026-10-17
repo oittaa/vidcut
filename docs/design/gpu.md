@@ -65,7 +65,7 @@ In exports:
 | Direct3D 11 | AMF on its adapter | the video processor; colors unchanged, not 8-bit into 10-bit | in memory | other encoders, QSV too; color changes; dissolves |
 | VideoToolbox | its own encoders | `transpose_vt`, `scale_vt`, where colors and layout stay | in memory | padding, layout or color changes; dissolves |
 
-Where a frame comes down and the output shows it smaller, the decoder's GPU shrinks it first (`scale_cuda`, `scale_vulkan`, `scale_vaapi`, the video processor, `scale_vt`). The viewer blends a dissolve's layers wherever each is. Any decoder's frames come down for CPU encoders, renders and tiles, and in the player where the viewer can't show that kind (`Gpu::gpu_pictures`), an import fails, pictures are shown shrunk, or their pool leaves the video-memory budget. Pictures made in memory go up into a GPU encoder's frames (`Upload`, `CudaFrames::upload`).
+Where the driver won't take `cuda::mix`'s kernel, the export mixes its dissolves on the CPU from then on, and its result says why. Where a frame comes down and the output shows it smaller, the decoder's GPU shrinks it first (`scale_cuda`, `scale_vulkan`, `scale_vaapi`, the video processor, `scale_vt`). The viewer blends a dissolve's layers wherever each is. Any decoder's frames come down for CPU encoders, renders and tiles, and in the player where the viewer can't show that kind (`Gpu::gpu_pictures`), an import fails, pictures are shown shrunk, or their pool leaves the video-memory budget. Pictures made in memory go up into a GPU encoder's frames (`Upload`, `CudaFrames::upload`).
 
 ## Encoders
 

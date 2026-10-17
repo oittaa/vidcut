@@ -35,7 +35,7 @@ Both doors end in `session::export_media`. Headless, `session::run_with` loads t
 
 `export::as_preferred` applies `gpu.acceleration`: off, every video encoder becomes `cpu`; on, one the GPU in use lacks becomes `auto`, with a note (`encoder_changed`). `export::availability` lists the GPU's working encoders.
 
-`export::choose_colors` picks each output's dynamic range and bit depth from the pictures it shows where the settings leave them open (spec D44), then its HDR metadata (spec D46), by the rules in `vidcut_core::export`. An export first measures light the files don't state (`light::analysis`, cached); `export.plan` measures nothing and returns `export::describe`.
+`export::choose_colors` picks each output's dynamic range and bit depth from the pictures it shows where the settings leave them open (spec D44), then its HDR metadata (spec D46), by the rules in `vidcut_core::export`. A depth that is set, or fixed by the codec or profile, wins. SDR takes 10 bits only from the encoder an 8-bit export would start with, rather than moving to a slower one, and DNxHR HQ in 10 bits becomes HQX (`ColorChoice::apply`). An export first measures light the files don't state (`light::analysis`, cached): the peaks of every pixel, the averages and distribution of at most half a million a frame. `export.plan` measures nothing and returns `export::describe`.
 
 ## Choosing an encoder
 
@@ -56,6 +56,8 @@ The export takes the first that opens; a detected one can still fail (NVENC allo
 `export::run` calls `run_decoding_on` for each output in turn, with a GPU decoder of the export's own (`GpuDecoding::own_decoder`) while GPU decoding is on. It writes a hidden `.part` file beside the output (`partial_path`) and renames it on success; an error or cancel removes it.
 
 `encode` opens the muxer and both encoders and starts the `Writer` on `vidcut-encode` behind a bounded channel. The export's thread loops over the frames: `VideoFrames::next_frame` gives the picture, `AudioMix::read` exactly the samples that frame spans, and both go to the writer in order. The writer encodes, puts HDR metadata into the packets, interleaves them, then flushes the encoders and writes the trailer.
+
+**HDR metadata:** static values go to the encoder (x265 repeats them at every keyframe) and to the container, which MP4, MOV, Matroska and WebM write. `hdr` puts HDR10+ into each HEVC or AV1 frame, which FFmpeg's encoders don't do. Dolby Vision is profile 8.1 into PQ and 8.4 into HLG (10 in AV1); only libx265 and libsvtav1 write it, and every frame needs it, so black frames take the one before them, and black before the first picture leaves it out.
 
 **Why:** an encoder waiting on the GPU doesn't hold up decoding the next pictures.
 
@@ -100,6 +102,8 @@ An `.otio`, `.otioz` or `.otiod` output (`export::timeline_format`) writes the e
 ## Proxies
 
 `proxy.generate` uses the same machinery (spec D41). `Env::generate_proxy` in `AvEnv` picks encoders (`proxy::encoders`: the codec preference, the detected GPU encoders, for automatic the codecs the GPU plays, `export::plays`) and calls `proxy::write`: one source decoded on a GPU decoder of its own, pictures made by `Maker`, encoded on `vidcut-encode`, renamed into place. The Matroska file keeps each source frame's timestamp, and its `VIDCUT_ORIGIN` tag lets an unchanged source reuse it. Vulkan's ProRes encoder serves proxies only.
+
+Automatic tries DNxHR LB, ProRes Proxy, AV1, HEVC and H.264 in four rounds: made and played on the GPU, played on it, made on it (through Vulkan too), then the rest; the first that opens wins. A proxy is 10-bit from a source of more than 8 bits where its encoder takes them, keeping an HDR source's PQ or HLG and a PQ source's static metadata; an 8-bit one is SDR BT.709. Each has a keyframe every 60 frames (ProRes and DNxHR every frame) and no reordering, so a seek decodes at most 60 frames.
 
 ## Code
 

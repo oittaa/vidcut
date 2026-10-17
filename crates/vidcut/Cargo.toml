@@ -1,6 +1,6 @@
 [package]
 name = "vidcut"
-description = "A simple, fully scriptable video cutting tool modeled on DaVinci Resolve's Cut page"
+description = "A simple, fully scriptable video cutting tool"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

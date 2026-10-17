@@ -2,7 +2,7 @@
 
 Guide for AI agents (and humans) working on this repository.
 
-vidcut is a video cutting tool modeled on DaVinci Resolve's Cut page, in Rust: the FFmpeg libraries in-process (`ffmpeg-next`), its own player engine, an egui GUI on wgpu. [README.md](README.md) says what it does and how to build and use it.
+vidcut is a video cutting tool modeled on DaVinci Resolve's Cut page, in Rust. [README.md](README.md) says what it does and how to build it; [docs/design/](docs/design/README.md) how it is built.
 
 ## Ground rules
 
@@ -48,8 +48,8 @@ These are mandatory.
 
 Each fact lives in one doc; the others link to it. The design docs name what a reader greps for (types, modules, request methods, thread names), not tunable numbers, and `scripts/check-docs.sh` checks that every name in backticks in them exists in `crates/`.
 
-- [README.md](README.md): features, requirements, build, CLI basics. Keys: [docs/cut-page-spec.md](docs/cut-page-spec.md) §11.
-- [docs/cli.md](docs/cli.md): every command, JSON output and exit codes, live control of a running GUI.
+- [README.md](README.md): what vidcut does, requirements, build.
+- [docs/cli.md](docs/cli.md): the CLI guide (times, JSON output, exit codes, scripting, running GUIs); every command and flag is in `vidcut --help`.
 - [docs/cut-page-spec.md](docs/cut-page-spec.md): the behavioral spec; [docs/deviations.md](docs/deviations.md): where vidcut differs.
 - [docs/design/](docs/design/README.md): how vidcut is built, with charts; start there.
 - [docs/tools.md](docs/tools.md): debug and test tools; [docs/gotchas.md](docs/gotchas.md): FFmpeg, driver and library behavior vidcut works around.
