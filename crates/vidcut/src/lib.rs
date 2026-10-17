@@ -10,6 +10,7 @@ pub mod mcp;
 pub mod output;
 pub mod paths;
 pub mod preferences;
+pub mod reset;
 pub mod session;
 pub mod storyboard;
 pub mod system;

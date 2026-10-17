@@ -162,6 +162,8 @@ Which kept transitions play (`otio::transitions`): on picture, an `SMPTE_Dissolv
 
 Preferences are not in the project. They live in `preferences.toml` in the config dir (`preferences::path`): a `Preferences` with appearance, GPU, player, thumbnail and proxy sections. `preferences.get` and `preferences.set` are projectless, so every door runs them the same way. `preferences.set` takes a `PreferencesPatch`, applies it (`Preferences::patched`), checks it and replaces the file atomically. Code reads the file when it needs a value (`preferences::load`); a running GUI also watches it (`Msg::PreferencesChanged`) and follows GPU decoding, the audio device, the player's memory budget and the theme.
 
+`reset` (`reset::plan`, `reset::run`) empties the config, cache and state dirs: the preferences and view settings, every cache, the recent projects and remembered folders, and the undo histories but those of projects a running GUI has open (`Store::history_path`, the registry). Presets and themes go only with `presets_and_themes`. It deletes files only, so a running GUI follows through its watchers, and the GUI that asked reloads its view settings, folders and recent projects (`Workspace::after_reset`).
+
 ## Validation
 
 `validate::violations` lists what breaks the model's rules: unique ids, tracks named by place with video before audio and V1 present, clips and their sound sorted without overlap on each track, sources inside their media, known media and bins, gains in range. It runs when a file loads (the load fails), after every edit (the edit fails as a vidcut bug, and nothing is saved) and when an OTIO file opens.

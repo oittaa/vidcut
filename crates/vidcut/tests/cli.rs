@@ -1108,3 +1108,38 @@ fn stills_and_sequences_edit_and_export() {
     let r = sb.ok(&["media", "add", s(&seq[0])]);
     assert_eq!(r["changes"]["created"], serde_json::json!(["m3"]));
 }
+
+#[test]
+fn reset_deletes_settings_caches_and_state_but_keeps_presets() {
+    let s = Sandbox::new("reset");
+    let d = s.dir.path();
+    let files = [
+        "config/vidcut/preferences.toml",
+        "config/vidcut/presets/mine.toml",
+        "cache/vidcut/thumbs/a.jpg",
+        "state/vidcut/recent.json",
+    ];
+    for f in files {
+        std::fs::create_dir_all(d.join(f).parent().unwrap()).unwrap();
+        std::fs::write(d.join(f), "x").unwrap();
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_vidcut"))
+        .env("XDG_STATE_HOME", d.join("state"))
+        .env("XDG_RUNTIME_DIR", d.join("run"))
+        .env("XDG_CONFIG_HOME", d.join("config"))
+        .env("XDG_CACHE_HOME", d.join("cache"))
+        .env_remove("VIDCUT_SOCKET")
+        .env_remove("VIDCUT_PROJECT")
+        .args(["--json", "reset"])
+        .output()
+        .expect("run vidcut");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        files.map(|f| d.join(f).exists()),
+        [false, true, false, false]
+    );
+}

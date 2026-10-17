@@ -79,6 +79,10 @@ impl Store {
         &self.path
     }
 
+    pub fn history_path(&self) -> &Path {
+        &self.history_path
+    }
+
     fn dir(&self) -> &Path {
         self.path.parent().unwrap_or(Path::new("/"))
     }

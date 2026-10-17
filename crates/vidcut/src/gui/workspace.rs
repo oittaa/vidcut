@@ -475,6 +475,12 @@ impl Workspace {
         }
     }
 
+    pub(super) fn after_reset(&mut self) {
+        self.folders = super::folders::Folders::load();
+        self.timeline.options = super::timeline::Options::load();
+        self.recent = recent_projects();
+    }
+
     pub(super) fn say(&mut self, text: impl Into<String>) {
         self.flash = Some((text.into(), std::time::Instant::now()));
     }
