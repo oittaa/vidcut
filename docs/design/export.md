@@ -87,6 +87,10 @@ flowchart TD
 
 `AudioMix` mixes the lanes sample-exact: clip gains, cross fades, de-click fades at cuts, clips at other speeds stretched with their pitch kept. With `audio.loudness`, `analysis::mix_loudness` first measures the mix as it will be encoded, and `loudness_gain` gives one gain (`AudioMix::set_gain_db`) that reaches the target with the true peak under a ceiling.
 
+## Errors and logs
+
+FFmpeg logs only fatal errors unless `VIDCUT_AV_LOG` asks for more ([tools](../tools.md)): decoders recovering after a seek log harmless errors, and a real failure comes back as a vidcut error that says what failed.
+
 ## The GUI's exports
 
 GUI exports are `background`. Quick Export lists the presets marked `quick_export` and sends one with `overwrite` and no range. The Export dialog ([deviation X3](../deviations.md#x3-export-dialog-beyond-quick-export)) starts from a preset, sends changes as `set` overrides with a range, per-clip names and `overwrite`, and shows `export.plan` as its params change.

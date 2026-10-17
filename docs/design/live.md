@@ -135,6 +135,12 @@ All but an untimed `jobs.wait` have a deadline.
 - **Timeline tiles**, decoded by `Tiles` on `vidcut-tiles-N`.
 - **The two-up**: `Cells` owns its players on the UI thread; `Screens` draws them.
 
+## Themes and keys
+
+A theme is a TOML file: the built-in ones are compiled in from `crates/vidcut/themes/`, and the user's live in the config dir's `themes` folder (`themes::dir`), where one named like a built-in replaces it. A theme's `light_mode` table applies while the system is in light mode (`look::current`, watched on `vidcut-look`). The core loads the theme `appearance.theme` names into the snapshot, and loads it again when the preferences, the themes folder or the system's look change (`Msg::PreferencesChanged`); one that doesn't load shows the default, with a notice. The UI applies a new theme at its next frame.
+
+The keys are one table, `vidcut_core::shortcuts`: the Help window (`crates/vidcut/src/gui/help.rs`) and `keys.list` both read it.
+
 ## From a key press to a frame
 
 Ctrl+B splits at the playhead ([spec §8.5](../cut-page-spec.md#85-split-pp-646-723-950)):
