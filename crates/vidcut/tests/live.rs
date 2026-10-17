@@ -294,6 +294,30 @@ fn exact_seeks_external_edit_and_proxies() {
         assert_eq!(state["timeline"]["error"], Value::Null, "{state}");
         assert_eq!(h.shown(dir), want, "proxy, timeline frame {t}");
     }
+    let plays = |want: &str| {
+        let started = Instant::now();
+        loop {
+            h.ok("player.seek", json!({ "at": 0, "viewer": "timeline" }));
+            h.shown(dir);
+            let state = h.ok("player.state", json!({})).result;
+            let codec = state["stats"]["decoding"]["codec"].clone();
+            if codec == want {
+                return;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "the timeline plays {codec}, not {want}"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    plays("dnxhd");
+    let made = PathBuf::from(m1["proxy"]["path"].as_str().unwrap());
+    let aside = dir.join("aside.mkv");
+    std::fs::rename(&made, &aside).unwrap();
+    plays("h264");
+    std::fs::rename(&aside, &made).unwrap();
+    plays("dnxhd");
 
     let pq = fixture::ensure(
         &FixtureSpec::new(

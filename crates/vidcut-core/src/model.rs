@@ -266,8 +266,10 @@ pub struct Media {
 /// the source's presentation timestamps (decision D41, deviation X18).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Proxy {
-    /// The proxy file, absolute; stored like [`Media::path`].
-    pub path: PathBuf,
+    /// The proxy file's name. Each computer looks for it in its own proxy
+    /// folder (preferences `proxies.folder`), so the project names no
+    /// computer's folder.
+    pub file: String,
     /// [`Media::size`] when the proxy was made.
     pub source_size: u64,
     /// [`Media::mtime_ns`] when the proxy was made. A different size or
@@ -277,6 +279,12 @@ pub struct Proxy {
     pub height: u32,
     /// Encoder name, e.g. `h264`.
     pub codec: String,
+}
+
+impl Proxy {
+    pub fn path_in(&self, dir: &Path) -> PathBuf {
+        dir.join(&self.file)
+    }
 }
 
 impl Media {

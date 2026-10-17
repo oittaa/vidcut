@@ -144,10 +144,12 @@ fn cancelled_and_automatic_proxies() {
     let made = ok(&h, "media.get", json!({ "media": "m2" }))["proxy"]["path"].clone();
     let made = PathBuf::from(made.as_str().expect("a proxy"));
 
+    let rev = ok(&h, "project.summary", json!({}))["rev"].clone();
     std::fs::remove_file(&made).unwrap();
     let again = automatic_job(&h, &[first]).expect("the lost proxy made again");
     ok(&h, "jobs.wait", json!({ "job": again }));
     assert!(made.is_file());
+    assert_eq!(ok(&h, "project.summary", json!({}))["rev"], rev);
 
     h.shutdown();
     let _ = session.join();

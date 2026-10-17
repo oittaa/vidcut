@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{Value, json};
-use vidcut_core::editor::{media_context, resolve_clip};
+use vidcut_core::editor::{Env, media_context, resolve_clip};
 use vidcut_core::model::{Clip, Format};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
@@ -411,6 +411,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
         lost_proxies: Arc::new(HashMap::new()),
+        proxy_dir: Arc::from(Path::new("")),
         waveforms: Arc::new(HashMap::new()),
         jobs: Arc::new(Vec::new()),
         audio_scrubbing: true,
@@ -461,6 +462,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
         lost_proxies: Arc::new(HashMap::new()),
+        proxy_dir: Arc::from(Path::new("")),
         missing_watch: missing::MissingWatch::start(tx.clone()),
         thumbs_wanted: HashMap::new(),
         waveforms: Arc::new(HashMap::new()),
@@ -662,6 +664,7 @@ struct Live {
     thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     missing: Arc<HashSet<String>>,
     lost_proxies: Arc<HashMap<String, PathBuf>>,
+    proxy_dir: Arc<Path>,
     missing_watch: missing::MissingWatch,
     thumbs_wanted: HashMap<String, String>,
     waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
@@ -842,6 +845,9 @@ impl Live {
                 changed |= self.player.follow_audio(crate::preferences::audio_device());
                 self.player.set_budget(crate::preferences::player_budget());
                 self.follow_theme();
+                if self.project.is_some() && self.proxy_folder() != *self.proxy_dir {
+                    self.project_changed(None);
+                }
             }
             Msg::FileChanged => {
                 let refreshed = match self.project.as_mut().map(OpenProject::reload) {
@@ -876,8 +882,17 @@ impl Live {
                     .filter(|(id, path)| self.lost_proxies.get(*id) != Some(*path))
                     .map(|(id, _)| id.clone())
                     .collect();
+                let changed = *self.lost_proxies != proxies;
                 self.missing = Arc::new(media);
                 self.lost_proxies = Arc::new(proxies);
+                let playing = self
+                    .project
+                    .as_ref()
+                    .map(|o| o.project().settings.use_proxies);
+                if changed && playing == Some(true) {
+                    self.schedule_timeline();
+                    self.refresh_source();
+                }
                 if !lost.is_empty() {
                     self.make_proxies(Some(&lost));
                 }
@@ -1088,6 +1103,7 @@ impl Live {
             thumbs: self.thumbs.clone(),
             missing: self.missing.clone(),
             lost_proxies: self.lost_proxies.clone(),
+            proxy_dir: self.proxy_dir.clone(),
             waveforms: self.waveforms.clone(),
             jobs: self.jobs.clone(),
             audio_scrubbing: self.audio_scrubbing,
@@ -1510,6 +1526,9 @@ impl Live {
             return;
         };
         j.ended(result);
+        if j.kind == "proxy" {
+            self.missing_watch.look_again();
+        }
         if j.origin != (Origin::Gui { drag: false }).name() && j.origin != Origin::Session.name() {
             return;
         }
@@ -1659,6 +1678,13 @@ impl Live {
             _ => return,
         };
         self.make_proxies(added.map(Vec::as_slice));
+    }
+
+    fn proxy_folder(&self) -> PathBuf {
+        self.project
+            .as_ref()
+            .map(|open| AvEnv::for_project(open.store.path()).proxy_dir())
+            .unwrap_or_default()
     }
 
     fn make_proxies(&self, only: Option<&[String]>) {
@@ -2376,6 +2402,7 @@ impl Live {
             self.missing_watch.watch(Vec::new(), Vec::new());
             return;
         };
+        let folder = AvEnv::for_project(open.store.path()).proxy_dir();
         let p = open.project();
         self.missing_watch.watch(
             p.media
@@ -2384,9 +2411,10 @@ impl Live {
                 .collect(),
             p.media
                 .iter()
-                .filter_map(|m| Some((m.id.clone(), m.proxy.as_ref()?.path.clone())))
+                .filter_map(|m| Some((m.id.clone(), m.proxy.as_ref()?.path_in(&folder))))
                 .collect(),
         );
+        self.proxy_dir = Arc::from(folder);
         let history = open.editor.history_labels(1).unwrap_or_default();
         self.project_snap = Some(ProjectSnap {
             path: open.store.path().to_path_buf(),
@@ -2475,7 +2503,12 @@ impl Live {
 
     fn preview_plan(&self, mut plan: RenderPlan) -> RenderPlan {
         if let Some(open) = &self.project {
-            vidcut_core::preview::apply_proxies(&mut plan, open.project(), |path| path.is_file());
+            vidcut_core::preview::apply_proxies(
+                &mut plan,
+                open.project(),
+                &self.proxy_dir,
+                Path::is_file,
+            );
         }
         plan
     }

@@ -25,7 +25,7 @@ classDiagram
     sequence
   }
   class Proxy {
-    path, codec
+    file, codec
     source_size, source_mtime_ns
   }
   class Track {
@@ -100,13 +100,13 @@ The counters live in `NextIds`. Each alloc call adds one, and undo restores `nex
 
 ## The `.vidcut` file
 
-`Store` reads and writes the `Project` as pretty JSON (serde). Media and proxy paths in or under the project's folder are stored relative to it, others absolute; in memory they are always absolute. A save writes a temporary file and renames it over the project, so readers see the old file or the new one, never part of one. `Store::transact`, `Store::compact` and `OpenProject::apply` hold the project's lock file (`Store::lock`); `Store::create` and `Store::replace` write a new file without it. Loading runs `validate::violations` and refuses an inconsistent file. The undo history is kept apart, in the state dir ([requests](requests.md#undo-history)).
+`Store` reads and writes the `Project` as pretty JSON (serde). Media paths in or under the project's folder are stored relative to it, others absolute; in memory they are always absolute. A proxy is stored by its file name (`Proxy::file`), found in this computer's proxy folder (`Proxy::path_in`, `Env::proxy_dir`). A save writes a temporary file and renames it over the project, so readers see the old file or the new one, never part of one. `Store::transact`, `Store::compact` and `OpenProject::apply` hold the project's lock file (`Store::lock`); `Store::create` and `Store::replace` write a new file without it. Loading runs `validate::violations` and refuses an inconsistent file. The undo history is kept apart, in the state dir ([requests](requests.md#undo-history)).
 
 **Why** relative paths: a project folder moved or copied, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-projects-are-always-saved-standalone-json-files)).
 
 ## Fingerprints and relinking
 
-Two stamps identify a media file. `Media::size` and `Media::mtime_ns`, read when it was probed, make its `Origin` (`fingerprint::origin`). The origin names and stamps every cache file made from the media ([analysis](analysis.md)), and a proxy made from another size or time is stale (`Media::fresh_proxy`). A proxy whose file is gone is lost (`Env::proxy_present`): automatic proxies make it again. `Media::fingerprint` is a SHA-256 of the content (`fingerprint::file`): the whole of a file no larger than `WHOLE`, otherwise one `PIECE` from the start, the middle and the end; an image sequence is three pictures (`fingerprint::pictures`).
+Two stamps identify a media file. `Media::size` and `Media::mtime_ns`, read when it was probed, make its `Origin` (`fingerprint::origin`). The origin names and stamps every cache file made from the media ([analysis](analysis.md)), and a proxy made from another size or time is stale (`Media::fresh_proxy`). A proxy's file is named by the source's content instead (`paths::proxy_origin`), so it has the same name on every computer. A proxy whose file is gone is lost (`Env::proxy_present`): automatic proxies make it again as the project names it. `Media::fingerprint` is a SHA-256 of the content (`fingerprint::file`): the whole of a file no larger than `WHOLE`, otherwise one `PIECE` from the start, the middle and the end; an image sequence is three pictures (`fingerprint::pictures`).
 
 A file is missing when `Env::present` says so; a path absolute only on the other kind of system counts as missing. `media.relink` looks for missing files by name in `search` folders and relinks a candidate only if its size, streams, duration, timecode and fingerprint match. A file given as `path` is used either way.
 

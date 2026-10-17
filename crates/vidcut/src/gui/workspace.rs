@@ -1556,6 +1556,9 @@ impl Workspace {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.snap = self.live.snapshot();
+        if let Some(t) = &mut self.tiles {
+            t.proxies = self.snap.proxy_dir.clone();
+        }
         if !self
             .theme
             .as_ref()

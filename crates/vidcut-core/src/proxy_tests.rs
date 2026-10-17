@@ -91,3 +91,15 @@ fn a_lost_proxy_is_marked_missing() {
     let r = f.ok(req("media.get", json!({"media": "m1"})));
     assert_eq!(r.result["proxy"]["missing"], json!(true));
 }
+
+#[test]
+fn a_lost_proxy_is_made_again_at_its_own_size() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.env.proxy_rules.larger_than = [1, 1];
+    f.ok(req("proxy.generate", json!({"media": "m1", "width": 640})));
+    f.env
+        .lost_proxies
+        .insert(Path::new("/proxies").join("m1-640x360.mkv"));
+    let r = f.ok(req("proxy.generate", json!({"auto": true})));
+    assert_eq!(r.result["proxies"][0]["width"], json!(640));
+}

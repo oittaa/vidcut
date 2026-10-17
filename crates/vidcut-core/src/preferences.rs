@@ -120,8 +120,8 @@ impl Default for Thumbnails {
 #[serde(default, deny_unknown_fields)]
 pub struct Proxies {
     /// While a project plays proxies, the running app makes them for the
-    /// media these rules pick: those imported, and the pool's when proxies
-    /// are turned on.
+    /// media these rules pick: those imported, the pool's when proxies are
+    /// turned on, and again for any whose proxy file is gone.
     pub auto: bool,
     /// Image sequences get one.
     pub image_sequences: bool,
@@ -133,11 +133,13 @@ pub struct Proxies {
     pub size: u32,
     /// The codec proxies are made with.
     pub codec: ProxyCodec,
-    /// Where new proxies go: a folder in the project's folder (`proxies`,
-    /// the default), or an absolute path. Every project shares an absolute
-    /// one, so a file used in several projects gets one proxy; with a
-    /// project on a network drive, proxies can stay on a local one. Proxies
-    /// already made stay where they are.
+    /// Where this computer keeps proxies: a folder in the project's folder
+    /// (`proxies`, the default), or an absolute path. Every project shares
+    /// an absolute one, so a file used in several projects gets one proxy;
+    /// with a project on a network drive, proxies can stay on a local one.
+    /// A project names its proxies by file, and each computer looks for
+    /// them in its own folder: after a change, move the files there or let
+    /// them be made again.
     pub folder: PathBuf,
 }
 

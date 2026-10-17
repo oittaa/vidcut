@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::path::Path;
 use std::sync::Arc;
 
 use eframe::egui::{
@@ -241,7 +242,7 @@ struct ProxyState {
     tip: String,
 }
 
-fn proxy_state(m: &Media, lost: bool) -> Option<ProxyState> {
+fn proxy_state(m: &Media, lost: bool, folder: &Path) -> Option<ProxyState> {
     let p = m.proxy.as_ref()?;
     Some(if lost {
         ProxyState {
@@ -251,7 +252,7 @@ fn proxy_state(m: &Media, lost: bool) -> Option<ProxyState> {
             tip: format!(
                 "The proxy file is gone, so the original plays: {}. Generate Proxy makes it \
                  again.",
-                p.path.display()
+                p.path_in(folder).display()
             ),
         }
     } else if m.fresh_proxy().is_some() {
@@ -975,7 +976,8 @@ impl Workspace {
         if missing {
             badge("MISSING", theme::colors().error, false);
         }
-        let proxy = proxy_state(m, self.snap.lost_proxies.contains_key(&m.id));
+        let lost = self.snap.lost_proxies.contains_key(&m.id);
+        let proxy = proxy_state(m, lost, &self.snap.proxy_dir);
         if let Some(px) = &proxy {
             badge(px.badge, px.color, true);
         }
@@ -1179,7 +1181,11 @@ impl Workspace {
                     None => "none".into(),
                 });
             }
-            6 => match proxy_state(m, self.snap.lost_proxies.contains_key(&m.id)) {
+            6 => match proxy_state(
+                m,
+                self.snap.lost_proxies.contains_key(&m.id),
+                &self.snap.proxy_dir,
+            ) {
                 Some(px) => {
                     ui.label(RichText::new(px.column).color(px.color))
                         .on_hover_text(px.tip);

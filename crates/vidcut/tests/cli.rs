@@ -382,6 +382,49 @@ fn a_proxy_made_from_another_file_is_made_again() {
 }
 
 #[test]
+fn a_project_names_its_proxy_by_file_in_each_computers_folder() {
+    let sb = Sandbox::new("proxy-file");
+    let media = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        30,
+    ));
+    let (here, there) = (sb.dir.path().join("here"), sb.dir.path().join("there"));
+    sb.ok(&[
+        "preferences",
+        "set",
+        &format!("proxies.folder={}", s(&here)),
+    ]);
+    sb.ok(&["project", "create", s(&sb.project())]);
+    sb.ok(&["media", "add", s(&media)]);
+    let r = sb.ok(&["proxy", "generate", "m1"]);
+    let made = PathBuf::from(r["result"]["proxies"][0]["path"].as_str().unwrap());
+    let name = made.file_name().unwrap().to_str().unwrap();
+    std::fs::create_dir_all(&there).unwrap();
+    std::fs::rename(&made, there.join(name)).unwrap();
+    sb.ok(&[
+        "preferences",
+        "set",
+        &format!("proxies.folder={}", s(&there)),
+    ]);
+
+    let proxy = sb.ok(&["media", "get", "m1"])["result"]["proxy"].clone();
+    assert_eq!(proxy["path"].as_str(), Some(s(&there.join(name))));
+    assert_eq!(proxy["missing"], Value::Null);
+    let saved: Value =
+        serde_json::from_str(&std::fs::read_to_string(sb.project()).unwrap()).unwrap();
+    assert_eq!(
+        saved["media"][0]["proxy"]["file"].as_str(),
+        Some(name),
+        "{}",
+        saved["media"][0]["proxy"]
+    );
+}
+
+#[test]
 fn projects_share_an_absolute_proxy_folder() {
     let sb = Sandbox::new("proxy-folder");
     let media = fixture(FixtureSpec::new(
