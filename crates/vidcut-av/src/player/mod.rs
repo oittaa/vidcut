@@ -29,8 +29,7 @@
 //! reversed.
 //!
 //! **Scrubbing.** A frame step, and a seek while paused, play that frame's
-//! sound ([`scrub`]); [`Scrubber`] does it alone, for pictures shown by
-//! something else.
+//! sound ([`scrub`]).
 //!
 //! **The plan played next.** A viewer that shows one thing or another (the
 //! source or the timeline) plays both through one player: the frame it
@@ -60,7 +59,6 @@ pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,
 };
-pub use scrub::Scrubber;
 
 use crate::error::{Error, Result};
 use clock::{Heard, Markers};
@@ -1446,8 +1444,11 @@ impl Drop for Player {
         // The windows thread isn't waited for: it may be opening a file,
         // which no cancel flag reaches, or waiting its turn behind another
         // player's window. Its flag is raised; it holds the shared state
-        // itself and ends when it next looks.
-        drop(lock(&self.shared.windows).take());
+        // itself and ends when it next looks, which the process waits for
+        // (`crate::ending`).
+        if let Some(windows) = lock(&self.shared.windows).take() {
+            crate::ending::leave(windows);
+        }
         // The kept pictures go now, not once the windows thread lets the
         // shared state go.
         let (pictures, bytes) = self.shared.store.usage();

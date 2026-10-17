@@ -668,34 +668,38 @@ fn on_threads<T: Send, R: Send, S>(
     let inbox = Mutex::new(inbox);
     let failed = AtomicBool::new(false);
     // They work for whom this thread works ([`crate::first::as_job`]).
-    let yields = crate::first::yields();
+    let job = crate::first::yields();
     std::thread::scope(|scope| {
-        let working: Vec<_> = (0..threads)
-            .map(|_| {
-                scope.spawn(|| -> Result<Vec<R>> {
-                    crate::first::set_yields(yields);
-                    let mut own = state();
-                    let mut made = Vec::new();
-                    let mut error = None;
-                    loop {
-                        let next = inbox.lock().unwrap_or_else(|e| e.into_inner()).recv();
-                        let Ok(item) = next else {
-                            return error.map_or(Ok(made), Err);
-                        };
-                        if error.is_some() || failed.load(Ordering::Relaxed) {
-                            continue;
+        let working = (0..threads)
+            .map(|i| {
+                std::thread::Builder::new()
+                    .name(format!("vidcut-light-{i}"))
+                    .spawn_scoped(scope, || -> Result<Vec<R>> {
+                        if job {
+                            crate::first::as_job();
                         }
-                        match work(&mut own, item) {
-                            Ok(r) => made.push(r),
-                            Err(e) => {
-                                failed.store(true, Ordering::Relaxed);
-                                error = Some(e);
+                        let mut own = state();
+                        let mut made = Vec::new();
+                        let mut error = None;
+                        loop {
+                            let next = inbox.lock().unwrap_or_else(|e| e.into_inner()).recv();
+                            let Ok(item) = next else {
+                                return error.map_or(Ok(made), Err);
+                            };
+                            if error.is_some() || failed.load(Ordering::Relaxed) {
+                                continue;
+                            }
+                            match work(&mut own, item) {
+                                Ok(r) => made.push(r),
+                                Err(e) => {
+                                    failed.store(true, Ordering::Relaxed);
+                                    error = Some(e);
+                                }
                             }
                         }
-                    }
-                })
+                    })
             })
-            .collect();
+            .collect::<std::io::Result<Vec<_>>>()?;
         let fed = feed(&mut |item| !failed.load(Ordering::Relaxed) && to_work.send(item).is_ok());
         drop(to_work);
         let mut made = Vec::new();

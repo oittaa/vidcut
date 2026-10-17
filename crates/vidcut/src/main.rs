@@ -28,7 +28,12 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     vidcut_av::cuda::keep_shaders_in(vidcut::paths::cache_dir().join("shaders"));
     vidcut_av::light::cache_in(vidcut::paths::cache_dir().join("analysis"));
-    match run(&cli) {
+    let ran = run(&cli);
+    // The threads players and readers left to end close what they hold
+    // before the process exits: a GPU decoder closing during the exit hangs
+    // it (gotchas.md).
+    vidcut_av::ending::join();
+    match ran {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             if cli.json {

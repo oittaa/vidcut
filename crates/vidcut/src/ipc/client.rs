@@ -10,6 +10,7 @@ use serde_json::Value;
 use vidcut_core::{Envelope, Error, ErrorCode, Response, Result};
 
 use super::transport::Stream;
+use crate::threads::Work;
 
 /// Sends one request to the GUI listening on `socket` and waits for the answer.
 /// Progress notifications go to `progress`. `project`, if given, must be the
@@ -65,7 +66,7 @@ pub fn call(
     let (answered, waiting) = channel::<()>();
     std::thread::scope(|scope| {
         if let Some((cancel, s)) = &watched {
-            scope.spawn(move || {
+            crate::threads::scoped(scope, "vidcut-cancel", Work::Interactive, move || {
                 loop {
                     // Before the wait. Blocking in recv_timeout first leaves
                     // the flag invisible for up to 20 ms, and a reply in that
@@ -79,7 +80,8 @@ pub fn call(
                         _ => return,
                     }
                 }
-            });
+            })
+            .map_err(|e| Error::internal(format!("starting the cancel watcher: {e}")))?;
         }
         let answer = read_answer(BufReader::new(stream), progress);
         drop(answered);
