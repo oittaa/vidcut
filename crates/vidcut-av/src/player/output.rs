@@ -129,8 +129,38 @@ pub fn output_devices() -> Result<Vec<OutputDevice>> {
                 .and_then(|desc| desc.extended().nth(1).map(str::to_string)),
         );
     }
+    without_numbered_cards(&mut listed, &mut details);
     distinct_names(&mut listed, &details);
     Ok(listed)
+}
+
+/// ALSA lists a card's hardware devices twice, by the card's name
+/// (`hw:CARD=NVidia,DEV=3`) and by its number (`hw:CARD=0,DEV=3`): the same
+/// device, named and described alike, and the number changes between
+/// boots. A numbered one isn't listed where its named twin is. An id saved
+/// so still opens: [`output_by_id`] searches every device.
+fn without_numbered_cards(devices: &mut Vec<OutputDevice>, details: &mut Vec<Option<String>>) {
+    let numbered = |id: &str| {
+        id.split("CARD=")
+            .nth(1)
+            .and_then(|rest| rest.chars().next())
+            .is_some_and(|c| c.is_ascii_digit())
+    };
+    let keep: Vec<bool> = (0..devices.len())
+        .map(|i| {
+            let twin = |j: usize| {
+                j != i
+                    && !numbered(&devices[j].id)
+                    && devices[j].name == devices[i].name
+                    && details[j] == details[i]
+            };
+            !(numbered(&devices[i].id) && (0..devices.len()).any(twin))
+        })
+        .collect();
+    let mut kept = keep.iter();
+    devices.retain(|_| *kept.next().expect("one for each"));
+    let mut kept = keep.iter();
+    details.retain(|_| *kept.next().expect("one for each"));
 }
 
 /// Names that repeat made distinct: ALSA's outputs of one card share the
@@ -468,6 +498,29 @@ mod tests {
     #[test]
     fn a_device_gone_is_a_failure() {
         assert!(fails(cpal::ErrorKind::DeviceNotAvailable));
+    }
+
+    #[test]
+    fn a_card_listed_by_its_number_goes_where_its_named_twin_is() {
+        let device = |id: &str, name: &str| OutputDevice {
+            id: id.into(),
+            name: name.into(),
+            default: false,
+        };
+        let mut devices = vec![
+            device("alsa:hw:CARD=NVidia,DEV=3", "HDA NVidia, MSI MP273QP"),
+            device("alsa:hw:CARD=0,DEV=3", "HDA NVidia, MSI MP273QP"),
+            device("alsa:hw:CARD=1,DEV=3", "HD-Audio Generic, HDMI 0"),
+        ];
+        let mut details = vec![
+            Some("Direct hardware device without any conversions".into()),
+            Some("Direct hardware device without any conversions".into()),
+            Some("Direct hardware device without any conversions".into()),
+        ];
+        without_numbered_cards(&mut devices, &mut details);
+        let ids: Vec<&str> = devices.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(ids, ["alsa:hw:CARD=NVidia,DEV=3", "alsa:hw:CARD=1,DEV=3"]);
+        assert_eq!(details.len(), 2);
     }
 
     #[test]
