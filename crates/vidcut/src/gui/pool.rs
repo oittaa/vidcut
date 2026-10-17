@@ -1375,17 +1375,27 @@ impl Workspace {
             let at = self.snap.timeline.position;
             if ui
                 .button("Cut")
-                .on_hover_text("Make the edit nearest the playhead a cut again")
+                .on_hover_text(
+                    "Make the edit nearest the playhead a cut again; with clips selected, their edge",
+                )
                 .clicked()
             {
-                self.send("edit.remove_transition", json!({ "at": at }));
+                self.send(
+                    "edit.remove_transition",
+                    json!({ "at": at, "clips": self.snap.selection.clips }),
+                );
             }
             if ui
                 .button("Dissolve")
-                .on_hover_text("Ctrl+T: a one-second dissolve on the edit nearest the playhead")
+                .on_hover_text(
+                    "Ctrl+T: a one-second dissolve on the edit nearest the playhead; with clips selected, their edge",
+                )
                 .clicked()
             {
-                self.send("edit.dissolve", json!({ "at": at }));
+                self.send(
+                    "edit.dissolve",
+                    json!({ "at": at, "clips": self.snap.selection.clips }),
+                );
             }
             if ui
                 .toggle_value(&mut self.video_only, "Video Only")

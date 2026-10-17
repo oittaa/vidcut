@@ -1266,7 +1266,10 @@ impl Workspace {
                         "picture": e.side != Side::Audio,
                     })
                 }
-                None => json!({ "at": self.snap.timeline.position }),
+                None => json!({
+                    "at": self.snap.timeline.position,
+                    "clips": self.snap.selection.clips,
+                }),
             };
             self.send("edit.dissolve", params);
         }

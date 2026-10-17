@@ -875,6 +875,24 @@ fn resolve_clips(p: &Project, refs: &[ClipRef], playhead: Option<i64>) -> Result
     refs.iter().map(|r| resolve_clip(p, r, playhead)).collect()
 }
 
+fn transition_edit(
+    p: &Project,
+    track: Option<&str>,
+    clips: &[ClipRef],
+    at: i64,
+    playhead: Option<i64>,
+) -> Result<(String, i64)> {
+    if let Some(track) = track {
+        return Ok((track.to_string(), at));
+    }
+    if clips.is_empty() {
+        return Ok((ops::MAIN.to_string(), at));
+    }
+    let selected = resolve_clips(p, clips, playhead)?;
+    ops::edge_nearest(p, &selected, at)
+        .ok_or_else(|| Error::invalid("the clips have no edge to put a transition on"))
+}
+
 pub fn media_context(p: &Project, media: &Media, playhead: Option<i64>) -> TimeContext {
     TimeContext {
         fps: p.settings.fps,
@@ -1267,6 +1285,7 @@ fn mutate(
         Request::EditDissolve {
             at,
             track,
+            clips,
             length,
             align,
             picture,
@@ -1281,13 +1300,14 @@ fn mutate(
                 Some(l) => ctx(p, playhead).duration(l)?,
                 None => p.settings.fps.as_f64().round() as i64,
             };
-            let track = track.as_deref().unwrap_or(ops::MAIN);
-            let made = ops::dissolve(p, track, at, frames, *align, *picture, *sound, *all)?;
+            let (track, at) = transition_edit(p, track.as_deref(), clips, at, playhead)?;
+            let made = ops::dissolve(p, &track, at, frames, *align, *picture, *sound, *all)?;
             json!({ "transitions": made })
         }
         Request::EditRemoveTransition {
             at,
             track,
+            clips,
             picture,
             sound,
             all,
@@ -1296,8 +1316,8 @@ fn mutate(
                 Some(t) => resolve(p, t, playhead)?,
                 None => playhead.unwrap_or(0),
             };
-            let track = track.as_deref().unwrap_or(ops::MAIN);
-            json!({ "removed": ops::to_cut(p, track, at, *picture, *sound, *all)? })
+            let (track, at) = transition_edit(p, track.as_deref(), clips, at, playhead)?;
+            json!({ "removed": ops::to_cut(p, &track, at, *picture, *sound, *all)? })
         }
         Request::EditDelete { clips, lift } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;

@@ -375,8 +375,8 @@ pub enum Request {
         clips: Vec<ClipRef>,
     },
     /// The Dissolve button and Ctrl+T (decision D50): a Cross Dissolve on
-    /// the edit of `track` (default V1) nearest `at` (default: the
-    /// playhead), and a Cross Fade +3 dB where its clips' sounds meet
+    /// the edit of `track` nearest `at` (default: the playhead), and a
+    /// Cross Fade +3 dB where its clips' sounds meet
     /// there. `length` (default 1 s) is shortened to the frames its clips'
     /// media and the track leave. `align`: centered on the edit, starting
     /// on it or ending on it. `picture` or `sound` false leaves that one
@@ -386,8 +386,13 @@ pub enum Request {
     EditDissolve {
         #[serde(default)]
         at: Option<TimeSpec>,
+        /// Default: the track of `clips`, else V1.
         #[serde(default)]
         track: Option<String>,
+        /// The selected clips: without `track`, the edge of these clips
+        /// nearest `at`, on their track.
+        #[serde(default)]
+        clips: Vec<ClipRef>,
         #[serde(default)]
         length: Option<TimeSpec>,
         #[serde(default)]
@@ -399,8 +404,8 @@ pub enum Request {
         #[serde(default)]
         all: bool,
     },
-    /// The Cut button (decision D50): the edit of `track` (default V1)
-    /// nearest `at` (default: the playhead) becomes a cut again, its
+    /// The Cut button (decision D50): the edit of `track` nearest `at`
+    /// (default: the playhead) becomes a cut again, its
     /// transitions gone, those of its clips' sounds too. `picture` or
     /// `sound` false keeps those. `all`: every transition of the track
     /// (Clear Transition from All Edits).
@@ -408,8 +413,13 @@ pub enum Request {
     EditRemoveTransition {
         #[serde(default)]
         at: Option<TimeSpec>,
+        /// Default: the track of `clips`, else V1.
         #[serde(default)]
         track: Option<String>,
+        /// The selected clips: without `track`, the edge of these clips
+        /// nearest `at`, on their track.
+        #[serde(default)]
+        clips: Vec<ClipRef>,
         #[serde(default = "yes")]
         picture: bool,
         #[serde(default = "yes")]
