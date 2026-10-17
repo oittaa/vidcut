@@ -13,6 +13,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
 
+pub(crate) mod standalone;
+
 /// An audio frame that starts later than the frame before it ended, by more
 /// than this (s), follows a gap: a damaged packet, or one the file lacks.
 /// Smaller differences are timestamp rounding (Matroska keeps ms).
@@ -259,8 +261,9 @@ pub fn frames_decoded() -> u64 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reading {
     /// In order from where it starts: the player, exports, proxies,
-    /// analyses. FFmpeg's automatic count of frame threads, about one a
-    /// core, and graphs' slices on the shared pool ([`crate::pool`]).
+    /// analyses. Frames that stand alone decode on the shared pool
+    /// ([`crate::pool`]), others on FFmpeg's automatic count of frame
+    /// threads, about one a core; graphs' slices run on the pool.
     Stream,
     /// A frame here and there, each after a seek: filmstrip tiles,
     /// storyboards, `frame render`. No frame threads: they hand a frame out
@@ -306,6 +309,9 @@ pub struct VideoReader {
     kind: Option<crate::hw::Kind>,
     /// What the file holds and what decodes it ([`decoding`](Self::decoding)).
     decoding: Arc<Decoding>,
+    /// A stream whose frames stand alone: those in flight on the pool.
+    /// The decoder above, of one thread, then only says what decodes it.
+    standalone: Option<standalone::Standalone>,
     /// Its place among the readers open ([`open_readers`]), held for its
     /// drop. The last field: it goes after the decoder, so the close it
     /// says is done.
@@ -1094,6 +1100,7 @@ impl VideoReader {
         // SAFETY: the opened decoder's context, read only.
         let threads = unsafe { (*self.decoder.as_ptr()).thread_count };
         let threads = match threads {
+            _ if self.standalone.is_some() => standalone::Standalone::note(),
             // A decoder with a pool of its own (libdav1d) keeps the count
             // it was asked for, 0: FFmpeg's automatic one.
             0 => "threads of its own".to_string(),
@@ -1227,6 +1234,15 @@ impl VideoReader {
                 },
             }),
         }
+        // Frames that stand alone decode on the pool, each on a decoder of
+        // one thread: the reader's own is one.
+        let standalone = match on {
+            None => standalone::Standalone::for_stream(source, &stream, reading),
+            Some(_) => None,
+        };
+        if standalone.is_some() {
+            ctx.set_threading(standalone::one_thread());
+        }
         let decoder = match &on {
             Some((_, _, codec)) => ctx.decoder().open_as(*codec).and_then(|d| d.video()),
             None => ctx.decoder().video(),
@@ -1254,6 +1270,7 @@ impl VideoReader {
             gpu: device.cloned(),
             kind: on.map(|(kind, ..)| kind),
             decoding: Arc::default(),
+            standalone,
             _open: open,
         })
     }
@@ -1464,8 +1481,7 @@ impl VideoReader {
             if at_start {
                 self.rewind()?;
             } else {
-                self.decoder.flush();
-                self.draining = false;
+                self.flush();
             }
             self.min_pts = None;
             self.pending = None;
@@ -1513,13 +1529,24 @@ impl VideoReader {
         let input = self.source.open()?;
         crate::export::audio::discard_others(&input, self.stream);
         self.input = input;
+        self.flush();
+        Ok(())
+    }
+
+    /// Empties the decoder, and drops the frames in flight on the pool.
+    fn flush(&mut self) {
         self.decoder.flush();
         self.draining = false;
-        Ok(())
+        if let Some(s) = self.standalone.as_mut() {
+            s.flushed();
+        }
     }
 
     /// Decodes the next frame from the stream, feeding packets as needed.
     fn decode_one(&mut self) -> Result<Option<frame::Video>> {
+        if self.standalone.is_some() {
+            return standalone::decode_one(self);
+        }
         let mut damaged = 0;
         loop {
             crate::cancel::stop()?;
