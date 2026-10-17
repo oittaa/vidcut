@@ -98,22 +98,6 @@ fn edits(p: &Project, ti: usize, sound: bool) -> Vec<i64> {
     points
 }
 
-pub fn track_nearest(p: &Project, clips: &[String], at: i64) -> Option<String> {
-    p.tracks
-        .iter()
-        .flat_map(|t| {
-            let sound = t.kind == TrackKind::Audio;
-            t.clips
-                .iter()
-                .filter(|c| clips.contains(&c.id))
-                .filter_map(move |c| span(c, sound))
-                .flat_map(|(a, b)| [a, b])
-                .map(move |e| (&t.id, e))
-        })
-        .min_by_key(|(_, e)| ((e - at).abs(), *e))
-        .map(|(id, _)| id.clone())
-}
-
 fn nearest(p: &Project, ti: usize, sound: bool, at: i64) -> Option<i64> {
     edits(p, ti, sound)
         .into_iter()
@@ -260,9 +244,6 @@ pub fn dissolve(
     sound: bool,
     all: bool,
 ) -> Result<Vec<Made>> {
-    if frames < 1 {
-        return Err(Error::invalid("a dissolve lasts a frame at least"));
-    }
     let ti = p
         .track_index(track)
         .ok_or_else(|| Error::not_found(format!("no track {track}")))?;
@@ -283,33 +264,86 @@ pub fn dissolve(
         }
         return Ok(made);
     }
-    let mut clips = None;
-    if pictures {
-        let e = nearest(p, ti, false, at)
-            .ok_or_else(|| Error::invalid(format!("{track} has no edit to dissolve")))?;
-        if let Some(c) = compound_at(p, ti, false, e) {
-            return Err(Error::invalid(format!(
-                "{c} is a compound clip, and its edges take no dissolve: decompose it first"
-            )));
-        }
-        clips = Some(sides(p, ti, false, e));
-        made.extend(put(p, ti, false, e, frames, align));
+    let e = nearest(p, ti, !pictures, at)
+        .ok_or_else(|| Error::invalid(format!("{track} has no edit to dissolve")))?;
+    if pictures && let Some(c) = compound_at(p, ti, false, e) {
+        return Err(compound_error(&c));
     }
-    if sound {
-        let e = match &clips {
-            Some((from, to)) => sound_edit(p, ti, from.as_deref(), to.as_deref()),
-            None => nearest(p, ti, true, at),
-        };
-        if let Some(e) = e {
-            made.extend(put(p, ti, true, e, frames, align));
-        }
-    }
+    let made = at_edit(p, ti, pictures, sound, e, frames, align);
     if made.is_empty() {
         return Err(Error::invalid(
             "the clips at the edit have no frames past it to dissolve with",
         ));
     }
     Ok(made)
+}
+
+pub fn dissolve_clips(
+    p: &mut Project,
+    clips: &[String],
+    frames: i64,
+    align: Align,
+    picture: bool,
+    sound: bool,
+) -> Result<Vec<Made>> {
+    let mut points: Vec<(usize, bool, i64)> = p
+        .tracks
+        .iter()
+        .enumerate()
+        .flat_map(|(ti, t)| {
+            let pictures = picture && t.kind == TrackKind::Video;
+            t.clips
+                .iter()
+                .filter(|c| clips.contains(&c.id))
+                .filter_map(move |c| span(c, !pictures))
+                .flat_map(move |(a, b)| [(ti, pictures, a), (ti, pictures, b)])
+        })
+        .collect();
+    points.sort_unstable();
+    points.dedup();
+    let mut made = Vec::new();
+    for &(ti, pictures, e) in &points {
+        made.extend(at_edit(p, ti, pictures, sound, e, frames, align));
+    }
+    if made.is_empty() {
+        return Err(points
+            .iter()
+            .find_map(|&(ti, pictures, e)| compound_at(p, ti, !pictures, e))
+            .map_or_else(
+                || Error::invalid("the clips have no frames past their edges to dissolve with"),
+                |c| compound_error(&c),
+            ));
+    }
+    Ok(made)
+}
+
+fn compound_error(c: &str) -> Error {
+    Error::invalid(format!(
+        "{c} is a compound clip, and its edges take no dissolve: decompose it first"
+    ))
+}
+
+fn at_edit(
+    p: &mut Project,
+    ti: usize,
+    pictures: bool,
+    sound: bool,
+    e: i64,
+    frames: i64,
+    align: Align,
+) -> Vec<Made> {
+    let mut made = Vec::new();
+    let sound_e = if pictures {
+        let (from, to) = sides(p, ti, false, e);
+        made.extend(put(p, ti, false, e, frames, align));
+        sound_edit(p, ti, from.as_deref(), to.as_deref())
+    } else {
+        Some(e)
+    };
+    if sound && let Some(e) = sound_e {
+        made.extend(put(p, ti, true, e, frames, align));
+    }
+    made
 }
 
 fn sound_edit(p: &Project, ti: usize, from: Option<&str>, to: Option<&str>) -> Option<i64> {
@@ -433,47 +467,79 @@ mod tests {
         f.editor.project().track(track).unwrap().transitions.len()
     }
 
+    fn cuts(r: &Value) -> Vec<(bool, i64)> {
+        made(r).iter().map(|m| (m.0, m.1)).collect()
+    }
+
     #[test]
-    fn a_dissolve_with_a_clip_selected_goes_on_its_track_though_another_edit_is_nearer() {
+    fn the_dissolve_button_takes_track_1s_edit_though_another_tracks_is_nearer() {
         let mut f = fixture();
         one_clip_on_v2(&mut f);
-        let r = req(&mut f, "edit.dissolve", json!({"at": 55, "clips": ["c3"]}));
+        let r = req(&mut f, "edit.dissolve", json!({"at": 68}));
+        assert_eq!((made(&r)[0].1, transitions(&f, "V2")), (50, 0));
+    }
+
+    #[test]
+    fn the_cut_button_takes_track_1s_edit_though_another_tracks_is_nearer() {
+        let mut f = fixture();
+        one_clip_on_v2(&mut f);
+        req(&mut f, "edit.dissolve", json!({"at": 48}));
+        req(&mut f, "edit.dissolve", json!({"at": 70, "track": "V2"}));
+        req(&mut f, "edit.remove_transition", json!({"at": 68}));
         assert_eq!(
-            (
-                made(&r)[0].1,
-                transitions(&f, "V1"),
-                transitions(&f, "V2") > 0
-            ),
-            (70, 0, true)
+            (transitions(&f, "V1"), transitions(&f, "V2") > 0),
+            (0, true)
         );
     }
 
     #[test]
-    fn a_dissolve_with_a_clip_selected_goes_on_its_tracks_edit_nearest_the_playhead() {
+    fn ctrl_t_with_a_clip_selected_dissolves_each_of_its_edges() {
         let mut f = fixture();
         f.append("m1", 0, 50);
         f.append("m2", 10, 60);
         f.append("m1", 100, 150);
-        let r = req(&mut f, "edit.dissolve", json!({"at": 95, "clips": ["c1"]}));
-        let cuts: Vec<i64> = made(&r).iter().map(|m| m.1).collect();
-        assert_eq!(cuts, [100, 100]);
+        let r = req(&mut f, "edit.dissolve", json!({"at": 0, "clips": ["c2"]}));
+        assert_eq!(
+            cuts(&r),
+            [(false, 50), (true, 50), (false, 100), (true, 100)]
+        );
     }
 
     #[test]
-    fn the_cut_button_with_a_clip_selected_clears_its_track_only() {
+    fn ctrl_t_with_two_clips_selected_dissolves_the_edit_between_them_once() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        let r = req(&mut f, "edit.dissolve", json!({"clips": ["c1", "c2"]}));
+        assert_eq!(
+            cuts(&r),
+            [
+                (false, 0),
+                (true, 0),
+                (false, 50),
+                (true, 50),
+                (false, 100),
+                (true, 100)
+            ]
+        );
+    }
+
+    #[test]
+    fn ctrl_t_with_a_clip_selected_on_v2_dissolves_it_there() {
         let mut f = fixture();
         one_clip_on_v2(&mut f);
-        req(&mut f, "edit.dissolve", json!({"at": 48}));
-        req(&mut f, "edit.dissolve", json!({"at": 55, "clips": ["c3"]}));
-        req(
-            &mut f,
-            "edit.remove_transition",
-            json!({"at": 55, "clips": ["c3"]}),
-        );
+        let r = req(&mut f, "edit.dissolve", json!({"at": 55, "clips": ["c3"]}));
         assert_eq!(
-            (transitions(&f, "V1") > 0, transitions(&f, "V2")),
-            (true, 0)
+            (cuts(&r), transitions(&f, "V1")),
+            (vec![(false, 20), (true, 20), (false, 70), (true, 70)], 0)
         );
+    }
+
+    #[test]
+    fn dissolves_on_clips_take_no_track() {
+        let mut f = fixture();
+        one_clip_on_v2(&mut f);
+        f.err(json!({"method": "edit.dissolve", "params": {"clips": ["c3"], "track": "V1"}}));
     }
 
     #[test]
@@ -554,8 +620,7 @@ mod tests {
         assert_eq!(r["removed"], json!(["t1"]));
     }
 
-    #[test]
-    fn a_compound_clips_edge_takes_no_dissolve() {
+    fn c2_compound() -> crate::model::Project {
         let mut f = fixture();
         f.append("m1", 0, 50);
         f.append("m2", 10, 60);
@@ -566,6 +631,12 @@ mod tests {
             frames: 100,
             tracks: vec![inner],
         });
+        p
+    }
+
+    #[test]
+    fn a_compound_clips_edge_takes_no_dissolve() {
+        let mut p = c2_compound();
         let made = super::dissolve(
             &mut p,
             "V1",
@@ -577,6 +648,24 @@ mod tests {
             false,
         );
         assert!(made.is_err());
+    }
+
+    #[test]
+    fn ctrl_t_on_a_selected_compound_clip_asks_to_decompose_it() {
+        let mut p = c2_compound();
+        let e = super::dissolve_clips(
+            &mut p,
+            &["c2".to_string()],
+            25,
+            super::Align::Center,
+            true,
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "c2 is a compound clip, and its edges take no dissolve: decompose it first"
+        );
     }
 
     #[test]
