@@ -76,6 +76,9 @@ enum Work {
 struct Pool {
     queue: Mutex<VecDeque<Work>>,
     ready: Condvar,
+    /// Its threads. None: every slice and task runs on the thread that
+    /// asks.
+    threads: usize,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -111,6 +114,19 @@ fn budget(reading: Reading, job: bool, cores: usize) -> usize {
     n.clamp(1, MOST_FRAME_THREADS)
 }
 
+/// A pool's threads on `cores` cores: a thread fewer than the workers its
+/// class has, as the thread asking works too. The normal pool's workers
+/// are the cores; the jobs' are the jobs' budget ([`budget`], half the
+/// cores), the most a job's reader hands it at once.
+fn size(job: bool, cores: usize) -> usize {
+    let workers = if job {
+        budget(Reading::Stream, true, cores)
+    } else {
+        cores
+    };
+    workers.saturating_sub(1)
+}
+
 /// The pool of the calling thread: the jobs' for a thread working for a
 /// job, the other's for the rest. Started on first use.
 fn pool() -> &'static Pool {
@@ -128,10 +144,11 @@ fn pool() -> &'static Pool {
         Pool {
             queue: Mutex::new(VecDeque::new()),
             ready: Condvar::new(),
+            threads: size(job, threads()),
         }
     });
     if new {
-        for i in 0..threads() - 1 {
+        for i in 0..pool.threads {
             let _ = std::thread::Builder::new()
                 .name(format!("{name}-{i}"))
                 .spawn(move || {
@@ -197,12 +214,12 @@ fn work(pool: &Pool) {
 
 /// Hands `task` to the calling thread's pool, which runs it once a thread
 /// is free unless it is started elsewhere first. A pool of no threads
-/// (one core) never takes it: whoever wants its result runs it.
+/// never takes it: whoever wants its result runs it.
 pub(crate) fn give(task: Arc<dyn Task>) {
-    if threads() == 1 {
+    let pool = pool();
+    if pool.threads == 0 {
         return;
     }
-    let pool = pool();
     lock(&pool.queue).push_back(Work::Task(task));
     pool.ready.notify_one();
 }
@@ -216,7 +233,8 @@ pub fn run(slices: usize, job: &(dyn Fn(usize) + Sync)) {
         1 => return job(0),
         _ => {}
     }
-    if threads() == 1 {
+    let pool = pool();
+    if pool.threads == 0 {
         return (0..slices).for_each(job);
     }
     // SAFETY: only the lifetime goes: the batch calls `job` only for slices
@@ -230,7 +248,6 @@ pub fn run(slices: usize, job: &(dyn Fn(usize) + Sync)) {
         finished: Condvar::new(),
         panicked: AtomicBool::new(false),
     });
-    let pool = pool();
     lock(&pool.queue).push_back(Work::Slices(batch.clone()));
     pool.ready.notify_all();
     while batch.run_one() {}
@@ -366,6 +383,21 @@ mod tests {
             }
         }
         assert_eq!(*lock(&ran), ["first task", "slices", "last task"]);
+    }
+
+    #[test]
+    fn the_normal_pool_has_a_thread_fewer_than_the_cores() {
+        assert_eq!(size(false, 12), 11);
+    }
+
+    #[test]
+    fn the_jobs_pool_has_a_thread_fewer_than_the_jobs_budget() {
+        assert_eq!(size(true, 12), 5);
+    }
+
+    #[test]
+    fn a_jobs_pool_on_two_cores_has_no_thread() {
+        assert_eq!(size(true, 2), 0);
     }
 
     #[test]
