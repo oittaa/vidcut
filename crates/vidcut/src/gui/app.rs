@@ -95,7 +95,7 @@ impl live::Renderer for Port {
                     eprintln!("vidcut: the window didn't close; quitting without it");
                     session.shutdown_and_wait(Duration::from_secs(5));
                     crate::threads::join_closing();
-                    std::process::exit(0);
+                    crate::threads::exit_now(0);
                 },
             );
         }
