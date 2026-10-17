@@ -53,6 +53,9 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
         "edit.join" if d.list("clips").len() > 1 => format!("Join {}", d.clips("clips")),
         "edit.join" => format!("Join the clips at {}", d.time("at")),
         "edit.dissolve" if d.flag("all") => "Add dissolves to all edits".to_string(),
+        "edit.dissolve" if !d.list("clips").is_empty() => {
+            format!("Add dissolves to {}", d.clips("clips"))
+        }
         "edit.dissolve" => format!("Add a dissolve at {}", d.time("at")),
         "edit.remove_transition" if d.flag("all") => {
             "Clear the transitions from all edits".to_string()

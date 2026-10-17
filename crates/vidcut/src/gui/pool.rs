@@ -1391,26 +1391,20 @@ impl Workspace {
             if ui
                 .button("Cut")
                 .on_hover_text(
-                    "Make the edit nearest the playhead a cut again, on the selected clips' track, else on Track 1",
+                    "Make Track 1's edit nearest the playhead a cut again",
                 )
                 .clicked()
             {
-                self.send(
-                    "edit.remove_transition",
-                    json!({ "at": at, "clips": self.snap.selection.clips }),
-                );
+                self.send("edit.remove_transition", json!({ "at": at }));
             }
             if ui
                 .button("Dissolve")
                 .on_hover_text(
-                    "Ctrl+T: a one-second dissolve on the edit nearest the playhead, on the selected clips' track, else on Track 1",
+                    "A one-second dissolve on Track 1's edit nearest the playhead; Ctrl+T puts it on the selected edit or clips",
                 )
                 .clicked()
             {
-                self.send(
-                    "edit.dissolve",
-                    json!({ "at": at, "clips": self.snap.selection.clips }),
-                );
+                self.send("edit.dissolve", json!({ "at": at }));
             }
             if ui
                 .toggle_value(&mut self.video_only, "Video Only")

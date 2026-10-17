@@ -4,7 +4,7 @@ mod tracks;
 
 use std::collections::{BTreeMap, HashSet};
 
-pub use dissolve::{Align, Made, dissolve, split as dissolve_frames, to_cut, track_nearest};
+pub use dissolve::{Align, Made, dissolve, dissolve_clips, split as dissolve_frames, to_cut};
 use serde_json::json;
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
