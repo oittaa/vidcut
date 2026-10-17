@@ -46,6 +46,9 @@ if [[ -n "$binary" ]]; then
   exit 1
 fi
 
+step "docs: names and links"
+scripts/check-docs.sh
+
 step "rustfmt"
 cargo fmt --all --check
 

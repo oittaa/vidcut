@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Enforces the fast quality gate before every commit (see AGENTS.md).
 # Enabled per clone with: git config core.hooksPath .githooks
-# A commit of Markdown files alone builds nothing, so it isn't checked.
+# A commit of Markdown files alone builds nothing: only the docs are checked.
+top="$(git rev-parse --show-toplevel)"
 if git diff --cached --name-only | grep -qv '\.md$'; then
-  exec "$(git rev-parse --show-toplevel)/scripts/check.sh" fast
+  exec "$top/scripts/check.sh" fast
 fi
+exec "$top/scripts/check-docs.sh"
