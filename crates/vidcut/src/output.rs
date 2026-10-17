@@ -69,18 +69,19 @@ pub fn print(method: &str, r: &Response, json: bool) {
             println!("  on       {track}");
         }
         if let Some(removed) = r.result.get("removed").and_then(Value::as_array) {
-            println!(
-                "  removed  {} frames in {} parts",
-                r.result["frames"],
-                removed.len()
-            );
-            for part in removed {
-                println!(
-                    "    {} -> {}  {}",
-                    part["start_tc"].as_str().unwrap_or_default(),
-                    part["end_tc"].as_str().unwrap_or_default(),
-                    part["clip"].as_str().unwrap_or_default()
-                );
+            if let Some(frames) = r.result.get("frames") {
+                println!("  removed  {frames} frames in {} parts", removed.len());
+                for part in removed {
+                    println!(
+                        "    {} -> {}  {}",
+                        part["start_tc"].as_str().unwrap_or_default(),
+                        part["end_tc"].as_str().unwrap_or_default(),
+                        part["clip"].as_str().unwrap_or_default()
+                    );
+                }
+            } else {
+                let ids: Vec<&str> = removed.iter().filter_map(Value::as_str).collect();
+                println!("  removed  {}", ids.join(" "));
             }
         }
         if let Some(cuts) = r.result.get("cuts").and_then(Value::as_array) {
