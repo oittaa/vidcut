@@ -191,6 +191,18 @@ fn audio_part(c: &crate::model::Clip, a: i64, b: i64) -> Option<(i64, i64)> {
     (e > s).then_some((s, e))
 }
 
+fn played<'a>(c: &'a Clip, used: &mut Vec<String>, seen: &mut HashSet<&'a str>) {
+    match &c.compound {
+        Some(k) => {
+            for c in k.tracks.iter().flat_map(|t| &t.clips) {
+                played(c, used, seen);
+            }
+        }
+        None if !c.is_block() && seen.insert(&c.media) => used.push(c.media.clone()),
+        None => {}
+    }
+}
+
 pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     let (a, b) = span.unwrap_or((0, p.end()));
     let mut used: Vec<String> = Vec::new();
@@ -198,12 +210,55 @@ pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     for t in &p.tracks {
         for c in &t.clips {
             let shows = c.video && c.start.max(a) < c.end().min(b);
-            if (shows || audio_part(c, a, b).is_some()) && !c.is_block() && seen.insert(&c.media) {
-                used.push(c.media.clone());
+            if shows || audio_part(c, a, b).is_some() {
+                played(c, &mut used, &mut seen);
             }
         }
     }
     used
+}
+
+fn bundled_as<'a>(r: &MediaRef, bundled: &[(&Media, &'a String)]) -> Option<&'a String> {
+    let kind = || {
+        bundled
+            .iter()
+            .filter(|(m, _)| m.sequence.is_some() == r.sequence.is_some())
+    };
+    if let Some((_, to)) = kind().find(|(m, _)| r.paths.contains(&m.path)) {
+        return Some(to);
+    }
+    let mut named = kind().filter(|(m, _)| m.path.file_name().is_some_and(|n| *n == *r.file_name));
+    match (named.next(), named.next()) {
+        (Some((_, to)), None) => Some(to),
+        _ => None,
+    }
+}
+
+fn bundle_nested(v: &mut Value, bundled: &[(&Media, &String)], fps: Rational) {
+    let s = schema(v);
+    let found = if s.starts_with("ExternalReference") {
+        v["target_url"]
+            .as_str()
+            .and_then(|url| locate(url, None, fps))
+            .map(|r| ("target_url", r))
+    } else if s.starts_with("ImageSequenceReference") {
+        sequence_ref(v, None, fps)
+            .ok()
+            .map(|r| ("target_url_base", r))
+    } else {
+        None
+    };
+    if let Some((key, r)) = found {
+        if let Some(to) = bundled_as(&r, bundled) {
+            v[key] = json!(to);
+        }
+        return;
+    }
+    match v {
+        Value::Object(o) => o.values_mut().for_each(|x| bundle_nested(x, bundled, fps)),
+        Value::Array(a) => a.iter_mut().for_each(|x| bundle_nested(x, bundled, fps)),
+        _ => {}
+    }
 }
 
 fn speed_of(effect: Option<Value>) -> Option<Speed> {
@@ -334,6 +389,20 @@ pub fn export(
             [("children", Value::Array(children)), ("metadata", meta)],
         )
     };
+    let bundled: Vec<(&Media, &String)> = match locations {
+        Locations::Bundle(names) => p
+            .media
+            .iter()
+            .filter_map(|m| names.get(&m.id).map(|to| (m, to)))
+            .collect(),
+        Locations::Absolute => Vec::new(),
+    };
+    let block =
+        |c: &Clip, k: &Compound, label: &str, source: i64, frames: i64, effects: Vec<Value>| {
+            let mut it = compound_item(c, k, label, source, frames, effects, rate);
+            bundle_nested(&mut it["children"], &bundled, fps);
+            it
+        };
     let media: HashMap<&str, &Media> = p.media.iter().map(|m| (m.id.as_str(), m)).collect();
     let shown_color = |c: &Clip| {
         c.color
@@ -397,7 +466,7 @@ pub fn export(
                     }),
                 );
                 let mut it = match &c.compound {
-                    Some(k) => compound_item(c, k, &label, c.source_at(s), e - s, effects, rate),
+                    Some(k) => block(c, k, &label, c.source_at(s), e - s, effects),
                     None => item(
                         &label,
                         c,
@@ -481,15 +550,7 @@ pub fn export(
                             x.written(c.source_at(s), s > c.start, e < c.end())
                         }),
                     );
-                    audio.push(compound_item(
-                        c,
-                        k,
-                        &label,
-                        c.source_at(s),
-                        e - s,
-                        effects,
-                        rate,
-                    ));
+                    audio.push(block(c, k, &label, c.source_at(s), e - s, effects));
                     ta = e;
                 }
             }

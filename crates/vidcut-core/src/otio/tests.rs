@@ -323,6 +323,81 @@ fn a_timeline_imports_as_one_compound_clip() {
     );
 }
 
+fn compound_alone() -> Fixture {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.append("m1", 0, 50);
+    let mut other = Fixture::new(&[]);
+    other.env = FakeEnv::default().with(
+        "/media/1.mp4",
+        media_info(4.0, Rational::new(25, 1).unwrap(), true),
+    );
+    other.ok(req(
+        "timeline.import",
+        json!({"otio": written(&f), "mode": "compound"}),
+    ));
+    other
+}
+
+fn bundled(p: &Project) -> Value {
+    let names = HashMap::from([("m1".to_string(), "media/1.mp4".to_string())]);
+    export(p, "t", None, Locations::Bundle(&names)).unwrap()
+}
+
+fn urls(v: &Value) -> Vec<String> {
+    let mut found: Vec<String> = match v {
+        Value::Object(o) => o
+            .iter()
+            .flat_map(|(k, x)| match (k.as_str(), x.as_str()) {
+                ("target_url", Some(url)) => vec![url.to_string()],
+                _ => urls(x),
+            })
+            .collect(),
+        Value::Array(a) => a.iter().flat_map(urls).collect(),
+        _ => Vec::new(),
+    };
+    found.sort();
+    found.dedup();
+    found
+}
+
+#[test]
+fn media_only_inside_a_compound_clip_are_used() {
+    assert_eq!(used_media(compound_alone().editor.project(), None), ["m1"]);
+}
+
+#[test]
+fn a_bundle_points_a_compound_clips_media_into_it() {
+    assert_eq!(
+        urls(&bundled(compound_alone().editor.project())),
+        ["media/1.mp4"]
+    );
+}
+
+#[test]
+fn a_plain_file_keeps_a_compound_clips_media_where_they_are() {
+    assert_eq!(urls(&written(&compound_alone())), ["/media/1.mp4"]);
+}
+
+#[test]
+fn a_compound_clip_opened_from_a_bundle_plays_the_bundles_media() {
+    let doc = bundled(compound_alone().editor.project());
+    let env = FakeEnv::default().with(
+        "/away/media/1.mp4",
+        media_info(4.0, Rational::new(25, 1).unwrap(), true),
+    );
+    let (p, _) = crate::editor::open_otio(&doc, Some(Path::new("/away")), &env)
+        .unwrap()
+        .unwrap();
+    let k = p.tracks[0].clips[0].compound.as_ref().unwrap();
+    let played: Vec<&str> = k
+        .tracks
+        .iter()
+        .flat_map(|t| &t.clips)
+        .map(|c| c.media.as_str())
+        .collect();
+    assert_eq!((p.media.len(), played), (1, vec!["m1"]));
+}
+
 fn relink(v: &mut Value, from: &str, to: &str) {
     match v {
         Value::Object(o) => {
