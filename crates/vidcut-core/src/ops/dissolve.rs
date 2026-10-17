@@ -98,7 +98,7 @@ fn edits(p: &Project, ti: usize, sound: bool) -> Vec<i64> {
     points
 }
 
-pub fn edge_nearest(p: &Project, clips: &[String], at: i64) -> Option<(String, i64)> {
+pub fn track_nearest(p: &Project, clips: &[String], at: i64) -> Option<String> {
     p.tracks
         .iter()
         .flat_map(|t| {
@@ -108,9 +108,10 @@ pub fn edge_nearest(p: &Project, clips: &[String], at: i64) -> Option<(String, i
                 .filter(|c| clips.contains(&c.id))
                 .filter_map(move |c| span(c, sound))
                 .flat_map(|(a, b)| [a, b])
-                .map(move |e| (t.id.clone(), e))
+                .map(move |e| (&t.id, e))
         })
         .min_by_key(|(_, e)| ((e - at).abs(), *e))
+        .map(|(id, _)| id.clone())
 }
 
 fn nearest(p: &Project, ti: usize, sound: bool, at: i64) -> Option<i64> {
@@ -433,10 +434,10 @@ mod tests {
     }
 
     #[test]
-    fn a_dissolve_with_a_clip_selected_goes_on_its_edge_nearest_the_playhead() {
+    fn a_dissolve_with_a_clip_selected_goes_on_its_track_though_another_edit_is_nearer() {
         let mut f = fixture();
         one_clip_on_v2(&mut f);
-        let r = req(&mut f, "edit.dissolve", json!({"at": 60, "clips": ["c3"]}));
+        let r = req(&mut f, "edit.dissolve", json!({"at": 55, "clips": ["c3"]}));
         assert_eq!(
             (
                 made(&r)[0].1,
@@ -448,15 +449,26 @@ mod tests {
     }
 
     #[test]
+    fn a_dissolve_with_a_clip_selected_goes_on_its_tracks_edit_nearest_the_playhead() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        f.append("m1", 100, 150);
+        let r = req(&mut f, "edit.dissolve", json!({"at": 95, "clips": ["c1"]}));
+        let cuts: Vec<i64> = made(&r).iter().map(|m| m.1).collect();
+        assert_eq!(cuts, [100, 100]);
+    }
+
+    #[test]
     fn the_cut_button_with_a_clip_selected_clears_its_track_only() {
         let mut f = fixture();
         one_clip_on_v2(&mut f);
         req(&mut f, "edit.dissolve", json!({"at": 48}));
-        req(&mut f, "edit.dissolve", json!({"at": 60, "clips": ["c3"]}));
+        req(&mut f, "edit.dissolve", json!({"at": 55, "clips": ["c3"]}));
         req(
             &mut f,
             "edit.remove_transition",
-            json!({"at": 60, "clips": ["c3"]}),
+            json!({"at": 55, "clips": ["c3"]}),
         );
         assert_eq!(
             (transitions(&f, "V1") > 0, transitions(&f, "V2")),

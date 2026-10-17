@@ -885,15 +885,15 @@ fn transition_edit(
     clips: &[ClipRef],
     at: i64,
     playhead: Option<i64>,
-) -> Result<(String, i64)> {
+) -> Result<String> {
     if let Some(track) = track {
-        return Ok((track.to_string(), at));
+        return Ok(track.to_string());
     }
     if clips.is_empty() {
-        return Ok((ops::MAIN.to_string(), at));
+        return Ok(ops::MAIN.to_string());
     }
     let selected = resolve_clips(p, clips, playhead)?;
-    ops::edge_nearest(p, &selected, at)
+    ops::track_nearest(p, &selected, at)
         .ok_or_else(|| Error::invalid("the clips have no edge to put a transition on"))
 }
 
@@ -1304,7 +1304,7 @@ fn mutate(
                 Some(l) => ctx(p, playhead).duration(l)?,
                 None => p.settings.fps.as_f64().round() as i64,
             };
-            let (track, at) = transition_edit(p, track.as_deref(), clips, at, playhead)?;
+            let track = transition_edit(p, track.as_deref(), clips, at, playhead)?;
             let made = ops::dissolve(p, &track, at, frames, *align, *picture, *sound, *all)?;
             json!({ "transitions": made })
         }
@@ -1320,7 +1320,7 @@ fn mutate(
                 Some(t) => resolve(p, t, playhead)?,
                 None => playhead.unwrap_or(0),
             };
-            let (track, at) = transition_edit(p, track.as_deref(), clips, at, playhead)?;
+            let track = transition_edit(p, track.as_deref(), clips, at, playhead)?;
             json!({ "removed": ops::to_cut(p, &track, at, *picture, *sound, *all)? })
         }
         Request::EditDelete { clips, lift } => {
