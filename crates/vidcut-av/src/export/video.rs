@@ -61,6 +61,17 @@ impl Pictures {
             None => Self::Video,
         }
     }
+
+    /// How these pictures are read, asked for `reading`: a still's for
+    /// single frames ([`Reading::Frames`]), its reader and the graphs that
+    /// make its picture. Its one picture decodes as the reader opens and
+    /// is never read on: frame threads, and swscale's, would only start.
+    fn reading(self, reading: Reading) -> Reading {
+        match self {
+            Self::Still => Reading::Frames,
+            Self::Video | Self::Sequence { .. } => reading,
+        }
+    }
 }
 
 /// A new reference to `src`'s buffers (no pixel copy).
@@ -184,7 +195,8 @@ impl Source {
     /// Seeking would reopen the file and decode it again; a still is never
     /// sought.
     ///
-    /// `reading`: how the frames are asked for ([`Reading`]). `measure`:
+    /// `reading`: how the frames are asked for ([`Reading`]); a still's
+    /// reader reads single frames ([`Pictures::reading`]). `measure`:
     /// frames without HDR10+ are measured as they are decoded.
     #[allow(clippy::too_many_arguments)]
     fn open(
@@ -206,8 +218,11 @@ impl Source {
         let nvdec = gpu.filter(|_| video);
         let nvdec = nvdec.and_then(|g| g.device.with_own_stream().ok());
         let nvdec = nvdec.map(crate::hw::GpuDecoder::nvdec).transpose()?;
-        let reader =
-            VideoReader::open_as(input, nvdec.as_ref().or(decoder).filter(|_| video), reading)?;
+        let reader = VideoReader::open_as(
+            input,
+            nvdec.as_ref().or(decoder).filter(|_| video),
+            pictures.reading(reading),
+        )?;
         let fitting = match gpu {
             Some(g) => Fitting::on_gpu(&reader, g.out, g.format, g.target, true, Place::Cuda),
             None => Fitting::none(),
@@ -262,7 +277,7 @@ impl Source {
         reading: Reading,
         measure: bool,
     ) -> Result<Source> {
-        let reader = VideoReader::open_as(input, decoder, reading)?;
+        let reader = VideoReader::open_as(input, decoder, pictures.reading(reading))?;
         let decoder = reader.gpu();
         let tb = reader.time_base();
         Ok(Source {
@@ -1388,9 +1403,15 @@ impl VideoFrames {
         if changed || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
-            let made =
-                self.maker
-                    .make_layer(i, &mut src.fitting, frame, rotation, src.reader.path())?;
+            let reading = src.pictures.reading(self.maker.reading());
+            let made = self.maker.make_layer(
+                i,
+                &mut src.fitting,
+                frame,
+                rotation,
+                src.reader.path(),
+                reading,
+            )?;
             src.normalized = Some(made.ok_or_else(no_picture)?);
         }
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;

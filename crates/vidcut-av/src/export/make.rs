@@ -208,6 +208,8 @@ struct Stage {
     unkept: bool,
     /// Fits frames into the output on the GPU ([`Output::FittedOnGpu`]).
     fitter: Option<crate::hw::Fitter>,
+    /// How the frames its graphs split their work for are read.
+    reading: Option<Reading>,
 }
 
 impl Default for Stage {
@@ -219,6 +221,7 @@ impl Default for Stage {
             keeper: None,
             unkept: false,
             fitter: None,
+            reading: None,
         }
     }
 }
@@ -344,11 +347,12 @@ impl Maker {
         rotation: u16,
         path: &Path,
     ) -> Result<Option<frame::Video>> {
-        self.make_layer(0, fitting, frame, rotation, path)
+        self.make_layer(0, fitting, frame, rotation, path, self.reading)
     }
 
     /// [`make`](Self::make) for layer `layer` of a dissolve's mix, whose
-    /// pictures are made apart from the other layers'.
+    /// pictures are made apart from the other layers', of a frame read as
+    /// `reading` has it (a still's picture for single frames, say).
     pub(crate) fn make_layer(
         &mut self,
         layer: usize,
@@ -356,12 +360,13 @@ impl Maker {
         frame: &frame::Video,
         rotation: u16,
         path: &Path,
+        reading: Reading,
     ) -> Result<Option<frame::Video>> {
         if self.stages.len() <= layer {
             self.stages.resize_with(layer + 1, Stage::default);
         }
         let mut stage = std::mem::take(&mut self.stages[layer]);
-        let made = self.make_with(&mut stage, fitting, frame, rotation, path);
+        let made = self.make_with(&mut stage, fitting, frame, rotation, path, reading);
         self.stages[layer] = stage;
         made
     }
@@ -373,7 +378,13 @@ impl Maker {
         frame: &frame::Video,
         rotation: u16,
         path: &Path,
+        reading: Reading,
     ) -> Result<Option<frame::Video>> {
+        // Graphs built for another reading split their work as it does.
+        if stage.reading.replace(reading).is_some_and(|r| r != reading) {
+            stage.normalizer = None;
+            stage.relayout = Relayout::new();
+        }
         let (out_w, out_h, out_fmt) = self.out;
         let mut facts = self.facts(stage, fitting, frame, rotation);
         let dest = self.dest(frame);
@@ -461,7 +472,7 @@ impl Maker {
             if let Output::Decoded { .. } = self.output {
                 // Kept by the player: in memory freed with the picture,
                 // not a pool's (a filter graph's, libdav1d's).
-                break crate::buffers::owned(&stage.relayout.run(frame, self.reading)?)?;
+                break crate::buffers::owned(&stage.relayout.run(frame, reading)?)?;
             }
             let rebuild = stage
                 .normalizer
@@ -475,7 +486,7 @@ impl Maker {
                     out_h,
                     out_fmt,
                     self.target,
-                    self.reading,
+                    reading,
                 )?);
             }
             break stage.normalizer.as_mut().expect("built").run(frame)?;
