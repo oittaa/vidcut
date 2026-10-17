@@ -761,7 +761,8 @@ fn proxies(
                     )
                     .on_hover_text(
                         "While Proxies is on in the Media Pool: for the media you import that \
-                         these rules pick, and for the pool's when you turn Proxies on",
+                         these rules pick, for the pool's when you turn Proxies on, and again \
+                         when a proxy's file is gone",
                     )
                     .changed()
                 {

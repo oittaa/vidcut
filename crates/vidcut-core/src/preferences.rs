@@ -120,8 +120,8 @@ impl Default for Thumbnails {
 #[serde(default, deny_unknown_fields)]
 pub struct Proxies {
     /// While a project plays proxies, the running app makes them for the
-    /// media these rules pick: those imported, and the pool's when proxies
-    /// are turned on.
+    /// media these rules pick: those imported, the pool's when proxies are
+    /// turned on, and again for any whose proxy file is gone.
     pub auto: bool,
     /// Image sequences get one.
     pub image_sequences: bool,

@@ -16,8 +16,16 @@ pub fn media_origin(media: &Media) -> Origin {
 }
 
 pub fn proxy_origin(media: &Media) -> Origin {
-    match &media.fingerprint {
-        Some(content) => content_origin(content, media.size, media.mtime_ns),
+    let content = media.fingerprint.clone().or_else(|| match &media.sequence {
+        Some(s) => {
+            let file = |k| media.sequence_file(k);
+            let last = s.count.saturating_sub(1);
+            vidcut_core::fingerprint::pictures(&file(0)?, &file(s.count / 2)?, &file(last)?).ok()
+        }
+        None => vidcut_core::fingerprint::file(&media.path).ok(),
+    });
+    match content {
+        Some(content) => content_origin(&content, media.size, media.mtime_ns),
         None => media_origin(media),
     }
 }
