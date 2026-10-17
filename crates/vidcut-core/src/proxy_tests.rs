@@ -63,3 +63,31 @@ fn proxy_size_keeps_aspect_and_does_not_enlarge() {
     assert_eq!(proxy_size(320, 180, 960), (320, 180));
     assert_eq!(proxy_size(1080, 1920, 960), (540, 960));
 }
+
+#[test]
+fn automatic_proxies_make_a_lost_one_again() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.env.proxy_rules.larger_than = [1, 1];
+    f.ok(req("proxy.generate", json!({"media": "m1"})));
+    f.env.lost_proxies.insert(proxy_path("m1"));
+    let r = f.ok(req("proxy.generate", json!({"auto": true})));
+    assert_eq!(r.result["proxies"][0]["media"], json!("m1"));
+}
+
+#[test]
+fn automatic_proxies_leave_one_that_is_there() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.env.proxy_rules.larger_than = [1, 1];
+    f.ok(req("proxy.generate", json!({"media": "m1"})));
+    let r = f.ok(req("proxy.generate", json!({"auto": true})));
+    assert_eq!(r.result["proxies"], json!([]));
+}
+
+#[test]
+fn a_lost_proxy_is_marked_missing() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.ok(req("proxy.generate", json!({"media": "m1"})));
+    f.env.lost_proxies.insert(proxy_path("m1"));
+    let r = f.ok(req("media.get", json!({"media": "m1"})));
+    assert_eq!(r.result["proxy"]["missing"], json!(true));
+}

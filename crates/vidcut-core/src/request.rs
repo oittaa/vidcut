@@ -1101,8 +1101,8 @@ pub enum Request {
     /// (thumbnails, waveforms, measurements, encoder detection, shaders),
     /// the undo histories (but those of projects a running GUI has open),
     /// the recent projects, view settings and remembered folders. Projects,
-    /// media and proxies beside projects stay. `--dry-run` lists what would
-    /// go.
+    /// media and proxies stay, but proxies made without a project, which
+    /// live in the cache. `--dry-run` lists what would go.
     #[serde(rename = "reset")]
     Reset {
         /// Also delete your presets and themes.

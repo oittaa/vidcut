@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -9,7 +9,7 @@ use crate::editor::GeneratedProxy;
 use crate::editor::{Editor, Env, History, ProbedMedia};
 use crate::error::{Error, Result};
 use crate::model::{
-    AudioInfo, ImageSequence, Media, MediaInfo, Project, Settings, VideoInfo, proxy_size,
+    AudioInfo, ImageSequence, Media, MediaInfo, Project, Proxy, Settings, VideoInfo, proxy_size,
 };
 use crate::render::{AudioPiece, RenderPlan};
 use crate::request::{Envelope, Response};
@@ -72,6 +72,7 @@ pub struct FakeEnv {
     pub proxy_rules: crate::preferences::Proxies,
     pub sizes: HashMap<PathBuf, u64>,
     pub fingerprints: HashMap<PathBuf, String>,
+    pub lost_proxies: HashSet<PathBuf>,
 }
 
 pub fn levels(secs: f64, loud: &[(f64, f64)]) -> AudioLevels {
@@ -259,6 +260,10 @@ impl Env for FakeEnv {
 
     fn present(&self, m: &Media) -> bool {
         self.files.contains_key(&m.path) || self.sequences.contains_key(&m.path)
+    }
+
+    fn proxy_present(&self, proxy: &Proxy) -> bool {
+        !self.lost_proxies.contains(&proxy.path)
     }
 }
 

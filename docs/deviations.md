@@ -72,7 +72,7 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 
 ## X12. Preferences hold only what vidcut needs
 - **Resolve:** Preferences has System and User panels with many settings (p. 94). Caches and proxies are set up in project settings and preferences (pp. 191–218).
-- **vidcut:** File > Preferences (Ctrl+,) holds the theme, GPU use, the player's memory and audio device, the thumbnail cache and the proxy rules, in `preferences.toml` ([design/model.md](design/model.md#preferences)); `preferences get|set` reach them from scripts. Reset vidcut… there (and `vidcut reset`) goes back to a fresh install's state: the preferences, caches, undo histories (but those of open projects), recent projects, view settings and remembered folders; presets and themes only when asked. A confirmation comes first, and Esc cancels it.
+- **vidcut:** File > Preferences (Ctrl+,) holds the theme, GPU use, the player's memory and audio device, the thumbnail cache, and the proxy rules and folder, in `preferences.toml` ([design/model.md](design/model.md#preferences)); `preferences get|set` reach them from scripts. Reset vidcut… there (and `vidcut reset`) goes back to a fresh install's state: the preferences, caches, undo histories (but those of open projects), recent projects, view settings and remembered folders; presets and themes only when asked. A confirmation comes first, and Esc cancels it.
 - **Why:** a preference belongs here only once vidcut has a behavior to choose. A plain TOML file can be edited by hand, kept in dotfiles and changed by agents. A reset makes a clean start, for testing too, one step instead of finding each file.
 
 ## X13. Deinterlacing has one quality
@@ -139,3 +139,8 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Resolve:** the Import Media button sits in the Media Pool (p. 654); the transport bar has no Clear; Timeline Options (p. 645) have no filmstrip or waveform toggles, and Snap is there, not among the timeline buttons (p. 649); the pool doesn't sort by duration.
 - **vidcut:** Import in the top bar; Clear in the transport bar clears the marks (Alt+X); Filmstrips and Waveforms in Timeline Options; a Snap button among the timeline buttons as well as Snap in Timeline Options; Duration among the pool's sorts. File dialogs for media, projects and exports each start in the folder last used for them.
 - **Why:** each puts one click on something the Cut page hides in a menu or leaves out, and none changes how an edit works.
+
+## X26. The proxy folder is a preference
+- **Resolve:** proxies go to the project's "Proxy generation location" (Project Settings, Working Folders, p. 145), in subfolders by their sources' folders (p. 208). Preferences can put them in a "Proxy" subfolder beside each source instead, or ask for a folder each time (p. 98).
+- **vidcut:** one preference, `proxies.folder`: `proxies` in the project's folder by default; a relative folder is in the project's folder, an absolute one is shared by every project. A proxy is named by its source's path, size and modification time, so projects that use the same file find and play one proxy.
+- **Why:** where proxies go depends on the computer's disks, not the project. A project on a network drive opens on several computers, and a folder saved in it would name one computer's disk. One setting serves both reasons to move proxies: keeping them on a local disk while projects and media sit on a network drive, and making one proxy for intros and outros that several projects use.

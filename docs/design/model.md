@@ -106,7 +106,7 @@ The counters live in `NextIds`. Each alloc call adds one, and undo restores `nex
 
 ## Fingerprints and relinking
 
-Two stamps identify a media file. `Media::size` and `Media::mtime_ns`, read when it was probed, make its `Origin` (`fingerprint::origin`). The origin names and stamps every cache file made from the media ([analysis](analysis.md)), and a proxy made from another size or time is stale (`Media::fresh_proxy`). `Media::fingerprint` is a SHA-256 of the content (`fingerprint::file`): the whole of a file no larger than `WHOLE`, otherwise one `PIECE` from the start, the middle and the end; an image sequence is three pictures (`fingerprint::pictures`).
+Two stamps identify a media file. `Media::size` and `Media::mtime_ns`, read when it was probed, make its `Origin` (`fingerprint::origin`). The origin names and stamps every cache file made from the media ([analysis](analysis.md)), and a proxy made from another size or time is stale (`Media::fresh_proxy`). A proxy whose file is gone is lost (`Env::proxy_present`): automatic proxies make it again. `Media::fingerprint` is a SHA-256 of the content (`fingerprint::file`): the whole of a file no larger than `WHOLE`, otherwise one `PIECE` from the start, the middle and the end; an image sequence is three pictures (`fingerprint::pictures`).
 
 A file is missing when `Env::present` says so; a path absolute only on the other kind of system counts as missing. `media.relink` looks for missing files by name in `search` folders and relinks a candidate only if its size, streams, duration, timecode and fingerprint match. A file given as `path` is used either way.
 

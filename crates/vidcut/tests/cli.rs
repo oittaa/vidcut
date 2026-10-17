@@ -382,6 +382,39 @@ fn a_proxy_made_from_another_file_is_made_again() {
 }
 
 #[test]
+fn projects_share_an_absolute_proxy_folder() {
+    let sb = Sandbox::new("proxy-folder");
+    let media = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        30,
+    ));
+    let shared = sb.dir.path().join("shared");
+    let folder = format!("proxies.folder={}", s(&shared));
+    sb.ok(&["preferences", "set", &folder]);
+    let proxy = |name: &str| {
+        let project = sb.dir.path().join(name).join("p.vidcut");
+        std::fs::create_dir_all(project.parent().unwrap()).unwrap();
+        sb.ok_in(&project, &["project", "create", s(&project)]);
+        sb.ok_in(&project, &["media", "add", s(&media)]);
+        let r = sb.ok_in(&project, &["proxy", "generate", "m1"]);
+        PathBuf::from(r["result"]["proxies"][0]["path"].as_str().unwrap())
+    };
+    let first = proxy("a");
+    let made = std::fs::metadata(&first).unwrap().modified().unwrap();
+    let second = proxy("b");
+    assert_eq!(second, first);
+    assert_eq!(first.parent(), Some(shared.as_path()));
+    assert_eq!(
+        std::fs::metadata(&second).unwrap().modified().unwrap(),
+        made
+    );
+}
+
+#[test]
 fn exports_frames_ranges_and_clips() {
     let sb = Sandbox::new("export");
     let a = fixture(FixtureSpec::new(

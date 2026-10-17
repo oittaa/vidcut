@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -131,6 +133,12 @@ pub struct Proxies {
     pub size: u32,
     /// The codec proxies are made with.
     pub codec: ProxyCodec,
+    /// Where new proxies go: a folder in the project's folder (`proxies`,
+    /// the default), or an absolute path. Every project shares an absolute
+    /// one, so a file used in several projects gets one proxy; with a
+    /// project on a network drive, proxies can stay on a local one. Proxies
+    /// already made stay where they are.
+    pub folder: PathBuf,
 }
 
 /// The codec proxies are made with (decision D41).
@@ -173,11 +181,16 @@ impl Default for Proxies {
             above_mbps: 150,
             size: PROXY_LONGEST,
             codec: ProxyCodec::Auto,
+            folder: PathBuf::from("proxies"),
         }
     }
 }
 
 impl Proxies {
+    pub fn folder_in(&self, project_dir: &Path) -> PathBuf {
+        project_dir.join(&self.folder)
+    }
+
     pub fn wants(&self, m: &Media) -> bool {
         let Some(v) = m.info.video.as_ref().filter(|v| !v.still) else {
             return false;
@@ -264,6 +277,9 @@ pub struct ProxiesPatch {
     pub size: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codec: Option<ProxyCodec>,
+    /// A folder in the project's folder, or an absolute path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -338,6 +354,9 @@ impl Preferences {
             p.above_mbps = x.above_mbps.unwrap_or(p.above_mbps);
             p.size = x.size.unwrap_or(p.size);
             p.codec = x.codec.unwrap_or(p.codec);
+            if let Some(f) = &x.folder {
+                p.folder = f.clone();
+            }
         }
         p.check()?;
         Ok(p)
@@ -368,6 +387,16 @@ impl Preferences {
         }
         if !(16..=7680).contains(&x.size) || !x.size.is_multiple_of(2) {
             return Err(Error::usage("proxies.size must be even, from 16 to 7680"));
+        }
+        if x.folder.as_os_str().is_empty() {
+            return Err(Error::usage(
+                "proxies.folder names a folder: `proxies`, the default, is one in the project's folder",
+            ));
+        }
+        if x.folder.starts_with("~") {
+            return Err(Error::usage(
+                "proxies.folder: write the home folder out; `~` is not expanded",
+            ));
         }
         Ok(())
     }
@@ -405,5 +434,42 @@ mod tests {
             let e = pairs(bad).unwrap_err();
             assert_eq!(e.code, crate::ErrorCode::Usage, "{bad:?}: {e:?}");
         }
+    }
+
+    #[test]
+    fn a_relative_proxy_folder_is_in_the_project_folder() {
+        let rules = Proxies::default();
+        assert_eq!(
+            rules.folder_in(Path::new("/films/talk")),
+            PathBuf::from("/films/talk/proxies")
+        );
+    }
+
+    #[test]
+    fn an_absolute_proxy_folder_is_shared() {
+        let rules = Proxies {
+            folder: PathBuf::from("/local/proxies"),
+            ..Proxies::default()
+        };
+        assert_eq!(
+            rules.folder_in(Path::new("/nas/talk")),
+            PathBuf::from("/local/proxies")
+        );
+    }
+
+    #[test]
+    fn a_proxy_folder_with_a_tilde_is_refused() {
+        let patch = PreferencesPatch {
+            proxies: Some(ProxiesPatch {
+                folder: Some(PathBuf::from("~/proxies")),
+                ..ProxiesPatch::default()
+            }),
+            ..PreferencesPatch::default()
+        };
+        let e = Preferences::default().patched(&patch).unwrap_err();
+        assert_eq!(
+            e.message,
+            "proxies.folder: write the home folder out; `~` is not expanded"
+        );
     }
 }

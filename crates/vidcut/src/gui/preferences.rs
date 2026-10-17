@@ -1,5 +1,8 @@
+use std::path::{Path, PathBuf};
+
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
+use vidcut_core::preferences::Proxies;
 
 use super::export::{Ask, Picked, near_center};
 use super::theme;
@@ -16,12 +19,14 @@ pub(super) struct PreferencesUi {
     larger_h: String,
     mbps: String,
     size: String,
+    folder: String,
     player_memory: String,
     video_memory: String,
     audio_outputs: Option<Result<Vec<vidcut_av::player::OutputDevice>, String>>,
     listing:
         Option<std::sync::mpsc::Receiver<Result<Vec<vidcut_av::player::OutputDevice>, String>>>,
     importing: Option<Picked>,
+    choosing_folder: Option<Picked>,
     confirm_reset: bool,
     reset_presets_and_themes: bool,
     resetting: Option<Ask>,
@@ -164,6 +169,7 @@ impl Workspace {
     pub(super) fn preferences_window(&mut self, ctx: &egui::Context) {
         self.reset_answered(ctx);
         self.reset_window(ctx);
+        let project = self.project_folder();
         let ui_state = &mut self.preferences;
         if !ui_state.open {
             return;
@@ -192,10 +198,16 @@ impl Workspace {
                     ui_state.larger_h = n(&p["proxies"]["larger_than"][1]);
                     ui_state.mbps = n(&p["proxies"]["above_mbps"]);
                     ui_state.size = n(&p["proxies"]["size"]);
+                    ui_state.folder = proxy_folder(p).to_string();
                     ui_state.state = Some(r.result);
                     ui_state.error = None;
                 }
-                Err(e) => ui_state.error = Some(e.message),
+                Err(e) => {
+                    if let Some(state) = &ui_state.state {
+                        ui_state.folder = proxy_folder(&state["preferences"]).to_string();
+                    }
+                    ui_state.error = Some(e.message);
+                }
             }
         }
         let mut open = true;
@@ -204,6 +216,12 @@ impl Workspace {
             ui_state.importing = None;
             if let Some(path) = picked {
                 patch = Some(json!({ "appearance": { "theme": path } }));
+            }
+        }
+        if let Some(picked) = ui_state.choosing_folder.as_ref().and_then(Picked::take) {
+            ui_state.choosing_folder = None;
+            if let Some(path) = picked {
+                patch = Some(json!({ "proxies": { "folder": path } }));
             }
         }
         if let Some(listed) = ui_state.listing.as_ref().and_then(|r| r.try_recv().ok()) {
@@ -237,7 +255,11 @@ impl Workspace {
                         memory(ui, &state, busy, ui_state, &mut patch);
                         sound(ui, &state, busy, ui_state, &mut patch);
                         thumbnails(ui, &state, busy, ui_state, &mut patch);
-                        proxies(ui, &state, busy, ui_state, &mut patch);
+                        let folders = Folders {
+                            dialogs: &dialogs,
+                            project: project.as_deref(),
+                        };
+                        proxies(ui, &state, busy, ui_state, &folders, &mut patch);
                         if let Some(e) = &ui_state.error {
                             ui.label(RichText::new(e).color(theme::colors().error));
                         }
@@ -290,7 +312,7 @@ impl Workspace {
                  projects), the recent projects, view settings and remembered folders.",
             );
             ui.label(dim(
-                "Projects, media and proxies beside projects stay. This can't be undone.",
+                "Projects, media and proxies stay, but proxies made without a project. This can't be undone.",
             ));
             ui.checkbox(
                 &mut ui_state.reset_presets_and_themes,
@@ -757,11 +779,23 @@ fn thumbnails(
     );
 }
 
+fn proxy_folder(preferences: &Value) -> &str {
+    preferences["proxies"]["folder"]
+        .as_str()
+        .unwrap_or_default()
+}
+
+struct Folders<'a> {
+    dialogs: &'a std::sync::Arc<dyn super::export::Dialogs>,
+    project: Option<&'a Path>,
+}
+
 fn proxies(
     ui: &mut egui::Ui,
     state: &Value,
     busy: bool,
     ui_state: &mut PreferencesUi,
+    folders: &Folders,
     patch: &mut Option<Value>,
 ) {
     let proxies = &state["preferences"]["proxies"];
@@ -796,6 +830,14 @@ fn proxies(
                 });
                 ui.end_row();
                 codec(ui, state, busy, patch);
+                folder(
+                    ui,
+                    proxy_folder(&state["preferences"]),
+                    busy,
+                    ui_state,
+                    folders,
+                    patch,
+                );
                 let mut auto = proxies["auto"] == true;
                 ui.label("Automatic");
                 if ui
@@ -875,6 +917,73 @@ fn proxies(
             });
         },
     );
+}
+
+fn folder(
+    ui: &mut egui::Ui,
+    saved: &str,
+    busy: bool,
+    ui_state: &mut PreferencesUi,
+    folders: &Folders,
+    patch: &mut Option<Value>,
+) {
+    let label = ui.label("Folder");
+    ui.horizontal(|ui| {
+        let r = ui
+            .add_enabled(
+                !busy,
+                egui::TextEdit::singleline(&mut ui_state.folder).desired_width(280.0),
+            )
+            .labelled_by(label.id)
+            .on_hover_text(
+                "Where new proxies go: a folder in the project's folder, or an absolute path. \
+                 Every project shares an absolute one, so a file used in several projects gets \
+                 one proxy. Proxies already made stay where they are",
+            );
+        let typed = ui_state.folder.trim();
+        if r.lost_focus() && !busy && typed != saved {
+            *patch = Some(json!({ "proxies": { "folder": typed } }));
+        }
+        let choose = ui
+            .add_enabled(
+                !busy && ui_state.choosing_folder.is_none(),
+                egui::Button::new("Choose…"),
+            )
+            .on_hover_text("Pick a folder for the proxies of every project");
+        if choose.clicked() {
+            let dialogs = folders.dialogs.clone();
+            let start = match folders.project {
+                Some(dir) => dir.join(saved),
+                None => PathBuf::from(saved),
+            };
+            let start = if start.is_dir() {
+                start
+            } else {
+                folders.project.map(Path::to_path_buf).unwrap_or_default()
+            };
+            ui_state.choosing_folder = Some(Picked::ask(ui.ctx(), move || {
+                dialogs.pick_folder("Proxy Folder", &start)
+            }));
+        }
+        let default = Proxies::default().folder;
+        if Path::new(saved) != default
+            && ui
+                .add_enabled(!busy, egui::Button::new("Reset"))
+                .on_hover_text("A proxies folder in each project's folder")
+                .clicked()
+        {
+            *patch = Some(json!({ "proxies": { "folder": default } }));
+        }
+    });
+    ui.end_row();
+    let shown = match folders.project {
+        _ if Path::new(saved).is_absolute() => "Every project's new proxies go here".to_string(),
+        Some(dir) => format!("This project's: {}", dir.join(saved).display()),
+        None => "In each project's folder".to_string(),
+    };
+    ui.label("");
+    ui.add(egui::Label::new(dim(shown)).wrap());
+    ui.end_row();
 }
 
 fn codec(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>) {

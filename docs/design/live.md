@@ -118,7 +118,7 @@ While a job runs, the engine says what it is doing: the job thread installs a `v
 
 ## Missing media
 
-`MissingWatch` runs `vidcut-missing-media`, which looks at the media's paths after each project change and every few seconds, and sends `Msg::Missing` when the set changes. Missing means absent, or a path from another system. The UI marks them in the pool and timeline, offers Relink Media (`media.relink`) and shows Media Offline ([spec §3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675)).
+`MissingWatch` runs `vidcut-missing-media`, which looks at the media's and their proxies' paths after each project change and every few seconds, and sends `Msg::Missing` when either set changes. Missing means absent, or a path from another system. The UI marks missing media in the pool and timeline, offers Relink Media (`media.relink`) and shows Media Offline ([spec §3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675)). It marks a lost proxy LOST PROXY in the pool, and `Live::make_proxies` makes it again when the automatic rules pick its media ([spec D41](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
 **Why:** a stalled network drive can hold a file check for long.
 
