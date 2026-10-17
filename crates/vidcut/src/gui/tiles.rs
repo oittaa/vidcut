@@ -16,6 +16,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -117,6 +118,10 @@ struct Waiting {
 struct Queue {
     waiting: Mutex<Waiting>,
     ready: Condvar,
+    /// Set as the tiles drop: the workers' decoding stops, waiting for a
+    /// player included (`vidcut_av::cancel`), so joining them never waits
+    /// for a player that ends after them.
+    cancel: Arc<AtomicBool>,
 }
 
 /// The timeline's tile pictures and the threads making them.
@@ -159,6 +164,7 @@ impl Tiles {
             queue: Arc::new(Queue {
                 waiting: Mutex::default(),
                 ready: Condvar::new(),
+                cancel: Arc::new(AtomicBool::new(false)),
             }),
             results,
             sender,
@@ -409,6 +415,9 @@ impl Tiles {
 
 impl Drop for Tiles {
     fn drop(&mut self) {
+        // A worker decoding a tile is a job, which waits while a player
+        // plays; the player ends after the tiles, so the wait is cancelled.
+        self.queue.cancel.store(true, Ordering::SeqCst);
         {
             let mut w = self.queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
             w.stop = true;
@@ -481,6 +490,7 @@ type Block = Vec<(i64, Image)>;
 /// One worker: takes jobs until told to stop.
 fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Context) {
     static TRIMMED: Mutex<Option<Instant>> = Mutex::new(None);
+    let _cancel = vidcut_av::cancel::Guard::set(queue.cancel.clone());
     // Decoded on the GPU the viewer decodes on while the preferences say
     // so, read as a tile is decoded: a change reaches the tiles at once.
     let reader_for = |d: &GpuDecoding| match d.own_decoder() {
