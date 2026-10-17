@@ -598,7 +598,7 @@ impl Workspace {
             if d.run.is_none() {
                 ctx.request_repaint();
             } else if let Some(wait) = next_step_in(speed, fps, now - t0) {
-                ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+                super::repaint_in(ctx, std::time::Duration::from_secs_f64(wait));
             }
         }
         if let Some(until) = d.around_until

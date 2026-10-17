@@ -35,6 +35,11 @@ pub struct EditSel {
     pub track: TrackRef,
 }
 
+pub(crate) fn repaint_in(ctx: &egui::Context, wait: Duration) {
+    let early = ctx.input(|i| Duration::try_from_secs_f32(i.predicted_dt).unwrap_or_default());
+    ctx.request_repaint_after(wait + early);
+}
+
 pub(crate) fn audio_edit_outgoing(t: &Track, at: i64) -> Option<String> {
     t.clips.windows(2).find_map(|w| {
         let (a, b) = (&w[0], &w[1]);
@@ -1354,7 +1359,7 @@ impl Workspace {
                 self.timeline.snap_flipped = false;
             } else {
                 self.timeline.drag = Some(d);
-                ui.ctx().request_repaint_after(HELD_FRAME);
+                repaint_in(ui.ctx(), HELD_FRAME);
             }
             return;
         }
@@ -1411,7 +1416,7 @@ impl Workspace {
             return;
         }
         self.timeline.drag = Some(d);
-        ui.ctx().request_repaint_after(HELD_FRAME);
+        repaint_in(ui.ctx(), HELD_FRAME);
     }
 
     fn wheel(
@@ -2353,6 +2358,20 @@ mod tests {
     use vidcut_core::model::{Clip, ClipAudio, TrackKind};
 
     use super::*;
+
+    #[test]
+    fn a_repaint_in_16_ms_comes_in_16_ms() {
+        let ctx = egui::Context::default();
+        let pass = || {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                repaint_in(ui.ctx(), Duration::from_millis(16));
+            });
+            out.textures_delta.clear();
+            out.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+        };
+        let delays: Vec<Duration> = (0..3).map(|_| pass()).collect();
+        assert_eq!(delays[2], Duration::from_millis(16), "{delays:?}");
+    }
 
     fn clip(id: &str, start: i64, duration: i64, tail: Option<i64>) -> Clip {
         Clip {
