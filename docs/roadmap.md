@@ -1,24 +1,17 @@
 # Roadmap
 
-What vidcut is for, and what comes next.
-
 ## Use cases
 
-These guide what gets built and what gets tested.
+They decide what gets built and tested.
 
-1. **Cut by script or AI, finish in Resolve.**
-   - Someone has many clips and wants them cut largely automatically: silences out, shots found, long stretches flagged, by a script or an AI agent.
-   - DaVinci Resolve's free version has no scripting and no MCP server, so they do this quick cutting in vidcut.
-   - They then import the timeline into Resolve for color correction and effects.
-2. **A quick edit on a modest laptop.**
-   - Someone has a Google Meet recording and wants an intro and an outro around it, with the silent parts in the middle cut out.
-   - They may own Resolve Studio, but on a low-powered laptop a light app that starts fast and needs no GPU does this sooner.
+1. **Cut by script or AI, finish in Resolve.** Many clips cut largely automatically by a script or an AI agent: silences out, shots found, long stretches flagged. DaVinci Resolve's free version has no scripting and no MCP server, so the cutting happens in vidcut and the timeline goes to Resolve for color correction and effects.
+2. **A quick edit on a modest laptop.** An intro and an outro around a Google Meet recording, its silent parts cut out. Even with Resolve Studio, on a low-powered laptop an app that starts fast and needs no GPU does it sooner.
 
-**What they need from vidcut:**
-- Interchange with Resolve that is as easy as possible (below).
-- Running well without a GPU on a modest CPU. Meeting recordings are variable-frame-rate H.264: test with real ones.
+**What they need:**
+- Interchange with Resolve as easy as possible: moving an edit either way, or between computers, takes no fixing by hand.
+- Running well without a GPU on a modest CPU, tested with real meeting recordings (variable-frame-rate H.264).
 - Automatic cuts that are quick to tune: silence removal for speech, scene cuts for footage.
 
 ## What comes next
 
-Moving an edit in either direction, and between computers, should take no fixing by hand. Open work is in [docs/todo/](todo/), one file per item, each saying when it is wanted. Roughly: the interchange first (use case 1), then the smaller items, then macOS.
+Open work is in [docs/todo/](todo/), one file per item, each with a **When:** line. The interchange comes first (use case 1), then the smaller items, then macOS.

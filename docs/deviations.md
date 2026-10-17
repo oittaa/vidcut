@@ -1,218 +1,141 @@
 # Deviations from the Resolve Cut page
 
-vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an entry here says otherwise. Every intentional difference needs an entry with:
-- what Resolve does, with the manual page
-- what vidcut does
-- why our way is better for this tool
-
-Additions that don't change Cut-page behavior (for example, extra scripting commands) are listed too, so the GUI-vs-Resolve picture stays complete.
-
-Settling something the manual leaves open is a decision, not a deviation; decisions go in §12 of the spec.
+vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an entry here says otherwise: what Resolve does, with the manual page, what vidcut does, and why. Additions are listed too. What the manual leaves open is a decision ([spec §12](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), not a deviation.
 
 ## X1. Projects are always-saved standalone JSON files
-- **Resolve:** projects live in a project database and are saved explicitly; Live Save is an option (manual, Project Manager chapters).
-- **vidcut:** a project is one `.vidcut` JSON file, written atomically after every committed change. There is no "unsaved changes" state.
-- **Why:** agents and scripts edit projects headless through the CLI, sometimes while the GUI has the same project open. One always-current file means the GUI, the CLI and the user never disagree about what the project contains. JSON is also diffable and readable for agents.
-- **Paths:** media go offline in Resolve when they move, and are found again with Relink Media (Locate, Disk Search) or Relink Selected Clips (pp. 668–669). vidcut's file stores the media and proxies in or under the project's folder relative to it, so moving or copying the folder, to another computer too, keeps them linked. Media elsewhere stay absolute. A path absolute only on the other kind of system (`/Users/…` on Windows, `C:\…` or `\\server\…` elsewhere) names no file here: those media are missing until relinked, and nothing opens them.
-- **Relinking:** Relink Media looks for every missing file by name in a folder and its subfolders in one go, and relinks a file only if it is the one the project knew: the same size, streams (codecs, picture size, rate, audio, duration, timecode) and fingerprint, a SHA-256 of the whole file up to 10 MiB, else of 1 MiB from its start, middle and end (an image sequence: of its first, middle and last pictures). Files named alike in several folders (a camera's `C0001.MP4` on every card) are told apart by that check and by the folders named like the old one's. The others are listed with why they differ, and Relink Anyway uses one; a file picked with Relink… is used either way. The same file keeps its proxy. Media without a fingerprint are checked by size and streams.
+- **Resolve:** projects live in a project database, saved explicitly or by Live Save (Project Manager chapters). Media that move go offline until relinked (pp. 668–669).
+- **vidcut:** a project is one `.vidcut` JSON file, written atomically after every committed change. Media in or under the project's folder are stored relative to it, so the folder can move, to another computer too. Relink Media finds missing files by name and relinks only the same file ([design/model.md](design/model.md#fingerprints-and-relinking)).
+- **Why:** scripts and agents edit projects through the CLI while the GUI may have them open; one always-current file keeps them all agreeing. JSON is diffable and readable.
 
 ## X2. One timeline per project file
-- **Resolve:** a project holds many timelines, listed in the Master bin (p. 655, 678).
+- **Resolve:** a project holds many timelines, listed in the Master bin (pp. 655, 678).
 - **vidcut:** a project file holds exactly one timeline.
-- **Why:** simplicity for a cutting tool, and an obvious mapping for scripts. Several timelines means several project files that share media.
+- **Why:** simplicity for a cutting tool, and an obvious mapping for scripts; several timelines are several project files sharing media.
 
 ## X3. Export dialog beyond Quick Export
-- **Resolve:** the Cut page has Quick Export only, writing a single file. Full render settings and "Individual clips" live on the Deliver page (Ch. 39, pp. 788–790), and finished renders are tracked in the Deliver page's Render Queue.
-- **vidcut:** Quick Export behaves as in Resolve: a row of presets, Export, a file dialog, then a progress window (Cancel, or Hide to keep it running). It and Export are buttons in the top bar, not also File menu items: the bar always shows them. The preset tiles show the preset's name and format rather than brand logos. The row is shorter than Resolve's and starts with the modern codecs: H.265 Master, AV1 (10-bit, at the timeline's size), ProRes 422 HQ, YouTube 1080p and 2160p, TikTok. H.264 Master, YouTube 720p and Vimeo stay available as presets in the Export dialog, which starts from H.265 Master. An additional Export dialog provides:
-  - full codec and container settings, starting from any preset
-  - GPU encoder choice
-  - range (whole timeline, In–Out, or typed), per-clip export with file-name templates, audio-only export
-  - a live plan (`export.plan`: the encoder that will run, the files and their lengths) before anything is written
-  - the same export as a shell command, ready to copy
-  - saving the settings as a user preset, optionally added to Quick Export (p. 790)
-  - loudness normalization to a target in LUFS (`audio.loudness`; [design/export.md](design/export.md#sound)), like the Deliver page's Normalize Audio (p. 4105)
-
-  Every export is a job: a Jobs window lists them with progress, ETA and Cancel, including exports started from the CLI. Jobs run one at a time, in order, like the Deliver page's render queue (p. 4130). Quitting while exports run asks first.
-- **Why:** vidcut has no Deliver page, and the user requires these export options. The plan and the command make every GUI export reproducible from a script. A short row is quicker to choose from. AV1 makes the smallest files at a given quality, YouTube and other sites take it, and current GPUs encode it in hardware as fast as H.264; H.265 has replaced H.264 for masters.
+- **Resolve:** the Cut page has only Quick Export (Ch. 39, pp. 788–790). Render settings, individual clips, user presets, Normalize Audio and the Render Queue are on the Deliver page (pp. 790, 4105, 4130).
+- **vidcut:** Quick Export works as on the Cut page, with a shorter row: H.265 Master, AV1, ProRes 422 HQ, YouTube 1080p and 2160p, TikTok. An Export dialog adds every codec, container and encoder setting from any preset, a range, per-clip and audio-only export, loudness normalization, the live plan, the export as a shell command, and user presets. In a running GUI, exports are jobs, one encoding at a time ([design/export.md](design/export.md#the-guis-exports), [design/live.md](design/live.md#jobs)).
+- **Why:** vidcut has no Deliver page, and the user wants these options. The plan and the command make GUI exports reproducible from scripts. A short row is quicker to choose from: AV1 makes the smallest files and current GPUs encode it; H.265 has replaced H.264 for masters.
 
 ## X4. Undo history persists across sessions and CLI runs
 - **Resolve:** undo is unlimited within a session and cleared when the project closes (p. 651).
-- **vidcut:** the history is kept in a file under `~/.local/state/vidcut/history/`, named by the first 128 bits of the SHA-256 of the project's path, so it survives restarts and separate CLI runs. It holds up to 131,072 steps, each only what its edit changed (`vidcut_core::change`). Past that, the oldest 10% go. A save adds lines at the end of the file, and commands that only read don't open it.
+- **vidcut:** the history is a file in the state folder, so it survives restarts and separate CLI runs: up to 131,072 steps, then the oldest 10% go ([design/requests.md](design/requests.md#undo-history)).
 - **Why:** an agent can undo its own edits from a later CLI call, and a human can undo an agent's batch from the GUI.
 
 ## X5. Scripting additions (no Cut-page behavior changes)
-- **Exact-frame insert and overwrite:** `edit.insert --at` and `edit.overwrite --at` are API-only. The Cut page's Smart Insert can only insert at an existing edit point (p. 697). Scripts need deterministic, frame-exact placement that doesn't depend on a playhead.
-- **Command log panel:** shows every action as the request it sent, from any client (GUI or agent). A click copies it as a `vidcut rpc` command, which teaches the API.
-- **Live control of the running GUI** ([design/live.md](design/live.md)):
-  - CLI commands for an open project run inside the GUI, so humans and agents edit the same session.
-  - Live-only commands drive it: `player.*` (seek, step, play, mute: the viewer's monitoring mute), `viewer.*`, `selection.*` (clips, media and an edit point), `gui.screenshot` (the viewer picture, or the whole window), `gui.window`, `gui.log`, `gui.target`, `gui.timeline` (the zoom and Timeline Options), `gui.state`, and `pool.set` (the bin and sort order the pool shows, which Source Tape follows, its view and its search).
-- **Clipboard as data:** `edit.copy` returns the clips as JSON, and `edit.paste --clips` pastes such JSON into any project. In the GUI, Ctrl+C also puts that JSON on the system clipboard.
-- **API parameters for scripted edits:** `edit.overwrite`/`edit.ripple_overwrite` take `use_marks: false` to place by position (what a drag and drop does), `edit.change_duration` takes `end`, and `track.set`/`markers.set` cover the track header buttons, the mixer and the marker dialog. Edit functions and `edit.move` take `--track`, which may name the next new track (decision D27).
-- **Persistent source marks:** a media item's In/Out (`media.marks.set`) are saved in the project and used by edits without a range. Resolve remembers per-clip marks too (decision D6), and this makes them scriptable.
-- **Export jobs:** `export --background` returns a job id at once in a running GUI, and `jobs list|get|wait|cancel` follow it. Foreground exports report progress and cancel when the client disconnects. `export.plan` (`export --dry-run`) describes an export without writing anything.
-- **User presets from scripts:** `presets save` (from settings or from another preset with `--set` overrides) and `presets delete`.
-- **`gui.show`** opens Quick Export, the Export dialog, Jobs, the command log, the Mixer, Preferences or Help for the person at the GUI, and `gui.close` closes them.
-- **Measuring as data:** `analyze silence|scenes|black|loudness` report what Ripple Delete Silence, Detect Scene Cuts, a black check and a loudness meter find, as frame ranges, without changing anything. `vidcut timeline boring` is the Boring Detector's finding as a list. Agents use them to plan edits (markers, cuts, In/Out) before making them.
-- **Storyboards:** `storyboard.render` writes one PNG with a labeled picture of every shot (or every N seconds), so an agent can look at a whole edit at once; over MCP it comes back as an image.
+- **Resolve:** none on the Cut page.
+- **vidcut:**
+  - `edit insert --at` and `edit overwrite --at` place at an exact frame; Smart Insert inserts only at an edit point (p. 697).
+  - The command log shows every action, the GUI's or an agent's, as its request, copyable as a `vidcut rpc` command.
+  - Commands for a project open in a GUI run inside it, and live-only ones drive the GUI ([cli.md](cli.md), [design/live.md](design/live.md)).
+  - `edit copy` returns clips as JSON for `edit paste --clips` into any project; the GUI's Ctrl+C also puts it on the system clipboard.
+  - Overwrites with `--use-marks false` place by position, as a drag does; `--track` may name the next new track ([D27](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)); `track set` and `markers set` cover the track header, the mixer and the marker dialog; source marks are saved ([D6](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - In a running GUI, `export start --background` returns a job id for `jobs list|get|wait|cancel`; `export plan` writes nothing. `presets save|delete`, `gui show|close`.
+  - `analyze silence|scenes|black|loudness` and `timeline boring` report silences, shots, black, loudness and the Boring Detector's clips without editing; `storyboard render` draws every shot into one PNG.
+- **Why:** scripts and agents need frame-exact edits without a playhead, and measurements to plan with. The command log teaches the API.
 
 ## X6. Removing a bin keeps its clips
 - **Resolve:** Delete Bin deletes the bin, the bins inside it and their clips (p. 377).
-- **vidcut:** `bins.remove` (Remove Bin) removes the bin and the bins inside it. Their media move up into the removed bin's parent, and the timeline is untouched. Taking media out of the project stays `media.remove`, which needs `force` when timeline clips use them.
-- **Why:** bins only organize the pool. A bin removed by a script or by mistake must not take media, and the timeline clips cut from them, out of the project. Undo would restore them, but an agent tidying bins shouldn't have to know that.
+- **vidcut:** `bins.remove` removes the bin and those inside it; their media move up to its parent. Removing media is `media.remove`, with `force` when clips use them.
+- **Why:** bins only organize the pool: removing one, by script or by mistake, must not take media and their clips out of the project.
 
 ## X7. Timelines start at 00:00:00:00
 - **Resolve:** new timelines start at record timecode 01:00:00:00 (p. 678).
-- **vidcut:** the start timecode defaults to 00:00:00:00. New Project and File > Project Settings offer 00:00:00:00, 01:00:00:00 and 10:00:00:00, or any other typed; `project.create`, `project.open`'s create and `project.set` take `start_tc`. It keeps its label when the frame rate or drop-frame counting changes (decision D47), another frame count each time. Timecodes typed into commands are record timecodes, so they follow the setting.
-- **Why:** with a zero start, timecode, seconds and frame numbers all count from the same point. Scripts and agents mix all three, and a hidden one-hour offset would make `00:01:00:00` and `60s` mean different frames. The hours offered are where editors and broadcasters start: an hour (programmes, with bars, tone and a countdown before), ten hours (UK broadcast). A start is meant as its label, so a new rate keeps it.
+- **vidcut:** the start timecode defaults to 00:00:00:00. New Project and Project Settings offer 00, 01 and 10 hours or any typed timecode (`start_tc`). Timecodes typed into commands are record timecodes.
+- **Why:** with a zero start, timecode, seconds and frame numbers count from one point, so `00:01:00:00` and `60s` are the same frame. One hour (programmes) and ten (UK broadcast) are the usual other starts.
 
 ## X8. The source viewer counts project frames
-- **Resolve:** Source Clip and Source Tape show a clip at its own frame rate, with its own source timecode (p. 680, 688).
-- **vidcut:** source viewers step through *project* frames; for media at the project rate this is the same thing. Source times, marks and the timecode shown count project frames from the clip's first frame.
-  - A 23.976 clip in a 30 fps project steps the way it will appear in the timeline: nearest-frame sampling, as export does.
-  - Embedded start timecodes are not shown.
-- **Why:** vidcut stores every position, including `source_in` and source marks, in project frames ([cut-page-spec.md](cut-page-spec.md), time model). One unit everywhere means what you mark is exactly what lands in the timeline and in the export. The source viewer plays through the same player as the timeline, reading with the export's readers, so the preview matches export frame for frame.
+- **Resolve:** Source Clip and Source Tape show a clip at its own frame rate, with its own source timecode (pp. 680, 688).
+- **vidcut:** source viewers step through project frames, counted from the clip's first frame and sampled as export samples them ([design/export.md](design/export.md#which-source-frame)), which for media at the project rate are its own. Embedded start timecodes aren't shown.
+- **Why:** every position, source ones too, is in project frames ([design/model.md](design/model.md#time)), so what you mark is exactly what lands in the timeline and the export.
 
 ## X9. OpenTimelineIO interchange
-- **Resolve:** timelines move between applications as EDL, AAF, XML or OTIO files, imported with File > Import Timeline and exported from File > Export (pp. 527–530, 4159–4160).
-  - OTIO comes as `.otio` (the timeline) or `.otioz` (a bundle of the timeline and all of its media).
-  - Importing an `.otioz` unpacks its media into a folder named after the bundle, next to it, and links them (Studio 21.1.1).
-  - An import creates a new timeline, can apply the file's frame rate to the project, and asks for a folder (searched with its subfolders) when media isn't where the file says.
-  - None of this is on the Cut page.
-- **vidcut:** OpenTimelineIO only, both ways (`otio.rs`, `bundle.rs`), in the shapes Resolve writes and reads:
-  - **Formats:** `.otio` (the timeline), `.otioz` (a zip file of the timeline and its media) and `.otiod` (the same as a folder). They are laid out as OpenTimelineIO's own adapters lay them out: `content.otio`, `version.txt` (zip only), and the media stored uncompressed under `media/`, named by relative paths.
-  - **Exporting:** `vidcut export start cut.otio` (or File > Export Timeline) writes:
-    - each video track
-    - the audio of each video track's clips, as an audio track (J/L cuts become audio clips offset from the video edits)
-    - each audio track, and markers
-    - in `metadata.vidcut`: the In/Out marks, clip gain/mute and track settings (lock, mute, solo, fader, name)
-    - for the whole timeline, also the rest of the project in `metadata.vidcut.project`: the settings, the media pool with its bins, and the source tape marks. Clips, markers and media keep their ids.
-    - each clip's Clip Color, as OpenTimelineIO's item color, which vidcut's import reads back
-    - the clip effects, transitions, generators, compound clips and speed changes carried from another editor's file (below)
-
-    A track's video off or audio muted also marks the OTIO track disabled. Unlike media exports it covers the whole timeline unless given a range. An `.otioz` or `.otiod` export (File > Export Timeline with Media) copies the media whole, as Resolve does; it runs as a job.
-  - **What Resolve reads besides:**
-    - Paths, timecode source ranges (including drop-frame) and marker notes: spec D40.
-    - In `metadata.Resolve_OTIO`: a link group number joins each clip's video and audio, and the audio names the stream and channels it plays.
-    - Clip gain is also written as Resolve's clip volume, track lock and solo as Resolve's.
-    - Resolve neither writes nor reads clip colors in OTIO files.
-    - Tracks carry the names given to them (a video track's audio track its video track's), else the ones Resolve gives its own by place: `Video 1`, `Audio 2`.
-    - Resolve's files have no place for the In/Out marks or a track's fader, so Resolve gets neither, and vidcut's own import reads them back. Resolve drops other programs' metadata, so a timeline that went through Resolve comes back without them.
-    - A still is available for one frame, as Resolve writes it. An image sequence is OTIO's `ImageSequenceReference` (folder, name prefix and suffix, first number, zero padding, rate), whose available range is the picture count at that rate: OTIO counts pictures by truncating the range at the reference's rate, so a project-rate length would be a different number of pictures.
-  - **Importing:** `vidcut timeline import cut.otio` (or File > Import Timeline) adds the media to the pool.
-    - Video tracks become V1, V2, …, each with the audio that belongs to its clips (the clip's link group, if it has one). Other audio tracks become A1, A2, … (vidcut's own files map back exactly).
-    - One project holds one timeline (X2), so the import goes after the last clip (`--mode append`), replaces the timeline (`--mode replace`), comes as one compound clip after the last clip (`--mode compound`), or brings only its media (`--mode media`). The GUI asks which. An empty timeline takes the file's frame rate, start timecode and track settings.
-    - A file vidcut wrote of its whole timeline brings its media as its project has them: probe info, colors and marks, without proxies. They go into a bin named after the file, with their own bins under it, and get new ids. A file the pool has keeps its pool item. With `--mode media`, all of its pool comes.
-    - Resolve's channel map picks a clip's audio stream, and its clip volume the gain. Markers on clips and tracks become timeline markers; markers keep their lengths. Track names other than Resolve's defaults (`Video 1`, `Audio 2`) name the tracks; an audio track whose clips become clips' audio has none to keep it. A marker's note is its `comment`, or `Resolve_OTIO.Note` when that is empty, as Resolve leaves it. A file without a timeline name, as Resolve writes it, names the timeline after the file.
-  - **Opening:** an OTIO file also opens as a project: Open Project, `vidcut project open cut.otio` in a GUI, or `vidcut project create p.vidcut --from cut.otio`.
-    - The project file goes next to it, named alike (`cut.otio` → `cut.vidcut`), or where `--save-as` says. The OTIO file is never changed, and no project file is overwritten. When the name is taken, the GUI asks whether to open that file or save under another name.
-    - A file vidcut wrote of its whole timeline opens as the project it holds.
-    - Another editor's file is imported into a new project. The format is the file's frame rate and start timecode and its first video's size, or the one given. The GUI asks which.
-  - **Finding media:**
-    - Media are named as `file://` URLs (escaped or not), plain paths, Windows paths, paths relative to the file, or the URL Resolve kept for offline media.
-    - A project folder moved with its timeline file is found without asking: the path's last parts are looked for next to the file.
-    - Other media that moved are found by name with `--search FOLDER` (subfolders too), and the GUI asks for that folder.
-    - Only local regular files count as media: a device or a pipe counts as missing, and a clip whose `file://` URL names another host is left out with a warning.
-  - **Bundles:** an `.otioz` import unpacks the media into a folder named after the bundle, next to it (`cut.otioz` → `cut/media/…`), or where `--unpack` says. Files already there are kept if they are the bundle's (by CRC-32); other files in the way are an error. A dry run unpacks nothing.
-  - **Clip effects** (Transform, Cropping, Composite, Video Faders, the clip volume's fades, Pan, …; another program's named ones too) stay on the clip's picture or sound: kept as data, not shown or played, and written back unchanged on export. Editing them stays out of scope (spec §1).
-    - **Which:** the ones in use: Resolve's when switched on with a setting off its default, Dynamic Zoom whenever it is on. The untouched stack Resolve writes on every clip and switched-off effects are left out.
-    - **Shown:** a badge on the clip (`fx Transform, Cropping`), their names in `timeline get` (`effects`), the effects themselves in `project get`, and one import warning naming them.
-    - **Through edits:** keyframe times count from the clip's first source frame, so they stay on their source frames through trims, slips and splits. A split leaves the fade-in on the first part and the fade-out on the last, as does an export that cuts a clip. The clip volume's level is the clip gain, written into it. An import at another frame rate converts keyframe times and fade lengths.
-  - **Transitions** (a dissolve as OTIO's `SMPTE_Dissolve`, Resolve's audio crossfades and others as `Custom_Transition`) stay on their edit points, between two clips' pictures or sounds, or between a clip and a gap (a fade from or to black). Dissolves and cross fades play (spec D50); others play as cuts. All are written back while they fit.
-    - **Fitting:** the clips on each side still meet at the cut (or the gap is still there), the clip after it has the transition's frames before the cut (`in_offset`) as media before its first frame, and the clip before it those after the cut (`out_offset`) after its last. A split of the clip before a cut hands the transition to the part that ends there.
-    - **Dropped** when an edit leaves one that no longer fits (a clip moved, deleted, or trimmed to the end of its media), and the edit's `warnings` say how many; an undo brings them back. An import drops those that don't fit the project's media, an export those at its edges.
-    - **Shown:** a box over the frames each covers, across the picture or sound band; in `timeline get`, each track's `transitions` with id, name and cut; one import warning naming those that play as cuts.
-  - **Generators and titles** (OTIO `GeneratorReference`s: Resolve's Solid Color, standard titles with their text) become generator clips: blocks named after them, played as gaps, with no media and any length. Moving, trimming, splitting, copying and deleting work; the reference is written back as it came. A Fusion title (Text+) is an empty `MissingReference`, left out as a gap.
-    - **Shown:** a violet block; `generator` (its kind) in `timeline get`; one import warning naming them. Analyses and per-clip exports leave them out.
-  - **Compound clips and nested timelines** (nested OTIO `Stack`s) become compound clips: blocks with no media of their own, their stack kept, that play the clips they hold, trimmed to the part they show, on their track's layer with its fader, mute and solo. Those clips' media are found as an import finds media; when they aren't, the block plays as a gap and the import says so. One on a video track is the picture; one on an audio track (`video` false) stands for a nested timeline's sound and stays on audio tracks. Moving, trimming within the stack's length, splitting, copying and deleting work; the stack is written back as it came, its source range the clip's, without Resolve's link group number.
-    - **Shown:** a brown block, on the audio band for sound; `compound` (Resolve's `Sequence Type`) in `timeline get`; one import warning naming them. Analyses and per-clip exports leave them out.
-    - **Decompose in Place** (`edit.decompose`, the clip's menu): the block becomes the clips its stack holds, at their times, trimmed to the part it shows. A picture block brings the stack's video tracks, pictures only: the first in its place, each other on the next free video track above, or a new one. A sound block brings its audio tracks, sound only, the same way on audio tracks. Resolve writes a compound clip with sound as both blocks. The block's own effects are dropped, and the result says so; one at another speed leaves its clips at it (spec D48).
-    - **Flattened at import** (`timeline.import --flatten`, File > Import Timeline, Decomposing Compound Clips): each compound clip, and those it holds, is decomposed as it lands.
-  - **Speed changes** (OTIO time effects: Resolve's constant speeds as `LinearTimeWarp`, `time_scalar` 2.0, 0.5, -1.0 reversed) stay on their clips, which play and edit at their speed (spec D48). The time effect is written back first among the clip's effects; a reversed clip as Resolve writes it (spec D48). A time effect without a speed plays at normal speed, with an import warning.
-    - **Shown:** a badge (`200%`); `speed` (2.0) in `timeline get`.
-    - Resolve shows a 200% clip one frame early if the clip starts on an odd frame, from its own exports too.
-  - **In Resolve:** Studio 21.1.1 rebuilds the clip effects in use, transitions, generators, compound clips and speed changes from vidcut's files as from its own.
-  - **Accepts what Resolve writes:** `Clip.1` and `Clip.2`, source ranges in media timecode, float rates (snapped to exact rationals such as 24000/1001), Resolve's effect lists.
-  - **Left out, with a warning each:** nested tracks, and clips that would overlap others on their track.
-  - Export → import reproduces a timeline frame for frame (`tests/cli.rs`, `otio/tests.rs`).
+- **Resolve:** timelines move between applications as EDL, AAF, XML or OTIO files through File > Import Timeline and File > Export (pp. 527–530, 4159–4160), off the Cut page. An import makes a new timeline; an `.otioz` bundle unpacks into a folder named after it.
+- **vidcut:** OpenTimelineIO only, both ways, in Resolve's shapes ([D40](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)): `.otio`, `.otioz` bundles and `.otiod` bundle folders ([design/model.md](design/model.md#opentimelineio)).
+  - File > Export Timeline (`export start cut.otio`), with Media a bundle. Marks, faders and the rest of the project go in vidcut's metadata, which Resolve doesn't keep.
+  - File > Import Timeline (`timeline import`) appends, replaces the timeline, adds one compound clip or brings only the media: a project holds one timeline (X2). An OTIO file also opens as a new project.
+  - Clip effects, transitions, generators, compound clips and speed changes come in as data and are written back while they fit; Resolve Studio 21.1.1 rebuilds them. Dissolves, cross fades ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) and speeds ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) play; other transitions play as cuts, generators as gaps, other effects not at all.
 - **Why:**
-  - OTIO is the user's choice: an open standard that Resolve and other editors read and write, so a cut can move to a finishing tool and back, and agents can write timelines in a documented format instead of vidcut's own. Resolve's other formats keep less of a cut: its EDL holds one video track and no audio tracks or markers, its FCPXML (1.10) no markers.
-  - Writing Resolve's own conventions (plain paths, timecode source ranges, link groups) is what lets Resolve link media and keep audio with its video; other OTIO tools read them as plain OTIO. OpenTimelineIO's own bundler wants `file:` URLs and takes a Windows drive letter (`C:\…`) for a URL scheme, so its bundles of vidcut's Windows files need the paths made URLs first.
-  - Clip effects, transitions, generators, compound clips and speed changes are carried rather than left out so that a cut finished in Resolve can come back to vidcut for a recut and go back again without losing them: vidcut needn't understand an effect to keep it. Only the effects in use, because Resolve fills in the rest itself. A transition is dropped rather than moved when an edit takes its cut away, because a dissolve between two other shots is a different edit.
-  - A bundle's media go into a folder of their own, as Resolve's import puts them: two bundles unpacked in one folder (Downloads, say) would otherwise mix their `media/` folders, and one bundle's media can be moved or deleted as one folder.
+  - OTIO is an open standard Resolve and other editors read and write, so a cut can go to a finishing tool and back, and agents write timelines in a documented format. Resolve's EDL keeps one video track and no audio tracks or markers, its FCPXML (1.10) no markers.
+  - Carrying what vidcut doesn't model lets a cut finished in Resolve come back for a recut and return intact. Only effects in use are kept: Resolve fills in the rest. A transition whose cut an edit removes is dropped, not moved: a dissolve between two other shots is another edit.
+  - A bundle's media get their own folder, so bundles unpacked side by side don't mix and each moves or deletes whole.
 
 ## X10. An MCP server for AI agents
-- **Resolve:** scripting is a Python/Lua API for Studio (Workspace > Scripts, outside the Cut page chapters).
-- **vidcut:** `vidcut mcp` serves the Model Context Protocol on stdin/stdout, every request method a tool ([design/requests.md](design/requests.md)). [cli.md](cli.md) shows how to connect an agent.
-- **Why:** the user wants vidcut drivable by AI agents. MCP is how agents discover and call tools; generating the tools from the request schema keeps them complete and in step with the CLI.
+- **Resolve:** none on the Cut page; Studio has a Python/Lua scripting API (Workspace > Scripts).
+- **vidcut:** `vidcut mcp` serves the Model Context Protocol on stdin/stdout, every request method a tool ([design/requests.md](design/requests.md), [cli.md](cli.md)).
+- **Why:** MCP is how agents discover and call tools; tools generated from the request schema stay complete and in step with the CLI.
 
 ## X11. Dynamic Trim and Ripple Delete Silence, simplified
-- **Resolve:** Dynamic Trim trims while the program plays, with sound, in a dynamically updating timeline (pp. 730–731). Ripple Delete Silence can crossfade the remaining audio (p. 773).
-- **vidcut:**
-  - **Dynamic Trim:** J/L run the trim at shuttle speed while the two-up shows the frames on both sides as the trim leaves them, without sound. The timeline draws the trim as it runs, but the project changes once, when K stops it (spec D32).
-  - **Ripple Delete Silence:** there is no crossfade option. Its cuts get the 3 ms de-click fades every vidcut cut gets in export.
-- **Why:** one change at the end keeps the preview, the project file and the undo history out of a run of edits many times a second. The two-up shows exactly what the trim will make (players show the frames export makes), and one change at the end is one undo step that agents and the command log can follow. The de-click fades already keep its cuts silent.
+- **Resolve:** Dynamic Trim trims during playback, with sound, updating the timeline as it goes (pp. 730–731). Ripple Delete Silence can crossfade the remaining audio (p. 773).
+- **vidcut:** Dynamic Trim runs without sound and changes the project once, when K stops it ([D32](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). Ripple Delete Silence has no crossfade; its cuts get the 3 ms de-click fades every cut gets.
+- **Why:** one change at the end keeps the preview, the file and the history out of edits many times a second, and is one undo step. The de-click fades already keep the cuts silent.
 
 ## X12. Preferences hold only what vidcut needs
-- **Resolve:** the Preferences window has System and User panels with many settings: hardware, media storage, playback, the UI (p. 94). Caches and proxies are set up in the project settings and preferences (pp. 191–218).
-- **vidcut:** File > Preferences (Ctrl+,) holds settings for vidcut as a whole, kept in `~/.config/vidcut/preferences.toml`: GPU acceleration (everything on the CPU when off), GPU decoding (off: the CPU decodes) and the GPU that decodes and encodes (automatic, or one of the computer's), the player's memory for decoded pictures (automatic unless set: [design/playback.md](design/playback.md#the-engine)) and its audio device, the thumbnail disk cache and its limit, the timeline's picture memory, and the proxy rules, size and codec. `preferences.get` and `preferences.set` read and change them, from the CLI (`vidcut preferences`), IPC and MCP like everything else.
-- **Why:** a preference belongs here only once vidcut has a behavior to choose. A plain TOML file can be edited by hand, kept in dotfiles, and changed by agents.
+- **Resolve:** Preferences has System and User panels with many settings (p. 94). Caches and proxies are set up in project settings and preferences (pp. 191–218).
+- **vidcut:** File > Preferences (Ctrl+,) holds the theme, GPU use, the player's memory and audio device, the thumbnail cache and the proxy rules, in `preferences.toml` ([design/model.md](design/model.md#preferences)); `preferences get|set` reach them from scripts.
+- **Why:** a preference belongs here only once vidcut has a behavior to choose. A plain TOML file can be edited by hand, kept in dotfiles and changed by agents.
 
 ## X13. Deinterlacing has one quality
-- **Resolve:** each interlaced clip has a Deinterlace Quality (Normal, High, or the Neural Engine) in the Cut page's Inspector, and Normal is always used during playback (p. 741). Clip Attributes can turn deinterlacing on or off per clip (p. 451).
-- **vidcut:** frames flagged interlaced are always deinterlaced with one method (`bwdif`, one frame per frame), in the preview and in export alike (spec D34).
-- **Why:** one method keeps the preview and export frame-exact with each other, and `bwdif` is the better of FFmpeg's CPU deinterlacers. vidcut has no Inspector to hold a per-clip choice.
+- **Resolve:** each interlaced clip has a Deinterlace Quality (Normal, High, Neural Engine) in the Inspector; playback always uses Normal (p. 741), and Clip Attributes switch deinterlacing per clip (p. 451).
+- **vidcut:** frames flagged interlaced are always deinterlaced with `bwdif`, in the preview and export alike ([D34](cut-page-spec.md#12-decisions-on-gaps-and-contradictions); on the GPU: [design/gpu.md](design/gpu.md#deinterlacing-and-hdr)).
+- **Why:** one method keeps preview and export frame-exact, and `bwdif` is the better of FFmpeg's CPU deinterlacers. There is no Inspector for a per-clip choice.
 
 ## X14. Color is set per export, not managed
-- **Resolve:** color management (RCM) gives the timeline a color space. Media come into it through input transforms and tone mapping, and the output color space is chosen for delivery (pp. 230–239).
-- **vidcut:** there is no timeline color space and no grading. Each export picks its output, SDR BT.709 or HDR PQ or HLG (`video.hdr`), and every clip is converted to it from its own tags: tone-mapped, or with SDR white at 203 nits (spec D35). By default (`auto`) the export decides from the pictures it shows, and its bit depth too (spec D44): Resolve's output is whatever the project's color management says, SDR Rec.709 unless set up otherwise. The viewer converts each picture with the export's own math (HDR tone-mapped as into an SDR export), so HDR clips look there as they will in an SDR export.
-- **Why:** vidcut cuts, and color correction belongs in an editor like Resolve (see docs/roadmap.md). Converting each clip straight to the output keeps exports right for mixed phone, camera and screen footage without color settings, and choosing the output from the footage keeps a phone's HDR video HDR without anyone setting up a color space first.
+- **Resolve:** color management gives the timeline a color space; media come in through input transforms and tone mapping, and the output space is chosen for delivery (pp. 230–239).
+- **vidcut:** no timeline color space and no grading. Each export picks SDR, PQ or HLG from the footage it shows unless told ([D44](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), and converts each clip to it from its own tags ([D35](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)); the viewer uses the same math.
+- **Why:** vidcut cuts; grading belongs elsewhere. Mixed phone, camera and screen footage comes out right without color settings, and a phone's HDR video stays HDR.
 
 ## X15. The Smart Indicator holds still
-- **Resolve:** after a few seconds of idling, the Smart Indicator moves up and down on the ruler, and the edit point strobes green, or red once the clip has reached its start or end frame (p. 696).
-- **vidcut:** the indicator is green, or red where a clip at the edit shows its media's first or last frame (`ops::edit_has_handles`). It doesn't move or strobe.
-- **Why:** an idle animation keeps the window repainting for as long as it is open, which costs a modest laptop CPU time and battery while nothing happens. The color tells the same.
+- **Resolve:** after a few idle seconds, the Smart Indicator moves up and down on the ruler and the edit point strobes green, or red once a clip reaches its start or end frame (p. 696).
+- **vidcut:** the indicator is green, or red where a clip at the edit shows its media's first or last frame. It doesn't move or strobe.
+- **Why:** an idle animation repaints the window all the time, which costs a laptop CPU time and battery. The color tells the same.
 
 ## X16. The still duration is a project setting
 - **Resolve:** the standard still duration is a user preference (Preferences > User > Editing, p. 114).
-- **vidcut:** it is in the project's settings (`still_secs`; `vidcut project set --still-duration 3s`).
-- **Why:** an edit is then the same in every run, whoever makes it and on whichever computer: an agent appending a still gets the length the project says, not one set in somebody's preferences.
+- **vidcut:** it is a project setting (`project set --still-duration 3s`; [D38](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:** an edit is the same in every run on every computer: an agent appending a still gets the project's length.
 
 ## X17. Image sequences are asked for, not guessed
-- **Resolve:** the Media Storage panel's Frame Display Mode decides whether numbered images are one sequence or separate stills: Auto goes by file type (DPX and EXR as sequences, JPEG as stills), or always one way (p. 366).
-- **vidcut:** `media.add` adds a still for each image, unless `sequence` asks for the numbered run around it as one clip.
-- **Why:** the file type doesn't tell a render's frames from numbered photos or exported slides, and a wrong guess turns a slideshow into a fraction of a second of video, or a render into thousands of stills. A flag makes the CLI and agents predictable.
+- **Resolve:** the Frame Display Mode decides whether numbered images are one sequence or stills; Auto goes by file type (p. 366).
+- **vidcut:** each image is a still unless `media add --sequence` asks for the numbered run around it ([D39](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:** the file type doesn't tell a render's frames from numbered photos, and a wrong guess turns a slideshow into a blink or a render into thousands of stills. A flag keeps scripts predictable.
 
 ## X18. Proxies keep source timestamps, and only the preview uses them
-- **Resolve:** proxies are generated from the Media Pool. Playback can switch between proxies and originals. Export always reads the originals (pp. 207–218). The manual doesn't say that a proxy frame carries its source frame's timestamp.
-- **vidcut:** `proxy.generate` (Media Pool: Generate Proxy) writes a proxy of a video or an image sequence, on demand, or by itself in the GUI for heavy media (decision D41). Each proxy frame keeps the source frame's presentation timestamp, so the viewer can swap the path and pick the same frames. `use_proxies` (the Media Pool's Proxies checkbox) is the playback switch, and a stale proxy is not played. Files live in `proxies/` beside the project, or in `~/.cache/vidcut/proxies` when that folder is unknown. Preview audio, export, frames, analysis and OTIO always read the originals.
-- **Why:** the preview has to stay frame-exact with export, including image sequences of large pictures that cannot decode in real time. A timestamp-preserving file lets the export's sampling rule pick from it as from the original. Leaving audio and export on the originals means a proxy cannot drift from the mix or from the delivered frames.
+- **Resolve:** proxies are generated from the Media Pool, playback switches between them and the originals, and export reads the originals (pp. 207–218). The manual doesn't say whether proxy frames keep their sources' timestamps.
+- **vidcut:** they keep them, so the preview picks the same frames. Only the preview's pictures use proxies; its sound, export, frames, analysis and OTIO read the originals ([D41](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:** the preview stays frame-exact with export, even for image sequences too large to decode in real time, and can't drift from the mix or the delivered frames.
 
 ## X19. HDR metadata comes from the sources
-- **Resolve:** an HDR export carries the metadata of the grading setup: the Mastering Display chosen in Project Settings, HDR10 metadata exported or embedded on the Deliver page (p. 4117), Dolby Vision and HDR10+ from the grade's analysis and trims (pp. 151, 259–260); the Studio version measures MaxCLL and MaxFALL in a Light Level report (p. 282).
-- **vidcut:** there is no grade, so an export carries what its sources say (spec D46): the widest mastering display and the highest light levels of the pictures it shows, and their own HDR10+ and Dolby Vision, frame by frame. Where a source says nothing, light levels are measured from its frames, and frames without HDR10+ get statistics measured from them, without the trims a grade would add. Values can be given (`video.mastering_display`, `video.max_cll`).
-- **Why:** cutting phone, camera and graded HDR footage keeps it looking on TVs as the sources do, without a colorist's setup; where the sources say nothing, the values come from the pictures rather than a guess.
+- **Resolve:** an HDR export carries the grading setup's metadata: the Mastering Display, HDR10 metadata (p. 4117), Dolby Vision and HDR10+ from the grade (pp. 151, 259–260). Studio measures MaxCLL and MaxFALL (p. 282).
+- **vidcut:** there is no grade, so an export carries what its sources say, or measures it from their frames ([D46](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:** phone, camera and graded HDR footage keeps looking on TVs as its sources do, without a colorist's setup.
 
 ## X20. Stats for nerds
-- **Resolve:** the viewer shows nothing of how it plays.
-- **vidcut:** the viewer's right-click menu opens a panel over the picture. It has a group for each part of the player, with one fact on each row: decoding, the picture, the viewer, playback, the pictures kept and the sound. `player.stats` toggles it, and `player.state` has the same facts as `stats`.
-- **Why:** where the GPU decodes and draws differs from machine to machine. This shows it without a debug log.
+- **Resolve:** none: the viewer shows nothing of how it plays.
+- **vidcut:** the viewer's right-click menu opens a panel over the picture, a group each for decoding, the picture, the viewer, playback, the pictures kept and the sound. `player stats` toggles it; `player state` has the same facts as `stats`.
+- **Why:** where the GPU decodes and draws differs between machines; this shows it without a debug log.
 
 ## X21. Ctrl+wheel zooms the timeline
-- **Resolve:** Option+wheel zooms the timeline, and Command+wheel moves through it (Edit page, p. 853). The Cut page's lower timeline zooms with Option+wheel too.
+- **Resolve:** Option+wheel zooms the timeline and Command+wheel moves through it (Edit page, p. 853); the Cut page's lower timeline zooms with Option+wheel too.
 - **vidcut:** Ctrl+wheel (Cmd on a Mac) and a trackpad's pinch zoom the lower timeline.
-- **Why:** Ctrl+wheel and Cmd+wheel zoom in browsers and most other programs, and egui gives them and a pinch as the same zoom.
+- **Why:** Ctrl+wheel and Cmd+wheel zoom in browsers and most programs, and egui gives them and a pinch as one zoom.
 
 ## X22. Themes
-- **Resolve:** one dark gray look.
-- **vidcut:** nine built-in themes and your own TOML files. Native, the default, follows the computer's light or dark mode and accent color, so it can be light. Classic is a flat dark gray like the Cut page's. File > Preferences or `preferences set appearance.theme=…` switches at once.
-- **Why:** a desktop app is expected to offer a few looks, and people spend long sessions in an editor. Every theme keeps the Cut page's layout and what its colors mean.
+- **Resolve:** none: one dark gray look.
+- **vidcut:** nine built-in themes and your own TOML files. Native, the default, follows the computer's light or dark mode and accent color; Classic is a flat dark gray like the Cut page's. Preferences or `preferences set appearance.theme=…` switch at once.
+- **Why:** a desktop app is expected to offer a few looks for long sessions. Every theme keeps the Cut page's layout and what its colors mean.
 
 ## X23. A Keyboard Shortcuts window
-- **Resolve:** the keys are listed and changed in its Keyboard Customization window, without explanations.
-- **vidcut:** F1, or Help in the top bar, opens a list of every shortcut, one action a row. A ? beside an action that isn't obvious, like Dynamic Trim or Ripple Overwrite, opens a few plain words on what it does and why. Keys can't be changed.
-- **Why:** newcomers learn the keys and what the editing ideas are for in one place, without leaving the app.
+- **Resolve:** none on the Cut page; the Keyboard Customization window lists and changes keys, without explanations.
+- **vidcut:** F1, or Help in the top bar, lists every shortcut, one action a row. A ? beside a less obvious action explains it in a few plain words. Keys can't be changed.
+- **Why:** newcomers learn the keys and the ideas behind them in one place, without leaving the app.
 
 ## X24. Cross fades follow their curves exactly
-- **Resolve:** Studio 21.1.1 renders a Cross Fade's curve as straight lines between points of it: the fade's first sample, every 1000 samples from there and from the edit, and its last (measured at 48 kHz). In the first milliseconds of a +3 dB fade its gain is up to 0.06 off the curve.
-- **vidcut:** each sample's gain is the curve's (spec D50).
-- **Why:** the curve is what the transition is named for, and it needs no knowledge of where an editor puts its points. The two differ by more than 1 % only in the 20 ms where each curve leaves or reaches silence.
+- **Resolve:** Studio 21.1.1 renders a Cross Fade's curve as straight lines between points on it: the first sample, every 1000 from there and from the edit, and the last (at 48 kHz). Early in a +3 dB fade the gain is up to 0.06 off.
+- **vidcut:** each sample's gain is the curve's ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:** the curve is what the transition is named for, and needs no editor's points. The two differ by more than 1% only in the 20 ms where a curve leaves or reaches silence.
+
+## X25. Small additions to the layout
+- **Resolve:** the Import Media button sits in the Media Pool (p. 654); the transport bar has no Clear; Timeline Options (p. 645) have no filmstrip or waveform toggles, and Snap is there, not among the timeline buttons (p. 649); the pool doesn't sort by duration.
+- **vidcut:** Import in the top bar; Clear in the transport bar clears the marks (Alt+X); Filmstrips and Waveforms in Timeline Options; a Snap button among the timeline buttons as well as Snap in Timeline Options; Duration among the pool's sorts. File dialogs for media, projects and exports each start in the folder last used for them.
+- **Why:** each puts one click on something the Cut page hides in a menu or leaves out, and none changes how an edit works.

@@ -123,9 +123,40 @@ flowchart LR
   imported -- "timeline.import<br>project.create from" --> project
 ```
 
-`export.start` to an `.otio`, `.otioz` or `.otiod` path writes the timeline, not pictures: `otio::export` builds the document and `export::timeline` writes it, bundles through `bundle::write`, which copies the media in. Reading goes through `Env::open_timeline` and `otio::import`. A file vidcut wrote of a whole timeline also holds the rest of the project (`otio::holds_project`), so `project.create` from it gives the same project back (`editor::open_otio`). Another editor's timeline is imported into the project (`timeline.import`) or a new one (`editor::project_from_otio`).
+`export.start` to an `.otio`, `.otioz` or `.otiod` path writes the timeline, all of it unless given a range: `otio::export` builds the document, `export::timeline` writes it. A file vidcut wrote of a whole timeline holds the rest of the project too (`otio::holds_project`), which `editor::open_otio` gives back; another editor's goes into the project (`timeline.import`) or a new one (`editor::project_from_otio`). Why: [deviation X9](../deviations.md#x9-opentimelineio-interchange); conventions: [spec D40](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions).
 
-What vidcut doesn't model, clip effects, generators and titles, compound clips, speed changes and transitions, it keeps as `Kept`: the OTIO JSON as read, shared by every copy of the project, saved in the `.vidcut` file and written back on export. Behavior: [deviation X9](../deviations.md#x9-opentimelineio-interchange).
+**Bundles** (`bundle::plan`) hold `content.otio`, in a zip `version.txt`, and the media used, whole and uncompressed, under `media`, as OpenTimelineIO's adapters lay them out. `bundle::open` unpacks an `.otioz` into a folder named after it, or `unpack`, keeping files whose CRC-32 matches; anything else in the way is an error.
+
+| vidcut | Written as |
+|---|---|
+| video track | a `Video` track, disabled with its video off, and an `Audio` track of its clips' sound, J/L cuts as audio edits |
+| audio track | an `Audio` track, disabled when muted |
+| clip | `Clip.2`, its source range from the media's start timecode |
+| media | `ExternalReference` by plain path, relative in a bundle; a still one frame long; an image sequence an `ImageSequenceReference` at its rate |
+| Clip Color | the item's `color` |
+| markers | the top-level stack's, with their lengths |
+
+| Metadata | Holds |
+|---|---|
+| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `source_in` and `skip` for stills and speeds, which the source range rounds |
+| `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`) |
+| `Resolve_OTIO`, which other editors read | `Link Group ID`, `Channels`, a clip volume effect, and `Media In` on reversed clips; `Locked`, `SoloOn` and `Audio Type` on tracks; `Note` on markers |
+
+`otio::import` also takes `Clip.1`, float rates, snapped (`rational`), and media named by URLs, plain, Windows or relative paths, or an offline `MissingReference`'s `Media Url`. Video tracks become V1, V2, …; an audio clip lining up with a video clip of the same media (and link group) becomes its sound, others go on A1, A2, … Names other than the defaults (`default_track_name`) name tracks; markers on clips, tracks and the stack become timeline markers. Nested tracks, unknown items, clips without media and overlapping clips are left out with a warning. Media are looked for at the path, by its last parts beside the file (`MediaRef::paths`), then by name in `search` and the bundle's folder (`find_media`).
+
+`ImportMode` is `append`, `replace`, `compound` (`otio::as_compound`) or `media`; `flatten` decomposes compound clips. An empty timeline takes the file's rate, start timecode and track settings. A file vidcut wrote brings its pool items (`join_pool`) into a bin named after it, with new ids, without proxies.
+
+`Kept` holds what vidcut doesn't model: the OTIO JSON as read, shared by copies, saved in the `.vidcut` file and written back.
+
+| OTIO | Kept as |
+|---|---|
+| clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`: keyframes stay on their source frames (`Effects::from`) and fades at the clip's ends through splits; the clip volume's level is the gain |
+| `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` once it no longer fits; dissolves and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
+| `GeneratorReference` | `Generator`, a block that plays as a gap |
+| nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
+| `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
+
+Which kept transitions play (`otio::transitions`): on picture, an `SMPTE_Dissolve` whose editor metadata names no effect but a cross dissolve; on sound, a cross fade found by its effect type or name (+3, 0 or −3 dB), or a plain `SMPTE_Dissolve` at 0 dB. One plays only where its two clips cover its frames and no other clip of the track reaches into them; of two that overlap, the first.
 
 ## Preferences
 
