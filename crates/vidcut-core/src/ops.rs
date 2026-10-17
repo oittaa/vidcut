@@ -1,4 +1,5 @@
 mod dissolve;
+pub mod filmstrip;
 mod follow;
 mod tracks;
 

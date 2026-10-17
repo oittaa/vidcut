@@ -169,7 +169,7 @@ Ctrl+\, the Split button, or Split Clips splits at the playhead. Join Match Edit
   - **Lower audio band at an edit: audio-only roll**, a J/L cut (§8.7).
 - **Safe Edit** (option, p. 732): a trim stops at the neighboring clip, with a small timer on the cursor; keep dragging to overwrite anyway.
 - **Trim to Audio** (option, p. 645): the audio view expands while trimming.
-- **Trim Editor** (double-click an edit; pp. 729–730): the Viewer shows the outgoing filmstrip on top and the incoming one below. The top handle trims the outgoing Out, the bottom one the incoming In, the middle one rolls, and ±1-frame buttons nudge. Esc or Close closes it.
+- **Trim Editor** (double-click an edit; pp. 729–730): the Viewer shows the outgoing filmstrip on top and the incoming one below, each frame numbered from the edit. The top handle trims the outgoing Out, the bottom one the incoming In, the middle one rolls, and ±1-frame buttons nudge. Esc or Close closes it.
 - **Trim Start/End to Playhead** (Edit Actions, p. 729): moves a clip's head or tail to the playhead.
 - **Change Clip Speed** (R†): a speed, reversed or not, or a freeze frame, for every selected clip (D48).
 - **Change Clip Duration** (Ctrl+D, p. 693): frames or a timecode, or 1, 5 or 15 seconds, for every selected clip. End runs to the end of the media; Extend Beyond Clip Length pads with black.

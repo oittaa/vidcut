@@ -134,7 +134,7 @@ While a job runs, the engine says what it is doing: the job thread installs a `v
 
 - **Trims in progress.** The UI runs `vidcut_core::ops` on a clone of the snapshot's project for Dynamic Trim's drawing and two-up frames (`dynamic_preview`), and to try a trim before sending it. `Workspace::trim_sent` shows that copy until the core's revision catches up (`Workspace::shown_project`).
 - **View state.** The edit point selected, the target track, zoom and Timeline Options (in `timeline.json`), the windows open. Requests reach it through `Renderer::gui`.
-- **Timeline tiles**, decoded by `Tiles` on `vidcut-tiles-N`.
+- **Timeline tiles**, decoded by `Tiles` on `vidcut-tiles-N`; the Trim Editor's filmstrips use the same tiles, their frames and handle reach from `vidcut_core::ops::filmstrip`.
 - **The two-up**: `Cells` owns its players on the UI thread; `Screens` draws them.
 
 ## Themes and keys
@@ -176,7 +176,7 @@ sequenceDiagram
 ## Code
 
 - `crates/vidcut/src/gui/app.rs`, `crates/vidcut/src/gui/workspace.rs`, `crates/vidcut/src/gui/export.rs`
-- `crates/vidcut/src/gui/video.rs`, `crates/vidcut/src/gui/gate.rs`, `crates/vidcut/src/gui/cells.rs`, `crates/vidcut/src/gui/tiles.rs`, `crates/vidcut/src/gui/timeline/`
+- `crates/vidcut/src/gui/video.rs`, `crates/vidcut/src/gui/gate.rs`, `crates/vidcut/src/gui/cells.rs`, `crates/vidcut/src/gui/tiles.rs`, `crates/vidcut/src/gui/trim_strips.rs`, `crates/vidcut/src/gui/timeline/`
 - `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/snapshot.rs`, `crates/vidcut/src/live/project.rs`, `crates/vidcut/src/live/jobs.rs`
 - `crates/vidcut/src/live/missing.rs`, `crates/vidcut/src/live/workers.rs`, `crates/vidcut/src/live/player.rs`
 - `crates/vidcut/src/ipc/server.rs`, `crates/vidcut/src/ipc/registry.rs`

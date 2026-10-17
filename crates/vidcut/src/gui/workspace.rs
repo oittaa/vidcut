@@ -1655,14 +1655,14 @@ impl Workspace {
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Card, |ui| self.pool_panel(ui))
             });
-        if let Some(tiles) = &mut self.tiles {
-            tiles.end_frame();
-        }
         egui::CentralPanel::default()
             .frame(theme::card(theme::colors().panel_dark))
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Viewer, |ui| self.viewer_panel(ui))
             });
+        if let Some(tiles) = &mut self.tiles {
+            tiles.end_frame();
+        }
         self.media_drag_overlay(&ctx);
     }
 }

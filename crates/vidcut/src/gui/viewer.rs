@@ -312,14 +312,18 @@ impl Workspace {
             self.trim_editor = None;
             return;
         }
+        let band = super::trim_strips::band_height(area);
+        let pictures = Rect::from_min_max(area.min, pos2(area.right(), area.bottom() - band - 6.0));
         self.draw_two_up(
             ui,
-            area,
+            pictures,
             &p,
             &e.track.id(),
             TwoUpMode::TrimEditor,
             [(e.at - 1, "Out (outgoing)"), (e.at, "In (incoming)")],
         );
+        let strips = Rect::from_min_max(pos2(area.left(), area.bottom() - band), area.max);
+        self.trim_strips(ui, strips, &p, e);
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             for (side, label) in [(Side::Out, "Out"), (Side::Both, "Roll"), (Side::In, "In")] {

@@ -196,6 +196,35 @@ impl Gui {
         }
     }
 
+    fn double_click(&mut self, at: Pos2) {
+        self.click(at);
+        self.click(at);
+    }
+
+    fn drag(&mut self, from: Pos2, to: Pos2) {
+        self.harness.event(egui::Event::PointerMoved(from));
+        self.harness.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        });
+        self.harness.step();
+        for i in 1..=4 {
+            self.harness.event(egui::Event::PointerMoved(
+                from + (to - from) * (i as f32 / 4.0),
+            ));
+            self.harness.step();
+        }
+        self.harness.event(egui::Event::PointerButton {
+            pos: to,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        });
+        self.harness.step();
+    }
+
     fn at(&self, track: &str, frame: i64, dy: f32) -> Pos2 {
         let l = self.harness.state().timeline_layout().unwrap();
         let row = l.lower.get(track).unwrap().rect.rect;
@@ -318,6 +347,46 @@ fn two_quick_rolls_add_up() {
         ]
     );
     assert_eq!(gui.harness.state().selected_edit(), Some(62));
+    gui.quit();
+}
+
+#[test]
+fn dragging_the_trim_editors_roll_handle_two_frames_rolls_the_edit_two_frames() {
+    let mut gui = Gui::new();
+    gui.double_click(gui.at("V1", 60, 20.0));
+    gui.settle();
+    let roll = gui.harness.get_by_label("Roll the edit").rect();
+    let frame = gui.harness.get_by_label("Trim the Out").rect().height() * 16.0 / 9.0;
+    gui.drag(roll.center(), roll.center() + vec2(2.0 * frame, 0.0));
+    gui.settle();
+    assert_eq!(
+        gui.clips("V1"),
+        [
+            ("c1".into(), 0, 62),
+            ("c2".into(), 62, 58),
+            ("c3".into(), 120, 60)
+        ]
+    );
+    gui.quit();
+}
+
+#[test]
+fn dragging_the_trim_editors_out_handle_three_frames_left_trims_the_outgoing_clip() {
+    let mut gui = Gui::new();
+    gui.double_click(gui.at("V1", 60, 20.0));
+    gui.settle();
+    let out = gui.harness.get_by_label("Trim the Out").rect();
+    let frame = out.height() * 16.0 / 9.0;
+    gui.drag(out.center(), out.center() - vec2(3.0 * frame, 0.0));
+    gui.settle();
+    assert_eq!(
+        gui.clips("V1"),
+        [
+            ("c1".into(), 0, 57),
+            ("c2".into(), 57, 60),
+            ("c3".into(), 117, 60)
+        ]
+    );
     gui.quit();
 }
 
