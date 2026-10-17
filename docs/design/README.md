@@ -1,19 +1,8 @@
 # vidcut design
 
-These pages say how vidcut works.
-The text comes from the code.
-Start here.
-Then open the page for the part you need.
-The [spec](../cut-page-spec.md) says what vidcut does for the user.
-The [deviations](../deviations.md) say where vidcut differs from that spec.
-This folder says how the program is built.
+How vidcut works, from its code. Start here, then follow the links to the part you need. What vidcut does for the user is in the [spec](../cut-page-spec.md) and the [deviations](../deviations.md); this folder is about how it is built.
 
-vidcut is one binary.
-The binary contains three crates.
-A user, a script, or an agent does work through a request.
-Every request ends in the same editor.
-Decoding, playback, export, and measurement live in one crate.
-That crate calls the FFmpeg libraries.
+vidcut is one binary in three crates. Everything a user, a script or an agent can do is a request, and every request ends in the same editor. Media work (decoding, playback, export, measuring) lives in its own crate on the FFmpeg libraries.
 
 ```mermaid
 flowchart TD
@@ -31,11 +20,11 @@ flowchart TD
   app --> egui
 ```
 
-| Crate | Path | Contents | Limit |
-|---|---|---|---|
-| `vidcut-core` | `crates/vidcut-core` | The project model, time, the request protocol, the editor, undo, edit operations, render plans, OpenTimelineIO, decisions of the automatic tools, and preferences. | The crate does not call FFmpeg. The crate does not use a GPU. The crate starts no thread. |
-| `vidcut-av` | `crates/vidcut-av` | Probing, decoding on the CPU or a GPU, the player engine, exports, proxies, thumbnails, waveforms, measurements, and the CPU pools. | The crate does not implement the GUI, the CLI, or a request. |
-| `vidcut` | `crates/vidcut` | The CLI, the headless session, the GUI, the live core, IPC, the MCP server, and themes. | This crate is the binary. It calls the other two crates. |
+| Crate | Holds | Doesn't touch |
+|---|---|---|
+| `crates/vidcut-core` | the project model, time, the request protocol, the editor and undo, edit operations, render plans, OpenTimelineIO, decisions of the automatic tools, preferences | FFmpeg, GPUs; it starts no threads |
+| `crates/vidcut-av` | probing, decoding on the CPU or a GPU, the player engine, exports, proxies, thumbnails, waveforms, measurements, the CPU pools | the GUI, the CLI, requests |
+| `crates/vidcut` | the CLI, the headless session, the GUI and its live core, IPC, the MCP server, themes | — |
 
 ## The big picture
 
@@ -55,85 +44,47 @@ flowchart LR
   live -->|"export, analyze"| media
 ```
 
-- A request is one `Request` value.
-  The value has a method, such as `edit.split`, and its parameters.
-  An `Envelope` wraps the request.
-  The CLI, the MCP tools, and `vidcut schema` come from the JSON schema of the request type.
-  The GUI sends the same requests.
-  See [requests](requests.md).
-- A command runs headless when no GUI has the project open.
-  The headless path locks the `.vidcut` file, loads it, applies the request, and saves.
-  When a GUI has the project open, the command goes to that GUI on its socket.
-  The command then runs in the live core.
-  See [requests](requests.md) and [live](live.md).
-- The editor is `Editor`.
-  `Editor` applies edits to the `Project`.
-  It records each edit as a `Change` for undo.
-  It also answers queries.
-  See [model](model.md).
-- Play and export use a render plan.
-  The plan is a `RenderPlan`.
-  `render` flattens the project into pieces of sources on lanes, frame by frame.
-  The player engine decodes the plan ahead of the playhead for the viewer.
-  An export decodes the plan into an encoder.
-  See [playback](playback.md) and [export](export.md).
-- The automatic tools measure media in vidcut-av.
-  They decide in vidcut-core.
-  See [analysis](analysis.md).
+- A **request** is one `Request` value: a method like `edit.split` and its params, wrapped in an `Envelope`. The CLI, the MCP tools and `vidcut schema` are generated from the request type's JSON schema, and the GUI sends the same requests. [requests](requests.md)
+- With no GUI open on the project, a command runs **headless**: it locks the `.vidcut` file, loads it, applies the request and saves. With a GUI open, the command goes to that GUI over its socket and runs in its **live core**. [requests](requests.md), [live](live.md)
+- The **editor** (`Editor`) applies edits to the `Project`, records each as a `Change` for undo, and answers queries. [model](model.md)
+- To play or export, the project is flattened into a **render plan** (`RenderPlan`): pieces of sources on lanes, frame by frame. The player engine decodes it ahead of the playhead for the viewer, and an export decodes it into an encoder. [playback](playback.md), [export](export.md)
+- The automatic tools measure media in vidcut-av and decide in vidcut-core. [analysis](analysis.md)
 
 ## Rules the code follows
 
-- One vocabulary.
-  Every capability is a variant of `Request`.
-  A GUI action has the same request on the CLI, on IPC, and on MCP.
-- The file is the truth.
-  A command reads and writes the `.vidcut` file.
-  A running GUI watches the file and reloads it.
-  The project revision, `if_rev`, rejects an edit that crossed another edit.
-- The core is pure.
-  vidcut-core reaches media only through the `Env` trait.
-  The app uses `AvEnv`.
-  Tests use `FakeEnv`.
-  Edits, plans, and decisions have tests with no FFmpeg.
-- One decode path and one mix path.
-  The player and an export read the same `RenderPlan`.
-  Both use `VideoFrames` and `AudioMix` in vidcut-av.
-  The viewer shows the frames that an export writes.
-- The GPU is first.
-  Decoding, scaling, mixing, and encoding stay on the GPU when the GPU gives correct results.
-  See [gpu](gpu.md).
-- One thread has one purpose.
-  Each thread waits on one thing.
-  Media jobs run at the lowest priority.
-  They yield to playback.
-  See [threads](threads.md).
+- **One vocabulary.** Every capability is a variant of `Request`. Nothing the GUI can do is missing from the CLI, IPC or MCP.
+- **The file is the truth.** The `.vidcut` file is what a command reads and writes. A running GUI watches it and reloads; the project's revision (`if_rev`) catches edits that crossed.
+- **The core is pure.** vidcut-core reaches media only through the `Env` trait: `AvEnv` in the app, `FakeEnv` in tests. Edits, plans and decisions are tested without FFmpeg.
+- **One decode and mix stack.** The player and exports read the same `RenderPlan` through the same `VideoFrames` and `AudioMix` in vidcut-av, so the viewer shows the frames an export writes.
+- **The GPU first.** Decoding, scaling, mixing and encoding stay on the GPU wherever it gives correct results. [gpu](gpu.md)
+- **A thread per purpose.** Each thread waits on one thing; media jobs run at the lowest priority and yield to playback. [threads](threads.md)
 
 ## Words
 
 | Word | Meaning | In code |
 |---|---|---|
-| request | One call, with a method and parameters. | `Request`, `Envelope`, `Response` |
-| rev | The project revision. Each change adds one. | `Project::rev`, `if_rev` |
-| change | The difference that an edit made. Undo keeps it. | `Change`, `History` |
-| plan | The timeline, flattened for play or export. | `RenderPlan`, `VideoPiece`, `AudioPiece` |
-| lane | The pieces of one track in a plan. The mix includes every lane. | `LaneTrack` |
-| tape | The plan for the source viewer. Media items play one after another. | `render::tape` |
-| snapshot | The values that the GUI draws. The live core publishes it. | `Snapshot` |
-| origin | A cache stamp. It holds the path, the size, and the modification time of a file. | `Origin` |
-| kept | Data from another editor. vidcut stores it and does not model it. | `Kept` |
+| request | one capability call: method and params | `Request`, `Envelope`, `Response` |
+| rev | the project's revision, one more for each change | `Project::rev`, `if_rev` |
+| change | the difference an edit made, kept for undo | `Change`, `History` |
+| plan | the timeline flattened for playing or export | `RenderPlan`, `VideoPiece`, `AudioPiece` |
+| lane | one track's pieces in a plan, mixed with the others | `LaneTrack` |
+| tape | the source viewer's plan: media one after another | `render::tape` |
+| snapshot | what the GUI draws, published by the live core | `Snapshot` |
+| origin | a cache stamp of a file's path, size and time | `Origin` |
+| kept | data of another editor that vidcut carries without modeling it | `Kept` |
 
 ## Pages
 
 | Page | What it covers |
 |---|---|
-| [requests](requests.md) | The front doors, routing, the headless path, the editor, and undo. |
-| [model](model.md) | The project, time, the `.vidcut` file, OpenTimelineIO, and preferences. |
-| [live](live.md) | The running GUI: the live core, snapshots, jobs, and waits. |
-| [playback](playback.md) | The path from the playhead to pixels and sound. |
-| [export](export.md) | The path from `export.start` to a finished file. |
-| [gpu](gpu.md) | Which GPU does each step, and where a frame lives. |
-| [analysis](analysis.md) | Measurements, the automatic tools, and caches. |
-| [threads](threads.md) | Every thread that vidcut starts, the pools, and priorities. |
+| [requests](requests.md) | the front doors, routing, the headless path, the editor, undo |
+| [model](model.md) | the project, time, the `.vidcut` file, OpenTimelineIO, preferences |
+| [live](live.md) | the running GUI: the live core, snapshots, jobs, waits |
+| [playback](playback.md) | from the playhead to pixels and sound |
+| [export](export.md) | from `export.start` to a finished file |
+| [gpu](gpu.md) | which GPU does what, and where frames live |
+| [analysis](analysis.md) | measurements, the automatic tools, caches |
+| [threads](threads.md) | every thread vidcut starts, the pools, priorities |
 
 ## Code
 

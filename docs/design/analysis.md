@@ -1,13 +1,6 @@
 # Analysis
 
-The automatic tools are `edit.ripple_delete_silence` and `edit.detect_scene_cuts`.
-The measurements are `analyze.silence`, `analyze.scenes`, `analyze.black`, `analyze.loudness`, and `timeline.boring`.
-The work splits in two.
-vidcut-av measures media.
-vidcut-core decides.
-A measurement decodes a whole stream.
-Results are cached by the `Origin` of the file.
-A GUI measures on a job thread before it edits.
+The automatic tools (`edit.ripple_delete_silence`, `edit.detect_scene_cuts`) and the measurements (`analyze.silence`, `analyze.scenes`, `analyze.black`, `analyze.loudness`, `timeline.boring`) split in two: vidcut-av measures media, vidcut-core decides. Measuring decodes whole streams, so results are cached by the file's `Origin`, and a GUI measures on a job thread before it edits.
 
 ```mermaid
 flowchart TD
@@ -23,73 +16,43 @@ flowchart TD
 
 ## Measure, then decide
 
-vidcut-core reaches media only through the `Env` trait.
-`AvEnv` implements `Env` on vidcut-av.
-Tests use `FakeEnv`.
-A decision is a plain function of a measurement, a span, and the settings.
+vidcut-core reaches media only through the `Env` trait. `AvEnv` implements it on vidcut-av; tests use `FakeEnv`. Decisions are plain functions of a measurement, a span and the settings.
 
 | Request | Measurement (`Env`) | Decision (`analysis`) |
 |---|---|---|
-| `edit.ripple_delete_silence`, `analyze.silence` | `Env::audio_levels` returns the peaks of one audio stream. | `analysis::silent_parts`. The edit then calls `ops::remove_parts`. |
-| `edit.detect_scene_cuts`, `analyze.scenes` | `Env::picture_stats` returns one score for each frame, on luma scaled to a small size. The score is the minimum of `mafd` and the absolute change from `prev_mafd`. `mafd` is the sum of absolute sample differences, times 100, divided by the sample count and by 256. The score is clamped to 0 through 100. The first frame scores 0. | `analysis::scene_cuts`. The edit then calls `ops::split_clip`. |
-| `analyze.black` | `Env::picture_stats` also returns the black share of each frame. The share is the fraction of those luma samples at or below 25 in full range, or at or below 38 in limited range. | `analysis::black_parts`. There is no edit. |
-| `analyze.loudness` | `Env::loudness` measures the flattened timeline. | There is no decision function. |
-| `timeline.boring` | There is no measurement. The input is the clip lengths. | `analysis::boring`. |
+| `edit.ripple_delete_silence`, `analyze.silence` | `Env::audio_levels`: peaks of one audio stream | `analysis::silent_parts`; the edit then calls `ops::remove_parts` |
+| `edit.detect_scene_cuts`, `analyze.scenes` | `Env::picture_stats`: the smaller of each frame's difference from the last and the change in that difference; the first frame scores 0 | `analysis::scene_cuts`; the edit then calls `ops::split_clip` |
+| `analyze.black` | `Env::picture_stats`: each frame's black share | `analysis::black_parts` |
+| `analyze.loudness` | `Env::loudness` of the flattened timeline | none |
+| `timeline.boring` | none: clip lengths | `analysis::boring` |
 
 ## In a GUI
 
-`Live::measuring` lists the media of the clips that the two edits name.
-For silence, it also lists the audio streams.
-A `vidcut-measure` thread runs at job priority.
-The thread yields to playback.
-It measures into the memo cache and the disk cache of `AvEnv`.
-It then sends `Msg::Measured`.
-The session thread runs the edit on the project as it is then.
-Those measurements return at once.
-An `analyze` method runs whole on a job thread, through `Live::project_task`.
-In a headless run, the edit measures inside its transaction.
+`Live::measuring` lists the media (and audio streams) of the clips the two edits name. A `vidcut-measure` thread at job priority, which yields to playback, measures them into `AvEnv`'s memo and disk cache and sends `Msg::Measured`. The session thread then runs the edit on the project as it is then; its measurements return at once. The `analyze` methods run whole on a job thread through `Live::project_task`. Headless, the edit measures inside its transaction.
 
-The session thread answers every request.
-It also runs the players.
-A whole-file decode on that thread would hold up both ([live](live.md)).
+**Why** measure first: the session thread answers every request and runs the players; decoding a whole file there would hold up both ([live](live.md)).
 
 ## Caches
 
-An `Origin` is the path, the size, and the modification time of a file (`fingerprint::origin`).
-Its name names the cache file.
-Its text is stamped into the file (`Origin::stamp`).
-A read checks the stamp (`Origin::check`).
-A changed file misses.
-The cache directory is `dirs::cache`.
+An `Origin` is a file's path, size and modification time (`fingerprint::origin`). Its name names the cache file; its text is stamped into it (`Origin::stamp`) and checked on read (`Origin::check`), so a changed file misses. The cache dir is `dirs::cache`.
 
-| Cache | Directory | Key |
+| What | Where | Key |
 |---|---|---|
-| Pool filmstrips and timeline tiles | `thumbs` (`thumbcache`) | The origin, the size, and the frames. |
-| Waveforms | `waveforms` | The origin and the channels. |
-| Audio levels and picture stats | `analysis` (`AvEnv`) | The origin, and the stream or the picture count. |
-| Light, for HDR metadata | `analysis` (`light::cache_in`) | The origin. |
-| Proxies | `proxies` beside the project. The cache directory when there is no project. | The origin, the size, and the codec. |
-| GPU encoders that work | `encoders.json` (`export::detected`) | The FFmpeg build, the system, and the GPUs. |
-| Proxy codecs that the GPU decoder plays | `plays.json` (`export::plays`) | The same key, for each GPU. |
-| Clips for decoder tests | `decoder-tests` | There is no key. |
-| Compiled libplacebo shaders | `shaders` (`cuda::keep_shaders_in`) | The libplacebo version. |
+| pool filmstrips, timeline tiles | `thumbs` (`thumbcache`) | origin, size, frames |
+| waveforms | `waveforms` | origin, channels |
+| audio levels, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
+| light, for HDR metadata | `analysis` (`light::cache_in`) | origin |
+| proxies | `proxies` beside the project; the cache dir without one | origin, size, codec |
+| GPU encoders that work | `encoders.json` (`export::detected`) | FFmpeg, system and GPUs |
+| proxy codecs the GPU decoder plays | `plays.json` (`export::plays`) | the same, per GPU |
+| clips for decoder tests | `decoder-tests` | none |
+| compiled libplacebo shaders | `shaders` (`cuda::keep_shaders_in`) | libplacebo's |
 
-On disk, only the `thumbs` directory has a size limit.
-`thumbcache::evict` drops the files used longest ago.
-The limit is set in the preferences.
-`Tiles` also keeps pictures in memory.
-`Tiles::evict` drops the pictures used longest ago when the cache is above 256 MiB.
-Audio levels, picture stats, and light are also memoized in the process.
+On disk only `thumbs` has a size limit (`thumbcache::evict`, least recently used first), set in the preferences. `Tiles::evict` also drops kept pictures past the tile cache's own budget. Levels, picture stats and light are memoized in the process too.
 
 ## Storyboards
 
-`storyboard::render` flattens the timeline, or a range.
-It takes one picture for each shot, from the middle of each source piece.
-Or it takes one picture every `every` frames.
-It decodes the pictures with `FrameReader`.
-It writes one PNG.
-Each picture is labeled `{timecode} {clip id}`.
-When the clip is not on V1, the label also has the track id.
+`storyboard::render` flattens the timeline or a range and takes one picture per shot, from the middle of each source piece, or one every `every` frames. It decodes them with `FrameReader` and writes one PNG, each picture labeled with its timecode and clip, plus the track when the clip is not on V1.
 
 ## Code
 

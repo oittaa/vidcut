@@ -30,9 +30,6 @@ vidcut is a video cutting tool modeled on DaVinci Resolve's Cut page, in Rust. [
    - No progress notes, past attempts, "before, X did Y" or why a mistake happened. That goes in commit messages and PR descriptions.
    - A todo file says what is open, not what got done.
    - A PR that touches a doc also cuts the stale text in the parts it touches.
-12. **Write Markdown in STE.** Write every Markdown file in ASD-STE100 Simplified Technical English.
-    - Use short sentences. Use the active voice. Do not use a contraction.
-    - Do not copy the STE specification into the repository. Do not copy the STE dictionary into the repository.
 
 ## Quality gates
 
