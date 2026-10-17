@@ -1647,8 +1647,11 @@ fn mutate(
         )?,
         Request::EditDecompose { clips } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let (mut made, mut warnings) = (Vec::new(), Vec::new());
+            let (mut made, mut warnings, mut played) = (Vec::new(), Vec::new(), Vec::new());
             for id in &ids {
+                if let Some(k) = p.clip(id).and_then(|c| c.compound.as_ref()) {
+                    played.extend(otio::played_by(k));
+                }
                 made.extend(decompose(
                     p,
                     id,
@@ -1657,7 +1660,11 @@ fn mutate(
                     &mut warnings,
                 )?);
             }
-            fill_contents(p, &made, env, Lookup::default(), &mut warnings);
+            let at = Lookup {
+                played: &played,
+                ..Lookup::default()
+            };
+            fill_contents(p, &made, env, at, &mut warnings);
             json!({ "clips": made, "warnings": warnings })
         }
         Request::Apply { commands, .. } => {
@@ -2362,6 +2369,34 @@ fn place_imported(
 struct Lookup<'a> {
     base: Option<&'a Path>,
     dirs: &'a [PathBuf],
+    played: &'a [String],
+}
+
+fn nested_media(
+    p: &mut Project,
+    clips: &[otio::ImportedClip],
+    env: &dyn Env,
+    at: Lookup,
+) -> Result<MediaIds> {
+    let among: Vec<&Media> = p
+        .media
+        .iter()
+        .filter(|m| at.played.contains(&m.id))
+        .collect();
+    let mut ids: MediaIds = clips
+        .iter()
+        .filter(|c| !c.is_block())
+        .filter_map(|c| {
+            let m = otio::same_media(&c.media, &among)?;
+            Some((media_key(&c.media), m.id.clone()))
+        })
+        .collect();
+    let others = clips
+        .iter()
+        .filter(|c| !ids.contains_key(&media_key(&c.media)));
+    let (found, _) = find_media(p, others, env, at.dirs, false)?;
+    ids.extend(found);
+    Ok(ids)
 }
 
 fn nested(k: &Compound, video: bool, base: Option<&Path>) -> Result<otio::Imported> {
@@ -2398,7 +2433,7 @@ fn compound_contents(
     depth: usize,
 ) -> Result<Vec<crate::model::Track>> {
     let mut t = nested(k, video, at.base)?;
-    let (ids, _) = find_media(p, &t.clips, env, at.dirs, false)?;
+    let ids = nested_media(p, &t.clips, env, at)?;
     at_project_rate(p, &mut t, &ids);
     let mut inner = Project::new(p.settings.clone());
     let mut needed: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
@@ -2508,7 +2543,16 @@ fn decompose(
     let (lo, hi) = block.shown();
     t.clips.retain(|c| conv(c.start) < hi && conv(c.end()) > lo);
     t.markers.retain(|m| (lo..hi).contains(&conv(m.at)));
-    let (ids, _) = find_media(p, &t.clips, env, at.dirs, false)?;
+    let played = otio::played_by(&k);
+    let ids = nested_media(
+        p,
+        &t.clips,
+        env,
+        Lookup {
+            played: &played,
+            ..at
+        },
+    )?;
     at_project_rate(p, &mut t, &ids);
     if block.speed() != 1.0 {
         t.clips.retain_mut(|c| {
@@ -2681,6 +2725,11 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     if let Some(b) = &bundle {
         dirs.push(b.folder.clone());
     }
+    let at = Lookup {
+        base,
+        dirs: &dirs,
+        ..Lookup::default()
+    };
     let (ids, media) = match (&meta, &wanted) {
         (Some(meta), Some(wanted)) => {
             let bin = stem.as_deref().unwrap_or(&name).trim().replace('/', "-");
@@ -2713,7 +2762,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     };
     if mode == ImportMode::Media {
         let mut media = media;
-        compound_media(p, &t, env, Lookup { base, dirs: &dirs }, &mut media)?;
+        compound_media(p, &t, env, at, &mut media)?;
         return Ok(json!({
             "name": name,
             "fps": p.settings.fps,
@@ -2773,13 +2822,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     while flatten && !pending.is_empty() {
         let mut next = Vec::new();
         for id in pending {
-            let made = decompose(
-                p,
-                &id,
-                env,
-                (Lookup { base, dirs: &dirs }, true),
-                &mut warnings,
-            )?;
+            let made = decompose(p, &id, env, (at, true), &mut warnings)?;
             clips.retain(|c| c != &id);
             next.extend(compounds_among(p, &made));
             clips.extend(made);
@@ -2789,7 +2832,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     if mode == ImportMode::Compound || flatten && compounds_among(p, &clips).is_empty() {
         warnings.retain(|w| !w.starts_with(otio::COMPOUNDS_KEPT));
     }
-    fill_contents(p, &clips, env, Lookup { base, dirs: &dirs }, &mut warnings);
+    fill_contents(p, &clips, env, at, &mut warnings);
     if empty {
         let (i, o) = (t.marks.mark_in, t.marks.mark_out);
         if !matches!((i, o), (Some(i), Some(o)) if i >= o) {
@@ -2970,7 +3013,10 @@ pub fn open_otio(
         &mut p,
         &clips,
         env,
-        Lookup { base, dirs: &[] },
+        Lookup {
+            base,
+            ..Lookup::default()
+        },
         &mut warnings,
     );
     p.marks = t.marks.clone();

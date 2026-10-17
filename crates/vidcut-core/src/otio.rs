@@ -203,6 +203,14 @@ fn played<'a>(c: &'a Clip, used: &mut Vec<String>, seen: &mut HashSet<&'a str>) 
     }
 }
 
+pub fn played_by(k: &Compound) -> Vec<String> {
+    let (mut used, mut seen) = (Vec::new(), HashSet::new());
+    for c in k.tracks.iter().flat_map(|t| &t.clips) {
+        played(c, &mut used, &mut seen);
+    }
+    used
+}
+
 pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     let (a, b) = span.unwrap_or((0, p.end()));
     let mut used: Vec<String> = Vec::new();
@@ -218,23 +226,29 @@ pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     used
 }
 
-fn bundled_as<'a>(r: &MediaRef, bundled: &[(&Media, &'a String)]) -> Option<&'a String> {
+pub fn same_media<'a>(r: &MediaRef, among: &[&'a Media]) -> Option<&'a Media> {
     let kind = || {
-        bundled
+        among
             .iter()
-            .filter(|(m, _)| m.sequence.is_some() == r.sequence.is_some())
+            .copied()
+            .filter(|m| m.sequence.is_some() == r.sequence.is_some())
     };
-    if let Some((_, to)) = kind().find(|(m, _)| r.paths.contains(&m.path)) {
-        return Some(to);
+    if let Some(m) = kind().find(|m| r.paths.contains(&m.path)) {
+        return Some(m);
     }
-    let mut named = kind().filter(|(m, _)| m.path.file_name().is_some_and(|n| *n == *r.file_name));
+    let mut named = kind().filter(|m| m.path.file_name().is_some_and(|n| *n == *r.file_name));
     match (named.next(), named.next()) {
-        (Some((_, to)), None) => Some(to),
+        (Some(m), None) => Some(m),
         _ => None,
     }
 }
 
-fn bundle_nested(v: &mut Value, bundled: &[(&Media, &String)], fps: Rational) {
+fn bundle_nested(
+    v: &mut Value,
+    bundled: &[&Media],
+    names: &HashMap<String, String>,
+    fps: Rational,
+) {
     let s = schema(v);
     let found = if s.starts_with("ExternalReference") {
         v["target_url"]
@@ -249,14 +263,18 @@ fn bundle_nested(v: &mut Value, bundled: &[(&Media, &String)], fps: Rational) {
         None
     };
     if let Some((key, r)) = found {
-        if let Some(to) = bundled_as(&r, bundled) {
+        if let Some(to) = same_media(&r, bundled).and_then(|m| names.get(&m.id)) {
             v[key] = json!(to);
         }
         return;
     }
     match v {
-        Value::Object(o) => o.values_mut().for_each(|x| bundle_nested(x, bundled, fps)),
-        Value::Array(a) => a.iter_mut().for_each(|x| bundle_nested(x, bundled, fps)),
+        Value::Object(o) => o
+            .values_mut()
+            .for_each(|x| bundle_nested(x, bundled, names, fps)),
+        Value::Array(a) => a
+            .iter_mut()
+            .for_each(|x| bundle_nested(x, bundled, names, fps)),
         _ => {}
     }
 }
@@ -389,18 +407,20 @@ pub fn export(
             [("children", Value::Array(children)), ("metadata", meta)],
         )
     };
-    let bundled: Vec<(&Media, &String)> = match locations {
+    let bundled: Vec<&Media> = match locations {
         Locations::Bundle(names) => p
             .media
             .iter()
-            .filter_map(|m| names.get(&m.id).map(|to| (m, to)))
+            .filter(|m| names.contains_key(&m.id))
             .collect(),
         Locations::Absolute => Vec::new(),
     };
     let block =
         |c: &Clip, k: &Compound, label: &str, source: i64, frames: i64, effects: Vec<Value>| {
             let mut it = compound_item(c, k, label, source, frames, effects, rate);
-            bundle_nested(&mut it["children"], &bundled, fps);
+            if let Locations::Bundle(names) = locations {
+                bundle_nested(&mut it["children"], &bundled, names, fps);
+            }
             it
         };
     let media: HashMap<&str, &Media> = p.media.iter().map(|m| (m.id.as_str(), m)).collect();
