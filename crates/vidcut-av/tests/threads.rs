@@ -1,18 +1,18 @@
 //! The threads FFmpeg's readers and graphs start (docs/decisions/threads.md):
 //! a single-frame reader none, a job's stream decoder half the cores', a
-//! graph none once the shared pool runs; and the readers open, a file left
-//! lately among them. Linux only, which lists a process's threads in
-//! `/proc`.
+//! graph none once the shared pool runs, nor a stream of frames that stand
+//! alone; and the readers open, a file left lately among them. Linux only,
+//! which lists a process's threads in `/proc`.
 #![cfg(target_os = "linux")]
 
 use std::path::Path;
 use std::sync::Mutex;
 
-use vidcut_av::decode::{Reading, VideoReader, open_readers, read_barcode};
+use vidcut_av::decode::{Input, Reading, VideoReader, open_readers, read_barcode};
 use vidcut_av::export::renderer::FrameReader;
 use vidcut_av::export::video::VideoFrames;
 use vidcut_av::ffmpeg::{filter, format::Pixel, frame};
-use vidcut_av::fixture::{self, Container, FixtureSpec, VideoCodec};
+use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
 use vidcut_core::render::VideoPiece;
 use vidcut_core::time::Rational;
 
@@ -164,6 +164,47 @@ fn a_graph_runs_its_slices_on_the_pool() {
         "{} threads, {before} before",
         threads()
     );
+}
+
+/// The threads `source` started, read as a stream to its end once the pool
+/// runs, and the frames it gave.
+fn threads_reading(source: &Input) -> (usize, usize) {
+    vidcut_av::init();
+    vidcut_av::pool::run(2, &|_| {});
+    let before = threads();
+    let mut reader = VideoReader::open_input(source).unwrap();
+    let mut frames = 0;
+    while reader.next_frame().unwrap().is_some() {
+        frames += 1;
+    }
+    (threads().saturating_sub(before), frames)
+}
+
+#[test]
+fn a_stream_of_images_starts_no_thread() {
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let files = fixture::ensure_images(&ImageSpec::sequence(0, 30, 3, 320, 180)).unwrap();
+    let source = Input::Sequence {
+        pattern: files[0].with_file_name("img_%03d.png"),
+        first: 0,
+        rate: (30, 1),
+    };
+    assert_eq!(threads_reading(&source), (0, 30));
+}
+
+#[test]
+fn a_stream_of_an_intra_only_codec_starts_no_thread() {
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let spec = FixtureSpec::new(
+        VideoCodec::ProRes422Hq,
+        Container::Mov,
+        320,
+        180,
+        (30, 1),
+        30,
+    );
+    let path = fixture::ensure(&spec).unwrap();
+    assert_eq!(threads_reading(&Input::File(path)), (0, 30));
 }
 
 #[test]
