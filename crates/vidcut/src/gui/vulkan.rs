@@ -1,35 +1,16 @@
-//! Pictures FFmpeg's Vulkan device decoded (ProRes on NVIDIA's GPU), shown
-//! from GPU memory (docs/decisions/preview.md §4): each plane's memory,
-//! exported by FFmpeg's device ([`vidcut_av::hw::vulkan::Exported`]),
-//! imported by wgpu's device into an image made as FFmpeg made its own.
-//! An opaque handle needs that: the same image, the same allocation, on
-//! the same GPU and driver. A screen keeps the imports of the frames it
-//! draws ([`Imports`]).
-
 use std::collections::HashMap;
 
 use ash::vk;
 use vidcut_av::hw::vulkan::{HANDLE, Identity, Plane};
 
-/// A frame's planes imported into wgpu's device: their images, which each
-/// draw acquires, and the views the shader draws from.
 pub(super) struct Import {
     pub(super) images: Vec<vk::Image>,
-    /// Views of the Y, U and V planes.
     pub(super) views: [wgpu::TextureView; 3],
-    /// The luma texture's size.
     pub(super) size: (u32, u32),
-    /// FFmpeg's queue families share the images (`CONCURRENT`).
     pub(super) concurrent: bool,
-    /// The textures, which own the images.
     pub(super) _textures: Vec<wgpu::Texture>,
 }
 
-/// The imports a screen keeps: one for each frame of the frames context of
-/// the picture it drew last. That picture holds the context. While it
-/// lives, FFmpeg's pool hands its frames out again with the same images,
-/// so a frame drawn again is found by its identity. Imports of other
-/// frames contexts are let go: kept, they would hold memory FFmpeg freed.
 #[derive(Default)]
 pub(super) struct Imports {
     frames: Option<usize>,
@@ -37,9 +18,6 @@ pub(super) struct Imports {
 }
 
 impl Imports {
-    /// The import of the frame `identity` names, made by `import` the first
-    /// time, and whether it was. Those of another frames context are let
-    /// go first.
     pub(super) fn get_or_import(
         &mut self,
         identity: Identity,
@@ -56,17 +34,12 @@ impl Imports {
         Ok((&self.kept[&identity], new))
     }
 
-    /// Lets them all go: the next picture isn't of their frames context.
-    /// The driver takes a third of a millisecond to free each plane's
-    /// image and memory, so a thread of its own frees them, not the
-    /// screen's (wgpu frees those the GPU still reads once it is done).
     pub(super) fn clear(&mut self) {
         self.frames = None;
         let old = std::mem::take(&mut self.kept);
         if old.is_empty() {
             return;
         }
-        // Freed here when no thread starts.
         let _ = crate::threads::closing(
             "vidcut-frees-imports",
             crate::threads::Work::Interactive,
@@ -75,10 +48,6 @@ impl Imports {
     }
 }
 
-/// The UUIDs of `hal`'s GPU and of its driver.
-///
-/// # Safety
-/// `hal` is wgpu's live device.
 pub(super) unsafe fn uuids(hal: &wgpu::hal::vulkan::Device) -> ([u8; 16], [u8; 16]) {
     let mut id = vk::PhysicalDeviceIDProperties::default();
     let mut props = vk::PhysicalDeviceProperties2::default().push_next(&mut id);
@@ -91,8 +60,6 @@ pub(super) unsafe fn uuids(hal: &wgpu::hal::vulkan::Device) -> ([u8; 16], [u8; 1
     (id.device_uuid, id.driver_uuid)
 }
 
-/// An image of wgpu's device bound to a plane's imported memory: both freed
-/// when dropped, unless wgpu takes them over ([`Imported::into_hal`]).
 pub(super) struct Imported<'a> {
     device: &'a ash::Device,
     image: vk::Image,
@@ -102,11 +69,6 @@ pub(super) struct Imported<'a> {
 }
 
 impl Imported<'_> {
-    /// wgpu's texture of it, with its size and format: wgpu frees the image
-    /// and the memory once the texture is dropped and its work done.
-    ///
-    /// # Safety
-    /// `hal` is the device it was made on.
     pub(super) unsafe fn into_hal(
         self,
         hal: &wgpu::hal::vulkan::Device,
@@ -151,11 +113,6 @@ impl Drop for Imported<'_> {
     }
 }
 
-/// `plane` imported by `hal`'s device: an image made as FFmpeg made the
-/// plane's, bound to the plane's memory allocated as FFmpeg allocated it.
-///
-/// # Safety
-/// `hal` is wgpu's live device, on the GPU and driver the plane is on.
 pub(super) unsafe fn import(
     hal: &wgpu::hal::vulkan::Device,
     plane: Plane,
@@ -236,9 +193,7 @@ pub(super) unsafe fn import(
     } else {
         alloc
     };
-    // SAFETY: the memory FFmpeg allocated as described, for an image made
-    // as its own. An NT handle stays ours (closed when the plane drops); a
-    // file descriptor is Vulkan's once the import succeeds.
+    // SAFETY: `alloc` is FFmpeg's plane memory as allocated; on success Vulkan owns `fd`.
     let memory = match unsafe { raw.allocate_memory(&alloc, None) } {
         Ok(memory) => memory,
         Err(e) => {

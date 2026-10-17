@@ -1,6 +1,3 @@
-//! Drawing the timelines (spec §5): rulers, clips with filmstrips and
-//! waveforms, marks, markers, the playhead and gesture previews.
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -21,7 +18,6 @@ use crate::gui::theme;
 use crate::gui::tiles::{self, TileKey, Tiles};
 use crate::gui::workspace::Thumbs;
 
-/// What clips show (Timeline Options).
 #[derive(Debug, Clone, Copy)]
 pub struct Look {
     pub names: bool,
@@ -29,27 +25,19 @@ pub struct Look {
     pub status: bool,
     pub filmstrips: bool,
     pub waveforms: bool,
-    /// The edit functions' target track: its row is lighter.
     pub target: bool,
 }
 
-/// Media pictures and sounds to draw clips with.
 pub struct Assets<'a> {
     pub thumbs: &'a HashMap<String, Thumbs>,
     pub waveforms: &'a HashMap<String, Arc<Waveform>>,
-    /// Each tile's own frame (`None` in windows without them).
     pub tiles: Option<&'a Tiles>,
-    /// Media whose files are missing: their clips are red.
     pub missing: &'a HashSet<String>,
-    /// The pool's items by id.
     pub pool: &'a HashMap<&'a str, &'a Media>,
 }
 
-/// Each track's transitions that have a place, by track id: their cuts and
-/// indexes, in order of band and cut.
 pub type Placed = HashMap<String, Vec<(i64, usize)>>;
 
-/// [`Placed`] of `p`.
 pub fn placed(p: &Project) -> Placed {
     p.tracks
         .iter()
@@ -89,7 +77,6 @@ pub fn marker_color(name: &str) -> Color32 {
     }
 }
 
-/// A "nice" ruler step in seconds with labels at least `min_px` apart.
 fn step(scale: &Scale, fps: f64, min_px: f64) -> f64 {
     let px_per_s = scale.ppf * fps;
     for s in [
@@ -118,8 +105,6 @@ fn step(scale: &Scale, fps: f64, min_px: f64) -> f64 {
     7200.0
 }
 
-/// The ruler with timecodes, the In/Out range, markers and the Smart
-/// Indicator.
 #[allow(clippy::too_many_arguments)]
 pub fn ruler(
     painter: &Painter,
@@ -154,7 +139,6 @@ pub fn ruler(
         }
         t += s;
     }
-    // In/Out.
     if p.marks.mark_in.is_some() || p.marks.mark_out.is_some() {
         let x0 = scale.xf(p.marks.mark_in.unwrap_or(0));
         let x1 = scale.xf(p.marks.mark_out.unwrap_or(p.end()));
@@ -201,8 +185,6 @@ pub fn ruler(
         }
     }
     if let Some(e) = smart {
-        // The Smart Indicator: red where a clip has no media past
-        // the edit. It holds still (deviation X15).
         let x = scale.xf(e);
         let color = if ops::edit_has_handles(p, e) {
             theme::colors().ok
@@ -221,7 +203,6 @@ pub fn ruler(
     }
 }
 
-/// A track's clips, and its transitions where `placed` puts them.
 #[allow(clippy::too_many_arguments)]
 pub fn track(
     painter: &Painter,
@@ -247,7 +228,6 @@ pub fn track(
     let span = |c: &Clip| (c.start, c.end());
     let picked = |c: &Clip| selected.contains(c.id.as_str());
     for (i, c) in shown.iter().enumerate() {
-        // A selected clip is only drawn over by a selected one.
         let next = shown.get(i + 1);
         if covered(scale, span(c), next.map(span)) && (!picked(c) || next.is_some_and(picked)) {
             continue;
@@ -271,7 +251,6 @@ pub fn track(
         }
     }
     if t.locked {
-        // Stippled: clips can't be changed.
         let mut x = rect.left() - rect.height();
         while x < rect.right() {
             painter.line_segment(
@@ -302,16 +281,12 @@ fn clip(
         scale.xf(c.end()).max(scale.xf(c.start) + 1.0),
     );
     let video = Rect::from_x_y_ranges(x0..=x1, rect.top()..=tr.audio_top - 1.0);
-    // The audio band may reach into a neighbor (J/L cuts), so it is clipped
-    // to its own span rather than the clip's.
     let track_painter = painter;
     let painter = painter.with_clip_rect(rect.intersect(Rect::from_x_y_ranges(
         (x0 - 1.0)..=(x1 + 1.0),
         rect.y_range(),
     )));
     let enabled = c.enabled && t.video_enabled;
-    // Offline clips are red, as in the Media Pool, with nothing drawn of
-    // their file.
     let offline = assets.missing.contains(&c.media);
     let media = assets.pool.get(c.media.as_str()).copied();
     let tint = c.shown_color(media).and_then(theme::clip_color);
@@ -328,7 +303,6 @@ fn clip(
     } else {
         theme::colors().clip
     };
-    // Audio-only clips (and audio tracks) have no picture band.
     let has_picture = c.video && video.height() > 2.0;
     let corners = theme::clip_corners();
     if has_picture {
@@ -358,17 +332,14 @@ fn clip(
             assets,
             fps,
         );
-        // Its Clip Color over the pictures.
         if let Some(t) = tint {
             painter.rect_filled(parted(video), corners, t.gamma_multiply(0.35));
         }
     }
-    // A compound clip's sound: a block on the audio band.
     if c.compound.is_some() && !c.video {
         let band = Rect::from_x_y_ranges(x0..=x1, tr.audio_top..=rect.bottom());
         painter.rect_filled(parted(band), corners, fill);
     }
-    // Audio, offset by J/L cuts.
     if let Some((ra, rb)) = c.audio_range() {
         let (a0, a1) = (scale.xf(ra), scale.xf(rb).max(scale.xf(ra) + 1.0));
         let audio = Rect::from_x_y_ranges(a0..=a1, tr.audio_top..=rect.bottom());
@@ -417,11 +388,9 @@ fn clip(
             .or_else(|| c.generator.as_ref().map(vidcut_core::otio::generator_kind))
             .or_else(|| c.compound.as_ref().map(vidcut_core::otio::compound_kind))
             .unwrap_or_default();
-        // Pinned to the visible part of the clip.
         let left = x0.max(painter.clip_rect().left());
         let room = x1 - left;
         let label = elide(&name, ((room - 8.0) / 6.5).max(3.0) as usize);
-        // On audio rows the name sits on the audio band.
         let pos = pos2(left + 4.0, video.top().min(tr.audio_top) + 2.0);
         let galley = painter.layout_no_wrap(label, FontId::proportional(11.0), Color32::WHITE);
         painter.rect_filled(
@@ -432,7 +401,6 @@ fn clip(
         painter.galley(pos, galley, Color32::WHITE);
     }
     if look.durations && width > 70.0 && video.height() > 30.0 {
-        // Seconds:frames, bottom left.
         let f = fps.as_f64().round().max(1.0) as i64;
         let text = format!("{}:{:02}", c.duration / f, c.duration % f);
         painter.text(
@@ -485,9 +453,6 @@ fn clip(
     }
 }
 
-/// Clip band `r` with half a pixel off each side, which parts it from its
-/// neighbors, if that leaves a pixel: a thinner one is drawn whole, or
-/// nothing would show.
 fn parted(r: Rect) -> Rect {
     if r.width() >= 2.0 {
         r.shrink2(vec2(0.5, 0.0))
@@ -496,9 +461,6 @@ fn parted(r: Rect) -> Rect {
     }
 }
 
-/// A transition carried from another editor on the cut at `at` (deviation
-/// X9), played as a cut: a box over the frames it covers, across the
-/// picture or sound band, with a line rising through it.
 fn transition(painter: &Painter, tr: &TrackRect, scale: &Scale, at: i64, x: &Transition) {
     let rect = tr.rect;
     let band = if x.sound {
@@ -528,12 +490,8 @@ fn transition(painter: &Painter, tr: &TrackRect, scale: &Scale, at: i64, x: &Tra
     );
 }
 
-/// A badge at the bottom right of a clip's picture or sound band naming
-/// the effects it carries from another editor, kept but not shown
-/// (deviation X9): `fx Transform, Cropping`, or `fx` where that won't fit.
 fn effects_badge(painter: &Painter, band: Rect, effects: &Effects) {
     let right = band.right().min(painter.clip_rect().right());
-    // Clear of the duration at the bottom left.
     let room = right - band.left().max(painter.clip_rect().left()) - 40.0;
     if room < 16.0 || band.height() < 13.0 {
         return;
@@ -550,9 +508,6 @@ fn effects_badge(painter: &Painter, band: Rect, effects: &Effects) {
     });
 }
 
-/// A badge at the top right of a clip's picture or sound band with the
-/// speed change it carries from another editor (deviation X9), which it
-/// plays at (decision D48): `200%`.
 fn speed_badge(painter: &Painter, band: Rect, speed: &Speed) {
     let right = band.right().min(painter.clip_rect().right());
     if right - band.left().max(painter.clip_rect().left()) < 40.0 || band.height() < 13.0 {
@@ -563,7 +518,6 @@ fn speed_badge(painter: &Painter, band: Rect, speed: &Speed) {
     });
 }
 
-/// `text` small on a dark tag, where `at` puts it for its size.
 fn tag(painter: &Painter, text: String, at: impl FnOnce(egui::Vec2) -> Pos2) {
     let galley = painter.layout_no_wrap(text, FontId::proportional(9.0), theme::colors().accent);
     let pos = at(galley.size());
@@ -575,7 +529,6 @@ fn tag(painter: &Painter, text: String, at: impl FnOnce(egui::Vec2) -> Pos2) {
     painter.galley(pos, galley, theme::colors().accent);
 }
 
-/// Pool thumbnails tiled along a clip, each from the source time at its place.
 fn filmstrip(
     painter: &Painter,
     rect: Rect,
@@ -589,8 +542,6 @@ fn filmstrip(
         return;
     };
     let pool = assets.thumbs.get(&c.media);
-    // Tiles keep the picture's shape: the pool's pictures have it, else
-    // the media's display size.
     let aspect = pool
         .and_then(|t| t.textures.first())
         .map(|t| t.size_vec2().x / t.size_vec2().y.max(1.0))
@@ -615,7 +566,6 @@ fn filmstrip(
     let (lo, hi) = (c.source_in.min(last), c.source_in.max(last));
     let clip_rect = painter.clip_rect().intersect(rect);
     let mut x = rect.left();
-    // Start at the first tile that is visible.
     if clip_rect.left() > x {
         x += ((clip_rect.left() - x) / tile_w).floor() * tile_w;
     }
@@ -628,8 +578,6 @@ fn filmstrip(
             frame,
             height,
         };
-        // Its own frame, else the nearest kept one within a tile or two,
-        // else the pool's nearest.
         let texture = assets
             .tiles
             .and_then(|t| {
@@ -650,7 +598,6 @@ fn filmstrip(
     }
 }
 
-/// The clip's audio peaks, one line per pixel column.
 fn waveform(
     painter: &Painter,
     rect: Rect,
@@ -663,7 +610,6 @@ fn waveform(
     let Some(w) = assets.waveforms.get(&c.media) else {
         return;
     };
-    // At its speed (decision D48): a held frame is silent.
     if c.speed() == 0.0 {
         return;
     }
@@ -703,7 +649,6 @@ fn waveform(
     }
 }
 
-/// The playhead line (and its handle on the ruler).
 pub fn playhead(painter: &Painter, x: f32, ruler: Rect, bottom: f32, color: Color32) {
     theme::playhead_glow(painter, [pos2(x, ruler.top()), pos2(x, bottom)], color);
     painter.line_segment(
@@ -721,14 +666,11 @@ pub fn playhead(painter: &Painter, x: f32, ruler: Rect, bottom: f32, color: Colo
     ));
 }
 
-/// What a gesture would do: drop targets, the moved block, snap lines. A
-/// target on a track that doesn't exist yet shows where it will be made.
 pub fn preview(painter: &Painter, rows: &Rows, scale: &Scale, p: &Project, pv: &Preview) {
     let track = pv.row.as_deref().unwrap_or(vidcut_core::ops::MAIN);
     let tr = rows.rect_of(track);
     let rect = tr.rect;
     let new_track = rows.get(track).is_none();
-    // A new audio track shows below the timeline, where it is dropped.
     let mut painter = painter.clone();
     if new_track {
         painter.set_clip_rect(painter.clip_rect().union(rect));
@@ -747,7 +689,6 @@ pub fn preview(painter: &Painter, rows: &Rows, scale: &Scale, p: &Project, pv: &
     let span = |a: i64, b: i64| Rect::from_x_y_ranges(scale.xf(a)..=scale.xf(b), rect.y_range());
     match &pv.target {
         Target::Insert(e) => {
-            // The edit point turns purple.
             let x = scale.xf(*e);
             painter.line_segment(
                 [pos2(x, rect.top() - 4.0), pos2(x, rect.bottom() + 4.0)],
@@ -805,9 +746,6 @@ pub fn preview(painter: &Painter, rows: &Rows, scale: &Scale, p: &Project, pv: &
     }
 }
 
-/// What a drag at the pointer would trim, for the timeline's own pointer:
-/// the end of the clip on the left, the start of the clip on the right, or
-/// the cut between them (a roll).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrimPointer {
     End,
@@ -815,13 +753,8 @@ pub enum TrimPointer {
     Roll,
 }
 
-/// Draws the trim pointer at `at`: a bracket for each clip end that moves
-/// (`]` an end, `[` a start), with an arrow pointing into that clip, so the
-/// side that changes reads at a glance. Outlined, so it shows on any
-/// picture.
 pub fn trim_pointer(painter: &Painter, at: Pos2, kind: TrimPointer) {
     let (h, serif, reach, head) = (9.0, 4.0, 11.0, 4.0);
-    // A bracket at `x`; its serifs point toward `side` (-1 left, 1 right).
     let bracket = |x: f32, side: f32| {
         vec![
             pos2(x + side * serif, at.y - h),
@@ -830,7 +763,6 @@ pub fn trim_pointer(painter: &Painter, at: Pos2, kind: TrimPointer) {
             pos2(x + side * serif, at.y + h),
         ]
     };
-    // An arrow from `x` outward by `reach`, toward `side`.
     let arrow = |x: f32, side: f32| {
         let tip = x + side * reach;
         vec![

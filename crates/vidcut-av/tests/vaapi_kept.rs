@@ -1,14 +1,3 @@
-//! VA-API's kept pictures: copied by the driver's `vaCopy` into surfaces of
-//! their own where it has one (Intel's), else the decoder's surfaces, from
-//! the pool its decoders share (`hw::vaapi::Keeper`). Either way a kept
-//! picture is the frame as decoded, every sample: copied down, it is what
-//! the same decoder's frame gives copied down without being kept. Runs on
-//! the GPU decoder in use when it is VA-API (`VIDCUT_HWDEC=vaapi:...` picks
-//! one) and skips otherwise; the surface of its own is checked where the
-//! driver is Intel's (iHD), however the device was picked. A prepared
-//! picture, held whatever the budget, holds no pool its decoders share: it
-//! is a copy of its own, or in memory.
-
 mod player_support;
 
 use std::sync::Arc;
@@ -20,7 +9,6 @@ use vidcut_av::fixture::{Container, FixtureSpec, VideoCodec};
 use vidcut_av::hw::{GpuDecoder, Kind};
 use vidcut_av::player::{Config, ManualOutput, Picture, Player};
 
-/// The GPU decoder in use, when it is VA-API.
 fn vaapi() -> Option<GpuDecoder> {
     let gpu = GpuDecoder::best().filter(|g| g.kind() == Kind::Vaapi);
     if gpu.is_none() {
@@ -29,8 +17,6 @@ fn vaapi() -> Option<GpuDecoder> {
     gpu
 }
 
-/// The player's picture of frame 5 of a 10-bit HEVC clip, decoded on the
-/// GPU, kept there for `kept` decoders and come down for the rest.
 fn picture(kept: Vec<Kind>) -> Arc<Picture> {
     let clip_src = src(
         "m",
@@ -49,15 +35,11 @@ fn picture(kept: Vec<Kind>) -> Arc<Picture> {
     player.present(Instant::now()).unwrap().picture
 }
 
-/// Whether `p`, a VA-API picture, is on a display of Intel's driver (iHD),
-/// by the vendor string libva gives the display.
 #[cfg(target_os = "linux")]
 fn on_intels_driver(p: &Picture) -> bool {
     use std::ffi::{CStr, c_char, c_void};
     type Query = unsafe extern "C" fn(*mut c_void) -> *const c_char;
-    // SAFETY: libva's function, loaded with FFmpeg, as `va.h` declares it;
-    // a VA-API frame's frames context holds its device's, whose context
-    // starts with its display.
+    // SAFETY: `query` matches `va.h`; a VA-API frame's device `hwctx` starts with its display.
     unsafe {
         let query = libc::dlsym(libc::RTLD_DEFAULT, c"vaQueryVendorString".as_ptr());
         if query.is_null() {
@@ -71,13 +53,11 @@ fn on_intels_driver(p: &Picture) -> bool {
     }
 }
 
-/// VA-API is Linux's.
 #[cfg(not(target_os = "linux"))]
 fn on_intels_driver(_: &Picture) -> bool {
     false
 }
 
-/// The samples of `p`'s frame in memory, rows packed.
 fn samples(p: &Picture) -> Vec<u8> {
     let f = p.frame();
     // SAFETY: a frame in memory, its planes copied out at its own size.
@@ -132,7 +112,6 @@ fn a_picture_intels_driver_keeps_is_in_a_surface_of_its_own() {
         let frames = (*kept.frame().as_ptr()).hw_frames_ctx;
         (*((*frames).data as *const ffi::AVHWFramesContext)).initial_pool_size
     };
-    // Frames of its one surface; the decoders' pool grows as they need.
     assert_eq!(pool, 1);
 }
 
@@ -176,7 +155,6 @@ fn a_picture_kept_on_va_api_counts_at_least_its_samples() {
         return;
     }
     let kept = picture(vec![Kind::Vaapi]);
-    // P010: two bytes a sample, chroma half of luma.
     let samples = (W * H * 3) as usize;
     assert!(kept.bytes() >= samples, "{} bytes", kept.bytes());
 }

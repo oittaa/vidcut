@@ -1,7 +1,3 @@
-//! The Media Pool (spec §3): bins, thumbnails and filmstrips with hover
-//! scrubbing, a list view, search and sort, and the edit-function buttons
-//! below it (spec §2, §7).
-
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -18,11 +14,8 @@ use super::timeline::gesture::Gesture;
 use super::workspace::{Workspace, dim, fit};
 
 const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
-/// A tile with its name and time below the picture.
 const TILE_FULL: egui::Vec2 = egui::Vec2::new(TILE.x, TILE.y + 30.0);
-/// Between tiles, across and down.
 const TILE_GAP: f32 = 8.0;
-/// The List view's columns.
 const LIST_COLUMNS: [&str; 8] = [
     "Name",
     "Duration",
@@ -33,26 +26,18 @@ const LIST_COLUMNS: [&str; 8] = [
     "Proxy",
     "Color",
 ];
-/// Between the List view's columns, and between its rows.
 const LIST_GAP: Vec2 = Vec2::new(12.0, 4.0);
-/// The Filmstrip view's pictures, and the name line above them.
 const STRIP_HEIGHT: f32 = 54.0;
 const HEADER: f32 = 20.0;
 
-/// The pool's bins: where a dragged clip or bin can be dropped, the order
-/// media are shown in, and a bin being renamed.
 #[derive(Default)]
 pub(super) struct BinsUi {
-    /// Folder rows and path levels a clip or bin can be dropped on.
     pub(super) targets: Vec<(Rect, String)>,
-    /// The media shown, in order (Shift-click selects ranges of it).
     order: Vec<String>,
     rename: Option<Rename>,
-    /// The List view's sizes, last measured.
     list: Option<ListLayout>,
 }
 
-/// A row of the List view.
 #[derive(Clone, Copy)]
 enum ListRow<'a> {
     Header,
@@ -61,7 +46,6 @@ enum ListRow<'a> {
 }
 
 impl<'a> ListRow<'a> {
-    /// Which of [`ListSizes::rows`] it takes.
     fn kind(self) -> usize {
         match self {
             Self::Header => 0,
@@ -70,7 +54,6 @@ impl<'a> ListRow<'a> {
         }
     }
 
-    /// What its cells' ids are made of.
     fn id(self) -> (&'static str, &'a str) {
         match self {
             Self::Header => ("header", ""),
@@ -80,8 +63,6 @@ impl<'a> ListRow<'a> {
     }
 }
 
-/// The List view's sizes, measured over all its rows: each column as wide
-/// as its widest cell, and the header's, a bin's and a media's height.
 #[derive(Clone, Copy, PartialEq)]
 struct ListSizes {
     columns: [f32; 8],
@@ -89,7 +70,6 @@ struct ListSizes {
 }
 
 impl ListSizes {
-    /// A cell's least size, as a grid has it.
     fn least(ui: &egui::Ui) -> Self {
         let size = ui.spacing().interact_size;
         Self {
@@ -99,8 +79,6 @@ impl ListSizes {
     }
 }
 
-/// The List view's sizes, and what they were measured for: the project,
-/// the bin and the search, and the screen's scale.
 struct ListLayout {
     project: Arc<Project>,
     bin: String,
@@ -109,8 +87,6 @@ struct ListLayout {
     sizes: ListSizes,
 }
 
-/// The window naming a bin: the bin and the name typed so far. `new`: the
-/// bin isn't made yet (New Bin), and naming it makes it.
 struct Rename {
     path: String,
     name: String,
@@ -118,7 +94,6 @@ struct Rename {
     new: bool,
 }
 
-/// How many tiles fit in a row `width` points wide, one at least.
 fn per_row(width: f32) -> usize {
     if width < TILE_FULL.x {
         1
@@ -127,19 +102,15 @@ fn per_row(width: f32) -> usize {
     }
 }
 
-/// Which of `n` rows, the first at `top` and each `step` below the last,
-/// a scroll area shows in `view`: only those are laid out.
 fn shown(view: Rangef, top: f32, step: f32, n: usize) -> Range<usize> {
     let row = |y: f32| ((y - top) / step).max(0.0);
     (row(view.min).floor() as usize).min(n)..(row(view.max).ceil() as usize).min(n)
 }
 
-/// The last name in a bin path.
 fn leaf(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-/// The bin a bin is in (`""`: the top level, the Master bin).
 fn parent(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(a, _)| a)
 }
@@ -152,13 +123,10 @@ fn join(bin: &str, name: &str) -> String {
     }
 }
 
-/// Whether `bin` is `path` or inside it.
 fn within(bin: &str, path: &str) -> bool {
     path.is_empty() || bin == path || bin.starts_with(&format!("{path}/"))
 }
 
-/// The bin drawn at `pos`: a folder row or a level of the path.
-/// First match wins, the same order a clip drop uses.
 fn bin_at(targets: &[(Rect, String)], pos: Pos2) -> Option<&str> {
     targets
         .iter()
@@ -166,10 +134,6 @@ fn bin_at(targets: &[(Rect, String)], pos: Pos2) -> Option<&str> {
         .map(|(_, bin)| bin.as_str())
 }
 
-/// Where dropping bin `from` onto `onto` moves it (`bins.rename`'s `to`).
-///
-/// `None` when the drop would not move the bin: onto itself, onto a bin
-/// inside it, or onto its current parent.
 fn bin_drop_to(from: &str, onto: &str) -> Option<String> {
     if from.is_empty() || within(onto, from) || onto == parent(from) {
         None
@@ -178,7 +142,6 @@ fn bin_drop_to(from: &str, onto: &str) -> Option<String> {
     }
 }
 
-/// "Bin N" in `bin`, with the next number not taken.
 fn new_bin(p: &Project, bin: &str) -> String {
     (1..)
         .map(|n| join(bin, &format!("Bin {n}")))
@@ -186,7 +149,6 @@ fn new_bin(p: &Project, bin: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Master and every bin, with their depth: the hierarchical bin list.
 fn bin_list(p: &Project) -> Vec<(String, usize)> {
     std::iter::once((String::new(), 0))
         .chain(
@@ -205,33 +167,24 @@ fn bin_name(path: &str) -> &str {
     }
 }
 
-/// The whole of a picture, as egui maps a texture.
 const FULL: Rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
 
-/// The source frame under the pointer at `x`, `frames` spread across
-/// `rect`.
 fn frame_at(rect: Rect, x: f32, frames: i64) -> i64 {
     let f = ((x - rect.left()) / rect.width()).clamp(0.0, 1.0);
     ((f64::from(f) * frames as f64) as i64).min((frames - 1).max(0))
 }
 
-/// The frame each of `slots` places across a filmstrip of `frames` shows:
-/// the one at its middle.
 fn strip_frames(slots: usize, frames: i64) -> Vec<i64> {
     (0..slots)
         .map(|i| ((i as f64 + 0.5) / slots as f64 * frames as f64) as i64)
         .collect()
 }
 
-/// The frame hover scrubbing shows for `frame` of `frames` spread over
-/// `px` points: on a grid of a power of two frames no wider than a point,
-/// so going back over a spot shows the picture made for it.
 fn scrub_frame(frame: i64, frames: i64, px: f32) -> i64 {
     let step = super::tiles::tile_step(frames as f64 / f64::from(px.max(1.0)));
     frame - frame.rem_euclid(step)
 }
 
-/// A pool item without pictures (yet).
 fn no_pictures(painter: &egui::Painter, rect: Rect, m: &Media) {
     let text = if m.info.video.is_none() {
         "♪ audio"
@@ -247,8 +200,6 @@ fn no_pictures(painter: &egui::Painter, rect: Rect, m: &Media) {
     );
 }
 
-/// A pool item's source marks along the bottom of its pictures, and the
-/// hovered frame as a line: `frames` spread across `rect`.
 fn marks(painter: &egui::Painter, rect: Rect, m: &Media, frames: i64, hovered: Option<i64>) {
     if frames <= 0 {
         return;
@@ -283,9 +234,6 @@ fn sort_label(s: PoolSort) -> &'static str {
     }
 }
 
-/// The pool's mark for a media item's proxy: badge text, its color and a
-/// tooltip. None without a proxy. A proxy made from an older version of the
-/// file is out of date, and the original plays instead.
 fn proxy_state(m: &Media) -> Option<(&'static str, Color32, String)> {
     let p = m.proxy.as_ref()?;
     Some(if m.fresh_proxy().is_some() {
@@ -311,8 +259,6 @@ impl Workspace {
         self.bins.targets.clear();
         let snap = self.snap.clone();
         let project = snap.project();
-        // The session's search, as `pool.set` sets it. While the field has
-        // the keyboard, it shows what is typed.
         let search_id = egui::Id::new("pool-search");
         if !ui.ctx().memory(|m| m.has_focus(search_id)) && self.search != snap.pool.search {
             self.search = snap.pool.search.clone();
@@ -357,7 +303,6 @@ impl Workspace {
             {
                 self.relink_missing(ui.ctx());
             }
-            // The session's, as `pool.set` sets it.
             for (mode, name, tip) in [
                 (PoolMode::Thumbnail, "Grid", "Thumbnail view"),
                 (
@@ -372,7 +317,6 @@ impl Workspace {
                     self.send("pool.set", json!({ "view": mode }));
                 }
             }
-            // Too narrow a field goes on a row of its own.
             if ui.available_width() >= 120.0 {
                 search(ui, &mut self.search);
             } else {
@@ -386,8 +330,6 @@ impl Workspace {
             self.bin_bar(ui, p);
         }
         ui.separator();
-        // The open bin's bins, then its media in the pool's order. A search
-        // looks through the bins inside it too.
         let view = &snap.pool;
         let needle = self.search.to_lowercase();
         let searching = !needle.is_empty();
@@ -417,9 +359,6 @@ impl Workspace {
         };
         self.bins.order = media.iter().map(|m| m.id.clone()).collect();
         let height = (ui.available_height() - self.pool_buttons).max(60.0);
-        // The List view's columns scroll sideways. A scroll area that doesn't
-        // grows to fit them, and the pool with it, which then can't be
-        // dragged narrower. The other views fit the pool's width.
         let scroll = match snap.pool.view {
             PoolMode::List => egui::ScrollArea::both(),
             _ => egui::ScrollArea::vertical().horizontal_scroll_offset(0.0),
@@ -429,7 +368,6 @@ impl Workspace {
             .min_scrolled_height(height)
             .auto_shrink([false, false])
             .show_viewport(ui, |ui, viewport| {
-                // Right-click on empty space: New Bin, Import.
                 let background =
                     ui.interact(ui.max_rect(), ui.id().with("background"), Sense::click());
                 if let Some(p) = project {
@@ -472,7 +410,6 @@ impl Workspace {
                     PoolMode::List => self.list(ui, viewport, p, &folders, &media),
                 }
             });
-        // The buttons' height, for the next frame's list above them.
         let top = ui.cursor().top();
         ui.separator();
         self.edit_buttons(ui);
@@ -484,8 +421,6 @@ impl Workspace {
         self.rename_bin_window(ui.ctx());
     }
 
-    /// The bin dropdown and the path to the open bin, each level of which
-    /// opens it, and the sort order Source Tape follows.
     fn bin_bar(&mut self, ui: &mut egui::Ui, p: &Project) {
         let view = self.snap.pool.clone();
         ui.horizontal(|ui| {
@@ -557,7 +492,6 @@ impl Workspace {
         });
     }
 
-    /// Whether a clip from the pool is being dragged.
     fn dragging_media(&self) -> bool {
         self.timeline
             .drag
@@ -565,7 +499,6 @@ impl Workspace {
             .is_some_and(|d| matches!(d.drag.gesture, Gesture::Media { .. }))
     }
 
-    /// The bin being dragged, if the pointer is carrying one.
     fn dragged_bin(&self) -> Option<&str> {
         let Gesture::Bin { path } = &self.timeline.drag.as_ref()?.drag.gesture else {
             return None;
@@ -573,24 +506,18 @@ impl Workspace {
         Some(path.as_str())
     }
 
-    /// The bin under `pos`, if the pointer is over a folder or a path level.
     pub(super) fn bin_target_at(&self, pos: Pos2) -> Option<String> {
         bin_at(&self.bins.targets, pos).map(str::to_string)
     }
 
-    /// `bins.rename`'s `to` when bin `from` is dropped at `pos`, if that
-    /// drop moves it.
     pub(super) fn bin_rename_to(&self, from: &str, pos: Pos2) -> Option<String> {
         bin_drop_to(from, bin_at(&self.bins.targets, pos)?)
     }
 
-    /// The label that follows the pointer while a bin is dragged.
     pub(super) fn bin_drag_label(&self) -> Option<String> {
         self.dragged_bin().map(|path| elide(leaf(path), 30))
     }
 
-    /// Makes `rect` a place to drop a dragged clip or bin into `bin`, and
-    /// shows it while a drop that would move something is over it.
     fn drop_highlight(&mut self, ui: &egui::Ui, rect: Rect, bin: &str) {
         self.bins.targets.push((rect, bin.to_string()));
         let over = ui
@@ -611,9 +538,6 @@ impl Workspace {
         }
     }
 
-    /// The Grid view: the bins, then the media, in rows of tiles. Only the
-    /// rows in `viewport` are laid out, so a pool of thousands costs what
-    /// a screenful does.
     fn grid(
         &mut self,
         ui: &mut egui::Ui,
@@ -642,8 +566,6 @@ impl Workspace {
         ui.expand_to_include_rect(Rect::from_min_size(origin, size));
     }
 
-    /// The Filmstrip view: a row for each bin, then a strip for each media.
-    /// Only the strips in `viewport` are laid out.
     fn strips(
         &mut self,
         ui: &mut egui::Ui,
@@ -669,8 +591,6 @@ impl Workspace {
         }
     }
 
-    /// A bin in the pool: double-click opens it, dragging it onto another
-    /// bin moves it, and clips dropped on it move into it.
     fn folder_tile(&mut self, ui: &mut egui::Ui, rect: Rect, p: &Project, path: &str) {
         let resp = ui.interact(rect, ui.id().with(("bin", path)), Sense::click_and_drag());
         let picture = Rect::from_min_size(rect.min, TILE);
@@ -702,8 +622,6 @@ impl Workspace {
         self.bin_interaction(&resp, path);
     }
 
-    /// A bin in the Filmstrip view: a row with its name and how many clips
-    /// it holds.
     fn folder_row(&mut self, ui: &mut egui::Ui, p: &Project, path: &str) {
         let count = p.media.iter().filter(|m| within(&m.bin, path)).count();
         let r = ui
@@ -719,8 +637,6 @@ impl Workspace {
         self.bin_interaction(&r, path);
     }
 
-    /// Double-click opens a bin; dragging it onto another bin moves it;
-    /// its menu renames or removes it.
     fn bin_interaction(&mut self, resp: &egui::Response, path: &str) {
         if resp.drag_started()
             && let Some(press) = resp.ctx.input(|i| i.pointer.press_origin())
@@ -757,8 +673,6 @@ impl Workspace {
         });
     }
 
-    /// The window naming a bin, new or renamed. The name starts selected,
-    /// so typing replaces it; Enter applies, Escape cancels.
     fn rename_bin_window(&mut self, ctx: &egui::Context) {
         let Some(r) = &mut self.bins.rename else {
             return;
@@ -809,8 +723,6 @@ impl Workspace {
         }
     }
 
-    /// File > New Bin (Shift+Ctrl+N): names a new bin in the open bin, then
-    /// makes it. The name offered is the next free `Bin N`.
     pub(super) fn new_bin(&mut self) {
         if let Some(p) = self.project() {
             let path = new_bin(p, &self.snap.pool.bin);
@@ -823,7 +735,6 @@ impl Workspace {
         }
     }
 
-    /// One thumbnail with hover scrubbing and source marks.
     fn tile(&mut self, ui: &mut egui::Ui, rect: Rect, m: &Media) {
         let resp = ui.interact(
             rect,
@@ -842,7 +753,6 @@ impl Workspace {
             Some(t) if !t.textures.is_empty() => {
                 let size = t.textures[0].size_vec2();
                 let r = fit(picture, size.x / size.y.max(1.0));
-                // The frame under the pointer, else the first picture.
                 let shown = hovered_frame
                     .and_then(|f| {
                         let f = scrub_frame(f, frames, picture.width());
@@ -885,9 +795,6 @@ impl Workspace {
         self.media_interaction(&resp, m);
     }
 
-    /// A clip in the Filmstrip view (spec §3): its name over a strip of its
-    /// pictures as wide as the pool. Hovering scrubs it, and I/O mark the
-    /// clip there.
     fn filmstrip(&mut self, ui: &mut egui::Ui, rect: Rect, m: &Media) {
         let width = rect.width();
         let resp = ui.interact(
@@ -932,9 +839,6 @@ impl Workspace {
                 let w = film.height() * t.strip.width as f32 / t.strip.height.max(1) as f32;
                 let slots = (film.width() / w).ceil().max(1.0) as usize;
                 let mut at = strip_frames(slots, frames);
-                // Until its own frame comes, a place shows the nearest
-                // picture within half a place; the one under the pointer
-                // the nearest anywhere.
                 let mut within = vec![frames / slots as i64 / 2; slots];
                 if let (Some(f), Some(pos)) = (hovered_frame, resp.hover_pos()) {
                     let slot = (((pos.x - film.left()) / w) as usize).min(slots - 1);
@@ -961,9 +865,6 @@ impl Workspace {
         self.media_interaction(&resp, m);
     }
 
-    /// The picture of `m` at `frame` for a place `px` points tall: the
-    /// timeline's tiles decode that frame. Until it comes, the nearest one
-    /// they have within `within` frames, else the pool's nearest.
     fn pool_picture(
         &self,
         ctx: &egui::Context,
@@ -991,8 +892,6 @@ impl Workspace {
             .or_else(|| thumbs.nearest(p.settings.fps.frames_to_secs(frame)))
     }
 
-    /// A sound file's waveform across `rect`, the whole file, from the
-    /// peaks the timeline draws. Its label until they are measured.
     fn sound(&self, painter: &egui::Painter, rect: Rect, m: &Media) {
         let (Some(w), Some(p)) = (self.snap.waveforms.get(&m.id), self.project()) else {
             return no_pictures(painter, rect, m);
@@ -1018,8 +917,6 @@ impl Workspace {
         }
     }
 
-    /// The border of a pool item's pictures: the accent when selected, a
-    /// thin line when the source viewer shows it.
     fn outline(&self, painter: &egui::Painter, rect: Rect, m: &Media) {
         let selected = self.snap.selection.media.contains(&m.id);
         let open = self.snap.source_at().map(|(id, _)| id) == Some(m.id.as_str());
@@ -1038,8 +935,6 @@ impl Workspace {
         );
     }
 
-    /// MISSING and the proxy's badge on a pool item's pictures. Returns
-    /// what hovering it says.
     fn badges(&self, painter: &egui::Painter, rect: Rect, m: &Media) -> String {
         let badge = |text: &str, color: Color32, right: bool| {
             let galley =
@@ -1080,10 +975,6 @@ impl Workspace {
         )
     }
 
-    /// The List view: a header, a row for each bin, then one for each
-    /// media, in columns as wide as their widest cell, as a striped grid
-    /// lays them out. Only the rows in `viewport` are laid out. The sizes
-    /// are measured over every row when what the list shows changes.
     fn list(
         &mut self,
         ui: &mut egui::Ui,
@@ -1109,7 +1000,6 @@ impl Workspace {
             .as_ref()
             .filter(measured_for)
             .map(|l| l.sizes);
-        // Until measured, as last measured (as a grid shows its last sizes).
         let sizes = fresh
             .or_else(|| self.bins.list.as_ref().map(|l| l.sizes))
             .unwrap_or_else(|| ListSizes::least(ui));
@@ -1191,7 +1081,6 @@ impl Workspace {
         ui.expand_to_include_rect(Rect::from_min_size(origin, vec2(width, height)));
     }
 
-    /// Column `c` of `row` in the List view.
     fn list_cell(&mut self, ui: &mut egui::Ui, p: &Project, row: ListRow, c: usize) {
         match row {
             ListRow::Header => {
@@ -1220,7 +1109,6 @@ impl Workspace {
         }
     }
 
-    /// Column `c` of media `m`'s row in the List view.
     fn media_cell(&mut self, ui: &mut egui::Ui, m: &Media, c: usize) {
         let video = m.info.video.as_ref();
         match c {
@@ -1251,7 +1139,6 @@ impl Workspace {
                     },
                 ));
             }
-            // 23.976 shown, 24000/1001 on hover.
             3 => match video {
                 Some(v) => {
                     let rate = ui.label(v.fps.decimal());
@@ -1299,8 +1186,6 @@ impl Workspace {
         }
     }
 
-    /// Click selects (and shows the clip in a source viewer), double-click
-    /// opens it as Source Clip, dragging drops it on the timeline (spec §3).
     fn media_interaction(&mut self, resp: &egui::Response, m: &Media) {
         if resp.drag_started()
             && let Some(press) = resp.ctx.input(|i| i.pointer.press_origin())
@@ -1329,7 +1214,6 @@ impl Workspace {
             } else if mods.shift
                 && let Some(last) = selection.last()
             {
-                // A range of the media shown, in the order shown.
                 let ids: Vec<&str> = self.bins.order.iter().map(String::as_str).collect();
                 let (a, b) = (
                     ids.iter().position(|x| x == last).unwrap_or(0),
@@ -1384,7 +1268,6 @@ impl Workspace {
             }
             if m.info.video.is_some() && !m.is_still() && ui.button("Generate Proxy").clicked() {
                 self.send("proxy.generate", json!({ "media": m.id }));
-                // The encode is a job: its progress and Cancel are there.
                 self.export.show_jobs = true;
                 ui.close();
             }
@@ -1401,7 +1284,6 @@ impl Workspace {
                 ui.close();
             }
             ui.separator();
-            // Bins and colors: the selected clips, or this one.
             let ids = if self.snap.selection.media.contains(&m.id) {
                 self.snap.selection.media.clone()
             } else {
@@ -1464,7 +1346,6 @@ impl Workspace {
         });
     }
 
-    /// The edit-function buttons under the pool (spec §2, §7.2).
     fn edit_buttons(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             let buttons = [
@@ -1551,7 +1432,6 @@ fn range_text(app: &Workspace, source: &serde_json::Value) -> String {
     format!("{} long", app.src_tc(b - a))
 }
 
-/// Shortens `s` to `n` characters with an ellipsis.
 pub(super) fn elide(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()
@@ -1583,7 +1463,6 @@ mod tests {
 
     #[test]
     fn only_the_rows_in_view_are_laid_out() {
-        // Rows every 137 points: 300 to 700 shows rows 2 to 5.
         assert_eq!(shown(Rangef::new(300.0, 700.0), 0.0, 137.0, 100), 2..6);
     }
 
@@ -1594,7 +1473,6 @@ mod tests {
 
     #[test]
     fn scrubbing_a_long_clip_steps_by_whole_frames_per_point() {
-        // 18,000 frames over 400 points: 45 a point, so steps of 32.
         assert_eq!(scrub_frame(1000, 18_000, 400.0), 992);
     }
 
@@ -1605,7 +1483,6 @@ mod tests {
             Some("Interviews/Day 1")
         );
         assert_eq!(bin_drop_to("A/B", "C").as_deref(), Some("C/B"));
-        // A nested bin dropped on Master goes to the top level under its own name.
         assert_eq!(bin_drop_to("Hold/Inner", "").as_deref(), Some("Inner"));
         assert_eq!(
             bin_drop_to("Bin 1", "Bin 2").as_deref(),

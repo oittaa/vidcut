@@ -1,6 +1,3 @@
-//! A theme file set with `preferences.set` shows in the running GUI at
-//! once (egui_kittest, no window).
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -51,7 +48,6 @@ fn a_theme_file_set_in_the_preferences_shows_at_once() {
         std::env::set_var("XDG_RUNTIME_DIR", dir.join("run"));
         std::env::set_var("XDG_CACHE_HOME", dir.join("cache"));
     }
-    // Neon with panels of another color.
     let neon = include_str!("../themes/neon.toml");
     let mine = neon.replace("panel = \"#130C22\"", "panel = \"#123456\"");
     assert_ne!(mine, neon);

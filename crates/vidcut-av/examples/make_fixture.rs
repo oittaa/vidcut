@@ -1,13 +1,3 @@
-//! Generates (or finds cached) a barcode test fixture and prints its path.
-//!
-//! ```text
-//! cargo run -p vidcut-av --example make_fixture -- CODEC CONTAINER WIDTHxHEIGHT FPS FRAMES [no-audio] [busy] [tc=HH:MM:SS:FF] [g=GOP] [b=BFRAMES]
-//! cargo run -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 60 600
-//! cargo run -p vidcut-av --example make_fixture -- h264 mov 320x180 25 50 tc=10:00:00:00
-//! ```
-//! CODEC: h264 hevc10 prores dnxhr vp9 ffv1 av1; CONTAINER: mp4 mov mkv ts webm; FPS like 30 or 30000/1001.
-//! `busy` adds noise around the barcode, new in every frame: heavy to decode.
-
 use vidcut_av::fixture::{self, Container, FixtureSpec, Picture, VideoCodec};
 
 fn main() {

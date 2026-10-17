@@ -1,8 +1,3 @@
-//! An agent drives vidcut over MCP (`vidcut mcp`). Headless it makes a
-//! project, looks at a frame and gets an error for a bad edit. Against a
-//! live session (the GUI's core, serving IPC) its calls run in that session.
-//! Cutting the silences there is one undo step.
-
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Arc;
@@ -34,7 +29,6 @@ impl live::Renderer for NoRenderer {
     fn quit(&self) {}
 }
 
-/// An MCP client talking to a `vidcut mcp` child process.
 struct Client {
     child: Child,
     stdin: Option<ChildStdin>,
@@ -104,7 +98,6 @@ impl Client {
         }
     }
 
-    /// Calls a tool; returns its result (`content`, `structuredContent`, `isError`).
     fn call(&mut self, name: &str, arguments: Value) -> Value {
         let r = self.request(
             "tools/call",
@@ -113,7 +106,6 @@ impl Client {
         r["result"].clone()
     }
 
-    /// Calls a tool that must succeed; returns the vidcut response.
     fn ok(&mut self, name: &str, arguments: Value) -> Value {
         let r = self.call(name, arguments);
         assert_eq!(r["isError"], false, "{name}: {r}");
@@ -133,7 +125,6 @@ fn call(h: &live::Handle, method: &str, params: Value) -> Response {
         .unwrap_or_else(|e| panic!("{method}: {e}"))
 }
 
-/// The image in a tool result, decoded far enough to check it is a PNG.
 fn has_png(result: &Value) -> bool {
     result["content"].as_array().unwrap().iter().any(|c| {
         c["type"] == "image"
@@ -159,7 +150,6 @@ fn an_agent_edits_over_mcp_headless_and_live_in_the_gui() {
         std::env::set_var("XDG_RUNTIME_DIR", dir.join("run"));
     }
     std::fs::create_dir_all(dir.join("run")).unwrap();
-    // Ten seconds of 30 fps with a 10 ms beep at the start of each second.
     let media = fixture::ensure(&FixtureSpec::new(
         VideoCodec::H264,
         Container::Mp4,
@@ -170,7 +160,6 @@ fn an_agent_edits_over_mcp_headless_and_live_in_the_gui() {
     ))
     .unwrap();
 
-    // 1. Headless: a new project, media, and a look at a frame.
     let mut agent = Client::spawn(&["--headless"]);
     let scratch = dir.join("scratch.vidcut");
     agent.ok(
@@ -193,7 +182,6 @@ fn an_agent_edits_over_mcp_headless_and_live_in_the_gui() {
     );
     agent.finish();
 
-    // 2. Live: the GUI's session serves IPC; the agent's calls run in it.
     let path = dir.join("talk.vidcut");
     Store::create(
         &path,

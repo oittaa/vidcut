@@ -1,4 +1,3 @@
-//! Prints which GPU encoders work on this machine (test encodes).
 fn main() {
     let started = std::time::Instant::now();
     let a = vidcut_av::export::encode::detect(true);

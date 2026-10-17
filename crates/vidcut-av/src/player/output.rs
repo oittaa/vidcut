@@ -1,13 +1,3 @@
-//! Where a player's sound goes: an audio device whose callback pulls the
-//! mix, and with it the clock pictures follow.
-//!
-//! [`CpalOutput`] is a device of the system's (ALSA on Linux, which PipeWire
-//! and PulseAudio serve; WASAPI on Windows; Core Audio on macOS): its
-//! default, or one chosen by its id ([`output_devices`]). [`PacedOutput`] stands in for a device
-//! without one: a thread that pulls in real time, optionally recording what
-//! it pulled and when it would have been heard. [`ManualOutput`] pulls only
-//! when a test says so, so a test sets the clock itself.
-
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -18,14 +8,12 @@ use super::clock::Heard;
 use super::ring::Ring;
 use crate::error::{Error, Result};
 
-/// The player's end of an audio output: the device pulls from it.
 #[derive(Clone)]
 pub struct AudioSource {
     pub(crate) ring: Arc<Ring>,
     pub(crate) heard: Arc<Heard>,
     rate: u32,
     channels: u16,
-    /// What went wrong with the device, for the player's status.
     pub(crate) failure: Arc<Mutex<Option<String>>>,
 }
 
@@ -40,73 +28,48 @@ impl AudioSource {
         }
     }
 
-    /// Sample rate the device must run at.
     pub fn rate(&self) -> u32 {
         self.rate
     }
 
-    /// Channels the device must have.
     pub fn channels(&self) -> u16 {
         self.channels
     }
 
-    /// Fills `out` (interleaved) with what plays next, silence where nothing
-    /// is queued (paused, or the mix is late: then the clock waits too).
-    /// `heard_at`: when the first sample reaches the listener, the
-    /// callback's time plus the output's latency. Doesn't block or
-    /// allocate: for the device's own callback.
     pub fn fill(&self, out: &mut [f32], heard_at: Instant) {
         let (counter, n) = self.ring.pop(out);
         out[n * self.ring.channels()..].fill(0.0);
         self.heard.record(counter, n as u64, heard_at);
     }
 
-    /// Reports a device failure (it went away, say).
     pub fn fail(&self, why: String) {
         *self.failure.lock().unwrap_or_else(|e| e.into_inner()) = Some(why);
     }
 }
 
-/// Where the mix plays: a device that pulls from an [`AudioSource`], whose
-/// pulling is the player's clock.
 pub trait AudioOutput: Send {
-    /// Starts pulling from `source`, at its rate and channel count, on the
-    /// output's own thread, until the output is dropped.
     fn start(&mut self, source: AudioSource) -> Result<()>;
 
-    /// The device it plays on, once started.
     fn plays_on(&self) -> PlaysOn {
         PlaysOn::Default
     }
 }
 
-/// The device an [`AudioOutput`] plays on.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum PlaysOn {
-    /// The system's default, as none was chosen (or not a device at all:
-    /// a stand-in).
     #[default]
     Default,
-    /// The device chosen by its [`OutputDevice::id`].
     Chosen(String),
-    /// The system's default, as the device chosen by this id isn't
-    /// connected.
     Missing(String),
 }
 
-/// An output device of the system's.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct OutputDevice {
-    /// What [`CpalOutput::on`] opens it by: the same across runs and
-    /// reboots where the system allows (`wasapi:…`, `alsa:…`).
     pub id: String,
-    /// Its name, told apart from the others' ([`distinct_names`]).
     pub name: String,
-    /// The system's default.
     pub default: bool,
 }
 
-/// The system's output devices, its default among them.
 pub fn output_devices() -> Result<Vec<OutputDevice>> {
     use cpal::traits::{DeviceTrait, HostTrait};
     let host = cpal::default_host();
@@ -122,7 +85,6 @@ pub fn output_devices() -> Result<Vec<OutputDevice>> {
             id: id.to_string(),
             name: d.to_string(),
         });
-        // The description's line after the name.
         details.push(
             d.description()
                 .ok()
@@ -135,15 +97,6 @@ pub fn output_devices() -> Result<Vec<OutputDevice>> {
     Ok(listed)
 }
 
-/// ALSA lists each card's outputs once for each of its plugins (`hw`,
-/// `plughw`, `front`, the `surround` layouts, `iec958`, `dmix` and more),
-/// the same output each time, a hundred entries on a desktop. What is
-/// listed is one entry for each output: the system's own (`default`,
-/// `pipewire`, `pulse`), each card's `sysdefault`, and its `hdmi` outputs,
-/// one for each screen. A card with none of those keeps its `hw` entries.
-/// Other hosts' devices (WASAPI's, Core Audio's) are listed as they are. An
-/// id saved for any plugin still opens: [`output_by_id`] searches every
-/// device.
 fn one_for_each_output(devices: &mut Vec<OutputDevice>, details: &mut Vec<Option<String>>) {
     fn plugin(id: &str) -> Option<&str> {
         id.strip_prefix("alsa:")
@@ -180,11 +133,6 @@ fn one_for_each_output(devices: &mut Vec<OutputDevice>, details: &mut Vec<Option
     details.retain(|_| *kept.next().expect("one for each"));
 }
 
-/// ALSA lists a card's hardware devices twice, by the card's name
-/// (`hw:CARD=NVidia,DEV=3`) and by its number (`hw:CARD=0,DEV=3`): the same
-/// device, named and described alike, and the number changes between
-/// boots. A numbered one isn't listed where its named twin is. An id saved
-/// so still opens: [`output_by_id`] searches every device.
 fn without_numbered_cards(devices: &mut Vec<OutputDevice>, details: &mut Vec<Option<String>>) {
     let numbered = |id: &str| {
         id.split("CARD=")
@@ -209,11 +157,6 @@ fn without_numbered_cards(devices: &mut Vec<OutputDevice>, details: &mut Vec<Opt
     details.retain(|_| *kept.next().expect("one for each"));
 }
 
-/// Names that repeat made distinct: ALSA's outputs of one card share the
-/// card's name, told apart by their description's next line (`Front
-/// output / input`, `Default Audio Device`); those still alike (a mixer's
-/// two outputs named alike) are numbered, skipping numbers whose name
-/// another device has.
 fn distinct_names(devices: &mut [OutputDevice], details: &[Option<String>]) {
     let repeats = |devices: &[OutputDevice], name: &str| {
         devices.iter().filter(|d| d.name == name).count() > 1
@@ -244,25 +187,19 @@ fn distinct_names(devices: &mut [OutputDevice], details: &[Option<String>]) {
     }
 }
 
-/// An output device of the system's: its default, or one chosen by its
-/// [`OutputDevice::id`], which plays on the default while it isn't there.
 #[derive(Default)]
 pub struct CpalOutput {
-    /// The chosen device's id; `None`: the default.
     device: Option<String>,
-    /// Where it plays, once started.
     plays_on: PlaysOn,
     stop: Option<mpsc::Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl CpalOutput {
-    /// The system's default device.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// The device of `id`, or the default for `None`.
     pub fn on(device: Option<String>) -> Self {
         Self {
             device,
@@ -278,8 +215,6 @@ impl AudioOutput for CpalOutput {
         let (stop, stopped) = mpsc::channel::<()>();
         let (ready, opened) = mpsc::channel::<Result<PlaysOn>>();
         let device = self.device.clone();
-        // The stream lives on a thread of its own: it can't move between
-        // threads on every platform.
         let thread = std::thread::Builder::new()
             .name("vidcut-audio-out".into())
             .spawn(move || {
@@ -323,7 +258,6 @@ impl Drop for CpalOutput {
     }
 }
 
-/// The system's default output device: its name, or why there is none.
 pub fn output_device() -> Result<String> {
     use cpal::traits::HostTrait;
     let device = cpal::default_host()
@@ -332,10 +266,6 @@ pub fn output_device() -> Result<String> {
     Ok(device.to_string())
 }
 
-/// The output device whose id is `id`, as [`output_devices`] lists it.
-/// Not cpal's own lookup by id: on ALSA it adds a device number to the id
-/// it looks for (`sysdefault:CARD=PCH` becomes `…,DEV=0`), so the ids it
-/// lists aren't found.
 fn output_by_id(host: &cpal::Host, id: &str) -> Option<cpal::Device> {
     use cpal::traits::{DeviceTrait, HostTrait};
     host.output_devices()
@@ -343,8 +273,6 @@ fn output_by_id(host: &cpal::Host, id: &str) -> Option<cpal::Device> {
         .find(|d| d.id().is_ok_and(|d| d.to_string() == id))
 }
 
-/// A stream from `source` on `device` (an [`OutputDevice::id`]), or on the
-/// default device for `None` or a device that isn't there; and which it is.
 fn open_stream(source: AudioSource, device: Option<&str>) -> Result<(cpal::Stream, PlaysOn)> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     let host = cpal::default_host();
@@ -392,26 +320,18 @@ fn open_stream(source: AudioSource, device: Option<&str>) -> Result<(cpal::Strea
     Ok((stream, plays_on))
 }
 
-/// Whether a stream's error stops its sound. A glitch (an underrun) and a
-/// route the stream followed (macOS's default output, moved to headphones)
-/// don't: it plays on.
 fn fails(kind: cpal::ErrorKind) -> bool {
     use cpal::ErrorKind as K;
     !matches!(kind, K::Xrun | K::DeviceChanged | K::RealtimeDenied)
 }
 
-/// What a [`PacedOutput`] pulled.
 #[derive(Default)]
 pub struct Recording {
-    /// Every sample pulled, interleaved.
     pub samples: Vec<f32>,
-    /// For each buffer pulled: the index in `samples` of its first sample
-    /// frame, and when that would be heard.
     pub heard: Vec<(usize, Instant)>,
 }
 
 impl Recording {
-    /// When sample frame `i` of `samples` would be heard.
     pub fn heard_at(&self, i: usize, rate: u32) -> Option<Instant> {
         let at = self.heard.partition_point(|(first, _)| *first <= i);
         let (first, t) = self.heard.get(at.checked_sub(1)?)?;
@@ -419,8 +339,6 @@ impl Recording {
     }
 }
 
-/// A stand-in for a device: a thread that pulls `period` of sound every
-/// `period`, each buffer heard `latency` after its pull is due.
 pub struct PacedOutput {
     period: Duration,
     latency: Duration,
@@ -430,7 +348,6 @@ pub struct PacedOutput {
 }
 
 impl PacedOutput {
-    /// Drops what it pulls.
     pub fn new(period: Duration, latency: Duration) -> Self {
         Self {
             period,
@@ -441,7 +358,6 @@ impl PacedOutput {
         }
     }
 
-    /// Keeps what it pulls in the recording returned.
     pub fn recording(period: Duration, latency: Duration) -> (Self, Arc<Mutex<Recording>>) {
         let recording = Arc::new(Mutex::new(Recording::default()));
         let mut out = Self::new(period, latency);
@@ -460,8 +376,6 @@ impl AudioOutput for PacedOutput {
             .name("vidcut-audio-out".into())
             .spawn(move || {
                 let mut buf = vec![0.0f32; frames * usize::from(source.channels())];
-                // A device's clock is steady: each buffer is due a period
-                // after the one before, however late the thread wakes.
                 let mut due = Instant::now();
                 while !stop.load(Ordering::Relaxed) {
                     let now = Instant::now();
@@ -493,9 +407,6 @@ impl Drop for PacedOutput {
     }
 }
 
-/// An output that pulls only when told to: a test moves the clock itself,
-/// buffer by buffer. Never told, it is no sound, for players that never
-/// play (the two-up's).
 #[derive(Clone, Default)]
 pub struct ManualOutput {
     source: Arc<Mutex<Option<AudioSource>>>,
@@ -506,8 +417,6 @@ impl ManualOutput {
         Self::default()
     }
 
-    /// Pulls `frames` sample frames, the first heard at `heard_at`, as a
-    /// device callback would; empty before the player starts it.
     pub fn pull(&self, frames: usize, heard_at: Instant) -> Vec<f32> {
         let source = self.source.lock().unwrap_or_else(|e| e.into_inner());
         let Some(source) = source.as_ref() else {
@@ -518,7 +427,6 @@ impl ManualOutput {
         out
     }
 
-    /// Sample frames queued for the device, ahead of what it pulled.
     pub fn queued(&self) -> u64 {
         let source = self.source.lock().unwrap_or_else(|e| e.into_inner());
         source.as_ref().map_or(0, |s| s.ring.queued())
@@ -623,7 +531,6 @@ mod tests {
             device("alsa:front:CARD=PCH,DEV=0", "HDA Intel PCH, ALC897 Analog"),
             device("wasapi:a", "Speakers"),
             device("wasapi:b", "Speakers"),
-            // Named as numbering would name the first.
             device("wasapi:c", "Speakers (1)"),
         ];
         let details = [

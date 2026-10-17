@@ -1,7 +1,3 @@
-//! The player's pictures across edits and keyframes: playing on while the
-//! plan changes ahead, seeking after an edit that moves every frame, and
-//! stepping back over a keyframe.
-
 mod player_support;
 
 use std::time::{Duration, Instant};
@@ -12,7 +8,6 @@ use vidcut_av::player::{Config, ManualOutput, Player};
 
 #[test]
 fn edits_and_keyframes_show_the_right_frames() {
-    // Keyframes 120 frames apart, with B-frames.
     let long = src(
         "m1",
         FixtureSpec::new(VideoCodec::H264, Container::Mp4, W, H, (30, 1), 300)
@@ -41,7 +36,6 @@ fn edits_and_keyframes_show_the_right_frames() {
         }
     };
 
-    // An edit further on while it plays: every frame is still its own.
     let player = new_player();
     assert_eq!(shown_at(&player, 0), Some(0));
     player.play(1.0);
@@ -51,7 +45,6 @@ fn edits_and_keyframes_show_the_right_frames() {
     play_until(&player, &|t| t >= 150);
     player.pause();
 
-    // An edit that moves every frame 30 later: seeks show the moved frames.
     let edited = plan(&[clip(&other, 0, 30), clip(&long, 0, 300)], 0);
     player.seek(150);
     assert_eq!(shown_at(&player, 150), Some(150));
@@ -61,7 +54,6 @@ fn edits_and_keyframes_show_the_right_frames() {
         assert_eq!(shown_at(&player, t), rendered(&edited, t), "frame {t}");
     }
 
-    // Steps back from just past a keyframe (120) over it.
     drop(player);
     let player = new_player();
     player.seek(125);

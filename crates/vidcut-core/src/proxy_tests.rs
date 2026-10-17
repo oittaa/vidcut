@@ -1,7 +1,3 @@
-//! Playback proxies (decision D41). The fake env records a path and does not
-//! encode. Export plans keep original paths; only [`preview::apply_proxies`]
-//! swaps the picture.
-
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
@@ -14,7 +10,6 @@ fn req(method: &str, params: serde_json::Value) -> serde_json::Value {
 }
 
 fn proxy_path(id: &str) -> PathBuf {
-    // 1920×1080 fitted in 960, the default longest side.
     Path::new("/proxies").join(format!("{id}-960x540.mkv"))
 }
 

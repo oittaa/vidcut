@@ -1,7 +1,3 @@
-//! The Keyboard Shortcuts window (F1, Help in the top bar, `gui.show
-//! help`): every shortcut, one action a row, in groups. A row with a ?
-//! opens a few plain words on what it does and why.
-
 use std::collections::HashSet;
 
 use eframe::egui::{self, RichText};
@@ -15,14 +11,12 @@ use super::workspace::Workspace;
 pub(super) struct HelpUi {
     pub open: bool,
     search: String,
-    /// The rows open to their explanation, by action.
     explained: HashSet<&'static str>,
 }
 
 impl Workspace {
     pub(super) fn help_window(&mut self, ctx: &egui::Context) {
         let help = &mut self.help;
-        // Closed, it opens again on the whole list.
         if !help.open {
             help.search.clear();
             return;
@@ -88,7 +82,6 @@ impl Workspace {
     }
 }
 
-/// Where the groups split into two columns of about as many rows.
 fn halves(groups: &[(Group, Vec<&Shortcut>)]) -> usize {
     let total: usize = groups.iter().map(|(_, rows)| rows.len()).sum();
     (1..=groups.len())
@@ -99,8 +92,6 @@ fn halves(groups: &[(Group, Vec<&Shortcut>)]) -> usize {
         .unwrap_or(1)
 }
 
-/// Whether `s` has `query` in its action, its explanation or its keys. A
-/// single character is a key.
 fn matches(s: &Shortcut, query: &str) -> bool {
     if query.is_empty() {
         return true;
@@ -133,9 +124,6 @@ fn group(
     ui.add_space(16.0);
 }
 
-/// One action: its ? (if it has words), its name, its keys on the right,
-/// and its explanation under it while open. A search that finds words in
-/// the explanation opens it.
 fn row(ui: &mut egui::Ui, s: &Shortcut, query: &str, explained: &mut HashSet<&'static str>) {
     let open = s.explanation.is_some()
         && (explained.contains(s.action)
@@ -154,7 +142,6 @@ fn row(ui: &mut egui::Ui, s: &Shortcut, query: &str, explained: &mut HashSet<&'s
         } else {
             ui.add_space(MARK + ui.spacing().item_spacing.x);
         }
-        // The keys first, on the right: a long name wraps in the room left.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             keys(ui, s.keys);
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -182,11 +169,8 @@ fn row(ui: &mut egui::Ui, s: &Shortcut, query: &str, explained: &mut HashSet<&'s
     ui.add_space(4.0);
 }
 
-/// The ? mark's size.
 const MARK: f32 = 18.0;
 
-/// A ring with a ? in the accent color, filled while its row is open: the
-/// same in every theme, whatever its buttons look like.
 fn mark(ui: &mut egui::Ui, open: bool) -> egui::Response {
     let (rect, r) = ui.allocate_exact_size(egui::vec2(MARK, MARK), egui::Sense::click());
     let c = theme::colors();
@@ -212,7 +196,6 @@ fn mark(ui: &mut egui::Ui, open: bool) -> egui::Response {
     r.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// The keys as caps joined by +, laid out right to left.
 fn keys(ui: &mut egui::Ui, keys: &[&str]) {
     let mac = cfg!(target_os = "macos");
     let c = theme::colors();

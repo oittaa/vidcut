@@ -1,13 +1,3 @@
-//! The live session without a window. The viewer's player is the engine. A
-//! harness thread stands in for the GUI's renderer and turns its pictures
-//! into RGBA. Its sound goes to a stand-in device. Requests go through
-//! `Handle::call` as IPC clients' do.
-//! Checks that viewer seeks are frame-exact at every cut, that an edit by
-//! another process shows up and undoes, that proxies show the same frames
-//! as the originals, and that a fade shows as `frame render` renders it.
-//!
-//! No display, GPU or audio device.
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,7 +16,6 @@ const W: usize = 320;
 const H: usize = 180;
 const RATE: u32 = 48_000;
 
-/// How long after its buffer is due the stand-in device's sound is heard.
 const LATENCY: Duration = Duration::from_millis(30);
 
 type Engine = Arc<Player>;
@@ -55,12 +44,10 @@ impl live::Renderer for Port {
     fn quit(&self) {}
 }
 
-/// What the viewer shows: the picture, as drawn.
 #[derive(Default)]
 struct Screen {
     picture: Option<Arc<Picture>>,
     image: Option<Image>,
-    /// The frame the latest present showed exactly.
     exact: Option<i64>,
 }
 
@@ -83,8 +70,6 @@ impl Harness {
     fn start(project: &Path) -> Self {
         let port = Arc::new(Port::default());
         let stop = Arc::new(AtomicBool::new(false));
-        // The "render thread": presents the player every 2 ms, as a display
-        // would, draws what changed, and answers presents and captures.
         let render = {
             let (port, stop) = (port.clone(), stop.clone());
             std::thread::spawn(move || {
@@ -154,7 +139,6 @@ impl Harness {
             .unwrap_or_else(|e| panic!("{method} {params}: {e}"))
     }
 
-    /// The barcode the viewer shows (via a screenshot PNG).
     fn shown(&self, dir: &Path) -> Option<u32> {
         let out = dir.join("shot.png");
         self.ok("gui.screenshot", json!({ "out": out }));
@@ -163,7 +147,6 @@ impl Harness {
         vidcut_av::decode::read_barcode(&f).unwrap()
     }
 
-    /// Waits until `check` holds for the latest snapshot.
     fn wait_for(&self, what: &str, check: impl Fn(&live::Snapshot) -> bool) {
         let started = Instant::now();
         while started.elapsed() < Duration::from_secs(10) {
@@ -213,7 +196,6 @@ fn exact_seeks_external_edit_and_proxies() {
         std::env::set_var("XDG_STATE_HOME", dir.join("state"));
         std::env::set_var("XDG_CONFIG_HOME", dir.join("config"));
     }
-    // Decoding on the CPU: no GPU needed.
     std::fs::create_dir_all(dir.join("config/vidcut")).unwrap();
     std::fs::write(
         dir.join("config/vidcut/preferences.toml"),
@@ -245,7 +227,6 @@ fn exact_seeks_external_edit_and_proxies() {
     Store::create(&path, &Project::new(settings)).unwrap();
     let h = Harness::start(&path);
 
-    // Build a timeline live: c1 = m1 30..90, c2 = m2 0..30, c3 = m1 200..260.
     h.ok("media.add", json!({ "paths": [a, b] }));
     h.ok("edit.append", json!({ "media": "m1", "range": "30f..90f" }));
     h.ok("edit.append", json!({ "media": "m2", "range": "0f..30f" }));
@@ -254,7 +235,6 @@ fn exact_seeks_external_edit_and_proxies() {
         json!({ "media": "m1", "range": "200f..260f" }),
     );
 
-    // Seeks are frame-exact at every boundary.
     let expected = |t: i64| -> u32 {
         match t {
             0..60 => (30 + t) as u32,
@@ -267,7 +247,6 @@ fn exact_seeks_external_edit_and_proxies() {
         assert_eq!(h.shown(dir), Some(expected(t)), "timeline frame {t}");
     }
 
-    // Stats for nerds tell of the picture shown, and the panel toggles.
     let stats = h.ok("player.state", json!({})).result["stats"].clone();
     assert_eq!(stats["picture"]["frame"], json!(149), "{stats}");
     assert_eq!(stats["picture"]["size"], json!([W, H]), "{stats}");
@@ -275,7 +254,6 @@ fn exact_seeks_external_edit_and_proxies() {
     let toggled = h.ok("player.stats", json!({})).result;
     assert_eq!(toggled["stats_shown"], json!(true));
 
-    // A headless edit by another process (bypassing the GUI) shows up.
     let rev = h.ok("project.summary", json!({})).rev;
     let store = Store::open(&path).unwrap();
     store
@@ -292,15 +270,12 @@ fn exact_seeks_external_edit_and_proxies() {
         s.project()
             .is_some_and(|p| p.rev > rev && p.marks.mark_in == Some(5))
     });
-    // ...and undoes like any other step, from the GUI's side.
     let undone = h.ok("history.undo", json!({}));
     assert_eq!(
         undone.result["undone"],
         json!(["Timeline marks: In 00:00:00:05, Out 00:00:00:15"])
     );
 
-    // A proxy of m1 (decision D41) shows the frames `frame render` shows
-    // from the original once the project plays proxies.
     let rendered = |t: i64| {
         let out = dir.join("render.png");
         h.ok("frame.render", json!({ "at": t, "out": out }));
@@ -320,9 +295,6 @@ fn exact_seeks_external_edit_and_proxies() {
         assert_eq!(h.shown(dir), want, "proxy, timeline frame {t}");
     }
 
-    // A PQ source's 10-bit AV1 proxy keeps its HDR, and the viewer
-    // tone-maps it as it does the original: it shows the frames `frame
-    // render` shows.
     let pq = fixture::ensure(
         &FixtureSpec::new(
             VideoCodec::Hevc10,
@@ -351,9 +323,6 @@ fn exact_seeks_external_edit_and_proxies() {
         assert_eq!(h.shown(dir), want, "HDR proxy, timeline frame {t}");
     }
 
-    // A fade from black on the first clip (decision D50), a second starting
-    // on its edit: the viewer and `frame render` show frame 12 of its 30
-    // with the barcode's white at 12.5/30 of 255.
     h.ok("project.set", json!({ "use_proxies": false }));
     h.ok("edit.dissolve", json!({ "at": 0, "align": "start" }));
     let white = |png: &Path| -> u8 {
@@ -378,7 +347,6 @@ fn exact_seeks_external_edit_and_proxies() {
     h.ok("gui.screenshot", json!({ "out": shot }));
     assert_eq!(white(&shot), 106, "the viewer");
 
-    // An OTIO file opens as a project file made next to it (deviation X9).
     let cut = dir.join("cut.otio");
     h.ok("export.start", json!({ "output": cut }));
     let tracks = h.ok("timeline.get", json!({})).result["tracks"].clone();
@@ -387,11 +355,8 @@ fn exact_seeks_external_edit_and_proxies() {
     let project = PathBuf::from(opened["project"].as_str().unwrap());
     assert_eq!(project.file_name().unwrap(), "cut.vidcut");
     assert_eq!(h.ok("timeline.get", json!({})).result["tracks"], tracks);
-    // The name is taken now.
     assert!(h.call("project.open", json!({ "path": cut })).is_err());
 
-    // A new project over a file already there: without force the file
-    // opens, and this one isn't a project; with force it is replaced.
     let taken = dir.join("taken.vidcut");
     std::fs::write(&taken, "not a project").unwrap();
     let create = json!({ "path": taken, "create": true, "fps": "25", "width": 640, "height": 360 });
@@ -403,7 +368,6 @@ fn exact_seeks_external_edit_and_proxies() {
     let p = made.project();
     assert_eq!((p.settings.width, p.media.len()), (640, 0));
 
-    // The pool's view is the session's: the GUI draws the one set.
     h.ok("pool.set", json!({ "view": "list" }));
     assert_eq!(h.handle.snapshot().pool.view, PoolMode::List);
 

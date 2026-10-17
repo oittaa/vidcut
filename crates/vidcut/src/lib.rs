@@ -1,5 +1,3 @@
-//! vidcut application: CLI, headless session, GUI and live control.
-
 pub mod bundle;
 pub mod cli;
 pub mod env;

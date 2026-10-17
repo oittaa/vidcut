@@ -1,6 +1,3 @@
-//! Opening an OpenTimelineIO file from the start screen (deviation X9),
-//! under simulated input (egui_kittest, no window).
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -32,7 +29,6 @@ impl live::Renderer for NoRenderer {
     fn quit(&self) {}
 }
 
-/// File dialogs: Open Project picks `pick`, a save dialog names `save`.
 struct FakeDialogs {
     pick: PathBuf,
     save: PathBuf,
@@ -50,7 +46,6 @@ impl Dialogs for FakeDialogs {
     }
 }
 
-/// Runs a request headless on `project`.
 fn run(project: &Path, method: &str, params: Value) -> Value {
     let e = Envelope::from_json(json!({ "method": method, "params": params })).unwrap();
     vidcut::session::run(Some(project), e)
@@ -58,7 +53,6 @@ fn run(project: &Path, method: &str, params: Value) -> Value {
         .result
 }
 
-/// Steps the GUI until `ready` holds.
 fn until(
     harness: &mut Harness<'_, Workspace>,
     what: &str,
@@ -79,8 +73,6 @@ fn has(harness: &Harness<'_, Workspace>, text: &str) -> bool {
     harness.query_all_by_label_contains(text).next().is_some()
 }
 
-/// Clicks `label` in a window that just came up: its first frame only
-/// measures it.
 fn click_new(harness: &mut Harness<'_, Workspace>, label: &str) {
     harness.step();
     harness.get_by_label(label).click();
@@ -109,8 +101,6 @@ fn another_editors_file_opens_after_its_questions() {
         90,
     ))
     .unwrap();
-    // A file of two clips as another editor writes it: no vidcut project
-    // in it.
     let source = dir.join("source.vidcut");
     run(&source, "project.create", json!({ "path": source }));
     run(&source, "media.add", json!({ "paths": [media] }));
@@ -129,7 +119,6 @@ fn another_editors_file_opens_after_its_questions() {
         .unwrap()
         .remove("project");
     std::fs::write(&otio, doc.to_string()).unwrap();
-    // The name next to it is taken.
     Store::create(&dir.join("cut.vidcut"), &Project::new(Settings::default())).unwrap();
 
     let (h, session) = live::start(live::Config {
@@ -173,7 +162,6 @@ fn another_editors_file_opens_after_its_questions() {
     let p = &snap.project.as_ref().unwrap().project;
     assert_eq!(p.tracks[0].clips.len(), 2);
 
-    // New Project onto that file replaces it: the save dialog asked first.
     harness.get_by_label("File").click();
     click_new(&mut harness, "New Project…");
     until(&mut harness, "the format question", |h| {

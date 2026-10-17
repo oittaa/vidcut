@@ -1,10 +1,3 @@
-//! The timeline area (spec §5, §8): the upper timeline (the whole program)
-//! over the lower timeline (a zoomed detail view whose playhead is fixed in
-//! the middle by default), with the Timeline Options and Actions menus.
-//!
-//! Every gesture ends in one request: see [`gesture`]. What a gesture would
-//! do is drawn while dragging ([`paint::preview`]).
-
 pub mod geometry;
 pub mod gesture;
 pub mod paint;
@@ -27,22 +20,14 @@ use geometry::{Hit, NEW_TRACK_STRIP, Rows, Scale, Snap, hit_rows};
 use gesture::{Ctx, Drag, Gesture, Preview, swipe};
 use paint::{Assets, Look};
 
-/// Which part of an edit is selected (V, U).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
-    /// The outgoing clip's Out.
     Out,
-    /// The incoming clip's In.
     In,
-    /// Both: a roll of the picture cut.
     Both,
-    /// The J/L handle: the audio edit (D20).
-    /// `EditSel::at` is where that audio edit sits.
     Audio,
 }
 
-/// A selected edit point (keyboard trimming with `,` and `.`), on the
-/// track it was picked on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EditSel {
     pub at: i64,
@@ -50,8 +35,6 @@ pub struct EditSel {
     pub track: TrackRef,
 }
 
-/// Outgoing clip of the audio edit at timeline frame `at` (D14): its audio
-/// ends there, and the next clip has audio and starts where the picture ends.
 pub(crate) fn audio_edit_outgoing(t: &Track, at: i64) -> Option<String> {
     t.clips.windows(2).find_map(|w| {
         let (a, b) = (&w[0], &w[1]);
@@ -60,20 +43,13 @@ pub(crate) fn audio_edit_outgoing(t: &Track, at: i64) -> Option<String> {
     })
 }
 
-/// Trims sent that haven't landed yet, and the project as they leave it.
-/// The GUI shows that and builds on it until they land, so a trim never
-/// shows the timeline as it was for a frame, and quick trims add up. A
-/// request that fails leaves it for a second at most.
 #[derive(Debug)]
 pub struct SentTrim {
-    /// The revision once all of them have landed: each makes one.
     until: u64,
     project: Arc<Project>,
     since: std::time::Instant,
 }
 
-/// Whether the cut `e` selects is still on its track: an undo or someone
-/// else's edit can take it away.
 pub(crate) fn edit_exists(p: &Project, e: &EditSel) -> bool {
     let Some(t) = p.track(&e.track.id()) else {
         return false;
@@ -84,8 +60,6 @@ pub(crate) fn edit_exists(p: &Project, e: &EditSel) -> bool {
     }
 }
 
-/// Timeline frame of the audio edit on the picture cut at `picture`.
-/// `picture` itself when the clips that meet there have no audio.
 pub(crate) fn audio_at_cut(t: &Track, picture: i64) -> i64 {
     t.clips
         .windows(2)
@@ -97,8 +71,6 @@ pub(crate) fn audio_at_cut(t: &Track, picture: i64) -> i64 {
         .unwrap_or(picture)
 }
 
-/// Each cut of `t` between two clips with sound, and where its audio edit
-/// sits (D20).
 fn audio_edits(t: &Track) -> impl Iterator<Item = (i64, i64)> + '_ {
     t.clips.windows(2).filter_map(|w| {
         let (a, b) = (&w[0], &w[1]);
@@ -107,10 +79,6 @@ fn audio_edits(t: &Track) -> impl Iterator<Item = (i64, i64)> + '_ {
     })
 }
 
-/// The edit of `t` nearest `near` that `side` selects, and where it sits:
-/// a clip's end for the Out, a clip's start for the In, any edit point for
-/// both (as V picks one), and for the audio edit, that of the nearest cut
-/// between two clips with sound. Ties go to the earlier edit.
 pub(crate) fn nearest_edit(t: &Track, near: i64, side: Side) -> Option<i64> {
     let points: Vec<(i64, i64)> = match side {
         Side::Out => t.clips.iter().map(|c| (c.end(), c.end())).collect(),
@@ -124,14 +92,10 @@ pub(crate) fn nearest_edit(t: &Track, near: i64, side: Side) -> Option<i64> {
         .map(|(_, at)| at)
 }
 
-/// The lower timeline's zoom, in pixels a frame.
 pub const ZOOM: std::ops::RangeInclusive<f64> = 0.01..=40.0;
-/// The Boring Detector's limits: Boring Clips in seconds, Jump Cuts in
-/// frames.
 pub const BORING_SECS: std::ops::RangeInclusive<f64> = 1.0..=300.0;
 pub const JUMP_FRAMES: std::ops::RangeInclusive<i64> = 1..=120;
 
-/// A track by its id (`V2`, `A1`), small enough to keep selections `Copy`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrackRef {
     pub audio: bool,
@@ -139,8 +103,6 @@ pub struct TrackRef {
 }
 
 impl TrackRef {
-    /// Track 1, the main story: the Smart Indicator, V and Smart Insert
-    /// take their edits from it (spec D36).
     pub const MAIN: Self = Self { audio: false, n: 1 };
 
     pub fn of(id: &str) -> Option<Self> {
@@ -155,7 +117,6 @@ impl TrackRef {
         })
     }
 
-    /// The track of clip `id`.
     pub fn of_clip(p: &Project, id: &str) -> Option<Self> {
         let (t, _) = p.find_clip(id)?;
         Self::of(&p.tracks[t].id)
@@ -166,7 +127,6 @@ impl TrackRef {
     }
 }
 
-/// Timeline Options, kept between runs.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Options {
@@ -178,21 +138,17 @@ pub struct Options {
     pub status: bool,
     pub filmstrips: bool,
     pub waveforms: bool,
-    /// Lower timeline zoom in pixels per frame.
     pub ppf: f64,
-    /// The Boring Detector is on, and its limits: clips longer
-    /// than `boring_secs` and shorter than `jump_frames` are highlighted.
     pub boring: bool,
     pub boring_secs: f64,
     pub jump_frames: i64,
-    /// What Dynamic Trim does with selected clips.
     pub dynamic_mode: tools::DynamicMode,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
-            fixed_playhead: true, // decision D1
+            fixed_playhead: true,
             snapping: true,
             safe_edit: false,
             names: true,
@@ -201,7 +157,6 @@ impl Default for Options {
             filmstrips: true,
             waveforms: true,
             ppf: 4.0,
-            // Decision D31.
             boring: false,
             boring_secs: 30.0,
             jump_frames: 10,
@@ -210,7 +165,6 @@ impl Default for Options {
     }
 }
 
-/// A gesture in progress, on the upper or lower timeline.
 #[derive(Debug)]
 pub struct ActiveDrag {
     pub drag: Drag,
@@ -218,51 +172,28 @@ pub struct ActiveDrag {
     pub preview: Preview,
 }
 
-/// The timeline area's view state.
 #[derive(Debug)]
 pub struct TimelineView {
     pub options: Options,
-    /// `Instant` of egui time zero.
     pub epoch: Instant,
-    /// N pressed during the current drag: snapping flipped until release
-    ///.
     pub snap_flipped: bool,
-    /// First visible frame of the lower timeline with a free playhead.
     pub scroll: f64,
     pub drag: Option<ActiveDrag>,
     pub edit: Option<EditSel>,
-    /// The clip whose menu is open, and whether on the upper timeline.
     pub clip_menu: Option<(bool, String)>,
-    /// The last frame a scrub showed (to send each frame once).
     pub scrub_sent: Option<i64>,
-    /// A two-finger swipe moving the playhead: the frame it has reached, and
-    /// when it last moved.
     pub swipe: Option<(f64, Instant)>,
-    /// Marker being edited, and its fields.
     pub marker_dialog: Option<MarkerDialog>,
-    /// Change Clip Duration (Ctrl+D), the typed value.
     pub duration_dialog: Option<String>,
-    /// Change Clip Speed (R), while open.
     pub speed_dialog: Option<SpeedDialog>,
-    /// Ripple Delete Silence's dialog, while open.
     pub silence: Option<tools::SilenceDialog>,
-    /// Analyze Timeline Edits (the Boring Detector's settings): seconds and
-    /// frames being edited.
     pub boring_dialog: Option<(f64, i64)>,
-    /// Dynamic Trim mode (W), while on.
     pub dynamic: Option<tools::Dynamic>,
-    /// Upper and lower track rects and scales of the last frame.
     pub layout: Option<Layout>,
-    /// How many tracks the project had in the last frame.
     pub tracks: usize,
-    /// The project revision of the last frame.
     pub rev: u64,
-    /// Trims sent that haven't landed yet.
     pub sent_trim: Option<SentTrim>,
-    /// The track shown enlarged in the lower timeline (decision D43), if
-    /// any.
     pub enlarged: Option<String>,
-    /// Where the transitions of the project shown sit, found once for it.
     pub placed: Option<(Arc<Project>, Arc<paint::Placed>)>,
 }
 
@@ -295,7 +226,6 @@ impl Default for TimelineView {
 }
 
 impl TimelineView {
-    /// [`paint::placed`] of `p`, found again only for another project.
     fn placed_for(&mut self, p: &Arc<Project>) -> Arc<paint::Placed> {
         if let Some((q, placed)) = &self.placed
             && Arc::ptr_eq(q, p)
@@ -308,10 +238,8 @@ impl TimelineView {
     }
 }
 
-/// Change Clip Speed's fields (decision D48).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpeedDialog {
-    /// How fast, in percent of normal speed.
     pub percent: f64,
     pub reverse: bool,
     pub freeze: bool,
@@ -326,35 +254,24 @@ pub struct MarkerDialog {
     pub color: String,
 }
 
-/// Where things were drawn last frame (hit testing for new presses).
 #[derive(Debug, Clone)]
 pub struct Layout {
     pub upper_ruler: Rect,
-    /// The upper timeline's rows: Track 1 and a thin row per other track.
     pub upper: Rows,
     pub upper_scale: Scale,
     pub lower_ruler: Rect,
-    /// The lower timeline's rows, one per track.
     pub lower: Rows,
     pub lower_scale: Scale,
 }
 
 const UPPER_RULER: f32 = 16.0;
 const UPPER_TRACK: f32 = 30.0;
-/// Upper timeline rows for tracks other than Track 1.
 const UPPER_OTHER: f32 = 9.0;
-/// Preferred lower timeline row heights: Track 1, other video, audio.
 const LOWER_ROWS: [f32; 3] = [100.0, 60.0, 46.0];
 const LOWER_RULER: f32 = 22.0;
-/// The track header column: wide enough for a track's name with its four
-/// buttons on one line, which must not reach into the timeline.
 const HEADER: f32 = 120.0;
-/// The height of the header column's controls by the overview and the
-/// lower ruler. Their boxes are as tall as those, whatever height a theme
-/// gives buttons.
 const BOX_CONTROL: f32 = 18.0;
 
-/// The icons of the timeline's controls.
 mod icon {
     pub use egui_phosphor::regular::{
         ARROWS_IN_LINE_HORIZONTAL as RIPPLE, ARROWS_IN_LINE_VERTICAL as SHRINK,
@@ -366,15 +283,12 @@ mod icon {
     };
 }
 
-/// An icon button lit while `on`, read by `name` (accessibility, tests),
-/// with `tip` on hover.
 fn icon_toggle(ui: &mut egui::Ui, icon: &str, name: &str, on: bool, tip: &str) -> egui::Response {
     let r = ui.add(egui::Button::selectable(on, RichText::new(icon).size(15.0)));
     r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, name));
     r.on_hover_text(tip)
 }
 
-/// A track header's icon button at `at`, lit while `lit`, read by `name`.
 fn header_button(
     ui: &mut egui::Ui,
     at: Rect,
@@ -391,7 +305,6 @@ fn header_button(
     r.on_hover_text(tip)
 }
 
-/// An icon that opens a menu, read and hovered as `name`.
 fn icon_menu(ui: &mut egui::Ui, icon: &str, name: &str, menu: impl FnOnce(&mut egui::Ui)) {
     let r = ui
         .menu_button(RichText::new(icon).size(15.0), menu)
@@ -438,13 +351,10 @@ impl Workspace {
         }
     }
 
-    /// Whether `track` is where edit functions go: the one picked, else
-    /// Track 1.
     fn is_target(&self, track: &str) -> bool {
         self.target.as_deref() == Some(track) || (self.target.is_none() && track == MAIN)
     }
 
-    /// The project as shown: with the trims on their way.
     pub(crate) fn shown_project(&mut self) -> Option<Arc<Project>> {
         let p = self.project_shared()?;
         if let Some(s) = &self.timeline.sent_trim {
@@ -456,7 +366,6 @@ impl Workspace {
         Some(p)
     }
 
-    /// Records a trim just sent, as `trimmed` leaves the project shown.
     pub(crate) fn trim_sent(&mut self, trimmed: Project) {
         let rev = self.project().map_or(0, |p| p.rev);
         let until = match &self.timeline.sent_trim {
@@ -477,9 +386,6 @@ impl Workspace {
         self.timeline_toolbar(ui, &p);
         let full = ui.available_rect_before_wrap();
         let others = p.tracks.len().saturating_sub(1).min(6) as f32;
-        // The overview starts after the track header column, lined up with
-        // the detailed timeline, and leaves only a sliver after the end:
-        // the window's left edge is easy to miss, its right edge isn't.
         let upper_rect = Rect::from_min_size(
             pos2(full.left() + HEADER, full.top()),
             vec2(
@@ -499,7 +405,6 @@ impl Workspace {
         });
         let lower_resp = ui.allocate_rect(lower_rect, Sense::click_and_drag());
 
-        // Scales.
         let fps = p.settings.fps.as_f64();
         let end = p.end();
         let span = ((end as f64 * 1.01).max(fps * 10.0)).ceil() as i64;
@@ -545,15 +450,11 @@ impl Workspace {
         };
         self.timeline.layout = Some(layout.clone());
 
-        // Draw. While Dynamic Trim runs, the clips are drawn as the trim
-        // leaves them, so the cut moves as it runs; K sends it (spec D32).
         let trimmed = self.dynamic_drawn(&p);
         let (drawn, edit_at) = match &trimmed {
             Some((q, at)) => (q, *at),
             None => (&*p, None),
         };
-        // Found again only for another project, or each frame while
-        // Dynamic Trim redraws it.
         let placed = match &trimmed {
             Some((q, _)) => Arc::new(paint::placed(q)),
             None => self.timeline.placed_for(&p),
@@ -627,9 +528,6 @@ impl Workspace {
                 0.0,
                 theme::colors().panel_dark,
             );
-            // Each track's header is a band beside its row, with the rows'
-            // gaps between them, so a header reads as its track's.
-            // The target track's band is lighter, with an accent edge.
             for row in &layout.lower.rows {
                 let band = Rect::from_min_max(
                     pos2(lower_rect.left() + 1.0, row.rect.rect.top()),
@@ -652,7 +550,6 @@ impl Workspace {
                     continue;
                 };
                 let look = Look {
-                    // Small rows show less.
                     filmstrips: look.filmstrips && row.rect.rect.height() >= 40.0,
                     durations: look.durations && row.rect.rect.height() >= 40.0,
                     target: self.is_target(&row.track),
@@ -679,13 +576,11 @@ impl Workspace {
                     Side::In => (x, x + 6.0),
                     Side::Both | Side::Audio => (x - 4.0, x + 4.0),
                 };
-                // The J/L handle lives in the audio band (D20).
                 let y = if e.side == Side::Audio {
                     egui::Rangef::new(v1.rect.audio_top, v1.rect.rect.bottom())
                 } else {
                     v1.rect.rect.y_range()
                 };
-                // Red where a Dynamic Trim run stopped at a limit.
                 let stopped = self
                     .timeline
                     .dynamic
@@ -721,7 +616,6 @@ impl Workspace {
         );
         self.timeline_boxes(ui, upper_box, lower_box, &p);
 
-        // While a trim drags, its pointer stays.
         if let Some(d) = &self.timeline.drag
             && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
         {
@@ -749,7 +643,6 @@ impl Workspace {
             }
         }
 
-        // The pointer shows what a drag would do.
         if self.timeline.drag.is_none()
             && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
         {
@@ -757,14 +650,10 @@ impl Workspace {
                 (&layout.upper, &upper_scale, upper_rect),
                 (&layout.lower, &lower_scale, content),
             ] {
-                // Only over the timeline itself: an edge's zone reaches past
-                // the first clip's start, over the track header's buttons.
                 if !area.contains(pos) {
                     continue;
                 }
                 let (track, what) = hit_rows(&p, rows, scale, pos);
-                // The audio edit has no mark of its own: light it up while it
-                // can be grabbed, so a J/L cut is found without guessing.
                 if let Hit::AudioEdit { outgoing, .. } = &what
                     && let Some(row) = track.as_deref().and_then(|t| rows.get(t))
                     && let Some(c) = p.clip(outgoing)
@@ -777,8 +666,6 @@ impl Workspace {
                         Color32::from_rgb(255, 210, 60),
                     );
                 }
-                // The slip handle shows on the clip under the pointer, and
-                // lights up while it can be grabbed.
                 if let Hit::Clip(id) | Hit::Slip(id) = &what
                     && let Some(row) = track.as_deref().and_then(|t| rows.get(t))
                     && let Some(c) = p.clip(id)
@@ -801,9 +688,6 @@ impl Workspace {
                         ink,
                     );
                 }
-                // The clip end a drag would trim, or both ends at a cut that
-                // rolls, turn green, and the timeline draws its own pointer:
-                // a bracket for each end that moves, the arrow on its side.
                 let green = Color32::from_rgb(90, 220, 120);
                 let ends: Vec<(f32, f32)> = match &what {
                     Hit::Edge(id, edge) => p
@@ -822,9 +706,6 @@ impl Workspace {
                 };
                 if let Some(row) = track.as_deref().and_then(|t| rows.get(t)) {
                     let ys = row.rect.rect.y_range();
-                    // Each end: a solid band at the edge and a wash into the
-                    // clip, on the side that moves (`side`: 1 into the clip
-                    // on the right, -1 into the one on the left).
                     for (x, side) in &ends {
                         let span = |w: f32| {
                             let far = x + side * w;
@@ -854,8 +735,6 @@ impl Workspace {
             }
         }
 
-        // Input. Gesture timing (hover, Safe Edit) follows egui's clock, so
-        // tests can drive it.
         let now =
             self.timeline.epoch + std::time::Duration::from_secs_f64(ui.input(|i| i.time).max(0.0));
         for (resp, is_upper) in [(&upper_resp, true), (&lower_resp, false)] {
@@ -885,7 +764,6 @@ impl Workspace {
         self.dynamic_tick(ui.ctx());
     }
 
-    /// The playhead turns yellow in Dynamic Trim mode.
     fn playhead_color(&self) -> Color32 {
         if self.timeline.dynamic.is_some() {
             Color32::from_rgb(240, 200, 40)
@@ -894,8 +772,6 @@ impl Workspace {
         }
     }
 
-    /// The lower timeline's scale: the playhead fixed in the middle, or a
-    /// scrolled view that pages when the playhead leaves it.
     fn lower_scale(&mut self, content: Rect, playhead: i64) -> Scale {
         let ppf = self.timeline.options.ppf;
         if self.timeline.options.fixed_playhead {
@@ -910,9 +786,6 @@ impl Workspace {
         Scale::anchored(content.left(), self.timeline.scroll, ppf)
     }
 
-    /// The row above the timelines: the In/Out marks, zoom and what the
-    /// timeline holds. Its controls are in the header column's boxes
-    /// (`timeline_boxes`).
     fn timeline_toolbar(&mut self, ui: &mut egui::Ui, p: &Project) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Timeline").strong());
@@ -949,11 +822,6 @@ impl Workspace {
         });
     }
 
-    /// The header column's boxes, as the Cut page has them (spec §5): by the
-    /// overview, the Timeline Options, Timeline Actions and Edit Actions
-    /// menus and the target track for edit functions; by the lower ruler,
-    /// Ripple On, Dynamic Trim, Split, Add Marker and Snap. Icons, read by
-    /// their names; each says its name and key on hover.
     fn timeline_boxes(&mut self, ui: &mut egui::Ui, upper: Rect, lower: Rect, p: &Project) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(upper.shrink(3.0)));
         child.set_clip_rect(upper.intersect(child.clip_rect()));
@@ -975,7 +843,6 @@ impl Workspace {
             for t in p.tracks.iter() {
                 let on = self.is_target(&t.id);
                 let r = ui.selectable_label(on, RichText::new(&t.id).small());
-                // Read apart from the track headers' own labels.
                 let name = format!("Target {}", t.id);
                 r.widget_info(|| {
                     egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &name)
@@ -995,7 +862,6 @@ impl Workspace {
         child.horizontal_centered(|ui| self.timeline_tools(ui, p));
     }
 
-    /// Ripple On, Dynamic Trim, Split, Add Marker and Snap.
     fn timeline_tools(&mut self, ui: &mut egui::Ui, p: &Project) {
         let ripple = p.settings.ripple_on;
         if icon_toggle(
@@ -1052,8 +918,6 @@ impl Workspace {
         }
     }
 
-    /// Timeline Options: how the timeline shows and the modes of the whole
-    /// timeline.
     fn options_menu(&mut self, ui: &mut egui::Ui, p: &Project) {
         let mut ripple = p.settings.ripple_on;
         if ui.checkbox(&mut ripple, "Ripple On").changed() {
@@ -1086,7 +950,6 @@ impl Workspace {
         }
     }
 
-    /// Timeline Actions: what adds to the timeline or changes it as a whole.
     fn timeline_actions_menu(&mut self, ui: &mut egui::Ui, p: &Project) {
         if ui.button("Add Video Track").clicked() {
             self.send("track.add", json!({ "kind": "video" }));
@@ -1163,7 +1026,6 @@ impl Workspace {
         }
     }
 
-    /// Edit Actions: what changes the clips at the playhead or selected.
     fn edit_actions_menu(&mut self, ui: &mut egui::Ui) {
         let at = self.snap.timeline.position;
         for (label, edge) in [
@@ -1200,9 +1062,6 @@ impl Workspace {
         }
     }
 
-    /// Track headers: the number picks the target track for
-    /// edit functions; lock, mute and video enable; a menu to add and remove
-    /// tracks.
     fn track_headers(&mut self, ui: &mut egui::Ui, lower_rect: Rect, rows: &Rows, p: &Project) {
         for row in &rows.rows {
             let Some(t) = p.track(&row.track) else {
@@ -1214,14 +1073,11 @@ impl Workspace {
                 pos2(lower_rect.left() + HEADER - 4.0, r.bottom()),
             );
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-            // Nothing in a header reaches past it, to be hovered or clicked
-            // over a clip.
             child.set_clip_rect(rect.intersect(child.clip_rect()));
             child.spacing_mut().button_padding.x = 3.0;
             let is_target = self.is_target(&t.id);
             let label = t.name.clone().unwrap_or_else(|| t.id.clone());
             let parts = geometry::header_parts(rect);
-            // A long name is cut short rather than the toggles.
             let mut name = child.new_child(
                 egui::UiBuilder::new()
                     .max_rect(parts.name)
@@ -1229,7 +1085,6 @@ impl Workspace {
             );
             let r = name
                 .add(
-                    // Selected, the name takes the selection's text color.
                     egui::Button::selectable(
                         is_target,
                         if is_target {
@@ -1241,8 +1096,6 @@ impl Workspace {
                     .truncate(),
                 )
                 .on_hover_text("The target track for edit functions");
-            // A click makes the track the target, however often it comes;
-            // V1, the default, is no target of its own.
             if r.clicked() {
                 self.target = (t.id != MAIN).then(|| t.id.clone());
             }
@@ -1271,7 +1124,6 @@ impl Workspace {
                     }
                 }
             });
-            // The enlarge button: one track at a time.
             let enlarged = self.timeline.enlarged.as_deref() == Some(t.id.as_str());
             let (glyph, tip) = if enlarged {
                 (icon::SHRINK, "Back to its usual height")
@@ -1285,10 +1137,6 @@ impl Workspace {
             if header_button(&mut child, parts.enlarge, glyph, &name, enlarged, tip).clicked() {
                 self.timeline.enlarged = (!enlarged).then(|| t.id.clone());
             }
-            // The icon says the state; the button is lit when it is out of
-            // the ordinary: locked, muted, video off. Each has its own
-            // column, so an audio track's lock and audio sit under the video
-            // tracks'.
             let lock = if t.locked {
                 (icon::LOCKED, "Unlock the track")
             } else {
@@ -1352,12 +1200,10 @@ impl Workspace {
         }
     }
 
-    /// A press that became a drag: pick the gesture from what is under it.
     fn start_drag(&mut self, ui: &egui::Ui, p: &Project, upper: bool, layout: &Layout) {
         let Some(press) = ui.input(|i| i.pointer.press_origin()) else {
             return;
         };
-        // The track headers are buttons: a drag from there trims nothing.
         if !upper && press.x < layout.lower_ruler.left() {
             return;
         }
@@ -1396,7 +1242,6 @@ impl Workspace {
             }
         } else {
             let track = track.unwrap_or_else(|| MAIN.to_string());
-            // Other tracks ripple only where Track 1 has nothing.
             let ripples = |clip: &str| {
                 track == MAIN
                     || p.clip(clip).is_some_and(|c| {
@@ -1434,7 +1279,6 @@ impl Workspace {
                     let mut clips = if self.snap.selection.clips.contains(&id) {
                         self.snap.selection.clips.clone()
                     } else {
-                        // Dragging an unselected clip selects it.
                         self.send("selection.set", json!({ "clips": [id] }));
                         vec![id]
                     };
@@ -1475,7 +1319,6 @@ impl Workspace {
         });
     }
 
-    /// Advances the gesture in progress; the release sends its request.
     fn run_drag(&mut self, ui: &egui::Ui, p: &Project, layout: &Layout, now: Instant) {
         let Some(mut d) = self.timeline.drag.take() else {
             return;
@@ -1489,7 +1332,6 @@ impl Workspace {
             )
         });
         if escape {
-            // Esc cancels: nothing changes (a scrub stays where it is).
             self.timeline.snap_flipped = false;
             if let Some(f) = self.timeline.scrub_sent.take() {
                 self.seek(PlayerId::Timeline, f, false);
@@ -1503,8 +1345,6 @@ impl Workspace {
             self.timeline.drag = Some(d);
             return;
         };
-        // A bin dropped on a folder or a path level. Self, a descendant
-        // and the current parent send nothing (spec §3).
         if let Gesture::Bin { path } = &d.drag.gesture {
             let path = path.clone();
             if released {
@@ -1522,7 +1362,6 @@ impl Workspace {
             && let Gesture::Media { media, .. } = &d.drag.gesture
             && let Some(bin) = self.bin_target_at(pos)
         {
-            // Dropped on a bin in the pool: the clips move into it.
             let ids = if self.snap.selection.media.contains(media) {
                 self.snap.selection.media.clone()
             } else {
@@ -1532,7 +1371,6 @@ impl Workspace {
             self.timeline.snap_flipped = false;
             return;
         }
-        // Pool drags follow the pointer to whichever timeline it is over.
         if matches!(d.drag.gesture, Gesture::Media { .. }) {
             d.upper = layout.upper.area.expand(8.0).contains(pos);
         }
@@ -1542,8 +1380,6 @@ impl Workspace {
         };
         let scrubbing = matches!(d.drag.gesture, Gesture::Scrub { .. });
         let fixed = !d.upper && self.timeline.options.fixed_playhead;
-        // Clips don't snap to a fixed playhead; scrubs don't snap
-        // to the playhead they move.
         let playhead = (!fixed && !scrubbing).then_some(self.snap.timeline.position);
         let snap = Snap::new(p, playhead, &moving);
         let (preview, request) = {
@@ -1575,16 +1411,9 @@ impl Workspace {
             return;
         }
         self.timeline.drag = Some(d);
-        // Hover timers and auto-scroll need frames while dragging.
         ui.ctx().request_repaint();
     }
 
-    /// The wheel and the trackpad over a timeline (spec §5). Ctrl+wheel and
-    /// a pinch zoom the lower timeline: egui gives both as a zoom, as it
-    /// gives Cmd+wheel on a Mac. A sideways swipe scrolls the timeline: under
-    /// a fixed playhead it moves the clips, as dragging the ruler does, and
-    /// with Fixed Playhead off it scrolls the view. On the upper timeline,
-    /// which shows the whole program, it moves the playhead.
     fn wheel(
         &mut self,
         ui: &egui::Ui,
@@ -1628,9 +1457,6 @@ impl Workspace {
         self.timeline.swipe = Some((to, now));
     }
 
-    /// A swipe ends once nothing has moved it for a moment. Its frame is then
-    /// sought once more as a plain seek, for the command log, as a scrub's
-    /// release does.
     fn end_swipe(&mut self, ctx: &egui::Context, now: Instant) {
         const QUIET: Duration = Duration::from_millis(300);
         let Some((frame, last)) = self.timeline.swipe else {
@@ -1644,7 +1470,6 @@ impl Workspace {
         self.seek(PlayerId::Timeline, frame.round() as i64, false);
     }
 
-    /// Clicks that didn't become drags: select, seek, menus, dialogs.
     fn clicks(
         &mut self,
         ui: &mut egui::Ui,
@@ -1672,7 +1497,6 @@ impl Workspace {
             }
             self.timeline.clip_menu = id.map(|id| (upper, id));
         }
-        // Drawn every frame while open: egui closes a menu that isn't.
         if let Some((on_upper, id)) = self.timeline.clip_menu.clone()
             && on_upper == upper
         {
@@ -1690,8 +1514,6 @@ impl Workspace {
         let mods = ui.input(|i| i.modifiers);
         let on_ruler = ruler.expand2(vec2(0.0, 2.0)).contains(pos);
         let what = hit_rows(p, rows, &scale, pos).1;
-        // egui counts a double-click as a triple when the click before
-        // came shortly before, wherever it was: either opens.
         if resp.double_clicked() || resp.triple_clicked() {
             if on_ruler {
                 if let Some(k) = p
@@ -1740,8 +1562,6 @@ impl Workspace {
                         });
                     }
                 }
-                // The J/L handle is the audio edit (D20). The selection sits
-                // on that offset, so `,` and `.` move the audio.
                 Hit::AudioEdit { outgoing, .. } => {
                     if let (Some(c), Some(track)) =
                         (p.clip(outgoing), TrackRef::of_clip(p, outgoing))
@@ -1869,7 +1689,6 @@ impl Workspace {
             "edit.delete",
             json!({ "clips": clips, "lift": true }),
         );
-        // A compound clip from another editor (deviation X9).
         if c.compound.is_some() {
             ui.separator();
             item(
@@ -1932,9 +1751,6 @@ impl Workspace {
         painter.galley(at, galley, Color32::WHITE);
     }
 
-    // ---------------------------------------------------------------- media drags
-
-    /// Starts dragging a bin onto another bin in the pool (spec §3).
     pub(crate) fn start_bin_drag(&mut self, path: &str, press: Pos2) {
         if path.is_empty() {
             return;
@@ -1952,8 +1768,6 @@ impl Workspace {
         });
     }
 
-    /// Starts dragging media from the pool (or the source viewer) towards the
-    /// timeline (spec §7.3).
     pub(crate) fn start_media_drag(&mut self, media: &str, range: (i64, i64), press: Pos2) {
         if range.1 <= range.0 {
             return;
@@ -1974,8 +1788,6 @@ impl Workspace {
         });
     }
 
-    /// While media or a bin is being dragged anywhere: its label follows
-    /// the pointer.
     pub(crate) fn media_drag_overlay(&self, ctx: &egui::Context) {
         if let Some(text) = self.bin_drag_label()
             && let Some(pos) = ctx.input(|i| i.pointer.latest_pos())
@@ -2033,10 +1845,6 @@ impl Workspace {
         }
     }
 
-    // ---------------------------------------------------------------- keys and dialogs
-
-    /// Edit selection and keyboard trimming (`,`/`.` from the Edit
-    /// page nudge the selected edit one frame, Shift for one second).
     pub(crate) fn timeline_keys(&mut self, input: &egui::InputState) {
         let Some(p) = self.project_shared() else {
             return;
@@ -2057,7 +1865,6 @@ impl Workspace {
         if pressed(Key::U)
             && let Some(e) = &mut self.timeline.edit
         {
-            // U cycles the picture trim. An audio edit stays the audio edit (D20).
             e.side = match e.side {
                 Side::Both => Side::Out,
                 Side::Out => Side::In,
@@ -2080,7 +1887,6 @@ impl Workspace {
         } else {
             0
         };
-        // While Dynamic Trim runs, its pending trim is the one edit (D32).
         if nudge != 0
             && self.timeline.dynamic.is_none()
             && let Some(e) = self.timeline.edit
@@ -2098,11 +1904,6 @@ impl Workspace {
         }
     }
 
-    /// Trims the selected edit by `by` frames: the Out (outgoing tail), the
-    /// In (incoming head), both (a picture roll), or the audio edit (the J/L
-    /// offset). The selection follows the edit at once, ahead of the trim
-    /// landing; a trim that can't be made (tried on a copy) leaves it, and
-    /// the session says why.
     pub(crate) fn nudge_edit(&mut self, side: Side, by: i64) {
         let Some(e) = self.timeline.edit else { return };
         let Some(p) = self.shown_project() else {
@@ -2163,7 +1964,6 @@ impl Workspace {
         if tried.is_err() {
             return;
         }
-        // Where an In trim leaves the edit depends on whether it ripples.
         let at = if moves {
             e.at + by
         } else {
@@ -2235,7 +2035,6 @@ impl Workspace {
         }
     }
 
-    /// Change Clip Duration (Ctrl+D).
     fn duration_window(&mut self, ctx: &egui::Context) {
         let Some(mut text) = self.timeline.duration_dialog.take() else {
             return;
@@ -2289,7 +2088,6 @@ impl Workspace {
         }
     }
 
-    /// Opens Change Clip Speed with the first selected clip's speed.
     fn open_speed_dialog(&mut self) {
         let Some(p) = self.project() else {
             return;
@@ -2314,7 +2112,6 @@ impl Workspace {
         });
     }
 
-    /// Change Clip Speed (R; decision D48).
     fn speed_window(&mut self, ctx: &egui::Context) {
         let Some(mut d) = self.timeline.speed_dialog.take() else {
             return;
@@ -2372,7 +2169,6 @@ impl Workspace {
         }
     }
 
-    /// Opens the Trim Editor for the edit at `at` (double-click an edit).
     pub(crate) fn open_trim_editor(&mut self, at: i64, track: TrackRef) {
         self.timeline.edit = Some(EditSel {
             at,
@@ -2383,10 +2179,6 @@ impl Workspace {
         self.show_timeline();
     }
 
-    /// `gui.trim_editor`: opens the Trim Editor on the edit of its track
-    /// nearest `at` (else the edit it shows, else the one nearest the
-    /// playhead) and trims that edit by `by` as its buttons do, or closes
-    /// it.
     pub fn trim_editor_request(&mut self, r: crate::live::TrimEditor) {
         let crate::live::TrimEditor::Open {
             at,
@@ -2434,8 +2226,6 @@ impl Workspace {
         }
     }
 
-    /// Selects the edit of `track` nearest `near` that `side` selects
-    /// (`selection.set`).
     pub fn select_edit(&mut self, near: i64, track: &str, side: Side) -> Result<(), String> {
         let t = TrackRef::of(track).ok_or_else(|| format!("There is no {track}"))?;
         let p = self.shown_project().ok_or("No project is open")?;
@@ -2450,8 +2240,6 @@ impl Workspace {
         Ok(())
     }
 
-    /// Selects `side` of the selected edit, as U does. Between the picture
-    /// and the audio edit of a cut, the selection moves to the other.
     pub fn set_edit_side(&mut self, side: Side) -> Result<(), String> {
         let e = self.timeline.edit.ok_or("No edit is selected")?;
         let p = self.shown_project().ok_or("No project is open")?;
@@ -2477,7 +2265,6 @@ impl Workspace {
         Ok(())
     }
 
-    /// `gui.timeline`: the zoom and Timeline Options, kept between runs.
     pub fn set_timeline_options(
         &mut self,
         set: &vidcut_core::request::TimelineOptions,
@@ -2511,7 +2298,6 @@ impl Workspace {
         Ok(())
     }
 
-    /// The zoom and Timeline Options, as `gui.timeline` names them.
     pub(crate) fn timeline_state(&self) -> crate::live::TimelineState {
         let o = &self.timeline.options;
         crate::live::TimelineState {
@@ -2530,7 +2316,6 @@ impl Workspace {
         }
     }
 
-    /// The edit point selected, as `selection.get` gives it.
     pub(crate) fn edit_point(&self) -> Option<crate::live::EditPoint> {
         self.timeline.edit.map(|e| crate::live::EditPoint {
             at: e.at,
@@ -2569,8 +2354,6 @@ mod tests {
 
     use super::*;
 
-    /// A clip of m1 at `start`, its sound running `tail` frames past its
-    /// end, or without sound.
     fn clip(id: &str, start: i64, duration: i64, tail: Option<i64>) -> Clip {
         Clip {
             id: id.into(),
@@ -2599,7 +2382,6 @@ mod tests {
 
     #[test]
     fn the_nearest_audio_edit_is_that_of_the_nearest_cut_with_sound() {
-        // The cut at 120 is nearer 110, but c3 has no sound.
         let t = Track {
             clips: vec![
                 clip("c1", 0, 60, Some(8)),

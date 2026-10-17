@@ -1,10 +1,3 @@
-//! OpenTimelineIO bundles (deviation X9): a timeline with its media, as an
-//! `.otioz` zip file or an
-//! `.otiod` folder. Both are laid out as OpenTimelineIO's own adapters lay
-//! them out: `content.otio` and, in a zip, `version.txt` at the top, the
-//! media under `media/`, named by paths relative to the bundle. Media are
-//! stored uncompressed.
-
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
@@ -21,17 +14,13 @@ const VERSION_FILE: &str = "version.txt";
 const VERSION: &str = "1.0.0";
 const MEDIA: &str = "media";
 
-/// A bundle format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// A zip file.
     Otioz,
-    /// A folder.
     Otiod,
 }
 
 impl Kind {
-    /// The bundle format a path's extension names.
     pub fn of(path: &Path) -> Option<Self> {
         let ext = path.extension()?.to_str()?.to_ascii_lowercase();
         match ext.as_str() {
@@ -49,14 +38,10 @@ impl Kind {
     }
 }
 
-/// The files of one media in a bundle.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Item {
     pub media: String,
-    /// What the timeline names it by: its path in the bundle (for an image
-    /// sequence, the folder of its pictures, ending in `/`).
     pub location: String,
-    /// `(file, its path in the bundle)`.
     pub files: Vec<(PathBuf, String)>,
     pub bytes: u64,
 }
@@ -72,7 +57,6 @@ fn zip_error(path: &Path) -> impl Fn(zip::result::ZipError) -> Error + '_ {
     }
 }
 
-/// A file name that works on every system a bundle may go to.
 fn portable(name: &str) -> String {
     let s: String = name
         .chars()
@@ -90,8 +74,6 @@ fn portable(name: &str) -> String {
     if s.is_empty() { "media".into() } else { s }
 }
 
-/// `media/<name>`, numbered (`name-2.ext`) when another file has that name
-/// (ignoring case, as macOS and Windows do).
 fn unique(taken: &mut Vec<String>, name: &str) -> String {
     let (stem, ext) = match name.rfind('.').filter(|&i| i > 0) {
         Some(i) => (&name[..i], &name[i..]),
@@ -112,8 +94,6 @@ fn unique(taken: &mut Vec<String>, name: &str) -> String {
     }
 }
 
-/// Where the media `ids` go in a bundle, and their files. Fails if a file
-/// is missing.
 pub fn plan(p: &Project, ids: &[String]) -> Result<Vec<Item>> {
     let mut taken = Vec::new();
     let mut items = Vec::new();
@@ -135,7 +115,6 @@ pub fn plan(p: &Project, ids: &[String]) -> Result<Vec<Item>> {
             bytes: 0,
         };
         match &m.sequence {
-            // The pictures keep their names, in a folder named after theirs.
             Some(s) => {
                 let dir = m.path.parent().unwrap_or(Path::new("/"));
                 let folder = dir
@@ -187,7 +166,6 @@ pub fn plan(p: &Project, ids: &[String]) -> Result<Vec<Item>> {
     Ok(items)
 }
 
-/// Copies `src` into `to`, counting bytes into `done` of `total`.
 fn copy(
     src: &Path,
     to: &mut dyn Write,
@@ -213,9 +191,6 @@ fn copy(
     }
 }
 
-/// Writes a bundle of the timeline `text` and the media `items` to `out`,
-/// through a temporary name next to it so that a failed or cancelled
-/// export leaves nothing. `progress` gets the bytes written of all.
 pub fn write(
     kind: Kind,
     out: &Path,
@@ -239,7 +214,6 @@ pub fn write(
             )));
         }
     }
-    // Named as media exports name theirs, so the GUI's cleanup finds it.
     let part = vidcut_av::export::partial_path(out);
     let _ = std::fs::remove_dir_all(&part);
     let _ = std::fs::remove_file(&part);
@@ -276,8 +250,6 @@ fn write_zip(
     let err = zip_error(part);
     let werr = io_error(part);
     let options = SimpleFileOptions::default().unix_permissions(0o644);
-    // As OpenTimelineIO's adapter writes them: the version and the timeline
-    // compressed, then the media stored.
     let deflated = options.compression_method(zip::CompressionMethod::Deflated);
     zip.start_file(VERSION_FILE, deflated).map_err(&err)?;
     zip.write_all(VERSION.as_bytes()).map_err(&werr)?;
@@ -321,13 +293,8 @@ fn write_folder(
     std::fs::write(part.join(CONTENT), text).map_err(io_error(part))
 }
 
-/// What a file was when it was unpacked or checked: size, modification
-/// time (ns) and CRC-32.
 type Seen = (u64, i128, u32);
 
-/// Files unpacked or checked in this process. An import unpacks on a
-/// worker first, then opens the bundle again to edit: it needn't read the
-/// media twice.
 static CHECKED: LazyLock<Mutex<HashMap<PathBuf, Seen>>> = LazyLock::new(Default::default);
 
 fn modified(meta: &std::fs::Metadata) -> i128 {
@@ -346,7 +313,6 @@ fn remember(path: &Path, crc: u32) {
     }
 }
 
-/// Whether the file at `path` holds what has CRC-32 `crc`.
 fn holds(path: &Path, meta: &std::fs::Metadata, crc: u32) -> bool {
     let known = CHECKED
         .lock()
@@ -378,10 +344,6 @@ fn holds(path: &Path, meta: &std::fs::Metadata, crc: u32) -> bool {
     same
 }
 
-/// Opens an `.otioz` bundle to import: its timeline, its media unpacked
-/// into `unpack` (default: a folder named after the bundle, next to it)
-/// unless `write` is false. Media already there are kept if they are the
-/// bundle's; other files in the way are an error.
 pub fn open(path: &Path, unpack: Option<&Path>, write: bool) -> Result<TimelineFile> {
     let file = File::open(path).map_err(|e| {
         let message = format!("{}: {e}", path.display());
@@ -397,7 +359,6 @@ pub fn open(path: &Path, unpack: Option<&Path>, write: bool) -> Result<TimelineF
         ))
     })?;
     let err = zip_error(path);
-    // The timeline: content.otio, else an .otio file at the top.
     let content = match zip.index_for_name(CONTENT) {
         Some(_) => CONTENT.to_string(),
         None => zip
@@ -418,7 +379,6 @@ pub fn open(path: &Path, unpack: Option<&Path>, write: bool) -> Result<TimelineF
         Some(dir) => dir.to_path_buf(),
         None => path.with_extension(""),
     };
-    // The media: every other file.
     let mut entries = Vec::new();
     for i in 0..zip.len() {
         let e = zip.by_index_raw(i).map_err(&err)?;
@@ -464,7 +424,6 @@ pub fn open(path: &Path, unpack: Option<&Path>, write: bool) -> Result<TimelineF
                 let part = PathBuf::from(part);
                 let unpacked = (|| {
                     let mut out = BufWriter::new(File::create(&part).map_err(io_error(&part))?);
-                    // The reader checks the CRC at the end.
                     let mut entry = zip.by_index(*i).map_err(&err)?;
                     std::io::copy(&mut entry, &mut out).map_err(|e| {
                         Error::usage(format!("{}: {}: {e}", path.display(), rel.display()))

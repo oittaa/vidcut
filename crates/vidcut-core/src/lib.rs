@@ -1,8 +1,3 @@
-//! vidcut project model, edit operations and command protocol.
-//!
-//! Pure Rust: no FFmpeg, no GPU, no I/O beyond the project store, so it
-//! compiles and tests fast. Media facts come from the caller (see [`editor::Env`]).
-
 pub mod analysis;
 pub mod change;
 pub mod describe;

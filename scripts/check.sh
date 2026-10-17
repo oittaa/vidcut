@@ -46,6 +46,31 @@ if [[ -n "$binary" ]]; then
   exit 1
 fi
 
+step "no comments in crates/"
+# Only the schema's doc comments, one-line `// SAFETY:` comments, and on a
+# public unsafe fn the `# Safety` section clippy wants, one line under its
+# heading (AGENTS.md, rule 2). This finds line-leading and trailing comments;
+# `//!X` with no space is mpv's GLSL in a string.
+comments=$(
+  {
+    git grep --cached -n -E '^[[:space:]]*(//([^!]|!([[:space:]]|$)|$)|/\*)' -- 'crates/*.rs' 'crates/*.wgsl' || true
+    git grep --cached -n -E '[;,{}()][[:space:]]*//([[:space:]]|$)' -- 'crates/*.rs' 'crates/*.wgsl' || true
+  } | awk '
+    {
+      split($0, a, ":"); f = a[1]; n = a[2]; t = substr($0, length(f) + length(n) + 3)
+      if (t ~ /^[ \t]*\/\/ SAFETY: [^ \t]/) next
+      if (f ~ /^crates\/vidcut-core\/src\/(analysis|error|export|model|ops|ops\/dissolve|preferences|render|request)[.]rs$/ && t ~ /^[ \t]*\/\/\/( |$)/) next
+      if (t ~ /^[ \t]*\/\/\/ # Safety$/) { sf = f; sn = n; next }
+      if (f == sf && n == sn + 1 && t ~ /^[ \t]*\/\/\/ /) next
+      print
+    }'
+)
+if [[ -n "$comments" ]]; then
+  echo "comments in crates/ (AGENTS.md, rule 2):" >&2
+  printf '%s\n' "$comments" | sed 's/^/  /' >&2
+  exit 1
+fi
+
 step "rustfmt"
 cargo fmt --all --check
 

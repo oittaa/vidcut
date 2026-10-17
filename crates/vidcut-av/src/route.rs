@@ -1,16 +1,7 @@
-//! Where a job's frames go between the decoder and their destination.
-//! [`plan`] decides it for each frame, a pure function of facts about the
-//! frame ([`Facts`]). The backends do the work and say what they can do
-//! (`can_fit`, `can_mix`, and `reaches` for an encoder on another place):
-//! [`crate::cuda`] for CUDA frames, [`crate::hw::vaapi`] for VA-API's,
-//! `hw::d3d11` for Direct3D 11's, `hw::vt` for VideoToolbox's and
-//! `export::normalize` for the CPU.
-
 use vidcut_core::model::Hdr;
 
 use crate::ffmpeg::{format, frame};
 
-/// Where a frame's picture is: in memory, or in a GPU's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Place {
     Memory,
@@ -22,7 +13,6 @@ pub enum Place {
 }
 
 impl Place {
-    /// Where `f` is, by its pixel format.
     pub fn of(f: &frame::Video) -> Self {
         match f.format() {
             format::Pixel::CUDA => Self::Cuda,
@@ -35,45 +25,25 @@ impl Place {
     }
 }
 
-/// Where a job's pictures go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dest {
-    /// Pictures in memory: the CPU's encoders, tiles, renders, thumbnails.
     Memory,
-    /// An encoder that takes frames on `place` as they are.
     Encoder { place: Place },
-    /// Frames as decoded, for a display. With `keep`, it shows GPU frames
-    /// from there.
     Display { keep: bool },
 }
 
-/// What fitting a frame into the output takes, for a backend's `can_fit`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ops {
-    /// The clockwise turn that shows the frame upright: 0, 90, 180 or 270.
     pub rotation: u16,
-    /// The frame's layout (`hw::sw_format` for a GPU frame).
     pub layout: format::Pixel,
-    /// The output's layout.
     pub out_layout: format::Pixel,
-    /// An RGB picture (an image), not YUV.
     pub rgb: bool,
-    /// The output keeps the frame's colors: no matrix, range or transfer
-    /// to change (`color::kept`).
     pub colors_kept: bool,
-    /// The frame's picture is placed on black in the output: its aspect
-    /// differs.
     pub pads: bool,
-    /// The encoder's own frames are there to fit into. AMF takes
-    /// Direct3D 11's frames of those alone.
     pub into: bool,
 }
 
 impl Ops {
-    /// What fitting `f`, shown turned by `rotation`, into `out` pictures
-    /// of `out_layout` in `target`'s dynamic range takes (`None`: SDR
-    /// BT.709). With `into`, the encoder's own frames are there to fit
-    /// into.
     pub fn of(
         f: &frame::Video,
         rotation: u16,
@@ -83,7 +53,6 @@ impl Ops {
         into: bool,
     ) -> Self {
         let colors = crate::color::Source::of(f);
-        // Fitted upright: a quarter turn swaps the sides.
         let (w, h) = crate::export::normalize::shown_size(f, rotation, out);
         let fitted = if rotation % 180 == 90 { (h, w) } else { (w, h) };
         Self {
@@ -98,34 +67,20 @@ impl Ops {
     }
 }
 
-/// What the planner knows of one frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Facts {
     pub place: Place,
-    /// Its GPU can make the output picture from it for an encoder there
-    /// (`hw::can_fit`).
     pub fits: bool,
-    /// Its GPU hands the picture it makes to the encoder's place, another
-    /// than its own (`hw::reaches`): CUDA's frames to Vulkan's encoder.
     pub reaches: bool,
-    /// Fitting its source's frames on its GPU failed before.
     pub fit_failed: bool,
-    /// The output is smaller than the frame each way, so its GPU would
-    /// shrink it before it comes down.
     pub shrinks: bool,
-    /// Its layout is one a display takes (`normalize::displayable`).
     pub displayable: bool,
-    /// Keeping the job's frames on the GPU failed before.
     pub keep_failed: bool,
-    /// Its picture is mixed with another's while a dissolve plays.
     pub mixed: bool,
-    /// The encoder's GPU mixes pictures there (`hw::can_mix`).
     pub mixes: bool,
 }
 
 impl Facts {
-    /// What the planner knows of `f`, fitted as `ops` says into an `out`
-    /// picture for `dest`, before anything failed.
     pub fn of(f: &frame::Video, ops: &Ops, out: (u32, u32), dest: Dest) -> Self {
         let place = Place::of(f);
         let (w, h) = crate::export::normalize::shown_size(f, ops.rotation, out);
@@ -147,24 +102,15 @@ impl Facts {
     }
 }
 
-/// How a frame's picture is made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Route {
-    /// On the GPU where the frame is, handed on there.
     Gpu,
-    /// Shrunk on the GPU, copied down, finished on the CPU.
     Shrunk,
-    /// Copied down whole, made on the CPU.
     Whole,
-    /// Made on the CPU from a frame in memory.
     Cpu,
-    /// Kept on the GPU as decoded, for a display.
     Kept,
 }
 
-/// The route for a frame `facts` describe, to `dest`. A route that works
-/// on the GPU wins. A picture mixed where the encoder's GPU doesn't mix
-/// comes down, to be mixed on the CPU.
 pub fn plan(facts: &Facts, dest: Dest) -> Route {
     if facts.place == Place::Memory {
         return Route::Cpu;
@@ -190,21 +136,14 @@ pub fn plan(facts: &Facts, dest: Dest) -> Route {
     }
 }
 
-/// How a job's frames went, for people (`made_with`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Went {
-    /// They stayed on the GPU from the decoder to the encoder.
     Stayed,
-    /// They came down from the GPU at `size`. With `whole`, that is their
-    /// own size.
     Down { size: (u32, u32), whole: bool },
-    /// The CPU decoded them.
     Cpu,
 }
 
 impl Went {
-    /// `frames stayed there`, `frames came down at 960×540` or `frames
-    /// came down whole`. `None` for the CPU's.
     pub fn label(self) -> Option<String> {
         match self {
             Went::Stayed => Some("frames stayed there".into()),

@@ -1,7 +1,3 @@
-//! What this FFmpeg can't export is greyed out where it is chosen
-//! (egui_kittest, no window): Quick Export's tiles and the Export dialog's
-//! presets.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -38,7 +34,6 @@ fn call(h: &live::Handle, method: &str, params: Value) -> Response {
         .unwrap_or_else(|e| panic!("{method}: {e}"))
 }
 
-/// Steps the GUI until `ready` holds.
 fn until(
     harness: &mut Harness<'_, Workspace>,
     what: &str,
@@ -59,7 +54,6 @@ fn has(harness: &Harness<'_, Workspace>, text: &str) -> bool {
     harness.query_all_by_label_contains(text).next().is_some()
 }
 
-/// Whether the control labelled with `text` is greyed out.
 fn greyed(harness: &Harness<'_, Workspace>, text: &str) -> bool {
     harness
         .get_by_label_contains(text)
@@ -75,7 +69,6 @@ fn what_cant_be_exported_is_greyed_out() {
         .unwrap();
     let dir = tmp.path();
     // SAFETY: the only test in this binary; set before any thread starts.
-    // No AV1 encoder on the CPU, and no MP3 one.
     unsafe {
         std::env::set_var("XDG_STATE_HOME", dir.join("state"));
         std::env::set_var("XDG_CONFIG_HOME", dir.join("config"));
@@ -118,7 +111,6 @@ fn what_cant_be_exported_is_greyed_out() {
     });
     call(&h, "media.add", json!({ "paths": [media] }));
     call(&h, "edit.append", json!({ "media": "m1" }));
-    // The CPU's encoders only, whatever GPU this machine has.
     call(
         &h,
         "preferences.set",
@@ -134,8 +126,6 @@ fn what_cant_be_exported_is_greyed_out() {
         );
     harness.step();
 
-    // Quick Export: the AV1 tile is greyed out, the others aren't, and the
-    // first that exports is chosen.
     harness.get_by_label("Quick Export").click();
     until(&mut harness, "preset tiles", |h| has(h, "ProRes 422 HQ\n"));
     harness.step();
@@ -143,7 +133,6 @@ fn what_cant_be_exported_is_greyed_out() {
     assert!(!greyed(&harness, "ProRes 422 HQ\n"));
     assert!(!greyed(&harness, "Export…"));
 
-    // The Export dialog: AV1 and Audio: MP3 among the presets.
     harness.key_press(egui::Key::Escape);
     harness.step();
     harness.get_by_label("Export").click();
@@ -151,7 +140,6 @@ fn what_cant_be_exported_is_greyed_out() {
     harness.step();
     harness.get_by_label("Preset").click();
     until(&mut harness, "the presets", |h| has(h, "Audio: MP3"));
-    // A popup is measured in its first frame, everything in it disabled.
     harness.step();
     assert!(greyed(&harness, "Audio: MP3"));
     assert!(!greyed(&harness, "Audio: WAV"));

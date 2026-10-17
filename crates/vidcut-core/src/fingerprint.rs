@@ -1,13 +1,3 @@
-//! SHA-256 for media files and for vidcut's own.
-//!
-//! - A media fingerprint tells a moved file from another one with the same
-//!   name, size and streams, without reading all of a big file.
-//! - [`digest`] checks a text, and [`short_digest`] names files and pipes.
-//!   Both stay the same from release to release, and nobody can make two
-//!   inputs that share one.
-//! - An [`Origin`] goes in each file made from a media file, so a file made
-//!   from another one never passes for it.
-
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::File;
@@ -17,15 +7,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use sha2::{Digest, Sha256};
 
-/// Files up to this size are hashed whole: their fingerprint is their
-/// `sha256sum`.
 pub const WHOLE: u64 = 10 * 1024 * 1024;
 
-/// Bigger files are hashed by three pieces this long: from the start, the
-/// middle and the end.
 const PIECE: u64 = 1024 * 1024;
 
-/// The fingerprint of the file at `path`, in lowercase hex.
 pub fn file(path: &Path) -> std::io::Result<String> {
     let mut f = File::open(path)?;
     let size = f.metadata()?.len();
@@ -45,8 +30,6 @@ pub fn file(path: &Path) -> std::io::Result<String> {
     Ok(hex(&hash.finalize()))
 }
 
-/// An image sequence's fingerprint: of its first, middle and last
-/// pictures' (a render's first picture is often plain black).
 pub fn pictures(first: &Path, middle: &Path, last: &Path) -> std::io::Result<String> {
     let mut hash = Sha256::new();
     for picture in [first, middle, last] {
@@ -55,33 +38,21 @@ pub fn pictures(first: &Path, middle: &Path, last: &Path) -> std::io::Result<Str
     Ok(hex(&hash.finalize()))
 }
 
-/// The SHA-256 of `bytes` in lowercase hex, 64 digits: a check that a text
-/// is the same.
 pub fn digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
 
-/// The first 128 bits of [`digest`], 32 hex digits: a name for a file or a
-/// pipe.
 pub fn short_digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes)[..16])
 }
 
-/// What a file made from a media file (its thumbnails, waveform,
-/// measurements or proxy) says it was made from: the media file's path,
-/// size and modification time.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Origin {
-    /// How its name starts: the path's [`short_digest`], the size and the
-    /// time.
     pub name: Arc<str>,
-    /// What it keeps inside: the size, the time and the path.
     pub text: Arc<str>,
 }
 
 impl Origin {
-    /// A file of `bytes` made from this origin: the origin's text first,
-    /// after its length.
     pub fn stamp(&self, bytes: &[u8]) -> Vec<u8> {
         let mut file = Vec::with_capacity(4 + self.text.len() + bytes.len());
         file.extend_from_slice(&(self.text.len() as u32).to_le_bytes());
@@ -90,8 +61,6 @@ impl Origin {
         file
     }
 
-    /// The bytes [`stamp`](Self::stamp) put in `file`, if it was made from
-    /// this origin. `None` for a file made from another, or without one.
     pub fn check<'a>(&self, file: &'a [u8]) -> Option<&'a [u8]> {
         let (len, rest) = file.split_first_chunk::<4>()?;
         let (text, bytes) = rest.split_at_checked(u32::from_le_bytes(*len) as usize)?;
@@ -99,9 +68,6 @@ impl Origin {
     }
 }
 
-/// The origin of files made from the file at `path` as it is now: `size`
-/// bytes, changed at `mtime_ns`. Each is made once and kept, so asking
-/// again digests nothing.
 pub fn origin(path: &Path, size: u64, mtime_ns: i64) -> Origin {
     type Kept = HashMap<OsString, Vec<(u64, i64, Origin)>>;
     static KEPT: Mutex<Option<Kept>> = Mutex::new(None);

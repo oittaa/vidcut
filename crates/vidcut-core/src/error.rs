@@ -1,5 +1,3 @@
-//! Errors with stable codes, shared by the CLI (exit codes) and JSON-RPC.
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

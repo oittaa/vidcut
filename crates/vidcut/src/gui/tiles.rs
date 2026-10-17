@@ -1,18 +1,3 @@
-//! The timeline's filmstrip pictures (spec §5): each tile shows the frame
-//! under it.
-//!
-//! Painting asks for every visible tile by key: the media, the source frame
-//! (project frames from the media's first frame) and the picture's height
-//! in pixels. Kept pictures are textures. Above [`MEMORY`] those shown
-//! least recently go first: a tile comes back from the disk cache in a
-//! fraction of a millisecond. A tile not kept goes to worker threads, which take tiles in
-//! the order painting asked for them and go on along a file while it has
-//! more: each from the thumbnail cache on disk, where tiles are kept in
-//! blocks of [`TILE_BLOCK`] frames, or decoded with the export's frame
-//! picking (from a fresh proxy when there is one) and then kept on disk.
-//! Until its picture is there, a tile shows the nearest kept picture of the
-//! same media, else the pool's.
-
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -34,13 +19,10 @@ use crate::paths;
 use crate::preferences::GpuDecoding;
 use crate::thumbcache::{self, TILE_BLOCK};
 
-/// Decoding threads.
 const WORKERS: usize = 4;
 
-/// Memory for kept pictures: about 12,000 tiles 56 px tall.
 const MEMORY: usize = 256 << 20;
 
-/// A tile's picture: `frame` of `media`, `height` pixels tall.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TileKey {
     pub media: String,
@@ -48,29 +30,20 @@ pub struct TileKey {
     pub height: u32,
 }
 
-/// What a worker needs to make a tile.
 pub struct Job {
     key: TileKey,
     width: u32,
     fps: Rational,
-    /// The frame from a fresh proxy when there is one, then from the media
-    /// itself: a proxy that can't be read falls back on it.
     pieces: Vec<VideoPiece>,
-    /// The tile's block file and the disk cache's limit in bytes, while the
-    /// disk cache is on.
     disk: Option<(BlockFile, u64)>,
 }
 
-/// A block file of tiles, and the origin of the tiles it is for: a file
-/// holding another's is made again.
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct BlockFile {
     path: PathBuf,
     origin: Origin,
 }
 
-/// A media's file as last seen (path, size and modification time), and the
-/// origin of its tiles.
 struct Seen {
     path: PathBuf,
     size: u64,
@@ -88,7 +61,6 @@ impl Seen {
         }
     }
 
-    /// Whether `m`'s file is the one seen.
     fn is(&self, m: &Media) -> bool {
         self.path.as_os_str() == m.path.as_os_str()
             && self.size == m.size
@@ -98,19 +70,15 @@ impl Seen {
 
 struct Kept {
     texture: egui::TextureHandle,
-    /// The frame (`Tiles::clock`) it was last shown in.
     used: u64,
     bytes: usize,
 }
 
-/// Jobs waiting, in the order painting asked for them, and what workers do.
 #[derive(Default)]
 struct Waiting {
     jobs: Vec<Job>,
     busy: HashSet<TileKey>,
-    /// Tiles that couldn't be made: not asked for again.
     failed: HashSet<TileKey>,
-    /// Where each worker is: the media and frame it made last.
     at: HashMap<usize, (String, i64)>,
     stop: bool,
 }
@@ -118,33 +86,23 @@ struct Waiting {
 struct Queue {
     waiting: Mutex<Waiting>,
     ready: Condvar,
-    /// Set as the tiles drop: the workers' decoding stops, waiting for a
-    /// player included (`vidcut_av::cancel`), so joining them never waits
-    /// for a player that ends after them.
     cancel: Arc<AtomicBool>,
 }
 
-/// The timeline's tile pictures and the threads making them.
 pub struct Tiles {
     kept: HashMap<(String, u32), BTreeMap<i64, Kept>>,
-    /// Each media's file as last seen: another file drops its pictures.
     versions: HashMap<String, Seen>,
     clock: u64,
     bytes: usize,
     budget: usize,
-    /// The disk cache's limit in bytes, while it is on.
     disk: Option<u64>,
-    /// Asked for while painting this frame, and kept ones shown.
     asked: RefCell<Vec<Job>>,
     shown: RefCell<Vec<TileKey>>,
-    /// Asked for in the last frame, except those that couldn't be made.
     missing: HashSet<TileKey>,
     queue: Arc<Queue>,
     results: Receiver<(TileKey, Image)>,
     sender: Sender<(TileKey, Image)>,
     started: bool,
-    /// The workers, joined when the tiles drop: their readers close with
-    /// them, before the process ends (gotchas.md).
     workers: Vec<std::thread::JoinHandle<()>>,
 }
 
@@ -175,15 +133,12 @@ impl Tiles {
         tiles
     }
 
-    /// The disk cache, as the preferences say.
     pub fn set_prefs(&mut self, prefs: &Thumbnails) {
         self.disk = prefs
             .disk_cache
             .then(|| prefs.cache_limit_mb.saturating_mul(1 << 20));
     }
 
-    /// Takes in the pictures made since the last frame and keeps memory in
-    /// the budget. Before painting.
     pub fn begin_frame(&mut self, ctx: &egui::Context, p: Option<&Project>) {
         if !self.started {
             self.started = true;
@@ -238,8 +193,6 @@ impl Tiles {
         self.evict();
     }
 
-    /// The kept picture of `key`, marking it as shown. Without one, asks for
-    /// it (`job` makes the request) and returns `None`.
     pub fn want(
         &self,
         key: &TileKey,
@@ -259,8 +212,6 @@ impl Tiles {
         None
     }
 
-    /// The kept picture of `media` at `height` nearest `frame`, no further
-    /// than `within` frames away.
     pub fn nearest(
         &self,
         media: &str,
@@ -284,8 +235,6 @@ impl Tiles {
         Some(best.1.texture.id())
     }
 
-    /// The request for `key`'s picture, `width` pixels wide: its frame from
-    /// a fresh proxy if there is one, and from the media.
     pub fn job(&self, p: &Project, key: &TileKey, width: u32) -> Option<Job> {
         let m = p.media(&key.media)?;
         let piece = vidcut_core::render::media_frame(p, &key.media, key.frame).ok()?;
@@ -308,8 +257,6 @@ impl Tiles {
             pieces,
             disk: self.disk.map(|limit| {
                 let block = key.frame.div_euclid(TILE_BLOCK);
-                // Its origin as kept when the frame began: painting digests
-                // nothing.
                 let origin = match self.versions.get(&key.media) {
                     Some(seen) if seen.is(m) => seen.origin.clone(),
                     _ => paths::media_origin(m),
@@ -320,9 +267,6 @@ impl Tiles {
         })
     }
 
-    /// Marks the kept pictures shown in this frame as used and hands what
-    /// was asked for to the workers: the newest asks replace the old ones,
-    /// so tiles scrolled away aren't made. After painting.
     pub fn end_frame(&mut self) {
         let clock = self.clock;
         for key in self.shown.get_mut().drain(..) {
@@ -356,7 +300,6 @@ impl Tiles {
         self.clock += 1;
     }
 
-    /// Drops `media`'s pictures (its file changed).
     fn forget(&mut self, media: &str) {
         let gone: Vec<(String, u32)> = self
             .kept
@@ -373,8 +316,6 @@ impl Tiles {
         w.failed.retain(|k| k.media != media);
     }
 
-    /// Over the budget, drops the pictures shown least recently, down to
-    /// nine tenths of it; never those shown in the last frame.
     fn evict(&mut self) {
         if self.bytes <= self.budget {
             return;
@@ -400,13 +341,10 @@ impl Tiles {
         self.kept.retain(|_, m| !m.is_empty());
     }
 
-    /// How many pictures are kept and their bytes.
     pub fn usage(&self) -> (usize, usize) {
         (self.kept.values().map(BTreeMap::len).sum(), self.bytes)
     }
 
-    /// How many tiles are on their way: asked for in the last frame and not
-    /// made yet, or being made.
     pub fn pending(&self) -> usize {
         let w = self.queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
         self.missing.union(&w.busy).count()
@@ -415,8 +353,6 @@ impl Tiles {
 
 impl Drop for Tiles {
     fn drop(&mut self) {
-        // A worker decoding a tile is a job, which waits while a player
-        // plays; the player ends after the tiles, so the wait is cancelled.
         self.queue.cancel.store(true, Ordering::SeqCst);
         {
             let mut w = self.queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
@@ -424,7 +360,6 @@ impl Drop for Tiles {
             w.jobs.clear();
             self.queue.ready.notify_all();
         }
-        // Each closes its reader as it ends: before the process does.
         if !self.workers.is_empty() {
             crate::threads::ending("the filmstrip's workers");
         }
@@ -435,11 +370,7 @@ impl Drop for Tiles {
     }
 }
 
-/// The frame step between tiles `frames_per_tile` frames wide: the largest
-/// power of two not above it. Each tile then holds a frame of the grid, and
-/// zooming in or out by two keeps half of the frames.
 pub fn tile_step(frames_per_tile: f64) -> i64 {
-    // Below two frames a tile, and for nonsense (NaN), every frame.
     if frames_per_tile.is_nan() || frames_per_tile < 2.0 {
         return 1;
     }
@@ -447,10 +378,6 @@ pub fn tile_step(frames_per_tile: f64) -> i64 {
     1i64 << exp
 }
 
-/// The source frame a tile shows: the clip's first one for its first tile,
-/// else the first multiple of `step` at or after (backward: at or before)
-/// the one at the tile's left edge, `offset` frames into the clip from
-/// `source_in` at `speed` (decision D48).
 pub fn tile_frame(source_in: i64, offset: f64, step: i64, first: bool, speed: f64) -> i64 {
     if first || speed == 0.0 {
         return source_in;
@@ -464,45 +391,30 @@ pub fn tile_frame(source_in: i64, offset: f64, step: i64, first: bool, speed: f6
     n as i64 * step
 }
 
-/// A tile picture's height for a band `px` pixels tall: a multiple of 16,
-/// so small changes of row height keep the pictures.
 pub fn tile_height(px: f32) -> u32 {
     ((px / 16.0).ceil().max(1.0) as u32) * 16
 }
 
-/// Disk cache trims: at most one in this long, by any worker.
 const TRIM_EVERY: Duration = Duration::from_secs(30);
 
-/// A worker's reader closes after this long without decoding a tile: it
-/// holds an open file, a decoder (on a GPU, a session in video memory) and
-/// the frame it decoded last. The next tile opens one anew.
 const READER_IDLE: Duration = Duration::from_secs(10);
 
-/// How much longer a worker whose reader last decoded `idle` ago waits for
-/// a job before the reader closes; `None` once it is time.
 fn reader_waits(idle: Duration) -> Option<Duration> {
     READER_IDLE.checked_sub(idle).filter(|d| !d.is_zero())
 }
 
-/// Tiles kept for a block, as a worker last read or wrote them.
 type Block = Vec<(i64, Image)>;
 
-/// One worker: takes jobs until told to stop.
 fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Context) {
     static TRIMMED: Mutex<Option<Instant>> = Mutex::new(None);
     let _cancel = vidcut_av::cancel::Guard::set(queue.cancel.clone());
-    // Decoded on the GPU the viewer decodes on while the preferences say
-    // so, read as a tile is decoded: a change reaches the tiles at once.
     let reader_for = |d: &GpuDecoding| match d.own_decoder() {
         Some(gpu) => FrameReader::decoding_on(gpu),
         None => FrameReader::default(),
     };
     let mut decoding = crate::preferences::gpu_decoding();
-    // Made for a tile to decode, and when it last decoded one.
     let mut reader: Option<FrameReader> = None;
     let mut used = Instant::now();
-    // Blocks read or written lately (a missing file is an empty block),
-    // and tiles made but not yet on disk.
     let mut blocks: Vec<(BlockFile, Block)> = Vec::new();
     let mut unwritten: HashMap<BlockFile, (Block, u64)> = HashMap::new();
     loop {
@@ -514,7 +426,6 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
                 }
                 if let Some(job) = next(&mut w, n) {
                     w.busy.insert(job.key.clone());
-                    // Where it is heading: others leave what is near it.
                     w.at.insert(n, (job.key.media.clone(), job.key.frame));
                     break job;
                 }
@@ -536,7 +447,6 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
                         };
                     }
                     None => {
-                        // Idle: its file and decoder close, outside the lock.
                         drop(w);
                         reader = None;
                         w = queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
@@ -579,8 +489,6 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
                 w.failed.insert(job.key);
             }
         }
-        // Tiles go to disk in batches: when the queue empties, or once
-        // enough have gathered (it may not empty while the view moves).
         if unwritten
             .values()
             .map(|(tiles, _)| tiles.len())
@@ -592,9 +500,6 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
     }
 }
 
-/// The next job for worker `n`: the next frame along the file it is on,
-/// when that is asked for (decoding on beats a seek); else the first asked
-/// for that no other worker is near (it gets there soon), else the first.
 fn next(w: &mut Waiting, n: usize) -> Option<Job> {
     if w.jobs.is_empty() {
         return None;
@@ -621,8 +526,6 @@ fn next(w: &mut Waiting, n: usize) -> Option<Job> {
     Some(w.jobs.remove(i))
 }
 
-/// `job`'s tile from its block on disk, or from tiles made but not yet
-/// written.
 fn from_disk(
     job: &Job,
     blocks: &mut Vec<(BlockFile, Block)>,
@@ -645,7 +548,6 @@ fn from_disk(
                 file.clone(),
                 thumbcache::load_tiles(&file.path, &file.origin).unwrap_or_default(),
             ));
-            // A few blocks per worker: a clip's tiles share one at a time.
             if blocks.len() > 8 {
                 blocks.remove(0);
             }
@@ -655,8 +557,6 @@ fn from_disk(
     pick(&blocks[i].1)
 }
 
-/// Writes the tiles made to their block files, and now and then trims the
-/// disk cache to its limit.
 fn write(
     unwritten: &mut HashMap<BlockFile, (Block, u64)>,
     blocks: &mut Vec<(BlockFile, Block)>,
@@ -665,7 +565,6 @@ fn write(
     let mut limit = None;
     for (file, (tiles, l)) in unwritten.drain() {
         thumbcache::store_tiles(&file.path, &file.origin, &tiles);
-        // What the worker remembers of the block is what is there now.
         blocks.retain(|(f, _)| f != &file);
         limit = Some(l);
     }
@@ -695,20 +594,13 @@ mod tests {
 
     #[test]
     fn a_tile_shows_a_grid_frame_inside_it() {
-        // The first tile: the clip's first frame, whatever the grid.
         assert_eq!(tile_frame(100, 0.0, 64, true, 1.0), 100);
-        // Tiles 80 frames wide (step 64) from frame 100: lefts at 180,
-        // 260 and 340 show 192, 320 and 384.
         for (offset, want) in [(80.0, 192), (160.0, 320), (240.0, 384)] {
             let f = tile_frame(100, offset, 64, false, 1.0);
             assert_eq!(f, want);
             assert!(f >= 100 + offset as i64 && f < 100 + offset as i64 + 80);
         }
-        // Zoomed out twice as far (step 128), the frame there is one the
-        // closer view showed too: kept already.
         assert_eq!(tile_frame(100, 160.0, 128, false, 1.0), 384);
-        // At twice the speed 80 frames in show 260 on; backward from 500,
-        // 420 back.
         assert_eq!(tile_frame(100, 80.0, 64, false, 2.0), 320);
         assert_eq!(tile_frame(500, 80.0, 64, false, -1.0), 384);
         assert_eq!(tile_frame(500, 80.0, 64, false, 0.0), 500);

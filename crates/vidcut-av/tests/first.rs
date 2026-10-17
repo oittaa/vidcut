@@ -1,7 +1,3 @@
-//! The player comes first (player.md §1): a job's decoding waits while a
-//! player plays, and goes on once it stops. A test binary of its own, so
-//! no other test's player holds the jobs back.
-
 mod player_support;
 
 use std::sync::mpsc::{Receiver, channel};
@@ -12,7 +8,6 @@ use vidcut_av::decode::Input;
 use vidcut_av::fixture::{Container, FixtureSpec, VideoCodec};
 use vidcut_av::player::{Config, ManualOutput, Player};
 
-/// Runs `job` on a thread that yields to players; its result comes back.
 fn yielding(job: impl FnOnce() -> bool + Send + 'static) -> Receiver<bool> {
     let (done, result) = channel();
     std::thread::spawn(move || {
@@ -35,8 +30,6 @@ fn jobs_decode_once_the_player_stops() {
         Box::new(out.clone()),
     )
     .unwrap();
-    // The clock stands until a test pulls the sound, so it plays on. A
-    // frame decoded ahead means the decode thread has seen it play.
     player.play(1.0);
     assert!(player.wait_ready(6, Duration::from_secs(10)));
 

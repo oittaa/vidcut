@@ -1,23 +1,11 @@
-//! What an edit changed in a project, both ways. Undo steps keep this,
-//! not copies of the project, so a step costs about what it changed.
-//!
-//! It is what comparing the project's JSON before and after gives. Lists of
-//! things with ids (media, tracks, clips, markers, transitions) are
-//! compared by id: an inserted clip is one entry, and a ripple that moves
-//! every later clip by the same frames is one run. [`Change::of_items`]
-//! finds the same from the things themselves, turning only those that
-//! differ into JSON.
-
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-/// What changed in one value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Change {
-    /// Replaced: the value before and after, `None` where it is absent.
     #[serde(rename = "set")]
     Set {
         #[serde(
@@ -35,42 +23,30 @@ pub enum Change {
         )]
         after: Option<Value>,
     },
-    /// An object, with what changed in each of its fields that did.
     #[serde(rename = "fields")]
     Fields(BTreeMap<String, Change>),
-    /// A list of things with ids.
     #[serde(rename = "items")]
     Items(Box<Items>),
 }
 
-/// A value that is there, `null` too: a missing one is `None`.
 fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
     Value::deserialize(d).map(Some)
 }
 
-/// What changed in a list of things with ids.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Items {
-    /// Those only before, with their places before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     removed: Vec<(usize, Value)>,
-    /// Those only after, with their places after.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     added: Vec<(usize, Value)>,
-    /// The ids of the others in order, before and after, when it changed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     order: Option<(Vec<String>, Vec<String>)>,
-    /// Runs of the others, side by side, whose one whole-number field
-    /// moved by the same amount.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     runs: Vec<Run>,
-    /// What changed in the others, by id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     changed: BTreeMap<String, Change>,
 }
 
-/// The things from `first` to `last` (by id, inclusive) whose `field` went
-/// up by `by`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Run {
     first: String,
@@ -80,7 +56,6 @@ pub struct Run {
 }
 
 impl Change {
-    /// What changed from `before` to `after`; `None` when nothing did.
     pub fn between(before: &Value, after: &Value) -> Option<Self> {
         if before == after {
             return None;
@@ -110,10 +85,6 @@ impl Change {
         })
     }
 
-    /// [`between`](Self::between) two lists of things with ids as JSON,
-    /// from the things themselves: only those that differ become JSON.
-    /// `each` is what changed in one on both sides, `None` when nothing did;
-    /// it may take the thing apart, if it puts it back.
     pub fn of_items<T: Serialize + PartialEq>(
         a: &mut [T],
         b: &mut [T],
@@ -153,10 +124,6 @@ impl Change {
         Some(Self::Items(Box::new(items)))
     }
 
-    /// [`apply`](Self::apply) to a list of things with ids as they are:
-    /// only those the change names become JSON. `each` makes a change in
-    /// one thing; `shift` moves a whole-number field of one, as a run does
-    /// ([`shift_json`] does it through its JSON).
     pub fn apply_to_items<T: Serialize + DeserializeOwned>(
         &self,
         list: &mut Vec<T>,
@@ -167,7 +134,6 @@ impl Change {
     ) -> Result<(), String> {
         let items = match self {
             Self::Items(items) => items,
-            // The whole list, or none when it is left out.
             Self::Set { before, after } => {
                 *list = match if forward { after } else { before } {
                     Some(v) => from_json(v.clone())?,
@@ -192,7 +158,6 @@ impl Change {
             .map(|(i, x)| (id(x).to_string(), i))
             .collect();
         let place = |k: &str| at.get(k).copied().ok_or(format!("no {k}"));
-        // The others first: those that come and go don't move with them.
         for (k, change) in &items.changed {
             each(&mut list[place(k)?], change, forward)?;
         }
@@ -231,8 +196,6 @@ impl Change {
         }
     }
 
-    /// Makes the change in `value` (`forward`), or takes it back. Fails
-    /// when `value` isn't what the change was found on.
     pub fn apply(&self, value: &mut Value, forward: bool) -> Result<(), String> {
         match self {
             Self::Set { before, after } => {
@@ -261,7 +224,6 @@ impl Change {
     }
 }
 
-/// The ids of a list's things, when each is an object with its own.
 fn ids(list: &[Value]) -> Option<Vec<&str>> {
     let ids: Vec<&str> = list
         .iter()
@@ -295,9 +257,6 @@ impl Items {
         })
     }
 
-    /// What changed in a list whose things have the ids `ia` before and
-    /// `ib` after: `removed` and `added`, those only before and only after,
-    /// and `change`, what changed in one on both sides.
     fn build(
         ia: &[&str],
         ib: &[&str],
@@ -318,7 +277,6 @@ impl Items {
             }),
             ..Self::default()
         };
-        // Side by side runs only where the order stays.
         let in_order = items.order.is_none();
         let mut run: Option<(Run, Change, usize)> = None;
         for id in kept_b {
@@ -355,7 +313,6 @@ impl Items {
         items
     }
 
-    /// Keeps a run of two or more as a run, one as its own change.
     fn close(&mut self, run: Option<(Run, Change, usize)>) {
         match run {
             Some((run, _, n)) if n > 1 => self.runs.push(run),
@@ -376,7 +333,6 @@ impl Items {
             .order
             .as_ref()
             .map(|(a, b)| if forward { b } else { a });
-        // The others first: those that come and go don't move with them.
         let at: HashMap<String, usize> = list
             .iter()
             .enumerate()
@@ -409,7 +365,6 @@ impl Items {
     }
 }
 
-/// [`Change::apply`] to `x` through its JSON.
 pub fn apply_json<T: Serialize + DeserializeOwned>(
     x: &mut T,
     change: &Change,
@@ -421,7 +376,6 @@ pub fn apply_json<T: Serialize + DeserializeOwned>(
     Ok(())
 }
 
-/// Moves whole-number field `field` of `x` by `by`, through its JSON.
 pub fn shift_json<T: Serialize + DeserializeOwned>(
     x: &mut T,
     field: &str,
@@ -441,7 +395,6 @@ fn from_json<T: DeserializeOwned>(v: Value) -> Result<T, String> {
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
-/// The one whole-number field a change moved, and by how much.
 fn moved(change: &Change) -> Option<(String, i64)> {
     let Change::Fields(fields) = change else {
         return None;
@@ -458,7 +411,6 @@ fn moved(change: &Change) -> Option<(String, i64)> {
 }
 
 impl Run {
-    /// Moves the run's field, skipping things that come or go.
     fn apply(
         &self,
         list: &mut [Value],

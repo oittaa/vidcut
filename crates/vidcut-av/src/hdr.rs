@@ -1,8 +1,3 @@
-//! HDR metadata: the mastering display and content light levels a stream
-//! has once (static), and HDR10+ and Dolby Vision on each frame (dynamic).
-//! Read from decoded frames, written to encoders and frames, and HDR10+ put
-//! into HEVC and AV1 bitstreams, which FFmpeg's encoders don't do.
-
 use std::os::raw::{c_int, c_uint, c_void};
 use std::sync::OnceLock;
 
@@ -13,9 +8,6 @@ use crate::ffmpeg::{self, codec, ffi, frame};
 
 use ffi::AVFrameSideDataType as Sd;
 
-// FFmpeg's structs (libavutil/mastering_display_metadata.h, dovi_meta.h),
-// which ffmpeg-sys-next doesn't bind. Their sizes aren't ABI: buffers come
-// from FFmpeg's allocators, and only these leading fields are used.
 #[repr(C)]
 struct AvMastering {
     display_primaries: [[ffi::AVRational; 2]; 3],
@@ -52,7 +44,6 @@ unsafe extern "C" {
     fn av_dynamic_hdr_plus_from_t35(s: *mut c_void, data: *const u8, size: usize) -> c_int;
 }
 
-/// What a frame (and its stream) says of its HDR.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Metadata {
     pub mastering: Option<MasteringDisplay>,
@@ -61,7 +52,6 @@ pub struct Metadata {
     pub dolby_vision: Option<DolbyVision>,
 }
 
-/// The static values an output carries.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Static {
     pub mastering: Option<MasteringDisplay>,
@@ -74,7 +64,6 @@ impl Static {
     }
 }
 
-/// The dynamic metadata an output keeps from its sources' frames.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Dynamic {
     pub hdr10plus: bool,
@@ -89,8 +78,6 @@ fn q2f(q: ffi::AVRational) -> f64 {
     }
 }
 
-/// `v` as a fraction of `den`, as HEVC's SEI codes it: chromaticity in
-/// 1/50000, luminance in 1/10000 cd/m².
 fn f2q(v: f64, den: i32) -> ffi::AVRational {
     ffi::AVRational {
         num: (v * f64::from(den)).round().clamp(0.0, f64::from(i32::MAX)) as i32,
@@ -101,7 +88,6 @@ fn f2q(v: f64, den: i32) -> ffi::AVRational {
 const CHROMA: i32 = 50_000;
 const LUMA: i32 = 10_000;
 
-/// A mastering display from FFmpeg's struct at `data` (`size` bytes).
 unsafe fn mastering_at(data: *const u8, size: usize) -> Option<MasteringDisplay> {
     if data.is_null() || size < std::mem::size_of::<AvMastering>() {
         return None;
@@ -123,8 +109,6 @@ unsafe fn mastering_at(data: *const u8, size: usize) -> Option<MasteringDisplay>
     })
 }
 
-/// Light levels from FFmpeg's struct at `data` (`size` bytes); none when
-/// MaxCLL is 0 (unknown).
 unsafe fn light_at(data: *const u8, size: usize) -> Option<LightLevel> {
     if data.is_null() || size < std::mem::size_of::<AvLight>() {
         return None;
@@ -136,8 +120,6 @@ unsafe fn light_at(data: *const u8, size: usize) -> Option<LightLevel> {
     })
 }
 
-/// What `f` carries: its static values, and whether it has HDR10+ or a
-/// Dolby Vision RPU (the profile comes from the stream, [`dolby_vision`]).
 pub fn of_frame(f: &frame::Video) -> Metadata {
     unsafe {
         let f = f.as_ptr();
@@ -160,8 +142,6 @@ pub fn of_frame(f: &frame::Video) -> Metadata {
     }
 }
 
-/// The static values in a stream's parameters: what a container's boxes
-/// (MP4 `mdcv`/`clli`, Matroska's) said, or what an encoder was given.
 pub fn of_stream(params: &codec::Parameters) -> Static {
     use ffi::AVPacketSideDataType as Pd;
     unsafe {
@@ -183,8 +163,6 @@ pub fn of_stream(params: &codec::Parameters) -> Static {
     }
 }
 
-/// One decoded frame's HDR metadata, its HDR10+ as T.35, and whether it has
-/// a Dolby Vision RPU.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameHdr {
     pub pts: i64,
@@ -193,10 +171,6 @@ pub struct FrameHdr {
     pub dolby_vision: bool,
 }
 
-/// The HDR metadata of a file's first `max` frames or so (decoding stops
-/// once that many came out), in presentation order: with `container`, as a
-/// player sees it; without, from the bitstream alone (the stream's own
-/// values removed before decoding). For tests and checks.
 pub fn read_frames(path: &std::path::Path, container: bool, max: usize) -> Result<Vec<FrameHdr>> {
     use crate::error::Context;
     use ffi::AVPacketSideDataType as Pd;
@@ -240,7 +214,6 @@ pub fn read_frames(path: &std::path::Path, container: bool, max: usize) -> Resul
         if s.index() == index {
             decoder.send_packet(&packet).ctx(|| "decoding".into())?;
             take(&mut decoder, &mut out);
-            // Some past `max`: reordered frames still to come are earlier.
             if out.len() >= max.saturating_add(16) {
                 break;
             }
@@ -253,8 +226,6 @@ pub fn read_frames(path: &std::path::Path, container: bool, max: usize) -> Resul
     Ok(out)
 }
 
-/// The Dolby Vision a stream declares (MP4 `dvcC`/`dvvC`, Matroska's
-/// configuration), if it carries an RPU.
 pub fn dolby_vision(params: &codec::Parameters) -> Option<DolbyVision> {
     unsafe {
         let p = &*params.as_ptr();
@@ -274,7 +245,6 @@ pub fn dolby_vision(params: &codec::Parameters) -> Option<DolbyVision> {
     }
 }
 
-/// FFmpeg's sizes of the two structs, which may grow.
 fn sizes() -> (usize, usize) {
     static SIZES: OnceLock<(usize, usize)> = OnceLock::new();
     *SIZES.get_or_init(|| unsafe {
@@ -288,7 +258,6 @@ fn sizes() -> (usize, usize) {
     })
 }
 
-/// Fills side data `sd` (zeroed, `size` long) with `s`'s value of its type.
 unsafe fn fill(sd: *mut ffi::AVFrameSideData, s: &Static) {
     unsafe {
         std::ptr::write_bytes((*sd).data, 0, (*sd).size);
@@ -315,7 +284,6 @@ unsafe fn fill(sd: *mut ffi::AVFrameSideData, s: &Static) {
     }
 }
 
-/// The side data types `s` has, with their sizes.
 fn types(s: &Static) -> Vec<(Sd, usize)> {
     let (m, l) = sizes();
     let mut out = Vec::new();
@@ -328,10 +296,6 @@ fn types(s: &Static) -> Vec<(Sd, usize)> {
     out
 }
 
-/// Gives an encoder about to be opened `s`: libx265, libsvtav1 and NVENC
-/// write it into the bitstream, and FFmpeg copies it into the stream's
-/// parameters, from which MP4, MOV, Matroska and WebM write it.
-///
 /// # Safety
 /// `ctx` is an encoder context not opened yet.
 pub unsafe fn set_on_encoder(ctx: *mut ffi::AVCodecContext, s: &Static) -> Result<()> {
@@ -353,8 +317,6 @@ pub unsafe fn set_on_encoder(ctx: *mut ffi::AVCodecContext, s: &Static) -> Resul
     Ok(())
 }
 
-/// Attaches `s` to a frame, for encoders that read it frame by frame
-/// (VAAPI) or prefer that (NVENC).
 pub fn attach(f: &mut frame::Video, s: &Static) -> Result<()> {
     for (t, size) in types(s) {
         unsafe {
@@ -377,16 +339,12 @@ const ALL: [Sd; 5] = [
     Sd::AV_FRAME_DATA_DOVI_RPU_BUFFER,
 ];
 
-/// Removes all HDR metadata from a frame: what reaches the encoder is
-/// what the output was given, not what a source had.
 pub fn strip(f: &mut frame::Video) {
     for t in ALL {
         unsafe { ffi::av_frame_remove_side_data(f.as_mut_ptr(), t) };
     }
 }
 
-/// Copies the dynamic metadata `keep` names from a source frame onto an
-/// output frame made from it.
 pub fn copy_dynamic(from: &frame::Video, to: &mut frame::Video, keep: Dynamic) -> Result<()> {
     let mut wanted = Vec::new();
     if keep.hdr10plus {
@@ -412,12 +370,8 @@ pub fn copy_dynamic(from: &frame::Video, to: &mut frame::Video, keep: Dynamic) -
     Ok(())
 }
 
-/// The ITU-T T.35 header of HDR10+ (SMPTE ST 2094-40): the US, Samsung,
-/// provider-oriented code 1, application 4.
 const HDR10PLUS_T35: [u8; 6] = [0xB5, 0x00, 0x3C, 0x00, 0x01, 0x04];
 
-/// A frame's HDR10+ as an ITU-T T.35 payload, header included: what an
-/// HEVC SEI or an AV1 metadata OBU carries.
 pub fn hdr10plus_t35(f: &frame::Video) -> Option<Vec<u8>> {
     unsafe {
         let sd = ffi::av_frame_get_side_data(f.as_ptr(), Sd::AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
@@ -435,25 +389,15 @@ pub fn hdr10plus_t35(f: &frame::Video) -> Option<Vec<u8>> {
     }
 }
 
-/// One frame's HDR10+ (SMPTE ST 2094-40) with one window and no tone
-/// mapping curve: its light in cd/m². What frames without it are given
-/// (decision D46).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Hdr10Plus {
-    /// The display it was graded for, cd/m²; 0 for none.
     pub targeted_max_luminance: u32,
-    /// Each channel's brightest, red, green, blue.
     pub maxscl: [f64; 3],
-    /// The brightest channel of each pixel, averaged.
     pub average_maxrgb: f64,
-    /// That brightest channel at percentages of the pixels.
     pub percentiles: Vec<(u8, f64)>,
 }
 
 impl Hdr10Plus {
-    /// `f`'s HDR10+: its first window's light and the display it was graded
-    /// for, read from its T.35 payload ([`hdr10plus_t35`]). `None` without
-    /// any, or one that doesn't read.
     pub fn of_frame(f: &frame::Video) -> Option<Self> {
         let t35 = hdr10plus_t35(f)?;
         let mut bits = BitReader {
@@ -462,7 +406,6 @@ impl Hdr10Plus {
         };
         let _version = bits.take(8)?;
         let windows = bits.take(2)?;
-        // The other windows' places, which the first window's light follows.
         for _ in 1..windows {
             bits.take(16 * 4 + 16 * 2 + 8 + 16 * 3 + 1)?;
         }
@@ -489,9 +432,6 @@ impl Hdr10Plus {
         })
     }
 
-    /// The light `self` and `other` claim, each value the higher; the
-    /// percentiles too where both give the same ones, else those of the
-    /// brighter on average.
     pub fn brightest(mut self, other: &Self) -> Self {
         self.targeted_max_luminance = self
             .targeted_max_luminance
@@ -516,7 +456,6 @@ impl Hdr10Plus {
         self
     }
 
-    /// As an ITU-T T.35 payload, header included ([`hdr10plus_t35`]).
     pub fn t35(&self) -> Vec<u8> {
         struct Bits(Vec<u8>, u32);
         impl Bits {
@@ -531,13 +470,12 @@ impl Hdr10Plus {
                 }
             }
         }
-        // Light in 1/100000 of 10000 cd/m², 17 bits.
         let light = |nits: f64| ((nits * 10.0).round() as u32).min((1 << 17) - 1);
         let mut b = Bits(HDR10PLUS_T35.to_vec(), 48);
-        b.put(1, 8); // application_version
-        b.put(1, 2); // num_windows
+        b.put(1, 8);
+        b.put(1, 2);
         b.put(self.targeted_max_luminance, 27);
-        b.put(0, 1); // targeted_system_display_actual_peak_luminance_flag
+        b.put(0, 1);
         for c in self.maxscl {
             b.put(light(c), 17);
         }
@@ -548,14 +486,13 @@ impl Hdr10Plus {
             b.put(u32::from(percentage.min(100)), 7);
             b.put(light(nits), 17);
         }
-        b.put(0, 10); // fraction_bright_pixels
-        b.put(0, 1); // mastering_display_actual_peak_luminance_flag
-        b.put(0, 1); // tone_mapping_flag
-        b.put(0, 1); // color_saturation_mapping_flag
+        b.put(0, 10);
+        b.put(0, 1);
+        b.put(0, 1);
+        b.put(0, 1);
         b.0
     }
 
-    /// Puts it on `f`, in place of any it had.
     pub fn attach(&self, f: &mut frame::Video) -> Result<()> {
         let t35 = self.t35();
         let payload = &t35[HDR10PLUS_T35.len()..];
@@ -573,15 +510,12 @@ impl Hdr10Plus {
     }
 }
 
-/// Reads a bit string, the first bit the highest of the first byte.
 struct BitReader<'a> {
     data: &'a [u8],
     at: usize,
 }
 
 impl BitReader<'_> {
-    /// The next `n` bits as a number, the first the highest (at most 32);
-    /// more than 32 are passed over. `None` past the end.
     fn take(&mut self, n: u32) -> Option<u32> {
         let mut value = 0u32;
         for _ in 0..n {
@@ -594,16 +528,12 @@ impl BitReader<'_> {
     }
 }
 
-/// Whether `f` has HDR10+.
 pub fn has_hdr10plus(f: &frame::Video) -> bool {
     unsafe {
         !ffi::av_frame_get_side_data(f.as_ptr(), Sd::AV_FRAME_DATA_DYNAMIC_HDR_PLUS).is_null()
     }
 }
 
-/// Puts `t35` (HDR10+, from [`hdr10plus_t35`]) into an encoded HEVC or AV1
-/// packet: a prefix SEI before its first slice (Annex B or 4-byte length
-/// prefixed NAL units), or a metadata OBU before its first frame.
 pub fn insert_hdr10plus(packet: &mut ffmpeg::Packet, id: codec::Id, t35: &[u8]) -> Result<()> {
     let Some(data) = packet.data() else {
         return Ok(());
@@ -614,7 +544,6 @@ pub fn insert_hdr10plus(packet: &mut ffmpeg::Packet, id: codec::Id, t35: &[u8]) 
         _ => return Ok(()),
     }
     .ok_or_else(|| Error::Invalid("no picture in the packet for HDR10+".into()))?;
-    // New data; the timing, flags and side data stay.
     use ffmpeg::packet::{Mut, Ref};
     let mut new = ffmpeg::Packet::copy(&out);
     if unsafe { ffi::av_packet_copy_props(new.as_mut_ptr(), packet.as_ptr()) } < 0 {
@@ -624,11 +553,6 @@ pub fn insert_hdr10plus(packet: &mut ffmpeg::Packet, id: codec::Id, t35: &[u8]) 
     Ok(())
 }
 
-/// Puts `s` into an encoded HEVC or AV1 keyframe packet that doesn't carry
-/// it yet: a mastering display colour volume (137) and content light level
-/// (144) SEI, or HDR_MDCV and HDR_CLL metadata OBUs. Encoders that write
-/// none (NVENC built without its SDK 13 headers) then carry them in the
-/// bitstream too; those that do keep theirs.
 pub fn insert_static(packet: &mut ffmpeg::Packet, id: codec::Id, s: &Static) -> Result<()> {
     if s.is_empty() || !packet.is_key() {
         return Ok(());
@@ -653,7 +577,6 @@ pub fn insert_static(packet: &mut ffmpeg::Packet, id: codec::Id, s: &Static) -> 
     Ok(())
 }
 
-/// Removes emulation prevention bytes.
 fn unescape(nal: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(nal.len());
     let mut zeros = 0;
@@ -668,8 +591,6 @@ fn unescape(nal: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The payload types of an SEI NAL unit's messages (its RBSP after the
-/// two header bytes).
 fn sei_types(rbsp: &[u8]) -> Vec<usize> {
     let mut types = Vec::new();
     let mut at = 0;
@@ -684,7 +605,6 @@ fn sei_types(rbsp: &[u8]) -> Vec<usize> {
             }
         }
     };
-    // Messages until the trailing bits.
     while at < rbsp.len() && !(at + 1 == rbsp.len() && rbsp[at] == 0x80) {
         let (Some(t), Some(size)) = (ff(&mut at), ff(&mut at)) else {
             break;
@@ -714,7 +634,6 @@ fn hevc_with_static(data: &[u8], s: &Static) -> Option<Vec<u8>> {
         let c = |v: f64| ((v * 50_000.0).round() as u16).to_be_bytes();
         let l = |v: f64| ((v * 10_000.0).round() as u32).to_be_bytes();
         let mut payload = Vec::with_capacity(24);
-        // HEVC orders the primaries green, blue, red.
         for xy in [m.primaries[1], m.primaries[2], m.primaries[0], m.white] {
             payload.extend_from_slice(&c(xy[0]));
             payload.extend_from_slice(&c(xy[1]));
@@ -751,8 +670,6 @@ fn hevc_with_static(data: &[u8], s: &Static) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// An AV1 temporal unit's OBUs: (type, start of the OBU, start of its
-/// payload, end).
 fn obus(data: &[u8]) -> Option<Vec<(u8, usize, usize, usize)>> {
     let mut out = Vec::new();
     let mut at = 0;
@@ -798,8 +715,6 @@ fn av1_with_static(data: &[u8], s: &Static) -> Option<Vec<u8>> {
         add.extend(obu(1, &[v(light.max_cll), v(light.max_fall)].concat()));
     }
     if let Some(m) = s.mastering {
-        // Chromaticity in 0.16 fixed point, red, green, blue; luminance in
-        // 24.8 (max) and 18.14 (min).
         let c = |v: f64| ((v * 65_536.0).round().min(65_535.0) as u16).to_be_bytes();
         let mut body = Vec::with_capacity(24);
         for xy in [m.primaries[0], m.primaries[1], m.primaries[2], m.white] {
@@ -821,7 +736,6 @@ fn av1_with_static(data: &[u8], s: &Static) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Inserts emulation prevention bytes: no `00 00 0x` with x ≤ 3 in an RBSP.
 fn escape(rbsp: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(rbsp.len() + rbsp.len() / 64 + 4);
     let mut zeros = 0;
@@ -836,7 +750,6 @@ fn escape(rbsp: &[u8]) -> Vec<u8> {
     out
 }
 
-/// SEI's ff-coded numbers: 255s, then the rest.
 fn ff_coded(mut v: usize, out: &mut Vec<u8>) {
     while v >= 255 {
         out.push(255);
@@ -845,8 +758,6 @@ fn ff_coded(mut v: usize, out: &mut Vec<u8>) {
     out.push(v as u8);
 }
 
-/// A prefix SEI NAL unit (type 39) with one user data registered by ITU-T
-/// T.35 message (payload type 4), at temporal id `tid1` (plus one).
 fn hevc_sei(t35: &[u8], tid1: u8) -> Vec<u8> {
     let mut rbsp = Vec::with_capacity(t35.len() + 8);
     ff_coded(4, &mut rbsp);
@@ -858,12 +769,8 @@ fn hevc_sei(t35: &[u8], tid1: u8) -> Vec<u8> {
     nal
 }
 
-/// Where a NAL unit lies in an access unit: its start code or length,
-/// itself, and its end.
 type Unit = (usize, usize, usize);
 
-/// The NAL units of an HEVC access unit, and whether it uses Annex B start
-/// codes (else 4-byte lengths).
 fn nal_units(data: &[u8]) -> Option<(bool, Vec<Unit>)> {
     let annex_b = data.starts_with(&[0, 0, 1]) || data.starts_with(&[0, 0, 0, 1]);
     let mut units = Vec::new();
@@ -899,7 +806,6 @@ fn nal_units(data: &[u8]) -> Option<(bool, Vec<Unit>)> {
 
 fn hevc_with_sei(data: &[u8], t35: &[u8]) -> Option<Vec<u8>> {
     let (annex_b, units) = nal_units(data)?;
-    // The first slice: VCL NAL unit types are 0 to 31.
     let &(prefix, start, _) = units
         .iter()
         .find(|&&(_, s, e)| e > s + 1 && (data[s] >> 1) & 0x3F < 32)?;
@@ -941,7 +847,6 @@ fn read_leb128(data: &[u8], at: &mut usize) -> Option<usize> {
     None
 }
 
-/// A metadata OBU (type 5) of ITU-T T.35 metadata (type 4), with its size.
 fn av1_metadata(t35: &[u8]) -> Vec<u8> {
     let mut payload = Vec::with_capacity(t35.len() + 2);
     leb128(4, &mut payload);
@@ -954,7 +859,6 @@ fn av1_metadata(t35: &[u8]) -> Vec<u8> {
 }
 
 fn av1_with_metadata(data: &[u8], t35: &[u8]) -> Option<Vec<u8>> {
-    // Before the first frame header or frame OBU (types 3 and 6).
     let mut at = 0;
     let first = loop {
         let start = at;
