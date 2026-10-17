@@ -28,8 +28,8 @@ The GUI with a project open on Linux (an NVIDIA GPU, an AMD iGPU beside it):
 | The player | `vidcut-play-video`, `vidcut-play-audio` | `player::Player::new` | its pictures, and its sound |
 | Sound out | `vidcut-audio-out`, `cpal_alsa_out`; PipeWire's 3 (`alsa-pipewire`, `data-loop.0`, `module-rt`) | `player::CpalOutput` | the device's stream: cpal's, and PipeWire's ALSA plugin |
 | The pools | `vidcut-cpu-N`, a thread fewer than the cores; `vidcut-cpu-job-N`, as many | the pools, on first use | §3, and frames that stand alone (§4.2) |
-| FFmpeg | one frame thread a core for each stream decoder on the CPU whose frames lean on each other (`av:…:dfN`) | the readers' decoders | §4.2 |
-| | swscale's, one a core for each stream converted on the CPU | a stream's conversion | §5 |
+| FFmpeg | frame threads for each stream decoder on the CPU whose frames lean on each other (`av:…:dfN`): one a core, half that for a job's, at most 16 | the readers' decoders | §4.2 |
+| | swscale's, one fewer than `pool::threads_for` gives a stream, for each stream converted on the CPU | a stream's conversion | §5 |
 
 Threads that come and go: one for each IPC connection (`vidcut-ipc-conn`) and each task (gui.md §1); a player's `vidcut-play-windows` while it follows another, `vidcut-scrub` while a viewer scrubs without one; the opener of a reader that reads pieces (`vidcut-open`) and an export's `vidcut-encode` (with its encoder's own threads); measured light's measuring threads.
 
@@ -41,7 +41,7 @@ So the threads a project holds are its readers': each reader's decoder closes wi
 - **A call's slices,** which the calling thread works on too and waits for. A slice is short: nothing waits behind more than a frame's.
 - **Tasks** (`pool/tasks.rs`), handed over in order and taken back in that order: a stream's frames that stand alone (§4.2). A task not started when its result is wanted runs on the thread that wants it, so taking never waits for work queued behind other work. A pool of no threads (one core) takes none.
 - **Oldest first:** the pool runs the slices of the oldest call that has some left, or the oldest task, whichever came first.
-- **Slices:** filter graphs'. Every graph vidcut makes, audio ones too, comes from `pool::graph`, which hands FFmpeg the app's way of running slices (`AVFilterGraph.execute`): a graph starts no thread. And the row loops of `color.rs`.
+- **Slices:** filter graphs'. Every graph vidcut makes, audio ones too, comes from `pool::graph`, which hands FFmpeg the app's way of running slices (`AVFilterGraph.execute`): a graph starts no thread. A stream's graph cuts its work into as many slices as `pool::threads_for` gives a stream on its thread (§4.2), a single frame's into one. And the row loops of `color.rs`, in as many slices as the cores.
 - **What can't run there:** a decoder's own slices. `AVCodecContext.execute2` gives each slice a thread number below the decoder's thread count, by which decoders pick their buffers: a decoder opened for one thread would share its one buffer among the pool's threads, and one opened for more starts threads of its own as it opens. swscale has no such hook (§5).
 
 ## 4. Decoders
@@ -52,14 +52,15 @@ Every video decoder in vidcut-av is a `VideoReader`'s (`decode.rs`): the player'
 
 - **Opened with it** (`VideoReader::open_raw`), **closed with it,** on the thread that drops the reader. Every reader counts while it is open (`decode::open_readers`), and under `VIDCUT_DEBUG` says its decoder's thread count as it opens, and how many readers are open as it opens or closes (tools.md).
 - **A rewind** (a seek to the start, which some files only manage by opening again) reopens the file for the decoder it has, flushed: a decoder made anew would start a pool of frames of its own while kept pictures hold this one's.
-- **Opening ahead** (`vidcut-open`, export.md §1): one file at a time, from a piece's second frame on. A source nobody wants closes on that thread.
-- **The player's reader** keeps open the files the current piece reads (`VideoFrames::start_layers`); a file left closes, and coming back to it opens it anew.
+- **Opening ahead** (`vidcut-open`, export.md §1): one file at a time, from a piece's second frame on. A source it opened that nobody wants closes on that thread.
+- **A file left waits** (`VideoFrames::start_layers`, which the player, exports and the filmstrip read pieces with): a file no piece reads stays open ten seconds, four such files at most and two of them a GPU's (§4.3), the oldest closing first. A playhead dragged back across a cut seeks it rather than opening it anew, and the piece after a cutaway has it sought ahead on the opener thread; a seek into a file the opener holds takes it back from there. Files left close on the thread that reads: as a piece starts, and while a player's decode or windows thread has nothing to do.
+- **A filmstrip worker's reader** closes ten seconds after its last tile, and the next tile opens one.
 
 ### 4.2 On the CPU: the pool, or frame threads
 
 A stream (`Reading::Stream`, §4.4):
-- **Frames that stand alone decode on the pool** (`decode/standalone.rs`): every image sequence (each file is a picture), and a codec FFmpeg marks intra-only and decodes on frame threads (ProRes, DNxHD, JPEG 2000, EXR, TIFF, v210 and others). The reader demuxes on its own thread and hands each packet to its pool as a task, as many in flight as the cores, and takes the frames back in the stream's order; a seek drops those not started. Each pool thread keeps a decoder of one thread for each kind of stream (its codec parameters), which serves every file of that kind and closes once unused for 10 s; one that holds on to the frame it gave (PNG's) closes after each frame. Frames in flight hold what frame threads held, once for the process instead of once for each reader.
-- **Other streams take FFmpeg's automatic count of frame threads,** about one a core: frame threads are the only way to share among the cores a stream whose frames lean on each other. They start as the decoder opens and end as it closes, and hold as many frames in flight as there are threads. libdav1d (AV1 on the CPU) starts a pool of its own from the same count. FFmpeg decodes MJPEG and raw video on one thread, the reader's: their frames may lean on earlier packets (gotchas.md). PNG in a file, a still picture too, takes frame threads: FFmpeg doesn't mark PNG intra-only.
+- **Frames that stand alone decode on the pool** (`decode/standalone.rs`): every image sequence (each file is a picture), and a codec FFmpeg marks intra-only and decodes on frame threads (ProRes, DNxHD, JPEG 2000, EXR, TIFF, v210 and others). The reader demuxes on its own thread and hands each packet to its pool as a task, as many in flight as `pool::threads_for` gives a stream on its thread, and takes the frames back in the stream's order; a seek drops those not started. Each pool thread keeps a decoder of one thread for each kind of stream (its codec parameters), which serves every file of that kind and closes once unused for 10 s; one that holds on to the frame it gave (PNG's) closes after each frame. Frames in flight hold what frame threads held, once for the process instead of once for each reader.
+- **Other streams take frame threads,** the only way to share among the cores a stream whose frames lean on each other, as many as `pool::threads_for` gives by what its thread works for: the cores on an interactive one (the player, the two-up, the windows reader), half of them on a job's (§3), at most 16 (FFmpeg's automatic most). A job's decoder works beside its encoder at the lowest priority, and each frame thread holds a frame in flight that a job doesn't need. They start as the decoder opens and end as it closes. libdav1d (AV1 on the CPU) starts a pool of its own of the same count. FFmpeg decodes MJPEG and raw video on one thread, the reader's: their frames may lean on earlier packets (gotchas.md). PNG in a file, a still picture too, takes frame threads: FFmpeg doesn't mark PNG intra-only.
 
 **Single frames** decode on the reader's thread (§4.4).
 
@@ -75,12 +76,13 @@ A reader is opened for one of two kinds of reading (`decode::Reading`):
 
 ## 5. swscale
 
-FFmpeg's scale filter hands swscale its graph's thread count, and swscale starts that many threads of its own: one a core in a stream's graph, none in a single frame's.
+FFmpeg's scale filter hands swscale its graph's thread count (§3), and swscale starts one fewer threads of its own, as it works on the thread that runs the graph too: none in a single frame's graph.
 
 ## 6. Tests
 
-- [`crates/vidcut-av/tests/threads.rs`](../../crates/vidcut-av/tests/threads.rs) (Linux, which lists a process's threads in `/proc`): a single-frame reader starts no thread; a graph's slices start none once the pool runs, nor a stream of images or of ProRes; a reader counts while it is open.
+- [`crates/vidcut-av/tests/threads.rs`](../../crates/vidcut-av/tests/threads.rs) (Linux, which lists a process's threads in `/proc`): a single-frame reader starts no thread; a job's stream decoder starts half the cores' frame threads; a graph's slices start none once the pool runs, nor a stream of images or of ProRes; a reader counts while it is open; a file left stays open for a later piece of it, dragged back to or played across a cutaway.
 - `pool.rs`'s and `pool/tasks.rs`'s unit tests: the oldest work runs first, slices or a task; results come back in the order given; a task not started runs on the thread that takes it; a seek drops the tasks not started.
+- `export/video.rs`'s unit tests: a file left closes ten seconds after, past two the oldest, past one of a GPU's; `gui/tiles.rs`'s: a worker's reader closes ten seconds after its last tile.
 - `export/ahead.rs`'s unit tests: a source nobody wants closes on the helper thread; a start before the one before began replaces it; a running job nobody wants stops; a dropped reader leaves its source to the helper thread.
 - `player_load` ([tools.md](../tools.md)) plays a project with the real player beside filmstrip workers and a job, and seeks it around: the frames shown late, the threads at most and the peak memory.
 - `scripts/threads.sh` ([tools.md](../tools.md)) counts a running GUI's threads by name once a second.

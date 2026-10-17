@@ -154,7 +154,7 @@ fn stats_on(
     unsafe { (*ctx.as_mut_ptr()).pkt_timebase = tb.into() };
     ctx.set_threading(codec::threading::Config {
         kind: codec::threading::Type::Frame,
-        count: 0,
+        count: crate::pool::threads_for(crate::decode::Reading::Stream),
     });
     let id = stream.parameters().id();
     let mut decoder =

@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use super::frame::Picture;
 use super::plan::Id;
+use crate::error::Result;
 
 /// Where a picture's pixels are, for the budgets: memory, or video memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +52,8 @@ pub(crate) struct Store {
     inner: Mutex<Inner>,
     /// A picture landed.
     landed: Condvar,
+    /// Brings a picture down to memory: `Picture::copied_down`.
+    down: fn(&Picture) -> Result<Picture>,
 }
 
 struct Inner {
@@ -64,6 +67,10 @@ struct Inner {
     shared: bool,
     /// Never let go for the budget.
     held: Option<Id>,
+    /// Held pictures of pools let go, on their way down to memory off the
+    /// lock ([`Store::bring_down`]): counted as gone while they are kept
+    /// as they were.
+    coming_down: Vec<(Id, Arc<Picture>)>,
 }
 
 impl Store {
@@ -78,8 +85,10 @@ impl Store {
                 budget: [memory, video],
                 shared: false,
                 held: None,
+                coming_down: Vec::new(),
             }),
             landed: Condvar::new(),
+            down: Picture::copied_down,
         }
     }
 
@@ -104,8 +113,10 @@ impl Store {
     pub(crate) fn share(&self, shared: bool) {
         let mut inner = self.lock();
         inner.shared = shared;
-        inner.evict(Kind::Memory, None);
-        inner.evict(Kind::Video, None);
+        let mut down = inner.evict(Kind::Memory, None);
+        down.extend(inner.evict(Kind::Video, None));
+        drop(inner);
+        self.bring_down(down, None);
     }
 
     /// Another budget for pictures of `kind`: over it, those kept or
@@ -113,7 +124,9 @@ impl Store {
     pub(crate) fn set_budget(&self, kind: Kind, bytes: usize) {
         let mut inner = self.lock();
         inner.budget[kind.index()] = bytes;
-        inner.evict(kind, None);
+        let down = inner.evict(kind, None);
+        drop(inner);
+        self.bring_down(down, None);
     }
 
     /// The picture of `id`, as decoded or else shrunk, counted as looked
@@ -189,16 +202,40 @@ impl Store {
         if let Some((old, _)) = inner.pictures.insert(id.clone(), (picture, now)) {
             inner.uncharge(&old);
         }
-        for kind in [Kind::Memory, Kind::Video] {
-            inner.bytes[kind.index()] += charged[kind.index()];
-        }
+        inner.charge(charged);
+        let mut down = Vec::new();
         for kind in [Kind::Memory, Kind::Video] {
             if charged[kind.index()] > 0 {
-                inner.evict(kind, Some(&id));
+                down.extend(inner.evict(kind, Some(&id)));
             }
         }
         drop(inner);
         self.landed.notify_all();
+        self.bring_down(down, Some(&id));
+    }
+
+    /// Brings `down`, held pictures of pools let go, to memory off the
+    /// lock, so the viewer and the sound don't wait for the copy, and keeps
+    /// each copy in place of its picture where that is still kept. Counted
+    /// in memory, over its budget those kept or looked at least recently go,
+    /// never `keep` nor the one held. One whose copy fails stays as it is.
+    fn bring_down(&self, mut down: Vec<(Id, Arc<Picture>)>, keep: Option<&Id>) {
+        while let Some((id, picture)) = down.pop() {
+            let copied = (self.down)(&picture);
+            let mut inner = self.lock();
+            inner
+                .coming_down
+                .retain(|(i, p)| !(*i == id && Arc::ptr_eq(p, &picture)));
+            if let (true, Ok(copy)) = (inner.is_kept(&id, &picture), copied) {
+                let used = inner.pictures[&id].1;
+                inner.uncharge(&picture);
+                inner.charge(charges(&copy));
+                inner.pictures.insert(id, (Arc::new(copy), used));
+            }
+            for kind in [Kind::Memory, Kind::Video] {
+                down.extend(inner.evict(kind, keep));
+            }
+        }
     }
 
     /// The picture of `id`, waiting for it until `deadline`.
@@ -257,18 +294,48 @@ impl Inner {
         }
     }
 
+    /// Adds `charged` ([`charges`]) to the budgets.
+    fn charge(&mut self, charged: [usize; 2]) {
+        for (bytes, c) in self.bytes.iter_mut().zip(charged) {
+            *bytes += c;
+        }
+    }
+
     /// The kind whose budget pictures of `kind` count in.
     fn pool(&self, kind: Kind) -> Kind {
         if self.shared { Kind::Memory } else { kind }
     }
 
-    /// The bytes counted in `pool`'s budget.
+    /// The bytes counted in `pool`'s budget, but those of pictures coming
+    /// down to memory.
     fn counted(&self, pool: Kind) -> usize {
+        let leaving = self.leaving();
         [Kind::Memory, Kind::Video]
             .into_iter()
             .filter(|k| self.pool(*k) == pool)
-            .map(|k| self.bytes[k.index()])
+            .map(|k| self.bytes[k.index()] - leaving[k.index()])
             .sum()
+    }
+
+    /// The bytes of the pictures coming down to memory, while they are
+    /// kept as they were.
+    fn leaving(&self) -> [usize; 2] {
+        let mut bytes = [0; 2];
+        for (id, picture) in &self.coming_down {
+            if self.is_kept(id, picture) {
+                for (b, c) in bytes.iter_mut().zip(charges(picture)) {
+                    *b += c;
+                }
+            }
+        }
+        bytes
+    }
+
+    /// Whether `picture` is kept as `id`'s.
+    fn is_kept(&self, id: &Id, picture: &Arc<Picture>) -> bool {
+        self.pictures
+            .get(id)
+            .is_some_and(|(p, _)| Arc::ptr_eq(p, picture))
     }
 
     /// `picture` takes some of `pool`'s budget.
@@ -281,14 +348,16 @@ impl Inner {
 
     /// Lets the pictures counted in `kind`'s budget, those kept or looked
     /// at least recently, go while it is over; never `keep` nor the one
-    /// held. One whose memory is a pool's other than `keep`'s
-    /// (`Picture::pooled`) goes with all of that pool's pictures: letting
-    /// one go would free none of it.
-    fn evict(&mut self, kind: Kind, keep: Option<&Id>) {
+    /// held. One whose memory is of pools other than `keep`'s
+    /// (`Picture::pools`) goes with all of those pools' pictures: letting
+    /// one go would free none of it. Returns the held picture of a pool let
+    /// go, for [`Store::bring_down`] once the lock is let go.
+    fn evict(&mut self, kind: Kind, keep: Option<&Id>) -> Vec<(Id, Arc<Picture>)> {
         let pool = self.pool(kind);
         let room_for = keep
             .and_then(|k| self.pictures.get(k))
-            .and_then(|(p, _)| p.pooled());
+            .map_or_else(Vec::new, |(p, _)| p.pools());
+        let mut down = Vec::new();
         while self.counted(pool) > self.budget[pool.index()] {
             let held = self.held.as_ref();
             let oldest = self
@@ -298,45 +367,56 @@ impl Inner {
                     self.charges_in(p, pool) && Some(*k) != keep && Some(*k) != held
                 })
                 .min_by_key(|(_, (_, used))| *used)
-                .map(|(k, (p, _))| (k.clone(), p.pooled()));
-            let Some((oldest, pooled)) = oldest else {
+                .map(|(k, (p, _))| (k.clone(), p.pools()));
+            let Some((oldest, pools)) = oldest else {
                 break;
             };
-            match pooled {
-                Some(other) if pooled != room_for => self.let_pool_go(other, keep),
-                _ => {
-                    if let Some((old, _)) = self.pictures.remove(&oldest) {
-                        self.uncharge(&old);
-                    }
-                }
+            let others: Vec<usize> = pools
+                .into_iter()
+                .filter(|p| !room_for.contains(p))
+                .collect();
+            if others.is_empty()
+                && let Some((old, _)) = self.pictures.remove(&oldest)
+            {
+                self.uncharge(&old);
+            }
+            for other in others {
+                down.extend(self.let_pool_go(other, keep));
             }
         }
+        down
     }
 
-    /// Lets all the pictures of `pooled` go but `keep`: the pool's memory
-    /// goes with the last of them. The one held comes down to memory
-    /// instead, where it can, or stays as it is.
-    fn let_pool_go(&mut self, pooled: usize, keep: Option<&Id>) {
+    /// Lets all the pictures go that a frame of `pool` is in
+    /// (`Picture::holds`), but `keep`: the pool's memory goes with the last
+    /// of them. The one held stays, and is returned to come down to memory
+    /// off the lock, unless it is on its way already.
+    fn let_pool_go(&mut self, pool: usize, keep: Option<&Id>) -> Option<(Id, Arc<Picture>)> {
         let ids: Vec<Id> = self
             .pictures
             .iter()
-            .filter(|(k, (p, _))| p.pooled() == Some(pooled) && Some(*k) != keep)
+            .filter(|(k, (p, _))| p.holds(pool) && Some(*k) != keep)
             .map(|(k, _)| k.clone())
             .collect();
+        let mut down = None;
         for id in ids {
-            let Some((old, used)) = self.pictures.remove(&id) else {
-                continue;
-            };
-            self.uncharge(&old);
             if self.held.as_ref() != Some(&id) {
+                if let Some((old, _)) = self.pictures.remove(&id) {
+                    self.uncharge(&old);
+                }
                 continue;
             }
-            let picture = old.copied_down().map(Arc::new).unwrap_or(old);
-            for (bytes, c) in self.bytes.iter_mut().zip(charges(&picture)) {
-                *bytes += c;
+            let picture = self.pictures[&id].0.clone();
+            let on_its_way = self
+                .coming_down
+                .iter()
+                .any(|(i, p)| *i == id && Arc::ptr_eq(p, &picture));
+            if !on_its_way {
+                self.coming_down.push((id.clone(), picture.clone()));
+                down = Some((id, picture));
             }
-            self.pictures.insert(id, (picture, used));
         }
+        down
     }
 }
 
@@ -346,7 +426,7 @@ mod tests {
 
     use super::{Kind, Store};
     use crate::ffmpeg::{format::Pixel, frame};
-    use crate::player::frame::Picture;
+    use crate::player::frame::{Over, Picture};
     use crate::player::plan::Id;
 
     /// A 2×2 picture on a GPU, 6 bytes.
@@ -358,22 +438,36 @@ mod tests {
         Picture::new(f, 0, None, None)
     }
 
+    /// A 2×2 picture in memory, 6 bytes.
+    fn in_memory() -> Picture {
+        Picture::new(frame::Video::new(Pixel::YUV420P, 2, 2), 0, None, None)
+    }
+
     /// A 2×2 picture, 6 bytes: in memory, or on a GPU.
     fn picture(gpu: bool) -> Arc<Picture> {
-        if gpu {
-            return Arc::new(on_gpu());
-        }
-        Arc::new(Picture::new(
-            frame::Video::new(Pixel::YUV420P, 2, 2),
-            0,
-            None,
-            None,
-        ))
+        Arc::new(if gpu { on_gpu() } else { in_memory() })
+    }
+
+    /// A store whose pictures come down to memory as a 2×2 picture there.
+    fn coming_down_to_memory(memory: usize, video: usize) -> Store {
+        let mut store = Store::new(memory, video);
+        store.down = |_| Ok(in_memory());
+        store
     }
 
     /// A 2×2 picture on a GPU whose memory is `pool`'s, 6 bytes.
     fn of_pool(pool: usize) -> Arc<Picture> {
         Arc::new(on_gpu().in_pool(pool))
+    }
+
+    /// A dissolve: a 2×2 picture on a GPU under one whose memory is
+    /// `pool`'s, 12 bytes.
+    fn under_one_of(pool: usize) -> Arc<Picture> {
+        let over = Over {
+            picture: of_pool(pool),
+            weight: 1,
+        };
+        Arc::new(on_gpu().with_over(vec![over]))
     }
 
     /// Which of the clip's pictures at `0..4` are kept.
@@ -407,6 +501,37 @@ mod tests {
             store.put(Id::at("clip", pos), of_pool(pool));
         }
         assert_eq!(kept(&store), [true, false, false, true]);
+    }
+
+    #[test]
+    fn the_picture_held_comes_down_to_memory_and_counts_there_when_its_pool_goes() {
+        let store = coming_down_to_memory(18, 18);
+        store.hold(Some(Id::at("clip", 0)));
+        for (pos, pool) in [(0, 1), (1, 1), (2, 1), (3, 2)] {
+            store.put(Id::at("clip", pos), of_pool(pool));
+        }
+        let bytes = [Kind::Memory, Kind::Video].map(|k| store.bytes(k));
+        assert_eq!(bytes, [6, 6]);
+    }
+
+    #[test]
+    fn memory_makes_room_for_the_picture_held_come_down() {
+        let store = coming_down_to_memory(6, 12);
+        store.put(Id::at("clip", 0), picture(false));
+        store.hold(Some(Id::at("clip", 1)));
+        for (pos, pool) in [(1, 1), (2, 1), (3, 2)] {
+            store.put(Id::at("clip", pos), of_pool(pool));
+        }
+        assert_eq!(kept(&store), [false, true, false, true]);
+    }
+
+    #[test]
+    fn a_dissolve_goes_with_the_pool_of_the_picture_over_it() {
+        let store = Store::new(0, 18);
+        store.put(Id::at("clip", 0), of_pool(1));
+        store.put(Id::at("clip", 1), under_one_of(1));
+        store.put(Id::at("clip", 2), of_pool(2));
+        assert_eq!(kept(&store), [false, false, true, false]);
     }
 
     #[test]

@@ -88,6 +88,29 @@ pub fn threads() -> usize {
     std::thread::available_parallelism().map_or(1, |n| n.get())
 }
 
+/// FFmpeg's most frame threads by its automatic count, and the most it
+/// recommends.
+const MOST_FRAME_THREADS: usize = 16;
+
+/// The threads a reader's decoder and each of its graphs work with
+/// (docs/decisions/threads.md §4.2): one for single frames. For a stream,
+/// the cores on an interactive thread and half of them on a job's
+/// ([`crate::first::as_job`]), whose decoder works beside its encoder and
+/// needs no more frames in flight; at most 16 either way.
+pub fn threads_for(reading: Reading) -> usize {
+    budget(reading, crate::first::yields(), threads())
+}
+
+/// [`threads_for`] with `cores` cores, on a job's thread or not.
+fn budget(reading: Reading, job: bool, cores: usize) -> usize {
+    let n = match reading {
+        Reading::Frames => return 1,
+        Reading::Stream if job => cores / 2,
+        Reading::Stream => cores,
+    };
+    n.clamp(1, MOST_FRAME_THREADS)
+}
+
 /// The pool of the calling thread: the jobs' for a thread working for a
 /// job, the other's for the rest. Started on first use.
 fn pool() -> &'static Pool {
@@ -222,15 +245,13 @@ pub fn run(slices: usize, job: &(dyn Fn(usize) + Sync)) {
     );
 }
 
-/// A filter graph whose slices run on the pool, for a stream: in as many
-/// slices as [`threads`]. For single frames, in one, on the thread that
-/// runs the graph. Either way the graph starts no thread of its own.
+/// A filter graph whose slices run on the pool, in as many slices as
+/// [`threads_for`] gives: for single frames one, on the thread that runs
+/// the graph. Either way the graph starts no thread of its own; its `scale`
+/// filters hand the count to swscale, which starts that many less one.
 pub fn graph(reading: Reading) -> filter::Graph {
     let mut graph = filter::Graph::new();
-    let slices = match reading {
-        Reading::Stream => threads(),
-        Reading::Frames => 1,
-    };
+    let slices = threads_for(reading);
     // SAFETY: a graph of no filters yet, which is when FFmpeg takes both.
     unsafe {
         let raw = graph.as_mut_ptr();
@@ -345,6 +366,43 @@ mod tests {
             }
         }
         assert_eq!(*lock(&ran), ["first task", "slices", "last task"]);
+    }
+
+    #[test]
+    fn single_frames_take_one_thread() {
+        assert_eq!(budget(Reading::Frames, false, 12), 1);
+    }
+
+    #[test]
+    fn an_interactive_stream_takes_the_cores() {
+        assert_eq!(budget(Reading::Stream, false, 12), 12);
+    }
+
+    #[test]
+    fn a_jobs_stream_takes_half_the_cores() {
+        assert_eq!(budget(Reading::Stream, true, 12), 6);
+    }
+
+    #[test]
+    fn a_jobs_stream_on_one_core_takes_one() {
+        assert_eq!(budget(Reading::Stream, true, 1), 1);
+    }
+
+    #[test]
+    fn a_stream_takes_at_most_16() {
+        assert_eq!(budget(Reading::Stream, false, 64), 16);
+    }
+
+    #[test]
+    fn a_thread_that_yields_to_players_works_for_a_job() {
+        let job = std::thread::spawn(|| {
+            crate::first::yield_to_players();
+            threads_for(Reading::Stream)
+        });
+        assert_eq!(
+            job.join().unwrap(),
+            budget(Reading::Stream, true, threads())
+        );
     }
 
     #[test]

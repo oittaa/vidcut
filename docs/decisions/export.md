@@ -16,13 +16,14 @@
 **Engine:**
 - For each output frame, it pulls the next video frame from the current piece's decoder (one for each picture of a mix) and makes its picture, then exactly the audio samples that frame spans from each lane.
 - The encoders and the muxer work on a thread of their own (`export/worker.rs`), fed in order through a channel that holds three frames, so decoding and making the next pictures go on while an encoder waits for the GPU. Proxies encode the same way. An error on either thread stops the export with the error a single thread would have met first: after a decoding error the encoders still take the frames handed over before it. A cancel stops them at once.
-- Memory stays flat with the segment count: each reader (video, and each audio lane) has its current file open, plus the next one while it opens. A test with 400 segments checks this, in a process of its own.
+- Memory stays flat with the segment count: each reader (video, and each audio lane) has its current file open, plus the next one while it opens; video's, at most two more it left lately.
 - A two-pass export (§5, Passes) runs the video through the encoder twice: the first time to measure, muxing nothing, then as above.
 
 **Starting a piece** (`export/video.rs`, `export/audio.rs`, `export/ahead.rs`):
 - **Same file as the piece before:** the reader reads on. A piece that starts at most 1 s past where the decoder is decodes on to its first frame (or skips samples). Anything else seeks the open file. A frame repeated across the cut needs neither.
 - **Another file:** opening it, seeking and decoding up to its first frame happen on a helper thread while the piece before encodes, from the piece's second frame on. A failure there is the same error the piece would have hit.
-- **One file ahead at a time** (`Ahead`): a newer piece asked for replaces one not begun, and a source nobody wants any more (the pieces were made anew by a seek, and the next file is another) stops opening and closes on the helper thread, never on the reader's. The same file asked for again is taken up. A seek a frame, such as a dragged playhead, opens nothing ahead.
+- **A file left lately** (`VideoFrames::start_layers`): a video file no piece reads stays open ten seconds, four such files at most and two of them a GPU's, the oldest closing first. A later piece of it reads on or seeks, as for the same file; once the piece before it plays past its first frame, the helper thread does that ahead, and a seek into the file meanwhile takes it back from there. It isn't opened anew.
+- **One file ahead at a time** (`Ahead`): a newer piece asked for replaces one not begun, and a source it opened that nobody wants any more (the pieces were made anew by a seek, and the next file is another) stops opening and closes on the helper thread, never on the reader's. The same file asked for again is taken up. A seek a frame, such as a dragged playhead, opens nothing ahead.
 - **One opener thread per reader for the whole export.** glibc gives every new thread its own malloc arena, and decoder memory freed across many arenas stays resident.
 
 **Output:** goes to a hidden `.<name>.part` file, renamed into place on success. Errors and cancellation delete it.

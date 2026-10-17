@@ -28,10 +28,10 @@ use crate::pool::tasks::Ordered;
 /// A pool thread's decoder closes once unused for this long.
 const IDLE: Duration = Duration::from_secs(10);
 
-/// Frames a reader has in flight: as many as its pool and its own thread
-/// decode at once, as many as frame threads would hold.
+/// Frames a reader has in flight: as many as frame threads would hold on
+/// its thread ([`crate::pool::threads_for`]).
 fn in_flight() -> usize {
-    crate::pool::threads()
+    crate::pool::threads_for(Reading::Stream)
 }
 
 /// Whether the frames of a stream of `source` with `params` stand alone:

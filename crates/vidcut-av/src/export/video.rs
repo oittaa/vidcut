@@ -7,6 +7,7 @@
 //! sources at the project rate and nearest-frame sampling otherwise.
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use vidcut_core::model::Hdr;
 use vidcut_core::render::{Image, VideoPiece, WHOLE};
@@ -108,6 +109,9 @@ struct Source {
     decoder: Option<crate::hw::Kind>,
     /// Pictures of a piece walking its source backward, made ahead.
     reversed: Vec<Reversed>,
+    /// When the pieces stopped reading it: a file left waits open a moment
+    /// for a later piece of it ([`staying`]). `None` while a piece reads it.
+    left: Option<Instant>,
 }
 
 /// What a source needs to decode on NVDEC for an export whose frames stay
@@ -131,6 +135,36 @@ const DECODE_AHEAD: f64 = 1.0;
 const REVERSED_BYTES: usize = 256 << 20;
 const REVERSED_MOST: i64 = 64;
 const REVERSED_ON_GPU: i64 = 4;
+
+/// How long a file no piece reads stays open, for a later piece of it: a
+/// playhead dragged back across a cut seeks it rather than opening it anew.
+const LEFT_FOR: Duration = Duration::from_secs(10);
+
+/// Files left open at most, each holding its decoder's memory: the files
+/// a playhead is dragged across in a moment. Of those a GPU decodes, a
+/// dissolve's two: an idle GPU decoder holds video memory.
+const LEFT_MOST: usize = 4;
+const LEFT_ON_GPU: usize = 2;
+
+/// Which of the files left stay open, each given as the time since it was
+/// left and whether a GPU decodes it: those left less than [`LEFT_FOR`]
+/// ago, newest first, [`LEFT_MOST`] at most and [`LEFT_ON_GPU`] of a GPU's.
+fn staying(left: &[(Duration, bool)]) -> Vec<bool> {
+    let mut newest: Vec<usize> = (0..left.len()).collect();
+    newest.sort_by_key(|&i| left[i].0);
+    let mut stays = vec![false; left.len()];
+    let (mut kept, mut on_gpu) = (0, 0);
+    for i in newest {
+        let (age, gpu) = left[i];
+        if age >= LEFT_FOR || kept == LEFT_MOST || (gpu && on_gpu == LEFT_ON_GPU) {
+            continue;
+        }
+        stays[i] = true;
+        kept += 1;
+        on_gpu += usize::from(gpu);
+    }
+    stays
+}
 
 /// A picture of a piece walking its source backward, made ahead.
 struct Reversed {
@@ -195,6 +229,7 @@ impl Source {
             fitting,
             decoder,
             reversed: Vec::new(),
+            left: None,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -245,6 +280,7 @@ impl Source {
             fitting: Fitting::none(),
             decoder,
             reversed: Vec::new(),
+            left: None,
         })
     }
 
@@ -372,6 +408,27 @@ impl Source {
                 }),
         }
     }
+
+    /// No piece reads it from `now` on: it waits open, the pictures of a
+    /// piece walking backward gone. The frame decoded and the picture made
+    /// of it stay: making the picture may have taken the frame's buffers
+    /// (a relayout's graph, the GPU's scaler).
+    fn leave(&mut self, now: Instant) {
+        if self.left.is_none() {
+            self.left = Some(now);
+            self.reversed.clear();
+        }
+    }
+
+    /// Readies a file left for a piece starting at `target`, as
+    /// [`open`](Self::open) leaves a file it opens: `current` at the first
+    /// frame for it.
+    fn resume(&mut self, origin: f64, source_frame: i64, target: f64) -> Result<()> {
+        self.left = None;
+        self.reposition(origin, source_frame, target)?;
+        self.advance(target)?;
+        Ok(())
+    }
 }
 
 /// A picture of an output frame: the frame's only one, or one of the
@@ -429,7 +486,7 @@ pub struct VideoFrames {
     /// Frame index within the current piece.
     k: i64,
     /// The files open: those the current piece's pictures are read from,
-    /// and any the pieces after it may read on.
+    /// any the pieces after it may read on, and those left lately.
     open: Vec<Source>,
     /// Which of `open` reads each picture of the current piece (`None`:
     /// black).
@@ -995,8 +1052,9 @@ impl VideoFrames {
 
     /// Readies the files of the current piece's pictures: for each, an open
     /// file of it no other picture of the piece reads (the one that reads on
-    /// to it, if one does), the one opened ahead for it, or a new one.
-    /// Files none of them reads close.
+    /// to it, if one does; a file left lately among them), the one opened
+    /// ahead for it, or a new one. Files none of them reads are left, and
+    /// those left that wait no more close ([`close_left`](Self::close_left)).
     fn start_layers(&mut self, piece: &VideoPiece) -> Result<()> {
         let mut taken = vec![false; self.open.len()];
         let mut reading = Vec::new();
@@ -1037,19 +1095,29 @@ impl VideoFrames {
                     s
                 }
                 None => {
-                    let opened = match self.ahead.take(slot(self.piece, i)) {
-                        Some(opened) => opened?,
-                        None => Source::open(
-                            &input,
-                            *origin,
-                            from,
-                            target,
-                            pictures,
-                            self.gpu_side().as_ref(),
-                            self.decoder.as_ref(),
-                            self.maker.reading(),
-                            self.measures(&input),
-                        )?,
+                    // A file left that went to the opener for a later
+                    // piece: taken back, where the opener left it.
+                    let opened = match self.ahead.reclaim(|k| k.0 == input) {
+                        Some(source) => {
+                            let mut source = source?;
+                            source.left = None;
+                            source.reposition(*origin, from, target)?;
+                            source
+                        }
+                        None => match self.ahead.take(slot(self.piece, i)) {
+                            Some(opened) => opened?,
+                            None => Source::open(
+                                &input,
+                                *origin,
+                                from,
+                                target,
+                                pictures,
+                                self.gpu_side().as_ref(),
+                                self.decoder.as_ref(),
+                                self.maker.reading(),
+                                self.measures(&input),
+                            )?,
+                        },
                     };
                     self.open.push(opened);
                     taken.push(false);
@@ -1062,28 +1130,66 @@ impl VideoFrames {
             }
             reading.push(Some(s));
         }
-        let mut moved = Vec::with_capacity(taken.len());
-        let mut kept = Vec::new();
-        for (s, source) in std::mem::take(&mut self.open).into_iter().enumerate() {
-            moved.push(taken[s].then_some(kept.len()));
-            if taken[s] {
-                kept.push(source);
+        let now = Instant::now();
+        for (source, taken) in self.open.iter_mut().zip(taken) {
+            if taken {
+                source.left = None;
+            } else {
+                source.leave(now);
             }
         }
-        self.open = kept;
-        if moved.contains(&None) {
-            // Files closed: their decoders' memory goes back.
-            crate::buffers::give_back();
-        }
-        self.reading = reading
-            .into_iter()
-            .map(|r| r.and_then(|s| moved[s]))
-            .collect();
+        self.reading = reading;
+        self.close_left();
         Ok(())
     }
 
+    /// Closes the files left that wait no more ([`staying`]): left
+    /// [`LEFT_FOR`] ago, or the oldest past [`LEFT_MOST`] (of a GPU's,
+    /// [`LEFT_ON_GPU`]). On the thread that reads, as a piece starts and
+    /// whenever the reader idles.
+    pub(crate) fn close_left(&mut self) {
+        let now = Instant::now();
+        let left: Vec<usize> = (0..self.open.len())
+            .filter(|&s| self.open[s].left.is_some())
+            .collect();
+        let ages: Vec<(Duration, bool)> = left
+            .iter()
+            .map(|&s| {
+                let source = &self.open[s];
+                let since = source.left.expect("left");
+                (now.duration_since(since), source.decoder.is_some())
+            })
+            .collect();
+        let stays = staying(&ages);
+        let mut closed = false;
+        for (&s, stays) in left.iter().zip(stays).rev() {
+            if !stays {
+                drop(self.take_out(s));
+                closed = true;
+            }
+        }
+        if closed {
+            // Their decoders' memory goes back.
+            crate::buffers::give_back();
+        }
+    }
+
+    /// Open file `s`, one the current piece doesn't read, out of the files
+    /// open: the current piece's pictures read on from those after it, one
+    /// place down.
+    fn take_out(&mut self, s: usize) -> Source {
+        for r in self.reading.iter_mut().flatten() {
+            if *r > s {
+                *r -= 1;
+            }
+        }
+        self.open.remove(s)
+    }
+
     /// Starts opening the file of the next piece's first picture that no
-    /// open file reads; the next piece reads on with the open ones.
+    /// open file reads; the next piece reads on with the open ones. A file
+    /// left lately isn't opened anew: it goes to the opener, which readies
+    /// it there.
     fn open_next(&mut self) {
         let next = self
             .pieces
@@ -1112,9 +1218,10 @@ impl VideoFrames {
                 continue;
             };
             let input = input_of(path, image.as_ref());
-            if let Some(s) =
-                (0..self.open.len()).find(|&s| !used[s] && self.open[s].reader.input() == &input)
-            {
+            let free = |s: &usize| !used[*s] && self.open[*s].reader.input() == &input;
+            let read = (0..self.open.len()).find(|s| free(s) && self.open[*s].left.is_none());
+            let left = (0..self.open.len()).find(free);
+            if let Some(s) = read {
                 used[s] = true;
                 continue;
             }
@@ -1131,6 +1238,14 @@ impl VideoFrames {
             let measure = self.measures(&input);
             let reading = self.maker.reading();
             let key = (input.clone(), origin.to_bits(), from);
+            if let Some(s) = left {
+                let mut source = self.take_out(s);
+                self.ahead.start(slot(j, i), key, move || {
+                    source.resume(origin, from, target)?;
+                    Ok(source)
+                });
+                return;
+            }
             self.ahead.start(slot(j, i), key, move || {
                 Source::open(
                     &input,
@@ -1422,8 +1537,47 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::fill_black;
+    use std::time::Duration;
+
+    use super::{fill_black, staying};
     use crate::ffmpeg::{format::Pixel, frame};
+
+    const fn secs(s: u64) -> Duration {
+        Duration::from_secs(s)
+    }
+
+    #[test]
+    fn a_file_left_closes_ten_seconds_after() {
+        assert_eq!(
+            staying(&[(secs(9), false), (secs(10), false)]),
+            [true, false]
+        );
+    }
+
+    #[test]
+    fn past_four_files_left_the_oldest_closes() {
+        let left = [
+            (secs(5), false),
+            (secs(1), false),
+            (secs(2), false),
+            (secs(4), false),
+            (secs(3), false),
+        ];
+        assert_eq!(staying(&left), [false, true, true, true, true]);
+    }
+
+    #[test]
+    fn two_files_left_a_gpu_decodes_stay() {
+        assert_eq!(
+            staying(&[
+                (secs(3), true),
+                (secs(1), true),
+                (secs(2), true),
+                (secs(4), false)
+            ]),
+            [false, true, true, true]
+        );
+    }
 
     #[test]
     fn packed_rgba_black_is_opaque() {

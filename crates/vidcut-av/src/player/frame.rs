@@ -222,16 +222,29 @@ impl Picture {
         Ok(Self::new(frame, self.rotation, self.decoder, self.decoding.clone()).with_over(over))
     }
 
-    /// The pool whose surface its frame is, where its memory is a pool's
-    /// that other frames share: letting it go frees nothing until all of
-    /// that pool's frames go (`hw::pooled`). `None` where letting it go
-    /// frees its memory.
-    pub(crate) fn pooled(&self) -> Option<usize> {
-        self.pooled
+    /// The pools whose surfaces its frame and those over it are, where
+    /// their memory is a pool's that other frames share: letting it go
+    /// frees nothing of a pool until all of that pool's frames go
+    /// (`hw::pooled`). Empty where letting it go frees its memory.
+    pub(crate) fn pools(&self) -> Vec<usize> {
+        let mut pools: Vec<usize> = self
+            .pooled
+            .into_iter()
+            .chain(self.over.iter().flat_map(|o| o.picture.pools()))
+            .collect();
+        pools.sort_unstable();
+        pools.dedup();
+        pools
+    }
+
+    /// Whether its frame or one over it is a surface of `pool`
+    /// ([`pools`](Self::pools)).
+    pub(crate) fn holds(&self, pool: usize) -> bool {
+        self.pooled == Some(pool) || self.over.iter().any(|o| o.picture.holds(pool))
     }
 
     /// Whether its frame or one over it is a pool's that other frames share
-    /// ([`pooled`](Self::pooled)).
+    /// ([`pools`](Self::pools)).
     pub(crate) fn holds_a_pool(&self) -> bool {
         self.pooled.is_some() || self.over.iter().any(|o| o.picture.holds_a_pool())
     }
