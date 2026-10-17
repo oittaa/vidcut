@@ -28,6 +28,7 @@ pub mod route;
 pub(crate) mod stretch;
 pub mod testdata;
 pub mod thumbs;
+pub(crate) mod turns;
 pub mod waveform;
 
 pub use error::{Error, Result};

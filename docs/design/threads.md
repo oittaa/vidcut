@@ -67,6 +67,10 @@ There are two pools (`crates/vidcut-av/src/pool.rs`). A yielding caller uses the
 
 Every video decoder is a `VideoReader`'s: opened with it, used on its thread, closed when it drops (`decode::open_readers` counts them). A file whose pieces a plan has left stays open a short while, a few at a time and fewer on a GPU (`staying` in `crates/vidcut-av/src/export/video.rs`), so a piece of it that comes back, or a playhead dragged back, resumes its reader instead of opening the file again. One file at a time opens ahead, on `vidcut-open`. Readers on a GPU share its `GpuDecoder` device but not their decoders, and a GPU decoder takes one thread. On the CPU, frames that stand alone decode on the pool; other streams take FFmpeg frame threads, as many as `pool::threads_for` gives: fewer on a job's thread, one for single frames.
 
+Shot and black analyses that decode on the CPU take turns (`turns::cpu_analysis`): one runs at once for every few cores (`CORES_EACH`), with the frame threads it would have alone, and the rest wait in the order they asked; a cancel takes a waiting one out of the line. One that decodes on the GPU takes a single thread and doesn't wait.
+
+**Why:** a GUI starts an analysis for each request, so an agent asking for many at once would run them all, each with its own frame threads and decoder memory. An analysis scores its pictures on one thread and keeps only a few cores busy, so a few at a time finish as many as all at once, with fewer decoders in memory and fewer threads on the cores.
+
 ## How the process ends
 
 Threads a reader or player leaves behind as it drops (the source opener's helper, an engine's `vidcut-play-windows`) go to `vidcut_av::ending`. The CLI and MCP return from `main`, which waits for them (`ending::join`) before it exits. When the GUI's window closes, `App::on_exit` runs on the UI thread:

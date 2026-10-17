@@ -131,6 +131,11 @@ fn stats_on(
         count: crate::pool::threads_for(crate::decode::Reading::Stream),
     });
     let id = stream.parameters().id();
+    let _turn = match gpu {
+        Some(g) if crate::decode::gpu_takes(id, g, || crate::decode::h264_open_gop(source)) => None,
+        Some(_) => return Ok(None),
+        None => Some(crate::turns::cpu_analysis()?),
+    };
     let mut decoder =
         match crate::decode::open_video(ctx, id, gpu, || crate::decode::h264_open_gop(source)) {
             Ok(decoder) => decoder,
