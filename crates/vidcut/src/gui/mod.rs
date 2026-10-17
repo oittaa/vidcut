@@ -91,6 +91,11 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
     crate::threads::ending("the closing threads");
     crate::threads::join_closing();
     crate::threads::ending("the process's exit");
+    if ran.is_ok() {
+        // Everything of ours has ended: the process ends now, without the
+        // libraries' exit handlers, one of which hangs (gotchas.md).
+        crate::threads::exit_now(0);
+    }
     ran.map_err(|e| {
         #[cfg(all(unix, not(target_os = "macos")))]
         let hint = " (is a Wayland or X11 display available?)";

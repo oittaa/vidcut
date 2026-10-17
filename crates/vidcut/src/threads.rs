@@ -112,6 +112,23 @@ pub fn end_within(patience: std::time::Duration) {
     });
 }
 
+/// Ends the process now with `code`, its output flushed and no library's
+/// exit handler run: libnvcuvid's joins a thread of the driver's that
+/// never ends once a window closed while NVDEC decoded (gotchas.md). For
+/// the GUI once its own threads are joined ([`join_closing`]).
+pub fn exit_now(code: i32) -> ! {
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    #[cfg(unix)]
+    // SAFETY: ends the process at once; nothing of ours runs after.
+    unsafe {
+        libc::_exit(code)
+    }
+    #[cfg(not(unix))]
+    std::process::exit(code)
+}
+
 /// Every thread of the process with what the kernel has it waiting on
 /// (Linux, from `/proc`; nothing elsewhere), for the watchdog's report.
 fn threads_waiting() -> Vec<(String, String)> {
