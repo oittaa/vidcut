@@ -161,10 +161,10 @@ fn video_memory_auto_mb(p: &Preferences) -> u64 {
             mb => mb,
         };
     }
-    vidcut_av::gpus::in_use()
+    let gpu = vidcut_av::gpus::in_use()
         .filter(|_| p.gpu.acceleration && p.gpu.decoding)
-        .and_then(|g| g.memory_mb)
-        .map_or(1024, |mb| mb / 2)
+        .and_then(|g| g.memory_mb);
+    (vidcut_av::player::Budget::gpu_video(gpu) >> 20) as u64
 }
 
 fn describe(p: &Preferences) -> Value {
