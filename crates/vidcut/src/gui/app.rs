@@ -121,6 +121,7 @@ pub struct App {
     session: Option<std::thread::JoinHandle<()>>,
     window_captures: HashMap<u64, Capture>,
     next_capture: u64,
+    window: super::window::Window,
 }
 
 const QUIT_PATIENCE: Duration = Duration::from_secs(5);
@@ -137,6 +138,7 @@ impl App {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         project: Option<PathBuf>,
+        window: super::window::Window,
     ) -> std::result::Result<Self, String> {
         let render = cc
             .wgpu_render_state
@@ -203,6 +205,7 @@ impl App {
             session: Some(session),
             window_captures: HashMap::new(),
             next_capture: 1,
+            window,
         })
     }
 
@@ -262,6 +265,9 @@ impl eframe::App for App {
                     if let Some([width, height]) = w.size {
                         ctx.send_viewport_cmd(C::InnerSize(egui::vec2(width, height)));
                     }
+                    if let Some([x, y]) = w.position {
+                        ctx.send_viewport_cmd(C::OuterPosition(egui::pos2(x, y)));
+                    }
                     if let Some(m) = w.maximized {
                         ctx.send_viewport_cmd(C::Maximized(m));
                     }
@@ -299,6 +305,7 @@ impl eframe::App for App {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
         self.window_screenshots(&ctx);
+        self.window.watch(&ctx);
         self.ws.ui(ui);
         *self.port.two_up.lock().unwrap_or_else(|e| e.into_inner()) = self.ws.two_up_stats();
         self.publish();
@@ -310,6 +317,7 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        self.window.flush();
         crate::threads::end_within(EXIT_PATIENCE);
         crate::threads::ending("the session");
         self.gate.open();

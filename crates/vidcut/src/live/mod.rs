@@ -153,6 +153,7 @@ pub trait Renderer: Send + Sync {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WindowChange {
     pub size: Option<[f32; 2]>,
+    pub position: Option<[f32; 2]>,
     pub minimized: Option<bool>,
     pub maximized: Option<bool>,
     pub fullscreen: Option<bool>,
@@ -2266,6 +2267,7 @@ impl Live {
             }
             Request::GuiWindow {
                 size,
+                position,
                 minimized,
                 maximized,
                 fullscreen,
@@ -2277,8 +2279,14 @@ impl Live {
                         "size must be within 320x240..16384x16384",
                     )));
                 }
+                if let Some([x, y]) = position
+                    && !(x.abs() <= 65536.0 && y.abs() <= 65536.0)
+                {
+                    return Step::Now(Err(Error::usage("position must be within -65536..65536")));
+                }
                 self.renderer.window(WindowChange {
                     size,
+                    position,
                     minimized,
                     maximized,
                     fullscreen,
