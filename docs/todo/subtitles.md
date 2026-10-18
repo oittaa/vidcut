@@ -58,7 +58,10 @@ Models are ggml files from [Hugging Face](https://huggingface.co/ggerganov/whisp
 
 - `large-v3-turbo` heard the most: at 20:16, "we used to see them early in the morning", which `base` heard as "see Merlin the morning". On the GPU it took 1.4 GB of video memory. All three marked music and noises in brackets (`[Music]`, `[phone ringing]`).
 - **A modest laptop** is slower than this CPU's 4 threads. whisper.cpp's benchmark encodes a 30 s window with `base` in 5.3 s on a 2017 i7-8650U and 1.1 s on a 2021 Ryzen 7 5850U, with `small` in 22.8 and 4.0 s ([whisper.cpp #89](https://github.com/ggml-org/whisper.cpp/issues/89)). So `base` takes minutes for a meeting on a laptop CPU, `small` about the meeting's length on an older one, and `large-v3-turbo` wants a GPU. Phase 1 measures on a laptop.
-- **VAD:** a 885 KB [Silero model](https://huggingface.co/ggml-org/whisper-vad) finds speech, so Whisper doesn't invent text in silence. Through FFmpeg's filter it made 2 min take 89 s instead of 1.7 s on the GPU. The filter runs it again over its whole buffer every 0.6 s, and transcribes each stretch between pauses with a full 30 s window. vidcut would run it once per file.
+- **VAD:** a 885 KB [Silero model](https://huggingface.co/ggml-org/whisper-vad) finds speech. Whisper needs it: on music and effects alone it invents text ([testing](#testing)).
+  - FFmpeg's filter uses it only to choose where to cut, and still transcribes a full queue without speech. On the music it changed nothing.
+  - It is slow there too: 2 min took 89 s instead of 1.7 s on the GPU. The filter runs VAD again over its whole buffer every 0.6 s, and transcribes each stretch between pauses with a full 30 s window.
+  - vidcut would run it once per file, and transcribe only what it finds. Phase 1 checks that it finds no speech in `tos-music-fx`.
 
 Delivering models:
 
@@ -89,7 +92,11 @@ Subtitles can't go to Resolve through OTIO ([X9](../deviations.md#x9-opentimelin
 - Its OTIO export leaves subtitle tracks out, as its FCPXML 1.10 and EDL do. OpenTimelineIO has no subtitle schema; its track kinds are `Video` and `Audio`.
 - Its import reads a track of kind `Subtitle` as an audio track, and refuses the whole file when a clip's media is an `.srt` file or a `MissingReference`.
 
-So vidcut keeps its subtitle tracks in its own OTIO metadata for its own round trip, and writes each beside the timeline as an SRT (`cut.en.srt`), in bundles too. In Resolve: Import Subtitle, then Insert Selected Subtitles to Timeline Using Timecode (p. 1230); back: File > Export Subtitle. Open, for Resolve's UI since the API can't run that menu: whether the SRT's times start at zero, as players and Resolve's SubRip streams have them, or at the timeline's start timecode, as its TTML has them.
+So vidcut keeps its subtitle tracks in its own OTIO metadata for its own round trip, and writes each beside the timeline as an SRT (`cut.en.srt`), in bundles too. Checked by hand in Resolve's menus:
+
+- **For Resolve,** the SRT beside the OTIO is timed in the timeline's timecode (`01:00:01,000`), as Resolve's File > Export > Subtitle writes it. Import Subtitle, then Insert Selected Subtitles to Timeline Using Timecode (p. 1230), puts each cue back in place. From an SRT timed from zero it inserts nothing and says nothing.
+- **For players,** an SRT beside an exported video starts at zero, at the export's first frame.
+- **Reading an SRT** takes the timeline's start timecode off when every cue is at or after it. `<b>`, `<i>` and `<u>` are styling, dropped while vidcut has one style; Resolve's export wraps every cue in `<b>`.
 
 ## Cutting by transcript
 
@@ -115,6 +122,17 @@ Each service needs:
 - **Its key** in the system's keychain (Windows Credential Manager, macOS Keychain, the Secret Service on Linux) or an environment variable for scripts, never in the project file, `preferences.toml` or a log.
 - **Consent each time the audio leaves the computer:** the GUI names the service and the cost (minutes times price) and asks, and a project can remember the yes; the CLI and MCP take the service as an argument with no default.
 - **The same result:** words with times, made into cues as Whisper's are.
+
+## Testing
+
+The [media manifest](../../tests/media-manifest.toml) holds Tears of Steel's subtitles and soundtrack beside `tos-720p-mov`:
+
+- `tos-subtitles-en`: the reference text for transcription accuracy against the movie, and a real SRT to import (ASCII, CRLF). Its 76 cues are timed from the movie's start, rounded to half seconds; speech starts a median 0.3 s before a cue, most within a second (measured against Whisper's word times).
+- `tos-subtitles-ja`, `tos-subtitles-he`: UTF-8 without a BOM, CJK and right-to-left text in the viewer and burned in. The Hebrew file adds 8 cues for titles and credits.
+- `tos-music-fx`: music and effects without dialogue, the movie's length. Transcription must find no speech. Through FFmpeg's filter, `large-v3-turbo` invented 53 cues on it ("The first time I was in the middle of the night…"), and the same 9 in its first 3 min with the filter's VAD on.
+- `nasa-speech-1979`: speed, on a GPU and on a laptop's CPU.
+
+Unit tests take short SRT and WebVTT written in the test (rule 8); the media are for end-to-end tests.
 
 ## Phases
 

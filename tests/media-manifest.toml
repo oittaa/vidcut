@@ -1,4 +1,4 @@
-# Real-world test clips (never committed). `scripts/fetch-test-media.sh`
+# Real-world test media (never committed). `scripts/fetch-test-media.sh`
 # downloads them into $VIDCUT_TEST_DATA/media/<name>/ (default
 # ~/Downloads/vidcut-tmp/media). sha256 is of the extracted media file.
 
@@ -81,3 +81,35 @@ url = "https://archive.org/download/255-hq-296/255-hq-296.mp4"
 license = "NASA film from 1979, a US government work. The National Archives warns that parts may be under copyright: https://catalog.archives.gov/id/1262803"
 purpose = "29 min of speech with pauses, some of it clean and some with hiss: silence detection"
 sha256 = "9e48d5d639bb52e1d3ec2e22efd7b3ec5bd99fb3ab167cf0229165fe85dc6d95"
+
+[[clip]]
+name = "tos-subtitles-en"
+file = "TOS-en.srt"
+url = "https://download.blender.org/demo/movies/ToS/subtitles/TOS-en.srt"
+license = "CC BY 3.0 like the film, (c) Blender Foundation, https://mango.blender.org; the subtitles folder carries no license of its own"
+purpose = "English subtitles of tos-720p-mov, 76 cues timed from its start, rounded to half seconds; speech starts a median 0.3 s before a cue, most within a second: transcription's reference text, a real SRT to import (ASCII, CRLF)"
+sha256 = "ce9578f6fe098a5821045a38884b229160f9e7ba27890448a92f5be330c6e6fe"
+
+[[clip]]
+name = "tos-subtitles-ja"
+file = "TOS-JP.srt"
+url = "https://download.blender.org/demo/movies/ToS/subtitles/TOS-JP.srt"
+license = "CC BY 3.0 like the film, (c) Blender Foundation, https://mango.blender.org; the subtitles folder carries no license of its own"
+purpose = "Japanese subtitles of tos-720p-mov with the English times: UTF-8 without a BOM, CJK text"
+sha256 = "dae49f0d9231c93a3ca02f02ab08023a4e5379aa8dfa9e22f78bc40d8754ad74"
+
+[[clip]]
+name = "tos-subtitles-he"
+file = "TOS-HE.srt"
+url = "https://download.blender.org/demo/movies/ToS/subtitles/TOS-HE.srt"
+license = "CC BY 3.0 like the film, (c) Blender Foundation, https://mango.blender.org; the subtitles folder carries no license of its own"
+purpose = "Hebrew subtitles of tos-720p-mov, 84 cues with titles and credits added: UTF-8, right-to-left text"
+sha256 = "b868e12e032ff5bc379995cad5839c9aa4650bac74ffb1d90504680b54e1ad27"
+
+[[clip]]
+name = "tos-music-fx"
+file = "TOS_MUSIC+FX_NO_DIALOGUE.aif"
+url = "https://download.blender.org/demo/movies/ToS/TOS_MUSIC%2BFX_NO_DIALOGUE.aif"
+license = "CC BY 3.0, (c) Blender Foundation, https://mango.blender.org; its music CC BY-ND 3.0, (c) Joram Letwory, https://download.blender.org/demo/movies/ToS/copyright.txt"
+purpose = "Tears of Steel's music and effects without dialogue, 734 s like tos-720p-mov, 24-bit 48 kHz AIFF: transcription must find no speech in it"
+sha256 = "ba05dc3ae9f869170819ef9f74401e6c01ccc4afa9e8c926a076bea7b29741e0"
