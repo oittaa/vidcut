@@ -237,6 +237,7 @@ fn listed() -> Vec<Gpu> {
     use std::path::Path;
     let cuda = crate::cuda::listed();
     let names = pci_names();
+    let memory = vulkan_memory();
     let mut gpus = Vec::new();
     for (node, _driver) in crate::export::encode::render_nodes() {
         let name = node.trim_start_matches("/dev/dri/");
@@ -257,10 +258,9 @@ fn listed() -> Vec<Gpu> {
             .filter(|n| !n.is_empty())
             .or_else(|| names.get(&(vendor, device)).cloned())
             .unwrap_or_else(|| format!("{} GPU {vendor:04x}:{device:04x}", maker(vendor)));
-        let memory_mb = std::fs::read_to_string(dev.join("mem_info_vram_total"))
-            .ok()
-            .and_then(|bytes| bytes.trim().parse::<u64>().ok())
-            .map(|bytes| bytes >> 20)
+        let memory_mb = slot
+            .and_then(|s| memory.iter().find(|(at, _)| *at == s))
+            .map(|(_, bytes)| bytes >> 20)
             .filter(|&mb| mb > 0);
         gpus.push(Gpu {
             id: id(vendor, device, slot),
@@ -277,6 +277,55 @@ fn listed() -> Vec<Gpu> {
     }
     with_cuda(&mut gpus, &cuda);
     gpus
+}
+
+#[cfg(target_os = "linux")]
+fn vulkan_memory() -> Vec<(Slot, u64)> {
+    use ash::vk;
+    // SAFETY: Vulkan's loader and calls as vulkan.h declares them, the library loaded until they are done.
+    unsafe {
+        let Ok(library) = libloading::Library::new("libvulkan.so.1") else {
+            return Vec::new();
+        };
+        let Ok(get) = library.get::<vk::PFN_vkGetInstanceProcAddr>(b"vkGetInstanceProcAddr\0")
+        else {
+            return Vec::new();
+        };
+        let entry = ash::Entry::from_static_fn(ash::StaticFn {
+            get_instance_proc_addr: *get,
+        });
+        let app = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_1);
+        let info = vk::InstanceCreateInfo::default().application_info(&app);
+        let Ok(instance) = entry.create_instance(&info, None) else {
+            return Vec::new();
+        };
+        let mut sized = Vec::new();
+        for physical in instance.enumerate_physical_devices().unwrap_or_default() {
+            let has_bus = instance
+                .enumerate_device_extension_properties(physical)
+                .unwrap_or_default()
+                .iter()
+                .any(|e| e.extension_name_as_c_str() == Ok(ash::ext::pci_bus_info::NAME));
+            if !has_bus {
+                continue;
+            }
+            let mut bus = vk::PhysicalDevicePCIBusInfoPropertiesEXT::default();
+            let mut props = vk::PhysicalDeviceProperties2::default().push_next(&mut bus);
+            instance.get_physical_device_properties2(physical, &mut props);
+            let largest = instance
+                .get_physical_device_memory_properties(physical)
+                .memory_heaps_as_slice()
+                .iter()
+                .filter(|h| h.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
+                .map(|h| h.size)
+                .max();
+            if let Some(bytes) = largest {
+                sized.push(((bus.pci_bus, bus.pci_device, bus.pci_function), bytes));
+            }
+        }
+        instance.destroy_instance(None);
+        sized
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -323,7 +372,6 @@ fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
             g.cuda = Some(c.index);
             g.uuid = c.uuid;
             g.name = c.name.clone();
-            g.memory_mb = c.memory.map(|b| b as u64 >> 20).or(g.memory_mb);
         }
     }
     for c in cuda {
@@ -335,7 +383,7 @@ fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
             id: id(NVIDIA, device, c.slot),
             name: c.name.clone(),
             vendor: maker(NVIDIA),
-            memory_mb: c.memory.map(|b| b as u64 >> 20),
+            memory_mb: None,
             pci_vendor: NVIDIA,
             slot: c.slot,
             cuda: Some(c.index),

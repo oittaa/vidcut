@@ -19,7 +19,7 @@ flowchart LR
 
 ## Choosing the GPU and the decoder
 
-`gpus::list` lists the computer's GPUs once, each by its PCI ids and slot (`Gpu::id`), with its CUDA device, Direct3D 11 adapter or render node. Its dedicated memory (`Gpu::memory_mb`) is CUDA's figure for NVIDIA, else the dedicated video memory DXGI reports on Windows and amdgpu's `mem_info_vram_total` on Linux. Intel GPUs on Linux get none. `gpus::in_use` is the one `gpu.device` names (`gpus::choose`), else `gpus::automatic`: NVIDIA's first CUDA device, else the first other. A Mac lists none.
+`gpus::list` lists the computer's GPUs once, each by its PCI ids and slot (`Gpu::id`), with its CUDA device, Direct3D 11 adapter or render node. Its memory (`Gpu::memory_mb`) comes from one source per system, for every vendor: the dedicated video memory DXGI reports on Windows, and on Linux the largest device-local heap of the Vulkan device on the same PCI bus (`vulkan_memory`). A GPU that source can't size has none. `gpus::in_use` is the one `gpu.device` names (`gpus::choose`), else `gpus::automatic`: NVIDIA's first CUDA device, else the first other. A Mac lists none.
 
 `GpuDecoder::best` opens the decoder on the GPU in use, once per GPU: NVDEC on NVIDIA's (Vulkan beside it for ProRes), Direct3D 11 on Windows' others, VA-API on Linux's, VideoToolbox on a Mac. `VIDCUT_HWDEC` overrides it for tests. The player decodes on it. Exports, proxies, renders and the timeline's tiles use `GpuDecoder::own`: NVDEC on a CUDA stream of its own, the others on a device of their own on the same GPU.
 

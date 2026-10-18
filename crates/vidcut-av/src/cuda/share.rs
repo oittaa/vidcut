@@ -72,7 +72,6 @@ pub(super) struct Cuda {
     ctx_pop: unsafe extern "C" fn(*mut CuContext) -> CuResult,
     pub(super) ctx_get_device: unsafe extern "C" fn(*mut i32) -> CuResult,
     device_get_uuid: unsafe extern "C" fn(*mut [u8; 16], i32) -> CuResult,
-    device_total_mem: unsafe extern "C" fn(*mut usize, i32) -> CuResult,
     pub(super) device_get_attribute: unsafe extern "C" fn(*mut i32, i32, i32) -> CuResult,
     import: unsafe extern "C" fn(*mut CuExternalMemory, *const HandleDesc) -> CuResult,
     mapped_buffer:
@@ -136,7 +135,6 @@ impl Cuda {
                 ctx_pop: call!("cuCtxPopCurrent_v2"),
                 ctx_get_device: call!("cuCtxGetDevice"),
                 device_get_uuid: call!("cuDeviceGetUuid_v2"),
-                device_total_mem: call!("cuDeviceTotalMem_v2"),
                 device_get_attribute: call!("cuDeviceGetAttribute"),
                 import: call!("cuImportExternalMemory"),
                 mapped_buffer: call!("cuExternalMemoryGetMappedBuffer"),
@@ -276,25 +274,6 @@ impl CudaDevice {
             Ok(uuid)
         })
     }
-
-    pub fn memory(&self) -> Result<usize> {
-        let cuda = Cuda::get()?;
-        // SAFETY: a CUDA device, as `cuda_context` asks.
-        let (ctx, _) = unsafe { cuda_context(self.as_ptr()) };
-        in_context(cuda, ctx, || {
-            let mut device = 0;
-            // SAFETY: the context is current; the ordinal goes into `device`.
-            check("finding the device", unsafe {
-                (cuda.ctx_get_device)(&mut device)
-            })?;
-            let mut bytes = 0;
-            // SAFETY: the ordinal just read; the size goes into `bytes`.
-            check("reading the device's memory", unsafe {
-                (cuda.device_total_mem)(&mut bytes, device)
-            })?;
-            Ok(bytes)
-        })
-    }
 }
 
 pub(crate) struct Listed {
@@ -302,7 +281,6 @@ pub(crate) struct Listed {
     pub name: String,
     pub slot: Option<crate::gpus::Slot>,
     pub uuid: Option<[u8; 16]>,
-    pub memory: Option<usize>,
 }
 
 pub(crate) fn listed() -> Vec<Listed> {
@@ -337,14 +315,11 @@ pub(crate) fn listed() -> Vec<Listed> {
                     .flatten();
                 let mut uuid = [0u8; 16];
                 let uuid = ((cuda.device_get_uuid)(&mut uuid, device) == 0).then_some(uuid);
-                let mut bytes = 0;
-                let memory = ((cuda.device_total_mem)(&mut bytes, device) == 0).then_some(bytes);
                 Some(Listed {
                     index,
                     name: text(&name),
                     slot,
                     uuid,
-                    memory,
                 })
             })
             .collect()

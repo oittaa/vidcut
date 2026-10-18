@@ -563,11 +563,11 @@ impl Shared {
         lock(&self.levels).clear();
     }
 
-    pub(crate) fn gpu_found(&self, device: &crate::cuda::CudaDevice) {
+    pub(crate) fn gpu_found(&self, gpu: &crate::gpus::Gpu) {
         if self.gpu_memory.get().is_none()
-            && let Ok(bytes) = device.memory()
+            && let Some(mb) = gpu.memory_mb
         {
-            let _ = self.gpu_memory.set(bytes);
+            let _ = self.gpu_memory.set((mb as usize) << 20);
             self.apply_video_budget();
         }
     }
