@@ -448,12 +448,11 @@ fn v1_transitions(gui: &Gui) -> Vec<(i64, i64)> {
         .find(|t| t["id"] == "V1")
         .unwrap()
         .clone();
-    v1["transitions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| (t["before"].as_i64().unwrap(), t["after"].as_i64().unwrap()))
-        .collect()
+    v1["transitions"].as_array().map_or_else(Vec::new, |ts| {
+        ts.iter()
+            .map(|t| (t["before"].as_i64().unwrap(), t["after"].as_i64().unwrap()))
+            .collect()
+    })
 }
 
 #[test]
@@ -486,6 +485,56 @@ fn dragging_the_dissolves_end_two_frames_out_lengthens_it_two_frames_each_side()
     gui.drag(end, end + vec2(2.0 * frame, 0.0));
     gui.settle();
     assert_eq!(v1_transitions(&gui), [(7, 7)]);
+    gui.quit();
+}
+
+#[test]
+fn center_on_edit_from_a_dissolves_menu_recenters_it() {
+    let mut gui = Gui::new();
+    gui.call(
+        "edit.dissolve",
+        json!({ "at": 60, "length": "10f", "align": "end", "sound": false }),
+    );
+    gui.settle();
+    gui.click_with(gui.at("V1", 55, 20.0), egui::PointerButton::Secondary);
+    gui.settle();
+    gui.harness.get_by_label("Center on Edit").click();
+    gui.harness.step();
+    gui.settle();
+    assert_eq!(v1_transitions(&gui), [(5, 5)]);
+    gui.quit();
+}
+
+#[test]
+fn delete_with_a_dissolve_selected_takes_the_dissolve_away() {
+    let mut gui = Gui::new();
+    dissolve_at_60(&mut gui);
+    gui.click(gui.at("V1", 57, 20.0));
+    gui.settle();
+    gui.key(Key::Delete);
+    gui.settle();
+    assert_eq!((v1_transitions(&gui), gui.clips("V1").len()), (vec![], 3));
+    gui.quit();
+}
+
+#[test]
+fn change_duration_from_a_dissolves_menu_takes_frames() {
+    let mut gui = Gui::new();
+    dissolve_at_60(&mut gui);
+    gui.click_with(gui.at("V1", 57, 20.0), egui::PointerButton::Secondary);
+    gui.settle();
+    gui.harness.get_by_label("Change Duration…").click();
+    gui.harness.step();
+    gui.settle();
+    let label = gui.harness.get_by_label("Frames").rect();
+    gui.click(pos2(label.right() + 40.0, label.center().y));
+    gui.harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    gui.harness.event(egui::Event::Text("20".into()));
+    gui.harness.step();
+    gui.harness.get_by_label("Change").click();
+    gui.harness.step();
+    gui.settle();
+    assert_eq!(v1_transitions(&gui), [(10, 10)]);
     gui.quit();
 }
 

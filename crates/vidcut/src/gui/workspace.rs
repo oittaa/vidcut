@@ -1314,7 +1314,7 @@ impl Workspace {
             if self.pool_focus {
                 let selected = self.snap.selection.media.clone();
                 self.removing = (!selected.is_empty()).then_some(selected);
-            } else {
+            } else if !self.delete_transition() {
                 self.delete(m.alt);
             }
         }

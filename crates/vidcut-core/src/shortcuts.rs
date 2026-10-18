@@ -245,8 +245,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Delete",
         Some(
             "Removes the selected clips. On Track 1 the gap closes: Track 1 holds the main \
-             story and never has holes. Backspace does the same. After a click in the Media \
-             Pool, it removes the selected media from the pool instead, after asking.",
+             story and never has holes. Backspace does the same. With a dissolve selected, it \
+             removes the dissolve. After a click in the Media Pool, it removes the selected \
+             media from the pool instead, after asking.",
         ),
     ),
     key(
@@ -274,7 +275,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Picture off or on",
         Some("The clip stays in place with its picture off, so you see what's under it."),
     ),
-    key(Clips, &["Ctrl", "D"], "Change duration", None),
+    key(
+        Clips,
+        &["Ctrl", "D"],
+        "Change duration",
+        Some("Of the selected clips, or of the selected dissolve, in seconds or frames."),
+    ),
     key(
         Clips,
         &["R"],

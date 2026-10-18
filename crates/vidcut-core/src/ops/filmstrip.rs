@@ -1,4 +1,4 @@
-use crate::model::{Clip, Project};
+use crate::model::{Clip, Project, Track};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StripFrame {
@@ -35,6 +35,16 @@ pub fn strip(
 fn room(p: &Project, c: &Clip, tail: bool) -> i64 {
     p.source_range(c)
         .map_or(i64::MAX / 4, |have| c.room(tail, have))
+}
+
+pub fn extends(p: &Project, t: &Track, at: i64) -> (bool, bool) {
+    let side = |tail: bool| {
+        t.clips
+            .iter()
+            .find(|c| if tail { c.end() == at } else { c.start == at })
+            .is_some_and(|c| room(p, c, tail) > 0)
+    };
+    (side(true), side(false))
 }
 
 pub fn out_reach(p: &Project, out: &Clip) -> (i64, i64) {
@@ -96,6 +106,21 @@ mod tests {
                 .map(|s| (s.number, s.source, s.inside))
                 .collect();
         assert_eq!(numbers, [(-1, None, false), (0, Some(0), true)]);
+    }
+
+    #[test]
+    fn a_cut_extends_on_the_side_whose_clip_has_media_past_it() {
+        let f = two_clips();
+        let p = f.editor.project();
+        assert_eq!(extends(p, p.track("V1").unwrap(), 50), (true, true));
+    }
+
+    #[test]
+    fn a_clip_ending_on_its_medias_last_frame_cannot_extend_its_out() {
+        let mut f = Fixture::new(&[(2.0, true)]);
+        f.append("m1", 0, 50);
+        let p = f.editor.project();
+        assert_eq!(extends(p, p.track("V1").unwrap(), 50), (false, false));
     }
 
     #[test]
