@@ -90,7 +90,7 @@ pub struct Workspace {
     pub(super) target: Option<String>,
     pub(super) drag: Option<Drag>,
     pub(super) timeline: TimelineView,
-    pub(super) trim_editor: Option<i64>,
+    pub(super) trim_anchor: Option<super::trim_strips::TrimAnchor>,
     pub(super) cells: Option<super::cells::Cells>,
     pub(super) screens: Option<super::cells::Screens>,
     pub(super) two_up: Option<TwoUp>,
@@ -221,7 +221,7 @@ impl Workspace {
                 options: super::timeline::Options::load(),
                 ..TimelineView::default()
             },
-            trim_editor: None,
+            trim_anchor: None,
             cells: None,
             screens: None,
             two_up: None,

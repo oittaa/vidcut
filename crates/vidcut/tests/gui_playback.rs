@@ -6,7 +6,7 @@ use eframe::egui::{self, Key, Modifiers, Pos2, pos2, vec2};
 use egui_kittest::Harness;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use vidcut::gui::workspace::{TwoUp, Workspace};
+use vidcut::gui::workspace::{TwoUp, TwoUpMode, Workspace};
 use vidcut::live::{self, Capture, DynamicTrim, Origin, Presented, TrimEditor, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, Picture as Content, VideoCodec};
 use vidcut_av::player::{PacedOutput, Picture, Player};
@@ -443,6 +443,13 @@ fn trim_editor(codec: VideoCodec) {
     let cut = gui.at("V1", 80, 20.0);
     gui.double_click(cut);
     gui.two_up_shows([79, 100]);
+    gui.key(Key::Space);
+    gui.wait(
+        "Space to play the timeline in place of the Trim Editor",
+        |g| g.h.snapshot().timeline.playing && g.two_up().is_none(),
+    );
+    gui.call("player.pause", json!({}));
+    gui.two_up_shows([79, 100]);
     let by = |gui: &mut Gui, side, by| {
         gui.harness
             .state_mut()
@@ -451,6 +458,7 @@ fn trim_editor(codec: VideoCodec) {
                 track: "V1".into(),
                 by: Some(by),
                 side,
+                transition: false,
             });
         gui.settle();
     };
@@ -473,6 +481,7 @@ fn trim_editor(codec: VideoCodec) {
             track: "V1".into(),
             by: None,
             side: TrimSide::Both,
+            transition: false,
         });
     gui.settle();
     gui.two_up_shows([179, 190]);
@@ -483,6 +492,7 @@ fn trim_editor(codec: VideoCodec) {
             track: "V1".into(),
             by: None,
             side: TrimSide::Both,
+            transition: false,
         });
     gui.settle();
     gui.two_up_shows([79, 100]);
@@ -522,7 +532,11 @@ fn dynamic_trim_roll(codec: VideoCodec) {
     gui.key(Key::ArrowUp);
     gui.two_up_shows([79 + by, 100 + by]);
     gui.key(Key::W);
-    assert!(gui.two_up().is_none(), "W left Dynamic Trim on");
+    assert_eq!(
+        gui.two_up().map(|t| t.mode),
+        Some(TwoUpMode::TrimEditor),
+        "W left Dynamic Trim on, or closed the Trim Editor on the cut it trimmed"
+    );
 }
 
 fn dynamic_trim_clip(codec: VideoCodec, slide: bool) {

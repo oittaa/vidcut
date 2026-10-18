@@ -64,6 +64,7 @@ pub enum TrimEditor {
         track: String,
         by: Option<i64>,
         side: TrimSide,
+        transition: bool,
     },
     Close,
 }
@@ -2106,6 +2107,7 @@ impl Live {
                 track,
                 by,
                 side,
+                transition,
                 close,
             } => {
                 if close {
@@ -2140,6 +2142,7 @@ impl Live {
                     track,
                     by,
                     side,
+                    transition,
                 });
                 Step::Now(Ok(answer(Value::Null)))
             }

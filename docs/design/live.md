@@ -133,8 +133,8 @@ While a job runs, the engine says what it is doing: the job thread installs a `v
 ## What the GUI computes itself
 
 - **Trims in progress.** The UI runs `vidcut_core::ops` on a clone of the snapshot's project for Dynamic Trim's drawing and two-up frames (`dynamic_preview`), and to try a trim before sending it. `Workspace::trim_sent` shows that copy until the core's revision catches up (`Workspace::shown_project`).
-- **View state.** The edit point selected, the target track, zoom and Timeline Options (in `timeline.json`), the windows open. Requests reach it through `Renderer::gui`.
-- **Timeline tiles**, decoded by `Tiles` on `vidcut-tiles-N`; the Trim Editor's filmstrips use the same tiles, their frames and handle reach from `vidcut_core::ops::filmstrip`.
+- **View state.** The edit point selected, and whether its dissolve is (`TimelineView::transition`), the target track, zoom and Timeline Options (in `timeline.json`), the windows open. Requests reach it through `Renderer::gui`. The Trim Editor shows the selected edit while the player is stopped (`Workspace::trim_editor_edit`).
+- **Timeline tiles**, decoded by `Tiles` on `vidcut-tiles-N`; the Trim Editor's filmstrips use the same tiles, their frames and handle reach from `vidcut_core::ops::filmstrip`, their numbers from the clips' lengths when the editor opened (`TrimAnchor`).
 - **The two-up**: `Cells` owns its players on the UI thread; `Screens` draws them.
 
 ## Themes and keys

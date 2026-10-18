@@ -1,5 +1,3 @@
-use std::ops::RangeInclusive;
-
 use crate::model::{Clip, Project};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,11 +11,12 @@ pub fn strip(
     p: &Project,
     c: &Clip,
     outgoing: bool,
-    numbers: RangeInclusive<i64>,
+    numbers: impl IntoIterator<Item = i64>,
 ) -> Vec<StripFrame> {
     let have = p.source_range(c);
     let zero = if outgoing { c.end() - 1 } else { c.start };
     numbers
+        .into_iter()
         .map(|number| {
             let t = zero + number;
             let source = c.source_at(t);

@@ -1035,13 +1035,16 @@ pub enum Request {
     /// Answers what `gui.state` does.
     #[serde(rename = "gui.timeline")]
     GuiTimeline(TimelineOptions),
-    /// The Trim Editor (spec §8.6), as a double-click on an edit opens it:
-    /// the viewer shows the outgoing clip's last frame beside the incoming
-    /// clip's first. It opens on the edit of `track` (default V1) nearest
-    /// `at`, or, without `at`, stays on the edit it shows (else the one
-    /// nearest the playhead). `by` then trims that edit as the editor's
-    /// buttons do: its Out, its In or both, a roll (`side`). `close`
-    /// closes it. `player.state` says what the two-up shows (`two_up`).
+    /// The Trim Editor (spec §8.6): while an edit is selected and the
+    /// player is stopped, the viewer shows the outgoing clip's last frame
+    /// beside the incoming clip's first, over their filmstrips. This
+    /// selects the edit of `track` (default V1) nearest `at`, as a click on
+    /// it does, or, without `at`, keeps the selected edit (else the one
+    /// nearest the playhead). `transition` shows that edit's dissolve
+    /// between the filmstrips, as a click on the dissolve does. `by` then
+    /// trims the edit as the editor's buttons do: its Out, its In or both,
+    /// a roll (`side`). `close` deselects the edit, closing the editor.
+    /// `player.state` says what the two-up shows (`two_up`).
     #[serde(rename = "gui.trim_editor")]
     GuiTrimEditor {
         #[serde(default)]
@@ -1052,6 +1055,8 @@ pub enum Request {
         by: Option<i64>,
         #[serde(default)]
         side: TrimSide,
+        #[serde(default)]
+        transition: bool,
         #[serde(default)]
         close: bool,
     },

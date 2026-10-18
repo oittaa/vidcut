@@ -324,12 +324,15 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     key(
         Trim,
-        &["Double-click"],
+        &["Click"],
         "Trim Editor",
         Some(
-            "Double-click a cut: the viewer shows the last frame going out beside the first \
-             frame coming in. Its -1 and +1 buttons trim the clip going out, the one coming \
-             in, or both, a frame at a time. Esc closes it.",
+            "Click a cut: while it is selected and the player is stopped, the viewer shows \
+             the last frame going out beside the first frame coming in, over their \
+             filmstrips. Drag a filmstrip's handle, or use the -1 and +1 buttons beside the \
+             transport, to trim the clip going out, the one coming in, or both. Click a \
+             dissolve to see it between the filmstrips and drag its ends to change its \
+             length. Space plays as usual; Esc closes it.",
         ),
     ),
     key(

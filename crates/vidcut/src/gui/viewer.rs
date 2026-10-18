@@ -192,9 +192,13 @@ impl Workspace {
             (picture.height() * ppp).round() as i32,
         ];
         self.two_up = None;
+        if self.timeline.edit.is_none() {
+            self.trim_anchor = None;
+        }
         let dynamic = self.timeline.dynamic.is_some() && self.dynamic_target().is_some();
+        let trim = self.trim_editor_edit();
         if !dynamic
-            && self.trim_editor.is_none()
+            && trim.is_none()
             && let Some(cells) = &mut self.cells
         {
             cells.close();
@@ -203,8 +207,8 @@ impl Workspace {
             self.dynamic_view(ui, area);
             return;
         }
-        if self.trim_editor.is_some() {
-            self.trim_editor_view(ui, area);
+        if let Some(e) = trim {
+            self.trim_editor_view(ui, area, e);
             return;
         }
         let area_resp = ui.allocate_rect(area, Sense::click_and_drag());
@@ -299,17 +303,21 @@ impl Workspace {
         } else {
             self.clip_edge_hint(ui);
         }
-        self.transport(ui, id);
+        self.transport(ui, id, None);
     }
 
-    fn trim_editor_view(&mut self, ui: &mut egui::Ui, area: Rect) {
+    fn trim_editor_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        area: Rect,
+        e: crate::gui::timeline::EditSel,
+    ) {
         use crate::gui::timeline::Side;
-        let (Some(e), Some(p)) = (self.timeline.edit, self.shown_project()) else {
-            self.trim_editor = None;
+        let Some(p) = self.shown_project() else {
             return;
         };
         if ui.input(|i| i.key_pressed(Key::Escape)) {
-            self.trim_editor = None;
+            self.timeline.edit = None;
             return;
         }
         let band = super::trim_strips::band_height(area);
@@ -325,32 +333,22 @@ impl Workspace {
         let strips = Rect::from_min_max(pos2(area.left(), area.bottom() - band), area.max);
         self.trim_strips(ui, strips, &p, e);
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            for (side, label) in [(Side::Out, "Out"), (Side::Both, "Roll"), (Side::In, "In")] {
-                ui.label(dim(label));
-                for by in [-1, 1] {
-                    if ui
-                        .button(if by < 0 { "−1" } else { "+1" })
-                        .on_hover_text(format!("{label} {by:+} frame"))
-                        .clicked()
-                    {
-                        self.timeline.edit = Some(crate::gui::timeline::EditSel {
-                            at: e.at,
-                            side,
-                            track: e.track,
-                        });
-                        self.nudge_edit(side, by);
+        ui.allocate_ui(vec2(ui.available_width(), 28.0), |ui| {
+            ui.horizontal_centered(|ui| {
+                let side = match e.side {
+                    Side::Out => "the Out",
+                    Side::In => "the In",
+                    _ => "a roll",
+                };
+                ui.label(dim(format!("Trim Editor: {side} at {}", self.tc(e.at))));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Close").on_hover_text("Esc").clicked() {
+                        self.timeline.edit = None;
                     }
-                }
-                ui.separator();
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Close").on_hover_text("Esc").clicked() {
-                    self.trim_editor = None;
-                }
-                ui.label(RichText::new(format!("edit at {}", self.tc(e.at))).monospace());
+                });
             });
         });
+        self.transport(ui, PlayerId::Timeline, Some(e));
     }
 
     fn dynamic_view(&mut self, ui: &mut egui::Ui, area: Rect) {
@@ -726,10 +724,19 @@ impl Workspace {
         });
     }
 
-    fn transport(&mut self, ui: &mut egui::Ui, id: PlayerId) {
+    fn transport(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: PlayerId,
+        trim: Option<crate::gui::timeline::EditSel>,
+    ) {
         let player = self.snap.player(id).clone();
         ui.horizontal(|ui| {
             let big = |s: &str| RichText::new(s).size(16.0);
+            if let Some(e) = trim {
+                self.trim_pair(ui, e, true);
+                ui.separator();
+            }
             if ui
                 .button(big("⏮"))
                 .on_hover_text("Previous edit (Up)")
@@ -765,6 +772,10 @@ impl Workspace {
             {
                 self.send("player.loop", json!({ "on": !looping }));
             }
+            if let Some(e) = trim {
+                ui.separator();
+                self.trim_pair(ui, e, false);
+            }
             ui.separator();
             if ui.button("Mark In").on_hover_text("I").clicked() {
                 self.mark(true);
@@ -789,6 +800,45 @@ impl Workspace {
                 self.timecode_field(ui, id);
             });
         });
+    }
+
+    fn trim_pair(&mut self, ui: &mut egui::Ui, e: crate::gui::timeline::EditSel, outgoing: bool) {
+        use crate::gui::timeline::Side;
+        let mine = if outgoing { Side::Out } else { Side::In };
+        let (has_out, has_in) = self
+            .project()
+            .and_then(|p| {
+                p.track(&e.track.id()).map(|t| {
+                    (
+                        t.clips.iter().any(|c| c.end() == e.at),
+                        t.clips.iter().any(|c| c.start == e.at),
+                    )
+                })
+            })
+            .unwrap_or((false, false));
+        let side = if e.side == Side::Both && has_out && has_in {
+            Side::Both
+        } else {
+            mine
+        };
+        let here = if outgoing { has_out } else { has_in };
+        let enabled = here && (e.side == mine || e.side == Side::Both);
+        let what = match (side, outgoing) {
+            (Side::Both, _) => "Roll the edit",
+            (_, true) => "Trim the Out",
+            _ => "Trim the In",
+        };
+        for (by, icon, way) in [(-1, "◀|", "a frame earlier"), (1, "|▶", "a frame later")] {
+            let tip = format!("{what} {way}");
+            let r = ui
+                .add_enabled(enabled, egui::Button::new(RichText::new(icon).size(14.0)))
+                .on_hover_text(&tip)
+                .on_disabled_hover_text(&tip);
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &tip));
+            if r.clicked() {
+                self.nudge_edit(side, by);
+            }
+        }
     }
 
     fn jump_edit(&self, id: PlayerId, next: bool) {
