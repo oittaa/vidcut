@@ -74,15 +74,16 @@ impl Clock {
             .filter(|m| *m > 0.0)
             .unwrap_or(1.0);
         let frame_rate = nominal * multiplier;
+        let sub_rate = number("subFrameRate").unwrap_or(1.0);
         let tick_rate = number("tickRate").unwrap_or(if number("frameRate").is_some() {
-            frame_rate
+            frame_rate * sub_rate
         } else {
             1.0
         });
         Clock {
             nominal,
             frame_rate,
-            sub_rate: number("subFrameRate").unwrap_or(1.0),
+            sub_rate,
             tick_rate,
             smpte: root.attribute((TTP, "timeBase")) == Some("smpte"),
             drop: match root.attribute((TTP, "dropMode")) {
