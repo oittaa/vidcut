@@ -816,11 +816,13 @@ pub enum Request {
         at: Option<TimeSpec>,
         /// The file is timed in the timeline's timecode (true) or from the
         /// timeline's start (false). Default: true when every cue is at or
-        /// after the timeline's start timecode read as a clock time, or, on a
-        /// timeline starting at zero and shorter than an hour, at or after
-        /// 01:00:00.
+        /// after the timeline's start timecode, or, on a timeline starting at
+        /// zero and shorter than an hour, at or after 01:00:00:00.
         #[serde(default)]
         timecode: Option<bool>,
+        /// How the file's times count frames. Default: `auto`.
+        #[serde(default)]
+        time_base: Option<SubtitleTimeBase>,
     },
     /// Write a subtitle track's cues to a file: SRT, WebVTT or TTML (IMSC1).
     #[serde(rename = "subtitles.export")]
@@ -1407,6 +1409,21 @@ pub enum NewTrack {
     Video,
     Audio,
     Subtitle,
+}
+
+/// How a subtitle file's times count frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SubtitleTimeBase {
+    /// `label` when the times sit on whole seconds and frames of a timecode
+    /// clearly better than on the frames of real time, else `real`.
+    Auto,
+    /// Seconds of real time: frame n at n divided by the frame rate (23.976
+    /// counts 01:00:00:00 as 01:00:03.600).
+    Real,
+    /// Timecode read as a clock: whole seconds and frames at the timecode's
+    /// rate (01:00:00:00 is 01:00:00.000 at 23.976).
+    Label,
 }
 
 /// A subtitle file format.

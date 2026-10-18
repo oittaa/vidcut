@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::error::{Error, Result};
 use crate::model::{Cue, Place, Project, SubtitleTrack};
+use crate::request::SubtitleTimeBase;
 use crate::subtitles::{self, Read, Timed};
 
 pub const DEFAULT_SECS: f64 = 3.0;
@@ -352,41 +353,73 @@ pub fn join_cues(p: &mut Project, ids: &[String]) -> Result<String> {
 pub struct Imported {
     pub track: String,
     pub cues: usize,
-    pub shift: f64,
+    pub offset: i64,
     pub before_zero: usize,
+    pub time_base: SubtitleTimeBase,
 }
 
-fn label_secs(label: &str, base: i64) -> f64 {
-    let f: Vec<f64> = label
-        .split([':', ';'])
-        .filter_map(|x| x.parse().ok())
-        .collect();
-    match f[..] {
-        [h, m, s, fr] => h * 3600.0 + m * 60.0 + s + fr / base as f64,
-        _ => 0.0,
+const GRID_SLACK: f64 = 0.0015;
+
+fn label_frames(p: &Project, t: f64) -> i64 {
+    let fps = p.settings.fps;
+    let base = fps.timecode_base();
+    let mut whole = t.max(0.0).floor() as i64;
+    let mut f = ((t.max(0.0) - whole as f64) * base as f64).round() as i64;
+    if f >= base {
+        whole += 1;
+        f -= base;
+    }
+    let minutes = whole / 60;
+    let dropped = if p.settings.counts_drop_frame() {
+        fps.dropped_per_minute()
+    } else {
+        0
+    };
+    whole * base + f - dropped * (minutes - minutes / 10)
+}
+
+fn frames_of(p: &Project, t: f64, base: SubtitleTimeBase) -> i64 {
+    match base {
+        SubtitleTimeBase::Label => label_frames(p, t),
+        _ => (t * p.settings.fps.as_f64()).round() as i64,
     }
 }
 
-fn timecode_shift(p: &Project, first: f64, forced: bool) -> f64 {
+fn guess_base(p: &Project, cues: &[Timed]) -> SubtitleTimeBase {
     let fps = p.settings.fps.as_f64();
-    let slack = 0.5 / fps;
-    let base = p.settings.fps.timecode_base();
-    if p.settings.start_tc > 0 {
-        let label = label_secs(&p.settings.timecode(0), base);
-        return if forced || first + slack >= label {
-            subtitles::origin(&p.settings)
-        } else {
-            0.0
-        };
+    let nominal = p.settings.fps.timecode_base() as f64;
+    let (mut real, mut label, mut n) = (0usize, 0usize, 0usize);
+    for t in cues.iter().flat_map(|c| [c.start, c.end]) {
+        n += 1;
+        let r = t * fps;
+        if (r - r.round()).abs() / fps <= GRID_SLACK {
+            real += 1;
+        }
+        let l = (t - t.floor()) * nominal;
+        if (l - l.round()).abs() / nominal <= GRID_SLACK {
+            label += 1;
+        }
+    }
+    let n = n as f64;
+    if n > 0.0 && label as f64 >= 0.9 * n && label as f64 - real as f64 >= 0.4 * n {
+        SubtitleTimeBase::Label
+    } else {
+        SubtitleTimeBase::Real
+    }
+}
+
+fn timecode_offset(p: &Project, first: i64, forced: bool) -> i64 {
+    let start = p.settings.start_tc;
+    if start > 0 {
+        return if forced || first >= start { start } else { 0 };
     }
     let hour =
         crate::time::timecode_frames(1, 0, 0, 0, p.settings.fps, p.settings.counts_drop_frame())
-            .map_or(3600.0, |f| f as f64 / fps);
-    let short = (p.end() as f64) / fps <= hour;
-    if first + slack >= 3600.0 && (forced || short) {
+            .unwrap_or_else(|| (3600.0 * p.settings.fps.as_f64()).round() as i64);
+    if first >= hour && (forced || p.end() <= hour) {
         hour
     } else {
-        0.0
+        0
     }
 }
 
@@ -397,15 +430,25 @@ pub fn import(
     name: Option<String>,
     at: Option<i64>,
     timecode: Option<bool>,
+    time_base: Option<SubtitleTimeBase>,
 ) -> Result<Imported> {
-    let fps = p.settings.fps.as_f64();
-    let Some(first) = read.cues.iter().map(|c| c.start).reduce(f64::min) else {
+    if read.cues.is_empty() {
         return Err(Error::invalid("the file has no cues"));
+    }
+    let base = match time_base {
+        Some(SubtitleTimeBase::Auto) | None => guess_base(p, &read.cues),
+        Some(b) => b,
     };
-    let shift = match (at, timecode) {
-        (Some(at), _) => first - at as f64 / fps,
-        (None, Some(false)) => 0.0,
-        (None, forced) => timecode_shift(p, first, forced == Some(true)),
+    let spans: Vec<(i64, i64)> = read
+        .cues
+        .iter()
+        .map(|c| (frames_of(p, c.start, base), frames_of(p, c.end, base)))
+        .collect();
+    let first = spans.iter().map(|s| s.0).min().expect("cues");
+    let offset = match (at, timecode) {
+        (Some(at), _) => first - at,
+        (None, Some(false)) => 0,
+        (None, forced) => timecode_offset(p, first, forced == Some(true)),
     };
     let ti = match track {
         Some(id) => target(p, Some(id))?,
@@ -419,9 +462,8 @@ pub fn import(
     unlocked(p, ti)?;
     let mut count = 0;
     let mut before_zero = 0;
-    for c in read.cues {
-        let s = ((c.start - shift) * fps).round() as i64;
-        let e = ((c.end - shift) * fps).round() as i64;
+    for (c, (s, e)) in read.cues.into_iter().zip(spans) {
+        let (s, e) = (s - offset, e - offset);
         if e <= 0 {
             before_zero += 1;
             continue;
@@ -443,8 +485,9 @@ pub fn import(
     Ok(Imported {
         track: p.subtitles[ti].id.clone(),
         cues: count,
-        shift,
+        offset,
         before_zero,
+        time_base: base,
     })
 }
 

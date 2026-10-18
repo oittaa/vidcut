@@ -217,7 +217,7 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 
 ## X41. Subtitle files go straight onto a track, placed by their timecode
 - **Resolve:** a subtitle file is a Media Pool clip first. Insert Selected Subtitles to Timeline Using Timecode places its cues by timecode and inserts nothing from a file timed from zero; dragging it places its first cue where it is dropped (p. 1230).
-- **vidcut:** `subtitles.import` puts the cues on a new subtitle track, named after the file, or on one named. A file whose cues all start at or after the timeline's start timecode, or after 01:00:00:00 on a timeline starting at zero and shorter than an hour, each read as a clock time, is read as timecode ([D58](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)); otherwise times count from the timeline's start. `timecode` and `at` override that.
+- **vidcut:** `subtitles.import` puts the cues on a new subtitle track, named after the file, or on one named. A file whose cues all start at or after the timeline's start timecode, or after 01:00:00:00 on a timeline starting at zero and shorter than an hour, in the file's own time base (real time or timecode labels, [D58](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), is read as timecode; otherwise times count from the timeline's start. `timecode`, `time_base` and `at` override that.
 - **Why:** one step, the same from a script, and both kinds of file land where they belong.
 
 ## X42. Exported timelines keep their subtitles

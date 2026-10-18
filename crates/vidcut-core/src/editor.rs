@@ -2543,6 +2543,7 @@ fn mutate(
             track,
             at,
             timecode,
+            time_base,
         } => {
             let bytes = env.read_file(path)?;
             let (read, format, encoding) = crate::subtitles::parse(&bytes, path)?;
@@ -2552,7 +2553,8 @@ fn mutate(
                 .map(|n| n.to_string_lossy().into_owned())
                 .filter(|n| !n.is_empty());
             let mut warnings = read.warnings.clone();
-            let placed = ops::subtitles::import(p, read, track.as_deref(), name, at, *timecode)?;
+            let placed =
+                ops::subtitles::import(p, read, track.as_deref(), name, at, *timecode, *time_base)?;
             if placed.before_zero > 0 {
                 warnings.push(format!(
                     "{} cue(s) end before the timeline starts, left out",
@@ -2565,8 +2567,9 @@ fn mutate(
                 "cues": placed.cues,
                 "format": format,
                 "encoding": encoding.name(),
-                "moved_by": format!("{:+.3}s", 0.0 - placed.shift),
-                "moved_by_frames": -(placed.shift * fps).round() as i64,
+                "time_base": placed.time_base,
+                "moved_by": format!("{:+.3}s", 0.0 - placed.offset as f64 / fps),
+                "moved_by_frames": -placed.offset,
                 "warnings": warnings,
             })
         }
