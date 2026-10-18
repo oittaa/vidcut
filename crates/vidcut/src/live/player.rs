@@ -47,6 +47,7 @@ pub struct Player {
     presenting: Option<Presenting>,
     landed: bool,
     auditioning: bool,
+    looping: (bool, Option<(i64, i64)>),
     muted: bool,
     scrubbing: bool,
     decoding: crate::preferences::GpuDecoding,
@@ -82,6 +83,7 @@ impl Player {
             presenting: None,
             landed: false,
             auditioning: false,
+            looping: (false, None),
             muted: false,
             scrubbing: true,
             decoding,
@@ -293,6 +295,7 @@ impl Player {
         if engine.set_plan_at(plan, at).is_err() {
             return self.end_audition();
         }
+        engine.set_loop(None);
         engine.play(speed);
         self.motion += 1;
         Some(self.motion)
@@ -306,7 +309,9 @@ impl Player {
             e.pause();
         }
         let at = self.contents[PlayerId::Timeline.index()].position;
-        self.play_shown(Some(at))
+        let shown = self.play_shown(Some(at));
+        self.apply_loop();
+        shown
     }
 
     pub fn show(&mut self, id: PlayerId) -> Option<u64> {
@@ -412,8 +417,16 @@ impl Player {
         }
     }
 
-    pub fn set_loop(&self, on: bool, marks: Option<(i64, i64)>) {
+    pub fn set_loop(&mut self, on: bool, marks: Option<(i64, i64)>) {
+        self.looping = (on, marks);
+        if !self.auditioning {
+            self.apply_loop();
+        }
+    }
+
+    fn apply_loop(&self) {
         if let Some(e) = self.shown_engine() {
+            let (on, marks) = self.looping;
             let frames = self.contents[self.active.index()].frames;
             e.set_loop(on.then(|| marks.unwrap_or((0, frames))));
         }
