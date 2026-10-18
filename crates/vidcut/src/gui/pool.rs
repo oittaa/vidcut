@@ -261,6 +261,7 @@ fn sort_label(s: PoolSort) -> &'static str {
         PoolSort::Name => "Name",
         PoolSort::Duration => "Duration",
         PoolSort::Date => "Date",
+        PoolSort::Timecode => "Timecode",
     }
 }
 
@@ -524,6 +525,7 @@ impl Workspace {
                             PoolSort::Name,
                             PoolSort::Duration,
                             PoolSort::Date,
+                            PoolSort::Timecode,
                         ] {
                             ui.selectable_value(&mut sort, s, sort_label(s));
                         }
