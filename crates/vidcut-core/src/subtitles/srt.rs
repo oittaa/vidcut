@@ -54,7 +54,7 @@ pub fn read(source: &str) -> Read {
     let mut i = 0;
     let finish = |c: Option<(f64, f64, Vec<&str>)>, cues: &mut Vec<Timed>| {
         if let Some((start, end, lines)) = c {
-            let (body, place) = text::markup(&lines.join("\n"), Dialect::Srt);
+            let (body, place) = text::markup(&lines.join("\n"), Dialect::Srt, &[]);
             cues.push(Timed {
                 start,
                 end,
@@ -96,7 +96,11 @@ pub fn read(source: &str) -> Read {
             .collect::<Vec<_>>()
             .join("\n");
     }
-    Read { cues, warnings }
+    Read {
+        cues,
+        warnings,
+        language: None,
+    }
 }
 
 pub fn write(cues: &[Timed], positions: bool) -> String {

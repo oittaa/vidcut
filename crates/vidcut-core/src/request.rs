@@ -808,7 +808,7 @@ pub enum Request {
     SubtitlesImport {
         path: PathBuf,
         /// The subtitle track to add them to. Default: a new one, named after
-        /// the file and shown.
+        /// the file, in the file's language when it names one, and shown.
         #[serde(default)]
         track: Option<String>,
         /// Place the first cue here, the others after it as in the file.

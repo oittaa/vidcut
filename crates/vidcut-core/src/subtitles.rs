@@ -23,6 +23,7 @@ pub struct Timed {
 pub struct Read {
     pub cues: Vec<Timed>,
     pub warnings: Vec<String>,
+    pub language: Option<String>,
 }
 
 pub fn clock(secs: f64, separator: char) -> String {

@@ -100,11 +100,23 @@ pub trait Env {
     }
 
     fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
-        std::fs::read(path).map_err(|e| Error::usage(format!("{}: {e}", path.display())))
+        std::fs::read(path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => Error::not_found(format!("{}: {e}", path.display())),
+            _ => Error::usage(format!("{}: {e}", path.display())),
+        })
     }
 
     fn write_file(&self, path: &Path, bytes: &[u8]) -> Result<()> {
-        std::fs::write(path, bytes).map_err(|e| Error::usage(format!("{}: {e}", path.display())))
+        let name = path
+            .file_name()
+            .map_or_else(|| "export".into(), |n| n.to_string_lossy().into_owned());
+        let part = path.with_file_name(format!(".{name}.part"));
+        std::fs::write(&part, bytes)
+            .and_then(|()| std::fs::rename(&part, path))
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&part);
+                Error::new(ErrorCode::Export, format!("{}: {e}", path.display()))
+            })
     }
 
     fn exists(&self, path: &Path) -> bool {
@@ -662,12 +674,19 @@ impl Editor {
             });
         }
         if !request.is_mutation() {
-            let result = query(&self.project, &Labels::default(), &request, env, playhead)?;
+            let result = query(
+                &self.project,
+                &Labels::default(),
+                &request,
+                env,
+                playhead,
+                dry_run,
+            )?;
             return Ok(Response {
                 rev: self.project.rev,
                 changes: Changes::default(),
                 result,
-                dry_run: false,
+                dry_run: dry_run && matches!(request, Request::SubtitlesExport { .. }),
                 via: String::new(),
                 warnings: Vec::new(),
             });
@@ -2616,7 +2635,7 @@ fn mutate(
                 let r = if cmd.is_mutation() {
                     mutate(p, cmd, env, playhead, dry_run)
                 } else {
-                    query(p, &Labels::default(), cmd, env, playhead)
+                    query(p, &Labels::default(), cmd, env, playhead, dry_run)
                 };
                 results.push(r.map_err(|e| {
                     Error::new(
@@ -4357,6 +4376,7 @@ pub fn query(
     request: &Request,
     env: &dyn Env,
     playhead: Option<i64>,
+    dry_run: bool,
 ) -> Result<Value> {
     let tc = |f: i64| p.settings.timecode(f);
     Ok(match request {
@@ -4546,7 +4566,9 @@ pub fn query(
                     positions: true,
                 },
             );
-            env.write_file(out, text.as_bytes())?;
+            if !dry_run {
+                env.write_file(out, text.as_bytes())?;
+            }
             json!({ "path": out, "track": t.id, "format": format, "cues": cues.len() })
         }
         Request::MarkersList {} => json!(

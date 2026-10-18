@@ -41,36 +41,55 @@ impl Style {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DropMode {
+    None,
+    Ntsc,
+    Pal,
+}
+
 struct Clock {
+    nominal: f64,
     frame_rate: f64,
+    sub_rate: f64,
     tick_rate: f64,
+    smpte: bool,
+    drop: DropMode,
 }
 
 impl Clock {
     fn of(root: Node) -> Clock {
-        let base: f64 = root
-            .attribute((TTP, "frameRate"))
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(30.0);
+        let number = |name: &str| {
+            root.attribute((TTP, name))
+                .and_then(|v| v.trim().parse::<f64>().ok())
+                .filter(|v| *v > 0.0)
+        };
+        let nominal = number("frameRate").unwrap_or(30.0);
         let multiplier = root
             .attribute((TTP, "frameRateMultiplier"))
             .and_then(|v| {
                 let mut it = v.split_whitespace().filter_map(|x| x.parse::<f64>().ok());
                 Some(it.next()? / it.next()?)
             })
+            .filter(|m| *m > 0.0)
             .unwrap_or(1.0);
-        let frame_rate = base * multiplier;
-        let tick_rate = root
-            .attribute((TTP, "tickRate"))
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(if root.attribute((TTP, "frameRate")).is_some() {
-                frame_rate
-            } else {
-                1.0
-            });
+        let frame_rate = nominal * multiplier;
+        let tick_rate = number("tickRate").unwrap_or(if number("frameRate").is_some() {
+            frame_rate
+        } else {
+            1.0
+        });
         Clock {
+            nominal,
             frame_rate,
+            sub_rate: number("subFrameRate").unwrap_or(1.0),
             tick_rate,
+            smpte: root.attribute((TTP, "timeBase")) == Some("smpte"),
+            drop: match root.attribute((TTP, "dropMode")) {
+                Some("dropNTSC") => DropMode::Ntsc,
+                Some("dropPAL") => DropMode::Pal,
+                _ => DropMode::None,
+            },
         }
     }
 
@@ -81,11 +100,24 @@ impl Clock {
             let h: f64 = parts.first()?.parse().ok()?;
             let m: f64 = parts.get(1)?.parse().ok()?;
             let s: f64 = parts.get(2)?.parse().ok()?;
-            let frames = match parts.get(3) {
-                Some(f) => f.split('.').next()?.parse::<f64>().ok()? / self.frame_rate,
-                None => 0.0,
+            let (frames, sub) = match parts.get(3) {
+                Some(f) => {
+                    let (whole, sub) = f.split_once('.').unwrap_or((f, "0"));
+                    (whole.parse::<f64>().ok()?, sub.parse::<f64>().ok()?)
+                }
+                None => (0.0, 0.0),
             };
-            return Some(h * 3600.0 + m * 60.0 + s + frames);
+            let frames = frames + sub / self.sub_rate;
+            if !self.smpte {
+                return Some(h * 3600.0 + m * 60.0 + s + frames / self.frame_rate);
+            }
+            let counted = (3600.0 * h + 60.0 * m + s) * self.nominal + frames;
+            let dropped = match self.drop {
+                DropMode::None => 0.0,
+                DropMode::Ntsc => (h * 54.0 + m - (m / 10.0).floor()) * 2.0,
+                DropMode::Pal => (h * 27.0 + (m / 2.0).floor() - (m / 20.0).floor()) * 4.0,
+            };
+            return Some((counted - dropped) / self.frame_rate);
         }
         let unit_at = v.find(|c: char| c.is_ascii_alphabetic())?;
         let n: f64 = v[..unit_at].parse().ok()?;
@@ -136,6 +168,17 @@ impl<'a> Sheet<'a> {
         Style::of_attributes(n).over(&s)
     }
 
+    fn named(&self, n: Node<'a, 'a>, name: &str, depth: usize) -> Option<&'a str> {
+        if depth > 8 {
+            return None;
+        }
+        n.attribute("style")?.split_whitespace().find_map(|id| {
+            let s = self.styles.get(id)?;
+            s.attribute((TTS, name))
+                .or_else(|| self.named(*s, name, depth + 1))
+        })
+    }
+
     fn percent(&self, v: &str, axis: usize) -> Option<f64> {
         let parts: Vec<&str> = v.split_whitespace().collect();
         let p = parts.get(axis)?;
@@ -152,11 +195,13 @@ impl<'a> Sheet<'a> {
             return Place::Bottom;
         };
         let attr = |name: &str| {
-            r.attribute((TTS, name)).or_else(|| {
-                r.children()
-                    .filter(|c| c.has_tag_name("style"))
-                    .find_map(|c| c.attribute((TTS, name)))
-            })
+            r.attribute((TTS, name))
+                .or_else(|| {
+                    r.children()
+                        .filter(|c| c.has_tag_name("style"))
+                        .find_map(|c| c.attribute((TTS, name)))
+                })
+                .or_else(|| self.named(*r, name, 0))
         };
         let top = attr("origin").and_then(|o| self.percent(o, 1));
         let height = attr("extent").and_then(|e| self.percent(e, 1));
@@ -443,7 +488,16 @@ pub fn read(source: &str) -> Result<Read> {
         mut cues, warnings, ..
     } = walk;
     cues.sort_by(|a, b| a.start.total_cmp(&b.start));
-    Ok(Read { cues, warnings })
+    let language = root
+        .attribute((XML, "lang"))
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from);
+    Ok(Read {
+        cues,
+        warnings,
+        language,
+    })
 }
 
 fn span_style(tags: &[Tag]) -> String {

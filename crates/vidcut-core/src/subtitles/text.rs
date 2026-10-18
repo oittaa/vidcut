@@ -246,7 +246,15 @@ fn raw_tag(s: &str) -> Option<Raw<'_>> {
 
 fn attribute(rest: &str, key: &str) -> Option<String> {
     let lower = rest.to_ascii_lowercase();
-    let at = lower.find(&format!("{key}="))? + key.len() + 1;
+    let wanted = format!("{key}=");
+    let mut from = 0;
+    let at = loop {
+        let i = from + lower[from..].find(&wanted)?;
+        if i == 0 || lower[..i].ends_with(char::is_whitespace) {
+            break i + wanted.len();
+        }
+        from = i + wanted.len();
+    };
     let v = &rest[at..];
     let value = match v.chars().next()? {
         q @ ('"' | '\'') => v[1..].split(q).next()?,
@@ -265,7 +273,11 @@ fn ass_place(block: &str) -> Option<Place> {
     }
 }
 
-pub fn markup(raw: &str, dialect: Dialect) -> (String, Option<Place>) {
+pub fn markup(
+    raw: &str,
+    dialect: Dialect,
+    classes: &[(String, String)],
+) -> (String, Option<Place>) {
     let mut tokens = Vec::new();
     let mut text = String::new();
     let mut place = None;
@@ -294,12 +306,20 @@ pub fn markup(raw: &str, dialect: Dialect) -> (String, Option<Place>) {
                     .filter(|&kept| kept)
                     .map(|_| Token::Close(Tag::Color(String::new()))),
                 ("c", false) if dialect == Dialect::Vtt => {
-                    let c = tag
-                        .rest
-                        .split('.')
-                        .find_map(|class| PALETTE.iter().find(|(n, _)| *n == class.trim()));
+                    let c = tag.rest.split('.').map(str::trim).find_map(|class| {
+                        classes
+                            .iter()
+                            .find(|(n, _)| n == class)
+                            .map(|(_, hex)| hex.clone())
+                            .or_else(|| {
+                                PALETTE
+                                    .iter()
+                                    .find(|(n, _)| *n == class)
+                                    .map(|(_, hex)| (*hex).to_string())
+                            })
+                    });
                     fonts.push(c.is_some());
-                    c.map(|(_, hex)| Token::Open(Tag::Color((*hex).to_string())))
+                    c.map(|hex| Token::Open(Tag::Color(hex)))
                 }
                 ("c", true) if dialect == Dialect::Vtt => fonts
                     .pop()

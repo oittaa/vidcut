@@ -5,7 +5,6 @@ use crate::model::{Cue, Place, Project, SubtitleTrack};
 use crate::subtitles::{self, Read, Timed};
 
 pub const DEFAULT_SECS: f64 = 3.0;
-const HOUR: f64 = 3600.0;
 
 fn renumber(p: &mut Project) {
     for (i, t) in p.subtitles.iter_mut().enumerate() {
@@ -368,9 +367,12 @@ fn timecode_shift(p: &Project, first: f64, forced: bool) -> f64 {
             0.0
         };
     }
-    let short = (p.end() as f64) / fps <= HOUR;
-    if first + slack >= HOUR && (forced || short) {
-        HOUR
+    let hour =
+        crate::time::timecode_frames(1, 0, 0, 0, p.settings.fps, p.settings.counts_drop_frame())
+            .map_or(3600.0, |f| f as f64 / fps);
+    let short = (p.end() as f64) / fps <= hour;
+    if first + slack >= hour && (forced || short) {
+        hour
     } else {
         0.0
     }
@@ -397,7 +399,9 @@ pub fn import(
         Some(id) => target(p, Some(id))?,
         None => {
             add_track(p, name);
-            p.subtitles.len() - 1
+            let ti = p.subtitles.len() - 1;
+            p.subtitles[ti].language = read.language.clone();
+            ti
         }
     };
     unlocked(p, ti)?;

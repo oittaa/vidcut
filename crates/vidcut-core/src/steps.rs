@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::model::{Clip, Project, Track, Transition};
+use crate::model::{Clip, Cue, Project, SubtitleTrack, Track, Transition};
 use crate::request::{Client, ClientKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -437,7 +437,41 @@ pub fn places(before: &Project, after: &Project) -> (Vec<String>, Vec<Span>) {
             });
         }
     }
+    let (qa, qb) = (cues(before), cues(after));
+    let mut hits: Vec<(&str, &Cue)> = Vec::new();
+    for (id, (track, c)) in &qa {
+        match qb.get(id) {
+            Some(now) if now == &(*track, *c) => {}
+            Some((t, n)) => {
+                hits.push((track, c));
+                hits.push((t, n));
+            }
+            None => hits.push((track, c)),
+        }
+    }
+    for (id, (track, c)) in &qb {
+        if !qa.contains_key(id) {
+            hits.push((track, c));
+        }
+    }
+    let mut touched: BTreeMap<&str, (i64, i64)> = BTreeMap::new();
+    for (track, c) in hits {
+        let e = touched.entry(track).or_insert((c.start, c.end()));
+        *e = (e.0.min(c.start), e.1.max(c.end()));
+    }
+    spans.extend(touched.into_iter().map(|(track, (from, to))| Span {
+        track: Some(track.to_string()),
+        from,
+        to,
+    }));
     (clips, merged(spans))
+}
+
+fn cues(p: &Project) -> HashMap<&str, (&str, &Cue)> {
+    p.subtitles
+        .iter()
+        .flat_map(|t| t.cues.iter().map(|c| (c.id.as_str(), (t.id.as_str(), c))))
+        .collect()
 }
 
 pub fn union(steps: &[Step]) -> (Vec<String>, Vec<Span>) {
@@ -456,6 +490,7 @@ pub fn union(steps: &[Step]) -> (Vec<String>, Vec<Span>) {
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Since {
     pub clips: Counts,
+    pub subtitles: Counts,
     pub dissolves: Counts,
     pub fades: Counts,
     pub markers: Counts,
@@ -555,6 +590,16 @@ impl Counts {
         out
     }
 
+    fn plus(self, o: Counts) -> Counts {
+        Counts {
+            added: self.added + o.added,
+            deleted: self.deleted + o.deleted,
+            moved: self.moved + o.moved,
+            trimmed: self.trimmed + o.trimmed,
+            changed: self.changed + o.changed,
+        }
+    }
+
     fn of<'a, T: PartialEq + 'a>(
         before: impl IntoIterator<Item = (&'a str, &'a T)>,
         after: impl IntoIterator<Item = (&'a str, &'a T)>,
@@ -577,6 +622,7 @@ impl Since {
     pub fn text(&self) -> String {
         let mut parts = Vec::new();
         parts.extend(self.clips.words("clip", "clips"));
+        parts.extend(self.subtitles.words("subtitle", "subtitles"));
         parts.extend(self.dissolves.words("dissolve", "dissolves"));
         parts.extend(self.fades.words("cross fade", "cross fades"));
         parts.extend(self.markers.words("marker", "markers"));
@@ -635,8 +681,28 @@ pub fn since(before: &Project, after: &Project) -> Since {
             c.changed += 1;
         }
     }
+    let (qa, qb) = (cues(before), cues(after));
+    let mut q = Counts {
+        added: qb.keys().filter(|k| !qa.contains_key(*k)).count(),
+        deleted: qa.keys().filter(|k| !qb.contains_key(*k)).count(),
+        ..Counts::default()
+    };
+    for (id, (ta, x)) in &qa {
+        let Some((tb, y)) = qb.get(id) else { continue };
+        if ta == tb && x == y {
+            continue;
+        }
+        if x.text != y.text || x.place != y.place {
+            q.changed += 1;
+        } else if x.duration != y.duration {
+            q.trimmed += 1;
+        } else {
+            q.moved += 1;
+        }
+    }
     Since {
         clips: c,
+        subtitles: q,
         dissolves: Counts::of(transitions(before, false), transitions(after, false)),
         fades: Counts::of(transitions(before, true), transitions(after, true)),
         markers: Counts::of(
@@ -650,7 +716,11 @@ pub fn since(before: &Project, after: &Project) -> Since {
         tracks: Counts::of(
             bare(before).iter().map(|t| (t.id.as_str(), t)),
             bare(after).iter().map(|t| (t.id.as_str(), t)),
-        ),
+        )
+        .plus(Counts::of(
+            bare_subtitles(before).iter().map(|t| (t.id.as_str(), t)),
+            bare_subtitles(after).iter().map(|t| (t.id.as_str(), t)),
+        )),
         bins: Counts::of(
             before.bins.iter().map(|b| (b.as_str(), b)),
             after.bins.iter().map(|b| (b.as_str(), b)),
@@ -666,6 +736,16 @@ fn bare(p: &Project) -> Vec<Track> {
         .map(|t| Track {
             clips: Vec::new(),
             transitions: Vec::new(),
+            ..t.clone()
+        })
+        .collect()
+}
+
+fn bare_subtitles(p: &Project) -> Vec<SubtitleTrack> {
+    p.subtitles
+        .iter()
+        .map(|t| SubtitleTrack {
+            cues: Vec::new(),
             ..t.clone()
         })
         .collect()
