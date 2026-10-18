@@ -1,12 +1,8 @@
-# Check Import Media Folder against Resolve
+# Check Import Media Folder's button in Resolve
 
-**When:** next, while the Resolve test machine is free.
+**When:** when computer use on DaVinci Resolve is granted, or a person can look; the scripting API can't show these.
 
-Import a folder on Resolve Studio's Cut page and compare with [spec D53](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions): use a folder with a subfolder two levels down, an empty folder, a folder of documents only, numbered PNGs, a text file and a broken `.mp4`.
-- The button, its tooltip and the menu items (File, the pool's right-click menu), and any shortcut.
-- Which folders become bins: empty ones, ones holding no media.
-- What happens to files that aren't media: skipped silently, or a message.
-- The clips' order, and which video's frame rate the empty project is offered.
-- Importing the same folder again: a second bin, or the same one.
-
-Record what differs in [deviations.md](../deviations.md) or change D53 and the code.
+On the Cut page, import a folder with a subfolder two levels down, an empty folder and a folder of documents only, and compare with [spec D53](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions):
+- the button's tooltip, its File and right-click menu items, and any shortcut;
+- which folders become bins: the empty one, the documents-only one;
+- the clips' order in a new bin, and which video's frame rate an empty project is offered.
