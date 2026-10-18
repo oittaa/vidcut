@@ -414,12 +414,10 @@ impl HistoryFile {
         Ok((base, History::of(tree)))
     }
 
-    pub(crate) fn branch(&self, end: u64, id: u64) -> std::io::Result<Option<Vec<Entry>>> {
+    pub(crate) fn chain(&self, end: u64, id: u64) -> std::io::Result<Option<crate::editor::Chain>> {
         let (_, h) = self.read_all(end)?;
-        Ok(h.branches
-            .into_iter()
-            .find(|b| b.id() == Some(id))
-            .map(|b| b.steps))
+        Ok(crate::steps::chain(&h.branches, id)
+            .map(|c| c.into_iter().map(|b| (b.after, b.steps.clone())).collect()))
     }
 
     pub(crate) fn write_whole(

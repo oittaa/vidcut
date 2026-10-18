@@ -192,7 +192,7 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 
 ## X36. Nothing is lost: undone steps a new change replaces stay as a version
 - **Resolve:** a new change after an undo discards the steps that could be redone (p. 652; checked on 21.1.1).
-- **vidcut:** they stay in the history as a version, shown under the step they branched from ("2 undone steps, replaced 5 min ago"), with Restore this version. Restoring brings them back and keeps the steps that had replaced them as a version of their own. `history.get` lists them in `branches`; `history.restore` restores one.
+- **vidcut:** they stay in the history as a version, shown under the step they branched from ("2 undone steps, replaced 5 min ago"), with Restore this version. Restoring brings them back and keeps the steps that had replaced them as a version of their own; a version replaced inside another comes back with it in one step. Hovering a version's step draws the timeline as it was then. `history.get` lists them in `branches`; `history.restore` restores one.
 - **Why:** an undo, then an edit by mistake, shouldn't throw away work, least of all an agent's that the person undid to look at what came before.
 
 ## X37. Named versions
@@ -202,5 +202,5 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 
 ## X38. Find, revert one step, and what changed since
 - **Resolve:** the History window is a list of labels (21.1.1).
-- **vidcut:** the History window finds steps by their words or names, and filters them by kind (trims, deletes, dissolves…) and by who made them. A step's right-click menu has Revert This Step: its change undone alone, as a new step, keeping the steps after it; it is refused, naming the later step, when one changed what it changed (`history.revert`). Hovering a step says what changed since it ("Since this step: 5 clips moved, 2 deleted, 3 dissolves added"); `history.get` with `since` says the same.
+- **vidcut:** the History window finds steps by their words or names, and filters them by kind (trims, deletes, dissolves…) and by who made them, in the versions too. A step's right-click menu has Revert This Step: its change undone alone, as a new step, keeping the steps after it; it is refused, naming the later step, when one changed what it changed (`history.revert`). Hovering a step says what changed since it ("Since this step: 5 clips moved, 2 deleted, 3 dissolves added"), or for a step still to redo what redoing to it brings ("Redoing to here: 1 clip added"); `history.get` with `since` says the same.
 - **Why:** in a long history made by several hands, finding the step to go back to and undoing one mistake without losing the edits after it are what people need most.

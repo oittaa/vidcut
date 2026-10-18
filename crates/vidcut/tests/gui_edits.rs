@@ -1462,11 +1462,8 @@ fn hovering_a_history_row_previews_the_timeline_as_it_was() {
     gui.harness.step();
     let preview = wait_for_preview(&mut gui);
     assert_eq!(
-        (
-            preview.step,
-            preview.project.track("V1").unwrap().clips.len()
-        ),
-        (0, 0)
+        (preview.at, preview.project.track("V1").unwrap().clips.len()),
+        (live::PreviewAt::Step(0), 0)
     );
     assert_eq!(gui.clips("V1"), track_one());
     gui.quit();
@@ -1742,7 +1739,7 @@ fn opening_the_history_from_the_top_bar_gives_it_the_keys() {
     gui.harness.step();
     gui.harness.step();
     gui.key(Key::ArrowUp);
-    assert_eq!(wait_for_preview(&mut gui).step, 3);
+    assert_eq!(wait_for_preview(&mut gui).at, live::PreviewAt::Step(3));
     gui.quit();
 }
 
@@ -1786,5 +1783,74 @@ fn a_name_given_outside_the_gui_shows_in_its_history() {
         std::thread::sleep(Duration::from_millis(20));
         gui.settle();
     }
+    gui.quit();
+}
+
+fn find(gui: &mut Gui, text: &str) {
+    let placeholder = "Find a step or a name";
+    gui.harness
+        .query_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|n| n.accesskit_node().placeholder() == Some(placeholder))
+        .unwrap()
+        .focus();
+    gui.harness.step();
+    gui.harness
+        .query_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|n| n.accesskit_node().placeholder() == Some(placeholder))
+        .unwrap()
+        .type_text(text);
+    gui.harness.step();
+    gui.harness.step();
+}
+
+#[test]
+fn find_shows_a_match_inside_a_version() {
+    let mut gui = Gui::new();
+    gui.call("bins.add", json!({ "path": "Rushes" }));
+    gui.call("history.undo", json!({}));
+    gui.call("bins.add", json!({ "path": "Selects" }));
+    open_history(&mut gui);
+    find(&mut gui, "Rushes");
+    assert!(gui.harness.query_by_label("New bin Rushes").is_some());
+    gui.quit();
+}
+
+#[test]
+fn hovering_a_step_in_a_version_shows_the_timeline_as_it_was() {
+    let mut gui = Gui::new();
+    gui.call("history.undo", json!({}));
+    gui.call("bins.add", json!({ "path": "Selects" }));
+    open_history(&mut gui);
+    let row = gui
+        .harness
+        .get_by_label_contains("1 undone step, replaced")
+        .rect();
+    gui.click(pos2(row.left() + 12.0, row.center().y));
+    gui.settle();
+    gui.harness
+        .get_by_label_contains("00:00:06:20\u{2013}00:00:08:20")
+        .hover();
+    gui.harness.step();
+    let preview = wait_for_preview(&mut gui);
+    assert_eq!(preview.project.track("V1").unwrap().clips.len(), 3);
+    gui.quit();
+}
+
+#[test]
+fn hovering_a_step_to_redo_says_what_redoing_brings() {
+    let mut gui = Gui::new();
+    gui.call("history.undo", json!({}));
+    open_history(&mut gui);
+    gui.harness
+        .get_by_label_contains("00:00:06:20\u{2013}00:00:08:20")
+        .hover();
+    gui.harness.step();
+    wait_for_preview(&mut gui);
+    gui.harness.step();
+    assert!(
+        gui.harness
+            .query_by_label_contains("Redoing to here: 1 clip added")
+            .is_some()
+    );
     gui.quit();
 }

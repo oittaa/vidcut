@@ -187,16 +187,8 @@ impl<T: Node> Tree<T> {
         self.branches.iter().find(|b| b.id() == Some(id))
     }
 
-    pub fn holder(&self, id: u64) -> Option<u64> {
-        fn within<T: Node>(branches: &[Branch<T>], id: u64) -> bool {
-            branches
-                .iter()
-                .any(|b| b.id() == Some(id) || within(&b.branches, id))
-        }
-        self.branches
-            .iter()
-            .find(|b| within(&b.branches, id))
-            .and_then(Branch::id)
+    pub fn chain(&self, id: u64) -> Option<Vec<&Branch<T>>> {
+        chain(&self.branches, id)
     }
 
     pub fn map<U>(&self, f: &impl Fn(&T) -> U) -> Tree<U> {
@@ -216,6 +208,19 @@ impl<T: Node> Tree<T> {
             restoring: None,
         }
     }
+}
+
+pub fn chain<T: Node>(branches: &[Branch<T>], id: u64) -> Option<Vec<&Branch<T>>> {
+    for b in branches {
+        if b.id() == Some(id) {
+            return Some(vec![b]);
+        }
+        if let Some(mut inner) = chain(&b.branches, id) {
+            inner.insert(0, b);
+            return Some(inner);
+        }
+    }
+    None
 }
 
 impl Steps {
@@ -456,7 +461,42 @@ pub struct Since {
     pub markers: Counts,
     pub media: Counts,
     pub tracks: Counts,
+    pub bins: Counts,
+    pub marks: bool,
     pub settings: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SinceStep {
+    pub since: Since,
+    pub redo: bool,
+}
+
+pub fn since_step(then: &Project, now: &Project, step: usize, done: usize) -> SinceStep {
+    let redo = step > done;
+    SinceStep {
+        since: match redo {
+            true => since(now, then),
+            false => since(then, now),
+        },
+        redo,
+    }
+}
+
+impl SinceStep {
+    pub fn text(&self) -> String {
+        let lead = match self.redo {
+            true => "Redoing to here",
+            false => "Since this step",
+        };
+        format!("{lead}: {}", self.since.text())
+    }
+
+    pub fn json(&self, step: usize) -> Value {
+        let mut v = self.since.json(step);
+        v["redo"] = json!(self.redo);
+        v
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
@@ -516,9 +556,14 @@ impl Since {
         parts.extend(self.markers.words("marker", "markers"));
         parts.extend(self.media.words("media file", "media files"));
         parts.extend(self.tracks.words("track", "tracks"));
+        parts.extend(self.bins.words("bin", "bins"));
+        if self.marks {
+            parts.push("In and Out marks changed".into());
+        }
         if self.settings {
             parts.push("settings changed".into());
         }
+
         if parts.is_empty() {
             "nothing".into()
         } else {
@@ -572,22 +617,32 @@ pub fn since(before: &Project, after: &Project) -> Since {
             before.markers.iter().map(|k| (k.id.as_str(), k)),
             after.markers.iter().map(|k| (k.id.as_str(), k)),
         ),
-        media: Counts {
-            changed: 0,
-            ..Counts::of(
-                before.media.iter().map(|m| (m.id.as_str(), &m.id)),
-                after.media.iter().map(|m| (m.id.as_str(), &m.id)),
-            )
-        },
-        tracks: Counts {
-            changed: 0,
-            ..Counts::of(
-                before.tracks.iter().map(|t| (t.id.as_str(), &t.id)),
-                after.tracks.iter().map(|t| (t.id.as_str(), &t.id)),
-            )
-        },
+        media: Counts::of(
+            before.media.iter().map(|m| (m.id.as_str(), m)),
+            after.media.iter().map(|m| (m.id.as_str(), m)),
+        ),
+        tracks: Counts::of(
+            bare(before).iter().map(|t| (t.id.as_str(), t)),
+            bare(after).iter().map(|t| (t.id.as_str(), t)),
+        ),
+        bins: Counts::of(
+            before.bins.iter().map(|b| (b.as_str(), b)),
+            after.bins.iter().map(|b| (b.as_str(), b)),
+        ),
+        marks: before.marks != after.marks || before.tape_marks != after.tape_marks,
         settings: before.settings != after.settings,
     }
+}
+
+fn bare(p: &Project) -> Vec<Track> {
+    p.tracks
+        .iter()
+        .map(|t| Track {
+            clips: Vec::new(),
+            transitions: Vec::new(),
+            ..t.clone()
+        })
+        .collect()
 }
 
 fn transitions(p: &Project, sound: bool) -> impl Iterator<Item = (&str, &Transition)> {

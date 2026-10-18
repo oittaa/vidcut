@@ -9,11 +9,11 @@ use egui_phosphor::regular as icon;
 use serde_json::json;
 use vidcut_core::model::Project;
 use vidcut_core::request::{Client, ClientKind};
-use vidcut_core::steps::{Branch, Group, KINDS, Span, Step, Steps, category, groups, since};
+use vidcut_core::steps::{Branch, Group, KINDS, Span, Step, Steps, category, groups, since_step};
 
 use super::theme;
 use super::workspace::Workspace;
-use crate::live::PlayerId;
+use crate::live::{PlayerId, PreviewAt};
 use crate::when;
 
 const ROW: f32 = 24.0;
@@ -31,7 +31,10 @@ pub(super) struct HistoryUi {
     was: Option<usize>,
     cursor: Option<usize>,
     target: Option<usize>,
-    sent: Option<(Option<usize>, u64)>,
+    twig: Option<(u64, usize)>,
+    was_twig: Option<(u64, usize)>,
+    version: Option<(u64, usize)>,
+    sent: Option<(Option<PreviewAt>, u64)>,
     expanded: HashSet<usize>,
     parts: HashSet<usize>,
     twigs: HashSet<u64>,
@@ -54,6 +57,7 @@ pub(super) struct HistoryUi {
 struct Layout {
     groups: Arc<Vec<Group>>,
     rows: Arc<Vec<Row>>,
+    paths: Arc<Vec<Vec<usize>>>,
     kinds: Arc<Vec<&'static str>>,
     sources: Arc<Vec<String>>,
 }
@@ -148,6 +152,8 @@ impl HistoryUi {
         self.cursor = None;
         self.hovered = None;
         self.was = None;
+        self.twig = None;
+        self.was_twig = None;
     }
 
     fn filtered(&self) -> bool {
@@ -468,6 +474,7 @@ impl Workspace {
 
     pub(super) fn history_frame(&mut self, ctx: &egui::Context) {
         self.history.was = self.history.hovered.take();
+        self.history.was_twig = self.history.twig.take();
         self.naming_window(ctx);
         if !self.history.open {
             self.history.cursor = None;
@@ -533,9 +540,11 @@ impl Workspace {
             return l.layout.clone();
         }
         let all = groups(&steps.line);
+        let paths = version_paths(steps);
         let layout = Layout {
-            rows: Arc::new(self.history_rows(steps, &all)),
+            rows: Arc::new(self.history_rows(steps, &all, &paths)),
             groups: Arc::new(all),
+            paths: Arc::new(paths),
             kinds: Arc::new(kinds_in(steps)),
             sources: Arc::new(sources_in(steps)),
         };
@@ -680,7 +689,11 @@ impl Workspace {
 
     fn history_list(&mut self, ui: &mut egui::Ui, steps: &Arc<Steps>, p: Option<&Project>) {
         let layout = self.history_layout(steps);
-        let (all, rows) = (layout.groups.clone(), layout.rows.clone());
+        let (all, rows, paths) = (
+            layout.groups.clone(),
+            layout.rows.clone(),
+            layout.paths.clone(),
+        );
         let shown = rows.iter().filter(|r| matches!(r, Row::Step(..))).count();
         self.history_header(ui, steps, shown, &layout);
         ui.separator();
@@ -708,7 +721,7 @@ impl Workspace {
         let mut acts = Vec::new();
         area.show_rows(ui, ROW, rows.len(), |ui, range| {
             for k in range {
-                acts.extend(self.history_row(ui, rows[k], steps, &all, p, now));
+                acts.extend(self.history_row(ui, rows[k], steps, &all, &paths, p, now));
             }
         });
         let footer = self.history_footer(steps);
@@ -763,11 +776,7 @@ impl Workspace {
         };
         let key = (t, now.rev);
         if self.history.since.as_ref().is_none_or(|(k, _)| *k != key) {
-            let text = if t < steps.done {
-                format!("Since this step: {}", since(&then, &now).text())
-            } else {
-                format!("Redoing to here: {}", since(&now, &then).text())
-            };
+            let text = since_step(&then, &now, t, steps.done).text();
             self.history.since = Some((key, text));
         }
         self.history
@@ -777,12 +786,14 @@ impl Workspace {
             .unwrap_or_default()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn history_row(
         &mut self,
         ui: &mut egui::Ui,
         row: Row,
         steps: &Steps,
         all: &[Group],
+        paths: &[Vec<usize>],
         p: Option<&Project>,
         now: u64,
     ) -> Vec<Act> {
@@ -798,7 +809,7 @@ impl Workspace {
         let current =
             state == Some(steps.done) && !matches!(row, Row::Group(_, true) | Row::Flag(_));
         let cursor = self.history.cursor.is_some() && state == self.history.cursor;
-        let branch = |bi: usize| -> &Branch<Step> { &steps.branches[bi] };
+        let branch = |bi: usize| -> &Branch<Step> { version(steps, &paths[bi]) };
         let named = match row {
             Row::Original => "Original".to_string(),
             Row::Opened(t) => format!("Opened {}", when::stamp(t, now)),
@@ -836,7 +847,9 @@ impl Workspace {
         }
         let mid = rect.center().y;
         let depth = match row {
-            Row::Step(_, true) | Row::Part(..) | Row::Twig(..) | Row::Flag(_) => 1.0,
+            Row::Step(_, true) | Row::Part(..) | Row::Flag(_) => 1.0,
+            Row::Branch(bi, _) => paths[bi].len() as f32 - 1.0,
+            Row::Twig(bi, _) => paths[bi].len() as f32,
             _ => 0.0,
         };
         let mut x = rect.left() + 4.0 + depth * 18.0;
@@ -1042,7 +1055,11 @@ impl Workspace {
                 );
             }
             Row::Twig(bi, k) => {
-                let s = &branch(bi).steps[k];
+                let b = branch(bi);
+                let s = &b.steps[k];
+                if r.hovered() {
+                    self.history.twig = b.id().map(|id| (id, k));
+                }
                 if let Some(name) = s.id.and_then(|id| steps.named(id)) {
                     x += flag(ui, pos2(x, mid), name);
                 }
@@ -1084,7 +1101,7 @@ impl Workspace {
         acts
     }
 
-    fn history_rows(&self, steps: &Steps, all: &[Group]) -> Vec<Row> {
+    fn history_rows(&self, steps: &Steps, all: &[Group], paths: &[Vec<usize>]) -> Vec<Row> {
         let mut rows = vec![Row::Original];
         if self.history.filtered() {
             rows.extend(
@@ -1095,20 +1112,42 @@ impl Workspace {
                     .filter(|(_, s)| self.history.matches(s, s.id.and_then(|id| steps.named(id))))
                     .map(|(i, _)| Row::Step(i, false)),
             );
+            for (bi, path) in paths.iter().enumerate() {
+                let b = version(steps, path);
+                let found: Vec<usize> = (0..b.steps.len())
+                    .filter(|&k| {
+                        let s = &b.steps[k];
+                        self.history.matches(s, s.id.and_then(|id| steps.named(id)))
+                    })
+                    .collect();
+                if !found.is_empty() {
+                    rows.push(Row::Branch(bi, true));
+                    rows.extend(found.into_iter().map(|k| Row::Twig(bi, k)));
+                }
+            }
             return rows;
         }
+        let at: HashMap<&[usize], usize> = paths
+            .iter()
+            .enumerate()
+            .map(|(bi, p)| (p.as_slice(), bi))
+            .collect();
         let mut hanging: HashMap<usize, Vec<usize>> = HashMap::new();
-        for (bi, b) in steps.branches.iter().enumerate() {
-            hanging.entry(b.after).or_default().push(bi);
+        let mut inside: HashMap<usize, Vec<usize>> = HashMap::new();
+        for (bi, path) in paths.iter().enumerate() {
+            match path.split_last() {
+                Some((_, [])) => hanging
+                    .entry(version(steps, path).after)
+                    .or_default()
+                    .push(bi),
+                Some((_, outer)) => inside.entry(at[outer]).or_default().push(bi),
+                None => {}
+            }
         }
+        let twigs = &self.history.twigs;
         let branches = |rows: &mut Vec<Row>, after: usize| {
             for &bi in hanging.get(&after).into_iter().flatten() {
-                let b = &steps.branches[bi];
-                let open = b.id().is_some_and(|id| self.history.twigs.contains(&id));
-                rows.push(Row::Branch(bi, open));
-                if open {
-                    rows.extend((0..b.steps.len()).map(|k| Row::Twig(bi, k)));
-                }
+                version_rows(rows, bi, steps, paths, &inside, twigs);
             }
         };
         let step = |rows: &mut Vec<Row>, i: usize, inner: bool| {
@@ -1163,13 +1202,25 @@ impl Workspace {
             return;
         };
         let rev = self.project().map_or(0, |p| p.rev);
-        self.history.target = self
-            .history
-            .hovered
-            .or(self.history.was)
-            .or(self.history.cursor.filter(|_| self.history.keys))
-            .filter(|&s| s <= steps.line.len());
-        let wanted = self.history.target.filter(|&s| s != steps.done);
+        let version = self.history.twig.or(self.history.was_twig);
+        self.history.version = version;
+        self.history.target = match version {
+            Some(_) => None,
+            None => self
+                .history
+                .hovered
+                .or(self.history.was)
+                .or(self.history.cursor.filter(|_| self.history.keys))
+                .filter(|&s| s <= steps.line.len()),
+        };
+        let wanted = match version {
+            Some((id, k)) => Some(PreviewAt::Version(id, k)),
+            None => self
+                .history
+                .target
+                .filter(|&s| s != steps.done)
+                .map(PreviewAt::Step),
+        };
         if self.history.sent != Some((wanted, rev)) {
             self.history.sent = Some((wanted, rev));
             self.live.history_preview(wanted);
@@ -1182,14 +1233,26 @@ impl Workspace {
     }
 
     pub(super) fn history_shown(&self) -> Option<Arc<Project>> {
-        let target = self.history.target?;
+        let at = match self.history.version {
+            Some((id, k)) => PreviewAt::Version(id, k),
+            None => PreviewAt::Step(self.history.target?),
+        };
         let preview = self.snap.history_preview.as_ref()?;
         let rev = self.project()?.rev;
-        (preview.step == target && preview.rev == rev).then(|| preview.project.clone())
+        (preview.at == at && preview.rev == rev).then(|| preview.project.clone())
     }
 
     pub(super) fn history_marks(&self, ctx: &egui::Context) -> Option<Marks> {
         let steps = self.steps()?;
+        if let Some((id, k)) = self.history.version {
+            let s = steps.chain(id)?.last()?.steps.get(k)?;
+            return Some(Marks {
+                clips: s.clips.iter().cloned().collect(),
+                spans: s.spans.clone(),
+                strength: 1.0,
+                focus: true,
+            });
+        }
         if let Some(t) = self.history.target {
             let s = steps.line.get(t.checked_sub(1)?)?;
             return Some(Marks {
@@ -1213,6 +1276,55 @@ impl Workspace {
             strength: (1.0 - t * t).max(0.0),
             focus: false,
         })
+    }
+}
+
+fn version_paths(steps: &Steps) -> Vec<Vec<usize>> {
+    fn walk(branches: &[Branch<Step>], path: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+        for (i, b) in branches.iter().enumerate() {
+            path.push(i);
+            out.push(path.clone());
+            walk(&b.branches, path, out);
+            path.pop();
+        }
+    }
+    let mut out = Vec::new();
+    walk(&steps.branches, &mut Vec::new(), &mut out);
+    out
+}
+
+fn version<'a>(steps: &'a Steps, path: &[usize]) -> &'a Branch<Step> {
+    let mut b = &steps.branches[path[0]];
+    for &i in &path[1..] {
+        b = &b.branches[i];
+    }
+    b
+}
+
+fn version_rows(
+    rows: &mut Vec<Row>,
+    bi: usize,
+    steps: &Steps,
+    paths: &[Vec<usize>],
+    inside: &HashMap<usize, Vec<usize>>,
+    twigs: &HashSet<u64>,
+) {
+    let b = version(steps, &paths[bi]);
+    let open = b.id().is_some_and(|id| twigs.contains(&id));
+    rows.push(Row::Branch(bi, open));
+    if !open {
+        return;
+    }
+    let inner = inside.get(&bi).map(Vec::as_slice).unwrap_or_default();
+    for k in 0..=b.steps.len() {
+        for &c in inner {
+            if version(steps, &paths[c]).after == k {
+                version_rows(rows, c, steps, paths, inside, twigs);
+            }
+        }
+        if k < b.steps.len() {
+            rows.push(Row::Twig(bi, k));
+        }
     }
 }
 

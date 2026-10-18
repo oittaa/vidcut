@@ -844,7 +844,8 @@ pub enum Request {
     /// version `history.get` lists in `branches`, by its `id`. The steps
     /// after where it branched off become a version of their own, so
     /// nothing is lost, and the project goes to the restored version's
-    /// last step.
+    /// last step. A version inside another comes back with the versions
+    /// holding it.
     #[serde(rename = "history.restore")]
     HistoryRestore { branch: u64 },
     /// Undo one done step alone, as a new step, keeping the steps after
@@ -876,7 +877,9 @@ pub enum Request {
         limit: Option<usize>,
         /// Also say what changed from this step to the project as it is
         /// (`since`): clips added, deleted, moved and trimmed, dissolves,
-        /// markers, media and tracks.
+        /// cross fades, markers, media, tracks, bins, In and Out marks and
+        /// settings. For a step still to redo it says what redoing to it
+        /// brings, with `redo` true.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         since: Option<usize>,
     },

@@ -144,6 +144,20 @@ impl Store {
         )
     }
 
+    pub fn version_at(
+        &self,
+        past: &mut crate::past::Past,
+        current: Project,
+        id: u64,
+        k: usize,
+    ) -> Result<std::sync::Arc<Project>> {
+        past.version_at(
+            &Editor::on_file(current, self.history_file(), String::new()),
+            id,
+            k,
+        )
+    }
+
     pub fn recover(&self, editor: &mut Editor) -> bool {
         let Some(hash) = editor.blocked_on().map(String::from) else {
             return false;

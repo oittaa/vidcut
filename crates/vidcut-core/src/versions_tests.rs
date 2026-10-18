@@ -198,7 +198,7 @@ fn reverting_with_no_steps_says_so() {
 }
 
 #[test]
-fn restoring_a_version_inside_another_names_the_one_to_restore_first() {
+fn restoring_a_version_inside_another_brings_both_back() {
     let dir = tempfile::tempdir().unwrap();
     let s = store(dir.path());
     bins(&s, &["a", "b", "c"]);
@@ -206,13 +206,68 @@ fn restoring_a_version_inside_another_names_the_one_to_restore_first() {
     bins(&s, &["d"]);
     run(&s, "history.undo", json!({ "steps": 2 }));
     bins(&s, &["e"]);
-    let e = Envelope::from_json(json!({ "method": "history.restore", "params": { "branch": 3 } }))
-        .unwrap();
-    let err = s
-        .transact(|ed| ed.apply(e, &FakeEnv::default(), None))
-        .unwrap_err();
+    run(&s, "history.restore", json!({ "branch": 3 }));
+    assert_eq!(s.load().unwrap().project().bins, ["a", "b", "c"]);
+}
+
+#[test]
+fn since_a_step_counts_the_bins_added() {
+    let mut f = Fixture::new(&[]);
+    f.ok(json!({ "method": "bins.add", "params": { "path": "a" } }));
+    f.ok(json!({ "method": "bins.add", "params": { "path": "b" } }));
+    let r = f.ok(json!({ "method": "history.get", "params": { "since": 1 } }));
+    assert_eq!(r.result["since"]["text"], "1 bin added");
+}
+
+#[test]
+fn since_a_step_says_the_in_and_out_marks_changed() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 50);
+    f.ok(json!({ "method": "marks.set", "params": { "in": "10f", "out": "20f" } }));
+    let r = f.ok(json!({ "method": "history.get", "params": { "since": 2 } }));
+    assert_eq!(r.result["since"]["text"], "In and Out marks changed");
+}
+
+#[test]
+fn since_a_step_counts_a_renamed_media_file_as_changed() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(json!({ "method": "media.rename", "params": { "media": "m1", "name": "Take 2" } }));
+    let r = f.ok(json!({ "method": "history.get", "params": { "since": 1 } }));
+    assert_eq!(r.result["since"]["text"], "1 media file changed");
+}
+
+#[test]
+fn since_a_step_to_redo_says_what_redoing_brings() {
+    let mut f = Fixture::new(&[]);
+    f.ok(json!({ "method": "bins.add", "params": { "path": "a" } }));
+    f.ok(json!({ "method": "history.undo", "params": {} }));
+    let r = f.ok(json!({ "method": "history.get", "params": { "since": 1 } }));
+    let s = &r.result["since"];
     assert_eq!(
-        err.message,
-        "version 3 is inside version 2: restore version 2 first"
+        (s["text"].clone(), s["redo"].clone()),
+        (json!("1 bin added"), json!(true))
+    );
+}
+
+#[test]
+fn restoring_a_version_inside_another_keeps_what_it_replaces() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = store(dir.path());
+    bins(&s, &["a", "b", "c"]);
+    run(&s, "history.undo", json!({ "steps": 1 }));
+    bins(&s, &["d"]);
+    run(&s, "history.undo", json!({ "steps": 2 }));
+    bins(&s, &["e"]);
+    run(&s, "history.restore", json!({ "branch": 3 }));
+    let mut kept: Vec<Vec<String>> = history(&s)["branches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| labels(&b["steps"]))
+        .collect();
+    kept.sort();
+    assert_eq!(
+        kept,
+        [vec!["New bin d".to_string()], vec!["New bin e".to_string()]]
     );
 }
