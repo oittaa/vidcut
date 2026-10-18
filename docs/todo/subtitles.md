@@ -5,7 +5,11 @@
 Subtitles made from the timeline's speech, corrected on a subtitle track and exported. The Cut page has subtitle tracks and Create Subtitles from Audio (pp. 645–646, 702, 1227–1248); the spec leaves them out ([§1](../cut-page-spec.md#1-scope)).
 
 What it would take:
-- **Transcription on the computer:** [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) (MIT, on ggml) through the `transcribe-cpp` crate, on the GPU: Vulkan, Metal, CUDA or ROCm (rule 9). FFmpeg's `whisper` filter isn't in Ubuntu's, BtbN's or vidcut's own FFmpeg builds.
+- **Transcription on the computer:** [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) (MIT, on ggml) built into vidcut through the `transcribe-cpp` crate, on the GPU (rule 9): Vulkan on Windows and Linux, Metal on macOS.
+  - No CUDA. Its backend and NVIDIA's CUDA 12 runtime and cuBLAS add about 930 MB, and it was slower than Vulkan for two of the three models ([measured](#measured)).
+  - transcribe.cpp's Windows CPU and Vulkan DLLs are 53.6 MB unpacked, 41.6 MB of it the Vulkan backend.
+  - FFmpeg's `whisper` filter isn't in Ubuntu's, BtbN's or vidcut's own FFmpeg builds.
+- **Audio in pieces cut at pauses:** transcribe.cpp's Silero VAD finds the speech. A piece ends in a silence, with a little padding, and stays under a maximum: the aligner takes 5 min, and Qwen3-ASR ran a 16 GB GPU out of memory on 10 min in one pass. A long stretch without a pause is cut at its quietest point. Each piece's times shift back to the timeline's.
 - **Models**, GGUF files from Hugging Face:
   - **English, the default:** Qwen3-ASR 1.7B, with Qwen3-ForcedAligner-0.6B for word times (11 languages, up to 5 min a pass). transcribe.cpp doesn't run the aligner yet ([#200](https://github.com/handy-computer/transcribe.cpp/issues/200)).
   - **European languages:** Whisper large-v3, the most accurate of the candidates in Finnish and Spanish, 99 languages. transcribe.cpp gives it segment times only.
@@ -18,6 +22,16 @@ What it would take:
 - **Later:** paid services (xAI, Google) behind the same interface, asking each time before audio leaves the computer.
 
 Test media in the [manifest](../../tests/media-manifest.toml): `tos-subtitles-en`, `tos-subtitles-ja`, `tos-subtitles-he`, `tos-music-fx` (no speech), `nasa-speech-1979`, `nasa-roman-presser`.
+
+## Measured
+
+transcribe.cpp 0.4.0's prebuilt Windows bundles, on an RTX 4080 SUPER, over the first 10 min of `nasa-speech-1979`, Q8_0 models; the second run of two:
+
+| Model | Vulkan | CUDA 12 | GPU memory, Vulkan / CUDA |
+|---|---|---|---|
+| Parakeet Ultra | 1.8 s | 19.3 s | 1.2 / 1.6 GB |
+| Whisper large-v3 | 9.4 s | 17.0 s | 2.2 / 2.4 GB |
+| Qwen3-ASR 1.7B, 30 s pieces | 12.0 s | 10.6 s | 4.4 / 3.8 GB |
 
 ## Open
 
