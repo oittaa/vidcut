@@ -67,7 +67,7 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 
 ## X11. Dynamic Trim and Ripple Delete Silence, simplified
 - **Resolve:** a Dynamic Trim run changes the project as it goes, each run one undo step (pp. 730–731). Ripple Delete Silence can crossfade the remaining audio (p. 773).
-- **vidcut:** the timeline and the viewer show a Dynamic Trim run as it goes, and the project changes once, when the run stops ([D32](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). Ripple Delete Silence has no crossfade; its cuts get the 3 ms de-click fades every cut gets.
+- **vidcut:** a Dynamic Trim run plays, and the timeline and the viewer show it, as it goes; the project changes once, when the run stops ([D32](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). Ripple Delete Silence has no crossfade; its cuts get the 3 ms de-click fades every cut gets.
 - **Why:** one change at the end keeps the file, the history and other clients out of edits many times a second, and is the same one undo step. The de-click fades already keep the cuts silent.
 
 ## X12. Preferences hold only what vidcut needs

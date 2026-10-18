@@ -351,9 +351,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Some(
             "Trims with J, K and L. Press W on a selected cut, or on the cut nearest the \
              playhead: the playhead turns yellow and goes to the cut, and the Trim Editor \
-             shows it. J and L now move the cut instead of the playhead, and the viewer shows \
-             the frames on both sides as it moves, so you see the timing change and stop \
-             where it looks right. With clips selected instead, it slips or slides them: \
+             shows it. J and L now move the cut instead of the playhead, playing it with \
+             sound while the viewer shows the frames on both sides, so you see and hear the \
+             timing change and stop where it looks right. With clips selected instead, it slips or slides them: \
              right-click its button to choose. Press W again to finish.",
         ),
     ),

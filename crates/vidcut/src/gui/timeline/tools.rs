@@ -8,7 +8,7 @@ use crate::gui::export::{Ask, near_center};
 use crate::gui::theme;
 use crate::gui::timeline::geometry::{Rows, Scale};
 use crate::gui::workspace::{Workspace, dim};
-use crate::live::{MAX_SPEED, PlayerId};
+use crate::live::{Audition, Heard, MAX_SPEED, PlayerId};
 
 #[derive(Debug)]
 pub struct SilenceDialog {
@@ -68,6 +68,7 @@ pub struct Dynamic {
     pub pending: i64,
     around: Option<Around>,
     stopped: Option<(DynamicTarget, String)>,
+    end_edge: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -111,6 +112,106 @@ pub fn first_clip<'a>(p: &'a Project, ids: &[String]) -> Option<&'a vidcut_core:
     ids.iter()
         .filter_map(|id| p.clip(id))
         .min_by_key(|c| c.start)
+}
+
+pub fn nearer_end(at: i64, start: i64, end: i64) -> bool {
+    (end - at).abs() <= (at - start).abs()
+}
+
+pub fn furthest(from: i64, dir: i64, fits: impl Fn(i64) -> bool) -> i64 {
+    let (mut ok, mut step) = (from, 1i64);
+    while step < 1 << 40 && fits(from + dir * step) {
+        ok = from + dir * step;
+        step *= 2;
+    }
+    let mut bad = from + dir * step;
+    while (bad - ok).abs() > 1 {
+        let mid = ok + (bad - ok) / 2;
+        if fits(mid) {
+            ok = mid;
+        } else {
+            bad = mid;
+        }
+    }
+    ok
+}
+
+pub fn heard(
+    p: &Project,
+    target: &DynamicTarget,
+    mode: DynamicMode,
+    end_edge: bool,
+    pending: i64,
+    speed: f64,
+) -> Option<Audition> {
+    let trimmed = |by: i64| {
+        let mut q = p.clone();
+        dynamic_preview(&mut q, target, mode, by).ok().map(|_| q)
+    };
+    let dir = if speed > 0.0 { 1 } else { -1 };
+    let now = trimmed(pending)?;
+    let (id, out) = match target {
+        DynamicTarget::Edit(e) if e.side == Side::Audio => {
+            let by = match dir {
+                1 => pending,
+                _ => furthest(pending, dir, |b| trimmed(b).is_some()),
+            };
+            return Some(Audition {
+                heard: Heard::Timeline(Box::new(trimmed(by)?)),
+                at: e.at + pending,
+                speed,
+            });
+        }
+        DynamicTarget::Edit(e) => {
+            let t = p.track(&e.track.id())?;
+            let out = t.clips.iter().find(|c| c.end() == e.at);
+            let inc = t.clips.iter().find(|c| c.start == e.at);
+            match (e.side, out, inc) {
+                (Side::Out, Some(o), _) | (_, Some(o), None) => (o.id.clone(), true),
+                (_, _, Some(i)) => (i.id.clone(), false),
+                _ => return None,
+            }
+        }
+        DynamicTarget::Clips(ids) => {
+            let c = first_clip(&now, ids)?;
+            if mode == DynamicMode::Slip {
+                let at = match end_edge {
+                    true => c.source_at(c.end() - 1),
+                    false => c.source_at(c.start),
+                };
+                return Some(Audition {
+                    heard: Heard::Media(c.media.clone()),
+                    at,
+                    speed: -speed,
+                });
+            }
+            let t = now
+                .tracks
+                .iter()
+                .find(|t| t.clips.iter().any(|x| x.id == c.id))?;
+            let beside = match end_edge {
+                true => t.clips.iter().find(|x| x.start == c.end()),
+                false => t.clips.iter().find(|x| x.end() == c.start),
+            };
+            (beside?.id.clone(), !end_edge)
+        }
+    };
+    let c = now.clip(&id)?;
+    let source = match out {
+        true => c.source_at(c.end() - 1),
+        false => c.source_at(c.start),
+    };
+    let q = match (speed > 0.0) == out {
+        true => trimmed(furthest(pending, dir, |b| trimmed(b).is_some()))?,
+        false => now,
+    };
+    let c = q.clip(&id)?;
+    let at = (c.start..c.end()).min_by_key(|&x| (c.source_at(x) - source).abs())?;
+    Some(Audition {
+        heard: Heard::Timeline(Box::new(q)),
+        at,
+        speed,
+    })
 }
 
 pub fn dynamic_preview(
@@ -440,7 +541,25 @@ impl Workspace {
             });
         }
         self.timeline.dynamic = Some(Dynamic::default());
+        self.dynamic_edge();
         self.dynamic_to_head();
+    }
+
+    fn dynamic_edge(&mut self) {
+        let position = self.snap.timeline.position;
+        let end = match (self.dynamic_target(), self.shown_project()) {
+            (Some(DynamicTarget::Clips(ids)), Some(p)) => {
+                first_clip(&p, &ids).is_some_and(|c| nearer_end(position, c.start, c.end()))
+            }
+            _ => false,
+        };
+        if let Some(d) = &mut self.timeline.dynamic {
+            d.end_edge = end;
+        }
+    }
+
+    fn dynamic_end_edge(&self) -> bool {
+        self.timeline.dynamic.as_ref().is_some_and(|d| d.end_edge)
     }
 
     pub fn dynamic_trim_request(&mut self, r: crate::live::DynamicTrim, now: f64) {
@@ -492,6 +611,12 @@ impl Workspace {
             pending,
         )
         .ok()?;
+        let at = match &target {
+            DynamicTarget::Clips(ids) if self.dynamic_end_edge() => {
+                first_clip(&trimmed, ids).map_or(at, |c| c.end())
+            }
+            _ => at,
+        };
         Some((trimmed, at))
     }
 
@@ -505,8 +630,9 @@ impl Workspace {
         match self.dynamic_target()? {
             DynamicTarget::Edit(e) => Some(e.at),
             DynamicTarget::Clips(ids) => {
+                let end = self.dynamic_end_edge();
                 let p = self.shown_project()?;
-                first_clip(&p, &ids).map(|c| c.start)
+                first_clip(&p, &ids).map(|c| if end { c.end() } else { c.start })
             }
         }
     }
@@ -516,7 +642,9 @@ impl Workspace {
             && at != self.snap.timeline.position
         {
             self.seek(PlayerId::Timeline, at, false);
-            self.timeline.landing = Some((at, std::time::Instant::now()));
+            self.timeline
+                .landing
+                .set(Some((at, std::time::Instant::now())));
         }
     }
 
@@ -525,16 +653,41 @@ impl Workspace {
             return;
         }
         let playing = self.snap.timeline.playing;
+        let fresh = !self.timeline.dynamic.as_ref().is_some_and(Dynamic::running);
+        if fresh {
+            self.dynamic_edge();
+        }
         let Some(d) = &mut self.timeline.dynamic else {
             return;
         };
         d.around = None;
         d.stopped = None;
         d.run = Some((speed, now, d.pending));
-        if playing {
+        if playing && fresh {
             self.send("player.pause", json!({}));
         }
         self.dynamic_to_head();
+        self.dynamic_sound(speed);
+    }
+
+    fn dynamic_sound(&mut self, speed: f64) {
+        let (Some(target), Some(p), Some(d)) = (
+            self.dynamic_target(),
+            self.shown_project(),
+            self.timeline.dynamic.as_ref(),
+        ) else {
+            return;
+        };
+        let mode = self.timeline.options.dynamic_mode;
+        let a = heard(&p, &target, mode, d.end_edge, d.pending, speed);
+        self.timeline.heard = a.is_some();
+        self.live.audition(a);
+    }
+
+    fn dynamic_hush(&mut self) {
+        if std::mem::take(&mut self.timeline.heard) {
+            self.live.audition(None);
+        }
     }
 
     pub(crate) fn dynamic_stop(&mut self) {
@@ -550,6 +703,7 @@ impl Workspace {
         {
             self.send("player.pause", json!({}));
         }
+        self.dynamic_hush();
         let trimmed = self
             .shown_project()
             .and_then(|p| self.dynamic_drawn(&p))
@@ -648,6 +802,9 @@ impl Workspace {
     }
 
     pub(crate) fn dynamic_tick(&mut self, ctx: &egui::Context) {
+        if !self.timeline.dynamic.as_ref().is_some_and(Dynamic::running) {
+            self.dynamic_hush();
+        }
         let fps = self.fps().as_f64();
         let now = ctx.input(|i| i.time);
         let playing = self.snap.timeline.playing;
@@ -750,6 +907,31 @@ mod tests {
     #[test]
     fn a_seek_that_never_lands_stops_holding_the_playhead_after_a_second() {
         assert_eq!(landing(90, Duration::from_secs(2), 60), None);
+    }
+
+    #[test]
+    fn the_end_of_a_clip_is_nearer_a_playhead_halfway_along() {
+        assert!(nearer_end(90, 60, 120));
+    }
+
+    #[test]
+    fn the_start_of_a_clip_is_nearer_a_playhead_in_its_first_half() {
+        assert!(!nearer_end(240, 192, 316));
+    }
+
+    #[test]
+    fn the_furthest_trim_forward_is_the_last_that_fits() {
+        assert_eq!(furthest(0, 1, |by| by <= 37), 37);
+    }
+
+    #[test]
+    fn the_furthest_trim_backward_is_the_last_that_fits() {
+        assert_eq!(furthest(5, -1, |by| by >= -3), -3);
+    }
+
+    #[test]
+    fn a_trim_with_no_room_goes_nowhere() {
+        assert_eq!(furthest(4, 1, |by| by <= 4), 4);
     }
 
     #[test]

@@ -8,6 +8,8 @@ use vidcut_core::model::Project;
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{Rational, format_timecode};
 
+pub use super::timeline::tools::{DynamicMode, DynamicTarget, heard};
+pub use super::timeline::{EditSel, Side, TrackRef};
 pub use super::viewer::{TwoUp, TwoUpCell, TwoUpMode};
 
 use super::theme::{self, Deco};
@@ -392,7 +394,14 @@ impl Workspace {
     }
 
     pub(super) fn send(&self, method: &str, params: Value) {
+        self.moves(method);
         self.live.request(method, params);
+    }
+
+    fn moves(&self, method: &str) {
+        if ["player.seek", "player.step", "player.play", "player.toggle"].contains(&method) {
+            self.timeline.landing.set(None);
+        }
     }
 
     pub(super) fn show_timeline(&self) {
@@ -402,6 +411,7 @@ impl Workspace {
     }
 
     pub(super) fn send_drag(&self, method: &str, params: Value) {
+        self.moves(method);
         self.live.request_drag(method, params);
     }
 

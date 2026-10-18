@@ -46,6 +46,7 @@ pub struct Player {
     pub shown: u64,
     presenting: Option<Presenting>,
     landed: bool,
+    auditioning: bool,
     muted: bool,
     scrubbing: bool,
     decoding: crate::preferences::GpuDecoding,
@@ -80,6 +81,7 @@ impl Player {
             shown: 0,
             presenting: None,
             landed: false,
+            auditioning: false,
             muted: false,
             scrubbing: true,
             decoding,
@@ -109,7 +111,7 @@ impl Player {
 
     pub fn position(&self, id: PlayerId) -> i64 {
         let c = &self.contents[id.index()];
-        match self.engine_of(id) {
+        match self.engine_of(id).filter(|_| !self.auditioning) {
             Some(e) => e.status().position.clamp(0, c.frames.max(0)),
             None => c.position,
         }
@@ -147,6 +149,16 @@ impl Player {
             return None;
         }
         with_end(&mut plan);
+        if self.auditioning && id == PlayerId::Timeline {
+            let c = &mut self.contents[i];
+            c.position = at.unwrap_or(c.position).clamp(0, frames);
+            c.plan = Some(plan);
+            c.frames = frames;
+            c.lanes = lanes;
+            c.faders.clear();
+            c.error = None;
+            return None;
+        }
         if self.contents[i].plan.as_ref() == Some(&plan) {
             self.contents[i].frames = frames;
             let to = at?.clamp(0, frames);
@@ -266,7 +278,39 @@ impl Player {
         engine.prepare(other.plan.clone().map(|p| (p, other.position)));
     }
 
+    pub fn audition(&mut self, mut plan: RenderPlan, at: i64, speed: f64) -> Option<u64> {
+        if self.active != PlayerId::Timeline || (plan.sample_rate, plan.channels) != self.format {
+            return None;
+        }
+        let engine = self.shown_engine().cloned()?;
+        if !self.auditioning {
+            let c = &mut self.contents[PlayerId::Timeline.index()];
+            c.position = self.target.clamp(0, c.frames.max(0));
+            self.auditioning = true;
+        }
+        with_end(&mut plan);
+        let at = at.clamp(0, plan.frames - 1);
+        if engine.set_plan_at(plan, at).is_err() {
+            return self.end_audition();
+        }
+        engine.play(speed);
+        self.motion += 1;
+        Some(self.motion)
+    }
+
+    pub fn end_audition(&mut self) -> Option<u64> {
+        if !std::mem::take(&mut self.auditioning) {
+            return None;
+        }
+        if let Some(e) = self.shown_engine() {
+            e.pause();
+        }
+        let at = self.contents[PlayerId::Timeline.index()].position;
+        self.play_shown(Some(at))
+    }
+
     pub fn show(&mut self, id: PlayerId) -> Option<u64> {
+        self.end_audition();
         if id == self.active {
             return None;
         }
@@ -290,6 +334,9 @@ impl Player {
     }
 
     pub fn unload(&mut self, id: PlayerId) {
+        if id == PlayerId::Timeline {
+            self.auditioning = false;
+        }
         self.contents[id.index()] = Content::default();
         if !self.is_loaded(id.other()) {
             if self.engine.take().is_some() {
@@ -311,6 +358,7 @@ impl Player {
     }
 
     pub fn seek(&mut self, id: PlayerId, frame: i64, sound: bool) -> Option<u64> {
+        self.end_audition();
         if id != self.active {
             let c = &mut self.contents[id.index()];
             c.position = match c.plan {
@@ -338,6 +386,7 @@ impl Player {
     }
 
     pub fn step(&mut self, frames: i64) -> u64 {
+        self.end_audition();
         let Some(engine) = self.shown_engine().cloned() else {
             let c = &self.contents[self.active.index()];
             let to = c.position.saturating_add(frames).max(0);
@@ -350,12 +399,14 @@ impl Player {
     }
 
     pub fn play(&mut self, speed: f64) {
+        self.end_audition();
         if let Some(e) = self.shown_engine() {
             e.play(speed);
         }
     }
 
     pub fn pause(&mut self) {
+        self.end_audition();
         if let Some(e) = self.shown_engine() {
             e.pause();
         }

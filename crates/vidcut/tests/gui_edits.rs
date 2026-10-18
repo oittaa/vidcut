@@ -9,8 +9,12 @@ use egui_kittest::kittest::Queryable;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use vidcut::gui::export::Dialogs;
-use vidcut::gui::workspace::Workspace;
-use vidcut::live::{self, Capture, GuiChange, GuiDone, Origin, Presented, WindowChange};
+use vidcut::gui::workspace::{
+    DynamicMode, DynamicTarget, EditSel, Side, TrackRef, Workspace, heard,
+};
+use vidcut::live::{
+    self, Audition, Capture, GuiChange, GuiDone, Heard, Origin, Presented, WindowChange,
+};
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
 use vidcut_core::model::Settings;
 use vidcut_core::request::TrimSide;
@@ -310,6 +314,29 @@ fn call(h: &live::Handle, method: &str, params: Value) -> Value {
     h.call(e, Origin::Ipc, None, &mut |_| true)
         .unwrap_or_else(|e| panic!("{method}: {e}"))
         .result
+}
+
+fn cut(at: i64, side: Side) -> DynamicTarget {
+    DynamicTarget::Edit(EditSel {
+        at,
+        side,
+        track: TrackRef::MAIN,
+    })
+}
+
+fn run_heard(target: DynamicTarget, mode: DynamicMode, end_edge: bool, speed: f64) -> Audition {
+    let gui = Gui::new();
+    let p = gui.h.snapshot().project.clone().unwrap().project;
+    let heard = heard(&p, &target, mode, end_edge, 0, speed).unwrap();
+    gui.quit();
+    heard
+}
+
+fn heard_timeline(a: Audition) -> (Project, i64, f64) {
+    match a.heard {
+        Heard::Timeline(q) => (*q, a.at, a.speed),
+        Heard::Media(m) => panic!("heard media {m}, not the timeline"),
+    }
 }
 
 fn track_one() -> Vec<(String, i64, i64)> {
@@ -917,6 +944,92 @@ fn stopping_a_run_keeps_the_lower_timeline_on_the_cut() {
 }
 
 #[test]
+fn a_roll_forward_plays_the_incoming_clip_from_the_cut() {
+    let (q, at, speed) = heard_timeline(run_heard(
+        cut(60, Side::Both),
+        DynamicMode::Slip,
+        false,
+        1.0,
+    ));
+    let c2 = q.clip("c2").unwrap();
+    assert_eq!((at, speed, c2.source_at(at)), (60, 1.0, 100));
+}
+
+#[test]
+fn a_roll_backward_plays_the_incoming_clip_back_from_the_cut() {
+    let (q, at, speed) = heard_timeline(run_heard(
+        cut(60, Side::Both),
+        DynamicMode::Slip,
+        false,
+        -1.0,
+    ));
+    let c2 = q.clip("c2").unwrap();
+    assert_eq!((at, speed, c2.start, c2.source_at(at)), (60, -1.0, 1, 100));
+}
+
+#[test]
+fn an_out_trim_forward_plays_the_outgoing_clip_on_past_the_cut() {
+    let (q, at, speed) =
+        heard_timeline(run_heard(cut(60, Side::Out), DynamicMode::Slip, false, 1.0));
+    let c1 = q.clip("c1").unwrap();
+    assert_eq!((at, speed, c1.duration), (59, 1.0, 300));
+}
+
+#[test]
+fn an_in_trim_forward_plays_the_incoming_clip_from_its_first_frame() {
+    let (q, at, _) = heard_timeline(run_heard(cut(60, Side::In), DynamicMode::Slip, false, 1.0));
+    let c2 = q.clip("c2").unwrap();
+    assert_eq!((at, c2.source_at(at)), (60, 100));
+}
+
+#[test]
+fn a_slip_forward_plays_the_clips_media_backward_from_its_first_frame() {
+    let a = run_heard(
+        DynamicTarget::Clips(vec!["c2".into()]),
+        DynamicMode::Slip,
+        false,
+        1.0,
+    );
+    let media = match &a.heard {
+        Heard::Media(m) => m.clone(),
+        Heard::Timeline(_) => panic!("a slip heard the timeline"),
+    };
+    assert_eq!((media.as_str(), a.at, a.speed), ("m1", 100, -1.0));
+}
+
+#[test]
+fn a_slide_at_the_clips_end_plays_the_next_clip_from_its_first_frame() {
+    let (q, at, speed) = heard_timeline(run_heard(
+        DynamicTarget::Clips(vec!["c2".into()]),
+        DynamicMode::Slide,
+        true,
+        1.0,
+    ));
+    let c3 = q.clip("c3").unwrap();
+    assert_eq!((at, speed, c3.source_at(at)), (120, 1.0, 200));
+}
+
+#[test]
+fn a_seek_right_after_a_run_stops_moves_the_lower_timeline() {
+    let mut gui = Gui::new();
+    gui.call("player.seek", json!({ "at": 55, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.settle();
+    gui.key(Key::L);
+    for _ in 0..30 {
+        gui.harness.step();
+    }
+    gui.key(Key::K);
+    gui.key(Key::Home);
+    gui.settle();
+    let l = gui.harness.state().timeline_layout().unwrap();
+    let centre = l.lower_scale.frame(l.lower_ruler.center().x);
+    assert!(centre < 1.0, "the lower timeline stayed at frame {centre}");
+    gui.quit();
+}
+
+#[test]
 fn w_takes_the_playhead_to_the_nearest_cut() {
     let mut gui = Gui::new();
     gui.call("player.seek", json!({ "at": 50, "viewer": "timeline" }));
@@ -924,6 +1037,18 @@ fn w_takes_the_playhead_to_the_nearest_cut() {
     gui.key(Key::W);
     gui.settle();
     assert_eq!(gui.position(), 60);
+    gui.quit();
+}
+
+#[test]
+fn w_takes_the_playhead_to_the_nearer_end_of_the_selected_clip() {
+    let mut gui = Gui::new();
+    gui.call("selection.set", json!({ "clips": ["c2"] }));
+    gui.call("player.seek", json!({ "at": 100, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.settle();
+    assert_eq!(gui.position(), 120);
     gui.quit();
 }
 

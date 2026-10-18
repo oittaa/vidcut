@@ -255,7 +255,19 @@ pub(crate) enum Msg {
         id: String,
         result: Result<Response>,
     },
+    Audition(Option<Audition>),
     Shutdown,
+}
+
+pub enum Heard {
+    Timeline(Box<Project>),
+    Media(String),
+}
+
+pub struct Audition {
+    pub heard: Heard,
+    pub at: i64,
+    pub speed: f64,
 }
 
 #[derive(Clone)]
@@ -287,6 +299,10 @@ impl Handle {
 
     pub fn request(&self, method: &str, params: Value) {
         self.request_from(method, params, false);
+    }
+
+    pub fn audition(&self, audition: Option<Audition>) {
+        let _ = self.tx.send(Msg::Audition(audition));
     }
 
     pub fn request_drag(&self, method: &str, params: Value) {
@@ -805,6 +821,7 @@ impl Live {
                 project,
                 reply,
             } => self.request(envelope, origin, project, reply),
+            Msg::Audition(a) => changed = self.audition(a),
             Msg::Picture => {
                 self.player.picture_landed();
                 self.present_due();
@@ -2521,6 +2538,29 @@ impl Live {
                 });
             }
         }
+    }
+
+    fn audition(&mut self, audition: Option<Audition>) -> bool {
+        let Some(a) = audition else {
+            return self.player.end_audition().is_some();
+        };
+        let plan = match &a.heard {
+            Heard::Timeline(q) => render::flatten_lanes(q, 0, q.end()).map(|(plan, _)| plan),
+            Heard::Media(m) => match &self.project {
+                Some(open) => {
+                    render::tape(open.project(), std::slice::from_ref(m)).map(|(plan, _)| plan)
+                }
+                None => return false,
+            },
+        };
+        let Ok(plan) = plan else {
+            return false;
+        };
+        let mut plan = self.preview_plan(plan);
+        plan.video = vec![render::VideoPiece::Black {
+            frames: plan.frames,
+        }];
+        self.player.audition(plan, a.at, a.speed).is_some()
     }
 
     fn preview_plan(&self, mut plan: RenderPlan) -> RenderPlan {
