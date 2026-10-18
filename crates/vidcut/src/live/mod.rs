@@ -117,6 +117,8 @@ pub struct GuiState {
 
 pub type GuiDone = Box<dyn FnOnce(std::result::Result<GuiState, String>) + Send>;
 
+pub const MAX_SPEED: f64 = 64.0;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicTrim {
     pub on: Option<bool>,
@@ -1847,8 +1849,10 @@ impl Live {
                     self.set_viewer(v);
                 }
                 let speed = speed.unwrap_or(1.0);
-                if !speed.is_finite() || speed == 0.0 || speed.abs() > 64.0 {
-                    return Step::Now(Err(Error::usage("speed must be non-zero, within ±64")));
+                if !speed.is_finite() || speed == 0.0 || speed.abs() > MAX_SPEED {
+                    return Step::Now(Err(Error::usage(format!(
+                        "speed must be non-zero, within ±{MAX_SPEED}"
+                    ))));
                 }
                 self.player.play(speed);
                 Step::Now(Ok(self.state_response()))
@@ -2156,11 +2160,11 @@ impl Live {
                 step,
             } => {
                 if let Some(r) = run
-                    && !(-8.0..=8.0).contains(&r)
+                    && !(-MAX_SPEED..=MAX_SPEED).contains(&r)
                 {
-                    return Step::Now(Err(Error::usage(
-                        "Dynamic Trim runs at up to 8 times normal speed, either way",
-                    )));
+                    return Step::Now(Err(Error::usage(format!(
+                        "Dynamic Trim runs at up to {MAX_SPEED} times normal speed, either way"
+                    ))));
                 }
                 self.renderer.dynamic_trim(DynamicTrim {
                     on,

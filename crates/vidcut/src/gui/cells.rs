@@ -29,17 +29,19 @@ pub struct Cells {
     ctx: egui::Context,
     gpu_pictures: Vec<Kind>,
     budget: Budget,
-    cells: [Option<Cell>; 2],
+    cells: [Option<Cell>; CELLS],
     counts: Counts,
 }
+
+pub const CELLS: usize = 4;
 
 impl Cells {
     pub fn new(ctx: egui::Context, gpu_pictures: Vec<Kind>, viewer: Budget) -> Self {
         Self {
             ctx,
             gpu_pictures,
-            budget: viewer.part(4),
-            cells: [None, None],
+            budget: viewer.part(CELLS),
+            cells: std::array::from_fn(|_| None),
             counts: Counts::default(),
         }
     }
@@ -49,10 +51,19 @@ impl Cells {
     }
 
     pub fn close(&mut self) {
-        if self.cells.iter().all(Option::is_none) {
+        self.keep(0);
+    }
+
+    pub fn keep(&mut self, n: usize) {
+        let cells: Vec<Cell> = self
+            .cells
+            .iter_mut()
+            .skip(n)
+            .filter_map(Option::take)
+            .collect();
+        if cells.is_empty() {
             return;
         }
-        let cells = std::mem::take(&mut self.cells);
         let _ = crate::threads::closing(
             "vidcut-two-up-close",
             crate::threads::Work::Interactive,
@@ -169,8 +180,8 @@ fn plan(p: &Project, piece: &VideoPiece) -> Option<(RenderPlan, i64)> {
 pub struct Screens {
     render: RenderState,
     gpu: Gpu,
-    screens: [Screen; 2],
-    textures: [Option<egui::TextureId>; 2],
+    screens: [Screen; CELLS],
+    textures: [Option<egui::TextureId>; CELLS],
 }
 
 impl Screens {
@@ -178,8 +189,8 @@ impl Screens {
         Self {
             render: render.clone(),
             gpu: Gpu::new(&render.device, &render.queue),
-            screens: [Screen::new(), Screen::new()],
-            textures: [None, None],
+            screens: std::array::from_fn(|_| Screen::new()),
+            textures: [None; CELLS],
         }
     }
 

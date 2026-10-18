@@ -374,13 +374,17 @@ impl Workspace {
         TwoUpStats {
             shown: self.two_up.as_ref().map(|t| TwoUpShown {
                 mode: t.mode.to_string(),
-                cells: t.cells.each_ref().map(|c| {
-                    c.as_ref().map(|c| TwoUpCell {
-                        frame: c.frame,
-                        source_frame: c.source_frame,
-                        exact: c.exact,
+                cells: t
+                    .cells
+                    .iter()
+                    .map(|c| {
+                        c.as_ref().map(|c| TwoUpCell {
+                            frame: c.frame,
+                            source_frame: c.source_frame,
+                            exact: c.exact,
+                        })
                     })
-                }),
+                    .collect(),
             }),
             asked: counts.asked,
             passed_over: counts.passed_over,
@@ -1153,6 +1157,7 @@ impl Workspace {
         }
 
         let dynamic = self.timeline.dynamic.is_some();
+        let trimming = dynamic && self.dynamic_target().is_some();
         if dynamic {
             self.dynamic_keys(&input);
         }
@@ -1165,23 +1170,19 @@ impl Workspace {
         if pressed(Key::Slash) && m.command && !m.alt {
             self.send("player.loop", json!({}));
         }
-        if pressed(Key::K) && !dynamic {
+        if pressed(Key::K) && !trimming {
             self.send("player.pause", json!({}));
         }
         let k_down = input.key_down(Key::K);
         for (key, dir) in [(Key::L, 1.0), (Key::J, -1.0)]
             .into_iter()
-            .filter(|_| !dynamic)
+            .filter(|_| !trimming)
         {
             if pressed(key) {
                 if k_down {
                     self.send("player.step", json!({ "frames": dir as i64 }));
                 } else {
-                    let speed = if player.speed * dir > 0.0 {
-                        (player.speed * 2.0).clamp(-8.0, 8.0)
-                    } else {
-                        dir
-                    };
+                    let speed = crate::gui::timeline::tools::faster(player.speed, dir);
                     self.send("player.play", json!({ "speed": speed }));
                 }
             }

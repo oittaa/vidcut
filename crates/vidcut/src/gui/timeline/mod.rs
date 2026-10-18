@@ -1969,11 +1969,18 @@ impl Workspace {
         } else {
             0
         };
-        if nudge != 0
-            && self.timeline.dynamic.is_none()
-            && let Some(e) = self.timeline.edit
-        {
-            self.nudge_edit(e.side, nudge);
+        if nudge != 0 && self.timeline.edit.is_some() {
+            if self
+                .timeline
+                .dynamic
+                .as_ref()
+                .is_some_and(tools::Dynamic::running)
+            {
+                self.dynamic_stop();
+            }
+            if let Some(e) = self.timeline.edit {
+                self.nudge_edit(e.side, nudge);
+            }
         }
         if pressed(Key::D) && input.modifiers.command {
             if !self.snap.selection.clips.is_empty() {
@@ -2292,18 +2299,13 @@ impl Workspace {
         } else {
             row.rect.rect.y_range()
         };
-        let stopped = self
-            .timeline
-            .dynamic
-            .as_ref()
-            .is_some_and(|d| d.stopped.is_some());
         let (out_ok, in_ok) = match (e.side, p.track(&e.track.id())) {
             (Side::Audio, _) | (_, None) => (true, true),
             (_, Some(t)) => ops::filmstrip::extends(p, t, e.at),
         };
         let glow = paint::pulse(ctx.input(|i| i.time));
         let tint = |ok: bool| {
-            if stopped || !ok {
+            if !ok {
                 (
                     Color32::from_rgb(200, 40, 40),
                     Color32::from_rgb(240, 70, 70),
@@ -2366,7 +2368,12 @@ impl Workspace {
             .timeline
             .edit
             .filter(|e| e.side != Side::Audio && !e.track.audio)?;
-        let stopped = !self.snap.timeline.playing && self.timeline.dynamic.is_none();
+        let running = self
+            .timeline
+            .dynamic
+            .as_ref()
+            .is_some_and(tools::Dynamic::running);
+        let stopped = !self.snap.timeline.playing && !running;
         (stopped && self.snap.viewer == ViewerMode::Timeline).then_some(e)
     }
 

@@ -49,7 +49,7 @@ pub struct TwoUpStats {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TwoUpShown {
     pub mode: String,
-    pub cells: [Option<TwoUpCell>; 2],
+    pub cells: Vec<Option<TwoUpCell>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

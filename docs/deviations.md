@@ -66,8 +66,8 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Why:** MCP is how agents discover and call tools; tools generated from the request schema stay complete and in step with the CLI.
 
 ## X11. Dynamic Trim and Ripple Delete Silence, simplified
-- **Resolve:** Dynamic Trim trims during playback, with sound, updating the timeline as it goes (pp. 730–731). Ripple Delete Silence can crossfade the remaining audio (p. 773).
-- **vidcut:** Dynamic Trim runs without sound and changes the project once, when K stops it ([D32](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). Ripple Delete Silence has no crossfade; its cuts get the 3 ms de-click fades every cut gets.
+- **Resolve:** a Dynamic Trim run plays the timeline with sound, the playhead moving with the edit, and changes the project as it goes; each run is one undo step (pp. 730–731). Ripple Delete Silence can crossfade the remaining audio (p. 773).
+- **vidcut:** a Dynamic Trim run plays nothing: the timeline and the two-up show the trim as it goes, and the project changes once, when the run stops ([D32](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). Ripple Delete Silence has no crossfade; its cuts get the 3 ms de-click fades every cut gets.
 - **Why:** one change at the end keeps the preview, the file and the history out of edits many times a second, and is one undo step. The de-click fades already keep the cuts silent.
 
 ## X12. Preferences hold only what vidcut needs
@@ -149,3 +149,8 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Resolve:** Studio 21.1.1's Cut page adds no dissolve, and says nothing, when the clips lack media for the whole second at the edit; with none at all past the cut, Ctrl+T on one selected side adds the whole second anyway, the missing frames black. The manual says a transition is as long as the clips' media allow (p. 1159), and on the Edit page Ctrl+T asks to trim the clips or skip the edit (p. 1160).
 - **vidcut:** the dissolve is shortened to the media each side has, as the manual says ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). With no media past the cut on either side, the Dissolve button and Ctrl+T say so and add nothing.
 - **Why:** a key that does nothing without a word leaves the editor guessing, and a dissolve through black is a different transition from the one asked for.
+
+## X28. Up/Down in Dynamic Trim move the trim
+- **Resolve:** on the Cut page (21.1.1), Up/Down in Dynamic Trim move only the playhead; the selected edit stays, and the next J or L takes the playhead back to it. Down during a run rolls the edit to the next edit with the playhead, removing the clip between. The manual says Up/Down move both the selection and the playhead (p. 731).
+- **vidcut:** as the manual says: Up/Down stop a run and apply it, then select the next edit on the same track and move the playhead to it.
+- **Why:** the keyboard then picks the next edit to trim, as the manual describes, and no clip disappears.

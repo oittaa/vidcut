@@ -180,6 +180,39 @@ impl Gui {
         self.harness.step();
     }
 
+    fn hold(&mut self, key: Key, tap: Key) {
+        let event = |pressed| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        self.harness.event(event(true));
+        self.harness.step();
+        self.harness.key_press(tap);
+        self.harness.step();
+        self.harness.event(event(false));
+        self.settle();
+    }
+
+    fn position(&self) -> i64 {
+        self.h.snapshot().timeline.position
+    }
+
+    fn source_in(&self, clip: &str) -> Value {
+        let tl = self.call("timeline.get", json!({}));
+        let tracks = tl["tracks"].as_array().unwrap();
+        let items = &tracks.iter().find(|t| t["id"] == "V1").unwrap()["items"];
+        items
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == clip)
+            .unwrap()["source_in"]
+            .clone()
+    }
+
     fn click(&mut self, at: Pos2) {
         self.click_with(at, egui::PointerButton::Primary);
     }
@@ -659,23 +692,74 @@ fn the_numbered_images_question_takes_the_keys() {
 }
 
 #[test]
-fn k_applies_a_dynamic_trim_run_that_stopped() {
+fn a_dynamic_trim_run_applies_where_the_media_ends() {
     let mut gui = Gui::new();
     gui.call("selection.set", json!({ "clips": ["c3"] }));
     gui.settle();
     gui.key(Key::W);
     for _ in 0..4 {
-        gui.key(Key::L);
+        gui.key(Key::J);
     }
-    for _ in 0..30 {
+    let started = Instant::now();
+    while gui.source_in("c3") != json!(240) {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "no trim landed"
+        );
         gui.harness.step();
     }
-    gui.key(Key::K);
+    gui.quit();
+}
+
+#[test]
+fn w_takes_the_playhead_to_the_nearest_cut() {
+    let mut gui = Gui::new();
+    gui.call("player.seek", json!({ "at": 50, "viewer": "timeline" }));
     gui.settle();
-    let tl = gui.call("timeline.get", json!({}));
-    let tracks = tl["tracks"].as_array().unwrap();
-    let items = &tracks.iter().find(|t| t["id"] == "V1").unwrap()["items"];
-    assert_eq!(items[2]["source_in"], json!(240));
+    gui.key(Key::W);
+    gui.settle();
+    assert_eq!(gui.position(), 60);
+    gui.quit();
+}
+
+#[test]
+fn w_again_deselects_the_cut() {
+    let mut gui = Gui::new();
+    gui.key(Key::W);
+    gui.key(Key::W);
+    gui.settle();
+    assert_eq!(gui.call("selection.get", json!({}))["edit"], Value::Null);
+    gui.quit();
+}
+
+#[test]
+fn period_in_dynamic_trim_rolls_the_cut_a_frame() {
+    let mut gui = Gui::new();
+    gui.call("player.seek", json!({ "at": 55, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.key(Key::Period);
+    gui.settle();
+    assert_eq!(
+        gui.clips("V1"),
+        [
+            ("c1".into(), 0, 61),
+            ("c2".into(), 61, 59),
+            ("c3".into(), 120, 60)
+        ]
+    );
+    gui.quit();
+}
+
+#[test]
+fn k_and_l_in_dynamic_trim_slip_a_clip_to_an_earlier_frame() {
+    let mut gui = Gui::new();
+    gui.call("selection.set", json!({ "clips": ["c2"] }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.hold(Key::K, Key::L);
+    gui.settle();
+    assert_eq!(gui.source_in("c2"), json!(99));
     gui.quit();
 }
 
