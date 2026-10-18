@@ -204,3 +204,8 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Resolve:** the History window is a list of labels (21.1.1).
 - **vidcut:** the History window finds steps by their words or names, and filters them by kind (trims, deletes, dissolves…) and by who made them, in the versions too. A step's right-click menu has Revert This Step: its change undone alone, as a new step, keeping the steps after it; it is refused, naming the later step, when one changed what it changed (`history.revert`). Hovering a step says what changed since it ("Since this step: 5 clips moved, 2 deleted, 3 dissolves added"), or for a step still to redo what redoing to it brings ("Redoing to here: 1 clip added"), and for a version's step what going there brings ("Restoring to here: …"); `history.get` with `since` (and `branch`) says the same.
 - **Why:** in a long history made by several hands, finding the step to go back to and undoing one mistake without losing the edits after it are what people need most.
+
+## X39. A GIF of one frame is a still, whatever its delay
+- **Resolve:** a GIF of one frame comes in as a still only when its frame has no delay; with one, it is a video clip as long as the delay (0.1 s came in as 3 frames at 25 fps). A WebP of one frame is a still whatever its frame's duration (checked on 21.1.1).
+- **vidcut:** a GIF or WebP of one frame is a still ([D38](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:** the delay is how long a viewer shows the picture, not how long a clip it makes, and a clip of a few frames of one picture is a blink that can't be trimmed longer. GIF and WebP then behave alike.
