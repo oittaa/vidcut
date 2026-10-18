@@ -86,7 +86,10 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Play,
         &["K"],
         "Stop",
-        Some("Hold K and tap J or L to step one frame. Hold K with J or L to play slowly."),
+        Some(
+            "Hold K and tap J or L to step one frame. Hold K, then hold J or L, to play at half \
+             speed until you let go.",
+        ),
     ),
     key(
         Play,
@@ -378,8 +381,18 @@ pub const SHORTCUTS: &[Shortcut] = &[
              red and the viewer says why.",
         ),
     ),
-    key(Trim, &["K", "L"], "Dynamic Trim one frame forward", None),
-    key(Trim, &["K", "J"], "Dynamic Trim one frame backward", None),
+    key(
+        Trim,
+        &["K", "L"],
+        "Dynamic Trim one frame forward",
+        Some("Hold L too to trim at half speed until you let go."),
+    ),
+    key(
+        Trim,
+        &["K", "J"],
+        "Dynamic Trim one frame backward",
+        Some("Hold J too to trim at half speed until you let go."),
+    ),
     key(
         Trim,
         &["N"],

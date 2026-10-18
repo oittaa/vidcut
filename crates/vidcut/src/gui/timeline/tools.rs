@@ -5,6 +5,7 @@ use vidcut_core::ops;
 
 use super::{EditSel, Side, TrackRef, audio_edit_outgoing};
 use crate::gui::export::{Ask, near_center};
+use crate::gui::shuttle::{Jkl, first_press};
 use crate::gui::theme;
 use crate::gui::timeline::geometry::{Rows, Scale};
 use crate::gui::workspace::{Workspace, dim};
@@ -775,33 +776,38 @@ impl Workspace {
         }
     }
 
+    pub(crate) fn dynamic_jkl(&mut self, jkl: Jkl, now: f64) {
+        let running = self.timeline.dynamic.as_ref().is_some_and(Dynamic::running);
+        match jkl {
+            Jkl::Play(dir) => {
+                let speed = self.timeline.dynamic.as_ref().map_or(0.0, Dynamic::speed);
+                self.dynamic_start(faster(speed, dir), now);
+            }
+            Jkl::Step(dir) => {
+                if let Some(d) = &mut self.timeline.dynamic {
+                    d.pending += dir as i64;
+                }
+                self.dynamic_stop();
+            }
+            Jkl::Slow(speed) => self.dynamic_start(speed, now),
+            Jkl::Stop if running => self.dynamic_stop(),
+            Jkl::Stop => {
+                if self.snap.timeline.playing {
+                    self.send("player.pause", json!({}));
+                }
+            }
+        }
+    }
+
     pub(crate) fn dynamic_keys(&mut self, input: &egui::InputState) {
-        let now = input.time;
         let pressed = |k: egui::Key| input.key_pressed(k);
         let running = self.timeline.dynamic.as_ref().is_some_and(Dynamic::running);
         let playing = self.snap.timeline.playing;
-        if self.dynamic_target().is_some() {
-            let k_down = input.key_down(egui::Key::K);
-            for (key, dir) in [(egui::Key::L, 1.0), (egui::Key::J, -1.0)] {
-                if !pressed(key) {
-                    continue;
-                }
-                if k_down {
-                    if let Some(d) = &mut self.timeline.dynamic {
-                        d.pending += dir as i64;
-                    }
-                    self.dynamic_stop();
-                } else {
-                    let speed = self.timeline.dynamic.as_ref().map_or(0.0, Dynamic::speed);
-                    self.dynamic_start(faster(speed, dir), now);
-                }
-            }
-            if pressed(egui::Key::K) {
-                if running {
-                    self.dynamic_stop();
-                } else if playing {
-                    self.send("player.pause", json!({}));
-                }
+        if self.dynamic_target().is_some() && first_press(input, egui::Key::K) {
+            if running {
+                self.dynamic_stop();
+            } else if playing {
+                self.send("player.pause", json!({}));
             }
         }
         if pressed(egui::Key::Space) {

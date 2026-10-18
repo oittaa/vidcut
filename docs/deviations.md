@@ -159,3 +159,8 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Resolve:** a run that reaches a neighbor's last frame or the end of the media just stops; the Trim Editor comes back, its handles green, and nothing says why (21.1.1).
 - **vidcut:** the run stops there and applies; the cut turns red and the viewer says why, in the Trim Editor's line or under the picture, until the next trim ([D32](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:** as with [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a word leaves the editor guessing whether a key was missed or the media ran out.
+
+## X30. Slowed sound keeps its pitch on every system
+- **Resolve:** the manual says K held with L plays forward slowly with pitch-corrected sound on macOS (p. 871), so elsewhere the slowed sound is lower; K held with J plays backward with slowed sound. Studio 21.1.1 on Windows plays it slowed; its pitch wasn't checked.
+- **vidcut:** sound played at any speed but 1×, slow play included, keeps its pitch on every system, backward too ([D54](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:** one behavior everywhere, and slowed speech at its own pitch stays easy to follow when listening for a cut.

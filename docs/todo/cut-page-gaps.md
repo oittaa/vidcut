@@ -10,7 +10,6 @@ What [the spec](../cut-page-spec.md) describes and vidcut doesn't do yet.
 - Pool selection by marquee ([§3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675))
 - Zoomed-in waveform in the Source Clip scroll area ([§4.1](../cut-page-spec.md#41-modes))
 - Jog In and Jog Out controls ([§4.1](../cut-page-spec.md#41-modes))
-- Slow play with K and J or L held ([§4.2](../cut-page-spec.md#42-transport-pp-640-687688-870872))
 - Jog control ([§4.2](../cut-page-spec.md#42-transport-pp-640-687688-870872))
 - Timecode right-click menu: frame counts, Timer 1 and 2, KeyKode ([§4.3](../cut-page-spec.md#43-timecode-pp-640-688-713714))
 - Duration field taking a plain frame count, and + or − to change by ([§4.4](../cut-page-spec.md#44-inout-pp-691693-700))
