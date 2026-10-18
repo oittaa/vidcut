@@ -113,3 +113,21 @@ url = "https://download.blender.org/demo/movies/ToS/TOS_MUSIC%2BFX_NO_DIALOGUE.a
 license = "CC BY 3.0, (c) Blender Foundation, https://mango.blender.org; its music CC BY-ND 3.0, (c) Joram Letwory, https://download.blender.org/demo/movies/ToS/copyright.txt"
 purpose = "Tears of Steel's music and effects without dialogue, 734 s like tos-720p-mov, 24-bit 48 kHz AIFF: transcription must find no speech in it"
 sha256 = "ba05dc3ae9f869170819ef9f74401e6c01ccc4afa9e8c926a076bea7b29741e0"
+
+[[clip]]
+name = "nasa-roman-presser"
+file = "roman-postlaunch-presser-mobile.mp4"
+url = "https://images-assets.nasa.gov/video/KSC-20260830-VP-FMX02-0001-Roman_Space_Telescope_Postlaunch_News_Conference_4K-M26245/KSC-20260830-VP-FMX02-0001-Roman_Space_Telescope_Postlaunch_News_Conference_4K-M26245~mobile.mp4"
+license = "NASA's metadata: rights 'For copyright and restrictions, refer to http://www.nasa.gov/multimedia/guidelines/index.html' (now https://www.nasa.gov/nasa-brand-center/images-and-media/), usage terms 'PAO Approved For Release'"
+purpose = "NASA's video 'NASA's Nancy Grace Roman Space Telescope Postlaunch News Conference - 4K', created 2026-08-30, 3376.5 s long, for silence cutting and speech detection. This is NASA's mobile rendition: H.264 320x180 15 fps, AAC 22050 Hz stereo, 141964865 bytes"
+sha256 = "bc4b366781f12f79837ddec4ee2364f78c554e5063f329d862bbe5c284e69a8c"
+full_url = "https://images-assets.nasa.gov/video/KSC-20260830-VP-FMX02-0001-Roman_Space_Telescope_Postlaunch_News_Conference_4K-M26245/KSC-20260830-VP-FMX02-0001-Roman_Space_Telescope_Postlaunch_News_Conference_4K-M26245~orig.mp4"
+full = "the original of the same video, not fetched: 3209050026 bytes; NASA's metadata gives 3840x2160, 59.94 fps, H.264, AAC 48000 Hz stereo. NASA's ~medium.mp4 (999957027 bytes) is H.264 1080x608 30 fps, AAC 48000 Hz stereo"
+
+[[clip]]
+name = "nasa-roman-presser-captions"
+file = "roman-postlaunch-presser.srt"
+url = "https://images-assets.nasa.gov/video/KSC-20260830-VP-FMX02-0001-Roman_Space_Telescope_Postlaunch_News_Conference_4K-M26245/KSC-20260830-VP-FMX02-0001-Roman_Space_Telescope_Postlaunch_News_Conference_4K-M26245.srt"
+license = "NASA's metadata: rights 'For copyright and restrictions, refer to http://www.nasa.gov/multimedia/guidelines/index.html' (now https://www.nasa.gov/nasa-brand-center/images-and-media/), usage terms 'PAO Approved For Release'"
+purpose = "the SRT caption file NASA publishes with nasa-roman-presser: 1014 cues, the last ending at 00:55:43,807, UTF-8 with a byte order mark, 90989 bytes. How closely it matches the speech has not been checked"
+sha256 = "43a5f0800a2c26a93bd41d4f4cc1fb3e16459581815c43c9ff9e558b1e93b805"

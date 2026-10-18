@@ -18,7 +18,8 @@ use vidcut_core::editor::{Env, media_context, resolve_clip};
 use vidcut_core::model::{Clip, Format};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget, TimelineOptions, TrimSide, ViewerMode,
+    Client, ClientKind, DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget, TimelineOptions,
+    TrimSide, ViewerMode,
 };
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -228,6 +229,12 @@ pub(crate) enum Msg {
     },
     FileChanged,
     PreferencesChanged,
+    HistoryPreview(Option<PreviewAt>),
+    Previewed {
+        at: PreviewAt,
+        rev: u64,
+        result: Result<Arc<Project>>,
+    },
     Thumbs {
         media: String,
         wanted: String,
@@ -366,6 +373,10 @@ impl Handle {
         }
     }
 
+    pub fn history_preview(&self, at: Option<PreviewAt>) {
+        let _ = self.tx.send(Msg::HistoryPreview(at));
+    }
+
     pub fn shutdown(&self) {
         let _ = self.tx.send(Msg::Shutdown);
     }
@@ -434,6 +445,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
         budget,
+        history_preview: None,
+        flash: None,
     };
     let shared = Arc::new(Mutex::new(Arc::new(empty)));
     let preferences = crate::preferences::path();
@@ -503,6 +516,12 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         dirty: true,
         answers: Vec::new(),
         preview_error: config.preview_error,
+        history_preview: None,
+        preview_wanted: None,
+        previews: None,
+        past: Default::default(),
+        flash: None,
+        flash_seq: 0,
     };
     let project = config.project;
     let create = config.create;
@@ -524,6 +543,44 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     })
     .expect("spawning the session thread");
     (Handle { tx, shared }, thread)
+}
+
+struct Preview {
+    store: vidcut_core::Store,
+    project: Project,
+    at: PreviewAt,
+    rev: u64,
+}
+
+fn start_previews(
+    inbox: Sender<Msg>,
+    notify: Arc<dyn Fn() + Send + Sync>,
+) -> Option<Sender<Preview>> {
+    let (tx, rx) = channel::<Preview>();
+    crate::threads::spawn("vidcut-preview", Work::Interactive, move || {
+        let mut past = vidcut_core::past::Past::default();
+        while let Ok(mut job) = rx.recv() {
+            std::thread::sleep(Duration::from_millis(30));
+            while let Ok(newer) = rx.try_recv() {
+                job = newer;
+            }
+            let result = match job.at {
+                PreviewAt::Step(step) => job.store.project_at(&mut past, job.project, step),
+                PreviewAt::Version(id, k) => job.store.version_at(&mut past, job.project, id, k),
+            };
+            let done = Msg::Previewed {
+                at: job.at,
+                rev: job.rev,
+                result,
+            };
+            if inbox.send(done).is_err() {
+                return;
+            }
+            notify();
+        }
+    })
+    .ok()?;
+    Some(tx)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -706,6 +763,12 @@ struct Live {
     dirty: bool,
     answers: Vec<(Reply, Result<Response>)>,
     preview_error: Option<String>,
+    history_preview: Option<Arc<HistoryPreview>>,
+    preview_wanted: Option<(PreviewAt, u64)>,
+    previews: Option<Sender<Preview>>,
+    past: vidcut_core::past::Past,
+    flash: Option<Arc<Flash>>,
+    flash_seq: u64,
 }
 
 const SOURCE: PlayerId = PlayerId::Source;
@@ -868,6 +931,8 @@ impl Live {
                     self.project_changed(None);
                 }
             }
+            Msg::HistoryPreview(at) => changed = self.preview_step(at),
+            Msg::Previewed { at, rev, result } => changed = self.previewed(at, rev, result),
             Msg::FileChanged => {
                 let refreshed = match self.project.as_mut().map(OpenProject::reload) {
                     Some(Ok(changed)) => changed,
@@ -1132,6 +1197,8 @@ impl Live {
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
             budget: self.player.budget(),
+            history_preview: self.history_preview.clone(),
+            flash: self.flash.clone(),
         };
         *self.shared.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(snap);
         (self.notify)();
@@ -1182,7 +1249,14 @@ impl Live {
         expected: Option<PathBuf>,
         reply: Option<Reply>,
     ) {
-        let envelope = envelope.normalized();
+        let mut envelope = envelope.normalized();
+        if envelope.client.is_none() {
+            let kind = match origin {
+                Origin::Ipc => ClientKind::Ipc,
+                Origin::Gui { .. } | Origin::Session => ClientKind::Gui,
+            };
+            envelope.client = Some(Client::new(kind, None));
+        }
         let (method, params) = match serde_json::to_value(&envelope.request) {
             Ok(Value::Object(mut m)) => (
                 m.remove("method")
@@ -1630,6 +1704,7 @@ impl Live {
         }
         self.dirty = true;
         self.tool_notice(&job, &result);
+        self.history_notice(&job, &result);
         self.auto_proxies(&job, &result);
         if let Some(r) = job.reply {
             self.answers.push((r, result));
@@ -1657,6 +1732,115 @@ impl Live {
             "history.redo" => steps("redone").map_or(said, |s| format!("Redo: {s}")),
             _ => said,
         }
+    }
+
+    fn preview_step(&mut self, at: Option<PreviewAt>) -> bool {
+        let (Some(open), Some(at)) = (&self.project, at) else {
+            self.preview_wanted = None;
+            return self.history_preview.take().is_some();
+        };
+        let rev = open.project().rev;
+        if self
+            .history_preview
+            .as_ref()
+            .is_some_and(|p| p.at == at && p.rev == rev)
+            || self.preview_wanted == Some((at, rev))
+        {
+            return false;
+        }
+        self.preview_wanted = Some((at, rev));
+        if !open.editor.on_its_file() {
+            let result = match at {
+                PreviewAt::Step(step) => self.past.project_at(&open.editor, step),
+                PreviewAt::Version(id, k) => self.past.version_at(&open.editor, id, k),
+            };
+            return self.previewed(at, rev, result);
+        }
+        let job = Preview {
+            store: open.store.clone(),
+            project: open.project().clone(),
+            at,
+            rev,
+        };
+        if self.previews.is_none() {
+            self.previews = start_previews(self.tx.clone(), self.notify.clone());
+        }
+        if let Some(tx) = &self.previews
+            && tx.send(job).is_err()
+        {
+            self.previews = None;
+        }
+        false
+    }
+
+    fn previewed(&mut self, at: PreviewAt, rev: u64, result: Result<Arc<Project>>) -> bool {
+        let now = self.project.as_ref().map(|o| o.project().rev);
+        if self.preview_wanted != Some((at, rev)) || now != Some(rev) {
+            return false;
+        }
+        self.preview_wanted = None;
+        self.history_preview = result
+            .ok()
+            .map(|project| Arc::new(HistoryPreview { at, rev, project }));
+        self.dirty = true;
+        true
+    }
+
+    fn history_notice(&mut self, job: &Job, result: &Result<Response>) {
+        let Ok(r) = result else {
+            return;
+        };
+        if !matches!(job.origin, Origin::Gui { .. }) || job.dry_run {
+            return;
+        }
+        let said = |key: &str| r.result[key].as_str().unwrap_or_default().to_string();
+        match job.method.as_str() {
+            "history.revert" => {
+                return self.notice(format!("Reverted: {}", said("label")), false);
+            }
+            "history.mark" => {
+                return self.notice(
+                    format!(
+                        "Marked step {}: \u{201c}{}\u{201d}",
+                        r.result["step"],
+                        said("name")
+                    ),
+                    false,
+                );
+            }
+            "history.unmark" => {
+                return self.notice(
+                    format!("Took the name off step {}", r.result["step"]),
+                    false,
+                );
+            }
+            "history.restore" => {
+                let text = match r.result["restored"].as_array().map_or(0, Vec::len) {
+                    1 => "Restored a version: 1 step".to_string(),
+                    n => format!("Restored a version: {n} steps"),
+                };
+                return self.notice(text, false);
+            }
+            _ => {}
+        }
+        let (verb, labels) = match (r.result["undone"].as_array(), r.result["redone"].as_array()) {
+            (Some(l), _) => ("Undid", l),
+            (_, Some(l)) => ("Redid", l),
+            _ => return,
+        };
+        let text = match labels.as_slice() {
+            [] => return,
+            [one] => format!("{verb}: {}", one.as_str().unwrap_or_default()),
+            many => format!("{verb} {} steps", many.len()),
+        };
+        self.notice(text, false);
+        self.flash_seq += 1;
+        self.flash = Some(Arc::new(Flash {
+            seq: self.flash_seq,
+            rev: r.rev,
+            clips: serde_json::from_value(r.result["clips"].clone()).unwrap_or_default(),
+            spans: serde_json::from_value(r.result["spans"].clone()).unwrap_or_default(),
+        }));
     }
 
     fn tool_notice(&mut self, job: &Job, result: &Result<Response>) {
@@ -2431,6 +2615,9 @@ impl Live {
     }
 
     fn project_changed(&mut self, response: Option<&Response>) {
+        if let Some(trouble) = self.project.as_mut().and_then(OpenProject::trouble) {
+            self.notice(trouble, true);
+        }
         let Some(open) = &self.project else {
             self.project_snap = None;
             self.missing_watch.watch(Vec::new(), Vec::new());
@@ -2449,13 +2636,27 @@ impl Live {
                 .collect(),
         );
         self.proxy_dir = Arc::from(folder);
-        let history = open.editor.history_labels(1).unwrap_or_default();
+        let project = Arc::new(p.clone());
+        let path = open.store.path().to_path_buf();
+        let history = match self.project.as_mut().map(OpenProject::steps) {
+            Some(Ok(steps)) => Arc::new(steps),
+            Some(Err(e)) => {
+                self.notice(e.message, true);
+                self.project_snap
+                    .as_ref()
+                    .map(|s| s.history.clone())
+                    .unwrap_or_default()
+            }
+            None => Default::default(),
+        };
+        self.history_preview = None;
+        self.preview_wanted = None;
         self.project_snap = Some(ProjectSnap {
-            path: open.store.path().to_path_buf(),
-            project: Arc::new(p.clone()),
-            undo: history.undo.iter().rev().cloned().collect(),
-            redo: history.redo.iter().rev().cloned().collect(),
+            path,
+            project: project.clone(),
+            history,
         });
+        let p = &*project;
         let media: HashSet<String> = p.media.iter().map(|m| m.id.clone()).collect();
         self.selection.media.retain(|m| media.contains(m));
         self.selection.clips.retain(|c| p.clip(c).is_some());

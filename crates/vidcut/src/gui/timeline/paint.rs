@@ -796,6 +796,54 @@ pub fn trim_pointer(painter: &Painter, at: Pos2, kind: TrimPointer) {
     }
 }
 
+pub(crate) fn marks(
+    painter: &Painter,
+    rows: &Rows,
+    scale: &Scale,
+    p: &Project,
+    m: &crate::gui::history::Marks,
+) {
+    let accent = theme::colors().accent;
+    let fill = accent.gamma_multiply(0.22 * m.strength);
+    let edge = Stroke::new(1.5, accent.gamma_multiply(m.strength));
+    for row in &rows.rows {
+        let r = row.rect.rect;
+        for s in &m.spans {
+            if s.track.as_deref().is_some_and(|t| t != row.track) {
+                continue;
+            }
+            let x = scale.xf(s.from)..=scale.xf(s.to).max(scale.xf(s.from) + 2.0);
+            let band = Rect::from_x_y_ranges(x, r.y_range());
+            painter.rect_filled(band, CornerRadius::ZERO, fill);
+        }
+        let Some(t) = p.track(&row.track) else {
+            continue;
+        };
+        for c in t.clips.iter().filter(|c| m.clips.contains(&c.id)) {
+            let clip = Rect::from_x_y_ranges(scale.xf(c.start)..=scale.xf(c.end()), r.y_range());
+            painter.rect_stroke(
+                clip.shrink(1.0),
+                3.0,
+                Stroke::new(2.0, accent.gamma_multiply(m.strength)),
+                StrokeKind::Inside,
+            );
+        }
+        for s in m
+            .spans
+            .iter()
+            .filter(|s| s.track.as_deref() == Some(row.track.as_str()))
+        {
+            let x = scale.xf(s.from)..=scale.xf(s.to).max(scale.xf(s.from) + 2.0);
+            painter.rect_stroke(
+                Rect::from_x_y_ranges(x, r.y_range()),
+                0.0,
+                edge,
+                StrokeKind::Inside,
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

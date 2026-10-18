@@ -30,6 +30,7 @@ vidcut timeline get --json
 | `--if-rev REV` | fails with `CONFLICT` unless the project is at revision REV |
 | `--headless` | runs here even if a GUI has the project open |
 | `--instance PID\|SOCKET` | sends to this GUI; also `VIDCUT_SOCKET` |
+| `--client NAME` | who the undo history says made the change, such as an agent's or a script's name; also `VIDCUT_CLIENT` |
 
 ## Times, ranges and clips
 
@@ -82,7 +83,7 @@ An error is `{"error": {"code": "NOT_FOUND", "message": "…"}}` with `--json`. 
 - `--if-rev N` fails with `CONFLICT` unless the project is still at `N`, the `rev` you read; every request on a project checks it.
 - `vidcut apply FILE` (`-`: stdin) runs requests in order on one copy of the project: one revision, one undo step (`--label` names it). Any error fails them all.
   - One `{"method": …, "params": {…}}` per line (blank and `//` lines skipped), or one JSON array.
-  - `history undo`, `history redo` and `apply` can't be batched; `--if-rev` and `--dry-run` go on the command line.
+  - `apply` and the `history` commands that change the history can't be batched; `--if-rev` and `--dry-run` go on the command line.
 - Processes editing one project take its lock in turn ([design/requests.md](design/requests.md)).
 
 ## Live control of a running GUI

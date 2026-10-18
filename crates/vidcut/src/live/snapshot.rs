@@ -7,6 +7,7 @@ use serde_json::Value;
 use vidcut_core::Project;
 use vidcut_core::render::TapeEntry;
 use vidcut_core::request::ViewerMode;
+use vidcut_core::steps::{Span, Steps};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -56,8 +57,28 @@ pub struct PlayerSnap {
 pub struct ProjectSnap {
     pub path: PathBuf,
     pub project: Arc<Project>,
-    pub undo: Vec<String>,
-    pub redo: Vec<String>,
+    pub history: Arc<Steps>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewAt {
+    Step(usize),
+    Version(u64, usize),
+}
+
+#[derive(Debug, Clone)]
+pub struct HistoryPreview {
+    pub at: PreviewAt,
+    pub rev: u64,
+    pub project: Arc<Project>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Flash {
+    pub seq: u64,
+    pub rev: u64,
+    pub clips: Vec<String>,
+    pub spans: Vec<Span>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -155,6 +176,8 @@ pub struct Snapshot {
     pub preview_error: Option<String>,
     pub theme: Arc<crate::themes::Theme>,
     pub budget: vidcut_av::player::Budget,
+    pub history_preview: Option<Arc<HistoryPreview>>,
+    pub flash: Option<Arc<Flash>>,
 }
 
 impl Snapshot {

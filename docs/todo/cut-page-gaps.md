@@ -20,4 +20,3 @@ What [the spec](../cut-page-spec.md) describes and vidcut doesn't do yet.
 - Several edit points selected with Ctrl+click ([§8.1](../cut-page-spec.md#81-selection-pp-719720))
 - Trim to Audio ([§8.6](../cut-page-spec.md#86-trimming-pp-693-716-718-726732))
 - Extend Beyond Clip Length in Change Clip Duration ([§8.6](../cut-page-spec.md#86-trimming-pp-693-716-718-726732))
-- Edit > History and the History window ([§8.10](../cut-page-spec.md#810-undo-pp-651652))

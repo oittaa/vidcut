@@ -11,12 +11,14 @@ mod history;
 pub mod model;
 pub mod ops;
 pub mod otio;
+pub mod past;
 pub mod preferences;
 pub mod preview;
 pub mod render;
 pub mod request;
 pub mod sequence;
 pub mod shortcuts;
+pub mod steps;
 pub mod store;
 pub mod time;
 pub mod validate;
@@ -45,3 +47,5 @@ mod relink_tests;
 mod test_support;
 #[cfg(test)]
 mod tracks_tests;
+#[cfg(test)]
+mod versions_tests;

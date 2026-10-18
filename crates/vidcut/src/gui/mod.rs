@@ -7,6 +7,7 @@ mod file_manager;
 mod folders;
 mod gate;
 mod help;
+mod history;
 mod import;
 mod mixer;
 pub mod picture;

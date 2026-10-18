@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use crate::analysis::{self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span};
 use crate::change::Change;
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorCode, Result};
 use crate::folder::Folder;
 use crate::history::HistoryFile;
 use crate::model::{
@@ -19,8 +19,10 @@ use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
 use crate::render::RenderPlan;
 use crate::request::{
-    Changes, ClipRef, Envelope, ImportMode, OneOrMany, ProjectSet, Request, Response, SourceParams,
+    Changes, Client, ClientKind, ClipRef, Envelope, ImportMode, OneOrMany, ProjectSet, Request,
+    Response, SourceParams,
 };
+use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
 use crate::time::{Rational, TimeContext, TimeSpec, format_timecode};
 use crate::validate;
 
@@ -202,14 +204,51 @@ pub fn read_timeline_file(path: &Path) -> Result<TimelineFile> {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Entry {
-    pub label: String,
+    #[serde(flatten)]
+    pub step: Step,
     pub change: Change,
+}
+
+impl Entry {
+    pub fn new(label: impl Into<String>, change: Change) -> Self {
+        Self {
+            step: Step::labeled(label),
+            change,
+        }
+    }
+}
+
+impl crate::steps::Node for Entry {
+    fn id(&self) -> Option<u64> {
+        self.step.id
+    }
+
+    fn placed(&self) -> Option<u64> {
+        self.step.placed()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct History {
     pub undo: Vec<Entry>,
     pub redo: Vec<Entry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub branches: Vec<Branch<Entry>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub marks: Vec<Mark>,
+}
+
+impl History {
+    pub(crate) fn of(mut tree: Tree<Entry>) -> Self {
+        let mut redo = tree.line.split_off(tree.done.min(tree.line.len()));
+        redo.reverse();
+        Self {
+            undo: tree.line,
+            redo,
+            branches: tree.branches,
+            marks: tree.marks,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -221,14 +260,16 @@ pub struct Labels {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Moved {
-    Step(Entry),
+    Step(Box<Entry>),
     Undo(u32),
     Redo(u32),
+    Mark(Mark),
+    Unmark(u64),
 }
 
 pub const HISTORY_CAP: usize = 1 << 17;
 
-const LABELS: usize = 100;
+pub const EXTERNAL: &str = "Changed outside vidcut";
 
 fn over(len: usize) -> usize {
     if len > HISTORY_CAP {
@@ -243,6 +284,8 @@ pub struct Editor {
     history: History,
     moved: Vec<Moved>,
     pub(crate) file: Option<(HistoryFile, String)>,
+    opened: Option<u64>,
+    blocked: Option<(String, String)>,
 }
 
 fn now_ms() -> u64 {
@@ -259,7 +302,48 @@ impl Editor {
             history,
             moved: Vec::new(),
             file: None,
+            opened: None,
+            blocked: None,
         }
+    }
+
+    pub(crate) fn unreadable(project: Project, hash: String, why: String) -> Self {
+        Self {
+            blocked: Some((hash, why)),
+            ..Self::new(project, History::default())
+        }
+    }
+
+    pub fn history_trouble(&self) -> Option<&str> {
+        self.blocked.as_ref().map(|(_, why)| why.as_str())
+    }
+
+    pub(crate) fn blocked_on(&self) -> Option<&str> {
+        self.blocked.as_ref().map(|(hash, _)| hash.as_str())
+    }
+
+    pub(crate) fn stands_on(&self) -> Option<&str> {
+        match (&self.file, &self.blocked) {
+            (Some((_, hash)), _) | (None, Some((hash, _))) => Some(hash),
+            (None, None) => None,
+        }
+    }
+
+    pub(crate) fn block(&mut self, why: String) {
+        if let Some((_, hash)) = self.file.take() {
+            for m in &self.moved {
+                if let Moved::Step(e) = m {
+                    self.history.undo.push((**e).clone());
+                }
+            }
+            self.blocked = Some((hash, why));
+        } else if let Some((_, was)) = &mut self.blocked {
+            *was = why;
+        }
+    }
+
+    pub fn opened_at(&mut self, ms: u64) {
+        self.opened = Some(ms);
     }
 
     pub(crate) fn on_file(project: Project, file: HistoryFile, hash: String) -> Self {
@@ -288,12 +372,7 @@ impl Editor {
     pub(crate) fn saved_to(&mut self, file: HistoryFile, hash: String) {
         self.history = History::default();
         self.file = Some((file, hash));
-    }
-
-    pub(crate) fn lost_file(&mut self) {
-        if self.file.take().is_some() {
-            self.history = History::default();
-        }
+        self.blocked = None;
     }
 
     pub fn history_counts(&self) -> (usize, usize) {
@@ -312,19 +391,136 @@ impl Editor {
                     let n = (*n as usize).min(r);
                     (u, r) = (u + n, r - n);
                 }
+                Moved::Mark(_) | Moved::Unmark(_) => {}
             }
         }
         (u, r)
     }
 
+    pub fn pending(&self) -> bool {
+        !self.moved.is_empty()
+    }
+
+    pub fn unsaved(&self) -> (u64, usize) {
+        (self.project.rev, self.moved.len())
+    }
+
+    pub fn on_its_file(&self) -> bool {
+        self.file.is_some() && self.moved.is_empty()
+    }
+
     pub fn history_view(&self, n: usize) -> Result<History> {
         let (undo, redo) = self.view(n, HistoryFile::top, Entry::clone)?;
-        Ok(History { undo, redo })
+        Ok(History {
+            undo,
+            redo,
+            ..History::default()
+        })
     }
 
     pub fn history_labels(&self, n: usize) -> Result<Labels> {
-        let (undo, redo) = self.view(n, HistoryFile::top_labels, |e| e.label.clone())?;
+        let (undo, redo) = self.view(n, HistoryFile::top_labels, |e| e.step.label.clone())?;
         Ok(Labels { undo, redo })
+    }
+
+    pub fn history_steps(&self, cache: &mut StepsCache) -> Result<Steps> {
+        let Some((file, _)) = &self.file else {
+            let mut steps = Steps::default();
+            for e in &self.history.undo {
+                steps.place(e.step.clone());
+            }
+            let done = steps.done;
+            for e in self.history.redo.iter().rev() {
+                steps.place(e.step.clone());
+            }
+            steps.done = done;
+            for m in &self.history.marks {
+                steps.mark(m.clone());
+            }
+            return Ok(steps);
+        };
+        let unreadable = |e: std::io::Error| {
+            Error::internal(format!(
+                "the undo history {} can't be read: {e}",
+                file.path().display()
+            ))
+        };
+        let mut steps = match file.steps_now(cache).map_err(unreadable)? {
+            true => cache.steps.clone(),
+            false => Steps::default(),
+        };
+        for m in &self.moved {
+            match m {
+                Moved::Step(e) => steps.place(e.step.clone()),
+                Moved::Undo(n) => steps.back(*n as usize),
+                Moved::Redo(n) => steps.forward(*n as usize),
+                Moved::Mark(m) => steps.mark(m.clone()),
+                Moved::Unmark(id) => steps.unmark(*id),
+            }
+        }
+        Ok(steps)
+    }
+
+    pub fn project_at(&self, step: usize) -> Result<Project> {
+        let (u, _) = self.history_counts();
+        self.project_between(self.project.clone(), u, step)
+    }
+
+    pub fn project_between(&self, start: Project, from: usize, to: usize) -> Result<Project> {
+        let (u, r) = self.history_counts();
+        if from.max(to) > u + r {
+            return Err(Error::invalid(format!(
+                "no step {}: the undo history has {}",
+                from.max(to),
+                u + r
+            )));
+        }
+        let (lo, hi) = (from.min(to), from.max(to));
+        if lo < u && hi > u {
+            return Err(Error::internal(
+                "a step on the other side of the current one",
+            ));
+        }
+        let entries = self.entries_between(lo, hi, u)?;
+        let fits = |e: String| Error::internal(format!("the undo history doesn't fit: {e}"));
+        let mut project = start;
+        if to < from {
+            for e in entries.iter().rev() {
+                undo_step(&mut project, &e.change, false).map_err(fits)?;
+            }
+        } else {
+            for e in &entries {
+                undo_step(&mut project, &e.change, true).map_err(fits)?;
+            }
+        }
+        Ok(project)
+    }
+
+    fn entries_between(&self, lo: usize, hi: usize, u: usize) -> Result<Vec<Entry>> {
+        if lo == hi {
+            return Ok(Vec::new());
+        }
+        if let Some((file, _)) = &self.file
+            && self.moved.is_empty()
+        {
+            let unreadable = |e: std::io::Error| {
+                Error::internal(format!(
+                    "the undo history {} can't be read: {e}",
+                    file.path().display()
+                ))
+            };
+            let Some((tail, end)) = file.read_tail().map_err(unreadable)? else {
+                return Err(Error::internal("the undo history is gone"));
+            };
+            return file.between(&tail, end, lo, hi).map_err(unreadable);
+        }
+        if hi <= u {
+            let h = self.history_view(u - lo)?;
+            return Ok(h.undo.into_iter().take(hi - lo).collect());
+        }
+        let mut redo = self.history_view(hi - u)?.redo;
+        redo.reverse();
+        Ok(redo.into_iter().skip(lo - u).collect())
     }
 
     fn view<T: Clone>(
@@ -354,7 +550,7 @@ impl Editor {
             ))
         };
         let k = n + self.moved.len();
-        let (mut undo, mut redo) = match file.tail() {
+        let (mut undo, mut redo) = match file.read_tail().map_err(unreadable)? {
             Some((tail, end)) => {
                 let (mut undo, mut redo) = top(file, &tail, end, k, k).map_err(unreadable)?;
                 undo.reverse();
@@ -371,13 +567,26 @@ impl Editor {
                 }
                 Moved::Undo(n) => shift(*n, &mut undo, &mut redo),
                 Moved::Redo(n) => shift(*n, &mut redo, &mut undo),
+                Moved::Mark(_) | Moved::Unmark(_) => {}
             }
         }
         Ok((newest(&undo), newest(&redo)))
     }
 
-    fn push(&mut self, entry: Entry) {
-        self.moved.push(Moved::Step(entry.clone()));
+    fn push(&mut self, mut entry: Entry) {
+        if self.file.is_none() && entry.step.id.is_none() {
+            let next = self
+                .history
+                .undo
+                .iter()
+                .chain(&self.history.redo)
+                .filter_map(|e| e.step.id)
+                .max()
+                .unwrap_or(0)
+                + 1;
+            entry.step.id = Some(next);
+        }
+        self.moved.push(Moved::Step(Box::new(entry.clone())));
         if self.file.is_none() {
             self.history.undo.push(entry);
             self.history.redo.clear();
@@ -394,21 +603,50 @@ impl Editor {
     ) -> Result<Response> {
         envelope.check_rev(self.project.rev)?;
         let Envelope {
-            request, dry_run, ..
+            request,
+            dry_run,
+            client,
+            ..
         } = envelope;
-        if let Request::HistoryGet {} = request {
-            let (undo, redo) = self.history_counts();
-            let view = self.history_labels(LABELS)?;
-            let mut result = query(&self.project, &view, &request, env, playhead)?;
-            result["undo_steps"] = undo.into();
-            result["redo_steps"] = redo.into();
+        if let Request::HistoryGet {
+            from,
+            limit,
+            since,
+            branch,
+        } = request
+        {
+            let steps = self.history_steps(&mut StepsCache::default())?;
+            let mut result = crate::steps::listing(&steps, from, limit, &self.project);
+            match (since, branch) {
+                (Some(step), Some(id)) => {
+                    let k = step
+                        .checked_sub(1)
+                        .ok_or_else(|| Error::invalid("a version's steps count from 1"))?;
+                    let then = crate::past::Past::default().version_at(self, id, k)?;
+                    result["since"] =
+                        crate::steps::since_version(&then, &self.project, id).json(step);
+                }
+                (Some(step), None) => {
+                    let then = self.project_at(step)?;
+                    result["since"] =
+                        crate::steps::since_step(&then, &self.project, step, steps.done).json(step);
+                }
+                (None, Some(_)) => {
+                    return Err(Error::usage("`branch` goes with `since`"));
+                }
+                (None, None) => {}
+            }
             return Ok(Response {
                 rev: self.project.rev,
                 changes: Changes::default(),
                 result,
                 dry_run: false,
                 via: String::new(),
-                warnings: Vec::new(),
+                warnings: self
+                    .history_trouble()
+                    .map(String::from)
+                    .into_iter()
+                    .collect(),
             });
         }
         if !request.is_mutation() {
@@ -425,9 +663,27 @@ impl Editor {
         match request {
             Request::HistoryUndo { steps } => return self.step_history(steps, true, dry_run),
             Request::HistoryRedo { steps } => return self.step_history(steps, false, dry_run),
+            Request::HistoryGo { step } => return self.go_to(step, dry_run),
+            Request::HistoryMark { step, name } => return self.mark(step, Some(name), dry_run),
+            Request::HistoryUnmark { step } => return self.mark(step, None, dry_run),
+            Request::HistoryRestore { branch } => return self.restore(branch, dry_run),
+            Request::HistoryRevert { step } => return self.revert(step, client, dry_run),
             _ => {}
         }
-        let label = label_of(&request, &self.project);
+        let step = Step {
+            label: label_of(&request, &self.project, playhead),
+            kind: Some(request.method()),
+            by: client,
+            parts: match &request {
+                Request::Apply { commands, .. } => commands
+                    .iter()
+                    .filter(|c| c.is_mutation())
+                    .map(|c| label_of(c, &self.project, playhead))
+                    .collect(),
+                _ => Vec::new(),
+            },
+            ..Step::default()
+        };
         let mut working = self.project.clone();
         let result = mutate(&mut working, &request, env, playhead, dry_run)?;
         let mut warnings = Vec::new();
@@ -443,6 +699,17 @@ impl Editor {
                 problems.join("; ")
             )));
         }
+        self.commit(working, step, result, warnings, dry_run)
+    }
+
+    fn commit(
+        &mut self,
+        mut working: Project,
+        step: Step,
+        result: Value,
+        warnings: Vec<String>,
+        dry_run: bool,
+    ) -> Result<Response> {
         let changes = diff(&self.project, &working);
         if dry_run {
             return Ok(Response {
@@ -454,6 +721,7 @@ impl Editor {
                 warnings,
             });
         }
+        let (clips, spans) = crate::steps::places(&self.project, &working);
         let Some(change) = changed(&mut self.project, &mut working) else {
             return Ok(Response {
                 rev: self.project.rev,
@@ -464,10 +732,20 @@ impl Editor {
                 warnings: Vec::new(),
             });
         };
+        let now = now_ms();
         working.rev = self.project.rev + 1;
-        working.edited = Some(now_ms());
+        working.edited = Some(now);
         self.project = working;
-        self.push(Entry { label, change });
+        self.push(Entry {
+            step: Step {
+                time: Some(now),
+                opened: self.opened,
+                clips,
+                spans,
+                ..step
+            },
+            change,
+        });
         Ok(Response {
             rev: self.project.rev,
             changes,
@@ -478,22 +756,289 @@ impl Editor {
         })
     }
 
+    fn step_id(steps: &Steps, at: usize) -> Result<u64> {
+        if at == 0 {
+            return Ok(0);
+        }
+        let s = steps.line.get(at - 1).ok_or_else(|| {
+            Error::invalid(format!(
+                "no step {at}: the undo history has {}",
+                steps.line.len()
+            ))
+        })?;
+        s.id.ok_or_else(|| {
+            Error::invalid(format!(
+                "step {at} was made before steps could be named; name a later one"
+            ))
+        })
+    }
+
+    fn mark(
+        &mut self,
+        step: Option<usize>,
+        name: Option<String>,
+        dry_run: bool,
+    ) -> Result<Response> {
+        let steps = self.history_steps(&mut StepsCache::default())?;
+        let at = step.unwrap_or(steps.done);
+        let id = Self::step_id(&steps, at)?;
+        let name = name.map(|n| n.trim().to_string());
+        if name.as_deref() == Some("") {
+            return Err(Error::usage("a version needs a name"));
+        }
+        let was = steps.named(id).map(String::from);
+        if name.is_none() && was.is_none() {
+            return Err(Error::invalid(format!("step {at} has no name")));
+        }
+        if !dry_run {
+            let moved = match &name {
+                Some(n) => Moved::Mark(Mark {
+                    step: id,
+                    name: n.clone(),
+                    time: Some(now_ms()),
+                }),
+                None => Moved::Unmark(id),
+            };
+            if self.file.is_none() {
+                self.history.marks.retain(|m| m.step != id);
+                if let Moved::Mark(m) = &moved {
+                    self.history.marks.push(m.clone());
+                }
+            }
+            self.moved.push(moved);
+        }
+        Ok(Response {
+            rev: self.project.rev,
+            changes: Changes::default(),
+            result: json!({ "step": at, "name": name, "was": was }),
+            dry_run,
+            via: String::new(),
+            warnings: Vec::new(),
+        })
+    }
+
+    fn restore(&mut self, id: u64, dry_run: bool) -> Result<Response> {
+        if self.file.is_none() {
+            return Err(Error::invalid(
+                "this project's undo history isn't saved yet, so it keeps no versions",
+            ));
+        }
+        let chain = self.chain(id).map_err(|e| match e.code {
+            ErrorCode::NotFound => Error::not_found(format!(
+                "no version {id} to restore: history.get lists them in branches"
+            )),
+            _ => e,
+        })?;
+        let after = chain[0].0;
+        let (u, _) = self.history_counts();
+        let (mut project, back) = match after.cmp(&u) {
+            std::cmp::Ordering::Less => (
+                self.stepped((u - after) as u32, true)?.0,
+                Some(Moved::Undo((u - after) as u32)),
+            ),
+            std::cmp::Ordering::Greater => (
+                self.stepped((after - u) as u32, false)?.0,
+                Some(Moved::Redo((after - u) as u32)),
+            ),
+            std::cmp::Ordering::Equal => (self.project.clone(), None),
+        };
+        let mut moved: Vec<Moved> = back.into_iter().collect();
+        let at = climb(&chain, &mut project, usize::MAX, &mut moved)?;
+        let labels: Vec<&str> = chain
+            .iter()
+            .flat_map(|(_, entries)| entries.iter().map(|e| e.step.label.as_str()))
+            .collect();
+        let changes = diff(&self.project, &project);
+        let result = json!({ "restored": labels, "at": at });
+        if dry_run {
+            return Ok(Response {
+                rev: self.project.rev,
+                changes,
+                result,
+                dry_run: true,
+                via: String::new(),
+                warnings: Vec::new(),
+            });
+        }
+        let now = now_ms();
+        project.rev = self.project.rev + 1;
+        project.edited = Some(now);
+        self.project = project;
+        self.moved.extend(moved.into_iter().map(|m| match m {
+            Moved::Step(mut e) => {
+                e.step.restored = Some(now);
+                Moved::Step(e)
+            }
+            m => m,
+        }));
+        Ok(Response {
+            rev: self.project.rev,
+            changes,
+            result,
+            dry_run: false,
+            via: String::new(),
+            warnings: Vec::new(),
+        })
+    }
+
+    pub fn chain(&self, id: u64) -> Result<Chain> {
+        let missing = || {
+            Error::not_found(format!(
+                "no version {id}: history.get lists them in branches"
+            ))
+        };
+        let Some((file, _)) = &self.file else {
+            return Err(missing());
+        };
+        match file.tail() {
+            Some((_, end)) => file.chain(end, id).map_err(|e| {
+                Error::internal(format!(
+                    "the undo history {} can't be read: {e}",
+                    file.path().display()
+                ))
+            })?,
+            None => None,
+        }
+        .ok_or_else(missing)
+    }
+
+    fn revert(&mut self, step: usize, client: Option<Client>, dry_run: bool) -> Result<Response> {
+        let (u, _) = self.history_counts();
+        if u == 0 {
+            return Err(Error::invalid("there are no steps to revert"));
+        }
+        if step == 0 || step > u {
+            return Err(Error::invalid(format!(
+                "step {step} isn't done: only steps 1 to {u} can be reverted"
+            )));
+        }
+        let view = self.history_view(u - step + 1)?;
+        let (target, later) = view
+            .undo
+            .split_first()
+            .ok_or_else(|| Error::internal("the undo history is shorter than it says"))?;
+        let ours = |c: &Change| -> Vec<Vec<String>> {
+            c.touched()
+                .into_iter()
+                .filter(|p| {
+                    !matches!(
+                        p.first().map(String::as_str),
+                        Some("next_id" | "edited" | "rev")
+                    )
+                })
+                .collect()
+        };
+        let mine = ours(&target.change);
+        for (j, e) in later.iter().enumerate() {
+            if let Some(path) = crate::change::overlap(&mine, &ours(&e.change)) {
+                return Err(Error::conflict(format!(
+                    "can't revert step {step}: step {} (\u{201c}{}\u{201d}) changed {} since",
+                    step + 1 + j,
+                    e.step.label,
+                    what(&self.project, path)
+                )));
+            }
+        }
+        let mut working = self.project.clone();
+        if let Err(e) = undo_step(&mut working, &target.change, false) {
+            let why = match self.in_the_way(&target.change, later) {
+                Some(j) => format!(
+                    "step {} (\u{201c}{}\u{201d}) changed what is around it since",
+                    step + 1 + j,
+                    later[j].step.label
+                ),
+                None => e,
+            };
+            return Err(Error::conflict(format!("can't revert step {step}: {why}")));
+        }
+        working.next_id = self.project.next_id.clone();
+        let mut warnings = Vec::new();
+        let dropped = otio::transitions::prune(&mut working);
+        if dropped > 0 {
+            warnings.push(otio::transitions::dropped(dropped));
+        }
+        let problems = validate::violations(&working);
+        if !problems.is_empty() {
+            return Err(Error::conflict(format!(
+                "can't revert step {step}: the project would be broken: {}",
+                problems.join("; ")
+            )));
+        }
+        let label = format!("Revert \u{201c}{}\u{201d}", target.step.label);
+        let result = json!({ "reverted": step, "label": target.step.label });
+        self.commit(
+            working,
+            Step {
+                label,
+                kind: Some("history.revert".into()),
+                by: client,
+                ..Step::default()
+            },
+            result,
+            warnings,
+            dry_run,
+        )
+    }
+
+    fn in_the_way(&self, change: &Change, later: &[Entry]) -> Option<usize> {
+        let mut then = self.project.clone();
+        for (j, e) in later.iter().enumerate().rev() {
+            undo_step(&mut then, &e.change, false).ok()?;
+            if undo_step(&mut then.clone(), change, false).is_ok() {
+                return Some(j);
+            }
+        }
+        None
+    }
+
     pub fn record_external(&mut self, project: Project) {
         let mut project = project;
+        let (clips, spans) = crate::steps::places(&self.project, &project);
+        let kind = Some("file".to_string());
         let change = changed(&mut self.project, &mut project)
             .unwrap_or_else(|| Change::Fields(Default::default()));
+        let now = now_ms();
         project.rev = project.rev.max(self.project.rev + 1);
         if project.edited == self.project.edited {
-            project.edited = Some(now_ms());
+            project.edited = Some(now);
         }
         self.project = project;
         self.push(Entry {
-            label: "external change".into(),
+            step: Step {
+                label: EXTERNAL.into(),
+                kind,
+                by: Some(Client::new(ClientKind::File, None)),
+                time: Some(now),
+                opened: self.opened,
+                clips,
+                spans,
+                ..Step::default()
+            },
             change,
         });
     }
 
-    fn step_history(&mut self, steps: u32, undo: bool, dry_run: bool) -> Result<Response> {
+    fn go_to(&mut self, step: usize, dry_run: bool) -> Result<Response> {
+        let (u, r) = self.history_counts();
+        match step {
+            s if s > u + r => Err(Error::invalid(format!(
+                "no step {step}: the undo history has {}",
+                u + r
+            ))),
+            s if s < u => self.step_history((u - s) as u32, true, dry_run),
+            s if s > u => self.step_history((s - u) as u32, false, dry_run),
+            _ => Ok(Response {
+                rev: self.project.rev,
+                changes: Changes::default(),
+                result: json!({ "at": u }),
+                dry_run,
+                via: String::new(),
+                warnings: Vec::new(),
+            }),
+        }
+    }
+
+    fn stepped(&self, steps: u32, undo: bool) -> Result<(Project, History, Vec<Step>)> {
         let (u, r) = self.history_counts();
         let available = if undo { u } else { r };
         if available < steps as usize || steps == 0 {
@@ -509,7 +1054,7 @@ impl Editor {
             None => self.history.clone(),
             Some(_) => self.history_view(steps as usize)?,
         };
-        let mut labels = Vec::new();
+        let mut moved = Vec::new();
         for _ in 0..steps {
             let (from, to) = if undo {
                 (&mut history.undo, &mut history.redo)
@@ -521,15 +1066,33 @@ impl Editor {
             if let Some(json) = json.as_mut() {
                 entry.change.apply(json, !undo).map_err(fits)?;
             }
-            labels.push(entry.label.clone());
+            moved.push(entry.step.clone());
             to.push(entry);
         }
         debug_assert!(
             json.is_none_or(|j| serde_json::from_value::<Project>(j).is_ok_and(|q| q == project)),
             "the undo step makes another project as JSON"
         );
+        Ok((project, history, moved))
+    }
+
+    fn step_history(&mut self, steps: u32, undo: bool, dry_run: bool) -> Result<Response> {
+        let (mut project, history, moved) = self.stepped(steps, undo)?;
         let changes = diff(&self.project, &project);
-        let result = json!({ if undo { "undone" } else { "redone" }: labels });
+        let (u, _) = self.history_counts();
+        let at = if undo {
+            u - steps as usize
+        } else {
+            u + steps as usize
+        };
+        let labels: Vec<&str> = moved.iter().map(|s| s.label.as_str()).collect();
+        let (clips, spans) = crate::steps::union(&moved);
+        let result = json!({
+            if undo { "undone" } else { "redone" }: labels,
+            "at": at,
+            "clips": clips,
+            "spans": spans,
+        });
         if dry_run {
             return Ok(Response {
                 rev: self.project.rev,
@@ -560,6 +1123,24 @@ impl Editor {
             warnings: Vec::new(),
         })
     }
+}
+
+fn what(p: &Project, path: &[String]) -> String {
+    for part in path.iter().rev() {
+        if let Some(c) = p.clip(part) {
+            let name = c.name.clone().filter(|n| !n.is_empty());
+            return name
+                .or_else(|| p.media(&c.media).map(|m| m.name.clone()))
+                .unwrap_or_else(|| part.clone());
+        }
+        if let Some(m) = p.media(part) {
+            return m.name.clone();
+        }
+        if p.markers.iter().any(|k| &k.id == part) || p.track(part).is_some() {
+            return part.clone();
+        }
+    }
+    path.last().cloned().unwrap_or_default()
 }
 
 fn shift<T>(n: u32, from: &mut Vec<T>, to: &mut Vec<T>) {
@@ -649,6 +1230,44 @@ fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
     (a.clips, b.clips) = clips;
     (a.transitions, b.transitions) = transitions;
     joined(rest, lists)
+}
+
+pub type Chain = Vec<(usize, Vec<Entry>)>;
+
+pub(crate) fn climb(
+    chain: &[(usize, Vec<Entry>)],
+    project: &mut Project,
+    last: usize,
+    moved: &mut Vec<Moved>,
+) -> Result<usize> {
+    let fits = |e: String| Error::internal(format!("the undo history doesn't fit: {e}"));
+    let mut at = chain.first().map_or(0, |c| c.0);
+    let mut placed: &[Entry] = &[];
+    for (k, (inner, entries)) in chain.iter().enumerate() {
+        if k > 0 {
+            for e in placed[*inner..].iter().rev() {
+                undo_step(project, &e.change, false).map_err(fits)?;
+            }
+            if placed.len() > *inner {
+                moved.push(Moved::Undo((placed.len() - inner) as u32));
+            }
+            at += inner;
+        }
+        let take = match k + 1 == chain.len() {
+            true => last.min(entries.len()),
+            false => entries.len(),
+        };
+        for e in &entries[..take] {
+            undo_step(project, &e.change, true).map_err(fits)?;
+        }
+        moved.extend(
+            entries[..take]
+                .iter()
+                .map(|e| Moved::Step(Box::new(e.clone()))),
+        );
+        placed = &entries[..take];
+    }
+    Ok(at + placed.len())
 }
 
 fn undo_step(p: &mut Project, change: &Change, forward: bool) -> std::result::Result<(), String> {
@@ -802,12 +1421,30 @@ fn to_value<T: serde::Serialize + ?Sized>(x: &T) -> Value {
     serde_json::to_value(x).expect("a project is JSON")
 }
 
-fn label_of(request: &Request, project: &Project) -> String {
+fn label_of(request: &Request, project: &Project, playhead: Option<i64>) -> String {
+    if let Request::Apply {
+        commands,
+        label: None,
+    } = request
+    {
+        let edits: Vec<&Request> = commands.iter().filter(|c| c.is_mutation()).collect();
+        match edits.as_slice() {
+            [one] => return label_of(one, project, playhead),
+            [first, rest @ ..] => {
+                return format!(
+                    "{} and {} more",
+                    label_of(first, project, playhead),
+                    rest.len()
+                );
+            }
+            [] => {}
+        }
+    }
     let json = serde_json::to_value(request).unwrap_or_default();
     let method = json["method"]
         .as_str()
         .map_or_else(|| request.method(), String::from);
-    crate::describe::describe(&method, &json["params"], Some(project))
+    crate::describe::describe_at(&method, &json["params"], Some(project), playhead)
 }
 
 fn diff(before: &Project, after: &Project) -> Changes {
@@ -1744,6 +2381,11 @@ fn mutate(
                     cmd,
                     Request::HistoryUndo { .. }
                         | Request::HistoryRedo { .. }
+                        | Request::HistoryGo { .. }
+                        | Request::HistoryMark { .. }
+                        | Request::HistoryUnmark { .. }
+                        | Request::HistoryRestore { .. }
+                        | Request::HistoryRevert { .. }
                         | Request::Apply { .. }
                 ) {
                     return Err(Error::usage(format!(
@@ -3605,7 +4247,7 @@ pub fn query(
             let mark = |f: Option<i64>| f.map(|f| json!({ "frame": f, "tc": tc(f) }));
             json!({ "in": mark(p.marks.mark_in), "out": mark(p.marks.mark_out) })
         }
-        Request::HistoryGet {} => json!({
+        Request::HistoryGet { .. } => json!({
             "undo": history.undo.iter().rev().collect::<Vec<_>>(),
             "redo": history.redo.iter().rev().collect::<Vec<_>>(),
         }),
