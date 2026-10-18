@@ -2568,6 +2568,7 @@ fn mutate(
                 "format": format,
                 "encoding": encoding.name(),
                 "time_base": placed.time_base,
+                "time_base_why": placed.why,
                 "moved_by": format!("{:+.3}s", 0.0 - placed.offset as f64 / fps),
                 "moved_by_frames": -placed.offset,
                 "warnings": warnings,

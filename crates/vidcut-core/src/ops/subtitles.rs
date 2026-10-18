@@ -356,6 +356,7 @@ pub struct Imported {
     pub offset: i64,
     pub before_zero: usize,
     pub time_base: SubtitleTimeBase,
+    pub why: Option<String>,
 }
 
 const GRID_SLACK: f64 = 0.0015;
@@ -385,26 +386,35 @@ fn frames_of(p: &Project, t: f64, base: SubtitleTimeBase) -> i64 {
     }
 }
 
-fn guess_base(p: &Project, cues: &[Timed]) -> SubtitleTimeBase {
+const REAL_MISS: f64 = 0.005;
+
+fn guess_base(p: &Project, cues: &[Timed]) -> (SubtitleTimeBase, Option<String>) {
     let fps = p.settings.fps.as_f64();
     let nominal = p.settings.fps.timecode_base() as f64;
-    let (mut real, mut label, mut n) = (0usize, 0usize, 0usize);
+    let (mut fractions, mut labels, mut reals) = (0usize, 0usize, 0usize);
     for t in cues.iter().flat_map(|c| [c.start, c.end]) {
-        n += 1;
-        let r = t * fps;
-        if (r - r.round()).abs() / fps <= GRID_SLACK {
-            real += 1;
+        let ms = (t * 1000.0).round() as i64;
+        if ms % 100 == 0 {
+            continue;
         }
+        fractions += 1;
         let l = (t - t.floor()) * nominal;
-        if (l - l.round()).abs() / nominal <= GRID_SLACK {
-            label += 1;
+        let r = t * fps;
+        let (label_off, real_off) = ((l - l.round()).abs() / nominal, (r - r.round()).abs() / fps);
+        if label_off <= GRID_SLACK && real_off >= REAL_MISS {
+            labels += 1;
+        } else if real_off <= GRID_SLACK && label_off >= REAL_MISS {
+            reals += 1;
         }
     }
-    let n = n as f64;
-    if n > 0.0 && label as f64 >= 0.9 * n && label as f64 - real as f64 >= 0.4 * n {
-        SubtitleTimeBase::Label
+    if fractions >= 2 && labels * 2 >= fractions && reals * 10 <= labels {
+        let why = format!(
+            "{labels} of {fractions} times with fractions of a second are on 1/{nominal} s \
+             timecode frames and clearly off real-time frames; {reals} the other way round"
+        );
+        (SubtitleTimeBase::Label, Some(why))
     } else {
-        SubtitleTimeBase::Real
+        (SubtitleTimeBase::Real, None)
     }
 }
 
@@ -435,9 +445,9 @@ pub fn import(
     if read.cues.is_empty() {
         return Err(Error::invalid("the file has no cues"));
     }
-    let base = match time_base {
+    let (base, why) = match time_base {
         Some(SubtitleTimeBase::Auto) | None => guess_base(p, &read.cues),
-        Some(b) => b,
+        Some(b) => (b, None),
     };
     let spans: Vec<(i64, i64)> = read
         .cues
@@ -488,6 +498,7 @@ pub fn import(
         offset,
         before_zero,
         time_base: base,
+        why,
     })
 }
 

@@ -1415,8 +1415,10 @@ pub enum NewTrack {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum SubtitleTimeBase {
-    /// `label` when the times sit on whole seconds and frames of a timecode
-    /// clearly better than on the frames of real time, else `real`.
+    /// `real`, unless the times with fractions of a second fall on timecode
+    /// frames and clearly off the frames of real time; round times (whole
+    /// seconds, tenths) count for neither. The answer says which, and why
+    /// when it is `label`.
     Auto,
     /// Seconds of real time: frame n at n divided by the frame rate (23.976
     /// counts 01:00:00:00 as 01:00:03.600).
