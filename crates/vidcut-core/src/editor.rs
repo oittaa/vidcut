@@ -12,8 +12,8 @@ use crate::error::{Error, ErrorCode, Result};
 use crate::folder::Folder;
 use crate::history::HistoryFile;
 use crate::model::{
-    Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Media, MediaInfo,
-    Project, Proxy, Track, TrackKind, Transition, VideoInfo,
+    Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marks, Media,
+    MediaInfo, Project, Proxy, Track, TrackKind, Transition, VideoInfo,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -23,7 +23,7 @@ use crate::request::{
     Request, Response, SourceParams,
 };
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
-use crate::time::{Rational, TimeContext, TimeSpec, format_timecode};
+use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode};
 use crate::validate;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1521,6 +1521,27 @@ fn ctx(p: &Project, playhead: Option<i64>) -> TimeContext {
     p.time_context(playhead)
 }
 
+fn mark_duration(
+    d: &DurationSpec,
+    c: &TimeContext,
+    mark_in: Option<i64>,
+    out: Option<i64>,
+    marks: &Marks,
+) -> Result<(Option<i64>, Option<i64>)> {
+    if out.is_some() {
+        return Err(Error::usage("give `out` or `duration`, not both"));
+    }
+    let shown = marks.mark_out.unwrap_or(c.end) - marks.mark_in.unwrap_or(0);
+    let length = d.frames(c, shown)?;
+    if length < 1 {
+        return Err(Error::invalid(format!(
+            "a duration of {length} frames: it must be at least one frame"
+        )));
+    }
+    let start = mark_in.unwrap_or(0);
+    Ok((Some(start), Some(start + length)))
+}
+
 fn resolve(p: &Project, t: &TimeSpec, playhead: Option<i64>) -> Result<i64> {
     Ok(ctx(p, playhead).resolve(t)?)
 }
@@ -1824,15 +1845,21 @@ fn mutate(
             media,
             mark_in,
             out,
+            duration,
         } => {
             let m = p
                 .media(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             let c = media_context(p, m, None);
-            let i = mark_in.as_ref().map(|t| c.resolve(t)).transpose()?;
-            let o = out.as_ref().map(|t| c.resolve(t)).transpose()?;
+            let mut i = mark_in.as_ref().map(|t| c.resolve(t)).transpose()?;
+            let mut o = out.as_ref().map(|t| c.resolve(t)).transpose()?;
+            if let Some(d) = duration {
+                (i, o) = mark_duration(d, &c, i.or(m.marks.mark_in), o, &m.marks)?;
+            }
             if i.is_none() && o.is_none() {
-                return Err(Error::usage("media.marks.set needs `in` and/or `out`"));
+                return Err(Error::usage(
+                    "media.marks.set needs `in`, `out` or `duration`",
+                ));
             }
             ops::set_media_marks(p, media, i.map(Some), o.map(Some))?;
             let m = p.media(media).expect("exists");
@@ -2284,14 +2311,22 @@ fn mutate(
             };
             json!({ "clips": ops::paste(p, clips, at)? })
         }
-        Request::MarksSet { mark_in, out } => {
-            let i = mark_in
+        Request::MarksSet {
+            mark_in,
+            out,
+            duration,
+        } => {
+            let mut i = mark_in
                 .as_ref()
                 .map(|t| resolve(p, t, playhead))
                 .transpose()?;
-            let o = out.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
+            let mut o = out.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
+            if let Some(d) = duration {
+                let c = ctx(p, playhead);
+                (i, o) = mark_duration(d, &c, i.or(p.marks.mark_in), o, &p.marks)?;
+            }
             if i.is_none() && o.is_none() {
-                return Err(Error::usage("marks.set needs `in` and/or `out`"));
+                return Err(Error::usage("marks.set needs `in`, `out` or `duration`"));
             }
             ops::set_marks(p, i.map(Some), o.map(Some))?;
             json!({ "in": p.marks.mark_in, "out": p.marks.mark_out })

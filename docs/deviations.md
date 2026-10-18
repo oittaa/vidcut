@@ -205,17 +205,22 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **vidcut:** the History window finds steps by their words or names, and filters them by kind (trims, deletes, dissolves…) and by who made them, in the versions too. A step's right-click menu has Revert This Step: its change undone alone, as a new step, keeping the steps after it; it is refused, naming the later step, when one changed what it changed (`history.revert`). Hovering a step says what changed since it ("Since this step: 5 clips moved, 2 deleted, 3 dissolves added"), or for a step still to redo what redoing to it brings ("Redoing to here: 1 clip added"), and for a version's step what going there brings ("Restoring to here: …"); `history.get` with `since` (and `branch`) says the same.
 - **Why:** in a long history made by several hands, finding the step to go back to and undoing one mistake without losing the edits after it are what people need most.
 
-## X39. Subtitle files are read as they are written
+## X39. A GIF of one frame is a still, whatever its delay
+- **Resolve:** a GIF of one frame comes in as a still only when its frame has no delay; with one, it is a video clip as long as the delay (0.1 s came in as 3 frames at 25 fps). A WebP of one frame is a still whatever its frame's duration (checked on 21.1.1).
+- **vidcut:** a GIF or WebP of one frame is a still ([D38](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:** the delay is how long a viewer shows the picture, not how long a clip it makes, and a clip of a few frames of one picture is a blink that can't be trimmed longer. GIF and WebP then behave alike.
+
+## X40. Subtitle files are read as they are written
 - **Resolve:** Studio 21.1.1, through its scripting API: a Windows-1252 file shows U+FFFD for every accented letter; a WebVTT cue timed without hours is left out; of a TTML file it keeps only the cues of its first region (with none named, it imports nothing) and only the first span of each cue (`Two <span>spans</span> here` becomes "Two spans"); a cue starting before the one before it ends starts at that end instead, and is left out when nothing remains (TOS-HE.srt loses its cue 12). `{\an8}` shows as text; WebVTT `line`, `align` and color classes are ignored.
 - **vidcut:** it reads UTF-8, UTF-16 and Windows-1252, WebVTT times without hours, every TTML cue, span and region, and keeps cues that overlap. `{\an8}`, WebVTT `line` and a TTML region's place put a cue at the top, middle or bottom; italic, bold, underline and colors come along from all three formats.
 - **Why:** an imported subtitle file must not lose text unnoticed.
 
-## X40. Subtitle files go straight onto a track, placed by their timecode
+## X41. Subtitle files go straight onto a track, placed by their timecode
 - **Resolve:** a subtitle file is a Media Pool clip first. Insert Selected Subtitles to Timeline Using Timecode places its cues by timecode and inserts nothing from a file timed from zero; dragging it places its first cue where it is dropped (p. 1230).
 - **vidcut:** `subtitles.import` puts the cues on a new subtitle track, named after the file, or on one named. A file whose cues all start at or after the timeline's start timecode, or after 01:00:00:00 on a timeline starting at zero and shorter than an hour, is read as timecode; otherwise times count from the timeline's start. `timecode` and `at` override that.
 - **Why:** one step, the same from a script, and both kinds of file land where they belong.
 
-## X41. Exported timelines keep their subtitles
+## X42. Exported timelines keep their subtitles
 - **Resolve:** its OpenTimelineIO, FCPXML, FCP 7 XML, EDL and CSV exports leave the subtitle tracks out (Studio 21.1.1); a subtitle file in an OpenTimelineIO file it imports makes the import fail.
 - **vidcut:** an OpenTimelineIO export writes an SRT beside it for each subtitle track with cues, in its timecode, ready for Insert Selected Subtitles to Timeline Using Timecode; a whole timeline's file also holds the cues for vidcut. `export.start` writes subtitle files beside media when asked (`subtitles`).
 - **Why:** subtitles made in vidcut should reach the editor that finishes the program.

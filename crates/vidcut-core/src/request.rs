@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::model::{Place, TrackClip};
 use crate::ops::{Edge, MoveMode};
-use crate::time::{RangeSpec, Rational, TimeSpec};
+use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
 
 pub type ClipRef = String;
 
@@ -138,6 +138,11 @@ pub enum Request {
         mark_in: Option<TimeSpec>,
         #[serde(default)]
         out: Option<TimeSpec>,
+        /// The marked duration, as the viewer's Duration field takes it:
+        /// the Out moves to the In plus it; with no In, the first frame is
+        /// marked In (decision D60). Not with `out`.
+        #[serde(default)]
+        duration: Option<DurationSpec>,
     },
     /// Clear a media item's source In and Out.
     #[serde(rename = "media.marks.clear")]
@@ -683,6 +688,11 @@ pub enum Request {
         mark_in: Option<TimeSpec>,
         #[serde(default)]
         out: Option<TimeSpec>,
+        /// The marked duration, as the viewer's Duration field takes it:
+        /// the Out moves to the In plus it; with no In, the timeline's
+        /// start is marked In (decision D60). Not with `out`.
+        #[serde(default)]
+        duration: Option<DurationSpec>,
     },
     /// Clear timeline In and Out (Alt+X).
     #[serde(rename = "marks.clear")]

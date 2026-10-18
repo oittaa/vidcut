@@ -31,7 +31,6 @@ the library instead; its version must match the binding's.
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import os
 import platform
@@ -41,6 +40,7 @@ import sys
 import tarfile
 import tomllib
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -97,7 +97,8 @@ def fetch(url, path, digest):
 def packages():
     target = CACHE / f"python{sys.version_info.major}.{sys.version_info.minor}"
     sys.path.insert(0, str(target))
-    if all(importlib.util.find_spec(m) for m in ("av", "numpy", "transcribe_cpp")):
+    have = [f"transcribe_cpp-{TRANSCRIBE}.dist-info", "numpy-*.dist-info", "av-*.dist-info"]
+    if all(any(target.glob(pattern)) for pattern in have):
         return target
     print(f"installing {' '.join(PACKAGES)} into {target}", file=sys.stderr)
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--target", str(target), *PACKAGES], check=True)
@@ -131,13 +132,19 @@ def model_path(spec):
     if Path(path).is_file():
         return path, piece
     repo, _, file = path.partition("/")
+    if not repo or not file:
+        sys.exit(f"{spec}: no such file (a model on Hugging Face is REPO/FILE of handy-computer)")
+    missing = f"{spec}: no such file, and no {file} in handy-computer/{repo} on Hugging Face"
     digest = MODELS.get(path)
     if not digest:
-        with urllib.request.urlopen(f"https://huggingface.co/api/models/handy-computer/{repo}/tree/main") as r:
-            tree = json.load(r)
+        try:
+            with urllib.request.urlopen(f"https://huggingface.co/api/models/handy-computer/{repo}/tree/main") as r:
+                tree = json.load(r)
+        except urllib.error.HTTPError:
+            sys.exit(missing)
         entry = next((e for e in tree if e["path"] == file), None)
         if not entry or "lfs" not in entry:
-            sys.exit(f"{spec}: neither a file nor a file of handy-computer/{repo}")
+            sys.exit(missing)
         digest = entry["lfs"]["oid"]
     url = f"https://huggingface.co/handy-computer/{repo}/resolve/main/{file}"
     return str(fetch(url, DATA / "models" / repo / file, digest)), piece
@@ -197,7 +204,7 @@ def child(audio, seconds, kind, index, path, piece):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seconds", type=int, default=600)
     ap.add_argument("--devices", default="gpu,igpu,cpu")
     ap.add_argument("--json")
@@ -214,11 +221,14 @@ def main():
     for var in ("PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
         env[var] = str(lib.parent) + os.pathsep + env.get(var, "")
     me = [sys.executable, os.path.abspath(__file__)]
-    listed = subprocess.run(me + ["--list", a.devices], env=env, capture_output=True, text=True)
+    listed = subprocess.run(me + ["--list"], env=env, capture_output=True, text=True)
     try:
-        found = json.loads(listed.stdout.strip().splitlines()[-1])
+        devices = json.loads(listed.stdout.strip().splitlines()[-1])
     except (IndexError, ValueError):
         sys.exit(listed.stderr.strip() or "listing the devices failed")
+    found = [[k, i] for k in a.devices.split(",") for i in range(devices.count(k))]
+    if not found:
+        sys.exit(f"no device of type {a.devices}; this computer has {', '.join(dict.fromkeys(devices))}")
     rows = []
     print(f"{'model':36} {'device':44} {'load (s)':>8} {'run 1 (s)':>9} {'run 2 (s)':>9} {'speed (x)':>9} {'held (MB)':>9}")
     for path, piece in models:
@@ -241,6 +251,9 @@ def main():
     if a.json:
         with open(a.json, "w") as f:
             json.dump(rows, f, indent=1)
+    failed = sum("error" in r for r in rows)
+    if failed:
+        sys.exit(f"{failed} of {len(rows)} runs failed")
 
 
 if __name__ == "__main__":
@@ -249,7 +262,6 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "--list":
         import transcribe_cpp as tc
 
-        kinds = sys.argv[2].split(",")
-        print(json.dumps([[k, i] for k in kinds for i, _ in enumerate(d for d in tc.backends() if d.device_type == k)]))
+        print(json.dumps([d.device_type for d in tc.backends()]))
     else:
         main()

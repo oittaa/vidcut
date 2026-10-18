@@ -45,7 +45,7 @@ vidcut timeline get --json
 | `A..B`, `A..+D` | half-open range: B excluded, or D long |
 | `c17`, `V1@1m` | a clip by id, or the clip under that frame on a track |
 
-A number without a unit is an error. Ids: media `m1`, clips `c1`, markers `k1`, subtitle cues `q1`; tracks `V1`, `V2`, … from the bottom, `A1`, `A2`, … and subtitle tracks `S1`, `S2`, …, renumbered when one is removed. How they resolve: [design/model.md](design/model.md#time).
+A number without a unit is an error, except a `duration` of `marks set` and `media marks set`, which is frames, as in the viewer's Duration field. Ids: media `m1`, clips `c1`, markers `k1`, subtitle cues `q1`; tracks `V1`, `V2`, … from the bottom, `A1`, `A2`, … and subtitle tracks `S1`, `S2`, …, renumbered when one is removed. How they resolve: [design/model.md](design/model.md#time).
 
 ## Output
 

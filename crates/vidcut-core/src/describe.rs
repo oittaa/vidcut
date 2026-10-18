@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::model::Project;
-use crate::time::{Keyword, RangeSpec, TimeSpec};
+use crate::time::{DurationSpec, Keyword, RangeSpec, TimeSpec};
 
 pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> String {
     describe_at(method, params, project, None)
@@ -639,7 +639,11 @@ impl Words<'_> {
             Value::Null => None,
             _ => Some(format!("{label} {}", self.time(key))),
         };
-        let parts: Vec<String> = [part("in", "In"), part("out", "Out")]
+        let duration = match &self.params["duration"] {
+            Value::Null => None,
+            _ => Some(format!("Duration {}", self.marked_duration())),
+        };
+        let parts: Vec<String> = [part("in", "In"), part("out", "Out"), duration]
             .into_iter()
             .flatten()
             .collect();
@@ -647,6 +651,23 @@ impl Words<'_> {
             "unchanged".into()
         } else {
             parts.join(", ")
+        }
+    }
+
+    fn marked_duration(&self) -> String {
+        let spec = match &self.params["duration"] {
+            Value::Number(n) => n.as_i64().map(|n| DurationSpec(TimeSpec::Frames(n))),
+            Value::String(s) => DurationSpec::parse(s).ok(),
+            _ => None,
+        };
+        let (Some(DurationSpec(spec)), Some(p)) = (spec, self.project) else {
+            return self.text("duration");
+        };
+        match p.time_context(None).duration(&spec) {
+            Ok(n) if spec.is_relative() && n > 0 => format!("+{}", frames(n)),
+            Ok(n) if spec.is_relative() => frames(n),
+            Ok(n) => p.settings.length_timecode(n),
+            Err(_) => self.text("duration"),
         }
     }
 
