@@ -187,12 +187,21 @@ mod tests {
 
     #[test]
     fn a_folder_is_named_by_its_last_part() {
-        let folder = |path: &str| Folder {
-            path: PathBuf::from(path),
+        let folder = Folder {
+            path: PathBuf::from("/footage/Day 1"),
             ..Folder::default()
         };
-        assert_eq!(folder("/footage/Day 1").name(), "Day 1");
-        assert_eq!(folder(r"E:\").name(), "E:");
+        assert_eq!(folder.name(), "Day 1");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_drive_is_named_by_its_letter() {
+        let drive = Folder {
+            path: PathBuf::from(r"E:\"),
+            ..Folder::default()
+        };
+        assert_eq!(drive.name(), "E:");
     }
 
     #[test]
