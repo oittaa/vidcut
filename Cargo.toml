@@ -45,7 +45,6 @@ libc = "0.2"
 # the shell showing a file. MIT or Apache-2.0.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
-    "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",
@@ -95,6 +94,9 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "std",
     "NSColor",
     "NSColorSpace",
+    "NSResponder",
+    "NSView",
+    "NSWindow",
     "objc2-core-foundation",
 ] }
 objc2-foundation = { version = "0.3", default-features = false, features = [

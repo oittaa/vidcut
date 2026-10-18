@@ -293,7 +293,7 @@ impl eframe::App for App {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let gate = self.gate.clone();
         let _open = gate.opened();
         let (texture, has_frame) = self.viewer.sync(&self.render, self.ws.want);
@@ -305,7 +305,7 @@ impl eframe::App for App {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
         self.window_screenshots(&ctx);
-        self.window.watch(&ctx);
+        self.window.watch(&ctx, frame);
         self.ws.ui(ui);
         *self.port.two_up.lock().unwrap_or_else(|e| e.into_inner()) = self.ws.two_up_stats();
         self.publish();
