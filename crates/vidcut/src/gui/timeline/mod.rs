@@ -438,6 +438,7 @@ impl Workspace {
             None => self.history_shown(),
             Some(_) => None,
         };
+        let swallowed = self.history_swallows(ui, upper_rect.union(lower_rect), before.is_some());
         let marks = self.history_marks(ui.ctx());
         let playhead = match &trimmed {
             Some((_, at)) => *at,
@@ -801,6 +802,9 @@ impl Workspace {
         let now =
             self.timeline.epoch + std::time::Duration::from_secs_f64(ui.input(|i| i.time).max(0.0));
         for (resp, is_upper) in [(&upper_resp, true), (&lower_resp, false)] {
+            if swallowed {
+                continue;
+            }
             if resp.drag_started() {
                 self.start_drag(ui, &p, is_upper, &layout);
             }
@@ -834,6 +838,20 @@ impl Workspace {
         } else {
             theme::colors().playhead
         }
+    }
+
+    pub(crate) fn lower_shows(&self, from: i64, to: i64) -> bool {
+        let Some(l) = &self.timeline.layout else {
+            return true;
+        };
+        let ppf = self.timeline.options.ppf;
+        let visible = f64::from(l.lower_ruler.width()) / ppf;
+        let first = if self.timeline.options.fixed_playhead {
+            self.drawn_playhead() as f64 - visible / 2.0
+        } else {
+            self.timeline.scroll
+        };
+        (from as f64) < first + visible && (to as f64) > first
     }
 
     fn lower_scale(&mut self, content: Rect, playhead: i64) -> Scale {

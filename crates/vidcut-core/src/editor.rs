@@ -413,18 +413,65 @@ impl Editor {
     }
 
     pub fn project_at(&self, step: usize) -> Result<Project> {
+        let (u, _) = self.history_counts();
+        self.project_between(self.project.clone(), u, step)
+    }
+
+    pub fn project_between(&self, start: Project, from: usize, to: usize) -> Result<Project> {
         let (u, r) = self.history_counts();
-        if step > u + r {
+        if from.max(to) > u + r {
             return Err(Error::invalid(format!(
-                "no step {step}: the undo history has {}",
+                "no step {}: the undo history has {}",
+                from.max(to),
                 u + r
             )));
         }
-        Ok(match step.cmp(&u) {
-            std::cmp::Ordering::Equal => self.project.clone(),
-            std::cmp::Ordering::Less => self.stepped((u - step) as u32, true)?.0,
-            std::cmp::Ordering::Greater => self.stepped((step - u) as u32, false)?.0,
-        })
+        let (lo, hi) = (from.min(to), from.max(to));
+        if lo < u && hi > u {
+            return Err(Error::internal(
+                "a step on the other side of the current one",
+            ));
+        }
+        let entries = self.entries_between(lo, hi, u)?;
+        let fits = |e: String| Error::internal(format!("the undo history doesn't fit: {e}"));
+        let mut project = start;
+        if to < from {
+            for e in entries.iter().rev() {
+                undo_step(&mut project, &e.change, false).map_err(fits)?;
+            }
+        } else {
+            for e in &entries {
+                undo_step(&mut project, &e.change, true).map_err(fits)?;
+            }
+        }
+        Ok(project)
+    }
+
+    fn entries_between(&self, lo: usize, hi: usize, u: usize) -> Result<Vec<Entry>> {
+        if lo == hi {
+            return Ok(Vec::new());
+        }
+        if let Some((file, _)) = &self.file
+            && self.moved.is_empty()
+        {
+            let unreadable = |e: std::io::Error| {
+                Error::internal(format!(
+                    "the undo history {} can't be read: {e}",
+                    file.path().display()
+                ))
+            };
+            let Some((tail, end)) = file.read_tail().map_err(unreadable)? else {
+                return Err(Error::internal("the undo history is gone"));
+            };
+            return file.between(&tail, end, lo, hi).map_err(unreadable);
+        }
+        if hi <= u {
+            let h = self.history_view(u - lo)?;
+            return Ok(h.undo.into_iter().take(hi - lo).collect());
+        }
+        let mut redo = self.history_view(hi - u)?.redo;
+        redo.reverse();
+        Ok(redo.into_iter().skip(lo - u).collect())
     }
 
     fn view<T: Clone>(
@@ -532,12 +579,12 @@ impl Editor {
             Request::HistoryGo { step } => return self.go_to(step, dry_run),
             _ => {}
         }
-        let label = label_of(&request, &self.project);
+        let label = label_of(&request, &self.project, playhead);
         let parts = match &request {
             Request::Apply { commands, .. } => commands
                 .iter()
                 .filter(|c| c.is_mutation())
-                .map(|c| label_of(c, &self.project))
+                .map(|c| label_of(c, &self.project, playhead))
                 .collect(),
             _ => Vec::new(),
         };
@@ -976,7 +1023,7 @@ fn to_value<T: serde::Serialize + ?Sized>(x: &T) -> Value {
     serde_json::to_value(x).expect("a project is JSON")
 }
 
-fn label_of(request: &Request, project: &Project) -> String {
+fn label_of(request: &Request, project: &Project, playhead: Option<i64>) -> String {
     if let Request::Apply {
         commands,
         label: None,
@@ -984,9 +1031,13 @@ fn label_of(request: &Request, project: &Project) -> String {
     {
         let edits: Vec<&Request> = commands.iter().filter(|c| c.is_mutation()).collect();
         match edits.as_slice() {
-            [one] => return label_of(one, project),
+            [one] => return label_of(one, project, playhead),
             [first, rest @ ..] => {
-                return format!("{} and {} more", label_of(first, project), rest.len());
+                return format!(
+                    "{} and {} more",
+                    label_of(first, project, playhead),
+                    rest.len()
+                );
             }
             [] => {}
         }
@@ -995,7 +1046,7 @@ fn label_of(request: &Request, project: &Project) -> String {
     let method = json["method"]
         .as_str()
         .map_or_else(|| request.method(), String::from);
-    crate::describe::describe(&method, &json["params"], Some(project))
+    crate::describe::describe_at(&method, &json["params"], Some(project), playhead)
 }
 
 fn diff(before: &Project, after: &Project) -> Changes {

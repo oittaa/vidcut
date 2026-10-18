@@ -104,6 +104,27 @@ fn a_split_names_the_clip_it_cuts() {
 }
 
 #[test]
+fn a_split_at_a_timecode_names_the_clip_it_cuts() {
+    let mut f = trimmed();
+    f.ok(req("edit.split", json!({"at": "00:00:02:10"})));
+    assert_eq!(
+        steps(&f).undo().unwrap().label,
+        "Split 1.mp4 at 00:00:02:10 on V1"
+    );
+}
+
+#[test]
+fn a_split_at_the_playhead_names_the_clip_and_the_time() {
+    let mut f = trimmed();
+    let split = crate::request::Envelope::from_json(req("edit.split", json!({"at": "playhead"})));
+    f.editor.apply(split.unwrap(), &f.env, Some(60)).unwrap();
+    assert_eq!(
+        steps(&f).undo().unwrap().label,
+        "Split 1.mp4 at 00:00:02:10 on V1"
+    );
+}
+
+#[test]
 fn a_ripple_delete_takes_place_where_the_clip_was() {
     let mut f = trimmed();
     f.ok(req("edit.delete", json!({"clips": "c1"})));

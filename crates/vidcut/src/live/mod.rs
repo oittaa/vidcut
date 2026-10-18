@@ -233,7 +233,7 @@ pub(crate) enum Msg {
     Previewed {
         step: usize,
         rev: u64,
-        result: Result<Project>,
+        result: Result<Arc<Project>>,
     },
     Thumbs {
         media: String,
@@ -519,6 +519,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         history_preview: None,
         preview_wanted: None,
         previews: None,
+        past: Default::default(),
         flash: None,
         flash_seq: 0,
     };
@@ -557,12 +558,13 @@ fn start_previews(
 ) -> Option<Sender<Preview>> {
     let (tx, rx) = channel::<Preview>();
     crate::threads::spawn("vidcut-preview", Work::Interactive, move || {
+        let mut past = vidcut_core::past::Past::default();
         while let Ok(mut job) = rx.recv() {
             std::thread::sleep(Duration::from_millis(30));
             while let Ok(newer) = rx.try_recv() {
                 job = newer;
             }
-            let result = job.store.project_at(&job.project, job.step);
+            let result = job.store.project_at(&mut past, job.project, job.step);
             let done = Msg::Previewed {
                 step: job.step,
                 rev: job.rev,
@@ -761,6 +763,7 @@ struct Live {
     history_preview: Option<Arc<HistoryPreview>>,
     preview_wanted: Option<(usize, u64)>,
     previews: Option<Sender<Preview>>,
+    past: vidcut_core::past::Past,
     flash: Option<Arc<Flash>>,
     flash_seq: u64,
 }
@@ -1744,7 +1747,7 @@ impl Live {
         }
         self.preview_wanted = Some((step, rev));
         if !open.editor.on_its_file() {
-            let result = open.editor.project_at(step);
+            let result = self.past.project_at(&open.editor, step);
             return self.previewed(step, rev, result);
         }
         let job = Preview {
@@ -1764,19 +1767,15 @@ impl Live {
         false
     }
 
-    fn previewed(&mut self, step: usize, rev: u64, result: Result<Project>) -> bool {
+    fn previewed(&mut self, step: usize, rev: u64, result: Result<Arc<Project>>) -> bool {
         let now = self.project.as_ref().map(|o| o.project().rev);
         if self.preview_wanted != Some((step, rev)) || now != Some(rev) {
             return false;
         }
         self.preview_wanted = None;
-        self.history_preview = result.ok().map(|p| {
-            Arc::new(HistoryPreview {
-                step,
-                rev,
-                project: Arc::new(p),
-            })
-        });
+        self.history_preview = result
+            .ok()
+            .map(|project| Arc::new(HistoryPreview { step, rev, project }));
         self.dirty = true;
         true
     }

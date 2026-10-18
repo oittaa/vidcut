@@ -13,6 +13,7 @@ use vidcut_core::steps::{Group, Span, Step, Steps, groups};
 
 use super::theme;
 use super::workspace::Workspace;
+use crate::live::PlayerId;
 use crate::when;
 
 const ROW: f32 = 24.0;
@@ -38,6 +39,9 @@ pub(super) struct HistoryUi {
     seen: Option<(usize, usize)>,
     generation: u64,
     laid: Option<Laid>,
+    opening: bool,
+    drawn: bool,
+    swallow: bool,
 }
 
 struct Laid {
@@ -97,6 +101,7 @@ impl HistoryUi {
         self.open = true;
         self.keys = true;
         self.follow = true;
+        self.opening = true;
     }
 
     pub(super) fn close(&mut self) {
@@ -187,9 +192,43 @@ impl Workspace {
 
     pub(super) fn history_go(&mut self, step: usize) {
         self.history.cursor = None;
-        if self.steps().is_some_and(|s| s.done != step) {
-            self.send("history.go", json!({ "step": step }));
+        let Some(steps) = self.steps().filter(|s| s.done != step) else {
+            return;
+        };
+        self.send("history.go", json!({ "step": step }));
+        let spans = step
+            .checked_sub(1)
+            .and_then(|i| steps.line.get(i))
+            .map(|s| s.spans.as_slice())
+            .unwrap_or_default();
+        if let (Some(from), Some(to)) = (
+            spans.iter().map(|s| s.from).min(),
+            spans.iter().map(|s| s.to).max(),
+        ) && !self.lower_shows(from, to)
+        {
+            self.seek(PlayerId::Timeline, from, false);
         }
+    }
+
+    pub(super) fn history_swallows(&mut self, ui: &egui::Ui, rect: Rect, drawn: bool) -> bool {
+        let (pressed, down, released, pos) = ui.input(|i| {
+            (
+                i.pointer.any_pressed(),
+                i.pointer.any_down(),
+                i.pointer.any_released(),
+                i.pointer.interact_pos(),
+            )
+        });
+        let h = &mut self.history;
+        if h.swallow && !pressed && !down && !released {
+            h.swallow = false;
+        }
+        if h.drawn && pressed && pos.is_some_and(|p| rect.contains(p)) {
+            h.swallow = true;
+            h.leave();
+        }
+        h.drawn = drawn;
+        h.swallow
     }
 
     pub(super) fn history_keys(&mut self, ctx: &egui::Context) {
@@ -325,7 +364,10 @@ impl Workspace {
                 .then(|| i.pointer.interact_pos())
                 .flatten()
         });
-        if let Some(pos) = clicked {
+        let opening = std::mem::take(&mut self.history.opening);
+        if let Some(pos) = clicked
+            && !opening
+        {
             self.history.keys = inside.contains(pos);
             if !self.history.keys {
                 self.history.leave();

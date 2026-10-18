@@ -1538,3 +1538,62 @@ fn a_click_outside_the_history_ends_its_preview() {
     assert!(gui.h.snapshot().history_preview.is_none());
     gui.quit();
 }
+
+#[test]
+fn a_drag_on_the_timeline_while_a_past_state_shows_only_ends_the_preview() {
+    let mut gui = Gui::new();
+    gui.ask("gui.show", json!({ "panel": "history" })).unwrap();
+    gui.harness.step();
+    gui.key(Key::ArrowUp);
+    wait_for_preview(&mut gui);
+    gui.harness.step();
+    let before = gui.clips("V1");
+    gui.drag(gui.at("V1", 60, 20.0), gui.at("V1", 50, 20.0));
+    gui.settle();
+    assert_eq!(
+        (gui.clips("V1"), gui.h.snapshot().history_preview.is_none()),
+        (before, true)
+    );
+    gui.quit();
+}
+
+#[test]
+fn going_to_a_step_off_screen_brings_the_playhead_to_it() {
+    let mut gui = Gui::new();
+    for _ in 0..4 {
+        gui.call("edit.append", json!({ "media": "m1", "range": "0f..300f" }));
+    }
+    gui.call("player.seek", json!({ "at": 0 }));
+    gui.ask("gui.show", json!({ "panel": "history" })).unwrap();
+    gui.harness.step();
+    gui.key(Key::ArrowUp);
+    gui.key(Key::ArrowUp);
+    gui.key(Key::Enter);
+    gui.settle();
+    assert_eq!(gui.position(), 480);
+    gui.quit();
+}
+
+#[test]
+fn opening_the_history_from_the_top_bar_gives_it_the_keys() {
+    let mut gui = Gui::new();
+    let at = gui.harness.get_by_label("History").rect().center();
+    gui.harness.event(egui::Event::PointerMoved(at));
+    gui.harness.step();
+    for pressed in [true, false] {
+        gui.harness
+            .input_mut()
+            .events
+            .push(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+    }
+    gui.harness.step();
+    gui.harness.step();
+    gui.key(Key::ArrowUp);
+    assert_eq!(wait_for_preview(&mut gui).step, 3);
+    gui.quit();
+}

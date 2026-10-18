@@ -4,7 +4,20 @@ use crate::model::Project;
 use crate::time::{Keyword, RangeSpec, TimeSpec};
 
 pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> String {
-    let d = Words { params, project };
+    describe_at(method, params, project, None)
+}
+
+pub fn describe_at(
+    method: &str,
+    params: &Value,
+    project: Option<&Project>,
+    playhead: Option<i64>,
+) -> String {
+    let d = Words {
+        params,
+        project,
+        playhead,
+    };
     match method {
         "project.set" => format!("Project: {}", d.settings()),
         "project.open" => format!("Open {}", d.file("path")),
@@ -291,6 +304,7 @@ fn frames(n: i64) -> String {
 struct Words<'a> {
     params: &'a Value,
     project: Option<&'a Project>,
+    playhead: Option<i64>,
 }
 
 impl Words<'_> {
@@ -325,14 +339,16 @@ impl Words<'_> {
                 _ => n.to_string(),
             },
             Value::String(s) => match (TimeSpec::parse(s), self.project) {
-                (Ok(TimeSpec::Keyword(Keyword::Playhead)), _) => "the playhead".into(),
                 (Ok(t), Some(p)) => p
-                    .time_context(None)
+                    .time_context(self.playhead)
                     .resolve(&t)
-                    .map_or_else(|_| s.clone(), |f| p.settings.timecode(f)),
-                _ => s.clone(),
+                    .map_or_else(|_| self.unresolved(s), |f| p.settings.timecode(f)),
+                _ => self.unresolved(s),
             },
-            _ => "the playhead".into(),
+            _ => match (self.playhead, self.project) {
+                (Some(f), Some(p)) => p.settings.timecode(f),
+                _ => "the playhead".into(),
+            },
         };
         match &self.params[key] {
             Value::Array(a) if !a.is_empty() => a.iter().map(one).collect::<Vec<_>>().join(", "),
@@ -480,12 +496,32 @@ impl Words<'_> {
         format!(" on {}", self.params["track"].as_str().unwrap_or("V1"))
     }
 
+    fn unresolved(&self, s: &str) -> String {
+        match TimeSpec::parse(s) {
+            Ok(TimeSpec::Keyword(Keyword::Playhead)) => "the playhead".into(),
+            _ => s.to_string(),
+        }
+    }
+
+    fn frame(&self, v: &Value) -> Option<i64> {
+        match v {
+            Value::Number(n) => n.as_i64(),
+            Value::String(s) => self
+                .project?
+                .time_context(self.playhead)
+                .resolve(&TimeSpec::parse(s).ok()?)
+                .ok(),
+            Value::Null => self.playhead,
+            _ => None,
+        }
+    }
+
     fn split(&self) -> String {
         let at = self.time("at");
         let only = self.ids("clips");
         let frames: Option<Vec<i64>> = match &self.params["at"] {
-            Value::Array(a) => a.iter().map(Value::as_i64).collect(),
-            v => v.as_i64().map(|f| vec![f]),
+            Value::Array(a) => a.iter().map(|v| self.frame(v)).collect(),
+            v => self.frame(v).map(|f| vec![f]),
         };
         let (Some(p), Some(frames)) = (self.project, frames) else {
             return match only.as_slice() {

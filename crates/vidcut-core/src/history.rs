@@ -248,6 +248,25 @@ impl HistoryFile {
         self.top_with(tail, end, n, m, label_of)
     }
 
+    pub(crate) fn between(
+        &self,
+        tail: &Tail,
+        end: u64,
+        lo: usize,
+        hi: usize,
+    ) -> std::io::Result<Vec<Entry>> {
+        let d = tail.undo;
+        let text = |t: &str| Ok(t.to_string());
+        let lines: Vec<String> = if hi <= d {
+            let (undo, _) = self.top_with(tail, end, d - lo, 0, text)?;
+            undo.into_iter().skip(d - hi).rev().collect()
+        } else {
+            let (_, redo) = self.top_with(tail, end, 0, hi - d, text)?;
+            redo.into_iter().skip(lo - d).collect()
+        };
+        lines.iter().map(|l| entry_of(l)).collect()
+    }
+
     fn top_with<T>(
         &self,
         tail: &Tail,

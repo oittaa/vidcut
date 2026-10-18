@@ -53,7 +53,7 @@ impl Store {
         Self::open_in(path, &state_dir())
     }
 
-    fn open_in(path: &Path, state: &Path) -> Result<Self> {
+    pub(crate) fn open_in(path: &Path, state: &Path) -> Result<Self> {
         let path = crate::dirs::canonical(path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 Error::not_found(format!("no project file {}", path.display()))
@@ -129,8 +129,16 @@ impl Store {
         )
     }
 
-    pub fn project_at(&self, current: &Project, step: usize) -> Result<Project> {
-        Editor::on_file(current.clone(), self.history_file(), String::new()).project_at(step)
+    pub fn project_at(
+        &self,
+        past: &mut crate::past::Past,
+        current: Project,
+        step: usize,
+    ) -> Result<std::sync::Arc<Project>> {
+        past.project_at(
+            &Editor::on_file(current, self.history_file(), String::new()),
+            step,
+        )
     }
 
     pub fn recover(&self, editor: &mut Editor) -> bool {
