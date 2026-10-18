@@ -209,3 +209,18 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Resolve:** a GIF of one frame comes in as a still only when its frame has no delay; with one, it is a video clip as long as the delay (0.1 s came in as 3 frames at 25 fps). A WebP of one frame is a still whatever its frame's duration (checked on 21.1.1).
 - **vidcut:** a GIF or WebP of one frame is a still ([D38](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:** the delay is how long a viewer shows the picture, not how long a clip it makes, and a clip of a few frames of one picture is a blink that can't be trimmed longer. GIF and WebP then behave alike.
+
+## X40. Subtitle files are read as they are written
+- **Resolve:** Studio 21.1.1, through its scripting API: a Windows-1252 file shows U+FFFD for every accented letter; a WebVTT cue timed without hours is left out; of a TTML file it keeps only the cues of its first region (with none named, it imports nothing) and only the first span of each cue (`Two <span>spans</span> here` becomes "Two spans"); a cue starting before the one before it ends starts at that end instead, and is left out when nothing remains (TOS-HE.srt loses its cue 12). `{\an8}` shows as text; WebVTT `line`, `align` and color classes are ignored.
+- **vidcut:** it reads UTF-8, UTF-16 and Windows-1252, WebVTT times without hours, every TTML cue, span and region, and keeps cues that overlap. `{\an8}`, WebVTT `line` and a TTML region's place put a cue at the top, middle or bottom; italic, bold, underline and colors come along from all three formats.
+- **Why:** an imported subtitle file must not lose text unnoticed.
+
+## X41. Subtitle files go straight onto a track, placed by their timecode
+- **Resolve:** a subtitle file is a Media Pool clip first. Insert Selected Subtitles to Timeline Using Timecode places its cues by timecode and inserts nothing from a file timed from zero; dragging it places its first cue where it is dropped (p. 1230).
+- **vidcut:** `subtitles.import` puts the cues on a new subtitle track, named after the file, or on one named. A file whose cues all start at or after the timeline's start timecode, or after 01:00:00:00 on a timeline starting at zero and shorter than an hour, in the file's own time base (real time or timecode labels, [D58](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), is read as timecode: in real time at 23.976 the hour is `01:00:03.600`, where Resolve renders a cue on the first frame of a timeline starting at 01:00:00:00 (`01:00:03.599`); otherwise times count from the timeline's start. `timecode`, `time_base` and `at` override that.
+- **Why:** one step, the same from a script, and both kinds of file land where they belong.
+
+## X42. Exported timelines keep their subtitles
+- **Resolve:** its OpenTimelineIO, FCPXML, FCP 7 XML, EDL and CSV exports leave the subtitle tracks out (Studio 21.1.1); a subtitle file in an OpenTimelineIO file it imports makes the import fail.
+- **vidcut:** an OpenTimelineIO export writes an SRT beside it for each subtitle track with cues, in its timecode, ready for Insert Selected Subtitles to Timeline Using Timecode; a whole timeline's file also holds the cues for vidcut. `export.start` writes subtitle files beside media when asked (`subtitles`).
+- **Why:** subtitles made in vidcut should reach the editor that finishes the program.

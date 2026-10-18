@@ -1,6 +1,6 @@
 # Project model
 
-A project is one `Project` value in vidcut-core: settings, a media pool, tracks of clips, marks, markers and bins. It is saved as one `.vidcut` JSON file and changed only by the editor ([requests](requests.md)). This page covers the types, time, ids, the file, OpenTimelineIO and preferences.
+A project is one `Project` value in vidcut-core: settings, a media pool, tracks of clips, subtitle tracks of cues, marks, markers and bins. It is saved as one `.vidcut` JSON file and changed only by the editor ([requests](requests.md)). This page covers the types, time, ids, the file, OpenTimelineIO and preferences.
 
 ```mermaid
 classDiagram
@@ -61,10 +61,22 @@ classDiagram
   class Kept {
     OTIO JSON as read
   }
+  class SubtitleTrack {
+    id
+    name, language
+    shown, locked
+  }
+  class Cue {
+    id
+    start, duration
+    text, place
+  }
   Project *-- Settings : settings
   Project *-- "*" Media : media
   Project *-- "*" Track : tracks
   Project *-- "*" Marker : markers
+  Project *-- "*" SubtitleTrack : subtitles
+  SubtitleTrack *-- "*" Cue : cues
   Project *-- Marks : marks
   Media *-- Marks : source marks
   Media *-- "0..1" Proxy : proxy
@@ -96,7 +108,9 @@ Requests take times as strings that parse into a `TimeSpec`: frames ("450f", or 
 | clip | c1, c2 … | `Project::alloc_clip_id` |
 | marker | k1, k2 … | `Project::alloc_marker_id` |
 | carried transition | t1, t2 … | `Project::alloc_transition_id` |
+| cue | q1, q2 … | `Project::alloc_cue_id` |
 | track | V1 … then A1 …, by place | `ops::tracks`; removing one renumbers the rest |
+| subtitle track | S1 …, by place | `ops::subtitles::add_track`; removing one renumbers the rest |
 
 The counters live in `NextIds`. Each alloc call adds one, and undo restores `next_id` with the project, so an id from an undone edit can be used again. `ops::MAIN`, V1, always exists.
 
@@ -111,6 +125,14 @@ The counters live in `NextIds`. Each alloc call adds one, and undo restores `nex
 Two stamps identify a media file. `Media::size` and `Media::mtime_ns`, read when it was probed, make its `Origin` (`fingerprint::origin`). The origin names and stamps every cache file made from the media ([analysis](analysis.md)), and a proxy made from another size or time is stale (`Media::fresh_proxy`). A proxy's file is named by the source's content instead (`paths::proxy_origin`), so it has the same name on every computer. A proxy whose file is gone is lost (`Env::proxy_present`): automatic proxies make it again as the project names it. `Media::fingerprint` is a SHA-256 of the content (`fingerprint::file`): the whole of a file no larger than `WHOLE`, otherwise one `PIECE` from the start, the middle and the end; an image sequence is three pictures (`fingerprint::pictures`).
 
 A file is missing when `Env::present` says so; a path absolute only on the other kind of system counts as missing. `media.relink` looks for missing files by name in `search` folders and relinks a candidate only if its size, streams, duration, timecode and fingerprint match. A file given as `path` is used either way.
+
+## Subtitles
+
+`Project::subtitles` holds the subtitle tracks, S1 nearest the video; one is `shown` at a time. A `Cue` spans whole frames like a clip; its `text` is lines with `<i>`, `<b>`, `<u>` and `<font color>` around words, and `Place` says where on the picture it goes. Cues of a track are sorted by start and may overlap. `ops::subtitles` holds the edits, and `editor::resolve_cue` reads a cue reference: its id, or a track and a time (S1@15s).
+
+**Cues follow Track 1** ([spec D57](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `follow::follow`, which moves the clips of the other tracks after an edit on Track 1, also calls `ops::subtitles::remap` with its frame mapping, and `ops::delete_range` with the range's. `remap` maps each frame of a cue and the frame after it: a frame survives when it has a place and the next frame doesn't land on the same one (a deleted frame lands where the next kept one does, or nowhere). The surviving frames, in runs, are the cue's new spans; the first keeps its id, the others get new ones. A locked subtitle track is left alone.
+
+**Files.** `subtitles::parse` decodes the bytes (`Encoding`: a BOM, else UTF-8, else UTF-16 by its zero bytes, else Windows-1252), tells the format by its first lines, then by the extension, and reads it: SRT and WebVTT line by line (a WebVTT STYLE block's `::cue` colors too), TTML with roxmltree: its styles and regions resolved down to each span, a region's style references followed, its time base (media, or smpte with its drop mode, counted as TTML1's appendix N.3 does) and its language (xml:lang), which the new track takes. Each format's markup becomes the cue markup, and other tags go. `ops::subtitles::import` turns each time into the nearest frame in the file's time base (`SubtitleTimeBase`: real time, or timecode labels when the times sit on their grid), then takes off the timeline's start timecode, or 01:00:00:00, in frames when the file is in timecode ([deviation X41](../deviations.md#x41-subtitle-files-go-straight-onto-a-track-placed-by-their-timecode)). `ops::subtitles::collect` gives a track's cues in a range in seconds, from zero or in timecode (`subtitles::origin`: the start timecode's frames at the project's rate, [spec D58](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), and `subtitles::write` writes them as SRT, WebVTT (colors other than its eight named ones as STYLE classes) or IMSC1; `subtitles.export` writes the file through a partial one beside it (`Env::write_file`). `subtitles::beside` makes the files an export writes beside its output ([export](export.md#subtitle-files)).
 
 ## OpenTimelineIO
 
@@ -141,7 +163,7 @@ flowchart LR
 | Metadata | Holds |
 |---|---|
 | `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `source_in` and `skip` for stills and speeds, which the source range rounds |
-| `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`) |
+| `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO`, which other editors read | `Link Group ID`, `Channels`, a clip volume effect, and `Media In` on reversed clips; `Locked`, `SoloOn` and `Audio Type` on tracks; `Note` on markers |
 
 `otio::import` also takes `Clip.1`, float rates, snapped (`rational`), and media named by a `file` URL, a plain, Windows or relative path, or an offline `MissingReference`'s `Media Url` (`locate` returns no path for any other scheme). Video tracks become V1, V2, …; an audio clip lining up with a video clip of the same media (and link group) becomes its sound, others go on A1, A2, … Names other than the defaults (`default_track_name`) name tracks; markers on clips, tracks and the stack become timeline markers. Nested tracks, unknown items, clips without media and overlapping clips are left out with a warning. Media are looked for at the path, by its last parts beside the file (`MediaRef::paths`), then by name in `search` and the bundle's folder (`find_media`), a compound clip's the same way. `edit.decompose` first takes the media the compound clip already plays (`otio::same_media`: by path, then by a file name no other of them has), for its clips and the compound clips among them.
@@ -181,6 +203,9 @@ Preferences are not in the project. They live in `preferences.toml` in the confi
 - `crates/vidcut-core/src/otio.rs`
 - `crates/vidcut-core/src/otio/`
 - `crates/vidcut-core/src/editor.rs`
+- `crates/vidcut-core/src/subtitles.rs`
+- `crates/vidcut-core/src/subtitles/`
+- `crates/vidcut-core/src/ops/subtitles.rs`
 - `crates/vidcut-core/src/preferences.rs`
 - `crates/vidcut/src/bundle.rs`
 - `crates/vidcut/src/export.rs`

@@ -3914,6 +3914,7 @@ dependencies = [
 name = "vidcut-core"
 version = "0.1.0"
 dependencies = [
+ "roxmltree",
  "schemars",
  "serde",
  "serde_json",

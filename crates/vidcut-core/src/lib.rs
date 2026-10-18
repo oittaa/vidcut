@@ -20,6 +20,7 @@ pub mod sequence;
 pub mod shortcuts;
 pub mod steps;
 pub mod store;
+pub mod subtitles;
 pub mod time;
 pub mod validate;
 

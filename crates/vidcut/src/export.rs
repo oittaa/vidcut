@@ -230,6 +230,15 @@ pub fn timeline(
     if b <= a {
         return Err(Error::invalid("nothing to export: the range is empty"));
     }
+    let subtitles = vidcut_core::subtitles::beside(
+        p,
+        &params.output,
+        (a, b),
+        params.subtitles.as_deref(),
+        params.subtitle_format,
+        true,
+    )?;
+    refuse_existing(&subtitles, params.overwrite)?;
     let ids = otio::used_media(p, span);
     let items = match format {
         TimelineFormat::Otio => Vec::new(),
@@ -253,6 +262,7 @@ pub fn timeline(
         "path": params.output, "format": format.name(), "range": [a, b], "frames": b - a,
         "clips": clips,
     });
+    summary["subtitles"] = subtitle_files(&subtitles);
     if let TimelineFormat::Bundle(_) = format {
         summary["media"] = json!(items.len());
         summary["files"] = json!(items.iter().map(|i| i.files.len()).sum::<usize>());
@@ -281,7 +291,56 @@ pub fn timeline(
             writing.progress,
         )?,
     }
+    write_subtitles(&subtitles)?;
     Ok(json!({ "outputs": [summary] }))
+}
+
+pub fn refuse_existing(files: &[vidcut_core::subtitles::Beside], overwrite: bool) -> Result<()> {
+    match files.iter().find(|f| f.path.exists()) {
+        Some(f) if !overwrite => Err(Error::invalid(format!(
+            "{} exists; pass overwrite to replace it",
+            f.path.display()
+        ))),
+        _ => Ok(()),
+    }
+}
+
+pub fn subtitle_files(files: &[vidcut_core::subtitles::Beside]) -> Value {
+    json!(
+        files
+            .iter()
+            .map(|f| json!({ "path": f.path, "track": f.track, "cues": f.cues }))
+            .collect::<Vec<_>>()
+    )
+}
+
+pub fn write_subtitles(files: &[vidcut_core::subtitles::Beside]) -> Result<()> {
+    for f in files {
+        let part = vidcut_av::export::partial_path(&f.path);
+        std::fs::write(&part, &f.text)
+            .and_then(|()| std::fs::rename(&part, &f.path))
+            .map_err(|e| Error::usage(format!("{}: {e}", f.path.display())))?;
+    }
+    Ok(())
+}
+
+pub fn subtitles_beside(
+    p: &Project,
+    prepared: &Prepared,
+    params: &ExportParams,
+) -> Result<Vec<vidcut_core::subtitles::Beside>> {
+    let mut all = Vec::new();
+    for o in &prepared.outputs {
+        all.extend(vidcut_core::subtitles::beside(
+            p,
+            &o.path,
+            o.plan.range,
+            params.subtitles.as_deref(),
+            params.subtitle_format,
+            false,
+        )?);
+    }
+    Ok(all)
 }
 
 fn preset(name: &str) -> Result<Preset> {

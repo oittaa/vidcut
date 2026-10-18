@@ -13,14 +13,14 @@ use crate::folder::Folder;
 use crate::history::HistoryFile;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marks, Media,
-    MediaInfo, Project, Proxy, Track, Transition, VideoInfo,
+    MediaInfo, Project, Proxy, Track, TrackKind, Transition, VideoInfo,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
 use crate::render::RenderPlan;
 use crate::request::{
-    Changes, Client, ClientKind, ClipRef, Envelope, ImportMode, OneOrMany, ProjectSet, Request,
-    Response, SourceParams,
+    Changes, Client, ClientKind, ClipRef, Envelope, ImportMode, NewTrack, OneOrMany, ProjectSet,
+    Request, Response, SourceParams,
 };
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
 use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode};
@@ -97,6 +97,30 @@ pub trait Env {
 
     fn read_folder(&self, dir: &Path) -> Result<Folder> {
         crate::folder::read(dir)
+    }
+
+    fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
+        std::fs::read(path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => Error::not_found(format!("{}: {e}", path.display())),
+            _ => Error::usage(format!("{}: {e}", path.display())),
+        })
+    }
+
+    fn write_file(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+        let name = path
+            .file_name()
+            .map_or_else(|| "export".into(), |n| n.to_string_lossy().into_owned());
+        let part = path.with_file_name(format!(".{name}.part"));
+        std::fs::write(&part, bytes)
+            .and_then(|()| std::fs::rename(&part, path))
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&part);
+                Error::new(ErrorCode::Export, format!("{}: {e}", path.display()))
+            })
+    }
+
+    fn exists(&self, path: &Path) -> bool {
+        path.exists()
     }
 
     fn present(&self, m: &Media) -> bool {
@@ -650,12 +674,19 @@ impl Editor {
             });
         }
         if !request.is_mutation() {
-            let result = query(&self.project, &Labels::default(), &request, env, playhead)?;
+            let result = query(
+                &self.project,
+                &Labels::default(),
+                &request,
+                env,
+                playhead,
+                dry_run,
+            )?;
             return Ok(Response {
                 rev: self.project.rev,
                 changes: Changes::default(),
                 result,
-                dry_run: false,
+                dry_run: dry_run && matches!(request, Request::SubtitlesExport { .. }),
                 via: String::new(),
                 warnings: Vec::new(),
             });
@@ -1139,6 +1170,15 @@ fn what(p: &Project, path: &[String]) -> String {
         if p.markers.iter().any(|k| &k.id == part) || p.track(part).is_some() {
             return part.clone();
         }
+        if let Some(c) = p.cue(part) {
+            return format!(
+                "\"{}\"",
+                crate::subtitles::plain(&c.text).replace('\n', " ")
+            );
+        }
+        if let Some(t) = p.subtitle_track(part) {
+            return t.display_name();
+        }
     }
     path.last().cloned().unwrap_or_default()
 }
@@ -1453,6 +1493,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         Media(&'a Media),
         Clip(&'a str, &'a Clip),
         Marker(&'a crate::model::Marker),
+        Cue(&'a str, &'a crate::model::Cue),
     }
     fn index(p: &Project) -> HashMap<&str, Named<'_>> {
         let mut m = HashMap::new();
@@ -1466,6 +1507,11 @@ fn diff(before: &Project, after: &Project) -> Changes {
         }
         for k in &p.markers {
             m.insert(k.id.as_str(), Named::Marker(k));
+        }
+        for t in &p.subtitles {
+            for c in &t.cues {
+                m.insert(c.id.as_str(), Named::Cue(&t.id, c));
+            }
         }
         m
     }
@@ -1541,6 +1587,25 @@ pub fn resolve_clip(p: &Project, r: &ClipRef, playhead: Option<i64>) -> Result<S
 
 fn resolve_clips(p: &Project, refs: &[ClipRef], playhead: Option<i64>) -> Result<Vec<String>> {
     refs.iter().map(|r| resolve_clip(p, r, playhead)).collect()
+}
+
+pub fn resolve_cue(p: &Project, r: &str, playhead: Option<i64>) -> Result<String> {
+    if let Some((track, at)) = r.split_once('@') {
+        let t = p
+            .subtitle_track(track)
+            .ok_or_else(|| Error::not_found(format!("no subtitle track {track}")))?;
+        let frame = resolve(p, &TimeSpec::parse(at)?, playhead)?;
+        let ci = ops::subtitles::cue_at(t, frame)
+            .ok_or_else(|| Error::not_found(format!("no cue on {track} at frame {frame}")))?;
+        return Ok(t.cues[ci].id.clone());
+    }
+    p.cue(r)
+        .map(|c| c.id.clone())
+        .ok_or_else(|| Error::not_found(format!("no cue {r}")))
+}
+
+fn resolve_cues(p: &Project, refs: &[String], playhead: Option<i64>) -> Result<Vec<String>> {
+    refs.iter().map(|r| resolve_cue(p, r, playhead)).collect()
 }
 
 pub fn media_context(p: &Project, media: &Media, playhead: Option<i64>) -> TimeContext {
@@ -2334,11 +2399,45 @@ fn mutate(
         Request::TrackSet {
             track,
             locked,
+            name,
+            shown,
+            language,
+            muted: None,
+            solo: None,
+            volume_db: None,
+            video_enabled: None,
+        } if track.starts_with('S') => {
+            let props = ops::subtitles::TrackProps {
+                locked: *locked,
+                name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
+                shown: *shown,
+                language: language
+                    .as_ref()
+                    .map(|l| (!l.trim().is_empty()).then(|| l.trim().to_string())),
+            };
+            ops::subtitles::set_track(p, track, &props)?;
+            Value::Null
+        }
+        Request::TrackSet { track, .. } if track.starts_with('S') => {
+            return Err(Error::usage(
+                "a subtitle track takes locked, name, shown and language",
+            ));
+        }
+        Request::TrackSet { shown: Some(_), .. }
+        | Request::TrackSet {
+            language: Some(_), ..
+        } => {
+            return Err(Error::usage("shown and language are a subtitle track's"));
+        }
+        Request::TrackSet {
+            track,
+            locked,
             muted,
             solo,
             volume_db,
             video_enabled,
             name,
+            ..
         } => {
             let props = ops::TrackProps {
                 locked: *locked,
@@ -2355,8 +2454,18 @@ fn mutate(
             if !(1..=16).contains(count) {
                 return Err(Error::usage("count must be 1..16"));
             }
-            let ids: Vec<String> = (0..*count).map(|_| ops::add_track(p, *kind)).collect();
+            let ids: Vec<String> = (0..*count)
+                .map(|_| match kind {
+                    NewTrack::Video => ops::add_track(p, TrackKind::Video),
+                    NewTrack::Audio => ops::add_track(p, TrackKind::Audio),
+                    NewTrack::Subtitle => ops::subtitles::add_track(p, None),
+                })
+                .collect();
             json!({ "tracks": ids })
+        }
+        Request::TrackRemove { track, force } if track.starts_with('S') => {
+            ops::subtitles::remove_track(p, track, *force)?;
+            Value::Null
         }
         Request::TrackRemove { track, force } => {
             ops::remove_track(p, track, *force)?;
@@ -2365,6 +2474,105 @@ fn mutate(
         Request::MarkersRemove { marker } => {
             ops::remove_marker(p, marker)?;
             Value::Null
+        }
+        Request::SubtitlesAdd {
+            text,
+            at,
+            end,
+            duration,
+            track,
+            place,
+        } => {
+            let start = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => need(playhead, "at")?,
+            };
+            let end = end.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
+            let duration = duration.as_ref().map(|d| length(p, d)).transpose()?;
+            let ti = ops::subtitles::target(p, track.as_deref())?;
+            let id = ops::subtitles::add_cue(p, ti, start, end, duration, text, *place)?;
+            json!({ "cue": id, "track": p.subtitles[ti].id })
+        }
+        Request::SubtitlesSet {
+            cue,
+            text,
+            start,
+            end,
+            place,
+        } => {
+            let id = resolve_cue(p, cue, playhead)?;
+            let start = start
+                .as_ref()
+                .map(|t| resolve(p, t, playhead))
+                .transpose()?;
+            let end = end.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
+            ops::subtitles::set_cue(p, &id, text.as_deref(), start, end, *place)?;
+            Value::Null
+        }
+        Request::SubtitlesMove {
+            cues,
+            by,
+            to,
+            track,
+        } => {
+            let ids = resolve_cues(p, &cues.to_vec(), playhead)?;
+            let by = by.as_ref().map(|d| length(p, d)).transpose()?;
+            let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
+            ops::subtitles::move_cues(p, &ids, by, to, track.as_deref())?;
+            Value::Null
+        }
+        Request::SubtitlesRemove { cues } => {
+            let ids = resolve_cues(p, &cues.to_vec(), playhead)?;
+            ops::subtitles::remove_cues(p, &ids)?;
+            Value::Null
+        }
+        Request::SubtitlesSplit { cue, at } => {
+            let id = resolve_cue(p, cue, playhead)?;
+            let at = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => need(playhead, "at")?,
+            };
+            json!({ "cue": ops::subtitles::split_cue(p, &id, at)? })
+        }
+        Request::SubtitlesJoin { cues } => {
+            let ids = resolve_cues(p, &cues.to_vec(), playhead)?;
+            json!({ "cue": ops::subtitles::join_cues(p, &ids)? })
+        }
+        Request::SubtitlesImport {
+            path,
+            track,
+            at,
+            timecode,
+            time_base,
+        } => {
+            let bytes = env.read_file(path)?;
+            let (read, format, encoding) = crate::subtitles::parse(&bytes, path)?;
+            let at = at.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
+            let name = path
+                .file_stem()
+                .map(|n| n.to_string_lossy().into_owned())
+                .filter(|n| !n.is_empty());
+            let mut warnings = read.warnings.clone();
+            let placed =
+                ops::subtitles::import(p, read, track.as_deref(), name, at, *timecode, *time_base)?;
+            if placed.before_zero > 0 {
+                warnings.push(format!(
+                    "{} cue(s) end before the timeline starts, left out",
+                    placed.before_zero
+                ));
+            }
+            let fps = p.settings.fps.as_f64();
+            json!({
+                "track": placed.track,
+                "cues": placed.cues,
+                "format": format,
+                "encoding": encoding.name(),
+                "time_base": placed.time_base,
+                "time_base_why": placed.why,
+                "moved_by": format!("{:+.3}s", 0.0 - placed.offset as f64 / fps),
+                "moved_by_frames": -placed.offset,
+                "warnings": warnings,
+            })
         }
         Request::TimelineImport {
             path,
@@ -2431,7 +2639,7 @@ fn mutate(
                 let r = if cmd.is_mutation() {
                     mutate(p, cmd, env, playhead, dry_run)
                 } else {
-                    query(p, &Labels::default(), cmd, env, playhead)
+                    query(p, &Labels::default(), cmd, env, playhead, dry_run)
                 };
                 results.push(r.map_err(|e| {
                     Error::new(
@@ -3833,6 +4041,7 @@ pub fn open_otio(
     p.media = meta.media;
     p.bins = meta.bins;
     p.tape_marks = meta.tape_marks;
+    p.subtitles = meta.subtitles;
     p.settings.start_tc = t.start_tc;
     let mut warnings = t.warnings.clone();
     let mut ids = MediaIds::new();
@@ -4171,6 +4380,7 @@ pub fn query(
     request: &Request,
     env: &dyn Env,
     playhead: Option<i64>,
+    dry_run: bool,
 ) -> Result<Value> {
     let tc = |f: i64| p.settings.timecode(f);
     Ok(match request {
@@ -4187,6 +4397,9 @@ pub fn query(
             "duration_tc": tc(p.end()),
             "marks": p.marks,
             "markers": p.markers.len(),
+            "subtitles": p.subtitles.iter().map(|t| json!({
+                "track": t.id, "name": t.display_name(), "cues": t.cues.len(), "shown": t.shown,
+            })).collect::<Vec<_>>(),
             "bins": p.bins,
             "tape_marks": p.tape_marks,
         }),
@@ -4268,9 +4481,100 @@ pub fn query(
                     }
                     v
                 })
+                .chain(p.subtitles.iter().map(|t| {
+                    json!({
+                        "id": t.id, "kind": "subtitle", "cues": t.cues.len(),
+                        "locked": t.locked, "shown": t.shown, "name": t.display_name(),
+                        "language": t.language,
+                    })
+                }))
                 .collect::<Vec<_>>()
         ),
         Request::BinsList {} => json!(p.bins),
+        Request::SubtitlesList { track, range } => {
+            let (a, b) = match range {
+                Some(r) => ctx(p, playhead).range(r)?,
+                None => (0, i64::MAX),
+            };
+            let tracks: Vec<&crate::model::SubtitleTrack> = match track {
+                Some(id) => vec![
+                    p.subtitle_track(id)
+                        .ok_or_else(|| Error::not_found(format!("no subtitle track {id}")))?,
+                ],
+                None => p.subtitles.iter().collect(),
+            };
+            json!(
+                tracks
+                    .iter()
+                    .map(|t| json!({
+                        "track": t.id,
+                        "name": t.display_name(),
+                        "language": t.language,
+                        "shown": t.shown,
+                        "locked": t.locked,
+                        "cues": t.cues
+                            .iter()
+                            .filter(|c| c.start < b && c.end() > a)
+                            .map(|c| {
+                                let mut v = serde_json::to_value(c).unwrap_or_default();
+                                v["end"] = json!(c.end());
+                                v["start_tc"] = json!(tc(c.start));
+                                v["end_tc"] = json!(tc(c.end()));
+                                v
+                            })
+                            .collect::<Vec<_>>(),
+                    }))
+                    .collect::<Vec<_>>()
+            )
+        }
+        Request::SubtitlesExport {
+            out,
+            track,
+            format,
+            range,
+            timecode,
+            overwrite,
+        } => {
+            let ti = match track {
+                Some(id) => p
+                    .subtitle_index(id)
+                    .ok_or_else(|| Error::not_found(format!("no subtitle track {id}")))?,
+                None => ops::subtitles::shown(p)?,
+            };
+            let format = format
+                .or_else(|| crate::subtitles::format_of(out))
+                .ok_or_else(|| {
+                    Error::usage(format!(
+                        "{}: name a format (srt, vtt, ttml) or use one of their extensions",
+                        out.display()
+                    ))
+                })?;
+            if !overwrite && env.exists(out) {
+                return Err(Error::invalid(format!(
+                    "{} exists; pass overwrite to replace it",
+                    out.display()
+                )));
+            }
+            let span = match range {
+                Some(r) => ctx(p, playhead).range(r)?,
+                None => (0, i64::MAX),
+            };
+            let cues = ops::subtitles::collect(p, ti, span, timecode.unwrap_or(true));
+            let t = &p.subtitles[ti];
+            let text = crate::subtitles::write(
+                &cues,
+                format,
+                &crate::subtitles::Writing {
+                    language: t.language.as_deref(),
+                    frame_rate: Some(p.settings.fps.as_f64()),
+                    positions: true,
+                },
+            );
+            if !dry_run {
+                env.write_file(out, text.as_bytes())?;
+            }
+            json!({ "path": out, "track": t.id, "format": format, "cues": cues.len() })
+        }
         Request::MarkersList {} => json!(
             p.markers
                 .iter()
