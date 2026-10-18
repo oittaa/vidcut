@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -44,6 +44,10 @@ impl AudioSource {
 
     pub fn fail(&self, why: String) {
         *self.failure.lock().unwrap_or_else(|e| e.into_inner()) = Some(why);
+    }
+
+    fn recover(&self) {
+        *self.failure.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 
@@ -187,11 +191,16 @@ fn distinct_names(devices: &mut [OutputDevice], details: &[Option<String>]) {
     }
 }
 
+const RETIRE: Duration = Duration::from_millis(500);
+const RETRY: Duration = Duration::from_millis(250);
+const RETRIES: u32 = 8;
+const NO_TURN: u64 = u64::MAX;
+
 #[derive(Default)]
 pub struct CpalOutput {
     device: Option<String>,
     plays_on: PlaysOn,
-    stop: Option<mpsc::Sender<()>>,
+    events: Option<mpsc::Sender<Event>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -204,7 +213,7 @@ impl CpalOutput {
         Self {
             device,
             plays_on: PlaysOn::Default,
-            stop: None,
+            events: None,
             thread: None,
         }
     }
@@ -212,35 +221,48 @@ impl CpalOutput {
 
 impl AudioOutput for CpalOutput {
     fn start(&mut self, source: AudioSource) -> Result<()> {
-        let (stop, stopped) = mpsc::channel::<()>();
+        let (events, received) = mpsc::channel::<Event>();
         let (ready, opened) = mpsc::channel::<Result<PlaysOn>>();
         let device = self.device.clone();
+        let raise = events.clone();
         let thread = std::thread::Builder::new()
             .name("vidcut-audio-out".into())
             .spawn(move || {
-                let (stream, plays_on) = match open_stream(source, device.as_deref()) {
+                let turns = Arc::new(Turns::new());
+                let open =
+                    |turn, device: Option<&str>| open_stream(&source, &turns, turn, device, &raise);
+                let (stream, plays_on, _) = match open(0, device.as_deref()) {
                     Ok(s) => s,
                     Err(e) => {
                         let _ = ready.send(Err(e));
                         return;
                     }
                 };
-                let _ = ready.send(Ok(plays_on));
-                let _ = stopped.recv();
-                drop(stream);
+                if ready.send(Ok(plays_on)).is_err() {
+                    return;
+                }
+                follow(stream, &turns, &received, &source, |turn| {
+                    open(turn, None).map(|(stream, _, name)| {
+                        crate::debug!("audio", "the default output moved: playing on {name}");
+                        stream
+                    })
+                });
             })
             .map_err(Error::Io)?;
         match opened.recv_timeout(Duration::from_secs(5)) {
             Ok(Ok(plays_on)) => {
                 self.plays_on = plays_on;
-                self.stop = Some(stop);
+                self.events = Some(events);
                 self.thread = Some(thread);
                 Ok(())
             }
             Ok(Err(e)) => Err(e),
-            Err(_) => Err(Error::Invalid(
-                "the audio device didn't open within 5 s".into(),
-            )),
+            Err(_) => {
+                let _ = events.send(Event::Stop);
+                Err(Error::Invalid(
+                    "the audio device didn't open within 5 s".into(),
+                ))
+            }
         }
     }
 
@@ -251,10 +273,164 @@ impl AudioOutput for CpalOutput {
 
 impl Drop for CpalOutput {
     fn drop(&mut self) {
-        self.stop.take();
+        if let Some(events) = self.events.take() {
+            let _ = events.send(Event::Stop);
+        }
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
+    }
+}
+
+enum Event {
+    Stop,
+    Error {
+        turn: u64,
+        answer: Answer,
+        why: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Answer {
+    Nothing,
+    Follow,
+    Fail,
+}
+
+fn answer(kind: cpal::ErrorKind, on: &PlaysOn) -> Answer {
+    use cpal::ErrorKind as K;
+    match kind {
+        K::Xrun | K::DeviceChanged | K::RealtimeDenied => Answer::Nothing,
+        K::StreamInvalidated | K::DeviceNotAvailable if !matches!(on, PlaysOn::Chosen(_)) => {
+            Answer::Follow
+        }
+        _ => Answer::Fail,
+    }
+}
+
+fn follow<S>(
+    first: S,
+    turns: &Turns,
+    events: &mpsc::Receiver<Event>,
+    source: &AudioSource,
+    mut open: impl FnMut(u64) -> Result<S>,
+) {
+    use mpsc::RecvTimeoutError as Gone;
+    let (mut playing, mut turn) = (first, 0);
+    let mut retiring: Option<(S, Instant)> = None;
+    let mut retry: Option<(Instant, u32)> = None;
+    loop {
+        let wake = retiring
+            .as_ref()
+            .map(|r| r.1)
+            .into_iter()
+            .chain(retry.map(|r| r.0))
+            .min();
+        let event = match wake {
+            Some(at) => events.recv_timeout(at.saturating_duration_since(Instant::now())),
+            None => events.recv().map_err(|_| Gone::Disconnected),
+        };
+        let now = Instant::now();
+        let tries = match event {
+            Ok(Event::Stop) | Err(Gone::Disconnected) => return,
+            Err(Gone::Timeout) => {
+                if retiring.as_ref().is_some_and(|r| r.1 <= now) {
+                    retiring = None;
+                    if let Some(gap) = turns.gap(turn) {
+                        crate::debug!(
+                            "audio",
+                            "the new output's sound began {gap:+.0} ms after the old one's ended"
+                        );
+                    }
+                }
+                match retry {
+                    Some((at, tries)) if at <= now => tries,
+                    _ => continue,
+                }
+            }
+            Ok(Event::Error { turn: of, .. }) if of != turn => continue,
+            Ok(Event::Error {
+                answer: Answer::Nothing,
+                ..
+            }) => continue,
+            Ok(Event::Error {
+                answer: Answer::Follow,
+                ..
+            }) if turns.took(turn) => 0,
+            Ok(Event::Error { why, .. }) => {
+                source.fail(why);
+                continue;
+            }
+        };
+        retry = None;
+        match open(turn + 1) {
+            Ok(stream) => {
+                turn += 1;
+                turns.switch(turn);
+                source.recover();
+                retiring = Some((std::mem::replace(&mut playing, stream), now + RETIRE));
+            }
+            Err(_) if tries < RETRIES => retry = Some((now + RETRY, tries + 1)),
+            Err(e) => source.fail(e.to_string()),
+        }
+    }
+}
+
+struct Turns {
+    base: Instant,
+    active: AtomicU64,
+    filling: AtomicBool,
+    last: AtomicU64,
+    until: AtomicI64,
+    gap: AtomicI64,
+}
+
+impl Turns {
+    fn new() -> Self {
+        Self {
+            base: Instant::now(),
+            active: AtomicU64::new(0),
+            filling: AtomicBool::new(false),
+            last: AtomicU64::new(NO_TURN),
+            until: AtomicI64::new(0),
+            gap: AtomicI64::new(0),
+        }
+    }
+
+    fn fill(&self, turn: u64, source: &AudioSource, out: &mut [f32], heard_at: Instant) {
+        if self.active.load(Ordering::Acquire) != turn || self.filling.swap(true, Ordering::Acquire)
+        {
+            out.fill(0.0);
+            return;
+        }
+        if self.active.load(Ordering::Acquire) == turn {
+            source.fill(out, heard_at);
+            let from = heard_at.saturating_duration_since(self.base).as_nanos() as i64;
+            let frames = (out.len() / usize::from(source.channels().max(1))) as i64;
+            let lasts = frames * 1_000_000_000 / i64::from(source.rate().max(1));
+            if self.last.swap(turn, Ordering::Relaxed) != turn {
+                let until = self.until.load(Ordering::Relaxed);
+                self.gap.store(from - until, Ordering::Relaxed);
+            }
+            self.until.store(from + lasts, Ordering::Relaxed);
+        } else {
+            out.fill(0.0);
+        }
+        self.filling.store(false, Ordering::Release);
+    }
+
+    fn switch(&self, turn: u64) {
+        self.active.store(turn, Ordering::Release);
+    }
+
+    fn took(&self, turn: u64) -> bool {
+        self.last.load(Ordering::Relaxed) == turn
+    }
+
+    fn gap(&self, turn: u64) -> Option<f64> {
+        self.took(turn)
+            .then(|| self.gap.load(Ordering::Relaxed) as f64 / 1e6)
     }
 }
 
@@ -273,7 +449,13 @@ fn output_by_id(host: &cpal::Host, id: &str) -> Option<cpal::Device> {
         .find(|d| d.id().is_ok_and(|d| d.to_string() == id))
 }
 
-fn open_stream(source: AudioSource, device: Option<&str>) -> Result<(cpal::Stream, PlaysOn)> {
+fn open_stream(
+    source: &AudioSource,
+    turns: &Arc<Turns>,
+    turn: u64,
+    device: Option<&str>,
+    raise: &mpsc::Sender<Event>,
+) -> Result<(cpal::Stream, PlaysOn, String)> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     let host = cpal::default_host();
     let default = || {
@@ -292,18 +474,21 @@ fn open_stream(source: AudioSource, device: Option<&str>) -> Result<(cpal::Strea
         sample_rate: source.rate(),
         buffer_size: cpal::BufferSize::Default,
     };
-    let failed = source.clone();
+    let (filled, turns) = (source.clone(), turns.clone());
+    let (raise, on) = (raise.clone(), plays_on.clone());
     let stream = device
         .build_output_stream::<f32, _, _>(
             config,
             move |out, info| {
                 let t = info.timestamp();
                 let latency = t.playback.duration_since(t.callback);
-                source.fill(out, Instant::now() + latency);
+                turns.fill(turn, &filled, out, Instant::now() + latency);
             },
             move |e| {
-                if fails(e.kind()) {
-                    failed.fail(e.to_string());
+                let answer = answer(e.kind(), &on);
+                if answer != Answer::Nothing {
+                    let why = e.to_string();
+                    let _ = raise.send(Event::Error { turn, answer, why });
                 }
             },
             None,
@@ -317,12 +502,10 @@ fn open_stream(source: AudioSource, device: Option<&str>) -> Result<(cpal::Strea
     stream
         .play()
         .map_err(|e| Error::Invalid(format!("the audio device won't start: {e}")))?;
-    Ok((stream, plays_on))
-}
-
-fn fails(kind: cpal::ErrorKind) -> bool {
-    use cpal::ErrorKind as K;
-    !matches!(kind, K::Xrun | K::DeviceChanged | K::RealtimeDenied)
+    let name = device
+        .description()
+        .map_or_else(|_| "an unnamed device".into(), |d| d.name().to_string());
+    Ok((stream, plays_on, name))
 }
 
 #[derive(Default)]
@@ -444,14 +627,148 @@ impl AudioOutput for ManualOutput {
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_followed_route_change_is_no_failure() {
-        assert!(!fails(cpal::ErrorKind::DeviceChanged));
+    fn source(samples: &[f32]) -> AudioSource {
+        let ring = Arc::new(Ring::new(64, 1));
+        ring.push(samples);
+        let heard = Arc::new(Heard::new(Instant::now(), 1000));
+        AudioSource::new(ring, heard, 1000, 1)
+    }
+
+    fn moved(turn: u64) -> Event {
+        Event::Error {
+            turn,
+            answer: Answer::Follow,
+            why: "the default moved".into(),
+        }
+    }
+
+    fn failure(source: &AudioSource) -> Option<String> {
+        source.failure.lock().unwrap().clone()
     }
 
     #[test]
-    fn a_device_gone_is_a_failure() {
-        assert!(fails(cpal::ErrorKind::DeviceNotAvailable));
+    fn a_rerouted_stream_needs_nothing() {
+        let on = PlaysOn::Default;
+        assert_eq!(answer(cpal::ErrorKind::DeviceChanged, &on), Answer::Nothing);
+    }
+
+    #[test]
+    fn a_stream_on_the_default_that_must_be_rebuilt_follows_it() {
+        let on = PlaysOn::Default;
+        assert_eq!(
+            answer(cpal::ErrorKind::StreamInvalidated, &on),
+            Answer::Follow
+        );
+    }
+
+    #[test]
+    fn a_chosen_device_gone_is_a_failure() {
+        let on = PlaysOn::Chosen("wasapi:a".into());
+        assert_eq!(
+            answer(cpal::ErrorKind::DeviceNotAvailable, &on),
+            Answer::Fail
+        );
+    }
+
+    #[test]
+    fn the_new_stream_takes_the_sound_where_the_old_one_left_it() {
+        let source = source(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let turns = Turns::new();
+        let (mut old, mut new) = ([0.0; 2], [0.0; 2]);
+        turns.fill(0, &source, &mut old, Instant::now());
+        turns.switch(1);
+        turns.fill(0, &source, &mut old, Instant::now());
+        turns.fill(1, &source, &mut new, Instant::now());
+        assert_eq!((old, new), ([0.0, 0.0], [3.0, 4.0]));
+    }
+
+    #[test]
+    fn the_gap_runs_from_the_old_streams_last_sound_to_the_new_ones_first() {
+        let source = source(&[0.5; 20]);
+        let turns = Turns::new();
+        let at = turns.base + Duration::from_millis(100);
+        turns.fill(0, &source, &mut [0.0; 10], at);
+        turns.switch(1);
+        turns.fill(1, &source, &mut [0.0; 10], at + Duration::from_millis(14));
+        assert_eq!(turns.gap(1), Some(4.0));
+    }
+
+    #[test]
+    fn a_default_output_that_moved_is_opened_again() {
+        let source = source(&[1.0, 2.0]);
+        let turns = Turns::new();
+        turns.fill(0, &source, &mut [0.0; 2], Instant::now());
+        let (events, received) = mpsc::channel();
+        events.send(moved(0)).unwrap();
+        events.send(Event::Stop).unwrap();
+        let mut opened = Vec::new();
+        follow((), &turns, &received, &source, |turn| {
+            opened.push(turn);
+            Ok(())
+        });
+        assert_eq!(opened, [1]);
+    }
+
+    #[test]
+    fn a_default_output_not_there_yet_is_tried_again() {
+        let source = source(&[1.0, 2.0]);
+        let turns = Turns::new();
+        turns.fill(0, &source, &mut [0.0; 2], Instant::now());
+        let (events, received) = mpsc::channel();
+        events.send(moved(0)).unwrap();
+        let mut opened = Vec::new();
+        follow((), &turns, &received, &source, |turn| {
+            opened.push(turn);
+            if opened.len() == 1 {
+                return Err(Error::Invalid("no audio output device".into()));
+            }
+            events.send(Event::Stop).unwrap();
+            Ok(())
+        });
+        assert_eq!(opened, [1, 1]);
+    }
+
+    #[test]
+    fn a_stream_opened_again_ends_the_failure() {
+        let source = source(&[1.0, 2.0]);
+        source.fail("no audio output device".into());
+        let turns = Turns::new();
+        turns.fill(0, &source, &mut [0.0; 2], Instant::now());
+        let (events, received) = mpsc::channel();
+        events.send(moved(0)).unwrap();
+        events.send(Event::Stop).unwrap();
+        follow((), &turns, &received, &source, |_| Ok(()));
+        assert_eq!(failure(&source), None);
+    }
+
+    #[test]
+    fn an_error_from_the_stream_left_behind_is_no_failure() {
+        let source = source(&[1.0, 2.0]);
+        let turns = Turns::new();
+        turns.fill(0, &source, &mut [0.0; 2], Instant::now());
+        let (events, received) = mpsc::channel();
+        events.send(moved(0)).unwrap();
+        events
+            .send(Event::Error {
+                turn: 0,
+                answer: Answer::Fail,
+                why: "the old device went".into(),
+            })
+            .unwrap();
+        events.send(Event::Stop).unwrap();
+        follow((), &turns, &received, &source, |_| Ok(()));
+        assert_eq!(failure(&source), None);
+    }
+
+    #[test]
+    fn a_stream_that_never_played_fails_rather_than_open_again() {
+        let source = source(&[]);
+        let turns = Turns::new();
+        let (events, received) = mpsc::channel();
+        events.send(moved(0)).unwrap();
+        events.send(Event::Stop).unwrap();
+        follow((), &turns, &received, &source, |_| Ok(()));
+        assert_eq!(failure(&source), Some("the default moved".into()));
     }
 
     #[test]

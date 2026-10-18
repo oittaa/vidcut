@@ -88,6 +88,10 @@ Each time the device's callback takes sound, `Heard::record` notes the ring posi
 
 Without a device, the silent `PacedOutput` pulls the ring in real time, so the clock still runs.
 
+`CpalOutput` plays on the device chosen in Preferences or, without one, on the system's default. When cpal says a stream on the default must be rebuilt or has lost its device (`answer`), `follow` on `vidcut-audio-out` opens one on the new default. It plays silence until `Turns::switch` gives it the turn, and then takes the ring where the old one left off. Only one stream takes sound at a time, and the old one plays out what it holds before it closes. With no default yet, as when the default is unplugged, it tries again for a moment. A stream that fails before it took any sound fails for good, as does a chosen device that is lost: the viewer says so until a stream plays again.
+
+**Why:** WASAPI doesn't move a stream to a new default ([gotchas](../gotchas.md#operating-systems-and-libraries)). Opening the new stream before the old one stops leaves the clock a gap of only the difference in the two devices' latencies, which `VIDCUT_DEBUG` reports.
+
 ## The viewer thread
 
 `Viewer::start` spawns `vidcut-viewer`, which wakes when the session notifies or asks, the size changes, or `next_change` comes due. Each turn calls `Player::present`, then `Screen::draw` into an RGBA target the size of the viewer's picture in physical pixels. One render pass of `crates/vidcut/src/gui/picture.wgsl` fits the picture as the export does, turns it upright, scales in YUV and converts to RGB with the export's math (`shader_colors`), tone-mapping HDR; a dissolve's layers are more draws in it. On the UI thread, `Viewer::sync` shows the target as an egui native texture.
