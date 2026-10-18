@@ -816,8 +816,9 @@ pub enum Request {
         at: Option<TimeSpec>,
         /// The file is timed in the timeline's timecode (true) or from the
         /// timeline's start (false). Default: true when every cue is at or
-        /// after the timeline's start timecode, or, on a timeline starting at
-        /// zero and shorter than an hour, at or after 01:00:00:00.
+        /// after the timeline's start timecode read as a clock time, or, on a
+        /// timeline starting at zero and shorter than an hour, at or after
+        /// 01:00:00.
         #[serde(default)]
         timecode: Option<bool>,
     },

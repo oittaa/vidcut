@@ -356,13 +356,25 @@ pub struct Imported {
     pub before_zero: usize,
 }
 
+fn label_secs(label: &str, base: i64) -> f64 {
+    let f: Vec<f64> = label
+        .split([':', ';'])
+        .filter_map(|x| x.parse().ok())
+        .collect();
+    match f[..] {
+        [h, m, s, fr] => h * 3600.0 + m * 60.0 + s + fr / base as f64,
+        _ => 0.0,
+    }
+}
+
 fn timecode_shift(p: &Project, first: f64, forced: bool) -> f64 {
     let fps = p.settings.fps.as_f64();
     let slack = 0.5 / fps;
-    let origin = subtitles::origin(&p.settings);
-    if origin > 0.0 {
-        return if forced || first + slack >= origin {
-            origin
+    let base = p.settings.fps.timecode_base();
+    if p.settings.start_tc > 0 {
+        let label = label_secs(&p.settings.timecode(0), base);
+        return if forced || first + slack >= label {
+            subtitles::origin(&p.settings)
         } else {
             0.0
         };
@@ -371,7 +383,7 @@ fn timecode_shift(p: &Project, first: f64, forced: bool) -> f64 {
         crate::time::timecode_frames(1, 0, 0, 0, p.settings.fps, p.settings.counts_drop_frame())
             .map_or(3600.0, |f| f as f64 / fps);
     let short = (p.end() as f64) / fps <= hour;
-    if first + slack >= hour && (forced || short) {
+    if first + slack >= 3600.0 && (forced || short) {
         hour
     } else {
         0.0
