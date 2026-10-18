@@ -190,20 +190,44 @@ pub fn heard(
         }
     };
     let c = now.clip(&id)?;
-    let source = match out {
-        true => c.source_at(c.end() - 1),
-        false => c.source_at(c.start),
+    let edge = match out {
+        true => c.end() - 1,
+        false => c.start,
     };
+    let source = c.source_at(edge);
+    let into_run = first_showing(c, source).map(|first| edge - first);
     let q = match (speed > 0.0) == out {
         true => trimmed(furthest(pending, dir, |b| trimmed(b).is_some()))?,
         false => now,
     };
-    let at = frame_showing(q.clip(&id)?, source)?;
+    let qc = q.clip(&id)?;
+    let at = match (first_showing(qc, source), into_run) {
+        (Some(first), Some(k)) => (first + k).min(qc.end() - 1),
+        _ => frame_showing(qc, source)?,
+    };
     Some(Audition {
         timeline: Box::new(q),
         at,
         speed,
     })
+}
+
+fn first_showing(c: &vidcut_core::model::Clip, source: i64) -> Option<i64> {
+    let (mut lo, mut hi) = (c.start, c.end().checked_sub(1)?);
+    let rising = c.source_at(hi) >= c.source_at(lo);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let before = match rising {
+            true => c.source_at(mid) < source,
+            false => c.source_at(mid) > source,
+        };
+        if before {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    (c.source_at(lo) == source).then_some(lo)
 }
 
 fn frame_showing(c: &vidcut_core::model::Clip, source: i64) -> Option<i64> {

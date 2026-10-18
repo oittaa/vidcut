@@ -1448,18 +1448,9 @@ impl Workspace {
             .unwrap_or_default()
     }
 
-    fn edit_points(&self, id: PlayerId) -> Vec<i64> {
+    fn edit_points(&mut self, id: PlayerId) -> Vec<i64> {
         match id {
-            PlayerId::Timeline => self
-                .project()
-                .and_then(|p| p.track("V1"))
-                .map(|t| {
-                    let mut v = t.edit_points();
-                    v.push(t.end());
-                    v.dedup();
-                    v
-                })
-                .unwrap_or_default(),
+            PlayerId::Timeline => self.track_edit_points("V1"),
             PlayerId::Source => match self.snap.viewer {
                 ViewerMode::SourceTape => {
                     let mut v: Vec<i64> = self.snap.tape.iter().map(|e| e.start).collect();
