@@ -712,6 +712,43 @@ fn a_dynamic_trim_run_applies_where_the_media_ends() {
 }
 
 #[test]
+fn a_dynamic_trim_run_that_reaches_the_media_end_says_why() {
+    let mut gui = Gui::new();
+    gui.call("selection.set", json!({ "clips": ["c3"] }));
+    gui.settle();
+    gui.key(Key::W);
+    for _ in 0..4 {
+        gui.key(Key::J);
+    }
+    let started = Instant::now();
+    while gui
+        .harness
+        .query_by_label_contains("Stopped here")
+        .is_none()
+    {
+        assert!(started.elapsed() < Duration::from_secs(10), "no word why");
+        gui.harness.step();
+    }
+    gui.quit();
+}
+
+#[test]
+fn the_lower_timeline_follows_a_dynamic_trim_run() {
+    let mut gui = Gui::new();
+    gui.call("player.seek", json!({ "at": 55, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.key(Key::L);
+    for _ in 0..30 {
+        gui.harness.step();
+    }
+    let l = gui.harness.state().timeline_layout().unwrap();
+    let centre = l.lower_scale.frame(l.lower_ruler.center().x);
+    assert!(centre > 61.0, "the lower timeline stayed at frame {centre}");
+    gui.quit();
+}
+
+#[test]
 fn w_takes_the_playhead_to_the_nearest_cut() {
     let mut gui = Gui::new();
     gui.call("player.seek", json!({ "at": 50, "viewer": "timeline" }));

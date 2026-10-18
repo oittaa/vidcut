@@ -21,5 +21,6 @@ What [the spec](../cut-page-spec.md) describes and vidcut doesn't do yet.
 - Skimming with C held ([§4.5](../cut-page-spec.md#45-other-viewer-features))
 - Several edit points selected with Ctrl+click ([§8.1](../cut-page-spec.md#81-selection-pp-719720))
 - Trim to Audio ([§8.6](../cut-page-spec.md#86-trimming-pp-693-716-718-726732))
+- Sound during a Dynamic Trim run, the timeline playing at the run's speed ([D32](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
 - Extend Beyond Clip Length in Change Clip Duration ([§8.6](../cut-page-spec.md#86-trimming-pp-693-716-718-726732))
 - Edit > History and the History window ([§8.10](../cut-page-spec.md#810-undo-pp-651652))

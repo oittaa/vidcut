@@ -66,9 +66,9 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Why:** MCP is how agents discover and call tools; tools generated from the request schema stay complete and in step with the CLI.
 
 ## X11. Dynamic Trim and Ripple Delete Silence, simplified
-- **Resolve:** a Dynamic Trim run plays the timeline with sound, the playhead moving with the edit, and changes the project as it goes; each run is one undo step (pp. 730–731). Ripple Delete Silence can crossfade the remaining audio (p. 773).
-- **vidcut:** a Dynamic Trim run plays nothing: the timeline and the two-up show the trim as it goes, and the project changes once, when the run stops ([D32](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). Ripple Delete Silence has no crossfade; its cuts get the 3 ms de-click fades every cut gets.
-- **Why:** one change at the end keeps the preview, the file and the history out of edits many times a second, and is one undo step. The de-click fades already keep the cuts silent.
+- **Resolve:** a Dynamic Trim run changes the project as it goes, each run one undo step (pp. 730–731). Ripple Delete Silence can crossfade the remaining audio (p. 773).
+- **vidcut:** the timeline and the viewer show a Dynamic Trim run as it goes, and the project changes once, when the run stops ([D32](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). Ripple Delete Silence has no crossfade; its cuts get the 3 ms de-click fades every cut gets.
+- **Why:** one change at the end keeps the file, the history and other clients out of edits many times a second, and is the same one undo step. The de-click fades already keep the cuts silent.
 
 ## X12. Preferences hold only what vidcut needs
 - **Resolve:** Preferences has System and User panels with many settings (p. 94). Caches and proxies are set up in project settings and preferences (pp. 191–218).
@@ -154,3 +154,8 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Resolve:** on the Cut page (21.1.1), Up/Down in Dynamic Trim move only the playhead; the selected edit stays, and the next J or L takes the playhead back to it. Down during a run rolls the edit to the next edit with the playhead, removing the clip between. The manual says Up/Down move both the selection and the playhead (p. 731).
 - **vidcut:** as the manual says: Up/Down stop a run and apply it, then select the next edit on the same track and move the playhead to it.
 - **Why:** the keyboard then picks the next edit to trim, as the manual describes, and no clip disappears.
+
+## X29. A Dynamic Trim run says why it stopped
+- **Resolve:** a run that reaches a neighbor's last frame or the end of the media just stops; the Trim Editor comes back, its handles green, and nothing says why (21.1.1).
+- **vidcut:** the run stops there and applies; the cut turns red and the viewer says why, in the Trim Editor's line or under the picture, until the next trim ([D32](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:** as with [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a word leaves the editor guessing whether a key was missed or the media ran out.

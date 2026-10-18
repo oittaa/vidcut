@@ -345,6 +345,12 @@ impl Workspace {
                     Side::In => "the In",
                     _ => "a roll",
                 };
+                if let Some(why) = self.dynamic_stopped() {
+                    ui.label(
+                        RichText::new(format!("Stopped here: {why}."))
+                            .color(theme::colors().error),
+                    );
+                }
                 let text = if self.timeline.dynamic.is_some() {
                     format!(
                         "Dynamic Trim: {side} at {}. L/J trim, K stops, Space plays around it, W leaves",
@@ -738,8 +744,14 @@ impl Workspace {
                 }
             })
             .unwrap_or_default();
+        let text = match self.dynamic_stopped() {
+            Some(why) => {
+                RichText::new(format!("Stopped here: {why}.")).color(theme::colors().error)
+            }
+            None => dim(text),
+        };
         ui.allocate_ui(vec2(ui.available_width(), 28.0), |ui| {
-            ui.centered_and_justified(|ui| ui.label(dim(text)));
+            ui.centered_and_justified(|ui| ui.label(text));
         });
     }
 

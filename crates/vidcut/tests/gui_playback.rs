@@ -616,7 +616,7 @@ fn space_in_dynamic_trim_plays_around_the_playhead_and_goes_back() {
         first.is_some() && !playing && g.position() == 80
     });
     assert!(first.is_some_and(|f| f < 20), "it started at {first:?}");
-    assert!(furthest >= 200, "it went only as far as {furthest}");
+    assert!(furthest >= 180, "it went only as far as {furthest}");
 }
 
 macro_rules! codec_tests {

@@ -373,7 +373,10 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Trim,
         &["K"],
         "Dynamic Trim: stop",
-        Some("Stops the trim where it is. A trim also stops where a clip runs out."),
+        Some(
+            "Stops the trim where it is. A trim also stops where a clip runs out: the cut turns \
+             red and the viewer says why.",
+        ),
     ),
     key(Trim, &["K", "L"], "Dynamic Trim one frame forward", None),
     key(Trim, &["K", "J"], "Dynamic Trim one frame backward", None),

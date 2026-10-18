@@ -428,7 +428,10 @@ impl Workspace {
             pos2(lower_rect.left() + HEADER, lower_rect.top()),
             lower_rect.max,
         );
-        let playhead = self.snap.timeline.position;
+        let trimmed = self.dynamic_drawn(&p);
+        let playhead = trimmed
+            .as_ref()
+            .map_or(self.snap.timeline.position, |(_, at)| *at);
         let lower_scale = self.lower_scale(content, playhead);
         let upper_ruler =
             Rect::from_min_size(upper_rect.min, vec2(upper_rect.width(), UPPER_RULER));
@@ -465,9 +468,8 @@ impl Workspace {
         };
         self.timeline.layout = Some(layout.clone());
 
-        let trimmed = self.dynamic_drawn(&p);
         let (drawn, edit_at) = match &trimmed {
-            Some((q, at)) => (q, *at),
+            Some((q, at)) => (q, self.timeline.edit.is_some().then_some(*at)),
             None => (&*p, None),
         };
         let placed = match &trimmed {
@@ -2299,13 +2301,14 @@ impl Workspace {
         } else {
             row.rect.rect.y_range()
         };
+        let stopped = self.dynamic_stopped().is_some();
         let (out_ok, in_ok) = match (e.side, p.track(&e.track.id())) {
             (Side::Audio, _) | (_, None) => (true, true),
             (_, Some(t)) => ops::filmstrip::extends(p, t, e.at),
         };
         let glow = paint::pulse(ctx.input(|i| i.time));
         let tint = |ok: bool| {
-            if !ok {
+            if stopped || !ok {
                 (
                     Color32::from_rgb(200, 40, 40),
                     Color32::from_rgb(240, 70, 70),

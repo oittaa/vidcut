@@ -67,6 +67,7 @@ pub struct Dynamic {
     run: Option<(f64, f64, i64)>,
     pub pending: i64,
     around: Option<Around>,
+    stopped: Option<(DynamicTarget, String)>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -471,7 +472,7 @@ impl Workspace {
         }
     }
 
-    pub(crate) fn dynamic_drawn(&self, p: &Project) -> Option<(Project, Option<i64>)> {
+    pub(crate) fn dynamic_drawn(&self, p: &Project) -> Option<(Project, i64)> {
         let pending = self.timeline.dynamic.as_ref()?.pending;
         if pending == 0 {
             return None;
@@ -485,8 +486,13 @@ impl Workspace {
             pending,
         )
         .ok()?;
-        let at = matches!(target, DynamicTarget::Edit(_)).then_some(at);
         Some((trimmed, at))
+    }
+
+    pub(crate) fn dynamic_stopped(&self) -> Option<&str> {
+        let d = self.timeline.dynamic.as_ref()?;
+        let (target, why) = d.stopped.as_ref()?;
+        (!d.running() && self.dynamic_target().as_ref() == Some(target)).then_some(why.as_str())
     }
 
     fn dynamic_head(&mut self) -> Option<i64> {
@@ -516,6 +522,7 @@ impl Workspace {
             return;
         };
         d.around = None;
+        d.stopped = None;
         d.run = Some((speed, now, d.pending));
         if playing {
             self.send("player.pause", json!({}));
@@ -541,6 +548,7 @@ impl Workspace {
         if by == 0 {
             return;
         }
+        d.stopped = None;
         if let Some(DynamicTarget::Clips(_)) = self.dynamic_target()
             && let Some(q) = trimmed
         {
@@ -630,21 +638,29 @@ impl Workspace {
         let now = ctx.input(|i| i.time);
         let playing = self.snap.timeline.playing;
         let position = self.snap.timeline.position;
-        let mut ended = false;
+        let mut ended = None;
         if let (Some(target), Some(p)) = (self.dynamic_target(), self.shown_project())
             && let Some(d) = &mut self.timeline.dynamic
             && let Some((speed, t0, base)) = d.run
         {
             let mode = self.timeline.options.dynamic_mode;
-            let fits =
-                |by: i64| dynamic_preview(&mut Project::clone(&p), &target, mode, by).is_ok();
+            let tried = |by: i64| dynamic_preview(&mut Project::clone(&p), &target, mode, by);
             let want = base + (speed * fps * (now - t0)).round() as i64;
-            if want != d.pending && !fits(want) {
+            if want != d.pending
+                && let Err(e) = tried(want)
+            {
                 let step = if want > d.pending { 1 } else { -1 };
-                while d.pending != want && fits(d.pending + step) {
-                    d.pending += step;
+                let mut why = e.message;
+                while d.pending != want {
+                    match tried(d.pending + step) {
+                        Ok(_) => d.pending += step,
+                        Err(e) => {
+                            why = e.message;
+                            break;
+                        }
+                    }
                 }
-                ended = true;
+                ended = Some(why);
             } else {
                 d.pending = want;
                 if let Some(wait) = next_step_in(speed, fps, now - t0) {
@@ -652,8 +668,12 @@ impl Workspace {
                 }
             }
         }
-        if ended {
+        if let Some(why) = ended {
             self.dynamic_stop();
+            let target = self.dynamic_target();
+            if let (Some(d), Some(target)) = (&mut self.timeline.dynamic, target) {
+                d.stopped = Some((target, why));
+            }
             ctx.request_repaint();
         }
         let Some(d) = &mut self.timeline.dynamic else {
