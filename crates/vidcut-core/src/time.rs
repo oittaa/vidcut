@@ -447,6 +447,81 @@ impl schemars::JsonSchema for TimeSpec {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct DurationSpec(pub TimeSpec);
+
+impl DurationSpec {
+    pub fn parse(s: &str) -> Result<Self, TimeError> {
+        let t = s.trim();
+        let (sign, rest) = if let Some(r) = t.strip_prefix('+') {
+            (Some(1), r)
+        } else if let Some(r) = t.strip_prefix(['-', '\u{2212}']) {
+            (Some(-1), r)
+        } else {
+            (None, t)
+        };
+        let rest = rest.trim();
+        let length = if !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()) {
+            TimeSpec::Frames(
+                rest.parse()
+                    .map_err(|_| TimeError::Parse(s.to_string(), "too many frames"))?,
+            )
+        } else {
+            TimeSpec::parse_absolute(rest, s)?
+        };
+        Ok(Self(match sign {
+            Some(k) => TimeSpec::Relative(k, Box::new(length)),
+            None => length,
+        }))
+    }
+
+    pub fn frames(&self, ctx: &TimeContext, current: i64) -> Result<i64, TimeError> {
+        let d = ctx.duration(&self.0)?;
+        Ok(if self.0.is_relative() { current + d } else { d })
+    }
+}
+
+impl fmt::Display for DurationSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl serde::Serialize for DurationSpec {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(s)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for DurationSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Int(i64),
+            Str(String),
+        }
+        match Raw::deserialize(d)? {
+            Raw::Int(n) => Ok(Self(TimeSpec::Frames(n))),
+            Raw::Str(s) => Self::parse(&s).map_err(serde::de::Error::custom),
+        }
+    }
+}
+
+impl schemars::JsonSchema for DurationSpec {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "DurationSpec".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "A duration as the viewer's Duration field takes it: a number of frames, without a unit (`48`); a timecode or a time with a unit (`00:00:02:00`, `2s`, `450f`); or `+` or `-` and either, to change the duration by that much (`+12`, `-5`, `+1s`).",
+            "oneOf": [{"type": "integer"}, {"type": "string"}],
+            "examples": [48, "48", "00:00:02:00", "+12", "-5"]
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct RangeSpec {
     pub start: TimeSpec,
     pub end: RangeEnd,
