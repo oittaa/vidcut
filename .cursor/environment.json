@@ -1,0 +1,8 @@
+{
+  "name": "vidcut",
+  "user": "ubuntu",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "install": "set -euo pipefail\nexport RUSTUP_HOME=/usr/local/rustup\nexport CARGO_HOME=/usr/local/cargo\nexport PATH=\"/usr/local/cargo/bin:${PATH}\"\nrustup show active-toolchain\ncargo fetch --locked\n"
+}
