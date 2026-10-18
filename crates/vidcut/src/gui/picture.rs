@@ -24,6 +24,8 @@ pub struct Gpu {
     d3d11: bool,
     #[cfg(windows)]
     p010: bool,
+    #[cfg(windows)]
+    d3d11_shared: std::sync::Mutex<Vec<D3d11Shared>>,
     metal: bool,
     cuda: OnceLock<Result<CudaDevice, String>>,
     gate: Option<Arc<super::gate::Gate>>,
@@ -158,6 +160,8 @@ impl Gpu {
             p010: device
                 .features()
                 .contains(wgpu::Features::TEXTURE_FORMAT_P010),
+            #[cfg(windows)]
+            d3d11_shared: std::sync::Mutex::default(),
             // SAFETY: wgpu's own device, only asked what it is.
             #[cfg(target_os = "macos")]
             metal: unsafe { device.as_hal::<wgpu::hal::api::Metal>() }.is_some(),
@@ -204,6 +208,33 @@ impl Gpu {
         access: ash::vk::AccessFlags,
         source: super::acquire::Source,
     ) -> Result<wgpu::CommandBuffer, String> {
+        // SAFETY: as the caller says.
+        unsafe {
+            self.barrier(|acquirer, cmd| {
+                acquirer.record(cmd, images, source, layout, stage, access)
+            })
+        }
+    }
+
+    #[cfg(windows)]
+    unsafe fn release(
+        &self,
+        images: &[ash::vk::Image],
+        layout: (ash::vk::ImageLayout, ash::vk::ImageLayout),
+        stage: ash::vk::PipelineStageFlags,
+        access: ash::vk::AccessFlags,
+    ) -> Result<wgpu::CommandBuffer, String> {
+        // SAFETY: as the caller says.
+        unsafe {
+            self.barrier(|acquirer, cmd| acquirer.release(cmd, images, layout, stage, access))
+        }
+    }
+
+    #[cfg(any(target_os = "linux", windows))]
+    unsafe fn barrier(
+        &self,
+        record: impl FnOnce(&super::acquire::Acquirer, ash::vk::CommandBuffer),
+    ) -> Result<wgpu::CommandBuffer, String> {
         let acquirer = self
             .acquirer
             .get_or_init(|| {
@@ -221,9 +252,7 @@ impl Gpu {
         // SAFETY: this encoder's open buffer gets only the barrier; images as the caller says.
         let recorded = unsafe {
             encoder.as_hal_mut::<wgpu::hal::api::Vulkan, _, _>(|hal| {
-                hal.map(|hal| {
-                    acquirer.record(hal.raw_handle(), images, source, layout, stage, access)
-                })
+                hal.map(|hal| record(acquirer, hal.raw_handle()))
             })
         };
         recorded.ok_or("not Vulkan")?;
@@ -308,10 +337,9 @@ struct Slot {
     acquired: Option<wgpu::CommandBuffer>,
     #[cfg(any(target_os = "linux", windows))]
     kept: super::vulkan::Imports,
+    released: Option<wgpu::CommandBuffer>,
     #[cfg(windows)]
-    d3d11: Vec<D3d11Shared>,
-    #[cfg(windows)]
-    d3d11_filled: Option<usize>,
+    d3d11_used: Option<Arc<AtomicBool>>,
     imports: u64,
     last_shared: bool,
 }
@@ -457,7 +485,16 @@ impl Screen {
             .iter_mut()
             .filter_map(|s| s.acquired.take())
             .collect();
-        gpu.submit(acquired.into_iter().chain([encoder.finish()]));
+        let released: Vec<wgpu::CommandBuffer> = self.slots[..layers.len()]
+            .iter_mut()
+            .filter_map(|s| s.released.take())
+            .collect();
+        gpu.submit(
+            acquired
+                .into_iter()
+                .chain([encoder.finish()])
+                .chain(released),
+        );
         for slot in &mut self.slots[..layers.len()] {
             slot.submitted(gpu);
         }
@@ -536,9 +573,7 @@ impl Slot {
             self.shared[i].used(&gpu.queue);
         }
         #[cfg(windows)]
-        if let Some(i) = self.d3d11_filled.take() {
-            let busy = self.d3d11[i].busy.clone();
-            busy.store(true, Ordering::Release);
+        if let Some(busy) = self.d3d11_used.take() {
             gpu.queue
                 .on_submitted_work_done(move || busy.store(false, Ordering::Release));
         }
@@ -739,6 +774,7 @@ impl Slot {
 
     #[cfg(windows)]
     fn import_d3d11(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
+        use ash::vk::{AccessFlags, ImageLayout, PipelineStageFlags};
         if !gpu.d3d11 {
             return Err("the display's device imports no Direct3D 11 textures".into());
         }
@@ -766,57 +802,38 @@ impl Slot {
             }
         };
         let frame = picture.frame();
-        let i = self.d3d11_shared_for(gpu, frame, formats)?;
-        let shared = &mut self.d3d11[i];
+        let mut pool = gpu.d3d11_shared.lock().unwrap_or_else(|e| e.into_inner());
+        let (i, new) = d3d11_shared_for(gpu, &mut pool, frame, formats)?;
+        if new {
+            self.imports += 1;
+        }
+        let shared = &mut pool[i];
         shared.texture.fill(frame).map_err(|e| e.to_string())?;
-        shared.shown = std::time::Instant::now();
-        // SAFETY: this device's image on memory Direct3D 11 has just written.
-        unsafe {
-            self.acquired = Some(gpu.acquire(
-                &[shared.image],
-                ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                ash::vk::PipelineStageFlags::FRAGMENT_SHADER,
-                ash::vk::AccessFlags::SHADER_READ,
-                super::acquire::Source::Api,
-            )?);
-        }
-        self.views = Some((shared.y.clone(), shared.uv.clone(), shared.size));
-        self.d3d11_filled = Some(i);
-        Ok(())
-    }
-
-    #[cfg(windows)]
-    fn d3d11_shared_for(
-        &mut self,
-        gpu: &Gpu,
-        frame: &vidcut_av::ffmpeg::frame::Video,
-        formats: D3d11Formats,
-    ) -> Result<usize, String> {
-        let free = |all: &[D3d11Shared]| {
-            all.iter()
-                .position(|s| s.texture.fits(frame) && !s.busy.load(Ordering::Acquire))
+        // SAFETY: this device's image, released to Direct3D 11 in `GENERAL`, which has just written it.
+        let (acquired, released) = unsafe {
+            (
+                gpu.acquire(
+                    &[shared.image],
+                    ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    PipelineStageFlags::FRAGMENT_SHADER,
+                    AccessFlags::SHADER_READ,
+                    super::acquire::Source::Api,
+                )?,
+                gpu.release(
+                    &[shared.image],
+                    (ImageLayout::SHADER_READ_ONLY_OPTIMAL, ImageLayout::GENERAL),
+                    PipelineStageFlags::FRAGMENT_SHADER,
+                    AccessFlags::SHADER_READ,
+                )?,
+            )
         };
-        if let Some(i) = free(&self.d3d11) {
-            return Ok(i);
-        }
-        if self.d3d11.iter().filter(|s| s.texture.fits(frame)).count() >= MAX_SHARED {
-            let _ = gpu.device.poll(wgpu::PollType::wait_indefinitely());
-            return free(&self.d3d11).ok_or_else(|| "no shared texture came free".into());
-        }
-        if self.d3d11.len() >= 2 * MAX_SHARED
-            && let Some(oldest) = self
-                .d3d11
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| !s.busy.load(Ordering::Acquire))
-                .min_by_key(|(_, s)| s.shown)
-                .map(|(i, _)| i)
-        {
-            self.d3d11.remove(oldest);
-        }
-        self.d3d11.push(share_d3d11(gpu, frame, formats)?);
-        self.imports += 1;
-        Ok(self.d3d11.len() - 1)
+        shared.shown = std::time::Instant::now();
+        shared.busy.store(true, Ordering::Release);
+        self.acquired = Some(acquired);
+        self.released = Some(released);
+        self.views = Some((shared.y.clone(), shared.uv.clone(), shared.size));
+        self.d3d11_used = Some(shared.busy.clone());
+        Ok(())
     }
 
     #[cfg(any(target_os = "linux", windows))]
@@ -1276,6 +1293,48 @@ fn make_target(device: &wgpu::Device, size: (u32, u32)) -> Target {
 }
 
 #[cfg(windows)]
+fn d3d11_shared_for(
+    gpu: &Gpu,
+    pool: &mut Vec<D3d11Shared>,
+    frame: &vidcut_av::ffmpeg::frame::Video,
+    formats: D3d11Formats,
+) -> Result<(usize, bool), String> {
+    let free = |pool: &[D3d11Shared]| {
+        pool.iter()
+            .position(|s| s.texture.fits(frame) && !s.busy.load(Ordering::Acquire))
+    };
+    if let Some(i) = free(pool) {
+        return Ok((i, false));
+    }
+    if pool.iter().filter(|s| s.texture.fits(frame)).count() >= MAX_SHARED {
+        let _ = gpu.device.poll(wgpu::PollType::wait_indefinitely());
+        return free(pool)
+            .map(|i| (i, false))
+            .ok_or_else(|| "no shared texture came free".into());
+    }
+    if pool.len() >= 2 * MAX_SHARED
+        && let Some(oldest) = pool
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| !s.busy.load(Ordering::Acquire))
+            .min_by_key(|(_, s)| s.shown)
+            .map(|(i, _)| i)
+    {
+        pool.remove(oldest);
+    }
+    pool.push(share_d3d11(gpu, frame, formats)?);
+    vidcut_av::debug!(
+        "viewer",
+        "imported a {}x{} {:?} Direct3D 11 texture to show pictures through ({} in all)",
+        frame.width(),
+        frame.height(),
+        formats.0,
+        pool.len()
+    );
+    Ok((pool.len() - 1, true))
+}
+
+#[cfg(windows)]
 fn share_d3d11(
     gpu: &Gpu,
     frame: &vidcut_av::ffmpeg::frame::Video,
@@ -1363,9 +1422,29 @@ fn share_d3d11(
             plane(two, wgpu::TextureAspect::Plane1),
         )
     })?;
+    let image = image.ok_or("not Vulkan")?;
+    // SAFETY: this device's new image, which nothing has used yet.
+    let released = unsafe {
+        gpu.release(
+            &[image],
+            (
+                ash::vk::ImageLayout::UNDEFINED,
+                ash::vk::ImageLayout::GENERAL,
+            ),
+            ash::vk::PipelineStageFlags::TOP_OF_PIPE,
+            ash::vk::AccessFlags::empty(),
+        )?
+    };
+    let index = gpu.submit([released]);
+    gpu.device
+        .poll(wgpu::PollType::Wait {
+            submission_index: Some(index),
+            timeout: None,
+        })
+        .map_err(|e| format!("handing a texture to Direct3D 11: {e}"))?;
     Ok(D3d11Shared {
         texture: shared,
-        image: image.ok_or("not Vulkan")?,
+        image,
         y,
         uv,
         size: (desc.Width, desc.Height),

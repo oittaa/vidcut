@@ -84,4 +84,46 @@ impl Acquirer {
             );
         }
     }
+
+    #[cfg(windows)]
+    pub(super) unsafe fn release(
+        &self,
+        cmd: vk::CommandBuffer,
+        images: &[vk::Image],
+        (old, new): (vk::ImageLayout, vk::ImageLayout),
+        stage: vk::PipelineStageFlags,
+        access: vk::AccessFlags,
+    ) {
+        let barriers: Vec<_> = images
+            .iter()
+            .map(|&image| {
+                vk::ImageMemoryBarrier::default()
+                    .src_access_mask(access)
+                    .old_layout(old)
+                    .new_layout(new)
+                    .src_queue_family_index(self.family)
+                    .dst_queue_family_index(self.foreign)
+                    .image(image)
+                    .subresource_range(vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    })
+            })
+            .collect();
+        // SAFETY: as the caller says.
+        unsafe {
+            self.device.cmd_pipeline_barrier(
+                cmd,
+                stage,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &barriers,
+            );
+        }
+    }
 }
