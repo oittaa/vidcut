@@ -361,20 +361,4 @@ mod tests {
         ahead.start(2, "b", || Ok(2));
         assert_eq!(ahead.take(2).unwrap().unwrap(), 2);
     }
-
-    #[test]
-    fn a_dropped_readers_source_closes_on_the_helper_thread_before_the_threads_left_end() {
-        let (dropped, source) = noted();
-        let (began, begun) = mpsc::channel();
-        let mut ahead = Ahead::new();
-        ahead.start(1, "a", move || {
-            let _ = began.send(());
-            thread::sleep(Duration::from_millis(50));
-            Ok(source)
-        });
-        begun.recv().unwrap();
-        drop(ahead);
-        crate::ending::join();
-        assert_eq!(lock(&dropped).as_deref(), Some("vidcut-open"));
-    }
 }

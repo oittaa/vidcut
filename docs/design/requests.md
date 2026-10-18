@@ -26,7 +26,7 @@ flowchart TD
 
 `Request` has one variant per method, serialized as `method` and `params`. Its JSON schema (`session::schema`) generates the CLI commands (`cli::command`) and the MCP tools (`mcp::tools`), so every door names things alike.
 
-An `Envelope` adds the two options every request takes: `if_rev` (fail with `CONFLICT` unless the project is at that revision) and `dry_run`. `Envelope::from_json` takes them off the request object first, and out of `params` only when they are not there. Every answer is a `Response`: the revision after it, the ids created, modified and deleted (`Changes`), the result, `dry_run`, `warnings`, and where it ran (`via`).
+An `Envelope` adds the two options every request takes: `if_rev` (fail with `ErrorCode::Conflict` unless the project is at that revision) and `dry_run`. `Envelope::from_json` takes them off the request object first, and out of `params` only when they are not there. Every answer is a `Response`: the revision after it, the ids created, modified and deleted (`Changes`), the result, `dry_run`, `warnings`, and where it ran (`via`).
 
 Three questions drive the routing:
 

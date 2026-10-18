@@ -20,7 +20,7 @@
 # are this computer's, Ubuntu 26.04's as in the image: on another system the
 # copy may not run.
 #
-#   scripts/ffmpeg-host.sh -- cargo test -p vidcut --test picture
+#   scripts/ffmpeg-host.sh -- cargo test -p vidcut --lib
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 

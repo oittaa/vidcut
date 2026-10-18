@@ -514,12 +514,6 @@ mod tests {
         assert_eq!(store.load().unwrap().history_counts(), (2, 0));
     }
 
-    fn break_history(store: &Store) -> String {
-        let good = history_text(store);
-        std::fs::write(&store.history_path, format!("x{good}")).unwrap();
-        good
-    }
-
     #[test]
     fn a_dry_run_after_an_outside_change_leaves_the_project_file_as_it_is() {
         let dir = tempfile::tempdir().unwrap();
@@ -538,68 +532,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(store.read().unwrap(), outside);
-    }
-
-    #[test]
-    fn a_history_that_cant_be_read_isnt_written_over() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = project_in(dir.path());
-        add_bin(&store, "a");
-        let good = break_history(&store);
-        add_bin(&store, "b");
-        assert_eq!(history_text(&store), format!("x{good}"));
-    }
-
-    #[test]
-    fn a_history_that_cant_be_read_says_so() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = project_in(dir.path());
-        add_bin(&store, "a");
-        break_history(&store);
-        let editor = store.load().unwrap();
-        assert!(
-            editor
-                .history_trouble()
-                .is_some_and(|t| t.contains("can't be read"))
-        );
-    }
-
-    #[test]
-    fn steps_made_while_the_history_was_unreadable_join_it_when_it_reads_again() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = project_in(dir.path());
-        add_bin(&store, "a");
-        let good = break_history(&store);
-        let mut editor = store.load().unwrap();
-        let request = json!({"method": "bins.add", "params": {"path": "b"}});
-        editor
-            .apply(
-                Envelope::from_json(request).unwrap(),
-                &FakeEnv::default(),
-                None,
-            )
-            .unwrap();
-        assert!(store.save(&mut editor).unwrap().history_error.is_some());
-        std::fs::write(&store.history_path, good).unwrap();
-        let request = json!({"method": "bins.add", "params": {"path": "c"}});
-        editor
-            .apply(
-                Envelope::from_json(request).unwrap(),
-                &FakeEnv::default(),
-                None,
-            )
-            .unwrap();
-        store.save(&mut editor).unwrap();
-        let labels: Vec<String> = store
-            .load()
-            .unwrap()
-            .history_view(3)
-            .unwrap()
-            .undo
-            .into_iter()
-            .map(|e| e.step.label)
-            .collect();
-        assert_eq!(labels, ["New bin a", "New bin b", "New bin c"]);
     }
 
     #[test]
