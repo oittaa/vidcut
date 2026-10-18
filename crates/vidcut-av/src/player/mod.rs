@@ -48,11 +48,7 @@ impl Budget {
     }
 
     pub fn part(self, parts: usize) -> Self {
-        let gpu = || {
-            crate::gpus::in_use()
-                .and_then(|g| g.memory_mb)
-                .map_or(GB, |mb| (mb as usize) << 19)
-        };
+        let gpu = || Self::gpu_video(crate::gpus::in_use().and_then(|g| g.memory_mb));
         let video = match self.video {
             None if SHARED_MEMORY => None,
             v => Some(v.unwrap_or_else(gpu) / parts.max(1)),
@@ -68,6 +64,10 @@ impl Budget {
             memory: system_memory().map_or(GB, |m| (m / 2).max(GB)),
             video: None,
         }
+    }
+
+    pub fn gpu_video(memory_mb: Option<u64>) -> usize {
+        memory_mb.map_or(GB, |mb| ((mb as usize) << 19).max(GB))
     }
 }
 
@@ -312,7 +312,7 @@ pub(crate) struct Shared {
     pub(crate) gpu_pictures: Vec<crate::hw::Kind>,
     copies: Arc<crate::copies::Copies>,
     video_auto: AtomicBool,
-    gpu_memory: std::sync::OnceLock<usize>,
+    gpu_memory: std::sync::OnceLock<u64>,
     heard_epoch: std::sync::atomic::AtomicU64,
     levels: Mutex<std::collections::VecDeque<Level>>,
 }
@@ -567,7 +567,7 @@ impl Shared {
         if self.gpu_memory.get().is_none()
             && let Some(mb) = gpu.memory_mb
         {
-            let _ = self.gpu_memory.set((mb as usize) << 20);
+            let _ = self.gpu_memory.set(mb);
             self.apply_video_budget();
         }
     }
@@ -579,7 +579,7 @@ impl Shared {
         if SHARED_MEMORY {
             self.store.share(true);
         } else {
-            let bytes = self.gpu_memory.get().map_or(GB, |m| m / 2);
+            let bytes = Budget::gpu_video(self.gpu_memory.get().copied());
             self.store.set_budget(store::Kind::Video, bytes);
         }
     }

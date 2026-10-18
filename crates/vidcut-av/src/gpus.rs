@@ -282,7 +282,7 @@ fn listed() -> Vec<Gpu> {
 #[cfg(target_os = "linux")]
 fn vulkan_memory() -> Vec<(Slot, u64)> {
     use ash::vk;
-    // SAFETY: Vulkan's loader and calls as vulkan.h declares them, the library loaded until they are done.
+    // SAFETY: Vulkan's loader and calls as vulkan.h declares them; the library stays loaded.
     unsafe {
         let Ok(library) = libloading::Library::new("libvulkan.so.1") else {
             return Vec::new();
@@ -327,6 +327,7 @@ fn vulkan_memory() -> Vec<(Slot, u64)> {
             }
         }
         instance.destroy_instance(None);
+        std::mem::forget(library);
         sized
     }
 }

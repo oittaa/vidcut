@@ -52,9 +52,9 @@ pub struct Player {
     /// Video memory for pictures the GPU decoded and keeps there, in MB.
     /// `0` (the default): half the memory the system reports for the GPU
     /// that decodes them (its dedicated video memory on Windows, a discrete
-    /// GPU's largest device-local Vulkan heap on Linux), else 1 GB. On Apple
-    /// silicon, where the GPU's memory is the computer's, `0` counts them in
-    /// `memory_mb` instead.
+    /// GPU's largest device-local Vulkan heap on Linux), and at least 1 GB.
+    /// On Apple silicon, where the GPU's memory is the computer's, `0`
+    /// counts them in `memory_mb` instead.
     pub video_memory_mb: u64,
     /// The audio device the player plays on, by its id (`vidcut doctor`
     /// lists them as `audio_outputs`). Empty (the default): the system's

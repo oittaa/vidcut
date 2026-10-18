@@ -598,7 +598,7 @@ fn memory(
                     _ if state["player_video_memory_shared"] == true => {
                         format!("Shares the {} GB above", about_gb(video_auto))
                     }
-                    Some(m) if gpu_decodes => {
+                    Some(m) if gpu_decodes && video_auto > 1024 => {
                         format!(
                             "{} GB, half of the GPU's {} GB",
                             about_gb(video_auto),
