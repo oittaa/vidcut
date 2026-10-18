@@ -42,4 +42,5 @@ GPU memory: the RTX 4080 SUPER's at the most, sampled with `nvidia-smi` during t
 
 ## Open
 
+- **The aligner in transcribe.cpp** ([#200](https://github.com/handy-computer/transcribe.cpp/issues/200)): until it runs there, Qwen3-ASR gives no word times, and the English default gives none.
 - **Cloud:** which services, and when.
