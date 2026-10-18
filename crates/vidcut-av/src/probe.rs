@@ -82,6 +82,22 @@ fn image_format(format: &str) -> bool {
     format == "image2" || format.ends_with("_pipe")
 }
 
+fn animation_format(format: &str) -> bool {
+    matches!(format, "gif" | "webp_anim")
+}
+
+fn one_picture(input: &mut ffmpeg::format::context::Input) -> bool {
+    let Some(video) = input.streams().best(media::Type::Video).map(|s| s.index()) else {
+        return false;
+    };
+    input
+        .packets()
+        .filter(|(s, _)| s.index() == video)
+        .take(2)
+        .count()
+        == 1
+}
+
 pub fn pixel_depth(name: &str) -> u8 {
     use std::str::FromStr;
     ffmpeg::format::Pixel::from_str(name)
@@ -156,7 +172,9 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
     let path = source.path();
     let mut input = source.open()?;
     let skips = start_skips(&mut input);
-    let still = matches!(source, Input::File(_)) && image_format(input.format().name());
+    let format = input.format().name().to_string();
+    let still = matches!(source, Input::File(_))
+        && (image_format(&format) || (animation_format(&format) && one_picture(&mut input)));
     let (duration, start_time) = unsafe {
         let ctx = input.as_ptr();
         let to_secs = |v: i64| opt_ts(v).map(|v| v as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE));
@@ -287,7 +305,7 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
     let (timecode, time_reference) = clock_tags(&input, best_video);
     Ok(MediaInfo {
         path: path.to_path_buf(),
-        format: input.format().name().to_string(),
+        format,
         duration,
         start_time,
         video,
