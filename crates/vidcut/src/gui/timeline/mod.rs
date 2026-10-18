@@ -1,3 +1,4 @@
+pub mod fades;
 pub mod geometry;
 pub mod gesture;
 pub mod paint;
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use vidcut_core::model::{Project, Track};
 use vidcut_core::ops::{self, Edge, MAIN};
+use vidcut_core::request::ViewerMode;
 
 use crate::gui::workspace::{Workspace, dim};
 use crate::gui::{keys, theme};
@@ -185,6 +187,10 @@ pub struct TimelineView {
     pub scroll: f64,
     pub drag: Option<ActiveDrag>,
     pub edit: Option<EditSel>,
+    pub transition: Option<(TrackRef, i64)>,
+    pub transition_menu: Option<bool>,
+    pub fade_dialog: Option<fades::FadeDialog>,
+    pub fade_in_frames: bool,
     pub clip_menu: Option<(bool, String)>,
     pub scrub_sent: Option<i64>,
     pub swipe: Option<(f64, Instant)>,
@@ -211,6 +217,10 @@ impl Default for TimelineView {
             scroll: 0.0,
             drag: None,
             edit: None,
+            transition: None,
+            transition_menu: None,
+            fade_dialog: None,
+            fade_in_frames: false,
             clip_menu: None,
             scrub_sent: None,
             swipe: None,
@@ -515,6 +525,15 @@ impl Workspace {
             }
             self.paint_boring(&painter, &layout.upper, &upper_scale, drawn);
             self.paint_silence(&painter, &layout.upper, &upper_scale, drawn);
+            self.paint_edit_selection(
+                ui.ctx(),
+                &painter,
+                &layout.upper,
+                &upper_scale,
+                drawn,
+                edit_at,
+                5.0,
+            );
             paint::playhead(
                 &painter,
                 upper_scale.xf(playhead),
@@ -572,33 +591,29 @@ impl Workspace {
                     placed_on(t),
                 );
             }
+            self.paint_edit_selection(
+                ui.ctx(),
+                &painter,
+                &layout.lower,
+                &lower_scale,
+                drawn,
+                edit_at,
+                10.0,
+            );
             if let Some(e) = self.timeline.edit
-                && let Some(v1) = layout.lower.get(&e.track.id())
+                && self.timeline.transition == Some((e.track, e.at))
+                && let Some(row) = layout.lower.get(&e.track.id())
+                && let Some(x) = self.trim_transition(&p, e)
             {
-                let x = lower_scale.xf(edit_at.unwrap_or(e.at));
-                let (a, b) = match e.side {
-                    Side::Out => (x - 6.0, x),
-                    Side::In => (x, x + 6.0),
-                    Side::Both | Side::Audio => (x - 4.0, x + 4.0),
-                };
-                let y = if e.side == Side::Audio {
-                    egui::Rangef::new(v1.rect.audio_top, v1.rect.rect.bottom())
-                } else {
-                    v1.rect.rect.y_range()
-                };
-                let stopped = self
-                    .timeline
-                    .dynamic
-                    .as_ref()
-                    .is_some_and(|d| d.stopped.is_some());
-                painter.rect_filled(
-                    Rect::from_x_y_ranges(a..=b, y),
-                    0.0,
-                    if stopped {
-                        theme::colors().error
-                    } else {
-                        Color32::from_rgb(90, 200, 90)
-                    },
+                let r = Rect::from_x_y_ranges(
+                    lower_scale.xf(e.at - x.before)..=lower_scale.xf(e.at + x.after),
+                    row.rect.rect.top()..=row.rect.audio_top.max(row.rect.rect.top() + 4.0),
+                );
+                painter.rect_stroke(
+                    r,
+                    2.0,
+                    egui::Stroke::new(2.0, theme::colors().error),
+                    egui::StrokeKind::Inside,
                 );
             }
             self.paint_silence(&painter, &layout.lower, &lower_scale, drawn);
@@ -631,7 +646,9 @@ impl Workspace {
                 Gesture::Trim {
                     edge: Edge::Tail, ..
                 } => Some(paint::TrimPointer::End),
-                Gesture::Roll { .. } | Gesture::AudioRoll { .. } => Some(paint::TrimPointer::Roll),
+                Gesture::Roll { .. } | Gesture::AudioRoll { .. } | Gesture::Fade { .. } => {
+                    Some(paint::TrimPointer::Roll)
+                }
                 Gesture::Slip { .. } => {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                     None
@@ -721,7 +738,14 @@ impl Workspace {
                         ui.painter().rect_filled(span(4.0), 0.0, green);
                     }
                 }
+                let on_fade = rows
+                    .at(pos.y)
+                    .and_then(|r| {
+                        geometry::fade_edge_at(&p, p.track(&r.track)?, scale, &r.rect, pos)
+                    })
+                    .is_some();
                 let pointer = match &what {
+                    _ if on_fade => Some(paint::TrimPointer::Roll),
                     Hit::Edge(_, Edge::Head) => Some(paint::TrimPointer::Start),
                     Hit::Edge(_, Edge::Tail) => Some(paint::TrimPointer::End),
                     Hit::Roll { .. } | Hit::AudioEdit { .. } => Some(paint::TrimPointer::Roll),
@@ -763,6 +787,7 @@ impl Workspace {
         }
         self.marker_window(ui.ctx());
         self.duration_window(ui.ctx());
+        self.fade_window(ui.ctx());
         self.speed_window(ui.ctx());
         self.silence_window(ui.ctx());
         self.boring_window(ui.ctx());
@@ -1245,6 +1270,27 @@ impl Workspace {
                     from: playhead as f64,
                 }
             }
+        } else if let Some((track, at, end, x, sound)) = rows.at(press.y).and_then(|r| {
+            let t = p.track(&r.track)?;
+            let (at, end) = geometry::fade_edge_at(p, t, &scale, &r.rect, press)?;
+            let x = geometry::picture_transition(p, t, at)?;
+            let sound = t
+                .transitions
+                .iter()
+                .any(|y| y.sound && y.from == x.from && y.to == x.to);
+            Some((r.track.clone(), at, end, x.clone(), sound))
+        }) {
+            if let Some(t) = TrackRef::of(&track) {
+                self.select_transition(t, at);
+            }
+            Gesture::Fade {
+                track,
+                at,
+                end,
+                before: x.before,
+                after: x.after,
+                sound,
+            }
         } else {
             let track = track.unwrap_or_else(|| MAIN.to_string());
             let ripples = |clip: &str| {
@@ -1491,16 +1537,32 @@ impl Workspace {
         if resp.secondary_clicked()
             && let Some(pos) = resp.interact_pointer_pos()
         {
-            let id = match hit_rows(p, rows, &scale, pos).1 {
-                Hit::Clip(id) | Hit::Slip(id) | Hit::Edge(id, _) => Some(id),
-                _ => None,
-            };
-            if let Some(id) = &id
-                && !self.snap.selection.clips.contains(id)
-            {
-                self.send("selection.set", json!({ "clips": [id] }));
+            let faded = rows.at(pos.y).and_then(|r| {
+                let at = geometry::transition_at(p, p.track(&r.track)?, &scale, &r.rect, pos)?;
+                Some((TrackRef::of(&r.track)?, at))
+            });
+            if let Some((track, at)) = faded {
+                self.select_transition(track, at);
+                self.timeline.transition_menu = Some(upper);
+                self.timeline.clip_menu = None;
+            } else {
+                self.timeline.transition_menu = None;
+                let id = match hit_rows(p, rows, &scale, pos).1 {
+                    Hit::Clip(id) | Hit::Slip(id) | Hit::Edge(id, _) => Some(id),
+                    _ => None,
+                };
+                if let Some(id) = &id
+                    && !self.snap.selection.clips.contains(id)
+                {
+                    self.send("selection.set", json!({ "clips": [id] }));
+                }
+                self.timeline.clip_menu = id.map(|id| (upper, id));
             }
-            self.timeline.clip_menu = id.map(|id| (upper, id));
+        }
+        if self.timeline.transition_menu == Some(upper)
+            && resp.context_menu(|ui| self.transition_menu(ui)).is_none()
+        {
+            self.timeline.transition_menu = None;
         }
         if let Some((on_upper, id)) = self.timeline.clip_menu.clone()
             && on_upper == upper
@@ -1519,6 +1581,13 @@ impl Workspace {
         let mods = ui.input(|i| i.modifiers);
         let on_ruler = ruler.expand2(vec2(0.0, 2.0)).contains(pos);
         let what = hit_rows(p, rows, &scale, pos).1;
+        let faded = rows
+            .at(pos.y)
+            .filter(|_| !on_ruler && !matches!(what, Hit::Roll { .. } | Hit::AudioEdit { .. }))
+            .and_then(|r| {
+                let at = geometry::transition_at(p, p.track(&r.track)?, &scale, &r.rect, pos)?;
+                Some((TrackRef::of(&r.track)?, at))
+            });
         if resp.double_clicked() || resp.triple_clicked() {
             if on_ruler {
                 if let Some(k) = p
@@ -1528,6 +1597,8 @@ impl Workspace {
                 {
                     self.open_marker(k.id.clone(), p);
                 }
+            } else if let Some((track, at)) = faded {
+                self.select_transition(track, at);
             } else if let Hit::Roll { outgoing, .. } | Hit::Edge(outgoing, Edge::Tail) = &what
                 && let Some(c) = p.clip(outgoing)
                 && let Some(track) = TrackRef::of_clip(p, outgoing)
@@ -1543,6 +1614,11 @@ impl Workspace {
                 if upper || !self.timeline.options.fixed_playhead {
                     self.seek(PlayerId::Timeline, f, false);
                 }
+                return;
+            }
+            self.timeline.transition = None;
+            if let Some((track, at)) = faded {
+                self.select_transition(track, at);
                 return;
             }
             match &what {
@@ -1866,14 +1942,15 @@ impl Workspace {
                 side: Side::Both,
                 track: TrackRef::MAIN,
             });
+            self.timeline.transition = None;
         }
         if pressed(Key::U)
             && let Some(e) = &mut self.timeline.edit
         {
             e.side = match e.side {
-                Side::Both => Side::Out,
-                Side::Out => Side::In,
-                Side::In => Side::Both,
+                Side::Both => Side::In,
+                Side::In => Side::Out,
+                Side::Out => Side::Both,
                 Side::Audio => Side::Audio,
             };
         }
@@ -1898,8 +1975,12 @@ impl Workspace {
         {
             self.nudge_edit(e.side, nudge);
         }
-        if pressed(Key::D) && input.modifiers.command && !self.snap.selection.clips.is_empty() {
-            self.timeline.duration_dialog = Some(String::new());
+        if pressed(Key::D) && input.modifiers.command {
+            if !self.snap.selection.clips.is_empty() {
+                self.timeline.duration_dialog = Some(String::new());
+            } else if self.selected_transition().is_some() {
+                self.open_fade_dialog();
+            }
         }
         if pressed(Key::R) && !input.modifiers.command && !self.snap.selection.clips.is_empty() {
             self.open_speed_dialog();
@@ -1911,6 +1992,7 @@ impl Workspace {
 
     pub(crate) fn nudge_edit(&mut self, side: Side, by: i64) {
         let Some(e) = self.timeline.edit else { return };
+        let carried = self.timeline.transition == Some((e.track, e.at));
         let Some(p) = self.shown_project() else {
             return;
         };
@@ -1980,6 +2062,9 @@ impl Workspace {
             side,
             track: e.track,
         });
+        if carried {
+            self.timeline.transition = Some((e.track, at));
+        }
     }
 
     pub(crate) fn open_marker(&mut self, id: String, p: &Project) {
@@ -2180,8 +2265,109 @@ impl Workspace {
             side: Side::Both,
             track,
         });
-        self.trim_editor = Some(at);
+        self.timeline.transition = None;
         self.show_timeline();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn paint_edit_selection(
+        &self,
+        ctx: &egui::Context,
+        painter: &egui::Painter,
+        rows: &Rows,
+        scale: &Scale,
+        p: &Project,
+        moved: Option<i64>,
+        reach: f32,
+    ) {
+        let Some(e) = self.timeline.edit else {
+            return;
+        };
+        let Some(row) = rows.get(&e.track.id()) else {
+            return;
+        };
+        let x = scale.xf(moved.unwrap_or(e.at));
+        let y = if e.side == Side::Audio {
+            egui::Rangef::new(row.rect.audio_top, row.rect.rect.bottom())
+        } else {
+            row.rect.rect.y_range()
+        };
+        let stopped = self
+            .timeline
+            .dynamic
+            .as_ref()
+            .is_some_and(|d| d.stopped.is_some());
+        let (out_ok, in_ok) = match (e.side, p.track(&e.track.id())) {
+            (Side::Audio, _) | (_, None) => (true, true),
+            (_, Some(t)) => ops::filmstrip::extends(p, t, e.at),
+        };
+        let glow = paint::pulse(ctx.input(|i| i.time));
+        let tint = |ok: bool| {
+            if stopped || !ok {
+                (
+                    Color32::from_rgb(200, 40, 40),
+                    Color32::from_rgb(240, 70, 70),
+                )
+            } else {
+                (
+                    Color32::from_rgb(20, 150, 20),
+                    Color32::from_rgb(60, 230, 60),
+                )
+            }
+        };
+        let shade = |side: f32, ok: bool| {
+            let (_, light) = tint(ok);
+            let steps = reach.round().max(1.0) as usize;
+            for i in 0..steps {
+                let fade = 1.0 - i as f32 / steps as f32;
+                let a = x + side * (1.0 + i as f32);
+                let b = a + side;
+                painter.rect_filled(
+                    Rect::from_x_y_ranges(a.min(b)..=a.max(b), y),
+                    0.0,
+                    light.gamma_multiply(glow * fade),
+                );
+            }
+        };
+        let (out_side, in_side) = match e.side {
+            Side::Out => (true, false),
+            Side::In => (false, true),
+            Side::Both | Side::Audio => (true, true),
+        };
+        if out_side {
+            shade(-1.0, out_ok);
+        }
+        if in_side {
+            shade(1.0, in_ok);
+        }
+        let (core, _) = tint(if e.side == Side::In { in_ok } else { out_ok });
+        painter.rect_filled(Rect::from_x_y_ranges((x - 1.0)..=(x + 1.0), y), 0.0, core);
+        repaint_in(ctx, paint::PULSE_STEP);
+    }
+
+    pub(crate) fn select_transition(&mut self, track: TrackRef, at: i64) {
+        self.open_trim_editor(at, track);
+        self.timeline.transition = Some((track, at));
+        if !self.snap.selection.clips.is_empty() {
+            self.send("selection.set", json!({ "clips": [] }));
+        }
+    }
+
+    pub(crate) fn trim_transition(
+        &self,
+        p: &Project,
+        e: EditSel,
+    ) -> Option<vidcut_core::model::Transition> {
+        geometry::picture_transition(p, p.track(&e.track.id())?, e.at).cloned()
+    }
+
+    pub(crate) fn trim_editor_edit(&self) -> Option<EditSel> {
+        let e = self
+            .timeline
+            .edit
+            .filter(|e| e.side != Side::Audio && !e.track.audio)?;
+        let stopped = !self.snap.timeline.playing && self.timeline.dynamic.is_none();
+        (stopped && self.snap.viewer == ViewerMode::Timeline).then_some(e)
     }
 
     pub fn trim_editor_request(&mut self, r: crate::live::TrimEditor) {
@@ -2190,9 +2376,10 @@ impl Workspace {
             track,
             by,
             side,
+            transition,
         } = r
         else {
-            self.trim_editor = None;
+            self.timeline.edit = None;
             return;
         };
         let (Some(t), Some(p)) = (TrackRef::of(&track), self.shown_project()) else {
@@ -2209,7 +2396,7 @@ impl Workspace {
         let shown = self
             .timeline
             .edit
-            .filter(|e| self.trim_editor.is_some() && e.track == t);
+            .filter(|e| e.side != Side::Audio && e.track == t);
         let edit = match (at, shown) {
             (Some(at), _) => nearest(at),
             (None, Some(e)) => Some(e.at),
@@ -2219,6 +2406,7 @@ impl Workspace {
         if shown.map(|e| e.at) != Some(edit) {
             self.open_trim_editor(edit, t);
         }
+        self.timeline.transition = transition.then_some((t, edit));
         if let Some(by) = by {
             self.timeline.edit = Some(EditSel {
                 at: edit,
@@ -2242,6 +2430,7 @@ impl Workspace {
             _ => format!("{track} has no clips"),
         })?;
         self.timeline.edit = Some(EditSel { at, side, track: t });
+        self.timeline.transition = None;
         Ok(())
     }
 

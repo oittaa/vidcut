@@ -90,7 +90,7 @@ pub struct Workspace {
     pub(super) target: Option<String>,
     pub(super) drag: Option<Drag>,
     pub(super) timeline: TimelineView,
-    pub(super) trim_editor: Option<i64>,
+    pub(super) trim_anchor: Option<super::trim_strips::TrimAnchor>,
     pub(super) cells: Option<super::cells::Cells>,
     pub(super) screens: Option<super::cells::Screens>,
     pub(super) two_up: Option<TwoUp>,
@@ -221,7 +221,7 @@ impl Workspace {
                 options: super::timeline::Options::load(),
                 ..TimelineView::default()
             },
-            trim_editor: None,
+            trim_anchor: None,
             cells: None,
             screens: None,
             two_up: None,
@@ -1314,7 +1314,7 @@ impl Workspace {
             if self.pool_focus {
                 let selected = self.snap.selection.media.clone();
                 self.removing = (!selected.is_empty()).then_some(selected);
-            } else {
+            } else if !self.delete_transition() {
                 self.delete(m.alt);
             }
         }
@@ -1681,14 +1681,14 @@ impl Workspace {
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Card, |ui| self.pool_panel(ui))
             });
-        if let Some(tiles) = &mut self.tiles {
-            tiles.end_frame();
-        }
         egui::CentralPanel::default()
             .frame(theme::card(theme::colors().panel_dark))
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Viewer, |ui| self.viewer_panel(ui))
             });
+        if let Some(tiles) = &mut self.tiles {
+            tiles.end_frame();
+        }
         self.media_drag_overlay(&ctx);
     }
 }

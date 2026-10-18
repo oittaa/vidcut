@@ -394,6 +394,17 @@ pub fn tile_frame(source_in: i64, offset: f64, step: i64, first: bool, speed: f6
     n as i64 * step
 }
 
+pub fn media_aspect(m: &vidcut_core::model::Media) -> Option<f32> {
+    let v = m.info.video.as_ref()?;
+    let sar = if v.sar[0] > 0 && v.sar[1] > 0 {
+        v.sar[0] as f32 / v.sar[1] as f32
+    } else {
+        1.0
+    };
+    let (w, h) = (v.width as f32 * sar, v.height.max(1) as f32);
+    Some(if v.rotation % 180 == 90 { h / w } else { w / h })
+}
+
 pub fn tile_height(px: f32) -> u32 {
     ((px / 16.0).ceil().max(1.0) as u32) * 16
 }

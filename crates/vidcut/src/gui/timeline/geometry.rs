@@ -1,6 +1,7 @@
 use eframe::egui::{Pos2, Rect, pos2, vec2};
-use vidcut_core::model::{Clip, Project, Track, TrackKind};
+use vidcut_core::model::{Clip, Project, Track, TrackKind, Transition};
 use vidcut_core::ops::{Edge, MAIN};
+use vidcut_core::otio::transitions::Cuts;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scale {
@@ -254,6 +255,7 @@ const ROLL: f32 = 3.0;
 const EDGE: f32 = 10.0;
 const AUDIO_EDIT: f32 = 12.0;
 const SLIP: f32 = 9.0;
+const FADE_EDGE: f32 = 5.0;
 
 pub fn clips_in(track: &Track, a: i64, b: i64) -> std::ops::Range<usize> {
     let first = track.clips.partition_point(|c| c.end() <= a);
@@ -360,6 +362,58 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
         return Hit::Clip(c.id.clone());
     }
     Hit::Empty
+}
+
+pub fn picture_transition<'a>(p: &Project, track: &'a Track, at: i64) -> Option<&'a Transition> {
+    let cuts = Cuts::of(p, track);
+    track
+        .transitions
+        .iter()
+        .find(|x| !x.sound && cuts.place(p, x) == Some(at))
+}
+
+pub fn fade_edge_at(
+    p: &Project,
+    track: &Track,
+    scale: &Scale,
+    tr: &TrackRect,
+    pos: Pos2,
+) -> Option<(i64, bool)> {
+    let banded = tr.audio_top > tr.rect.top();
+    if !tr.rect.contains(pos) || (banded && tr.in_audio(pos.y)) {
+        return None;
+    }
+    let cuts = Cuts::of(p, track);
+    track.transitions.iter().filter(|x| !x.sound).find_map(|x| {
+        let at = cuts.place(p, x)?;
+        let near = |f: i64| f != at && (scale.xf(f) - pos.x).abs() <= FADE_EDGE;
+        if near(at + x.after) {
+            Some((at, true))
+        } else if near(at - x.before) {
+            Some((at, false))
+        } else {
+            None
+        }
+    })
+}
+
+pub fn transition_at(
+    p: &Project,
+    track: &Track,
+    scale: &Scale,
+    tr: &TrackRect,
+    pos: Pos2,
+) -> Option<i64> {
+    let banded = tr.audio_top > tr.rect.top();
+    if !tr.rect.contains(pos) || (banded && tr.in_audio(pos.y)) {
+        return None;
+    }
+    let cuts = Cuts::of(p, track);
+    track.transitions.iter().filter(|x| !x.sound).find_map(|x| {
+        let at = cuts.place(p, x)?;
+        let over = scale.xf(at - x.before) <= pos.x && pos.x <= scale.xf(at + x.after);
+        (over && (pos.x - scale.xf(at)).abs() > ROLL).then_some(at)
+    })
 }
 
 pub fn hit_rows(p: &Project, rows: &Rows, scale: &Scale, pos: Pos2) -> (Option<String>, Hit) {

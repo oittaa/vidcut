@@ -142,7 +142,7 @@ A marker on the ruler shows the edit point nearest the playhead, which some func
 
 ### 8.1 Selection (pp. 719–720)
 - **Clips:** click selects, Ctrl+click toggles, Shift+click selects a range, a marquee from empty space selects what it touches. Clicking empty space, or Ctrl+Shift+A, deselects. Alt+Shift+V selects every clip under the playhead.
-- **Edit points:** the pointer at the center of an edit selects both sides (a roll), just left or right of it one side (a resize); Ctrl+click adds edits. V selects the edit nearest the playhead; U cycles outgoing / incoming / both.
+- **Edit points:** the pointer at the center of an edit selects both sides (a roll), just left or right of it one side (a resize); Ctrl+click adds edits. V selects the edit nearest the playhead; U cycles both, incoming, outgoing. In both timelines the selected edit is a solid line on the cut with a glow on its selected side, or both, pulsing about once a second: green where that side has media to trim into, red where it has none.
 
 ### 8.2 Moving clips (pp. 720–723)
 - **Onto another Track 1 clip, released quickly:** replaces it and ripples.
@@ -169,7 +169,7 @@ Ctrl+\, the Split button, or Split Clips splits at the playhead. Join Match Edit
   - **Lower audio band at an edit: audio-only roll**, a J/L cut (§8.7).
 - **Safe Edit** (option, p. 732): a trim stops at the neighboring clip, with a small timer on the cursor; keep dragging to overwrite anyway.
 - **Trim to Audio** (option, p. 645): the audio view expands while trimming.
-- **Trim Editor** (double-click an edit; pp. 729–730): the Viewer shows the outgoing filmstrip on top and the incoming one below. The top handle trims the outgoing Out, the bottom one the incoming In, the middle one rolls, and ±1-frame buttons nudge. Esc or Close closes it.
+- **Trim Editor** (pp. 729–730; D52): while an edit is selected and the player is stopped, the Viewer shows the outgoing clip's last frame beside the incoming clip's first, over the outgoing filmstrip on top and the incoming one below. Each frame is numbered from where the edit was when the editor opened, with a bar in the clip's color under the clip's own frames and a grey one under those past its edge. The handles stay at the centre while the filmstrips slide under them, as far as the media allow: the top handle trims the outgoing Out, the bottom one the incoming In, the white one between them rolls. A handle turns red where its side has no more media. A pair of ±1-frame buttons each side of the transport nudges the Out (left) and the In (right), or rolls with both sides selected. An edit with a dissolve shows the dissolve between the filmstrips, several frames to a cell; dragging either end makes it longer or shorter about the edit. Esc or Close deselects the edit.
 - **Trim Start/End to Playhead** (Edit Actions, p. 729): moves a clip's head or tail to the playhead.
 - **Change Clip Speed** (R†): a speed, reversed or not, or a freeze frame, for every selected clip (D48).
 - **Change Clip Duration** (Ctrl+D, p. 693): frames or a timecode, or 1, 5 or 15 seconds, for every selected clip. End runs to the end of the media; Extend Beyond Clip Length pads with black.
@@ -190,8 +190,9 @@ Ctrl+Z / Ctrl+Shift+Z, unlimited. Edit > History lists the last twenty steps, an
 ### 8.11 Dissolves (pp. 645, 747, 758–761, 895, 1114, 1159, 1173)
 - **Dissolve and Ctrl+T** (p. 758): a one-second Cross Dissolve centered on the edit nearest the playhead. Ctrl+T puts it on the selected edit (V) instead, else on the selected clips (p. 895), else on the edit nearest the playhead. U picks where: ending on the edit (outgoing side), starting on it (incoming) or centered (both). Where the clips' sounds meet at that edit, a Cross Fade goes on the sound too (p. 1114). Details: D50.
 - **Cut** (p. 759): the edit nearest the playhead becomes a cut again.
+- **A selected dissolve** (pp. 759, 761): a click selects it. Its right-click menu has Change Transition Duration, then Start on Edit, Center on Edit and End on Edit, the current one greyed. Change Transition Duration takes a timecode or frames (Format, remembered) or a 1, 5 or 15-second preset, and is shortened to the media (deviation X27); Ctrl+D opens it too. Delete removes the dissolve. Dragging a dissolve's edge, in either timeline, makes it longer or shorter evenly about the edit at that timeline's scale, shortened to the media (X27), with a tooltip of the edge's move and the new length, and selects it. Each acts on the Cross Fade at the edit as well.
 - **How it plays** (pp. 747, 760, 1159, 1173): each clip shows its media past its edge, so a dissolve is as long as the clips have frames there. Pictures cross in a straight line, at a gap from or to black; a Cross Fade's level at its middle is +3, 0 or −3 dB.
-- **Out:** other transitions (wipes, Smooth Cut, the Transitions browser), the Transition Inspector, dragging or moving a transition, Set Default Transition.
+- **Out:** other transitions (wipes, Smooth Cut, the Transitions browser), the Transition Inspector, moving a transition to another edit, Change Transition Type, Set as Default Transition, and cutting, copying and pasting transitions.
 
 ## 9. Audio (pp. 642, 649–650, 743, 771, 773)
 
@@ -238,7 +239,7 @@ Shortcuts do nothing while a text field has focus or a modal question is up; Esc
 | Shift+F12† | Append |
 | Ctrl+\ or Ctrl+B | Split at playhead |
 | Ctrl+T | Dissolve (§8.11) |
-| Delete / Backspace | Delete (ripples on Track 1) |
+| Delete / Backspace | Delete (ripples on Track 1); a selected dissolve |
 | Alt+Delete | Lift the selection (D9) |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
@@ -246,11 +247,11 @@ Shortcuts do nothing while a text field has focus or a modal question is up; Esc
 | V / U | Select nearest edit / cycle edit side |
 | , / . (Shift: 1 s)† | Trim the selected edit a frame |
 | D | Disable / enable clip video |
-| Ctrl+D | Change clip duration |
+| Ctrl+D | Change clip or dissolve duration |
 | R† | Change clip speed (D48) |
 | N | Snapping on/off |
 | M / Alt+M | Add or edit / delete marker |
-| Double-click an edit | Trim Editor |
+| Click an edit | Trim Editor (D52) |
 | W | Dynamic Trim on/off |
 | Shift+S | Audio scrubbing on/off |
 | Ctrl+wheel | Zoom the lower timeline (X21) |
@@ -312,5 +313,6 @@ Each decision holds until the manual or testing shows Resolve behaves otherwise;
 - **D47. Drop-frame timecode** (§4.3). At 29.97 and 59.94 fps record timecode can count drop-frame, as Resolve's project settings offer: frame numbers 00 and 01 (00–03 at 59.94) are skipped each minute but every tenth. New Project and Project Settings offer it; the first video setting the format (D37), or an OTIO import into an empty timeline, turns it on when the media's timecode counts so. It shows as `;` before the frames. Typed, `;` means drop-frame, as does `:` in a drop-frame project; a skipped label is refused, and digits that fill one land on the minute's first frame.
 - **D48. Clips at another speed** (§1, §8.6; deviation X9). A clip's constant speed, from Change Clip Speed or an OTIO file, holds wherever its pictures and sound go. Change Clip Speed takes 1% to 10000% either way, or 0, freezing the frame under the playhead. Without ripple the clip keeps its length; with ripple it keeps its source, and later clips follow. Each frame shows the source frame its stretch of the source starts in (backward, its bottom, as Resolve shows it), without blending. Sound keeps its pitch, reversed backward; a freeze is silent. Edits count frames through the speed.
 - **D49. What Join Match Edit Clips joins** (pp. 646, 950). The manual says only that it rejoins a split clip. Two clips join when the second plays on from where the first stops, so nothing seen or heard changes: adjacent on one track, with the same media, speed and settings, no frames missing, no fade or transition between. With two or more clips selected, those that meet join; otherwise those at the playhead, chosen as for Split (D2). The first part keeps its id.
-- **D50. Dissolves** (§8.11; deviations X9, X24). The manual says only that one picture fades as the next comes in; these rules match Resolve's renders. Frame i of an n-frame dissolve shows the incoming picture at (i + ½)/n and the outgoing at the rest, mixed in the output's code values, not linear light; at a gap, with what is under the track. A Cross Fade gives the incoming sound √x (+3 dB), x (0 dB) or x^1.5 (−3 dB) at x of the way, the outgoing the same of 1 − x, with no de-click at its edges. The manual names no track for the edit nearest the playhead, so it is Track 1's (D36). Ctrl+T on selected clips puts a dissolve on both edges of each, on its track, an edit between two of them once. A new dissolve is a second, centered with an odd length's middle frame before the edit and shortened to the media each side has, and adds a Cross Fade +3 dB where the sounds meet. A fade to black past the last clip lengthens the program.
+- **D50. Dissolves** (§8.11; deviations X9, X24, X27). The manual says only that one picture fades as the next comes in; these rules match Resolve's renders. Frame i of an n-frame dissolve shows the incoming picture at (i + ½)/n and the outgoing at the rest, mixed in the output's code values, not linear light; at a gap, with what is under the track. A Cross Fade gives the incoming sound √x (+3 dB), x (0 dB) or x^1.5 (−3 dB) at x of the way, the outgoing the same of 1 − x, with no de-click at its edges. The manual names no track for the edit nearest the playhead, so it is Track 1's (D36). Ctrl+T on selected clips puts a dissolve on both edges of each, on its track, an edit between two of them once. A new dissolve is a second, centered with an odd length's middle frame before the edit and shortened to the media each side has (deviation X27), and adds a Cross Fade +3 dB where the sounds meet. Longer than both sides allow, it fills both, as in Resolve: 999 frames on a cut between two 300-frame clips with long handles make 300 + 300. At a clip's edge with no clip beside it, beside empty track or at the timeline start, it lies inside the clip, ending on its last frame or starting on its first, whether U picks the clip's side or both; the empty side alone takes none. A fade past the last clip, as an OTIO file may hold, lengthens the program.
 - **D51. Loop** (§4.2; p. 640). The manual says only that Loop Playback loops. With it on, play that reaches the end goes on from the start; with both In and Out set in the viewer, play that reaches the Out goes on from the In, and play from past the Out runs to the end, then goes on from the In. Backward play loops the other way round. The sound runs on without a break. It is off at the start and not in the project.
+- **D52. When the Trim Editor shows** (§8.6; pp. 729–731). The manual opens it with a double-click. Resolve Studio 21.1.1 shows it whenever an edit is selected and the player is stopped: a click on the edit, V or a double-click, or a click on a dissolve, which selects its edit and the dissolve. Either way an edit with a dissolve shows the dissolve. Space plays the timeline as usual, through the edit, the editor hidden; stopping brings it back, the edit still selected. Dragging its handles trims at the lower timeline's scale, a dissolve's ends at the filmstrips'.

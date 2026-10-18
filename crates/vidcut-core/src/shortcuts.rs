@@ -245,8 +245,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Delete",
         Some(
             "Removes the selected clips. On Track 1 the gap closes: Track 1 holds the main \
-             story and never has holes. Backspace does the same. After a click in the Media \
-             Pool, it removes the selected media from the pool instead, after asking.",
+             story and never has holes. Backspace does the same. With a dissolve selected, it \
+             removes the dissolve and its Cross Fade. After a click in the Media Pool, it \
+             removes the selected media from the pool instead, after asking.",
         ),
     ),
     key(
@@ -274,7 +275,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Picture off or on",
         Some("The clip stays in place with its picture off, so you see what's under it."),
     ),
-    key(Clips, &["Ctrl", "D"], "Change duration", None),
+    key(
+        Clips,
+        &["Ctrl", "D"],
+        "Change duration",
+        Some("Of the selected clips, or of the selected dissolve, as a timecode or in frames."),
+    ),
     key(
         Clips,
         &["R"],
@@ -307,7 +313,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Some(
             "A cut has two sides: the end of the clip going out and the start of the one \
              coming in. U goes from rolling both, which moves the cut and keeps the length, \
-             to the clip going out, to the clip coming in. In Dynamic Trim too.",
+             to the clip coming in, to the clip going out. In Dynamic Trim too.",
         ),
     ),
     key(
@@ -324,12 +330,15 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     key(
         Trim,
-        &["Double-click"],
+        &["Click"],
         "Trim Editor",
         Some(
-            "Double-click a cut: the viewer shows the last frame going out beside the first \
-             frame coming in. Its -1 and +1 buttons trim the clip going out, the one coming \
-             in, or both, a frame at a time. Esc closes it.",
+            "Click a cut: while it is selected and the player is stopped, the viewer shows \
+             the last frame going out beside the first frame coming in, over their \
+             filmstrips. Drag a filmstrip's handle, or use the -1 and +1 buttons beside the \
+             transport, to trim the clip going out, the one coming in, or both. Click a \
+             dissolve to see it between the filmstrips and drag its ends to change its \
+             length. Space plays as usual; Esc closes it.",
         ),
     ),
     key(

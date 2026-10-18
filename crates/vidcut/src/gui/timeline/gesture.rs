@@ -42,6 +42,14 @@ pub enum Gesture {
     Slip {
         clips: Vec<String>,
     },
+    Fade {
+        track: String,
+        at: i64,
+        end: bool,
+        before: i64,
+        after: i64,
+        sound: bool,
+    },
     AudioRoll {
         outgoing: String,
         from: i64,
@@ -227,6 +235,39 @@ impl Drag {
                 roll_preview(ctx, *from + moved(ctx, self.press, pos), outgoing, *from)
             }
             Gesture::Slip { clips } => slip_preview(ctx, pos, self.press, clips),
+            Gesture::Fade {
+                track,
+                at,
+                end,
+                before,
+                after,
+                sound,
+            } => {
+                let d = moved(ctx, self.press, pos);
+                let grow = if *end { d } else { -d };
+                let (b, a) = crate::gui::trim_strips::grown(*before, *after, grow);
+                let (length, align) = crate::gui::trim_strips::resized(*before, *after, grow);
+                Preview {
+                    request: (grow != 0)
+                        .then(|| {
+                            request(
+                                "edit.dissolve",
+                                json!({
+                                    "at": at,
+                                    "track": track,
+                                    "length": format!("{length}f"),
+                                    "align": align,
+                                    "sound": sound,
+                                }),
+                            )
+                        })
+                        .flatten(),
+                    delta: Some((d, Some(b + a))),
+                    ghost: Some((at - b, at + a)),
+                    row: Some(track.clone()),
+                    ..Preview::default()
+                }
+            }
             Gesture::AudioRoll { outgoing, from } => {
                 audio_roll_preview(ctx, *from + moved(ctx, self.press, pos), outgoing, *from)
             }

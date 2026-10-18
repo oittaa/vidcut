@@ -38,6 +38,13 @@ pub struct Assets<'a> {
 
 pub type Placed = HashMap<String, Vec<(i64, usize)>>;
 
+pub const PULSE: f64 = 1.0;
+pub const PULSE_STEP: std::time::Duration = std::time::Duration::from_millis(40);
+
+pub fn pulse(time: f64) -> f32 {
+    (0.66 + 0.06 * (time * std::f64::consts::TAU / PULSE).cos()) as f32
+}
+
 pub fn placed(p: &Project) -> Placed {
     p.tracks
         .iter()
@@ -545,16 +552,7 @@ fn filmstrip(
     let aspect = pool
         .and_then(|t| t.textures.first())
         .map(|t| t.size_vec2().x / t.size_vec2().y.max(1.0))
-        .or_else(|| {
-            let v = m.info.video.as_ref()?;
-            let sar = if v.sar[0] > 0 && v.sar[1] > 0 {
-                v.sar[0] as f32 / v.sar[1] as f32
-            } else {
-                1.0
-            };
-            let (w, h) = (v.width as f32 * sar, v.height.max(1) as f32);
-            Some(if v.rotation % 180 == 90 { h / w } else { w / h })
-        })
+        .or_else(|| tiles::media_aspect(m))
         .unwrap_or(16.0 / 9.0)
         .clamp(0.1, 10.0);
     let tile_w = (rect.height() * aspect).max(8.0);
@@ -795,5 +793,13 @@ pub fn trim_pointer(painter: &Painter, at: Pos2, kind: TrimPointer) {
         for l in &lines {
             painter.add(egui::Shape::line(l.clone(), Stroke::new(width, color)));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_selected_edits_glow_is_strongest_at_the_start_of_each_pulse() {
+        assert_eq!((super::pulse(super::PULSE) * 100.0).round(), 72.0);
     }
 }

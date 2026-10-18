@@ -13,6 +13,7 @@ use vidcut::gui::workspace::Workspace;
 use vidcut::live::{self, Capture, GuiChange, GuiDone, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
 use vidcut_core::model::Settings;
+use vidcut_core::request::TrimSide;
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, Project, Store};
 
@@ -196,6 +197,35 @@ impl Gui {
         }
     }
 
+    fn double_click(&mut self, at: Pos2) {
+        self.click(at);
+        self.click(at);
+    }
+
+    fn drag(&mut self, from: Pos2, to: Pos2) {
+        self.harness.event(egui::Event::PointerMoved(from));
+        self.harness.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        });
+        self.harness.step();
+        for i in 1..=4 {
+            self.harness.event(egui::Event::PointerMoved(
+                from + (to - from) * (i as f32 / 4.0),
+            ));
+            self.harness.step();
+        }
+        self.harness.event(egui::Event::PointerButton {
+            pos: to,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        });
+        self.harness.step();
+    }
+
     fn at(&self, track: &str, frame: i64, dy: f32) -> Pos2 {
         let l = self.harness.state().timeline_layout().unwrap();
         let row = l.lower.get(track).unwrap().rect.rect;
@@ -318,6 +348,233 @@ fn two_quick_rolls_add_up() {
         ]
     );
     assert_eq!(gui.harness.state().selected_edit(), Some(62));
+    gui.quit();
+}
+
+#[test]
+fn dragging_the_trim_editors_roll_handle_two_frames_rolls_the_edit_two_frames() {
+    let mut gui = Gui::new();
+    gui.double_click(gui.at("V1", 60, 20.0));
+    gui.settle();
+    let roll = gui.harness.get_by_label("Roll the edit").rect();
+    gui.drag(roll.center(), roll.center() + vec2(2.0 * 4.0, 0.0));
+    gui.settle();
+    assert_eq!(
+        gui.clips("V1"),
+        [
+            ("c1".into(), 0, 62),
+            ("c2".into(), 62, 58),
+            ("c3".into(), 120, 60)
+        ]
+    );
+    gui.quit();
+}
+
+#[test]
+fn dragging_the_trim_editors_out_handle_three_frames_left_trims_the_outgoing_clip() {
+    let mut gui = Gui::new();
+    gui.double_click(gui.at("V1", 60, 20.0));
+    gui.settle();
+    let out = gui.harness.get_by_label("Trim the Out").rect();
+    gui.drag(out.center(), out.center() - vec2(3.0 * 4.0, 0.0));
+    gui.settle();
+    assert_eq!(
+        gui.clips("V1"),
+        [
+            ("c1".into(), 0, 57),
+            ("c2".into(), 57, 60),
+            ("c3".into(), 117, 60)
+        ]
+    );
+    gui.quit();
+}
+
+#[test]
+fn one_click_on_a_cut_opens_the_trim_editor() {
+    let mut gui = Gui::new();
+    gui.click(gui.at("V1", 60, 20.0));
+    gui.settle();
+    assert!(gui.harness.query_by_label("Roll the edit").is_some());
+    gui.quit();
+}
+
+#[test]
+fn the_trim_editors_pair_beside_the_transport_rolls_a_cut_with_both_sides_selected() {
+    let mut gui = Gui::new();
+    gui.click(gui.at("V1", 60, 20.0));
+    gui.settle();
+    gui.harness
+        .get_all_by_label("Roll the edit a frame later")
+        .next()
+        .unwrap()
+        .click();
+    gui.harness.step();
+    gui.settle();
+    assert_eq!(
+        gui.clips("V1"),
+        [
+            ("c1".into(), 0, 61),
+            ("c2".into(), 61, 59),
+            ("c3".into(), 120, 60)
+        ]
+    );
+    gui.quit();
+}
+
+#[test]
+fn esc_in_the_trim_editor_deselects_the_cut() {
+    let mut gui = Gui::new();
+    gui.click(gui.at("V1", 60, 20.0));
+    gui.settle();
+    gui.key(Key::Escape);
+    gui.settle();
+    assert_eq!(gui.harness.state().selected_edit(), None);
+    gui.quit();
+}
+
+fn dissolve_at_60(gui: &mut Gui) {
+    gui.call(
+        "edit.dissolve",
+        json!({ "at": 60, "length": "10f", "sound": false }),
+    );
+    gui.settle();
+}
+
+fn v1_transitions(gui: &Gui) -> Vec<(i64, i64)> {
+    let p = gui.call("project.get", json!({}));
+    let v1 = p["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "V1")
+        .unwrap()
+        .clone();
+    v1["transitions"].as_array().map_or_else(Vec::new, |ts| {
+        ts.iter()
+            .map(|t| (t["before"].as_i64().unwrap(), t["after"].as_i64().unwrap()))
+            .collect()
+    })
+}
+
+#[test]
+fn a_click_on_a_dissolve_shows_it_between_the_trim_editors_strips() {
+    let mut gui = Gui::new();
+    dissolve_at_60(&mut gui);
+    gui.click(gui.at("V1", 57, 20.0));
+    gui.settle();
+    assert!(gui.harness.query_by_label("The dissolve's end").is_some());
+    gui.quit();
+}
+
+#[test]
+fn dragging_the_dissolves_end_two_frames_out_lengthens_it_two_frames_each_side() {
+    let mut gui = Gui::new();
+    dissolve_at_60(&mut gui);
+    gui.click(gui.at("V1", 57, 20.0));
+    gui.settle();
+    let start = gui
+        .harness
+        .get_by_label("The dissolve's start")
+        .rect()
+        .center();
+    let end = gui
+        .harness
+        .get_by_label("The dissolve's end")
+        .rect()
+        .center();
+    let frame = (end.x - start.x) / 10.0;
+    gui.drag(end, end + vec2(2.0 * frame, 0.0));
+    gui.settle();
+    assert_eq!(v1_transitions(&gui), [(7, 7)]);
+    gui.quit();
+}
+
+#[test]
+fn center_on_edit_from_a_dissolves_menu_recenters_it() {
+    let mut gui = Gui::new();
+    gui.call(
+        "edit.dissolve",
+        json!({ "at": 60, "length": "10f", "align": "end", "sound": false }),
+    );
+    gui.settle();
+    gui.click_with(gui.at("V1", 55, 20.0), egui::PointerButton::Secondary);
+    gui.settle();
+    gui.harness.get_by_label("Center on Edit").click();
+    gui.harness.step();
+    gui.settle();
+    assert_eq!(v1_transitions(&gui), [(5, 5)]);
+    gui.quit();
+}
+
+#[test]
+fn delete_with_a_dissolve_selected_takes_the_dissolve_away() {
+    let mut gui = Gui::new();
+    dissolve_at_60(&mut gui);
+    gui.click(gui.at("V1", 57, 20.0));
+    gui.settle();
+    gui.key(Key::Delete);
+    gui.settle();
+    assert_eq!((v1_transitions(&gui), gui.clips("V1").len()), (vec![], 3));
+    gui.quit();
+}
+
+#[test]
+fn change_transition_duration_from_a_dissolves_menu_takes_frames() {
+    let mut gui = Gui::new();
+    dissolve_at_60(&mut gui);
+    gui.click_with(gui.at("V1", 57, 20.0), egui::PointerButton::Secondary);
+    gui.settle();
+    gui.harness
+        .get_by_label("Change Transition Duration…")
+        .click();
+    gui.harness.step();
+    gui.settle();
+    gui.harness.get_by_label("Frames").click();
+    gui.harness.step();
+    let label = gui
+        .harness
+        .get_all_by_label("Duration")
+        .map(|n| n.rect())
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    gui.click(pos2(label.right() + 40.0, label.center().y));
+    gui.harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    gui.harness.event(egui::Event::Text("20".into()));
+    gui.harness.step();
+    gui.harness.get_by_label("Change").click();
+    gui.harness.step();
+    gui.settle();
+    assert_eq!(v1_transitions(&gui), [(10, 10)]);
+    gui.quit();
+}
+
+#[test]
+fn u_after_a_click_on_a_cut_selects_the_incoming_side() {
+    let mut gui = Gui::new();
+    gui.click(gui.at("V1", 60, 20.0));
+    gui.key(Key::U);
+    let side = gui.harness.state().gui_state().edit.map(|e| e.side);
+    assert_eq!(side, Some(TrimSide::In));
+    gui.quit();
+}
+
+#[test]
+fn dragging_a_dissolves_end_on_the_track_lengthens_it_evenly() {
+    let mut gui = Gui::new();
+    dissolve_at_60(&mut gui);
+    gui.drag(gui.at("V1", 65, 20.0), gui.at("V1", 67, 20.0));
+    gui.settle();
+    assert_eq!(v1_transitions(&gui), [(7, 7)]);
+    gui.quit();
+}
+
+#[test]
+fn a_click_on_the_cut_under_a_dissolve_shows_the_dissolve_in_the_trim_editor() {
+    let mut gui = Gui::new();
+    dissolve_at_60(&mut gui);
+    gui.click(gui.at("V1", 60, 20.0));
+    gui.settle();
+    assert!(gui.harness.query_by_label("The dissolve's end").is_some());
     gui.quit();
 }
 

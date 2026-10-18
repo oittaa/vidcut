@@ -64,6 +64,7 @@ pub enum TrimEditor {
         track: String,
         by: Option<i64>,
         side: TrimSide,
+        transition: bool,
     },
     Close,
 }
@@ -419,6 +420,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         stats: false,
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
+        budget,
     };
     let shared = Arc::new(Mutex::new(Arc::new(empty)));
     let preferences = crate::preferences::path();
@@ -1115,6 +1117,7 @@ impl Live {
             stats: self.stats,
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
+            budget: self.player.budget(),
         };
         *self.shared.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(snap);
         (self.notify)();
@@ -2106,6 +2109,7 @@ impl Live {
                 track,
                 by,
                 side,
+                transition,
                 close,
             } => {
                 if close {
@@ -2140,6 +2144,7 @@ impl Live {
                     track,
                     by,
                     side,
+                    transition,
                 });
                 Step::Now(Ok(answer(Value::Null)))
             }

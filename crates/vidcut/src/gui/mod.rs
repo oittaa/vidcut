@@ -18,6 +18,7 @@ mod shared;
 mod theme;
 mod tiles;
 mod timeline;
+mod trim_strips;
 mod video;
 mod viewer;
 #[cfg(any(target_os = "linux", windows))]

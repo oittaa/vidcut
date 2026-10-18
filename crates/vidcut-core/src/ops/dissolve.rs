@@ -27,6 +27,15 @@ pub fn split(length: i64, align: Align) -> (i64, i64) {
     }
 }
 
+fn wanted(length: i64, align: Align, outgoing: bool, incoming: bool) -> Option<(i64, i64)> {
+    match (outgoing, incoming, align) {
+        (true, false, Align::Start) | (false, true, Align::End) => None,
+        (true, false, _) => Some((length, 0)),
+        (false, true, _) => Some((0, length)),
+        _ => Some(split(length, align)),
+    }
+}
+
 fn otio(sound: bool, frames: i64) -> Value {
     if sound {
         return json!({
@@ -193,7 +202,7 @@ fn put(p: &mut Project, ti: usize, sound: bool, e: i64, frames: i64, align: Alig
     if from.is_none() && to.is_none() || compound_at(p, ti, sound, e).is_some() {
         return None;
     }
-    let (want_before, want_after) = split(frames, align);
+    let (want_before, want_after) = wanted(frames, align, from.is_some(), to.is_some())?;
     let (room_before, room_after) = room(p, ti, sound, e, from.as_deref(), to.as_deref());
     let (before, after) = (want_before.min(room_before), want_after.min(room_after));
     if before + after == 0 {
@@ -271,8 +280,13 @@ pub fn dissolve(
     }
     let made = at_edit(p, ti, pictures, sound, e, frames, align);
     if made.is_empty() {
+        let (from, to) = sides(p, ti, !pictures, e);
         return Err(Error::invalid(
-            "the clips at the edit have no frames past it to dissolve with",
+            if wanted(frames, align, from.is_some(), to.is_some()).is_none() {
+                "the edit has no clip on that side to dissolve"
+            } else {
+                "the clips at the edit have no frames past it to dissolve with"
+            },
         ));
     }
     Ok(made)
@@ -585,11 +599,44 @@ mod tests {
     }
 
     #[test]
-    fn a_fade_to_black_past_the_last_clip_ends_the_program() {
+    fn a_dissolve_on_the_last_clips_end_fades_it_out_inside_it() {
         let mut f = fixture();
         f.append("m1", 0, 50);
-        req(&mut f, "edit.dissolve", json!({"at": 50, "length": "10f"}));
-        assert_eq!(f.editor.project().end(), 55);
+        let r = req(&mut f, "edit.dissolve", json!({"at": 50, "length": "10f"}));
+        assert_eq!(made(&r), [(false, 50, 10, 0), (true, 50, 10, 0)]);
+    }
+
+    #[test]
+    fn a_dissolve_at_the_timeline_start_goes_inside_the_first_clip_though_it_has_media_before() {
+        let mut f = fixture();
+        f.append("m1", 20, 70);
+        let r = req(&mut f, "edit.dissolve", json!({"at": 10}));
+        assert_eq!(made(&r), [(false, 0, 0, 25), (true, 0, 0, 25)]);
+    }
+
+    #[test]
+    fn ctrl_t_on_a_clip_with_empty_track_around_it_dissolves_inside_its_edges() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m1", 100, 150);
+        f.ok(json!({"method": "edit.move", "params": {"clips": "c2", "to": "20f", "track": "V2"}}));
+        let r = req(
+            &mut f,
+            "edit.dissolve",
+            json!({"clips": ["c2"], "sound": false}),
+        );
+        assert_eq!(made(&r), [(false, 20, 0, 25), (false, 70, 25, 0)]);
+    }
+
+    #[test]
+    fn a_dissolve_toward_the_empty_side_of_a_clips_end_is_refused() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        let e = f.err(json!({"method": "edit.dissolve", "params": {"at": 50, "align": "start"}}));
+        assert_eq!(
+            e.to_string(),
+            "the edit has no clip on that side to dissolve"
+        );
     }
 
     #[test]
@@ -666,6 +713,19 @@ mod tests {
             e.to_string(),
             "c2 is a compound clip, and its edges take no dissolve: decompose it first"
         );
+    }
+
+    #[test]
+    fn a_dissolve_longer_than_both_clips_fills_both() {
+        let mut f = Fixture::new(&[(60.0, true)]);
+        f.append("m1", 100, 400);
+        f.append("m1", 700, 1000);
+        let r = req(
+            &mut f,
+            "edit.dissolve",
+            json!({"at": 300, "length": "999f"}),
+        );
+        assert_eq!(made(&r), [(false, 300, 300, 300), (true, 300, 300, 300)]);
     }
 
     #[test]
