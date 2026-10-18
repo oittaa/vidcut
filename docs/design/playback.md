@@ -49,7 +49,7 @@ Each seek, step, load and switch is a numbered motion. `Player::present_due` ask
 
 **Decoding** reuses the export's reader, `VideoFrames`, with `Output::Decoded`: YUV frames at their own size. Each turn does the first of: the viewer's frame; pictures ahead in the direction of play; playing backward, whole windows from a keyframe; when idle, the prepared frame and a window behind the playhead. Playing, or while its viewer waits, it holds a `first::Claim`, so jobs yield.
 
-**Kept pictures** live in `player::store::Store` under a memory and a video-memory budget (`player.memory_mb`, `player.video_memory_mb`; by default one shared budget on Apple silicon). The least recently used go first, never the prepared one.
+**Kept pictures** live in `player::store::Store` under a memory and a video-memory budget (`player.memory_mb`, `player.video_memory_mb`). By default the video budget is half the in-use GPU's dedicated memory (`Gpu::memory_mb`, [gpu](gpu.md)), else 1 GB, and Apple silicon has one shared budget. The least recently used go first, never the prepared one.
 
 **Dissolves** aren't mixed here: a `VideoPiece::Mix` frame is one `Picture` with an `Over` (picture and weight) per layer on top, each as decoded, and the viewer blends them as it draws, each converted to its RGB first. An export mixes them in its own code values ([export](export.md)), so mid-dissolve an HDR export's picture is not the viewer's ([todo](../todo/hdr-dissolve-preview.md)).
 

@@ -169,7 +169,7 @@ fn listed() -> Vec<Gpu> {
             id: id(desc.VendorId, desc.DeviceId, slot),
             name,
             vendor: maker(desc.VendorId),
-            memory_mb: None,
+            memory_mb: Some(desc.DedicatedVideoMemory as u64 >> 20).filter(|&mb| mb > 0),
             pci_vendor: desc.VendorId,
             slot,
             cuda: None,
@@ -257,11 +257,16 @@ fn listed() -> Vec<Gpu> {
             .filter(|n| !n.is_empty())
             .or_else(|| names.get(&(vendor, device)).cloned())
             .unwrap_or_else(|| format!("{} GPU {vendor:04x}:{device:04x}", maker(vendor)));
+        let memory_mb = std::fs::read_to_string(dev.join("mem_info_vram_total"))
+            .ok()
+            .and_then(|bytes| bytes.trim().parse::<u64>().ok())
+            .map(|bytes| bytes >> 20)
+            .filter(|&mb| mb > 0);
         gpus.push(Gpu {
             id: id(vendor, device, slot),
             name: named,
             vendor: maker(vendor),
-            memory_mb: None,
+            memory_mb,
             pci_vendor: vendor,
             slot,
             cuda: None,
@@ -318,7 +323,7 @@ fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
             g.cuda = Some(c.index);
             g.uuid = c.uuid;
             g.name = c.name.clone();
-            g.memory_mb = c.memory.map(|b| b as u64 >> 20);
+            g.memory_mb = c.memory.map(|b| b as u64 >> 20).or(g.memory_mb);
         }
     }
     for c in cuda {
