@@ -310,7 +310,8 @@ impl Workspace {
             ui.label(
                 "This deletes the preferences, the thumbnails, waveforms, measurements, \
                  encoder detection and shaders, the undo histories (but those of open \
-                 projects), the recent projects, view settings and remembered folders.",
+                 projects), the recent projects, view settings, the window's size and place, \
+                 and remembered folders.",
             );
             ui.label(dim(
                 "Projects, media, a proxy folder you set and the proxies in it stay; proxies \

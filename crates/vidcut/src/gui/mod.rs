@@ -25,6 +25,7 @@ mod video;
 mod viewer;
 #[cfg(any(target_os = "linux", windows))]
 mod vulkan;
+mod window;
 pub mod workspace;
 
 use std::path::PathBuf;
@@ -35,6 +36,14 @@ use vidcut_core::{Error, ErrorCode, Result};
 pub fn run(project: Option<PathBuf>) -> Result<()> {
     use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};
     use eframe::wgpu;
+    let window = window::Window::load();
+    let viewport = window.builder(
+        egui::ViewportBuilder::default()
+            .with_title("vidcut")
+            .with_app_id("vidcut")
+            .with_inner_size([1600.0, 980.0])
+            .with_min_inner_size([960.0, 600.0]),
+    );
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         wgpu_options: WgpuConfiguration {
@@ -60,18 +69,14 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
             }),
             ..Default::default()
         },
-        viewport: egui::ViewportBuilder::default()
-            .with_title("vidcut")
-            .with_app_id("vidcut")
-            .with_inner_size([1600.0, 980.0])
-            .with_min_inner_size([960.0, 600.0]),
+        viewport,
         ..Default::default()
     };
     let ran = eframe::run_native(
         "vidcut",
         options,
         Box::new(move |cc| {
-            app::App::new(cc, project)
+            app::App::new(cc, project, window)
                 .map(|a| Box::new(a) as Box<dyn eframe::App>)
                 .map_err(Into::into)
         }),
