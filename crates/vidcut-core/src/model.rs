@@ -7,7 +7,7 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::time::{Rational, TimeContext, TimeSpec, format_timecode};
+use crate::time::{Rational, TimeContext, TimeSpec, format_timecode, label_frames};
 
 pub const STILL_LIMIT_SECS: f64 = 63_600.0;
 
@@ -395,6 +395,11 @@ pub struct StartTimecode {
 }
 
 impl StartTimecode {
+    pub fn label_seconds(&self) -> f64 {
+        let frames = label_frames(self.count, self.rate, self.drop_frame);
+        frames as f64 / self.rate.timecode_base() as f64
+    }
+
     pub fn frames_at(&self, fps: Rational) -> f64 {
         if self.rate == fps {
             return self.count as f64;
