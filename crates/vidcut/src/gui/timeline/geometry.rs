@@ -255,6 +255,7 @@ const ROLL: f32 = 3.0;
 const EDGE: f32 = 10.0;
 const AUDIO_EDIT: f32 = 12.0;
 const SLIP: f32 = 9.0;
+const FADE_EDGE: f32 = 5.0;
 
 pub fn clips_in(track: &Track, a: i64, b: i64) -> std::ops::Range<usize> {
     let first = track.clips.partition_point(|c| c.end() <= a);
@@ -369,6 +370,31 @@ pub fn picture_transition<'a>(p: &Project, track: &'a Track, at: i64) -> Option<
         .transitions
         .iter()
         .find(|x| !x.sound && cuts.place(p, x) == Some(at))
+}
+
+pub fn fade_edge_at(
+    p: &Project,
+    track: &Track,
+    scale: &Scale,
+    tr: &TrackRect,
+    pos: Pos2,
+) -> Option<(i64, bool)> {
+    let banded = tr.audio_top > tr.rect.top();
+    if !tr.rect.contains(pos) || (banded && tr.in_audio(pos.y)) {
+        return None;
+    }
+    let cuts = Cuts::of(p, track);
+    track.transitions.iter().filter(|x| !x.sound).find_map(|x| {
+        let at = cuts.place(p, x)?;
+        let near = |f: i64| f != at && (scale.xf(f) - pos.x).abs() <= FADE_EDGE;
+        if near(at + x.after) {
+            Some((at, true))
+        } else if near(at - x.before) {
+            Some((at, false))
+        } else {
+            None
+        }
+    })
 }
 
 pub fn transition_at(

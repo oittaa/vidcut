@@ -45,7 +45,10 @@ fn found(p: &Project, track: TrackRef, at: i64) -> Option<Transition> {
 
 impl Workspace {
     pub(crate) fn selected_transition(&self) -> Option<(EditSel, Transition)> {
-        let e = self.timeline.edit?;
+        let e = self
+            .timeline
+            .edit
+            .filter(|e| self.timeline.transition == Some((e.track, e.at)))?;
         let x = self.trim_transition(self.project()?, e)?;
         Some((e, x))
     }

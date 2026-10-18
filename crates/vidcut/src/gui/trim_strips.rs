@@ -67,6 +67,14 @@ pub(super) fn fade_step(frames: i64, cells: f32) -> i64 {
     ((frames as f32 * 1.6 / cells.max(1.0)).ceil() as i64).max(1)
 }
 
+pub(super) fn grown(before: i64, after: i64, grow: i64) -> (i64, i64) {
+    match (before, after) {
+        (0, a) => (0, (a + grow).max(1)),
+        (b, 0) => ((b + grow).max(1), 0),
+        (b, a) => ((b + grow).max(1), (a + grow).max(1)),
+    }
+}
+
 pub(super) fn resized(before: i64, after: i64, grow: i64) -> (i64, &'static str) {
     match (before, after) {
         (0, a) => ((a + grow).max(1), "start"),
@@ -256,12 +264,8 @@ impl Workspace {
             };
             Some((grow, r.drag_stopped()))
         });
-        let (before, after) = match grow {
-            Some((g, _)) if x.before == 0 => (0, (x.after + g).max(1)),
-            Some((g, _)) if x.after == 0 => ((x.before + g).max(1), 0),
-            Some((g, _)) => ((x.before + g).max(1), (x.after + g).max(1)),
-            None => (x.before, x.after),
-        };
+        let (before, after) =
+            grow.map_or((x.before, x.after), |(g, _)| grown(x.before, x.after, g));
         let bar = Rect::from_x_y_ranges(
             fx(-before)..=fx(after),
             gap.shrink2(vec2(0.0, 2.0)).y_range(),
@@ -392,6 +396,11 @@ mod tests {
     #[test]
     fn a_one_second_dissolve_shows_three_frames_a_cell_across_sixteen_cells() {
         assert_eq!(fade_step(30, 16.0), 3);
+    }
+
+    #[test]
+    fn a_dissolve_starting_on_the_edit_grows_only_after_it() {
+        assert_eq!(grown(0, 30, 5), (0, 35));
     }
 
     #[test]

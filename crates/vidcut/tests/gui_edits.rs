@@ -559,6 +559,26 @@ fn u_after_a_click_on_a_cut_selects_the_incoming_side() {
 }
 
 #[test]
+fn dragging_a_dissolves_end_on_the_track_lengthens_it_evenly() {
+    let mut gui = Gui::new();
+    dissolve_at_60(&mut gui);
+    gui.drag(gui.at("V1", 65, 20.0), gui.at("V1", 67, 20.0));
+    gui.settle();
+    assert_eq!(v1_transitions(&gui), [(7, 7)]);
+    gui.quit();
+}
+
+#[test]
+fn a_click_on_the_cut_under_a_dissolve_shows_the_dissolve_in_the_trim_editor() {
+    let mut gui = Gui::new();
+    dissolve_at_60(&mut gui);
+    gui.click(gui.at("V1", 60, 20.0));
+    gui.settle();
+    assert!(gui.harness.query_by_label("The dissolve's end").is_some());
+    gui.quit();
+}
+
+#[test]
 fn a_cut_clicked_on_v2_rolls_on_v2() {
     let mut gui = Gui::new();
     gui.call("track.add", json!({ "kind": "video" }));

@@ -601,6 +601,7 @@ impl Workspace {
                 10.0,
             );
             if let Some(e) = self.timeline.edit
+                && self.timeline.transition == Some((e.track, e.at))
                 && let Some(row) = layout.lower.get(&e.track.id())
                 && let Some(x) = self.trim_transition(&p, e)
             {
@@ -645,7 +646,9 @@ impl Workspace {
                 Gesture::Trim {
                     edge: Edge::Tail, ..
                 } => Some(paint::TrimPointer::End),
-                Gesture::Roll { .. } | Gesture::AudioRoll { .. } => Some(paint::TrimPointer::Roll),
+                Gesture::Roll { .. } | Gesture::AudioRoll { .. } | Gesture::Fade { .. } => {
+                    Some(paint::TrimPointer::Roll)
+                }
                 Gesture::Slip { .. } => {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                     None
@@ -735,7 +738,14 @@ impl Workspace {
                         ui.painter().rect_filled(span(4.0), 0.0, green);
                     }
                 }
+                let on_fade = rows
+                    .at(pos.y)
+                    .and_then(|r| {
+                        geometry::fade_edge_at(&p, p.track(&r.track)?, scale, &r.rect, pos)
+                    })
+                    .is_some();
                 let pointer = match &what {
+                    _ if on_fade => Some(paint::TrimPointer::Roll),
                     Hit::Edge(_, Edge::Head) => Some(paint::TrimPointer::Start),
                     Hit::Edge(_, Edge::Tail) => Some(paint::TrimPointer::End),
                     Hit::Roll { .. } | Hit::AudioEdit { .. } => Some(paint::TrimPointer::Roll),
@@ -1259,6 +1269,27 @@ impl Workspace {
                     drag_content: fixed,
                     from: playhead as f64,
                 }
+            }
+        } else if let Some((track, at, end, x, sound)) = rows.at(press.y).and_then(|r| {
+            let t = p.track(&r.track)?;
+            let (at, end) = geometry::fade_edge_at(p, t, &scale, &r.rect, press)?;
+            let x = geometry::picture_transition(p, t, at)?;
+            let sound = t
+                .transitions
+                .iter()
+                .any(|y| y.sound && y.from == x.from && y.to == x.to);
+            Some((r.track.clone(), at, end, x.clone(), sound))
+        }) {
+            if let Some(t) = TrackRef::of(&track) {
+                self.select_transition(t, at);
+            }
+            Gesture::Fade {
+                track,
+                at,
+                end,
+                before: x.before,
+                after: x.after,
+                sound,
             }
         } else {
             let track = track.unwrap_or_else(|| MAIN.to_string());
@@ -2327,9 +2358,6 @@ impl Workspace {
         p: &Project,
         e: EditSel,
     ) -> Option<vidcut_core::model::Transition> {
-        if self.timeline.transition != Some((e.track, e.at)) {
-            return None;
-        }
         geometry::picture_transition(p, p.track(&e.track.id())?, e.at).cloned()
     }
 
