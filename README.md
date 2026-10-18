@@ -9,7 +9,8 @@ A simple, fully scriptable video cutting tool for Linux, Windows and macOS. It b
 - **Editing:** a media pool with bins; a source and timeline viewer; the dual timeline; Smart Insert, Append, Ripple Overwrite, Overwrite, Place On Top; split, ripple delete, trimming, the Trim Editor and Dynamic Trim; clip speed; dissolves and fades; several video and audio tracks; a mixer; snapping, markers and undo.
 - **Export:** Quick Export and an Export dialog, GPU encoding (NVIDIA, AMD, Intel, Apple), background jobs, HDR that follows the footage, loudness normalization.
 - **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts, the Boring Detector.
-- **Interchange:** OpenTimelineIO (`.otio`, `.otioz`, `.otiod`), which also open as projects.
+- **Subtitles:** subtitle tracks; SRT, WebVTT and TTML in and out, beside an export too.
+- **Interchange:** OpenTimelineIO (`.otio`, `.otioz`, `.otiod`), which also open as projects, with subtitles as SRT beside them.
 - **Scriptable:** every action is a CLI command, a JSON-RPC call on the running app and an MCP tool.
 - **Not included:** effects, titles, color grading, transitions other than dissolves. Those in another editor's OTIO file are kept and written back.
 

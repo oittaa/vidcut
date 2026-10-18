@@ -667,6 +667,7 @@ pub fn export(
             bins: p.bins.clone(),
             tape_marks: p.tape_marks.clone(),
             next_id: p.next_id.clone(),
+            subtitles: p.subtitles.clone(),
         });
     }
     let tracks = with(
@@ -950,6 +951,8 @@ pub struct ProjectMeta {
     pub bins: Vec<String>,
     pub tape_marks: crate::model::TapeMarks,
     pub next_id: crate::model::NextIds,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subtitles: Vec<crate::model::SubtitleTrack>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

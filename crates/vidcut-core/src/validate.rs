@@ -157,6 +157,30 @@ pub fn violations(p: &Project) -> Vec<String> {
             v.push(format!("duplicate id {}", k.id));
         }
     }
+    for (i, t) in p.subtitles.iter().enumerate() {
+        if t.id != format!("S{}", i + 1) {
+            v.push(format!("subtitle track {} in place {}", t.id, i + 1));
+        }
+        if p.subtitles[..i].iter().any(|o| o.shown) && t.shown {
+            v.push(format!("{} is shown with another subtitle track", t.id));
+        }
+        let mut prev = None;
+        for c in &t.cues {
+            if !ids.insert(c.id.as_str()) {
+                v.push(format!("duplicate id {}", c.id));
+            }
+            if c.duration < 1 {
+                v.push(format!("{}: duration {} < 1", c.id, c.duration));
+            }
+            if c.start < 0 {
+                v.push(format!("{}: starts before 0 ({})", c.id, c.start));
+            }
+            if prev.is_some_and(|s| c.start < s) {
+                v.push(format!("{}: out of order on {}", c.id, t.id));
+            }
+            prev = Some(c.start);
+        }
+    }
     if let (Some(i), Some(o)) = (p.marks.mark_in, p.marks.mark_out)
         && i >= o
     {

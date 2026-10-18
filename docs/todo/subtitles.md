@@ -2,7 +2,7 @@
 
 **When:** next.
 
-Subtitles made from the timeline's speech, corrected on a subtitle track and exported. The Cut page has subtitle tracks and Create Subtitles from Audio (pp. 645–646, 702, 1227–1248); the spec leaves them out ([§1](../cut-page-spec.md#1-scope)).
+Subtitles made from the timeline's speech, corrected on a subtitle track and exported. Subtitle tracks, cues and subtitle files are in ([spec §8.12](../cut-page-spec.md#812-subtitles-pp-645646-702-12271248)), from the CLI, IPC and MCP; Create Subtitles from Audio (p. 1234) and the rest below are not.
 
 What it would take:
 - **Transcription on the computer:** [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) (MIT, on ggml) built into vidcut through the `transcribe-cpp` crate, on the GPU (rule 9): Vulkan on Windows and Linux, Metal on macOS.
@@ -15,9 +15,9 @@ What it would take:
   - **European languages:** Whisper large-v3, the most accurate of the candidates in Finnish and Spanish, 99 languages. transcribe.cpp gives it segment times only.
   - **Small GPUs:** Parakeet Ultra, 740 MB at Q8, 25 languages, token times.
   - Kept in the cache dir, which `vidcut reset` empties. Downloaded only after asking, and checked against a SHA-256, or a file the user names. Parakeet Ultra's CC BY 4.0 asks for attribution.
-- **A subtitle track:** cues (start, end, text) that move with every edit as clips do; added, typed, moved, trimmed, split and joined; scriptable (rule 3).
-- **Import and export:** SRT and WebVTT. On export, a file beside the output, a subtitle stream, or burned in on the GPU.
-- **OTIO:** an SRT beside the OTIO, timed in the timeline's timecode. Resolve's Insert Selected Subtitles to Timeline Using Timecode (p. 1230) inserts nothing from an SRT timed from zero. An SRT beside an exported video starts at zero.
+- **The GUI:** subtitle tracks on the timeline, cues drawn on them and in the viewer, moved, trimmed and typed with the mouse and keys; Add Subtitle Track, Add Subtitle, Import Subtitle and Export Subtitle in the menus; subtitle files in the Export dialog.
+- **Styles:** a track's font, size, color, outline, background and margin, written to IMSC1.
+- **In the export:** a subtitle stream (mov_text in MP4 and MOV, SubRip in Matroska, WebVTT in WebM), or burned in on the GPU.
 - **Re-timing a subtitle file to the speech:** the aligner places an imported file's text on the audio; `nasa-roman-presser-captions`, which aren't aligned with the speech, are the case to check it on. The aligner has no Finnish.
 - **Cutting by transcript:** the words with their times as a request's answer, and a request that removes words. It needs word times: the aligner, or Whisper's in transcribe.cpp.
 - **Later:** paid services (xAI, Google) behind the same interface, asking each time before audio leaves the computer.

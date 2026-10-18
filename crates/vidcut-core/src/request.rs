@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::export::{EncoderChoice, ExportSettings};
-use crate::model::{TrackClip, TrackKind};
+use crate::model::{Place, TrackClip};
 use crate::ops::{Edge, MoveMode};
 use crate::time::{RangeSpec, Rational, TimeSpec};
 
@@ -608,10 +608,11 @@ pub enum Request {
     #[serde(rename = "track.list")]
     TrackList {},
     /// Add tracks (Timeline Actions > Add Track): video tracks go on top, audio
-    /// tracks at the bottom. Returns their ids.
+    /// tracks at the bottom, subtitle tracks above the video. Returns their
+    /// ids. A new subtitle track is the one shown.
     #[serde(rename = "track.add")]
     TrackAdd {
-        kind: TrackKind,
+        kind: NewTrack,
         #[serde(default = "one")]
         count: u32,
     },
@@ -624,7 +625,8 @@ pub enum Request {
         force: bool,
     },
     /// Track header toggles (lock, mute, video on or off) and the mixer (solo,
-    /// volume in dB).
+    /// volume in dB). A subtitle track (`S1`) takes `locked`, `name`, `shown`
+    /// and `language`.
     #[serde(rename = "track.set")]
     TrackSet {
         track: String,
@@ -641,6 +643,14 @@ pub enum Request {
         /// Empty string clears the name.
         #[serde(default)]
         name: Option<String>,
+        /// A subtitle track's cues show in the viewer. Showing one hides the
+        /// others.
+        #[serde(default)]
+        shown: Option<bool>,
+        /// A subtitle track's language, as a code such as `en` or `pt-BR`.
+        /// Empty string clears it.
+        #[serde(default)]
+        language: Option<String>,
     },
     /// Enable/disable video (D), mute, gain (dB, -60..24), name and Clip
     /// Color.
@@ -712,6 +722,115 @@ pub enum Request {
     },
     #[serde(rename = "markers.remove")]
     MarkersRemove { marker: String },
+    /// Subtitle cues with their times in frames: every track's, or `track`'s;
+    /// those in `range` only, if given.
+    #[serde(rename = "subtitles.list")]
+    SubtitlesList {
+        #[serde(default)]
+        track: Option<String>,
+        #[serde(default)]
+        range: Option<RangeSpec>,
+    },
+    /// Add a cue: `text` from `at` (default: the playhead) to `end`, or for
+    /// `duration`. Without either it lasts 3 s, or until the track's next cue
+    /// starts. On `track` (default: the shown subtitle track; S1 is made when
+    /// there is none). Returns its id.
+    #[serde(rename = "subtitles.add")]
+    SubtitlesAdd {
+        /// Its lines, separated by a line break. `<i>`, `<b>`, `<u>` and
+        /// `<font color="#rrggbb">` style words.
+        text: String,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        #[serde(default)]
+        end: Option<TimeSpec>,
+        #[serde(default)]
+        duration: Option<TimeSpec>,
+        #[serde(default)]
+        track: Option<String>,
+        #[serde(default)]
+        place: Option<Place>,
+    },
+    /// Change a cue (`q3`, or `S1@15s` for the cue on S1 at 15 s): its text,
+    /// its start or end (each moves that edge alone), or where it shows.
+    #[serde(rename = "subtitles.set")]
+    SubtitlesSet {
+        cue: String,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        start: Option<TimeSpec>,
+        #[serde(default)]
+        end: Option<TimeSpec>,
+        #[serde(default)]
+        place: Option<Place>,
+    },
+    /// Move cues by `by` (`+12f`, `-1s`) or so the first starts at `to`; with
+    /// `track`, onto that subtitle track.
+    #[serde(rename = "subtitles.move")]
+    SubtitlesMove {
+        cues: OneOrMany<String>,
+        #[serde(default)]
+        by: Option<TimeSpec>,
+        #[serde(default)]
+        to: Option<TimeSpec>,
+        #[serde(default)]
+        track: Option<String>,
+    },
+    /// Remove cues (`q3`, or `S1@15s`).
+    #[serde(rename = "subtitles.remove")]
+    SubtitlesRemove { cues: OneOrMany<String> },
+    /// Split a cue at `at` (default: the playhead). Both parts keep its text.
+    #[serde(rename = "subtitles.split")]
+    SubtitlesSplit {
+        cue: String,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+    },
+    /// Join cues of one track into the first: from its start to the last
+    /// one's end, their texts on separate lines.
+    #[serde(rename = "subtitles.join")]
+    SubtitlesJoin { cues: OneOrMany<String> },
+    /// Put a subtitle file's cues on a subtitle track: SRT, WebVTT, or TTML
+    /// (`.ttml`, `.dfxp`, `.xml`, IMSC1 too), in UTF-8, UTF-16 or
+    /// Windows-1252. Each time goes to the nearest frame.
+    #[serde(rename = "subtitles.import")]
+    SubtitlesImport {
+        path: PathBuf,
+        /// The subtitle track to add them to. Default: a new one, named after
+        /// the file and shown.
+        #[serde(default)]
+        track: Option<String>,
+        /// Place the first cue here, the others after it as in the file.
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        /// The file is timed in the timeline's timecode (true) or from the
+        /// timeline's start (false). Default: true when every cue is at or
+        /// after the timeline's start timecode, or, on a timeline starting at
+        /// zero and shorter than an hour, at or after 01:00:00:00.
+        #[serde(default)]
+        timecode: Option<bool>,
+    },
+    /// Write a subtitle track's cues to a file: SRT, WebVTT or TTML (IMSC1).
+    #[serde(rename = "subtitles.export")]
+    SubtitlesExport {
+        out: PathBuf,
+        /// Default: the shown subtitle track.
+        #[serde(default)]
+        track: Option<String>,
+        /// Default: from the extension of `out`.
+        #[serde(default)]
+        format: Option<SubtitleFormat>,
+        /// The cues in this range only, cut to it.
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        /// Times in the timeline's timecode (the default), or from the start
+        /// of `range` (false).
+        #[serde(default)]
+        timecode: Option<bool>,
+        #[serde(default)]
+        overwrite: bool,
+    },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.
     #[serde(rename = "export.plan")]
@@ -1255,6 +1374,36 @@ pub struct ExportParams {
     /// see `jobs.*`).
     #[serde(default)]
     pub background: bool,
+    /// Subtitle files beside the output, one for each of these subtitle
+    /// tracks (`S1`). Beside media they start at zero; beside a timeline
+    /// file (`.otio`) they are in its timecode. Default: none beside media,
+    /// every track with cues beside a timeline file.
+    #[serde(default)]
+    pub subtitles: Option<Vec<String>>,
+    /// The subtitle files' format. Default: SRT.
+    #[serde(default)]
+    pub subtitle_format: Option<SubtitleFormat>,
+}
+
+/// What kind of track `track.add` makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum NewTrack {
+    Video,
+    Audio,
+    Subtitle,
+}
+
+/// A subtitle file format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SubtitleFormat {
+    /// SubRip (`.srt`).
+    Srt,
+    /// WebVTT (`.vtt`).
+    Vtt,
+    /// TTML, written as IMSC1 (`.ttml`).
+    Ttml,
 }
 
 /// Where `timeline.import` puts the timeline (deviation X9).
@@ -1673,6 +1822,8 @@ impl Request {
                     | Self::BinsList {}
                     | Self::MarksGet {}
                     | Self::MarkersList {}
+                    | Self::SubtitlesList { .. }
+                    | Self::SubtitlesExport { .. }
                     | Self::MediaList {}
                     | Self::MediaGet { .. }
                     | Self::Probe { .. }
@@ -1711,7 +1862,10 @@ impl Request {
             Self::MediaRelink { path, search, .. } => {
                 path.iter_mut().chain(search.iter_mut()).collect()
             }
-            Self::MediaAddFolder { path, .. } | Self::Probe { path } => vec![path],
+            Self::MediaAddFolder { path, .. }
+            | Self::Probe { path }
+            | Self::SubtitlesImport { path, .. }
+            | Self::SubtitlesExport { out: path, .. } => vec![path],
             Self::ProjectOpen { path, save_as, .. } => {
                 std::iter::once(path).chain(save_as.iter_mut()).collect()
             }

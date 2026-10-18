@@ -1,6 +1,7 @@
 mod dissolve;
 pub mod filmstrip;
 mod follow;
+pub mod subtitles;
 mod tracks;
 
 use std::collections::{BTreeMap, HashSet};
@@ -826,6 +827,11 @@ pub fn delete_range(p: &mut Project, a: i64, b: i64, lift: bool) -> Result<()> {
         }
         fix_audio(p, ti);
     }
+    subtitles::remap(p, |x| match x {
+        x if a <= x && x < b => None,
+        x if ripple && x >= b => Some(x - (b - a)),
+        x => Some(x),
+    });
     Ok(())
 }
 

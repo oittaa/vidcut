@@ -174,6 +174,17 @@ pub fn describe_at(
         "markers.move" => format!("Move marker {} to {}", d.text("marker"), d.time("to")),
         "markers.set" => format!("Change marker {}{}", d.text("marker"), d.named()),
         "markers.remove" => format!("Remove marker {}", d.text("marker")),
+        "subtitles.add" => format!("Subtitle {} at {}", quoted(&d.text("text")), d.time("at")),
+        "subtitles.set" => format!("Change subtitle {}", d.cues("cue")),
+        "subtitles.move" if d.params["track"].is_string() => {
+            format!("Move {} to {}", d.cues("cues"), d.text("track"))
+        }
+        "subtitles.move" => format!("Move {} {}", d.cues("cues"), d.by()),
+        "subtitles.remove" => format!("Remove {}", d.cues("cues")),
+        "subtitles.split" => format!("Split {} at {}", d.cues("cue"), d.time("at")),
+        "subtitles.join" => format!("Join {}", d.cues("cues")),
+        "subtitles.import" => format!("Import subtitles {}", d.file("path")),
+        "subtitles.export" => format!("Export subtitles to {}", d.file("out")),
         "export.start" => format!("Export {}", d.file("output")),
         "export.plan" => format!("Plan an export to {}", d.file("output")),
         "frame.render" => format!("Render the frame at {}", d.time("at")),
@@ -297,6 +308,16 @@ fn compact(params: &Value) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn quoted(text: &str) -> String {
+    let plain = crate::subtitles::plain(text).replace('\n', " ");
+    let short: String = plain.chars().take(40).collect();
+    if short.len() < plain.len() {
+        format!("\u{201c}{}\u{2026}\u{201d}", short.trim_end())
+    } else {
+        format!("\u{201c}{short}\u{201d}")
+    }
 }
 
 fn db(v: &Value) -> String {
@@ -653,6 +674,28 @@ impl Words<'_> {
         }
     }
 
+    fn cues(&self, key: &str) -> String {
+        let names: Vec<String> = self
+            .list(key)
+            .iter()
+            .map(|r| {
+                let cue = self.project.and_then(|p| {
+                    let id = crate::editor::resolve_cue(p, r, self.playhead).ok()?;
+                    p.cue(&id)
+                });
+                match cue {
+                    Some(c) => quoted(&c.text),
+                    None => r.clone(),
+                }
+            })
+            .collect();
+        match names.as_slice() {
+            [] => "?".into(),
+            [one] => one.clone(),
+            [first, rest @ ..] => format!("{first} and {} more", rest.len()),
+        }
+    }
+
     fn named(&self) -> String {
         match self.params["name"].as_str() {
             Some(n) if !n.is_empty() => format!(" \u{201c}{n}\u{201d}"),
@@ -711,6 +754,12 @@ impl Words<'_> {
         parts.extend(on_off("muted", "audio off", "audio on"));
         parts.extend(on_off("solo", "solo on", "solo off"));
         parts.extend(on_off("video_enabled", "video on", "video off"));
+        parts.extend(on_off("shown", "shown", "hidden"));
+        match p["language"].as_str() {
+            Some("") => parts.push("no language".to_string()),
+            Some(l) => parts.push(format!("language {l}")),
+            None => {}
+        }
         if !p["volume_db"].is_null() {
             parts.push(format!("volume {}", db(&p["volume_db"])));
         }

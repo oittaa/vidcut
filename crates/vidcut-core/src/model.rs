@@ -35,6 +35,9 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "TapeMarks::is_empty")]
     pub tape_marks: TapeMarks,
     pub markers: Vec<Marker>,
+    /// Subtitle tracks `S1…`, from the one nearest the video up.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subtitles: Vec<SubtitleTrack>,
     pub next_id: NextIds,
     /// Media Pool bins, as `/`-separated paths below the top level
     /// (`Interviews`, `Interviews/Day 1`), sorted.
@@ -965,6 +968,87 @@ fn is_one_frame(frames: &i64) -> bool {
     *frames == 1
 }
 
+/// A subtitle track: cues shown over the picture, one language or use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SubtitleTrack {
+    /// `S<N>`, by place: S1 is the one nearest the video.
+    pub id: String,
+    /// A name shown in the track header and used in exported file names;
+    /// `Subtitle N` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Its language, as a code such as `en` or `pt-BR`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// Shown in the viewer. One subtitle track at a time is.
+    pub shown: bool,
+    pub locked: bool,
+    /// Sorted by `start`; cues may overlap.
+    pub cues: Vec<Cue>,
+}
+
+/// One subtitle: its text over a span of the timeline.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Cue {
+    /// `q<N>`, never reused.
+    pub id: String,
+    pub start: i64,
+    /// Frames, at least one.
+    pub duration: i64,
+    /// Its lines, separated by `\n`. `<i>`, `<b>`, `<u>` and `<font
+    /// color="#rrggbb">` mark italic, bold, underlined and colored words.
+    pub text: String,
+    /// Where it shows on the picture: the bottom unless set.
+    #[serde(default, skip_serializing_if = "Place::is_bottom")]
+    pub place: Place,
+}
+
+/// Where a cue shows on the picture.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Place {
+    #[default]
+    Bottom,
+    Middle,
+    Top,
+}
+
+impl Place {
+    pub fn is_bottom(&self) -> bool {
+        *self == Self::Bottom
+    }
+}
+
+impl Cue {
+    pub fn end(&self) -> i64 {
+        self.start + self.duration
+    }
+}
+
+impl SubtitleTrack {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: None,
+            language: None,
+            shown: false,
+            locked: false,
+            cues: Vec::new(),
+        }
+    }
+
+    pub fn display_name(&self) -> String {
+        match &self.name {
+            Some(n) if !n.is_empty() => n.clone(),
+            _ => format!("Subtitle {}", self.id.trim_start_matches('S')),
+        }
+    }
+
+    pub fn sort(&mut self) {
+        self.cues.sort_by_key(|c| (c.start, c.end()));
+    }
+}
+
 /// Counters for new ids.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct NextIds {
@@ -972,6 +1056,12 @@ pub struct NextIds {
     pub clip: u64,
     pub marker: u64,
     pub transition: u64,
+    #[serde(default = "first_id")]
+    pub cue: u64,
+}
+
+fn first_id() -> u64 {
+    1
 }
 
 impl Project {
@@ -985,11 +1075,13 @@ impl Project {
             marks: Marks::default(),
             tape_marks: TapeMarks::default(),
             markers: Vec::new(),
+            subtitles: Vec::new(),
             next_id: NextIds {
                 media: 1,
                 clip: 1,
                 marker: 1,
                 transition: 1,
+                cue: 1,
             },
             bins: Vec::new(),
         }
@@ -1133,6 +1225,31 @@ impl Project {
         let id = format!("t{}", self.next_id.transition);
         self.next_id.transition += 1;
         id
+    }
+
+    pub fn alloc_cue_id(&mut self) -> String {
+        let id = format!("q{}", self.next_id.cue);
+        self.next_id.cue += 1;
+        id
+    }
+
+    pub fn subtitle_index(&self, id: &str) -> Option<usize> {
+        self.subtitles.iter().position(|t| t.id == id)
+    }
+
+    pub fn subtitle_track(&self, id: &str) -> Option<&SubtitleTrack> {
+        self.subtitles.iter().find(|t| t.id == id)
+    }
+
+    pub fn find_cue(&self, id: &str) -> Option<(usize, usize)> {
+        self.subtitles
+            .iter()
+            .enumerate()
+            .find_map(|(ti, t)| t.cues.iter().position(|c| c.id == id).map(|ci| (ti, ci)))
+    }
+
+    pub fn cue(&self, id: &str) -> Option<&Cue> {
+        self.find_cue(id).map(|(t, c)| &self.subtitles[t].cues[c])
     }
 }
 

@@ -103,7 +103,11 @@ GUI media exports are `background`. Quick Export lists the presets marked `quick
 
 ## Timeline exports
 
-An `.otio`, `.otioz` or `.otiod` output (`export::timeline_format`) writes the edit, not pictures ([deviation X9](../deviations.md#x9-opentimelineio-interchange)). `export::timeline` takes only a range and `overwrite`, and writes `otio::export`'s document through the partial path; a bundle adds the media used (`bundle::plan`, `bundle::write`), with byte progress and cancel. In the GUI an `.otio` runs as a task (`Live::project_task`), a bundle as a job.
+An `.otio`, `.otioz` or `.otiod` output (`export::timeline_format`) writes the edit, not pictures ([deviation X9](../deviations.md#x9-opentimelineio-interchange)). `export::timeline` takes only a range, `overwrite` and the subtitle files, and writes `otio::export`'s document through the partial path; a bundle adds the media used (`bundle::plan`, `bundle::write`), with byte progress and cancel. In the GUI an `.otio` runs as a task (`Live::project_task`), a bundle as a job.
+
+## Subtitle files
+
+`subtitles` names the subtitle tracks to write beside the output, as SRT unless `subtitle_format` says otherwise; a timeline export writes every track with cues when it isn't given. `subtitles::beside` names each file after the output, with the track's language, or with its name when there are several, and cuts its cues to the output's range: from zero beside media (`export::subtitles_beside`, one set per output of a `per_clip` export), in the timeline's timecode beside a timeline file ([spec D58](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). An existing file stops the export before it starts unless `overwrite` is set (`export::refuse_existing`); `export::write_subtitles` writes them through partial paths after the output is done, and the answer lists them.
 
 ## Proxies
 
@@ -124,6 +128,7 @@ Automatic tries DNxHR LB, ProRes Proxy, AV1, HEVC and H.264 in four rounds: made
 - `crates/vidcut-core/src/export/color.rs`
 - `crates/vidcut-core/src/export/metadata.rs`
 - `crates/vidcut-core/src/render.rs`
+- `crates/vidcut-core/src/subtitles.rs`
 - `crates/vidcut-av/src/export/mod.rs`
 - `crates/vidcut-av/src/export/encode.rs`
 - `crates/vidcut-av/src/export/worker.rs`

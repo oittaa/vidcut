@@ -171,6 +171,7 @@ pub(crate) fn follow(p: &mut Project, before: &Before, edit: &Edit<'_>) {
         }
         track.clips.retain(|c| !gone.contains(&c.id));
     }
+    super::subtitles::remap(p, |x| mapper.map(x, ""));
     settle(p, &moved);
     for ti in 0..p.tracks.len() {
         if ti != main_index {

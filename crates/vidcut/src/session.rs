@@ -275,7 +275,12 @@ pub fn render(
                 Default::default()
             };
             export::choose_colors(&mut prepared, project, &available, None)?;
-            answer(export::describe(&prepared, &available))
+            let subtitles = export::subtitles_beside(project, &prepared, params)?;
+            let mut plan = export::describe(&prepared, &available);
+            if !subtitles.is_empty() {
+                plan["subtitles"] = export::subtitle_files(&subtitles);
+            }
+            answer(plan)
         }
         Request::ExportStart(params) => {
             export_media(project, path, params, hooks, &mut |_| Ok(()))?
@@ -369,6 +374,8 @@ pub fn export_media(
         return Ok(r);
     }
     let mut prepared = export::prepare(p, params, None)?;
+    let subtitles = export::subtitles_beside(p, &prepared, params)?;
+    export::refuse_existing(&subtitles, params.overwrite)?;
     export::as_preferred(&mut prepared, crate::preferences::gpu_acceleration());
     let available = if export::needs_gpu_info(&prepared.settings) {
         export::availability(false)
@@ -411,8 +418,12 @@ pub fn export_media(
         hooks.cancel,
         &mut |i, path, pr| (hooks.progress)(i, count, path, pr),
     )?;
-    let mut r =
-        answer(json!({ "outputs": reports, "notes": export::notes(&prepared, &available) }));
+    export::write_subtitles(&subtitles)?;
+    let mut r = answer(json!({
+        "outputs": reports,
+        "notes": export::notes(&prepared, &available),
+        "subtitles": export::subtitle_files(&subtitles),
+    }));
     r.rev = p.rev;
     Ok(r)
 }
