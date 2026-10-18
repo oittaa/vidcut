@@ -605,6 +605,23 @@ fn dynamic_trim_clip(codec: VideoCodec, slide: bool) {
 }
 
 #[test]
+fn k_and_l_during_space_leave_the_playhead_on_the_trimmed_cut() {
+    let mut gui = Gui::new(VideoCodec::Vp9);
+    gui.call("player.seek", json!({ "at": "78f" }));
+    gui.key(Key::W);
+    gui.wait("W to take the playhead to the cut", |g| g.position() == 80);
+    gui.key(Key::Space);
+    gui.wait("Space to play", |g| g.h.snapshot().timeline.playing);
+    gui.hold(Key::K, Key::L);
+    gui.wait("the trim to land", |g| g.clip("c1").1 == 81);
+    gui.wait("the playhead to stop on the cut", |g| {
+        !g.h.snapshot().timeline.playing && g.position() == 81
+    });
+    gui.run_for(30);
+    assert_eq!(gui.position(), 81, "the playhead left the cut");
+}
+
+#[test]
 fn space_in_dynamic_trim_plays_around_the_playhead_and_goes_back() {
     let mut gui = Gui::new(VideoCodec::Vp9);
     gui.call("player.seek", json!({ "at": "78f" }));

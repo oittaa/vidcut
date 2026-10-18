@@ -835,6 +835,44 @@ fn the_lower_timeline_follows_a_dynamic_trim_run() {
 }
 
 #[test]
+fn a_cut_mid_run_with_media_on_both_sides_has_media_on_both_sides() {
+    let mut gui = Gui::new();
+    gui.call("player.seek", json!({ "at": 55, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.key(Key::L);
+    for _ in 0..10 {
+        gui.harness.step();
+    }
+    assert_eq!(
+        gui.harness.state_mut().drawn_cut_media(),
+        Some((true, true))
+    );
+    gui.quit();
+}
+
+#[test]
+fn stopping_a_run_keeps_the_lower_timeline_on_the_cut() {
+    let mut gui = Gui::new();
+    gui.call("player.seek", json!({ "at": 55, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.settle();
+    gui.key(Key::L);
+    for _ in 0..30 {
+        gui.harness.step();
+    }
+    gui.key(Key::K);
+    let l = gui.harness.state().timeline_layout().unwrap();
+    let centre = l.lower_scale.frame(l.lower_ruler.center().x);
+    assert!(
+        centre > 61.0,
+        "the lower timeline went back to frame {centre}"
+    );
+    gui.quit();
+}
+
+#[test]
 fn w_takes_the_playhead_to_the_nearest_cut() {
     let mut gui = Gui::new();
     gui.call("player.seek", json!({ "at": 50, "viewer": "timeline" }));

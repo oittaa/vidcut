@@ -93,6 +93,12 @@ pub enum DynamicTarget {
     Clips(Vec<String>),
 }
 
+const LANDING: std::time::Duration = std::time::Duration::from_secs(1);
+
+pub fn landing(at: i64, since: std::time::Duration, position: i64) -> Option<i64> {
+    (at != position && since < LANDING).then_some(at)
+}
+
 pub fn faster(speed: f64, dir: f64) -> f64 {
     if speed * dir > 0.0 {
         (speed * 2.0).clamp(-MAX_SPEED, MAX_SPEED)
@@ -510,6 +516,7 @@ impl Workspace {
             && at != self.snap.timeline.position
         {
             self.seek(PlayerId::Timeline, at, false);
+            self.timeline.landing = Some((at, std::time::Instant::now()));
         }
     }
 
@@ -536,6 +543,13 @@ impl Workspace {
     }
 
     pub(crate) fn dynamic_commit(&mut self) {
+        let playing = self.snap.timeline.playing;
+        if let Some(d) = &mut self.timeline.dynamic
+            && d.around.take().is_some()
+            && playing
+        {
+            self.send("player.pause", json!({}));
+        }
         let trimmed = self
             .shown_project()
             .and_then(|p| self.dynamic_drawn(&p))
@@ -706,6 +720,7 @@ fn next_step_in(speed: f64, fps: f64, elapsed: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn a_run_at_25_fps_steps_half_a_frame_after_it_starts() {
@@ -720,6 +735,21 @@ mod tests {
     #[test]
     fn a_run_at_no_speed_never_steps() {
         assert_eq!(next_step_in(0.0, 25.0, 1.0), None);
+    }
+
+    #[test]
+    fn the_playhead_is_drawn_at_the_cut_until_its_seek_lands() {
+        assert_eq!(landing(90, Duration::from_millis(100), 60), Some(90));
+    }
+
+    #[test]
+    fn the_playhead_is_drawn_where_it_is_once_the_seek_lands() {
+        assert_eq!(landing(90, Duration::from_millis(100), 90), None);
+    }
+
+    #[test]
+    fn a_seek_that_never_lands_stops_holding_the_playhead_after_a_second() {
+        assert_eq!(landing(90, Duration::from_secs(2), 60), None);
     }
 
     #[test]

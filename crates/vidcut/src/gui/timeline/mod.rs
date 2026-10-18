@@ -200,6 +200,7 @@ pub struct TimelineView {
     pub silence: Option<tools::SilenceDialog>,
     pub boring_dialog: Option<(f64, i64)>,
     pub dynamic: Option<tools::Dynamic>,
+    pub landing: Option<(i64, Instant)>,
     pub layout: Option<Layout>,
     pub tracks: usize,
     pub rev: u64,
@@ -231,6 +232,7 @@ impl Default for TimelineView {
             silence: None,
             boring_dialog: None,
             dynamic: None,
+            landing: None,
             layout: None,
             tracks: 0,
             rev: 0,
@@ -429,9 +431,10 @@ impl Workspace {
             lower_rect.max,
         );
         let trimmed = self.dynamic_drawn(&p);
-        let playhead = trimmed
-            .as_ref()
-            .map_or(self.snap.timeline.position, |(_, at)| *at);
+        let playhead = match &trimmed {
+            Some((_, at)) => *at,
+            None => self.landed_playhead(),
+        };
         let lower_scale = self.lower_scale(content, playhead);
         let upper_ruler =
             Rect::from_min_size(upper_rect.min, vec2(upper_rect.width(), UPPER_RULER));
@@ -2302,10 +2305,7 @@ impl Workspace {
             row.rect.rect.y_range()
         };
         let stopped = self.dynamic_stopped().is_some();
-        let (out_ok, in_ok) = match (e.side, p.track(&e.track.id())) {
-            (Side::Audio, _) | (_, None) => (true, true),
-            (_, Some(t)) => ops::filmstrip::extends(p, t, e.at),
-        };
+        let (out_ok, in_ok) = self.cut_media(p, moved);
         let glow = paint::pulse(ctx.input(|i| i.time));
         let tint = |ok: bool| {
             if stopped || !ok {
@@ -2364,6 +2364,37 @@ impl Workspace {
         e: EditSel,
     ) -> Option<vidcut_core::model::Transition> {
         geometry::picture_transition(p, p.track(&e.track.id())?, e.at).cloned()
+    }
+
+    fn cut_media(&self, p: &Project, moved: Option<i64>) -> (bool, bool) {
+        let Some(e) = self.timeline.edit else {
+            return (true, true);
+        };
+        match (e.side, p.track(&e.track.id())) {
+            (Side::Audio, _) | (_, None) => (true, true),
+            (_, Some(t)) => ops::filmstrip::extends(p, t, moved.unwrap_or(e.at)),
+        }
+    }
+
+    pub fn drawn_cut_media(&mut self) -> Option<(bool, bool)> {
+        self.timeline.edit?;
+        let p = self.shown_project()?;
+        Some(match self.dynamic_drawn(&p) {
+            Some((q, at)) => self.cut_media(&q, Some(at)),
+            None => self.cut_media(&p, None),
+        })
+    }
+
+    fn landed_playhead(&mut self) -> i64 {
+        let position = self.snap.timeline.position;
+        let landing = self
+            .timeline
+            .landing
+            .and_then(|(at, since)| tools::landing(at, since.elapsed(), position));
+        if landing.is_none() {
+            self.timeline.landing = None;
+        }
+        landing.unwrap_or(position)
     }
 
     pub(crate) fn trim_editor_edit(&self) -> Option<EditSel> {
