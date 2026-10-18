@@ -882,6 +882,11 @@ pub enum Request {
         /// brings, with `redo` true.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         since: Option<usize>,
+        /// With `since`, a version from `branches`, by its `id`: `since`
+        /// counts its steps from 1, and the answer says what going from the
+        /// project as it is to that step of the version brings.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branch: Option<u64>,
     },
     /// Apply requests atomically as one undo step.
     #[serde(rename = "apply")]

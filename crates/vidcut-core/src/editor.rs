@@ -608,13 +608,33 @@ impl Editor {
             client,
             ..
         } = envelope;
-        if let Request::HistoryGet { from, limit, since } = request {
+        if let Request::HistoryGet {
+            from,
+            limit,
+            since,
+            branch,
+        } = request
+        {
             let steps = self.history_steps(&mut StepsCache::default())?;
             let mut result = crate::steps::listing(&steps, from, limit, &self.project);
-            if let Some(step) = since {
-                let then = self.project_at(step)?;
-                result["since"] =
-                    crate::steps::since_step(&then, &self.project, step, steps.done).json(step);
+            match (since, branch) {
+                (Some(step), Some(id)) => {
+                    let k = step
+                        .checked_sub(1)
+                        .ok_or_else(|| Error::invalid("a version's steps count from 1"))?;
+                    let then = crate::past::Past::default().version_at(self, id, k)?;
+                    result["since"] =
+                        crate::steps::since_version(&then, &self.project, id).json(step);
+                }
+                (Some(step), None) => {
+                    let then = self.project_at(step)?;
+                    result["since"] =
+                        crate::steps::since_step(&then, &self.project, step, steps.done).json(step);
+                }
+                (None, Some(_)) => {
+                    return Err(Error::usage("`branch` goes with `since`"));
+                }
+                (None, None) => {}
             }
             return Ok(Response {
                 rev: self.project.rev,

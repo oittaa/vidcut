@@ -404,8 +404,14 @@ impl Workspace {
         };
         self.history_update(ui.ctx());
         self.timeline_toolbar(ui, &p);
+        let trimmed = self.dynamic_drawn(&p);
+        let before = match trimmed {
+            None => self.history_shown(),
+            Some(_) => None,
+        };
+        let shape: &Project = before.as_deref().unwrap_or(&p);
         let full = ui.available_rect_before_wrap();
-        let others = p.tracks.len().saturating_sub(1).min(6) as f32;
+        let others = shape.tracks.len().saturating_sub(1).min(6) as f32;
         let upper_rect = Rect::from_min_size(
             pos2(full.left() + HEADER, full.top()),
             vec2(
@@ -426,18 +432,13 @@ impl Workspace {
         let lower_resp = ui.allocate_rect(lower_rect, Sense::click_and_drag());
 
         let fps = p.settings.fps.as_f64();
-        let end = p.end();
+        let end = shape.end();
         let span = ((end as f64 * 1.01).max(fps * 10.0)).ceil() as i64;
         let upper_scale = Scale::fit(upper_rect.left(), upper_rect.width(), span);
         let content = Rect::from_min_max(
             pos2(lower_rect.left() + HEADER, lower_rect.top()),
             lower_rect.max,
         );
-        let trimmed = self.dynamic_drawn(&p);
-        let before = match trimmed {
-            None => self.history_shown(),
-            Some(_) => None,
-        };
         let swallowed = self.history_swallows(ui, upper_rect.union(lower_rect), before.is_some());
         let marks = self.history_marks(ui.ctx());
         let playhead = match &trimmed {
@@ -461,7 +462,7 @@ impl Workspace {
         let upper_ruler =
             Rect::from_min_size(upper_rect.min, vec2(upper_rect.width(), UPPER_RULER));
         let upper = Rows::layout(
-            &p,
+            shape,
             Rect::from_min_max(
                 pos2(upper_rect.left(), upper_ruler.bottom() + 1.0),
                 upper_rect.max,
@@ -473,7 +474,7 @@ impl Workspace {
         );
         let lower_ruler = Rect::from_min_size(content.min, vec2(content.width(), LOWER_RULER));
         let lower = Rows::layout(
-            &p,
+            shape,
             Rect::from_min_max(
                 pos2(content.left(), lower_ruler.bottom() + 2.0),
                 content.max,
@@ -701,6 +702,7 @@ impl Workspace {
         }
 
         if self.timeline.drag.is_none()
+            && before.is_none()
             && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
         {
             for (rows, scale, area) in [

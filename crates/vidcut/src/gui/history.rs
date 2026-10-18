@@ -9,7 +9,10 @@ use egui_phosphor::regular as icon;
 use serde_json::json;
 use vidcut_core::model::Project;
 use vidcut_core::request::{Client, ClientKind};
-use vidcut_core::steps::{Branch, Group, KINDS, Span, Step, Steps, category, groups, since_step};
+use vidcut_core::steps::{
+    Branch, Group, KINDS, Span, Step, Steps, category, every_step, groups, since_step,
+    since_version,
+};
 
 use super::theme;
 use super::workspace::Workspace;
@@ -45,7 +48,7 @@ pub(super) struct HistoryUi {
     kind: Option<&'static str>,
     source: Option<String>,
     naming: Option<Naming>,
-    since: Option<((usize, u64), String)>,
+    since: Option<((PreviewAt, u64), String)>,
     generation: u64,
     laid: Option<Laid>,
     opening: bool,
@@ -282,9 +285,8 @@ fn steps_word(n: usize) -> String {
 }
 
 fn kinds_in(steps: &Steps) -> Vec<&'static str> {
-    let present: HashSet<&'static str> = steps
-        .line
-        .iter()
+    let present: HashSet<&'static str> = every_step(steps)
+        .into_iter()
         .filter_map(|s| s.kind.as_deref().map(category))
         .collect();
     KINDS.into_iter().filter(|k| present.contains(k)).collect()
@@ -292,7 +294,7 @@ fn kinds_in(steps: &Steps) -> Vec<&'static str> {
 
 fn sources_in(steps: &Steps) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for s in &steps.line {
+    for s in every_step(steps) {
         if let Some(name) = s.by.as_ref().map(Client::shown)
             && !out.contains(&name)
         {
@@ -762,21 +764,24 @@ impl Workspace {
     fn history_footer(&mut self, steps: &Steps) -> String {
         let hint = "Hover a step to see the timeline as it was. Click it, or use \u{2191} \
                     \u{2193} and Enter, to go there; Esc comes back.";
-        let Some(t) = self.history.target else {
-            return hint.into();
+        let at = match (self.history.version, self.history.target) {
+            (Some((id, k)), _) => PreviewAt::Version(id, k),
+            (None, Some(t)) if t == steps.done => return "This is where the project is".into(),
+            (None, Some(t)) => PreviewAt::Step(t),
+            (None, None) => return hint.into(),
         };
-        if t == steps.done {
-            return "This is where the project is".into();
-        }
         let (Some(then), Some(now)) = (
             self.history_shown(),
             self.snap.project.as_ref().map(|p| p.project.clone()),
         ) else {
             return hint.into();
         };
-        let key = (t, now.rev);
+        let key = (at, now.rev);
         if self.history.since.as_ref().is_none_or(|(k, _)| *k != key) {
-            let text = since_step(&then, &now, t, steps.done).text();
+            let text = match at {
+                PreviewAt::Version(id, _) => since_version(&then, &now, id).text(),
+                PreviewAt::Step(t) => since_step(&then, &now, t, steps.done).text(),
+            };
             self.history.since = Some((key, text));
         }
         self.history
@@ -1430,4 +1435,52 @@ fn step_tip(s: &Step, n: usize, done: bool, p: Option<&Project>) -> String {
     }
     lines.push("Right-click to revert it alone or mark it".into());
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn by(kind: &str, client: Client) -> Step {
+        Step {
+            kind: Some(kind.into()),
+            by: Some(client),
+            ..Step::labeled("x")
+        }
+    }
+
+    fn nested(step: Step) -> Steps {
+        let mut steps = Steps::default();
+        steps
+            .line
+            .push(by("edit.append", Client::new(ClientKind::Gui, None)));
+        steps.branches.push(Branch {
+            after: 1,
+            replaced: None,
+            steps: vec![by("bins.add", Client::new(ClientKind::Gui, None))],
+            branches: vec![Branch {
+                after: 0,
+                replaced: None,
+                steps: vec![step],
+                branches: Vec::new(),
+            }],
+        });
+        steps
+    }
+
+    #[test]
+    fn the_kind_filter_offers_a_kind_found_only_in_a_version() {
+        let steps = nested(by("markers.add", Client::new(ClientKind::Gui, None)));
+        assert_eq!(
+            kinds_in(&steps),
+            ["Edits in", "Markers and marks", "Media and bins"]
+        );
+    }
+
+    #[test]
+    fn the_who_filter_offers_a_client_found_only_in_a_version() {
+        let agent = Client::new(ClientKind::Mcp, Some("agent".into()));
+        let steps = nested(by("markers.add", agent));
+        assert_eq!(sources_in(&steps), ["GUI", "agent"]);
+    }
 }

@@ -271,3 +271,14 @@ fn restoring_a_version_inside_another_keeps_what_it_replaces() {
         [vec!["New bin d".to_string()], vec!["New bin e".to_string()]]
     );
 }
+
+#[test]
+fn since_a_step_of_a_version_says_what_going_there_brings() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = store(dir.path());
+    bins(&s, &["a", "b"]);
+    run(&s, "history.undo", json!({ "steps": 1 }));
+    bins(&s, &["c"]);
+    let r = run(&s, "history.get", json!({ "since": 1, "branch": 2 }));
+    assert_eq!(r["since"]["text"], "1 bin added, 1 deleted");
+}

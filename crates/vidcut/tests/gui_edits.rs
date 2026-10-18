@@ -1854,3 +1854,61 @@ fn hovering_a_step_to_redo_says_what_redoing_brings() {
     );
     gui.quit();
 }
+
+#[test]
+fn a_preview_lays_out_a_track_deleted_since() {
+    let mut gui = Gui::new();
+    gui.call(
+        "edit.place_on_top",
+        json!({ "media": "m1", "range": "0f..30f", "at": "0f" }),
+    );
+    gui.call("track.remove", json!({ "track": "V2", "force": true }));
+    open_history(&mut gui);
+    gui.key(Key::ArrowUp);
+    wait_for_preview(&mut gui);
+    gui.harness.step();
+    let l = gui.harness.state().timeline_layout().unwrap();
+    assert!(l.lower.get("V2").is_some());
+    gui.quit();
+}
+
+#[test]
+fn find_shows_a_match_inside_a_version_inside_another() {
+    let mut gui = Gui::new();
+    gui.call("bins.add", json!({ "path": "Rushes" }));
+    gui.call("bins.add", json!({ "path": "Nested" }));
+    gui.call("history.undo", json!({}));
+    gui.call("bins.add", json!({ "path": "Other" }));
+    gui.call("history.undo", json!({ "steps": 2 }));
+    gui.call("bins.add", json!({ "path": "Last" }));
+    open_history(&mut gui);
+    find(&mut gui, "Nested");
+    assert!(gui.harness.query_by_label("New bin Nested").is_some());
+    gui.quit();
+}
+
+#[test]
+fn hovering_a_step_in_a_version_says_what_going_there_brings() {
+    let mut gui = Gui::new();
+    gui.call("history.undo", json!({}));
+    gui.call("bins.add", json!({ "path": "Selects" }));
+    open_history(&mut gui);
+    let row = gui
+        .harness
+        .get_by_label_contains("1 undone step, replaced")
+        .rect();
+    gui.click(pos2(row.left() + 12.0, row.center().y));
+    gui.settle();
+    gui.harness
+        .get_by_label_contains("00:00:06:20\u{2013}00:00:08:20")
+        .hover();
+    gui.harness.step();
+    wait_for_preview(&mut gui);
+    gui.harness.step();
+    assert!(
+        gui.harness
+            .query_by_label_contains("Restoring to here: 1 clip added, 1 bin deleted")
+            .is_some()
+    );
+    gui.quit();
+}

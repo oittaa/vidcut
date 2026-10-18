@@ -470,6 +470,7 @@ pub struct Since {
 pub struct SinceStep {
     pub since: Since,
     pub redo: bool,
+    pub version: Option<u64>,
 }
 
 pub fn since_step(then: &Project, now: &Project, step: usize, done: usize) -> SinceStep {
@@ -480,14 +481,24 @@ pub fn since_step(then: &Project, now: &Project, step: usize, done: usize) -> Si
             false => since(then, now),
         },
         redo,
+        version: None,
+    }
+}
+
+pub fn since_version(then: &Project, now: &Project, id: u64) -> SinceStep {
+    SinceStep {
+        since: since(now, then),
+        redo: false,
+        version: Some(id),
     }
 }
 
 impl SinceStep {
     pub fn text(&self) -> String {
-        let lead = match self.redo {
-            true => "Redoing to here",
-            false => "Since this step",
+        let lead = match (self.version, self.redo) {
+            (Some(_), _) => "Restoring to here",
+            (None, true) => "Redoing to here",
+            (None, false) => "Since this step",
         };
         format!("{lead}: {}", self.since.text())
     }
@@ -495,8 +506,23 @@ impl SinceStep {
     pub fn json(&self, step: usize) -> Value {
         let mut v = self.since.json(step);
         v["redo"] = json!(self.redo);
+        if let Some(id) = self.version {
+            v["branch"] = json!(id);
+        }
         v
     }
+}
+
+pub fn every_step(steps: &Steps) -> Vec<&Step> {
+    fn walk<'a>(branches: &'a [Branch<Step>], out: &mut Vec<&'a Step>) {
+        for b in branches {
+            out.extend(&b.steps);
+            walk(&b.branches, out);
+        }
+    }
+    let mut out: Vec<&Step> = steps.line.iter().collect();
+    walk(&steps.branches, &mut out);
+    out
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
