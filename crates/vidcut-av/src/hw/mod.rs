@@ -1,5 +1,5 @@
 #[cfg(windows)]
-pub(crate) mod d3d11;
+pub mod d3d11;
 pub(crate) mod deinterlace;
 mod gpu_graph;
 pub mod vaapi;
