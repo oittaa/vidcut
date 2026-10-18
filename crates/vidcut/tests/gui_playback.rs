@@ -572,6 +572,7 @@ fn dynamic_trim_clip(codec: VideoCodec, slide: bool) {
         0.0,
     );
     gui.call("selection.set", json!({ "clips": ["c2"] }));
+    gui.call("player.seek", json!({ "at": "90f" }));
     gui.settle();
     gui.key(Key::W);
     gui.wait("W to take the playhead to the clip", |g| g.position() == 80);
@@ -619,6 +620,23 @@ fn k_and_l_during_space_leave_the_playhead_on_the_trimmed_cut() {
     });
     gui.run_for(30);
     assert_eq!(gui.position(), 81, "the playhead left the cut");
+}
+
+#[test]
+fn a_dynamic_trim_run_plays_and_the_timeline_comes_back_at_the_cut() {
+    let mut gui = Gui::new(VideoCodec::Vp9);
+    gui.call("player.seek", json!({ "at": "78f" }));
+    gui.key(Key::W);
+    gui.wait("W to take the playhead to the cut", |g| g.position() == 80);
+    gui.harness.key_press(Key::L);
+    gui.wait("the run to play", |g| g.h.snapshot().timeline.playing);
+    assert_eq!(gui.position(), 80, "the timeline's own position moved");
+    gui.run_for(10);
+    gui.key(Key::K);
+    gui.wait("the trim to land", |g| g.clip("c1").1 != 80);
+    let at = gui.clip("c1").1;
+    gui.shows(at);
+    assert!(!gui.h.snapshot().timeline.playing, "K left it playing");
 }
 
 #[test]
