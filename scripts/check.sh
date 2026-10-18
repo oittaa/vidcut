@@ -2,7 +2,7 @@
 # Quality gates for vidcut. See AGENTS.md ("Quality gates").
 #
 #   scripts/check.sh          fast: fmt + clippy + unit tests (run before every commit)
-#   scripts/check.sh full     fast + integration/e2e + doc tests (after bigger changes, per milestone)
+#   scripts/check.sh full     fast + integration/e2e tests one at a time + doc tests (after bigger changes, per milestone)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -86,8 +86,27 @@ case "$mode" in
     cargo test --workspace --lib --bins ${cargo_quiet[@]+"${cargo_quiet[@]}"} "$@"
     ;;
   full)
-    step "all tests (unit, integration, e2e, doc)"
-    cargo test --workspace --all-targets ${cargo_quiet[@]+"${cargo_quiet[@]}"} "$@"
+    gate="${TMPDIR:-/tmp}/vidcut-check-full.lock"
+    waited=
+    until mkdir "$gate" 2>/dev/null; do
+      holder=$(cat "$gate/pid" 2>/dev/null || true)
+      if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
+        rm -rf "$gate"
+        continue
+      fi
+      if [[ -z "$waited" ]]; then
+        echo "waiting for another full check on this computer (pid ${holder:-?}) to end" >&2
+        waited=1
+      fi
+      sleep 5
+    done
+    echo $$ > "$gate/pid"
+    trap 'rm -rf "$gate"' EXIT
+    step "unit tests"
+    cargo test --workspace --lib --bins --examples --benches ${cargo_quiet[@]+"${cargo_quiet[@]}"} "$@"
+    step "integration and e2e tests, one at a time"
+    cargo test --workspace --test '*' ${cargo_quiet[@]+"${cargo_quiet[@]}"} "$@" -- --test-threads=1
+    step "doc tests"
     cargo test --workspace --doc ${cargo_quiet[@]+"${cargo_quiet[@]}"} "$@"
     ;;
   *)
