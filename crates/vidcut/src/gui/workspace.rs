@@ -8,6 +8,8 @@ use vidcut_core::model::Project;
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{Rational, format_timecode};
 
+pub use super::timeline::tools::{DynamicMode, DynamicTarget, heard};
+pub use super::timeline::{EditSel, Side, TrackRef};
 pub use super::viewer::{TwoUp, TwoUpCell, TwoUpMode};
 
 use super::theme::{self, Deco};
