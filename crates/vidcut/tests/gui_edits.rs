@@ -1055,6 +1055,26 @@ fn a_dynamic_trim_run_shows_the_timeline_viewer() {
 }
 
 #[test]
+fn a_slow_dynamic_trim_run_shows_the_timeline_viewer() {
+    let mut gui = Gui::new();
+    gui.call("player.seek", json!({ "at": 60, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.call("viewer.set", json!({ "mode": "source_tape" }));
+    gui.settle();
+    gui.press(Key::K, true);
+    gui.press(Key::L, true);
+    for _ in 0..20 {
+        gui.harness.step();
+    }
+    gui.settle();
+    assert_eq!(gui.h.snapshot().viewer, ViewerMode::Timeline);
+    gui.press(Key::L, false);
+    gui.press(Key::K, false);
+    gui.quit();
+}
+
+#[test]
 fn a_slide_at_the_clips_end_plays_the_next_clip_from_its_first_frame() {
     let (q, at, speed) = heard_timeline(run_heard(
         DynamicTarget::Clips(vec!["c2".into()]),
