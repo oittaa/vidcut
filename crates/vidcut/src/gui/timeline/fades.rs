@@ -1,6 +1,7 @@
 use eframe::egui::{self, Key};
 use serde_json::json;
 use vidcut_core::model::{Project, Transition};
+use vidcut_core::ops;
 use vidcut_core::time::{Rational, format_timecode, parse_media_timecode};
 
 use super::{EditSel, TrackRef, geometry};
@@ -21,6 +22,19 @@ pub fn alignment(x: &Transition) -> &'static str {
     }
 }
 
+pub fn changed(before: i64, after: i64, length: i64, room: (i64, i64)) -> (i64, i64) {
+    let (b, a) = match (before, after) {
+        (0, _) => (0, length),
+        (_, 0) => (length, 0),
+        _ => {
+            let grow = length - before - after;
+            let a = (after + grow.div_euclid(2)).max(1).min(length - 1);
+            (length - a, a)
+        }
+    };
+    (b.min(room.0), a.min(room.1))
+}
+
 pub fn shown(frames: i64, fps: Rational, in_frames: bool) -> String {
     if in_frames {
         frames.to_string()
@@ -39,8 +53,14 @@ pub fn typed(text: &str, fps: Rational, in_frames: bool) -> Option<i64> {
     (frames > 0).then_some(frames)
 }
 
-fn found(p: &Project, track: TrackRef, at: i64) -> Option<Transition> {
-    geometry::picture_transition(p, p.track(&track.id())?, at).cloned()
+fn with_sound(p: &Project, track: TrackRef, at: i64) -> Option<(Transition, bool)> {
+    let t = p.track(&track.id())?;
+    let x = geometry::picture_transition(p, t, at)?;
+    let sound = t
+        .transitions
+        .iter()
+        .any(|y| y.sound && y.from == x.from && y.to == x.to);
+    Some((x.clone(), sound))
 }
 
 impl Workspace {
@@ -53,32 +73,41 @@ impl Workspace {
         Some((e, x))
     }
 
-    fn reshape_transition(
-        &self,
-        track: TrackRef,
-        at: i64,
-        length: Option<i64>,
-        align: Option<&str>,
-    ) {
-        let Some(x) = self.project().and_then(|p| found(p, track, at)) else {
+    fn realign_transition(&self, track: TrackRef, at: i64, align: &str) {
+        let Some((x, sound)) = self.project().and_then(|p| with_sound(p, track, at)) else {
             return;
         };
-        let sound = self
-            .project()
-            .and_then(|p| p.track(&track.id()))
-            .is_some_and(|t| {
-                t.transitions
-                    .iter()
-                    .any(|y| y.sound && y.from == x.from && y.to == x.to)
-            });
-        let length = length.unwrap_or(x.before + x.after);
         self.send(
             "edit.dissolve",
             json!({
                 "at": at,
                 "track": track.id(),
-                "length": format!("{length}f"),
-                "align": align.unwrap_or(alignment(&x)),
+                "length": format!("{}f", x.before + x.after),
+                "align": align,
+                "sound": sound,
+            }),
+        );
+    }
+
+    fn resize_transition(&self, track: TrackRef, at: i64, length: i64) {
+        let Some(p) = self.project() else {
+            return;
+        };
+        let Some((x, sound)) = with_sound(p, track, at) else {
+            return;
+        };
+        let room = ops::dissolve_room(p, &track.id(), at, false).unwrap_or((x.before, x.after));
+        let (before, after) = changed(x.before, x.after, length, room);
+        if (before, after) == (x.before, x.after) {
+            return;
+        }
+        self.send(
+            "edit.dissolve",
+            json!({
+                "at": at,
+                "track": track.id(),
+                "before": format!("{before}f"),
+                "after": format!("{after}f"),
                 "sound": sound,
             }),
         );
@@ -129,7 +158,7 @@ impl Workspace {
                 .add_enabled(now != align, egui::Button::new(label))
                 .clicked()
             {
-                self.reshape_transition(e.track, e.at, None, Some(align));
+                self.realign_transition(e.track, e.at, align);
                 ui.close();
             }
         }
@@ -207,7 +236,7 @@ impl Workspace {
             });
         self.timeline.fade_in_frames = in_frames;
         if let Some(f) = apply {
-            self.reshape_transition(d.track, d.at, Some(f), None);
+            self.resize_transition(d.track, d.at, f);
         }
         if open && !done {
             self.timeline.fade_dialog = Some(d);
@@ -223,6 +252,26 @@ mod tests {
     fn a_one_second_dissolve_reads_as_a_timecode_in_time_format() {
         let fps = Rational::new(30, 1).unwrap();
         assert_eq!(super::shown(30, fps, false), "00:00:01:00");
+    }
+
+    #[test]
+    fn changing_an_uneven_dissolve_to_its_own_length_keeps_its_sides() {
+        assert_eq!(super::changed(10, 15, 25, (10, 300)), (10, 15));
+    }
+
+    #[test]
+    fn a_longer_duration_lengthens_both_sides_evenly_from_their_split() {
+        assert_eq!(super::changed(10, 15, 31, (40, 300)), (13, 18));
+    }
+
+    #[test]
+    fn a_duration_past_both_sides_media_fills_both() {
+        assert_eq!(super::changed(10, 15, 999, (10, 300)), (10, 300));
+    }
+
+    #[test]
+    fn a_shorter_centered_dissolve_keeps_its_odd_frame_before_the_edit() {
+        assert_eq!(super::changed(15, 15, 25, (60, 60)), (13, 12));
     }
 
     #[test]

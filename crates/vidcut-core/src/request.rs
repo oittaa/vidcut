@@ -380,7 +380,9 @@ pub enum Request {
     /// playhead), and a Cross Fade +3 dB where its clips' sounds meet
     /// there. `length` (default 1 s) is shortened to the frames its clips'
     /// media and the track leave. `align`: centered on the edit, starting
-    /// on it or ending on it. `picture` or `sound` false leaves that one
+    /// on it or ending on it. `before` and `after` instead give each side
+    /// of the edit, each shortened to its own media, as dragging a
+    /// dissolve's edge does. `picture` or `sound` false leaves that one
     /// out. `all`: on every edit between two clips of the track (Add
     /// Dissolve to All Edits). Transitions on those edits go.
     #[serde(rename = "edit.dissolve")]
@@ -397,6 +399,13 @@ pub enum Request {
         length: Option<TimeSpec>,
         #[serde(default)]
         align: crate::ops::Align,
+        /// Frames before the edit, with `after`, instead of `length` and
+        /// `align`.
+        #[serde(default)]
+        before: Option<TimeSpec>,
+        /// Frames after the edit, with `before`.
+        #[serde(default)]
+        after: Option<TimeSpec>,
         #[serde(default = "yes")]
         picture: bool,
         #[serde(default = "yes")]

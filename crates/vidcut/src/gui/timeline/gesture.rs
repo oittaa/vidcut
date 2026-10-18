@@ -245,24 +245,26 @@ impl Drag {
             } => {
                 let d = moved(ctx, self.press, pos);
                 let grow = if *end { d } else { -d };
-                let (b, a) = crate::gui::trim_strips::grown(*before, *after, grow);
-                let (length, align) = crate::gui::trim_strips::resized(*before, *after, grow);
+                let room = vidcut_core::ops::dissolve_room(ctx.project, track, *at, false)
+                    .unwrap_or((*before, *after));
+                let (b, a) = crate::gui::trim_strips::grown(*before, *after, grow, room);
+                let edge = if *end { a - after } else { before - b };
                 Preview {
-                    request: (grow != 0)
+                    request: ((b, a) != (*before, *after))
                         .then(|| {
                             request(
                                 "edit.dissolve",
                                 json!({
                                     "at": at,
                                     "track": track,
-                                    "length": format!("{length}f"),
-                                    "align": align,
+                                    "before": format!("{b}f"),
+                                    "after": format!("{a}f"),
                                     "sound": sound,
                                 }),
                             )
                         })
                         .flatten(),
-                    delta: Some((d, Some(b + a))),
+                    delta: Some((edge, Some(b + a))),
                     ghost: Some((at - b, at + a)),
                     row: Some(track.clone()),
                     ..Preview::default()

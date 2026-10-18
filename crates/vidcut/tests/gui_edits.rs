@@ -612,6 +612,92 @@ fn a_click_on_the_cut_under_a_dissolve_shows_the_dissolve_in_the_trim_editor() {
 }
 
 #[test]
+fn dragging_an_uneven_dissolves_end_two_frames_out_lengthens_only_the_side_with_media() {
+    let mut gui = Gui::new();
+    gui.call("edit.slip", json!({ "clip": "c2", "by": "-90f" }));
+    gui.call("edit.dissolve", json!({ "at": 60, "sound": false }));
+    gui.settle();
+    gui.click(gui.at("V1", 65, 20.0));
+    gui.settle();
+    let cut = gui.harness.get_by_label("Roll the edit").rect().center();
+    let end = gui
+        .harness
+        .get_by_label("The dissolve's end")
+        .rect()
+        .center();
+    let frame = (end.x - cut.x) / 15.0;
+    gui.drag(end, end + vec2(2.0 * frame, 0.0));
+    gui.settle();
+    assert_eq!(v1_transitions(&gui), [(10, 17)]);
+    gui.quit();
+}
+
+#[test]
+fn the_trim_editors_out_handle_trims_at_the_lower_timelines_scale_with_a_dissolve_shown() {
+    let mut gui = Gui::new();
+    dissolve_at_60(&mut gui);
+    gui.click(gui.at("V1", 57, 20.0));
+    gui.settle();
+    let out = gui.harness.get_by_label("Trim the Out").rect();
+    gui.drag(out.center(), out.center() - vec2(3.0 * 4.0, 0.0));
+    gui.settle();
+    assert_eq!(
+        gui.clips("V1"),
+        [
+            ("c1".into(), 0, 57),
+            ("c2".into(), 57, 60),
+            ("c3".into(), 117, 60)
+        ]
+    );
+    gui.quit();
+}
+
+#[test]
+fn the_trim_editors_roll_handle_rolls_under_a_dissolve_starting_on_the_edit() {
+    let mut gui = Gui::new();
+    gui.call(
+        "edit.dissolve",
+        json!({ "at": 60, "length": "10f", "align": "start", "sound": false }),
+    );
+    gui.settle();
+    gui.click(gui.at("V1", 65, 20.0));
+    gui.settle();
+    let roll = gui.harness.get_by_label("Roll the edit").rect();
+    gui.drag(roll.center(), roll.center() + vec2(2.0 * 4.0, 0.0));
+    gui.settle();
+    assert_eq!(
+        gui.clips("V1"),
+        [
+            ("c1".into(), 0, 62),
+            ("c2".into(), 62, 58),
+            ("c3".into(), 120, 60)
+        ]
+    );
+    gui.quit();
+}
+
+#[test]
+fn a_drag_on_the_cut_rolls_it_under_a_dissolve_one_frame_before_it() {
+    let mut gui = Gui::new();
+    gui.call(
+        "edit.dissolve",
+        json!({ "at": 60, "before": "1f", "after": "9f", "sound": false }),
+    );
+    gui.settle();
+    gui.drag(gui.at("V1", 60, 20.0), gui.at("V1", 62, 20.0));
+    gui.settle();
+    assert_eq!(
+        gui.clips("V1"),
+        [
+            ("c1".into(), 0, 62),
+            ("c2".into(), 62, 58),
+            ("c3".into(), 120, 60)
+        ]
+    );
+    gui.quit();
+}
+
+#[test]
 fn a_cut_clicked_on_v2_rolls_on_v2() {
     let mut gui = Gui::new();
     gui.call("track.add", json!({ "kind": "video" }));
