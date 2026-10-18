@@ -15,6 +15,7 @@ mod preferences;
 mod project;
 mod relink;
 mod shared;
+mod shuttle;
 mod theme;
 mod tiles;
 mod timeline;

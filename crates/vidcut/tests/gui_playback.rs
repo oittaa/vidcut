@@ -195,6 +195,17 @@ impl Gui {
         self.settle();
     }
 
+    fn press(&mut self, key: Key, pressed: bool) {
+        self.harness.event(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        });
+        self.harness.step();
+    }
+
     fn hold(&mut self, key: Key, tap: Key) {
         let event = |pressed| egui::Event::Key {
             key,
@@ -664,6 +675,50 @@ fn a_dynamic_trim_run_plays_past_the_loop_and_the_loop_comes_back() {
         g.h.snapshot().timeline.playing && g.position() < 90
     });
     gui.call("player.pause", json!({}));
+}
+
+#[test]
+fn k_held_with_l_held_plays_at_half_speed_until_l_is_let_go() {
+    let mut gui = Gui::new(VideoCodec::Vp9);
+    gui.call("player.seek", json!({ "at": "20f" }));
+    gui.shows(20);
+    gui.press(Key::K, true);
+    gui.press(Key::L, true);
+    gui.wait("slow play", |g| {
+        let t = &g.h.snapshot().timeline;
+        t.playing && t.speed == 0.5
+    });
+    gui.wait("slow play to move on", |g| g.position() >= 24);
+    gui.press(Key::L, false);
+    gui.wait("letting L go to stop", |g| !g.h.snapshot().timeline.playing);
+    gui.press(Key::K, false);
+    let at = gui.position();
+    gui.shows(at);
+}
+
+#[test]
+fn k_held_with_j_held_in_dynamic_trim_trims_at_half_speed_with_sound() {
+    let mut gui = Gui::new(VideoCodec::Vp9);
+    gui.call("player.seek", json!({ "at": "78f" }));
+    gui.key(Key::W);
+    gui.wait("W to take the playhead to the cut", |g| g.position() == 80);
+    gui.press(Key::K, true);
+    gui.press(Key::J, true);
+    gui.wait("the slow run to play its sound", |g| {
+        let t = &g.h.snapshot().timeline;
+        t.playing && t.speed == -0.5
+    });
+    assert_eq!(gui.position(), 80, "the timeline's own position moved");
+    gui.run_for(30);
+    gui.press(Key::K, false);
+    gui.wait("letting K go to apply the trim", |g| g.clip("c1").1 < 80);
+    gui.wait("the run's sound to stop", |g| {
+        !g.h.snapshot().timeline.playing
+    });
+    gui.press(Key::J, false);
+    let at = gui.clip("c1").1;
+    gui.wait("the playhead to follow the cut", |g| g.position() == at);
+    gui.two_up_shows(&[at - 1, at + 20]);
 }
 
 #[test]

@@ -136,6 +136,7 @@ While a job runs, the engine says what it is doing: the job thread installs a `v
 - **View state.** The edit point selected, and whether its dissolve is (`TimelineView::transition`), the target track, zoom and Timeline Options (in `timeline.json`), the windows open. Requests reach it through `Renderer::gui`. The Trim Editor shows the selected edit while the player is stopped (`Workspace::trim_editor_edit`). The selected edit pulses (`paint::pulse`), the UI repainting only while one is selected.
 - **Timeline tiles**, decoded by `Tiles` on `vidcut-tiles-N`; the Trim Editor's filmstrips use the same tiles, their frames and handle reach from `vidcut_core::ops::filmstrip`, their numbers from the clips' lengths when the editor opened (`TrimAnchor`).
 - **The two-up**: `Cells` owns its players on the UI thread; `Screens` draws them.
+- **J and L with K held.** `Shuttle` tells a tap from a hold by the time between a key's press and release, ignoring key repeats, asking for a frame when a hold turns slow (`Shuttle::due`), and gives a frame step, slow play or its stop, for the player or for Dynamic Trim ([spec D54](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
 ## Themes and keys
 

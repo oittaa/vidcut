@@ -183,6 +183,17 @@ impl Gui {
         self.harness.step();
     }
 
+    fn press(&mut self, key: Key, pressed: bool) {
+        self.harness.event(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        });
+        self.harness.step();
+    }
+
     fn hold(&mut self, key: Key, tap: Key) {
         let event = |pressed| egui::Event::Key {
             key,
@@ -1136,6 +1147,37 @@ fn k_and_l_in_dynamic_trim_slip_a_clip_to_an_earlier_frame() {
     gui.hold(Key::K, Key::L);
     gui.settle();
     assert_eq!(gui.source_in("c2"), json!(99));
+    gui.quit();
+}
+
+#[test]
+fn k_and_l_held_in_dynamic_trim_roll_the_cut_slowly_in_one_undo_step() {
+    let mut gui = Gui::new();
+    gui.call("player.seek", json!({ "at": 55, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.press(Key::K, true);
+    gui.press(Key::L, true);
+    for _ in 0..60 {
+        gui.harness.step();
+    }
+    gui.press(Key::L, false);
+    gui.press(Key::K, false);
+    gui.settle();
+    let rolled = gui.clips("V1")[0].2 - 60;
+    assert!(
+        (9..=13).contains(&rolled),
+        "a second held rolled the cut {rolled} frames, not about 11"
+    );
+    gui.call("history.undo", json!({}));
+    assert_eq!(
+        gui.clips("V1"),
+        [
+            ("c1".into(), 0, 60),
+            ("c2".into(), 60, 60),
+            ("c3".into(), 120, 60)
+        ]
+    );
     gui.quit();
 }
 

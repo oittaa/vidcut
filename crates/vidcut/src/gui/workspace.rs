@@ -12,6 +12,7 @@ pub use super::timeline::tools::{DynamicMode, DynamicTarget, heard};
 pub use super::timeline::{EditSel, Side, TrackRef};
 pub use super::viewer::{TwoUp, TwoUpCell, TwoUpMode};
 
+use super::shuttle::Jkl;
 use super::theme::{self, Deco};
 use super::timeline::TimelineView;
 use crate::live::{self, Filmstrip, PlayerId, Snapshot};
@@ -107,6 +108,7 @@ pub struct Workspace {
     pub(super) dialogs: Arc<dyn super::export::Dialogs>,
     pub(super) folders: super::folders::Folders,
     pub(super) tiles: Option<super::tiles::Tiles>,
+    pub(super) shuttle: super::shuttle::Shuttle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -240,6 +242,7 @@ impl Workspace {
             tiles: Some(super::tiles::Tiles::new(
                 &crate::preferences::load().unwrap_or_default().thumbnails,
             )),
+            shuttle: Default::default(),
         }
     }
 
@@ -1194,22 +1197,26 @@ impl Workspace {
         if pressed(Key::Slash) && m.command && !m.alt {
             self.send("player.loop", json!({}));
         }
-        if pressed(Key::K) && !trimming {
+        if super::shuttle::first_press(&input, Key::K) && !trimming {
             self.send("player.pause", json!({}));
         }
-        let k_down = input.key_down(Key::K);
-        for (key, dir) in [(Key::L, 1.0), (Key::J, -1.0)]
-            .into_iter()
-            .filter(|_| !trimming)
-        {
-            if pressed(key) {
-                if k_down {
-                    self.send("player.step", json!({ "frames": dir as i64 }));
-                } else {
+        for jkl in self.shuttle.input(&input) {
+            if trimming {
+                self.dynamic_jkl(jkl, input.time);
+                continue;
+            }
+            match jkl {
+                Jkl::Play(dir) => {
                     let speed = crate::gui::timeline::tools::faster(player.speed, dir);
                     self.send("player.play", json!({ "speed": speed }));
                 }
+                Jkl::Step(dir) => self.send("player.step", json!({ "frames": dir as i64 })),
+                Jkl::Slow(speed) => self.send("player.play", json!({ "speed": speed })),
+                Jkl::Stop => self.send("player.pause", json!({})),
             }
+        }
+        if let Some(wait) = self.shuttle.due(input.time) {
+            super::timeline::repaint_in(ctx, std::time::Duration::from_secs_f64(wait));
         }
         if pressed(Key::ArrowLeft) {
             let n = if m.shift { fps } else { 1 };
