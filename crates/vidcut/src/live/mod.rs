@@ -3360,7 +3360,7 @@ fn folder_notice(result: &Value) -> String {
     };
     let skipped: Vec<&Value> = result["skipped"].as_array().into_iter().flatten().collect();
     let (others, unread): (Vec<&Value>, Vec<&Value>) = skipped
-        .into_iter()
+        .iter()
         .partition(|s| s["why"] == vidcut_core::folder::NOT_MEDIA);
     match others.len() {
         0 => {}
@@ -3375,6 +3375,14 @@ fn folder_notice(result: &Value) -> String {
     }
     if !unread.is_empty() {
         text.push_str(&format!("; couldn't open {}", names(&unread, true)));
+    }
+    for s in &skipped {
+        let path = s["path"].as_str().unwrap_or_default();
+        let why = s["why"].as_str().unwrap_or_default();
+        text.push_str(&format!(
+            "
+{path}: {why}"
+        ));
     }
     text
 }
@@ -3397,7 +3405,10 @@ mod tests {
         assert_eq!(
             folder_notice(&result),
             "Import Media Folder: 2 clips in bin Shoot; skipped 2 files that aren't media: \
-             notes.txt, readme.txt; couldn't open broken.mp4 (Invalid data found when processing input)"
+             notes.txt, readme.txt; couldn't open broken.mp4 (Invalid data found when processing input)\n\
+             /shoot/broken.mp4: Invalid data found when processing input\n\
+             /shoot/notes.txt: not a media file\n\
+             /shoot/Docs/readme.txt: not a media file"
         );
     }
 }

@@ -178,20 +178,7 @@ fn read_in(path: PathBuf, above: &mut Vec<DirId>) -> Folder {
 }
 
 pub(crate) fn hidden(e: &std::fs::DirEntry) -> bool {
-    if e.file_name().to_string_lossy().starts_with('.') {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const HIDDEN: u32 = 0x2;
-        if e.metadata()
-            .is_ok_and(|m| m.file_attributes() & HIDDEN != 0)
-        {
-            return true;
-        }
-    }
-    false
+    e.file_name().to_string_lossy().starts_with('.')
 }
 
 #[cfg(test)]
