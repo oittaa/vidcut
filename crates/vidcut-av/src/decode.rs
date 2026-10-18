@@ -151,7 +151,10 @@ pub(crate) fn open_file(path: &Path) -> Result<format::context::Input> {
             path.display()
         )));
     }
-    format::input(path).ctx(|| format!("opening {}", path.display()))
+    let what = || format!("opening {}", path.display());
+    let file = std::fs::File::open(path).map_err(|e| Error::Invalid(format!("{}: {e}", what())))?;
+    let io = format::context::StreamIo::from_read_seek(file).ctx(what)?;
+    format::input_from_stream(io, Some(&path.to_string_lossy()), None).ctx(what)
 }
 
 fn open_sequence(pattern: &Path, first: u64, rate: (i32, i32)) -> Result<format::context::Input> {
