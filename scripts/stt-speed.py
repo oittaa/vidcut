@@ -4,10 +4,12 @@ through transcribe.cpp: the time to load each model, then two runs over the
 same audio, and the device memory the model holds after them. Each model
 and device runs in a process of its own.
 
-    python3 scripts/stt-speed.py [--seconds S] [--devices KINDS] [--json FILE] [AUDIO [MODEL[@PIECE]...]]
+    python3 scripts/stt-speed.py [--audio FILE] [--seconds S] [--devices KINDS] [--json FILE] [MODEL[@PIECE]...]
 
-AUDIO is any media file with sound (nasa-speech-1979 from the media
-manifest); its first S seconds (600) are decoded to 16 kHz mono. MODEL is a
+FILE is any media file with sound: by default nasa-speech-1979 from the
+media manifest, downloaded into $VIDCUT_TEST_DATA/media and checked against
+the manifest's SHA-256. Its first S seconds (600) are decoded to 16 kHz
+mono. MODEL is a
 GGUF file, or REPO/FILE of a handy-computer repository on Hugging Face,
 which is downloaded into $VIDCUT_TEST_DATA/models and checked against its
 SHA-256 (Parakeet Ultra, Whisper large-v3 and Qwen3-ASR 1.7B at Q8_0).
@@ -30,6 +32,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tomllib
 import time
 import urllib.request
 from pathlib import Path
@@ -56,7 +59,8 @@ DEFAULT_MODELS = [
 ]
 DATA = Path(os.environ.get("VIDCUT_TEST_DATA", Path.home() / "Downloads" / "vidcut-tmp"))
 CACHE = DATA / "stt-speed"
-DEFAULT_AUDIO = DATA / "media" / "nasa-speech-1979" / "255-hq-296.mp4"
+MANIFEST = Path(__file__).resolve().parent.parent / "tests" / "media-manifest.toml"
+DEFAULT_AUDIO = "nasa-speech-1979"
 
 
 def sha256(path):
@@ -132,6 +136,12 @@ def model_path(spec):
     return str(fetch(url, DATA / "models" / repo / file, digest)), piece
 
 
+def clip(name):
+    with open(MANIFEST, "rb") as f:
+        c = next(c for c in tomllib.load(f)["clip"] if c["name"] == name)
+    return fetch(c["url"], DATA / "media" / name / c["file"], c["sha256"])
+
+
 def decode(path, seconds):
     import av
     import numpy as np
@@ -184,11 +194,12 @@ def main():
     ap.add_argument("--seconds", type=int, default=600)
     ap.add_argument("--devices", default="gpu,igpu,cpu")
     ap.add_argument("--json")
-    ap.add_argument("audio", nargs="?", default=str(DEFAULT_AUDIO))
+    ap.add_argument("--audio")
     ap.add_argument("models", nargs="*")
     a = ap.parse_args()
-    if not Path(a.audio).is_file():
-        sys.exit(f"{a.audio}: no such file (scripts/fetch-test-media.sh fetches nasa-speech-1979)")
+    if a.audio and not Path(a.audio).is_file():
+        sys.exit(f"{a.audio}: no such file")
+    a.audio = a.audio or str(clip(DEFAULT_AUDIO))
     target = packages()
     lib = library()
     models = [model_path(m) for m in a.models or DEFAULT_MODELS]
