@@ -18,6 +18,7 @@ What it would take:
 - **A subtitle track:** cues (start, end, text) that move with every edit as clips do; added, typed, moved, trimmed, split and joined; scriptable (rule 3).
 - **Import and export:** SRT and WebVTT. On export, a file beside the output, a subtitle stream, or burned in on the GPU.
 - **OTIO:** an SRT beside the OTIO, timed in the timeline's timecode. Resolve's Insert Selected Subtitles to Timeline Using Timecode (p. 1230) inserts nothing from an SRT timed from zero. An SRT beside an exported video starts at zero.
+- **Re-timing a subtitle file to the speech:** the aligner places an imported file's text on the audio; `nasa-roman-presser-captions`, which aren't aligned with the speech, are the case to check it on. The aligner has no Finnish.
 - **Cutting by transcript:** the words with their times as a request's answer, and a request that removes words. It needs word times: the aligner, or Whisper's in transcribe.cpp.
 - **Later:** paid services (xAI, Google) behind the same interface, asking each time before audio leaves the computer.
 
