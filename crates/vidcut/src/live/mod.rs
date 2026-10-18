@@ -2509,6 +2509,9 @@ impl Live {
     }
 
     fn project_changed(&mut self, response: Option<&Response>) {
+        if let Some(trouble) = self.project.as_mut().and_then(OpenProject::trouble) {
+            self.notice(trouble, true);
+        }
         let Some(open) = &self.project else {
             self.project_snap = None;
             self.missing_watch.watch(Vec::new(), Vec::new());
@@ -2530,10 +2533,13 @@ impl Live {
         let project = Arc::new(p.clone());
         let path = open.store.path().to_path_buf();
         let history = match self.project.as_mut().map(OpenProject::steps) {
-            Some(Ok(steps)) => steps,
+            Some(Ok(steps)) => Arc::new(steps),
             Some(Err(e)) => {
                 self.notice(e.message, true);
-                Default::default()
+                self.project_snap
+                    .as_ref()
+                    .map(|s| s.history.clone())
+                    .unwrap_or_default()
             }
             None => Default::default(),
         };
@@ -2541,7 +2547,7 @@ impl Live {
         self.project_snap = Some(ProjectSnap {
             path,
             project: project.clone(),
-            history: Arc::new(history),
+            history,
         });
         let p = &*project;
         let media: HashSet<String> = p.media.iter().map(|m| m.id.clone()).collect();

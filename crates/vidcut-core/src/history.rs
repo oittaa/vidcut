@@ -173,19 +173,28 @@ impl HistoryFile {
     }
 
     pub(crate) fn tail(&self) -> Option<(Tail, u64)> {
-        let mut file = File::open(&self.path).ok()?;
+        self.read_tail().ok().flatten()
+    }
+
+    pub(crate) fn read_tail(&self) -> std::io::Result<Option<(Tail, u64)>> {
+        let mut file = match File::open(&self.path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
         let mut first = String::new();
         {
             use std::io::BufRead;
-            std::io::BufReader::new(&mut file)
-                .read_line(&mut first)
-                .ok()?;
+            std::io::BufReader::new(&mut file).read_line(&mut first)?;
         }
-        match serde_json::from_str(&first).ok()? {
-            Line::Of(of) if of == self.of => {}
-            _ => return None,
+        match serde_json::from_str(&first) {
+            Ok(Line::Of(of)) if of == self.of => {}
+            Ok(Line::Of(of)) => {
+                return Err(bad(&format!("it is the history of {}", of.display())));
+            }
+            _ => return Err(bad("its first line doesn't say whose history it is")),
         }
-        let end = file.metadata().ok()?.len();
+        let end = file.metadata()?.len();
         let mut found = None;
         lines_back(&mut file, end, CHUNK, |at, text| {
             if text.ends_with('\n')
@@ -195,9 +204,10 @@ impl HistoryFile {
                 return Ok(false);
             }
             Ok(true)
-        })
-        .ok()?;
+        })?;
         found
+            .map(Some)
+            .ok_or_else(|| bad("it has no complete save"))
     }
 
     pub(crate) fn top(
@@ -685,5 +695,22 @@ mod tests {
         let mut fresh = StepsCache::default();
         file.read_steps(end, &mut fresh).unwrap();
         assert_eq!(cache.steps, fresh.steps);
+    }
+
+    #[test]
+    fn a_missing_history_is_no_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = HistoryFile::new(dir.path().join("h.jsonl"), dir.path().join("p.vidcut"));
+        assert!(file.read_tail().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_history_without_a_save_is_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = history(dir.path(), 1);
+        let text = std::fs::read_to_string(file.path()).unwrap();
+        let cut = text.lines().take(2).collect::<Vec<_>>().join("\n");
+        std::fs::write(file.path(), cut).unwrap();
+        assert!(file.read_tail().is_err());
     }
 }

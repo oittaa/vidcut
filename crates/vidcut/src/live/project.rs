@@ -14,6 +14,7 @@ pub struct OpenProject {
     disk: String,
     stamp: Option<(u64, std::time::SystemTime)>,
     pub history_error: Option<String>,
+    told: Option<String>,
     opened: u64,
     steps: StepsCache,
     _watcher: Option<notify::RecommendedWatcher>,
@@ -47,6 +48,7 @@ impl OpenProject {
             disk,
             stamp,
             history_error: None,
+            told: None,
             opened,
             steps: StepsCache::default(),
             _watcher: watcher,
@@ -57,7 +59,17 @@ impl OpenProject {
         self.editor.project()
     }
 
+    pub fn trouble(&mut self) -> Option<String> {
+        let now = self.editor.history_trouble().map(String::from);
+        if now == self.told {
+            return None;
+        }
+        self.told.clone_from(&now);
+        now
+    }
+
     pub fn steps(&mut self) -> Result<Steps> {
+        self.store.recover(&mut self.editor);
         self.editor.history_steps(&mut self.steps)
     }
 

@@ -256,6 +256,7 @@ pub struct Editor {
     moved: Vec<Moved>,
     pub(crate) file: Option<(HistoryFile, String)>,
     opened: Option<u64>,
+    blocked: Option<(String, String)>,
 }
 
 fn now_ms() -> u64 {
@@ -273,6 +274,42 @@ impl Editor {
             moved: Vec::new(),
             file: None,
             opened: None,
+            blocked: None,
+        }
+    }
+
+    pub(crate) fn unreadable(project: Project, hash: String, why: String) -> Self {
+        Self {
+            blocked: Some((hash, why)),
+            ..Self::new(project, History::default())
+        }
+    }
+
+    pub fn history_trouble(&self) -> Option<&str> {
+        self.blocked.as_ref().map(|(_, why)| why.as_str())
+    }
+
+    pub(crate) fn blocked_on(&self) -> Option<&str> {
+        self.blocked.as_ref().map(|(hash, _)| hash.as_str())
+    }
+
+    pub(crate) fn stands_on(&self) -> Option<&str> {
+        match (&self.file, &self.blocked) {
+            (Some((_, hash)), _) | (None, Some((hash, _))) => Some(hash),
+            (None, None) => None,
+        }
+    }
+
+    pub(crate) fn block(&mut self, why: String) {
+        if let Some((_, hash)) = self.file.take() {
+            for m in &self.moved {
+                if let Moved::Step(e) = m {
+                    self.history.undo.push((**e).clone());
+                }
+            }
+            self.blocked = Some((hash, why));
+        } else if let Some((_, was)) = &mut self.blocked {
+            *was = why;
         }
     }
 
@@ -306,12 +343,7 @@ impl Editor {
     pub(crate) fn saved_to(&mut self, file: HistoryFile, hash: String) {
         self.history = History::default();
         self.file = Some((file, hash));
-    }
-
-    pub(crate) fn lost_file(&mut self) {
-        if self.file.take().is_some() {
-            self.history = History::default();
-        }
+        self.blocked = None;
     }
 
     pub fn history_counts(&self) -> (usize, usize) {
@@ -335,6 +367,10 @@ impl Editor {
         (u, r)
     }
 
+    pub fn pending(&self) -> bool {
+        !self.moved.is_empty()
+    }
+
     pub fn history_view(&self, n: usize) -> Result<History> {
         let (undo, redo) = self.view(n, HistoryFile::top, Entry::clone)?;
         Ok(History { undo, redo })
@@ -352,14 +388,15 @@ impl Editor {
             line.extend(self.history.redo.iter().rev().map(|e| e.step.clone()));
             return Ok(Steps { line, done });
         };
-        let mut steps = match file.tail() {
+        let unreadable = |e: std::io::Error| {
+            Error::internal(format!(
+                "the undo history {} can't be read: {e}",
+                file.path().display()
+            ))
+        };
+        let mut steps = match file.read_tail().map_err(unreadable)? {
             Some((_, end)) => {
-                file.read_steps(end, cache).map_err(|e| {
-                    Error::internal(format!(
-                        "the undo history {} can't be read: {e}",
-                        file.path().display()
-                    ))
-                })?;
+                file.read_steps(end, cache).map_err(unreadable)?;
                 cache.steps.clone()
             }
             None => Steps::default(),
@@ -416,7 +453,7 @@ impl Editor {
             ))
         };
         let k = n + self.moved.len();
-        let (mut undo, mut redo) = match file.tail() {
+        let (mut undo, mut redo) = match file.read_tail().map_err(unreadable)? {
             Some((tail, end)) => {
                 let (mut undo, mut redo) = top(file, &tail, end, k, k).map_err(unreadable)?;
                 undo.reverse();
@@ -470,7 +507,11 @@ impl Editor {
                 result,
                 dry_run: false,
                 via: String::new(),
-                warnings: Vec::new(),
+                warnings: self
+                    .history_trouble()
+                    .map(String::from)
+                    .into_iter()
+                    .collect(),
             });
         }
         if !request.is_mutation() {
