@@ -32,6 +32,13 @@ pub fn is_image(path: &Path) -> bool {
     IMAGE_TYPES.contains(&extension(path).as_str())
 }
 
+pub fn sort_by_name(paths: &mut [PathBuf]) {
+    paths.sort_by_cached_key(|p| {
+        let name = p.file_name().unwrap_or_default().to_string_lossy();
+        (name.to_lowercase(), p.clone())
+    });
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Folder {
     pub path: PathBuf,
@@ -126,8 +133,8 @@ fn read_in(path: PathBuf) -> Folder {
             files.push(e.path());
         }
     }
-    files.sort();
-    dirs.sort();
+    sort_by_name(&mut files);
+    sort_by_name(&mut dirs);
     Folder {
         path,
         files,
@@ -163,6 +170,19 @@ mod tests {
         assert!(is_media(Path::new("/shoot/frame_0001.exr")));
         assert!(!is_media(Path::new("/shoot/notes.txt")));
         assert!(!is_media(Path::new("/shoot/README")));
+    }
+
+    #[test]
+    fn names_sort_ignoring_case() {
+        let mut paths: Vec<PathBuf> = ["/s/B-close.mp4", "/s/a-wide.mp4", "/s/clip.mp4"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        sort_by_name(&mut paths);
+        assert_eq!(
+            paths,
+            ["/s/a-wide.mp4", "/s/B-close.mp4", "/s/clip.mp4"].map(PathBuf::from)
+        );
     }
 
     #[test]

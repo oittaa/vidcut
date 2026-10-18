@@ -130,12 +130,12 @@ fn media_already_in_the_pool_move_into_the_folder_bin() {
 }
 
 #[test]
-fn the_first_video_in_the_folder_sets_the_format() {
+fn the_first_video_by_name_sets_the_format_whatever_its_case() {
     let mut f = shoot(&[], &[]);
     f.editor = Editor::new(Project::new(Settings::default()), History::default());
     f.env = std::mem::take(&mut f.env)
-        .with("/shoot/a.mp4", media_info(4.0, fps(50), true))
-        .with("/shoot/b.mp4", media_info(4.0, fps(24), true));
+        .with("/shoot/B.mp4", media_info(4.0, fps(24), true))
+        .with("/shoot/a.mp4", media_info(4.0, fps(50), true));
     f.ok(req("media.add_folder", json!({"path": "/shoot"})));
     assert_eq!(f.editor.project().settings.fps, fps(50));
 }

@@ -129,11 +129,12 @@ impl FakeEnv {
 }
 
 fn tree(dir: &Path, paths: &[PathBuf]) -> Folder {
-    let files = paths
+    let mut files: Vec<PathBuf> = paths
         .iter()
         .filter(|p| p.parent() == Some(dir))
         .cloned()
         .collect();
+    crate::folder::sort_by_name(&mut files);
     let mut dirs: Vec<PathBuf> = paths
         .iter()
         .filter_map(|p| {
@@ -143,7 +144,9 @@ fn tree(dir: &Path, paths: &[PathBuf]) -> Folder {
             Some(dir.join(first))
         })
         .collect();
+    dirs.sort();
     dirs.dedup();
+    crate::folder::sort_by_name(&mut dirs);
     Folder {
         path: dir.to_path_buf(),
         files,
