@@ -1275,6 +1275,8 @@ fn mutate(
             clips,
             length,
             align,
+            before,
+            after,
             picture,
             sound,
             all,
@@ -1283,23 +1285,45 @@ fn mutate(
                 Some(t) => resolve(p, t, playhead)?,
                 None => playhead.unwrap_or(0),
             };
-            let frames = match length {
-                Some(l) => ctx(p, playhead).duration(l)?,
-                None => p.settings.fps.as_f64().round() as i64,
+            let frames = |t: &TimeSpec| ctx(p, playhead).duration(t);
+            let shape = match (before, after) {
+                (None, None) => ops::Shape::Length(
+                    match length {
+                        Some(l) => frames(l)?,
+                        None => p.settings.fps.as_f64().round() as i64,
+                    },
+                    *align,
+                ),
+                (Some(b), Some(a)) if length.is_none() && *align == ops::Align::default() => {
+                    let (b, a) = (frames(b)?, frames(a)?);
+                    if b < 0 || a < 0 {
+                        return Err(Error::invalid("a dissolve's sides can't be negative"));
+                    }
+                    ops::Shape::Sides(b, a)
+                }
+                _ => {
+                    return Err(Error::usage(
+                        "give a dissolve `before` and `after` together, without `length` and `align`",
+                    ));
+                }
             };
-            if frames < 1 {
+            let total = match shape {
+                ops::Shape::Length(f, _) => f,
+                ops::Shape::Sides(b, a) => b + a,
+            };
+            if total < 1 {
                 return Err(Error::invalid("a dissolve lasts a frame at least"));
             }
             let made = if clips.is_empty() {
                 let track = track.as_deref().unwrap_or(ops::MAIN);
-                ops::dissolve(p, track, at, frames, *align, *picture, *sound, *all)?
+                ops::dissolve(p, track, at, shape, *picture, *sound, *all)?
             } else if track.is_some() || *all {
                 return Err(Error::usage(
                     "dissolves on `clips` go on their own edits; leave out `track` and `all`",
                 ));
             } else {
                 let ids = resolve_clips(p, clips, playhead)?;
-                ops::dissolve_clips(p, &ids, frames, *align, *picture, *sound)?
+                ops::dissolve_clips(p, &ids, shape, *picture, *sound)?
             };
             json!({ "transitions": made })
         }

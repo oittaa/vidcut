@@ -13,6 +13,8 @@ use super::workspace::{Workspace, fit};
 
 const GAP: f32 = 18.0;
 const BAR: f32 = 5.0;
+const ROLL_GRAB: f32 = 24.0;
+const FADE_GRAB: f32 = 8.0;
 
 pub(super) fn band_height(area: Rect) -> f32 {
     2.0 * strip_height(area) + GAP
@@ -54,6 +56,14 @@ impl TrimAnchor {
     }
 }
 
+struct FadeBar<'a> {
+    x: &'a vidcut_core::model::Transition,
+    sound: bool,
+    room: (i64, i64),
+    roll: bool,
+    ppf: f32,
+}
+
 struct Strip<'a> {
     rect: Rect,
     clip: &'a Clip,
@@ -67,20 +77,20 @@ pub(super) fn fade_step(frames: i64, cells: f32) -> i64 {
     ((frames as f32 * 1.6 / cells.max(1.0)).ceil() as i64).max(1)
 }
 
-pub(super) fn grown(before: i64, after: i64, grow: i64) -> (i64, i64) {
-    match (before, after) {
-        (0, a) => (0, (a + grow).max(1)),
-        (b, 0) => ((b + grow).max(1), 0),
-        (b, a) => ((b + grow).max(1), (a + grow).max(1)),
-    }
+pub(super) fn grown(before: i64, after: i64, grow: i64, room: (i64, i64)) -> (i64, i64) {
+    let side = |s: i64, room: i64| {
+        if s == 0 {
+            0
+        } else {
+            (s + grow).max(1).min(room)
+        }
+    };
+    (side(before, room.0), side(after, room.1))
 }
 
-pub(super) fn resized(before: i64, after: i64, grow: i64) -> (i64, &'static str) {
-    match (before, after) {
-        (0, a) => ((a + grow).max(1), "start"),
-        (b, 0) => ((b + grow).max(1), "end"),
-        (b, a) => ((b + a + 2 * grow).max(1), "center"),
-    }
+fn beside_roll(cut: f32, at: f32, toward: f32) -> f32 {
+    let clear = (ROLL_GRAB + FADE_GRAB) / 2.0;
+    cut + toward * (toward * (at - cut)).max(clear)
 }
 
 impl Workspace {
@@ -132,7 +142,7 @@ impl Workspace {
             (Side::In, inc.map(|_| grab(bottom, 12.0, "Trim the In"))),
             (
                 Side::Both,
-                out.and(inc).map(|_| grab(gap, 24.0, "Roll the edit")),
+                out.and(inc).map(|_| grab(gap, ROLL_GRAB, "Roll the edit")),
             ),
         ];
         let reach = |side: Side| match (side, out, inc) {
@@ -141,11 +151,7 @@ impl Workspace {
             (Side::Both, Some(o), Some(i)) => Some(filmstrip::roll_reach(p, o, i)),
             _ => None,
         };
-        let ppf = if fade.is_some() {
-            w / step as f32
-        } else {
-            self.timeline.options.ppf.max(0.01) as f32
-        };
+        let ppf = self.timeline.options.ppf.max(0.01) as f32;
         let active = handles.iter().find_map(|(side, r)| {
             let r = r.as_ref().filter(|r| r.dragged() || r.drag_stopped())?;
             let (lo, hi) = reach(*side)?;
@@ -204,7 +210,16 @@ impl Workspace {
                 .transitions
                 .iter()
                 .any(|y| y.sound && y.from == x.from && y.to == x.to);
-            self.fade_bar(ui, &painter, [gap, top, bottom], e, (x, sound), ppf, &fx);
+            let room = vidcut_core::ops::dissolve_room(p, &e.track.id(), e.at, false)
+                .unwrap_or((x.before, x.after));
+            let bar = FadeBar {
+                x,
+                sound,
+                room,
+                roll: out.is_some() && inc.is_some(),
+                ppf: w / step as f32,
+            };
+            self.fade_bar(ui, &painter, [gap, top, bottom], e, &bar, &fx);
         }
         if out.is_some() && inc.is_some() {
             mark(gap.shrink2(vec2(0.0, 4.0)), 3.0, Color32::WHITE);
@@ -221,26 +236,41 @@ impl Workspace {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn fade_bar(
         &mut self,
         ui: &mut egui::Ui,
         painter: &Painter,
         [gap, top, bottom]: [Rect; 3],
         e: EditSel,
-        (x, sound): (&vidcut_core::model::Transition, bool),
-        ppf: f32,
+        bar: &FadeBar,
         fx: &dyn Fn(i64) -> f32,
     ) {
+        let FadeBar {
+            x,
+            sound,
+            room,
+            roll,
+            ppf,
+        } = *bar;
         let edges = [
             (false, "The dissolve's start"),
             (true, "The dissolve's end"),
         ]
         .map(|(end, label)| {
-            let at = if end { fx(x.after) } else { fx(-x.before) };
+            let (at, toward) = match (end, x.before, x.after) {
+                (false, 0, _) => (fx(0), 1.0),
+                (false, b, _) => (fx(-b), -1.0),
+                (true, _, 0) => (fx(0), -1.0),
+                (true, _, a) => (fx(a), 1.0),
+            };
+            let at = if roll {
+                beside_roll(fx(0), at, toward)
+            } else {
+                at
+            };
             let r = ui
                 .interact(
-                    Rect::from_center_size(pos2(at, gap.center().y), vec2(8.0, gap.height())),
+                    Rect::from_center_size(pos2(at, gap.center().y), vec2(FADE_GRAB, gap.height())),
                     ui.id().with(("trim-fade", end)),
                     Sense::drag(),
                 )
@@ -264,8 +294,9 @@ impl Workspace {
             };
             Some((grow, r.drag_stopped()))
         });
-        let (before, after) =
-            grow.map_or((x.before, x.after), |(g, _)| grown(x.before, x.after, g));
+        let (before, after) = grow.map_or((x.before, x.after), |(g, _)| {
+            grown(x.before, x.after, g, room)
+        });
         let bar = Rect::from_x_y_ranges(
             fx(-before)..=fx(after),
             gap.shrink2(vec2(0.0, 2.0)).y_range(),
@@ -289,17 +320,16 @@ impl Workspace {
             let r = Rect::from_center_size(pos2(at, row.bottom() - BAR / 2.0), vec2(2.0, BAR));
             painter.rect_filled(r, CornerRadius::ZERO, Color32::WHITE);
         }
-        if let Some((g, true)) = grow
-            && g != 0
+        if let Some((_, true)) = grow
+            && (before, after) != (x.before, x.after)
         {
-            let (length, align) = resized(x.before, x.after, g);
             self.send(
                 "edit.dissolve",
                 json!({
                     "at": e.at,
                     "track": e.track.id(),
-                    "length": format!("{length}f"),
-                    "align": align,
+                    "before": format!("{before}f"),
+                    "after": format!("{after}f"),
                     "sound": sound,
                 }),
             );
@@ -400,12 +430,17 @@ mod tests {
 
     #[test]
     fn a_dissolve_starting_on_the_edit_grows_only_after_it() {
-        assert_eq!(grown(0, 30, 5), (0, 35));
+        assert_eq!(grown(0, 30, 5, (100, 100)), (0, 35));
     }
 
     #[test]
-    fn dragging_a_centered_dissolves_end_three_frames_out_lengthens_it_six() {
-        assert_eq!(resized(15, 15, 3), (36, "center"));
+    fn dragging_an_uneven_dissolves_end_two_frames_out_grows_the_side_with_media() {
+        assert_eq!(grown(10, 15, 2, (10, 300)), (10, 17));
+    }
+
+    #[test]
+    fn a_dissolve_edge_on_the_cut_is_grabbed_beside_the_roll_handle() {
+        assert_eq!(beside_roll(100.0, 100.0, 1.0), 116.0);
     }
 
     #[test]

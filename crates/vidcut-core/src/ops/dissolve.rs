@@ -27,7 +27,23 @@ pub fn split(length: i64, align: Align) -> (i64, i64) {
     }
 }
 
-fn wanted(length: i64, align: Align, outgoing: bool, incoming: bool) -> Option<(i64, i64)> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shape {
+    Length(i64, Align),
+    Sides(i64, i64),
+}
+
+fn wanted(shape: Shape, outgoing: bool, incoming: bool) -> Option<(i64, i64)> {
+    let (length, align) = match shape {
+        Shape::Sides(before, after) => {
+            let sides = (
+                if outgoing { before } else { 0 },
+                if incoming { after } else { 0 },
+            );
+            return (sides.0 + sides.1 > 0).then_some(sides);
+        }
+        Shape::Length(length, align) => (length, align),
+    };
     match (outgoing, incoming, align) {
         (true, false, Align::Start) | (false, true, Align::End) => None,
         (true, false, _) => Some((length, 0)),
@@ -188,6 +204,12 @@ fn room(
     (before.max(0), after.max(0))
 }
 
+pub fn room_at(p: &Project, track: &str, at: i64, sound: bool) -> Option<(i64, i64)> {
+    let ti = p.track_index(track)?;
+    let (from, to) = sides(p, ti, sound, at);
+    Some(room(p, ti, sound, at, from.as_deref(), to.as_deref()))
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Made {
     pub id: String,
@@ -197,12 +219,12 @@ pub struct Made {
     pub after: i64,
 }
 
-fn put(p: &mut Project, ti: usize, sound: bool, e: i64, frames: i64, align: Align) -> Option<Made> {
+fn put(p: &mut Project, ti: usize, sound: bool, e: i64, shape: Shape) -> Option<Made> {
     let (from, to) = sides(p, ti, sound, e);
     if from.is_none() && to.is_none() || compound_at(p, ti, sound, e).is_some() {
         return None;
     }
-    let (want_before, want_after) = wanted(frames, align, from.is_some(), to.is_some())?;
+    let (want_before, want_after) = wanted(shape, from.is_some(), to.is_some())?;
     let (room_before, room_after) = room(p, ti, sound, e, from.as_deref(), to.as_deref());
     let (before, after) = (want_before.min(room_before), want_after.min(room_after));
     if before + after == 0 {
@@ -242,13 +264,11 @@ fn put(p: &mut Project, ti: usize, sound: bool, e: i64, frames: i64, align: Alig
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn dissolve(
     p: &mut Project,
     track: &str,
     at: i64,
-    frames: i64,
-    align: Align,
+    shape: Shape,
     picture: bool,
     sound: bool,
     all: bool,
@@ -265,7 +285,7 @@ pub fn dissolve(
             }
             for e in edits(p, ti, band) {
                 if let (Some(_), Some(_)) = sides(p, ti, band, e)
-                    && let Some(m) = put(p, ti, band, e, frames, align)
+                    && let Some(m) = put(p, ti, band, e, shape)
                 {
                     made.push(m);
                 }
@@ -278,11 +298,11 @@ pub fn dissolve(
     if pictures && let Some(c) = compound_at(p, ti, false, e) {
         return Err(compound_error(&c));
     }
-    let made = at_edit(p, ti, pictures, sound, e, frames, align);
+    let made = at_edit(p, ti, pictures, sound, e, shape);
     if made.is_empty() {
         let (from, to) = sides(p, ti, !pictures, e);
         return Err(Error::invalid(
-            if wanted(frames, align, from.is_some(), to.is_some()).is_none() {
+            if wanted(shape, from.is_some(), to.is_some()).is_none() {
                 "the edit has no clip on that side to dissolve"
             } else {
                 "the clips at the edit have no frames past it to dissolve with"
@@ -295,8 +315,7 @@ pub fn dissolve(
 pub fn dissolve_clips(
     p: &mut Project,
     clips: &[String],
-    frames: i64,
-    align: Align,
+    shape: Shape,
     picture: bool,
     sound: bool,
 ) -> Result<Vec<Made>> {
@@ -317,7 +336,7 @@ pub fn dissolve_clips(
     points.dedup();
     let mut made = Vec::new();
     for &(ti, pictures, e) in &points {
-        made.extend(at_edit(p, ti, pictures, sound, e, frames, align));
+        made.extend(at_edit(p, ti, pictures, sound, e, shape));
     }
     if made.is_empty() {
         return Err(points
@@ -343,19 +362,18 @@ fn at_edit(
     pictures: bool,
     sound: bool,
     e: i64,
-    frames: i64,
-    align: Align,
+    shape: Shape,
 ) -> Vec<Made> {
     let mut made = Vec::new();
     let sound_e = if pictures {
         let (from, to) = sides(p, ti, false, e);
-        made.extend(put(p, ti, false, e, frames, align));
+        made.extend(put(p, ti, false, e, shape));
         sound_edit(p, ti, from.as_deref(), to.as_deref())
     } else {
         Some(e)
     };
     if sound && let Some(e) = sound_e {
-        made.extend(put(p, ti, true, e, frames, align));
+        made.extend(put(p, ti, true, e, shape));
     }
     made
 }
@@ -688,8 +706,7 @@ mod tests {
             &mut p,
             "V1",
             50,
-            25,
-            super::Align::Center,
+            super::Shape::Length(25, super::Align::Center),
             true,
             false,
             false,
@@ -703,8 +720,7 @@ mod tests {
         let e = super::dissolve_clips(
             &mut p,
             &["c2".to_string()],
-            25,
-            super::Align::Center,
+            super::Shape::Length(25, super::Align::Center),
             true,
             false,
         )
@@ -726,6 +742,27 @@ mod tests {
             json!({"at": 300, "length": "999f"}),
         );
         assert_eq!(made(&r), [(false, 300, 300, 300), (true, 300, 300, 300)]);
+    }
+
+    #[test]
+    fn a_dissolves_sides_are_each_shortened_to_their_own_media() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        let r = req(
+            &mut f,
+            "edit.dissolve",
+            json!({"at": 50, "before": "12f", "after": "17f", "sound": false}),
+        );
+        assert_eq!(made(&r), [(false, 50, 10, 17)]);
+    }
+
+    #[test]
+    fn a_dissolve_takes_its_sides_or_a_length_not_both() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        f.err(json!({"method": "edit.dissolve", "params": {"at": 50, "before": "5f", "after": "5f", "length": "10f"}}));
     }
 
     #[test]

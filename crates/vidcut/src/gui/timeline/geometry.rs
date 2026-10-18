@@ -386,6 +386,9 @@ pub fn fade_edge_at(
     let cuts = Cuts::of(p, track);
     track.transitions.iter().filter(|x| !x.sound).find_map(|x| {
         let at = cuts.place(p, x)?;
+        if (pos.x - scale.xf(at)).abs() <= ROLL {
+            return None;
+        }
         let near = |f: i64| f != at && (scale.xf(f) - pos.x).abs() <= FADE_EDGE;
         if near(at + x.after) {
             Some((at, true))
