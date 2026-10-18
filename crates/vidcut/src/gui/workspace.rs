@@ -394,14 +394,7 @@ impl Workspace {
     }
 
     pub(super) fn send(&self, method: &str, params: Value) {
-        self.moves(method);
         self.live.request(method, params);
-    }
-
-    fn moves(&self, method: &str) {
-        if ["player.seek", "player.step", "player.play", "player.toggle"].contains(&method) {
-            self.timeline.landing.set(None);
-        }
     }
 
     pub(super) fn show_timeline(&self) {
@@ -411,7 +404,6 @@ impl Workspace {
     }
 
     pub(super) fn send_drag(&self, method: &str, params: Value) {
-        self.moves(method);
         self.live.request_drag(method, params);
     }
 
@@ -1240,10 +1232,14 @@ impl Workspace {
                 (false, Some(t)) => self.track_edit_points(&t.id()),
                 (false, None) => self.edit_points(id),
             };
+            let at = match id {
+                PlayerId::Timeline => self.drawn_playhead(),
+                PlayerId::Source => player.position,
+            };
             let target = if up {
-                points.iter().rev().find(|&&f| f < player.position)
+                points.iter().rev().find(|&&f| f < at)
             } else {
-                points.iter().find(|&&f| f > player.position)
+                points.iter().find(|&&f| f > at)
             };
             if let Some(&f) = target {
                 self.seek(id, f, false);
@@ -1446,14 +1442,15 @@ impl Workspace {
         }
     }
 
-    fn track_edit_points(&self, track: &str) -> Vec<i64> {
-        self.project()
-            .and_then(|p| p.track(track))
-            .map(|t| {
-                let mut v = t.edit_points();
-                v.push(t.end());
-                v.dedup();
-                v
+    fn track_edit_points(&mut self, track: &str) -> Vec<i64> {
+        self.shown_project()
+            .and_then(|p| {
+                p.track(track).map(|t| {
+                    let mut v = t.edit_points();
+                    v.push(t.end());
+                    v.dedup();
+                    v
+                })
             })
             .unwrap_or_default()
     }

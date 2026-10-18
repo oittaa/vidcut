@@ -96,8 +96,8 @@ pub enum DynamicTarget {
 
 const LANDING: std::time::Duration = std::time::Duration::from_secs(1);
 
-pub fn landing(at: i64, since: std::time::Duration, position: i64) -> Option<i64> {
-    (at != position && since < LANDING).then_some(at)
+pub fn landing(at: i64, since: std::time::Duration, from: i64, position: i64) -> Option<i64> {
+    (position == from && since < LANDING).then_some(at)
 }
 
 pub fn faster(speed: f64, dir: f64) -> f64 {
@@ -669,9 +669,8 @@ impl Workspace {
             && at != self.snap.timeline.position
         {
             self.seek(PlayerId::Timeline, at, false);
-            self.timeline
-                .landing
-                .set(Some((at, std::time::Instant::now())));
+            let from = self.snap.timeline.position;
+            self.timeline.landing = Some((at, std::time::Instant::now(), from));
         }
     }
 
@@ -816,7 +815,7 @@ impl Workspace {
     }
 
     fn play_around(&mut self) {
-        let at = self.snap.timeline.position;
+        let at = self.drawn_playhead();
         let two = 2 * self.fps().as_f64().round() as i64;
         self.seek(PlayerId::Timeline, (at - two).max(0), false);
         self.send("player.play", json!({ "speed": 1.0, "viewer": "timeline" }));
@@ -924,17 +923,22 @@ mod tests {
 
     #[test]
     fn the_playhead_is_drawn_at_the_cut_until_its_seek_lands() {
-        assert_eq!(landing(90, Duration::from_millis(100), 60), Some(90));
+        assert_eq!(landing(90, Duration::from_millis(100), 60, 60), Some(90));
     }
 
     #[test]
     fn the_playhead_is_drawn_where_it_is_once_the_seek_lands() {
-        assert_eq!(landing(90, Duration::from_millis(100), 90), None);
+        assert_eq!(landing(90, Duration::from_millis(100), 60, 90), None);
+    }
+
+    #[test]
+    fn the_playhead_is_drawn_where_it_is_once_another_seek_moves_it() {
+        assert_eq!(landing(90, Duration::from_millis(100), 60, 0), None);
     }
 
     #[test]
     fn a_seek_that_never_lands_stops_holding_the_playhead_after_a_second() {
-        assert_eq!(landing(90, Duration::from_secs(2), 60), None);
+        assert_eq!(landing(90, Duration::from_secs(2), 60, 60), None);
     }
 
     #[test]

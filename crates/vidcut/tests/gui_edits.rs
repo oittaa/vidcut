@@ -1076,6 +1076,54 @@ fn a_seek_right_after_a_run_stops_moves_the_lower_timeline() {
 }
 
 #[test]
+fn a_seek_from_outside_the_gui_right_after_a_run_stops_moves_the_lower_timeline() {
+    let mut gui = Gui::new();
+    gui.call("player.seek", json!({ "at": 55, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.settle();
+    gui.key(Key::L);
+    for _ in 0..30 {
+        gui.harness.step();
+    }
+    gui.key(Key::K);
+    gui.call("player.seek", json!({ "at": 0, "viewer": "timeline" }));
+    gui.harness.step();
+    let l = gui.harness.state().timeline_layout().unwrap();
+    let centre = l.lower_scale.frame(l.lower_ruler.center().x);
+    assert!(centre < 1.0, "the lower timeline stayed at frame {centre}");
+    gui.quit();
+}
+
+#[test]
+fn down_right_after_a_trim_goes_to_the_edit_after_the_cut() {
+    let mut gui = Gui::new();
+    gui.call("project.set", json!({ "ripple_on": true }));
+    gui.call("player.seek", json!({ "at": 55, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.key(Key::U);
+    gui.key(Key::U);
+    gui.settle();
+    let k = |pressed| egui::Event::Key {
+        key: Key::K,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    };
+    gui.harness.event(k(true));
+    gui.harness.step();
+    gui.harness.key_press(Key::L);
+    gui.harness.key_press(Key::ArrowDown);
+    gui.harness.step();
+    gui.harness.event(k(false));
+    gui.settle();
+    assert_eq!(gui.position(), 121);
+    gui.quit();
+}
+
+#[test]
 fn w_takes_the_playhead_to_the_nearest_cut() {
     let mut gui = Gui::new();
     gui.call("player.seek", json!({ "at": 50, "viewer": "timeline" }));
