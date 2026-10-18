@@ -176,16 +176,36 @@ impl HistoryFile {
         self.read_tail().ok().flatten()
     }
 
+    fn open(&self) -> std::io::Result<Option<File>> {
+        match File::open(&self.path) {
+            Ok(f) => Ok(Some(f)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     pub(crate) fn read_tail(&self) -> std::io::Result<Option<(Tail, u64)>> {
-        let mut file = match File::open(&self.path) {
-            Ok(f) => f,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e),
+        match self.open()? {
+            Some(mut file) => self.tail_in(&mut file).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub(crate) fn steps_now(&self, cache: &mut StepsCache) -> std::io::Result<bool> {
+        let Some(mut file) = self.open()? else {
+            return Ok(false);
         };
+        let (_, end) = self.tail_in(&mut file)?;
+        self.steps_in(&mut file, end, cache)?;
+        Ok(true)
+    }
+
+    fn tail_in(&self, file: &mut File) -> std::io::Result<(Tail, u64)> {
+        file.seek(SeekFrom::Start(0))?;
         let mut first = String::new();
         {
             use std::io::BufRead;
-            std::io::BufReader::new(&mut file).read_line(&mut first)?;
+            std::io::BufReader::new(&mut *file).read_line(&mut first)?;
         }
         match serde_json::from_str(&first) {
             Ok(Line::Of(of)) if of == self.of => {}
@@ -196,7 +216,7 @@ impl HistoryFile {
         }
         let end = file.metadata()?.len();
         let mut found = None;
-        lines_back(&mut file, end, CHUNK, |at, text| {
+        lines_back(file, end, CHUNK, |at, text| {
             if text.ends_with('\n')
                 && let Ok(Line::Saved(t)) = serde_json::from_str(text)
             {
@@ -205,9 +225,7 @@ impl HistoryFile {
             }
             Ok(true)
         })?;
-        found
-            .map(Some)
-            .ok_or_else(|| bad("it has no complete save"))
+        found.ok_or_else(|| bad("it has no complete save"))
     }
 
     pub(crate) fn top(
@@ -283,8 +301,7 @@ impl HistoryFile {
         Ok((undo, redo))
     }
 
-    pub(crate) fn read_steps(&self, end: u64, cache: &mut StepsCache) -> std::io::Result<()> {
-        let mut file = File::open(&self.path)?;
+    fn steps_in(&self, file: &mut File, end: u64, cache: &mut StepsCache) -> std::io::Result<()> {
         let mut mark = vec![0; MARK.min(end) as usize];
         file.seek(SeekFrom::Start(end - mark.len() as u64))?;
         file.read_exact(&mut mark)?;
@@ -670,10 +687,28 @@ mod tests {
              {{\"saved\":{{\"hash\":\"x\",\"undo\":1,\"redo\":0,\"steps\":1}}}}\n"
         );
         std::fs::write(file.path(), text).unwrap();
-        let (_, end) = file.tail().unwrap();
         let mut cache = StepsCache::default();
-        file.read_steps(end, &mut cache).unwrap();
+        file.steps_now(&mut cache).unwrap();
         assert_eq!(cache.steps.line, [Step::labeled("old")]);
+    }
+
+    #[test]
+    fn a_step_by_a_client_kind_this_vidcut_doesnt_know_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = HistoryFile::new(dir.path().join("h.jsonl"), dir.path().join("p.vidcut"));
+        let of = serde_json::to_string(&dir.path().join("p.vidcut")).unwrap();
+        let text = format!(
+            "{{\"of\":{of}}}\n{{\"base\":{{\"n\":0}}}}\n\
+             {{\"step\":{{\"at\":1,\"label\":\"new\",\"by\":{{\"kind\":\"robot\"}},\"change\":{{\"set\":{{\"was\":0,\"is\":1}}}}}}}}\n\
+             {{\"saved\":{{\"hash\":\"x\",\"undo\":1,\"redo\":0,\"steps\":1}}}}\n"
+        );
+        std::fs::write(file.path(), text).unwrap();
+        let (tail, end) = file.tail().unwrap();
+        let (undo, _) = file.top(&tail, end, 1, 0).unwrap();
+        assert_eq!(
+            undo[0].step.by.as_ref().map(|c| c.kind),
+            Some(crate::request::ClientKind::Other)
+        );
     }
 
     #[test]
@@ -682,7 +717,7 @@ mod tests {
         let file = history(dir.path(), 3);
         let mut cache = StepsCache::default();
         let (tail, end) = file.tail().unwrap();
-        file.read_steps(end, &mut cache).unwrap();
+        file.steps_now(&mut cache).unwrap();
         file.append(
             &tail,
             end,
@@ -690,10 +725,9 @@ mod tests {
             "y",
         )
         .unwrap();
-        let (_, end) = file.tail().unwrap();
-        file.read_steps(end, &mut cache).unwrap();
+        file.steps_now(&mut cache).unwrap();
         let mut fresh = StepsCache::default();
-        file.read_steps(end, &mut fresh).unwrap();
+        file.steps_now(&mut fresh).unwrap();
         assert_eq!(cache.steps, fresh.steps);
     }
 

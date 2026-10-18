@@ -230,6 +230,11 @@ pub(crate) enum Msg {
     FileChanged,
     PreferencesChanged,
     HistoryPreview(Option<usize>),
+    Previewed {
+        step: usize,
+        rev: u64,
+        result: Result<Project>,
+    },
     Thumbs {
         media: String,
         wanted: String,
@@ -512,6 +517,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         answers: Vec::new(),
         preview_error: config.preview_error,
         history_preview: None,
+        preview_wanted: None,
+        previews: None,
         flash: None,
         flash_seq: 0,
     };
@@ -535,6 +542,40 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     })
     .expect("spawning the session thread");
     (Handle { tx, shared }, thread)
+}
+
+struct Preview {
+    store: vidcut_core::Store,
+    project: Project,
+    step: usize,
+    rev: u64,
+}
+
+fn start_previews(
+    inbox: Sender<Msg>,
+    notify: Arc<dyn Fn() + Send + Sync>,
+) -> Option<Sender<Preview>> {
+    let (tx, rx) = channel::<Preview>();
+    crate::threads::spawn("vidcut-preview", Work::Interactive, move || {
+        while let Ok(mut job) = rx.recv() {
+            std::thread::sleep(Duration::from_millis(30));
+            while let Ok(newer) = rx.try_recv() {
+                job = newer;
+            }
+            let result = job.store.project_at(&job.project, job.step);
+            let done = Msg::Previewed {
+                step: job.step,
+                rev: job.rev,
+                result,
+            };
+            if inbox.send(done).is_err() {
+                return;
+            }
+            notify();
+        }
+    })
+    .ok()?;
+    Some(tx)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -718,6 +759,8 @@ struct Live {
     answers: Vec<(Reply, Result<Response>)>,
     preview_error: Option<String>,
     history_preview: Option<Arc<HistoryPreview>>,
+    preview_wanted: Option<(usize, u64)>,
+    previews: Option<Sender<Preview>>,
     flash: Option<Arc<Flash>>,
     flash_seq: u64,
 }
@@ -883,6 +926,7 @@ impl Live {
                 }
             }
             Msg::HistoryPreview(step) => changed = self.preview_step(step),
+            Msg::Previewed { step, rev, result } => changed = self.previewed(step, rev, result),
             Msg::FileChanged => {
                 let refreshed = match self.project.as_mut().map(OpenProject::reload) {
                     Some(Ok(changed)) => changed,
@@ -1685,21 +1729,48 @@ impl Live {
     }
 
     fn preview_step(&mut self, step: Option<usize>) -> bool {
-        let Some(open) = &self.project else {
+        let (Some(open), Some(step)) = (&self.project, step) else {
+            self.preview_wanted = None;
             return self.history_preview.take().is_some();
         };
         let rev = open.project().rev;
-        let Some(step) = step else {
-            return self.history_preview.take().is_some();
-        };
         if self
             .history_preview
             .as_ref()
             .is_some_and(|p| p.step == step && p.rev == rev)
+            || self.preview_wanted == Some((step, rev))
         {
             return false;
         }
-        self.history_preview = open.editor.project_at(step).ok().map(|p| {
+        self.preview_wanted = Some((step, rev));
+        if !open.editor.on_its_file() {
+            let result = open.editor.project_at(step);
+            return self.previewed(step, rev, result);
+        }
+        let job = Preview {
+            store: open.store.clone(),
+            project: open.project().clone(),
+            step,
+            rev,
+        };
+        if self.previews.is_none() {
+            self.previews = start_previews(self.tx.clone(), self.notify.clone());
+        }
+        if let Some(tx) = &self.previews
+            && tx.send(job).is_err()
+        {
+            self.previews = None;
+        }
+        false
+    }
+
+    fn previewed(&mut self, step: usize, rev: u64, result: Result<Project>) -> bool {
+        let now = self.project.as_ref().map(|o| o.project().rev);
+        if self.preview_wanted != Some((step, rev)) || now != Some(rev) {
+            return false;
+        }
+        self.preview_wanted = None;
+        self.history_preview = result.ok().map(|p| {
             Arc::new(HistoryPreview {
                 step,
                 rev,
@@ -2544,6 +2615,7 @@ impl Live {
             None => Default::default(),
         };
         self.history_preview = None;
+        self.preview_wanted = None;
         self.project_snap = Some(ProjectSnap {
             path,
             project: project.clone(),

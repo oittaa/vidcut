@@ -26,6 +26,7 @@ Priority: **interactive** and **job** are the `Work` kinds; **inherited** sets n
 | `vidcut-task`, `vidcut-make`, `vidcut-measure` | the core, per `Step` | their step | task: its `Work`; make: interactive; measure: job |
 | vidcut-j1, vidcut-j2, … | `Live::start_export`, `Live::start_encode` | an export or proxy job | job |
 | `vidcut-history` | `OpenProject::apply` | `Store::compact` | job |
+| `vidcut-preview` | `Live::preview_step` | the project as it was at a step of the history (`Store::project_at`), the newest asked only | interactive |
 | `vidcut-worker-N`, `vidcut-tiles-N` | `Workers::new`, `Tiles::begin_frame` | filmstrips and waveforms; timeline tiles | job |
 | `vidcut-missing-media`, `vidcut-look` | `MissingWatch::start`, `look::watch` | media and proxy files; the OS's look | interactive |
 | `vidcut-ask`, `vidcut-file-dialog`, `vidcut-import-dialog`, `vidcut-project-dialog`, `vidcut-audio-devices`, `vidcut-show-in-folder`, `vidcut-open-file` | `Ask::send`, `Picked::ask`, `Workspace::import_media`, `Workspace::pick_project`, `Workspace::open_preferences`, `file_manager::show`, `file_manager::open` | UI helpers | interactive |

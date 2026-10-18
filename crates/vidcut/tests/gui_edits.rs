@@ -1394,6 +1394,18 @@ fn the_pools_search_field_follows_pool_set() {
     gui.quit();
 }
 
+fn wait_for_preview(gui: &mut Gui) -> Arc<live::HistoryPreview> {
+    let started = Instant::now();
+    loop {
+        gui.settle();
+        if let Some(p) = gui.h.snapshot().history_preview.clone() {
+            return p;
+        }
+        assert!(started.elapsed() < Duration::from_secs(10), "no preview");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn at_step(gui: &Gui) -> Value {
     gui.call("history.get", json!({}))["at"].clone()
 }
@@ -1448,8 +1460,7 @@ fn hovering_a_history_row_previews_the_timeline_as_it_was() {
     gui.harness.step();
     gui.harness.get_by_label("Original").hover();
     gui.harness.step();
-    gui.settle();
-    let preview = gui.h.snapshot().history_preview.clone().unwrap();
+    let preview = wait_for_preview(&mut gui);
     assert_eq!(
         (
             preview.step,
@@ -1509,5 +1520,21 @@ fn the_edit_menus_history_lists_the_newest_step_first() {
         .min_by(|a, b| a.rect().min.y.total_cmp(&b.rect().min.y))
         .and_then(|n| n.accesskit_node().label());
     assert_eq!(first.map(|l| l.contains(&newest)), Some(true));
+    gui.quit();
+}
+
+#[test]
+fn a_click_outside_the_history_ends_its_preview() {
+    let mut gui = Gui::new();
+    gui.ask("gui.show", json!({ "panel": "history" })).unwrap();
+    gui.harness.step();
+    gui.key(Key::ArrowUp);
+    gui.settle();
+    let at = gui.at("V1", 30, 10.0);
+    gui.click(at);
+    gui.settle();
+    gui.harness.step();
+    gui.settle();
+    assert!(gui.h.snapshot().history_preview.is_none());
     gui.quit();
 }

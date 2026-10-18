@@ -129,6 +129,10 @@ impl Store {
         )
     }
 
+    pub fn project_at(&self, current: &Project, step: usize) -> Result<Project> {
+        Editor::on_file(current.clone(), self.history_file(), String::new()).project_at(step)
+    }
+
     pub fn recover(&self, editor: &mut Editor) -> bool {
         let Some(hash) = editor.blocked_on().map(String::from) else {
             return false;

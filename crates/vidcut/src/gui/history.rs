@@ -36,6 +36,16 @@ pub(super) struct HistoryUi {
     flash: Option<(u64, f64)>,
     follow: bool,
     seen: Option<(usize, usize)>,
+    generation: u64,
+    laid: Option<Laid>,
+}
+
+struct Laid {
+    steps: Arc<Steps>,
+    cursor: Option<usize>,
+    generation: u64,
+    groups: Arc<Vec<Group>>,
+    rows: Arc<Vec<Row>>,
 }
 
 pub(super) struct Marks {
@@ -91,8 +101,14 @@ impl HistoryUi {
 
     pub(super) fn close(&mut self) {
         self.open = false;
+        self.leave();
+    }
+
+    fn leave(&mut self) {
         self.keys = false;
         self.cursor = None;
+        self.hovered = None;
+        self.was = None;
     }
 }
 
@@ -103,6 +119,7 @@ fn kind_color(kind: ClientKind) -> Color32 {
         ClientKind::Mcp => Color32::from_rgb(150, 110, 225),
         ClientKind::Ipc => Color32::from_rgb(80, 135, 215),
         ClientKind::File => Color32::from_rgb(210, 135, 55),
+        ClientKind::Other => Color32::from_rgb(120, 120, 130),
     }
 }
 
@@ -310,6 +327,9 @@ impl Workspace {
         });
         if let Some(pos) = clicked {
             self.history.keys = inside.contains(pos);
+            if !self.history.keys {
+                self.history.leave();
+            }
         }
         let width = ui.min_rect().width();
         if (width - self.history.width).abs() > 1.0 && !ui.input(|i| i.pointer.any_down()) {
@@ -318,7 +338,28 @@ impl Workspace {
         }
     }
 
-    fn history_list(&mut self, ui: &mut egui::Ui, steps: &Steps, p: Option<&Project>) {
+    fn history_layout(&mut self, steps: &Arc<Steps>) -> (Arc<Vec<Group>>, Arc<Vec<Row>>) {
+        let h = &self.history;
+        if let Some(l) = &h.laid
+            && Arc::ptr_eq(&l.steps, steps)
+            && l.cursor == h.cursor
+            && l.generation == h.generation
+        {
+            return (l.groups.clone(), l.rows.clone());
+        }
+        let all = Arc::new(groups(&steps.line));
+        let rows = Arc::new(self.history_rows(steps, &all));
+        self.history.laid = Some(Laid {
+            steps: steps.clone(),
+            cursor: self.history.cursor,
+            generation: self.history.generation,
+            groups: all.clone(),
+            rows: rows.clone(),
+        });
+        (all, rows)
+    }
+
+    fn history_list(&mut self, ui: &mut egui::Ui, steps: &Arc<Steps>, p: Option<&Project>) {
         let n = steps.line.len();
         ui.horizontal(|ui| {
             let undo = ui
@@ -349,8 +390,7 @@ impl Workspace {
             });
         });
         ui.separator();
-        let all = groups(&steps.line);
-        let rows = self.history_rows(steps, &all);
+        let (all, rows) = self.history_layout(steps);
         let mark = self.history.cursor.unwrap_or(steps.done);
         let mark_row = rows.iter().position(|r| match *r {
             Row::Original => mark == 0,
@@ -624,15 +664,17 @@ impl Workspace {
             )
             .wrap(),
         );
-        if let Some(g) = toggle_group
-            && !self.history.expanded.remove(&g)
-        {
-            self.history.expanded.insert(g);
+        if let Some(g) = toggle_group {
+            self.history.generation += 1;
+            if !self.history.expanded.remove(&g) {
+                self.history.expanded.insert(g);
+            }
         }
-        if let Some(i) = toggle_parts
-            && !self.history.parts.remove(&i)
-        {
-            self.history.parts.insert(i);
+        if let Some(i) = toggle_parts {
+            self.history.generation += 1;
+            if !self.history.parts.remove(&i) {
+                self.history.parts.insert(i);
+            }
         }
         if let Some(step) = go {
             self.history.keys = true;
@@ -687,7 +729,7 @@ impl Workspace {
             .history
             .hovered
             .or(self.history.was)
-            .or(self.history.cursor)
+            .or(self.history.cursor.filter(|_| self.history.keys))
             .filter(|&s| s <= steps.line.len());
         let wanted = self.history.target.filter(|&s| s != steps.done);
         if self.history.sent != Some((wanted, rev)) {

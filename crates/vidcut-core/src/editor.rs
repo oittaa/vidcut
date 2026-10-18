@@ -371,6 +371,10 @@ impl Editor {
         !self.moved.is_empty()
     }
 
+    pub fn on_its_file(&self) -> bool {
+        self.file.is_some() && self.moved.is_empty()
+    }
+
     pub fn history_view(&self, n: usize) -> Result<History> {
         let (undo, redo) = self.view(n, HistoryFile::top, Entry::clone)?;
         Ok(History { undo, redo })
@@ -394,12 +398,9 @@ impl Editor {
                 file.path().display()
             ))
         };
-        let mut steps = match file.read_tail().map_err(unreadable)? {
-            Some((_, end)) => {
-                file.read_steps(end, cache).map_err(unreadable)?;
-                cache.steps.clone()
-            }
-            None => Steps::default(),
+        let mut steps = match file.steps_now(cache).map_err(unreadable)? {
+            true => cache.steps.clone(),
+            false => Steps::default(),
         };
         for m in &self.moved {
             match m {
@@ -535,6 +536,7 @@ impl Editor {
         let parts = match &request {
             Request::Apply { commands, .. } => commands
                 .iter()
+                .filter(|c| c.is_mutation())
                 .map(|c| label_of(c, &self.project))
                 .collect(),
             _ => Vec::new(),

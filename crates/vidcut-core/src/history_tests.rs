@@ -225,3 +225,16 @@ fn a_time_in_seconds_is_named_in_timecode() {
     f.ok(req("markers.add", json!({"at": "2s"})));
     assert_eq!(steps(&f).undo().unwrap().label, "Marker at 00:00:02:00");
 }
+
+#[test]
+fn an_applys_parts_leave_out_its_queries() {
+    let mut f = trimmed();
+    f.ok(req(
+        "apply",
+        json!({"commands": [
+            {"method": "project.get", "params": {}},
+            {"method": "bins.add", "params": {"path": "a"}},
+        ]}),
+    ));
+    assert_eq!(steps(&f).undo().unwrap().parts, ["New bin a"]);
+}

@@ -108,6 +108,7 @@ impl OpenProject {
         env: &dyn Env,
         playhead: Option<i64>,
     ) -> (Result<Response>, bool) {
+        self.store.recover(&mut self.editor);
         if !envelope.request.is_mutation() {
             let refreshed = self.refresh().unwrap_or(false);
             return (self.editor.apply(envelope, env, playhead), refreshed);

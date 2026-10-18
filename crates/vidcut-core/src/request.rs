@@ -1702,6 +1702,8 @@ pub enum ClientKind {
     Mcp,
     Ipc,
     File,
+    #[serde(other)]
+    Other,
 }
 
 impl ClientKind {
@@ -1712,6 +1714,7 @@ impl ClientKind {
             Self::Mcp => "MCP",
             Self::Ipc => "IPC",
             Self::File => "File",
+            Self::Other => "Other",
         }
     }
 }
