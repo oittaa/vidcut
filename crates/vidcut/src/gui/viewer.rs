@@ -7,7 +7,6 @@ use eframe::egui::{
 use serde_json::json;
 use vidcut_core::model::{Media, Project, TrackKind};
 use vidcut_core::request::ViewerMode;
-use vidcut_core::time::{TimeContext, TimeSpec};
 
 use super::pool::elide;
 use super::theme;
@@ -944,22 +943,15 @@ impl Workspace {
 
     fn duration_field(&mut self, ui: &mut egui::Ui) {
         let Some(p) = self.project() else { return };
-        let (start, end, media) = match self.snap.source_at() {
-            Some((media, _)) => {
-                let len = self.media_frames(media);
-                let marks = p.media(media).map(|m| m.marks.clone()).unwrap_or_default();
-                (
-                    marks.mark_in.unwrap_or(0),
-                    marks.mark_out.unwrap_or(len),
-                    Some(media.to_string()),
-                )
-            }
-            None => match (p.marks.mark_in, p.marks.mark_out) {
-                (Some(a), Some(b)) => (a, b, None),
-                _ => (0, p.end(), None),
-            },
+        let (marks, end, media) = match self.snap.source_at() {
+            Some((media, _)) => (
+                p.media(media).map(|m| m.marks.clone()).unwrap_or_default(),
+                self.media_frames(media),
+                Some(media.to_string()),
+            ),
+            None => (p.marks.clone(), p.end(), None),
         };
-        let current = self.src_tc(end - start);
+        let current = self.src_tc(marks.mark_out.unwrap_or(end) - marks.mark_in.unwrap_or(0));
         if let Some(text) = &mut self.duration_text {
             let r = ui.add(
                 egui::TextEdit::singleline(text)
@@ -967,37 +959,20 @@ impl Workspace {
                     .desired_width(110.0)
                     .hint_text(&current),
             );
-            r.request_focus();
             if r.lost_focus() {
                 let submit = ui.input(|i| i.key_pressed(Key::Enter));
                 let text = self.duration_text.take().unwrap_or_default();
-                let length = timecode_input(&text, self.dropped())
-                    .and_then(|spec| TimeSpec::parse(&spec).ok())
-                    .and_then(|t| {
-                        TimeContext {
-                            fps: self.fps(),
-                            start_tc: 0,
-                            drop_frame: self
-                                .project()
-                                .is_some_and(|p| p.settings.counts_drop_frame()),
-                            end: 0,
-                            mark_in: None,
-                            mark_out: None,
-                            playhead: None,
-                        }
-                        .duration(&t)
-                        .ok()
-                    })
-                    .filter(|&d| d > 0);
-                if submit && let Some(d) = length {
+                let text = text.trim();
+                if submit && !text.is_empty() {
                     match media {
-                        Some(m) => self.send(
-                            "media.marks.set",
-                            json!({ "media": m, "in": start, "out": start + d }),
-                        ),
-                        None => self.send("marks.set", json!({ "in": start, "out": start + d })),
+                        Some(m) => {
+                            self.send("media.marks.set", json!({ "media": m, "duration": text }))
+                        }
+                        None => self.send("marks.set", json!({ "duration": text })),
                     }
                 }
+            } else if !r.has_focus() {
+                r.request_focus();
             }
         } else {
             let r = ui
@@ -1005,7 +980,10 @@ impl Workspace {
                     egui::Label::new(RichText::new(&current).font(FontId::monospace(13.0)))
                         .sense(Sense::click()),
                 )
-                .on_hover_text("Marked duration; click to change it (moves the Out mark)");
+                .on_hover_text(
+                    "Marked duration; click to change it, moving the Out mark: frames (48), \
+                     a timecode, or + or - to change it by (+12)",
+                );
             ui.label(dim("Duration"));
             if r.clicked() {
                 self.duration_text = Some(String::new());
