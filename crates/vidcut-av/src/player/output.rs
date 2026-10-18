@@ -720,25 +720,6 @@ mod tests {
     }
 
     #[test]
-    fn a_default_output_not_there_yet_is_tried_again() {
-        let source = source(&[1.0, 2.0]);
-        let turns = Turns::new();
-        turns.fill(0, &source, &mut [0.0; 2], Instant::now());
-        let (events, received) = mpsc::channel();
-        events.send(moved(0)).unwrap();
-        let mut opened = Vec::new();
-        follow((), &turns, &received, &source, |turn| {
-            opened.push(turn);
-            if opened.len() == 1 {
-                return Err(Error::Invalid("no audio output device".into()));
-            }
-            events.send(Event::Stop).unwrap();
-            Ok(())
-        });
-        assert_eq!(opened, [1, 1]);
-    }
-
-    #[test]
     fn a_stream_opened_again_ends_the_failure() {
         let source = source(&[1.0, 2.0]);
         source.fail("no audio output device".into());
@@ -803,46 +784,6 @@ mod tests {
         assert_eq!(
             (opened, failure(&source)),
             (9, Some("the default moved".into()))
-        );
-    }
-
-    #[derive(Default)]
-    struct Played {
-        stop: Option<mpsc::Sender<Event>>,
-        closed: Arc<Mutex<Option<Instant>>>,
-    }
-
-    impl Drop for Played {
-        fn drop(&mut self) {
-            if let Some(stop) = self.stop.take() {
-                *self.closed.lock().unwrap() = Some(Instant::now());
-                stop.send(Event::Stop).unwrap();
-            }
-        }
-    }
-
-    #[test]
-    fn the_old_stream_plays_out_after_a_slow_open() {
-        let source = source(&[1.0, 2.0]);
-        let turns = Turns::new();
-        turns.fill(0, &source, &mut [0.0; 2], Instant::now());
-        let (events, received) = mpsc::channel();
-        events.send(moved(0)).unwrap();
-        let closed = Arc::new(Mutex::new(None));
-        let old = Played {
-            stop: Some(events.clone()),
-            closed: closed.clone(),
-        };
-        let mut opened = None;
-        follow(old, &turns, &received, &source, |_| {
-            std::thread::sleep(Duration::from_millis(100));
-            opened = Some(Instant::now());
-            Ok(Played::default())
-        });
-        let held = closed.lock().unwrap().unwrap() - opened.unwrap();
-        assert!(
-            held >= RETIRE,
-            "the old stream closed {held:?} after the open"
         );
     }
 

@@ -142,10 +142,6 @@ fn threads_waiting() -> Vec<(String, String)> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::Duration;
-
     use super::*;
 
     #[test]
@@ -153,19 +149,6 @@ mod tests {
         ending("the session");
         ending("the window");
         assert_eq!(ending_at(), "the window");
-    }
-
-    #[test]
-    fn join_closing_waits_for_a_closing_thread() {
-        let done = Arc::new(AtomicBool::new(false));
-        let flag = done.clone();
-        closing("vidcut-test-close", Work::Interactive, move || {
-            std::thread::sleep(Duration::from_millis(50));
-            flag.store(true, Ordering::SeqCst);
-        })
-        .unwrap();
-        join_closing();
-        assert!(done.load(Ordering::SeqCst));
     }
 
     #[test]

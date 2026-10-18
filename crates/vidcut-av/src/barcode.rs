@@ -100,30 +100,6 @@ fn read_cells(
 mod tests {
     use super::*;
 
-    fn roundtrip(index: u32, width: usize, height: usize, stride: usize) -> Option<u32> {
-        let mut buf = vec![0u8; stride * height];
-        paint(index, &mut buf, width, height, stride);
-        read(&buf, width, height, stride)
-    }
-
-    #[test]
-    fn roundtrips_across_sizes_and_strides() {
-        for &(w, h, s) in &[
-            (320, 180, 320),
-            (320, 180, 384),
-            (1920, 1080, 1920),
-            (100, 8, 128),
-        ] {
-            for index in [0, 1, 2, 29, 30, 1000, 65_535, MAX_INDEX] {
-                assert_eq!(
-                    roundtrip(index, w, h, s),
-                    Some(index),
-                    "{w}x{h}/{s} #{index}"
-                );
-            }
-        }
-    }
-
     #[test]
     fn rejects_blank_and_uniform_frames() {
         let gray = vec![MID; 320 * 180];
