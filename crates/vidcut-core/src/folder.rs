@@ -5,8 +5,9 @@ use crate::error::{Error, Result};
 use crate::model::ImageSequence;
 
 pub const MEDIA_TYPES: &[&str] = &[
-    "mp4", "mov", "mkv", "webm", "avi", "mxf", "m4v", "ts", "mts", "m2ts", "mpg", "mpeg", "3gp",
-    "dv", "wav", "aif", "aiff", "flac", "mp3", "m4a", "aac", "ogg", "opus",
+    "mp4", "mov", "mkv", "webm", "avi", "mxf", "m4v", "ts", "mts", "m2ts", "mpg", "mpeg", "vob",
+    "3gp", "dv", "wmv", "flv", "ogv", "gif", "wav", "aif", "aiff", "flac", "mp3", "m4a", "aac",
+    "ogg", "opus", "wma",
 ];
 
 pub const IMAGE_TYPES: &[&str] = &[
