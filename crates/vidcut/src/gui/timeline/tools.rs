@@ -190,15 +190,16 @@ pub fn heard(
         }
     };
     let c = now.clip(&id)?;
-    let source = match out {
-        true => c.source_at(c.end() - 1),
-        false => c.source_at(c.start),
+    let edge = match out {
+        true => c.end() - 1,
+        false => c.start,
     };
+    let heard = c.sound_at(edge as f64);
     let q = match (speed > 0.0) == out {
         true => trimmed(furthest(pending, dir, |b| trimmed(b).is_some()))?,
         false => now,
     };
-    let at = frame_showing(q.clip(&id)?, source)?;
+    let at = frame_hearing(q.clip(&id)?, heard)?;
     Some(Audition {
         timeline: Box::new(q),
         at,
@@ -206,12 +207,13 @@ pub fn heard(
     })
 }
 
-fn frame_showing(c: &vidcut_core::model::Clip, source: i64) -> Option<i64> {
+fn frame_hearing(c: &vidcut_core::model::Clip, heard: f64) -> Option<i64> {
     let (mut lo, mut hi) = (c.start, c.end().checked_sub(1)?);
-    let rising = c.source_at(hi) >= c.source_at(lo);
+    let at = |x: i64| c.sound_at(x as f64);
+    let rising = at(hi) >= at(lo);
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
-        if (c.source_at(mid) < source) == rising {
+        if (at(mid) < heard) == rising {
             lo = mid + 1;
         } else {
             hi = mid;
@@ -220,7 +222,7 @@ fn frame_showing(c: &vidcut_core::model::Clip, source: i64) -> Option<i64> {
     [lo - 1, lo]
         .into_iter()
         .filter(|&x| x >= c.start)
-        .min_by_key(|&x| (c.source_at(x) - source).abs())
+        .min_by(|&x, &y| (at(x) - heard).abs().total_cmp(&(at(y) - heard).abs()))
 }
 
 pub fn slip_room(media_frames: i64, speed: f64, duration: i64) -> i64 {
