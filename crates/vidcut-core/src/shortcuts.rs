@@ -71,7 +71,10 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Play,
         &["Space"],
         "Play or stop",
-        Some("In Dynamic Trim, it applies the trim and plays from 2 seconds before the cut."),
+        Some(
+            "In Dynamic Trim, it plays from 2 seconds before the playhead to 2 seconds after \
+             and puts the playhead back, or stops a trim.",
+        ),
     ),
     key(
         Play,
@@ -347,18 +350,18 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Dynamic Trim",
         Some(
             "Trims with J, K and L. Press W on a selected cut, or on the cut nearest the \
-             playhead: the playhead turns yellow, and the viewer shows the frames on both \
-             sides of the cut. J and L now move the cut instead of the playhead, so you see \
-             the timing as it changes and stop where it looks right. With clips selected \
-             instead, it slips or slides them: right-click its button to choose. Press W \
-             again to apply and finish.",
+             playhead: the playhead turns yellow and goes to the cut, and the Trim Editor \
+             shows it. J and L now move the cut instead of the playhead, and the viewer shows \
+             the frames on both sides as it moves, so you see the timing change and stop \
+             where it looks right. With clips selected instead, it slips or slides them: \
+             right-click its button to choose. Press W again to finish.",
         ),
     ),
     key(
         Trim,
         &["L"],
         "Dynamic Trim forward",
-        Some("Press L again to trim faster: 2, 4 and 8 times."),
+        Some("Press L again to trim faster: 2, 4, 8, 16, 32 and 64 times."),
     ),
     key(
         Trim,
@@ -369,8 +372,11 @@ pub const SHORTCUTS: &[Shortcut] = &[
     key(
         Trim,
         &["K"],
-        "Dynamic Trim: apply",
-        Some("Stops the trim and applies it, also one that stopped where a clip ran out."),
+        "Dynamic Trim: stop",
+        Some(
+            "Stops the trim where it is. A trim also stops where a clip runs out: the cut turns \
+             red and the viewer says why.",
+        ),
     ),
     key(Trim, &["K", "L"], "Dynamic Trim one frame forward", None),
     key(Trim, &["K", "J"], "Dynamic Trim one frame backward", None),

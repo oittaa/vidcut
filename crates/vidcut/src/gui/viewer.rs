@@ -17,7 +17,7 @@ use crate::live::PlayerId;
 #[derive(Clone)]
 pub struct TwoUp {
     pub mode: TwoUpMode,
-    pub cells: [Option<TwoUpCell>; 2],
+    pub cells: Vec<Option<TwoUpCell>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,7 +195,12 @@ impl Workspace {
         if self.timeline.edit.is_none() {
             self.trim_anchor = None;
         }
-        let dynamic = self.timeline.dynamic.is_some() && self.dynamic_target().is_some();
+        let dynamic = self
+            .timeline
+            .dynamic
+            .as_ref()
+            .is_some_and(crate::gui::timeline::tools::Dynamic::running)
+            && self.dynamic_target().is_some();
         let trim = self.trim_editor_edit();
         if !dynamic
             && trim.is_none()
@@ -328,7 +333,7 @@ impl Workspace {
             &p,
             &e.track.id(),
             TwoUpMode::TrimEditor,
-            [(e.at - 1, "Out (outgoing)"), (e.at, "In (incoming)")],
+            &[(e.at - 1, "Out (outgoing)"), (e.at, "In (incoming)")],
         );
         let strips = Rect::from_min_max(pos2(area.left(), area.bottom() - band), area.max);
         self.trim_strips(ui, strips, &p, e);
@@ -340,7 +345,21 @@ impl Workspace {
                     Side::In => "the In",
                     _ => "a roll",
                 };
-                ui.label(dim(format!("Trim Editor: {side} at {}", self.tc(e.at))));
+                if let Some(why) = self.dynamic_stopped() {
+                    ui.label(
+                        RichText::new(format!("Stopped here: {why}."))
+                            .color(theme::colors().error),
+                    );
+                }
+                let text = if self.timeline.dynamic.is_some() {
+                    format!(
+                        "Dynamic Trim: {side} at {}. L/J trim, K stops, Space plays around it, W leaves",
+                        self.tc(e.at)
+                    )
+                } else {
+                    format!("Trim Editor: {side} at {}", self.tc(e.at))
+                };
+                ui.label(dim(text));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Close").on_hover_text("Esc").clicked() {
                         self.timeline.edit = None;
@@ -352,39 +371,48 @@ impl Workspace {
     }
 
     fn dynamic_view(&mut self, ui: &mut egui::Ui, area: Rect) {
-        use crate::gui::timeline::tools::{DynamicTarget, dynamic_preview};
+        use crate::gui::timeline::tools::{DynamicTarget, dynamic_preview, first_clip};
         let (Some(target), Some(p)) = (self.dynamic_target(), self.shown_project()) else {
             return;
         };
         let mut p = Project::clone(&p);
         let pending = self.timeline.dynamic.as_ref().map_or(0, |d| d.pending);
         let mode = self.timeline.options.dynamic_mode;
-        let Ok((left, right)) = dynamic_preview(&mut p, &target, mode, pending) else {
+        let Ok(at) = dynamic_preview(&mut p, &target, mode, pending) else {
             return;
         };
-        let track = match &target {
-            DynamicTarget::Edit(e) => e.track.id(),
-            DynamicTarget::Clips(ids) => ids
-                .first()
-                .and_then(|id| crate::gui::timeline::TrackRef::of_clip(&p, id))
-                .unwrap_or(crate::gui::timeline::TrackRef::MAIN)
-                .id(),
-        };
-        let labels = match &target {
-            DynamicTarget::Edit(_) => ["Out (outgoing)", "In (incoming)"],
-            DynamicTarget::Clips(_) => match mode {
-                crate::gui::timeline::tools::DynamicMode::Slip => ["First frame", "Last frame"],
-                crate::gui::timeline::tools::DynamicMode::Slide => ["Before", "After"],
-            },
-        };
-        self.draw_two_up(
-            ui,
-            area,
-            &p,
-            &track,
-            TwoUpMode::DynamicTrim,
-            [(left, labels[0]), (right, labels[1])],
-        );
+        let pictures = Rect::from_min_max(area.min, pos2(area.right(), area.bottom() - 28.0));
+        match &target {
+            DynamicTarget::Edit(e) => self.draw_two_up(
+                ui,
+                pictures,
+                &p,
+                &e.track.id(),
+                TwoUpMode::DynamicTrim,
+                &[(at - 1, "Out (outgoing)"), (at, "In (incoming)")],
+            ),
+            DynamicTarget::Clips(ids) => {
+                let Some((track, start, end)) = first_clip(&p, ids).and_then(|c| {
+                    let track = crate::gui::timeline::TrackRef::of_clip(&p, &c.id)?;
+                    Some((track.id(), c.start, c.end()))
+                }) else {
+                    return;
+                };
+                self.draw_two_up(
+                    ui,
+                    pictures,
+                    &p,
+                    &track,
+                    TwoUpMode::DynamicTrim,
+                    &[
+                        (start, "First frame"),
+                        (end - 1, "Last frame"),
+                        (start - 1, "Before"),
+                        (end, "After"),
+                    ],
+                );
+            }
+        }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.label(
@@ -392,16 +420,7 @@ impl Workspace {
                     .monospace()
                     .color(Color32::from_rgb(240, 200, 40)),
             );
-            match self.timeline.dynamic.as_ref().and_then(|d| d.stopped.as_ref()) {
-                Some(why) => {
-                    let back = if pending > 0 { "J" } else { "L" };
-                    ui.label(
-                        RichText::new(format!("Stopped here: {why}. K applies, {back} goes back"))
-                            .color(theme::colors().error),
-                    )
-                }
-                None => ui.label(dim("L/J trim (repeat for speed), K stops and applies, K+L/J one frame, Space plays around it, W leaves")),
-            };
+            ui.label(dim("K or Space stops, L/J again for speed, W leaves"));
         });
     }
 
@@ -412,13 +431,17 @@ impl Workspace {
         p: &vidcut_core::model::Project,
         track: &str,
         mode: TwoUpMode,
-        cells: [(i64, &str); 2],
+        cells: &[(i64, &str)],
     ) {
         let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
         ui.allocate_rect(area, Sense::hover());
         let painter = ui.painter_at(area);
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
-        let half = area.width() / 2.0;
+        let cols = cells.len().clamp(1, 2);
+        let size = vec2(
+            area.width() / cols as f32,
+            area.height() / cells.len().div_ceil(cols).max(1) as f32,
+        );
         let ppp = ui.ctx().pixels_per_point();
         let speed = match mode {
             TwoUpMode::DynamicTrim => self.timeline.dynamic.as_ref().map_or(0.0, |d| d.speed()),
@@ -431,11 +454,12 @@ impl Workspace {
             super::cells::Cells::new(ctx, gpu_pictures.unwrap_or_default(), budget)
         });
         let track = p.track(track);
-        let mut shown = [None, None];
-        for (i, (frame, label)) in cells.into_iter().enumerate() {
+        players.keep(cells.len());
+        let mut shown = vec![None; cells.len()];
+        for (i, &(frame, label)) in cells.iter().enumerate() {
             let cell = Rect::from_min_size(
-                pos2(area.left() + half * i as f32, area.top()),
-                vec2(half, area.height()),
+                area.min + vec2(size.x * (i % cols) as f32, size.y * (i / cols) as f32),
+                size,
             );
             let picture = fit(cell.shrink(6.0), aspect);
             painter.rect_filled(picture, CornerRadius::ZERO, Color32::BLACK);
@@ -720,8 +744,14 @@ impl Workspace {
                 }
             })
             .unwrap_or_default();
+        let text = match self.dynamic_stopped() {
+            Some(why) => {
+                RichText::new(format!("Stopped here: {why}.")).color(theme::colors().error)
+            }
+            None => dim(text),
+        };
         ui.allocate_ui(vec2(ui.available_width(), 28.0), |ui| {
-            ui.centered_and_justified(|ui| ui.label(dim(text)));
+            ui.centered_and_justified(|ui| ui.label(text));
         });
     }
 

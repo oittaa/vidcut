@@ -428,7 +428,10 @@ impl Workspace {
             pos2(lower_rect.left() + HEADER, lower_rect.top()),
             lower_rect.max,
         );
-        let playhead = self.snap.timeline.position;
+        let trimmed = self.dynamic_drawn(&p);
+        let playhead = trimmed
+            .as_ref()
+            .map_or(self.snap.timeline.position, |(_, at)| *at);
         let lower_scale = self.lower_scale(content, playhead);
         let upper_ruler =
             Rect::from_min_size(upper_rect.min, vec2(upper_rect.width(), UPPER_RULER));
@@ -465,9 +468,8 @@ impl Workspace {
         };
         self.timeline.layout = Some(layout.clone());
 
-        let trimmed = self.dynamic_drawn(&p);
         let (drawn, edit_at) = match &trimmed {
-            Some((q, at)) => (q, *at),
+            Some((q, at)) => (q, self.timeline.edit.is_some().then_some(*at)),
             None => (&*p, None),
         };
         let placed = match &trimmed {
@@ -1969,11 +1971,18 @@ impl Workspace {
         } else {
             0
         };
-        if nudge != 0
-            && self.timeline.dynamic.is_none()
-            && let Some(e) = self.timeline.edit
-        {
-            self.nudge_edit(e.side, nudge);
+        if nudge != 0 && self.timeline.edit.is_some() {
+            if self
+                .timeline
+                .dynamic
+                .as_ref()
+                .is_some_and(tools::Dynamic::running)
+            {
+                self.dynamic_stop();
+            }
+            if let Some(e) = self.timeline.edit {
+                self.nudge_edit(e.side, nudge);
+            }
         }
         if pressed(Key::D) && input.modifiers.command {
             if !self.snap.selection.clips.is_empty() {
@@ -2292,11 +2301,7 @@ impl Workspace {
         } else {
             row.rect.rect.y_range()
         };
-        let stopped = self
-            .timeline
-            .dynamic
-            .as_ref()
-            .is_some_and(|d| d.stopped.is_some());
+        let stopped = self.dynamic_stopped().is_some();
         let (out_ok, in_ok) = match (e.side, p.track(&e.track.id())) {
             (Side::Audio, _) | (_, None) => (true, true),
             (_, Some(t)) => ops::filmstrip::extends(p, t, e.at),
@@ -2366,7 +2371,12 @@ impl Workspace {
             .timeline
             .edit
             .filter(|e| e.side != Side::Audio && !e.track.audio)?;
-        let stopped = !self.snap.timeline.playing && self.timeline.dynamic.is_none();
+        let running = self
+            .timeline
+            .dynamic
+            .as_ref()
+            .is_some_and(tools::Dynamic::running);
+        let stopped = !self.snap.timeline.playing && !running;
         (stopped && self.snap.viewer == ViewerMode::Timeline).then_some(e)
     }
 

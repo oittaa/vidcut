@@ -112,7 +112,7 @@ A dragged mixer fader sends `mixer.preview`; `Player::preview_fader` makes it a 
 
 ## The two-up
 
-For the Trim Editor's and Dynamic Trim's two frames, `Cells` gives each its own engine on the clip's media (`render::tape`, no sound), with `ManualOutput` and a quarter of the viewer's budget (`Budget::part`). Every UI frame, `Player::follow` gives each its frame and the trim's speed, and the engine decodes ahead as if playing; `Player::shrink_to` keeps a run's pictures at the cell's size. Windows behind decode on `vidcut-play-windows`, one at a time across followed players, none while any moves forward. `Screens` draws the cells with `Screen` on the UI thread, which needs no gate.
+For the Trim Editor's and Dynamic Trim's two frames, four while a slip or slide runs, `Cells` gives each its own engine on the clip's media (`render::tape`, no sound), with `ManualOutput` and a quarter of the viewer's budget (`Budget::part`). Every UI frame, `Player::follow` gives each its frame and the trim's speed, and the engine decodes ahead as if playing; `Player::shrink_to` keeps a run's pictures at the cell's size. Windows behind decode on `vidcut-play-windows`, one at a time across followed players, none while any moves forward. `Screens` draws the cells with `Screen` on the UI thread, which needs no gate.
 
 ## Code
 

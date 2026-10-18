@@ -8,7 +8,7 @@ use crate::gui::export::{Ask, near_center};
 use crate::gui::theme;
 use crate::gui::timeline::geometry::{Rows, Scale};
 use crate::gui::workspace::{Workspace, dim};
-use crate::live::PlayerId;
+use crate::live::{MAX_SPEED, PlayerId};
 
 #[derive(Debug)]
 pub struct SilenceDialog {
@@ -66,13 +66,24 @@ pub enum DynamicMode {
 pub struct Dynamic {
     run: Option<(f64, f64, i64)>,
     pub pending: i64,
-    around_until: Option<i64>,
-    pub stopped: Option<String>,
+    around: Option<Around>,
+    stopped: Option<(DynamicTarget, String)>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Around {
+    until: i64,
+    back: i64,
+    playing: bool,
 }
 
 impl Dynamic {
     pub fn speed(&self) -> f64 {
         self.run.map_or(0.0, |(speed, ..)| speed)
+    }
+
+    pub fn running(&self) -> bool {
+        self.run.is_some()
     }
 }
 
@@ -82,12 +93,26 @@ pub enum DynamicTarget {
     Clips(Vec<String>),
 }
 
+pub fn faster(speed: f64, dir: f64) -> f64 {
+    if speed * dir > 0.0 {
+        (speed * 2.0).clamp(-MAX_SPEED, MAX_SPEED)
+    } else {
+        dir
+    }
+}
+
+pub fn first_clip<'a>(p: &'a Project, ids: &[String]) -> Option<&'a vidcut_core::model::Clip> {
+    ids.iter()
+        .filter_map(|id| p.clip(id))
+        .min_by_key(|c| c.start)
+}
+
 pub fn dynamic_preview(
     p: &mut Project,
     target: &DynamicTarget,
     mode: DynamicMode,
     by: i64,
-) -> vidcut_core::Result<(i64, i64)> {
+) -> vidcut_core::Result<i64> {
     match target {
         DynamicTarget::Edit(e) => {
             if e.side == Side::Audio {
@@ -96,8 +121,7 @@ pub fn dynamic_preview(
                     .and_then(|t| audio_edit_outgoing(t, e.at))
                     .ok_or_else(|| vidcut_core::Error::not_found("no audio edit"))?;
                 ops::audio_roll(p, &id, ops::Edge::Tail, by)?;
-                let at = e.at + by;
-                return Ok((at - 1, at));
+                return Ok(e.at + by);
             }
             let t = p
                 .track(&e.track.id())
@@ -127,23 +151,18 @@ pub fn dynamic_preview(
                 }
                 _ => return Err(vidcut_core::Error::not_found("no clip at the edit")),
             };
-            Ok((at - 1, at))
+            Ok(at)
         }
         DynamicTarget::Clips(ids) => {
-            let id = ids
-                .first()
-                .ok_or_else(|| vidcut_core::Error::usage("no clip"))?;
-            match mode {
-                DynamicMode::Slip => ops::slip(p, id, by)?,
-                DynamicMode::Slide => ops::slide(p, id, by)?,
+            for id in ids {
+                match mode {
+                    DynamicMode::Slip => ops::slip(p, id, -by)?,
+                    DynamicMode::Slide => ops::slide(p, id, by)?,
+                }
             }
-            let c = p
-                .clip(id)
-                .ok_or_else(|| vidcut_core::Error::not_found(format!("no clip {id}")))?;
-            Ok(match mode {
-                DynamicMode::Slip => (c.start, c.end() - 1),
-                DynamicMode::Slide => (c.start - 1, c.end()),
-            })
+            first_clip(p, ids)
+                .map(|c| c.start)
+                .ok_or_else(|| vidcut_core::Error::usage("no clip"))
         }
     }
 }
@@ -398,8 +417,9 @@ impl Workspace {
 
     pub(crate) fn toggle_dynamic(&mut self) {
         if self.timeline.dynamic.is_some() {
-            self.dynamic_commit();
+            self.dynamic_stop();
             self.timeline.dynamic = None;
+            self.timeline.edit = None;
             return;
         }
         if self.dynamic_target().is_none()
@@ -414,6 +434,7 @@ impl Workspace {
             });
         }
         self.timeline.dynamic = Some(Dynamic::default());
+        self.dynamic_to_head();
     }
 
     pub fn dynamic_trim_request(&mut self, r: crate::live::DynamicTrim, now: f64) {
@@ -442,36 +463,76 @@ impl Workspace {
             if let Some(d) = &mut self.timeline.dynamic {
                 d.pending += step;
             }
-            self.dynamic_commit();
+            self.dynamic_stop();
         }
         match r.run {
-            Some(0.0) => self.dynamic_commit(),
-            Some(speed) => {
-                if let Some(d) = &mut self.timeline.dynamic {
-                    d.run = Some((speed, now, d.pending));
-                    d.stopped = None;
-                }
-            }
+            Some(0.0) => self.dynamic_stop(),
+            Some(speed) => self.dynamic_start(speed, now),
             None => {}
         }
     }
 
-    pub(crate) fn dynamic_drawn(&self, p: &Project) -> Option<(Project, Option<i64>)> {
+    pub(crate) fn dynamic_drawn(&self, p: &Project) -> Option<(Project, i64)> {
         let pending = self.timeline.dynamic.as_ref()?.pending;
         if pending == 0 {
             return None;
         }
         let target = self.dynamic_target()?;
         let mut trimmed = p.clone();
-        let (_, right) = dynamic_preview(
+        let at = dynamic_preview(
             &mut trimmed,
             &target,
             self.timeline.options.dynamic_mode,
             pending,
         )
         .ok()?;
-        let at = matches!(target, DynamicTarget::Edit(_)).then_some(right);
         Some((trimmed, at))
+    }
+
+    pub(crate) fn dynamic_stopped(&self) -> Option<&str> {
+        let d = self.timeline.dynamic.as_ref()?;
+        let (target, why) = d.stopped.as_ref()?;
+        (!d.running() && self.dynamic_target().as_ref() == Some(target)).then_some(why.as_str())
+    }
+
+    fn dynamic_head(&mut self) -> Option<i64> {
+        match self.dynamic_target()? {
+            DynamicTarget::Edit(e) => Some(e.at),
+            DynamicTarget::Clips(ids) => {
+                let p = self.shown_project()?;
+                first_clip(&p, &ids).map(|c| c.start)
+            }
+        }
+    }
+
+    fn dynamic_to_head(&mut self) {
+        if let Some(at) = self.dynamic_head()
+            && at != self.snap.timeline.position
+        {
+            self.seek(PlayerId::Timeline, at, false);
+        }
+    }
+
+    fn dynamic_start(&mut self, speed: f64, now: f64) {
+        if self.dynamic_target().is_none() {
+            return;
+        }
+        let playing = self.snap.timeline.playing;
+        let Some(d) = &mut self.timeline.dynamic else {
+            return;
+        };
+        d.around = None;
+        d.stopped = None;
+        d.run = Some((speed, now, d.pending));
+        if playing {
+            self.send("player.pause", json!({}));
+        }
+        self.dynamic_to_head();
+    }
+
+    pub(crate) fn dynamic_stop(&mut self) {
+        self.dynamic_commit();
+        self.dynamic_to_head();
     }
 
     pub(crate) fn dynamic_commit(&mut self) {
@@ -487,6 +548,7 @@ impl Workspace {
         if by == 0 {
             return;
         }
+        d.stopped = None;
         if let Some(DynamicTarget::Clips(_)) = self.dynamic_target()
             && let Some(q) = trimmed
         {
@@ -495,9 +557,9 @@ impl Workspace {
         match self.dynamic_target() {
             Some(DynamicTarget::Edit(e)) => self.nudge_edit(e.side, by),
             Some(DynamicTarget::Clips(ids)) => {
-                let method = match self.timeline.options.dynamic_mode {
-                    DynamicMode::Slip => "edit.slip",
-                    DynamicMode::Slide => "edit.slide",
+                let (method, by) = match self.timeline.options.dynamic_mode {
+                    DynamicMode::Slip => ("edit.slip", -by),
+                    DynamicMode::Slide => ("edit.slide", by),
                 };
                 match ids.as_slice() {
                     [one] => self.send(method, json!({ "clip": one, "by": by })),
@@ -520,94 +582,114 @@ impl Workspace {
     pub(crate) fn dynamic_keys(&mut self, input: &egui::InputState) {
         let now = input.time;
         let pressed = |k: egui::Key| input.key_pressed(k);
-        let k_down = input.key_down(egui::Key::K);
-        for (key, dir) in [(egui::Key::L, 1.0), (egui::Key::J, -1.0)] {
-            if !pressed(key) {
-                continue;
-            }
-            if k_down {
-                if let Some(d) = &mut self.timeline.dynamic {
-                    d.pending += dir as i64;
+        let running = self.timeline.dynamic.as_ref().is_some_and(Dynamic::running);
+        let playing = self.snap.timeline.playing;
+        if self.dynamic_target().is_some() {
+            let k_down = input.key_down(egui::Key::K);
+            for (key, dir) in [(egui::Key::L, 1.0), (egui::Key::J, -1.0)] {
+                if !pressed(key) {
+                    continue;
                 }
-                self.dynamic_commit();
-            } else if let Some(d) = &mut self.timeline.dynamic {
-                let speed = match d.run {
-                    Some((s, _, _)) if s * dir > 0.0 => (s * 2.0).clamp(-8.0, 8.0),
-                    _ => dir,
-                };
-                d.run = Some((speed, now, d.pending));
-                d.stopped = None;
+                if k_down {
+                    if let Some(d) = &mut self.timeline.dynamic {
+                        d.pending += dir as i64;
+                    }
+                    self.dynamic_stop();
+                } else {
+                    let speed = self.timeline.dynamic.as_ref().map_or(0.0, Dynamic::speed);
+                    self.dynamic_start(faster(speed, dir), now);
+                }
             }
-        }
-        if pressed(egui::Key::K)
-            && self
-                .timeline
-                .dynamic
-                .as_ref()
-                .is_some_and(|d| d.run.is_some() || d.pending != 0)
-        {
-            self.dynamic_commit();
+            if pressed(egui::Key::K) {
+                if running {
+                    self.dynamic_stop();
+                } else if playing {
+                    self.send("player.pause", json!({}));
+                }
+            }
         }
         if pressed(egui::Key::Space) {
-            self.dynamic_commit();
-            let center = match self.dynamic_target() {
-                Some(DynamicTarget::Edit(e)) => Some(e.at),
-                Some(DynamicTarget::Clips(ids)) => self
-                    .project()
-                    .and_then(|p| p.clip(&ids[0]))
-                    .map(|c| c.start),
-                None => None,
-            };
-            if let Some(at) = center {
-                let two = 2 * self.fps().as_f64().round() as i64;
-                self.seek(PlayerId::Timeline, (at - two).max(0), false);
-                self.send("player.play", json!({ "speed": 1.0, "viewer": "timeline" }));
-                if let Some(d) = &mut self.timeline.dynamic {
-                    d.around_until = Some(at + two);
-                }
+            if running {
+                self.dynamic_stop();
+            } else if playing {
+                self.send("player.pause", json!({}));
+            } else {
+                self.play_around();
             }
+        }
+    }
+
+    fn play_around(&mut self) {
+        let at = self.snap.timeline.position;
+        let two = 2 * self.fps().as_f64().round() as i64;
+        self.seek(PlayerId::Timeline, (at - two).max(0), false);
+        self.send("player.play", json!({ "speed": 1.0, "viewer": "timeline" }));
+        if let Some(d) = &mut self.timeline.dynamic {
+            d.around = Some(Around {
+                until: at + two,
+                back: at,
+                playing: false,
+            });
         }
     }
 
     pub(crate) fn dynamic_tick(&mut self, ctx: &egui::Context) {
         let fps = self.fps().as_f64();
         let now = ctx.input(|i| i.time);
-        let (Some(target), Some(p)) = (self.dynamic_target(), self.shown_project()) else {
-            return;
-        };
-        let mode = self.timeline.options.dynamic_mode;
         let playing = self.snap.timeline.playing;
         let position = self.snap.timeline.position;
+        let mut ended = None;
+        if let (Some(target), Some(p)) = (self.dynamic_target(), self.shown_project())
+            && let Some(d) = &mut self.timeline.dynamic
+            && let Some((speed, t0, base)) = d.run
+        {
+            let mode = self.timeline.options.dynamic_mode;
+            let tried = |by: i64| dynamic_preview(&mut Project::clone(&p), &target, mode, by);
+            let want = base + (speed * fps * (now - t0)).round() as i64;
+            if want != d.pending
+                && let Err(e) = tried(want)
+            {
+                let step = if want > d.pending { 1 } else { -1 };
+                let mut why = e.message;
+                while d.pending != want {
+                    match tried(d.pending + step) {
+                        Ok(_) => d.pending += step,
+                        Err(e) => {
+                            why = e.message;
+                            break;
+                        }
+                    }
+                }
+                ended = Some(why);
+            } else {
+                d.pending = want;
+                if let Some(wait) = next_step_in(speed, fps, now - t0) {
+                    super::repaint_in(ctx, std::time::Duration::from_secs_f64(wait));
+                }
+            }
+        }
+        if let Some(why) = ended {
+            self.dynamic_stop();
+            let target = self.dynamic_target();
+            if let (Some(d), Some(target)) = (&mut self.timeline.dynamic, target) {
+                d.stopped = Some((target, why));
+            }
+            ctx.request_repaint();
+        }
         let Some(d) = &mut self.timeline.dynamic else {
             return;
         };
-        if let Some((speed, t0, base)) = d.run {
-            let want = base + (speed * fps * (now - t0)).round() as i64;
-            let mut last = d.pending;
-            let step = if want > last { 1 } else { -1 };
-            while last != want {
-                if let Err(e) = dynamic_preview(&mut Project::clone(&p), &target, mode, last + step)
-                {
-                    d.run = None;
-                    d.stopped = Some(e.message);
-                    break;
-                }
-                last += step;
-            }
-            d.pending = last;
-            if d.run.is_none() {
-                ctx.request_repaint();
-            } else if let Some(wait) = next_step_in(speed, fps, now - t0) {
-                super::repaint_in(ctx, std::time::Duration::from_secs_f64(wait));
-            }
-        }
-        if let Some(until) = d.around_until
-            && (!playing || position >= until)
-        {
-            d.around_until = None;
+        let Some(a) = &mut d.around else {
+            return;
+        };
+        a.playing |= playing;
+        if a.playing && (!playing || position >= a.until) {
+            let back = a.back;
+            d.around = None;
             if playing {
                 self.send("player.pause", json!({}));
             }
+            self.seek(PlayerId::Timeline, back, false);
         }
     }
 }
@@ -638,5 +720,20 @@ mod tests {
     #[test]
     fn a_run_at_no_speed_never_steps() {
         assert_eq!(next_step_in(0.0, 25.0, 1.0), None);
+    }
+
+    #[test]
+    fn l_again_at_32_times_runs_at_64() {
+        assert_eq!(faster(32.0, 1.0), 64.0);
+    }
+
+    #[test]
+    fn j_again_at_64_times_backward_stays_at_64() {
+        assert_eq!(faster(-64.0, -1.0), -64.0);
+    }
+
+    #[test]
+    fn j_during_a_run_forward_runs_backward_at_normal_speed() {
+        assert_eq!(faster(8.0, -1.0), -1.0);
     }
 }

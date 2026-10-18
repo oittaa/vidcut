@@ -322,20 +322,24 @@ impl Gui {
         self.harness.state().two_up().cloned()
     }
 
-    fn two_up_shows(&mut self, want: [i64; 2]) {
+    fn two_up_shows(&mut self, want: &[i64]) {
         self.wait(&format!("the two-up to show source frames {want:?}"), |g| {
             g.two_up().is_some_and(|t| {
-                t.cells.iter().zip(want).all(|(c, w)| {
-                    c.as_ref()
-                        .is_some_and(|c| c.exact && c.source_frame == w && c.picture.is_some())
-                })
+                t.cells.len() == want.len()
+                    && t.cells.iter().zip(want).all(|(c, &w)| {
+                        c.as_ref()
+                            .is_some_and(|c| c.exact && c.source_frame == w && c.picture.is_some())
+                    })
             })
         });
         let t = self.two_up().unwrap();
-        let read = t
+        let read: Vec<_> = t
             .cells
-            .map(|c| c.and_then(|c| c.picture).and_then(|p| picture_code(&p)));
-        assert_eq!(read, want.map(|w| Some(w as u32)), "the two-up's pictures");
+            .into_iter()
+            .map(|c| c.and_then(|c| c.picture).and_then(|p| picture_code(&p)))
+            .collect();
+        let want: Vec<_> = want.iter().map(|&w| Some(w as u32)).collect();
+        assert_eq!(read, want, "the two-up's pictures");
     }
 
     fn two_up_wrong(&self) -> Vec<(i64, Option<u32>)> {
@@ -447,14 +451,14 @@ fn trim_editor(codec: VideoCodec) {
     let mut gui = Gui::new(codec);
     let cut = gui.at("V1", 80, 20.0);
     gui.double_click(cut);
-    gui.two_up_shows([79, 100]);
+    gui.two_up_shows(&[79, 100]);
     gui.key(Key::Space);
     gui.wait(
         "Space to play the timeline in place of the Trim Editor",
         |g| g.h.snapshot().timeline.playing && g.two_up().is_none(),
     );
     gui.call("player.pause", json!({}));
-    gui.two_up_shows([79, 100]);
+    gui.two_up_shows(&[79, 100]);
     let by = |gui: &mut Gui, side, by| {
         gui.harness
             .state_mut()
@@ -468,17 +472,17 @@ fn trim_editor(codec: VideoCodec) {
         gui.settle();
     };
     by(&mut gui, TrimSide::Both, 1);
-    gui.two_up_shows([80, 101]);
+    gui.two_up_shows(&[80, 101]);
     by(&mut gui, TrimSide::Both, -1);
-    gui.two_up_shows([79, 100]);
+    gui.two_up_shows(&[79, 100]);
     by(&mut gui, TrimSide::Out, 1);
-    gui.two_up_shows([80, 100]);
+    gui.two_up_shows(&[80, 100]);
     by(&mut gui, TrimSide::In, -1);
-    gui.two_up_shows([80, 99]);
+    gui.two_up_shows(&[80, 99]);
     by(&mut gui, TrimSide::In, 1);
-    gui.two_up_shows([80, 100]);
+    gui.two_up_shows(&[80, 100]);
     by(&mut gui, TrimSide::Out, -1);
-    gui.two_up_shows([79, 100]);
+    gui.two_up_shows(&[79, 100]);
     gui.harness
         .state_mut()
         .trim_editor_request(TrimEditor::Open {
@@ -489,7 +493,7 @@ fn trim_editor(codec: VideoCodec) {
             transition: false,
         });
     gui.settle();
-    gui.two_up_shows([179, 190]);
+    gui.two_up_shows(&[179, 190]);
     gui.harness
         .state_mut()
         .trim_editor_request(TrimEditor::Open {
@@ -500,7 +504,7 @@ fn trim_editor(codec: VideoCodec) {
             transition: false,
         });
     gui.settle();
-    gui.two_up_shows([79, 100]);
+    gui.two_up_shows(&[79, 100]);
     gui.key(Key::Escape);
     assert!(gui.two_up().is_none(), "Esc left the Trim Editor open");
 }
@@ -509,11 +513,12 @@ fn dynamic_trim_roll(codec: VideoCodec) {
     let mut gui = Gui::new(codec);
     gui.call("player.seek", json!({ "at": "78f" }));
     gui.key(Key::W);
-    gui.two_up_shows([79, 100]);
+    gui.wait("W to take the playhead to the cut", |g| g.position() == 80);
+    gui.two_up_shows(&[79, 100]);
     gui.hold(Key::K, Key::L);
-    gui.two_up_shows([80, 101]);
+    gui.two_up_shows(&[80, 101]);
     gui.hold(Key::K, Key::J);
-    gui.two_up_shows([79, 100]);
+    gui.two_up_shows(&[79, 100]);
 
     for presses in [vec![Key::L], vec![Key::L, Key::L], vec![Key::J]] {
         let (_, before) = gui.clip("c1");
@@ -521,26 +526,31 @@ fn dynamic_trim_roll(codec: VideoCodec) {
             gui.harness.key_press(k);
         }
         gui.run_for(20);
+        assert_eq!(
+            gui.two_up().map(|t| t.mode),
+            Some(TwoUpMode::DynamicTrim),
+            "a run's two-up"
+        );
         gui.key(Key::K);
         gui.wait("the trim to land", |g| g.clip("c1").1 != before);
         let by = gui.clip("c1").1 - 80;
-        gui.two_up_shows([79 + by, 100 + by]);
+        gui.two_up_shows(&[79 + by, 100 + by]);
+        gui.wait("the playhead to follow the cut", |g| {
+            g.position() == 80 + by
+        });
     }
 
     let by = gui.clip("c1").1 - 80;
     gui.key(Key::ArrowDown);
-    gui.two_up_shows([79 + by, 100 + by]);
-    gui.key(Key::ArrowDown);
     let (_, end) = gui.clip("c2");
     assert_eq!(end, 160);
-    gui.two_up_shows([179, 190]);
+    gui.two_up_shows(&[179, 190]);
     gui.key(Key::ArrowUp);
-    gui.two_up_shows([79 + by, 100 + by]);
+    gui.two_up_shows(&[79 + by, 100 + by]);
     gui.key(Key::W);
-    assert_eq!(
-        gui.two_up().map(|t| t.mode),
-        Some(TwoUpMode::TrimEditor),
-        "W left Dynamic Trim on, or closed the Trim Editor on the cut it trimmed"
+    assert!(
+        gui.two_up().is_none(),
+        "W left the cut selected in the Trim Editor"
     );
 }
 
@@ -564,30 +574,54 @@ fn dynamic_trim_clip(codec: VideoCodec, slide: bool) {
     gui.call("selection.set", json!({ "clips": ["c2"] }));
     gui.settle();
     gui.key(Key::W);
+    gui.wait("W to take the playhead to the clip", |g| g.position() == 80);
+    assert!(gui.two_up().is_none(), "a two-up before the trim ran");
     let cells = |gui: &Gui| {
         let (start, end) = gui.clip("c2");
-        if slide {
-            [gui.source_at(start - 1), gui.source_at(end)]
-        } else {
-            [gui.source_at(start), gui.source_at(end - 1)]
-        }
+        [
+            gui.source_at(start),
+            gui.source_at(end - 1),
+            gui.source_at(start - 1),
+            gui.source_at(end),
+        ]
     };
-    let first = cells(&gui);
-    assert_eq!(first, if slide { [79, 190] } else { [100, 179] });
-    gui.two_up_shows(first);
+    assert_eq!(cells(&gui), [100, 179, 79, 190]);
     gui.hold(Key::K, Key::L);
-    gui.two_up_shows([first[0] + 1, first[1] + 1]);
-    gui.hold(Key::K, Key::J);
-    gui.two_up_shows(first);
+    let stepped = if slide {
+        [100, 179, 80, 191]
+    } else {
+        [99, 178, 79, 190]
+    };
+    gui.wait("K and L to trim a frame", |g| cells(g) == stepped);
     for k in [Key::L, Key::J] {
         let before = cells(&gui);
         gui.harness.key_press(k);
         gui.run_for(15);
+        assert_eq!(gui.two_up().map(|t| t.cells.len()), Some(4), "a run's 4-up");
         gui.key(Key::K);
         gui.wait("the trim to land", |g| cells(g) != before);
-        let now = cells(&gui);
-        gui.two_up_shows(now);
+        assert!(gui.two_up().is_none(), "the 4-up stayed after K");
     }
+}
+
+#[test]
+fn space_in_dynamic_trim_plays_around_the_playhead_and_goes_back() {
+    let mut gui = Gui::new(VideoCodec::Vp9);
+    gui.call("player.seek", json!({ "at": "78f" }));
+    gui.key(Key::W);
+    gui.wait("W to take the playhead to the cut", |g| g.position() == 80);
+    gui.key(Key::Space);
+    let (mut first, mut furthest) = (None, 0);
+    gui.wait("Space to play past the cut and come back", |g| {
+        let playing = g.h.snapshot().timeline.playing;
+        if playing {
+            first.get_or_insert(g.position());
+            furthest = furthest.max(g.position());
+        }
+        first.is_some() && !playing && g.position() == 80
+    });
+    assert!(first.is_some_and(|f| f < 20), "it started at {first:?}");
+    assert!(furthest >= 180, "it went only as far as {furthest}");
 }
 
 macro_rules! codec_tests {

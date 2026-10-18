@@ -1061,10 +1061,12 @@ pub enum Request {
         close: bool,
     },
     /// Dynamic Trim (W, spec D32). `on` turns it on, on the selected edit
-    /// or clips (else the edit nearest the playhead), or off, applying what
-    /// it trimmed. `side` is what it trims of an edit, and `mode` what it
-    /// does with selected clips. `run` trims at that speed, as L and J do
-    /// (negative backward, up to 8×), and `0` stops and applies, as K does.
+    /// or clips (else the edit nearest the playhead), and moves the
+    /// playhead there; off applies what it trimmed and deselects the edit.
+    /// `side` is what it trims of an edit, and `mode` what it does with
+    /// selected clips. `run` trims at that speed, as L and J do (negative
+    /// backward, up to 64×), and `0` stops and applies, as K does; forward
+    /// slides clips right and slips their content right, to earlier frames.
     /// `step` trims that many frames and applies, as K held with a tap of L
     /// or J does. `player.state` says what the two-up shows (`two_up`).
     #[serde(rename = "gui.dynamic_trim")]
