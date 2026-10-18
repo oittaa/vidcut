@@ -315,6 +315,7 @@ impl Gui {
         drop(self.harness);
         self.h.shutdown();
         let _ = self.session.join();
+        vidcut::threads::join_closing();
     }
 }
 

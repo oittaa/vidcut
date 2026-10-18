@@ -21,6 +21,35 @@ const H: u32 = 180;
 
 const PATIENCE: Duration = Duration::from_secs(60);
 
+const SETTLING: Duration = Duration::from_secs(10);
+
+fn settle() -> Option<usize> {
+    vidcut::threads::join_closing();
+    let started = Instant::now();
+    loop {
+        let open = vidcut_av::decode::open_readers();
+        if open == 0 {
+            return None;
+        }
+        if started.elapsed() >= SETTLING {
+            return Some(open);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+struct Settle;
+
+impl Drop for Settle {
+    fn drop(&mut self) {
+        if let Some(open) = settle()
+            && !std::thread::panicking()
+        {
+            panic!("the session left {open} decoders open");
+        }
+    }
+}
+
 #[derive(Default)]
 struct Screen {
     exact: Option<i64>,
@@ -81,6 +110,7 @@ struct Gui {
     render: Option<std::thread::JoinHandle<()>>,
     harness: Harness<'static, Workspace>,
     _dir: TempDir,
+    _settle: Settle,
     _alone: MutexGuard<'static, ()>,
 }
 
@@ -88,6 +118,9 @@ impl Gui {
     fn new(codec: VideoCodec) -> Self {
         let _ = &*HOME;
         let alone = ONE_GUI.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(open) = settle() {
+            panic!("{open} decoders of an earlier test are still open");
+        }
         let media = fixture::ensure(
             &FixtureSpec::new(codec, Container::Mkv, 3840, 2160, (60, 1), 240)
                 .gop(120)
@@ -174,6 +207,7 @@ impl Gui {
             render: Some(render),
             harness,
             _dir: dir,
+            _settle: Settle,
             _alone: alone,
         };
         gui.settle();

@@ -38,7 +38,7 @@ These are mandatory.
 | When | Command | Runs |
 |---|---|---|
 | Before **every commit** (enforced by `.githooks/pre-commit`) | `make check` (`scripts/check.sh`); for `.md` files alone, `scripts/check-docs.sh` | no binary files in git, no comments in `crates/` (rule 2), the docs' names and links (`scripts/check-docs.sh`), `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
-| After a **bigger change** | `make check-full` (`scripts/check.sh full`) | the above plus all integration/e2e tests and doc tests |
+| After a **bigger change** | `make check-full` (`scripts/check.sh full`) | the above plus all integration/e2e tests, one at a time, and doc tests |
 
 **Enable the hook once per clone:** `make hooks` (`git config core.hooksPath .githooks`).
 
