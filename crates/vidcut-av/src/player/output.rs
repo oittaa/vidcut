@@ -317,22 +317,22 @@ fn follow<S>(
     mut open: impl FnMut(u64) -> Result<S>,
 ) {
     use mpsc::RecvTimeoutError as Gone;
-    let (mut playing, mut turn) = (first, 0);
+    let (mut playing, mut turn, mut tries) = (first, 0, 0);
     let mut retiring: Option<(S, Instant)> = None;
-    let mut retry: Option<(Instant, u32)> = None;
+    let mut retry: Option<Instant> = None;
     loop {
         let wake = retiring
             .as_ref()
             .map(|r| r.1)
             .into_iter()
-            .chain(retry.map(|r| r.0))
+            .chain(retry)
             .min();
         let event = match wake {
             Some(at) => events.recv_timeout(at.saturating_duration_since(Instant::now())),
             None => events.recv().map_err(|_| Gone::Disconnected),
         };
         let now = Instant::now();
-        let tries = match event {
+        match event {
             Ok(Event::Stop) | Err(Gone::Disconnected) => return,
             Err(Gone::Timeout) => {
                 if retiring.as_ref().is_some_and(|r| r.1 <= now) {
@@ -344,9 +344,8 @@ fn follow<S>(
                         );
                     }
                 }
-                match retry {
-                    Some((at, tries)) if at <= now => tries,
-                    _ => continue,
+                if !retry.is_some_and(|at| at <= now) {
+                    continue;
                 }
             }
             Ok(Event::Error { turn: of, .. }) if of != turn => continue,
@@ -356,22 +355,33 @@ fn follow<S>(
             }) => continue,
             Ok(Event::Error {
                 answer: Answer::Follow,
+                why,
                 ..
-            }) if turns.took(turn) => 0,
+            }) => {
+                if turns.took(turn) {
+                    tries = 0;
+                }
+                if tries > RETRIES {
+                    source.fail(why);
+                    continue;
+                }
+            }
             Ok(Event::Error { why, .. }) => {
                 source.fail(why);
                 continue;
             }
-        };
+        }
         retry = None;
+        tries += 1;
         match open(turn + 1) {
             Ok(stream) => {
                 turn += 1;
                 turns.switch(turn);
                 source.recover();
-                retiring = Some((std::mem::replace(&mut playing, stream), now + RETIRE));
+                let old = std::mem::replace(&mut playing, stream);
+                retiring = Some((old, Instant::now() + RETIRE));
             }
-            Err(_) if tries < RETRIES => retry = Some((now + RETRY, tries + 1)),
+            Err(_) if tries <= RETRIES => retry = Some(Instant::now() + RETRY),
             Err(e) => source.fail(e.to_string()),
         }
     }
@@ -761,14 +771,79 @@ mod tests {
     }
 
     #[test]
-    fn a_stream_that_never_played_fails_rather_than_open_again() {
+    fn a_default_that_moved_before_any_sound_is_followed() {
         let source = source(&[]);
         let turns = Turns::new();
         let (events, received) = mpsc::channel();
         events.send(moved(0)).unwrap();
         events.send(Event::Stop).unwrap();
-        follow((), &turns, &received, &source, |_| Ok(()));
-        assert_eq!(failure(&source), Some("the default moved".into()));
+        let mut opened = Vec::new();
+        follow((), &turns, &received, &source, |turn| {
+            opened.push(turn);
+            Ok(())
+        });
+        assert_eq!(opened, [1]);
+    }
+
+    #[test]
+    fn a_default_that_keeps_moving_before_any_sound_gives_up() {
+        let source = source(&[]);
+        let turns = Turns::new();
+        let (events, received) = mpsc::channel();
+        events.send(moved(0)).unwrap();
+        let mut opened = 0;
+        follow((), &turns, &received, &source, |turn| {
+            opened += 1;
+            events.send(moved(turn)).unwrap();
+            if opened == RETRIES + 1 {
+                events.send(Event::Stop).unwrap();
+            }
+            Ok(())
+        });
+        assert_eq!(
+            (opened, failure(&source)),
+            (9, Some("the default moved".into()))
+        );
+    }
+
+    #[derive(Default)]
+    struct Played {
+        stop: Option<mpsc::Sender<Event>>,
+        closed: Arc<Mutex<Option<Instant>>>,
+    }
+
+    impl Drop for Played {
+        fn drop(&mut self) {
+            if let Some(stop) = self.stop.take() {
+                *self.closed.lock().unwrap() = Some(Instant::now());
+                stop.send(Event::Stop).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn the_old_stream_plays_out_after_a_slow_open() {
+        let source = source(&[1.0, 2.0]);
+        let turns = Turns::new();
+        turns.fill(0, &source, &mut [0.0; 2], Instant::now());
+        let (events, received) = mpsc::channel();
+        events.send(moved(0)).unwrap();
+        let closed = Arc::new(Mutex::new(None));
+        let old = Played {
+            stop: Some(events.clone()),
+            closed: closed.clone(),
+        };
+        let mut opened = None;
+        follow(old, &turns, &received, &source, |_| {
+            std::thread::sleep(Duration::from_millis(100));
+            opened = Some(Instant::now());
+            Ok(Played::default())
+        });
+        let held = closed.lock().unwrap().unwrap() - opened.unwrap();
+        assert!(
+            held >= RETIRE,
+            "the old stream closed {held:?} after the open"
+        );
     }
 
     #[test]
