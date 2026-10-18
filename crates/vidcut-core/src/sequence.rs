@@ -25,6 +25,7 @@ pub fn find(path: &Path) -> Result<ImageSequence> {
     let names: HashSet<String> = std::fs::read_dir(dir)
         .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?
         .flatten()
+        .filter(|e| !crate::folder::hidden(e) && e.path().is_file())
         .filter_map(|e| e.file_name().into_string().ok())
         .collect();
     find_among(path, &names)
