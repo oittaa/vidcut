@@ -1218,12 +1218,15 @@ pub enum Request {
         #[serde(default)]
         limit: Option<usize>,
     },
-    /// Change the window: inner `size` in logical pixels `[w, h]`, minimize
-    /// (Wayland can't un-minimize), maximize, fullscreen.
+    /// Change the window: inner `size` and outer `position` in logical pixels
+    /// (`[w, h]`, `[x, y]`; Wayland can't place a window), minimize (Wayland
+    /// can't un-minimize), maximize, fullscreen.
     #[serde(rename = "gui.window")]
     GuiWindow {
         #[serde(default)]
         size: Option<[f32; 2]>,
+        #[serde(default)]
+        position: Option<[f32; 2]>,
         #[serde(default)]
         minimized: Option<bool>,
         #[serde(default)]
@@ -1332,7 +1335,8 @@ pub enum Request {
     /// Reset vidcut to a fresh install's state: the preferences, the caches
     /// (thumbnails, waveforms, measurements, encoder detection, shaders),
     /// the undo histories (but those of projects a running GUI has open),
-    /// the recent projects, view settings and remembered folders. Projects,
+    /// the recent projects, view settings, the window's size and place, and
+    /// remembered folders. Projects,
     /// media and proxies stay, but those in vidcut's cache: made without a
     /// project, into no proxy folder of your own. It refuses while another vidcut GUI runs, which
     /// would write its settings back: reset from that GUI's Preferences.
