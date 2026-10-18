@@ -103,6 +103,14 @@ impl PoolView {
             PoolSort::Name => media.sort_by_key(|m| m.name.to_lowercase()),
             PoolSort::Duration => media.sort_by_key(|m| p.media_frames(m)),
             PoolSort::Date => media.sort_by_key(|m| m.mtime_ns),
+            PoolSort::Timecode => {
+                let start = |m: &vidcut_core::model::Media| {
+                    m.info
+                        .timecode
+                        .map_or(0.0, |t| t.rate.frames_to_secs(t.count))
+                };
+                media.sort_by(|a, b| start(a).total_cmp(&start(b)));
+            }
         }
         if self.descending {
             media.reverse();
