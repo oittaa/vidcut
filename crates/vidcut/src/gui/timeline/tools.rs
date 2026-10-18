@@ -198,13 +198,37 @@ pub fn heard(
         true => trimmed(furthest(pending, dir, |b| trimmed(b).is_some()))?,
         false => now,
     };
-    let c = q.clip(&id)?;
-    let at = (c.start..c.end()).min_by_key(|&x| (c.source_at(x) - source).abs())?;
+    let at = frame_showing(q.clip(&id)?, source)?;
     Some(Audition {
         timeline: Box::new(q),
         at,
         speed,
     })
+}
+
+fn frame_showing(c: &vidcut_core::model::Clip, source: i64) -> Option<i64> {
+    let (mut lo, mut hi) = (c.start, c.end().checked_sub(1)?);
+    let rising = c.source_at(hi) >= c.source_at(lo);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if (c.source_at(mid) < source) == rising {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    [lo - 1, lo]
+        .into_iter()
+        .filter(|&x| x >= c.start)
+        .min_by_key(|&x| (c.source_at(x) - source).abs())
+}
+
+pub fn slip_room(media_frames: i64, speed: f64, duration: i64) -> i64 {
+    let slowed = match speed.abs() {
+        s if s > 0.0 => (media_frames as f64 / s).ceil().min(1e15) as i64,
+        _ => 0,
+    };
+    slowed + duration
 }
 
 fn slip_heard(
@@ -213,16 +237,17 @@ fn slip_heard(
     end_edge: bool,
     speed: f64,
 ) -> Option<Audition> {
-    let source = match end_edge {
-        true => c.source_at(c.end() - 1),
-        false => c.source_at(c.start),
+    let edge_frame = match end_edge {
+        true => c.end() - 1,
+        false => c.start,
     };
     let mut q = p.clone();
     for t in &mut q.tracks {
         t.clips.retain(|x| x.id == c.id);
         t.transitions.clear();
     }
-    let room = q.media(&c.media).map_or(0, |m| q.media_frames(m)) * 16 + c.duration;
+    let media = q.media(&c.media).map_or(0, |m| q.media_frames(m));
+    let room = slip_room(media, c.speed(), c.duration);
     let moved = q.tracks.iter_mut().flat_map(|t| t.clips.iter_mut());
     moved.filter(|x| x.id == c.id).for_each(|x| x.start += room);
     let (edge, dir) = match speed > 0.0 {
@@ -232,11 +257,9 @@ fn slip_heard(
     let grows = |k: i64| ops::trim(&mut q.clone(), &c.id, edge, dir * k, Some(false)).is_ok();
     let k = furthest(0, 1, grows);
     ops::trim(&mut q, &c.id, edge, dir * k, Some(false)).ok()?;
-    let c = q.clip(&c.id)?;
-    let at = (c.start..c.end()).min_by_key(|&x| (c.source_at(x) - source).abs())?;
     Some(Audition {
         timeline: Box::new(q),
-        at,
+        at: edge_frame + room,
         speed: -speed,
     })
 }
@@ -970,6 +993,16 @@ mod tests {
     #[test]
     fn a_trim_with_no_room_goes_nowhere() {
         assert_eq!(furthest(4, 1, |by| by <= 4), 4);
+    }
+
+    #[test]
+    fn a_one_percent_clip_needs_a_hundred_frames_of_room_for_each_frame_of_media() {
+        assert_eq!(slip_room(300, 0.01, 60), 30_060);
+    }
+
+    #[test]
+    fn a_freeze_needs_room_for_its_own_length_only() {
+        assert_eq!(slip_room(300, 0.0, 60), 60);
     }
 
     #[test]

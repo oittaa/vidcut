@@ -1030,6 +1030,21 @@ fn a_slip_plays_the_clip_as_the_timeline_plays_it() {
 }
 
 #[test]
+fn a_slip_of_a_one_percent_clip_is_heard_back_to_its_medias_start() {
+    let gui = Gui::new();
+    gui.call(
+        "edit.change_speed",
+        json!({ "clips": ["c2"], "speed": 0.01, "ripple": false }),
+    );
+    let p = gui.h.snapshot().project.clone().unwrap().project;
+    let target = DynamicTarget::Clips(vec!["c2".into()]);
+    let (q, at, _) = heard_timeline(heard(&p, &target, DynamicMode::Slip, false, 0, 1.0).unwrap());
+    gui.quit();
+    let c2 = q.clip("c2").unwrap();
+    assert_eq!((c2.source_at(c2.start), c2.source_at(at)), (0, 100));
+}
+
+#[test]
 fn w_shows_the_timeline_viewer() {
     let mut gui = Gui::new();
     gui.call("player.seek", json!({ "at": 60, "viewer": "timeline" }));
