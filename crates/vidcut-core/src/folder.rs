@@ -102,14 +102,41 @@ pub fn read(dir: &Path) -> Result<Folder> {
             dir.display()
         )));
     }
-    let folder = read_in(path);
+    let folder = read_in(path, &mut Vec::new());
     match &folder.error {
         Some(e) => Err(Error::media(format!("{}: {e}", dir.display()))),
         None => Ok(folder),
     }
 }
 
-fn read_in(path: PathBuf) -> Folder {
+pub const LOOPS: &str = "the same folder as one above it";
+
+#[cfg(unix)]
+type DirId = (u64, u64);
+
+#[cfg(not(unix))]
+type DirId = PathBuf;
+
+#[cfg(unix)]
+fn dir_id(path: &Path) -> Option<DirId> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
+#[cfg(not(unix))]
+fn dir_id(path: &Path) -> Option<DirId> {
+    crate::dirs::canonical(path).ok()
+}
+
+fn read_in(path: PathBuf, above: &mut Vec<DirId>) -> Folder {
+    let id = dir_id(&path);
+    if id.as_ref().is_some_and(|id| above.contains(id)) {
+        return Folder {
+            path,
+            error: Some(LOOPS.into()),
+            ..Folder::default()
+        };
+    }
     let entries = match std::fs::read_dir(&path) {
         Ok(entries) => entries,
         Err(e) => {
@@ -136,29 +163,22 @@ fn read_in(path: PathBuf) -> Folder {
     }
     sort_by_name(&mut files);
     sort_by_name(&mut dirs);
+    let held = id.is_some();
+    above.extend(id);
+    let folders = dirs.into_iter().map(|d| read_in(d, above)).collect();
+    if held {
+        above.pop();
+    }
     Folder {
         path,
         files,
-        folders: dirs.into_iter().map(read_in).collect(),
+        folders,
         error: None,
     }
 }
 
-fn hidden(e: &std::fs::DirEntry) -> bool {
-    if e.file_name().to_string_lossy().starts_with('.') {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const HIDDEN: u32 = 0x2;
-        if e.metadata()
-            .is_ok_and(|m| m.file_attributes() & HIDDEN != 0)
-        {
-            return true;
-        }
-    }
-    false
+pub(crate) fn hidden(e: &std::fs::DirEntry) -> bool {
+    e.file_name().to_string_lossy().starts_with('.')
 }
 
 #[cfg(test)]

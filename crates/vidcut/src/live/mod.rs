@@ -3334,16 +3334,17 @@ fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
 }
 
 fn folder_notice(result: &Value) -> String {
-    let names = |files: &[&Value]| {
+    let names = |files: &[&Value], why: bool| {
         let mut names: Vec<String> = files
             .iter()
             .take(5)
             .map(|s| {
                 let path = Path::new(s["path"].as_str().unwrap_or_default());
-                path.file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned()
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                match (why, s["why"].as_str()) {
+                    (true, Some(why)) => format!("{name} ({why})"),
+                    _ => name.into_owned(),
+                }
             })
             .collect();
         if files.len() > names.len() {
@@ -3359,21 +3360,29 @@ fn folder_notice(result: &Value) -> String {
     };
     let skipped: Vec<&Value> = result["skipped"].as_array().into_iter().flatten().collect();
     let (others, unread): (Vec<&Value>, Vec<&Value>) = skipped
-        .into_iter()
+        .iter()
         .partition(|s| s["why"] == vidcut_core::folder::NOT_MEDIA);
     match others.len() {
         0 => {}
         1 => text.push_str(&format!(
             "; skipped a file that isn't media: {}",
-            names(&others)
+            names(&others, false)
         )),
         n => text.push_str(&format!(
             "; skipped {n} files that aren't media: {}",
-            names(&others)
+            names(&others, false)
         )),
     }
     if !unread.is_empty() {
-        text.push_str(&format!("; couldn't open {}", names(&unread)));
+        text.push_str(&format!("; couldn't open {}", names(&unread, true)));
+    }
+    for s in &skipped {
+        let path = s["path"].as_str().unwrap_or_default();
+        let why = s["why"].as_str().unwrap_or_default();
+        text.push_str(&format!(
+            "
+{path}: {why}"
+        ));
     }
     text
 }
@@ -3396,7 +3405,10 @@ mod tests {
         assert_eq!(
             folder_notice(&result),
             "Import Media Folder: 2 clips in bin Shoot; skipped 2 files that aren't media: \
-             notes.txt, readme.txt; couldn't open broken.mp4"
+             notes.txt, readme.txt; couldn't open broken.mp4 (Invalid data found when processing input)\n\
+             /shoot/broken.mp4: Invalid data found when processing input\n\
+             /shoot/notes.txt: not a media file\n\
+             /shoot/Docs/readme.txt: not a media file"
         );
     }
 }

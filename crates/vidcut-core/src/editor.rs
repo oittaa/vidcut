@@ -2543,7 +2543,10 @@ fn add_folder(
         let probed = match probed {
             Ok(probed) => probed,
             Err(e) => {
-                out.skip(file, &e.message);
+                match runs.get(file) {
+                    Some(s) => out.skip(&folder.path.join(s.display()), &e.message),
+                    None => out.skip(file, &e.message),
+                }
                 continue;
             }
         };
