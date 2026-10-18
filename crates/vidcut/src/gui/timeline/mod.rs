@@ -200,7 +200,7 @@ pub struct TimelineView {
     pub silence: Option<tools::SilenceDialog>,
     pub boring_dialog: Option<(f64, i64)>,
     pub dynamic: Option<tools::Dynamic>,
-    pub landing: std::cell::Cell<Option<(i64, Instant)>>,
+    pub landing: Option<(i64, Instant, i64)>,
     pub heard: bool,
     pub layout: Option<Layout>,
     pub tracks: usize,
@@ -233,7 +233,7 @@ impl Default for TimelineView {
             silence: None,
             boring_dialog: None,
             dynamic: None,
-            landing: std::cell::Cell::new(None),
+            landing: None,
             heard: false,
             layout: None,
             tracks: 0,
@@ -1251,7 +1251,7 @@ impl Workspace {
             (layout.lower_ruler, &layout.lower, layout.lower_scale)
         };
         let fixed = !upper && self.timeline.options.fixed_playhead;
-        let playhead = self.snap.timeline.position;
+        let playhead = self.drawn_playhead();
         let (track, what) = hit_rows(p, rows, &scale, press);
         let gesture = if ruler.expand2(vec2(0.0, 2.0)).contains(press) || track.is_none() && !upper
         {
@@ -1507,7 +1507,7 @@ impl Workspace {
         let from = self
             .timeline
             .swipe
-            .map_or(self.snap.timeline.position as f64, |(f, _)| f);
+            .map_or(self.drawn_playhead() as f64, |(f, _)| f);
         let to = swipe(from, scroll.x, ppf, !upper, p.end());
         if to.round() != from.round() {
             self.seek(PlayerId::Timeline, to.round() as i64, true);
@@ -2387,17 +2387,20 @@ impl Workspace {
         })
     }
 
-    fn landed_playhead(&mut self) -> i64 {
+    pub(crate) fn drawn_playhead(&self) -> i64 {
         let position = self.snap.timeline.position;
-        let landing = self
-            .timeline
+        self.timeline
             .landing
-            .get()
-            .and_then(|(at, since)| tools::landing(at, since.elapsed(), position));
-        if landing.is_none() {
-            self.timeline.landing.set(None);
+            .and_then(|(at, since, from)| tools::landing(at, since.elapsed(), from, position))
+            .unwrap_or(position)
+    }
+
+    fn landed_playhead(&mut self) -> i64 {
+        let drawn = self.drawn_playhead();
+        if drawn == self.snap.timeline.position {
+            self.timeline.landing = None;
         }
-        landing.unwrap_or(position)
+        drawn
     }
 
     pub(crate) fn trim_editor_edit(&self) -> Option<EditSel> {
