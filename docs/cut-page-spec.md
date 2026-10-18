@@ -142,7 +142,7 @@ A marker on the ruler shows the edit point nearest the playhead, which some func
 
 ### 8.1 Selection (pp. 719–720)
 - **Clips:** click selects, Ctrl+click toggles, Shift+click selects a range, a marquee from empty space selects what it touches. Clicking empty space, or Ctrl+Shift+A, deselects. Alt+Shift+V selects every clip under the playhead.
-- **Edit points:** the pointer at the center of an edit selects both sides (a roll), just left or right of it one side (a resize); Ctrl+click adds edits. V selects the edit nearest the playhead; U cycles outgoing / incoming / both. The selected edit pulses on its side of the cut, or both sides, in both timelines: green where that side has media to trim into, red where it has none.
+- **Edit points:** the pointer at the center of an edit selects both sides (a roll), just left or right of it one side (a resize); Ctrl+click adds edits. V selects the edit nearest the playhead; U cycles both, incoming, outgoing. In both timelines the selected edit is a solid line on the cut with a glow on its selected side, or both, pulsing about once a second: green where that side has media to trim into, red where it has none.
 
 ### 8.2 Moving clips (pp. 720–723)
 - **Onto another Track 1 clip, released quickly:** replaces it and ripples.
@@ -190,7 +190,7 @@ Ctrl+Z / Ctrl+Shift+Z, unlimited. Edit > History lists the last twenty steps, an
 ### 8.11 Dissolves (pp. 645, 747, 758–761, 895, 1114, 1159, 1173)
 - **Dissolve and Ctrl+T** (p. 758): a one-second Cross Dissolve centered on the edit nearest the playhead. Ctrl+T puts it on the selected edit (V) instead, else on the selected clips (p. 895), else on the edit nearest the playhead. U picks where: ending on the edit (outgoing side), starting on it (incoming) or centered (both). Where the clips' sounds meet at that edit, a Cross Fade goes on the sound too (p. 1114). Details: D50.
 - **Cut** (p. 759): the edit nearest the playhead becomes a cut again.
-- **A selected dissolve** (pp. 759, 761): a click selects it. Its right-click menu has Change Duration, in seconds or frames and shortened to the media (deviation X27); Start on Edit, Center on Edit and End on Edit; and Delete. Ctrl+D changes its duration and Delete removes it, its Cross Fade staying.
+- **A selected dissolve** (pp. 759, 761): a click selects it. Its right-click menu has Change Transition Duration, then Start on Edit, Center on Edit and End on Edit, the current one greyed. Change Transition Duration takes a timecode or frames (Format, remembered) or a 1, 5 or 15-second preset, and is shortened to the media (deviation X27); Ctrl+D opens it too. Delete removes the dissolve. Each acts on the Cross Fade at the edit as well.
 - **How it plays** (pp. 747, 760, 1159, 1173): each clip shows its media past its edge, so a dissolve is as long as the clips have frames there. Pictures cross in a straight line, at a gap from or to black; a Cross Fade's level at its middle is +3, 0 or −3 dB.
 - **Out:** other transitions (wipes, Smooth Cut, the Transitions browser), the Transition Inspector, dragging or moving a transition in the timeline, Change Transition Type, Set as Default Transition, and cutting, copying and pasting transitions.
 

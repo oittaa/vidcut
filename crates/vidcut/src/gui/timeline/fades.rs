@@ -1,6 +1,7 @@
 use eframe::egui::{self, Key};
 use serde_json::json;
 use vidcut_core::model::{Project, Transition};
+use vidcut_core::time::{Rational, format_timecode, parse_media_timecode};
 
 use super::{EditSel, TrackRef, geometry};
 use crate::gui::workspace::Workspace;
@@ -9,8 +10,7 @@ use crate::gui::workspace::Workspace;
 pub struct FadeDialog {
     pub track: TrackRef,
     pub at: i64,
-    pub seconds: String,
-    pub frames: String,
+    pub text: String,
 }
 
 pub fn alignment(x: &Transition) -> &'static str {
@@ -21,24 +21,26 @@ pub fn alignment(x: &Transition) -> &'static str {
     }
 }
 
-pub fn seconds(frames: i64, fps: f64) -> String {
-    let s = format!("{:.2}", frames as f64 / fps.max(0.001));
-    s.trim_end_matches('0').trim_end_matches('.').to_string()
+pub fn shown(frames: i64, fps: Rational, in_frames: bool) -> String {
+    if in_frames {
+        frames.to_string()
+    } else {
+        format_timecode(frames, fps, 0, false)
+    }
 }
 
-pub fn frames_of(seconds: &str, fps: f64) -> Option<i64> {
-    let s: f64 = seconds.trim().replace(',', ".").parse().ok()?;
-    (s > 0.0).then(|| ((s * fps).round() as i64).max(1))
+pub fn typed(text: &str, fps: Rational, in_frames: bool) -> Option<i64> {
+    let text = text.trim();
+    let frames = if in_frames {
+        text.parse().ok()?
+    } else {
+        parse_media_timecode(text, fps)?
+    };
+    (frames > 0).then_some(frames)
 }
 
-fn found(p: &Project, track: TrackRef, at: i64) -> Option<(Transition, bool)> {
-    let t = p.track(&track.id())?;
-    let x = geometry::picture_transition(p, t, at)?.clone();
-    let sound = t
-        .transitions
-        .iter()
-        .any(|y| y.sound && y.from == x.from && y.to == x.to);
-    Some((x, sound))
+fn found(p: &Project, track: TrackRef, at: i64) -> Option<Transition> {
+    geometry::picture_transition(p, p.track(&track.id())?, at).cloned()
 }
 
 impl Workspace {
@@ -55,9 +57,17 @@ impl Workspace {
         length: Option<i64>,
         align: Option<&str>,
     ) {
-        let Some((x, sound)) = self.project().and_then(|p| found(p, track, at)) else {
+        let Some(x) = self.project().and_then(|p| found(p, track, at)) else {
             return;
         };
+        let sound = self
+            .project()
+            .and_then(|p| p.track(&track.id()))
+            .is_some_and(|t| {
+                t.transitions
+                    .iter()
+                    .any(|y| y.sound && y.from == x.from && y.to == x.to)
+            });
         let length = length.unwrap_or(x.before + x.after);
         self.send(
             "edit.dissolve",
@@ -77,7 +87,7 @@ impl Workspace {
         };
         self.send(
             "edit.remove_transition",
-            json!({ "at": e.at, "track": e.track.id(), "sound": false }),
+            json!({ "at": e.at, "track": e.track.id() }),
         );
         true
     }
@@ -86,13 +96,13 @@ impl Workspace {
         let Some((e, x)) = self.selected_transition() else {
             return;
         };
-        let fps = self.project().map_or(30.0, |p| p.settings.fps.as_f64());
-        let frames = x.before + x.after;
+        let Some(fps) = self.project().map(|p| p.settings.fps) else {
+            return;
+        };
         self.timeline.fade_dialog = Some(FadeDialog {
             track: e.track,
             at: e.at,
-            seconds: seconds(frames, fps),
-            frames: frames.to_string(),
+            text: shown(x.before + x.after, fps, self.timeline.fade_in_frames),
         });
     }
 
@@ -101,7 +111,7 @@ impl Workspace {
             ui.close();
             return;
         };
-        if ui.button("Change Duration…").clicked() {
+        if ui.button("Change Transition Duration…").clicked() {
             self.open_fade_dialog();
             ui.close();
         }
@@ -112,15 +122,13 @@ impl Workspace {
             ("center", "Center on Edit"),
             ("end", "End on Edit"),
         ] {
-            if ui.radio(now == align, label).clicked() {
+            if ui
+                .add_enabled(now != align, egui::Button::new(label))
+                .clicked()
+            {
                 self.reshape_transition(e.track, e.at, None, Some(align));
                 ui.close();
             }
-        }
-        ui.separator();
-        if ui.button("Delete").clicked() {
-            self.delete_transition();
-            ui.close();
         }
     }
 
@@ -128,49 +136,76 @@ impl Workspace {
         let Some(mut d) = self.timeline.fade_dialog.take() else {
             return;
         };
-        let fps = self.project().map_or(30.0, |p| p.settings.fps.as_f64());
+        let Some(fps) = self.project().map(|p| p.settings.fps) else {
+            return;
+        };
+        let mut in_frames = self.timeline.fade_in_frames;
         let mut open = true;
+        let mut apply = None;
         let mut done = false;
         egui::Window::new("Change Transition Duration")
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
             .show(ctx, |ui| {
-                let mut enter = false;
                 egui::Grid::new("fade-duration").show(ui, |ui| {
-                    ui.label("Seconds");
-                    let r = ui.add(egui::TextEdit::singleline(&mut d.seconds).desired_width(90.0));
-                    if r.changed()
-                        && let Some(f) = frames_of(&d.seconds, fps)
-                    {
-                        d.frames = f.to_string();
-                    }
-                    enter |= r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                    ui.label("Format");
+                    ui.horizontal(|ui| {
+                        for (frames, label) in [(false, "Time"), (true, "Frames")] {
+                            if ui.selectable_label(in_frames == frames, label).clicked()
+                                && in_frames != frames
+                            {
+                                if let Some(f) = typed(&d.text, fps, in_frames) {
+                                    d.text = shown(f, fps, frames);
+                                }
+                                in_frames = frames;
+                            }
+                        }
+                    });
                     ui.end_row();
-                    ui.label("Frames");
-                    let r = ui.add(egui::TextEdit::singleline(&mut d.frames).desired_width(90.0));
-                    if r.changed()
-                        && let Ok(f) = d.frames.trim().parse::<i64>()
-                    {
-                        d.seconds = seconds(f, fps);
+                    ui.label("Duration");
+                    let r = ui.add(egui::TextEdit::singleline(&mut d.text).desired_width(110.0));
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                        apply = typed(&d.text, fps, in_frames);
+                        done = apply.is_some();
                     }
-                    enter |= r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                    ui.end_row();
+                    ui.label("Preset");
+                    ui.horizontal(|ui| {
+                        for secs in [1, 5, 15] {
+                            let frames = fps.secs_to_frames(f64::from(secs));
+                            let label = if in_frames {
+                                frames.to_string()
+                            } else {
+                                format!("{secs}s")
+                            };
+                            if ui.button(label).clicked() {
+                                apply = Some(frames);
+                                done = true;
+                            }
+                        }
+                        ui.add_enabled(false, egui::Button::new("End"));
+                    });
                     ui.end_row();
                 });
-                let frames = d.frames.trim().parse::<i64>().ok().filter(|&f| f > 0);
+                let frames = typed(&d.text, fps, in_frames);
                 ui.horizontal(|ui| {
                     if ui.button("Cancel").clicked() {
                         done = true;
                     }
-                    let change = ui.add_enabled(frames.is_some(), egui::Button::new("Change"));
-                    if let Some(f) = frames
-                        && (change.clicked() || enter)
+                    if ui
+                        .add_enabled(frames.is_some(), egui::Button::new("Change"))
+                        .clicked()
                     {
-                        self.reshape_transition(d.track, d.at, Some(f), None);
+                        apply = frames;
                         done = true;
                     }
                 });
             });
+        self.timeline.fade_in_frames = in_frames;
+        if let Some(f) = apply {
+            self.reshape_transition(d.track, d.at, Some(f), None);
+        }
         if open && !done {
             self.timeline.fade_dialog = Some(d);
         }
@@ -179,13 +214,17 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
+    use vidcut_core::time::Rational;
+
     #[test]
-    fn a_dissolve_of_45_frames_at_30_fps_reads_1_5_seconds() {
-        assert_eq!(super::seconds(45, 30.0), "1.5");
+    fn a_one_second_dissolve_reads_as_a_timecode_in_time_format() {
+        let fps = Rational::new(30, 1).unwrap();
+        assert_eq!(super::shown(30, fps, false), "00:00:01:00");
     }
 
     #[test]
-    fn two_seconds_at_25_fps_are_50_frames() {
-        assert_eq!(super::frames_of("2", 25.0), Some(50));
+    fn a_typed_timecode_of_two_seconds_at_25_fps_is_50_frames() {
+        let fps = Rational::new(25, 1).unwrap();
+        assert_eq!(super::typed("00:00:02:00", fps, false), Some(50));
     }
 }

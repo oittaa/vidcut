@@ -190,6 +190,7 @@ pub struct TimelineView {
     pub transition: Option<(TrackRef, i64)>,
     pub transition_menu: Option<bool>,
     pub fade_dialog: Option<fades::FadeDialog>,
+    pub fade_in_frames: bool,
     pub clip_menu: Option<(bool, String)>,
     pub scrub_sent: Option<i64>,
     pub swipe: Option<(f64, Instant)>,
@@ -219,6 +220,7 @@ impl Default for TimelineView {
             transition: None,
             transition_menu: None,
             fade_dialog: None,
+            fade_in_frames: false,
             clip_menu: None,
             scrub_sent: None,
             swipe: None,
@@ -530,7 +532,7 @@ impl Workspace {
                 &upper_scale,
                 drawn,
                 edit_at,
-                2.0,
+                5.0,
             );
             paint::playhead(
                 &painter,
@@ -596,7 +598,7 @@ impl Workspace {
                 &lower_scale,
                 drawn,
                 edit_at,
-                4.0,
+                10.0,
             );
             if let Some(e) = self.timeline.edit
                 && let Some(row) = layout.lower.get(&e.track.id())
@@ -1915,9 +1917,9 @@ impl Workspace {
             && let Some(e) = &mut self.timeline.edit
         {
             e.side = match e.side {
-                Side::Both => Side::Out,
-                Side::Out => Side::In,
-                Side::In => Side::Both,
+                Side::Both => Side::In,
+                Side::In => Side::Out,
+                Side::Out => Side::Both,
                 Side::Audio => Side::Audio,
             };
         }
@@ -2245,7 +2247,7 @@ impl Workspace {
         scale: &Scale,
         p: &Project,
         moved: Option<i64>,
-        half: f32,
+        reach: f32,
     ) {
         let Some(e) = self.timeline.edit else {
             return;
@@ -2269,25 +2271,46 @@ impl Workspace {
             (_, Some(t)) => ops::filmstrip::extends(p, t, e.at),
         };
         let glow = paint::pulse(ctx.input(|i| i.time));
-        let color = |ok: bool| {
-            let c = if stopped || !ok {
-                theme::colors().error
+        let tint = |ok: bool| {
+            if stopped || !ok {
+                (
+                    Color32::from_rgb(200, 40, 40),
+                    Color32::from_rgb(240, 70, 70),
+                )
             } else {
-                Color32::from_rgb(90, 200, 90)
-            };
-            c.gamma_multiply(glow)
-        };
-        let fill = |a: f32, b: f32, c: Color32| {
-            painter.rect_filled(Rect::from_x_y_ranges(a..=b, y), 0.0, c);
-        };
-        match e.side {
-            Side::Out => fill(x - 1.5 * half, x, color(out_ok)),
-            Side::In => fill(x, x + 1.5 * half, color(in_ok)),
-            Side::Both | Side::Audio => {
-                fill(x - half, x, color(out_ok));
-                fill(x, x + half, color(in_ok));
+                (
+                    Color32::from_rgb(20, 150, 20),
+                    Color32::from_rgb(60, 230, 60),
+                )
             }
+        };
+        let shade = |side: f32, ok: bool| {
+            let (_, light) = tint(ok);
+            let steps = reach.round().max(1.0) as usize;
+            for i in 0..steps {
+                let fade = 1.0 - i as f32 / steps as f32;
+                let a = x + side * (1.0 + i as f32);
+                let b = a + side;
+                painter.rect_filled(
+                    Rect::from_x_y_ranges(a.min(b)..=a.max(b), y),
+                    0.0,
+                    light.gamma_multiply(glow * fade),
+                );
+            }
+        };
+        let (out_side, in_side) = match e.side {
+            Side::Out => (true, false),
+            Side::In => (false, true),
+            Side::Both | Side::Audio => (true, true),
+        };
+        if out_side {
+            shade(-1.0, out_ok);
         }
+        if in_side {
+            shade(1.0, in_ok);
+        }
+        let (core, _) = tint(if e.side == Side::In { in_ok } else { out_ok });
+        painter.rect_filled(Rect::from_x_y_ranges((x - 1.0)..=(x + 1.0), y), 0.0, core);
         repaint_in(ctx, paint::PULSE_STEP);
     }
 

@@ -13,6 +13,7 @@ use vidcut::gui::workspace::Workspace;
 use vidcut::live::{self, Capture, GuiChange, GuiDone, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
 use vidcut_core::model::Settings;
+use vidcut_core::request::TrimSide;
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, Project, Store};
 
@@ -518,15 +519,24 @@ fn delete_with_a_dissolve_selected_takes_the_dissolve_away() {
 }
 
 #[test]
-fn change_duration_from_a_dissolves_menu_takes_frames() {
+fn change_transition_duration_from_a_dissolves_menu_takes_frames() {
     let mut gui = Gui::new();
     dissolve_at_60(&mut gui);
     gui.click_with(gui.at("V1", 57, 20.0), egui::PointerButton::Secondary);
     gui.settle();
-    gui.harness.get_by_label("Change Duration…").click();
+    gui.harness
+        .get_by_label("Change Transition Duration…")
+        .click();
     gui.harness.step();
     gui.settle();
-    let label = gui.harness.get_by_label("Frames").rect();
+    gui.harness.get_by_label("Frames").click();
+    gui.harness.step();
+    let label = gui
+        .harness
+        .get_all_by_label("Duration")
+        .map(|n| n.rect())
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
     gui.click(pos2(label.right() + 40.0, label.center().y));
     gui.harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
     gui.harness.event(egui::Event::Text("20".into()));
@@ -535,6 +545,16 @@ fn change_duration_from_a_dissolves_menu_takes_frames() {
     gui.harness.step();
     gui.settle();
     assert_eq!(v1_transitions(&gui), [(10, 10)]);
+    gui.quit();
+}
+
+#[test]
+fn u_after_a_click_on_a_cut_selects_the_incoming_side() {
+    let mut gui = Gui::new();
+    gui.click(gui.at("V1", 60, 20.0));
+    gui.key(Key::U);
+    let side = gui.harness.state().gui_state().edit.map(|e| e.side);
+    assert_eq!(side, Some(TrimSide::In));
     gui.quit();
 }
 

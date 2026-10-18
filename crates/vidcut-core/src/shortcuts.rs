@@ -246,8 +246,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Some(
             "Removes the selected clips. On Track 1 the gap closes: Track 1 holds the main \
              story and never has holes. Backspace does the same. With a dissolve selected, it \
-             removes the dissolve. After a click in the Media Pool, it removes the selected \
-             media from the pool instead, after asking.",
+             removes the dissolve and its Cross Fade. After a click in the Media Pool, it \
+             removes the selected media from the pool instead, after asking.",
         ),
     ),
     key(
@@ -279,7 +279,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Clips,
         &["Ctrl", "D"],
         "Change duration",
-        Some("Of the selected clips, or of the selected dissolve, in seconds or frames."),
+        Some("Of the selected clips, or of the selected dissolve, as a timecode or in frames."),
     ),
     key(
         Clips,
@@ -313,7 +313,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Some(
             "A cut has two sides: the end of the clip going out and the start of the one \
              coming in. U goes from rolling both, which moves the cut and keeps the length, \
-             to the clip going out, to the clip coming in. In Dynamic Trim too.",
+             to the clip coming in, to the clip going out. In Dynamic Trim too.",
         ),
     ),
     key(
