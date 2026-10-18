@@ -146,6 +146,9 @@ pub fn request_json(id: u64, envelope: &Envelope, project: Option<&Path>) -> Res
         }
     }
     let mut v = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+    if let Some(client) = &envelope.client {
+        v["client"] = json!(client);
+    }
     if let Some(project) = project {
         v["project"] = json!(project);
     }

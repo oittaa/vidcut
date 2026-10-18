@@ -111,7 +111,13 @@ sequenceDiagram
 
 A `Change` is a tree of what differs: replaced values (`Set`), object fields (`Fields`) and lists of things with ids (`Items`), so a step costs what it changed. Undo applies it backward and still makes a new revision: revisions only grow.
 
-The history is a `.jsonl` file in the state dir's `history` folder, named by a digest of the project's path (`HistoryFile`). Each save appends lines ending with a hash of the project text it wrote. On load (`Store::load_text`), a project file that doesn't match that hash was changed by something else: `Editor::record_external` makes the difference from the last saved state one undoable "external change" step. A GUI notices such writes through its file watcher (`Msg::FileChanged`, `OpenProject::reload`). Behavior: [spec §8.10](../cut-page-spec.md#810-undo-pp-651652), [deviation X4](../deviations.md#x4-undo-history-persists-across-sessions-and-cli-runs).
+The history is a `.jsonl` file in the state dir's `history` folder, named by a digest of the project's path (`HistoryFile`). Each save appends lines ending with a hash of the project text it wrote. On load (`Store::load_text`), a project file that doesn't match that hash was changed by something else: `Editor::record_external` makes the difference from the last saved state one undoable step by `file`. A GUI notices such writes through its file watcher (`Msg::FileChanged`, `OpenProject::reload`). Behavior: [spec §8.10](../cut-page-spec.md#810-undo-pp-651652), [deviation X4](../deviations.md#x4-undo-history-persists-across-sessions-and-cli-runs).
+
+Each `Entry` keeps a `Step` beside its `Change`: the label (`describe`), who made it (the request's `Client`), when, when its GUI opened the project (`Editor::opened_at`), the clips and frames it changed (`steps::places`, from the project before and after) and an `apply`'s commands. Lines written before steps had these load with them empty. The CLI and `mcp` put the `Client` on the `Envelope` (the `client` key of a JSON-RPC request); a GUI gives its own and its IPC callers' in `Live::request`.
+
+`Editor::history_steps` reads the steps without their changes (`HistoryFile::read_steps`). A `StepsCache` keeps what it read, so a GUI reads only what a save appended, and the whole file again after a compaction. `history.get` lists them with the runs one client made in a row (`steps::listing`, `steps::groups`); `history.go` undoes or redoes to a step as one revision.
+
+The History panel (`HistoryUi`, docked beside the Media Pool, its width kept in the config folder) previews a step without changing the project. `Handle::history_preview` asks the live core; `Live::preview_step` makes the project as it was (`Editor::project_at`) and publishes it in the snapshot (`HistoryPreview`), which the timeline draws in place of the project, outlining what the step changed. An undo, redo or `history.go` from the GUI publishes a `Flash` of what it moved through. Behavior: [deviations X33–X35](../deviations.md#x33-each-undo-step-says-what-where-and-how-much).
 
 **Why** the lock, the revision and the reload: the CLI, agents and the GUI edit one file at once ([deviation X1](../deviations.md#x1-projects-are-always-saved-standalone-json-files)). The lock orders the writers, the file always holds the latest project, and `if_rev` refuses an edit to a project that changed since the client read it.
 
@@ -121,6 +127,8 @@ The history is a `.jsonl` file in the state dir's `history` folder, named by a d
 - `crates/vidcut-core/src/editor.rs`
 - `crates/vidcut-core/src/store.rs`
 - `crates/vidcut-core/src/history.rs`
+- `crates/vidcut-core/src/steps.rs`
+- `crates/vidcut-core/src/describe.rs`
 - `crates/vidcut-core/src/change.rs`
 - `crates/vidcut-core/src/ops.rs`
 - `crates/vidcut/src/main.rs`
@@ -131,3 +139,4 @@ The history is a `.jsonl` file in the state dir's `history` folder, named by a d
 - `crates/vidcut/src/live/mod.rs`
 - `crates/vidcut/src/live/project.rs`
 - `crates/vidcut/src/gui/workspace.rs`
+- `crates/vidcut/src/gui/history.rs`

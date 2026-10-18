@@ -174,3 +174,18 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Resolve:** a file it can't read, a text file or one that only looks like a video, is left out without a word, and a folder without media imports nothing (Studio 21.1.1, through its scripting API).
 - **vidcut:** the result and the notice name each file skipped and why, and a folder without media is an error ([D53](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:** as with [X29](#x29-a-dynamic-trim-run-says-why-it-stopped): a card or render folder imported for an agent to cut must not lose a clip unnoticed.
+
+## X33. Each undo step says what, where and how much
+- **Resolve:** Studio 21.1.1 names a step by its kind: "Split Clips", "Remove clips", "Add Transition to Edit Points"; only Append names the media. Edit > Undo and Redo don't say what they would undo or redo. Ctrl+Z shows nothing.
+- **vidcut:** a step says what it did, to which clip (its name, else its media's), where (timecode and track) and by how much: "Trim the end of Interview.mp4 by -12 frames at 00:01:02:10 on V1". An `apply` batch lists its commands under it. Edit > Undo and Redo name the step. Ctrl+Z and Ctrl+Shift+Z say what they undid or redid and briefly outline where it was in the timeline ([D55](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:** ten lines of "Split Clips" don't say which one to go back to, and an undo whose change is off screen, or was an agent's, looks like nothing happened.
+
+## X34. The undo history says who made each step, and when
+- **Resolve:** one editor makes every step; the History window lists labels alone (21.1.1).
+- **vidcut:** each step keeps who made it (the GUI, the CLI, an MCP client by its own name, another program over IPC, or a program that wrote the project file) and when. The History window badges the steps the GUI didn't make, says how long ago each was made, and marks where each GUI session began ("Opened Tue 14:02"), since the history outlives sessions ([X4](#x4-undo-history-persists-across-sessions-and-cli-runs)). Steps one client made in a row, such as an agent's forty edits, fold into one row that opens to show them, and its Undo all goes back to before the first. A script or agent on the CLI names itself with `--client` (`VIDCUT_CLIENT`). `history.get` gives all of it, and `history.go` goes to any step.
+- **Why:** agents and scripts edit the project the person has open ([X1](#x1-projects-are-always-saved-standalone-json-files)). Seeing which steps were theirs, and undoing them as one, is what makes that safe.
+
+## X35. The History window docks, and shows a step before going there
+- **Resolve:** the History window floats over the page; hovering a row turns it bold, and a click goes there at once. Up and Down don't move in the list (21.1.1).
+- **vidcut:** the history docks beside the Media Pool (Edit > History > Open History Window, or History in the top bar), keeping the width it was given between runs, so it covers neither the viewer nor the timeline. Hovering a step, there or in Edit > History, draws the timeline as it was after that step without changing the project, outlines what the step changed, and scrolls the lower timeline there if it is off screen. In the panel, Up and Down step through the history the same way, Enter goes there, and Esc comes back to where the project is. A click goes there, as in Resolve.
+- **Why:** a window over the picture hides what the history is about, and a label can't show a cut the way the timeline does; looking costs nothing, as the project changes only on a click or Enter.

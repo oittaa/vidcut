@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Key, Modifiers, Pos2, pos2, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use vidcut::gui::export::Dialogs;
@@ -1391,5 +1391,123 @@ fn the_pools_search_field_follows_pool_set() {
         .min_by(|a, b| a.rect().min.x.total_cmp(&b.rect().min.x))
         .expect("the pool's search field");
     assert_eq!(field.value().as_deref(), Some("interview"));
+    gui.quit();
+}
+
+fn at_step(gui: &Gui) -> Value {
+    gui.call("history.get", json!({}))["at"].clone()
+}
+
+#[test]
+fn ctrl_z_says_what_it_undid() {
+    let mut gui = Gui::new();
+    gui.harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    gui.harness.step();
+    gui.settle();
+    let snap = gui.h.snapshot();
+    let name = snap.project().unwrap().media[0].name.clone();
+    assert_eq!(
+        snap.notices.back().map(|n| n.text.clone()),
+        Some(format!(
+            "Undid: Append {name} 00:00:06:20\u{2013}00:00:08:20"
+        ))
+    );
+    gui.quit();
+}
+
+#[test]
+fn ctrl_z_flashes_where_the_undone_step_was() {
+    let mut gui = Gui::new();
+    gui.harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    gui.harness.step();
+    gui.settle();
+    let flash = gui.h.snapshot().flash.clone().unwrap();
+    assert_eq!(
+        serde_json::to_value(&flash.spans).unwrap(),
+        json!([{ "track": "V1", "from": 120, "to": 180 }])
+    );
+    gui.quit();
+}
+
+#[test]
+fn a_click_on_original_in_the_history_window_undoes_everything() {
+    let mut gui = Gui::new();
+    gui.ask("gui.show", json!({ "panel": "history" })).unwrap();
+    gui.harness.step();
+    gui.harness.get_by_label("Original").click();
+    gui.harness.step();
+    gui.settle();
+    assert_eq!(at_step(&gui), json!(0));
+    gui.quit();
+}
+
+#[test]
+fn hovering_a_history_row_previews_the_timeline_as_it_was() {
+    let mut gui = Gui::new();
+    gui.ask("gui.show", json!({ "panel": "history" })).unwrap();
+    gui.harness.step();
+    gui.harness.get_by_label("Original").hover();
+    gui.harness.step();
+    gui.settle();
+    let preview = gui.h.snapshot().history_preview.clone().unwrap();
+    assert_eq!(
+        (
+            preview.step,
+            preview.project.track("V1").unwrap().clips.len()
+        ),
+        (0, 0)
+    );
+    assert_eq!(gui.clips("V1"), track_one());
+    gui.quit();
+}
+
+#[test]
+fn up_and_enter_in_the_history_window_undo_a_step() {
+    let mut gui = Gui::new();
+    gui.ask("gui.show", json!({ "panel": "history" })).unwrap();
+    gui.harness.step();
+    gui.key(Key::ArrowUp);
+    gui.key(Key::Enter);
+    gui.settle();
+    assert_eq!(at_step(&gui), json!(3));
+    gui.quit();
+}
+
+#[test]
+fn esc_after_up_in_the_history_window_stays_where_it_was() {
+    let mut gui = Gui::new();
+    gui.ask("gui.show", json!({ "panel": "history" })).unwrap();
+    gui.harness.step();
+    gui.key(Key::ArrowUp);
+    gui.settle();
+    gui.key(Key::Escape);
+    gui.settle();
+    let snap = gui.h.snapshot();
+    assert_eq!(
+        (at_step(&gui), snap.history_preview.is_none()),
+        (json!(4), true)
+    );
+    gui.quit();
+}
+
+#[test]
+fn the_edit_menus_history_lists_the_newest_step_first() {
+    let mut gui = Gui::new();
+    gui.harness.get_by_label("Edit").click();
+    for _ in 0..3 {
+        gui.harness.step();
+    }
+    gui.harness.get_by_label("History \u{23f5}").hover();
+    for _ in 0..3 {
+        gui.harness.step();
+    }
+    let name = gui.h.snapshot().project().unwrap().media[0].name.clone();
+    let newest = format!("Append {name} 00:00:06:20\u{2013}00:00:08:20");
+    let first = gui
+        .harness
+        .query_all_by_label_contains(&format!("Append {name}"))
+        .min_by(|a, b| a.rect().min.y.total_cmp(&b.rect().min.y))
+        .and_then(|n| n.accesskit_node().label());
+    assert_eq!(first.map(|l| l.contains(&newest)), Some(true));
     gui.quit();
 }

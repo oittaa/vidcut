@@ -18,7 +18,8 @@ use vidcut_core::editor::{Env, media_context, resolve_clip};
 use vidcut_core::model::{Clip, Format};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget, TimelineOptions, TrimSide, ViewerMode,
+    Client, ClientKind, DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget, TimelineOptions,
+    TrimSide, ViewerMode,
 };
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -228,6 +229,7 @@ pub(crate) enum Msg {
     },
     FileChanged,
     PreferencesChanged,
+    HistoryPreview(Option<usize>),
     Thumbs {
         media: String,
         wanted: String,
@@ -366,6 +368,10 @@ impl Handle {
         }
     }
 
+    pub fn history_preview(&self, step: Option<usize>) {
+        let _ = self.tx.send(Msg::HistoryPreview(step));
+    }
+
     pub fn shutdown(&self) {
         let _ = self.tx.send(Msg::Shutdown);
     }
@@ -434,6 +440,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
         budget,
+        history_preview: None,
+        flash: None,
     };
     let shared = Arc::new(Mutex::new(Arc::new(empty)));
     let preferences = crate::preferences::path();
@@ -503,6 +511,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         dirty: true,
         answers: Vec::new(),
         preview_error: config.preview_error,
+        history_preview: None,
+        flash: None,
+        flash_seq: 0,
     };
     let project = config.project;
     let create = config.create;
@@ -706,6 +717,9 @@ struct Live {
     dirty: bool,
     answers: Vec<(Reply, Result<Response>)>,
     preview_error: Option<String>,
+    history_preview: Option<Arc<HistoryPreview>>,
+    flash: Option<Arc<Flash>>,
+    flash_seq: u64,
 }
 
 const SOURCE: PlayerId = PlayerId::Source;
@@ -868,6 +882,7 @@ impl Live {
                     self.project_changed(None);
                 }
             }
+            Msg::HistoryPreview(step) => changed = self.preview_step(step),
             Msg::FileChanged => {
                 let refreshed = match self.project.as_mut().map(OpenProject::reload) {
                     Some(Ok(changed)) => changed,
@@ -1132,6 +1147,8 @@ impl Live {
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
             budget: self.player.budget(),
+            history_preview: self.history_preview.clone(),
+            flash: self.flash.clone(),
         };
         *self.shared.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(snap);
         (self.notify)();
@@ -1182,7 +1199,14 @@ impl Live {
         expected: Option<PathBuf>,
         reply: Option<Reply>,
     ) {
-        let envelope = envelope.normalized();
+        let mut envelope = envelope.normalized();
+        if envelope.client.is_none() {
+            let kind = match origin {
+                Origin::Ipc => ClientKind::Ipc,
+                Origin::Gui { .. } | Origin::Session => ClientKind::Gui,
+            };
+            envelope.client = Some(Client::new(kind, None));
+        }
         let (method, params) = match serde_json::to_value(&envelope.request) {
             Ok(Value::Object(mut m)) => (
                 m.remove("method")
@@ -1630,6 +1654,7 @@ impl Live {
         }
         self.dirty = true;
         self.tool_notice(&job, &result);
+        self.history_notice(&job, &result);
         self.auto_proxies(&job, &result);
         if let Some(r) = job.reply {
             self.answers.push((r, result));
@@ -1657,6 +1682,59 @@ impl Live {
             "history.redo" => steps("redone").map_or(said, |s| format!("Redo: {s}")),
             _ => said,
         }
+    }
+
+    fn preview_step(&mut self, step: Option<usize>) -> bool {
+        let Some(open) = &self.project else {
+            return self.history_preview.take().is_some();
+        };
+        let rev = open.project().rev;
+        let Some(step) = step else {
+            return self.history_preview.take().is_some();
+        };
+        if self
+            .history_preview
+            .as_ref()
+            .is_some_and(|p| p.step == step && p.rev == rev)
+        {
+            return false;
+        }
+        self.history_preview = open.editor.project_at(step).ok().map(|p| {
+            Arc::new(HistoryPreview {
+                step,
+                rev,
+                project: Arc::new(p),
+            })
+        });
+        self.dirty = true;
+        true
+    }
+
+    fn history_notice(&mut self, job: &Job, result: &Result<Response>) {
+        let Ok(r) = result else {
+            return;
+        };
+        if !matches!(job.origin, Origin::Gui { .. }) || job.dry_run {
+            return;
+        }
+        let (verb, labels) = match (r.result["undone"].as_array(), r.result["redone"].as_array()) {
+            (Some(l), _) => ("Undid", l),
+            (_, Some(l)) => ("Redid", l),
+            _ => return,
+        };
+        let text = match labels.as_slice() {
+            [] => return,
+            [one] => format!("{verb}: {}", one.as_str().unwrap_or_default()),
+            many => format!("{verb} {} steps", many.len()),
+        };
+        self.notice(text, false);
+        self.flash_seq += 1;
+        self.flash = Some(Arc::new(Flash {
+            seq: self.flash_seq,
+            rev: r.rev,
+            clips: serde_json::from_value(r.result["clips"].clone()).unwrap_or_default(),
+            spans: serde_json::from_value(r.result["spans"].clone()).unwrap_or_default(),
+        }));
     }
 
     fn tool_notice(&mut self, job: &Job, result: &Result<Response>) {
@@ -2449,13 +2527,23 @@ impl Live {
                 .collect(),
         );
         self.proxy_dir = Arc::from(folder);
-        let history = open.editor.history_labels(1).unwrap_or_default();
+        let project = Arc::new(p.clone());
+        let path = open.store.path().to_path_buf();
+        let history = match self.project.as_mut().map(OpenProject::steps) {
+            Some(Ok(steps)) => steps,
+            Some(Err(e)) => {
+                self.notice(e.message, true);
+                Default::default()
+            }
+            None => Default::default(),
+        };
+        self.history_preview = None;
         self.project_snap = Some(ProjectSnap {
-            path: open.store.path().to_path_buf(),
-            project: Arc::new(p.clone()),
-            undo: history.undo.iter().rev().cloned().collect(),
-            redo: history.redo.iter().rev().cloned().collect(),
+            path,
+            project: project.clone(),
+            history: Arc::new(history),
         });
+        let p = &*project;
         let media: HashSet<String> = p.media.iter().map(|m| m.id.clone()).collect();
         self.selection.media.retain(|m| media.contains(m));
         self.selection.clips.retain(|c| p.clip(c).is_some());

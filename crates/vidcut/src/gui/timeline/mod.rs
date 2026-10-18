@@ -402,6 +402,7 @@ impl Workspace {
         let Some(p) = self.shown_project() else {
             return;
         };
+        self.history_update(ui.ctx());
         self.timeline_toolbar(ui, &p);
         let full = ui.available_rect_before_wrap();
         let others = p.tracks.len().saturating_sub(1).min(6) as f32;
@@ -433,11 +434,29 @@ impl Workspace {
             lower_rect.max,
         );
         let trimmed = self.dynamic_drawn(&p);
+        let before = match trimmed {
+            None => self.history_shown(),
+            Some(_) => None,
+        };
+        let marks = self.history_marks(ui.ctx());
         let playhead = match &trimmed {
             Some((_, at)) => *at,
             None => self.landed_playhead(),
         };
         let lower_scale = self.lower_scale(content, playhead);
+        let lower_scale = match marks.as_ref().filter(|m| m.focus).and_then(focus) {
+            Some((from, to))
+                if lower_scale.xf(to) < content.left()
+                    || lower_scale.xf(from) > content.right() =>
+            {
+                Scale::anchored(
+                    content.center().x,
+                    (from + to) as f64 / 2.0,
+                    self.timeline.options.ppf,
+                )
+            }
+            _ => lower_scale,
+        };
         let upper_ruler =
             Rect::from_min_size(upper_rect.min, vec2(upper_rect.width(), UPPER_RULER));
         let upper = Rows::layout(
@@ -473,13 +492,15 @@ impl Workspace {
         };
         self.timeline.layout = Some(layout.clone());
 
-        let (drawn, edit_at) = match &trimmed {
-            Some((q, at)) => (q, self.timeline.edit.is_some().then_some(*at)),
-            None => (&*p, None),
+        let (drawn, edit_at) = match (&trimmed, &before) {
+            (Some((q, at)), _) => (q, self.timeline.edit.is_some().then_some(*at)),
+            (None, Some(q)) => (&**q, None),
+            (None, None) => (&*p, None),
         };
-        let placed = match &trimmed {
-            Some((q, _)) => Arc::new(paint::placed(q)),
-            None => self.timeline.placed_for(&p),
+        let placed = match (&trimmed, &before) {
+            (Some((q, _)), _) => Arc::new(paint::placed(q)),
+            (None, Some(q)) => Arc::new(paint::placed(q)),
+            (None, None) => self.timeline.placed_for(&p),
         };
         let none = Vec::new();
         let placed_on = |t: &Track| placed.get(&t.id).unwrap_or(&none);
@@ -532,6 +553,9 @@ impl Workspace {
             }
             self.paint_boring(&painter, &layout.upper, &upper_scale, drawn);
             self.paint_silence(&painter, &layout.upper, &upper_scale, drawn);
+            if let Some(m) = &marks {
+                paint::marks(&painter, &layout.upper, &upper_scale, drawn, m);
+            }
             self.paint_edit_selection(
                 ui.ctx(),
                 &painter,
@@ -624,6 +648,9 @@ impl Workspace {
                 );
             }
             self.paint_silence(&painter, &layout.lower, &lower_scale, drawn);
+            if let Some(m) = &marks {
+                paint::marks(&painter, &layout.lower, &lower_scale, drawn, m);
+            }
             paint::playhead(
                 &painter,
                 lower_scale.xf(playhead),
@@ -2587,6 +2614,12 @@ impl From<Side> for vidcut_core::request::TrimSide {
             Side::Audio => Self::Audio,
         }
     }
+}
+
+fn focus(m: &crate::gui::history::Marks) -> Option<(i64, i64)> {
+    let from = m.spans.iter().map(|s| s.from).min()?;
+    let to = m.spans.iter().map(|s| s.to).max()?;
+    Some((from, to))
 }
 
 #[cfg(test)]

@@ -143,6 +143,9 @@ fn answer(line: &str, handler: &Handler, writer: &mut Stream) -> (Value, Result<
     if let Some(p) = v.get("params") {
         request["params"] = p.clone();
     }
+    if let Some(c) = v.get("client") {
+        request["client"] = c.clone();
+    }
     let envelope = match Envelope::from_json(request) {
         Ok(e) => e,
         Err(e) => return (id, Err(Error::usage(e))),

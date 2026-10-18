@@ -415,7 +415,7 @@ mod tests {
             .replace("\"ripple_on\": true", "\"ripple_on\": false");
         std::fs::write(store.path(), text).unwrap();
         let newest = store.load().unwrap().history_view(1).unwrap().undo;
-        assert_eq!(newest[0].label, "external change");
+        assert_eq!(newest[0].step.label, crate::editor::EXTERNAL);
     }
 
     #[test]
