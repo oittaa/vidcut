@@ -12,12 +12,10 @@ use vidcut::gui::export::Dialogs;
 use vidcut::gui::workspace::{
     DynamicMode, DynamicTarget, EditSel, Side, TrackRef, Workspace, heard,
 };
-use vidcut::live::{
-    self, Audition, Capture, GuiChange, GuiDone, Heard, Origin, Presented, WindowChange,
-};
+use vidcut::live::{self, Audition, Capture, GuiChange, GuiDone, Origin, Presented, WindowChange};
 use vidcut_av::fixture::{self, Container, FixtureSpec, ImageSpec, VideoCodec};
 use vidcut_core::model::Settings;
-use vidcut_core::request::TrimSide;
+use vidcut_core::request::{TrimSide, ViewerMode};
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, Project, Store};
 
@@ -332,10 +330,7 @@ fn run_heard(target: DynamicTarget, mode: DynamicMode, end_edge: bool, speed: f6
 }
 
 fn heard_timeline(a: Audition) -> (Project, i64, f64) {
-    match a.heard {
-        Heard::Timeline(q) => (*q, a.at, a.speed),
-        Heard::Media(m) => panic!("heard media {m}, not the timeline"),
-    }
+    (*a.timeline, a.at, a.speed)
 }
 
 fn track_one() -> Vec<(String, i64, i64)> {
@@ -940,17 +935,68 @@ fn an_in_trim_forward_plays_the_incoming_clip_from_its_first_frame() {
 
 #[test]
 fn a_slip_forward_plays_the_clips_media_backward_from_its_first_frame() {
-    let a = run_heard(
+    let (q, at, speed) = heard_timeline(run_heard(
         DynamicTarget::Clips(vec!["c2".into()]),
         DynamicMode::Slip,
         false,
         1.0,
+    ));
+    let c2 = q.clip("c2").unwrap();
+    assert_eq!(
+        (c2.source_at(at), c2.source_at(at - 1), speed),
+        (100, 99, -1.0)
     );
-    let media = match &a.heard {
-        Heard::Media(m) => m.clone(),
-        Heard::Timeline(_) => panic!("a slip heard the timeline"),
-    };
-    assert_eq!((media.as_str(), a.at, a.speed), ("m1", 100, -1.0));
+}
+
+#[test]
+fn a_slip_plays_the_clip_as_the_timeline_plays_it() {
+    let gui = Gui::new();
+    gui.call("track.set", json!({ "track": "V1", "muted": true }));
+    gui.call(
+        "edit.change_speed",
+        json!({ "clips": ["c2"], "speed": -1.0, "ripple": false }),
+    );
+    let p = gui.h.snapshot().project.clone().unwrap().project;
+    let target = DynamicTarget::Clips(vec!["c2".into()]);
+    let (q, at, _) = heard_timeline(heard(&p, &target, DynamicMode::Slip, false, 0, 1.0).unwrap());
+    gui.quit();
+    let clips: usize = q.tracks.iter().map(|t| t.clips.len()).sum();
+    let c2 = q.clip("c2").unwrap();
+    assert_eq!(
+        (
+            q.track("V1").unwrap().muted,
+            clips,
+            c2.source_at(at),
+            c2.source_at(at - 1)
+        ),
+        (true, 1, 159, 160)
+    );
+}
+
+#[test]
+fn w_shows_the_timeline_viewer() {
+    let mut gui = Gui::new();
+    gui.call("player.seek", json!({ "at": 60, "viewer": "timeline" }));
+    gui.call("viewer.set", json!({ "mode": "source_tape" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.settle();
+    assert_eq!(gui.h.snapshot().viewer, ViewerMode::Timeline);
+    gui.quit();
+}
+
+#[test]
+fn a_dynamic_trim_run_shows_the_timeline_viewer() {
+    let mut gui = Gui::new();
+    gui.call("player.seek", json!({ "at": 60, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.call("viewer.set", json!({ "mode": "source_tape" }));
+    gui.settle();
+    gui.key(Key::L);
+    gui.settle();
+    assert_eq!(gui.h.snapshot().viewer, ViewerMode::Timeline);
+    gui.quit();
 }
 
 #[test]

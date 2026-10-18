@@ -259,13 +259,8 @@ pub(crate) enum Msg {
     Shutdown,
 }
 
-pub enum Heard {
-    Timeline(Box<Project>),
-    Media(String),
-}
-
 pub struct Audition {
-    pub heard: Heard,
+    pub timeline: Box<Project>,
     pub at: i64,
     pub speed: f64,
 }
@@ -2541,16 +2536,8 @@ impl Live {
         let Some(a) = audition else {
             return self.player.end_audition().is_some();
         };
-        let plan = match &a.heard {
-            Heard::Timeline(q) => render::flatten_lanes(q, 0, q.end()).map(|(plan, _)| plan),
-            Heard::Media(m) => match &self.project {
-                Some(open) => {
-                    render::tape(open.project(), std::slice::from_ref(m)).map(|(plan, _)| plan)
-                }
-                None => return false,
-            },
-        };
-        let Ok(plan) = plan else {
+        let q = &a.timeline;
+        let Ok((plan, _)) = render::flatten_lanes(q, 0, q.end()) else {
             return false;
         };
         let mut plan = self.preview_plan(plan);

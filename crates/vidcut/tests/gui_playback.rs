@@ -249,6 +249,11 @@ impl Gui {
         self.h.snapshot().timeline.position
     }
 
+    fn engine_position(&self) -> i64 {
+        let engine = self.port.engine.lock().unwrap().clone();
+        engine.map_or(0, |e| e.status().position)
+    }
+
     fn clips(&self) -> Vec<Value> {
         let tl = self.call("timeline.get", json!({}));
         let track = tl["tracks"]
@@ -637,6 +642,28 @@ fn a_dynamic_trim_run_plays_and_the_timeline_comes_back_at_the_cut() {
     let at = gui.clip("c1").1;
     gui.shows(at);
     assert!(!gui.h.snapshot().timeline.playing, "K left it playing");
+}
+
+#[test]
+fn a_dynamic_trim_run_plays_past_the_loop_and_the_loop_comes_back() {
+    let mut gui = Gui::new(VideoCodec::Vp9);
+    gui.call("marks.set", json!({ "in": "60f", "out": "100f" }));
+    gui.call("player.loop", json!({ "on": true }));
+    gui.call("player.seek", json!({ "at": "78f" }));
+    gui.key(Key::W);
+    gui.wait("W to take the playhead to the cut", |g| g.position() == 80);
+    gui.harness.key_press(Key::L);
+    gui.wait("the run's sound to play past the Out mark", |g| {
+        g.h.snapshot().timeline.playing && g.engine_position() > 105
+    });
+    gui.key(Key::K);
+    gui.wait("the run to stop", |g| !g.h.snapshot().timeline.playing);
+    gui.call("player.seek", json!({ "at": "90f" }));
+    gui.call("player.play", json!({}));
+    gui.wait("the loop to wrap at the Out mark", |g| {
+        g.h.snapshot().timeline.playing && g.position() < 90
+    });
+    gui.call("player.pause", json!({}));
 }
 
 #[test]

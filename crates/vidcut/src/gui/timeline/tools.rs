@@ -8,7 +8,7 @@ use crate::gui::export::{Ask, near_center};
 use crate::gui::theme;
 use crate::gui::timeline::geometry::{Rows, Scale};
 use crate::gui::workspace::{Workspace, dim};
-use crate::live::{Audition, Heard, MAX_SPEED, PlayerId};
+use crate::live::{Audition, MAX_SPEED, PlayerId};
 
 #[derive(Debug)]
 pub struct SilenceDialog {
@@ -157,7 +157,7 @@ pub fn heard(
                 _ => furthest(pending, dir, |b| trimmed(b).is_some()),
             };
             return Some(Audition {
-                heard: Heard::Timeline(Box::new(trimmed(by)?)),
+                timeline: Box::new(trimmed(by)?),
                 at: e.at + pending,
                 speed,
             });
@@ -175,15 +175,7 @@ pub fn heard(
         DynamicTarget::Clips(ids) => {
             let c = first_clip(&now, ids)?;
             if mode == DynamicMode::Slip {
-                let at = match end_edge {
-                    true => c.source_at(c.end() - 1),
-                    false => c.source_at(c.start),
-                };
-                return Some(Audition {
-                    heard: Heard::Media(c.media.clone()),
-                    at,
-                    speed: -speed,
-                });
+                return slip_heard(&now, c, end_edge, speed);
             }
             let t = now
                 .tracks
@@ -208,9 +200,43 @@ pub fn heard(
     let c = q.clip(&id)?;
     let at = (c.start..c.end()).min_by_key(|&x| (c.source_at(x) - source).abs())?;
     Some(Audition {
-        heard: Heard::Timeline(Box::new(q)),
+        timeline: Box::new(q),
         at,
         speed,
+    })
+}
+
+fn slip_heard(
+    p: &Project,
+    c: &vidcut_core::model::Clip,
+    end_edge: bool,
+    speed: f64,
+) -> Option<Audition> {
+    let source = match end_edge {
+        true => c.source_at(c.end() - 1),
+        false => c.source_at(c.start),
+    };
+    let mut q = p.clone();
+    for t in &mut q.tracks {
+        t.clips.retain(|x| x.id == c.id);
+        t.transitions.clear();
+    }
+    let room = q.media(&c.media).map_or(0, |m| q.media_frames(m)) * 16 + c.duration;
+    let moved = q.tracks.iter_mut().flat_map(|t| t.clips.iter_mut());
+    moved.filter(|x| x.id == c.id).for_each(|x| x.start += room);
+    let (edge, dir) = match speed > 0.0 {
+        true => (ops::Edge::Head, -1),
+        false => (ops::Edge::Tail, 1),
+    };
+    let grows = |k: i64| ops::trim(&mut q.clone(), &c.id, edge, dir * k, Some(false)).is_ok();
+    let k = furthest(0, 1, grows);
+    ops::trim(&mut q, &c.id, edge, dir * k, Some(false)).ok()?;
+    let c = q.clip(&c.id)?;
+    let at = (c.start..c.end()).min_by_key(|&x| (c.source_at(x) - source).abs())?;
+    Some(Audition {
+        timeline: Box::new(q),
+        at,
+        speed: -speed,
     })
 }
 
@@ -541,6 +567,7 @@ impl Workspace {
             });
         }
         self.timeline.dynamic = Some(Dynamic::default());
+        self.show_timeline();
         self.dynamic_edge();
         self.dynamic_to_head();
     }
@@ -666,6 +693,7 @@ impl Workspace {
         if playing && fresh {
             self.send("player.pause", json!({}));
         }
+        self.show_timeline();
         self.dynamic_to_head();
         self.dynamic_sound(speed);
     }
