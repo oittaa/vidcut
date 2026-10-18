@@ -1758,3 +1758,33 @@ fn a_named_step_in_a_folded_group_still_shows() {
     );
     gui.quit();
 }
+
+#[test]
+fn a_name_given_outside_the_gui_shows_in_its_history() {
+    let mut gui = Gui::new();
+    let path = gui._dir.path().join("p.vidcut");
+    let store = Store::open(&path).unwrap();
+    let mark = json!({ "method": "history.mark", "params": { "step": 2, "name": "Outside" } });
+    store
+        .transact(|ed| {
+            ed.apply(
+                Envelope::from_json(mark).unwrap(),
+                &vidcut::env::AvEnv::for_project(&path),
+                None,
+            )
+        })
+        .unwrap();
+    let started = Instant::now();
+    while gui
+        .h
+        .snapshot()
+        .project
+        .as_ref()
+        .is_some_and(|p| p.history.marks.is_empty())
+    {
+        assert!(started.elapsed() < Duration::from_secs(5), "no name");
+        std::thread::sleep(Duration::from_millis(20));
+        gui.settle();
+    }
+    gui.quit();
+}

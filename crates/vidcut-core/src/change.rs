@@ -174,11 +174,7 @@ impl Change {
         let going: HashSet<&str> = gone.iter().map(|(_, v)| self::id(v)).collect();
         list.retain(|x| !going.contains(id(x)));
         if let Some(order) = order {
-            let mut by_id: HashMap<String, T> =
-                list.drain(..).map(|x| (id(&x).to_string(), x)).collect();
-            for i in order {
-                list.push(by_id.remove(i).ok_or(format!("no {i}"))?);
-            }
+            reorder(list, order, id);
         }
         for (i, v) in come {
             if *i > list.len() {
@@ -216,6 +212,9 @@ impl Change {
                 }
                 if items.order.is_some() {
                     out.push(below(at, "#order"));
+                }
+                if !items.runs.is_empty() {
+                    out.push(at.clone());
                 }
                 for (k, c) in &items.changed {
                     at.push(k.clone());
@@ -271,6 +270,29 @@ pub fn overlap<'a>(a: &'a [Vec<String>], b: &'a [Vec<String>]) -> Option<&'a [St
         }
     }
     None
+}
+
+fn reorder<T>(list: &mut Vec<T>, order: &[String], id: impl Fn(&T) -> &str) {
+    let wanted: Vec<usize> = {
+        let at: HashMap<&str, usize> = list.iter().enumerate().map(|(i, x)| (id(x), i)).collect();
+        order
+            .iter()
+            .filter_map(|k| at.get(k.as_str()).copied())
+            .collect()
+    };
+    let mut slots = wanted.clone();
+    slots.sort_unstable();
+    let mut items: Vec<Option<T>> = list.drain(..).map(Some).collect();
+    let mut out: Vec<Option<T>> = std::iter::repeat_with(|| None).take(items.len()).collect();
+    for (slot, from) in slots.into_iter().zip(wanted) {
+        out[slot] = items[from].take();
+    }
+    for (i, x) in items.into_iter().enumerate() {
+        if x.is_some() {
+            out[i] = x;
+        }
+    }
+    list.extend(out.into_iter().flatten());
 }
 
 fn ids(list: &[Value]) -> Option<Vec<&str>> {
@@ -398,11 +420,7 @@ impl Items {
         let going: HashSet<&str> = gone.iter().map(|(_, v)| id(v)).collect();
         list.retain(|v| !going.contains(id(v)));
         if let Some(order) = order {
-            let mut by_id: HashMap<String, Value> =
-                list.drain(..).map(|v| (id(&v).to_string(), v)).collect();
-            for i in order {
-                list.push(by_id.remove(i).ok_or(format!("no {i}"))?);
-            }
+            reorder(list, order, id);
         }
         for (i, v) in come {
             if *i > list.len() {

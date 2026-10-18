@@ -223,8 +223,8 @@ impl crate::steps::Node for Entry {
         self.step.id
     }
 
-    fn time(&self) -> Option<u64> {
-        self.step.time
+    fn placed(&self) -> Option<u64> {
+        self.step.placed()
     }
 }
 
@@ -399,6 +399,10 @@ impl Editor {
 
     pub fn pending(&self) -> bool {
         !self.moved.is_empty()
+    }
+
+    pub fn unsaved(&self) -> (u64, usize) {
+        (self.project.rev, self.moved.len())
     }
 
     pub fn on_its_file(&self) -> bool {
@@ -800,6 +804,11 @@ impl Editor {
         };
         let steps = self.history_steps(&mut StepsCache::default())?;
         let Some(b) = steps.branch(id) else {
+            if let Some(outer) = steps.holder(id) {
+                return Err(Error::invalid(format!(
+                    "version {id} is inside version {outer}: restore version {outer} first"
+                )));
+            }
             return Err(Error::not_found(format!(
                 "no version {id} to restore: history.get lists them in branches"
             )));
@@ -846,12 +855,15 @@ impl Editor {
                 warnings: Vec::new(),
             });
         }
+        let now = now_ms();
         project.rev = self.project.rev + 1;
-        project.edited = Some(now_ms());
+        project.edited = Some(now);
         self.project = project;
         self.moved.extend(back);
-        self.moved
-            .extend(entries.into_iter().map(|e| Moved::Step(Box::new(e))));
+        self.moved.extend(entries.into_iter().map(|mut e| {
+            e.step.restored = Some(now);
+            Moved::Step(Box::new(e))
+        }));
         Ok(Response {
             rev: self.project.rev,
             changes,
@@ -864,6 +876,9 @@ impl Editor {
 
     fn revert(&mut self, step: usize, client: Option<Client>, dry_run: bool) -> Result<Response> {
         let (u, _) = self.history_counts();
+        if u == 0 {
+            return Err(Error::invalid("there are no steps to revert"));
+        }
         if step == 0 || step > u {
             return Err(Error::invalid(format!(
                 "step {step} isn't done: only steps 1 to {u} can be reverted"
@@ -897,8 +912,17 @@ impl Editor {
             }
         }
         let mut working = self.project.clone();
-        undo_step(&mut working, &target.change, false)
-            .map_err(|e| Error::conflict(format!("can't revert step {step}: {e}")))?;
+        if let Err(e) = undo_step(&mut working, &target.change, false) {
+            let why = match self.in_the_way(&target.change, later) {
+                Some(j) => format!(
+                    "step {} (\u{201c}{}\u{201d}) changed what is around it since",
+                    step + 1 + j,
+                    later[j].step.label
+                ),
+                None => e,
+            };
+            return Err(Error::conflict(format!("can't revert step {step}: {why}")));
+        }
         working.next_id = self.project.next_id.clone();
         let mut warnings = Vec::new();
         let dropped = otio::transitions::prune(&mut working);
@@ -928,6 +952,17 @@ impl Editor {
         )
     }
 
+    fn in_the_way(&self, change: &Change, later: &[Entry]) -> Option<usize> {
+        let mut then = self.project.clone();
+        for (j, e) in later.iter().enumerate().rev() {
+            undo_step(&mut then, &e.change, false).ok()?;
+            if undo_step(&mut then.clone(), change, false).is_ok() {
+                return Some(j);
+            }
+        }
+        None
+    }
+
     pub fn record_external(&mut self, project: Project) {
         let mut project = project;
         let (clips, spans) = crate::steps::places(&self.project, &project);
@@ -943,14 +978,13 @@ impl Editor {
         self.push(Entry {
             step: Step {
                 label: EXTERNAL.into(),
-                id: None,
                 kind,
                 by: Some(Client::new(ClientKind::File, None)),
                 time: Some(now),
                 opened: self.opened,
                 clips,
                 spans,
-                parts: Vec::new(),
+                ..Step::default()
             },
             change,
         });

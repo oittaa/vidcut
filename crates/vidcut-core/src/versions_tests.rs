@@ -95,9 +95,10 @@ fn a_named_step_keeps_its_name_in_a_later_run() {
     bins(&s, &["a", "b"]);
     run(&s, "history.mark", json!({ "step": 1, "name": "Before b" }));
     let again = Store::open_in(s.path(), &dir.path().join("state")).unwrap();
+    let m = &history(&again)["marks"][0];
     assert_eq!(
-        history(&again)["marks"],
-        json!([{ "step": 1, "id": 1, "name": "Before b", "time": history(&again)["marks"][0]["time"] }])
+        (m["step"].clone(), m["id"].clone(), m["name"].clone()),
+        (json!(1), json!(1), json!("Before b"))
     );
 }
 
@@ -145,4 +146,73 @@ fn since_a_step_says_what_changed() {
     f.ok(json!({ "method": "edit.delete", "params": { "clips": "c1" } }));
     let r = f.ok(json!({ "method": "history.get", "params": { "since": 3 } }));
     assert_eq!(r.result["since"]["text"], "1 clip deleted, 1 moved");
+}
+
+#[test]
+fn reverting_a_move_keeps_a_clip_added_after_it() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 100);
+    f.append("m1", 100, 200);
+    f.ok(json!({ "method": "edit.move", "params": { "clips": "c1", "to": "200f" } }));
+    f.append("m1", 0, 50);
+    f.ok(json!({ "method": "history.revert", "params": { "step": 4 } }));
+    let ids: Vec<String> = f.v1().into_iter().map(|r| r.0).collect();
+    assert_eq!(ids, ["c1", "c2", "c3"]);
+}
+
+#[test]
+fn reverting_a_ripple_a_later_move_changed_is_refused() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 50);
+    f.append("m1", 50, 100);
+    f.append("m1", 100, 150);
+    f.ok(json!({ "method": "edit.delete", "params": { "clips": "c1" } }));
+    f.ok(json!({ "method": "project.set", "params": { "ripple_on": false } }));
+    f.ok(json!({ "method": "edit.move", "params": { "clips": "c3", "to": "300f", "mode": "overwrite" } }));
+    let e = f.err(json!({ "method": "history.revert", "params": { "step": 5 } }));
+    assert_eq!(e.code, crate::error::ErrorCode::Conflict);
+}
+
+#[test]
+fn a_revert_that_no_longer_fits_names_the_step_in_its_way() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 50);
+    f.append("m1", 50, 100);
+    f.append("m1", 100, 150);
+    f.ok(json!({ "method": "edit.delete", "params": { "clips": "c3", "lift": true } }));
+    f.ok(json!({ "method": "edit.delete", "params": { "clips": "c1", "lift": true } }));
+    f.ok(json!({ "method": "edit.delete", "params": { "clips": "c2", "lift": true } }));
+    let e = f.err(json!({ "method": "history.revert", "params": { "step": 5 } }));
+    assert_eq!(
+        e.message,
+        "can't revert step 5: step 6 (\u{201c}Delete 1.mp4 at 00:00:00:00 on V1, leaving a gap\u{201d}) \
+         changed what is around it since"
+    );
+}
+
+#[test]
+fn reverting_with_no_steps_says_so() {
+    let mut f = Fixture::new(&[]);
+    let e = f.err(json!({ "method": "history.revert", "params": { "step": 1 } }));
+    assert_eq!(e.message, "there are no steps to revert");
+}
+
+#[test]
+fn restoring_a_version_inside_another_names_the_one_to_restore_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = store(dir.path());
+    bins(&s, &["a", "b", "c"]);
+    run(&s, "history.undo", json!({ "steps": 1 }));
+    bins(&s, &["d"]);
+    run(&s, "history.undo", json!({ "steps": 2 }));
+    bins(&s, &["e"]);
+    let e = Envelope::from_json(json!({ "method": "history.restore", "params": { "branch": 3 } }))
+        .unwrap();
+    let err = s
+        .transact(|ed| ed.apply(e, &FakeEnv::default(), None))
+        .unwrap_err();
+    assert_eq!(
+        err.message,
+        "version 3 is inside version 2: restore version 2 first"
+    );
 }

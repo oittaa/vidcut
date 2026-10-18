@@ -27,6 +27,8 @@ pub struct Step {
     pub time: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opened: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restored: Option<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub clips: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -46,7 +48,7 @@ impl Step {
 
 pub trait Node: Clone {
     fn id(&self) -> Option<u64>;
-    fn time(&self) -> Option<u64>;
+    fn placed(&self) -> Option<u64>;
 }
 
 impl Node for Step {
@@ -54,8 +56,8 @@ impl Node for Step {
         self.id
     }
 
-    fn time(&self) -> Option<u64> {
-        self.time
+    fn placed(&self) -> Option<u64> {
+        self.restored.or(self.time)
     }
 }
 
@@ -138,7 +140,7 @@ impl<T: Node> Tree<T> {
             self.branches = outer;
             self.branches.push(Branch {
                 after: pos,
-                replaced: step.time(),
+                replaced: step.placed(),
                 steps: tail,
                 branches: inner
                     .into_iter()
@@ -183,6 +185,18 @@ impl<T: Node> Tree<T> {
 
     pub fn branch(&self, id: u64) -> Option<&Branch<T>> {
         self.branches.iter().find(|b| b.id() == Some(id))
+    }
+
+    pub fn holder(&self, id: u64) -> Option<u64> {
+        fn within<T: Node>(branches: &[Branch<T>], id: u64) -> bool {
+            branches
+                .iter()
+                .any(|b| b.id() == Some(id) || within(&b.branches, id))
+        }
+        self.branches
+            .iter()
+            .find(|b| within(&b.branches, id))
+            .and_then(Branch::id)
     }
 
     pub fn map<U>(&self, f: &impl Fn(&T) -> U) -> Tree<U> {
@@ -698,6 +712,29 @@ mod tests {
             opened,
             ..Step::labeled("x")
         }
+    }
+
+    fn made(id: u64, time: u64) -> Step {
+        Step {
+            id: Some(id),
+            time: Some(time),
+            ..Step::labeled("x")
+        }
+    }
+
+    #[test]
+    fn a_restore_says_when_it_replaced_the_steps_it_replaced() {
+        let mut tree = Steps::default();
+        tree.place(made(1, 10));
+        tree.place(made(2, 20));
+        tree.back(1);
+        tree.place(made(3, 30));
+        tree.back(1);
+        tree.place(Step {
+            restored: Some(40),
+            ..made(2, 20)
+        });
+        assert_eq!(tree.branches[0].replaced, Some(40));
     }
 
     #[test]

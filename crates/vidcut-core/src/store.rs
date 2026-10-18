@@ -88,8 +88,11 @@ impl Store {
     }
 
     pub fn stamp(&self) -> Option<(u64, std::time::SystemTime)> {
-        let meta = std::fs::metadata(&self.path).ok()?;
-        Some((meta.len(), meta.modified().ok()?))
+        stamp_of(&self.path)
+    }
+
+    pub fn history_stamp(&self) -> Option<(u64, std::time::SystemTime)> {
+        stamp_of(&self.history_path)
     }
 
     pub fn read(&self) -> Result<String> {
@@ -178,9 +181,9 @@ impl Store {
     ) -> Result<(T, Option<String>)> {
         let lock = self.lock()?;
         let mut editor = self.load()?;
-        let rev = editor.project().rev;
+        let was = editor.unsaved();
         let out = f(&mut editor)?;
-        if editor.project().rev == rev && !editor.pending() {
+        if editor.unsaved() == was {
             return Ok((out, None));
         }
         let saved = self.save(&mut editor)?;
@@ -272,6 +275,11 @@ impl Store {
             }
         }
     }
+}
+
+fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
 }
 
 fn settled(file: &HistoryFile) -> std::io::Result<Option<(Tail, u64)>> {
@@ -496,6 +504,26 @@ mod tests {
         let good = history_text(store);
         std::fs::write(&store.history_path, format!("x{good}")).unwrap();
         good
+    }
+
+    #[test]
+    fn a_dry_run_after_an_outside_change_leaves_the_project_file_as_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = project_in(dir.path());
+        add_bin(&store, "a");
+        let outside = store.read().unwrap().replace("\"a\"", "\"z\"");
+        std::fs::write(&store.path, &outside).unwrap();
+        let request = json!({"method": "bins.add", "params": {"path": "b"}, "dry_run": true});
+        store
+            .transact(|ed| {
+                ed.apply(
+                    Envelope::from_json(request).unwrap(),
+                    &FakeEnv::default(),
+                    None,
+                )
+            })
+            .unwrap();
+        assert_eq!(store.read().unwrap(), outside);
     }
 
     #[test]
