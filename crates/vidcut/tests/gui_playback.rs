@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Key, Modifiers, Pos2, pos2, vec2};
@@ -71,6 +71,8 @@ static HOME: LazyLock<TempDir> = LazyLock::new(|| {
     dir
 });
 
+static ONE_GUI: Mutex<()> = Mutex::new(());
+
 struct Gui {
     h: live::Handle,
     session: Option<std::thread::JoinHandle<()>>,
@@ -79,11 +81,13 @@ struct Gui {
     render: Option<std::thread::JoinHandle<()>>,
     harness: Harness<'static, Workspace>,
     _dir: TempDir,
+    _alone: MutexGuard<'static, ()>,
 }
 
 impl Gui {
     fn new(codec: VideoCodec) -> Self {
         let _ = &*HOME;
+        let alone = ONE_GUI.lock().unwrap_or_else(|e| e.into_inner());
         let media = fixture::ensure(
             &FixtureSpec::new(codec, Container::Mkv, 3840, 2160, (60, 1), 240)
                 .gop(120)
@@ -170,6 +174,7 @@ impl Gui {
             render: Some(render),
             harness,
             _dir: dir,
+            _alone: alone,
         };
         gui.settle();
         gui
