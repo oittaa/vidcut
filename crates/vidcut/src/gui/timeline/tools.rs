@@ -642,7 +642,9 @@ impl Workspace {
             && at != self.snap.timeline.position
         {
             self.seek(PlayerId::Timeline, at, false);
-            self.timeline.landing = Some((at, std::time::Instant::now()));
+            self.timeline
+                .landing
+                .set(Some((at, std::time::Instant::now())));
         }
     }
 

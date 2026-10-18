@@ -966,6 +966,26 @@ fn a_slide_at_the_clips_end_plays_the_next_clip_from_its_first_frame() {
 }
 
 #[test]
+fn a_seek_right_after_a_run_stops_moves_the_lower_timeline() {
+    let mut gui = Gui::new();
+    gui.call("player.seek", json!({ "at": 55, "viewer": "timeline" }));
+    gui.settle();
+    gui.key(Key::W);
+    gui.settle();
+    gui.key(Key::L);
+    for _ in 0..30 {
+        gui.harness.step();
+    }
+    gui.key(Key::K);
+    gui.key(Key::Home);
+    gui.settle();
+    let l = gui.harness.state().timeline_layout().unwrap();
+    let centre = l.lower_scale.frame(l.lower_ruler.center().x);
+    assert!(centre < 1.0, "the lower timeline stayed at frame {centre}");
+    gui.quit();
+}
+
+#[test]
 fn w_takes_the_playhead_to_the_nearest_cut() {
     let mut gui = Gui::new();
     gui.call("player.seek", json!({ "at": 50, "viewer": "timeline" }));
