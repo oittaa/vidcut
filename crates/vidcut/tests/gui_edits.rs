@@ -1745,3 +1745,16 @@ fn opening_the_history_from_the_top_bar_gives_it_the_keys() {
     assert_eq!(wait_for_preview(&mut gui).step, 3);
     gui.quit();
 }
+
+#[test]
+fn a_named_step_in_a_folded_group_still_shows() {
+    let mut gui = Gui::new();
+    gui.call("history.mark", json!({ "step": 2, "name": "First cut" }));
+    open_history(&mut gui);
+    assert!(
+        gui.harness
+            .query_by_label_contains("First cut: Append")
+            .is_some()
+    );
+    gui.quit();
+}

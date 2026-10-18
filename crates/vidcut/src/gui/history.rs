@@ -88,6 +88,7 @@ enum Row {
     Part(usize, usize),
     Branch(usize, bool),
     Twig(usize, usize),
+    Flag(usize),
 }
 
 enum Act {
@@ -791,9 +792,11 @@ impl Workspace {
             Row::Original => Some(0),
             Row::Step(i, _) => Some(i + 1),
             Row::Group(g, _) => Some(all[g].to),
+            Row::Flag(i) => Some(i + 1),
             Row::Opened(_) | Row::Part(..) | Row::Branch(..) | Row::Twig(..) => None,
         };
-        let current = state == Some(steps.done) && !matches!(row, Row::Group(_, true));
+        let current =
+            state == Some(steps.done) && !matches!(row, Row::Group(_, true) | Row::Flag(_));
         let cursor = self.history.cursor.is_some() && state == self.history.cursor;
         let branch = |bi: usize| -> &Branch<Step> { &steps.branches[bi] };
         let named = match row {
@@ -810,6 +813,11 @@ impl Workspace {
             Row::Part(i, j) => steps.line[i].parts.get(j).cloned().unwrap_or_default(),
             Row::Branch(bi, _) => branch_label(branch(bi), now),
             Row::Twig(bi, k) => branch(bi).steps[k].label.clone(),
+            Row::Flag(i) => {
+                let s = &steps.line[i];
+                let name = s.id.and_then(|id| steps.named(id)).unwrap_or_default();
+                format!("{name}: {}", s.label)
+            }
         };
         r.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Button, true, current, &named)
@@ -828,7 +836,7 @@ impl Workspace {
         }
         let mid = rect.center().y;
         let depth = match row {
-            Row::Step(_, true) | Row::Part(..) | Row::Twig(..) => 1.0,
+            Row::Step(_, true) | Row::Part(..) | Row::Twig(..) | Row::Flag(_) => 1.0,
             _ => 0.0,
         };
         let mut x = rect.left() + 4.0 + depth * 18.0;
@@ -1049,6 +1057,29 @@ impl Workspace {
                 ui.painter()
                     .galley(pos2(x, mid - text.size().y / 2.0), text, c.text_dim);
             }
+            Row::Flag(i) => {
+                let s = &steps.line[i];
+                if let Some(name) = s.id.and_then(|id| steps.named(id)) {
+                    x += flag(ui, pos2(x, mid), name);
+                }
+                let color = if i < steps.done { c.text } else { c.text_dim };
+                let text = one_line(ui, &s.label, right - x - 8.0, small, color);
+                ui.painter()
+                    .galley(pos2(x, mid - text.size().y / 2.0), text, color);
+                if r.hovered() {
+                    self.history.hovered = Some(i + 1);
+                }
+                if r.clicked() {
+                    acts.push(Act::Go(i + 1));
+                }
+                let r = r.on_hover_text(step_tip(s, i + 1, i < steps.done, p));
+                r.context_menu(|ui| {
+                    if ui.button("Go Here").clicked() {
+                        acts.push(Act::Go(i + 1));
+                    }
+                    names_menu(ui, steps, i + 1, &mut acts);
+                });
+            }
         }
         acts
     }
@@ -1107,6 +1138,11 @@ impl Workspace {
                         step(&mut rows, j, true);
                     }
                 } else {
+                    rows.extend(
+                        (g.from..g.to)
+                            .filter(|&j| steps.line[j].id.and_then(|id| steps.named(id)).is_some())
+                            .map(Row::Flag),
+                    );
                     for j in g.from..g.to {
                         branches(&mut rows, j + 1);
                     }
