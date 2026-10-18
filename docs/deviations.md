@@ -164,3 +164,13 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Resolve:** the manual says K held with L plays forward slowly with pitch-corrected sound on macOS (p. 871), so elsewhere the slowed sound is lower; K held with J plays backward with slowed sound. Studio 21.1.1 on Windows plays it slowed; its pitch wasn't checked.
 - **vidcut:** sound played at any speed but 1×, slow play included, keeps its pitch on every system, backward too ([D54](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:** one behavior everywhere, and slowed speech at its own pitch stays easy to follow when listening for a cut.
+
+## X31. A file is in the pool once
+- **Resolve:** importing a file into another bin adds a second item for it, with its own media id; importing it into the bin that holds it adds nothing (Studio 21.1.1, through its scripting API).
+- **vidcut:** a file, or an image sequence, is one pool item. Importing it again keeps its id; Import Media Folder, or an import into a bin, moves it into that bin ([D53](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:** scripts, the command log and OTIO files name media by id. Two items for one file would split its marks, color and proxy, and an agent importing a folder again would double the pool.
+
+## X32. Import Media Folder names what it left out
+- **Resolve:** a file it can't read, a text file or one that only looks like a video, is left out without a word, and a folder without media imports nothing (Studio 21.1.1, through its scripting API).
+- **vidcut:** the result and the notice name each file skipped and why, and a folder without media is an error ([D53](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:** as with [X29](#x29-a-dynamic-trim-run-says-why-it-stopped): a card or render folder imported for an agent to cut must not lose a clip unnoticed.
