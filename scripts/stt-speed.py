@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """How fast speech recognition models run on each device of this computer,
-through transcribe.cpp: the time to load each model, then two runs over the
-same audio, and the device memory the model holds after them. Each model
-and device runs in a process of its own.
+through transcribe.cpp. Each model and device runs in a process of its own,
+and prints:
+
+- load (seconds): opening the model file and setting it up on the device,
+  before any audio.
+- run 1, run 2 (seconds): transcribing the same audio twice, the first run
+  with the device still warming up.
+- speed (times real time): seconds of audio per second of run 2.
+- held (MB): device memory the model still holds after the runs; - for
+  the CPU, and where a device doesn't report its memory.
 
     python3 scripts/stt-speed.py [--audio FILE] [--seconds S] [--devices KINDS] [--json FILE] [MODEL[@PIECE]...]
 
@@ -184,7 +191,7 @@ def child(audio, seconds, kind, index, path, piece):
             runs.append(time.perf_counter() - t)
     after = free_bytes(tc, kind, index)
     model.close()
-    held = (before - after) / 1048576 if before is not None and after is not None else None
+    held = (before - after) / 1048576 if kind != "cpu" and None not in (before, after) else None
     name = f"{device.name} ({device.description})" if getattr(device, "description", None) else device.name
     print(json.dumps({"device": name, "load_s": load, "runs_s": runs, "audio_s": len(pcm) / 16000, "held_mb": held}))
 
@@ -213,7 +220,7 @@ def main():
     except (IndexError, ValueError):
         sys.exit(listed.stderr.strip() or "listing the devices failed")
     rows = []
-    print(f"{'model':36} {'device':44} {'load':>6} {'run 1':>8} {'run 2':>8} {'speed':>6} {'held':>8}")
+    print(f"{'model':36} {'device':44} {'load (s)':>8} {'run 1 (s)':>9} {'run 2 (s)':>9} {'speed (x)':>9} {'held (MB)':>9}")
     for path, piece in models:
         name = Path(path).name + (f"@{piece}" if piece else "")
         for kind, index in found:
@@ -228,9 +235,9 @@ def main():
                 continue
             r["model"] = name
             rows.append(r)
-            held = f"{r['held_mb']:.0f} MB" if r["held_mb"] is not None else "-"
-            print(f"{name:36} {r['device'][:44]:44} {r['load_s']:5.2f}s {r['runs_s'][0]:7.2f}s "
-                  f"{r['runs_s'][1]:7.2f}s {r['audio_s'] / r['runs_s'][1]:5.0f}x {held:>8}", flush=True)
+            held = f"{r['held_mb']:.0f}" if r["held_mb"] is not None else "-"
+            print(f"{name:36} {r['device'][:44]:44} {r['load_s']:8.2f} {r['runs_s'][0]:9.1f} "
+                  f"{r['runs_s'][1]:9.1f} {r['audio_s'] / r['runs_s'][1]:9.0f} {held:>9}", flush=True)
     if a.json:
         with open(a.json, "w") as f:
             json.dump(rows, f, indent=1)
