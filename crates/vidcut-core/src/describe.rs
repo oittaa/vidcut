@@ -1,9 +1,23 @@
 use serde_json::Value;
 
 use crate::model::Project;
+use crate::time::{Keyword, RangeSpec, TimeSpec};
 
 pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> String {
-    let d = Words { params, project };
+    describe_at(method, params, project, None)
+}
+
+pub fn describe_at(
+    method: &str,
+    params: &Value,
+    project: Option<&Project>,
+    playhead: Option<i64>,
+) -> String {
+    let d = Words {
+        params,
+        project,
+        playhead,
+    };
     match method {
         "project.set" => format!("Project: {}", d.settings()),
         "project.open" => format!("Open {}", d.file("path")),
@@ -50,20 +64,26 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
         "edit.overwrite" => format!("Overwrite {} at {}", d.source(), d.time("at")),
         "edit.ripple_overwrite" => format!("Ripple Overwrite {}", d.source()),
         "edit.place_on_top" => format!("Place On Top {} at {}", d.source(), d.time("at")),
-        "edit.split" => format!("Split at {}{}", d.time("at"), d.split_clips()),
+        "edit.split" => d.split(),
         "edit.join" if d.list("clips").len() > 1 => format!("Join {}", d.clips("clips")),
         "edit.join" => format!("Join the clips at {}", d.time("at")),
         "edit.dissolve" if d.flag("all") => "Add dissolves to all edits".to_string(),
         "edit.dissolve" if !d.list("clips").is_empty() => {
             format!("Add dissolves to {}", d.clips("clips"))
         }
-        "edit.dissolve" => format!("Add a dissolve at {}", d.time("at")),
+        "edit.dissolve" => format!("Add a dissolve at {}{}", d.time("at"), d.track_or_v1()),
         "edit.remove_transition" if d.flag("all") => {
             "Clear the transitions from all edits".to_string()
         }
-        "edit.remove_transition" => format!("Make the edit at {} a cut", d.time("at")),
-        "edit.delete" if d.flag("lift") => format!("Delete {}, leaving a gap", d.clips("clips")),
-        "edit.delete" => format!("Delete {}", d.clips("clips")),
+        "edit.remove_transition" => {
+            format!("Make the edit at {}{} a cut", d.time("at"), d.track_or_v1())
+        }
+        "edit.delete" if d.flag("lift") => format!(
+            "Delete {}{}, leaving a gap",
+            d.clips("clips"),
+            d.place("clips", None)
+        ),
+        "edit.delete" => format!("Delete {}{}", d.clips("clips"), d.place("clips", None)),
         "edit.delete_range" => format!("Delete {}", d.range("range")),
         "edit.close_gap" => format!("Close the gap at {}", d.time("at")),
         "edit.move" => format!(
@@ -71,23 +91,46 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
             d.clips("clips"),
             d.time("to"),
             d.on_track()
+                .or_else(|| d.track_of("clips"))
+                .unwrap_or_default()
         ),
         "edit.replace" => format!("Replace {} with {}", d.clips("onto"), d.clips("clip")),
-        "edit.trim" => format!("Trim the {} of {} {}", d.edge(), d.clips("clip"), d.by()),
-        "edit.roll" => format!(
-            "Roll the cut at the {} of {} {}",
+        "edit.trim" => format!(
+            "Trim the {} of {} {}{}",
             d.edge(),
             d.clips("clip"),
-            d.by()
+            d.by(),
+            d.place("clip", d.params["edge"].as_str())
         ),
-        "edit.slip" => format!("Slip {} {}", d.clips("clip"), d.by()),
+        "edit.roll" => format!(
+            "Roll the cut {} {} {}{}",
+            match d.params["edge"].as_str() {
+                Some("head") => "before",
+                _ => "after",
+            },
+            d.clips("clip"),
+            d.by(),
+            d.place("clip", d.params["edge"].as_str())
+        ),
+        "edit.slip" => format!(
+            "Slip {} {}{}",
+            d.clips("clip"),
+            d.by(),
+            d.place("clip", None)
+        ),
         "edit.decompose" => format!("Decompose {}", d.clips("clips")),
-        "edit.slide" => format!("Slide {} {}", d.clips("clip"), d.by()),
+        "edit.slide" => format!(
+            "Slide {} {}{}",
+            d.clips("clip"),
+            d.by(),
+            d.place("clip", None)
+        ),
         "edit.audio_roll" => format!(
-            "Move the audio cut at the {} of {} {}",
+            "Move the audio cut at the {} of {} {}{}",
             d.edge(),
             d.clips("clip"),
-            d.by()
+            d.by(),
+            d.place("clip", d.params["edge"].as_str())
         ),
         "edit.ripple_delete_silence" => format!("Ripple Delete Silence in {}", d.clips("clips")),
         "edit.detect_scene_cuts" => format!("Detect Scene Cuts in {}", d.clips("clips")),
@@ -99,7 +142,7 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
         "edit.change_duration" => format!(
             "Change the duration of {} to {}",
             d.clips("clips"),
-            d.time("duration")
+            d.length("duration")
         ),
         "edit.change_speed" => format!(
             "Change the speed of {} to {}",
@@ -140,6 +183,11 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
         "preferences.set" => format!("Preferences: {}", compact(params)),
         "history.undo" => "Undo".into(),
         "history.redo" => "Redo".into(),
+        "history.go" => match params["step"].as_u64() {
+            Some(0) => "Go back to the start of the undo history".into(),
+            Some(n) => format!("Go to step {n} of the undo history"),
+            None => "Go to a step of the undo history".into(),
+        },
         "apply" => match params["label"].as_str() {
             Some(l) => l.to_string(),
             None => format!(
@@ -256,6 +304,7 @@ fn frames(n: i64) -> String {
 struct Words<'a> {
     params: &'a Value,
     project: Option<&'a Project>,
+    playhead: Option<i64>,
 }
 
 impl Words<'_> {
@@ -289,8 +338,17 @@ impl Words<'_> {
                 (Some(f), None) => format!("{f}f"),
                 _ => n.to_string(),
             },
-            Value::String(s) => s.clone(),
-            _ => "the playhead".into(),
+            Value::String(s) => match (TimeSpec::parse(s), self.project) {
+                (Ok(t), Some(p)) => p
+                    .time_context(self.playhead)
+                    .resolve(&t)
+                    .map_or_else(|_| self.unresolved(s), |f| p.settings.timecode(f)),
+                _ => self.unresolved(s),
+            },
+            _ => match (self.playhead, self.project) {
+                (Some(f), Some(p)) => p.settings.timecode(f),
+                _ => "the playhead".into(),
+            },
         };
         match &self.params[key] {
             Value::Array(a) if !a.is_empty() => a.iter().map(one).collect::<Vec<_>>().join(", "),
@@ -298,12 +356,53 @@ impl Words<'_> {
         }
     }
 
-    fn range(&self, key: &str) -> String {
-        match &self.params[key] {
-            Value::String(s) => s.clone(),
-            Value::Null => "the timeline marks".into(),
-            other => other.to_string(),
+    fn length(&self, key: &str) -> String {
+        let frames = match (&self.params[key], self.project) {
+            (Value::Number(n), _) => n.as_i64(),
+            (Value::String(s), Some(p)) => TimeSpec::parse(s)
+                .ok()
+                .and_then(|t| p.time_context(None).duration(&t).ok()),
+            _ => None,
+        };
+        match (frames, self.project) {
+            (Some(f), Some(p)) => p.settings.length_timecode(f),
+            _ => self.text(key),
         }
+    }
+
+    fn range(&self, key: &str) -> String {
+        match (&self.params[key], self.project) {
+            (Value::String(s), Some(p)) => RangeSpec::parse(s)
+                .ok()
+                .and_then(|r| p.time_context(None).range(&r).ok())
+                .map_or_else(
+                    || s.clone(),
+                    |(a, b)| {
+                        format!(
+                            "{}\u{2013}{}",
+                            p.settings.timecode(a),
+                            p.settings.timecode(b)
+                        )
+                    },
+                ),
+            (Value::String(s), None) => s.clone(),
+            (Value::Null, _) => "the timeline marks".into(),
+            (other, _) => other.to_string(),
+        }
+    }
+
+    fn source_range(&self) -> Option<String> {
+        let s = self.params["range"].as_str()?;
+        let p = self.project?;
+        let media = p.media(self.list("media").first()?)?;
+        let (a, b) = crate::editor::media_context(p, media, None)
+            .range(&RangeSpec::parse(s).ok()?)
+            .ok()?;
+        Some(format!(
+            "{}\u{2013}{}",
+            p.settings.length_timecode(a),
+            p.settings.length_timecode(b)
+        ))
     }
 
     fn media(&self, key: &str) -> String {
@@ -330,51 +429,127 @@ impl Words<'_> {
         }
     }
 
+    fn ids(&self, key: &str) -> Vec<String> {
+        self.list(key)
+            .into_iter()
+            .map(|r| match self.project {
+                Some(p) if r.contains('@') => crate::editor::resolve_clip(p, &r, None).unwrap_or(r),
+                _ => r,
+            })
+            .collect()
+    }
+
+    fn clip_name(&self, id: &str) -> String {
+        let Some(p) = self.project else {
+            return id.to_string();
+        };
+        match p.clip(id) {
+            Some(c) => match &c.name {
+                Some(n) if !n.is_empty() => n.clone(),
+                _ => p
+                    .media(&c.media)
+                    .map_or_else(|| id.to_string(), |m| m.name.clone()),
+            },
+            None => id.to_string(),
+        }
+    }
+
+    fn names_of(&self, ids: &[String]) -> String {
+        match ids {
+            [] => "the selected clips".into(),
+            [one] => self.clip_name(one),
+            [a, b] if self.clip_name(a) != self.clip_name(b) => {
+                format!("{} and {}", self.clip_name(a), self.clip_name(b))
+            }
+            _ => format!("{} clips", ids.len()),
+        }
+    }
+
     fn clips(&self, key: &str) -> String {
-        let ids = self.list(key);
-        match ids.len() {
-            0 => "the selected clips".into(),
-            1..=4 => ids.join(", "),
-            n => format!("{} clips", n),
+        self.names_of(&self.ids(key))
+    }
+
+    fn place(&self, key: &str, edge: Option<&str>) -> String {
+        let ids = self.ids(key);
+        let (Some(p), [id]) = (self.project, ids.as_slice()) else {
+            return String::new();
+        };
+        let Some((t, c)) = p.find_clip(id) else {
+            return String::new();
+        };
+        let clip = &p.tracks[t].clips[c];
+        let at = match edge {
+            Some("tail") => clip.end(),
+            _ => clip.start,
+        };
+        format!(" at {} on {}", p.settings.timecode(at), p.tracks[t].id)
+    }
+
+    fn track_of(&self, key: &str) -> Option<String> {
+        let p = self.project?;
+        let ids = self.ids(key);
+        let (t, _) = p.find_clip(ids.first()?)?;
+        Some(format!(" on {}", p.tracks[t].id))
+    }
+
+    fn track_or_v1(&self) -> String {
+        format!(" on {}", self.params["track"].as_str().unwrap_or("V1"))
+    }
+
+    fn unresolved(&self, s: &str) -> String {
+        match TimeSpec::parse(s) {
+            Ok(TimeSpec::Keyword(Keyword::Playhead)) => "the playhead".into(),
+            _ => s.to_string(),
         }
     }
 
-    fn of_clips(&self) -> String {
-        if self.list("clips").is_empty() {
-            String::new()
-        } else {
-            format!(" in {}", self.clips("clips"))
+    fn frame(&self, v: &Value) -> Option<i64> {
+        match v {
+            Value::Number(n) => n.as_i64(),
+            Value::String(s) => self
+                .project?
+                .time_context(self.playhead)
+                .resolve(&TimeSpec::parse(s).ok()?)
+                .ok(),
+            Value::Null => self.playhead,
+            _ => None,
         }
     }
 
-    fn split_clips(&self) -> String {
+    fn split(&self) -> String {
+        let at = self.time("at");
+        let only = self.ids("clips");
         let frames: Option<Vec<i64>> = match &self.params["at"] {
-            Value::Array(a) => a.iter().map(Value::as_i64).collect(),
-            v => v.as_i64().map(|f| vec![f]),
+            Value::Array(a) => a.iter().map(|v| self.frame(v)).collect(),
+            v => self.frame(v).map(|f| vec![f]),
         };
         let (Some(p), Some(frames)) = (self.project, frames) else {
-            return self.of_clips();
+            return match only.as_slice() {
+                [] => format!("Split at {at}"),
+                ids => format!("Split {} at {at}", self.names_of(ids)),
+            };
         };
-        let cut: Vec<String> = self
-            .list("clips")
-            .into_iter()
-            .filter(|id| {
-                p.clip(id)
-                    .is_some_and(|c| frames.iter().any(|&f| c.start < f && f <= c.end()))
-            })
+        let cut: Vec<(String, &str)> = p
+            .tracks
+            .iter()
+            .filter(|t| !only.is_empty() || !t.locked)
+            .flat_map(|t| t.clips.iter().map(move |c| (c, t.id.as_str())))
+            .filter(|(c, _)| only.is_empty() || only.contains(&c.id))
+            .filter(|(c, _)| frames.iter().any(|&f| c.start < f && f < c.end()))
+            .map(|(c, t)| (c.id.clone(), t))
             .collect();
-        match cut.len() {
-            0 => String::new(),
-            1..=4 => format!(" in {}", cut.join(", ")),
-            n => format!(" in {n} clips"),
+        match cut.as_slice() {
+            [] => format!("Split at {at}"),
+            [(id, track)] => format!("Split {} at {at} on {track}", self.clip_name(id)),
+            _ => {
+                let ids: Vec<String> = cut.iter().map(|(id, _)| id.clone()).collect();
+                format!("Split {} at {at}", self.names_of(&ids))
+            }
         }
     }
 
-    fn on_track(&self) -> String {
-        match self.params["track"].as_str() {
-            Some(t) => format!(" on {t}"),
-            None => String::new(),
-        }
+    fn on_track(&self) -> Option<String> {
+        self.params["track"].as_str().map(|t| format!(" on {t}"))
     }
 
     fn files(&self, key: &str) -> String {
@@ -411,9 +586,10 @@ impl Words<'_> {
         let what = if self.flag("tape") {
             "the Source Tape span".to_string()
         } else {
-            let range = match self.params["range"].as_str() {
-                Some(r) => format!(" {r}"),
-                None => String::new(),
+            let range = match (self.source_range(), self.params["range"].as_str()) {
+                (Some(r), _) => format!(" {r}"),
+                (None, Some(r)) => format!(" {r}"),
+                (None, None) => String::new(),
             };
             format!("{}{range}", self.media("media"))
         };
@@ -424,7 +600,7 @@ impl Words<'_> {
         } else {
             ""
         };
-        format!("{what}{only}{}", self.on_track())
+        format!("{what}{only}{}", self.on_track().unwrap_or_default())
     }
 
     fn in_out(&self) -> String {
@@ -453,7 +629,14 @@ impl Words<'_> {
     }
 
     fn by(&self) -> String {
-        match self.params["by"].as_i64() {
+        let n = match &self.params["by"] {
+            Value::String(s) => match (crate::time::TimeSpec::parse(s), self.project) {
+                (Ok(t), Some(p)) => p.time_context(None).duration(&t).ok(),
+                _ => return format!("by {s}"),
+            },
+            v => v.as_i64(),
+        };
+        match n {
             Some(n) if n > 0 => format!("by +{}", frames(n)),
             Some(n) => format!("by {}", frames(n)),
             None => format!("to {}", self.time("to")),

@@ -3,6 +3,7 @@ use std::sync::mpsc::Sender;
 
 use notify::Watcher;
 use vidcut_core::model::Settings;
+use vidcut_core::steps::{Steps, StepsCache};
 use vidcut_core::{Editor, Env, Envelope, Project, Response, Result, Store};
 
 use super::Msg;
@@ -13,6 +14,9 @@ pub struct OpenProject {
     disk: String,
     stamp: Option<(u64, std::time::SystemTime)>,
     pub history_error: Option<String>,
+    told: Option<String>,
+    opened: u64,
+    steps: StepsCache,
     _watcher: Option<notify::RecommendedWatcher>,
 }
 
@@ -34,7 +38,9 @@ impl OpenProject {
         let store = Store::open(path)?;
         let stamp = store.stamp();
         let disk = store.read()?;
-        let editor = store.load_text(&disk)?;
+        let opened = crate::when::now_ms();
+        let mut editor = store.load_text(&disk)?;
+        editor.opened_at(opened);
         let watcher = watch(store.path(), inbox, || Msg::FileChanged);
         Ok(Self {
             store,
@@ -42,12 +48,29 @@ impl OpenProject {
             disk,
             stamp,
             history_error: None,
+            told: None,
+            opened,
+            steps: StepsCache::default(),
             _watcher: watcher,
         })
     }
 
     pub fn project(&self) -> &Project {
         self.editor.project()
+    }
+
+    pub fn trouble(&mut self) -> Option<String> {
+        let now = self.editor.history_trouble().map(String::from);
+        if now == self.told {
+            return None;
+        }
+        self.told.clone_from(&now);
+        now
+    }
+
+    pub fn steps(&mut self) -> Result<Steps> {
+        self.store.recover(&mut self.editor);
+        self.editor.history_steps(&mut self.steps)
     }
 
     pub fn reload(&mut self) -> Result<bool> {
@@ -70,7 +93,8 @@ impl OpenProject {
         if text == self.disk {
             return Ok(false);
         }
-        let editor = self.store.load_text(&text)?;
+        let mut editor = self.store.load_text(&text)?;
+        editor.opened_at(self.opened);
         let changed = editor.project() != self.editor.project()
             || editor.history_counts() != self.editor.history_counts();
         self.editor = editor;
@@ -84,6 +108,7 @@ impl OpenProject {
         env: &dyn Env,
         playhead: Option<i64>,
     ) -> (Result<Response>, bool) {
+        self.store.recover(&mut self.editor);
         if !envelope.request.is_mutation() {
             let refreshed = self.refresh().unwrap_or(false);
             return (self.editor.apply(envelope, env, playhead), refreshed);

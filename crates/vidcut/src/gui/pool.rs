@@ -1207,7 +1207,7 @@ impl Workspace {
                 let date = u64::try_from(m.mtime_ns / 1_000_000)
                     .ok()
                     .filter(|&ms| ms > 0)
-                    .and_then(super::workspace::local_time);
+                    .and_then(crate::when::local_time);
                 ui.label(date.map_or_else(|| "-".to_string(), |d| d.minutes()));
             }
             3 => {

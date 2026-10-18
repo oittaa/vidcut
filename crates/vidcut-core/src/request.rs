@@ -819,10 +819,31 @@ pub enum Request {
         #[serde(default = "one")]
         steps: u32,
     },
-    /// How many steps there are to undo and redo (`undo_steps`,
-    /// `redo_steps`), and the newest 100 of each by label, newest first.
+    /// Go to a step of the undo history as one action: undo or redo until
+    /// `step` steps are done. 0 is the project before them all;
+    /// `history.get` numbers the steps.
+    #[serde(rename = "history.go")]
+    HistoryGo { step: usize },
+    /// The undo history. `steps` lists them oldest first, numbered from 1:
+    /// each with its `label`, who made it (`by`: `gui`, `cli`, `mcp`, `ipc`
+    /// or `file`, another program writing the project file, and a `name`
+    /// the client gave), when (`time`, milliseconds since 1970 UTC), the
+    /// clips and frames it changed (`clips`, `spans`), the commands of an
+    /// `apply` (`parts`), when the GUI that made it opened the project
+    /// (`opened`), and whether it is `done` (redo steps are not). `at` is
+    /// the step the project is at. `groups` are runs of steps one client
+    /// made in a row (an agent's edits). `undo_steps` and `redo_steps`
+    /// count them; `undo` and `redo` are the newest 100 labels of each,
+    /// newest first.
     #[serde(rename = "history.get")]
-    HistoryGet {},
+    HistoryGet {
+        /// The first step `steps` lists (default: the newest `limit`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<usize>,
+        /// How many steps `steps` lists (default 100).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+    },
     /// Apply requests atomically as one undo step.
     #[serde(rename = "apply")]
     Apply {
@@ -1041,8 +1062,8 @@ pub enum Request {
     #[serde(rename = "gui.quit")]
     GuiQuit {},
     /// Open a window for the person at the GUI: `quick_export`, `export`,
-    /// `jobs`, `log`, `mixer`, `preferences` or `help` (the keyboard
-    /// shortcuts). Answers what `gui.state` does.
+    /// `jobs`, `log`, `mixer`, `preferences`, `history` (the undo history)
+    /// or `help` (the keyboard shortcuts). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
@@ -1308,6 +1329,8 @@ pub enum GuiPanel {
     Preferences,
     /// The keyboard shortcuts.
     Help,
+    /// The undo history.
+    History,
 }
 
 /// Media Pool sort orders.
@@ -1618,7 +1641,7 @@ impl Request {
                     | Self::AnalyzeBlack { .. }
                     | Self::AnalyzeLoudness { .. }
                     | Self::StoryboardRender { .. }
-                    | Self::HistoryGet {}
+                    | Self::HistoryGet { .. }
                     | Self::Schema { .. }
                     | Self::Doctor {}
                     | Self::Reset { .. }
@@ -1671,11 +1694,58 @@ impl Request {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClientKind {
+    Gui,
+    Cli,
+    Mcp,
+    Ipc,
+    File,
+    #[serde(other)]
+    Other,
+}
+
+impl ClientKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Gui => "GUI",
+            Self::Cli => "CLI",
+            Self::Mcp => "MCP",
+            Self::Ipc => "IPC",
+            Self::File => "File",
+            Self::Other => "Other",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Client {
+    pub kind: ClientKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl Client {
+    pub fn new(kind: ClientKind, name: Option<String>) -> Self {
+        let name = name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        Self { kind, name }
+    }
+
+    pub fn shown(&self) -> String {
+        match &self.name {
+            Some(n) => n.clone(),
+            None => self.kind.name().to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Envelope {
     pub request: Request,
     pub if_rev: Option<u64>,
     pub dry_run: bool,
+    pub client: Option<Client>,
 }
 
 impl Envelope {
@@ -1684,7 +1754,13 @@ impl Envelope {
             request,
             if_rev: None,
             dry_run: false,
+            client: None,
         }
+    }
+
+    pub fn by(mut self, client: Client) -> Self {
+        self.client = Some(client);
+        self
     }
 
     pub fn normalized(mut self) -> Self {
@@ -1715,6 +1791,14 @@ impl Envelope {
             .remove("method")
             .and_then(|m| m.as_str().map(str::to_string))
             .ok_or("missing \"method\"")?;
+        let client = match obj.remove("client") {
+            Some(v) => Some(
+                serde_json::from_value::<Client>(v)
+                    .map_err(|e| format!("client: {e}"))
+                    .map(|c| Client::new(c.kind, c.name))?,
+            ),
+            None => None,
+        };
         let mut params = obj.remove("params");
         let mut take = |key: &str| -> Option<serde_json::Value> {
             obj.remove(key).or_else(|| {
@@ -1736,6 +1820,7 @@ impl Envelope {
             request: Request::from_parts(&method, params)?,
             if_rev,
             dry_run,
+            client,
         })
     }
 }

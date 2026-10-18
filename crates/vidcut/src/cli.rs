@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use serde_json::{Map, Value, json};
+use vidcut_core::request::{Client, ClientKind};
 use vidcut_core::{Envelope, Error, Request, Result};
 
 pub const POSITIONAL: &[(&str, &[&str])] = &[
@@ -67,6 +68,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("presets.delete", &["name"]),
     ("history.undo", &["steps"]),
     ("history.redo", &["steps"]),
+    ("history.go", &["step"]),
     ("viewer.set", &["mode"]),
     ("viewer.load", &["media"]),
     ("player.seek", &["at"]),
@@ -543,6 +545,15 @@ pub fn command() -> Command {
                 .env("VIDCUT_SOCKET")
                 .value_name("PID|SOCKET")
                 .help("Send to this running GUI instead of choosing one"),
+        )
+        .arg(
+            Arg::new("client")
+                .help_heading("Global options")
+                .long("client")
+                .global(true)
+                .env("VIDCUT_CLIENT")
+                .value_name("NAME")
+                .help("Who the undo history says made the change, like an agent's or a script's name"),
         );
     let mut groups: Vec<(String, Vec<&Method>)> = Vec::new();
     for m in methods() {
@@ -710,6 +721,7 @@ pub struct Cli {
     pub if_rev: Option<u64>,
     pub headless: bool,
     pub instance: Option<String>,
+    pub client: Option<String>,
     chosen: Option<(Vec<String>, ArgMatches)>,
 }
 
@@ -740,6 +752,7 @@ impl Cli {
             if_rev: m.get_one::<u64>("if_rev").copied(),
             headless: m.get_flag("headless"),
             instance: m.get_one::<String>("instance").cloned(),
+            client: m.get_one::<String>("client").cloned(),
             chosen: (!names.is_empty()).then(|| (names, leaf.clone())),
         }
     }
@@ -761,6 +774,7 @@ impl Cli {
                 let mut env = Envelope::from_json(v).map_err(Error::usage)?;
                 env.if_rev = env.if_rev.or(self.if_rev);
                 env.dry_run |= self.dry_run;
+                env.client.get_or_insert_with(|| self.client());
                 return Ok(Some(Action::Run(Box::new(env))));
             }
             "apply" => {
@@ -814,7 +828,12 @@ impl Cli {
             request,
             if_rev: self.if_rev,
             dry_run: self.dry_run,
+            client: Some(self.client()),
         })
+    }
+
+    fn client(&self) -> Client {
+        Client::new(ClientKind::Cli, self.client.clone())
     }
 }
 

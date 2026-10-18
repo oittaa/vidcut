@@ -16,6 +16,7 @@ use super::shuttle::Jkl;
 use super::theme::{self, Deco};
 use super::timeline::TimelineView;
 use crate::live::{self, Filmstrip, PlayerId, Snapshot};
+use crate::when::{LocalTime, local_time};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct TimecodeEntry {
@@ -102,6 +103,7 @@ pub struct Workspace {
     pub(super) mixer: super::mixer::Mixer,
     pub(super) preferences: super::preferences::PreferencesUi,
     pub(super) help: super::help::HelpUi,
+    pub(super) history: super::history::HistoryUi,
     pub(super) project_ui: super::project::ProjectUi,
     pub(super) import: super::import::ImportUi,
     pub(super) relink: super::relink::RelinkUi,
@@ -109,54 +111,6 @@ pub struct Workspace {
     pub(super) folders: super::folders::Folders,
     pub(super) tiles: Option<super::tiles::Tiles>,
     pub(super) shuttle: super::shuttle::Shuttle,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct LocalTime {
-    year: i32,
-    month: u32,
-    day: u32,
-    hour: u32,
-    minute: u32,
-    second: u32,
-}
-
-impl LocalTime {
-    fn full(&self) -> String {
-        format!(
-            "{}-{:02}-{:02} {:02}:{:02}:{:02}",
-            self.year, self.month, self.day, self.hour, self.minute, self.second
-        )
-    }
-
-    pub(super) fn minutes(&self) -> String {
-        format!(
-            "{}-{:02}-{:02} {:02}:{:02}",
-            self.year, self.month, self.day, self.hour, self.minute
-        )
-    }
-}
-
-pub(super) fn local_time(ms: u64) -> Option<LocalTime> {
-    let secs = libc::time_t::try_from(ms / 1000).ok()?;
-    // SAFETY: an all-zero `tm` is valid, and localtime_r (localtime_s) writes only the `tm` given.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    #[cfg(unix)]
-    if unsafe { libc::localtime_r(&secs, &mut tm) }.is_null() {
-        return None;
-    }
-    #[cfg(windows)]
-    if unsafe { libc::localtime_s(&mut tm, &secs) } != 0 {
-        return None;
-    }
-    Some(LocalTime {
-        year: tm.tm_year + 1900,
-        month: u32::try_from(tm.tm_mon + 1).ok()?,
-        day: u32::try_from(tm.tm_mday).ok()?,
-        hour: u32::try_from(tm.tm_hour).ok()?,
-        minute: u32::try_from(tm.tm_min).ok()?,
-        second: u32::try_from(tm.tm_sec).ok()?,
-    })
 }
 
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
@@ -234,6 +188,7 @@ impl Workspace {
             mixer: Default::default(),
             preferences: Default::default(),
             help: Default::default(),
+            history: super::history::HistoryUi::load(),
             project_ui: Default::default(),
             import: Default::default(),
             relink: Default::default(),
@@ -272,6 +227,7 @@ impl Workspace {
             GuiPanel::Mixer => self.show_mixer = true,
             GuiPanel::Preferences => self.open_preferences(ctx),
             GuiPanel::Help => self.help.open = true,
+            GuiPanel::History => self.history.show(),
         }
     }
 
@@ -314,6 +270,7 @@ impl Workspace {
             GuiPanel::Mixer => self.show_mixer = false,
             GuiPanel::Preferences => self.preferences.open = false,
             GuiPanel::Help => self.help.open = false,
+            GuiPanel::History => self.history.close(),
         }
     }
 
@@ -328,6 +285,7 @@ impl Workspace {
             (GuiPanel::Mixer, self.show_mixer),
             (GuiPanel::Preferences, self.preferences.open),
             (GuiPanel::Help, self.help.open),
+            (GuiPanel::History, self.history.open),
         ];
         live::GuiState {
             edit: self.edit_point(),
@@ -779,12 +737,20 @@ impl Workspace {
                     .snap
                     .project
                     .as_ref()
-                    .map(|p| (p.undo.first().cloned(), p.redo.first().cloned()))
+                    .map(|p| {
+                        let label = |s: &vidcut_core::steps::Step| s.label.clone();
+                        (p.history.undo().map(label), p.history.redo().map(label))
+                    })
                     .unwrap_or_default();
+                let named = |verb: &str, label: &Option<String>| match label {
+                    Some(l) => format!("{verb} {l}"),
+                    None => verb.to_string(),
+                };
                 if ui
                     .add_enabled(
                         undo.is_some(),
-                        egui::Button::new(format!("Undo {}", undo.unwrap_or_default())),
+                        egui::Button::new(named("Undo", &undo))
+                            .shortcut_text(super::keys("Ctrl+Z")),
                     )
                     .clicked()
                 {
@@ -793,12 +759,16 @@ impl Workspace {
                 if ui
                     .add_enabled(
                         redo.is_some(),
-                        egui::Button::new(format!("Redo {}", redo.unwrap_or_default())),
+                        egui::Button::new(named("Redo", &redo))
+                            .shortcut_text(super::keys("Ctrl+Shift+Z")),
                     )
                     .clicked()
                 {
                     self.send("history.redo", json!({}));
                 }
+                ui.add_enabled_ui(self.snap.project.is_some(), |ui| {
+                    ui.menu_button("History", |ui| self.history_menu(ui));
+                });
             });
             ui.menu_button("Timeline", |ui| {
                 let mut on = self.snap.audio_scrubbing;
@@ -851,6 +821,21 @@ impl Workspace {
                 if self.project().is_some() {
                     ui.toggle_value(&mut self.show_mixer, "Mixer")
                         .on_hover_text("Track faders, mute, solo and meters");
+                    let mut open = self.history.open;
+                    if ui
+                        .toggle_value(&mut open, "History")
+                        .on_hover_text(
+                            "Every step, who made it and when; hover one to see the timeline as \
+                             it was",
+                        )
+                        .changed()
+                    {
+                        if open {
+                            self.history.show();
+                        } else {
+                            self.history.close();
+                        }
+                    }
                 }
                 self.jobs_button(ui);
                 if let Some(e) = &self.snap.preview_error {
@@ -1139,6 +1124,7 @@ impl Workspace {
         if self.help.open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape)) {
             self.help.open = false;
         }
+        self.history_keys(ctx);
         if ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Comma)) {
             self.open_preferences(ctx);
         }
@@ -1659,6 +1645,7 @@ impl Workspace {
         self.export_windows(&ctx);
         self.preferences_window(&ctx);
         self.help_window(&ctx);
+        self.history_frame();
         self.project_windows(&ctx);
         self.import_window(&ctx);
         self.relink_window(&ctx);
@@ -1710,6 +1697,16 @@ impl Workspace {
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Card, |ui| self.pool_panel(ui))
             });
+        if self.history.open {
+            egui::Panel::left("history")
+                .resizable(true)
+                .default_size(self.history.width)
+                .min_size(super::history::MIN_WIDTH)
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.history_panel(ui))
+                });
+        }
         egui::CentralPanel::default()
             .frame(theme::card(theme::colors().panel_dark))
             .show(ui, |ui| {

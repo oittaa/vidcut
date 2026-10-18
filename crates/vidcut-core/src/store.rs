@@ -53,7 +53,7 @@ impl Store {
         Self::open_in(path, &state_dir())
     }
 
-    fn open_in(path: &Path, state: &Path) -> Result<Self> {
+    pub(crate) fn open_in(path: &Path, state: &Path) -> Result<Self> {
         let path = crate::dirs::canonical(path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 Error::not_found(format!("no project file {}", path.display()))
@@ -104,18 +104,58 @@ impl Store {
         let project = parse(&self.path, self.dir(), text)?;
         let file = self.history_file();
         let hash = text_hash(text);
-        let Some((tail, end)) = file.tail() else {
-            return Ok(Editor::new(project, History::default()));
+        let (tail, end) = match settled(&file) {
+            Ok(Some(found)) => found,
+            Ok(None) => return Ok(Editor::new(project, History::default())),
+            Err(e) => return Ok(Editor::unreadable(project, hash, self.trouble(&e))),
         };
         if tail.hash == hash {
             return Ok(Editor::on_file(project, file, hash));
         }
         let Some(last) = last_saved(&file, end) else {
-            return Ok(Editor::new(project, History::default()));
+            let why = "its last saved project can't be rebuilt from it".to_string();
+            return Ok(Editor::unreadable(project, hash, self.trouble(&why)));
         };
         let mut editor = Editor::on_file(last, file, tail.hash);
         editor.record_external(project);
         Ok(editor)
+    }
+
+    fn trouble(&self, why: &dyn std::fmt::Display) -> String {
+        format!(
+            "the undo history {} can't be read ({why}). This session's steps are kept in \
+             memory and the file is left as it is",
+            self.history_path.display()
+        )
+    }
+
+    pub fn project_at(
+        &self,
+        past: &mut crate::past::Past,
+        current: Project,
+        step: usize,
+    ) -> Result<std::sync::Arc<Project>> {
+        past.project_at(
+            &Editor::on_file(current, self.history_file(), String::new()),
+            step,
+        )
+    }
+
+    pub fn recover(&self, editor: &mut Editor) -> bool {
+        let Some(hash) = editor.blocked_on().map(String::from) else {
+            return false;
+        };
+        if editor.pending() {
+            return false;
+        }
+        let file = self.history_file();
+        match file.read_tail() {
+            Ok(Some((tail, _))) if tail.hash == hash => {
+                editor.saved_to(file, hash);
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn load_project(&self) -> Result<Editor> {
@@ -154,9 +194,6 @@ impl Store {
     pub fn save(&self, editor: &mut Editor) -> Result<Saved> {
         let text = to_json(editor.project_mut(), self.dir())?;
         let history = self.save_history(editor, &text_hash(&text));
-        if history.is_err() {
-            editor.lost_file();
-        }
         write_atomic(&self.path, &text).map_err(|e| io(&self.path, e))?;
         Ok(Saved {
             text,
@@ -168,16 +205,28 @@ impl Store {
     }
 
     fn save_history(&self, editor: &mut Editor, hash: &str) -> std::io::Result<Tail> {
-        let moved = editor.take_moved();
         let file = self.history_file();
-        if let Some((_, stands_on)) = &editor.file
-            && let Some((tail, end)) = file.tail()
-            && tail.hash == *stands_on
-        {
-            let tail = file.append(&tail, end, moved, hash)?;
-            editor.saved_to(file, hash.into());
-            return Ok(tail);
+        let found = settled(&file);
+        let stands_on = editor.stands_on().map(String::from);
+        match found {
+            Ok(Some((tail, end))) if Some(&tail.hash) == stands_on.as_ref() => {
+                let moved = editor.take_moved();
+                let tail = file.append(&tail, end, moved, hash)?;
+                editor.saved_to(file, hash.into());
+                return Ok(tail);
+            }
+            Ok(None) => {}
+            Ok(Some(_)) => {
+                let why = "another program changed it since this session read it";
+                editor.block(self.trouble(&why));
+                return Err(std::io::Error::other(why));
+            }
+            Err(e) => {
+                editor.block(self.trouble(&e));
+                return Err(e);
+            }
         }
+        editor.take_moved();
         let h = editor.held();
         let mut base = serde_json::to_value(editor.project()).map_err(std::io::Error::other)?;
         for e in h.undo.iter().rev() {
@@ -221,6 +270,19 @@ impl Store {
                 }
                 Err(std::fs::TryLockError::Error(e)) => return Err(io(&self.lock_path, e)),
             }
+        }
+    }
+}
+
+fn settled(file: &HistoryFile) -> std::io::Result<Option<(Tail, u64)>> {
+    let mut tries = 0;
+    loop {
+        match file.read_tail() {
+            Err(_) if tries < 10 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            found => return found,
         }
     }
 }
@@ -415,7 +477,7 @@ mod tests {
             .replace("\"ripple_on\": true", "\"ripple_on\": false");
         std::fs::write(store.path(), text).unwrap();
         let newest = store.load().unwrap().history_view(1).unwrap().undo;
-        assert_eq!(newest[0].label, "external change");
+        assert_eq!(newest[0].step.label, crate::editor::EXTERNAL);
     }
 
     #[test]
@@ -428,6 +490,74 @@ mod tests {
         text.push_str("{\"step\": {\"lab");
         std::fs::write(&store.history_path, text).unwrap();
         assert_eq!(store.load().unwrap().history_counts(), (2, 0));
+    }
+
+    fn break_history(store: &Store) -> String {
+        let good = history_text(store);
+        std::fs::write(&store.history_path, format!("x{good}")).unwrap();
+        good
+    }
+
+    #[test]
+    fn a_history_that_cant_be_read_isnt_written_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = project_in(dir.path());
+        add_bin(&store, "a");
+        let good = break_history(&store);
+        add_bin(&store, "b");
+        assert_eq!(history_text(&store), format!("x{good}"));
+    }
+
+    #[test]
+    fn a_history_that_cant_be_read_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = project_in(dir.path());
+        add_bin(&store, "a");
+        break_history(&store);
+        let editor = store.load().unwrap();
+        assert!(
+            editor
+                .history_trouble()
+                .is_some_and(|t| t.contains("can't be read"))
+        );
+    }
+
+    #[test]
+    fn steps_made_while_the_history_was_unreadable_join_it_when_it_reads_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = project_in(dir.path());
+        add_bin(&store, "a");
+        let good = break_history(&store);
+        let mut editor = store.load().unwrap();
+        let request = json!({"method": "bins.add", "params": {"path": "b"}});
+        editor
+            .apply(
+                Envelope::from_json(request).unwrap(),
+                &FakeEnv::default(),
+                None,
+            )
+            .unwrap();
+        assert!(store.save(&mut editor).unwrap().history_error.is_some());
+        std::fs::write(&store.history_path, good).unwrap();
+        let request = json!({"method": "bins.add", "params": {"path": "c"}});
+        editor
+            .apply(
+                Envelope::from_json(request).unwrap(),
+                &FakeEnv::default(),
+                None,
+            )
+            .unwrap();
+        store.save(&mut editor).unwrap();
+        let labels: Vec<String> = store
+            .load()
+            .unwrap()
+            .history_view(3)
+            .unwrap()
+            .undo
+            .into_iter()
+            .map(|e| e.step.label)
+            .collect();
+        assert_eq!(labels, ["New bin a", "New bin b", "New bin c"]);
     }
 
     #[test]

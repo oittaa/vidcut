@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use vidcut_core::model::Settings;
+use vidcut_core::request::{Client, ClientKind};
 use vidcut_core::store::Store;
 use vidcut_core::time::Rational;
 use vidcut_core::{Envelope, Error, Project, Request, Result};
@@ -26,7 +27,8 @@ tracks above it and audio tracks below; these tools are the same requests the vi
 (create: true makes a new one). Times are strings with a unit: \"450f\" (frames), \"15s\", \"1m30s\", \
 \"00:01:00:00\"; a bare number is a frame. Ranges: \"10s..20s\" or \"1m..+5s\". Clips: their id \
 (\"c17\") or \"V1@1m\" (the clip on V1 at 1 minute). Each change is one undo step (history_undo), \
-and changes take dry_run: true to preview. Look at your edit with frame_render or storyboard_render, \
+under your name in the person's History window; history_get lists the steps with who made them, \
+and history_go goes back to any of them. Changes take dry_run: true to preview. Look at your edit with frame_render or storyboard_render, \
 which return images. If a vidcut GUI has the project open, calls run inside it and the person at it \
 sees each edit; viewer_*, player_*, selection_*, gui_*, jobs_* and pool_set need that GUI.";
 
@@ -75,6 +77,7 @@ pub fn serve(project: Option<PathBuf>, options: RouteOptions) -> Result<()> {
         options,
         running: Mutex::new(HashMap::new()),
         methods,
+        client: Mutex::new(None),
     });
     let mut calls = Vec::new();
     for line in std::io::stdin().lock().lines() {
@@ -102,6 +105,10 @@ pub fn serve(project: Option<PathBuf>, options: RouteOptions) -> Result<()> {
         };
         match method {
             "initialize" => {
+                *state.client.lock().unwrap_or_else(PoisonError::into_inner) =
+                    message["params"]["clientInfo"]["name"]
+                        .as_str()
+                        .map(String::from);
                 let asked = message["params"]["protocolVersion"]
                     .as_str()
                     .unwrap_or_default();
@@ -158,6 +165,7 @@ struct State {
     options: RouteOptions,
     running: Mutex<HashMap<String, Arc<AtomicBool>>>,
     methods: HashMap<String, String>,
+    client: Mutex<Option<String>>,
 }
 
 impl State {
@@ -223,6 +231,13 @@ impl State {
             Err(e) => return failure(&Error::usage(e)),
         };
         absolute_paths(&mut envelope.request);
+        envelope.client = Some(Client::new(
+            ClientKind::Mcp,
+            self.client
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone(),
+        ));
         let project = self.project();
         match ipc::run(
             project.as_deref(),

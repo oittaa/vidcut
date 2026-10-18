@@ -617,20 +617,28 @@ pub fn print(method: &str, r: &Response, json: bool) {
             }
         }
         "history.get" => {
-            for (title, key) in [("undo (newest first)", "undo"), ("redo", "redo")] {
-                let items = r.result[key].as_array().cloned().unwrap_or_default();
-                let steps = r.result[format!("{key}_steps")].as_u64().unwrap_or(0);
+            let v = &r.result;
+            let at = v["at"].as_u64().unwrap_or(0);
+            let total =
+                v["undo_steps"].as_u64().unwrap_or(0) + v["redo_steps"].as_u64().unwrap_or(0);
+            println!("at step {at} of {total}");
+            let now = crate::when::now_ms();
+            for s in v["steps"].as_array().into_iter().flatten() {
+                let n = s["step"].as_u64().unwrap_or(0);
+                let by = match (s["by"]["name"].as_str(), s["by"]["kind"].as_str()) {
+                    (Some(name), _) => name.to_string(),
+                    (None, Some(kind)) => kind.to_uppercase(),
+                    _ => "-".into(),
+                };
+                let when = s["time"]
+                    .as_u64()
+                    .map_or_else(|| "-".into(), |t| crate::when::ago(t, now));
                 println!(
-                    "{title}: {}",
-                    if steps == 0 {
-                        "-".into()
-                    } else {
-                        steps.to_string()
-                    }
+                    "{}{n:>5}  {by:<12}  {when:<16}  {}{}",
+                    if n == at { '*' } else { ' ' },
+                    s["label"].as_str().unwrap_or_default(),
+                    if s["done"] == true { "" } else { "  (undone)" }
                 );
-                for l in items {
-                    println!("  {}", l.as_str().unwrap_or_default());
-                }
             }
         }
         _ => println!(

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::editor::{Entry, HISTORY_CAP, History, Moved};
+use crate::steps::{Step, Steps, StepsCache};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Tail {
@@ -22,18 +23,49 @@ pub(crate) struct Tail {
 enum Line {
     Of(PathBuf),
     Base(Value),
-    Step(Step),
+    Step(Placed),
     Undo(usize),
     Redo(usize),
     Saved(Tail),
 }
 
 #[derive(Serialize, Deserialize)]
-struct Step {
+struct Placed {
     at: usize,
     #[serde(flatten)]
     entry: Entry,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Brief {
+    Of(serde::de::IgnoredAny),
+    Base(serde::de::IgnoredAny),
+    Step(BriefStep),
+    Undo(usize),
+    Redo(usize),
+    Saved(serde::de::IgnoredAny),
+}
+
+#[derive(Deserialize)]
+struct BriefStep {
+    at: usize,
+    label: String,
+    #[serde(default)]
+    by: Option<crate::request::Client>,
+    #[serde(default)]
+    time: Option<u64>,
+    #[serde(default)]
+    opened: Option<u64>,
+    #[serde(default)]
+    clips: Vec<String>,
+    #[serde(default)]
+    spans: Vec<crate::steps::Span>,
+    #[serde(default)]
+    parts: Vec<String>,
+}
+
+const MARK: u64 = 256;
 
 fn line(l: &Line) -> String {
     let mut s = serde_json::to_string(l).expect("history lines are JSON");
@@ -42,7 +74,7 @@ fn line(l: &Line) -> String {
 }
 
 fn step_line(at: usize, entry: &Entry) -> String {
-    line(&Line::Step(Step {
+    line(&Line::Step(Placed {
         at,
         entry: entry.clone(),
     }))
@@ -141,21 +173,50 @@ impl HistoryFile {
     }
 
     pub(crate) fn tail(&self) -> Option<(Tail, u64)> {
-        let mut file = File::open(&self.path).ok()?;
+        self.read_tail().ok().flatten()
+    }
+
+    fn open(&self) -> std::io::Result<Option<File>> {
+        match File::open(&self.path) {
+            Ok(f) => Ok(Some(f)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub(crate) fn read_tail(&self) -> std::io::Result<Option<(Tail, u64)>> {
+        match self.open()? {
+            Some(mut file) => self.tail_in(&mut file).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub(crate) fn steps_now(&self, cache: &mut StepsCache) -> std::io::Result<bool> {
+        let Some(mut file) = self.open()? else {
+            return Ok(false);
+        };
+        let (_, end) = self.tail_in(&mut file)?;
+        self.steps_in(&mut file, end, cache)?;
+        Ok(true)
+    }
+
+    fn tail_in(&self, file: &mut File) -> std::io::Result<(Tail, u64)> {
+        file.seek(SeekFrom::Start(0))?;
         let mut first = String::new();
         {
             use std::io::BufRead;
-            std::io::BufReader::new(&mut file)
-                .read_line(&mut first)
-                .ok()?;
+            std::io::BufReader::new(&mut *file).read_line(&mut first)?;
         }
-        match serde_json::from_str(&first).ok()? {
-            Line::Of(of) if of == self.of => {}
-            _ => return None,
+        match serde_json::from_str(&first) {
+            Ok(Line::Of(of)) if of == self.of => {}
+            Ok(Line::Of(of)) => {
+                return Err(bad(&format!("it is the history of {}", of.display())));
+            }
+            _ => return Err(bad("its first line doesn't say whose history it is")),
         }
-        let end = file.metadata().ok()?.len();
+        let end = file.metadata()?.len();
         let mut found = None;
-        lines_back(&mut file, end, CHUNK, |at, text| {
+        lines_back(file, end, CHUNK, |at, text| {
             if text.ends_with('\n')
                 && let Ok(Line::Saved(t)) = serde_json::from_str(text)
             {
@@ -163,9 +224,8 @@ impl HistoryFile {
                 return Ok(false);
             }
             Ok(true)
-        })
-        .ok()?;
-        found
+        })?;
+        found.ok_or_else(|| bad("it has no complete save"))
     }
 
     pub(crate) fn top(
@@ -186,6 +246,25 @@ impl HistoryFile {
         m: usize,
     ) -> std::io::Result<(Vec<String>, Vec<String>)> {
         self.top_with(tail, end, n, m, label_of)
+    }
+
+    pub(crate) fn between(
+        &self,
+        tail: &Tail,
+        end: u64,
+        lo: usize,
+        hi: usize,
+    ) -> std::io::Result<Vec<Entry>> {
+        let d = tail.undo;
+        let text = |t: &str| Ok(t.to_string());
+        let lines: Vec<String> = if hi <= d {
+            let (undo, _) = self.top_with(tail, end, d - lo, 0, text)?;
+            undo.into_iter().skip(d - hi).rev().collect()
+        } else {
+            let (_, redo) = self.top_with(tail, end, 0, hi - d, text)?;
+            redo.into_iter().skip(lo - d).collect()
+        };
+        lines.iter().map(|l| entry_of(l)).collect()
     }
 
     fn top_with<T>(
@@ -239,6 +318,52 @@ impl HistoryFile {
             return Err(bad("fewer steps to redo than the file says"));
         }
         Ok((undo, redo))
+    }
+
+    fn steps_in(&self, file: &mut File, end: u64, cache: &mut StepsCache) -> std::io::Result<()> {
+        let mut mark = vec![0; MARK.min(end) as usize];
+        file.seek(SeekFrom::Start(end - mark.len() as u64))?;
+        file.read_exact(&mut mark)?;
+        let kept = cache.path == self.path && cache.end > 0 && cache.end <= end && {
+            let mut was = vec![0; cache.mark.len()];
+            file.seek(SeekFrom::Start(cache.end - was.len() as u64))?;
+            file.read_exact(&mut was)?;
+            was == cache.mark
+        };
+        let (mut steps, start) = if kept {
+            (std::mem::take(&mut cache.steps), cache.end)
+        } else {
+            (Steps::default(), 0)
+        };
+        let mut text = String::new();
+        file.seek(SeekFrom::Start(start))?;
+        file.take(end - start).read_to_string(&mut text)?;
+        for l in text.lines() {
+            match serde_json::from_str::<Brief>(l) {
+                Ok(Brief::Step(b)) => {
+                    steps.done = b.at.saturating_sub(1).min(steps.line.len());
+                    steps.place(Step {
+                        label: b.label,
+                        by: b.by,
+                        time: b.time,
+                        opened: b.opened,
+                        clips: b.clips,
+                        spans: b.spans,
+                        parts: b.parts,
+                    });
+                }
+                Ok(Brief::Undo(n)) => steps.back(n),
+                Ok(Brief::Redo(n)) => steps.forward(n),
+                _ => {}
+            }
+        }
+        *cache = StepsCache {
+            path: self.path.clone(),
+            end,
+            mark,
+            steps,
+        };
+        Ok(())
     }
 
     pub(crate) fn read_all(&self, end: u64) -> std::io::Result<(Value, History)> {
@@ -450,10 +575,10 @@ mod tests {
     use crate::change::Change;
 
     fn step(k: i64) -> Entry {
-        Entry {
-            label: format!("step {k}"),
-            change: Change::between(&json!({"n": k - 1}), &json!({"n": k})).unwrap(),
-        }
+        Entry::new(
+            format!("step {k}"),
+            Change::between(&json!({"n": k - 1}), &json!({"n": k})).unwrap(),
+        )
     }
 
     fn history(dir: &Path, n: i64) -> HistoryFile {
@@ -467,7 +592,7 @@ mod tests {
     }
 
     fn labels(entries: &[Entry]) -> Vec<&str> {
-        entries.iter().map(|e| e.label.as_str()).collect()
+        entries.iter().map(|e| e.step.label.as_str()).collect()
     }
 
     #[test]
@@ -527,7 +652,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = history(dir.path(), 2);
         let (tail, end) = file.tail().unwrap();
-        let moved = vec![Moved::Undo(1), Moved::Step(step(3))];
+        let moved = vec![Moved::Undo(1), Moved::Step(Box::new(step(3)))];
         file.append(&tail, end, moved, "y").unwrap();
         let (tail, end) = file.tail().unwrap();
         let (undo, _) = file.top(&tail, end, 2, 0).unwrap();
@@ -562,11 +687,83 @@ mod tests {
         let file = history(dir.path(), 11);
         let meanwhile = || {
             let (tail, end) = file.tail().unwrap();
-            file.append(&tail, end, vec![Moved::Step(step(12))], "y")
+            file.append(&tail, end, vec![Moved::Step(Box::new(step(12)))], "y")
         };
         file.compact_to(10, meanwhile).unwrap();
         let (tail, end) = file.tail().unwrap();
         let (undo, _) = file.top(&tail, end, 2, 0).unwrap();
         assert_eq!((tail.undo, labels(&undo)), (10, vec!["step 12", "step 11"]));
+    }
+
+    #[test]
+    fn a_step_written_before_steps_had_sources_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = HistoryFile::new(dir.path().join("h.jsonl"), dir.path().join("p.vidcut"));
+        let of = serde_json::to_string(&dir.path().join("p.vidcut")).unwrap();
+        let text = format!(
+            "{{\"of\":{of}}}\n{{\"base\":{{\"n\":0}}}}\n\
+             {{\"step\":{{\"at\":1,\"label\":\"old\",\"change\":{{\"set\":{{\"was\":0,\"is\":1}}}}}}}}\n\
+             {{\"saved\":{{\"hash\":\"x\",\"undo\":1,\"redo\":0,\"steps\":1}}}}\n"
+        );
+        std::fs::write(file.path(), text).unwrap();
+        let mut cache = StepsCache::default();
+        file.steps_now(&mut cache).unwrap();
+        assert_eq!(cache.steps.line, [Step::labeled("old")]);
+    }
+
+    #[test]
+    fn a_step_by_a_client_kind_this_vidcut_doesnt_know_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = HistoryFile::new(dir.path().join("h.jsonl"), dir.path().join("p.vidcut"));
+        let of = serde_json::to_string(&dir.path().join("p.vidcut")).unwrap();
+        let text = format!(
+            "{{\"of\":{of}}}\n{{\"base\":{{\"n\":0}}}}\n\
+             {{\"step\":{{\"at\":1,\"label\":\"new\",\"by\":{{\"kind\":\"robot\"}},\"change\":{{\"set\":{{\"was\":0,\"is\":1}}}}}}}}\n\
+             {{\"saved\":{{\"hash\":\"x\",\"undo\":1,\"redo\":0,\"steps\":1}}}}\n"
+        );
+        std::fs::write(file.path(), text).unwrap();
+        let (tail, end) = file.tail().unwrap();
+        let (undo, _) = file.top(&tail, end, 1, 0).unwrap();
+        assert_eq!(
+            undo[0].step.by.as_ref().map(|c| c.kind),
+            Some(crate::request::ClientKind::Other)
+        );
+    }
+
+    #[test]
+    fn steps_read_again_after_a_save_match_a_fresh_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = history(dir.path(), 3);
+        let mut cache = StepsCache::default();
+        let (tail, end) = file.tail().unwrap();
+        file.steps_now(&mut cache).unwrap();
+        file.append(
+            &tail,
+            end,
+            vec![Moved::Undo(1), Moved::Step(Box::new(step(4)))],
+            "y",
+        )
+        .unwrap();
+        file.steps_now(&mut cache).unwrap();
+        let mut fresh = StepsCache::default();
+        file.steps_now(&mut fresh).unwrap();
+        assert_eq!(cache.steps, fresh.steps);
+    }
+
+    #[test]
+    fn a_missing_history_is_no_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = HistoryFile::new(dir.path().join("h.jsonl"), dir.path().join("p.vidcut"));
+        assert!(file.read_tail().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_history_without_a_save_is_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = history(dir.path(), 1);
+        let text = std::fs::read_to_string(file.path()).unwrap();
+        let cut = text.lines().take(2).collect::<Vec<_>>().join("\n");
+        std::fs::write(file.path(), cut).unwrap();
+        assert!(file.read_tail().is_err());
     }
 }
