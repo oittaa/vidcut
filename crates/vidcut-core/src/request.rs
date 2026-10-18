@@ -1388,8 +1388,8 @@ pub enum PoolSort {
     Duration,
     /// The file's modification time.
     Date,
-    /// The file's start timecode, as a time of day; media without one
-    /// count as 00:00:00:00 (decision D59).
+    /// The label of the file's start timecode; media without one count
+    /// as 00:00:00:00 (decision D59).
     Timecode,
 }
 

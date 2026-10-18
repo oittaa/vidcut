@@ -105,9 +105,7 @@ impl PoolView {
             PoolSort::Date => media.sort_by_key(|m| m.mtime_ns),
             PoolSort::Timecode => {
                 let start = |m: &vidcut_core::model::Media| {
-                    m.info
-                        .timecode
-                        .map_or(0.0, |t| t.rate.frames_to_secs(t.count))
+                    m.info.timecode.map_or(0.0, |t| t.label_seconds())
                 };
                 media.sort_by(|a, b| start(a).total_cmp(&start(b)));
             }
