@@ -123,5 +123,6 @@ The schema describes parameters, not results. Commonly read:
 | `export start --background`, `jobs get` | `id`, `state` (`queued`, `running`, `done`, `failed`, `cancelled`), `progress` (0–1), `result`, `error`, and `details` as it runs: `video` (`encoder`, `device`, `pixel`, `bits`, `passes`, `gpu_frames_in`), `audio`, `color`, `metadata`, `tried`, `sources`, `gpu_frames`, `gpu_decoded`, `copied`, `fps` |
 | `proxy generate` | `proxies[]`: `media`, `path`, `made_with` (how it was decoded and encoded), `copies` |
 | `media list`, `media get` | `missing` (the file is gone), `proxy`: `file`, `path` (in this computer's proxy folder), `width`, `height`, `codec`, `stale` (made from another version of the file), `missing` (its file is gone) |
+| `media add-folder` | `bin` (the folder's), `media` (in the folder's order), `skipped[]`: `path`, `why` |
 | `media relink` | `relinked`, `different` (with `why`), `not_found` |
 | `player state` | per viewer (`timeline`, `source`): `position`, `playing`, `ready`, `hwdec` (the GPU decoder, or `no`). `late`, `skipped` (frames while playing), `audio_device` (null: the default), `audio_error`, `loop` (Loop playback is on), `two_up` (the trim two-up's frames) |

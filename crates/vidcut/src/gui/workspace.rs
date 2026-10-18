@@ -714,6 +714,13 @@ impl Workspace {
                     self.import_media();
                 }
                 if ui
+                    .add_enabled(open, egui::Button::new("Import Media Folder…"))
+                    .on_hover_text(FOLDER_HINT)
+                    .clicked()
+                {
+                    self.import_folder();
+                }
+                if ui
                     .add_enabled(open, egui::Button::new("New Bin"))
                     .on_hover_text(super::keys("Shift+Ctrl+N: a bin in the bin the pool shows"))
                     .clicked()
@@ -809,6 +816,13 @@ impl Workspace {
                     .clicked()
                 {
                     self.import_media();
+                }
+                if ui
+                    .button("Import Folder")
+                    .on_hover_text(FOLDER_HINT)
+                    .clicked()
+                {
+                    self.import_folder();
                 }
                 if ui
                     .button("Quick Export")
@@ -1695,6 +1709,8 @@ impl Workspace {
 }
 
 const NOTICE_FADE: f64 = 1.0;
+
+const FOLDER_HINT: &str = "A folder as a bin, with a bin for each folder in it";
 
 fn recent_projects() -> Vec<PathBuf> {
     std::fs::read_to_string(crate::paths::state_dir().join("recent.json"))

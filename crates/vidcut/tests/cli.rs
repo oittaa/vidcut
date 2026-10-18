@@ -1186,6 +1186,79 @@ fn stills_and_sequences_edit_and_export() {
 }
 
 #[test]
+fn a_folder_comes_in_as_a_bin_skipping_what_isnt_media() {
+    let sb = Sandbox::new("folder");
+    let shoot = sb.dir.path().join("Shoot");
+    for dir in ["Day 1", "Empty", "Frames", "Docs"] {
+        std::fs::create_dir_all(shoot.join(dir)).unwrap();
+    }
+    let wide = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (25, 1),
+        50,
+    ));
+    let take = fixture(FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mkv,
+        320,
+        180,
+        (30, 1),
+        30,
+    ));
+    std::fs::copy(&wide, shoot.join("a-wide.mp4")).unwrap();
+    std::fs::copy(&take, shoot.join("Day 1").join("take.mkv")).unwrap();
+    for frame in fixture::ensure_images(&ImageSpec::sequence(1, 8, 4, 320, 180)).unwrap() {
+        std::fs::copy(
+            &frame,
+            shoot.join("Frames").join(frame.file_name().unwrap()),
+        )
+        .unwrap();
+    }
+    std::fs::write(shoot.join("broken.mp4"), "not a video").unwrap();
+    std::fs::write(shoot.join("Docs").join("readme.txt"), "readme").unwrap();
+    sb.cmd(&["project", "create"])
+        .arg(sb.project())
+        .output()
+        .unwrap();
+
+    let r = sb.ok(&["media", "add-folder", s(&shoot), "--sequence"]);
+    assert_eq!(r["result"]["bin"], "Shoot");
+    assert_eq!(r["result"]["media"], serde_json::json!(["m1", "m2", "m3"]));
+    let skipped: Vec<&str> = r["result"]["skipped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["path"].as_str().unwrap())
+        .collect();
+    let canonical = |p: PathBuf| vidcut_core::dirs::canonical(&p).unwrap();
+    assert_eq!(
+        skipped,
+        [
+            s(&canonical(shoot.join("broken.mp4"))),
+            s(&canonical(shoot.join("Docs").join("readme.txt"))),
+        ]
+    );
+    assert_eq!(
+        sb.ok(&["bins", "list"])["result"],
+        serde_json::json!(["Shoot", "Shoot/Day 1", "Shoot/Frames"])
+    );
+    let m3 = sb.ok(&["media", "get", "m3"])["result"].clone();
+    assert_eq!(
+        (&m3["name"], &m3["bin"]),
+        (&"img_[0001-0008].png".into(), &"Shoot/Frames".into())
+    );
+    let info = sb.ok(&["project", "summary"]);
+    assert_eq!(info["result"]["settings"]["fps"], "25", "{info}");
+
+    sb.ok(&["history", "undo"]);
+    assert_eq!(sb.ok(&["media", "list"])["result"], serde_json::json!([]));
+    assert_eq!(sb.ok(&["bins", "list"])["result"], serde_json::json!([]));
+}
+
+#[test]
 fn reset_deletes_settings_caches_and_state_but_keeps_presets() {
     let s = Sandbox::new("reset");
     let d = s.dir.path();

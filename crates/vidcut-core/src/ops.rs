@@ -1967,7 +1967,7 @@ fn check_bin(path: &str) -> Result<()> {
     Ok(())
 }
 
-fn has_bin(p: &Project, path: &str) -> bool {
+pub fn has_bin(p: &Project, path: &str) -> bool {
     path.is_empty() || p.bins.iter().any(|b| b == path)
 }
 

@@ -42,6 +42,7 @@ impl live::Renderer for Port {
 #[derive(Default)]
 struct FakeDialogs {
     files: Mutex<Vec<PathBuf>>,
+    folder: Mutex<Option<PathBuf>>,
     picks: AtomicUsize,
 }
 
@@ -53,7 +54,7 @@ impl Dialogs for FakeDialogs {
         None
     }
     fn pick_folder(&self, _: &str, _: &Path) -> Option<PathBuf> {
-        None
+        self.folder.lock().unwrap().clone()
     }
     fn pick_files(&self, _: &str, _: &Path, _: &[(&str, &[&str])]) -> Vec<PathBuf> {
         self.picks.fetch_add(1, Ordering::SeqCst);
@@ -773,6 +774,49 @@ fn the_numbered_images_question_takes_the_keys() {
     assert_eq!(
         gui.call("media.list", json!({})).as_array().unwrap().len(),
         1
+    );
+    gui.quit();
+}
+
+#[test]
+fn import_folder_brings_a_folder_in_as_a_bin_and_names_what_it_skipped() {
+    let mut gui = Gui::new();
+    let tmp = tempfile::Builder::new()
+        .prefix("vidcut-gui-folder-")
+        .tempdir_in(vidcut_av::testdata::temp_dir())
+        .unwrap();
+    let shoot = tmp.path().join("Shoot");
+    std::fs::create_dir_all(shoot.join("Day 1")).unwrap();
+    let clip = fixture::ensure(&FixtureSpec::new(
+        VideoCodec::H264,
+        Container::Mp4,
+        320,
+        180,
+        (30, 1),
+        30,
+    ))
+    .unwrap();
+    std::fs::copy(&clip, shoot.join("Day 1").join("take.mp4")).unwrap();
+    std::fs::write(shoot.join("notes.txt"), "shot list").unwrap();
+    *gui.dialogs.folder.lock().unwrap() = Some(shoot);
+
+    gui.harness.get_by_label("Import Folder").click();
+    let started = Instant::now();
+    while gui.call("media.list", json!({})).as_array().unwrap().len() < 2 {
+        assert!(started.elapsed() < Duration::from_secs(30), "no import");
+        std::thread::sleep(Duration::from_millis(5));
+        gui.harness.step();
+    }
+    assert_eq!(
+        gui.call("bins.list", json!({})),
+        json!(["Shoot", "Shoot/Day 1"])
+    );
+    let notices = gui.h.snapshot().notices.clone();
+    assert_eq!(
+        notices.back().map(|n| n.text.as_str()),
+        Some(
+            "Import Media Folder: 1 clip in bin Shoot; skipped a file that isn't media: notes.txt"
+        )
     );
     gui.quit();
 }

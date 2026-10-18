@@ -21,6 +21,16 @@ fn escape(s: &str) -> String {
 }
 
 pub fn find(path: &Path) -> Result<ImageSequence> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let names: HashSet<String> = std::fs::read_dir(dir)
+        .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?
+        .flatten()
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    find_among(path, &names)
+}
+
+pub fn find_among(path: &Path, names: &HashSet<String>) -> Result<ImageSequence> {
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -33,12 +43,6 @@ pub fn find(path: &Path) -> Result<ImageSequence> {
     let n: u64 = digits
         .parse()
         .map_err(|_| Error::usage(format!("{name}: the number {digits} is too big")))?;
-    let dir = path.parent().unwrap_or(Path::new("."));
-    let names: HashSet<String> = std::fs::read_dir(dir)
-        .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?
-        .flatten()
-        .filter_map(|e| e.file_name().into_string().ok())
-        .collect();
     let width = digits.len();
     let padded = width > 1
         && names.iter().any(|other| {

@@ -1661,6 +1661,7 @@ impl Live {
                 1 => "Detect Scene Cuts: split at 1 shot change".to_string(),
                 n => format!("Detect Scene Cuts: split at {n} shot changes"),
             },
+            "media.add_folder" => folder_notice(&r.result),
             "edit.ripple_delete_silence" => match count("removed") {
                 0 => "Ripple Delete Silence: no silences in the selected clips".to_string(),
                 n => {
@@ -1683,7 +1684,9 @@ impl Live {
         };
         let added = match job.method.as_str() {
             _ if job.dry_run => return,
-            "media.add" | "timeline.import" | "apply" => Some(&response.changes.created),
+            "media.add" | "media.add_folder" | "timeline.import" | "apply" => {
+                Some(&response.changes.created)
+            }
             "project.set" if job.params["use_proxies"] == json!(true) => None,
             _ => return,
         };
@@ -3100,4 +3103,72 @@ fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
         *at = TimeSpec::Frames(f);
     }
     envelope
+}
+
+fn folder_notice(result: &Value) -> String {
+    let names = |files: &[&Value]| {
+        let mut names: Vec<String> = files
+            .iter()
+            .take(5)
+            .map(|s| {
+                let path = Path::new(s["path"].as_str().unwrap_or_default());
+                path.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        if files.len() > names.len() {
+            names.push(format!("and {} more", files.len() - names.len()));
+        }
+        names.join(", ")
+    };
+    let clips = result["media"].as_array().map_or(0, Vec::len);
+    let bin = result["bin"].as_str().unwrap_or_default();
+    let mut text = match clips {
+        1 => format!("Import Media Folder: 1 clip in bin {bin}"),
+        n => format!("Import Media Folder: {n} clips in bin {bin}"),
+    };
+    let skipped: Vec<&Value> = result["skipped"].as_array().into_iter().flatten().collect();
+    let (others, unread): (Vec<&Value>, Vec<&Value>) = skipped
+        .into_iter()
+        .partition(|s| s["why"] == vidcut_core::folder::NOT_MEDIA);
+    match others.len() {
+        0 => {}
+        1 => text.push_str(&format!(
+            "; skipped a file that isn't media: {}",
+            names(&others)
+        )),
+        n => text.push_str(&format!(
+            "; skipped {n} files that aren't media: {}",
+            names(&others)
+        )),
+    }
+    if !unread.is_empty() {
+        text.push_str(&format!("; couldn't open {}", names(&unread)));
+    }
+    text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_folder_notice_names_the_files_skipped() {
+        let result = json!({
+            "bin": "Shoot",
+            "media": ["m1", "m2"],
+            "skipped": [
+                { "path": "/shoot/broken.mp4", "why": "Invalid data found when processing input" },
+                { "path": "/shoot/notes.txt", "why": "not a media file" },
+                { "path": "/shoot/Docs/readme.txt", "why": "not a media file" },
+            ],
+        });
+        assert_eq!(
+            folder_notice(&result),
+            "Import Media Folder: 2 clips in bin Shoot; skipped 2 files that aren't media: \
+             notes.txt, readme.txt; couldn't open broken.mp4"
+        );
+    }
 }
