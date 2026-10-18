@@ -425,10 +425,11 @@ impl Workspace {
             TwoUpMode::TrimEditor => 0.0,
         };
         let gpu_pictures = self.screens.as_ref().map(|s| s.gpu_pictures());
+        let budget = self.snap.budget;
         let ctx = ui.ctx().clone();
-        let players = self
-            .cells
-            .get_or_insert_with(|| super::cells::Cells::new(ctx, gpu_pictures.unwrap_or_default()));
+        let players = self.cells.get_or_insert_with(|| {
+            super::cells::Cells::new(ctx, gpu_pictures.unwrap_or_default(), budget)
+        });
         let track = p.track(track);
         let mut shown = [None, None];
         for (i, (frame, label)) in cells.into_iter().enumerate() {

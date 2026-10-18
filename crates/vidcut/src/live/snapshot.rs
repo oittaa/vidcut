@@ -154,6 +154,7 @@ pub struct Snapshot {
     pub stats: bool,
     pub preview_error: Option<String>,
     pub theme: Arc<crate::themes::Theme>,
+    pub budget: vidcut_av::player::Budget,
 }
 
 impl Snapshot {

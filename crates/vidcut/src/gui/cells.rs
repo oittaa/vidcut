@@ -5,7 +5,7 @@ use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 use eframe::wgpu;
 use vidcut_av::hw::Kind;
-use vidcut_av::player::{Config, ManualOutput, Picture, Player, Shown};
+use vidcut_av::player::{Budget, Config, ManualOutput, Picture, Player, Shown};
 use vidcut_core::model::Project;
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
@@ -28,15 +28,17 @@ struct Cell {
 pub struct Cells {
     ctx: egui::Context,
     gpu_pictures: Vec<Kind>,
+    budget: Budget,
     cells: [Option<Cell>; 2],
     counts: Counts,
 }
 
 impl Cells {
-    pub fn new(ctx: egui::Context, gpu_pictures: Vec<Kind>) -> Self {
+    pub fn new(ctx: egui::Context, gpu_pictures: Vec<Kind>, viewer: Budget) -> Self {
         Self {
             ctx,
             gpu_pictures,
+            budget: viewer.part(4),
             cells: [None, None],
             counts: Counts::default(),
         }
@@ -82,7 +84,7 @@ impl Cells {
         {
             let ctx = self.ctx.clone();
             let config = Config {
-                budget: crate::preferences::player_budget().part(4),
+                budget: self.budget,
                 audio_scrubbing: false,
                 on_picture: Some(Arc::new(move || ctx.request_repaint())),
                 hardware: crate::preferences::gpu_decoding().on,

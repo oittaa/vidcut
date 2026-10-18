@@ -386,6 +386,10 @@ impl Player {
         }
     }
 
+    pub fn budget(&self) -> engine::Budget {
+        self.budget
+    }
+
     pub fn set_budget(&mut self, budget: engine::Budget) {
         self.budget = budget;
         if let Some(e) = &self.engine {
