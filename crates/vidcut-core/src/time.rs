@@ -188,18 +188,7 @@ pub fn format_timecode(frames: i64, fps: Rational, start_tc: i64, drop: bool) ->
         ("", total)
     };
     let dropped = if drop { fps.dropped_per_minute() } else { 0 };
-    let t = if dropped > 0 {
-        let (per_ten, per_minute) = (base * 600 - dropped * 9, base * 60 - dropped);
-        let (tens, rest) = (t / per_ten, t % per_ten);
-        let minutes = if rest > dropped {
-            (rest - dropped) / per_minute
-        } else {
-            0
-        };
-        t + dropped * (9 * tens + minutes)
-    } else {
-        t
-    };
+    let t = label_frames(t, fps, drop);
     let ff = t % base;
     let s = t / base;
     format!(
@@ -210,6 +199,22 @@ pub fn format_timecode(frames: i64, fps: Rational, start_tc: i64, drop: bool) ->
         if dropped > 0 { ';' } else { ':' },
         ff
     )
+}
+
+pub fn label_frames(frames: i64, fps: Rational, drop: bool) -> i64 {
+    let dropped = if drop { fps.dropped_per_minute() } else { 0 };
+    if dropped == 0 {
+        return frames;
+    }
+    let base = fps.timecode_base();
+    let (per_ten, per_minute) = (base * 600 - dropped * 9, base * 60 - dropped);
+    let (tens, rest) = (frames / per_ten, frames % per_ten);
+    let minutes = if rest > dropped {
+        (rest - dropped) / per_minute
+    } else {
+        0
+    };
+    frames + dropped * (9 * tens + minutes)
 }
 
 pub fn timecode_frames(h: i64, m: i64, s: i64, f: i64, fps: Rational, drop: bool) -> Option<i64> {
