@@ -716,6 +716,19 @@ mod tests {
     }
 
     #[test]
+    fn a_dissolve_longer_than_both_clips_fills_both() {
+        let mut f = Fixture::new(&[(60.0, true)]);
+        f.append("m1", 100, 400);
+        f.append("m1", 700, 1000);
+        let r = req(
+            &mut f,
+            "edit.dissolve",
+            json!({"at": 300, "length": "999f"}),
+        );
+        assert_eq!(made(&r), [(false, 300, 300, 300), (true, 300, 300, 300)]);
+    }
+
+    #[test]
     fn a_dissolve_of_odd_length_has_its_middle_frame_before_the_edit() {
         assert_eq!(super::split(7, super::Align::Center), (4, 3));
     }
