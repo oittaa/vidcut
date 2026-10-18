@@ -824,17 +824,49 @@ pub enum Request {
     /// `history.get` numbers the steps.
     #[serde(rename = "history.go")]
     HistoryGo { step: usize },
+    /// Name a step of the undo history as a version to come back to:
+    /// `step` (default: the step the project is at; 0 is the project before
+    /// them all). Naming a step again renames it. The names stay with the
+    /// history, listed by `history.get` as `marks`.
+    #[serde(rename = "history.mark")]
+    HistoryMark {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step: Option<usize>,
+        name: String,
+    },
+    /// Take the name off a step (default: the step the project is at).
+    #[serde(rename = "history.unmark")]
+    HistoryUnmark {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step: Option<usize>,
+    },
+    /// Bring back steps that a new change replaced after an undo: a
+    /// version `history.get` lists in `branches`, by its `id`. The steps
+    /// after where it branched off become a version of their own, so
+    /// nothing is lost, and the project goes to the restored version's
+    /// last step. A version inside another comes back with the versions
+    /// holding it.
+    #[serde(rename = "history.restore")]
+    HistoryRestore { branch: u64 },
+    /// Undo one done step alone, as a new step, keeping the steps after
+    /// it. Refused, saying which, when a later step changed what it
+    /// changed.
+    #[serde(rename = "history.revert")]
+    HistoryRevert { step: usize },
     /// The undo history. `steps` lists them oldest first, numbered from 1:
     /// each with its `label`, who made it (`by`: `gui`, `cli`, `mcp`, `ipc`
     /// or `file`, another program writing the project file, and a `name`
     /// the client gave), when (`time`, milliseconds since 1970 UTC), the
     /// clips and frames it changed (`clips`, `spans`), the commands of an
     /// `apply` (`parts`), when the GUI that made it opened the project
-    /// (`opened`), and whether it is `done` (redo steps are not). `at` is
-    /// the step the project is at. `groups` are runs of steps one client
-    /// made in a row (an agent's edits). `undo_steps` and `redo_steps`
-    /// count them; `undo` and `redo` are the newest 100 labels of each,
-    /// newest first.
+    /// (`opened`), its `id` and `kind` (the request that made it), and
+    /// whether it is `done` (redo steps are not). `at` is the step the
+    /// project is at. `groups` are runs of steps one client made in a row
+    /// (an agent's edits). `branches` are steps a new change replaced after
+    /// an undo, kept as versions to restore (`history.restore`), each
+    /// `after` the step it branched from; `marks` are named steps
+    /// (`history.mark`). `undo_steps` and `redo_steps` count the steps;
+    /// `undo` and `redo` are the newest 100 labels of each, newest first.
     #[serde(rename = "history.get")]
     HistoryGet {
         /// The first step `steps` lists (default: the newest `limit`).
@@ -843,6 +875,18 @@ pub enum Request {
         /// How many steps `steps` lists (default 100).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         limit: Option<usize>,
+        /// Also say what changed from this step to the project as it is
+        /// (`since`): clips added, deleted, moved and trimmed, dissolves,
+        /// cross fades, markers, media, tracks, bins, In and Out marks and
+        /// settings. For a step still to redo it says what redoing to it
+        /// brings, with `redo` true.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        since: Option<usize>,
+        /// With `since`, a version from `branches`, by its `id`: `since`
+        /// counts its steps from 1, and the answer says what going from the
+        /// project as it is to that step of the version brings.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branch: Option<u64>,
     },
     /// Apply requests atomically as one undo step.
     #[serde(rename = "apply")]

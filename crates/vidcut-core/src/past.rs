@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::editor::Editor;
+use crate::editor::{Chain, Editor};
 use crate::error::Result;
 use crate::model::Project;
 
@@ -11,17 +11,40 @@ const KEPT: usize = 32;
 pub struct Past {
     key: Option<(u64, usize, usize)>,
     states: VecDeque<(usize, Arc<Project>)>,
+    chain: Option<(u64, Arc<Chain>)>,
     applied: usize,
 }
 
 impl Past {
-    pub fn project_at(&mut self, editor: &Editor, step: usize) -> Result<Arc<Project>> {
+    fn fresh(&mut self, editor: &Editor) -> usize {
         let (u, r) = editor.history_counts();
         let key = (editor.project().rev, u, r);
         if self.key != Some(key) {
             self.states.clear();
+            self.chain = None;
             self.key = Some(key);
         }
+        u
+    }
+
+    pub fn version_at(&mut self, editor: &Editor, id: u64, k: usize) -> Result<Arc<Project>> {
+        self.fresh(editor);
+        let chain = match &self.chain {
+            Some((held, c)) if *held == id => c.clone(),
+            _ => {
+                let c = Arc::new(editor.chain(id)?);
+                self.chain = Some((id, c.clone()));
+                c
+            }
+        };
+        let start = self.project_at(editor, chain[0].0)?;
+        let mut project = (*start).clone();
+        crate::editor::climb(&chain, &mut project, k + 1, &mut Vec::new())?;
+        Ok(Arc::new(project))
+    }
+
+    pub fn project_at(&mut self, editor: &Editor, step: usize) -> Result<Arc<Project>> {
+        let u = self.fresh(editor);
         if let Some(i) = self.states.iter().position(|(s, _)| *s == step) {
             let hit = self.states.remove(i).expect("found above");
             let project = hit.1.clone();
@@ -122,6 +145,19 @@ mod tests {
         bins(&s, &["x", "y"]);
         let then = past.project_at(&s.load().unwrap(), 2).unwrap();
         assert_eq!(then.bins, ["a", "x"]);
+    }
+
+    #[test]
+    fn a_versions_step_shows_the_project_as_it_was_then() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        bins(&s, &["a", "b", "c"]);
+        run(&s, "history.undo", json!({ "steps": 2 }));
+        bins(&s, &["d"]);
+        let then = Past::default()
+            .version_at(&s.load().unwrap(), 2, 0)
+            .unwrap();
+        assert_eq!(then.bins, ["a", "b"]);
     }
 
     #[test]

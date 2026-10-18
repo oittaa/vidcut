@@ -17,7 +17,9 @@ pub struct OpenProject {
     told: Option<String>,
     opened: u64,
     steps: StepsCache,
+    history_stamp: Option<(u64, std::time::SystemTime)>,
     _watcher: Option<notify::RecommendedWatcher>,
+    _history_watcher: Option<notify::RecommendedWatcher>,
 }
 
 pub struct New {
@@ -41,6 +43,8 @@ impl OpenProject {
         let opened = crate::when::now_ms();
         let mut editor = store.load_text(&disk)?;
         editor.opened_at(opened);
+        let history_stamp = store.history_stamp();
+        let history_watcher = watch(store.history_path(), inbox.clone(), || Msg::FileChanged);
         let watcher = watch(store.path(), inbox, || Msg::FileChanged);
         Ok(Self {
             store,
@@ -51,7 +55,9 @@ impl OpenProject {
             told: None,
             opened,
             steps: StepsCache::default(),
+            history_stamp,
             _watcher: watcher,
+            _history_watcher: history_watcher,
         })
     }
 
@@ -80,7 +86,10 @@ impl OpenProject {
 
     pub fn refresh(&mut self) -> Result<bool> {
         let stamp = self.store.stamp();
-        if stamp.is_some() && stamp == self.stamp {
+        if stamp.is_some()
+            && stamp == self.stamp
+            && self.store.history_stamp() == self.history_stamp
+        {
             return Ok(false);
         }
         self.read_again()
@@ -88,10 +97,13 @@ impl OpenProject {
 
     fn read_again(&mut self) -> Result<bool> {
         let stamp = self.store.stamp();
+        let history = self.store.history_stamp();
         let text = self.store.read()?;
         self.stamp = stamp;
+        let history_moved = history != self.history_stamp;
+        self.history_stamp = history;
         if text == self.disk {
-            return Ok(false);
+            return Ok(history_moved);
         }
         let mut editor = self.store.load_text(&text)?;
         editor.opened_at(self.opened);
@@ -121,14 +133,15 @@ impl OpenProject {
             Ok(r) => r,
             Err(e) => return (Err(e), false),
         };
-        let rev = self.editor.project().rev;
+        let was = self.editor.unsaved();
         let result = self.editor.apply(envelope, env, playhead);
-        let committed = self.editor.project().rev != rev;
+        let committed = self.editor.unsaved() != was;
         if committed {
             match self.store.save(&mut self.editor) {
                 Ok(saved) => {
                     self.disk = saved.text;
                     self.stamp = self.store.stamp();
+                    self.history_stamp = self.store.history_stamp();
                     self.history_error = saved.history_error;
                     if saved.compact {
                         let store = self.store.clone();

@@ -60,9 +60,15 @@ pub struct ProjectSnap {
     pub history: Arc<Steps>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewAt {
+    Step(usize),
+    Version(u64, usize),
+}
+
 #[derive(Debug, Clone)]
 pub struct HistoryPreview {
-    pub step: usize,
+    pub at: PreviewAt,
     pub rev: u64,
     pub project: Arc<Project>,
 }

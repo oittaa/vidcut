@@ -174,11 +174,7 @@ impl Change {
         let going: HashSet<&str> = gone.iter().map(|(_, v)| self::id(v)).collect();
         list.retain(|x| !going.contains(id(x)));
         if let Some(order) = order {
-            let mut by_id: HashMap<String, T> =
-                list.drain(..).map(|x| (id(&x).to_string(), x)).collect();
-            for i in order {
-                list.push(by_id.remove(i).ok_or(format!("no {i}"))?);
-            }
+            reorder(list, order, id);
         }
         for (i, v) in come {
             if *i > list.len() {
@@ -187,6 +183,46 @@ impl Change {
             list.insert(*i, from_json(v.clone())?);
         }
         Ok(())
+    }
+
+    pub fn touched(&self) -> Vec<Vec<String>> {
+        let mut out = Vec::new();
+        self.touch(&mut Vec::new(), &mut out);
+        out
+    }
+
+    fn touch(&self, at: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+        let below = |at: &[String], key: &str| {
+            let mut path = at.to_vec();
+            path.push(key.to_string());
+            path
+        };
+        match self {
+            Self::Set { .. } => out.push(at.clone()),
+            Self::Fields(fields) => {
+                for (k, c) in fields {
+                    at.push(k.clone());
+                    c.touch(at, out);
+                    at.pop();
+                }
+            }
+            Self::Items(items) => {
+                for (_, v) in items.removed.iter().chain(&items.added) {
+                    out.push(below(at, id(v)));
+                }
+                if items.order.is_some() {
+                    out.push(below(at, "#order"));
+                }
+                if !items.runs.is_empty() {
+                    out.push(at.clone());
+                }
+                for (k, c) in &items.changed {
+                    at.push(k.clone());
+                    c.touch(at, out);
+                    at.pop();
+                }
+            }
+        }
     }
 
     fn replaced(before: &Value, after: &Value) -> Self {
@@ -222,6 +258,41 @@ impl Change {
         }
         Ok(())
     }
+}
+
+pub fn overlap<'a>(a: &'a [Vec<String>], b: &'a [Vec<String>]) -> Option<&'a [String]> {
+    for x in a {
+        for y in b {
+            let n = x.len().min(y.len());
+            if x[..n] == y[..n] {
+                return Some(if x.len() >= y.len() { x } else { y });
+            }
+        }
+    }
+    None
+}
+
+fn reorder<T>(list: &mut Vec<T>, order: &[String], id: impl Fn(&T) -> &str) {
+    let wanted: Vec<usize> = {
+        let at: HashMap<&str, usize> = list.iter().enumerate().map(|(i, x)| (id(x), i)).collect();
+        order
+            .iter()
+            .filter_map(|k| at.get(k.as_str()).copied())
+            .collect()
+    };
+    let mut slots = wanted.clone();
+    slots.sort_unstable();
+    let mut items: Vec<Option<T>> = list.drain(..).map(Some).collect();
+    let mut out: Vec<Option<T>> = std::iter::repeat_with(|| None).take(items.len()).collect();
+    for (slot, from) in slots.into_iter().zip(wanted) {
+        out[slot] = items[from].take();
+    }
+    for (i, x) in items.into_iter().enumerate() {
+        if x.is_some() {
+            out[i] = x;
+        }
+    }
+    list.extend(out.into_iter().flatten());
 }
 
 fn ids(list: &[Value]) -> Option<Vec<&str>> {
@@ -349,11 +420,7 @@ impl Items {
         let going: HashSet<&str> = gone.iter().map(|(_, v)| id(v)).collect();
         list.retain(|v| !going.contains(id(v)));
         if let Some(order) = order {
-            let mut by_id: HashMap<String, Value> =
-                list.drain(..).map(|v| (id(&v).to_string(), v)).collect();
-            for i in order {
-                list.push(by_id.remove(i).ok_or(format!("no {i}"))?);
-            }
+            reorder(list, order, id);
         }
         for (i, v) in come {
             if *i > list.len() {
@@ -533,6 +600,23 @@ mod tests {
             change(json!({"a": null}), json!({})),
             json!({"fields": {"a": {"set": {"was": null}}}})
         );
+    }
+
+    #[test]
+    fn a_change_touches_the_fields_it_sets() {
+        let c = Change::between(
+            &json!({"t": [{"id": "c1", "d": 5}, {"id": "c2", "d": 9}]}),
+            &json!({"t": [{"id": "c1", "d": 4}, {"id": "c2", "d": 9}]}),
+        )
+        .unwrap();
+        assert_eq!(c.touched(), [vec!["t", "c1", "d"]]);
+    }
+
+    #[test]
+    fn a_field_and_its_item_overlap() {
+        let a = [vec!["t".to_string(), "c1".into(), "d".into()]];
+        let b = [vec!["t".to_string(), "c1".into()]];
+        assert_eq!(overlap(&a, &b), Some(&a[0][..]));
     }
 
     #[test]

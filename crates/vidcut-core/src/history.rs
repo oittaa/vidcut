@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::editor::{Entry, HISTORY_CAP, History, Moved};
-use crate::steps::{Step, Steps, StepsCache};
+use crate::steps::{Branch, Mark, Node, Step, Steps, StepsCache, Tree};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Tail {
@@ -16,6 +16,8 @@ pub(crate) struct Tail {
     pub undo: usize,
     pub redo: usize,
     pub steps: usize,
+    #[serde(default)]
+    pub next: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -23,9 +25,11 @@ pub(crate) struct Tail {
 enum Line {
     Of(PathBuf),
     Base(Value),
-    Step(Placed),
+    Step(Box<Placed>),
     Undo(usize),
     Redo(usize),
+    Mark(Mark),
+    Unmark(u64),
     Saved(Tail),
 }
 
@@ -44,6 +48,8 @@ enum Brief {
     Step(BriefStep),
     Undo(usize),
     Redo(usize),
+    Mark(Mark),
+    Unmark(u64),
     Saved(serde::de::IgnoredAny),
 }
 
@@ -52,11 +58,17 @@ struct BriefStep {
     at: usize,
     label: String,
     #[serde(default)]
+    id: Option<u64>,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
     by: Option<crate::request::Client>,
     #[serde(default)]
     time: Option<u64>,
     #[serde(default)]
     opened: Option<u64>,
+    #[serde(default)]
+    restored: Option<u64>,
     #[serde(default)]
     clips: Vec<String>,
     #[serde(default)]
@@ -74,10 +86,10 @@ fn line(l: &Line) -> String {
 }
 
 fn step_line(at: usize, entry: &Entry) -> String {
-    line(&Line::Step(Placed {
+    line(&Line::Step(Box::new(Placed {
         at,
         entry: entry.clone(),
-    }))
+    })))
 }
 
 fn place(line: &str) -> Option<usize> {
@@ -341,19 +353,26 @@ impl HistoryFile {
         for l in text.lines() {
             match serde_json::from_str::<Brief>(l) {
                 Ok(Brief::Step(b)) => {
-                    steps.done = b.at.saturating_sub(1).min(steps.line.len());
-                    steps.place(Step {
-                        label: b.label,
-                        by: b.by,
-                        time: b.time,
-                        opened: b.opened,
-                        clips: b.clips,
-                        spans: b.spans,
-                        parts: b.parts,
-                    });
+                    steps.place_at(
+                        b.at,
+                        Step {
+                            label: b.label,
+                            id: b.id,
+                            kind: b.kind,
+                            by: b.by,
+                            time: b.time,
+                            opened: b.opened,
+                            restored: b.restored,
+                            clips: b.clips,
+                            spans: b.spans,
+                            parts: b.parts,
+                        },
+                    );
                 }
                 Ok(Brief::Undo(n)) => steps.back(n),
                 Ok(Brief::Redo(n)) => steps.forward(n),
+                Ok(Brief::Mark(m)) => steps.mark(m),
+                Ok(Brief::Unmark(id)) => steps.unmark(id),
                 _ => {}
             }
         }
@@ -375,23 +394,30 @@ impl HistoryFile {
         let Some(Ok(Line::Base(base))) = lines.next().map(serde_json::from_str) else {
             return Err(bad("no first project"));
         };
-        let mut h = History::default();
+        let mut tree: Tree<Entry> = Tree::default();
         for l in lines {
             let Ok(l) = serde_json::from_str::<Line>(l) else {
                 continue;
             };
             match l {
                 Line::Step(s) => {
-                    h.undo.truncate(s.at.saturating_sub(1));
-                    h.undo.push(s.entry);
-                    h.redo.clear();
+                    let Placed { at, entry } = *s;
+                    tree.place_at(at, entry)
                 }
-                Line::Undo(n) => shift(n, &mut h.undo, &mut h.redo),
-                Line::Redo(n) => shift(n, &mut h.redo, &mut h.undo),
+                Line::Undo(n) => tree.back(n),
+                Line::Redo(n) => tree.forward(n),
+                Line::Mark(m) => tree.mark(m),
+                Line::Unmark(id) => tree.unmark(id),
                 Line::Of(_) | Line::Base(_) | Line::Saved(_) => {}
             }
         }
-        Ok((base, h))
+        Ok((base, History::of(tree)))
+    }
+
+    pub(crate) fn chain(&self, end: u64, id: u64) -> std::io::Result<Option<crate::editor::Chain>> {
+        let (_, h) = self.read_all(end)?;
+        Ok(crate::steps::chain(&h.branches, id)
+            .map(|c| c.into_iter().map(|b| (b.after, b.steps.clone())).collect()))
     }
 
     pub(crate) fn write_whole(
@@ -400,7 +426,7 @@ impl HistoryFile {
         history: &History,
         hash: &str,
     ) -> std::io::Result<Tail> {
-        let (text, tail) = whole(&self.of, base, history, hash);
+        let (text, tail) = whole(&self.of, base, history, hash, 1, true);
         std::fs::create_dir_all(self.path.parent().expect("history dir"))?;
         crate::store::write_atomic(&self.path, &text)?;
         Ok(tail)
@@ -415,14 +441,27 @@ impl HistoryFile {
     ) -> std::io::Result<Tail> {
         let mut t = tail.clone();
         let mut add = String::new();
+        if t.next == 0
+            && moved
+                .iter()
+                .any(|m| matches!(m, Moved::Step(e) if e.step.id.is_none()))
+        {
+            t.next = self.largest_id(end)? + 1;
+        }
         for m in moved {
             match m {
-                Moved::Step(e) => {
+                Moved::Step(mut e) => {
                     t.undo += 1;
                     t.redo = 0;
                     t.steps += 1;
+                    if e.step.id.is_none() {
+                        e.step.id = Some(t.next);
+                        t.next += 1;
+                    }
                     add.push_str(&step_line(t.undo, &e));
                 }
+                Moved::Mark(m) => add.push_str(&line(&Line::Mark(m))),
+                Moved::Unmark(id) => add.push_str(&line(&Line::Unmark(id))),
                 Moved::Undo(n) => {
                     let n = (n as usize).min(t.undo);
                     t.undo -= n;
@@ -483,11 +522,42 @@ impl HistoryFile {
         }
         let keep = limit - limit / 10;
         let (mut base, mut h) = self.read_all(end)?;
-        let gone = h.undo.len().saturating_sub(keep);
+        let next = tail
+            .next
+            .max(biggest(&h.undo, &h.branches).max(biggest(&h.redo, &[])) + 1);
+        let reserve = h.branches.iter().map(size).sum::<usize>().min(limit / 10);
+        let gone = h.undo.len().saturating_sub(keep - reserve);
         for e in h.undo.drain(..gone) {
             e.change.apply(&mut base, true).map_err(|e| bad(&e))?;
         }
-        let (mut text, mut kept) = whole(&self.of, &base, &h, &tail.hash);
+        h.branches.retain(|b| b.after >= gone);
+        for b in &mut h.branches {
+            b.after -= gone;
+        }
+        let main = h.undo.len() + h.redo.len();
+        let named: HashSet<u64> = h.marks.iter().map(|m| m.step).collect();
+        h.branches.sort_by_key(|b| {
+            (
+                std::cmp::Reverse(holds(b, &named)),
+                std::cmp::Reverse(b.replaced),
+            )
+        });
+        let mut room = keep.saturating_sub(main);
+        h.branches.retain(|b| {
+            let n = size(b);
+            let fits = n <= room;
+            room = room.saturating_sub(n);
+            fits
+        });
+        h.branches.sort_by_key(|b| b.replaced);
+        let mut ids = HashSet::new();
+        ids_in(&h.undo, &h.branches, &mut ids);
+        ids_in(&h.redo, &[], &mut ids);
+        h.marks.retain(|m| match m.step {
+            0 => gone == 0,
+            id => ids.contains(&id),
+        });
+        let (mut text, mut kept) = whole(&self.of, &base, &h, &tail.hash, next, false);
         let _lock = lock()?;
         let Some((_, now_end)) = self.tail() else {
             return Ok(());
@@ -522,6 +592,21 @@ impl HistoryFile {
 }
 
 impl HistoryFile {
+    fn largest_id(&self, end: u64) -> std::io::Result<u64> {
+        let mut text = String::new();
+        File::open(&self.path)?
+            .take(end)
+            .read_to_string(&mut text)?;
+        Ok(text
+            .lines()
+            .filter_map(|l| match serde_json::from_str::<Brief>(l) {
+                Ok(Brief::Step(b)) => b.id,
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0))
+    }
+
     fn saved_before(&self, end: u64) -> std::io::Result<Option<Tail>> {
         let mut file = File::open(&self.path)?;
         let mut found = None;
@@ -535,36 +620,92 @@ impl HistoryFile {
     }
 }
 
-fn whole(of: &Path, base: &Value, h: &History, hash: &str) -> (String, Tail) {
-    let mut text = line(&Line::Of(of.to_path_buf()));
-    text.push_str(&line(&Line::Base(base.clone())));
-    let mut at = 0;
-    for e in &h.undo {
-        at += 1;
-        text.push_str(&step_line(at, e));
+fn size<T>(b: &Branch<T>) -> usize {
+    b.steps.len() + b.branches.iter().map(size).sum::<usize>()
+}
+
+fn holds<T: Node>(b: &Branch<T>, ids: &HashSet<u64>) -> bool {
+    b.steps
+        .iter()
+        .any(|s| s.id().is_some_and(|id| ids.contains(&id)))
+        || b.branches.iter().any(|x| holds(x, ids))
+}
+
+fn ids_in<T: Node>(steps: &[T], branches: &[Branch<T>], out: &mut HashSet<u64>) {
+    out.extend(steps.iter().filter_map(Node::id));
+    for b in branches {
+        ids_in(&b.steps, &b.branches, out);
     }
-    for e in h.redo.iter().rev() {
-        at += 1;
-        text.push_str(&step_line(at, e));
+}
+
+fn biggest<T: Node>(steps: &[T], branches: &[Branch<T>]) -> u64 {
+    steps
+        .iter()
+        .filter_map(Node::id)
+        .chain(branches.iter().map(|b| biggest(&b.steps, &b.branches)))
+        .max()
+        .unwrap_or(0)
+}
+
+struct Writer {
+    text: String,
+    steps: usize,
+    next: u64,
+    assign: bool,
+}
+
+impl Writer {
+    fn emit(&mut self, offset: usize, steps: &[Entry], branches: &[Branch<Entry>]) {
+        for i in 0..=steps.len() {
+            for b in branches.iter().filter(|b| b.after == i) {
+                self.emit(offset + i, &b.steps, &b.branches);
+            }
+            if let Some(e) = steps.get(i) {
+                let mut e = e.clone();
+                if self.assign && e.step.id.is_none() {
+                    e.step.id = Some(self.next);
+                    self.next += 1;
+                }
+                self.steps += 1;
+                self.text.push_str(&step_line(offset + i + 1, &e));
+            }
+        }
     }
+}
+
+fn whole(
+    of: &Path,
+    base: &Value,
+    h: &History,
+    hash: &str,
+    next: u64,
+    assign: bool,
+) -> (String, Tail) {
+    let mut line_of: Vec<Entry> = h.undo.clone();
+    line_of.extend(h.redo.iter().rev().cloned());
+    let mut w = Writer {
+        text: line(&Line::Of(of.to_path_buf())),
+        steps: 0,
+        next: next.max(biggest(&line_of, &h.branches) + 1),
+        assign,
+    };
+    w.text.push_str(&line(&Line::Base(base.clone())));
+    w.emit(0, &line_of, &h.branches);
     if !h.redo.is_empty() {
-        text.push_str(&line(&Line::Undo(h.redo.len())));
+        w.text.push_str(&line(&Line::Undo(h.redo.len())));
+    }
+    for m in &h.marks {
+        w.text.push_str(&line(&Line::Mark(m.clone())));
     }
     let tail = Tail {
         hash: hash.to_string(),
         undo: h.undo.len(),
         redo: h.redo.len(),
-        steps: at,
+        steps: w.steps,
+        next: w.next,
     };
-    text.push_str(&line(&Line::Saved(tail.clone())));
-    (text, tail)
-}
-
-fn shift(n: usize, from: &mut Vec<Entry>, to: &mut Vec<Entry>) {
-    for _ in 0..n {
-        let Some(e) = from.pop() else { return };
-        to.push(e);
-    }
+    w.text.push_str(&line(&Line::Saved(tail.clone())));
+    (w.text, tail)
 }
 
 #[cfg(test)]
@@ -585,10 +726,42 @@ mod tests {
         let file = HistoryFile::new(dir.join("h.jsonl"), dir.join("p.vidcut"));
         let h = History {
             undo: (1..=n).map(step).collect(),
-            redo: Vec::new(),
+            ..History::default()
         };
         file.write_whole(&json!({"n": 0}), &h, "x").unwrap();
         file
+    }
+
+    fn old_history(dir: &Path, n: i64) -> HistoryFile {
+        let file = HistoryFile::new(dir.join("h.jsonl"), dir.join("p.vidcut"));
+        let mut text = line(&Line::Of(dir.join("p.vidcut")));
+        text.push_str(&line(&Line::Base(json!({"n": 0}))));
+        for k in 1..=n {
+            text.push_str(&step_line(k as usize, &step(k)));
+        }
+        text.push_str(&format!(
+            "{{\"saved\":{{\"hash\":\"x\",\"undo\":{n},\"redo\":0,\"steps\":{n}}}}}\n"
+        ));
+        std::fs::write(file.path(), text).unwrap();
+        file
+    }
+
+    fn made(k: i64, id: u64, time: u64) -> Box<Entry> {
+        let mut e = step(k);
+        e.step.id = Some(id);
+        e.step.time = Some(time);
+        Box::new(e)
+    }
+
+    fn save(file: &HistoryFile, moved: Vec<Moved>) {
+        let (tail, end) = file.tail().unwrap();
+        file.append(&tail, end, moved, "y").unwrap();
+    }
+
+    fn steps_of(file: &HistoryFile) -> Steps {
+        let mut cache = StepsCache::default();
+        file.steps_now(&mut cache).unwrap();
+        cache.steps
     }
 
     fn labels(entries: &[Entry]) -> Vec<&str> {
@@ -765,5 +938,140 @@ mod tests {
         let cut = text.lines().take(2).collect::<Vec<_>>().join("\n");
         std::fs::write(file.path(), cut).unwrap();
         assert!(file.read_tail().is_err());
+    }
+
+    #[test]
+    fn a_compaction_keeps_a_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = history(dir.path(), 11);
+        let (tail, end) = file.tail().unwrap();
+        let moved = vec![Moved::Undo(1), Moved::Step(Box::new(step(12)))];
+        file.append(&tail, end, moved, "y").unwrap();
+        file.compact_to(10, || Ok(())).unwrap();
+        let mut cache = StepsCache::default();
+        file.steps_now(&mut cache).unwrap();
+        let b = &cache.steps.branches[0];
+        assert_eq!((b.after, b.steps[0].label.as_str()), (7, "step 11"));
+    }
+
+    #[test]
+    fn a_compaction_leaves_room_for_the_next_step() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = history(dir.path(), 11);
+        save(&file, vec![Moved::Undo(1), Moved::Step(Box::new(step(12)))]);
+        file.compact_to(10, || Ok(())).unwrap();
+        assert_eq!(file.tail().unwrap().0.steps, 9);
+    }
+
+    #[test]
+    fn a_save_by_an_older_vidcut_doesnt_start_the_ids_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = history(dir.path(), 3);
+        let mut text = std::fs::read_to_string(file.path()).unwrap();
+        text.push_str(&step_line(4, &step(4)));
+        text.push_str("{\"saved\":{\"hash\":\"x\",\"undo\":4,\"redo\":0,\"steps\":4}}\n");
+        std::fs::write(file.path(), text).unwrap();
+        save(&file, vec![Moved::Step(Box::new(step(5)))]);
+        let ids: Vec<Option<u64>> = steps_of(&file).line.iter().map(|s| s.id).collect();
+        assert_eq!(ids, [Some(1), Some(2), Some(3), None, Some(4)]);
+    }
+
+    #[test]
+    fn a_compaction_gives_no_step_an_id_a_step_saved_meanwhile_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = old_history(dir.path(), 11);
+        save(&file, vec![Moved::Step(Box::new(step(12)))]);
+        let meanwhile = || {
+            let (tail, end) = file.tail().unwrap();
+            file.append(&tail, end, vec![Moved::Step(Box::new(step(13)))], "y")
+        };
+        file.compact_to(10, meanwhile).unwrap();
+        let ids: Vec<u64> = steps_of(&file).line.iter().filter_map(|s| s.id).collect();
+        assert_eq!(ids, [1, 2]);
+    }
+
+    #[test]
+    fn a_compaction_that_drops_a_branch_doesnt_give_its_ids_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = history(dir.path(), 11);
+        save(
+            &file,
+            vec![
+                Moved::Undo(2),
+                Moved::Step(made(12, 12, 1)),
+                Moved::Step(made(13, 13, 1)),
+            ],
+        );
+        save(
+            &file,
+            vec![
+                Moved::Undo(2),
+                Moved::Step(made(10, 10, 1)),
+                Moved::Step(made(11, 11, 1)),
+            ],
+        );
+        file.compact_to(10, || Ok(())).unwrap();
+        assert_eq!(file.tail().unwrap().0.next, 14);
+    }
+
+    #[test]
+    fn a_compaction_that_drops_the_first_steps_drops_the_name_of_the_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = history(dir.path(), 11);
+        let start = Mark {
+            step: 0,
+            name: "Start".into(),
+            time: None,
+        };
+        save(&file, vec![Moved::Mark(start)]);
+        file.compact_to(10, || Ok(())).unwrap();
+        assert_eq!(steps_of(&file).marks, []);
+    }
+
+    #[test]
+    fn a_compaction_drops_the_names_of_the_steps_it_drops() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = history(dir.path(), 11);
+        let first = Mark {
+            step: 1,
+            name: "First".into(),
+            time: None,
+        };
+        save(&file, vec![Moved::Mark(first)]);
+        file.compact_to(10, || Ok(())).unwrap();
+        assert_eq!(steps_of(&file).marks, []);
+    }
+
+    #[test]
+    fn a_compaction_keeps_a_named_branch_before_a_newer_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = history(dir.path(), 11);
+        save(&file, vec![Moved::Undo(1), Moved::Step(made(12, 12, 2))]);
+        save(&file, vec![Moved::Undo(1), Moved::Step(made(13, 13, 3))]);
+        let kept = Mark {
+            step: 11,
+            name: "Keep".into(),
+            time: None,
+        };
+        save(&file, vec![Moved::Mark(kept)]);
+        file.compact_to(10, || Ok(())).unwrap();
+        let labels: Vec<String> = steps_of(&file)
+            .branches
+            .iter()
+            .map(|b| b.steps[0].label.clone())
+            .collect();
+        assert_eq!(labels, ["step 11"]);
+    }
+
+    #[test]
+    fn a_saved_step_gets_the_next_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = history(dir.path(), 3);
+        let (tail, end) = file.tail().unwrap();
+        file.append(&tail, end, vec![Moved::Step(Box::new(step(4)))], "y")
+            .unwrap();
+        let (tail, end) = file.tail().unwrap();
+        let (undo, _) = file.top(&tail, end, 1, 0).unwrap();
+        assert_eq!(undo[0].step.id, Some(4));
     }
 }

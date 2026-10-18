@@ -229,9 +229,9 @@ pub(crate) enum Msg {
     },
     FileChanged,
     PreferencesChanged,
-    HistoryPreview(Option<usize>),
+    HistoryPreview(Option<PreviewAt>),
     Previewed {
-        step: usize,
+        at: PreviewAt,
         rev: u64,
         result: Result<Arc<Project>>,
     },
@@ -373,8 +373,8 @@ impl Handle {
         }
     }
 
-    pub fn history_preview(&self, step: Option<usize>) {
-        let _ = self.tx.send(Msg::HistoryPreview(step));
+    pub fn history_preview(&self, at: Option<PreviewAt>) {
+        let _ = self.tx.send(Msg::HistoryPreview(at));
     }
 
     pub fn shutdown(&self) {
@@ -548,7 +548,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
 struct Preview {
     store: vidcut_core::Store,
     project: Project,
-    step: usize,
+    at: PreviewAt,
     rev: u64,
 }
 
@@ -564,9 +564,12 @@ fn start_previews(
             while let Ok(newer) = rx.try_recv() {
                 job = newer;
             }
-            let result = job.store.project_at(&mut past, job.project, job.step);
+            let result = match job.at {
+                PreviewAt::Step(step) => job.store.project_at(&mut past, job.project, step),
+                PreviewAt::Version(id, k) => job.store.version_at(&mut past, job.project, id, k),
+            };
             let done = Msg::Previewed {
-                step: job.step,
+                at: job.at,
                 rev: job.rev,
                 result,
             };
@@ -761,7 +764,7 @@ struct Live {
     answers: Vec<(Reply, Result<Response>)>,
     preview_error: Option<String>,
     history_preview: Option<Arc<HistoryPreview>>,
-    preview_wanted: Option<(usize, u64)>,
+    preview_wanted: Option<(PreviewAt, u64)>,
     previews: Option<Sender<Preview>>,
     past: vidcut_core::past::Past,
     flash: Option<Arc<Flash>>,
@@ -928,8 +931,8 @@ impl Live {
                     self.project_changed(None);
                 }
             }
-            Msg::HistoryPreview(step) => changed = self.preview_step(step),
-            Msg::Previewed { step, rev, result } => changed = self.previewed(step, rev, result),
+            Msg::HistoryPreview(at) => changed = self.preview_step(at),
+            Msg::Previewed { at, rev, result } => changed = self.previewed(at, rev, result),
             Msg::FileChanged => {
                 let refreshed = match self.project.as_mut().map(OpenProject::reload) {
                     Some(Ok(changed)) => changed,
@@ -1731,8 +1734,8 @@ impl Live {
         }
     }
 
-    fn preview_step(&mut self, step: Option<usize>) -> bool {
-        let (Some(open), Some(step)) = (&self.project, step) else {
+    fn preview_step(&mut self, at: Option<PreviewAt>) -> bool {
+        let (Some(open), Some(at)) = (&self.project, at) else {
             self.preview_wanted = None;
             return self.history_preview.take().is_some();
         };
@@ -1740,20 +1743,23 @@ impl Live {
         if self
             .history_preview
             .as_ref()
-            .is_some_and(|p| p.step == step && p.rev == rev)
-            || self.preview_wanted == Some((step, rev))
+            .is_some_and(|p| p.at == at && p.rev == rev)
+            || self.preview_wanted == Some((at, rev))
         {
             return false;
         }
-        self.preview_wanted = Some((step, rev));
+        self.preview_wanted = Some((at, rev));
         if !open.editor.on_its_file() {
-            let result = self.past.project_at(&open.editor, step);
-            return self.previewed(step, rev, result);
+            let result = match at {
+                PreviewAt::Step(step) => self.past.project_at(&open.editor, step),
+                PreviewAt::Version(id, k) => self.past.version_at(&open.editor, id, k),
+            };
+            return self.previewed(at, rev, result);
         }
         let job = Preview {
             store: open.store.clone(),
             project: open.project().clone(),
-            step,
+            at,
             rev,
         };
         if self.previews.is_none() {
@@ -1767,15 +1773,15 @@ impl Live {
         false
     }
 
-    fn previewed(&mut self, step: usize, rev: u64, result: Result<Arc<Project>>) -> bool {
+    fn previewed(&mut self, at: PreviewAt, rev: u64, result: Result<Arc<Project>>) -> bool {
         let now = self.project.as_ref().map(|o| o.project().rev);
-        if self.preview_wanted != Some((step, rev)) || now != Some(rev) {
+        if self.preview_wanted != Some((at, rev)) || now != Some(rev) {
             return false;
         }
         self.preview_wanted = None;
         self.history_preview = result
             .ok()
-            .map(|project| Arc::new(HistoryPreview { step, rev, project }));
+            .map(|project| Arc::new(HistoryPreview { at, rev, project }));
         self.dirty = true;
         true
     }
@@ -1786,6 +1792,36 @@ impl Live {
         };
         if !matches!(job.origin, Origin::Gui { .. }) || job.dry_run {
             return;
+        }
+        let said = |key: &str| r.result[key].as_str().unwrap_or_default().to_string();
+        match job.method.as_str() {
+            "history.revert" => {
+                return self.notice(format!("Reverted: {}", said("label")), false);
+            }
+            "history.mark" => {
+                return self.notice(
+                    format!(
+                        "Marked step {}: \u{201c}{}\u{201d}",
+                        r.result["step"],
+                        said("name")
+                    ),
+                    false,
+                );
+            }
+            "history.unmark" => {
+                return self.notice(
+                    format!("Took the name off step {}", r.result["step"]),
+                    false,
+                );
+            }
+            "history.restore" => {
+                let text = match r.result["restored"].as_array().map_or(0, Vec::len) {
+                    1 => "Restored a version: 1 step".to_string(),
+                    n => format!("Restored a version: {n} steps"),
+                };
+                return self.notice(text, false);
+            }
+            _ => {}
         }
         let (verb, labels) = match (r.result["undone"].as_array(), r.result["redone"].as_array()) {
             (Some(l), _) => ("Undid", l),

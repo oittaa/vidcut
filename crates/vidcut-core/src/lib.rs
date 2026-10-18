@@ -47,3 +47,5 @@ mod relink_tests;
 mod test_support;
 #[cfg(test)]
 mod tracks_tests;
+#[cfg(test)]
+mod versions_tests;

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use eframe::egui::{
@@ -9,16 +9,19 @@ use egui_phosphor::regular as icon;
 use serde_json::json;
 use vidcut_core::model::Project;
 use vidcut_core::request::{Client, ClientKind};
-use vidcut_core::steps::{Group, Span, Step, Steps, groups};
+use vidcut_core::steps::{
+    Branch, Group, KINDS, Span, Step, Steps, category, every_step, groups, since_step,
+    since_version,
+};
 
 use super::theme;
 use super::workspace::Workspace;
-use crate::live::PlayerId;
+use crate::live::{PlayerId, PreviewAt};
 use crate::when;
 
 const ROW: f32 = 24.0;
-const WIDTH: f32 = 420.0;
-pub(super) const MIN_WIDTH: f32 = 300.0;
+const WIDTH: f32 = 440.0;
+pub(super) const MIN_WIDTH: f32 = 320.0;
 const MENU: usize = 20;
 const FLASH: f64 = 1.6;
 
@@ -31,12 +34,21 @@ pub(super) struct HistoryUi {
     was: Option<usize>,
     cursor: Option<usize>,
     target: Option<usize>,
-    sent: Option<(Option<usize>, u64)>,
+    twig: Option<(u64, usize)>,
+    was_twig: Option<(u64, usize)>,
+    version: Option<(u64, usize)>,
+    sent: Option<(Option<PreviewAt>, u64)>,
     expanded: HashSet<usize>,
     parts: HashSet<usize>,
+    twigs: HashSet<u64>,
     flash: Option<(u64, f64)>,
     follow: bool,
     seen: Option<(usize, usize)>,
+    find: String,
+    kind: Option<&'static str>,
+    source: Option<String>,
+    naming: Option<Naming>,
+    since: Option<((PreviewAt, u64), String)>,
     generation: u64,
     laid: Option<Laid>,
     opening: bool,
@@ -44,12 +56,27 @@ pub(super) struct HistoryUi {
     swallow: bool,
 }
 
+#[derive(Clone)]
+struct Layout {
+    groups: Arc<Vec<Group>>,
+    rows: Arc<Vec<Row>>,
+    paths: Arc<Vec<Vec<usize>>>,
+    kinds: Arc<Vec<&'static str>>,
+    sources: Arc<Vec<String>>,
+}
+
 struct Laid {
     steps: Arc<Steps>,
     cursor: Option<usize>,
     generation: u64,
-    groups: Arc<Vec<Group>>,
-    rows: Arc<Vec<Row>>,
+    filter: (String, Option<&'static str>, Option<String>),
+    layout: Layout,
+}
+
+struct Naming {
+    step: usize,
+    name: String,
+    fresh: bool,
 }
 
 pub(super) struct Marks {
@@ -66,6 +93,20 @@ enum Row {
     Group(usize, bool),
     Step(usize, bool),
     Part(usize, usize),
+    Branch(usize, bool),
+    Twig(usize, usize),
+    Flag(usize),
+}
+
+enum Act {
+    Go(usize),
+    Group(usize),
+    Parts(usize),
+    Twigs(u64),
+    Restore(u64),
+    Revert(usize),
+    Name(usize),
+    Unname(usize),
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -114,6 +155,28 @@ impl HistoryUi {
         self.cursor = None;
         self.hovered = None;
         self.was = None;
+        self.twig = None;
+        self.was_twig = None;
+    }
+
+    fn filtered(&self) -> bool {
+        !self.find.trim().is_empty() || self.kind.is_some() || self.source.is_some()
+    }
+
+    fn matches(&self, s: &Step, name: Option<&str>) -> bool {
+        let find = self.find.trim().to_lowercase();
+        let text = find.is_empty()
+            || s.label.to_lowercase().contains(&find)
+            || name.is_some_and(|n| n.to_lowercase().contains(&find))
+            || s.parts.iter().any(|p| p.to_lowercase().contains(&find));
+        let kind = self
+            .kind
+            .is_none_or(|k| s.kind.as_deref().map(category) == Some(k));
+        let source = self
+            .source
+            .as_ref()
+            .is_none_or(|w| s.by.as_ref().map(Client::shown).as_ref() == Some(w));
+        text && kind && source
     }
 }
 
@@ -168,21 +231,77 @@ fn one_line(
     ui.painter().layout_job(job)
 }
 
-fn badge(ui: &egui::Ui, at: egui::Pos2, c: &Client) -> f32 {
+fn chip(ui: &egui::Ui, at: egui::Pos2, text: &str, fill: Color32) -> f32 {
     let font = FontId::proportional(11.0);
-    let text = one_line(ui, &c.shown(), 110.0, font, Color32::WHITE);
+    let text = one_line(ui, text, 140.0, font, Color32::WHITE);
     let rect = Rect::from_min_size(
         pos2(at.x, at.y - text.size().y / 2.0 - 2.0),
         vec2(text.size().x + 10.0, text.size().y + 4.0),
     );
-    ui.painter()
-        .rect_filled(rect, CornerRadius::same(4), kind_color(c.kind));
+    ui.painter().rect_filled(rect, CornerRadius::same(4), fill);
     ui.painter().galley(
         pos2(rect.left() + 5.0, rect.top() + 2.0),
         text,
         Color32::WHITE,
     );
     rect.width() + 6.0
+}
+
+fn badge(ui: &egui::Ui, at: egui::Pos2, c: &Client) -> f32 {
+    chip(ui, at, &c.shown(), kind_color(c.kind))
+}
+
+fn flag(ui: &egui::Ui, at: egui::Pos2, name: &str) -> f32 {
+    chip(
+        ui,
+        at,
+        &format!("{} {name}", icon::FLAG),
+        theme::colors().accent.gamma_multiply(0.85),
+    )
+}
+
+fn caret(ui: &egui::Ui, at: egui::Pos2, open: bool) -> Rect {
+    let c = if open {
+        icon::CARET_DOWN
+    } else {
+        icon::CARET_RIGHT
+    };
+    ui.painter().text(
+        at,
+        Align2::CENTER_CENTER,
+        c,
+        FontId::proportional(12.0),
+        theme::colors().text_dim,
+    );
+    Rect::from_center_size(at, vec2(18.0, ROW))
+}
+
+fn steps_word(n: usize) -> String {
+    if n == 1 {
+        "1 step".into()
+    } else {
+        format!("{n} steps")
+    }
+}
+
+fn kinds_in(steps: &Steps) -> Vec<&'static str> {
+    let present: HashSet<&'static str> = every_step(steps)
+        .into_iter()
+        .filter_map(|s| s.kind.as_deref().map(category))
+        .collect();
+    KINDS.into_iter().filter(|k| present.contains(k)).collect()
+}
+
+fn sources_in(steps: &Steps) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for s in every_step(steps) {
+        if let Some(name) = s.by.as_ref().map(Client::shown)
+            && !out.contains(&name)
+        {
+            out.push(name);
+        }
+    }
+    out
 }
 
 impl Workspace {
@@ -231,9 +350,29 @@ impl Workspace {
         h.swallow
     }
 
+    pub(super) fn history_name(&mut self, step: Option<usize>) {
+        let Some(steps) = self.steps() else {
+            return;
+        };
+        let step = step.unwrap_or(steps.done);
+        let id = match step {
+            0 => Some(0),
+            n => steps.line.get(n - 1).and_then(|s| s.id),
+        };
+        let name = id
+            .and_then(|id| steps.named(id))
+            .map(String::from)
+            .unwrap_or_else(|| format!("Version {}", steps.marks.len() + 1));
+        self.history.naming = Some(Naming {
+            step,
+            name,
+            fresh: true,
+        });
+    }
+
     pub(super) fn history_keys(&mut self, ctx: &egui::Context) {
         let h = &mut self.history;
-        if !h.open || !h.keys {
+        if !h.open || !h.keys || h.naming.is_some() {
             return;
         }
         let Some(steps) = self.snap.project.as_ref().map(|p| p.history.clone()) else {
@@ -277,10 +416,15 @@ impl Workspace {
             let s = &steps.line[i];
             let done = i < steps.done;
             let current = i + 1 == steps.done;
+            let name = s.id.and_then(|id| steps.named(id));
+            let label = match name {
+                Some(n) => format!("{} {n} · {}", icon::FLAG, s.label),
+                None => s.label.clone(),
+            };
             let mut text = RichText::new(format!(
                 "{}  {}",
                 if current { icon::CHECK } else { "   " },
-                truncate(&s.label, 64)
+                truncate(&label, 64)
             ));
             if !done {
                 text = text.color(theme::colors().text_dim);
@@ -318,6 +462,10 @@ impl Workspace {
             ui.label(RichText::new("Nothing to undo yet").color(theme::colors().text_dim));
         }
         ui.separator();
+        if ui.button("Mark This Version…").clicked() {
+            self.history_name(None);
+            ui.close();
+        }
         if ui.button("Open History Window").clicked() {
             self.history.show();
         }
@@ -326,8 +474,10 @@ impl Workspace {
         }
     }
 
-    pub(super) fn history_frame(&mut self) {
+    pub(super) fn history_frame(&mut self, ctx: &egui::Context) {
         self.history.was = self.history.hovered.take();
+        self.history.was_twig = self.history.twig.take();
+        self.naming_window(ctx);
         if !self.history.open {
             self.history.cursor = None;
         }
@@ -380,28 +530,97 @@ impl Workspace {
         }
     }
 
-    fn history_layout(&mut self, steps: &Arc<Steps>) -> (Arc<Vec<Group>>, Arc<Vec<Row>>) {
+    fn history_layout(&mut self, steps: &Arc<Steps>) -> Layout {
         let h = &self.history;
+        let filter = (h.find.clone(), h.kind, h.source.clone());
         if let Some(l) = &h.laid
             && Arc::ptr_eq(&l.steps, steps)
             && l.cursor == h.cursor
             && l.generation == h.generation
+            && l.filter == filter
         {
-            return (l.groups.clone(), l.rows.clone());
+            return l.layout.clone();
         }
-        let all = Arc::new(groups(&steps.line));
-        let rows = Arc::new(self.history_rows(steps, &all));
+        let all = groups(&steps.line);
+        let paths = version_paths(steps);
+        let layout = Layout {
+            rows: Arc::new(self.history_rows(steps, &all, &paths)),
+            groups: Arc::new(all),
+            paths: Arc::new(paths),
+            kinds: Arc::new(kinds_in(steps)),
+            sources: Arc::new(sources_in(steps)),
+        };
         self.history.laid = Some(Laid {
             steps: steps.clone(),
             cursor: self.history.cursor,
             generation: self.history.generation,
-            groups: all.clone(),
-            rows: rows.clone(),
+            filter,
+            layout: layout.clone(),
         });
-        (all, rows)
+        layout
     }
 
-    fn history_list(&mut self, ui: &mut egui::Ui, steps: &Arc<Steps>, p: Option<&Project>) {
+    fn naming_window(&mut self, ctx: &egui::Context) {
+        let Some(naming) = &mut self.history.naming else {
+            return;
+        };
+        let mut done = None;
+        let mut open = true;
+        egui::Window::new("Mark This Version")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_pos(ctx.content_rect().center() - vec2(160.0, 60.0))
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new(if naming.step == 0 {
+                        "A name for the project as it was before every step".to_string()
+                    } else {
+                        format!("A name for the project as it is after step {}", naming.step)
+                    })
+                    .color(theme::colors().text_dim),
+                );
+                ui.horizontal(|ui| {
+                    ui.label("Name");
+                    let r =
+                        ui.add(egui::TextEdit::singleline(&mut naming.name).desired_width(240.0));
+                    if naming.fresh {
+                        r.request_focus();
+                        naming.fresh = false;
+                    }
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                        done = Some(true);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        done = Some(false);
+                    }
+                    let ok = !naming.name.trim().is_empty();
+                    if ui.add_enabled(ok, egui::Button::new("Mark")).clicked() {
+                        done = Some(true);
+                    }
+                });
+                if ui.input(|i| i.key_pressed(Key::Escape)) {
+                    done = Some(false);
+                }
+            });
+        if !open {
+            done = Some(false);
+        }
+        match done {
+            Some(true) if !naming.name.trim().is_empty() => {
+                let (step, name) = (naming.step, naming.name.trim().to_string());
+                self.history.naming = None;
+                self.send("history.mark", json!({ "step": step, "name": name }));
+            }
+            Some(_) => self.history.naming = None,
+            None => {}
+        }
+    }
+
+    fn history_header(&mut self, ui: &mut egui::Ui, steps: &Steps, shown: usize, layout: &Layout) {
+        let (kinds, sources) = (&layout.kinds, &layout.sources);
         let n = steps.line.len();
         ui.horizontal(|ui| {
             let undo = ui
@@ -422,17 +641,64 @@ impl Workspace {
             if redo.clicked() {
                 self.send("history.redo", json!({}));
             }
+            if ui
+                .button(format!("{} Mark…", icon::FLAG))
+                .on_hover_text(
+                    "Name the project as it is now, as a version to come back to. Names stay \
+                     with the history",
+                )
+                .clicked()
+            {
+                self.history_name(None);
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let text = match n {
                     0 => "No changes yet".to_string(),
-                    _ if steps.done == n => format!("{n} steps"),
+                    _ if self.history.filtered() => format!("{shown} of {n} steps"),
+                    _ if steps.done == n => steps_word(n),
                     _ => format!("At step {} of {n}", steps.done),
                 };
                 ui.label(RichText::new(text).color(theme::colors().text_dim));
             });
         });
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(icon::MAGNIFYING_GLASS).color(theme::colors().text_dim));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.history.find)
+                    .hint_text("Find a step or a name")
+                    .desired_width(170.0),
+            );
+            egui::ComboBox::from_id_salt("history-kind")
+                .selected_text(self.history.kind.unwrap_or("Every kind"))
+                .width(118.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.history.kind, None, "Every kind");
+                    for &k in kinds.iter() {
+                        ui.selectable_value(&mut self.history.kind, Some(k), k);
+                    }
+                });
+            egui::ComboBox::from_id_salt("history-source")
+                .selected_text(self.history.source.as_deref().unwrap_or("Anyone"))
+                .width(96.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.history.source, None, "Anyone");
+                    for s in sources.iter() {
+                        ui.selectable_value(&mut self.history.source, Some(s.clone()), s);
+                    }
+                });
+        });
+    }
+
+    fn history_list(&mut self, ui: &mut egui::Ui, steps: &Arc<Steps>, p: Option<&Project>) {
+        let layout = self.history_layout(steps);
+        let (all, rows, paths) = (
+            layout.groups.clone(),
+            layout.rows.clone(),
+            layout.paths.clone(),
+        );
+        let shown = rows.iter().filter(|r| matches!(r, Row::Step(..))).count();
+        self.history_header(ui, steps, shown, &layout);
         ui.separator();
-        let (all, rows) = self.history_layout(steps);
         let mark = self.history.cursor.unwrap_or(steps.done);
         let mark_row = rows.iter().position(|r| match *r {
             Row::Original => mark == 0,
@@ -440,8 +706,8 @@ impl Workspace {
             Row::Group(g, false) => all[g].to == mark,
             _ => false,
         });
-        let hint = 52.0;
-        let view = (ui.available_height() - hint).max(ROW * 3.0);
+        let footer = 52.0;
+        let view = (ui.available_height() - footer).max(ROW * 3.0);
         let spacing = ui.spacing().item_spacing.y;
         let mut area = egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -454,287 +720,452 @@ impl Workspace {
             area = area.vertical_scroll_offset(y.max(0.0));
         }
         let now = when::now_ms();
-        let mut go = None;
-        let mut toggle_group = None;
-        let mut toggle_parts = None;
+        let mut acts = Vec::new();
         area.show_rows(ui, ROW, rows.len(), |ui, range| {
             for k in range {
-                let row = rows[k];
-                let (rect, r) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
-                let state = match row {
-                    Row::Original => Some(0),
-                    Row::Step(i, _) => Some(i + 1),
-                    Row::Group(g, _) => Some(all[g].to),
-                    Row::Opened(_) | Row::Part(..) => None,
-                };
-                let current = state == Some(steps.done) && !matches!(row, Row::Group(_, true));
-                let cursor = self.history.cursor.is_some() && state == self.history.cursor;
-                let named = match row {
-                    Row::Original => "Original".to_string(),
-                    Row::Opened(t) => format!("Opened {}", when::stamp(t, now)),
-                    Row::Group(g, _) => {
-                        format!("{} steps by {}", all[g].to - all[g].from, all[g].by.shown())
-                    }
-                    Row::Step(i, _) => steps.line[i].label.clone(),
-                    Row::Part(i, j) => steps.line[i].parts.get(j).cloned().unwrap_or_default(),
-                };
-                r.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::WidgetType::Button, true, current, &named)
-                });
-                let c = theme::colors();
-                if current {
-                    ui.painter()
-                        .rect_filled(rect, 3.0, c.selection.gamma_multiply(0.55));
-                } else if r.hovered() && state.is_some() {
-                    ui.painter()
-                        .rect_filled(rect, 3.0, c.text.gamma_multiply(0.07));
-                }
-                if cursor {
-                    ui.painter().rect_stroke(
-                        rect,
-                        3.0,
-                        Stroke::new(1.5, c.accent),
-                        StrokeKind::Inside,
-                    );
-                }
-                let mid = rect.center().y;
-                let mut x = rect.left() + 4.0;
-                let depth = match row {
-                    Row::Step(_, true) | Row::Part(..) => 1.0,
-                    _ => 0.0,
-                };
-                x += depth * 18.0;
-                if current {
-                    ui.painter()
-                        .circle_filled(pos2(x + 5.0, mid), 3.5, c.accent);
-                }
-                x += 14.0;
-                let font = FontId::proportional(13.0);
-                let right = rect.right() - 6.0;
-                match row {
-                    Row::Original => {
-                        let g = one_line(ui, "Original", right - x, font, c.text);
-                        ui.painter()
-                            .galley(pos2(x, mid - g.size().y / 2.0), g, c.text);
-                    }
-                    Row::Opened(t) => {
-                        let text = format!("Opened {}", when::stamp(t, now));
-                        let g =
-                            one_line(ui, &text, right - x, FontId::proportional(11.0), c.text_dim);
-                        let w = g.size().x;
-                        ui.painter()
-                            .galley(pos2(x, mid - g.size().y / 2.0), g, c.text_dim);
-                        ui.painter().hline(
-                            (x + w + 8.0)..=right,
-                            mid,
-                            Stroke::new(1.0, c.text_dim.gamma_multiply(0.35)),
-                        );
-                    }
-                    Row::Part(i, j) => {
-                        let text = steps.line[i].parts.get(j).cloned().unwrap_or_default();
-                        let g = one_line(
-                            ui,
-                            &format!("· {text}"),
-                            right - x,
-                            FontId::proportional(12.0),
-                            c.text_dim,
-                        );
-                        ui.painter()
-                            .galley(pos2(x + 14.0, mid - g.size().y / 2.0), g, c.text_dim);
-                    }
-                    Row::Group(gi, open) => {
-                        let g = &all[gi];
-                        let caret = if open {
-                            icon::CARET_DOWN
-                        } else {
-                            icon::CARET_RIGHT
-                        };
-                        let caret_rect =
-                            Rect::from_center_size(pos2(x + 6.0, mid), vec2(18.0, ROW));
-                        ui.painter().text(
-                            pos2(x + 6.0, mid),
-                            Align2::CENTER_CENTER,
-                            caret,
-                            FontId::proportional(13.0),
-                            c.text_dim,
-                        );
-                        x += 18.0;
-                        x += badge(ui, pos2(x, mid), &g.by);
-                        let done = steps.done >= g.to;
-                        let partly = steps.done > g.from && steps.done < g.to;
-                        let color = if done || partly { c.text } else { c.text_dim };
-                        let undone = g.to - steps.done.clamp(g.from, g.to);
-                        let label = match undone {
-                            0 => format!("{} steps", g.to - g.from),
-                            u if u == g.to - g.from => format!("{} steps, undone", g.to - g.from),
-                            u => format!("{} steps, {u} undone", g.to - g.from),
-                        };
-                        let undo_rect = Rect::from_min_max(
-                            pos2(right - 92.0, rect.top() + 2.0),
-                            pos2(right, rect.bottom() - 2.0),
-                        );
-                        let show_undo = r.hovered() && steps.done > g.from;
-                        let time_w = if show_undo {
-                            92.0
-                        } else {
-                            time_text(ui, steps.line[g.to - 1].time, now, right, mid)
-                        };
-                        let text = one_line(ui, &label, right - x - time_w - 8.0, font, color);
-                        ui.painter()
-                            .galley(pos2(x, mid - text.size().y / 2.0), text, color);
-                        if show_undo {
-                            let pointer = ui.input(|i| i.pointer.hover_pos());
-                            let over = pointer.is_some_and(|p| undo_rect.contains(p));
-                            ui.painter().rect_filled(
-                                undo_rect,
-                                3.0,
-                                if over {
-                                    c.accent.gamma_multiply(0.5)
-                                } else {
-                                    c.text.gamma_multiply(0.1)
-                                },
-                            );
-                            ui.painter().text(
-                                undo_rect.center(),
-                                Align2::CENTER_CENTER,
-                                format!("{} Undo all", icon::ARROW_COUNTER_CLOCKWISE),
-                                FontId::proportional(12.0),
-                                c.text,
-                            );
-                            if over {
-                                self.history.hovered = Some(g.from);
-                                if r.clicked() {
-                                    go = Some(g.from);
-                                }
-                            }
-                        }
-                        let pointer = ui.input(|i| i.pointer.interact_pos());
-                        if r.clicked() && go.is_none() {
-                            if pointer.is_some_and(|p| caret_rect.contains(p)) {
-                                toggle_group = Some(g.from);
-                            } else {
-                                go = Some(g.to);
-                            }
-                        }
-                        if r.double_clicked() {
-                            toggle_group = Some(g.from);
-                        }
-                        if r.hovered() && self.history.hovered.is_none() {
-                            self.history.hovered = Some(g.to);
-                        }
-                        r.on_hover_text(format!(
-                            "{} steps by {} in a row. Click to go to the last, ▸ to see them; \
-                             Undo all goes back to before the first",
-                            g.to - g.from,
-                            who(&g.by)
-                        ));
-                        continue;
-                    }
-                    Row::Step(i, inner) => {
-                        let s = &steps.line[i];
-                        let done = i < steps.done;
-                        let caret_rect =
-                            Rect::from_center_size(pos2(x - 8.0, mid), vec2(16.0, ROW));
-                        if !s.parts.is_empty() {
-                            let caret = if self.history.parts.contains(&i) {
-                                icon::CARET_DOWN
-                            } else {
-                                icon::CARET_RIGHT
-                            };
-                            ui.painter().text(
-                                pos2(x - 8.0, mid),
-                                Align2::CENTER_CENTER,
-                                caret,
-                                FontId::proportional(12.0),
-                                c.text_dim,
-                            );
-                        }
-                        if let Some(by) =
-                            s.by.as_ref()
-                                .filter(|b| b.kind != ClientKind::Gui && !inner)
-                        {
-                            x += badge(ui, pos2(x, mid), by);
-                        }
-                        let time_w = time_text(ui, s.time, now, right, mid);
-                        let color = if done { c.text } else { c.text_dim };
-                        let font = if current {
-                            FontId::proportional(13.5)
-                        } else {
-                            font
-                        };
-                        let text = one_line(ui, &s.label, right - x - time_w - 8.0, font, color);
-                        ui.painter()
-                            .galley(pos2(x, mid - text.size().y / 2.0), text, color);
-                        if r.clicked() {
-                            let pointer = ui.input(|i| i.pointer.interact_pos());
-                            if !s.parts.is_empty()
-                                && pointer.is_some_and(|p| caret_rect.contains(p))
-                            {
-                                toggle_parts = Some(i);
-                            } else {
-                                go = Some(i + 1);
-                            }
-                        }
-                        if r.hovered() {
-                            self.history.hovered = Some(i + 1);
-                        }
-                        r.on_hover_text(step_tip(s, i + 1, done, p));
-                        continue;
-                    }
-                }
-                if r.hovered()
-                    && let Some(s) = state
-                {
-                    self.history.hovered = Some(s);
-                }
-                if r.clicked()
-                    && let Some(s) = state
-                {
-                    go = Some(s);
-                }
+                acts.extend(self.history_row(ui, rows[k], steps, &all, &paths, p, now));
             }
         });
+        let footer = self.history_footer(steps);
         ui.add_space(6.0);
-        ui.add(
-            egui::Label::new(
-                RichText::new(
-                    "Hover a step to see the timeline as it was. Click it, or use \
-                     \u{2191} \u{2193} and Enter, to go there; Esc comes back.",
-                )
-                .color(theme::colors().text_dim),
-            )
-            .wrap(),
-        );
-        if let Some(g) = toggle_group {
-            self.history.generation += 1;
-            if !self.history.expanded.remove(&g) {
-                self.history.expanded.insert(g);
+        ui.add(egui::Label::new(RichText::new(footer).color(theme::colors().text_dim)).wrap());
+        for act in acts {
+            match act {
+                Act::Go(step) => {
+                    self.history.keys = true;
+                    self.history_go(step);
+                }
+                Act::Group(g) => {
+                    self.history.generation += 1;
+                    if !self.history.expanded.remove(&g) {
+                        self.history.expanded.insert(g);
+                    }
+                }
+                Act::Parts(i) => {
+                    self.history.generation += 1;
+                    if !self.history.parts.remove(&i) {
+                        self.history.parts.insert(i);
+                    }
+                }
+                Act::Twigs(id) => {
+                    self.history.generation += 1;
+                    if !self.history.twigs.remove(&id) {
+                        self.history.twigs.insert(id);
+                    }
+                }
+                Act::Restore(id) => self.send("history.restore", json!({ "branch": id })),
+                Act::Revert(step) => self.send("history.revert", json!({ "step": step })),
+                Act::Name(step) => self.history_name(Some(step)),
+                Act::Unname(step) => self.send("history.unmark", json!({ "step": step })),
             }
-        }
-        if let Some(i) = toggle_parts {
-            self.history.generation += 1;
-            if !self.history.parts.remove(&i) {
-                self.history.parts.insert(i);
-            }
-        }
-        if let Some(step) = go {
-            self.history.keys = true;
-            self.history_go(step);
         }
     }
 
-    fn history_rows(&self, steps: &Steps, all: &[Group]) -> Vec<Row> {
+    fn history_footer(&mut self, steps: &Steps) -> String {
+        let hint = "Hover a step to see the timeline as it was. Click it, or use \u{2191} \
+                    \u{2193} and Enter, to go there; Esc comes back.";
+        let at = match (self.history.version, self.history.target) {
+            (Some((id, k)), _) => PreviewAt::Version(id, k),
+            (None, Some(t)) if t == steps.done => return "This is where the project is".into(),
+            (None, Some(t)) => PreviewAt::Step(t),
+            (None, None) => return hint.into(),
+        };
+        let (Some(then), Some(now)) = (
+            self.history_shown(),
+            self.snap.project.as_ref().map(|p| p.project.clone()),
+        ) else {
+            return hint.into();
+        };
+        let key = (at, now.rev);
+        if self.history.since.as_ref().is_none_or(|(k, _)| *k != key) {
+            let text = match at {
+                PreviewAt::Version(id, _) => since_version(&then, &now, id).text(),
+                PreviewAt::Step(t) => since_step(&then, &now, t, steps.done).text(),
+            };
+            self.history.since = Some((key, text));
+        }
+        self.history
+            .since
+            .as_ref()
+            .map(|(_, t)| t.clone())
+            .unwrap_or_default()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn history_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        row: Row,
+        steps: &Steps,
+        all: &[Group],
+        paths: &[Vec<usize>],
+        p: Option<&Project>,
+        now: u64,
+    ) -> Vec<Act> {
+        let mut acts = Vec::new();
+        let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
+        let state = match row {
+            Row::Original => Some(0),
+            Row::Step(i, _) => Some(i + 1),
+            Row::Group(g, _) => Some(all[g].to),
+            Row::Flag(i) => Some(i + 1),
+            Row::Opened(_) | Row::Part(..) | Row::Branch(..) | Row::Twig(..) => None,
+        };
+        let current =
+            state == Some(steps.done) && !matches!(row, Row::Group(_, true) | Row::Flag(_));
+        let cursor = self.history.cursor.is_some() && state == self.history.cursor;
+        let branch = |bi: usize| -> &Branch<Step> { version(steps, &paths[bi]) };
+        let named = match row {
+            Row::Original => "Original".to_string(),
+            Row::Opened(t) => format!("Opened {}", when::stamp(t, now)),
+            Row::Group(g, _) => {
+                format!(
+                    "{} by {}",
+                    steps_word(all[g].to - all[g].from),
+                    all[g].by.shown()
+                )
+            }
+            Row::Step(i, _) => steps.line[i].label.clone(),
+            Row::Part(i, j) => steps.line[i].parts.get(j).cloned().unwrap_or_default(),
+            Row::Branch(bi, _) => branch_label(branch(bi), now),
+            Row::Twig(bi, k) => branch(bi).steps[k].label.clone(),
+            Row::Flag(i) => {
+                let s = &steps.line[i];
+                let name = s.id.and_then(|id| steps.named(id)).unwrap_or_default();
+                format!("{name}: {}", s.label)
+            }
+        };
+        r.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Button, true, current, &named)
+        });
+        let c = theme::colors();
+        if current {
+            ui.painter()
+                .rect_filled(rect, 3.0, c.selection.gamma_multiply(0.55));
+        } else if r.hovered() && !matches!(row, Row::Opened(_) | Row::Part(..)) {
+            ui.painter()
+                .rect_filled(rect, 3.0, c.text.gamma_multiply(0.07));
+        }
+        if cursor {
+            ui.painter()
+                .rect_stroke(rect, 3.0, Stroke::new(1.5, c.accent), StrokeKind::Inside);
+        }
+        let mid = rect.center().y;
+        let depth = match row {
+            Row::Step(_, true) | Row::Part(..) | Row::Flag(_) => 1.0,
+            Row::Branch(bi, _) => paths[bi].len() as f32 - 1.0,
+            Row::Twig(bi, _) => paths[bi].len() as f32,
+            _ => 0.0,
+        };
+        let mut x = rect.left() + 4.0 + depth * 18.0;
+        if current {
+            ui.painter()
+                .circle_filled(pos2(x + 5.0, mid), 3.5, c.accent);
+        }
+        x += 14.0;
+        let font = FontId::proportional(13.0);
+        let small = FontId::proportional(12.0);
+        let right = rect.right() - 6.0;
+        let pointer = ui.input(|i| i.pointer.interact_pos());
+        let on = |rect: Rect| pointer.is_some_and(|p| rect.contains(p));
+        match row {
+            Row::Original => {
+                if let Some(name) = steps.named(0) {
+                    x += flag(ui, pos2(x, mid), name);
+                }
+                let g = one_line(ui, "Original", right - x, font, c.text);
+                ui.painter()
+                    .galley(pos2(x, mid - g.size().y / 2.0), g, c.text);
+                if r.hovered() {
+                    self.history.hovered = Some(0);
+                }
+                if r.clicked() {
+                    acts.push(Act::Go(0));
+                }
+                r.context_menu(|ui| {
+                    if ui.button("Go Here").clicked() {
+                        acts.push(Act::Go(0));
+                    }
+                    names_menu(ui, steps, 0, &mut acts);
+                });
+            }
+            Row::Opened(t) => {
+                let text = format!("Opened {}", when::stamp(t, now));
+                let g = one_line(ui, &text, right - x, FontId::proportional(11.0), c.text_dim);
+                let w = g.size().x;
+                ui.painter()
+                    .galley(pos2(x, mid - g.size().y / 2.0), g, c.text_dim);
+                ui.painter().hline(
+                    (x + w + 8.0)..=right,
+                    mid,
+                    Stroke::new(1.0, c.text_dim.gamma_multiply(0.35)),
+                );
+            }
+            Row::Part(i, j) => {
+                let text = steps.line[i].parts.get(j).cloned().unwrap_or_default();
+                let g = one_line(ui, &format!("· {text}"), right - x, small, c.text_dim);
+                ui.painter()
+                    .galley(pos2(x + 14.0, mid - g.size().y / 2.0), g, c.text_dim);
+            }
+            Row::Group(gi, open) => {
+                let g = &all[gi];
+                let caret_rect = caret(ui, pos2(x + 6.0, mid), open);
+                x += 18.0;
+                x += badge(ui, pos2(x, mid), &g.by);
+                let reached = steps.done > g.from;
+                let color = if reached { c.text } else { c.text_dim };
+                let undone = g.to - steps.done.clamp(g.from, g.to);
+                let label = match undone {
+                    0 => steps_word(g.to - g.from),
+                    u if u == g.to - g.from => format!("{}, undone", steps_word(u)),
+                    u => format!("{}, {u} undone", steps_word(g.to - g.from)),
+                };
+                let undo_rect = Rect::from_min_max(
+                    pos2(right - 92.0, rect.top() + 2.0),
+                    pos2(right, rect.bottom() - 2.0),
+                );
+                let show_undo = r.hovered() && reached;
+                let time_w = if show_undo {
+                    92.0
+                } else {
+                    time_text(ui, steps.line[g.to - 1].time, now, right, mid)
+                };
+                let text = one_line(ui, &label, right - x - time_w - 8.0, font, color);
+                ui.painter()
+                    .galley(pos2(x, mid - text.size().y / 2.0), text, color);
+                let over_undo = show_undo
+                    && ui
+                        .input(|i| i.pointer.hover_pos())
+                        .is_some_and(|p| undo_rect.contains(p));
+                if show_undo {
+                    button(
+                        ui,
+                        undo_rect,
+                        &format!("{} Undo all", icon::ARROW_COUNTER_CLOCKWISE),
+                        over_undo,
+                    );
+                }
+                if over_undo {
+                    self.history.hovered = Some(g.from);
+                } else if r.hovered() {
+                    self.history.hovered = Some(g.to);
+                }
+                if r.clicked() {
+                    acts.push(if over_undo {
+                        Act::Go(g.from)
+                    } else if on(caret_rect) {
+                        Act::Group(g.from)
+                    } else {
+                        Act::Go(g.to)
+                    });
+                }
+                if r.double_clicked() {
+                    acts.push(Act::Group(g.from));
+                }
+                r.on_hover_text(format!(
+                    "{} by {} in a row. Click to go to the last, ▸ to see them; Undo all goes \
+                     back to before the first",
+                    steps_word(g.to - g.from),
+                    who(&g.by)
+                ));
+            }
+            Row::Step(i, inner) => {
+                let s = &steps.line[i];
+                let done = i < steps.done;
+                let caret_rect = (!s.parts.is_empty())
+                    .then(|| caret(ui, pos2(x - 8.0, mid), self.history.parts.contains(&i)));
+                if let Some(by) =
+                    s.by.as_ref()
+                        .filter(|b| b.kind != ClientKind::Gui && !inner)
+                {
+                    x += badge(ui, pos2(x, mid), by);
+                }
+                if let Some(name) = s.id.and_then(|id| steps.named(id)) {
+                    x += flag(ui, pos2(x, mid), name);
+                }
+                let time_w = time_text(ui, s.time, now, right, mid);
+                let color = if done { c.text } else { c.text_dim };
+                let text = one_line(ui, &s.label, right - x - time_w - 8.0, font, color);
+                ui.painter()
+                    .galley(pos2(x, mid - text.size().y / 2.0), text, color);
+                if r.clicked() {
+                    acts.push(match caret_rect {
+                        Some(cr) if on(cr) => Act::Parts(i),
+                        _ => Act::Go(i + 1),
+                    });
+                }
+                if r.hovered() {
+                    self.history.hovered = Some(i + 1);
+                }
+                let r = r.on_hover_text(step_tip(s, i + 1, done, p));
+                r.context_menu(|ui| {
+                    if ui.button("Go Here").clicked() {
+                        acts.push(Act::Go(i + 1));
+                    }
+                    let revert = ui
+                        .add_enabled(done, egui::Button::new("Revert This Step"))
+                        .on_hover_text(
+                            "Undo this step alone, as a new step, keeping the ones after it",
+                        );
+                    if revert.clicked() {
+                        acts.push(Act::Revert(i + 1));
+                    }
+                    names_menu(ui, steps, i + 1, &mut acts);
+                    ui.separator();
+                    if ui.button("Copy Label").clicked() {
+                        ui.ctx().copy_text(s.label.clone());
+                    }
+                });
+            }
+            Row::Branch(bi, open) => {
+                let b = branch(bi);
+                let id = b.id();
+                let caret_rect = caret(ui, pos2(x + 6.0, mid), open);
+                x += 18.0;
+                ui.painter().text(
+                    pos2(x + 6.0, mid),
+                    Align2::CENTER_CENTER,
+                    icon::GIT_BRANCH,
+                    FontId::proportional(13.0),
+                    c.accent,
+                );
+                x += 16.0;
+                let back_rect = Rect::from_min_max(
+                    pos2(right - 128.0, rect.top() + 2.0),
+                    pos2(right, rect.bottom() - 2.0),
+                );
+                let show = r.hovered() && id.is_some();
+                let over = show
+                    && ui
+                        .input(|i| i.pointer.hover_pos())
+                        .is_some_and(|p| back_rect.contains(p));
+                let label = branch_label(b, now);
+                let w = if show { 132.0 } else { 0.0 };
+                let text = one_line(ui, &label, right - x - w - 4.0, small.clone(), c.text_dim);
+                ui.painter()
+                    .galley(pos2(x, mid - text.size().y / 2.0), text, c.text_dim);
+                if show {
+                    button(ui, back_rect, "Restore this version", over);
+                }
+                if r.clicked() {
+                    match (over, id) {
+                        (true, Some(id)) => acts.push(Act::Restore(id)),
+                        (_, Some(id)) if on(caret_rect) || !over => acts.push(Act::Twigs(id)),
+                        _ => {}
+                    }
+                }
+                r.on_hover_text(
+                    "Steps a new change replaced after an undo. Restore this version brings \
+                     them back; the steps that replaced them stay as a version of their own",
+                );
+            }
+            Row::Twig(bi, k) => {
+                let b = branch(bi);
+                let s = &b.steps[k];
+                if r.hovered() {
+                    self.history.twig = b.id().map(|id| (id, k));
+                }
+                if let Some(name) = s.id.and_then(|id| steps.named(id)) {
+                    x += flag(ui, pos2(x, mid), name);
+                }
+                let time_w = time_text(ui, s.time, now, right, mid);
+                let text = one_line(
+                    ui,
+                    &s.label,
+                    right - x - time_w - 8.0,
+                    FontId::new(12.5, egui::FontFamily::Proportional),
+                    c.text_dim.gamma_multiply(0.8),
+                );
+                ui.painter()
+                    .galley(pos2(x, mid - text.size().y / 2.0), text, c.text_dim);
+            }
+            Row::Flag(i) => {
+                let s = &steps.line[i];
+                if let Some(name) = s.id.and_then(|id| steps.named(id)) {
+                    x += flag(ui, pos2(x, mid), name);
+                }
+                let color = if i < steps.done { c.text } else { c.text_dim };
+                let text = one_line(ui, &s.label, right - x - 8.0, small, color);
+                ui.painter()
+                    .galley(pos2(x, mid - text.size().y / 2.0), text, color);
+                if r.hovered() {
+                    self.history.hovered = Some(i + 1);
+                }
+                if r.clicked() {
+                    acts.push(Act::Go(i + 1));
+                }
+                let r = r.on_hover_text(step_tip(s, i + 1, i < steps.done, p));
+                r.context_menu(|ui| {
+                    if ui.button("Go Here").clicked() {
+                        acts.push(Act::Go(i + 1));
+                    }
+                    names_menu(ui, steps, i + 1, &mut acts);
+                });
+            }
+        }
+        acts
+    }
+
+    fn history_rows(&self, steps: &Steps, all: &[Group], paths: &[Vec<usize>]) -> Vec<Row> {
         let mut rows = vec![Row::Original];
-        let mut opened = None;
-        let mut gi = 0;
-        let mut i = 0;
+        if self.history.filtered() {
+            rows.extend(
+                steps
+                    .line
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| self.history.matches(s, s.id.and_then(|id| steps.named(id))))
+                    .map(|(i, _)| Row::Step(i, false)),
+            );
+            for (bi, path) in paths.iter().enumerate() {
+                let b = version(steps, path);
+                let found: Vec<usize> = (0..b.steps.len())
+                    .filter(|&k| {
+                        let s = &b.steps[k];
+                        self.history.matches(s, s.id.and_then(|id| steps.named(id)))
+                    })
+                    .collect();
+                if !found.is_empty() {
+                    rows.push(Row::Branch(bi, true));
+                    rows.extend(found.into_iter().map(|k| Row::Twig(bi, k)));
+                }
+            }
+            return rows;
+        }
+        let at: HashMap<&[usize], usize> = paths
+            .iter()
+            .enumerate()
+            .map(|(bi, p)| (p.as_slice(), bi))
+            .collect();
+        let mut hanging: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut inside: HashMap<usize, Vec<usize>> = HashMap::new();
+        for (bi, path) in paths.iter().enumerate() {
+            match path.split_last() {
+                Some((_, [])) => hanging
+                    .entry(version(steps, path).after)
+                    .or_default()
+                    .push(bi),
+                Some((_, outer)) => inside.entry(at[outer]).or_default().push(bi),
+                None => {}
+            }
+        }
+        let twigs = &self.history.twigs;
+        let branches = |rows: &mut Vec<Row>, after: usize| {
+            for &bi in hanging.get(&after).into_iter().flatten() {
+                version_rows(rows, bi, steps, paths, &inside, twigs);
+            }
+        };
         let step = |rows: &mut Vec<Row>, i: usize, inner: bool| {
             rows.push(Row::Step(i, inner));
             if self.history.parts.contains(&i) {
                 rows.extend((0..steps.line[i].parts.len()).map(|j| Row::Part(i, j)));
             }
+            branches(rows, i + 1);
         };
+        branches(&mut rows, 0);
+        let mut opened = None;
+        let mut gi = 0;
+        let mut i = 0;
         while i < steps.line.len() {
             let s = &steps.line[i];
             if s.opened.is_some() && s.opened != opened {
@@ -749,6 +1180,15 @@ impl Workspace {
                 if open {
                     for j in g.from..g.to {
                         step(&mut rows, j, true);
+                    }
+                } else {
+                    rows.extend(
+                        (g.from..g.to)
+                            .filter(|&j| steps.line[j].id.and_then(|id| steps.named(id)).is_some())
+                            .map(Row::Flag),
+                    );
+                    for j in g.from..g.to {
+                        branches(&mut rows, j + 1);
                     }
                 }
                 i = g.to;
@@ -767,13 +1207,25 @@ impl Workspace {
             return;
         };
         let rev = self.project().map_or(0, |p| p.rev);
-        self.history.target = self
-            .history
-            .hovered
-            .or(self.history.was)
-            .or(self.history.cursor.filter(|_| self.history.keys))
-            .filter(|&s| s <= steps.line.len());
-        let wanted = self.history.target.filter(|&s| s != steps.done);
+        let version = self.history.twig.or(self.history.was_twig);
+        self.history.version = version;
+        self.history.target = match version {
+            Some(_) => None,
+            None => self
+                .history
+                .hovered
+                .or(self.history.was)
+                .or(self.history.cursor.filter(|_| self.history.keys))
+                .filter(|&s| s <= steps.line.len()),
+        };
+        let wanted = match version {
+            Some((id, k)) => Some(PreviewAt::Version(id, k)),
+            None => self
+                .history
+                .target
+                .filter(|&s| s != steps.done)
+                .map(PreviewAt::Step),
+        };
         if self.history.sent != Some((wanted, rev)) {
             self.history.sent = Some((wanted, rev));
             self.live.history_preview(wanted);
@@ -786,14 +1238,26 @@ impl Workspace {
     }
 
     pub(super) fn history_shown(&self) -> Option<Arc<Project>> {
-        let target = self.history.target?;
+        let at = match self.history.version {
+            Some((id, k)) => PreviewAt::Version(id, k),
+            None => PreviewAt::Step(self.history.target?),
+        };
         let preview = self.snap.history_preview.as_ref()?;
         let rev = self.project()?.rev;
-        (preview.step == target && preview.rev == rev).then(|| preview.project.clone())
+        (preview.at == at && preview.rev == rev).then(|| preview.project.clone())
     }
 
     pub(super) fn history_marks(&self, ctx: &egui::Context) -> Option<Marks> {
         let steps = self.steps()?;
+        if let Some((id, k)) = self.history.version {
+            let s = steps.chain(id)?.last()?.steps.get(k)?;
+            return Some(Marks {
+                clips: s.clips.iter().cloned().collect(),
+                spans: s.spans.clone(),
+                strength: 1.0,
+                focus: true,
+            });
+        }
         if let Some(t) = self.history.target {
             let s = steps.line.get(t.checked_sub(1)?)?;
             return Some(Marks {
@@ -817,6 +1281,115 @@ impl Workspace {
             strength: (1.0 - t * t).max(0.0),
             focus: false,
         })
+    }
+}
+
+fn version_paths(steps: &Steps) -> Vec<Vec<usize>> {
+    fn walk(branches: &[Branch<Step>], path: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+        for (i, b) in branches.iter().enumerate() {
+            path.push(i);
+            out.push(path.clone());
+            walk(&b.branches, path, out);
+            path.pop();
+        }
+    }
+    let mut out = Vec::new();
+    walk(&steps.branches, &mut Vec::new(), &mut out);
+    out
+}
+
+fn version<'a>(steps: &'a Steps, path: &[usize]) -> &'a Branch<Step> {
+    let mut b = &steps.branches[path[0]];
+    for &i in &path[1..] {
+        b = &b.branches[i];
+    }
+    b
+}
+
+fn version_rows(
+    rows: &mut Vec<Row>,
+    bi: usize,
+    steps: &Steps,
+    paths: &[Vec<usize>],
+    inside: &HashMap<usize, Vec<usize>>,
+    twigs: &HashSet<u64>,
+) {
+    let b = version(steps, &paths[bi]);
+    let open = b.id().is_some_and(|id| twigs.contains(&id));
+    rows.push(Row::Branch(bi, open));
+    if !open {
+        return;
+    }
+    let inner = inside.get(&bi).map(Vec::as_slice).unwrap_or_default();
+    for k in 0..=b.steps.len() {
+        for &c in inner {
+            if version(steps, &paths[c]).after == k {
+                version_rows(rows, c, steps, paths, inside, twigs);
+            }
+        }
+        if k < b.steps.len() {
+            rows.push(Row::Twig(bi, k));
+        }
+    }
+}
+
+fn names_menu(ui: &mut egui::Ui, steps: &Steps, step: usize, acts: &mut Vec<Act>) {
+    let id = match step {
+        0 => Some(0),
+        n => steps.line.get(n - 1).and_then(|s| s.id),
+    };
+    let named = id.and_then(|id| steps.named(id)).is_some();
+    let mark = ui.add_enabled(
+        id.is_some(),
+        egui::Button::new(if named {
+            "Rename This Version…"
+        } else {
+            "Mark This Version…"
+        }),
+    );
+    if mark.clicked() {
+        acts.push(Act::Name(step));
+    }
+    if named && ui.button("Remove the Name").clicked() {
+        acts.push(Act::Unname(step));
+    }
+}
+
+fn button(ui: &egui::Ui, rect: Rect, text: &str, over: bool) {
+    let c = theme::colors();
+    ui.painter().rect_filled(
+        rect,
+        3.0,
+        if over {
+            c.accent.gamma_multiply(0.5)
+        } else {
+            c.text.gamma_multiply(0.1)
+        },
+    );
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        FontId::proportional(12.0),
+        c.text,
+    );
+}
+
+fn branch_label(b: &Branch<Step>, now: u64) -> String {
+    let n = b.steps.len();
+    let undone = if n == 1 {
+        "1 undone step".to_string()
+    } else {
+        format!("{n} undone steps")
+    };
+    let more = match b.branches.len() {
+        0 => String::new(),
+        1 => " (and a version of them)".into(),
+        k => format!(" (and {k} versions of them)"),
+    };
+    match b.replaced {
+        Some(t) => format!("{undone}{more}, replaced {}", when::ago(t, now)),
+        None => format!("{undone}{more}, replaced"),
     }
 }
 
@@ -860,5 +1433,54 @@ fn step_tip(s: &Step, n: usize, done: bool, p: Option<&Project>) -> String {
     if !done {
         lines.push("Undone: a click redoes up to here".into());
     }
+    lines.push("Right-click to revert it alone or mark it".into());
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn by(kind: &str, client: Client) -> Step {
+        Step {
+            kind: Some(kind.into()),
+            by: Some(client),
+            ..Step::labeled("x")
+        }
+    }
+
+    fn nested(step: Step) -> Steps {
+        let mut steps = Steps::default();
+        steps
+            .line
+            .push(by("edit.append", Client::new(ClientKind::Gui, None)));
+        steps.branches.push(Branch {
+            after: 1,
+            replaced: None,
+            steps: vec![by("bins.add", Client::new(ClientKind::Gui, None))],
+            branches: vec![Branch {
+                after: 0,
+                replaced: None,
+                steps: vec![step],
+                branches: Vec::new(),
+            }],
+        });
+        steps
+    }
+
+    #[test]
+    fn the_kind_filter_offers_a_kind_found_only_in_a_version() {
+        let steps = nested(by("markers.add", Client::new(ClientKind::Gui, None)));
+        assert_eq!(
+            kinds_in(&steps),
+            ["Edits in", "Markers and marks", "Media and bins"]
+        );
+    }
+
+    #[test]
+    fn the_who_filter_offers_a_client_found_only_in_a_version() {
+        let agent = Client::new(ClientKind::Mcp, Some("agent".into()));
+        let steps = nested(by("markers.add", agent));
+        assert_eq!(sources_in(&steps), ["GUI", "agent"]);
+    }
 }
