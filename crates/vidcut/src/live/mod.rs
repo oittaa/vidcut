@@ -2521,6 +2521,7 @@ impl Live {
                 media,
                 mark_in,
                 out,
+                ..
             } => {
                 let base = self.source_frame_of(media);
                 for spec in [mark_in, out].into_iter().flatten() {

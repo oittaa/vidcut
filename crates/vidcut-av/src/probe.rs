@@ -82,6 +82,35 @@ fn image_format(format: &str) -> bool {
     format == "image2" || format.ends_with("_pipe")
 }
 
+fn animation_format(format: &str) -> bool {
+    matches!(format, "gif" | "webp_anim")
+}
+
+fn pictures(input: &mut ffmpeg::format::context::Input, all: bool) -> (usize, Option<f64>) {
+    let Some((video, tb)) = input
+        .streams()
+        .best(media::Type::Video)
+        .map(|s| (s.index(), s.time_base()))
+    else {
+        return (0, None);
+    };
+    let (mut count, mut end) = (0, None);
+    for (stream, packet) in input.packets() {
+        if stream.index() != video {
+            continue;
+        }
+        count += 1;
+        if let Some(pts) = packet.pts() {
+            end = end.max(Some(pts + packet.duration().max(0)));
+        }
+        if !all && count == 2 {
+            break;
+        }
+    }
+    let secs = end.map(|e| e as f64 * f64::from(tb.numerator()) / f64::from(tb.denominator()));
+    (count, secs)
+}
+
 pub fn pixel_depth(name: &str) -> u8 {
     use std::str::FromStr;
     ffmpeg::format::Pixel::from_str(name)
@@ -156,12 +185,21 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
     let path = source.path();
     let mut input = source.open()?;
     let skips = start_skips(&mut input);
-    let still = matches!(source, Input::File(_)) && image_format(input.format().name());
-    let (duration, start_time) = unsafe {
+    let format = input.format().name().to_string();
+    let (mut duration, start_time) = unsafe {
         let ctx = input.as_ptr();
         let to_secs = |v: i64| opt_ts(v).map(|v| v as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE));
         (to_secs((*ctx).duration), to_secs((*ctx).start_time))
     };
+    let file = matches!(source, Input::File(_));
+    let (count, end) = match file && animation_format(&format) {
+        true => pictures(&mut input, duration.is_none()),
+        false => (0, None),
+    };
+    let still = file && (image_format(&format) || count == 1);
+    if duration.is_none() && !still {
+        duration = end.map(|e| e - start_time.unwrap_or(0.0));
+    }
 
     let best_video = input.streams().best(media::Type::Video).map(|s| s.index());
     let mut video = None;
@@ -287,7 +325,7 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
     let (timecode, time_reference) = clock_tags(&input, best_video);
     Ok(MediaInfo {
         path: path.to_path_buf(),
-        format: input.format().name().to_string(),
+        format,
         duration,
         start_time,
         video,
