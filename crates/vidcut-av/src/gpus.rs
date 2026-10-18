@@ -312,6 +312,9 @@ fn vulkan_memory() -> Vec<(Slot, u64)> {
             let mut bus = vk::PhysicalDevicePCIBusInfoPropertiesEXT::default();
             let mut props = vk::PhysicalDeviceProperties2::default().push_next(&mut bus);
             instance.get_physical_device_properties2(physical, &mut props);
+            if props.properties.device_type == vk::PhysicalDeviceType::INTEGRATED_GPU {
+                continue;
+            }
             let largest = instance
                 .get_physical_device_memory_properties(physical)
                 .memory_heaps_as_slice()
