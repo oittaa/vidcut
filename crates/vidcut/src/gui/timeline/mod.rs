@@ -200,7 +200,7 @@ pub struct TimelineView {
     pub silence: Option<tools::SilenceDialog>,
     pub boring_dialog: Option<(f64, i64)>,
     pub dynamic: Option<tools::Dynamic>,
-    pub landing: Option<(i64, Instant)>,
+    pub landing: std::cell::Cell<Option<(i64, Instant)>>,
     pub heard: bool,
     pub layout: Option<Layout>,
     pub tracks: usize,
@@ -233,7 +233,7 @@ impl Default for TimelineView {
             silence: None,
             boring_dialog: None,
             dynamic: None,
-            landing: None,
+            landing: std::cell::Cell::new(None),
             heard: false,
             layout: None,
             tracks: 0,
@@ -2392,9 +2392,10 @@ impl Workspace {
         let landing = self
             .timeline
             .landing
+            .get()
             .and_then(|(at, since)| tools::landing(at, since.elapsed(), position));
         if landing.is_none() {
-            self.timeline.landing = None;
+            self.timeline.landing.set(None);
         }
         landing.unwrap_or(position)
     }
