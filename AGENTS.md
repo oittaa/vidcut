@@ -21,7 +21,7 @@ vidcut is a video cutting tool modeled on DaVinci Resolve's Cut page, in Rust. [
 7. **FFmpeg:** 8.0 (the latest Ubuntu LTS) up to the newest release. No code for FFmpeg before 8.0.
 8. **A unit test is a unit test:** one behavior, a fixed input, and the output it must give written out, like `assert_eq!(sha("test text"), "abcd")`.
    - It doesn't reimplement the code to work out what to expect, doesn't test a dozen things at once, and isn't 100+ lines stuffed together.
-   - Anything that needs more than that is an end-to-end test (`crates/*/tests/`).
+   - Anything that needs more than that is checked by hand: no tests that open a window, play real media or depend on timing.
 9. **The GPU first, wherever the user lets it work.** With `gpu.acceleration` and `gpu.decoding` on, decoding and encoding run on the GPU wherever it does them right, in every path, H.264 included.
    - Never move work to the CPU because the CPU is faster. A GPU that is fast enough is what counts, and it saves CPU and battery.
    - The only exception is a GPU that gives wrong results, such as wrong frames after a seek. Name it in `GpuDecoder::why_not` and gotchas.md.
@@ -38,7 +38,7 @@ These are mandatory.
 | When | Command | Runs |
 |---|---|---|
 | Before **every commit** (enforced by `.githooks/pre-commit`) | `make check` (`scripts/check.sh`); for `.md` files alone, `scripts/check-docs.sh` | no binary files in git, no comments in `crates/` (rule 2), the docs' names and links (`scripts/check-docs.sh`), `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
-| After a **bigger change** | `make check-full` (`scripts/check.sh full`) | the above plus all integration/e2e tests, one at a time, and doc tests |
+| After a **bigger change** | `make check-full` (`scripts/check.sh full`) | the above plus the examples, benches and doc tests |
 
 **Enable the hook once per clone:** `make hooks` (`git config core.hooksPath .githooks`).
 

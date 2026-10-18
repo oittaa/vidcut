@@ -21,7 +21,7 @@ run: build ## Start the GUI. make run P=talk.vidcut opens a project
 check: ## The gate before every commit: binary files, fmt, clippy, unit tests
 	scripts/check.sh
 
-check-full: ## The gate after bigger changes: check, plus every integration test
+check-full: ## The gate after bigger changes: check, plus the examples, benches and doc tests
 	scripts/check.sh full
 
 fmt: ## Format the code
