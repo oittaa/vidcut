@@ -4,7 +4,6 @@ What [the spec](../cut-page-spec.md) describes and vidcut doesn't do yet.
 
 - Media Pool tab that hides and shows the pool ([§2](../cut-page-spec.md#2-layout-pp-636637))
 - Audio Only and Video Only toggles beside the upper timeline ([§2](../cut-page-spec.md#2-layout-pp-636637))
-- Import Media Folder ([§3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675))
 - A thumbnail's lower-right corner showing its metadata ([§3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675))
 - Metadata view ([§3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675))
 - Sort Media By Timecode ([§3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675))

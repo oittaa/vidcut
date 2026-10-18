@@ -61,6 +61,13 @@ pub fn print(method: &str, r: &Response, json: bool) {
             let ids: Vec<&str> = media.iter().filter_map(Value::as_str).collect();
             println!("  media    {}", ids.join(" "));
         }
+        if let Some(bin) = r.result.get("bin").and_then(Value::as_str) {
+            println!("  bin      {bin}");
+        }
+        for x in r.result["skipped"].as_array().into_iter().flatten() {
+            let field = |k: &str| x[k].as_str().unwrap_or_default();
+            println!("  skipped  {}: {}", field("path"), field("why"));
+        }
         if let Some(tracks) = r.result.get("tracks").and_then(Value::as_array) {
             let ids: Vec<&str> = tracks.iter().filter_map(Value::as_str).collect();
             println!("  tracks   {}", ids.join(" "));

@@ -9,6 +9,7 @@ pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> Stri
         "project.open" => format!("Open {}", d.file("path")),
         "project.create" => format!("Create {}", d.file("path")),
         "media.add" => format!("Import {}", d.files("paths")),
+        "media.add_folder" => format!("Import folder {}", d.file("path")),
         "media.remove" => format!("Remove {}", d.media("media")),
         "media.relink" if d.params.get("path").is_some_and(|v| !v.is_null()) => {
             format!("Relink {} to {}", d.media("media"), d.file("path"))

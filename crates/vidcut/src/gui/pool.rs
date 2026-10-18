@@ -417,6 +417,10 @@ impl Workspace {
                             self.import_media();
                             ui.close();
                         }
+                        if ui.button("Import Media Folder…").clicked() {
+                            self.import_folder();
+                            ui.close();
+                        }
                     });
                 }
                 if folders.is_empty() && media.is_empty() {

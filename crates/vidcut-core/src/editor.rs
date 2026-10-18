@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use crate::analysis::{self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span};
 use crate::change::Change;
 use crate::error::{Error, Result};
+use crate::folder::Folder;
 use crate::history::HistoryFile;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Media, MediaInfo,
@@ -90,6 +91,10 @@ pub trait Env {
             }
         }
         found
+    }
+
+    fn read_folder(&self, dir: &Path) -> Result<Folder> {
+        crate::folder::read(dir)
     }
 
     fn present(&self, m: &Media) -> bool {
@@ -1043,6 +1048,47 @@ fn mutate(
             }
             json!({ "media": ids })
         }
+        Request::MediaAddFolder {
+            path,
+            bin,
+            sequence,
+            fps,
+        } => {
+            if fps.is_some() && !sequence {
+                return Err(Error::usage(
+                    "fps is the frame rate of image sequences: add them with sequence",
+                ));
+            }
+            let parent = bin.clone().unwrap_or_default();
+            if !ops::has_bin(p, &parent) {
+                return Err(Error::not_found(format!(
+                    "no bin {parent:?}; add it with bins.add"
+                )));
+            }
+            let folder = env.read_folder(path)?;
+            let name = folder.name().trim().to_string();
+            if name.is_empty() {
+                return Err(Error::usage(format!(
+                    "{} has no name to give its bin",
+                    path.display()
+                )));
+            }
+            let top = match parent.is_empty() {
+                true => name,
+                false => format!("{parent}/{name}"),
+            };
+            let mut out = FolderImport {
+                sequence: *sequence,
+                fps: *fps,
+                ..FolderImport::default()
+            };
+            let mut files = PoolFiles::of(p);
+            add_folder(p, env, &mut files, &folder, &top, &mut out)?;
+            if out.media.is_empty() {
+                return Err(Error::media(no_media(path, &out.skipped)));
+            }
+            json!({ "bin": top, "media": out.media, "skipped": out.skipped })
+        }
         Request::MediaMove { media, bin } => {
             ops::move_media(p, &media.to_vec(), bin)?;
             Value::Null
@@ -1800,6 +1846,103 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
     });
     files.note(p, p.media.len() - 1);
     id
+}
+
+#[derive(Default)]
+struct FolderImport {
+    sequence: bool,
+    fps: Option<Rational>,
+    media: Vec<String>,
+    skipped: Vec<Value>,
+}
+
+impl FolderImport {
+    fn skip(&mut self, path: &Path, why: &str) {
+        self.skipped.push(json!({ "path": path, "why": why }));
+    }
+}
+
+fn add_folder(
+    p: &mut Project,
+    env: &dyn Env,
+    files: &mut PoolFiles,
+    folder: &Folder,
+    bin: &str,
+    out: &mut FolderImport,
+) -> Result<()> {
+    if let Some(e) = &folder.error {
+        out.skip(&folder.path, e);
+        return Ok(());
+    }
+    let runs: HashMap<PathBuf, ImageSequence> = match out.sequence {
+        true => folder.runs_here().into_iter().collect(),
+        false => HashMap::new(),
+    };
+    let taken: HashSet<PathBuf> = runs
+        .iter()
+        .flat_map(|(file, s)| {
+            (0..s.count)
+                .map(|k| s.file(&folder.path, k))
+                .filter(move |f| f != file)
+        })
+        .collect();
+    for file in &folder.files {
+        if taken.contains(file) {
+            continue;
+        }
+        if !crate::folder::is_media(file) {
+            out.skip(file, crate::folder::NOT_MEDIA);
+            continue;
+        }
+        let probed = match runs.contains_key(file) {
+            true => env.probe_sequence(file, out.fps.unwrap_or(p.settings.fps)),
+            false => env.probe(file),
+        };
+        let probed = match probed {
+            Ok(probed) => probed,
+            Err(e) => {
+                out.skip(file, &e.message);
+                continue;
+            }
+        };
+        ops::add_bin(p, bin)?;
+        let id = add_media(p, files, probed);
+        ops::move_media(p, std::slice::from_ref(&id), bin)?;
+        if !out.media.contains(&id) {
+            out.media.push(id);
+        }
+    }
+    for sub in &folder.folders {
+        let name = sub.name();
+        if name.trim().is_empty() {
+            out.skip(&sub.path, "a folder with a blank name can't be a bin");
+            continue;
+        }
+        let inner = format!("{bin}/{}", name.trim());
+        add_folder(p, env, files, sub, &inner, out)?;
+    }
+    Ok(())
+}
+
+fn no_media(path: &Path, skipped: &[Value]) -> String {
+    let mut text = format!("no media in {} or the folders in it", path.display());
+    let shown: Vec<String> = skipped
+        .iter()
+        .take(3)
+        .map(|s| {
+            let file = Path::new(s["path"].as_str().unwrap_or_default());
+            let name = file.file_name().unwrap_or_default().to_string_lossy();
+            format!("{name}: {}", s["why"].as_str().unwrap_or_default())
+        })
+        .collect();
+    if !shown.is_empty() {
+        text.push_str(&format!(" (skipped {}", shown.join("; ")));
+        if skipped.len() > shown.len() {
+            text.push_str(&format!(" and {} more", skipped.len() - shown.len()));
+        }
+        text.push(')');
+    }
+    text
 }
 
 fn relink(

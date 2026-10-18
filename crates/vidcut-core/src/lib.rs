@@ -6,6 +6,7 @@ pub mod editor;
 pub mod error;
 pub mod export;
 pub mod fingerprint;
+pub mod folder;
 mod history;
 pub mod model;
 pub mod ops;
@@ -28,6 +29,8 @@ pub use store::Store;
 
 #[cfg(test)]
 mod analysis_tests;
+#[cfg(test)]
+mod folder_tests;
 #[cfg(test)]
 mod history_tests;
 #[cfg(test)]

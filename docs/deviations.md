@@ -97,7 +97,7 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 
 ## X17. Image sequences are asked for, not guessed
 - **Resolve:** the Frame Display Mode decides whether numbered images are one sequence or stills; Auto goes by file type (p. 366).
-- **vidcut:** each image is a still unless `media add --sequence` asks for the numbered run around it ([D39](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **vidcut:** each image is a still unless `media add --sequence` asks for the numbered run around it, or `media add-folder --sequence` for the runs in a folder ([D39](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). Importing numbered images in the GUI, picked or in a folder, asks which, with one clip each already chosen for frame formats (PNG, TIFF, EXR, DPX, TGA, BMP).
 - **Why:** the file type doesn't tell a render's frames from numbered photos, and a wrong guess turns a slideshow into a blink or a render into thousands of stills. A flag keeps scripts predictable.
 
 ## X18. Proxies keep source timestamps, and only the preview uses them
@@ -136,8 +136,8 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Why:** the curve is what the transition is named for, and needs no editor's points. The two differ by more than 1% only in the 20 ms where a curve leaves or reaches silence.
 
 ## X25. Small additions to the layout
-- **Resolve:** the Import Media button sits in the Media Pool (p. 654); the transport bar has no Clear; Timeline Options (p. 645) have no filmstrip or waveform toggles, and Snap is there, not among the timeline buttons (p. 649); the pool doesn't sort by duration.
-- **vidcut:** Import in the top bar; Clear in the transport bar clears the marks (Alt+X); Filmstrips and Waveforms in Timeline Options; a Snap button among the timeline buttons as well as Snap in Timeline Options; Duration among the pool's sorts. File dialogs for media, projects and exports each start in the folder last used for them.
+- **Resolve:** the Import Media and Import Media Folder buttons sit in the Media Pool (p. 654); the transport bar has no Clear; Timeline Options (p. 645) have no filmstrip or waveform toggles, and Snap is there, not among the timeline buttons (p. 649); the pool doesn't sort by duration.
+- **vidcut:** Import and Import Folder in the top bar; Clear in the transport bar clears the marks (Alt+X); Filmstrips and Waveforms in Timeline Options; a Snap button among the timeline buttons as well as Snap in Timeline Options; Duration among the pool's sorts. File dialogs for media, projects and exports each start in the folder last used for them.
 - **Why:** each puts one click on something the Cut page hides in a menu or leaves out, and none changes how an edit works.
 
 ## X26. The proxy folder is a preference

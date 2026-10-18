@@ -73,6 +73,23 @@ pub enum Request {
         #[serde(default)]
         fps: Option<Rational>,
     },
+    /// Bring a folder in as a bin, with a bin inside it for each folder in it
+    /// that holds media. Files that aren't media are skipped and listed;
+    /// returns the bin, the media ids and the skipped files.
+    #[serde(rename = "media.add_folder")]
+    MediaAddFolder {
+        path: PathBuf,
+        /// Put the folder's bin into this bin (default: the top level).
+        #[serde(default)]
+        bin: Option<String>,
+        /// Numbered images, two or more in a row, come in as one clip each,
+        /// as with media.add's sequence; without it, each image is a still.
+        #[serde(default)]
+        sequence: bool,
+        /// Frame rate of the image sequences (default: the project's).
+        #[serde(default)]
+        fps: Option<Rational>,
+    },
     #[serde(rename = "media.list")]
     MediaList {},
     #[serde(rename = "media.get")]
@@ -1627,7 +1644,7 @@ impl Request {
             Self::MediaRelink { path, search, .. } => {
                 path.iter_mut().chain(search.iter_mut()).collect()
             }
-            Self::Probe { path } => vec![path],
+            Self::MediaAddFolder { path, .. } | Self::Probe { path } => vec![path],
             Self::ProjectOpen { path, save_as, .. } => {
                 std::iter::once(path).chain(save_as.iter_mut()).collect()
             }

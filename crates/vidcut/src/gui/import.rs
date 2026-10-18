@@ -4,20 +4,11 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use serde_json::{Value, json};
+use vidcut_core::folder::{FRAME_TYPES, IMAGE_TYPES, MEDIA_TYPES, extension};
+use vidcut_core::model::ImageSequence;
 use vidcut_core::time::Rational;
 
 use super::workspace::{Workspace, dim, escape_cancels};
-
-const MEDIA_TYPES: &[&str] = &[
-    "mp4", "mov", "mkv", "webm", "avi", "mxf", "m4v", "ts", "mts", "m2ts", "mpg", "wav", "flac",
-    "mp3", "m4a", "aac", "ogg", "opus",
-];
-
-const IMAGE_TYPES: &[&str] = &[
-    "png", "jpg", "jpeg", "tif", "tiff", "exr", "dpx", "tga", "bmp", "webp",
-];
-
-const FRAME_TYPES: &[&str] = &["png", "tif", "tiff", "exr", "dpx", "tga", "bmp"];
 
 fn filters() -> [(&'static str, Vec<&'static str>); 3] {
     [
@@ -31,16 +22,11 @@ pub(super) fn media_types() -> Vec<&'static str> {
     [MEDIA_TYPES, IMAGE_TYPES].concat()
 }
 
-fn extension(path: &Path) -> String {
-    path.extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_default()
-}
-
 #[derive(Default)]
 pub(super) struct ImportUi {
     pub(super) ctx: Option<egui::Context>,
     picked: Arc<Mutex<Option<Picked>>>,
+    folder: Arc<Mutex<Option<PickedFolder>>>,
     choice: Option<Choice>,
 }
 
@@ -52,10 +38,17 @@ impl ImportUi {
 
 type Picked = (Vec<PathBuf>, Option<String>);
 
+struct PickedFolder {
+    path: PathBuf,
+    bin: Option<String>,
+    runs: Vec<(PathBuf, ImageSequence)>,
+}
+
 struct Choice {
     runs: Vec<Run>,
     others: Vec<PathBuf>,
     files: Vec<PathBuf>,
+    folder: Option<PathBuf>,
     bin: Option<String>,
     sequences: bool,
     fps: String,
@@ -107,16 +100,28 @@ fn runs(files: &[PathBuf]) -> (Vec<Run>, Vec<PathBuf>, bool) {
 
 fn request(choice: &Choice) -> Result<(&'static str, Value), String> {
     let bin = &choice.bin;
-    if !choice.sequences {
-        return Ok(("media.add", json!({ "paths": choice.files, "bin": bin })));
+    let fps = match choice.sequences {
+        false => None,
+        true => Some(
+            choice
+                .fps
+                .trim()
+                .parse::<Rational>()
+                .ok()
+                .filter(|fps| fps.as_f64() > 0.0)
+                .ok_or_else(|| format!("{:?} isn't a frame rate", choice.fps))?,
+        ),
+    };
+    if let Some(folder) = &choice.folder {
+        let mut params = json!({ "path": folder, "bin": bin, "sequence": choice.sequences });
+        if let Some(fps) = fps {
+            params["fps"] = json!(fps.to_string());
+        }
+        return Ok(("media.add_folder", params));
     }
-    let fps = choice
-        .fps
-        .trim()
-        .parse::<Rational>()
-        .ok()
-        .filter(|fps| fps.as_f64() > 0.0)
-        .ok_or_else(|| format!("{:?} isn't a frame rate", choice.fps))?;
+    let Some(fps) = fps else {
+        return Ok(("media.add", json!({ "paths": choice.files, "bin": bin })));
+    };
     let sequences: Vec<&PathBuf> = choice.runs.iter().map(|r| &r.file).collect();
     let add = json!({ "paths": sequences, "bin": bin, "sequence": true, "fps": fps.to_string() });
     if choice.others.is_empty() {
@@ -132,16 +137,50 @@ fn request(choice: &Choice) -> Result<(&'static str, Value), String> {
 }
 
 impl Workspace {
-    pub(super) fn import_media(&self) {
-        if self.project().is_none() {
-            return;
-        }
+    fn import_from(&self) -> (Option<String>, PathBuf) {
         let bin = Some(self.snap.pool.bin.clone()).filter(|b| !b.is_empty());
         let folder = self
             .folders
             .get(super::folders::Kind::Media)
             .or_else(|| self.project_folder())
             .unwrap_or_default();
+        (bin, folder)
+    }
+
+    pub(super) fn import_folder(&self) {
+        if self.project().is_none() {
+            return;
+        }
+        let (bin, folder) = self.import_from();
+        let (dialogs, slot, ctx) = (
+            self.dialogs.clone(),
+            self.import.folder.clone(),
+            self.import.ctx.clone(),
+        );
+        let _ = crate::threads::spawn(
+            "vidcut-import-dialog",
+            crate::threads::Work::Interactive,
+            move || {
+                let Some(path) = dialogs.pick_folder("Import Media Folder", &folder) else {
+                    return;
+                };
+                let runs = vidcut_core::folder::read(&path)
+                    .map(|f| f.runs())
+                    .unwrap_or_default();
+                *slot.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(PickedFolder { path, bin, runs });
+                if let Some(ctx) = ctx {
+                    ctx.request_repaint();
+                }
+            },
+        );
+    }
+
+    pub(super) fn import_media(&self) {
+        if self.project().is_none() {
+            return;
+        }
+        let (bin, folder) = self.import_from();
         let (dialogs, slot, ctx) = (
             self.dialogs.clone(),
             self.import.picked.clone(),
@@ -173,6 +212,43 @@ impl Workspace {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
+        let folder = self
+            .import
+            .folder
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(f) = folder {
+            let parent = f.path.parent().unwrap_or(&f.path);
+            self.folders.remember(super::folders::Kind::Media, parent);
+            if f.runs.is_empty() {
+                self.send("media.add_folder", json!({ "path": f.path, "bin": f.bin }));
+            } else {
+                let frames = f
+                    .runs
+                    .iter()
+                    .any(|(file, _)| FRAME_TYPES.contains(&extension(file).as_str()));
+                let runs = f
+                    .runs
+                    .into_iter()
+                    .map(|(file, s)| Run {
+                        name: s.display(),
+                        count: s.count,
+                        file,
+                    })
+                    .collect();
+                self.import.choice = Some(Choice {
+                    runs,
+                    others: Vec::new(),
+                    files: Vec::new(),
+                    folder: Some(f.path),
+                    bin: f.bin,
+                    sequences: frames,
+                    fps: self.fps().decimal(),
+                    error: None,
+                });
+            }
+        }
         if let Some((files, bin)) = picked.filter(|(files, _)| !files.is_empty()) {
             self.folders
                 .remember(super::folders::Kind::Media, &files[0]);
@@ -184,6 +260,7 @@ impl Workspace {
                     runs,
                     others,
                     files,
+                    folder: None,
                     bin,
                     sequences: frames,
                     fps: self.fps().decimal(),

@@ -8,6 +8,7 @@ use crate::analysis::{AudioLevels, Loudness, PictureStats};
 use crate::editor::GeneratedProxy;
 use crate::editor::{Editor, Env, History, ProbedMedia};
 use crate::error::{Error, Result};
+use crate::folder::Folder;
 use crate::model::{
     AudioInfo, ImageSequence, Media, MediaInfo, Project, Settings, VideoInfo, proxy_size,
 };
@@ -73,6 +74,7 @@ pub struct FakeEnv {
     pub sizes: HashMap<PathBuf, u64>,
     pub fingerprints: HashMap<PathBuf, String>,
     pub lost_proxies: HashSet<PathBuf>,
+    pub others: Vec<PathBuf>,
 }
 
 pub fn levels(secs: f64, loud: &[(f64, f64)]) -> AudioLevels {
@@ -123,6 +125,33 @@ impl FakeEnv {
     pub fn with(mut self, path: &str, info: MediaInfo) -> Self {
         self.files.insert(PathBuf::from(path), info);
         self
+    }
+}
+
+fn tree(dir: &Path, paths: &[PathBuf]) -> Folder {
+    let mut files: Vec<PathBuf> = paths
+        .iter()
+        .filter(|p| p.parent() == Some(dir))
+        .cloned()
+        .collect();
+    crate::folder::sort_by_name(&mut files);
+    let mut dirs: Vec<PathBuf> = paths
+        .iter()
+        .filter_map(|p| {
+            let mut parts = p.strip_prefix(dir).ok()?.components();
+            let first = parts.next()?;
+            parts.next()?;
+            Some(dir.join(first))
+        })
+        .collect();
+    dirs.sort();
+    dirs.dedup();
+    crate::folder::sort_by_name(&mut dirs);
+    Folder {
+        path: dir.to_path_buf(),
+        files,
+        folders: dirs.iter().map(|d| tree(d, paths)).collect(),
+        error: None,
     }
 }
 
@@ -257,6 +286,27 @@ impl Env for FakeEnv {
             }
         }
         found
+    }
+
+    fn read_folder(&self, dir: &Path) -> Result<Folder> {
+        let frames = self.sequences.iter().flat_map(|(first, (s, ..))| {
+            let at = first.parent().unwrap_or(Path::new("")).to_path_buf();
+            (0..s.count).map(move |k| s.file(&at, k))
+        });
+        let mut paths: Vec<PathBuf> = self
+            .files
+            .keys()
+            .cloned()
+            .chain(frames)
+            .chain(self.others.iter().cloned())
+            .filter(|p| p.starts_with(dir) && p != dir)
+            .collect();
+        paths.sort();
+        paths.dedup();
+        if paths.is_empty() {
+            return Err(Error::media(format!("{}: no such folder", dir.display())));
+        }
+        Ok(tree(dir, &paths))
     }
 
     fn present(&self, m: &Media) -> bool {

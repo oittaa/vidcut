@@ -12,6 +12,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("project.create", &["path"]),
     ("project.open", &["path"]),
     ("media.add", &["paths"]),
+    ("media.add_folder", &["path"]),
     ("media.get", &["media"]),
     ("media.move", &["media"]),
     ("media.remove", &["media"]),
@@ -158,6 +159,10 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "media.add",
         "vidcut media add cam.mp4 screen.mkv --bin Interviews\n  vidcut media add renders/frame_000001.png --sequence --fps 60",
+    ),
+    (
+        "media.add_folder",
+        "vidcut media add-folder ~/footage/shoot\n  vidcut media add-folder renders --bin VFX --sequence --fps 24",
     ),
     (
         "media.marks.set",

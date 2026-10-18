@@ -80,6 +80,8 @@ classDiagram
 
 `Project` holds `rev`, one more for every change, and `edited`, when. `media` is the pool in pool order; `bins` are slash-separated paths, and each `Media` names its `bin` (spec §3). `tracks` are video tracks first, then audio tracks. A clip on a video track carries its picture and, in `ClipAudio`, its sound with J/L offsets (`head`, `tail`); audio tracks hold sound-only clips. `MediaInfo` keeps what probing found: streams, duration, start timecode. `tape_marks` holds the source tape's In and Out. One project is one timeline ([deviation X2](../deviations.md#x2-one-timeline-per-project-file)).
 
+`media.add_folder` lists the folder with `Env::read_folder` (`folder::read`: each folder's files and folders sorted by name ignoring case, as the pool sorts, hidden ones left out, linked folders not followed) and adds its media in that order through `add_folder`, each into the bin named after its folder, made when the first media goes in. A file is media by its extension (`folder::MEDIA_TYPES`, `folder::IMAGE_TYPES`); the rest, and files that don't probe, are skipped and listed. With `sequence`, `Folder::runs_here` finds each folder's runs of numbered images (`sequence::find_among`). It is one request, so one undo step. **Why** the extension: probing every sidecar and document in a camera card's folders is slow, and FFmpeg opens some of them (subtitles, for one) as streams.
+
 ## Time
 
 Every timeline position and length is a whole frame at the project's rate, `Settings::fps`, an exact `Rational` (30000/1001, not 29.97). A clip's `source_in` counts project frames from its media's first frame too.
