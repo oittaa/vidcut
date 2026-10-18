@@ -661,8 +661,8 @@ impl Decoder {
             "a new reader decodes on {gpu} where it can; the viewer shows {shows:?} pictures \
              from GPU memory, the rest come down to memory"
         );
-        if let Some(cuda) = gpu.cuda() {
-            self.shared.gpu_found(cuda);
+        if let Some(found) = gpu.gpu() {
+            self.shared.gpu_found(found);
         }
         frames.output(decoded(shows)).decode_on(gpu.clone())
     }
