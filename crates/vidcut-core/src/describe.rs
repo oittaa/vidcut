@@ -183,6 +183,16 @@ pub fn describe_at(
         "preferences.set" => format!("Preferences: {}", compact(params)),
         "history.undo" => "Undo".into(),
         "history.redo" => "Redo".into(),
+        "history.mark" => match params["step"].as_u64() {
+            Some(n) => format!("Name step {n} \u{201c}{}\u{201d}", d.text("name")),
+            None => format!("Name this version \u{201c}{}\u{201d}", d.text("name")),
+        },
+        "history.unmark" => match params["step"].as_u64() {
+            Some(n) => format!("Take the name off step {n}"),
+            None => "Take the name off this version".into(),
+        },
+        "history.restore" => format!("Restore version {}", d.text("branch")),
+        "history.revert" => format!("Revert step {}", d.text("step")),
         "history.go" => match params["step"].as_u64() {
             Some(0) => "Go back to the start of the undo history".into(),
             Some(n) => format!("Go to step {n} of the undo history"),

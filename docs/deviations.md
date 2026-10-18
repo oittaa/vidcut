@@ -189,3 +189,18 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Resolve:** the History window floats over the page; hovering a row turns it bold, and a click goes there at once. Up and Down don't move in the list (21.1.1).
 - **vidcut:** the history docks beside the Media Pool (Edit > History > Open History Window, or History in the top bar), keeping the width it was given between runs, so it covers neither the viewer nor the timeline. Hovering a step, there or in Edit > History, draws the timeline as it was after that step without changing the project, outlines what the step changed, and scrolls the lower timeline there if it is off screen; going to such a step brings the playhead to it, so the timeline stays there. While a past state is drawn, a click on the timeline only ends the preview: it never edits a project the timeline isn't showing. In the panel, Up and Down step through the history the same way, Enter goes there, and Esc comes back to where the project is. A click goes there, as in Resolve. Edit > History lists the newest twenty steps, as in Resolve, until the current step is older than those; then it lists the twenty around the current one.
 - **Why:** a window over the picture hides what the history is about, and a label can't show a cut the way the timeline does; looking costs nothing, as the project changes only on a click or Enter. A menu that has scrolled past the current step can't show where the project is, or take it one step either way.
+
+## X36. Nothing is lost: undone steps a new change replaces stay as a version
+- **Resolve:** a new change after an undo discards the steps that could be redone (p. 652; checked on 21.1.1).
+- **vidcut:** they stay in the history as a version, shown under the step they branched from ("2 undone steps, replaced 5 min ago"), with Restore this version. Restoring brings them back and keeps the steps that had replaced them as a version of their own. `history.get` lists them in `branches`; `history.restore` restores one.
+- **Why:** an undo, then an edit by mistake, shouldn't throw away work, least of all an agent's that the person undid to look at what came before.
+
+## X37. Named versions
+- **Resolve:** the undo history has no names. Studio 20.3 added named timeline backups (File > Create Timeline Backup…, a "New Timeline Backup" dialog with a Name), copies kept beside the project.
+- **vidcut:** Mark This Version… (Edit > History, the History window's Mark… button, or a step's right-click menu) names a step of the history ("Before the silence cut"). The name shows on its step as a flag, Find finds it, and going there is a click; names stay with the history across runs and don't change the project. `history.mark` and `history.unmark` do the same.
+- **Why:** the history already holds every version, so a name is all a backup needs here, and naming costs nothing to make or to keep.
+
+## X38. Find, revert one step, and what changed since
+- **Resolve:** the History window is a list of labels (21.1.1).
+- **vidcut:** the History window finds steps by their words or names, and filters them by kind (trims, deletes, dissolves…) and by who made them. A step's right-click menu has Revert This Step: its change undone alone, as a new step, keeping the steps after it; it is refused, naming the later step, when one changed what it changed (`history.revert`). Hovering a step says what changed since it ("Since this step: 5 clips moved, 2 deleted, 3 dissolves added"); `history.get` with `since` says the same.
+- **Why:** in a long history made by several hands, finding the step to go back to and undoing one mistake without losing the edits after it are what people need most.

@@ -123,7 +123,7 @@ impl OpenProject {
         };
         let rev = self.editor.project().rev;
         let result = self.editor.apply(envelope, env, playhead);
-        let committed = self.editor.project().rev != rev;
+        let committed = self.editor.project().rev != rev || self.editor.pending();
         if committed {
             match self.store.save(&mut self.editor) {
                 Ok(saved) => {

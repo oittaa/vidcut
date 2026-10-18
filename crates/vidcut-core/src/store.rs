@@ -180,7 +180,7 @@ impl Store {
         let mut editor = self.load()?;
         let rev = editor.project().rev;
         let out = f(&mut editor)?;
-        if editor.project().rev == rev {
+        if editor.project().rev == rev && !editor.pending() {
             return Ok((out, None));
         }
         let saved = self.save(&mut editor)?;

@@ -189,6 +189,43 @@ impl Change {
         Ok(())
     }
 
+    pub fn touched(&self) -> Vec<Vec<String>> {
+        let mut out = Vec::new();
+        self.touch(&mut Vec::new(), &mut out);
+        out
+    }
+
+    fn touch(&self, at: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+        let below = |at: &[String], key: &str| {
+            let mut path = at.to_vec();
+            path.push(key.to_string());
+            path
+        };
+        match self {
+            Self::Set { .. } => out.push(at.clone()),
+            Self::Fields(fields) => {
+                for (k, c) in fields {
+                    at.push(k.clone());
+                    c.touch(at, out);
+                    at.pop();
+                }
+            }
+            Self::Items(items) => {
+                for (_, v) in items.removed.iter().chain(&items.added) {
+                    out.push(below(at, id(v)));
+                }
+                if items.order.is_some() {
+                    out.push(below(at, "#order"));
+                }
+                for (k, c) in &items.changed {
+                    at.push(k.clone());
+                    c.touch(at, out);
+                    at.pop();
+                }
+            }
+        }
+    }
+
     fn replaced(before: &Value, after: &Value) -> Self {
         Self::Set {
             before: Some(before.clone()),
@@ -222,6 +259,18 @@ impl Change {
         }
         Ok(())
     }
+}
+
+pub fn overlap<'a>(a: &'a [Vec<String>], b: &'a [Vec<String>]) -> Option<&'a [String]> {
+    for x in a {
+        for y in b {
+            let n = x.len().min(y.len());
+            if x[..n] == y[..n] {
+                return Some(if x.len() >= y.len() { x } else { y });
+            }
+        }
+    }
+    None
 }
 
 fn ids(list: &[Value]) -> Option<Vec<&str>> {
@@ -533,6 +582,23 @@ mod tests {
             change(json!({"a": null}), json!({})),
             json!({"fields": {"a": {"set": {"was": null}}}})
         );
+    }
+
+    #[test]
+    fn a_change_touches_the_fields_it_sets() {
+        let c = Change::between(
+            &json!({"t": [{"id": "c1", "d": 5}, {"id": "c2", "d": 9}]}),
+            &json!({"t": [{"id": "c1", "d": 4}, {"id": "c2", "d": 9}]}),
+        )
+        .unwrap();
+        assert_eq!(c.touched(), [vec!["t", "c1", "d"]]);
+    }
+
+    #[test]
+    fn a_field_and_its_item_overlap() {
+        let a = [vec!["t".to_string(), "c1".into(), "d".into()]];
+        let b = [vec!["t".to_string(), "c1".into()]];
+        assert_eq!(overlap(&a, &b), Some(&a[0][..]));
     }
 
     #[test]

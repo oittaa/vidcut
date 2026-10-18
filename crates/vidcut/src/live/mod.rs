@@ -1787,6 +1787,36 @@ impl Live {
         if !matches!(job.origin, Origin::Gui { .. }) || job.dry_run {
             return;
         }
+        let said = |key: &str| r.result[key].as_str().unwrap_or_default().to_string();
+        match job.method.as_str() {
+            "history.revert" => {
+                return self.notice(format!("Reverted: {}", said("label")), false);
+            }
+            "history.mark" => {
+                return self.notice(
+                    format!(
+                        "Marked step {}: \u{201c}{}\u{201d}",
+                        r.result["step"],
+                        said("name")
+                    ),
+                    false,
+                );
+            }
+            "history.unmark" => {
+                return self.notice(
+                    format!("Took the name off step {}", r.result["step"]),
+                    false,
+                );
+            }
+            "history.restore" => {
+                let text = match r.result["restored"].as_array().map_or(0, Vec::len) {
+                    1 => "Restored a version: 1 step".to_string(),
+                    n => format!("Restored a version: {n} steps"),
+                };
+                return self.notice(text, false);
+            }
+            _ => {}
+        }
         let (verb, labels) = match (r.result["undone"].as_array(), r.result["redone"].as_array()) {
             (Some(l), _) => ("Undid", l),
             (_, Some(l)) => ("Redid", l),

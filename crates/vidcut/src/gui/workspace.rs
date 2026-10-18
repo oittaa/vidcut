@@ -1645,7 +1645,7 @@ impl Workspace {
         self.export_windows(&ctx);
         self.preferences_window(&ctx);
         self.help_window(&ctx);
-        self.history_frame();
+        self.history_frame(&ctx);
         self.project_windows(&ctx);
         self.import_window(&ctx);
         self.relink_window(&ctx);
