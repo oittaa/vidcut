@@ -6,7 +6,6 @@ What [the spec](../cut-page-spec.md) describes and vidcut doesn't do yet.
 - Audio Only and Video Only toggles beside the upper timeline ([§2](../cut-page-spec.md#2-layout-pp-636637))
 - A thumbnail's lower-right corner showing its metadata ([§3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675))
 - Metadata view ([§3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675))
-- Sort Media By Timecode ([§3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675))
 - Pool selection by marquee ([§3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675))
 - Zoomed-in waveform in the Source Clip scroll area ([§4.1](../cut-page-spec.md#41-modes))
 - Jog In and Jog Out controls ([§4.1](../cut-page-spec.md#41-modes))
