@@ -199,6 +199,7 @@ pub fn describe_at(
             format!("Words in {}", d.range("range"))
         }
         "analyze.words" => "Words in the speech".into(),
+        "media.transcribe" => format!("Transcribe {}", d.media("media")),
         "edit.ripple_delete_words" => format!(
             "Ripple Delete {} word(s)",
             d.params["words"].as_array().map_or(0, Vec::len)

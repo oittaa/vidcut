@@ -187,6 +187,25 @@ impl Span {
     }
 }
 
+pub fn words_in(span: &Span, words: &[crate::transcript::Word]) -> Vec<(usize, i64, i64)> {
+    words
+        .iter()
+        .enumerate()
+        .filter_map(|(i, w)| {
+            let a = span.frame(span.origin + w.start);
+            let b = span.frame(span.origin + w.end);
+            let (a, b) = (a.min(b), a.max(b));
+            let middle = (a + b) / 2.0;
+            if middle < span.start as f64 || middle >= span.end as f64 {
+                return None;
+            }
+            let start = (a.round() as i64).max(span.start);
+            let end = (b.round() as i64).max(start + 1).min(span.end);
+            (end > start).then_some((i, start, end))
+        })
+        .collect()
+}
+
 const CLICK: f64 = 0.05;
 const CLICK_GAP: f64 = 0.1;
 
