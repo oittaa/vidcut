@@ -3982,6 +3982,7 @@ dependencies = [
  "crc32fast",
  "ctrlc",
  "eframe",
+ "egui 0.37.0",
  "egui-phosphor",
  "fontdb",
  "libc",
