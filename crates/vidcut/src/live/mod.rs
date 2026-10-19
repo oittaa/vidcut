@@ -18,8 +18,8 @@ use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue};
 use vidcut_core::model::{Clip, Format};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    Client, ClientKind, DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget, TimelineOptions,
-    TrimSide, ViewerMode,
+    Client, ClientKind, Detect, DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget,
+    TimelineOptions, TrimSide, ViewerMode,
 };
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -1358,9 +1358,11 @@ impl Live {
     fn measuring(&self, envelope: &Envelope) -> Option<Measure> {
         let p = self.project.as_ref()?.project();
         let playhead = Some(self.player.position(TIMELINE));
-        let (clips, sound) = match &envelope.request {
-            Request::EditRippleDeleteSilence { clips, .. } => (clips.to_vec(), true),
-            Request::EditDetectSceneCuts { clips, .. } => (clips.to_vec(), false),
+        let (clips, sound, speech) = match &envelope.request {
+            Request::EditRippleDeleteSilence { clips, detect, .. } => {
+                (clips.to_vec(), true, *detect == Detect::Speech)
+            }
+            Request::EditDetectSceneCuts { clips, .. } => (clips.to_vec(), false, false),
             _ => return None,
         };
         let mut needed = Vec::new();
@@ -1379,6 +1381,7 @@ impl Live {
             use vidcut_core::Env;
             for (m, stream) in &needed {
                 match stream {
+                    Some(s) if speech => AvEnv::new().voice_activity(m, *s).map(drop)?,
                     Some(s) => AvEnv::new().audio_levels(m, *s).map(drop)?,
                     None => AvEnv::new().picture_stats(m).map(drop)?,
                 }

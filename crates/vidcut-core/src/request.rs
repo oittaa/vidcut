@@ -248,9 +248,19 @@ pub enum Request {
         media: Option<String>,
         #[serde(default)]
         clips: Option<OneOrMany<ClipRef>>,
-        /// Sound below this level (dBFS) is silence.
+        /// What counts as silence.
+        #[serde(default)]
+        detect: Detect,
+        /// Sound below this level (dBFS) is silence (`detect: level`).
         #[serde(default = "silence_threshold")]
         threshold_db: f64,
+        /// Speech probability (0..1) from which a moment is speech
+        /// (`detect: speech`).
+        #[serde(default = "speech_threshold")]
+        speech_threshold: f64,
+        /// Shorter speech doesn't count (`detect: speech`).
+        #[serde(default = "min_speech")]
+        min_speech: TimeSpec,
         /// The shortest silence reported.
         #[serde(default = "silence_min")]
         min: TimeSpec,
@@ -529,9 +539,19 @@ pub enum Request {
     #[serde(rename = "edit.ripple_delete_silence")]
     EditRippleDeleteSilence {
         clips: OneOrMany<ClipRef>,
-        /// Sound below this level (dBFS) is silence.
+        /// What counts as silence.
+        #[serde(default)]
+        detect: Detect,
+        /// Sound below this level (dBFS) is silence (`detect: level`).
         #[serde(default = "silence_threshold")]
         threshold_db: f64,
+        /// Speech probability (0..1) from which a moment is speech
+        /// (`detect: speech`).
+        #[serde(default = "speech_threshold")]
+        speech_threshold: f64,
+        /// Shorter speech doesn't count (`detect: speech`).
+        #[serde(default = "min_speech")]
+        min_speech: TimeSpec,
         /// Silence kept before each audible part ("pre head").
         #[serde(default = "silence_margin")]
         pre_head: TimeSpec,
@@ -1525,6 +1545,18 @@ pub enum SubtitleFormat {
     Ttml,
 }
 
+/// What Ripple Delete Silence counts as silence (deviation X47).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Detect {
+    /// Sound below `threshold_db`.
+    #[default]
+    Level,
+    /// Whatever the speech detector (Silero VAD, on the CPU) doesn't hear as
+    /// speech: applause and room noise too.
+    Speech,
+}
+
 /// Where `timeline.import` puts the timeline (deviation X9).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1706,6 +1738,14 @@ fn one() -> u32 {
 
 fn silence_threshold() -> f64 {
     -40.0
+}
+
+fn speech_threshold() -> f64 {
+    0.5
+}
+
+fn min_speech() -> TimeSpec {
+    TimeSpec::Seconds(0.25)
 }
 
 fn silence_margin() -> TimeSpec {

@@ -13,6 +13,14 @@ pub struct AudioLevels {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
+pub struct VoiceActivity {
+    pub rate: u32,
+    pub frame: u32,
+    pub start: f64,
+    pub speech: Vec<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct PictureStats {
     pub pts: Vec<f64>,
     pub score: Vec<f32>,
@@ -62,6 +70,37 @@ impl AudioLevels {
             per_second,
             start,
             peaks,
+        })
+    }
+}
+
+impl VoiceActivity {
+    const TAG: &'static [u8; 4] = b"vcv1";
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Self::TAG.to_vec();
+        out.extend_from_slice(&u64::from(self.rate).to_le_bytes());
+        out.extend_from_slice(&u64::from(self.frame).to_le_bytes());
+        out.extend_from_slice(&self.start.to_le_bytes());
+        out.extend_from_slice(&(self.speech.len() as u64).to_le_bytes());
+        for p in &self.speech {
+            out.extend_from_slice(&p.to_le_bytes());
+        }
+        out
+    }
+
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        let mut r = Bytes(b.strip_prefix(Self::TAG)?);
+        let rate = u32::try_from(r.u64()?).ok()?;
+        let frame = u32::try_from(r.u64()?).ok()?;
+        let start = r.f64()?;
+        let n = usize::try_from(r.u64()?).ok()?;
+        let speech = (0..n).map(|_| r.f32()).collect::<Option<Vec<_>>>()?;
+        Some(Self {
+            rate,
+            frame,
+            start,
+            speech,
         })
     }
 }
@@ -217,6 +256,79 @@ fn clicks(quiet: &[bool], len: usize, gap: usize) -> Vec<(usize, usize)> {
     out
 }
 
+fn speech_runs(
+    speech: &[f32],
+    frame: i64,
+    threshold: f64,
+    min_speech: f64,
+    min_silence: f64,
+) -> Vec<(i64, i64)> {
+    let below = (threshold - 0.15).max(0.01).min(threshold);
+    let mut out = Vec::new();
+    let (mut start, mut quiet_from): (Option<i64>, Option<i64>) = (None, None);
+    for (i, &p) in speech.iter().enumerate() {
+        let (p, at) = (f64::from(p), frame * i as i64);
+        if p >= threshold {
+            quiet_from = None;
+            start.get_or_insert(at);
+        } else if p < below
+            && let Some(s) = start
+        {
+            let q = *quiet_from.get_or_insert(at);
+            if (at - q) as f64 >= min_silence {
+                if (q - s) as f64 > min_speech {
+                    out.push((s, q));
+                }
+                (start, quiet_from) = (None, None);
+            }
+        }
+    }
+    let end = frame * speech.len() as i64;
+    if let Some(s) = start
+        && (end - s) as f64 > min_speech
+    {
+        out.push((s, end));
+    }
+    out
+}
+
+pub fn non_speech(
+    va: &VoiceActivity,
+    from: f64,
+    to: f64,
+    threshold: f64,
+    min_speech: f64,
+    min: f64,
+) -> Vec<(f64, f64)> {
+    let rate = f64::from(va.rate.max(1));
+    let frame = i64::from(va.frame.max(1));
+    let index = |t: f64| (t - va.start) * rate / frame as f64;
+    let n = va.speech.len();
+    let first = (index(from).floor().max(0.0) as usize).min(n);
+    let last = (index(to).ceil().max(0.0) as usize).clamp(first, n);
+    let time = |s: i64| va.start + (first as i64 * frame + s) as f64 / rate;
+    let runs = speech_runs(
+        &va.speech[first..last],
+        frame,
+        threshold,
+        min_speech * rate,
+        min * rate,
+    );
+    let mut out = Vec::new();
+    let mut at = from;
+    for (a, b) in runs
+        .into_iter()
+        .map(|(a, b)| (time(a).max(from), time(b).min(to)))
+        .chain([(to, to)])
+    {
+        if a > at && a - at >= min - 1e-9 {
+            out.push((at, a));
+        }
+        at = at.max(b);
+    }
+    out
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SilenceSettings {
     pub threshold_db: f64,
@@ -225,23 +337,48 @@ pub struct SilenceSettings {
     pub min: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpeechSettings {
+    pub threshold: f64,
+    pub min_speech: i64,
+}
+
 pub fn silent_parts(
     span: &Span,
     levels: &AudioLevels,
     gain_db: f64,
     s: &SilenceSettings,
 ) -> Vec<(i64, i64)> {
+    parts_of(span, s, |from, to, min| {
+        silences(levels, from, to, s.threshold_db, gain_db, min)
+    })
+}
+
+pub fn non_speech_parts(
+    span: &Span,
+    va: &VoiceActivity,
+    s: &SilenceSettings,
+    speech: &SpeechSettings,
+) -> Vec<(i64, i64)> {
+    let min_speech = speech.min_speech as f64 * span.pace.speed.abs() / span.fps.as_f64();
+    parts_of(span, s, |from, to, min| {
+        non_speech(va, from, to, speech.threshold, min_speech, min)
+    })
+}
+
+fn parts_of(
+    span: &Span,
+    s: &SilenceSettings,
+    quiet: impl FnOnce(f64, f64, f64) -> Vec<(f64, f64)>,
+) -> Vec<(i64, i64)> {
     if span.pace.speed == 0.0 {
         return Vec::new();
     }
     let f = span.fps.as_f64();
     let (from, to) = (span.time(span.start as f64), span.time(span.end as f64));
-    let quiet = silences(
-        levels,
+    let quiet = quiet(
         from.min(to),
         from.max(to),
-        s.threshold_db,
-        gain_db,
         s.min as f64 * span.pace.speed.abs() / f,
     );
     let mut parts = Vec::new();
