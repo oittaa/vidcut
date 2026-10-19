@@ -123,9 +123,10 @@ pub enum Request {
     /// Transcribe Audio: hear each pool item's own sound (`stream`, counted
     /// from 0) and keep its words, with their times, with the media, for
     /// `analyze.words` with `media` or `clips` and the Transcription window.
-    /// A media already transcribed keeps its transcript unless `again`. It
-    /// runs as a job. A transcript is kept with vidcut's other measurements
-    /// of the file, so a changed file has none.
+    /// A media already transcribed keeps its transcript unless `again`. Only
+    /// a model that times words is kept: Parakeet Ultra; the others are
+    /// refused. It runs as a job. A transcript is kept with vidcut's other
+    /// measurements of the file, so a changed file has none.
     #[serde(rename = "media.transcribe")]
     MediaTranscribe {
         media: OneOrMany<String>,
@@ -372,6 +373,10 @@ pub enum Request {
         /// A pool item: its words in source frames, from its transcript.
         #[serde(default)]
         media: Option<String>,
+        /// With `media`: the sound stream whose transcript is read, counted
+        /// from 0. Default: the first one transcribed.
+        #[serde(default)]
+        stream: Option<u32>,
         /// Clips: the words each one shows, in timeline frames, from its
         /// media's transcript.
         #[serde(default)]
@@ -1732,6 +1737,12 @@ pub enum SpeechModel {
     /// phrase. It wants a GPU with 4 GB.
     #[serde(rename = "whisper-large-v3")]
     WhisperLargeV3,
+}
+
+impl SpeechModel {
+    pub fn times_words(self) -> bool {
+        self == Self::ParakeetUltra
+    }
 }
 
 /// A subtitle file format.

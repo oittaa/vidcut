@@ -188,6 +188,9 @@ impl Span {
 }
 
 pub fn words_in(span: &Span, words: &[crate::transcript::Word]) -> Vec<(usize, i64, i64)> {
+    if span.pace.speed == 0.0 {
+        return Vec::new();
+    }
     words
         .iter()
         .enumerate()
