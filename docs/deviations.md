@@ -235,3 +235,8 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Resolve:** each subtitle track's header has a destination control (ST1, ST2, …) that picks the track Add Subtitle puts new subtitles on (p. 1232); Add Subtitle is in a subtitle track's right-click menu (p. 1233).
 - **vidcut:** Add Subtitle in Timeline Actions puts the subtitle on the shown subtitle track, making Subtitle 1 when there is none; in a subtitle track's right-click menu it puts it on that track. The header has no destination control.
 - **Why:** the track shown in the viewer is the one being worked on, so one control serves both, and Timeline Actions reaches Add Subtitle before there is a track to right-click.
+
+## X45. Subtitles go into any container, and burn in from any track
+- **Resolve:** the Deliver page's subtitle Format is a separate file, Burn into video (the selected track) or As embedded captions: CEA-608 in MXF OP1A and QuickTime, or several tracks as subtitle streams or CEA-608 or EAS708 captions in QuickTime and MXF, by the Codec pop-up (Text, CEA-608) (pp. 1247–1248).
+- **vidcut:** `subtitles_as` on `export.start`, and Subtitles in the Export dialog: `file`, `stream` or `burn`. A stream is text in every container vidcut writes that holds one: mov_text in MP4, MOV and M4A, SubRip in Matroska, WebVTT in WebM, a stream for each track named (default: the shown track), with its name and language, the shown track's the default stream. `burn` draws one track, the shown one unless another is named ([D61](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). No CEA-608 or MXF.
+- **Why:** text streams are what players read in the containers vidcut writes; CEA-608 is a broadcast format of 32-character lines, and vidcut writes no MXF.

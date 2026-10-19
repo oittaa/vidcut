@@ -1,0 +1,258 @@
+use std::ffi::c_void;
+use std::sync::Mutex;
+
+use super::CudaFrames;
+use super::share::{CuContext, Cuda, check, cuda_context, in_context};
+use crate::error::{Error, Result};
+use crate::export::mix::Samples;
+use crate::ffmpeg::{ffi, frame};
+
+const PTX: &str = r#"
+.version 7.0
+.target sm_52
+.address_size 64
+
+.visible .entry vidcut_burn(
+	.param .u64 p_out,
+	.param .u64 p_out_pitch,
+	.param .u64 p_under,
+	.param .u64 p_under_pitch,
+	.param .u64 p_color,
+	.param .u64 p_color_pitch,
+	.param .u64 p_alpha,
+	.param .u64 p_alpha_pitch,
+	.param .u32 p_width,
+	.param .u32 p_height,
+	.param .u32 p_bytes,
+	.param .u32 p_shift,
+	.param .u32 p_top
+)
+{
+	.reg .pred %p<4>;
+	.reg .b32 %r<16>;
+	.reg .b64 %rd<16>;
+	.reg .f32 %f<8>;
+
+	mov.u32 %r1, %ctaid.x;
+	mov.u32 %r2, %ntid.x;
+	mov.u32 %r3, %tid.x;
+	mad.lo.s32 %r4, %r1, %r2, %r3;
+	mov.u32 %r1, %ctaid.y;
+	mov.u32 %r2, %ntid.y;
+	mov.u32 %r3, %tid.y;
+	mad.lo.s32 %r5, %r1, %r2, %r3;
+	ld.param.u32 %r6, [p_width];
+	ld.param.u32 %r7, [p_height];
+	setp.ge.u32 %p1, %r4, %r6;
+	setp.ge.u32 %p2, %r5, %r7;
+	or.pred %p1, %p1, %p2;
+	@%p1 bra $L_done;
+
+	ld.param.u32 %r8, [p_bytes];
+	ld.param.u32 %r9, [p_shift];
+	setp.eq.u32 %p3, %r8, 1;
+	mul.wide.u32 %rd1, %r4, %r8;
+	cvt.u64.u32 %rd2, %r5;
+
+	ld.param.u64 %rd3, [p_under];
+	ld.param.u64 %rd4, [p_under_pitch];
+	mad.lo.s64 %rd5, %rd2, %rd4, %rd3;
+	add.s64 %rd5, %rd5, %rd1;
+	@%p3 ld.global.u8 %r10, [%rd5];
+	@!%p3 ld.global.u16 %r10, [%rd5];
+
+	ld.param.u64 %rd6, [p_color];
+	ld.param.u64 %rd7, [p_color_pitch];
+	mad.lo.s64 %rd8, %rd2, %rd7, %rd6;
+	add.s64 %rd8, %rd8, %rd1;
+	@%p3 ld.global.u8 %r11, [%rd8];
+	@!%p3 ld.global.u16 %r11, [%rd8];
+
+	ld.param.u64 %rd9, [p_alpha];
+	ld.param.u64 %rd10, [p_alpha_pitch];
+	mad.lo.s64 %rd11, %rd2, %rd10, %rd9;
+	add.s64 %rd11, %rd11, %rd1;
+	@%p3 ld.global.u8 %r12, [%rd11];
+	@!%p3 ld.global.u16 %r12, [%rd11];
+
+	shr.u32 %r10, %r10, %r9;
+	shr.u32 %r11, %r11, %r9;
+	shr.u32 %r12, %r12, %r9;
+	ld.param.u32 %r13, [p_top];
+	cvt.rn.f32.u32 %f1, %r10;
+	cvt.rn.f32.u32 %f2, %r11;
+	cvt.rn.f32.u32 %f3, %r12;
+	cvt.rn.f32.u32 %f4, %r13;
+	div.rn.f32 %f3, %f3, %f4;
+	sub.f32 %f5, %f2, %f1;
+	fma.rn.f32 %f6, %f5, %f3, %f1;
+	cvt.rni.u32.f32 %r14, %f6;
+	shl.b32 %r14, %r14, %r9;
+
+	ld.param.u64 %rd12, [p_out];
+	ld.param.u64 %rd13, [p_out_pitch];
+	mad.lo.s64 %rd14, %rd2, %rd13, %rd12;
+	add.s64 %rd14, %rd14, %rd1;
+	@%p3 st.global.u8 [%rd14], %r14;
+	@!%p3 st.global.u16 [%rd14], %r14;
+
+$L_done:
+	ret;
+}
+"#;
+
+const BLOCK: (u32, u32) = (32, 8);
+
+struct Kernel {
+    ctx: usize,
+    function: usize,
+}
+
+fn kernel(cuda: &Cuda, ctx: CuContext) -> Result<*mut c_void> {
+    static LOADED: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
+    let mut loaded = LOADED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(k) = loaded.iter().find(|k| k.ctx == ctx as usize) {
+        return Ok(k.function as *mut c_void);
+    }
+    let function = in_context(cuda, ctx, || {
+        let ptx = std::ffi::CString::new(PTX).expect("no NUL");
+        let mut module = std::ptr::null_mut();
+        // SAFETY: the context is current; `ptx` is NUL-terminated.
+        check("loading the subtitle kernel", unsafe {
+            (cuda.module_load_data)(&mut module, ptx.as_ptr().cast())
+        })?;
+        let mut function = std::ptr::null_mut();
+        // SAFETY: the context is current; the module just loaded.
+        check("finding the subtitle kernel", unsafe {
+            (cuda.module_get_function)(&mut function, module, c"vidcut_burn".as_ptr())
+        })?;
+        Ok(function)
+    })?;
+    loaded.push(Kernel {
+        ctx: ctx as usize,
+        function: function as usize,
+    });
+    Ok(function)
+}
+
+pub(crate) struct Overlay {
+    color: frame::Video,
+    alpha: frame::Video,
+}
+
+impl Overlay {
+    pub(crate) fn new(
+        frames: &CudaFrames,
+        like: &frame::Video,
+        sprites: &[crate::burn::Sprite],
+    ) -> Result<Self> {
+        // SAFETY: the pool is a live CUDA frames context.
+        let sw = unsafe { (*((*frames.as_ptr()).data as *const ffi::AVHWFramesContext)).sw_format };
+        let (color, alpha) = crate::burn::overlay(sw.into(), like, sprites)?;
+        Ok(Self {
+            color: frames.upload(&color)?,
+            alpha: frames.upload(&alpha)?,
+        })
+    }
+}
+
+pub(crate) fn burn(
+    frames: &CudaFrames,
+    under: &frame::Video,
+    over: &Overlay,
+) -> Result<frame::Video> {
+    let cuda = Cuda::get()?;
+    super::share::wait_for(under)?;
+    // SAFETY: the pool is a live CUDA frames context.
+    let (fc, (ctx, stream)) = unsafe {
+        let fc = &*((*frames.as_ptr()).data as *const ffi::AVHWFramesContext);
+        (fc, cuda_context(fc.device_ref))
+    };
+    let sw: crate::ffmpeg::format::Pixel = fc.sw_format.into();
+    if !matches!(
+        sw,
+        crate::ffmpeg::format::Pixel::NV12 | crate::ffmpeg::format::Pixel::P010LE
+    ) {
+        return Err(Error::Invalid(format!(
+            "the GPU draws subtitles into NV12 and P010 pictures, not {sw:?}"
+        )));
+    }
+    let samples = Samples::of(sw)?;
+    let mut out = frame::Video::empty();
+    // SAFETY: a frame of the pool, its planes in CUDA memory.
+    let ret = unsafe { ffi::av_hwframe_get_buffer(frames.as_ptr(), out.as_mut_ptr(), 0) };
+    if ret < 0 {
+        return Err(Error::Ffmpeg {
+            context: "getting a GPU frame".into(),
+            source: crate::ffmpeg::Error::from(ret),
+        });
+    }
+    let function = kernel(cuda, ctx)?;
+    let (w, h) = match (u32::try_from(fc.width), u32::try_from(fc.height)) {
+        (Ok(w), Ok(h)) => (w, h),
+        _ => {
+            return Err(Error::Invalid(format!(
+                "{}×{} doesn't fit a frame",
+                fc.width, fc.height
+            )));
+        }
+    };
+    let deep = samples.bytes == 2;
+    let rows = samples.row_bytes(w);
+    in_context(cuda, ctx, || {
+        for (p, rows_down) in [(0usize, h), (1, h.div_ceil(2))] {
+            let plane = |f: &frame::Video| -> Result<(u64, u64)> {
+                // SAFETY: a CUDA frame's planes are device pointers.
+                let f = unsafe { &*f.as_ptr() };
+                let pitch = u64::try_from(f.linesize[p]).map_err(|_| {
+                    Error::Invalid(format!("a picture stride of {} doesn't fit", f.linesize[p]))
+                })?;
+                Ok((f.data[p] as u64, pitch))
+            };
+            let (mut o, mut o_pitch) = plane(&out)?;
+            let (mut u, mut u_pitch) = plane(under)?;
+            let (mut c, mut c_pitch) = plane(&over.color)?;
+            let (mut a, mut a_pitch) = plane(&over.alpha)?;
+            let mut width = (rows[p] / samples.bytes) as u32;
+            let mut height = rows_down;
+            let mut bytes = samples.bytes as u32;
+            let mut shift = samples.shift;
+            let mut top: u32 = if deep { 1023 } else { 255 };
+            let mut params: [*mut c_void; 13] = [
+                (&raw mut o).cast(),
+                (&raw mut o_pitch).cast(),
+                (&raw mut u).cast(),
+                (&raw mut u_pitch).cast(),
+                (&raw mut c).cast(),
+                (&raw mut c_pitch).cast(),
+                (&raw mut a).cast(),
+                (&raw mut a_pitch).cast(),
+                (&raw mut width).cast(),
+                (&raw mut height).cast(),
+                (&raw mut bytes).cast(),
+                (&raw mut shift).cast(),
+                (&raw mut top).cast(),
+            ];
+            // SAFETY: the context is current; `params` holds the kernel's 13 parameters, in order.
+            check("drawing subtitles", unsafe {
+                (cuda.launch_kernel)(
+                    function,
+                    width.div_ceil(BLOCK.0),
+                    height.div_ceil(BLOCK.1),
+                    1,
+                    BLOCK.0,
+                    BLOCK.1,
+                    1,
+                    0,
+                    stream,
+                    params.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                )
+            })?;
+        }
+        Ok(())
+    })?;
+    // SAFETY: both are valid frames.
+    unsafe { ffi::av_frame_copy_props(out.as_mut_ptr(), under.as_ptr()) };
+    Ok(out)
+}
