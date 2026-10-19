@@ -29,6 +29,7 @@ impl Workspace {
             .resizable(true)
             .default_size([820.0, height])
             .default_pos(near_center(ctx, 820.0, height))
+            .frame(egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::same(16)))
             .show(ctx, |ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut help.search)
@@ -51,35 +52,71 @@ impl Workspace {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        if groups.is_empty() {
-                            ui.label(
-                                RichText::new(
-                                    "Nothing matches. Try a key like J, or a word like trim.",
-                                )
-                                .color(theme::colors().text_dim),
-                            );
-                            return;
-                        }
-                        let explained = &mut help.explained;
-                        if ui.available_width() < 640.0 {
-                            for (g, rows) in &groups {
-                                group(ui, *g, rows, &query, explained);
-                            }
-                            return;
-                        }
-                        let split = halves(&groups);
-                        ui.columns(2, |columns| {
-                            for (g, rows) in &groups[..split] {
-                                group(&mut columns[0], *g, rows, &query, explained);
-                            }
-                            for (g, rows) in &groups[split..] {
-                                group(&mut columns[1], *g, rows, &query, explained);
-                            }
-                        });
+                        egui::Frame::new()
+                            .inner_margin(egui::Margin {
+                                left: 6,
+                                right: 14,
+                                ..Default::default()
+                            })
+                            .show(ui, |ui| shortcuts(ui, &groups, &query, &mut help.explained));
                     });
             });
         help.open = open;
     }
+}
+
+const GAP: i8 = 14;
+
+fn shortcuts(
+    ui: &mut egui::Ui,
+    groups: &[(Group, Vec<&Shortcut>)],
+    query: &str,
+    explained: &mut HashSet<&'static str>,
+) {
+    if groups.is_empty() {
+        ui.label(
+            RichText::new("Nothing matches. Try a key like J, or a word like trim.")
+                .color(theme::colors().text_dim),
+        );
+        return;
+    }
+    if ui.available_width() < 640.0 {
+        for (g, rows) in groups {
+            group(ui, *g, rows, query, explained);
+        }
+        return;
+    }
+    let split = halves(groups);
+    let middle = ui.available_rect_before_wrap().center().x;
+    let top = ui.cursor().top();
+    ui.columns(2, |columns| {
+        let (left, right) = columns.split_at_mut(1);
+        egui::Frame::new()
+            .inner_margin(egui::Margin {
+                right: GAP,
+                ..Default::default()
+            })
+            .show(&mut left[0], |ui| {
+                for (g, rows) in &groups[..split] {
+                    group(ui, *g, rows, query, explained);
+                }
+            });
+        egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: GAP,
+                ..Default::default()
+            })
+            .show(&mut right[0], |ui| {
+                for (g, rows) in &groups[split..] {
+                    group(ui, *g, rows, query, explained);
+                }
+            });
+    });
+    ui.painter().vline(
+        middle,
+        top..=ui.cursor().top(),
+        egui::Stroke::new(1.0, theme::colors().line),
+    );
 }
 
 fn halves(groups: &[(Group, Vec<&Shortcut>)]) -> usize {
@@ -118,52 +155,70 @@ fn group(
             .color(theme::colors().accent),
     );
     ui.add_space(4.0);
-    for s in rows {
-        row(ui, s, query, explained);
+    for (i, s) in rows.iter().enumerate() {
+        row(ui, s, query, explained, i % 2 == 1);
     }
     ui.add_space(16.0);
 }
 
-fn row(ui: &mut egui::Ui, s: &Shortcut, query: &str, explained: &mut HashSet<&'static str>) {
+fn row(
+    ui: &mut egui::Ui,
+    s: &Shortcut,
+    query: &str,
+    explained: &mut HashSet<&'static str>,
+    stripe: bool,
+) {
     let open = s.explanation.is_some()
         && (explained.contains(s.action)
             || (!query.is_empty()
                 && s.explanation
                     .is_some_and(|e| e.to_lowercase().contains(query))));
     let mut toggle = false;
-    ui.horizontal(|ui| {
-        if s.explanation.is_some() {
-            let r = mark(ui, open).on_hover_text("What it does");
-            let name = format!("What {} does", s.action);
-            r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, open, &name));
-            toggle |= r.clicked();
-        } else {
-            ui.add_space(MARK + ui.spacing().item_spacing.x);
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            keys(ui, s.keys);
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                let name = egui::Label::new(s.action).wrap();
-                if s.explanation.is_some() {
-                    toggle |= ui.add(name.sense(egui::Sense::click())).clicked();
-                } else {
-                    ui.add(name);
-                }
+    let behind = ui.painter().add(egui::Shape::Noop);
+    let shown = ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            if s.explanation.is_some() {
+                let r = mark(ui, open).on_hover_text("What it does");
+                let name = format!("What {} does", s.action);
+                r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, open, &name));
+                toggle |= r.clicked();
+            } else {
+                ui.add_space(MARK + ui.spacing().item_spacing.x);
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                keys(ui, s.keys);
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let name = egui::Label::new(s.action).wrap();
+                    if s.explanation.is_some() {
+                        toggle |= ui.add(name.sense(egui::Sense::click())).clicked();
+                    } else {
+                        ui.add(name);
+                    }
+                });
             });
         });
+        if open && let Some(e) = s.explanation {
+            ui.horizontal(|ui| {
+                ui.add_space(MARK + ui.spacing().item_spacing.x);
+                ui.add(
+                    egui::Label::new(RichText::new(super::keys(e)).color(theme::colors().text_dim))
+                        .wrap(),
+                );
+            });
+        }
     });
     if toggle && !explained.remove(s.action) {
         explained.insert(s.action);
     }
-    if open && let Some(e) = s.explanation {
-        ui.horizontal(|ui| {
-            ui.add_space(MARK + ui.spacing().item_spacing.x);
-            ui.add(
-                egui::Label::new(RichText::new(super::keys(e)).color(theme::colors().text_dim))
-                    .wrap(),
-            );
-        });
-    }
+    let rect = shown.response.rect.expand2(egui::vec2(6.0, 2.0));
+    let c = theme::colors();
+    let fill = match (ui.rect_contains_pointer(rect), stripe) {
+        (true, _) => c.accent.gamma_multiply(0.15),
+        (false, true) => c.faint,
+        (false, false) => egui::Color32::TRANSPARENT,
+    };
+    ui.painter()
+        .set(behind, egui::Shape::rect_filled(rect, 4.0, fill));
     ui.add_space(4.0);
 }
 
