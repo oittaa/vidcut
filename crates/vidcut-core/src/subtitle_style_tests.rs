@@ -121,21 +121,21 @@ fn an_imsc1_file_writes_the_track_style() {
          \x20 <head>\n\
          \x20   <styling>\n\
          \x20     <style xml:id=\"s\" tts:color=\"#ffcc00\" tts:fontFamily=\"Arial\" \
-         tts:fontSize=\"4c\" tts:textAlign=\"center\" \
-         tts:backgroundColor=\"#00000080\"/>\n\
+         tts:fontSize=\"4c\" tts:textAlign=\"center\"/>\n\
          \x20   </styling>\n\
          \x20   <layout>\n\
-         \x20     <region xml:id=\"bottom\" tts:origin=\"8% 72%\" tts:extent=\"84% 20%\" \
+         \x20     <region xml:id=\"bottom\" tts:origin=\"8% 0%\" tts:extent=\"84% 92%\" \
          tts:displayAlign=\"after\"/>\n\
-         \x20     <region xml:id=\"middle\" tts:origin=\"8% 40%\" tts:extent=\"84% 20%\" \
+         \x20     <region xml:id=\"middle\" tts:origin=\"8% 0%\" tts:extent=\"84% 100%\" \
          tts:displayAlign=\"center\"/>\n\
-         \x20     <region xml:id=\"top\" tts:origin=\"8% 8%\" tts:extent=\"84% 20%\" \
+         \x20     <region xml:id=\"top\" tts:origin=\"8% 8%\" tts:extent=\"84% 92%\" \
          tts:displayAlign=\"before\"/>\n\
          \x20   </layout>\n\
          \x20 </head>\n\
          \x20 <body style=\"s\">\n\
          \x20   <div>\n\
-         \x20     <p begin=\"00:00:01.000\" end=\"00:00:02.500\" region=\"bottom\">Hi</p>\n\
+         \x20     <p begin=\"00:00:01.000\" end=\"00:00:02.500\" region=\"bottom\"><span \
+         tts:backgroundColor=\"#00000080\">Hi</span></p>\n\
          \x20   </div>\n\
          \x20 </body>\n\
          </tt>\n"

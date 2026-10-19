@@ -584,15 +584,26 @@ fn plain_number(x: f64) -> String {
     }
 }
 
-fn regions(margin: f64) -> String {
-    let x = plain_number(margin * 100.0);
-    let w = plain_number((1.0 - 2.0 * margin) * 100.0);
-    let bottom = plain_number((1.0 - margin) * 100.0 - 20.0);
+fn regions(margin: Option<f64>) -> String {
+    let (x, w, top, after) = match margin {
+        None => (10.0, 80.0, 10.0, 90.0),
+        Some(m) => (
+            m * 100.0,
+            (1.0 - 2.0 * m) * 100.0,
+            m * 100.0,
+            (1.0 - m) * 100.0,
+        ),
+    };
     format!(
-        "      <region xml:id=\"bottom\" tts:origin=\"{x}% {bottom}%\" tts:extent=\"{w}% 20%\" \
-         tts:displayAlign=\"after\"/>\n      <region xml:id=\"middle\" tts:origin=\"{x}% 40%\" \
-         tts:extent=\"{w}% 20%\" tts:displayAlign=\"center\"/>\n      <region xml:id=\"top\" \
-         tts:origin=\"{x}% {x}%\" tts:extent=\"{w}% 20%\" tts:displayAlign=\"before\"/>\n    "
+        "      <region xml:id=\"bottom\" tts:origin=\"{x}% 0%\" tts:extent=\"{w}% {after}%\" \
+         tts:displayAlign=\"after\"/>\n      <region xml:id=\"middle\" tts:origin=\"{x}% 0%\" \
+         tts:extent=\"{w}% 100%\" tts:displayAlign=\"center\"/>\n      <region xml:id=\"top\" \
+         tts:origin=\"{x}% {top}%\" tts:extent=\"{w}% {below}%\" tts:displayAlign=\"before\"/>\n    ",
+        x = plain_number(x),
+        w = plain_number(w),
+        top = plain_number(top),
+        after = plain_number(after),
+        below = plain_number(100.0 - top),
     )
 }
 
@@ -620,21 +631,17 @@ fn style_attrs(style: &SubtitleStyle) -> String {
             plain_number(frac * 100.0)
         ));
     }
-    if let Some((rgb, opacity)) = style.backing() {
-        let aa = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
-        if aa == 255 {
-            attrs.push_str(&format!(
-                " tts:backgroundColor=\"#{:02x}{:02x}{:02x}\"",
-                rgb[0], rgb[1], rgb[2]
-            ));
-        } else {
-            attrs.push_str(&format!(
-                " tts:backgroundColor=\"#{:02x}{:02x}{:02x}{aa:02x}\"",
-                rgb[0], rgb[1], rgb[2]
-            ));
-        }
-    }
     attrs
+}
+
+fn background_color(style: &SubtitleStyle) -> Option<String> {
+    let (rgb, opacity) = style.backing()?;
+    let aa = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Some(if aa == 255 {
+        format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])
+    } else {
+        format!("#{:02x}{:02x}{:02x}{aa:02x}", rgb[0], rgb[1], rgb[2])
+    })
 }
 
 pub fn write(
@@ -651,14 +658,8 @@ pub fn write(
         .size
         .map(|_| " ttp:cellResolution=\"50 100\"")
         .unwrap_or("");
-    let regions = match style.margin {
-        Some(m) => regions(m),
-        None => "      <region xml:id=\"bottom\" tts:origin=\"10% 70%\" tts:extent=\"80% 20%\" \
-         tts:displayAlign=\"after\"/>\n      <region xml:id=\"middle\" tts:origin=\"10% 40%\" \
-         tts:extent=\"80% 20%\" tts:displayAlign=\"center\"/>\n      <region xml:id=\"top\" \
-         tts:origin=\"10% 10%\" tts:extent=\"80% 20%\" tts:displayAlign=\"before\"/>\n    "
-            .to_string(),
-    };
+    let regions = regions(style.margin);
+    let background = background_color(style);
     let mut out = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tt xml:lang=\"{}\" \
          xmlns=\"http://www.w3.org/ns/ttml\" xmlns:ttp=\"{TTP}\" xmlns:tts=\"{TTS}\" \
@@ -670,22 +671,28 @@ pub fn write(
         rate = rate_attr(frame_rate),
         attrs = style_attrs(style),
     );
-    push_cues(&mut out, cues);
+    push_cues(&mut out, cues, background.as_deref());
     out
 }
 
-fn push_cues(out: &mut String, cues: &[Timed]) {
+fn push_cues(out: &mut String, cues: &[Timed], background: Option<&str>) {
     for c in cues {
         let region = match c.place {
             Place::Bottom => "bottom",
             Place::Middle => "middle",
             Place::Top => "top",
         };
+        let text = match background {
+            Some(color) => format!(
+                "<span tts:backgroundColor=\"{color}\">{}</span>",
+                paragraph(&c.text)
+            ),
+            None => paragraph(&c.text),
+        };
         out.push_str(&format!(
-            "      <p begin=\"{}\" end=\"{}\" region=\"{region}\">{}</p>\n",
+            "      <p begin=\"{}\" end=\"{}\" region=\"{region}\">{text}</p>\n",
             clock(c.start, '.'),
-            clock(c.end, '.'),
-            paragraph(&c.text)
+            clock(c.end, '.')
         ));
     }
     out.push_str("    </div>\n  </body>\n</tt>\n");

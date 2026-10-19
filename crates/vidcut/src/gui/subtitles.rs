@@ -254,9 +254,13 @@ pub(super) fn paint_cues(
             let r = plain.rect;
             let at = pos2(picture.center().x - r.center().x, top - r.top());
             if let Some(color) = backing {
-                let bounds = plain.mesh_bounds.translate(at.to_vec2());
+                let bounds = plain.mesh_bounds;
                 if bounds.width() > 0.0 && bounds.height() > 0.0 {
-                    painter.rect_filled(bounds, 0.0, color);
+                    painter.rect_filled(
+                        bounds.translate(at.to_vec2()).expand((size * 0.15).ceil()),
+                        0.0,
+                        color,
+                    );
                 }
             }
             if let Some(color) = outline {
@@ -515,7 +519,7 @@ impl Workspace {
                     "Burned in, and written to an IMSC1 file. An empty field keeps the usual look",
                 ));
                 if !d.error.is_empty() {
-                    ui.colored_label(Color32::from_rgb(220, 80, 80), &d.error);
+                    ui.colored_label(ui.visuals().error_fg_color, &d.error);
                 }
                 ui.horizontal(|ui| {
                     if ui.button("Done").clicked() || enter {

@@ -968,11 +968,12 @@ fn encode(
                 passes: enc.passes.count(),
                 gpu_frames_in: !matches!(output, Output::Fitted),
             }));
+            let burned = burn();
             let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, pixel, enc.hdr)
                 .output(output)
                 .with_dynamic(enc.dynamic)
                 .with_light(light)
-                .with_burn(burn().0, burn().1);
+                .with_burn(burned.0, burned.1);
             if let Some(d) = decoder {
                 frames = frames.decode_on(d.clone());
             }

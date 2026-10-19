@@ -199,8 +199,12 @@ fn block(
         Some(s) => size * s as f32,
         None => size * OUTLINE,
     };
-    let pad = outline.ceil() as i32 + 2;
     let slack = (size * 0.15).ceil() as i32;
+    let pad = if style.background.is_some() {
+        (outline.ceil() as i32 + 2).max(slack)
+    } else {
+        outline.ceil() as i32 + 2
+    };
     let bands: Vec<(i32, i32, i32, i32)> = if style.background.is_some() {
         buffer
             .layout_runs()
