@@ -7,7 +7,9 @@ use std::time::Instant;
 
 use sha2::{Digest, Sha256};
 use transcribe_cpp as tc;
-use vidcut_core::render::RenderPlan;
+use vidcut_core::analysis::VoiceActivity;
+use vidcut_core::model::Media;
+use vidcut_core::render::{AudioPiece, RenderPlan};
 use vidcut_core::request::SpeechModel;
 use vidcut_core::transcript::{self, Asked, RATE, Said, Speech, Timing, Word};
 
@@ -370,7 +372,27 @@ fn download_from(
     Ok(())
 }
 
-fn listen(plan: &RenderPlan, path: &Path, started: Instant) -> Result<Vec<f32>> {
+fn listen(
+    lanes: &[Vec<AudioPiece>],
+    total: i64,
+    path: &Path,
+    started: Instant,
+    mut heard: impl FnMut(&[f32]) -> Result<()>,
+) -> Result<()> {
+    let mut mix = AudioMix::new(lanes, RATE, 1, DECLICK_MS);
+    let mut done = 0;
+    while done < total {
+        crate::cancel::stop()?;
+        let n = (total - done).min(i64::from(RATE) * 10);
+        heard(&mix.read(n as usize)?)?;
+        done += n;
+        let ms = |s: i64| s * 1000 / i64::from(RATE);
+        report(path, Stage::Listening, ms(done), ms(total), started);
+    }
+    Ok(())
+}
+
+fn heard_plan(plan: &RenderPlan, path: &Path, started: Instant) -> Result<Vec<f32>> {
     if plan.sample_rate != RATE || plan.channels != 1 {
         return Err(Error::Invalid(format!(
             "speech is heard at {RATE} Hz in one channel, not {} Hz in {}",
@@ -378,33 +400,70 @@ fn listen(plan: &RenderPlan, path: &Path, started: Instant) -> Result<Vec<f32>> 
         )));
     }
     let total = plan.samples().max(0);
-    let mut mix = AudioMix::new(&plan.audio, RATE, 1, DECLICK_MS);
     let mut pcm = Vec::with_capacity(total as usize);
-    while (pcm.len() as i64) < total {
-        crate::cancel::stop()?;
-        let n = (total - pcm.len() as i64).min(i64::from(RATE) * 10) as usize;
-        pcm.extend(mix.read(n)?);
-        let ms = |s: i64| s * 1000 / i64::from(RATE);
-        report(
-            path,
-            Stage::Listening,
-            ms(pcm.len() as i64),
-            ms(total),
-            started,
-        );
-    }
+    listen(&plan.audio, total, path, started, |s| {
+        pcm.extend_from_slice(s);
+        Ok(())
+    })?;
     Ok(pcm)
 }
 
-fn speech(vad: &Path, pcm: &[f32]) -> Result<(Vec<(i64, i64)>, usize)> {
-    let model = tc::Model::load_with(
+fn vad_model(vad: &Path) -> Result<tc::Model> {
+    tc::Model::load_with(
         vad,
         &tc::ModelOptions {
             backend: tc::Backend::Cpu,
             device: None,
         },
     )
-    .map_err(tc_error)?;
+    .map_err(tc_error)
+}
+
+pub fn voice_activity(media: &Media, stream: u32, models: &Path) -> Result<VoiceActivity> {
+    init();
+    let started = Instant::now();
+    let a = media
+        .info
+        .audio
+        .iter()
+        .find(|a| a.index == stream)
+        .ok_or_else(|| Error::Invalid(format!("{}: no audio stream {stream}", media.id)))?;
+    let secs = if a.duration > 0.0 {
+        a.duration
+    } else {
+        media.info.duration
+    };
+    let total = (secs * f64::from(RATE)).ceil() as i64;
+    let lane = vec![AudioPiece::Source {
+        media: media.id.clone(),
+        path: media.path.clone(),
+        stream,
+        origin: a.first_pts,
+        source_sample: 0,
+        samples: total,
+        gain_db: 0.0,
+        speed: 1.0,
+        fade: None,
+    }];
+    let model = vad_model(&vad_file(models)?)?;
+    let frame = model.vad_info().map_err(tc_error)?.frame_samples.max(1);
+    let mut session = model.vad_session().map_err(tc_error)?;
+    let mut speech = Vec::new();
+    listen(&[lane], total, &media.path, started, |pcm| {
+        speech.extend(session.stream_feed(pcm).map_err(tc_error)?.probs);
+        Ok(())
+    })?;
+    speech.extend(session.stream_flush().map_err(tc_error)?.probs);
+    Ok(VoiceActivity {
+        rate: RATE,
+        frame: frame as u32,
+        start: a.first_pts,
+        speech,
+    })
+}
+
+fn speech(vad: &Path, pcm: &[f32]) -> Result<(Vec<(i64, i64)>, usize)> {
+    let model = vad_model(vad)?;
     let frame = model.vad_info().map_err(tc_error)?.frame_samples.max(1) as usize;
     let found = model
         .vad_session()
@@ -610,7 +669,7 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
     init();
     let started = Instant::now();
     let (model_path, vad_path) = files(asked, options.models)?;
-    let pcm = listen(plan, &model_path, started)?;
+    let pcm = heard_plan(plan, &model_path, started)?;
     let (stretches, frame) = speech(&vad_path, &pcm)?;
     let quiet: Vec<f32> = pcm
         .chunks(frame)

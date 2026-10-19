@@ -2,6 +2,7 @@ use eframe::egui::{self, Color32, CornerRadius, Painter, Rect, RichText};
 use serde_json::{Value, json};
 use vidcut_core::model::Project;
 use vidcut_core::ops;
+use vidcut_core::request::Detect;
 
 use super::{EditSel, Side, TrackRef, audio_edit_outgoing};
 use crate::gui::export::{Ask, near_center};
@@ -14,7 +15,10 @@ use crate::live::{Audition, MAX_SPEED, PlayerId};
 #[derive(Debug)]
 pub struct SilenceDialog {
     pub clips: Vec<String>,
+    pub detect: Detect,
     pub threshold_db: f64,
+    pub speech_threshold: f64,
+    pub min_speech: f64,
     pub pre_head: f64,
     pub post_tail: f64,
     pub min: f64,
@@ -29,7 +33,10 @@ impl SilenceDialog {
     pub fn new(clips: Vec<String>) -> Self {
         Self {
             clips,
+            detect: Detect::Level,
             threshold_db: -40.0,
+            speech_threshold: 0.5,
+            min_speech: 0.25,
             pre_head: 0.15,
             post_tail: 0.15,
             min: 0.5,
@@ -42,13 +49,21 @@ impl SilenceDialog {
     }
 
     pub fn params(&self) -> Value {
-        json!({
+        let mut p = json!({
             "clips": self.clips,
-            "threshold_db": self.threshold_db,
+            "detect": self.detect,
             "pre_head": format!("{}s", self.pre_head),
             "post_tail": format!("{}s", self.post_tail),
             "min": format!("{}s", self.min),
-        })
+        });
+        match self.detect {
+            Detect::Level => p["threshold_db"] = json!(self.threshold_db),
+            Detect::Speech => {
+                p["speech_threshold"] = json!(self.speech_threshold);
+                p["min_speech"] = json!(format!("{}s", self.min_speech));
+            }
+        }
+        p
     }
 
     pub fn current(&self) -> bool {
@@ -381,6 +396,11 @@ impl Workspace {
             [one] => one.clone(),
             many => format!("{} clips", many.len()),
         };
+        let speech = d.detect == Detect::Speech;
+        let (cut, kept, finding) = match speech {
+            false => ("the silent parts", "audible", "Finding silence…"),
+            true => ("what isn't speech", "spoken", "Finding speech…"),
+        };
         egui::Window::new("Ripple Delete Silence")
             .collapsible(false)
             .resizable(false)
@@ -388,20 +408,48 @@ impl Workspace {
             .open(&mut open)
             .show(ctx, |ui| {
                 ui.label(dim(format!(
-                    "Cuts the silent parts out of {what} and closes the gaps."
+                    "Cuts {cut} out of {what} and closes the gaps."
                 )));
                 egui::Grid::new("silence-settings")
                     .num_columns(3)
                     .show(ui, |ui| {
-                        ui.label("Threshold");
-                        ui.add(
-                            egui::DragValue::new(&mut d.threshold_db)
-                                .range(-90.0..=0.0)
-                                .speed(0.5)
-                                .suffix(" dB"),
-                        );
-                        ui.label(dim("sound below this is silence"));
+                        ui.label("Detect");
+                        ui.horizontal(|ui| {
+                            ui.radio_value(&mut d.detect, Detect::Level, "Sound level");
+                            ui.radio_value(&mut d.detect, Detect::Speech, "Speech");
+                        });
+                        ui.label(dim("what counts as silence"));
                         ui.end_row();
+                        ui.label("Threshold");
+                        if speech {
+                            ui.add(
+                                egui::DragValue::new(&mut d.speech_threshold)
+                                    .range(0.0..=1.0)
+                                    .speed(0.01)
+                                    .fixed_decimals(2),
+                            );
+                            ui.label(dim("speech probability from which it is speech"));
+                        } else {
+                            ui.add(
+                                egui::DragValue::new(&mut d.threshold_db)
+                                    .range(-90.0..=0.0)
+                                    .speed(0.5)
+                                    .suffix(" dB"),
+                            );
+                            ui.label(dim("sound below this is silence"));
+                        }
+                        ui.end_row();
+                        if speech {
+                            ui.label("Shortest Speech");
+                            ui.add(
+                                egui::DragValue::new(&mut d.min_speech)
+                                    .range(0.0..=5.0)
+                                    .speed(0.01)
+                                    .suffix(" s"),
+                            );
+                            ui.label(dim("shorter speech doesn't count"));
+                            ui.end_row();
+                        }
                         ui.label("Pre Head");
                         ui.add(
                             egui::DragValue::new(&mut d.pre_head)
@@ -409,7 +457,7 @@ impl Workspace {
                                 .speed(0.01)
                                 .suffix(" s"),
                         );
-                        ui.label(dim("kept before each audible part"));
+                        ui.label(dim(format!("kept before each {kept} part")));
                         ui.end_row();
                         ui.label("Post Tail");
                         ui.add(
@@ -418,7 +466,7 @@ impl Workspace {
                                 .speed(0.01)
                                 .suffix(" s"),
                         );
-                        ui.label(dim("kept after each audible part"));
+                        ui.label(dim(format!("kept after each {kept} part")));
                         ui.end_row();
                         ui.label("Minimum to Trip");
                         ui.add(
@@ -427,14 +475,18 @@ impl Workspace {
                                 .speed(0.01)
                                 .suffix(" s"),
                         );
-                        ui.label(dim("shorter silences stay"));
+                        ui.label(dim(if speech {
+                            "shorter non-speech stays"
+                        } else {
+                            "shorter silences stay"
+                        }));
                         ui.end_row();
                     });
                 ui.separator();
                 let status = match (&d.error, d.current(), d.asked.is_some()) {
                     (Some(e), _, _) => RichText::new(e).color(theme::colors().error),
-                    (None, _, true) | (None, false, _) => dim("Finding silence…"),
-                    (None, true, false) if d.parts.is_empty() => dim("No silence to remove."),
+                    (None, _, true) | (None, false, _) => dim(finding),
+                    (None, true, false) if d.parts.is_empty() => dim("Nothing to remove."),
                     (None, true, false) => RichText::new(format!(
                         "Removes {} parts, {} ({} frames): the red stripes.",
                         d.parts.len(),

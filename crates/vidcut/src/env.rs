@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
-use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats};
+use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats, VoiceActivity};
 use vidcut_core::editor::GeneratedProxy;
 use vidcut_core::fingerprint::Origin;
 use vidcut_core::model::{
@@ -63,6 +63,7 @@ const LEVELS_PER_SECOND: u32 = 100;
 type Memo<T> = LazyLock<Mutex<HashMap<(PathBuf, Origin), Arc<T>>>>;
 static LEVELS: Memo<AudioLevels> = LazyLock::new(Default::default);
 static PICTURES: Memo<PictureStats> = LazyLock::new(Default::default);
+static VOICES: Memo<VoiceActivity> = LazyLock::new(Default::default);
 
 static MADE_WITH: LazyLock<Mutex<HashMap<PathBuf, (String, vidcut_core::editor::Copied)>>> =
     LazyLock::new(Default::default);
@@ -212,6 +213,16 @@ impl Env for AvEnv {
             },
             PictureStats::to_bytes,
             PictureStats::from_bytes,
+        )
+    }
+
+    fn voice_activity(&self, media: &Media, stream: u32) -> Result<Arc<VoiceActivity>> {
+        measured(
+            &VOICES,
+            analysis_file(media, &format!("speech{stream}")),
+            || vidcut_av::transcribe::voice_activity(media, stream, &paths::models_dir()),
+            VoiceActivity::to_bytes,
+            VoiceActivity::from_bytes,
         )
     }
 

@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use crate::analysis::{self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span};
+use crate::analysis::{
+    self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span, SpeechSettings, VoiceActivity,
+};
 use crate::change::Change;
 use crate::error::{Error, ErrorCode, Result};
 use crate::folder::Folder;
@@ -19,8 +21,8 @@ use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
 use crate::render::RenderPlan;
 use crate::request::{
-    Changes, Client, ClientKind, ClipRef, Envelope, ImportMode, NewTrack, OneOrMany, ProjectSet,
-    Request, Response, SourceParams,
+    Changes, Client, ClientKind, ClipRef, Detect, Envelope, ImportMode, NewTrack, OneOrMany,
+    ProjectSet, Request, Response, SourceParams,
 };
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
 use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode};
@@ -141,6 +143,11 @@ pub trait Env {
     fn transcribe(&self, plan: &RenderPlan, asked: &transcript::Asked) -> Result<Arc<Speech>> {
         let _ = (plan, asked);
         Err(Error::usage("speech is transcribed by the vidcut program"))
+    }
+
+    fn voice_activity(&self, media: &Media, stream: u32) -> Result<Arc<VoiceActivity>> {
+        let _ = (media, stream);
+        Err(Error::usage("speech is detected by the vidcut program"))
     }
 
     fn proxy_dir(&self) -> PathBuf;
@@ -2220,7 +2227,10 @@ fn mutate(
         }
         Request::EditRippleDeleteSilence {
             clips,
+            detect,
             threshold_db,
+            speech_threshold,
+            min_speech,
             pre_head,
             post_tail,
             min,
@@ -2232,6 +2242,7 @@ fn mutate(
                 post_tail: length(p, post_tail)?.max(0),
                 min: length(p, min)?.max(1),
             };
+            let speech = speech_settings(p, *detect, *speech_threshold, min_speech)?;
             let shown = p.settings.clone();
             let tc = move |f: i64| shown.timecode(f);
             let mut parts = Vec::new();
@@ -2241,7 +2252,7 @@ fn mutate(
                 if c.is_block() || c.speed() == 0.0 {
                     continue;
                 }
-                let found = silent_parts(p, env, &Target::Clip(c), &settings)?;
+                let found = silent_parts(p, env, &Target::Clip(c), &settings, speech.as_ref())?;
                 for &(a, b) in &found {
                     removed.push(json!({
                         "clip": id, "start": a, "end": b,
@@ -4734,7 +4745,10 @@ pub fn query(
         Request::AnalyzeSilence {
             media,
             clips,
+            detect,
             threshold_db,
+            speech_threshold,
+            min_speech,
             min,
         } => {
             let settings = SilenceSettings {
@@ -4743,9 +4757,10 @@ pub fn query(
                 post_tail: 0,
                 min: length(p, min)?.max(1),
             };
+            let speech = speech_settings(p, *detect, *speech_threshold, min_speech)?;
             let mut out = Vec::new();
             for target in targets(p, media, clips, playhead, true)? {
-                let ranges = silent_parts(p, env, &target, &settings)?;
+                let ranges = silent_parts(p, env, &target, &settings, speech.as_ref())?;
                 out.push(target.json(p, json!({ "ranges": target.ranges(p, &ranges) })));
             }
             json!(out)
@@ -4943,11 +4958,30 @@ fn targets<'a>(
     }
 }
 
+fn speech_settings(
+    p: &Project,
+    detect: Detect,
+    threshold: f64,
+    min_speech: &TimeSpec,
+) -> Result<Option<SpeechSettings>> {
+    if detect == Detect::Level {
+        return Ok(None);
+    }
+    if !(0.0..=1.0).contains(&threshold) {
+        return Err(Error::usage("speech_threshold: a probability, 0 to 1"));
+    }
+    Ok(Some(SpeechSettings {
+        threshold,
+        min_speech: length(p, min_speech)?.max(0),
+    }))
+}
+
 fn silent_parts(
     p: &Project,
     env: &dyn Env,
     target: &Target<'_>,
     settings: &SilenceSettings,
+    speech: Option<&SpeechSettings>,
 ) -> Result<Vec<(i64, i64)>> {
     let m = target.media(p)?;
     let (stream, gain) = match target {
@@ -4965,13 +4999,17 @@ fn silent_parts(
     if m.info.audio.is_empty() {
         return Err(Error::invalid(format!("{} has no sound", m.id)));
     }
-    let levels = env.audio_levels(m, stream)?;
-    Ok(analysis::silent_parts(
-        &target.span(p)?,
-        &levels,
-        gain,
-        settings,
-    ))
+    let span = target.span(p)?;
+    Ok(match speech {
+        Some(speech) => {
+            let va = env.voice_activity(m, stream)?;
+            analysis::non_speech_parts(&span, &va, settings, speech)
+        }
+        None => {
+            let levels = env.audio_levels(m, stream)?;
+            analysis::silent_parts(&span, &levels, gain, settings)
+        }
+    })
 }
 
 fn scene_cuts(
