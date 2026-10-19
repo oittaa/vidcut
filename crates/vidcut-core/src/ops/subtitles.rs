@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 
 use crate::error::{Error, Result};
-use crate::model::{Cue, Place, Project, SubtitleTrack};
+use crate::model::{
+    Cue, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle, SubtitleTrack,
+};
 use crate::request::SubtitleTimeBase;
 use crate::subtitles::{self, Read, Timed};
 
@@ -69,6 +71,105 @@ pub struct TrackProps {
     pub name: Option<Option<String>>,
     pub shown: Option<bool>,
     pub language: Option<Option<String>>,
+    pub style: Option<SubtitleStyle>,
+}
+
+fn fraction(value: f64, low: f64, high: f64, closed: bool) -> bool {
+    value.is_finite() && value >= low && (if closed { value <= high } else { value < high })
+}
+
+fn paint(value: &str, what: &str) -> Result<String> {
+    let v = value.trim().to_ascii_lowercase();
+    let digits = v.strip_prefix('#').unwrap_or(&v);
+    let alpha = v.starts_with("rgba(")
+        || (matches!(digits.len(), 4 | 8) && digits.bytes().all(|b| b.is_ascii_hexdigit()));
+    subtitles::color(&v)
+        .filter(|_| !alpha)
+        .ok_or_else(|| Error::invalid(format!("{what} is #rrggbb, #rgb or a name such as yellow")))
+}
+
+pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
+    let font = match &style.font {
+        None => None,
+        Some(s) => {
+            let t = s.trim();
+            if t.is_empty() {
+                None
+            } else if t.chars().count() > 200
+                || t.chars()
+                    .any(|c| c.is_control() || matches!(c, '<' | '>' | '&' | '"' | '\'' | ','))
+            {
+                return Err(Error::invalid(
+                    "a subtitle font is a family name, at most 200 characters",
+                ));
+            } else {
+                Some(t.to_string())
+            }
+        }
+    };
+    let size = match style.size {
+        None => None,
+        Some(s) if fraction(s, f64::MIN_POSITIVE, 0.5, true) => Some(s),
+        Some(_) => {
+            return Err(Error::invalid(
+                "a subtitle size is a fraction of the picture height, above 0 and at most 1/2",
+            ));
+        }
+    };
+    let color = match &style.color {
+        None => None,
+        Some(c) => Some(paint(c, "a subtitle color")?),
+    };
+    let outline = match &style.outline {
+        None => None,
+        Some(o) => {
+            let color = match &o.color {
+                None => None,
+                Some(c) => Some(paint(c, "an outline color")?),
+            };
+            let size = match o.size {
+                None => None,
+                Some(s) if s.is_finite() && (0.0..=0.10).contains(&s) => Some(s),
+                Some(_) => {
+                    return Err(Error::invalid(
+                        "an outline's thickness is a fraction of the text height, from 0 to 1/10",
+                    ));
+                }
+            };
+            (color.is_some() || size.is_some()).then_some(SubtitleOutline { color, size })
+        }
+    };
+    let background = match &style.background {
+        None => None,
+        Some(b) => {
+            let color = paint(&b.color, "a background color")?;
+            let opacity = match b.opacity {
+                None => None,
+                Some(o) if fraction(o, 0.0, 1.0, true) => (o < 1.0).then_some(o),
+                Some(_) => {
+                    return Err(Error::invalid("a background opacity is from 0 to 1"));
+                }
+            };
+            Some(SubtitleBackground { color, opacity })
+        }
+    };
+    let margin = match style.margin {
+        None => None,
+        Some(m) if fraction(m, 0.0, 0.5, false) => Some(m),
+        Some(_) => {
+            return Err(Error::invalid(
+                "a subtitle margin is a fraction of the picture, from 0 up to but not including 1/2",
+            ));
+        }
+    };
+    Ok(SubtitleStyle {
+        font,
+        size,
+        color,
+        outline,
+        background,
+        margin,
+    })
 }
 
 pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
@@ -91,6 +192,9 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     }
     if let Some(l) = &props.language {
         t.language = l.clone();
+    }
+    if let Some(s) = &props.style {
+        t.style = s.clone();
     }
     Ok(())
 }

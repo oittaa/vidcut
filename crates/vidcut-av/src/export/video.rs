@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use vidcut_core::model::{ColorSpace, Hdr};
+use vidcut_core::model::{ColorSpace, Hdr, SubtitleStyle};
 use vidcut_core::render::{Image, VideoPiece, WHOLE};
 use vidcut_core::time::Rational;
 
@@ -397,6 +397,7 @@ pub struct VideoFrames {
 
 struct Burner {
     cues: Vec<super::subtitles::Cue>,
+    style: SubtitleStyle,
     frame: i64,
     showing: Vec<usize>,
     size: (u32, u32),
@@ -425,7 +426,7 @@ impl Burner {
                 .iter()
                 .map(|&i| (self.cues[i].text.as_str(), self.cues[i].place))
                 .collect();
-            self.sprites = crate::burn::draw(&cues, size.0, size.1);
+            self.sprites = crate::burn::draw(&cues, size.0, size.1, &self.style);
             self.showing = showing;
             self.size = size;
             self.on_gpu = None;
@@ -521,9 +522,10 @@ impl VideoFrames {
         }
     }
 
-    pub fn with_burn(mut self, cues: Vec<super::subtitles::Cue>) -> Self {
+    pub fn with_burn(mut self, cues: Vec<super::subtitles::Cue>, style: SubtitleStyle) -> Self {
         self.burn = (!cues.is_empty()).then(|| Burner {
             cues,
+            style,
             frame: 0,
             showing: Vec::new(),
             size: (0, 0),

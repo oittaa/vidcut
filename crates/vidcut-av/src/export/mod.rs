@@ -20,7 +20,7 @@ use vidcut_core::export::metadata::{self, Measured, MetadataChoice, PieceMeta};
 use vidcut_core::export::{
     EncoderChoice, ExportSettings, HdrMetadata, HdrMode, VideoSettings, validate,
 };
-use vidcut_core::model::Hdr;
+use vidcut_core::model::{Hdr, SubtitleStyle};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
@@ -510,14 +510,14 @@ fn first_run(
     mut encoder: encoder::Video,
     (w, h): (u32, u32),
     decoder: Option<&crate::hw::GpuDecoder>,
-    burn: Vec<subtitles::Cue>,
+    burn: (Vec<subtitles::Cue>, SubtitleStyle),
     cancel: &AtomicBool,
     started: Instant,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Option<String>> {
     let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr)
         .with_dynamic(enc.dynamic)
-        .with_burn(burn);
+        .with_burn(burn.0, burn.1);
     if let Some(d) = decoder {
         frames = frames.decode_on(d.clone());
     }
@@ -834,7 +834,12 @@ fn encode(
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
     let started = Instant::now();
-    let burn = || subs.burn.as_ref().map_or_else(Vec::new, |t| t.cues.clone());
+    let burn = || {
+        subs.burn
+            .as_ref()
+            .map(|t| (t.cues.clone(), t.style.clone()))
+            .unwrap_or_else(|| (Vec::new(), SubtitleStyle::default()))
+    };
     let fps = ffmpeg::Rational(plan.fps.num() as i32, plan.fps.den() as i32);
     let times = (fps.invert(), Some(fps));
     let mut octx = format::output_as(part, settings.container.muxer())
@@ -963,11 +968,12 @@ fn encode(
                 passes: enc.passes.count(),
                 gpu_frames_in: !matches!(output, Output::Fitted),
             }));
+            let burned = burn();
             let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, pixel, enc.hdr)
                 .output(output)
                 .with_dynamic(enc.dynamic)
                 .with_light(light)
-                .with_burn(burn());
+                .with_burn(burned.0, burned.1);
             if let Some(d) = decoder {
                 frames = frames.decode_on(d.clone());
             }

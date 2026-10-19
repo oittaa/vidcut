@@ -7,11 +7,11 @@ mod vtt;
 use std::path::Path;
 
 use crate::error::{Error, Result};
-use crate::model::{Place, Settings};
+use crate::model::{Place, Settings, SubtitleStyle};
 use crate::request::SubtitleFormat;
 
 pub use languages::three_letter;
-pub use text::{Encoding, Tag, Token, plain, tokens};
+pub use text::{Encoding, Tag, Token, color, plain, rgb, tokens};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Timed {
@@ -91,14 +91,21 @@ pub struct Writing<'a> {
     pub language: Option<&'a str>,
     pub frame_rate: Option<f64>,
     pub positions: bool,
+    pub style: &'a SubtitleStyle,
 }
 
-pub fn write(cues: &[Timed], format: SubtitleFormat, how: &Writing) -> String {
-    match format {
-        SubtitleFormat::Srt => srt::write(cues, how.positions),
-        SubtitleFormat::Vtt => vtt::write(cues),
-        SubtitleFormat::Ttml => ttml::write(cues, how.language, how.frame_rate),
-    }
+pub struct Written {
+    pub text: String,
+    pub warnings: Vec<String>,
+}
+
+pub fn write(cues: &[Timed], format: SubtitleFormat, how: &Writing) -> Written {
+    let (text, warnings) = match format {
+        SubtitleFormat::Srt => (srt::write(cues, how.positions), Vec::new()),
+        SubtitleFormat::Vtt => (vtt::write(cues), Vec::new()),
+        SubtitleFormat::Ttml => ttml::write(cues, how.language, how.frame_rate, how.style),
+    };
+    Written { text, warnings }
 }
 
 pub fn normalize(text: &str) -> String {
@@ -120,6 +127,7 @@ pub struct Beside {
     pub track: String,
     pub cues: usize,
     pub text: String,
+    pub warnings: Vec<String>,
 }
 
 pub fn beside(
@@ -167,20 +175,22 @@ pub fn beside(
             name = format!("{stem}.{}.{ext}", t.id);
         }
         let cues = crate::ops::subtitles::collect(p, ti, range, timeline);
-        let text = write(
+        let written = write(
             &cues,
             format,
             &Writing {
                 language: t.language.as_deref(),
                 frame_rate: Some(p.settings.fps.as_f64()),
                 positions: !timeline,
+                style: &t.style,
             },
         );
         out.push(Beside {
             path: dir.join(name),
             track: t.id.clone(),
             cues: cues.len(),
-            text,
+            text: written.text,
+            warnings: written.warnings,
         });
     }
     Ok(out)

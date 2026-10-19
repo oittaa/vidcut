@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use serde::Serialize;
-use vidcut_core::model::Place;
+use vidcut_core::model::{Place, SubtitleStyle};
 use vidcut_core::subtitles::{Tag, Token, three_letter, tokens};
 use vidcut_core::time::Rational;
 
@@ -22,6 +22,7 @@ pub struct Track {
     pub name: String,
     pub language: Option<String>,
     pub shown: bool,
+    pub style: SubtitleStyle,
     pub cues: Vec<Cue>,
 }
 

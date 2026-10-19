@@ -295,6 +295,9 @@ pub fn render(
             if !subtitles.is_empty() {
                 plan["subtitles"] = export::subtitle_files(&subtitles);
             }
+            if let Some(notes) = plan["notes"].as_array_mut() {
+                notes.extend(export::subtitle_notes(&subtitles));
+            }
             answer(plan)
         }
         Request::ExportStart(params) => {
@@ -434,9 +437,11 @@ pub fn export_media(
         &mut |i, path, pr| (hooks.progress)(i, count, path, pr),
     )?;
     export::write_subtitles(&subtitles)?;
+    let mut notes = export::notes(&prepared, &available);
+    notes.extend(export::subtitle_notes(&subtitles));
     let mut r = answer(json!({
         "outputs": reports,
-        "notes": export::notes(&prepared, &available),
+        "notes": notes,
         "subtitles": export::subtitle_files(&subtitles),
     }));
     r.rev = p.rev;

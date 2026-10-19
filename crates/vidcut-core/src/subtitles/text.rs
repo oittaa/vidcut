@@ -169,6 +169,15 @@ pub fn color(value: &str) -> Option<String> {
     }
 }
 
+pub fn rgb(hex: &str) -> Option<[u8; 3]> {
+    let digits = hex.strip_prefix('#')?;
+    if digits.len() != 6 || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let n = u32::from_str_radix(digits, 16).ok()?;
+    Some([(n >> 16) as u8, (n >> 8) as u8, n as u8])
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tag {
     I,
