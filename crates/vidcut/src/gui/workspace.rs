@@ -763,6 +763,18 @@ impl Workspace {
                     Some(l) => format!("{verb} {l}"),
                     None => verb.to_string(),
                 };
+                let stripes = self
+                    .timeline
+                    .silence
+                    .as_ref()
+                    .map(|d| (d.can_undo(), d.can_redo()));
+                let (undo, redo) = match stripes {
+                    Some((u, r)) => (
+                        u.then(|| "Stripe Change".to_string()),
+                        r.then(|| "Stripe Change".to_string()),
+                    ),
+                    None => (undo, redo),
+                };
                 if ui
                     .add_enabled(
                         undo.is_some(),
@@ -771,7 +783,10 @@ impl Workspace {
                     )
                     .clicked()
                 {
-                    self.send("history.undo", json!({}));
+                    match &mut self.timeline.silence {
+                        Some(d) => d.undo(),
+                        None => self.send("history.undo", json!({})),
+                    }
                 }
                 if ui
                     .add_enabled(
@@ -781,7 +796,10 @@ impl Workspace {
                     )
                     .clicked()
                 {
-                    self.send("history.redo", json!({}));
+                    match &mut self.timeline.silence {
+                        Some(d) => d.redo(),
+                        None => self.send("history.redo", json!({})),
+                    }
                 }
                 ui.add_enabled_ui(self.snap.project.is_some(), |ui| {
                     ui.menu_button("History", |ui| self.history_menu(ui));
@@ -1361,14 +1379,12 @@ impl Workspace {
             }
         }
         if pressed(Key::Z) && m.command {
-            self.send(
-                if m.shift {
-                    "history.redo"
-                } else {
-                    "history.undo"
-                },
-                json!({}),
-            );
+            match (&mut self.timeline.silence, m.shift) {
+                (Some(d), true) => d.redo(),
+                (Some(d), false) => d.undo(),
+                (None, true) => self.send("history.redo", json!({})),
+                (None, false) => self.send("history.undo", json!({})),
+            }
         }
         if pressed(Key::I) && m.command {
             self.import_media();
