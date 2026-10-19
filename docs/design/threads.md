@@ -9,6 +9,7 @@ flowchart LR
   AJ -->|"thread-local flag"| Y["first::yield_to_players"]
   Y -->|"decoding calls"| W["first::wait<br>between frames"]
   C["first::Claim<br>vidcut-play-video"] -->|"held: wait blocks"| W
+  B["first::Beside<br>vidcut-tiles-N"] -->|"one thread at a time: wait passes"| W
   Y -->|"picks"| JP["vidcut-cpu-job-N<br>the jobs' pool"]
 ```
 
@@ -52,7 +53,7 @@ Libraries start their own (FFmpeg, GPU drivers, CUDA, transcribe.cpp's ggml, cpa
 
 ## Job priority
 
-`first::as_job` gives the thread the lowest CPU class (the idle class on Linux) and sets its yield flag. Decoding loops call `first::wait` between frames; on a yielding thread it blocks while any `first::Claim` is held, until a cancel. An engine's `vidcut-play-video` claims while it plays or its viewer waits for a picture.
+`first::as_job` gives the thread the lowest CPU class (the idle class on Linux) and sets its yield flag. Decoding loops call `first::wait` between frames; on a yielding thread it blocks while any `first::Claim` is held, until a cancel. An engine's `vidcut-play-video` claims while it plays or its viewer waits for a picture. A timeline tile's decode holds `first::Beside`, which lets one yielding thread at a time pass the claims, so the filmstrip keeps filling in during playback, one tile at a time.
 
 **Why:** jobs and players share the GPU's decoder, which no CPU priority reaches.
 

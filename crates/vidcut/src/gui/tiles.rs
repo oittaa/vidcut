@@ -475,10 +475,12 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
                 decoding = now;
             }
             let reader = reader.get_or_insert_with(|| reader_for(&decoding));
+            let beside = vidcut_av::first::Beside::ask();
             let made = job
                 .pieces
                 .iter()
                 .find_map(|piece| reader.rgba(piece, job.fps, job.width, job.key.height).ok());
+            drop(beside);
             used = Instant::now();
             let made = made?;
             if let Some((file, limit)) = &job.disk {
