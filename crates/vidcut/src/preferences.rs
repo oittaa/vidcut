@@ -83,7 +83,7 @@ fn prune(table: &mut toml::Table, known: &toml::Table, at: &str) -> Vec<String> 
                 ignored.push(name);
                 false
             }
-            (Some(toml::Value::Table(k)), toml::Value::Table(t)) => {
+            (Some(toml::Value::Table(k)), toml::Value::Table(t)) if !k.is_empty() => {
                 ignored.extend(prune(t, k, &name));
                 true
             }
