@@ -131,10 +131,10 @@ impl Workspace {
         let grab = |rect: Rect, width: f32, label: &str| {
             let at = Rect::from_center_size(pos2(cut, rect.center().y), vec2(width, rect.height()));
             let r = ui
-                .interact(at, ui.id().with(("trim-strip", label)), Sense::drag())
+                .interact(at, ui.scope_id().with(("trim-strip", label)), Sense::drag())
                 .on_hover_cursor(CursorIcon::ResizeHorizontal)
                 .on_hover_text(label);
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, label));
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, true, label));
             r
         };
         let handles = [
@@ -271,12 +271,12 @@ impl Workspace {
             let r = ui
                 .interact(
                     Rect::from_center_size(pos2(at, gap.center().y), vec2(FADE_GRAB, gap.height())),
-                    ui.id().with(("trim-fade", end)),
+                    ui.scope_id().with(("trim-fade", end)),
                     Sense::drag(),
                 )
                 .on_hover_cursor(CursorIcon::ResizeHorizontal)
                 .on_hover_text(label);
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, label));
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, true, label));
             (end, r)
         });
         let grow = edges.iter().find_map(|(end, r)| {
