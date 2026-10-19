@@ -1,4 +1,6 @@
 use std::cell::Cell;
+use std::marker::PhantomData;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -6,11 +8,14 @@ use crate::error::Result;
 
 static CLAIMS: Mutex<usize> = Mutex::new(0);
 static FREE: Condvar = Condvar::new();
+static BESIDE: AtomicBool = AtomicBool::new(false);
 
 const LOOK: Duration = Duration::from_millis(100);
 
 thread_local! {
     static YIELDS: Cell<bool> = const { Cell::new(false) };
+    static ASKS: Cell<bool> = const { Cell::new(false) };
+    static HOLDS: Cell<bool> = const { Cell::new(false) };
 }
 
 fn claims() -> MutexGuard<'static, usize> {
@@ -61,7 +66,7 @@ pub(crate) fn wait() -> Result<()> {
         return Ok(());
     }
     let mut n = claims();
-    while *n > 0 {
+    while *n > 0 && !beside() {
         crate::cancel::stop()?;
         n = FREE
             .wait_timeout(n, LOOK)
@@ -69,6 +74,39 @@ pub(crate) fn wait() -> Result<()> {
             .0;
     }
     Ok(())
+}
+
+fn beside() -> bool {
+    if !ASKS.get() {
+        return false;
+    }
+    if !HOLDS.get() {
+        let won = BESIDE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok();
+        HOLDS.set(won);
+    }
+    HOLDS.get()
+}
+
+pub struct Beside(PhantomData<*const ()>);
+
+impl Beside {
+    pub fn ask() -> Self {
+        ASKS.set(true);
+        Self(PhantomData)
+    }
+}
+
+impl Drop for Beside {
+    fn drop(&mut self) {
+        ASKS.set(false);
+        if HOLDS.replace(false) {
+            let _n = claims();
+            BESIDE.store(false, Ordering::Release);
+            FREE.notify_all();
+        }
+    }
 }
 
 #[derive(Default)]
