@@ -864,6 +864,15 @@ pub struct Title {
     /// `[0.5, 0.88]` and `[0.9, 0.88]`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
+    /// How much larger its text is drawn, from 1/4 to 4, about the middle of
+    /// a `text` title or the point where a lower third's lines meet. Its
+    /// background keeps its size. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<f64>,
+    /// Degrees it is turned counterclockwise, with its background and
+    /// shadow, about the same point as `zoom`. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<f64>,
 }
 
 /// What kind of title: one block of text, or a lower third.
@@ -913,6 +922,53 @@ pub struct TitleStyle {
     /// A box behind the whole block of text. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<SubtitleBackground>,
+    /// A soft copy of the text behind it, over its background. Usual: none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<TitleShadow>,
+}
+
+/// A title's drop shadow. A field left out keeps the usual look.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct TitleShadow {
+    /// `#rrggbb`, `#rgb` or a name such as `navy`. Usual: black.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// From 0 to 1. Usual: 0.75.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+    /// `[x, y]`: how far it falls right and down, as fractions of the
+    /// picture's width and height, each from -1/2 to 1/2. Usual: `[0.003,
+    /// 0.005]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<[f64; 2]>,
+    /// How soft its edge is, from 0 (sharp) to 100, where the blur's radius
+    /// is about 3% of the picture height. Usual: 20.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur: Option<f64>,
+}
+
+impl TitleShadow {
+    pub const OPACITY: f64 = 0.75;
+    pub const OFFSET: [f64; 2] = [0.003, 0.005];
+    pub const BLUR: f64 = 20.0;
+    pub const BLUR_PER_PICTURE: f64 = 3300.0;
+    pub const GAIN: f64 = 1.24;
+
+    pub fn ink(&self) -> [u8; 3] {
+        paint(self.color.as_deref(), [0, 0, 0])
+    }
+
+    pub fn alpha(&self) -> f64 {
+        self.opacity.unwrap_or(Self::OPACITY)
+    }
+
+    pub fn shift(&self) -> [f64; 2] {
+        self.offset.unwrap_or(Self::OFFSET)
+    }
+
+    pub fn softness(&self) -> f64 {
+        self.blur.unwrap_or(Self::BLUR)
+    }
 }
 
 impl TitleStyle {
@@ -933,6 +989,8 @@ impl Title {
             text: text.into(),
             style: TitleStyle::default(),
             position: None,
+            zoom: None,
+            rotation: None,
         }
     }
 
@@ -991,6 +1049,22 @@ impl Title {
 
     pub fn wrap_width(&self, picture_width: f64, picture_height: f64) -> f64 {
         (picture_width * Self::SAFE).max(self.text_fraction() * picture_height)
+    }
+
+    pub fn scale(&self) -> f64 {
+        self.zoom.unwrap_or(1.0)
+    }
+
+    pub fn turn(&self) -> f64 {
+        self.rotation.unwrap_or(0.0)
+    }
+
+    pub fn pivot(&self) -> [f64; 2] {
+        let [x, y] = self.place();
+        match self.kind {
+            TitleKind::Text => [x, y],
+            TitleKind::LowerThird => [x, y - self.text_fraction() * SubtitleStyle::LINE],
+        }
     }
 
     pub fn label(&self) -> String {

@@ -2,7 +2,8 @@ use serde_json::{Value, json};
 
 use super::{EDITOR, VIDCUT};
 use crate::model::{
-    SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleAlign, TitleKind, TitleStyle,
+    SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleAlign, TitleKind, TitleShadow,
+    TitleStyle,
 };
 
 pub const STROKE_PER_TEXT: f64 = 160.0;
@@ -111,8 +112,16 @@ fn group(name: &str, kind: u32, shown: u32, parameters: Vec<Value>) -> Value {
     })
 }
 
-fn rich_text(lines: &[&str], blob: String, anchor: u32, at: [f64; 2], usual: [f64; 2]) -> Value {
-    let zoom = |id: &str| ranged(keyed(id, json!(1.0), json!(1.0), "Double"), 0.25, 4.0);
+fn rich_text(
+    t: &Title,
+    lines: &[&str],
+    blob: String,
+    anchor: u32,
+    at: [f64; 2],
+    usual: [f64; 2],
+) -> Value {
+    let scale = rounded(t.scale());
+    let zoom = |id: &str| ranged(keyed(id, json!(scale), json!(1.0), "Double"), 0.25, 4.0);
     group(
         "Rich Text",
         24,
@@ -133,7 +142,7 @@ fn rich_text(lines: &[&str], blob: String, anchor: u32, at: [f64; 2], usual: [f6
             ranged(
                 keyed(
                     "transformationRotationAngle",
-                    json!(0.0),
+                    json!(rounded(t.turn())),
                     json!(0.0),
                     "Double",
                 ),
@@ -167,6 +176,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
     let (mut groups, hold) = match t.kind {
         TitleKind::Text => (
             vec![rich_text(
+                t,
                 &lines,
                 html(&lines, Some("center"), 0, family, points, &color),
                 4,
@@ -190,6 +200,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
             (
                 vec![
                     rich_text(
+                        t,
                         &[upper],
                         html(&[upper], align, 1, family, points, &color),
                         column,
@@ -197,6 +208,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
                         [usual_x, 0.2],
                     ),
                     rich_text(
+                        t,
                         &[lower],
                         html(&[lower], align, 0, family, points, &color),
                         6 + column,
@@ -208,21 +220,28 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
             )
         }
     };
+    let (shade, shift, blur, dim) = match &t.style.shadow {
+        Some(s) => {
+            let [dx, dy] = s.shift();
+            (
+                hex(s.ink()),
+                [rounded(dx), rounded(-dy)],
+                s.softness().round().clamp(1.0, 100.0) as i64,
+                (s.alpha() * 100.0).round() as i64,
+            )
+        }
+        None => ("#000000".into(), [0.0, 0.0], 20, 75),
+    };
     groups.push(group(
         "Drop Shadow",
         8,
         1,
         vec![
-            plain("shadow color", json!("#000000"), json!("#000000"), "Color"),
-            keyed(
-                "shadow offset",
-                json!([0.0, 0.0]),
-                json!([0.0, 0.0]),
-                "POINTF",
-            ),
-            ranged(keyed("shadow", json!(20), json!(20), "Int"), 1.0, 100.0),
+            plain("shadow color", json!(shade), json!("#000000"), "Color"),
+            keyed("shadow offset", json!(shift), json!([0.0, 0.0]), "POINTF"),
+            ranged(keyed("shadow", json!(blur), json!(20), "Int"), 1.0, 100.0),
             ranged(
-                keyed("shadow opacity", json!(75), json!(75), "Int"),
+                keyed("shadow opacity", json!(dim), json!(75), "Int"),
                 0.0,
                 100.0,
             ),
@@ -521,11 +540,11 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let first = *texts.first()?;
     let read_of = |g: &Value| read_html(value(g, "title blob").as_str().unwrap_or(""));
     let row = |g: &Value| (value(g, "anchor").as_u64().unwrap_or(4) / 3).min(2);
-    let (lines, style_from, at, lowered) = match kind {
+    let (lines, style_from, at, lowered, turned_by) = match kind {
         TitleKind::Text => {
             let r = read_of(first);
             let at = point(value(first, "position")).unwrap_or([0.5, 0.5]);
-            (r.lines.clone(), r, at, None)
+            (r.lines.clone(), r, at, None, first)
         }
         TitleKind::LowerThird => {
             let (upper, lower) = match texts.get(1).copied() {
@@ -542,9 +561,17 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
                 .collect();
             let at = point(value(lower, "position")).unwrap_or([0.1, 0.22]);
             let style_from = if high.points.is_some() { high } else { low };
-            (lines, style_from, at, Some(row(lower)))
+            (lines, style_from, at, Some(row(lower)), lower)
         }
     };
+    let zoom = value(turned_by, "transformationZoomX")
+        .as_f64()
+        .filter(|z| z.is_finite())
+        .map(|z| rounded(z.clamp(0.25, 4.0)));
+    let rotation = value(turned_by, "transformationRotationAngle")
+        .as_f64()
+        .filter(|r| r.is_finite() && r.abs() <= 3600.0)
+        .map(rounded);
     let size = style_from
         .points
         .map(|p| p / f64::from(height.max(1)))
@@ -581,6 +608,23 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
                 .map(|o| (o / 100.0).clamp(0.0, 1.0)),
         })
     });
+    let shadow = named(&all, "Drop Shadow").first().and_then(|g| {
+        let [dx, dy] = point(value(g, "shadow offset"))?;
+        (dx != 0.0 || dy != 0.0).then(|| TitleShadow {
+            color: value(g, "shadow color")
+                .as_str()
+                .filter(|c| crate::ops::subtitles::checked_color(Some(c), "shadow").is_ok())
+                .map(str::to_string),
+            opacity: value(g, "shadow opacity")
+                .as_f64()
+                .map(|o| (o / 100.0).clamp(0.0, 1.0)),
+            offset: Some([
+                rounded(dx.clamp(-0.5, 0.5)),
+                rounded((-dy).clamp(-0.5, 0.5)),
+            ]),
+            blur: value(g, "shadow").as_f64().map(|b| b.clamp(0.0, 100.0)),
+        })
+    });
     let mut title = Title {
         kind,
         align,
@@ -591,8 +635,11 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             color,
             outline,
             background,
+            shadow,
         },
         position: None,
+        zoom,
+        rotation,
     };
     let [x, from_bottom] = at;
     let mut y = 1.0 - from_bottom;

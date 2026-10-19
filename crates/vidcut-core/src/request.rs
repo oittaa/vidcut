@@ -1143,9 +1143,11 @@ pub enum Request {
         /// fraction of the picture height, above 0, at most 1/2), `color`
         /// (`#rrggbb`, `#rgb` or a name such as `yellow`), `outline` (a
         /// color and a `size` as a fraction of the text height, from 0 to
-        /// 1/10, `0` drawing none) and `background` (a color and an
-        /// `opacity` from 0 to 1, a box behind the whole text). A field
-        /// left out keeps the usual look.
+        /// 1/10, `0` drawing none), `background` (a color and an `opacity`
+        /// from 0 to 1, a box behind the whole text) and `shadow` (a
+        /// `color`, an `opacity` from 0 to 1, an `offset` `[x, y]` right and
+        /// down as fractions of the picture, and a `blur` from 0 to 100). A
+        /// field left out keeps the usual look.
         #[serde(default)]
         style: Option<TitleStyle>,
         /// Where it goes, `[x, y]` as fractions of the picture from its top
@@ -1153,6 +1155,12 @@ pub enum Request {
         /// `align`. Default: the kind's usual place.
         #[serde(default)]
         position: Option<[f64; 2]>,
+        /// How much larger its text is drawn, from 1/4 to 4. Default: 1.
+        #[serde(default)]
+        zoom: Option<f64>,
+        /// Degrees turned counterclockwise. Default: 0.
+        #[serde(default)]
+        rotation: Option<f64>,
         #[serde(default)]
         at: Option<TimeSpec>,
         #[serde(default)]
@@ -1179,6 +1187,13 @@ pub enum Request {
         /// usual place.
         #[serde(default)]
         position: Option<Vec<f64>>,
+        /// How much larger its text is drawn, from 1/4 to 4; 1 for the usual
+        /// size.
+        #[serde(default)]
+        zoom: Option<f64>,
+        /// Degrees turned counterclockwise; 0 for none.
+        #[serde(default)]
+        rotation: Option<f64>,
     },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.

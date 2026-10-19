@@ -2775,6 +2775,8 @@ fn mutate(
             align,
             style,
             position,
+            zoom,
+            rotation,
             at,
             duration,
             track,
@@ -2793,6 +2795,8 @@ fn mutate(
                 text: text.clone(),
                 style: style.clone().unwrap_or_default(),
                 position: *position,
+                zoom: *zoom,
+                rotation: *rotation,
             };
             let (id, track) = ops::titles::add(p, track.as_deref(), start, frames, &title)?;
             json!({ "clip": id, "track": track })
@@ -2804,6 +2808,8 @@ fn mutate(
             align,
             style,
             position,
+            zoom,
+            rotation,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
             let change = ops::titles::TitleChange {
@@ -2812,6 +2818,8 @@ fn mutate(
                 align: *align,
                 style: style.clone(),
                 position: position.as_deref().map(ops::titles::position).transpose()?,
+                zoom: *zoom,
+                rotation: *rotation,
             };
             ops::titles::set(p, &id, &change)?;
             Value::Null

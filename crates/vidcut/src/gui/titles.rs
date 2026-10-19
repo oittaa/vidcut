@@ -1,7 +1,7 @@
 use eframe::egui::{self, Key};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    SubtitleBackground, SubtitleOutline, Title, TitleAlign, TitleKind, TitleStyle,
+    SubtitleBackground, SubtitleOutline, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle,
 };
 
 use super::export::Ask;
@@ -22,8 +22,15 @@ pub struct TitleDialog {
     outline_size: String,
     background: String,
     opacity: String,
+    shadow: String,
+    shadow_opacity: String,
+    shadow_across: String,
+    shadow_down: String,
+    shadow_blur: String,
     across: String,
     down: String,
+    zoom: String,
+    rotation: String,
     error: String,
     families: Vec<String>,
     shown: Option<Title>,
@@ -51,8 +58,15 @@ impl TitleDialog {
             outline_size: String::new(),
             background: String::new(),
             opacity: String::new(),
+            shadow: String::new(),
+            shadow_opacity: String::new(),
+            shadow_across: String::new(),
+            shadow_down: String::new(),
+            shadow_blur: String::new(),
             across: String::new(),
             down: String::new(),
+            zoom: String::new(),
+            rotation: String::new(),
             error: String::new(),
             families: vidcut_av::burn::families(),
             shown: None,
@@ -85,10 +99,84 @@ impl TitleDialog {
             .map(|b| b.color.clone())
             .unwrap_or_default();
         self.opacity = percent(s.background.as_ref().and_then(|b| b.opacity));
+        let shade = s.shadow.as_ref();
+        self.shadow = shade.map_or_else(String::new, |h| {
+            h.color.clone().unwrap_or_else(|| SHADOW_INK.to_string())
+        });
+        self.shadow_opacity = percent(shade.and_then(|h| h.opacity));
+        self.shadow_across = percent(shade.and_then(|h| h.offset).map(|o| o[0]));
+        self.shadow_down = percent(shade.and_then(|h| h.offset).map(|o| o[1]));
+        self.shadow_blur = plain(shade.and_then(|h| h.blur));
         self.across = percent(t.position.map(|p| p[0]));
         self.down = percent(t.position.map(|p| p[1]));
+        self.zoom = percent(t.zoom);
+        self.rotation = plain(t.rotation);
         self.loaded = true;
     }
+}
+
+const SHADOW_INK: &str = "#000000";
+
+fn plain(v: Option<f64>) -> String {
+    v.map_or_else(String::new, |n| {
+        let s = format!("{n:.3}");
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    })
+}
+
+fn kept_plain(shown: &str, stored: Option<f64>, what: &str) -> Result<Option<f64>, String> {
+    if shown.trim() == plain(stored) {
+        return Ok(stored);
+    }
+    let t = shown.trim().trim_end_matches('°').trim();
+    if t.is_empty() {
+        return Ok(None);
+    }
+    t.parse::<f64>()
+        .map(Some)
+        .map_err(|_| format!("{what} is a number, such as 20"))
+}
+
+fn shadow_of(d: &TitleDialog, stored: Option<&TitleShadow>) -> Result<Option<TitleShadow>, String> {
+    let rest = [
+        &d.shadow_opacity,
+        &d.shadow_across,
+        &d.shadow_down,
+        &d.shadow_blur,
+    ];
+    let Some(color) = field(&d.shadow) else {
+        return if rest.iter().all(|f| f.trim().is_empty()) {
+            Ok(None)
+        } else {
+            Err("a shadow needs a color".into())
+        };
+    };
+    let color = match stored {
+        Some(h) if h.color.is_none() && color.eq_ignore_ascii_case(SHADOW_INK) => None,
+        _ => Some(color),
+    };
+    let offset = stored.and_then(|h| h.offset);
+    let across = kept_number(&d.shadow_across, offset.map(|o| o[0]), "shadow offset")?;
+    let down = kept_number(&d.shadow_down, offset.map(|o| o[1]), "shadow offset")?;
+    let offset = match (across, down) {
+        (Some(x), Some(y)) => Some([x, y]),
+        (None, None) => None,
+        _ => {
+            return Err(
+                "a shadow's offset takes both numbers, or neither for the usual one".into(),
+            );
+        }
+    };
+    Ok(Some(TitleShadow {
+        color,
+        opacity: kept_number(
+            &d.shadow_opacity,
+            stored.and_then(|h| h.opacity),
+            "shadow opacity",
+        )?,
+        offset,
+        blur: kept_plain(&d.shadow_blur, stored.and_then(|h| h.blur), "blur")?,
+    }))
 }
 
 fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
@@ -142,8 +230,11 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
                 },
             ),
             background,
+            shadow: shadow_of(d, s.shadow.as_ref())?,
         },
         position,
+        zoom: kept_number(&d.zoom, stored.zoom, "zoom")?,
+        rotation: kept_plain(&d.rotation, stored.rotation, "rotation")?,
     };
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
 }
@@ -164,6 +255,12 @@ fn changes(clip: &str, t: &Title, stored: &Title) -> Option<Value> {
     }
     if t.position != stored.position {
         params["position"] = json!(t.position.map_or_else(Vec::new, |p| p.to_vec()));
+    }
+    if t.zoom != stored.zoom {
+        params["zoom"] = json!(t.scale());
+    }
+    if t.rotation != stored.rotation {
+        params["rotation"] = json!(t.turn());
     }
     params
         .as_object()
@@ -297,6 +394,10 @@ impl Workspace {
                 );
                 let across_hint = format!("{}%", percent(Some(usual[0])));
                 let down_hint = format!("{}%", percent(Some(usual[1])));
+                let shadow_opacity = format!("{}%", percent(Some(TitleShadow::OPACITY)));
+                let shadow_across = format!("{}%", percent(Some(TitleShadow::OFFSET[0])));
+                let shadow_down = format!("{}%", percent(Some(TitleShadow::OFFSET[1])));
+                let shadow_blur = plain(Some(TitleShadow::BLUR));
                 egui::Grid::new("title-style-fields").show(ui, |ui| {
                     let row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
                         ui.label(label);
@@ -325,17 +426,36 @@ impl Workspace {
                     ui.end_row();
                     changed |= row(ui, "Opacity", &mut d.opacity, "100%");
                     ui.end_row();
+                    changed |= row(ui, "Shadow", &mut d.shadow, "none");
+                    changed |= swatch(ui, &mut d.shadow, [0, 0, 0]);
+                    ui.end_row();
+                    changed |= row(ui, "Shadow opacity", &mut d.shadow_opacity, &shadow_opacity);
+                    ui.end_row();
+                    changed |= row(ui, "Shadow across", &mut d.shadow_across, &shadow_across);
+                    ui.end_row();
+                    changed |= row(ui, "Shadow down", &mut d.shadow_down, &shadow_down);
+                    ui.end_row();
+                    changed |= row(ui, "Shadow blur", &mut d.shadow_blur, &shadow_blur);
+                    ui.end_row();
                     changed |= row(ui, "Across", &mut d.across, &across_hint);
                     ui.end_row();
                     changed |= row(ui, "Down", &mut d.down, &down_hint);
                     ui.end_row();
+                    changed |= row(ui, "Zoom", &mut d.zoom, "100%");
+                    ui.end_row();
+                    changed |= row(ui, "Rotation", &mut d.rotation, "0°");
+                    ui.end_row();
                 });
                 ui.label(dim(if lower {
                     "Across and Down place the lower third's corner, as percents of the \
-                     picture. An empty field keeps the usual look"
+                     picture; it grows and turns about the point where its lines meet. \
+                     A shadow's Across and Down are percents of the picture too, and its \
+                     blur from 0 to 100. An empty field keeps the usual look"
                 } else {
                     "Across and Down place the middle of the text, as percents of the \
-                     picture. An empty field keeps the usual look"
+                     picture; it grows and turns about that point. A shadow's Across and \
+                     Down are percents of the picture too, and its blur from 0 to 100. An \
+                     empty field keeps the usual look"
                 }));
                 if !d.error.is_empty() {
                     ui.colored_label(ui.visuals().error_fg_color, &d.error);
