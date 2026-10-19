@@ -256,7 +256,7 @@ impl Workspace {
                         reset = ui
                             .add_enabled(ui_state.ask.is_none(), egui::Button::new("Reset Preferences"))
                             .on_hover_text(
-                                "Back to the defaults; the old file is kept as preferences.toml.bak",
+                                "Back to the defaults; the old file is kept next to it, as preferences.toml.bak",
                             )
                             .clicked();
                     });
