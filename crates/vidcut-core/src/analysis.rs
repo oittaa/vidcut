@@ -187,6 +187,37 @@ impl Span {
     }
 }
 
+pub struct Heard<'a> {
+    pub span: &'a Span,
+    pub levels: &'a AudioLevels,
+    pub gain_db: f64,
+}
+
+const QUIET_AROUND: f64 = 0.02;
+
+pub fn quietest(heard: &[Heard], at: i64, around: std::ops::RangeInclusive<i64>) -> i64 {
+    around
+        .map(|f| (level_at(heard, f), (f - at).abs(), f))
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map_or(at, |(_, _, f)| f)
+}
+
+fn level_at(heard: &[Heard], frame: i64) -> f64 {
+    heard
+        .iter()
+        .filter(|h| h.span.pace.speed != 0.0 && h.span.start <= frame && frame <= h.span.end)
+        .map(|h| {
+            let rate = f64::from(h.levels.per_second.max(1));
+            let i = ((h.span.time(frame as f64) - h.levels.start) * rate).floor() as i64;
+            let reach = (QUIET_AROUND * rate).round().max(1.0) as i64;
+            let peak = (i - reach..=i + reach)
+                .filter_map(|i| usize::try_from(i).ok().and_then(|i| h.levels.peaks.get(i)))
+                .fold(0.0_f32, |m, &p| m.max(p));
+            f64::from(peak) * linear(h.gain_db)
+        })
+        .sum()
+}
+
 pub fn words_in(span: &Span, words: &[crate::transcript::Word]) -> Vec<(usize, i64, i64)> {
     if span.pace.speed == 0.0 {
         return Vec::new();

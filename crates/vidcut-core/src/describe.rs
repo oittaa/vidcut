@@ -212,10 +212,15 @@ pub fn describe_at(
             d.params["words"].as_array().map_or(0, Vec::len),
             d.media("media")
         ),
-        "edit.ripple_delete_words" => format!(
-            "Ripple Delete {} word(s)",
-            d.params["words"].as_array().map_or(0, Vec::len)
-        ),
+        "edit.ripple_delete_words" => match d.params["words"].as_array().map(Vec::as_slice) {
+            Some([one]) if one["text"].as_str().is_some_and(|t| !t.trim().is_empty()) => {
+                format!(
+                    "Ripple Delete {}",
+                    quoted(one["text"].as_str().unwrap_or_default())
+                )
+            }
+            words => format!("Ripple Delete {} word(s)", words.map_or(0, <[Value]>::len)),
+        },
         "subtitles.transcribe" if d.params["range"].is_string() => {
             format!("Create Subtitles from Audio in {}", d.range("range"))
         }

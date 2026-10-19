@@ -69,6 +69,9 @@ pub enum Note {
     },
     Tried(Tried),
     Source(SourceNote),
+    Downloading {
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

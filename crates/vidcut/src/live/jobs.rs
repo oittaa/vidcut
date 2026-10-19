@@ -68,6 +68,8 @@ pub struct JobDetails {
     pub tried: Vec<Tried>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<SourceNote>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub downloading: Option<String>,
     pub gpu_frames: i64,
     pub gpu_decoded: i64,
     pub copied: Copied,
@@ -92,6 +94,7 @@ impl JobDetails {
                 Some(o) => *o = s,
                 None => self.sources.push(s),
             },
+            Note::Downloading { name } => self.downloading = Some(name),
         }
     }
 

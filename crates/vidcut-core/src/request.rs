@@ -691,7 +691,22 @@ pub enum Request {
     /// out of every unlocked track and the rest closes up, whether or not
     /// ripple is on. A dry run says what would go and changes nothing.
     #[serde(rename = "edit.ripple_delete_words")]
-    EditRippleDeleteWords { words: Vec<SpokenWord> },
+    EditRippleDeleteWords {
+        words: Vec<SpokenWord>,
+        /// Move each cut's edges to the quietest frame boundary nearby, in the
+        /// sound of the tracks heard there, as far as the clips' transcripts
+        /// show the words: inward no further than a third into any word
+        /// wholly inside the cut, so the words cut always lose their middles,
+        /// and outward only into the pause beside it, up to the next word,
+        /// within about a tenth of a second. Without a transcript the edges
+        /// stay. Levels not measured yet are measured first.
+        #[serde(default)]
+        quiet: bool,
+        /// Clear the timeline In and Out in the same step, as the
+        /// Transcription window does when they mark the words it deletes.
+        #[serde(default)]
+        clear_marks: bool,
+    },
     /// Detect Scene Cuts: split `clips` where their shots change.
     #[serde(rename = "edit.detect_scene_cuts")]
     EditDetectSceneCuts {
@@ -1573,8 +1588,9 @@ pub enum Request {
     #[serde(rename = "gui.quit")]
     GuiQuit {},
     /// Open a window for the person at the GUI: `quick_export`, `export`,
-    /// `jobs`, `log`, `mixer`, `preferences`, `history` (the undo history)
-    /// or `help` (the keyboard shortcuts). Answers what `gui.state` does.
+    /// `jobs`, `log`, `mixer`, `preferences`, `history` (the undo history),
+    /// `help` (the keyboard shortcuts) or `transcription` (the words of the
+    /// source clip or the timeline). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.

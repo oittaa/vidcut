@@ -1644,6 +1644,90 @@ fn media_sound_plan(p: &Project, m: &Media, stream: u32) -> Result<RenderPlan> {
     Ok(plan)
 }
 
+const QUIET_REACH: f64 = 0.12;
+
+fn quiet_edges(p: &Project, env: &dyn Env, spans: &[(i64, i64)]) -> Result<Vec<(i64, i64)>> {
+    let fps = p.settings.fps;
+    let reach = ((fps.as_f64() * QUIET_REACH).round() as i64).max(1);
+    let solo = p.any_solo();
+    let mut sources = Vec::new();
+    let mut known: Vec<(i64, i64)> = Vec::new();
+    for t in p.tracks.iter().filter(|t| t.audible(solo)) {
+        for c in &t.clips {
+            let Some(a) = &c.audio else { continue };
+            let near = spans
+                .iter()
+                .any(|&(s, e)| c.start <= e + reach && c.end() >= s - reach);
+            if c.is_block() || !near {
+                continue;
+            }
+            let m = p
+                .media(&c.media)
+                .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
+            let (_, origin) = p.media_origin(&c.media)?;
+            let span = Span::of_clip(c, origin, fps);
+            if let Some(speech) = env.transcript(m, a.stream)?
+                && let Ok(timed) = transcript::spoken(&speech)
+            {
+                known.extend(
+                    analysis::words_in(&span, &timed)
+                        .into_iter()
+                        .map(|(_, a, b)| (a, b)),
+                );
+            }
+            sources.push((span, env.audio_levels(m, a.stream)?, a.gain_db));
+        }
+    }
+    let heard: Vec<analysis::Heard> = sources
+        .iter()
+        .map(|(span, levels, gain_db)| analysis::Heard {
+            span,
+            levels,
+            gain_db: *gain_db,
+        })
+        .collect();
+    Ok(spans
+        .iter()
+        .map(|&(s, e)| {
+            let inside = known.iter().filter(|w| s <= w.0 && w.1 <= e);
+            let first = inside
+                .clone()
+                .map(|w| w.0 - s + (w.1 - w.0) / 3)
+                .min()
+                .unwrap_or(0);
+            let last = inside.map(|w| e - w.1 + (w.1 - w.0) / 3).min().unwrap_or(0);
+            let before = known.iter().filter(|w| w.1 <= s).map(|w| w.1).max();
+            let after = known.iter().filter(|w| w.0 >= e).map(|w| w.0).min();
+            let from = before.map_or(s, |end| end.max(s - reach)).max(0);
+            let to = after.map_or(e, |start| start.min(e + reach));
+            let a = analysis::quietest(&heard, s, from..=(s + first).min(e - 1));
+            let b = analysis::quietest(&heard, e, (e - last).max(a + 1)..=to.max(a + 1));
+            (a, b)
+        })
+        .collect())
+}
+
+fn filler_language(
+    asked: &Option<String>,
+    speech: &Speech,
+    words: &[transcript::Word],
+) -> Option<String> {
+    asked
+        .clone()
+        .or_else(|| speech.language.clone())
+        .or_else(|| {
+            transcript::language_of(words.iter().map(|w| w.text.as_str())).map(String::from)
+        })
+}
+
+fn word_json(w: &transcript::Word, start: i64, end: i64, filler_language: Option<&str>) -> Value {
+    let mut v = json!({ "text": w.text, "start": start, "end": end, "joined": w.joined });
+    if filler_language.is_some_and(|l| transcript::is_filler(&w.text, l)) {
+        v["filler"] = json!(true);
+    }
+    v
+}
+
 fn transcript_json(stream: u32, s: &Speech) -> Value {
     json!({
         "stream": stream,
@@ -2881,7 +2965,11 @@ fn mutate(
                 "warnings": warnings,
             })
         }
-        Request::EditRippleDeleteWords { words } => {
+        Request::EditRippleDeleteWords {
+            words,
+            quiet,
+            clear_marks,
+        } => {
             if words.is_empty() {
                 return Err(Error::usage("name the words to cut"));
             }
@@ -2891,7 +2979,15 @@ fn mutate(
                 let end = resolve(p, &w.end, playhead)?;
                 spans.push((start, end));
             }
+            let spans = match quiet {
+                true => quiet_edges(p, env, &spans)?,
+                false => spans,
+            };
             let removed = ops::cut_ranges(p, &spans)?;
+            if *clear_marks {
+                p.marks.mark_in = None;
+                p.marks.mark_out = None;
+            }
             json!({
                 "removed": removed
                     .iter()
@@ -5009,12 +5105,10 @@ pub fn query(
                         ))
                     })?;
                     let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
+                    let tongue = filler_language(language, &speech, &timed);
                     let words: Vec<Value> = analysis::words_in(&target.span(p)?, &timed)
                         .into_iter()
-                        .map(|(i, a, b)| {
-                            let w = &timed[i];
-                            json!({ "text": w.text, "start": a, "end": b, "joined": w.joined })
-                        })
+                        .map(|(i, a, b)| word_json(&timed[i], a, b, tongue.as_deref()))
                         .collect();
                     out.push(target.json(
                         p,
@@ -5022,6 +5116,7 @@ pub fn query(
                             "words": words,
                             "model": speech.model,
                             "language": speech.language,
+                            "filler_language": tongue,
                         }),
                     ));
                 }
@@ -5040,14 +5135,13 @@ pub fn query(
                 },
             )?;
             let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
+            let tongue = filler_language(&None, &speech, &timed);
             let words: Vec<Value> = timed
                 .iter()
                 .flat_map(|w| {
                     transcript::word_frames(std::slice::from_ref(w), p.settings.fps, a, b)
                         .into_iter()
-                        .map(|(text, start, end)| {
-                            json!({ "text": text, "start": start, "end": end, "joined": w.joined })
-                        })
+                        .map(|(_, start, end)| word_json(w, start, end, tongue.as_deref()))
                 })
                 .collect();
             let mut warnings = speech.warnings.clone();
@@ -5062,6 +5156,7 @@ pub fn query(
                 "model": speech.model,
                 "device": speech.device,
                 "language": speech.language,
+                "filler_language": tongue,
                 "timing": speech.timing,
                 "pieces": speech.pieces,
                 "longest_piece": speech.longest_piece,

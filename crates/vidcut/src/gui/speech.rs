@@ -239,7 +239,7 @@ fn language_name(code: &str) -> &'static str {
     }
 }
 
-fn language_label(code: &str) -> String {
+pub(super) fn language_label(code: &str) -> String {
     match language_name(code) {
         "" => code.to_string(),
         name => format!("{name} ({code})"),

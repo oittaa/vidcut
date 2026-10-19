@@ -1565,7 +1565,8 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
             let (done, total) = (j.frames, j.total);
             ui.label(dim(match j.stage {
                 Some(Stage::Downloading) => format!(
-                    "downloading · {:.0} / {:.0} MB",
+                    "downloading {} · {:.0} / {:.0} MB",
+                    j.details.downloading.as_deref().unwrap_or("files"),
                     done as f64 / 1e6,
                     total as f64 / 1e6
                 ),

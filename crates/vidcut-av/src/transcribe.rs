@@ -335,6 +335,7 @@ fn get_ready(dir: &Path, model: Option<&File>, vad: bool, download: bool) -> Res
             &Fetch {
                 url: runtime.url(),
                 name: runtime.archive(),
+                title: "transcribe.cpp's library".into(),
                 bytes: runtime.bytes,
                 sha256: runtime.sha256,
             },
@@ -496,6 +497,7 @@ fn open(url: &str, stop: &Arc<AtomicBool>) -> Result<Connection> {
 struct Fetch {
     url: String,
     name: String,
+    title: String,
     bytes: u64,
     sha256: &'static str,
 }
@@ -505,6 +507,7 @@ impl Fetch {
         Self {
             url: f.url(),
             name: f.name.to_string(),
+            title: f.title.to_string(),
             bytes: f.bytes,
             sha256: f.sha256,
         }
@@ -513,6 +516,9 @@ impl Fetch {
 
 fn fetch(f: &Fetch, dir: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
+    crate::progress::note(crate::export::Note::Downloading {
+        name: format!("{} ({})", f.title, size(f.bytes)),
+    });
     let target = dir.join(&f.name);
     let part = dir.join(format!("{}.part", f.name));
     let stop = crate::cancel::current().unwrap_or_default();
