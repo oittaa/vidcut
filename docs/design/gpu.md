@@ -21,6 +21,8 @@ flowchart LR
 
 `gpus::list` lists the computer's GPUs once, each by its PCI ids and slot (`Gpu::id`), with its CUDA device, Direct3D 11 adapter or render node. Its memory (`Gpu::memory_mb`) comes from one source per system, for every vendor: the dedicated video memory DXGI reports on Windows, and on Linux the largest device-local heap of the Vulkan device on the same PCI bus (`vulkan_memory`, which leaves Vulkan's loader loaded for the viewer). Integrated GPUs on Linux get none, since their Vulkan heap is system memory. A GPU that source can't size has none either. `gpus::in_use` is the one `gpu.device` names (`gpus::choose`), else `gpus::automatic`: NVIDIA's first CUDA device, else the first other. A Mac lists none.
 
+Speech is transcribed on that GPU too: transcribe.cpp's Vulkan device with its PCI slot or name (Metal on a Mac), with pieces sized by its memory, and the voice-activity model on the CPU ([analysis](analysis.md#transcription)).
+
 `GpuDecoder::best` opens the decoder on the GPU in use, once per GPU: NVDEC on NVIDIA's (Vulkan beside it for ProRes), Direct3D 11 on Windows' others, VA-API on Linux's, VideoToolbox on a Mac. `VIDCUT_HWDEC` overrides it for tests. The player decodes on it. Exports, proxies, renders and the timeline's tiles use `GpuDecoder::own`: NVDEC on a CUDA stream of its own, the others on a device of their own on the same GPU.
 
 **Why:** on the player's decoder their work would wait in line with playback's.

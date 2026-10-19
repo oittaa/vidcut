@@ -215,11 +215,14 @@ impl State {
                     "progressToken": token,
                     "progress": v["frames"],
                     "total": v["total"],
-                    "message": format!(
-                        "{file} ({}/{})",
-                        v["output"].as_u64().unwrap_or(0) + 1,
-                        v["outputs"].as_u64().unwrap_or(1)
-                    ),
+                    "message": match v["stage"].as_str() {
+                        Some(stage) => format!("{file}: {stage}"),
+                        None => format!(
+                            "{file} ({}/{})",
+                            v["output"].as_u64().unwrap_or(0) + 1,
+                            v["outputs"].as_u64().unwrap_or(1)
+                        ),
+                    },
                 },
             }));
         };

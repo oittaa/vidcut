@@ -11,6 +11,10 @@ pub fn cache_dir() -> PathBuf {
     vidcut_core::dirs::cache()
 }
 
+pub fn models_dir() -> PathBuf {
+    cache_dir().join("models")
+}
+
 pub fn media_origin(media: &Media) -> Origin {
     vidcut_core::fingerprint::origin(&media.path, media.size, media.mtime_ns)
 }

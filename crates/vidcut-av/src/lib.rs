@@ -28,6 +28,7 @@ pub mod route;
 pub(crate) mod stretch;
 pub mod testdata;
 pub mod thumbs;
+pub mod transcribe;
 pub(crate) mod turns;
 pub mod waveform;
 

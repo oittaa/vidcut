@@ -10,6 +10,7 @@ use vidcut_core::model::{
 };
 use vidcut_core::render::RenderPlan;
 use vidcut_core::time::Rational;
+use vidcut_core::transcript::{Asked, Speech};
 use vidcut_core::{Env, Error, ProbedMedia, Result};
 
 use crate::paths;
@@ -17,6 +18,7 @@ use crate::paths;
 #[derive(Clone, Debug, Default)]
 pub struct AvEnv {
     project_dir: Option<PathBuf>,
+    heard_only: bool,
 }
 
 impl AvEnv {
@@ -27,8 +29,33 @@ impl AvEnv {
     pub fn for_project(project_file: &Path) -> Self {
         Self {
             project_dir: project_file.parent().map(Path::to_path_buf),
+            heard_only: false,
         }
     }
+
+    pub fn heard_only(self) -> Self {
+        Self {
+            heard_only: true,
+            ..self
+        }
+    }
+}
+
+static HEARD: LazyLock<Mutex<HashMap<String, Arc<Speech>>>> = LazyLock::new(Default::default);
+const HEARD_KEPT: usize = 8;
+
+fn heard_key(plan: &RenderPlan, asked: &Asked) -> String {
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "audio": plan.audio,
+        "frames": plan.frames,
+        "fps": plan.fps,
+        "model": asked.model,
+        "model_file": asked.model_file,
+        "vad_file": asked.vad_file,
+        "language": asked.language,
+    }))
+    .unwrap_or_default();
+    vidcut_core::fingerprint::digest(&bytes)
 }
 
 const LEVELS_PER_SECOND: u32 = 100;
@@ -190,6 +217,35 @@ impl Env for AvEnv {
 
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
         vidcut_av::analysis::loudness(plan).map_err(av_error)
+    }
+
+    fn transcribe(&self, plan: &RenderPlan, asked: &Asked) -> Result<Arc<Speech>> {
+        let lock = || HEARD.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = heard_key(plan, asked);
+        if let Some(s) = lock().get(&key) {
+            return Ok(s.clone());
+        }
+        if self.heard_only {
+            return Err(Error::conflict(
+                "the timeline's sound changed while it was being transcribed; run it again",
+            ));
+        }
+        let speech = vidcut_av::transcribe::transcribe(
+            plan,
+            asked,
+            &vidcut_av::transcribe::Options {
+                models: &paths::models_dir(),
+                gpu: crate::preferences::gpu_acceleration(),
+            },
+        )
+        .map_err(av_error)?;
+        let speech = Arc::new(speech);
+        let mut memo = lock();
+        if memo.len() >= HEARD_KEPT {
+            memo.clear();
+        }
+        memo.insert(key, speech.clone());
+        Ok(speech)
     }
 
     fn proxy_rules(&self) -> vidcut_core::preferences::Proxies {

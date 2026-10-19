@@ -24,7 +24,7 @@ Priority: **interactive** and **job** are the `Work` kinds; **inherited** sets n
 | `vidcut-ipc`, `vidcut-ipc-conn` | `ipc::server::start`; one per connection | accepts; serves one | interactive |
 | `vidcut-mcp-call` | `mcp::serve`, per tool call | one MCP call | interactive |
 | `vidcut-task`, `vidcut-make`, `vidcut-measure` | the core, per `Step` | their step | task: its `Work`; make: interactive; measure: job |
-| vidcut-j1, vidcut-j2, … | `Live::start_export`, `Live::start_encode` | an export or proxy job | job |
+| vidcut-j1, vidcut-j2, … | `Live::start_export`, `Live::start_encode` | an export, proxy or transcription job | job |
 | `vidcut-history` | `OpenProject::apply` | `Store::compact` | job |
 | `vidcut-preview` | `Live::preview_step` | the project as it was at a step of the history (`Store::project_at`, from the nearest state its `Past` keeps), the newest asked only | interactive |
 | `vidcut-worker-N`, `vidcut-tiles-N` | `Workers::new`, `Tiles::begin_frame` | filmstrips and waveforms; timeline tiles | job |
@@ -33,7 +33,7 @@ Priority: **interactive** and **job** are the `Work` kinds; **inherited** sets n
 | `vidcut-quit`, `vidcut-exit-watch` | `Port::quit`, `threads::end_within` | quit fallback, exit watchdog | interactive |
 | `vidcut-viewer-close`, `vidcut-two-up-close`, `vidcut-frees-imports` | `threads::closing` | drop players, Vulkan imports | interactive |
 | `vidcut-cancel` | `ipc::client::call` | watches a CLI call's cancel | interactive |
-| `vidcut-proxies`, `vidcut-story-N` | `session::run_with`, `storyboard::render` | a headless proxy encode; storyboard pictures | starter's (`Work::current`) |
+| `vidcut-proxies`, `vidcut-transcribe`, `vidcut-story-N` | `session::run_with`, `storyboard::render` | a headless proxy encode or transcription; storyboard pictures | starter's (`Work::current`) |
 | `vidcut-play-video`, `vidcut-play-audio`, `vidcut-play-windows` | `Player::new`; windows once followed | an engine's decoding, mix, two-up windows | inherited |
 | `vidcut-audio-out` | `CpalOutput`, `PacedOutput` | the device's stream, or paced silence | inherited |
 | `vidcut-encode` | `Worker::spawn` | an output's encoders and muxer | starter's |
@@ -44,7 +44,7 @@ Priority: **interactive** and **job** are the `Work` kinds; **inherited** sets n
 
 On Windows `look::watch` starts two `vidcut-look` threads; Linux and macOS start one.
 
-Libraries start their own (FFmpeg, GPU drivers, CUDA, cpal, PipeWire, `notify`, zbus, ctrlc).
+Libraries start their own (FFmpeg, GPU drivers, CUDA, transcribe.cpp's ggml, cpal, PipeWire, `notify`, zbus, ctrlc).
 
 ## `threads::spawn` and `Work`
 

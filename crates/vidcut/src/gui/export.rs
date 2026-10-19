@@ -1532,21 +1532,38 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
                     .text(text)
                     .desired_width(360.0),
             );
-            ui.label(dim(format!(
-                "{} / {} frames{}{}",
-                j.frames,
-                j.total,
-                if j.outputs.len() > 1 {
-                    format!(" · file {} of {}", j.output + 1, j.outputs.len())
-                } else {
-                    String::new()
-                },
-                if j.passes > 1 {
-                    format!(" · pass {} of {}", j.pass, j.passes)
-                } else {
-                    String::new()
+            use vidcut_av::export::Stage;
+            let (done, total) = (j.frames, j.total);
+            ui.label(dim(match j.stage {
+                Some(Stage::Downloading) => format!(
+                    "downloading the model · {:.0} / {:.0} MB",
+                    done as f64 / 1e6,
+                    total as f64 / 1e6
+                ),
+                Some(Stage::Listening) => {
+                    format!("listening · {} / {} s of sound", done / 1000, total / 1000)
                 }
-            )));
+                Some(Stage::Transcribing) => {
+                    format!(
+                        "transcribing · {} / {} s of speech",
+                        done / 1000,
+                        total / 1000
+                    )
+                }
+                None => format!(
+                    "{done} / {total} frames{}{}",
+                    if j.outputs.len() > 1 {
+                        format!(" · file {} of {}", j.output + 1, j.outputs.len())
+                    } else {
+                        String::new()
+                    },
+                    if j.passes > 1 {
+                        format!(" · pass {} of {}", j.pass, j.passes)
+                    } else {
+                        String::new()
+                    }
+                ),
+            }));
             if ui.button("Cancel").clicked() {
                 send("jobs.cancel", json!({ "job": j.id }));
             }
@@ -1677,6 +1694,7 @@ fn job_method(j: &JobInfo) -> Option<&'static str> {
     match j.kind {
         "export" => Some("export.start"),
         "proxy" => Some("proxy.generate"),
+        "subtitles" => Some("subtitles.transcribe"),
         _ => None,
     }
 }

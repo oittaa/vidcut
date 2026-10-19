@@ -16,6 +16,13 @@ serde_json.workspace = true
 cpal.workspace = true
 libloading.workspace = true
 libc.workspace = true
+sha2.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+transcribe-cpp = { workspace = true, features = ["metal"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+transcribe-cpp = { workspace = true, features = ["vulkan"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true

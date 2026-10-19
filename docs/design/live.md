@@ -12,7 +12,7 @@ flowchart LR
   IPC["vidcut-ipc<br>accepts clients"]
   CONN["vidcut-ipc-conn<br>one per connection"]
   STEP["vidcut-task, vidcut-make,<br>vidcut-measure"]
-  JOB["vidcut-j1, vidcut-j2, …<br>export or proxy jobs"]
+  JOB["vidcut-j1, vidcut-j2, …<br>export, proxy or transcription jobs"]
   WORK["vidcut-worker-N<br>filmstrips, waveforms"]
   MISS["vidcut-missing-media"]
   WATCH["notify callbacks, vidcut-look<br>project, preferences, themes, OS look"]
@@ -95,7 +95,7 @@ The `Snapshot` carries the project, players, selection, log, notices, filmstrips
 | `Task` | `vidcut-task`, at its `Work`: plans, frames, storyboards, analyses, project-less requests, UI answers | `Msg::TaskDone` |
 | `Make` | `vidcut-make`: a project from an OpenTimelineIO file | `Msg::Made`; the core opens it |
 | `Measure` | `vidcut-measure`, a job: measuring for Ripple Delete Silence or Detect Scene Cuts, unpacking an `.otioz` | `Msg::Measured`; the edit runs here |
-| `Encode` | a job thread: proxies | `Msg::Measured`; the edit records them |
+| `Encode` | a job thread: proxies; Create Subtitles from Audio | `Msg::Measured`; the edit records them, or adds the cues |
 
 Work off the core uses a copy of the project from the request's arrival.
 
@@ -112,7 +112,7 @@ All but an untimed `jobs.wait` have a deadline.
 
 ## Jobs
 
-`export.start` to a media file and `proxy.generate` are jobs: a `JobInfo` in the snapshot, a cancel flag and a thread (vidcut-j1, vidcut-j2, …). `jobs::Turns` lets one job encode at a time, exports ahead of waiting proxies. A job waits at its gate channel for its turn: an export once its files are planned (`Msg::JobPlanned`), a proxy job before it starts. `jobs.cancel` sets the flag and closes a queued job's gate, so it wakes, cancelled. A client that disconnects sets that flag on its foreground job and does not close the gate, so a queued job waits its turn and then stops. A `background` request, as the GUI's are, is answered once the files are planned, others when the job ends. Automatic proxies are the core's own `proxy.generate` (`Origin::Session`).
+`export.start` to a media file, `proxy.generate` and `subtitles.transcribe` are jobs: a `JobInfo` in the snapshot, a cancel flag and a thread (vidcut-j1, vidcut-j2, …). `jobs::Turns` lets one job run at a time, exports ahead of waiting proxies and transcriptions. A job waits at its gate channel for its turn: an export once its files are planned (`Msg::JobPlanned`), the others before they start. A transcription hears the timeline on a copy, and the edit then adds the cues with `AvEnv::heard_only`: it takes what the job heard, and fails with CONFLICT if the timeline's sound changed meanwhile, rather than transcribe on the core's thread ([analysis](analysis.md#transcription)). `jobs.cancel` sets the flag and closes a queued job's gate, so it wakes, cancelled. A client that disconnects sets that flag on its foreground job and does not close the gate, so a queued job waits its turn and then stops. A `background` request, as the GUI's are, is answered once the files are planned, others when the job ends. Automatic proxies are the core's own `proxy.generate` (`Origin::Session`).
 
 While a job runs, the engine says what it is doing: the job thread installs a `vidcut_av::progress::Noting` that turns each note (the encoder that opened, those that didn't, the audio encoder, the color choice, each source file and its decoder) into a `Msg::JobNote`, and its progress carries the frames made and decoded on the GPU and the copies between GPU and memory. `JobDetails` collects them in the `JobInfo`, so `jobs.get` and the Jobs window show the same. The window never opens by itself: the Jobs button in the top bar counts the running jobs, glows a moment when one starts or ends, and stays in the error color after a failure until Jobs is opened. A job's details copy as text or as the `vidcut` command that runs it again; a finished one opens, and a failed or cancelled one runs again as the same request.
 

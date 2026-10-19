@@ -203,8 +203,14 @@ pub fn run_with(
         _ => {
             let store = open(project)?;
             let env = AvEnv::for_project(store.path());
-            if matches!(envelope.request, Request::ProxyGenerate { .. }) && !envelope.dry_run {
-                encode_proxies(&store, &envelope, &env, hooks)?;
+            match envelope.request {
+                Request::ProxyGenerate { .. } if !envelope.dry_run => {
+                    work_first(&store, &envelope, &env, hooks, "vidcut-proxies")?;
+                }
+                Request::SubtitlesTranscribe { .. } => {
+                    work_first(&store, &envelope, &env, hooks, "vidcut-transcribe")?;
+                }
+                _ => {}
             }
             if envelope.request.is_mutation() {
                 let (mut r, history_error) =
@@ -222,29 +228,30 @@ pub fn run_with(
     Ok(response)
 }
 
-fn encode_proxies(
+fn work_first(
     store: &Store,
     envelope: &Envelope,
     env: &AvEnv,
     hooks: &mut Hooks<'_>,
+    thread: &str,
 ) -> Result<()> {
     let mut copy = store.load_project()?;
     let (tx, rx) = std::sync::mpsc::channel::<(std::path::PathBuf, Progress)>();
     let cancel = hooks.cancel.clone();
     std::thread::scope(|scope| {
-        let work = crate::threads::scoped(scope, "vidcut-proxies", Work::current(), move || {
+        let work = crate::threads::scoped(scope, thread, Work::current(), move || {
             let _cancel = vidcut_av::cancel::Guard::set(cancel);
             let _report = vidcut_av::progress::Guard::set(Box::new(move |out: &Path, p| {
                 let _ = tx.send((out.to_path_buf(), p));
             }));
             copy.apply(envelope.clone(), env, None).map(drop)
         })
-        .map_err(|e| Error::internal(format!("starting the proxy encode: {e}")))?;
+        .map_err(|e| Error::internal(format!("starting {thread}: {e}")))?;
         for (out, p) in rx {
             (hooks.progress)(0, 1, &out, p);
         }
         work.join()
-            .unwrap_or_else(|_| Err(Error::internal("encoding proxies panicked")))
+            .unwrap_or_else(|_| Err(Error::internal(format!("{thread} panicked"))))
     })
 }
 

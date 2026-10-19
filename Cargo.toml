@@ -165,6 +165,10 @@ sha2 = "0.11"
 # The player's audio output (ALSA on Linux, which PipeWire and PulseAudio
 # serve). Apache-2.0; needs libasound2-dev to build.
 cpal = "0.18"
+# Speech to text on this computer: transcribe.cpp on ggml, built from source
+# with CMake and linked in, on Vulkan (Windows, Linux) or Metal (macOS). MIT.
+# Exact version: its library checks the binding's version at load.
+transcribe-cpp = { version = "=0.4.0", default-features = false }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

@@ -844,6 +844,49 @@ pub enum Request {
         #[serde(default)]
         overwrite: bool,
     },
+    /// Create Subtitles from Audio: transcribe the speech in the timeline's
+    /// mix over `range` (default: In–Out when both are set, else
+    /// everything) on this computer, on the GPU unless the preferences turn
+    /// it off, and add it as cues to a subtitle track. Muted tracks aren't
+    /// heard. The model files are downloaded once, into the cache folder,
+    /// when `download` allows it.
+    #[serde(rename = "subtitles.transcribe")]
+    SubtitlesTranscribe {
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        /// Default: `qwen3-asr`.
+        #[serde(default)]
+        model: Option<SpeechModel>,
+        /// A transcribe.cpp GGUF model file to use instead of `model`'s.
+        #[serde(default)]
+        model_file: Option<PathBuf>,
+        /// A Silero VAD model file (GGUF, or whisper.cpp's `.bin`) to find
+        /// the speech with, instead of the one downloaded with the models.
+        #[serde(default)]
+        vad_file: Option<PathBuf>,
+        /// The language spoken, as a code such as `en` or `fi`. Default: the
+        /// model tells it from the longest stretch of speech.
+        #[serde(default)]
+        language: Option<String>,
+        /// The subtitle track for the cues. Default: the highest one, or a
+        /// new one when there is none.
+        #[serde(default)]
+        track: Option<String>,
+        /// Characters per line, 1 to 60.
+        #[serde(default = "chars_per_line")]
+        chars: u32,
+        /// Lines per cue: 1 or 2.
+        #[serde(default = "one_line")]
+        lines: u32,
+        /// Frames left between a cue and the next, 0 to 10.
+        #[serde(default)]
+        gap: u32,
+        /// Download the model files this computer doesn't have yet from
+        /// Hugging Face, each checked against its SHA-256. Without it, a
+        /// missing file is an error that says what would be downloaded.
+        #[serde(default)]
+        download: bool,
+    },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.
     #[serde(rename = "export.plan")]
@@ -1428,6 +1471,24 @@ pub enum SubtitleTimeBase {
     Label,
 }
 
+/// A speech recognition model, a GGUF file transcribe.cpp runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub enum SpeechModel {
+    /// Qwen3-ASR 1.7B (Apache-2.0), 2.2 GB: 30 languages. It gives no times
+    /// of its own, so each cue's time comes from the pauses in the speech.
+    #[default]
+    #[serde(rename = "qwen3-asr")]
+    Qwen3Asr,
+    /// Whisper large-v3 (Apache-2.0), 1.7 GB: 100 languages, times per
+    /// phrase.
+    #[serde(rename = "whisper-large-v3")]
+    WhisperLargeV3,
+    /// Parakeet Ultra by Moondream (CC BY 4.0), 740 MB, for small GPUs: 25
+    /// European languages, times per word.
+    #[serde(rename = "parakeet-ultra")]
+    ParakeetUltra,
+}
+
 /// A subtitle file format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -1626,6 +1687,14 @@ fn silence_margin() -> TimeSpec {
 
 fn silence_min() -> TimeSpec {
     TimeSpec::Seconds(0.5)
+}
+
+fn chars_per_line() -> u32 {
+    42
+}
+
+fn one_line() -> u32 {
+    1
 }
 
 fn scene_threshold() -> f64 {
@@ -1903,6 +1972,11 @@ impl Request {
             | Self::Probe { path }
             | Self::SubtitlesImport { path, .. }
             | Self::SubtitlesExport { out: path, .. } => vec![path],
+            Self::SubtitlesTranscribe {
+                model_file,
+                vad_file,
+                ..
+            } => model_file.iter_mut().chain(vad_file.iter_mut()).collect(),
             Self::ProjectOpen { path, save_as, .. } => {
                 std::iter::once(path).chain(save_as.iter_mut()).collect()
             }

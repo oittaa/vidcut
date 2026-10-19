@@ -42,6 +42,15 @@ pub struct Progress {
     pub gpu_frames: i64,
     pub gpu_decoded: i64,
     pub copied: vidcut_core::editor::Copied,
+    pub stage: Option<Stage>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Stage {
+    Downloading,
+    Listening,
+    Transcribing,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -110,6 +119,13 @@ impl Progress {
             pass: 1,
             passes: 1,
             ..Self::default()
+        }
+    }
+
+    pub fn stage(stage: Stage, done: i64, total: i64, elapsed: Duration) -> Self {
+        Self {
+            stage: Some(stage),
+            ..Self::single(done, total, elapsed)
         }
     }
 
@@ -540,6 +556,7 @@ fn first_run(
                 gpu_frames: frames.gpu_frames(),
                 gpu_decoded: frames.gpu_decoded(),
                 copied: crate::copies::counted(),
+                stage: None,
             });
         }
         Ok(())
@@ -1098,6 +1115,7 @@ fn encode(
                 gpu_frames: video.as_ref().map_or(0, |v| v.frames.gpu_frames()),
                 gpu_decoded: video.as_ref().map_or(0, |v| v.frames.gpu_decoded()),
                 copied: crate::copies::counted(),
+                stage: None,
             });
         }
         Ok(())

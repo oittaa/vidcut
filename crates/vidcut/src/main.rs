@@ -96,7 +96,7 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
     static CANCEL: LazyLock<Arc<AtomicBool>> = LazyLock::new(Arc::default);
     if matches!(
         envelope.request.method().as_str(),
-        "export.start" | "proxy.generate"
+        "export.start" | "proxy.generate" | "subtitles.transcribe"
     ) {
         let _ = ctrlc::set_handler(|| CANCEL.store(true, Ordering::Relaxed));
     }
@@ -159,6 +159,32 @@ impl ProgressBar {
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())
             .unwrap_or_default();
+        if let Some(stage) = v["stage"].as_str() {
+            let pct = frames * 100 / total.max(1);
+            let eta = (total - frames) as f64 / (frames as f64 / elapsed.max(1e-3)).max(1e-3);
+            let eta = format!("ETA {}:{:02}", eta as u64 / 60, eta as u64 % 60);
+            match stage {
+                "downloading" => eprint!(
+                    "\r{file}: downloading {pct:3}% ({:.0}/{:.0} MB, {eta})   ",
+                    frames as f64 / 1e6,
+                    total as f64 / 1e6
+                ),
+                "listening" => eprint!(
+                    "\r{file}: listening {pct:3}% ({}/{} s of sound)   ",
+                    frames / 1000,
+                    total / 1000
+                ),
+                _ => eprint!(
+                    "\r{file}: transcribing {pct:3}% ({}/{} s of speech, {eta})   ",
+                    frames / 1000,
+                    total / 1000
+                ),
+            }
+            if frames == total {
+                eprintln!();
+            }
+            return;
+        }
         if v["measuring"].as_bool() == Some(true) {
             eprint!(
                 "\r{file}: measuring light for the HDR metadata, {:3}%   ",

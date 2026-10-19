@@ -1348,7 +1348,9 @@ impl Live {
                     });
                 });
             }
-            Step::Encode(encode, then, title) => self.start_encode(job, encode, *then, title),
+            Step::Encode(encode, then, title, kind) => {
+                self.start_encode(job, encode, *then, title, kind)
+            }
         }
     }
 
@@ -1481,7 +1483,14 @@ impl Live {
         self.dirty = true;
     }
 
-    fn start_encode(&mut self, job: Job, encode: Measure, then: Envelope, title: String) {
+    fn start_encode(
+        &mut self,
+        job: Job,
+        encode: Measure,
+        then: Envelope,
+        title: String,
+        kind: &'static str,
+    ) {
         let id = format!("j{}", self.next_job);
         self.next_job += 1;
         let cancel = job
@@ -1490,8 +1499,9 @@ impl Live {
             .map(|r| r.cancel.clone())
             .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         let progress = job.reply.as_ref().map(|r| r.tx.clone());
-        let info = JobInfo::proxies(
+        let info = JobInfo::task(
             id.clone(),
+            kind,
             job.origin.name(),
             job.params.clone(),
             title.clone(),
@@ -1531,7 +1541,7 @@ impl Live {
                         if let Some(ptx) = &progress {
                             let _ = ptx.send(ReplyEvent::Progress(json!({
                                 "job": id, "output": output, "path": out,
-                                "frames": p.frames, "total": p.total,
+                                "frames": p.frames, "total": p.total, "stage": p.stage,
                                 "elapsed": p.elapsed.as_secs_f64(),
                             })));
                         }
@@ -2426,7 +2436,24 @@ impl Live {
                         .apply(copy, &env, None)
                         .map(drop)
                 };
-                Step::Encode(Box::new(encode), Box::new(envelope), title)
+                Step::Encode(Box::new(encode), Box::new(envelope), title, "proxy")
+            }
+            Request::SubtitlesTranscribe { .. } => {
+                let Some(open) = &self.project else {
+                    return Step::Now(Err(no_project()));
+                };
+                let (project, path) = (open.project().clone(), open.store.path().to_path_buf());
+                let context = project.time_context(Some(self.player.position(TIMELINE)));
+                let envelope = bind_playhead(envelope, &context);
+                let copy = envelope.clone();
+                let hear = move || {
+                    let env = AvEnv::for_project(&path);
+                    vidcut_core::Editor::new(project, Default::default())
+                        .apply(copy, &env, None)
+                        .map(drop)
+                };
+                let title = "Create Subtitles from Audio".to_string();
+                Step::Encode(Box::new(hear), Box::new(envelope), title, "subtitles")
             }
             Request::TimelineImport {
                 path: Some(path),
@@ -2548,7 +2575,7 @@ impl Live {
         let env = self
             .project
             .as_ref()
-            .map(|open| AvEnv::for_project(open.store.path()))
+            .map(|open| AvEnv::for_project(open.store.path()).heard_only())
             .unwrap_or_default();
         let Some(open) = self.project.as_mut() else {
             return Err(no_project());
@@ -3209,7 +3236,7 @@ enum Step {
     Task(Work, Task),
     Make(Make),
     Measure(Measure, Box<Envelope>),
-    Encode(Measure, Box<Envelope>, String),
+    Encode(Measure, Box<Envelope>, String, &'static str),
 }
 
 type Measure = Box<dyn FnOnce() -> Result<()> + Send>;
@@ -3338,6 +3365,16 @@ fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
         && let Ok(f) = context.resolve_from(at, playhead)
     {
         *at = TimeSpec::Frames(f);
+    }
+    if let Request::SubtitlesTranscribe {
+        range: Some(range), ..
+    } = &mut envelope.request
+        && let Ok((a, b)) = context.range(range)
+    {
+        *range = vidcut_core::time::RangeSpec {
+            start: TimeSpec::Frames(a),
+            end: vidcut_core::time::RangeEnd::At(TimeSpec::Frames(b)),
+        };
     }
     envelope
 }
