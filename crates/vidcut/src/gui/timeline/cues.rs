@@ -555,7 +555,13 @@ impl Workspace {
             .filter(|q| p.cue(q).is_some_and(|c| c.start < at && at < c.end()))
             .map(|q| command("subtitles.split", json!({ "cue": q, "at": at })))
             .collect();
-        if selection.cues.is_empty() || !selection.clips.is_empty() {
+        let clip_under = selection.clips.iter().any(|id| {
+            p.find_clip(id).is_some_and(|(t, c)| {
+                let (track, clip) = (&p.tracks[t], &p.tracks[t].clips[c]);
+                !track.locked && clip.start < at && at < clip.end()
+            })
+        });
+        if selection.cues.is_empty() || clip_under {
             commands.insert(
                 0,
                 command("edit.split", json!({ "at": at, "clips": selection.clips })),
