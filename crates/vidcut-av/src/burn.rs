@@ -4,7 +4,9 @@ use cosmic_text::{
     Align, Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, Style, SwashCache,
     UnderlineStyle, Weight, Wrap,
 };
-use vidcut_core::model::{Place, SubtitleStyle, Title, TitleAlign};
+use vidcut_core::model::{
+    Place, SubtitleStyle, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle,
+};
 use vidcut_core::subtitles::{Tag, Token, rgb, tokens};
 
 use crate::error::{Error, Result};
@@ -188,8 +190,86 @@ struct Look<'a> {
     ink: [u8; 3],
     stroke: Option<([u8; 3], f64)>,
     backing: Option<([u8; 3], f64)>,
+    shadow: Option<Shade>,
     boxed: bool,
     rich: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Shade {
+    ink: [u8; 3],
+    opacity: f32,
+    shift: (i32, i32),
+    sigma: f32,
+}
+
+fn radii(sigma: f32) -> [usize; 3] {
+    let n = 3.0;
+    let ideal = (12.0 * sigma * sigma / n + 1.0).sqrt();
+    let mut low = ideal.floor() as i32;
+    if low % 2 == 0 {
+        low -= 1;
+    }
+    let low = low.max(1);
+    let lw = low as f32;
+    let m =
+        ((12.0 * sigma * sigma - n * lw * lw - 4.0 * n * lw - 3.0 * n) / (-4.0 * lw - 4.0)).round();
+    let mut out = [0; 3];
+    for (i, r) in out.iter_mut().enumerate() {
+        let width = if (i as f32) < m { low } else { low + 2 };
+        *r = ((width - 1) / 2) as usize;
+    }
+    out
+}
+
+fn box_pass(src: &[f32], dst: &mut [f32], w: usize, h: usize, r: usize, across: bool) {
+    let (lines, len, step, stride) = if across { (h, w, 1, w) } else { (w, h, w, 1) };
+    let scale = 1.0 / (2 * r + 1) as f32;
+    for l in 0..lines {
+        let base = l * stride;
+        let at = |i: isize| -> f32 {
+            if i < 0 || i >= len as isize {
+                0.0
+            } else {
+                src[base + i as usize * step]
+            }
+        };
+        let mut sum: f32 = (-(r as isize)..=r as isize).map(at).sum();
+        for i in 0..len {
+            dst[base + i * step] = sum * scale;
+            sum += at(i as isize + r as isize + 1) - at(i as isize - r as isize);
+        }
+    }
+}
+
+fn soften(alpha: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
+    let mut a = alpha.to_vec();
+    if sigma < 0.5 {
+        return a;
+    }
+    let mut b = vec![0.0; a.len()];
+    for r in radii(sigma) {
+        box_pass(&a, &mut b, w, h, r, true);
+        box_pass(&b, &mut a, w, h, r, false);
+    }
+    a
+}
+
+fn shifted(alpha: &[f32], w: usize, h: usize, (dx, dy): (i32, i32)) -> Vec<f32> {
+    let mut out = vec![0.0; alpha.len()];
+    for y in 0..h as i32 {
+        let sy = y - dy;
+        if sy < 0 || sy >= h as i32 {
+            continue;
+        }
+        for x in 0..w as i32 {
+            let sx = x - dx;
+            if sx >= 0 && sx < w as i32 {
+                out[y as usize * w + x as usize] = alpha[sy as usize * w + sx as usize];
+            }
+        }
+    }
+    out
 }
 
 fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
@@ -237,11 +317,14 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
     let backing = look.backing;
     let outline = stroke.map_or(0.0, |(_, s)| size * s as f32);
     let slack = (size * SubtitleStyle::PADDING as f32).ceil() as i32;
+    let reach = look.shadow.map_or(0, |s| {
+        s.shift.0.abs().max(s.shift.1.abs()) + (3.0 * s.sigma).ceil() as i32 + 1
+    });
     let pad = if backing.is_some() {
         (outline.ceil() as i32 + 2).max(slack)
     } else {
         outline.ceil() as i32 + 2
-    };
+    } + reach;
     let mut bands: Vec<(i32, i32, i32, i32)> = if backing.is_some() {
         buffer
             .layout_runs()
@@ -306,6 +389,21 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
         Some((rgb, _)) => (dilate(&alpha, w, h, outline), rgb),
         None => (vec![0.0; alpha.len()], [0, 0, 0]),
     };
+    let shade: Vec<f32> = match look.shadow {
+        Some(s) => {
+            let shape: Vec<f32> = alpha
+                .iter()
+                .zip(&ring)
+                .map(|(&a, &o)| a + o * (1.0 - a))
+                .collect();
+            let gain = TitleShadow::GAIN as f32;
+            soften(&shifted(&shape, w, h, s.shift), w, h, s.sigma)
+                .into_iter()
+                .map(|v| (v * gain).min(1.0) * s.opacity)
+                .collect()
+        }
+        None => Vec::new(),
+    };
     let rgba: Vec<[f32; 4]> = canvas
         .iter()
         .zip(&ring)
@@ -324,7 +422,11 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
             } else {
                 [0.0; 4]
             };
-            over(over(bg, unit(edge, o)), text)
+            let behind = match look.shadow {
+                Some(sh) => over(bg, unit(sh.ink, shade[i])),
+                None => bg,
+            };
+            over(over(behind, unit(edge, o)), text)
         })
         .collect();
     let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
@@ -378,6 +480,7 @@ fn block(
         ink: style.ink(),
         stroke: style.stroke(),
         backing: style.backing(),
+        shadow: None,
         boxed: false,
         rich: true,
     };
@@ -410,11 +513,12 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
     }
     let mut f = fonts().lock().unwrap_or_else(|e| e.into_inner());
     let (w, h) = (f64::from(width), f64::from(height));
-    let size = (height as f32 * t.text_fraction() as f32).max(1.0);
+    let zoom = t.scale();
+    let size = (h * t.text_fraction() * zoom).max(1.0) as f32;
     let look = Look {
         font: t.style.font.as_deref(),
         size,
-        wrap: (t.wrap_width(w, h) as f32).max(size),
+        wrap: ((t.wrap_width(w, h) * zoom) as f32).max(size),
         align: match t.align() {
             TitleAlign::Left => Align::Left,
             TitleAlign::Middle => Align::Center,
@@ -423,6 +527,15 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
         ink: t.ink(),
         stroke: t.stroke(),
         backing: t.backing(),
+        shadow: t.style.shadow.as_ref().map(|s| {
+            let [dx, dy] = s.shift();
+            Shade {
+                ink: s.ink(),
+                opacity: s.alpha() as f32,
+                shift: ((dx * w).round() as i32, (dy * h).round() as i32),
+                sigma: (s.softness() * h / TitleShadow::BLUR_PER_PICTURE) as f32,
+            }
+        }),
         boxed: true,
         rich: false,
     };
@@ -431,14 +544,96 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
     };
     let [x, y] = t.place();
     let [across, down] = t.anchor();
+    let bottom = match t.kind {
+        TitleKind::Text => y,
+        TitleKind::LowerThird => y + t.text_fraction() * SubtitleStyle::LINE * (zoom - 1.0),
+    };
     let left = (x * w) as f32 - across as f32 * look.wrap;
-    let top = (y * h) as f32 - down as f32 * lines;
-    vec![placed(sprite, left, top)]
+    let top = (bottom * h) as f32 - down as f32 * lines;
+    let sprite = placed(sprite, left, top);
+    let [px, py] = t.pivot();
+    vec![turned(sprite, ((px * w) as f32, (py * h) as f32), t.turn())]
+}
+
+fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
+    if degrees == 0.0 || s.width == 0 || s.height == 0 {
+        return s;
+    }
+    let (sin, cos) = (
+        degrees.to_radians().sin() as f32,
+        degrees.to_radians().cos() as f32,
+    );
+    let forward = |x: f32, y: f32| {
+        let (u, v) = (x - px, y - py);
+        (px + u * cos + v * sin, py - u * sin + v * cos)
+    };
+    let (x0, y0) = (s.x as f32, s.y as f32);
+    let (x1, y1) = (x0 + s.width as f32, y0 + s.height as f32);
+    let corners = [
+        forward(x0, y0),
+        forward(x1, y0),
+        forward(x0, y1),
+        forward(x1, y1),
+    ];
+    let lo_x = corners.iter().map(|c| c.0).fold(f32::MAX, f32::min).floor() as i32;
+    let hi_x = corners.iter().map(|c| c.0).fold(f32::MIN, f32::max).ceil() as i32;
+    let lo_y = corners.iter().map(|c| c.1).fold(f32::MAX, f32::min).floor() as i32;
+    let hi_y = corners.iter().map(|c| c.1).fold(f32::MIN, f32::max).ceil() as i32;
+    let (ow, oh) = ((hi_x - lo_x).max(1) as usize, (hi_y - lo_y).max(1) as usize);
+    let held = |x: i32, y: i32| -> [f32; 4] {
+        let p = s.at(x, y);
+        [p[0] * p[3], p[1] * p[3], p[2] * p[3], p[3]]
+    };
+    let mut rgba = vec![[0.0f32; 4]; ow * oh];
+    for oy in 0..oh {
+        for ox in 0..ow {
+            let (u, v) = (
+                lo_x as f32 + ox as f32 + 0.5 - px,
+                lo_y as f32 + oy as f32 + 0.5 - py,
+            );
+            let (sx, sy) = (px + u * cos - v * sin - 0.5, py + u * sin + v * cos - 0.5);
+            let (fx, fy) = (sx.floor(), sy.floor());
+            let (ax, ay) = (sx - fx, sy - fy);
+            let (ix, iy) = (fx as i32, fy as i32);
+            let mut p = [0.0f32; 4];
+            for (dx, dy, k) in [
+                (0, 0, (1.0 - ax) * (1.0 - ay)),
+                (1, 0, ax * (1.0 - ay)),
+                (0, 1, (1.0 - ax) * ay),
+                (1, 1, ax * ay),
+            ] {
+                let q = held(ix + dx, iy + dy);
+                for c in 0..4 {
+                    p[c] += q[c] * k;
+                }
+            }
+            rgba[oy * ow + ox] = if p[3] > 0.0 {
+                [p[0] / p[3], p[1] / p[3], p[2] / p[3], p[3]]
+            } else {
+                [0.0; 4]
+            };
+        }
+    }
+    Sprite {
+        x: lo_x,
+        y: lo_y,
+        width: ow as u32,
+        height: oh as u32,
+        rgba,
+    }
 }
 
 pub fn backing_box(t: &Title, width: u32, height: u32) -> Option<[f64; 4]> {
     t.backing()?;
-    let s = title(t, width, height).into_iter().next()?;
+    let upright = Title {
+        rotation: None,
+        style: TitleStyle {
+            shadow: None,
+            ..t.style.clone()
+        },
+        ..t.clone()
+    };
+    let s = title(&upright, width, height).into_iter().next()?;
     let (w, h) = (f64::from(width), f64::from(height));
     Some([
         f64::from(s.x) / w,
