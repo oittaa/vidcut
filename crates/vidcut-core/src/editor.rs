@@ -21,8 +21,8 @@ use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
 use crate::render::RenderPlan;
 use crate::request::{
-    Changes, Client, ClientKind, ClipRef, Detect, Envelope, ImportMode, NewTrack, OneOrMany,
-    ProjectSet, Request, Response, SourceParams, SpeechModel,
+    Changes, Client, ClientKind, ClipPart, ClipRef, Detect, Envelope, ImportMode, NewTrack,
+    OneOrMany, ProjectSet, Request, Response, SourceParams, SpeechModel,
 };
 use crate::retime;
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
@@ -2228,6 +2228,7 @@ fn mutate(
         }
         Request::EditRippleDeleteSilence {
             clips,
+            parts: given,
             detect,
             threshold_db,
             speech_threshold,
@@ -2237,33 +2238,43 @@ fn mutate(
             min,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let settings = SilenceSettings {
-                threshold_db: *threshold_db,
-                pre_head: length(p, pre_head)?.max(0),
-                post_tail: length(p, post_tail)?.max(0),
-                min: length(p, min)?.max(1),
+            let parts = match given {
+                Some(given) => given_parts(p, given, &ids, playhead)?,
+                None => {
+                    let settings = SilenceSettings {
+                        threshold_db: *threshold_db,
+                        pre_head: length(p, pre_head)?.max(0),
+                        post_tail: length(p, post_tail)?.max(0),
+                        min: length(p, min)?.max(1),
+                    };
+                    let speech = speech_settings(p, *detect, *speech_threshold, min_speech)?;
+                    let mut parts = Vec::new();
+                    for id in &ids {
+                        let c = p.clip(id).expect("resolved");
+                        if c.is_block() || c.speed() == 0.0 {
+                            continue;
+                        }
+                        let found =
+                            silent_parts(p, env, &Target::Clip(c), &settings, speech.as_ref())?;
+                        if !found.is_empty() {
+                            parts.push((id.clone(), found));
+                        }
+                    }
+                    parts
+                }
             };
-            let speech = speech_settings(p, *detect, *speech_threshold, min_speech)?;
             let shown = p.settings.clone();
             let tc = move |f: i64| shown.timecode(f);
-            let mut parts = Vec::new();
-            let mut removed = Vec::new();
-            for id in &ids {
-                let c = p.clip(id).expect("resolved");
-                if c.is_block() || c.speed() == 0.0 {
-                    continue;
-                }
-                let found = silent_parts(p, env, &Target::Clip(c), &settings, speech.as_ref())?;
-                for &(a, b) in &found {
-                    removed.push(json!({
+            let removed: Vec<Value> = parts
+                .iter()
+                .flat_map(|(id, spans)| spans.iter().map(move |&(a, b)| (id, a, b)))
+                .map(|(id, a, b)| {
+                    json!({
                         "clip": id, "start": a, "end": b,
                         "start_tc": tc(a), "end_tc": tc(b),
-                    }));
-                }
-                if !found.is_empty() {
-                    parts.push((id.clone(), found));
-                }
-            }
+                    })
+                })
+                .collect();
             let frames: i64 = parts
                 .iter()
                 .flat_map(|(_, spans)| spans.iter().map(|(a, b)| b - a))
@@ -4992,6 +5003,54 @@ fn speech_settings(
         threshold,
         min_speech: length(p, min_speech)?.max(0),
     }))
+}
+
+fn given_parts(
+    p: &Project,
+    given: &[ClipPart],
+    ids: &[String],
+    playhead: Option<i64>,
+) -> Result<Vec<ops::ClipSpans>> {
+    let mut cuts = Vec::new();
+    for g in given {
+        let id = resolve_clip(p, &g.clip, playhead)?;
+        if !ids.contains(&id) {
+            return Err(Error::usage(format!("{id} isn't one of `clips`")));
+        }
+        let (a, b) = (
+            resolve(p, &g.start, playhead)?,
+            resolve(p, &g.end, playhead)?,
+        );
+        let c = p.clip(&id).expect("resolved");
+        if a >= b || a < c.start || b > c.end() {
+            return Err(Error::usage(format!(
+                "{a}..{b} isn't inside {id} ({}..{})",
+                c.start,
+                c.end()
+            )));
+        }
+        cuts.push((id, a, b));
+    }
+    let mut parts: Vec<ops::ClipSpans> = Vec::new();
+    for id in ids {
+        let mut spans: Vec<(i64, i64)> = cuts
+            .iter()
+            .filter(|c| &c.0 == id)
+            .map(|c| (c.1, c.2))
+            .collect();
+        if spans.is_empty() || parts.iter().any(|(x, _)| x == id) {
+            continue;
+        }
+        spans.sort_unstable();
+        if let Some(w) = spans.windows(2).find(|w| w[1].0 < w[0].1) {
+            return Err(Error::usage(format!(
+                "{}..{} and {}..{} of {id} overlap",
+                w[0].0, w[0].1, w[1].0, w[1].1
+            )));
+        }
+        parts.push((id.clone(), spans));
+    }
+    Ok(parts)
 }
 
 fn silent_parts(

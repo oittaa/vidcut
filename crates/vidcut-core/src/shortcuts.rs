@@ -73,7 +73,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Play or stop",
         Some(
             "In Dynamic Trim, it plays from 2 seconds before the playhead to 2 seconds after \
-             and puts the playhead back, or stops a trim.",
+             and puts the playhead back, or stops a trim. While Ripple Delete Silence is \
+             open, it plays the timeline as Remove would leave it.",
         ),
     ),
     key(
@@ -301,6 +302,28 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Enter"],
         "Edit the selected subtitle",
         Some("Opens its text and position in the Subtitle window; Ctrl+Enter there is Done."),
+    ),
+    key(
+        Clips,
+        &["]"],
+        "Next silence stripe",
+        Some("While Ripple Delete Silence is open: the playhead goes to the next stripe."),
+    ),
+    key(
+        Clips,
+        &["["],
+        "Previous silence stripe",
+        Some("While Ripple Delete Silence is open: the playhead goes to the stripe before."),
+    ),
+    key(
+        Clips,
+        &["X"],
+        "Keep or cut the silence stripe at the playhead",
+        Some(
+            "While Ripple Delete Silence is open. A kept stripe turns gray and hatched and \
+             stays when Remove cuts the red ones. A click on a stripe does the same, and its \
+             edges drag to cut less or more.",
+        ),
     ),
     key(
         Trim,

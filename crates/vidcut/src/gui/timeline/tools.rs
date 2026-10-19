@@ -1,7 +1,9 @@
-use eframe::egui::{self, Color32, CornerRadius, Painter, Rect, RichText};
+use std::collections::HashMap;
+
+use eframe::egui::{self, Color32, CornerRadius, Painter, Pos2, Rect, RichText, Stroke, pos2};
 use serde_json::{Value, json};
 use vidcut_core::model::Project;
-use vidcut_core::ops;
+use vidcut_core::ops::{self, Edge};
 use vidcut_core::request::Detect;
 
 use super::{EditSel, Side, TrackRef, audio_edit_outgoing};
@@ -11,6 +13,14 @@ use crate::gui::theme;
 use crate::gui::timeline::geometry::{Rows, Scale};
 use crate::gui::workspace::{Workspace, dim};
 use crate::live::{Audition, MAX_SPEED, PlayerId};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stripe {
+    pub clip: String,
+    pub start: i64,
+    pub end: i64,
+    pub keep: bool,
+}
 
 #[derive(Debug)]
 pub struct SilenceDialog {
@@ -22,11 +32,13 @@ pub struct SilenceDialog {
     pub pre_head: f64,
     pub post_tail: f64,
     pub min: f64,
-    pub parts: Vec<(String, i64, i64)>,
-    pub frames: i64,
+    pub stripes: Vec<Stripe>,
+    found: Vec<Stripe>,
     pub error: Option<String>,
     asked: Option<(Value, Ask)>,
     found_for: Option<Value>,
+    held: Option<(usize, Edge)>,
+    skipped: Option<Vec<Stripe>>,
 }
 
 impl SilenceDialog {
@@ -40,11 +52,13 @@ impl SilenceDialog {
             pre_head: 0.15,
             post_tail: 0.15,
             min: 0.5,
-            parts: Vec::new(),
-            frames: 0,
+            stripes: Vec::new(),
+            found: Vec::new(),
             error: None,
             asked: None,
             found_for: None,
+            held: None,
+            skipped: None,
         }
     }
 
@@ -69,6 +83,141 @@ impl SilenceDialog {
     pub fn current(&self) -> bool {
         self.found_for.as_ref() == Some(&self.params())
     }
+
+    pub fn edited(&self) -> bool {
+        self.stripes != self.found
+    }
+
+    fn cut(&self) -> impl Iterator<Item = &Stripe> {
+        self.stripes.iter().filter(|s| !s.keep)
+    }
+
+    pub fn cut_parts(&self) -> Value {
+        self.cut()
+            .map(|s| json!({ "clip": s.clip, "start": s.start, "end": s.end }))
+            .collect()
+    }
+
+    pub fn spans(&self) -> Vec<ops::ClipSpans> {
+        let mut out: Vec<ops::ClipSpans> = Vec::new();
+        for s in self.cut() {
+            match out.iter_mut().find(|(c, _)| *c == s.clip) {
+                Some((_, spans)) => spans.push((s.start, s.end)),
+                None => out.push((s.clip.clone(), vec![(s.start, s.end)])),
+            }
+        }
+        out
+    }
+
+    pub fn remove_params(&self) -> Value {
+        let mut p = self.params();
+        p["parts"] = self.cut_parts();
+        p
+    }
+
+    pub fn at(&self, frame: i64) -> Option<usize> {
+        self.stripes
+            .iter()
+            .position(|s| s.start <= frame && frame < s.end)
+    }
+
+    pub fn next(&self, from: i64, dir: i64) -> Option<i64> {
+        let starts = self.stripes.iter().map(|s| s.start);
+        match dir {
+            1 => starts.filter(|&s| s > from).min(),
+            _ => starts.filter(|&s| s < from).max(),
+        }
+    }
+
+    fn room(&self, i: usize, p: &Project) -> Option<(i64, i64)> {
+        let s = self.stripes.get(i)?;
+        let c = p.clip(&s.clip)?;
+        let same = || {
+            self.stripes
+                .iter()
+                .enumerate()
+                .filter(move |(j, x)| *j != i && x.clip == s.clip)
+                .map(|(_, x)| x)
+        };
+        let lo = same()
+            .map(|x| x.end)
+            .filter(|&e| e <= s.start)
+            .fold(c.start, i64::max);
+        let hi = same()
+            .map(|x| x.start)
+            .filter(|&a| a >= s.end)
+            .fold(c.end(), i64::min);
+        Some((lo, hi))
+    }
+}
+
+pub fn clip_tracks(p: &Project) -> HashMap<&str, &str> {
+    p.tracks
+        .iter()
+        .flat_map(|t| t.clips.iter().map(|c| (c.id.as_str(), t.id.as_str())))
+        .collect()
+}
+
+fn hatch(painter: &Painter, rect: Rect, color: Color32) {
+    let shown = rect.intersect(painter.clip_rect());
+    if !shown.is_positive() {
+        return;
+    }
+    let p = painter.with_clip_rect(shown);
+    let (h, step) = (rect.height(), 6.0);
+    let mut x = rect.left() + ((shown.left() - h - rect.left()) / step).floor() * step;
+    while x < shown.right() {
+        p.line_segment(
+            [pos2(x, rect.bottom()), pos2(x + h, rect.top())],
+            Stroke::new(1.0, color),
+        );
+        x += step;
+    }
+}
+
+const STRIPE_EDGE: f32 = 5.0;
+
+pub fn stripe_at(
+    d: &SilenceDialog,
+    p: &Project,
+    rows: &Rows,
+    scale: &Scale,
+    pos: Pos2,
+    edges: bool,
+) -> Option<(usize, Option<Edge>)> {
+    if !rows.area.contains(pos) {
+        return None;
+    }
+    let row = rows.at(pos.y)?;
+    let tracks = clip_tracks(p);
+    let on_row = |s: &Stripe| tracks.get(s.clip.as_str()) == Some(&row.track.as_str());
+    let spans = d
+        .stripes
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| on_row(s))
+        .map(|(i, s)| (i, scale.xf(s.start), scale.xf(s.end)));
+    if edges {
+        let edge = spans
+            .clone()
+            .flat_map(|(i, a, b)| {
+                let grab = STRIPE_EDGE.min((b - a) / 3.0);
+                [(i, Edge::Head, pos.x - a, a), (i, Edge::Tail, b - pos.x, b)]
+                    .into_iter()
+                    .filter(move |&(.., inside, _)| (-STRIPE_EDGE..=grab).contains(&inside))
+            })
+            .min_by(|x, y| (x.3 - pos.x).abs().total_cmp(&(y.3 - pos.x).abs()));
+        if let Some((i, edge, ..)) = edge {
+            return Some((i, Some(edge)));
+        }
+    }
+    spans
+        .filter(|&(_, a, b)| {
+            let half = ((b - a) / 2.0).max(3.0);
+            ((a + b) / 2.0 - pos.x).abs() <= half
+        })
+        .map(|(i, ..)| (i, None))
+        .next()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
@@ -176,6 +325,7 @@ pub fn heard(
                 timeline: Box::new(trimmed(by)?),
                 at: e.at + pending,
                 speed,
+                skips: None,
             });
         }
         DynamicTarget::Edit(e) => {
@@ -219,6 +369,7 @@ pub fn heard(
         timeline: Box::new(q),
         at,
         speed,
+        skips: None,
     })
 }
 
@@ -278,6 +429,7 @@ fn slip_heard(
         timeline: Box::new(q),
         at: edge_frame + room,
         speed: -speed,
+        skips: None,
     })
 }
 
@@ -343,9 +495,10 @@ pub fn dynamic_preview(
 
 impl Workspace {
     pub(crate) fn open_silence(&mut self, clips: Vec<String>) {
-        if !clips.is_empty() {
-            self.timeline.silence = Some(SilenceDialog::new(clips));
+        if clips.is_empty() {
+            return;
         }
+        self.timeline.silence = Some(SilenceDialog::new(clips));
     }
 
     pub(super) fn silence_window(&mut self, ctx: &egui::Context) {
@@ -357,26 +510,28 @@ impl Workspace {
         {
             match result {
                 Ok(r) => {
-                    d.parts = r.result["removed"]
+                    d.stripes = r.result["removed"]
                         .as_array()
                         .into_iter()
                         .flatten()
                         .filter_map(|p| {
-                            Some((
-                                p["clip"].as_str()?.to_string(),
-                                p["start"].as_i64()?,
-                                p["end"].as_i64()?,
-                            ))
+                            Some(Stripe {
+                                clip: p["clip"].as_str()?.to_string(),
+                                start: p["start"].as_i64()?,
+                                end: p["end"].as_i64()?,
+                                keep: false,
+                            })
                         })
                         .collect();
-                    d.frames = r.result["frames"].as_i64().unwrap_or(0);
                     d.error = None;
                 }
                 Err(e) => {
-                    d.parts.clear();
+                    d.stripes.clear();
                     d.error = Some(e.message);
                 }
             }
+            d.found = d.stripes.clone();
+            d.held = None;
             d.found_for = Some(params.clone());
             d.asked = None;
         }
@@ -389,6 +544,7 @@ impl Workspace {
                 Ask::send(&self.live, ctx, "edit.ripple_delete_silence", dry),
             ));
         }
+        self.silence_skips(&mut d);
         let mut open = true;
         let (mut remove, mut cancel) = (false, false);
         let fps = self.fps().as_f64().max(1.0);
@@ -401,6 +557,7 @@ impl Workspace {
             false => ("the silent parts", "audible", "Finding silence…"),
             true => ("what isn't speech", "spoken", "Finding speech…"),
         };
+        let edited = d.edited();
         egui::Window::new("Ripple Delete Silence")
             .collapsible(false)
             .resizable(false)
@@ -410,6 +567,13 @@ impl Workspace {
                 ui.label(dim(format!(
                     "Cuts {cut} out of {what} and closes the gaps."
                 )));
+                ui.label(match edited {
+                    true => RichText::new(
+                        "Changing a setting finds the stripes again: your edits are lost.",
+                    )
+                    .color(theme::colors().accent),
+                    false => dim("Changing a setting finds the stripes again."),
+                });
                 egui::Grid::new("silence-settings")
                     .num_columns(3)
                     .show(ui, |ui| {
@@ -483,58 +647,222 @@ impl Workspace {
                         ui.end_row();
                     });
                 ui.separator();
+                let all = d.stripes.len();
+                let n = d.cut().count();
+                let frames: i64 = d.cut().map(|s| s.end - s.start).sum();
                 let status = match (&d.error, d.current(), d.asked.is_some()) {
                     (Some(e), _, _) => RichText::new(e).color(theme::colors().error),
                     (None, _, true) | (None, false, _) => dim(finding),
-                    (None, true, false) if d.parts.is_empty() => dim("Nothing to remove."),
-                    (None, true, false) => RichText::new(format!(
-                        "Removes {} parts, {} ({} frames): the red stripes.",
-                        d.parts.len(),
-                        self.src_tc(d.frames),
-                        d.frames
-                    )),
+                    (None, true, false) if all == 0 => dim("Nothing to remove."),
+                    (None, true, false) if n == 0 => {
+                        dim(format!("Keeps all {all} parts: nothing to remove."))
+                    }
+                    (None, true, false) => {
+                        let of = match n == all {
+                            true => String::new(),
+                            false => format!(" of {all}"),
+                        };
+                        RichText::new(format!(
+                            "Removes {n}{of} parts, {} ({frames} frames): the red stripes.",
+                            self.src_tc(frames),
+                        ))
+                    }
                 };
                 ui.label(status);
+                ui.label(dim(
+                    "Click a stripe to keep it, or drag its edges. [ and ] go to the previous \
+                     and next, X keeps or cuts the one at the playhead. Play and Space play \
+                     the timeline as Remove would leave it.",
+                ));
                 ui.label(dim("Cuts are de-clicked with 3 ms fades."));
+                let ready = d.current() && all > 0;
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(ready, egui::Button::new("Keep All"))
+                        .clicked()
+                    {
+                        d.stripes.iter_mut().for_each(|s| s.keep = true);
+                    }
+                    if ui
+                        .add_enabled(ready, egui::Button::new("Cut All"))
+                        .clicked()
+                    {
+                        d.stripes.iter_mut().for_each(|s| s.keep = false);
+                    }
+                });
                 ui.horizontal(|ui| {
                     remove = ui
-                        .add_enabled(
-                            d.current() && !d.parts.is_empty(),
-                            egui::Button::new("Remove"),
-                        )
+                        .add_enabled(ready && n > 0, egui::Button::new("Remove"))
                         .clicked();
                     cancel = ui.button("Cancel").clicked();
                 });
             });
+        if remove || cancel || !open {
+            self.live.skip(None);
+        }
         if remove {
-            self.send("edit.ripple_delete_silence", params);
+            self.send("edit.ripple_delete_silence", d.remove_params());
         } else if open && !cancel {
             self.timeline.silence = Some(d);
         }
+    }
+
+    fn silence_skips(&mut self, d: &mut SilenceDialog) {
+        if d.held.is_some() || d.skipped.as_ref() == Some(&d.stripes) {
+            return;
+        }
+        d.skipped = Some(d.stripes.clone());
+        let spans = d.spans();
+        self.live.skip((!spans.is_empty()).then_some(spans));
+    }
+
+    pub(crate) fn silence_keys(&mut self, input: &egui::InputState) {
+        let at = self.drawn_playhead();
+        let Some(d) = &mut self.timeline.silence else {
+            return;
+        };
+        let m = input.modifiers;
+        if input.key_pressed(egui::Key::X)
+            && !m.command
+            && !m.alt
+            && let Some(i) = d.at(at)
+        {
+            d.stripes[i].keep ^= true;
+        }
+        let struck = |k: egui::Key| {
+            input.events.iter().any(|e| {
+                matches!(e, egui::Event::Key { key, physical_key, pressed: true, .. }
+                    if *key == k || *physical_key == Some(k))
+            })
+        };
+        let dir = match (
+            struck(egui::Key::OpenBracket),
+            struck(egui::Key::CloseBracket),
+        ) {
+            (true, false) => -1,
+            (false, true) => 1,
+            _ => return,
+        };
+        if let Some(to) = d.next(at, dir) {
+            self.show_timeline();
+            self.seek(PlayerId::Timeline, to, false);
+            let from = self.snap.timeline.position;
+            self.timeline.landing = Some((to, std::time::Instant::now(), from));
+        }
+    }
+
+    pub(super) fn stripe_hover(
+        &self,
+        ui: &egui::Ui,
+        p: &Project,
+        rows: &Rows,
+        scale: &Scale,
+    ) -> bool {
+        let Some(d) = &self.timeline.silence else {
+            return false;
+        };
+        let hit = ui
+            .input(|i| i.pointer.hover_pos())
+            .and_then(|pos| stripe_at(d, p, rows, scale, pos, true));
+        match (d.held.is_some(), hit) {
+            (true, _) | (_, Some((_, Some(_)))) => {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                true
+            }
+            (false, Some((_, None))) => {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                true
+            }
+            (false, None) => false,
+        }
+    }
+
+    pub(super) fn stripe_press(
+        &mut self,
+        ui: &egui::Ui,
+        resp: &egui::Response,
+        p: &Project,
+        rows: &Rows,
+        scale: &Scale,
+    ) -> bool {
+        let Some(d) = &mut self.timeline.silence else {
+            return false;
+        };
+        if resp.drag_started_by(egui::PointerButton::Primary)
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+            && let Some((i, edge)) = stripe_at(d, p, rows, scale, press, true)
+        {
+            d.held = edge.map(|e| (i, e));
+            return true;
+        }
+        if resp.clicked()
+            && let Some(pos) = resp.interact_pointer_pos()
+            && let Some((i, _)) = stripe_at(d, p, rows, scale, pos, false)
+        {
+            d.stripes[i].keep ^= true;
+            return true;
+        }
+        false
+    }
+
+    pub(super) fn stripe_drag(&mut self, ui: &egui::Ui, p: &Project, scale: &Scale) {
+        let Some(d) = &mut self.timeline.silence else {
+            return;
+        };
+        let Some((i, edge)) = d.held else {
+            return;
+        };
+        let (pos, down) = ui.input(|i| (i.pointer.latest_pos(), i.pointer.primary_down()));
+        let (Some(pos), true, Some((lo, hi))) = (pos, down, d.room(i, p)) else {
+            d.held = None;
+            return;
+        };
+        let at = scale.boundary(pos.x);
+        let s = &mut d.stripes[i];
+        let (from, to, edge) = match edge {
+            Edge::Head => (lo, s.end - 1, &mut s.start),
+            Edge::Tail => (s.start + 1, hi, &mut s.end),
+        };
+        if from > to {
+            d.held = None;
+            return;
+        }
+        *edge = at.clamp(from, to);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
 
     pub(super) fn paint_silence(&self, painter: &Painter, rows: &Rows, scale: &Scale, p: &Project) {
         let Some(d) = &self.timeline.silence else {
             return;
         };
-        for (clip, a, b) in &d.parts {
-            let Some(track) = p
-                .tracks
-                .iter()
-                .find(|t| t.clips.iter().any(|c| &c.id == clip))
-            else {
+        let tracks = clip_tracks(p);
+        let cut = Color32::from_rgba_unmultiplied(225, 50, 45, 110);
+        let kept = Color32::from_rgba_unmultiplied(150, 150, 155, 70);
+        let lines = Color32::from_rgba_unmultiplied(205, 205, 210, 120);
+        for (i, s) in d.stripes.iter().enumerate() {
+            let Some(row) = tracks.get(s.clip.as_str()).and_then(|t| rows.get(t)) else {
                 continue;
             };
-            let Some(row) = rows.get(&track.id) else {
+            let rect =
+                Rect::from_x_y_ranges(scale.xf(s.start)..=scale.xf(s.end), row.rect.rect.y_range());
+            if !painter.clip_rect().intersects(rect) {
                 continue;
-            };
-            let r = row.rect.rect;
-            let rect = Rect::from_x_y_ranges(scale.xf(*a)..=scale.xf(*b), r.y_range());
-            painter.rect_filled(
-                rect,
-                CornerRadius::ZERO,
-                Color32::from_rgba_unmultiplied(225, 50, 45, 110),
-            );
+            }
+            if s.keep {
+                painter.rect_filled(rect, CornerRadius::ZERO, kept);
+                hatch(painter, rect, lines);
+            } else {
+                painter.rect_filled(rect, CornerRadius::ZERO, cut);
+            }
+            if let Some((h, edge)) = d.held
+                && h == i
+            {
+                let x = match edge {
+                    Edge::Head => rect.left(),
+                    Edge::Tail => rect.right(),
+                };
+                painter.vline(x, rect.y_range(), Stroke::new(2.0, Color32::WHITE));
+            }
         }
     }
 

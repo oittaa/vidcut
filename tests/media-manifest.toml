@@ -131,3 +131,19 @@ url = "https://images-assets.nasa.gov/video/KSC-20260830-VP-FMX02-0001-Roman_Spa
 license = "NASA's metadata: rights 'For copyright and restrictions, refer to http://www.nasa.gov/multimedia/guidelines/index.html' (now https://www.nasa.gov/nasa-brand-center/images-and-media/), usage terms 'PAO Approved For Release'"
 purpose = "the SRT caption file NASA publishes with nasa-roman-presser: 1014 cues, the last ending at 00:55:43,807, UTF-8 with a byte order mark, 90989 bytes. Not aligned with the speech of the 4K original, seen when played together; how far off and where not measured. Real captions to re-time to the speech"
 sha256 = "43a5f0800a2c26a93bd41d4f4cc1fb3e16459581815c43c9ff9e558b1e93b805"
+
+[[clip]]
+name = "gulliver-fi"
+file = "gulliverinmatkat_13_swift_128kb.mp3"
+url = "https://archive.org/download/gulliverin_matkat_kaukaisilla_mailla_1611_librivox/gulliverinmatkat_13_swift_128kb.mp3"
+license = "Public domain in the USA: 'LibriVox recordings are Public Domain in the USA', https://librivox.org/gulliverin-matkat-kaukaisilla-mailla-by-jonathan-swift/; archive.org gives Public Domain Mark 1.0, https://archive.org/details/gulliverin_matkat_kaukaisilla_mailla_1611_librivox"
+purpose = "Finnish speech: section 13, '2. osa, 5. luku', of LibriVox's reading of Gulliverin matkat kaukaisilla mailla by one reader, Harri Tapani Ylilammi. MP3 128 kbps, 532.64 s, 8526874 bytes (archive.org's MD5 57fec5e53cbfd86b9568689d72a24598). gulliver-fi-text has its text"
+sha256 = "cdabf7e474e3f6ca4877e171a33928e76411d96f5ff5610754f5d7fd04fb09d8"
+
+[[clip]]
+name = "gulliver-fi-text"
+file = "44892-0.txt"
+url = "https://www.gutenberg.org/files/44892/44892-0.txt"
+license = "Project Gutenberg: 'Public domain in the USA.', https://www.gutenberg.org/ebooks/44892; Swift's book translated by Samuli Suomalainen (1850-1907)"
+purpose = "the text gulliver-fi reads: Samuli Suomalainen's translation, the one the reading names and LibriVox links, the whole book, UTF-8 without a byte order mark, CRLF, 234327 bytes. Section 13 is TOINEN OSA's VIIDES LUKU, lines 2930-3031, 717 words with its heading: transcription's reference text in Finnish. Not compared word for word with the reading"
+sha256 = "909de2ca45f8c576ae96c8f8668881ece0a9953f57a07141ce5f972a15e7cc5e"
