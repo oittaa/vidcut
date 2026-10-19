@@ -422,7 +422,7 @@ struct Burner {
 #[derive(Default)]
 struct Drawn {
     sprites: Vec<crate::burn::Sprite>,
-    on_gpu: Option<(crate::cuda::burn::Overlay, (i32, i32))>,
+    on_gpu: Option<(crate::cuda::burn::Overlay, crate::burn::Placing)>,
 }
 
 impl Drawn {
@@ -439,9 +439,9 @@ impl Drawn {
         output: &Output,
         gpu_failed: &mut bool,
         what: &str,
-        shift: (i32, i32),
+        shift: crate::burn::Placing,
     ) -> Result<frame::Video> {
-        if self.sprites.is_empty() {
+        if self.sprites.is_empty() || shift.1 <= 0.0 {
             return Ok(f);
         }
         match (Place::of(&f), output) {
@@ -472,7 +472,7 @@ impl Drawn {
         &mut self,
         frames: &crate::cuda::CudaFrames,
         f: &frame::Video,
-        shift: (i32, i32),
+        shift: crate::burn::Placing,
     ) -> Result<frame::Video> {
         if self.on_gpu.as_ref().is_none_or(|(_, at)| *at != shift) {
             let overlay = crate::cuda::burn::Overlay::new(frames, f, &self.sprites, shift)?;
@@ -485,7 +485,7 @@ impl Drawn {
         &self,
         f: &frame::Video,
         up: Option<&crate::cuda::CudaFrames>,
-        shift: (i32, i32),
+        shift: crate::burn::Placing,
     ) -> Result<frame::Video> {
         let mut m = crate::hw::download(f)?;
         crate::burn::blend_at(&mut m, &self.sprites, shift)?;
@@ -521,7 +521,7 @@ impl Burner {
             self.size = size;
         }
         self.drawn
-            .over(f, output, &mut self.gpu_failed, "subtitles", (0, 0))
+            .over(f, output, &mut self.gpu_failed, "subtitles", ((0, 0), 1.0))
     }
 }
 
@@ -568,9 +568,10 @@ impl Titles {
                 }
                 _ => 0,
             };
+            let alpha = shown.alpha() as f32;
             f = k
                 .drawn
-                .over(f, output, &mut self.gpu_failed, "titles", (0, dy))?;
+                .over(f, output, &mut self.gpu_failed, "titles", ((0, dy), alpha))?;
         }
         Ok(f)
     }

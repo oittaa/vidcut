@@ -54,6 +54,7 @@ impl Titles {
                             above,
                             picture: p.clone(),
                             dy,
+                            alpha: shown.alpha() as f32,
                         });
                     }
                 }

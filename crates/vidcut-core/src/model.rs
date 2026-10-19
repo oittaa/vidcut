@@ -880,6 +880,9 @@ pub struct Title {
     /// shadow, about the same point as `zoom`. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<f64>,
+    /// How opaque the whole title is, from 0 to 1. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
 }
 
 /// What kind of title: one block of text, a lower third, or a scroll.
@@ -999,6 +1002,7 @@ impl Title {
             position: None,
             zoom: None,
             rotation: None,
+            opacity: None,
         }
     }
 
@@ -1078,6 +1082,10 @@ impl Title {
 
     pub fn turn(&self) -> f64 {
         self.rotation.unwrap_or(0.0)
+    }
+
+    pub fn opaque(&self) -> f64 {
+        self.opacity.unwrap_or(1.0)
     }
 
     pub fn pivot(&self) -> [f64; 2] {

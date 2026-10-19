@@ -74,6 +74,9 @@ pub struct ShownTitle {
     pub title: Title,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<Run>,
+    /// How a dissolve at its clip's edge fades it in or out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade: Option<Ramp>,
 }
 
 /// Where a piece is in a moving title's clip.
@@ -104,7 +107,12 @@ impl ShownTitle {
         Self {
             title: self.title.clone(),
             run: self.run.map(|r| r.after(k)),
+            fade: self.fade.map(|r| r.after(k)),
         }
+    }
+
+    pub fn alpha(&self) -> f64 {
+        self.title.opaque() * self.fade.map_or(1.0, |r| r.level(0))
     }
 }
 
@@ -816,17 +824,40 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                     }
                 }
             }
-            if let Some((c, title)) = t
-                .clip_covering(x)
-                .map(|ci| &t.clips[ci])
-                .filter(|c| titled(t, c))
-                .and_then(|c| Some((c, c.title.clone()?)))
-            {
+            let shown = |c: &Clip, fade: Option<Ramp>| {
+                let title = c.title.clone()?;
                 let run = title.moves().then(|| Run {
                     at: x - c.start,
                     of: c.duration,
                 });
-                stack.push(Layer::Title(ShownTitle { title, run }));
+                Some(ShownTitle { title, run, fade })
+            };
+            match played.iter().find(|d| d.frames.0 <= x && x < d.frames.1) {
+                Some(d) => {
+                    let ramp = |falling| Ramp {
+                        at: x - d.frames.0,
+                        of: d.frames.1 - d.frames.0,
+                        falling,
+                    };
+                    for (c, falling) in [(d.before, true), (d.after, false)] {
+                        if let Some(s) = c
+                            .filter(|c| titled(t, c))
+                            .and_then(|c| shown(c, Some(ramp(falling))))
+                        {
+                            stack.push(Layer::Title(s));
+                        }
+                    }
+                }
+                None => {
+                    if let Some(s) = t
+                        .clip_covering(x)
+                        .map(|ci| &t.clips[ci])
+                        .filter(|c| titled(t, c))
+                        .and_then(|c| shown(c, None))
+                    {
+                        stack.push(Layer::Title(s));
+                    }
+                }
             }
         }
         let mut piece = VideoPiece::Black { frames: y - x };

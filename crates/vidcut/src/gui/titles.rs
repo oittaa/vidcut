@@ -31,6 +31,7 @@ pub struct TitleDialog {
     down: String,
     zoom: String,
     rotation: String,
+    title_opacity: String,
     error: String,
     families: Vec<String>,
     shown: Option<Title>,
@@ -71,6 +72,7 @@ impl TitleDialog {
             down: String::new(),
             zoom: String::new(),
             rotation: String::new(),
+            title_opacity: String::new(),
             error: String::new(),
             families: vidcut_av::burn::families(),
             selection: (0, 0),
@@ -119,6 +121,7 @@ impl TitleDialog {
         self.down = percent(t.position.map(|p| p[1]));
         self.zoom = percent(t.zoom);
         self.rotation = plain(t.rotation);
+        self.title_opacity = percent(t.opacity);
         self.loaded = true;
     }
 }
@@ -275,6 +278,7 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         } else {
             kept_plain(&d.rotation, stored.rotation, "rotation")?
         },
+        opacity: kept_number(&d.title_opacity, stored.opacity, "title opacity")?,
     };
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
 }
@@ -301,6 +305,9 @@ fn changes(clip: &str, t: &Title, stored: &Title) -> Option<Value> {
     }
     if t.rotation != stored.rotation {
         params["rotation"] = json!(t.turn());
+    }
+    if t.opacity != stored.opacity {
+        params["opacity"] = json!(t.opaque());
     }
     params
         .as_object()
@@ -550,6 +557,8 @@ impl Workspace {
                         changed |= row(ui, "Rotation", &mut d.rotation, "0°");
                         ui.end_row();
                     }
+                    changed |= row(ui, "Title opacity", &mut d.title_opacity, "100%");
+                    ui.end_row();
                 });
                 ui.label(dim(match d.kind {
                     TitleKind::LowerThird => {
