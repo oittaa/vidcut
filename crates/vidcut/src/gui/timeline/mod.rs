@@ -217,6 +217,7 @@ pub struct TimelineView {
     pub track_dialog: Option<crate::gui::subtitles::TrackDialog>,
     pub(super) adding_title: Option<crate::gui::export::Ask>,
     pub title_dialog: Option<crate::gui::titles::TitleDialog>,
+    pub(crate) title_grab: crate::gui::onscreen::Grab,
     pub(super) files: Option<crate::gui::subtitles::Files>,
     pub(super) retime: Option<crate::gui::retime::Retime>,
 }
@@ -258,6 +259,7 @@ impl Default for TimelineView {
             track_dialog: None,
             adding_title: None,
             title_dialog: None,
+            title_grab: Default::default(),
             files: None,
             retime: None,
         }
