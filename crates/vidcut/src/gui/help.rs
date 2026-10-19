@@ -135,9 +135,7 @@ fn row(ui: &mut egui::Ui, s: &Shortcut, query: &str, explained: &mut HashSet<&'s
         if s.explanation.is_some() {
             let r = mark(ui, open).on_hover_text("What it does");
             let name = format!("What {} does", s.action);
-            r.widget_info(|| {
-                egui::WidgetInfo::selected(egui::WidgetType::Button, true, open, &name)
-            });
+            r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, open, &name));
             toggle |= r.clicked();
         } else {
             ui.add_space(MARK + ui.spacing().item_spacing.x);

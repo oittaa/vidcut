@@ -499,7 +499,7 @@ impl Workspace {
                     .add(egui::Button::new(icon::X).frame(false))
                     .on_hover_text("Close the history");
                 close.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close the history")
+                    egui::WidgetInfo::labeled(egui::Role::Button, true, "Close the history")
                 });
                 if close.clicked() {
                     self.history.close();
@@ -835,9 +835,7 @@ impl Workspace {
                 format!("{name}: {}", s.label)
             }
         };
-        r.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, true, current, &named)
-        });
+        r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, current, &named));
         let c = theme::colors();
         if current {
             ui.painter()

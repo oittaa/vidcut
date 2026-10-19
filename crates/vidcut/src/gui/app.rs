@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -119,8 +118,6 @@ pub struct App {
     viewer: Viewer,
     gate: Arc<Gate>,
     session: Option<std::thread::JoinHandle<()>>,
-    window_captures: HashMap<u64, Capture>,
-    next_capture: u64,
     window: super::window::Window,
 }
 
@@ -203,46 +200,12 @@ impl App {
             viewer,
             gate,
             session: Some(session),
-            window_captures: HashMap::new(),
-            next_capture: 1,
             window,
         })
     }
 
     fn publish(&self) {
         *self.port.gui.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.ws.gui_state());
-    }
-
-    fn window_screenshots(&mut self, ctx: &egui::Context) {
-        let shots: Vec<(u64, Arc<egui::ColorImage>)> = ctx.input(|i| {
-            i.events
-                .iter()
-                .filter_map(|e| match e {
-                    egui::Event::Screenshot {
-                        user_data, image, ..
-                    } => user_data
-                        .data
-                        .as_ref()
-                        .and_then(|d| d.downcast_ref::<u64>())
-                        .map(|id| (*id, image.clone())),
-                    _ => None,
-                })
-                .collect()
-        });
-        for (id, image) in shots {
-            if let Some(done) = self.window_captures.remove(&id) {
-                let rgba = image
-                    .pixels
-                    .iter()
-                    .flat_map(|c| [c.r(), c.g(), c.b(), 255])
-                    .collect();
-                done(Ok(Image {
-                    width: image.size[0] as u32,
-                    height: image.size[1] as u32,
-                    rgba,
-                }));
-            }
-        }
     }
 }
 
@@ -253,12 +216,18 @@ impl eframe::App for App {
         for task in self.port.take() {
             match task {
                 UiTask::CaptureWindow(done) => {
-                    let id = self.next_capture;
-                    self.next_capture += 1;
-                    self.window_captures.insert(id, done);
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(
-                        id,
-                    )));
+                    ctx.request_screenshot(move |image| {
+                        let rgba = image
+                            .pixels
+                            .iter()
+                            .flat_map(|c| [c.r(), c.g(), c.b(), 255])
+                            .collect();
+                        done(Ok(Image {
+                            width: image.size[0] as u32,
+                            height: image.size[1] as u32,
+                            rgba,
+                        }));
+                    });
                 }
                 UiTask::Window(w) => {
                     use egui::ViewportCommand as C;
@@ -304,7 +273,6 @@ impl eframe::App for App {
         if self.ws.stats.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
-        self.window_screenshots(&ctx);
         self.window.watch(&ctx, frame);
         self.ws.ui(ui);
         *self.port.two_up.lock().unwrap_or_else(|e| e.into_inner()) = self.ws.two_up_stats();
