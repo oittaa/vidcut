@@ -901,7 +901,9 @@ impl Workspace {
                 }
             }
             Act::Delete | Act::Undelete => {
-                let Some((_, _, a, b)) = selected else { return };
+                let Some((first, last, a, b)) = selected else {
+                    return;
+                };
                 match media {
                     Some(m) => self.send(
                         "media.leave_out",
@@ -917,7 +919,15 @@ impl Workspace {
                         });
                         self.send(
                             "edit.ripple_delete_words",
-                            json!({ "words": [span(a, b)], "quiet": true, "clear_marks": marked }),
+                            json!({
+                                "words": [{
+                                    "start": format!("{a}f"),
+                                    "end": format!("{b}f"),
+                                    "text": text_of(&items[first..=last]),
+                                }],
+                                "quiet": true,
+                                "clear_marks": marked,
+                            }),
                         );
                         t.selection = None;
                         t.anchor = None;
