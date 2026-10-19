@@ -123,6 +123,8 @@ The schema describes parameters, not results. Commonly read:
 | `export start` | `outputs[]`: `frames`, `video_encoder`, `gpu_frames` (made on the GPU), `gpu_decoded`, `copies` (GPU frames copied `down` and `up`), `color` and `metadata` (what was chosen, and `why`), `tried` (video encoders that didn't open, and why), `sources` (each file and how it was decoded). `notes[]`: `code`, `message` |
 | `export start --background`, `jobs get` | `id`, `state` (`queued`, `running`, `done`, `failed`, `cancelled`), `progress` (0–1), `result`, `error`, and `details` as it runs: `video` (`encoder`, `device`, `pixel`, `bits`, `passes`, `gpu_frames_in`), `audio`, `color`, `metadata`, `tried`, `sources`, `gpu_frames`, `gpu_decoded`, `copied`, `fps` |
 | `proxy generate` | `proxies[]`: `media`, `path`, `made_with` (how it was decoded and encoded), `copies` |
+| `titles add` | `clip`, `track` (where it went) |
+| `titles list` | per title: `clip`, `track`, `start`, `end` (frames), `start_tc`, `end_tc`, `enabled`, `title` |
 | `subtitles export` | `path`, `track`, `format`, `cues` (how many), `warnings` (an IMSC1 file's cues with more lines than their region holds) |
 | `subtitles transcribe` | `track`, `cues` (their ids), `from`, `to`, `heard` (the tracks heard that have sound), `model`, `device` (the GPU or `CPU`), `language`, `timing` (`words`, `phrases`, or `pauses` for a model without times), `pieces`, `longest_piece` (seconds), `warnings` |
 | `analyze words` | `words[]`: `text`, `start`, `end` (timeline frames), `joined` (no space before it). The rest as `subtitles transcribe`, without cues. A model that doesn't time words is an error |

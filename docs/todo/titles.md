@@ -1,11 +1,13 @@
 # Titles
 
-**When:** not decided; after subtitles, if those are taken up.
+**When:** not decided.
 
-The Cut page adds a title from its Titles browser as a clip: 5 s long by default, moved and trimmed like any other, with the Transform, Cropping, Speed and Composite controls every clip has. Its text is edited in the viewer or the Video Inspector (pp. 763–764). The spec leaves titles out ([§1](../cut-page-spec.md#1-scope)), and the [README](../../README.md) says titles in another editor's OTIO file are kept and written back ([deviation X9](../deviations.md#x9-opentimelineio-interchange): while they fit).
+vidcut has Text titles and the three lower thirds ([spec §8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)). Open:
 
-What titles would take:
-- **A title clip:** text, font, size, color and position, on a background or none, on any video track, edited, trimmed and moved like a clip, and scriptable (AGENTS.md rule 3).
-- **The same text in the viewer and the export**, drawn on the GPU (rule 9): rendered once per title and picture size, and laid over the clips as a dissolve's layers are.
-- **OTIO both ways:** Resolve's Text and Text+ titles read as vidcut titles where they fit; the rest carried as now.
-- **Which titles first:** plain text and a lower third, checked against what the Cut page's Titles browser offers.
+- **OTIO in Resolve's shape:** Resolve's Text and lower-third titles read as vidcut titles, and vidcut's written back as Resolve's generators. Today Resolve's are carried as generators that play as gaps ([deviation X9](../deviations.md#x9-opentimelineio-interchange)), and vidcut's own don't come back from an OTIO file.
+- **More kinds:** Scroll, Text+ and Fusion titles (p. 1178).
+- **Rich text:** words of one title styled apart (p. 1178).
+- **Transform, Cropping, Speed and Composite** on title clips (pp. 763, 1176), and the viewer's onscreen controls (pp. 763–764).
+- **Animation and keyframes**, and dissolves that fade a title: a dissolve at a title's edge leaves it whole ([D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **A Titles browser tab** with Hover Scrub Preview (p. 762).
+- **Thumbnails** of title clips on the timeline.

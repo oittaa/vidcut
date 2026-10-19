@@ -33,7 +33,7 @@ flowchart TD
 
 ## The plan
 
-`render::flatten_lanes` makes the timeline's `RenderPlan`: video pieces (a `VideoPiece::Mix` during a dissolve), audio lanes, and a `LaneTrack` per lane. The source viewer plays `render::tape`. `preview::apply_proxies` swaps in fresh proxies' video where the project plays proxies (spec D41): proxy frames keep their sources' timestamps, so the same frames are picked, and sound stays on the originals. After each edit or file reload, `Live::project_changed` reloads the source plan and schedules `Live::refresh_timeline_at`, so a burst of edits makes one plan.
+`render::flatten_lanes` makes the timeline's `RenderPlan`: video pieces (a `VideoPiece::Mix` during a dissolve, a `VideoPiece::Titled` under a title), audio lanes, and a `LaneTrack` per lane. The source viewer plays `render::tape`. `preview::apply_proxies` swaps in fresh proxies' video where the project plays proxies (spec D41): proxy frames keep their sources' timestamps, so the same frames are picked, and sound stays on the originals. After each edit or file reload, `Live::project_changed` reloads the source plan and schedules `Live::refresh_timeline_at`, so a burst of edits makes one plan.
 
 ## The session's player
 
@@ -52,6 +52,8 @@ Each seek, step, load and switch is a numbered motion. `Player::present_due` ask
 **Kept pictures** live in `player::store::Store` under a memory and a video-memory budget (`player.memory_mb`, `player.video_memory_mb`). By default the video budget is half the memory of the GPU that decodes (`Gpu::memory_mb`, [gpu](gpu.md)) and at least 1 GB (`Budget::gpu_video`), so an integrated GPU's small dedicated share doesn't shrink it. Apple silicon has one shared budget. The least recently used go first, never the prepared one.
 
 **Dissolves** aren't mixed here: a `VideoPiece::Mix` frame is one `Picture` with an `Over` (picture and weight) per layer on top, each as decoded, and the viewer blends them as it draws, each converted to its RGB first. An export mixes them in its own code values ([export](export.md)), so mid-dissolve an HDR export's picture is not the viewer's ([todo](../todo/hdr-dissolve-preview.md)).
+
+**Titles** aren't in the pictures kept, so a title's edit keeps the frames decoded. `player::titles` draws each title of the plan at the plan's size with `burn::title`, the export's drawing, on the decoding thread: before it keeps a frame the title shows over, for the prepared frame, and for the frame at the playhead when its titles aren't drawn yet, then wakes the viewer. It keeps the newest few. `Player::present` hands a frame's titles with it in `Shown`, each a `TitleOver`: the picture in premultiplied RGBA and how many layers go under it. A frame whose titles aren't drawn yet isn't exact.
 
 ## The clock
 
@@ -94,7 +96,7 @@ Without a device, the silent `PacedOutput` pulls the ring in real time, so the c
 
 ## The viewer thread
 
-`Viewer::start` spawns `vidcut-viewer`, which wakes when the session notifies or asks, the size changes, or `next_change` comes due. Each turn calls `Player::present`, then `Screen::draw` into an RGBA target the size of the viewer's picture in physical pixels. One render pass of `crates/vidcut/src/gui/picture.wgsl` fits the picture as the export does, turns it upright, scales in YUV and converts to RGB with the export's math (`shader_colors`), tone-mapping HDR; a dissolve's layers are more draws in it. On the UI thread, `Viewer::sync` shows the target as an egui native texture.
+`Viewer::start` spawns `vidcut-viewer`, which wakes when the session notifies or asks, the size changes, or `next_change` comes due. Each turn calls `Player::present`, then `Screen::draw` into an RGBA target the size of the viewer's picture in physical pixels. One render pass of `crates/vidcut/src/gui/picture.wgsl` fits the picture as the export does, turns it upright, scales in YUV and converts to RGB with the export's math (`shader_colors`), tone-mapping HDR; a dissolve's layers are more draws in it, and each title one more after the layers under it (`fs_title`), placed by the frame it was drawn for and shrunk with as many taps as the picture. On the UI thread, `Viewer::sync` shows the target as an egui native texture.
 
 A present answers with the frame drawn, if exact; a `gui.screenshot` of the viewer reads the target back, to the pixel.
 
