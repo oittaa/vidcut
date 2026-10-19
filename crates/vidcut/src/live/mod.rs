@@ -2569,6 +2569,17 @@ impl Live {
         {
             self.pool.bin = format!("{to}{rest}");
         }
+        if let Request::MediaAddFolder { .. } = &request
+            && let Ok(r) = &result
+            && !r.dry_run
+            && let Some(bin) = r.result["bin"].as_str()
+            && self.pool.bin != bin
+        {
+            self.pool.bin = bin.to_string();
+            if !changed {
+                self.refresh_source();
+            }
+        }
         if changed {
             self.project_changed(result.as_ref().ok());
         }

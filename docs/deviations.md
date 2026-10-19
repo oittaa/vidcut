@@ -136,9 +136,9 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Why:** the curve is what the transition is named for, and needs no editor's points. The two differ by more than 1% only in the 20 ms where a curve leaves or reaches silence.
 
 ## X25. Small additions to the layout
-- **Resolve:** the Import Media and Import Media Folder buttons sit in the Media Pool (p. 654); the transport bar has no Clear; Timeline Options (p. 645) have no filmstrip or waveform toggles, and Snap is there, not among the timeline buttons (p. 649); the pool doesn't sort by duration.
-- **vidcut:** Import and Import Folder in the top bar; Clear in the transport bar clears the marks (Alt+X); Filmstrips and Waveforms in Timeline Options; a Snap button among the timeline buttons as well as Snap in Timeline Options; Duration among the pool's sorts. File dialogs for media, projects and exports each start in the folder last used for them.
-- **Why:** each puts one click on something the Cut page hides in a menu or leaves out, and none changes how an edit works.
+- **Resolve:** the Import Media and Import Media Folder buttons sit in the Media Pool (p. 654), and on the Cut page Import Media Folder has no menu item (Studio 21.1.1); the transport bar has no Clear; Timeline Options (p. 645) have no filmstrip or waveform toggles, and Snap is there, not among the timeline buttons (p. 649); the pool doesn't sort by duration.
+- **vidcut:** Import and Import Folder in the top bar, and Import Media Folder… on the File menu and the pool's right-click menu; Clear in the transport bar clears the marks (Alt+X); Filmstrips and Waveforms in Timeline Options; a Snap button among the timeline buttons as well as Snap in Timeline Options; Duration among the pool's sorts. File dialogs for media, projects and exports each start in the folder last used for them.
+- **Why:** each puts one click on something the Cut page hides in a menu or leaves out, or a menu item where it has only a button, and none changes how an edit works.
 
 ## X26. The proxy folder is a preference
 - **Resolve:** proxies go to the project's "Proxy generation location" (Project Settings, Working Folders, p. 145), in subfolders by their sources' folders (p. 208). Preferences can put them in a "Proxy" subfolder beside each source instead, or ask for a folder each time (p. 98).
