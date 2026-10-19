@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 use vidcut_av::color::shader_colors;
 use vidcut_av::cuda::{CudaDevice, PlaneCopy};
 use vidcut_av::hw::Kind;
-use vidcut_av::player::{Layout, Picture};
+use vidcut_av::player::{Layout, Picture, TitleOver, TitlePicture};
 use vidcut_av::thumbs::Image;
 use vidcut_core::model::Hdr;
 
@@ -17,6 +17,8 @@ pub struct Gpu {
     pipeline: wgpu::RenderPipeline,
     blended: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
+    lettering: wgpu::RenderPipeline,
+    lettering_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     wide: bool,
     shares: bool,
@@ -129,6 +131,67 @@ impl Gpu {
             color: over,
             alpha: over,
         }));
+        let lettering_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("vidcut title"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                texture(6),
+            ],
+        });
+        let lettering_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("vidcut title"),
+                bind_group_layouts: &[Some(&lettering_layout)],
+                immediate_size: 0,
+            });
+        let premultiplied = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let lettering = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("vidcut title"),
+            layout: Some(&lettering_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_title"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: TARGET,
+                    blend: Some(wgpu::BlendState {
+                        color: premultiplied,
+                        alpha: premultiplied,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("vidcut picture"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -145,6 +208,8 @@ impl Gpu {
             pipeline,
             blended,
             layout,
+            lettering,
+            lettering_layout,
             sampler,
             wide: device
                 .features()
@@ -319,8 +384,103 @@ struct Target {
 pub struct Screen {
     target: Option<Target>,
     drawn: Option<Option<Arc<Picture>>>,
+    drawn_titles: Vec<TitleOver>,
     slots: Vec<Slot>,
+    letters: Vec<Letters>,
     imports_before: u64,
+}
+
+struct Letters {
+    picture: Arc<TitlePicture>,
+    params: wgpu::Buffer,
+    bind: wgpu::BindGroup,
+}
+
+impl Letters {
+    fn new(gpu: &Gpu, picture: &Arc<TitlePicture>) -> Self {
+        let size = wgpu::Extent3d {
+            width: picture.width.max(1),
+            height: picture.height.max(1),
+            depth_or_array_layers: 1,
+        };
+        let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("vidcut title"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let row = picture.width as usize * 4;
+        if row > 0 && picture.rgba.len() >= row * picture.height as usize {
+            gpu.queue.write_texture(
+                texture.as_image_copy(),
+                &picture.rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row as u32),
+                    rows_per_image: Some(picture.height),
+                },
+                size,
+            );
+        }
+        let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vidcut title"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let view = texture.create_view(&Default::default());
+        let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vidcut title"),
+            layout: &gpu.lettering_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&gpu.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+            ],
+        });
+        Self {
+            picture: picture.clone(),
+            params,
+            bind,
+        }
+    }
+
+    fn place(&self, gpu: &Gpu, size: (u32, u32)) {
+        let p = &self.picture;
+        let (fw, fh) = (f64::from(p.frame.0.max(1)), f64::from(p.frame.1.max(1)));
+        let (sx, sy) = (f64::from(size.0) / fw, f64::from(size.1) / fh);
+        let place = [
+            f64::from(p.left) * sx,
+            f64::from(p.top) * sy,
+            f64::from(p.width) * sx,
+            f64::from(p.height) * sy,
+        ];
+        let bytes: Vec<u8> = place
+            .iter()
+            .flat_map(|v| (*v as f32).to_le_bytes())
+            .collect();
+        gpu.queue.write_buffer(&self.params, 0, &bytes);
+    }
+}
+
+fn same_titles(a: &[TitleOver], b: &[TitleOver]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| x.above == y.above && Arc::ptr_eq(&x.picture, &y.picture))
 }
 
 #[derive(Default)]
@@ -390,6 +550,7 @@ impl Screen {
         &mut self,
         gpu: &Gpu,
         picture: Option<&Arc<Picture>>,
+        titles: &[TitleOver],
         width: u32,
         height: u32,
     ) -> Drawn {
@@ -404,7 +565,7 @@ impl Screen {
                 (Some(Some(a)), Some(b)) => Arc::ptr_eq(a, b),
                 (Some(None), None) => true,
                 _ => false,
-            };
+            } && same_titles(&self.drawn_titles, titles);
             if same {
                 return Drawn::Same;
             }
@@ -446,6 +607,20 @@ impl Screen {
                 (slot.prepare(gpu, picture, size, &mut encoder), level)
             })
             .collect();
+        self.letters
+            .retain(|l| titles.iter().any(|t| Arc::ptr_eq(&t.picture, &l.picture)));
+        for t in titles {
+            if !self
+                .letters
+                .iter()
+                .any(|l| Arc::ptr_eq(&l.picture, &t.picture))
+            {
+                self.letters.push(Letters::new(gpu, &t.picture));
+            }
+        }
+        for l in &self.letters {
+            l.place(gpu, size);
+        }
         let target = self.target.as_ref().expect("made above");
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -464,7 +639,8 @@ impl Screen {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            for (bind, level) in &binds {
+            let drawn_layers = binds.len();
+            for (i, (bind, level)) in binds.iter().enumerate() {
                 match level {
                     None => pass.set_pipeline(&gpu.pipeline),
                     Some(l) => {
@@ -479,6 +655,22 @@ impl Screen {
                 }
                 pass.set_bind_group(0, bind, &[]);
                 pass.draw(0..3, 0..1);
+                let after = i + 1;
+                for t in titles
+                    .iter()
+                    .filter(|t| t.above == after || (after == drawn_layers && t.above > after))
+                {
+                    let Some(l) = self
+                        .letters
+                        .iter()
+                        .find(|l| Arc::ptr_eq(&l.picture, &t.picture))
+                    else {
+                        continue;
+                    };
+                    pass.set_pipeline(&gpu.lettering);
+                    pass.set_bind_group(0, &l.bind, &[]);
+                    pass.draw(0..3, 0..1);
+                }
             }
         }
         let acquired: Vec<wgpu::CommandBuffer> = self.slots[..layers.len()]
@@ -502,6 +694,7 @@ impl Screen {
         self.imports_before += self.slots.iter().skip(keep).map(|s| s.imports).sum::<u64>();
         self.slots.truncate(keep);
         self.drawn = Some(picture.cloned());
+        self.drawn_titles = titles.to_vec();
         drawn
     }
 }

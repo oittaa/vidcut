@@ -193,6 +193,8 @@ pub fn describe_at(
         "subtitles.remove" => format!("Remove {}", d.cues("cues")),
         "subtitles.split" => format!("Split {} at {}", d.cues("cue"), d.time("at")),
         "subtitles.join" => format!("Join {}", d.cues("cues")),
+        "titles.add" => format!("Title {} at {}", quoted(&d.text("text")), d.time("at")),
+        "titles.set" => format!("Change title {}", d.clips("clip")),
         "subtitles.import" => format!("Import subtitles {}", d.file("path")),
         "subtitles.export" => format!("Export subtitles to {}", d.file("out")),
         "analyze.words" if d.params["range"].is_string() => {
@@ -514,8 +516,9 @@ impl Words<'_> {
             return id.to_string();
         };
         match p.clip(id) {
-            Some(c) => match &c.name {
-                Some(n) if !n.is_empty() => n.clone(),
+            Some(c) => match (&c.name, &c.title) {
+                (Some(n), _) if !n.is_empty() => n.clone(),
+                (_, Some(t)) => quoted(&t.label()),
                 _ => p
                     .media(&c.media)
                     .map_or_else(|| id.to_string(), |m| m.name.clone()),

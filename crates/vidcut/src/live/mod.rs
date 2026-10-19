@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{Value, json};
 use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue};
-use vidcut_core::model::{Clip, Format};
+use vidcut_core::model::{Clip, Format, Title};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
@@ -267,6 +267,7 @@ pub(crate) enum Msg {
     },
     Audition(Option<Audition>),
     Skip(Option<Vec<ClipSpans>>),
+    PreviewTitle(Option<(String, Title)>),
     Shutdown,
 }
 
@@ -314,6 +315,10 @@ impl Handle {
 
     pub fn skip(&self, parts: Option<Vec<ClipSpans>>) {
         let _ = self.tx.send(Msg::Skip(parts));
+    }
+
+    pub fn preview_title(&self, title: Option<(String, Title)>) {
+        let _ = self.tx.send(Msg::PreviewTitle(title));
     }
 
     pub fn request_drag(&self, method: &str, params: Value) {
@@ -492,6 +497,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         tape_media: None,
         player,
         skipping: None,
+        title_preview: None,
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
@@ -743,6 +749,7 @@ struct Live {
     tape_media: Option<String>,
     player: Player,
     skipping: Option<Vec<ClipSpans>>,
+    title_preview: Option<(String, Title)>,
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
@@ -897,6 +904,13 @@ impl Live {
             } => self.request(envelope, origin, project, reply),
             Msg::Audition(a) => changed = self.audition(a),
             Msg::Skip(parts) => changed = self.set_skipping(parts),
+            Msg::PreviewTitle(title) => {
+                changed = false;
+                if self.title_preview != title {
+                    self.title_preview = title;
+                    self.schedule_timeline();
+                }
+            }
             Msg::Picture => {
                 self.player.picture_landed();
                 self.present_due();
@@ -2976,7 +2990,13 @@ impl Live {
     }
 
     fn refresh_timeline_at(&mut self, at: Option<i64>) -> Option<u64> {
-        let p = self.project.as_ref()?.project().clone();
+        let mut p = self.project.as_ref()?.project().clone();
+        if let Some((id, title)) = &self.title_preview
+            && let Some((t, c)) = p.find_clip(id)
+            && p.tracks[t].clips[c].title.is_some()
+        {
+            p.tracks[t].clips[c].title = Some(title.clone());
+        }
         let end = p.end();
         if end == 0 {
             self.player.unload(TIMELINE);

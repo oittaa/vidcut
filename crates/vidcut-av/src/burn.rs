@@ -4,7 +4,7 @@ use cosmic_text::{
     Align, Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, Style, SwashCache,
     UnderlineStyle, Weight, Wrap,
 };
-use vidcut_core::model::{Place, SubtitleStyle};
+use vidcut_core::model::{Place, SubtitleStyle, Title, TitleAlign};
 use vidcut_core::subtitles::{Tag, Token, rgb, tokens};
 
 use crate::error::{Error, Result};
@@ -172,23 +172,28 @@ fn over(dst: [f32; 4], src: [f32; 4]) -> [f32; 4] {
     out
 }
 
-fn block(
-    text: &str,
-    place: Place,
-    width: u32,
-    height: u32,
-    style: &SubtitleStyle,
-    f: &mut Fonts,
-) -> Option<Sprite> {
-    let size = (height as f32 * style.text_fraction() as f32).max(1.0);
-    let wrap = (style.wrap_width(f64::from(width), f64::from(height)) as f32).max(size);
+struct Look<'a> {
+    font: Option<&'a str>,
+    size: f32,
+    wrap: f32,
+    align: Align,
+    ink: [u8; 3],
+    stroke: Option<([u8; 3], f64)>,
+    backing: Option<([u8; 3], f64)>,
+    boxed: bool,
+    rich: bool,
+}
+
+fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
+    let size = look.size;
+    let wrap = look.wrap;
     let mut buffer = Buffer::new(
         &mut f.system,
         Metrics::new(size, size * SubtitleStyle::LINE as f32),
     );
     buffer.set_wrap(Wrap::WordOrGlyph);
     buffer.set_size(Some(wrap), None);
-    let installed = style.font.as_deref().and_then(|name| {
+    let installed = look.font.and_then(|name| {
         f.system.db().faces().find_map(|face| {
             face.families
                 .iter()
@@ -200,21 +205,28 @@ fn block(
         Some(name) => Family::Name(name),
         None => Family::SansSerif,
     };
-    let spans = spans(text, family, color(style.ink()));
+    let spans = if look.rich {
+        spans(text, family, color(look.ink))
+    } else {
+        vec![(
+            text.to_string(),
+            Attrs::new().family(family).color(color(look.ink)),
+        )]
+    };
     let base = Attrs::new().family(family);
     buffer.set_rich_text(
         spans.iter().map(|(s, a)| (s.as_str(), a.clone())),
         &base,
         Shaping::Advanced,
-        Some(Align::Center),
+        Some(look.align),
     );
     buffer.shape_until_scroll(&mut f.system, false);
     let lines: f32 = buffer.layout_runs().map(|r| r.line_height).sum();
     if lines <= 0.0 {
         return None;
     }
-    let stroke = style.stroke();
-    let backing = style.backing();
+    let stroke = look.stroke;
+    let backing = look.backing;
     let outline = stroke.map_or(0.0, |(_, s)| size * s as f32);
     let slack = (size * SubtitleStyle::PADDING as f32).ceil() as i32;
     let pad = if backing.is_some() {
@@ -222,7 +234,7 @@ fn block(
     } else {
         outline.ceil() as i32 + 2
     };
-    let bands: Vec<(i32, i32, i32, i32)> = if backing.is_some() {
+    let mut bands: Vec<(i32, i32, i32, i32)> = if backing.is_some() {
         buffer
             .layout_runs()
             .filter_map(|run| {
@@ -245,6 +257,14 @@ fn block(
     } else {
         Vec::new()
     };
+    if look.boxed
+        && let Some(all) = bands
+            .iter()
+            .copied()
+            .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
+    {
+        bands = vec![all];
+    }
     let (cw, ch) = (wrap.ceil() as i32 + 2 * pad, lines.ceil() as i32 + 2 * pad);
     let (w, h) = (cw as usize, ch as usize);
     let mut canvas = vec![[0.0f32; 4]; w * h];
@@ -312,19 +332,50 @@ fn block(
     if x1 <= x0 || y1 <= y0 {
         return None;
     }
-    let text_top = style.block_top(place, f64::from(height), f64::from(lines)) as f32;
-    let left = ((width as f32 - wrap) / 2.0).round() as i32 - pad;
-    let top = text_top.round() as i32 - pad;
     let crop = (y0..y1)
         .flat_map(|y| rgba[y * w + x0..y * w + x1].iter().copied())
         .collect();
-    Some(Sprite {
-        x: left + x0 as i32,
-        y: top + y0 as i32,
-        width: (x1 - x0) as u32,
-        height: (y1 - y0) as u32,
-        rgba: crop,
-    })
+    Some((
+        Sprite {
+            x: x0 as i32 - pad,
+            y: y0 as i32 - pad,
+            width: (x1 - x0) as u32,
+            height: (y1 - y0) as u32,
+            rgba: crop,
+        },
+        lines,
+    ))
+}
+
+fn placed(mut sprite: Sprite, left: f32, top: f32) -> Sprite {
+    sprite.x += left.round() as i32;
+    sprite.y += top.round() as i32;
+    sprite
+}
+
+fn block(
+    text: &str,
+    place: Place,
+    width: u32,
+    height: u32,
+    style: &SubtitleStyle,
+    f: &mut Fonts,
+) -> Option<Sprite> {
+    let size = (height as f32 * style.text_fraction() as f32).max(1.0);
+    let look = Look {
+        font: style.font.as_deref(),
+        size,
+        wrap: (style.wrap_width(f64::from(width), f64::from(height)) as f32).max(size),
+        align: Align::Center,
+        ink: style.ink(),
+        stroke: style.stroke(),
+        backing: style.backing(),
+        boxed: false,
+        rich: true,
+    };
+    let (sprite, lines) = lay_out(text, &look, f)?;
+    let text_top = style.block_top(place, f64::from(height), f64::from(lines)) as f32;
+    Some(placed(sprite, (width as f32 - look.wrap) / 2.0, text_top))
 }
 
 pub fn draw(cues: &[(&str, Place)], width: u32, height: u32, style: &SubtitleStyle) -> Vec<Sprite> {
@@ -343,6 +394,51 @@ pub fn draw(cues: &[(&str, Place)], width: u32, height: u32, style: &SubtitleSty
             block(&text.join("\n"), place, width, height, style, &mut f)
         })
         .collect()
+}
+
+pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
+    if t.text.trim().is_empty() {
+        return Vec::new();
+    }
+    let mut f = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let (w, h) = (f64::from(width), f64::from(height));
+    let size = (height as f32 * t.text_fraction() as f32).max(1.0);
+    let look = Look {
+        font: t.style.font.as_deref(),
+        size,
+        wrap: (t.wrap_width(w, h) as f32).max(size),
+        align: match t.align() {
+            TitleAlign::Left => Align::Left,
+            TitleAlign::Middle => Align::Center,
+            TitleAlign::Right => Align::Right,
+        },
+        ink: t.ink(),
+        stroke: t.stroke(),
+        backing: t.backing(),
+        boxed: true,
+        rich: false,
+    };
+    let Some((sprite, lines)) = lay_out(&t.text, &look, &mut f) else {
+        return Vec::new();
+    };
+    let [x, y] = t.place();
+    let [across, down] = t.anchor();
+    let left = (x * w) as f32 - across as f32 * look.wrap;
+    let top = (y * h) as f32 - down as f32 * lines;
+    vec![placed(sprite, left, top)]
+}
+
+impl Sprite {
+    pub fn premultiplied(&self) -> Vec<u8> {
+        self.rgba
+            .iter()
+            .flat_map(|p| {
+                let a = p[3].clamp(0.0, 1.0);
+                let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                [byte(p[0] * a), byte(p[1] * a), byte(p[2] * a), byte(a)]
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

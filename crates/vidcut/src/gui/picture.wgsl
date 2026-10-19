@@ -106,3 +106,30 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }
+
+struct Lettering {
+    place: vec4<f32>,
+};
+
+@group(0) @binding(5) var<uniform> lettering: Lettering;
+@group(0) @binding(6) var letters: texture_2d<f32>;
+
+@fragment
+fn fs_title(in: Out) -> @location(0) vec4<f32> {
+    let px = in.position.xy;
+    let rel = (px - lettering.place.xy) / lettering.place.zw;
+    if any(rel < vec2<f32>(0.0)) || any(rel >= vec2<f32>(1.0)) {
+        discard;
+    }
+    let cover = vec2<f32>(textureDimensions(letters)) / lettering.place.zw;
+    let taps = vec2<u32>(clamp(ceil(cover), vec2<f32>(1.0), vec2<f32>(8.0)));
+    let step = vec2<f32>(1.0) / (lettering.place.zw * vec2<f32>(taps));
+    let first = (px - vec2<f32>(0.5) - lettering.place.xy) / lettering.place.zw + step * 0.5;
+    var sum = vec4<f32>(0.0);
+    for (var j = 0u; j < taps.y; j++) {
+        for (var i = 0u; i < taps.x; i++) {
+            sum += textureSampleLevel(letters, bilinear, first + vec2<f32>(f32(i), f32(j)) * step, 0.0);
+        }
+    }
+    return sum / f32(taps.x * taps.y);
+}

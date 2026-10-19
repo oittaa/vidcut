@@ -392,6 +392,7 @@ fn clip(
             .name
             .clone()
             .or_else(|| media.map(|m| m.name.clone()))
+            .or_else(|| c.title.as_ref().map(vidcut_core::model::Title::label))
             .or_else(|| c.generator.as_ref().map(vidcut_core::otio::generator_kind))
             .or_else(|| c.compound.as_ref().map(vidcut_core::otio::compound_kind))
             .unwrap_or_default();

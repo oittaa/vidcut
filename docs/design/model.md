@@ -73,6 +73,11 @@ classDiagram
     start, duration
     text, place
   }
+  class Title {
+    kind, align
+    text, style
+    position
+  }
   Project *-- Settings : settings
   Project *-- "*" Media : media
   Project *-- "*" Track : tracks
@@ -85,6 +90,7 @@ classDiagram
   Track *-- "*" Clip : clips
   Track *-- "*" Transition : transitions
   Clip *-- "0..1" ClipAudio : audio
+  Clip *-- "0..1" Title : title
   Clip ..> Media : media id
   Clip *-- Kept : effects, generator, compound, speed
   Transition *-- Kept : otio
@@ -136,6 +142,10 @@ A file is missing when `Env::present` says so; a path absolute only on the other
 
 **Files.** `subtitles::parse` decodes the bytes (`Encoding`: a BOM, else UTF-8, else UTF-16 by its zero bytes, else Windows-1252), tells the format by its first lines, then by the extension, and reads it: SRT and WebVTT line by line (a WebVTT STYLE block's `::cue` colors too), TTML with roxmltree: its styles and regions resolved down to each span, a region's style references followed, its time base (media, or smpte with its drop mode, counted as TTML1's appendix N.3 does) and its language (xml:lang), which the new track takes. Each format's markup becomes the cue markup, and other tags go. `ops::subtitles::import` turns each time into the nearest frame in the file's time base (`SubtitleTimeBase`: real time, or timecode labels when the times sit on their grid), then takes off the timeline's start timecode, or 01:00:00:00, in frames when the file is in timecode ([deviation X41](../deviations.md#x41-subtitle-files-go-straight-onto-a-track-placed-by-their-timecode)). `ops::subtitles::collect` gives a track's cues in a range in seconds, from zero or in timecode (`subtitles::origin`: the start timecode's frames at the project's rate, [spec D58](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), and `subtitles::write` writes them as SRT, WebVTT (colors other than its eight named ones as STYLE classes) or IMSC1, the IMSC1 file carrying the track's `SubtitleStyle` and regions sized from its cues ([spec D64](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), with what doesn't fit as `Written::warnings`; `subtitles.export` writes the file through a partial one beside it (`Env::write_file`). `subtitles::beside` makes the files an export writes beside its output ([export](export.md#subtitles)).
 
+## Titles
+
+A clip with a `title` is a title ([spec §8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)): no media, no audio, any length, on a video track. `Clip::is_generator` and `Clip::is_block` count it, so edits treat it as a carried generator, and it has no speed. Its `Title` holds a `TitleKind` (`text` or `lower_third`), a lower third's `TitleAlign`, its lines, a `TitleStyle` and an optional `position`, the point its anchor goes to (`Title::place`, `Title::anchor`; [spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `ops::titles` holds the edits; `ops::titles::checked` is the check `titles.add`, `titles.set` and `validate::violations` share, and it takes the style's font, size, colors, outline and background through the subtitle style's (`checked_font`, `checked_size`, `checked_color`, `checked_outline`, `checked_background`).
+
 ## OpenTimelineIO
 
 ```mermaid
@@ -160,11 +170,12 @@ flowchart LR
 | clip | `Clip.2`, its source range from the media's start timecode |
 | media | `ExternalReference` by plain path, relative in a bundle; a still one frame long, its clips from source 0; an image sequence an `ImageSequenceReference` at its rate |
 | Clip Color | the item's `color` |
+| title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 | markers | the top-level stack's, with their lengths |
 
 | Metadata | Holds |
 |---|---|
-| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `source_in` and `skip` for stills and speeds, which the source range rounds |
+| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `source_in` and `skip` for stills and speeds, which the source range rounds; a title's `Title` |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO`, which other editors read | `Link Group ID`, `Channels`, a clip volume effect, and `Media In` on reversed clips; on compound clips a `Sequence ID`, kept or made from the compound's content, and a `Link Group ID` joining the picture and sound of one compound at the same place (`compound_links`); `Locked`, `SoloOn` and `Audio Type` on tracks; `Note` on markers |
 
@@ -178,7 +189,7 @@ flowchart LR
 |---|---|
 | clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`: keyframes stay on their source frames (the `from` field of `Effects`, set by `carry`) and fades at the clip's ends through splits; the clip volume's level is the gain |
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` once it no longer fits; dissolves and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
-| `GeneratorReference` | `Generator`, a block that plays as a gap |
+| `GeneratorReference` | a title when it is vidcut's or Resolve's Text or lower third (`otio::titles::read`), else `Generator`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 
@@ -192,7 +203,7 @@ Preferences are not in the project. They live in `preferences.toml` in the confi
 
 ## Validation
 
-`validate::violations` lists what breaks the model's rules: unique ids, tracks named by place with video before audio and V1 present, clips and their sound sorted without overlap on each track, sources inside their media, known media and bins, gains in range. It runs when a file loads (the load fails), after every edit (the edit fails as a vidcut bug, and nothing is saved) and when an OTIO file opens.
+`validate::violations` lists what breaks the model's rules: unique ids, tracks named by place with video before audio and V1 present, clips and their sound sorted without overlap on each track, sources inside their media, known media and bins, gains in range, titles on video tracks, and titles and subtitle styles their requests would refuse. It runs when a file loads (the load fails), after every edit (the edit fails as a vidcut bug, and nothing is saved) and when an OTIO file opens.
 
 ## Code
 
@@ -208,6 +219,7 @@ Preferences are not in the project. They live in `preferences.toml` in the confi
 - `crates/vidcut-core/src/subtitles.rs`
 - `crates/vidcut-core/src/subtitles/`
 - `crates/vidcut-core/src/ops/subtitles.rs`
+- `crates/vidcut-core/src/ops/titles.rs`
 - `crates/vidcut-core/src/preferences.rs`
 - `crates/vidcut/src/bundle.rs`
 - `crates/vidcut/src/export.rs`

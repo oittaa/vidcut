@@ -146,7 +146,7 @@ pub fn sampled(piece: &VideoPiece, fps: Rational) -> impl Iterator<Item = f64> +
             ..
         } => (f64::NEG_INFINITY, 1),
         VideoPiece::Source { origin, frames, .. } => (*origin, *frames),
-        VideoPiece::Black { .. } | VideoPiece::Mix { .. } => (0.0, 0),
+        VideoPiece::Black { .. } | VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => (0.0, 0),
     };
     let still = origin == f64::NEG_INFINITY;
     let piece = piece.clone();
