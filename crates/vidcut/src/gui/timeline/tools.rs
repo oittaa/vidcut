@@ -683,6 +683,7 @@ impl Workspace {
                         if speech {
                             ui.add(
                                 egui::DragValue::new(&mut d.speech_threshold)
+                                    .update_while_editing(false)
                                     .range(0.0..=1.0)
                                     .speed(0.01)
                                     .fixed_decimals(2),
@@ -691,6 +692,7 @@ impl Workspace {
                         } else {
                             ui.add(
                                 egui::DragValue::new(&mut d.threshold_db)
+                                    .update_while_editing(false)
                                     .range(-90.0..=0.0)
                                     .speed(0.5)
                                     .suffix(" dB"),
@@ -702,6 +704,7 @@ impl Workspace {
                             ui.label("Shortest Speech");
                             ui.add(
                                 egui::DragValue::new(&mut d.min_speech)
+                                    .update_while_editing(false)
                                     .range(0.0..=5.0)
                                     .speed(0.01)
                                     .suffix(" s"),
@@ -712,6 +715,7 @@ impl Workspace {
                         ui.label("Pre Head");
                         ui.add(
                             egui::DragValue::new(&mut d.pre_head)
+                                .update_while_editing(false)
                                 .range(0.0..=5.0)
                                 .speed(0.01)
                                 .suffix(" s"),
@@ -721,6 +725,7 @@ impl Workspace {
                         ui.label("Post Tail");
                         ui.add(
                             egui::DragValue::new(&mut d.post_tail)
+                                .update_while_editing(false)
                                 .range(0.0..=5.0)
                                 .speed(0.01)
                                 .suffix(" s"),
@@ -730,6 +735,7 @@ impl Workspace {
                         ui.label("Minimum to Trip");
                         ui.add(
                             egui::DragValue::new(&mut d.min)
+                                .update_while_editing(false)
                                 .range(1.0 / fps..=60.0)
                                 .speed(0.01)
                                 .suffix(" s"),
