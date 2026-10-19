@@ -24,6 +24,7 @@ pub struct File {
     pub revision: &'static str,
     pub bytes: u64,
     pub sha256: &'static str,
+    pub gpu_gb: u64,
 }
 
 impl File {
@@ -42,6 +43,7 @@ pub const QWEN3_ASR: File = File {
     revision: "0e0a596e3959c3f3f2ab7d443a5b6f0f4a4bba6f",
     bytes: 2_185_030_624,
     sha256: "9a0d81792dfea2d5f278b8a63deb3ea6e02139ce42c2301f32ea19c4f77526b7",
+    gpu_gb: 8,
 };
 
 pub const WHISPER_LARGE_V3: File = File {
@@ -51,6 +53,7 @@ pub const WHISPER_LARGE_V3: File = File {
     revision: "274ad1d1cf680b7ee53cc70f78461394cd3a344b",
     bytes: 1_668_741_440,
     sha256: "2fa1a5f179f8a511a53e2108db270aa4af3ce08cd976af4180e2854666bb4ba3",
+    gpu_gb: 4,
 };
 
 pub const PARAKEET_ULTRA: File = File {
@@ -60,6 +63,7 @@ pub const PARAKEET_ULTRA: File = File {
     revision: "a1539be1b849ea7463b88343e5277b373d0c4ea9",
     bytes: 740_363_168,
     sha256: "007a59761e9258779f189df396b50d12b83bb5b79e66df4b955c230d2f2a0a59",
+    gpu_gb: 2,
 };
 
 pub const VAD_NAME: &str = "silero-vad-v6.2-F32.gguf";
@@ -502,6 +506,23 @@ fn load(path: &Path, gpu: bool, warnings: &mut Vec<String>) -> Result<Loaded> {
     })
 }
 
+fn gigabytes(mb: f64) -> String {
+    let gb = format!("{:.1}", mb / 1024.0);
+    gb.trim_end_matches(".0").to_string()
+}
+
+fn short_of_memory(f: &File) -> Option<String> {
+    let have = crate::gpus::in_use()?.memory_mb?;
+    (have < f.gpu_gb * 1024).then(|| {
+        format!(
+            "{} needs about {} GB of GPU memory; this GPU has {} GB",
+            f.title,
+            f.gpu_gb,
+            gigabytes(have as f64)
+        )
+    })
+}
+
 fn timing_of(kind: tc::TimestampKind) -> Timing {
     match kind {
         tc::TimestampKind::Word | tc::TimestampKind::Token => Timing::Words,
@@ -597,6 +618,12 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
         .collect();
     let mut warnings = Vec::new();
     let loaded = load(&model_path, options.gpu, &mut warnings)?;
+    if loaded.gpu
+        && asked.model_file.is_none()
+        && let Some(warning) = short_of_memory(file_of(asked.model))
+    {
+        warnings.push(warning);
+    }
     let caps = loaded.model.capabilities().map_err(tc_error)?;
     if let Some(l) = &asked.language
         && !caps.languages.is_empty()

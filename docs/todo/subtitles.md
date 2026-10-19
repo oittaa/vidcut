@@ -28,6 +28,8 @@ transcribe.cpp 0.4.0's prebuilt bundles, over the first 10 min of `nasa-speech-1
 
 GPU memory: the RTX 4080 SUPER's at the most, sampled with `nvidia-smi` during the runs, Vulkan / CUDA, is 1.2 / 1.6 GB for Parakeet Ultra, 2.2 / 2.4 GB for Whisper large-v3 and 4.4 / 3.8 GB for Qwen3-ASR; the M4 holds 0.7, 1.6 and 2.8 GB after the runs, the figure `scripts/stt-speed.py` reports.
 
+Peak GPU memory against piece length on the RTX 4080 SUPER (Vulkan), one model at a time over `nasa-speech-1979`: the transcribing process's own, which held nothing but the model and its work, from DXGI's `QueryVideoMemoryInfo`, local and non-local, every 10 ms. In MiB: Parakeet Ultra 786 at 10 s pieces, 896 at 30 s, 1,035 at 1 min, 1,311 at 2 min and 1,311 at 5 min; Whisper large-v3 2,114 at 30 s pieces; Qwen3-ASR 3,317 at 10 s pieces, 4,951 at 2 min and 9,855 at 5 min, lengths it would take once the aligner gives it word times.
+
 ## Open
 
 - **The aligner in transcribe.cpp** ([#200](https://github.com/handy-computer/transcribe.cpp/issues/200)): Qwen3-ForcedAligner-0.6B (11 languages, up to 5 min a pass). Until it runs there, Qwen3-ASR gives no word times: its cues' times are estimates, its text spread over the speech, so Parakeet Ultra, with word times, is the default. Qwen3-ASR becomes the English default again once it has word times.

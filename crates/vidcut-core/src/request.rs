@@ -1497,18 +1497,18 @@ pub enum SubtitleTimeBase {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub enum SpeechModel {
     /// Parakeet Ultra by Moondream (CC BY 4.0), 740 MB, the default: 25
-    /// European languages, times per word; small GPUs run it too.
+    /// European languages, times per word. It wants a GPU with 2 GB.
     #[default]
     #[serde(rename = "parakeet-ultra")]
     ParakeetUltra,
     /// Qwen3-ASR 1.7B (Apache-2.0), 2.2 GB: 30 languages. It gives no times
     /// until transcribe.cpp runs its aligner, so its text is spread over the
     /// speech in pieces of 10 s at the most, and its cues' times are
-    /// estimates.
+    /// estimates. It wants a GPU with 8 GB.
     #[serde(rename = "qwen3-asr")]
     Qwen3Asr,
     /// Whisper large-v3 (Apache-2.0), 1.7 GB: 100 languages, times per
-    /// phrase.
+    /// phrase. It wants a GPU with 4 GB.
     #[serde(rename = "whisper-large-v3")]
     WhisperLargeV3,
 }
