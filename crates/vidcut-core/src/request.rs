@@ -693,9 +693,12 @@ pub enum Request {
     #[serde(rename = "edit.ripple_delete_words")]
     EditRippleDeleteWords {
         words: Vec<SpokenWord>,
-        /// Move each cut's edges to the quietest frame boundary within about
-        /// a tenth of a second, in the sound of the tracks heard there, so the
-        /// words beside a cut keep their starts and ends. Levels not measured
+        /// Move each cut's edges to the quietest frame boundary nearby, in the
+        /// sound of the tracks heard there, as far as the clips' transcripts
+        /// show the words: inward by at most a third of the word at that edge,
+        /// so the words cut always lose their middles, and outward only into
+        /// the pause beside it, up to the next word, within about a tenth of a
+        /// second. Without a transcript the edges stay. Levels not measured
         /// yet are measured first.
         #[serde(default)]
         quiet: bool,

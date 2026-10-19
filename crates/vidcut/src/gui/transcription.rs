@@ -15,10 +15,6 @@ use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
 
 const PAUSE: f64 = 1.0;
-const FILLERS: [&str; 22] = [
-    "um", "umm", "uh", "uhh", "uhm", "er", "erm", "ah", "eh", "ehm", "hmm", "hm", "mm", "mhm",
-    "äh", "ähm", "öh", "öhm", "öö", "ää", "euh", "heu",
-];
 const FOUND: Color32 = Color32::from_rgba_premultiplied(110, 90, 20, 140);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,6 +29,7 @@ struct Asked {
     rev: u64,
     transcribed: usize,
     clips: Vec<String>,
+    fillers_in: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -42,6 +39,7 @@ struct Item {
     text: String,
     joined: bool,
     silence: bool,
+    filler: bool,
 }
 
 type Words = Result<Arc<Vec<Item>>, String>;
@@ -103,6 +101,8 @@ pub(super) struct TranscriptionUi {
     scroll_to: Option<(usize, bool)>,
     hold: bool,
     followed: Option<usize>,
+    fillers_in: Option<String>,
+    detected: Option<String>,
 }
 
 impl TranscriptionUi {
@@ -179,6 +179,7 @@ fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Vec<Item> {
                 text: w["text"].as_str()?.to_string(),
                 joined: w["joined"].as_bool().unwrap_or(false),
                 silence: false,
+                filler: w["filler"].as_bool().unwrap_or(false),
             })
         })
         .collect();
@@ -189,6 +190,7 @@ fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Vec<Item> {
         text: "(...)".into(),
         joined: false,
         silence: true,
+        filler: false,
     };
     let mut out: Vec<Item> = Vec::with_capacity(words.len() * 2);
     let mut last = bounds.map(|(a, _)| a);
@@ -255,14 +257,7 @@ fn sentence(items: &[Item], at: usize) -> (usize, usize) {
     (a, b)
 }
 
-fn filler(text: &str) -> bool {
-    let word = text
-        .trim_matches(|c: char| !c.is_alphanumeric())
-        .to_lowercase();
-    FILLERS.contains(&word.as_str())
-}
-
-fn left_out(item: &Item, spans: &[(i64, i64)]) -> bool {
+fn is_left_out(item: &Item, spans: &[(i64, i64)]) -> bool {
     spans.iter().any(|&(a, b)| item.start >= a && item.end <= b)
 }
 
@@ -292,10 +287,10 @@ fn layout(
             job.append(" ", 0.0, gap);
             count += 1;
         }
-        let dim = item.silence || filler(&item.text);
+        let dim = item.silence || item.filler;
         let mut f = TextFormat::simple(font, if dim { c.text_dim } else { c.text });
         f.italics = dim;
-        if left_out(item, &look.left_out) {
+        if is_left_out(item, &look.left_out) {
             f.color = c.marked;
             f.strikethrough = Stroke::new(1.5, c.marked);
         }
@@ -395,6 +390,7 @@ impl Workspace {
             rev: p.rev,
             transcribed: Arc::as_ptr(&self.snap.transcribed) as usize,
             clips: clips.clone(),
+            fillers_in: t.fillers_in.clone(),
         });
         let have_words = match &want {
             Some(Asked {
@@ -411,10 +407,13 @@ impl Workspace {
             && t.shown.as_ref().map(|(a, _)| a) != Some(&want)
             && t.asking.as_ref().map(|(a, _)| a) != Some(&want)
         {
-            let params = match &want.shown {
+            let mut params = match &want.shown {
                 Shown::Media(m) => json!({ "media": m }),
                 Shown::Timeline => json!({ "clips": want.clips }),
             };
+            if let Some(language) = &want.fillers_in {
+                params["language"] = json!(language);
+            }
             t.asking = Some((
                 want.clone(),
                 Ask::send(&self.live, ctx, "analyze.words", params),
@@ -427,6 +426,14 @@ impl Workspace {
                 Shown::Media(m) => p.media(m).map(|m| (0, p.media_frames(m))),
                 Shown::Timeline => None,
             };
+            if let Ok(r) = &answer {
+                t.detected = r
+                    .result
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find_map(|e| e["filler_language"].as_str().map(String::from));
+            }
             let items = answer
                 .map(|r| Arc::new(parse(&r.result, pause, bounds)))
                 .map_err(|e| e.message);
@@ -512,61 +519,87 @@ impl Workspace {
             .default_size([560.0, 620.0])
             .resizable(true)
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&title).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let mut follow = !t.hold;
-                        if ui
-                            .checkbox(&mut follow, "Follow")
-                            .on_hover_text(
-                                "While playing, keep the word under the playhead in view",
-                            )
-                            .changed()
-                        {
-                            t.hold = !follow;
-                        }
-                        let fillers = items.as_ref().map_or(0, |i| {
-                            i.iter().filter(|x| !x.silence && filler(&x.text)).count()
-                        });
-                        if ui
-                            .add_enabled(
-                                fillers > 0,
-                                egui::Button::new(format!("Delete Filler Words ({fillers})")),
-                            )
-                            .on_hover_text(match shown {
-                                Some(Shown::Timeline) => {
-                                    "Ripple delete every um, uh, er and the like, at the quiet \
-                                     points around them"
-                                }
-                                _ => "Leave every um, uh, er and the like out of the edits",
-                            })
-                            .clicked()
-                        {
-                            acts.push(Act::Fillers);
-                        }
-                        let silences = items.as_ref().is_some_and(|i| i.iter().any(|x| x.silence));
-                        if ui
-                            .add_enabled(silences, egui::Button::new("Remove Silent Portions"))
-                            .on_hover_text(match shown {
-                                Some(Shown::Timeline) => {
-                                    "Ripple delete every pause of a second or more between words"
-                                }
-                                _ => "Leave every pause of a second or more out of the edits",
-                            })
-                            .clicked()
-                        {
-                            acts.push(Act::RemoveSilences);
-                        }
-                        let r = ui.add(
-                            egui::TextEdit::singleline(&mut t.search)
-                                .hint_text("Search")
-                                .desired_width(150.0),
-                        );
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                            search_go = true;
-                            r.request_focus();
-                        }
+                ui.add(egui::Label::new(RichText::new(&title).strong()).truncate());
+                ui.horizontal_wrapped(|ui| {
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut t.search)
+                            .hint_text("Search")
+                            .desired_width(150.0),
+                    );
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                        search_go = true;
+                        r.request_focus();
+                    }
+                    let mut follow = !t.hold;
+                    if ui
+                        .checkbox(&mut follow, "Follow")
+                        .on_hover_text("While playing, keep the word under the playhead in view")
+                        .changed()
+                    {
+                        t.hold = !follow;
+                    }
+                    let silences = items.as_ref().is_some_and(|i| i.iter().any(|x| x.silence));
+                    if ui
+                        .add_enabled(silences, egui::Button::new("Remove Silent Portions"))
+                        .on_hover_text(match shown {
+                            Some(Shown::Timeline) => {
+                                "Ripple delete every pause of a second or more between words"
+                            }
+                            _ => "Leave every pause of a second or more out of the edits",
+                        })
+                        .clicked()
+                    {
+                        acts.push(Act::RemoveSilences);
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    let fillers = items.as_ref().map_or(0, |i| {
+                        i.iter()
+                            .filter(|x| x.filler && !is_left_out(x, &left_out))
+                            .count()
                     });
+                    if ui
+                        .add_enabled(
+                            fillers > 0,
+                            egui::Button::new(format!("Delete Filler Words ({fillers})")),
+                        )
+                        .on_hover_text(match shown {
+                            Some(Shown::Timeline) => {
+                                "Ripple delete every filler word (dimmed in the text), at the \
+                                 quiet points around it"
+                            }
+                            _ => "Leave every filler word (dimmed in the text) out of the edits",
+                        })
+                        .clicked()
+                    {
+                        acts.push(Act::Fillers);
+                    }
+                    let auto = match &t.detected {
+                        Some(code) => format!("Auto: {}", super::speech::language_label(code)),
+                        None => "Auto".to_string(),
+                    };
+                    let chosen = t
+                        .fillers_in
+                        .as_deref()
+                        .map_or_else(|| auto.clone(), super::speech::language_label);
+                    egui::ComboBox::from_id_salt("transcription-fillers")
+                        .selected_text(chosen)
+                        .height(320.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut t.fillers_in, None, auto.clone());
+                            for code in vidcut_core::transcript::FILLER_LANGUAGES {
+                                ui.selectable_value(
+                                    &mut t.fillers_in,
+                                    Some(code.to_string()),
+                                    super::speech::language_label(code),
+                                );
+                            }
+                        })
+                        .response
+                        .on_hover_text(
+                            "Whose filler words are marked. Auto: the transcript's language, or \
+                             the one its commonest words belong to",
+                        );
                 });
                 if !missing.is_empty() {
                     ui.horizontal_wrapped(|ui| {
@@ -893,7 +926,7 @@ impl Workspace {
                 let words: Vec<Value> = items
                     .iter()
                     .filter(|i| match fillers {
-                        true => !i.silence && filler(&i.text),
+                        true => i.filler && !is_left_out(i, left_out),
                         false => i.silence,
                     })
                     .map(|i| span(i.start, i.end))

@@ -2485,7 +2485,9 @@ impl Live {
             | Request::AnalyzeLoudness { .. }
             | Request::AnalyzeWords { media: Some(_), .. }
             | Request::AnalyzeWords { clips: Some(_), .. } => self.project_task(envelope, job),
-            Request::EditRippleDeleteSilence { .. } | Request::EditDetectSceneCuts { .. } => {
+            Request::EditRippleDeleteSilence { .. }
+            | Request::EditDetectSceneCuts { .. }
+            | Request::EditRippleDeleteWords { quiet: true, .. } => {
                 match self.measuring(&envelope) {
                     Some(measure) => Step::Measure(measure, Box::new(envelope)),
                     None => Step::Now(self.edit(envelope, job.origin)),

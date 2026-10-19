@@ -192,6 +192,92 @@ fn is_wide(c: char) -> bool {
         0x1100..=0x11FF | 0x2E80..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF | 0x20000..=0x3FFFF)
 }
 
+pub const FILLER_LANGUAGES: [&str; 25] = [
+    "en", "de", "fr", "es", "it", "pt", "ru", "uk", "hr", "sl", "lv", "lt", "et", "fi", "sv", "da",
+    "nl", "pl", "cs", "sk", "hu", "ro", "bg", "el", "mt",
+];
+
+pub fn fillers(language: &str) -> &'static [&'static str] {
+    match language {
+        "en" => &[
+            "um", "umm", "uh", "uhh", "uhm", "er", "erm", "hmm", "hm", "mmm", "mhm",
+        ],
+        "de" => &["äh", "ähm", "öh", "öhm", "hm", "hmm", "mhm"],
+        "fr" => &["euh", "heu", "hum", "hmm"],
+        "es" => &["eh", "em", "ehm", "emm", "mmm", "hmm"],
+        "it" => &["eh", "ehm", "ehh", "mmm", "hmm"],
+        "pt" => &["hum", "hmm", "ahn", "hã", "éé"],
+        "ru" => &["э", "ээ", "эээ", "эм", "ммм", "хм"],
+        "uk" => &["ее", "еее", "ем", "ммм", "хм"],
+        "hr" | "sl" | "cs" | "sk" => &["eee", "ee", "ehm", "hmm", "mmm"],
+        "lv" => &["ēē", "ēēē", "hmm", "mmm"],
+        "lt" => &["ėė", "ėėė", "hmm", "mmm"],
+        "et" => &["ee", "eee", "õõ", "õõõ", "hmm"],
+        "fi" => &["öö", "ööh", "ää", "äää", "hmm", "mmm"],
+        "sv" => &["öh", "öhm", "eh", "ehm", "hmm", "mmm"],
+        "da" => &["øh", "øhm", "øøh", "hmm", "mmm"],
+        "nl" => &["eh", "ehm", "uh", "uhm", "eeh", "hmm"],
+        "pl" => &["yyy", "yy", "eee", "ee", "hmm", "mmm"],
+        "hu" => &["öö", "ööö", "hmm", "mmm"],
+        "ro" => &["ăă", "ăăă", "îî", "hmm", "mmm"],
+        "bg" => &["ъъ", "ъъъ", "ъм", "ммм", "хм"],
+        "el" => &["εε", "εεε", "εμ", "χμ"],
+        "mt" => &["ehm", "mmm", "hmm"],
+        _ => &[],
+    }
+}
+
+const COMMON: [(&str, [&str; 6]); 25] = [
+    ("en", ["the", "and", "of", "to", "is", "that"]),
+    ("de", ["der", "die", "und", "das", "ist", "nicht"]),
+    ("fr", ["le", "les", "et", "est", "des", "une"]),
+    ("es", ["el", "los", "que", "y", "una", "del"]),
+    ("it", ["il", "che", "di", "non", "gli", "una"]),
+    ("pt", ["o", "os", "não", "uma", "do", "com"]),
+    ("ru", ["и", "в", "не", "что", "на", "это"]),
+    ("uk", ["і", "в", "не", "що", "на", "це"]),
+    ("hr", ["je", "i", "da", "se", "u", "na"]),
+    ("sl", ["je", "in", "da", "se", "v", "ki"]),
+    ("lv", ["un", "ir", "ka", "ar", "uz", "no"]),
+    ("lt", ["ir", "kad", "tai", "su", "yra", "ne"]),
+    ("et", ["ja", "on", "et", "ei", "see", "ka"]),
+    ("fi", ["ja", "on", "että", "ei", "se", "oli"]),
+    ("sv", ["och", "att", "det", "är", "som", "inte"]),
+    ("da", ["og", "at", "det", "er", "som", "ikke"]),
+    ("nl", ["de", "het", "een", "en", "van", "niet"]),
+    ("pl", ["i", "w", "nie", "się", "na", "że"]),
+    ("cs", ["a", "je", "se", "na", "že", "to"]),
+    ("sk", ["a", "je", "sa", "na", "že", "to"]),
+    ("hu", ["a", "az", "és", "hogy", "nem", "egy"]),
+    ("ro", ["și", "de", "în", "nu", "că", "este"]),
+    ("bg", ["и", "на", "да", "се", "не", "е"]),
+    ("el", ["και", "το", "να", "η", "του", "είναι"]),
+    ("mt", ["il", "u", "li", "ta", "fil", "huwa"]),
+];
+
+fn bare(text: &str) -> String {
+    text.trim_matches(|c: char| !c.is_alphanumeric())
+        .to_lowercase()
+}
+
+pub fn language_of<'a>(texts: impl Iterator<Item = &'a str>) -> Option<&'static str> {
+    let mut score = [0usize; COMMON.len()];
+    for text in texts {
+        let word = bare(text);
+        for (k, (_, common)) in COMMON.iter().enumerate() {
+            if common.contains(&word.as_str()) {
+                score[k] += 1;
+            }
+        }
+    }
+    let (k, best) = score.iter().enumerate().max_by_key(|(_, s)| **s)?;
+    (*best > 0).then_some(COMMON[k].0)
+}
+
+pub fn is_filler(text: &str, language: &str) -> bool {
+    fillers(language).contains(&bare(text).as_str())
+}
+
 pub fn spoken(speech: &Speech) -> std::result::Result<Vec<Word>, String> {
     match speech.timing {
         Timing::Words => Ok(speech
