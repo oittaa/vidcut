@@ -155,7 +155,7 @@ shlex = "2.0"
 # timeline. Pure Rust (zlib-rs), MIT.
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # Reads TTML subtitle files (DFXP, IMSC1). MIT or Apache-2.0.
-roxmltree = "0.20"
+roxmltree = "0.21"
 # Checks media already unpacked from a bundle against its CRC-32.
 crc32fast = "1.5"
 # SHA-256: media fingerprints, to tell a moved file from another one when
