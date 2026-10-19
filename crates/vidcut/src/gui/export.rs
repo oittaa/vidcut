@@ -1193,7 +1193,7 @@ impl Workspace {
         };
         let button = ui
             .toggle_value(&mut self.export.show_jobs, label)
-            .on_hover_text("Exports and proxy encodes, with progress and details");
+            .on_hover_text("Exports, proxy encodes and transcriptions, with progress and details");
         let left = self.export.jobs_glow_until - now;
         if left > 0.0 {
             ui.painter().rect_stroke(
@@ -1572,6 +1572,7 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
                 Some(Stage::Listening) => {
                     format!("listening · {} / {} s of sound", done / 1000, total / 1000)
                 }
+                Some(Stage::Loading) => "loading the model".into(),
                 Some(Stage::Transcribing) => {
                     format!(
                         "transcribing · {} / {} s of speech",
@@ -1579,6 +1580,7 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
                         total / 1000
                     )
                 }
+                None if j.kind == "subtitles" => "preparing…".into(),
                 None => format!(
                     "{done} / {total} frames{}{}",
                     if j.outputs.len() > 1 {

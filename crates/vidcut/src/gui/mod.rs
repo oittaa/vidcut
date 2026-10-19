@@ -18,6 +18,7 @@ mod relink;
 mod retime;
 mod shared;
 mod shuttle;
+mod speech;
 mod subtitles;
 mod theme;
 mod tiles;
