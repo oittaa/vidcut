@@ -51,7 +51,7 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
         renderer: eframe::Renderer::Wgpu,
         wgpu_options: WgpuConfiguration {
             surface: eframe::SurfaceConfig {
-                present_mode: wgpu::PresentMode::AutoNoVsync,
+                present_mode: wgpu::PresentMode::AutoVsync,
                 desired_maximum_frame_latency: Some(1),
             },
             wgpu_setup: WgpuSetup::CreateNew(WgpuSetupCreateNew {

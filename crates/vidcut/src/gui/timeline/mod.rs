@@ -463,7 +463,14 @@ impl Workspace {
             Some((_, at)) => *at,
             None => self.landed_playhead(),
         };
-        let lower_scale = self.lower_scale(content, playhead);
+        let glided = match &trimmed {
+            Some(_) => playhead as f64,
+            None => self.glided_playhead(playhead),
+        };
+        let lower_scale = self.lower_scale(content, glided);
+        if trimmed.is_none() {
+            self.glide_repaint(ui.ctx(), upper_scale.ppf.max(lower_scale.ppf));
+        }
         let lower_scale = match marks.as_ref().filter(|m| m.focus).and_then(focus) {
             Some((from, to))
                 if lower_scale.xf(to) < content.left()
@@ -617,7 +624,7 @@ impl Workspace {
             );
             paint::playhead(
                 &painter,
-                upper_scale.xf(playhead),
+                upper_scale.x(glided),
                 upper_ruler,
                 layout.upper.span().1,
                 self.playhead_color(),
@@ -715,7 +722,7 @@ impl Workspace {
             }
             paint::playhead(
                 &painter,
-                lower_scale.xf(playhead),
+                lower_scale.x(glided),
                 lower_ruler,
                 layout.lower.span().1,
                 self.playhead_color(),
@@ -935,14 +942,14 @@ impl Workspace {
         (from as f64) < first + visible && (to as f64) > first
     }
 
-    fn lower_scale(&mut self, content: Rect, playhead: i64) -> Scale {
+    fn lower_scale(&mut self, content: Rect, playhead: f64) -> Scale {
         let ppf = self.timeline.options.ppf;
         if self.timeline.options.fixed_playhead {
-            return Scale::anchored(content.center().x, playhead as f64, ppf);
+            return Scale::anchored(content.center().x, playhead, ppf);
         }
         let visible = f64::from(content.width()) / ppf;
         let first = self.timeline.scroll;
-        let p = playhead as f64;
+        let p = playhead;
         if p < first || p > first + visible * 0.98 {
             self.timeline.scroll = (p - visible * 0.05).max(0.0);
         }
@@ -2589,6 +2596,32 @@ impl Workspace {
             .landing
             .and_then(|(at, since, from)| tools::landing(at, since.elapsed(), from, position))
             .unwrap_or(position)
+    }
+
+    pub(crate) fn glided_playhead(&self, at: i64) -> f64 {
+        let s = &self.snap.timeline;
+        match s.glide {
+            Some(g) if s.playing && at == s.position => {
+                let ahead = g.fraction + g.at.elapsed().as_secs_f64() * g.rate;
+                at as f64 + ahead.clamp(0.0, 1.0)
+            }
+            _ => at as f64,
+        }
+    }
+
+    fn glide_repaint(&self, ctx: &egui::Context, ppf: f64) {
+        let s = &self.snap.timeline;
+        let Some(g) = s.glide.filter(|_| s.playing) else {
+            return;
+        };
+        let shown = ctx.input(|i| {
+            let v = i.viewport();
+            v.minimized != Some(true) && v.occluded != Some(true)
+        });
+        let pixels_per_second = ppf * g.rate.abs() * f64::from(ctx.pixels_per_point());
+        if shown && pixels_per_second > 0.0 {
+            ctx.request_repaint_after(Duration::from_secs_f64(1.0 / pixels_per_second));
+        }
     }
 
     fn landed_playhead(&mut self) -> i64 {

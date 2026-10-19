@@ -69,6 +69,10 @@ flowchart LR
 
 `gui::run` runs eframe with `App` on the main thread. `App::new` starts the viewer thread, the core (`live::start`) with `Port` as its `Renderer`, and the IPC server. Each frame, `App::logic` runs the `UiTask`s the core queued in `Port` (captures, window and GUI changes, trims, quit); `App::ui` takes the viewer's target (`Viewer::sync`) and calls `Workspace::ui`, which reads `Handle::snapshot` once and draws from it. Both hold the `Gate` open for the viewer's GPU submissions. After each frame the UI leaves its `GuiState` in `Port`.
 
+The window presents with vsync (`PresentMode::AutoVsync`) and redraws on demand: input, a new snapshot, a new viewer picture. While the timeline plays, its playhead and, with Fixed Playhead, the strip under it are drawn between whole frames: the engine's `Status::glide` gives the fraction of the frame on the audio clock and the rate, the snapshot carries it (`PlayerSnap::glide`), and `Workspace::glided_playhead` runs it on to the moment of drawing, within the frame the snapshot shows. `Workspace::glide_repaint` asks for the next redraw when either timeline would move a physical pixel, at most once a refresh, and not while the window is minimized or covered. Stopped, nothing redraws on its own.
+
+**Why:** drawn in whole frames, the timeline jumps a frame's width at a time, 15 times a second in a 15 fps project. Vsync lands each redraw on a refresh, so the steps between them are even.
+
 A gesture is one request: `Workspace::send` calls `Handle::request`, a `Msg::Request` with `Origin::Gui` and no reply; a failure comes back as a notice. Where the UI needs the answer (presets, export plans, preferences), `Ask::send` calls `Handle::call` on a `vidcut-ask` thread and leaves the result in a slot.
 
 ## The core
