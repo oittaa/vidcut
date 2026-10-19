@@ -22,6 +22,8 @@ const FAMILIES: &[&str] = &[
     "Liberation Sans",
 ];
 
+pub(crate) type Placing = ((i32, i32), f32);
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sprite {
     pub x: i32,
@@ -862,7 +864,7 @@ fn layout(pixel: format::Pixel) -> Result<Layout> {
 
 fn visit(
     sprites: &[Sprite],
-    (dx, dy): (i32, i32),
+    ((dx, dy), alpha): Placing,
     (w, h): (i32, i32),
     c: &Comp,
     coding: &Coding,
@@ -900,7 +902,7 @@ fn visit(
                 } else {
                     coding.codes(color, c.depth)[c.role]
                 };
-                each(cx as usize, cy as usize, target, a / n);
+                each(cx as usize, cy as usize, target, a / n * alpha);
             }
         }
     }
@@ -932,7 +934,7 @@ fn mask(c: &Comp) -> u32 {
     }
 }
 
-pub(crate) fn blend_at(f: &mut frame::Video, sprites: &[Sprite], shift: (i32, i32)) -> Result<()> {
+pub(crate) fn blend_at(f: &mut frame::Video, sprites: &[Sprite], shift: Placing) -> Result<()> {
     let layout = layout(f.format())?;
     // SAFETY: a live frame.
     let ret = unsafe { ffi::av_frame_make_writable(f.as_mut_ptr()) };
@@ -971,7 +973,7 @@ pub(crate) fn overlay(
     pixel: format::Pixel,
     like: &frame::Video,
     sprites: &[Sprite],
-    shift: (i32, i32),
+    shift: Placing,
 ) -> Result<(frame::Video, frame::Video)> {
     let layout = layout(pixel)?;
     let (w, h) = (like.width(), like.height());

@@ -1163,6 +1163,9 @@ pub enum Request {
         /// Degrees turned counterclockwise. Default: 0.
         #[serde(default)]
         rotation: Option<f64>,
+        /// How opaque the whole title is, from 0 to 1. Default: 1.
+        #[serde(default)]
+        opacity: Option<f64>,
         #[serde(default)]
         at: Option<TimeSpec>,
         #[serde(default)]
@@ -1196,6 +1199,9 @@ pub enum Request {
         /// Degrees turned counterclockwise; 0 for none.
         #[serde(default)]
         rotation: Option<f64>,
+        /// How opaque the whole title is, from 0 to 1.
+        #[serde(default)]
+        opacity: Option<f64>,
     },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.

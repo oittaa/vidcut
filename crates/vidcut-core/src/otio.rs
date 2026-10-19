@@ -515,6 +515,10 @@ pub fn export_drawn(
                         x.written(c.source_at(s), s > c.start, e < c.end())
                     }),
                 );
+                let effects = match &c.title {
+                    Some(t) => titles::with_opacity(t, effects),
+                    None => effects,
+                };
                 let mut it = match &c.compound {
                     Some(k) => block(c, k, &label, c.source_at(s), e - s, effects),
                     None => item(
@@ -1604,7 +1608,11 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 c.speed = speed;
                 if stack {
                     c.compound = Some(compound_of(item, fps));
-                } else if let Some(t) = titles::read(item, reference, titles::UNKNOWN_HEIGHT) {
+                } else if let Some(mut t) = titles::read(item, reference, titles::UNKNOWN_HEIGHT) {
+                    let opacity = titles::take_opacity(&mut c.effects);
+                    if item["metadata"][VIDCUT].get("title").is_none() {
+                        t.opacity = opacity;
+                    }
                     if c.name == reference["name"].as_str().unwrap_or_default()
                         || c.name == t.label()
                     {

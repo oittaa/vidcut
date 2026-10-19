@@ -59,6 +59,11 @@ pub fn checked(t: &Title) -> Result<Title> {
         }
         None => None,
     };
+    let opacity = match t.opacity {
+        Some(o) if o.is_finite() && (0.0..=1.0).contains(&o) => (o != 1.0).then_some(o),
+        Some(_) => return Err(Error::invalid("a title's opacity is from 0 to 1")),
+        None => None,
+    };
     let s = &t.style;
     let style = TitleStyle {
         font: checked_font(s.font.as_deref(), "title")?,
@@ -76,6 +81,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         position: t.position,
         zoom,
         rotation,
+        opacity,
     })
 }
 
@@ -185,6 +191,7 @@ pub struct TitleChange {
     pub position: Option<Option<[f64; 2]>>,
     pub zoom: Option<f64>,
     pub rotation: Option<f64>,
+    pub opacity: Option<f64>,
 }
 
 pub fn set(p: &mut Project, id: &str, change: &TitleChange) -> Result<()> {
@@ -216,6 +223,9 @@ pub fn set(p: &mut Project, id: &str, change: &TitleChange) -> Result<()> {
     }
     if let Some(r) = change.rotation {
         t.rotation = Some(r);
+    }
+    if let Some(o) = change.opacity {
+        t.opacity = Some(o);
     }
     let t = checked(&t)?;
     p.tracks[ti].clips[ci].title = Some(t);

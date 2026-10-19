@@ -27,6 +27,51 @@ pub fn name(t: &Title) -> &'static str {
     kind_of(t).1
 }
 
+fn composite_opacity(e: &Value) -> Option<f64> {
+    (super::effects::name(e) == "Composite").then(|| {
+        e["metadata"][EDITOR]["Parameters"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|p| p["Parameter ID"] == "opacity")
+            .and_then(|p| p["Parameter Value"].as_f64())
+            .unwrap_or(100.0)
+    })
+}
+
+pub fn with_opacity(t: &Title, effects: Vec<Value>) -> Vec<Value> {
+    let mut out: Vec<Value> = effects
+        .into_iter()
+        .filter(|e| composite_opacity(e).is_none())
+        .collect();
+    if let Some(o) = t.opacity {
+        out.push(json!({
+            "OTIO_SCHEMA": "Effect.1",
+            "metadata": { EDITOR: group(
+                "Composite",
+                1,
+                1,
+                vec![ranged(
+                    keyed("opacity", json!(rounded(o * 100.0)), json!(100.0), "Double"),
+                    0.0,
+                    100.0,
+                )],
+            ) },
+            "name": "",
+            "effect_name": "Resolve Effect",
+        }));
+    }
+    out
+}
+
+pub fn take_opacity(effects: &mut Vec<Value>) -> Option<f64> {
+    let found = effects.iter().find_map(composite_opacity);
+    effects.retain(|e| composite_opacity(e).is_none());
+    found
+        .map(|o| rounded((o / 100.0).clamp(0.0, 1.0)))
+        .filter(|o| *o < 1.0)
+}
+
 fn kind_named(kind: &str) -> Option<(TitleKind, Option<TitleAlign>)> {
     match kind {
         "Rich" => Some((TitleKind::Text, None)),
@@ -781,6 +826,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
         position: Some([clamped(x), 0.5]),
         zoom: None,
         rotation: None,
+        opacity: None,
     };
     crate::ops::titles::checked(&title).ok()
 }
@@ -906,6 +952,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         position: None,
         zoom,
         rotation,
+        opacity: None,
     };
     let [x, from_bottom] = at;
     let mut y = 1.0 - from_bottom;
