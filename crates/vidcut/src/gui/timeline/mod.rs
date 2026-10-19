@@ -1,3 +1,4 @@
+pub mod cues;
 pub mod fades;
 pub mod geometry;
 pub mod gesture;
@@ -149,6 +150,7 @@ pub struct Options {
     pub boring_secs: f64,
     pub jump_frames: i64,
     pub dynamic_mode: tools::DynamicMode,
+    pub minimize_subtitles: bool,
 }
 
 impl Default for Options {
@@ -167,6 +169,7 @@ impl Default for Options {
             boring_secs: 30.0,
             jump_frames: 10,
             dynamic_mode: tools::DynamicMode::Slip,
+            minimize_subtitles: false,
         }
     }
 }
@@ -207,6 +210,11 @@ pub struct TimelineView {
     pub sent_trim: Option<SentTrim>,
     pub enlarged: Option<String>,
     pub placed: Option<(Arc<Project>, Arc<paint::Placed>)>,
+    pub cue_menu: Option<cues::CueMenu>,
+    pub(super) adding: Option<crate::gui::export::Ask>,
+    pub cue_dialog: Option<crate::gui::subtitles::CueDialog>,
+    pub track_dialog: Option<crate::gui::subtitles::TrackDialog>,
+    pub(super) files: Option<crate::gui::subtitles::Files>,
 }
 
 impl Default for TimelineView {
@@ -239,6 +247,11 @@ impl Default for TimelineView {
             rev: 0,
             sent_trim: None,
             placed: None,
+            cue_menu: None,
+            adding: None,
+            cue_dialog: None,
+            track_dialog: None,
+            files: None,
         }
     }
 }
@@ -286,6 +299,8 @@ const UPPER_RULER: f32 = 16.0;
 const UPPER_TRACK: f32 = 30.0;
 const UPPER_OTHER: f32 = 9.0;
 const LOWER_ROWS: [f32; 3] = [100.0, 60.0, 46.0];
+const LOWER_SUBTITLE: f32 = 40.0;
+const LOWER_SUBTITLE_MINIMIZED: f32 = 22.0;
 const LOWER_RULER: f32 = 22.0;
 const HEADER: f32 = 120.0;
 const BOX_CONTROL: f32 = 18.0;
@@ -410,7 +425,7 @@ impl Workspace {
         };
         let shape: &Project = before.as_deref().unwrap_or(&p);
         let full = ui.available_rect_before_wrap();
-        let others = shape.tracks.len().saturating_sub(1).min(6) as f32;
+        let others = (shape.tracks.len().saturating_sub(1) + shape.subtitles.len()).min(6) as f32;
         let upper_rect = Rect::from_min_size(
             pos2(full.left() + HEADER, full.top()),
             vec2(
@@ -466,19 +481,25 @@ impl Workspace {
                 pos2(upper_rect.left(), upper_ruler.bottom() + 1.0),
                 upper_rect.max,
             ),
-            [UPPER_TRACK, UPPER_OTHER, UPPER_OTHER],
+            [UPPER_TRACK, UPPER_OTHER, UPPER_OTHER, UPPER_OTHER],
             4.0,
             0.0,
             None,
         );
         let lower_ruler = Rect::from_min_size(content.min, vec2(content.width(), LOWER_RULER));
+        let [v1_h, video_h, audio_h] = LOWER_ROWS;
+        let subtitle_h = if self.timeline.options.minimize_subtitles {
+            LOWER_SUBTITLE_MINIMIZED
+        } else {
+            LOWER_SUBTITLE
+        };
         let lower = Rows::layout(
             shape,
             Rect::from_min_max(
                 pos2(content.left(), lower_ruler.bottom() + 2.0),
                 content.max,
             ),
-            LOWER_ROWS,
+            [v1_h, video_h, audio_h, subtitle_h],
             22.0,
             NEW_TRACK_STRIP,
             self.timeline.enlarged.as_deref(),
@@ -525,10 +546,34 @@ impl Workspace {
             .iter()
             .map(String::as_str)
             .collect();
+        let picked_cues: HashSet<&str> = self
+            .snap
+            .selection
+            .cues
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let typing = self
+            .timeline
+            .cue_dialog
+            .as_ref()
+            .map(|d| (d.cue.as_str(), d.text.as_str()));
         {
             let painter = ui.painter_at(upper_rect);
             paint::ruler(&painter, upper_ruler, &upper_scale, drawn, smart, true);
             for row in &layout.upper.rows {
+                if let Some(s) = drawn.subtitle_track(&row.track) {
+                    cues::paint_track(
+                        &painter,
+                        &row.rect,
+                        &upper_scale,
+                        s,
+                        &picked_cues,
+                        true,
+                        typing,
+                    );
+                    continue;
+                }
                 let Some(t) = drawn.track(&row.track) else {
                     continue;
                 };
@@ -602,6 +647,18 @@ impl Workspace {
             }
             paint::ruler(&painter, lower_ruler, &lower_scale, drawn, smart, false);
             for row in &layout.lower.rows {
+                if let Some(s) = drawn.subtitle_track(&row.track) {
+                    cues::paint_track(
+                        &painter,
+                        &row.rect,
+                        &lower_scale,
+                        s,
+                        &picked_cues,
+                        false,
+                        typing,
+                    );
+                    continue;
+                }
                 let Some(t) = drawn.track(&row.track) else {
                     continue;
                 };
@@ -677,8 +734,14 @@ impl Workspace {
             let pointer = match &d.drag.gesture {
                 Gesture::Trim {
                     edge: Edge::Head, ..
+                }
+                | Gesture::CueTrim {
+                    edge: Edge::Head, ..
                 } => Some(paint::TrimPointer::Start),
                 Gesture::Trim {
+                    edge: Edge::Tail, ..
+                }
+                | Gesture::CueTrim {
                     edge: Edge::Tail, ..
                 } => Some(paint::TrimPointer::End),
                 Gesture::Roll { .. } | Gesture::AudioRoll { .. } | Gesture::Fade { .. } => {
@@ -709,6 +772,10 @@ impl Workspace {
                 (&layout.lower, &lower_scale, content),
             ] {
                 if !area.contains(pos) {
+                    continue;
+                }
+                if let Some(row) = rows.at(pos.y).filter(|r| geometry::is_subtitle(&r.track)) {
+                    self.cue_hover(ui, &p, row, scale, pos);
                     continue;
                 }
                 let (track, what) = hit_rows(&p, rows, scale, pos);
@@ -830,6 +897,7 @@ impl Workspace {
         self.speed_window(ui.ctx());
         self.silence_window(ui.ctx());
         self.boring_window(ui.ctx());
+        self.subtitle_windows(ui.ctx());
         self.dynamic_tick(ui.ctx());
     }
 
@@ -977,10 +1045,7 @@ impl Workspace {
             }
         });
         if icon_toggle(ui, icon::SPLIT, "Split", false, &keys("Split (Ctrl+B)")).clicked() {
-            self.send(
-                "edit.split",
-                json!({ "at": self.snap.timeline.position, "clips": self.snap.selection.clips }),
-            );
+            self.split_at_playhead();
         }
         if icon_toggle(ui, icon::MARKER, "Marker", false, "Add Marker (M)").clicked() {
             self.send("markers.add", json!({ "at": self.snap.timeline.position }));
@@ -1015,6 +1080,8 @@ impl Workspace {
         ui.checkbox(&mut o.status, "Display Clip Status");
         ui.checkbox(&mut o.filmstrips, "Filmstrips");
         ui.checkbox(&mut o.waveforms, "Waveforms");
+        ui.checkbox(&mut o.minimize_subtitles, "Minimize Subtitle Track")
+            .on_hover_text("Draws the subtitle tracks shorter, for more room");
         ui.separator();
         ui.checkbox(&mut o.boring, "Boring Detector")
             .on_hover_text("Highlights clips that are too long (gray) or too short (red)");
@@ -1040,13 +1107,18 @@ impl Workspace {
             self.send("track.add", json!({ "kind": "audio" }));
             ui.close();
         }
+        if ui
+            .button("Add Subtitle Track")
+            .on_hover_text("A subtitle track above the video tracks, shown in the viewer")
+            .clicked()
+        {
+            self.send("track.add", json!({ "kind": "subtitle" }));
+            ui.close();
+        }
         ui.separator();
         let at = self.snap.timeline.position;
         if ui.button(keys("Split Clips  (Ctrl+B)")).clicked() {
-            self.send(
-                "edit.split",
-                json!({ "at": at, "clips": self.snap.selection.clips }),
-            );
+            self.split_at_playhead();
             ui.close();
         }
         if ui
@@ -1062,6 +1134,17 @@ impl Workspace {
         }
         if ui.button("Add Marker  (M)").clicked() {
             self.send("markers.add", json!({ "at": at }));
+            ui.close();
+        }
+        if ui
+            .button("Add Subtitle")
+            .on_hover_text(
+                "A subtitle at the playhead on the shown subtitle track (one is made if there is \
+                 none)",
+            )
+            .clicked()
+        {
+            self.add_subtitle(ui.ctx(), None);
             ui.close();
         }
         ui.separator();
@@ -1145,14 +1228,18 @@ impl Workspace {
 
     fn track_headers(&mut self, ui: &mut egui::Ui, lower_rect: Rect, rows: &Rows, p: &Project) {
         for row in &rows.rows {
-            let Some(t) = p.track(&row.track) else {
-                continue;
-            };
             let r = row.rect.rect;
             let rect = Rect::from_min_max(
                 pos2(lower_rect.left() + 2.0, r.top()),
                 pos2(lower_rect.left() + HEADER - 4.0, r.bottom()),
             );
+            if let Some(s) = p.subtitle_track(&row.track) {
+                self.subtitle_header(ui, rect, s);
+                continue;
+            }
+            let Some(t) = p.track(&row.track) else {
+                continue;
+            };
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
             child.set_clip_rect(rect.intersect(child.clip_rect()));
             child.spacing_mut().button_padding.x = 3.0;
@@ -1187,6 +1274,10 @@ impl Workspace {
                 }
                 if ui.button("Add Audio Track").clicked() {
                     self.send("track.add", json!({ "kind": "audio" }));
+                    ui.close();
+                }
+                if ui.button("Add Subtitle Track").clicked() {
+                    self.send("track.add", json!({ "kind": "subtitle" }));
                     ui.close();
                 }
                 if t.id != MAIN {
@@ -1266,6 +1357,7 @@ impl Workspace {
         upper: bool,
         layout: &'a Layout,
         snap: Option<&'a Snap>,
+        selected: &'a [String],
     ) -> Ctx<'a> {
         Ctx {
             project: p,
@@ -1277,7 +1369,7 @@ impl Workspace {
             rows: if upper { &layout.upper } else { &layout.lower },
             snap: snap.filter(|_| self.snapping()),
             safe_edit: self.timeline.options.safe_edit,
-            selected: &self.snap.selection.clips,
+            selected,
         }
     }
 
@@ -1321,6 +1413,8 @@ impl Workspace {
                     from: playhead as f64,
                 }
             }
+        } else if let Some(g) = self.cue_gesture(p, rows, &scale, press, upper, mods.command) {
+            g
         } else if let Some((track, at, end, x, sound)) = rows.at(press.y).and_then(|r| {
             let t = p.track(&r.track)?;
             let (at, end) = geometry::fade_edge_at(p, t, &scale, &r.rect, press)?;
@@ -1381,7 +1475,7 @@ impl Workspace {
                     let mut clips = if self.snap.selection.clips.contains(&id) {
                         self.snap.selection.clips.clone()
                     } else {
-                        self.send("selection.set", json!({ "clips": [id] }));
+                        self.send("selection.set", json!({ "clips": [id], "cues": [] }));
                         vec![id]
                     };
                     clips.sort_by_key(|c| p.clip(c).map_or(0, |c| c.start));
@@ -1478,14 +1572,24 @@ impl Workspace {
         }
         let moving: Vec<String> = match &d.drag.gesture {
             Gesture::Move { clips, .. } => clips.clone(),
+            Gesture::CueMove { cues, .. } => cues.clone(),
+            Gesture::CueTrim { cue, .. } => vec![cue.clone()],
             _ => Vec::new(),
         };
         let scrubbing = matches!(d.drag.gesture, Gesture::Scrub { .. });
         let fixed = !d.upper && self.timeline.options.fixed_playhead;
         let playhead = (!fixed && !scrubbing).then_some(self.snap.timeline.position);
         let snap = Snap::new(p, playhead, &moving);
+        let picked: Vec<String> = self
+            .snap
+            .selection
+            .clips
+            .iter()
+            .chain(&self.snap.selection.cues)
+            .cloned()
+            .collect();
         let (preview, request) = {
-            let ctx = self.ctx_for(p, d.upper, layout, Some(&snap));
+            let ctx = self.ctx_for(p, d.upper, layout, Some(&snap), &picked);
             let preview = d.drag.update(pos, now, &ctx);
             let request = if released {
                 d.drag.finish(pos, now, &ctx)
@@ -1587,7 +1691,9 @@ impl Workspace {
         };
         if resp.secondary_clicked()
             && let Some(pos) = resp.interact_pointer_pos()
+            && !self.cue_secondary(p, rows, &scale, pos, upper)
         {
+            self.timeline.cue_menu = None;
             let faded = rows.at(pos.y).and_then(|r| {
                 let at = geometry::transition_at(p, p.track(&r.track)?, &scale, &r.rect, pos)?;
                 Some((TrackRef::of(&r.track)?, at))
@@ -1605,7 +1711,7 @@ impl Workspace {
                 if let Some(id) = &id
                     && !self.snap.selection.clips.contains(id)
                 {
-                    self.send("selection.set", json!({ "clips": [id] }));
+                    self.send("selection.set", json!({ "clips": [id], "cues": [] }));
                 }
                 self.timeline.clip_menu = id.map(|id| (upper, id));
             }
@@ -1626,11 +1732,15 @@ impl Workspace {
                 self.timeline.clip_menu = None;
             }
         }
+        self.cue_menus(resp, p, upper);
         let Some(pos) = resp.interact_pointer_pos() else {
             return;
         };
         let mods = ui.input(|i| i.modifiers);
         let on_ruler = ruler.expand2(vec2(0.0, 2.0)).contains(pos);
+        if !on_ruler && self.cue_click(resp, p, (rows, &scale), pos, upper, mods) {
+            return;
+        }
         let what = hit_rows(p, rows, &scale, pos).1;
         let faded = rows
             .at(pos.y)
@@ -1709,7 +1819,7 @@ impl Workspace {
                 Hit::Empty => {
                     if !mods.command {
                         self.timeline.edit = None;
-                        self.send("selection.set", json!({ "clips": [] }));
+                        self.send("selection.set", json!({ "clips": [], "cues": [] }));
                     }
                     if upper {
                         self.seek(
@@ -1751,7 +1861,12 @@ impl Workspace {
             sel = vec![id.to_string()];
         }
         self.timeline.edit = None;
-        self.send("selection.set", json!({ "clips": sel }));
+        let params = if mods.command {
+            json!({ "clips": sel })
+        } else {
+            json!({ "clips": sel, "cues": [] })
+        };
+        self.send("selection.set", params);
     }
 
     fn clip_menu(&mut self, ui: &mut egui::Ui, c: &vidcut_core::model::Clip) {
@@ -2577,6 +2692,7 @@ impl Workspace {
         o.boring = set.boring.unwrap_or(o.boring);
         o.boring_secs = set.boring_secs.unwrap_or(o.boring_secs);
         o.jump_frames = set.jump_frames.unwrap_or(o.jump_frames);
+        o.minimize_subtitles = set.minimize_subtitles.unwrap_or(o.minimize_subtitles);
         if *o != before {
             o.save();
         }
@@ -2598,6 +2714,7 @@ impl Workspace {
             boring: o.boring,
             boring_secs: o.boring_secs,
             jump_frames: o.jump_frames,
+            minimize_subtitles: o.minimize_subtitles,
         }
     }
 

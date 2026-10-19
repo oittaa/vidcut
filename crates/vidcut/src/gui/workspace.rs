@@ -684,6 +684,13 @@ impl Workspace {
                     self.import_folder();
                 }
                 if ui
+                    .add_enabled(open, egui::Button::new("Import Subtitle…"))
+                    .on_hover_text("SRT, WebVTT or TTML, onto a new subtitle track")
+                    .clicked()
+                {
+                    self.import_subtitle(ui.ctx());
+                }
+                if ui
                     .add_enabled(open, egui::Button::new("New Bin"))
                     .on_hover_text(super::keys("Shift+Ctrl+N: a bin in the bin the pool shows"))
                     .clicked()
@@ -719,6 +726,14 @@ impl Workspace {
                     .clicked()
                 {
                     self.export_timeline(ui.ctx(), true);
+                }
+                let subtitles = self.project().is_some_and(|p| !p.subtitles.is_empty());
+                if ui
+                    .add_enabled(subtitles, egui::Button::new("Export Subtitle…"))
+                    .on_hover_text("The shown subtitle track, as SRT or WebVTT")
+                    .clicked()
+                {
+                    self.export_subtitle(ui.ctx(), None);
                 }
                 ui.separator();
                 if ui
@@ -1319,17 +1334,21 @@ impl Workspace {
             self.send("edit.dissolve", params);
         }
         if (pressed(Key::Backslash) || pressed(Key::B)) && m.command {
-            self.send(
-                "edit.split",
-                json!({ "at": self.snap.timeline.position, "clips": self.snap.selection.clips }),
-            );
+            self.split_at_playhead();
+        }
+        if pressed(Key::Enter)
+            && !m.any()
+            && let [cue] = self.snap.selection.cues.as_slice()
+        {
+            let cue = cue.clone();
+            self.open_cue(&cue);
         }
         if (pressed(Key::Delete) || pressed(Key::Backspace)) && !m.command {
             if self.pool_focus {
                 let selected = self.snap.selection.media.clone();
                 self.removing = (!selected.is_empty()).then_some(selected);
-            } else if !self.delete_transition() {
-                self.delete(m.alt);
+            } else {
+                self.delete_key(m.alt);
             }
         }
         if pressed(Key::Z) && m.command {
@@ -1389,20 +1408,22 @@ impl Workspace {
             };
             self.send("selection.set", json!({ "media": media }));
         } else if pressed(Key::A) && m.command {
-            let clips: Vec<String> = if m.shift {
-                Vec::new()
-            } else {
-                self.project()
-                    .map(|p| {
-                        p.tracks
-                            .iter()
-                            .flat_map(|t| &t.clips)
-                            .map(|c| c.id.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default()
+            let (clips, cues): (Vec<String>, Vec<String>) = match self.project() {
+                Some(p) if !m.shift => (
+                    p.tracks
+                        .iter()
+                        .flat_map(|t| &t.clips)
+                        .map(|c| c.id.clone())
+                        .collect(),
+                    p.subtitles
+                        .iter()
+                        .flat_map(|t| &t.cues)
+                        .map(|c| c.id.clone())
+                        .collect(),
+                ),
+                _ => (Vec::new(), Vec::new()),
             };
-            self.send("selection.set", json!({ "clips": clips }));
+            self.send("selection.set", json!({ "clips": clips, "cues": cues }));
         }
         if pressed(Key::V) && m.alt && m.shift {
             let at = self.snap.timeline.position;
@@ -1569,18 +1590,18 @@ impl Workspace {
         }
     }
 
-    fn delete(&self, lift: bool) {
+    pub(super) fn delete_key(&self, lift: bool) {
+        if self.delete_transition() {
+            return;
+        }
         let Some(p) = self.project() else { return };
         if let (Some(a), Some(b)) = (p.marks.mark_in, p.marks.mark_out) {
             self.send(
                 "edit.delete_range",
                 json!({ "range": format!("{a}f..{b}f"), "lift": lift }),
             );
-        } else if !self.snap.selection.clips.is_empty() {
-            self.send(
-                "edit.delete",
-                json!({ "clips": self.snap.selection.clips, "lift": lift }),
-            );
+        } else {
+            self.delete_selected(lift);
         }
     }
 

@@ -141,7 +141,7 @@ const GROUPS: &[(&str, &str)] = &[
     ),
     (
         "selection",
-        "The GUI's selection: timeline clips, pool media and an edit point",
+        "The GUI's selection: timeline clips, subtitle cues, pool media and an edit point",
     ),
     ("storyboard", "Storyboards: a labeled picture of every shot"),
     (

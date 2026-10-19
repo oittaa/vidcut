@@ -267,11 +267,13 @@ pub fn describe_at(
         }
         "selection.set" => {
             let clips = d.list("clips");
+            let cues = d.list("cues");
             let media = d.list("media");
-            match (clips.is_empty(), media.is_empty()) {
-                (true, true) => "Select nothing".into(),
-                (false, _) => format!("Select {}", d.clips("clips")),
-                (true, false) => format!("Select {}", d.media("media")),
+            match (clips.is_empty(), cues.is_empty(), media.is_empty()) {
+                (true, true, true) => "Select nothing".into(),
+                (false, _, _) => format!("Select {}", d.clips("clips")),
+                (true, false, _) => format!("Select {}", d.cues("cues")),
+                (true, true, false) => format!("Select {}", d.media("media")),
             }
         }
         "gui.show" => format!("Show {}", d.text("panel")),

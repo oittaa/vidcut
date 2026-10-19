@@ -735,8 +735,9 @@ fn live(method: &str, r: &Response) -> Option<()> {
                     .unwrap_or_else(|| "-".into())
             };
             println!(
-                "clips {}  media {}  edit {}",
+                "clips {}  cues {}  media {}  edit {}",
                 ids("clips"),
+                ids("cues"),
                 ids("media"),
                 edit_point(&v["edit"])
             );
@@ -780,6 +781,7 @@ fn live(method: &str, r: &Response) -> Option<()> {
                 t["boring_secs"],
                 t["jump_frames"]
             );
+            println!("subtitle tracks minimized {}", on("minimize_subtitles"));
             println!(
                 "windows {}",
                 if windows.is_empty() {

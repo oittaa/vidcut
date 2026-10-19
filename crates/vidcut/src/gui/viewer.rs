@@ -270,6 +270,13 @@ impl Workspace {
             offline_media(p, &self.snap.missing, mode, player.position, source)
                 .map(|m| m.name.clone())
         });
+        if mode == ViewerMode::Timeline
+            && offline.is_none()
+            && let Some(p) = self.project()
+        {
+            let typing = self.timeline.cue_dialog.as_ref();
+            super::subtitles::paint_cues(&painter, picture, p, player.position, typing);
+        }
         if let Some(name) = offline {
             painter.rect_filled(picture, CornerRadius::ZERO, theme::colors().offline);
             let text = RichText::new(format!("Media Offline\n{name}"))

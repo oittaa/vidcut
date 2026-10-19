@@ -91,6 +91,10 @@ pub struct Rows {
 
 pub const NEW_TRACK_STRIP: f32 = 14.0;
 
+pub fn is_subtitle(track: &str) -> bool {
+    track.starts_with('S')
+}
+
 const ENLARGE: f32 = 3.0;
 const ENLARGED_MIN: f32 = 180.0;
 
@@ -98,33 +102,41 @@ impl Rows {
     pub fn layout(
         p: &Project,
         area: Rect,
-        heights: [f32; 3],
+        heights: [f32; 4],
         min: f32,
         strip: f32,
         enlarged: Option<&str>,
     ) -> Self {
-        let [v1, video, audio] = heights;
-        let mut order: Vec<&Track> = p
-            .tracks_of(TrackKind::Video)
-            .into_iter()
+        let [v1, video, audio, subtitle] = heights;
+        let mut order: Vec<(&str, f32, f32)> = p
+            .subtitles
+            .iter()
             .rev()
-            .map(|i| &p.tracks[i])
+            .map(|t| (t.id.as_str(), subtitle, 0.0))
             .collect();
+        let track = |t: &'_ Track| match t.kind {
+            TrackKind::Audio => audio,
+            TrackKind::Video if t.id == MAIN => v1,
+            TrackKind::Video => video,
+        };
+        let share = |t: &'_ Track| match t.kind {
+            TrackKind::Audio => 1.0,
+            TrackKind::Video if t.id == MAIN => 0.32,
+            TrackKind::Video => 0.3,
+        };
         order.extend(
-            p.tracks_of(TrackKind::Audio)
+            p.tracks_of(TrackKind::Video)
                 .into_iter()
-                .map(|i| &p.tracks[i]),
+                .rev()
+                .chain(p.tracks_of(TrackKind::Audio))
+                .map(|i| &p.tracks[i])
+                .map(|t| (t.id.as_str(), track(t), share(t))),
         );
-        let big = order.iter().position(|t| Some(t.id.as_str()) == enlarged);
+        let big = order.iter().position(|t| Some(t.0) == enlarged);
         let want: Vec<f32> = order
             .iter()
             .enumerate()
-            .map(|(i, t)| {
-                let h = match t.kind {
-                    TrackKind::Audio => audio,
-                    TrackKind::Video if t.id == MAIN => v1,
-                    TrackKind::Video => video,
-                };
+            .map(|(i, &(_, h, _))| {
                 if Some(i) == big {
                     (h * ENLARGE).max(ENLARGED_MIN)
                 } else {
@@ -154,17 +166,12 @@ impl Rows {
         let rows = order
             .iter()
             .zip(heights)
-            .map(|(t, h)| {
+            .map(|(&(id, _, share), h)| {
                 let rect =
                     Rect::from_min_max(pos2(area.left(), y), pos2(area.right(), y + h - 1.0));
                 y += h;
-                let share = match t.kind {
-                    TrackKind::Audio => 1.0,
-                    TrackKind::Video if t.id == MAIN => 0.32,
-                    TrackKind::Video => 0.3,
-                };
                 Row {
-                    track: t.id.clone(),
+                    track: id.to_string(),
                     rect: TrackRect::new(rect, share),
                 }
             })
@@ -203,7 +210,7 @@ impl Rows {
 
     pub fn target(&self, p: &Project, y: f32) -> Option<String> {
         if let Some(r) = self.at(y) {
-            return Some(r.track.clone());
+            return (!is_subtitle(&r.track)).then(|| r.track.clone());
         }
         let (top, bottom) = self.span();
         let count = |k| p.tracks_of(k).len() + 1;
@@ -474,6 +481,13 @@ impl Snap {
             .flat_map(|t| t.clips.iter())
             .filter(|c| !moving.contains(&c.id))
             .flat_map(|c| [c.start, c.end()])
+            .chain(
+                p.subtitles
+                    .iter()
+                    .flat_map(|t| t.cues.iter())
+                    .filter(|c| !moving.contains(&c.id))
+                    .flat_map(|c| [c.start, c.end()]),
+            )
             .chain(p.markers.iter().map(|k| k.at))
             .chain(p.marks.mark_in)
             .chain(p.marks.mark_out)

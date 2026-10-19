@@ -120,6 +120,7 @@ impl PoolView {
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Selection {
     pub clips: Vec<String>,
+    pub cues: Vec<String>,
     pub media: Vec<String>,
 }
 

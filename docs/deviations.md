@@ -218,13 +218,23 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 
 ## X41. Subtitle files go straight onto a track, placed by their timecode
 - **Resolve:** a subtitle file is a Media Pool clip first. Insert Selected Subtitles to Timeline Using Timecode places its cues by timecode and inserts nothing from a file timed from zero; dragging it places its first cue where it is dropped (p. 1230).
-- **vidcut:** `subtitles.import` puts the cues on a new subtitle track, named after the file, or on one named. A file whose cues all start at or after the timeline's start timecode, or after 01:00:00:00 on a timeline starting at zero and shorter than an hour, in the file's own time base (real time or timecode labels, [D58](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), is read as timecode: in real time at 23.976 the hour is `01:00:03.600`, where Resolve renders a cue on the first frame of a timeline starting at 01:00:00:00 (`01:00:03.599`); otherwise times count from the timeline's start. `timecode`, `time_base` and `at` override that.
+- **vidcut:** `subtitles.import` (File > Import Subtitle) puts the cues on a new subtitle track, named after the file, or on one named. A file whose cues all start at or after the timeline's start timecode, or after 01:00:00:00 on a timeline starting at zero and shorter than an hour, in the file's own time base (real time or timecode labels, [D58](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), is read as timecode: in real time at 23.976 the hour is `01:00:03.600`, where Resolve renders a cue on the first frame of a timeline starting at 01:00:00:00 (`01:00:03.599`); otherwise times count from the timeline's start. `timecode`, `time_base` and `at` override that.
 - **Why:** one step, the same from a script, and both kinds of file land where they belong.
 
 ## X42. Exported timelines keep their subtitles
 - **Resolve:** its OpenTimelineIO, FCPXML, FCP 7 XML, EDL and CSV exports leave the subtitle tracks out (Studio 21.1.1); a subtitle file in an OpenTimelineIO file it imports makes the import fail.
 - **vidcut:** an OpenTimelineIO export writes an SRT beside it for each subtitle track with cues, in its timecode, ready for Insert Selected Subtitles to Timeline Using Timecode; a whole timeline's file also holds the cues for vidcut. `export.start` writes subtitle files beside media when asked (`subtitles`).
 - **Why:** subtitles made in vidcut should reach the editor that finishes the program.
+
+## X43. A subtitle's text is typed in its own window
+- **Resolve:** a selected subtitle's text is typed in the Captions panel of the Inspector, and shows on the clip as it is typed (p. 1233).
+- **vidcut:** double-clicking a cue, Enter with one selected, Edit Subtitle… in its right-click menu, or Add Subtitle opens a Subtitle window with its text and position. The text shows on the cue and in the viewer as it is typed, and the position in the viewer as it is picked; both go in as one change on Done (Ctrl+Enter), or when another subtitle is opened in the window. Cancel leaves the cue as it was.
+- **Why:** vidcut has no Inspector, and one change per subtitle keeps typing out of the undo history.
+
+## X44. Add Subtitle uses the shown subtitle track
+- **Resolve:** each subtitle track's header has a destination control (ST1, ST2, …) that picks the track Add Subtitle puts new subtitles on (p. 1232); Add Subtitle is in a subtitle track's right-click menu (p. 1233).
+- **vidcut:** Add Subtitle in Timeline Actions puts the subtitle on the shown subtitle track, making Subtitle 1 when there is none; in a subtitle track's right-click menu it puts it on that track. The header has no destination control.
+- **Why:** the track shown in the viewer is the one being worked on, so one control serves both, and Timeline Actions reaches Add Subtitle before there is a track to right-click.
 
 ## X45. Subtitles go into any container, and burn in from any track
 - **Resolve:** the Deliver page's subtitle Format is a separate file, Burn into video (the selected track) or As embedded captions: CEA-608 in MXF OP1A and QuickTime, or several tracks as subtitle streams or CEA-608 or EAS708 captions in QuickTime and MXF, by the Codec pop-up (Text, CEA-608) (pp. 1247–1248).
