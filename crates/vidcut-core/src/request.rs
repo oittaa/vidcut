@@ -312,6 +312,41 @@ pub enum Request {
         #[serde(default)]
         range: Option<RangeSpec>,
     },
+    /// The words said in the mix of the tracks heard (`tracks`) over
+    /// `range`, each with the timeline frames the model gave it, for
+    /// `edit.ripple_delete_words`. It hears as `subtitles.transcribe` does
+    /// and adds no cues. Only a model that times words: Parakeet Ultra
+    /// does. Whisper large-v3 times phrases and Qwen3-ASR gives no times,
+    /// so they are refused rather than have estimates cut as words.
+    #[serde(rename = "analyze.words")]
+    AnalyzeWords {
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        /// The tracks heard, such as `["A1"]`, muted or not; the others
+        /// aren't. Default: the tracks playback hears, those not muted, or
+        /// the soloed ones.
+        #[serde(default)]
+        tracks: Option<Vec<String>>,
+        /// Default: `parakeet-ultra`.
+        #[serde(default)]
+        model: Option<SpeechModel>,
+        /// A transcribe.cpp GGUF model file to use instead of `model`'s.
+        #[serde(default)]
+        model_file: Option<PathBuf>,
+        /// A Silero VAD model file (GGUF, or whisper.cpp's `.bin`) to find
+        /// the speech with, instead of the one built into vidcut.
+        #[serde(default)]
+        vad_file: Option<PathBuf>,
+        /// The language spoken, as a code such as `en` or `fi`. Default: the
+        /// model tells it from the longest stretch of speech.
+        #[serde(default)]
+        language: Option<String>,
+        /// Download the model files this computer doesn't have yet from
+        /// Hugging Face, each checked against its SHA-256. Without it, a
+        /// missing file is an error that says what would be downloaded.
+        #[serde(default)]
+        download: bool,
+    },
     /// Import an OpenTimelineIO timeline: an `.otio` file, an `.otioz` bundle
     /// (its media are unpacked first) or an `.otiod` bundle folder, as other
     /// editors write them. Its media join the pool, and its tracks go on V1,
@@ -589,6 +624,13 @@ pub enum Request {
         #[serde(default)]
         download: bool,
     },
+    /// Ripple Delete Words: take these words out of the timeline. Each is a
+    /// `start` and `end` from `analyze.words` (its other fields are
+    /// ignored). Touching or overlapping spans are one cut. The spans come
+    /// out of every unlocked track and the rest closes up, whether or not
+    /// ripple is on. A dry run says what would go and changes nothing.
+    #[serde(rename = "edit.ripple_delete_words")]
+    EditRippleDeleteWords { words: Vec<SpokenWord> },
     /// Detect Scene Cuts: split `clips` where their shots change.
     #[serde(rename = "edit.detect_scene_cuts")]
     EditDetectSceneCuts {
@@ -1606,6 +1648,16 @@ pub enum SubtitleTimeBase {
     Label,
 }
 
+/// A word from `analyze.words`, sent back to `edit.ripple_delete_words`.
+/// The cut uses `start` and `end`; `text` is ignored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SpokenWord {
+    #[serde(default)]
+    pub text: String,
+    pub start: TimeSpec,
+    pub end: TimeSpec,
+}
+
 /// A speech recognition model, a GGUF file transcribe.cpp runs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub enum SpeechModel {
@@ -2100,6 +2152,7 @@ impl Request {
                     | Self::MarkersList {}
                     | Self::SubtitlesList { .. }
                     | Self::SubtitlesExport { .. }
+                    | Self::AnalyzeWords { .. }
                     | Self::MediaList {}
                     | Self::MediaGet { .. }
                     | Self::Probe { .. }
@@ -2144,6 +2197,11 @@ impl Request {
             | Self::SubtitlesImport { path, .. }
             | Self::SubtitlesExport { out: path, .. } => vec![path],
             Self::SubtitlesTranscribe {
+                model_file,
+                vad_file,
+                ..
+            }
+            | Self::AnalyzeWords {
                 model_file,
                 vad_file,
                 ..

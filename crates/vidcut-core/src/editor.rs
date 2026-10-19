@@ -2781,6 +2781,25 @@ fn mutate(
                 "warnings": warnings,
             })
         }
+        Request::EditRippleDeleteWords { words } => {
+            if words.is_empty() {
+                return Err(Error::usage("name the words to cut"));
+            }
+            let mut spans = Vec::with_capacity(words.len());
+            for w in words {
+                let start = resolve(p, &w.start, playhead)?;
+                let end = resolve(p, &w.end, playhead)?;
+                spans.push((start, end));
+            }
+            let removed = ops::cut_ranges(p, &spans)?;
+            json!({
+                "removed": removed
+                    .iter()
+                    .map(|(s, e)| json!({"start": s, "end": e}))
+                    .collect::<Vec<_>>(),
+                "frames": removed.iter().map(|(s, e)| e - s).sum::<i64>(),
+            })
+        }
         Request::SubtitlesRetime {
             track,
             tracks,
@@ -4754,6 +4773,56 @@ pub fn query(
                     }))
                     .collect::<Vec<_>>()
             )
+        }
+        Request::AnalyzeWords {
+            range,
+            tracks,
+            model,
+            model_file,
+            vad_file,
+            language,
+            download,
+        } => {
+            let (a, b) = transcribed_range(p, range.as_ref(), playhead)?;
+            let heard = heard_tracks(p, tracks.as_deref())?;
+            let speech = env.transcribe(
+                &sound_plan(p, a, b, &heard)?,
+                &transcript::Asked {
+                    model: model.unwrap_or_default(),
+                    model_file: model_file.clone(),
+                    vad_file: vad_file.clone(),
+                    language: language.clone(),
+                    download: *download,
+                },
+            )?;
+            let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
+            let words: Vec<Value> = timed
+                .iter()
+                .flat_map(|w| {
+                    transcript::word_frames(std::slice::from_ref(w), p.settings.fps, a, b)
+                        .into_iter()
+                        .map(|(text, start, end)| {
+                            json!({ "text": text, "start": start, "end": end, "joined": w.joined })
+                        })
+                })
+                .collect();
+            let mut warnings = speech.warnings.clone();
+            if words.is_empty() {
+                warnings.push("no speech found".into());
+            }
+            json!({
+                "words": words,
+                "from": a,
+                "to": b,
+                "heard": sounding(p, &heard),
+                "model": speech.model,
+                "device": speech.device,
+                "language": speech.language,
+                "timing": speech.timing,
+                "pieces": speech.pieces,
+                "longest_piece": speech.longest_piece,
+                "warnings": warnings,
+            })
         }
         Request::SubtitlesExport {
             out,

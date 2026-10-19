@@ -96,7 +96,11 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
     static CANCEL: LazyLock<Arc<AtomicBool>> = LazyLock::new(Arc::default);
     if matches!(
         envelope.request.method().as_str(),
-        "export.start" | "proxy.generate" | "subtitles.transcribe" | "subtitles.retime"
+        "export.start"
+            | "proxy.generate"
+            | "subtitles.transcribe"
+            | "analyze.words"
+            | "subtitles.retime"
     ) {
         let _ = ctrlc::set_handler(|| CANCEL.store(true, Ordering::Relaxed));
     }

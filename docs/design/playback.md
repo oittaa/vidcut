@@ -45,7 +45,7 @@ Each seek, step, load and switch is a numbered motion. `Player::present_due` ask
 
 `vidcut_av::player::Player::new` starts `vidcut-play-video` and `vidcut-play-audio`; its audio output adds `vidcut-audio-out`. Methods return at once: each changes `Control`, the wanted state behind a mutex and condvar. The threads read it anew each turn, so a burst of seeks collapses into the last. It holds the plan, the `mode` (`Mode::Paused` at a frame, or `Mode::Playing` from a sample at a speed, negative backward), fader `trims`, the mute, a `scrub` request, a position the caller moves itself (`Player::follow`) and the `prepared` frame. A change cancels decoding it no longer needs. A `looping` range (`Player::set_loop`, spec D51) keeps `Mode::Playing` going past its end: the audio thread reads on from its start and queues the jump's `Marker` before the sound ahead of it, so the ring and the clock run on, and decoding reads ahead across the jump.
 
-`player::plan::Plan` gives each frame an `Id` naming what the picture shows (file, source position, layers over it), not where, so kept pictures survive edits that move them.
+`player::plan::Plan` gives each frame an `Id` naming what the picture shows (file, how its colors are read, source position, layers over it), not where, so kept pictures survive edits that move them.
 
 **Decoding** reuses the export's reader, `VideoFrames`, with `Output::Decoded`: YUV frames at their own size. Each turn does the first of: the viewer's frame; pictures ahead in the direction of play; playing backward, whole windows from a keyframe; when idle, the prepared frame and a window behind the playhead. Playing, or while its viewer waits, it holds a `first::Claim`, so jobs yield.
 

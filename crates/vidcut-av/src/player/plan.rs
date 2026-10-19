@@ -162,12 +162,14 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             path,
             origin,
             image,
+            color_space,
             ..
         } => format!(
-            "{}|{:x}|{image:?}|{}",
+            "{}|{:x}|{image:?}|{}|{}",
             path.display(),
             origin.to_bits(),
-            plan.fps
+            plan.fps,
+            color_space.key()
         )
         .into(),
         VideoPiece::Black { .. } | VideoPiece::Mix { .. } => {
