@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use vidcut_core::model::{Hdr, SubtitleStyle};
+use vidcut_core::model::{ColorSpace, Hdr, SubtitleStyle};
 use vidcut_core::render::{Image, VideoPiece, WHOLE};
 use vidcut_core::time::Rational;
 
@@ -141,16 +141,18 @@ impl Source {
         decoder: Option<&crate::hw::GpuDecoder>,
         reading: Reading,
         measure: bool,
+        color_space: ColorSpace,
     ) -> Result<Source> {
         let video = pictures == Pictures::Video;
         let nvdec = gpu.filter(|_| video);
         let nvdec = nvdec.and_then(|g| g.device.with_own_stream().ok());
         let nvdec = nvdec.map(crate::hw::GpuDecoder::nvdec).transpose()?;
-        let reader = VideoReader::open_as(
+        let mut reader = VideoReader::open_as(
             input,
             nvdec.as_ref().or(decoder).filter(|_| video),
             pictures.reading(reading),
         )?;
+        reader.set_color_space(color_space);
         let fitting = match gpu {
             Some(g) => Fitting::on_gpu(&reader, g.out, g.format, g.target, true, Place::Cuda),
             None => Fitting::none(),
@@ -197,8 +199,10 @@ impl Source {
         decoder: Option<&crate::hw::GpuDecoder>,
         reading: Reading,
         measure: bool,
+        color_space: ColorSpace,
     ) -> Result<Source> {
-        let reader = VideoReader::open_as(input, decoder, pictures.reading(reading))?;
+        let mut reader = VideoReader::open_as(input, decoder, pictures.reading(reading))?;
+        reader.set_color_space(color_space);
         let decoder = reader.gpu();
         let tb = reader.time_base();
         Ok(Source {
@@ -910,6 +914,7 @@ impl VideoFrames {
             origin,
             source_frame,
             image: None,
+            color_space,
             ..
         } = piece
         else {
@@ -927,6 +932,7 @@ impl VideoFrames {
                     self.decoder.as_ref(),
                     self.maker.reading(),
                     self.measures(&input),
+                    *color_space,
                 )?;
                 self.open.push(bare);
                 self.open.len() - 1
@@ -979,6 +985,7 @@ impl VideoFrames {
                 source_frame,
                 image,
                 pace,
+                color_space,
                 ..
             } = layer
             else {
@@ -999,6 +1006,7 @@ impl VideoFrames {
                 .find(|&s| self.open[s].reads_on(target));
             let s = match reads_on.or(free.first().copied()) {
                 Some(s) => {
+                    self.open[s].reader.set_color_space(*color_space);
                     if let Err(e) = self.open[s].reposition(*origin, from, target) {
                         self.open[s].current = None;
                         self.open[s].normalized = None;
@@ -1011,6 +1019,7 @@ impl VideoFrames {
                         Some(source) => {
                             let mut source = source?;
                             source.left = None;
+                            source.reader.set_color_space(*color_space);
                             source.reposition(*origin, from, target)?;
                             source
                         }
@@ -1026,6 +1035,7 @@ impl VideoFrames {
                                 self.decoder.as_ref(),
                                 self.maker.reading(),
                                 self.measures(&input),
+                                *color_space,
                             )?,
                         },
                     };
@@ -1110,11 +1120,13 @@ impl VideoFrames {
                 origin,
                 source_frame,
                 image,
+                color_space,
                 ..
             } = layer
             else {
                 continue;
             };
+            let color_space = *color_space;
             let input = input_of(path, image.as_ref());
             let free = |s: &usize| !used[*s] && self.open[*s].reader.input() == &input;
             let read = (0..self.open.len()).find(|s| free(s) && self.open[*s].left.is_none());
@@ -1139,6 +1151,7 @@ impl VideoFrames {
             if let Some(s) = left {
                 let mut source = self.take_out(s);
                 self.ahead.start(slot(j, i), key, move || {
+                    source.reader.set_color_space(color_space);
                     source.resume(origin, from, target)?;
                     Ok(source)
                 });
@@ -1155,6 +1168,7 @@ impl VideoFrames {
                     decoder.as_ref(),
                     reading,
                     measure,
+                    color_space,
                 )
             });
             return;

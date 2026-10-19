@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use vidcut_core::export::EncoderChoice;
-use vidcut_core::model::Hdr;
+use vidcut_core::model::{ColorSpace, Hdr};
 use vidcut_core::preferences::ProxyCodec;
 
 use crate::cuda::CudaFrames;
@@ -328,6 +328,7 @@ pub fn write(
     encoders: &[ProxyEncoder],
     decoder: Option<&crate::hw::GpuDecoder>,
     origin: &str,
+    color_space: ColorSpace,
 ) -> Result<WrittenProxy> {
     crate::init();
     let copies = std::sync::Arc::new(crate::copies::Copies::default());
@@ -372,6 +373,7 @@ pub fn write(
             Some(d) => VideoReader::open_gpu_or_cpu(input, d)?,
             None => VideoReader::open_input(input)?,
         };
+        reader.set_color_space(color_space);
         if errors.is_empty() {
             crate::progress::note(crate::export::Note::Source(crate::export::SourceNote {
                 path: input.path().to_path_buf(),

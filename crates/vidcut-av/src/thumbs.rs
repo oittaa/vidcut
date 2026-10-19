@@ -1,3 +1,5 @@
+use vidcut_core::model::ColorSpace;
+
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, decoder, encoder, format, frame, media, software::scaling};
 
@@ -14,8 +16,9 @@ pub fn filmstrip(
     max_w: u32,
     max_h: u32,
     decoder: Option<&crate::hw::GpuDecoder>,
+    space: ColorSpace,
 ) -> Result<(Vec<Image>, Vec<f64>)> {
-    filmstrip_inner(source, count, max_w, max_h, None, decoder)
+    filmstrip_inner(source, count, max_w, max_h, None, decoder, space)
 }
 
 pub fn filmstrip_pictures(
@@ -25,8 +28,9 @@ pub fn filmstrip_pictures(
     max_w: u32,
     max_h: u32,
     decoder: Option<&crate::hw::GpuDecoder>,
+    space: ColorSpace,
 ) -> Result<(Vec<Image>, Vec<f64>)> {
-    filmstrip_inner(source, count, max_w, max_h, Some(pictures), decoder)
+    filmstrip_inner(source, count, max_w, max_h, Some(pictures), decoder, space)
 }
 
 fn filmstrip_inner(
@@ -36,22 +40,22 @@ fn filmstrip_inner(
     max_h: u32,
     pictures: Option<u64>,
     gpu: Option<&crate::hw::GpuDecoder>,
+    space: ColorSpace,
 ) -> Result<(Vec<Image>, Vec<f64>)> {
     if gpu.is_some()
-        && let Ok(Some(strip)) = strip_on(source, count, max_w, max_h, pictures, gpu)
+        && let Ok(Some(strip)) = strip_on(source, (count, max_w, max_h), pictures, gpu, space)
     {
         return Ok(strip);
     }
-    strip_on(source, count, max_w, max_h, pictures, None).map(Option::unwrap_or_default)
+    strip_on(source, (count, max_w, max_h), pictures, None, space).map(Option::unwrap_or_default)
 }
 
 fn strip_on(
     source: &crate::decode::Input,
-    count: usize,
-    max_w: u32,
-    max_h: u32,
+    (count, max_w, max_h): (usize, u32, u32),
     pictures: Option<u64>,
     gpu: Option<&crate::hw::GpuDecoder>,
+    space: ColorSpace,
 ) -> Result<Option<(Vec<Image>, Vec<f64>)>> {
     if pictures == Some(0) {
         return Ok(Some((Vec::new(), Vec::new())));
@@ -94,7 +98,10 @@ fn strip_on(
     } else {
         crate::export::normalize::fit(w, h, sar, max_w, max_h)
     };
-    let mut fit = Fit::default();
+    let mut fit = Fit {
+        space,
+        ..Fit::default()
+    };
 
     let rate = stream_rate(&input.stream(index).expect("found"));
     let pictures = pictures.filter(|n| *n > 0);
@@ -208,11 +215,23 @@ fn keep(
 struct Fit {
     normalizer: Option<crate::export::normalize::Normalizer>,
     shrinker: Option<crate::hw::Shrinker>,
+    space: ColorSpace,
 }
 
 impl Fit {
     fn picture(&mut self, decoded: &frame::Video, place: (u16, u32, u32)) -> Result<Image> {
         let (rotation, tw, th) = place;
+        let retagged;
+        let decoded = if self.space.is_tagged() {
+            decoded
+        } else {
+            // SAFETY: a new frame on the same buffers, so the tags change on it alone.
+            let mut f =
+                unsafe { frame::Video::wrap(ffmpeg::ffi::av_frame_clone(decoded.as_ptr())) };
+            crate::color::retag(&mut f, self.space);
+            retagged = f;
+            &retagged
+        };
         let down;
         let decoded = if crate::hw::on_gpu(decoded) {
             down = crate::export::normalize::down(&mut self.shrinker, decoded, rotation, (tw, th))?;

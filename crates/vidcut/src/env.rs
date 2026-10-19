@@ -325,6 +325,7 @@ impl Env for AvEnv {
                 &encoders,
                 decoder.as_ref(),
                 &origin.text,
+                media.color_space,
             )
             .map_err(av_error)?;
             let went = written

@@ -4,6 +4,7 @@ use std::time::SystemTime;
 
 use vidcut_av::thumbs::Image;
 use vidcut_core::fingerprint::Origin;
+use vidcut_core::model::ColorSpace;
 use vidcut_core::model::Media;
 
 use crate::paths;
@@ -18,10 +19,11 @@ fn file(media: &Media, origin: &Origin, count: usize, size: (u32, u32)) -> PathB
         .as_ref()
         .map(|s| format!("-{}", s.count))
         .unwrap_or_default();
+    let space = read_as(media.color_space);
     paths::media_cache(
         "thumbs",
         origin,
-        &format!("{count}-{}x{}{pictures}.thumbs", size.0, size.1),
+        &format!("{count}-{}x{}{pictures}{space}.thumbs", size.0, size.1),
     )
 }
 
@@ -37,8 +39,20 @@ pub fn load(media: &Media, count: usize, size: (u32, u32)) -> Option<(Vec<Image>
 
 pub const TILE_BLOCK: i64 = 64;
 
-pub fn tile_block(origin: &Origin, height: u32, block: i64) -> PathBuf {
-    paths::media_cache("thumbs", origin, &format!("t{height}-b{block}.thumbs"))
+pub fn tile_block(origin: &Origin, height: u32, block: i64, space: ColorSpace) -> PathBuf {
+    let space = read_as(space);
+    paths::media_cache(
+        "thumbs",
+        origin,
+        &format!("t{height}-b{block}{space}.thumbs"),
+    )
+}
+
+fn read_as(space: ColorSpace) -> String {
+    match space {
+        ColorSpace::Tagged => String::new(),
+        s => format!("-{}", s.key()),
+    }
 }
 
 pub fn load_tiles(path: &Path, origin: &Origin) -> Option<Vec<(i64, Image)>> {

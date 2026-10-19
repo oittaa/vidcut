@@ -49,6 +49,7 @@ fn main() {
         source_frame: start,
         frames,
         image: None,
+        color_space: Default::default(),
     };
     let plan = RenderPlan {
         fps,

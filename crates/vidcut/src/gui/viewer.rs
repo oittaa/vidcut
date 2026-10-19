@@ -201,6 +201,9 @@ impl Workspace {
             .is_some_and(crate::gui::timeline::tools::Dynamic::running)
             && self.dynamic_target().is_some();
         let trim = self.trim_editor_edit();
+        if dynamic || trim.is_none() {
+            self.timeline.strip_drag = None;
+        }
         if !dynamic
             && trim.is_none()
             && let Some(cells) = &mut self.cells
@@ -333,13 +336,18 @@ impl Workspace {
         }
         let band = super::trim_strips::band_height(area);
         let pictures = Rect::from_min_max(area.min, pos2(area.right(), area.bottom() - band - 6.0));
+        let dragged = self.strip_drawn(&p);
+        let (drawn, at) = match &dragged {
+            Some((q, at)) => (q, *at),
+            None => (&*p, e.at),
+        };
         self.draw_two_up(
             ui,
             pictures,
-            &p,
+            drawn,
             &e.track.id(),
             TwoUpMode::TrimEditor,
-            &[(e.at - 1, "Out (outgoing)"), (e.at, "In (incoming)")],
+            &[(at - 1, "Out (outgoing)"), (at, "In (incoming)")],
         );
         let strips = Rect::from_min_max(pos2(area.left(), area.bottom() - band), area.max);
         self.trim_strips(ui, strips, &p, e);
