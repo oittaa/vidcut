@@ -23,6 +23,7 @@ mod subtitles;
 mod theme;
 mod tiles;
 mod timeline;
+mod transcription;
 mod trim_strips;
 mod video;
 mod viewer;

@@ -154,6 +154,18 @@ pub enum Request {
         #[serde(default)]
         again: bool,
     },
+    /// Leave words of a pool item out of edits, as Delete does in the
+    /// Transcription window on a source clip: their spans (source frames,
+    /// as `analyze.words` gives them with `media`) are struck through there,
+    /// and its Place on Top, Insert and Append edit only the rest of the
+    /// selection. `back` brings them back (Undelete).
+    #[serde(rename = "media.leave_out")]
+    MediaLeaveOut {
+        media: String,
+        words: Vec<SpokenWord>,
+        #[serde(default)]
+        back: bool,
+    },
     /// Set the Clip Color of media items, which their clips show unless
     /// they have their own.
     #[serde(rename = "media.set")]
@@ -1876,6 +1888,9 @@ pub enum GuiPanel {
     Help,
     /// The undo history.
     History,
+    /// The Transcription window: the words of the source clip or the
+    /// timeline, from their media's transcripts.
+    Transcription,
 }
 
 /// Media Pool sort orders.
