@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use eframe::egui::{self, RichText};
 use serde_json::json;
 use vidcut_av::transcribe;
@@ -61,6 +63,46 @@ struct Dialog {
     short: [Option<String>; 3],
     gpu: bool,
     asking: bool,
+    hear: Hear,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct Hear(HashMap<String, bool>);
+
+impl Hear {
+    pub(super) fn ui(&mut self, ui: &mut egui::Ui, p: &Project) -> Vec<String> {
+        let solo = p.any_solo();
+        let mut heard = Vec::new();
+        ui.horizontal_wrapped(|ui| {
+            let sounding: Vec<_> = p
+                .tracks
+                .iter()
+                .filter(|t| t.clips.iter().any(|c| c.audio.is_some()))
+                .collect();
+            if sounding.is_empty() {
+                ui.label(dim("No track has sound"));
+            }
+            for t in sounding {
+                let mut on = self.0.get(&t.id).copied().unwrap_or(t.audible(solo));
+                let label = match &t.name {
+                    Some(name) => format!("{} {name}", t.id),
+                    None => t.id.clone(),
+                };
+                let r = ui.checkbox(&mut on, label);
+                let r = match t.muted {
+                    true => r.on_hover_text("Muted on the timeline"),
+                    false => r,
+                };
+                if r.changed() {
+                    self.0.insert(t.id.clone(), on);
+                }
+                if on {
+                    heard.push(t.id.clone());
+                }
+            }
+        });
+        heard
+    }
 }
 
 #[derive(Debug, Default)]
@@ -77,6 +119,14 @@ fn marked(p: &Project) -> Option<(i64, i64)> {
     match (p.marks.mark_in, p.marks.mark_out) {
         (Some(a), Some(b)) if b > a => Some((a, b)),
         _ => None,
+    }
+}
+
+pub(super) fn listed(ids: &[String]) -> String {
+    match ids {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
     }
 }
 
@@ -210,10 +260,11 @@ impl Workspace {
             }),
             gpu,
             asking: false,
+            hear: Hear::default(),
         });
     }
 
-    fn create_subtitles(&mut self, s: &Settings, download: bool) {
+    fn create_subtitles(&mut self, s: &Settings, heard: &[String], download: bool) {
         let Some(p) = self.project() else {
             return;
         };
@@ -224,6 +275,7 @@ impl Workspace {
         let mut params = json!({
             "model": s.model,
             "range": range,
+            "tracks": heard,
             "chars": s.chars,
             "lines": s.lines,
             "gap": s.gap,
@@ -259,6 +311,7 @@ impl Workspace {
         }
         let range = marked(&p);
         let file = transcribe::file_of(s.model);
+        let mut heard: Vec<String> = Vec::new();
         let mut open = true;
         let (mut create, mut cancel) = (false, false);
         egui::Window::new("Create Subtitles from Audio")
@@ -269,8 +322,8 @@ impl Workspace {
             .show(ctx, |ui| {
                 ui.add_enabled_ui(!d.asking, |ui| {
                     ui.label(dim(
-                        "Transcribes the timeline's speech on this computer and adds it as \
-                         subtitles. Muted tracks aren't heard.",
+                        "Transcribes the speech on the tracks it hears, on this computer, and \
+                         adds it as subtitles.",
                     ));
                     ui.add_space(4.0);
                     ui.label("Model");
@@ -354,6 +407,9 @@ impl Workspace {
                                 });
                             });
                             ui.end_row();
+                            ui.label("Hear");
+                            heard = d.hear.ui(ui, &p);
+                            ui.end_row();
                             ui.label("Track");
                             let highest = p.subtitles.last();
                             let shown = match (&s.onto, highest) {
@@ -400,10 +456,27 @@ impl Workspace {
                             );
                             ui.end_row();
                         });
+                    let (a, b) = match range {
+                        Some(marks) if s.in_out => marks,
+                        _ => (0, p.end()),
+                    };
                     ui.separator();
+                    match heard.is_empty() {
+                        true => ui.label(
+                            RichText::new("Tick a track to hear").color(ui.visuals().warn_fg_color),
+                        ),
+                        false => ui.label(format!(
+                            "Hears {}, {} – {}",
+                            listed(&heard),
+                            self.tc(a),
+                            self.tc(b - 1)
+                        )),
+                    };
                     ui.label(dim("Jobs shows its progress, and can cancel it"));
                     ui.horizontal(|ui| {
-                        create = ui.button("Create").clicked();
+                        create = ui
+                            .add_enabled(!heard.is_empty(), egui::Button::new("Create"))
+                            .clicked();
                         cancel = ui.button("Cancel").clicked();
                     });
                 });
@@ -413,7 +486,7 @@ impl Workspace {
             d.have[index(s.model)] = transcribe::present(&dir, file);
             if d.have[index(s.model)] {
                 let settings = s.clone();
-                self.create_subtitles(&settings, false);
+                self.create_subtitles(&settings, &heard, false);
                 return;
             }
             d.asking = true;
@@ -446,7 +519,7 @@ impl Workspace {
             match answer {
                 Some(true) => {
                     let settings = d.settings.clone();
-                    self.create_subtitles(&settings, true);
+                    self.create_subtitles(&settings, &heard, true);
                     return;
                 }
                 Some(false) => d.asking = false,
