@@ -47,6 +47,8 @@ mod proxy_tests;
 #[cfg(test)]
 mod relink_tests;
 #[cfg(test)]
+mod subtitle_style_tests;
+#[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tracks_tests;

@@ -5,7 +5,7 @@ use roxmltree::{Document, Node, ParsingOptions};
 use super::text::{self, Tag, Token, escape_xml};
 use super::{Read, Timed, clock};
 use crate::error::{Error, Result};
-use crate::model::Place;
+use crate::model::{Place, SubtitleStyle};
 
 const TTP: &str = "http://www.w3.org/ns/ttml#parameter";
 const TTS: &str = "http://www.w3.org/ns/ttml#styling";
@@ -563,7 +563,135 @@ fn paragraph(text: &str) -> String {
     out
 }
 
-pub fn write(cues: &[Timed], language: Option<&str>, frame_rate: Option<f64>) -> String {
+fn rate_attr(frame_rate: Option<f64>) -> String {
+    match frame_rate {
+        Some(r) if (r - r.round()).abs() < 1e-6 => format!(" ttp:frameRate=\"{}\"", r.round()),
+        Some(r) => format!(
+            " ttp:frameRate=\"{}\" ttp:frameRateMultiplier=\"1000 1001\"",
+            (r * 1001.0 / 1000.0).round()
+        ),
+        None => String::new(),
+    }
+}
+
+fn plain_number(x: f64) -> String {
+    let r = (x * 1000.0).round() / 1000.0;
+    if (r - r.round()).abs() < 1e-9 {
+        format!("{}", r.round() as i64)
+    } else {
+        let s = format!("{r:.3}");
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+fn regions(margin: f64) -> String {
+    let x = plain_number(margin * 100.0);
+    let w = plain_number((1.0 - 2.0 * margin) * 100.0);
+    let bottom = plain_number((1.0 - margin) * 100.0 - 20.0);
+    format!(
+        "      <region xml:id=\"bottom\" tts:origin=\"{x}% {bottom}%\" tts:extent=\"{w}% 20%\" \
+         tts:displayAlign=\"after\"/>\n      <region xml:id=\"middle\" tts:origin=\"{x}% 40%\" \
+         tts:extent=\"{w}% 20%\" tts:displayAlign=\"center\"/>\n      <region xml:id=\"top\" \
+         tts:origin=\"{x}% {x}%\" tts:extent=\"{w}% 20%\" tts:displayAlign=\"before\"/>\n    "
+    )
+}
+
+fn style_attrs(style: &SubtitleStyle) -> String {
+    let color = style.color.clone().unwrap_or_else(|| "#ffffff".into());
+    let font = style
+        .font
+        .clone()
+        .unwrap_or_else(|| "proportionalSansSerif".into());
+    let size = match style.size {
+        Some(s) => format!("{}c", plain_number(s * 100.0)),
+        None => "100%".into(),
+    };
+    let mut attrs = format!(
+        "tts:color=\"{}\" tts:fontFamily=\"{}\" tts:fontSize=\"{size}\" tts:textAlign=\"center\"",
+        escape_xml(&color),
+        escape_xml(&font)
+    );
+    if let Some((rgb, frac)) = style.stroke() {
+        attrs.push_str(&format!(
+            " tts:textOutline=\"#{:02x}{:02x}{:02x} {}%\"",
+            rgb[0],
+            rgb[1],
+            rgb[2],
+            plain_number(frac * 100.0)
+        ));
+    }
+    if let Some((rgb, opacity)) = style.backing() {
+        let aa = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+        if aa == 255 {
+            attrs.push_str(&format!(
+                " tts:backgroundColor=\"#{:02x}{:02x}{:02x}\"",
+                rgb[0], rgb[1], rgb[2]
+            ));
+        } else {
+            attrs.push_str(&format!(
+                " tts:backgroundColor=\"#{:02x}{:02x}{:02x}{aa:02x}\"",
+                rgb[0], rgb[1], rgb[2]
+            ));
+        }
+    }
+    attrs
+}
+
+pub fn write(
+    cues: &[Timed],
+    language: Option<&str>,
+    frame_rate: Option<f64>,
+    style: &SubtitleStyle,
+) -> String {
+    if style.is_empty() {
+        return write_plain(cues, language, frame_rate);
+    }
+    let lang = language.unwrap_or("");
+    let cells = style
+        .size
+        .map(|_| " ttp:cellResolution=\"50 100\"")
+        .unwrap_or("");
+    let regions = match style.margin {
+        Some(m) => regions(m),
+        None => "      <region xml:id=\"bottom\" tts:origin=\"10% 70%\" tts:extent=\"80% 20%\" \
+         tts:displayAlign=\"after\"/>\n      <region xml:id=\"middle\" tts:origin=\"10% 40%\" \
+         tts:extent=\"80% 20%\" tts:displayAlign=\"center\"/>\n      <region xml:id=\"top\" \
+         tts:origin=\"10% 10%\" tts:extent=\"80% 20%\" tts:displayAlign=\"before\"/>\n    "
+            .to_string(),
+    };
+    let mut out = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tt xml:lang=\"{}\" \
+         xmlns=\"http://www.w3.org/ns/ttml\" xmlns:ttp=\"{TTP}\" xmlns:tts=\"{TTS}\" \
+         xmlns:ittp=\"http://www.w3.org/ns/ttml/profile/imsc1#parameter\" \
+         ttp:profile=\"http://www.w3.org/ns/ttml/profile/imsc1/text\" \
+         ttp:timeBase=\"media\"{rate}{cells}>\n  <head>\n    <styling>\n      <style xml:id=\"s\" \
+         {attrs}/>\n    </styling>\n    <layout>\n{regions}</layout>\n  </head>\n  <body style=\"s\">\n    <div>\n",
+        escape_xml(lang),
+        rate = rate_attr(frame_rate),
+        attrs = style_attrs(style),
+    );
+    push_cues(&mut out, cues);
+    out
+}
+
+fn push_cues(out: &mut String, cues: &[Timed]) {
+    for c in cues {
+        let region = match c.place {
+            Place::Bottom => "bottom",
+            Place::Middle => "middle",
+            Place::Top => "top",
+        };
+        out.push_str(&format!(
+            "      <p begin=\"{}\" end=\"{}\" region=\"{region}\">{}</p>\n",
+            clock(c.start, '.'),
+            clock(c.end, '.'),
+            paragraph(&c.text)
+        ));
+    }
+    out.push_str("    </div>\n  </body>\n</tt>\n");
+}
+
+fn write_plain(cues: &[Timed], language: Option<&str>, frame_rate: Option<f64>) -> String {
     let lang = language.unwrap_or("");
     let rate = match frame_rate {
         Some(r) if (r - r.round()).abs() < 1e-6 => format!(" ttp:frameRate=\"{}\"", r.round()),

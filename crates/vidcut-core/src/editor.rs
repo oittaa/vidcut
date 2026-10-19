@@ -2491,6 +2491,7 @@ fn mutate(
             name,
             shown,
             language,
+            style,
             muted: None,
             solo: None,
             volume_db: None,
@@ -2503,20 +2504,27 @@ fn mutate(
                 language: language
                     .as_ref()
                     .map(|l| (!l.trim().is_empty()).then(|| l.trim().to_string())),
+                style: style
+                    .as_ref()
+                    .map(ops::subtitles::checked_style)
+                    .transpose()?,
             };
             ops::subtitles::set_track(p, track, &props)?;
             Value::Null
         }
         Request::TrackSet { track, .. } if track.starts_with('S') => {
             return Err(Error::usage(
-                "a subtitle track takes locked, name, shown and language",
+                "a subtitle track takes locked, name, shown, language and style",
             ));
         }
         Request::TrackSet { shown: Some(_), .. }
         | Request::TrackSet {
             language: Some(_), ..
-        } => {
-            return Err(Error::usage("shown and language are a subtitle track's"));
+        }
+        | Request::TrackSet { style: Some(_), .. } => {
+            return Err(Error::usage(
+                "shown, language and style are a subtitle track's",
+            ));
         }
         Request::TrackSet {
             track,
@@ -4762,6 +4770,7 @@ pub fn query(
                     language: t.language.as_deref(),
                     frame_rate: Some(p.settings.fps.as_f64()),
                     positions: true,
+                    style: &t.style,
                 },
             );
             if !dry_run {

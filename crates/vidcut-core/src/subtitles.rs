@@ -7,7 +7,7 @@ mod vtt;
 use std::path::Path;
 
 use crate::error::{Error, Result};
-use crate::model::{Place, Settings};
+use crate::model::{Place, Settings, SubtitleStyle};
 use crate::request::SubtitleFormat;
 
 pub use languages::three_letter;
@@ -91,13 +91,14 @@ pub struct Writing<'a> {
     pub language: Option<&'a str>,
     pub frame_rate: Option<f64>,
     pub positions: bool,
+    pub style: &'a SubtitleStyle,
 }
 
 pub fn write(cues: &[Timed], format: SubtitleFormat, how: &Writing) -> String {
     match format {
         SubtitleFormat::Srt => srt::write(cues, how.positions),
         SubtitleFormat::Vtt => vtt::write(cues),
-        SubtitleFormat::Ttml => ttml::write(cues, how.language, how.frame_rate),
+        SubtitleFormat::Ttml => ttml::write(cues, how.language, how.frame_rate, how.style),
     }
 }
 
@@ -174,6 +175,7 @@ pub fn beside(
                 language: t.language.as_deref(),
                 frame_rate: Some(p.settings.fps.as_f64()),
                 positions: !timeline,
+                style: &t.style,
             },
         );
         out.push(Beside {

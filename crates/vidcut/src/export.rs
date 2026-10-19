@@ -430,6 +430,7 @@ fn subtitle_track(p: &Project, ti: usize, (a, b): (i64, i64)) -> engine::subtitl
         name: t.display_name(),
         language: t.language.clone(),
         shown: t.shown,
+        style: t.style.clone(),
         cues: t
             .cues
             .iter()

@@ -973,6 +973,144 @@ fn is_one_frame(frames: &i64) -> bool {
     *frames == 1
 }
 
+/// How a subtitle track looks burned in, and in an IMSC1 file. A field
+/// left out keeps the usual look.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct SubtitleStyle {
+    /// Font family. The burn-in uses it when that font is installed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<String>,
+    /// Text height as a fraction of the picture height. Usual: 0.055.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// `#rrggbb`. Usual: white.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Outline color and thickness. Usual: black, a twentieth of the text
+    /// height.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline: Option<SubtitleOutline>,
+    /// A box behind each line of text. Usual: none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<SubtitleBackground>,
+    /// Inset from the left and right, as a fraction of the picture width,
+    /// and from the top or bottom for a cue placed there, as a fraction of
+    /// the height. Usual: wrapped at 90% of the width, the block centered
+    /// at 80%, 50% or 20% of the height.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin: Option<f64>,
+}
+
+/// An outline around a subtitle track's text.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct SubtitleOutline {
+    /// `#rrggbb`. Usual: black.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Thickness as a fraction of the text height. Usual: 0.05. `0` draws
+    /// none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+}
+
+/// A box behind a subtitle track's text.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SubtitleBackground {
+    /// `#rrggbb`.
+    pub color: String,
+    /// From 0 to 1. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+}
+
+/// `#rgb` or `#rrggbb`, as `#rrggbb`.
+pub fn css_color(value: &str) -> Option<String> {
+    let hex = value.trim().strip_prefix('#').unwrap_or(value.trim());
+    if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    match hex.len() {
+        3 => {
+            let d: Vec<char> = hex.chars().collect();
+            Some(format!("#{0}{0}{1}{1}{2}{2}", d[0], d[1], d[2]).to_ascii_lowercase())
+        }
+        6 => Some(format!("#{hex}").to_ascii_lowercase()),
+        _ => None,
+    }
+}
+
+fn rgb_of(hex: &str) -> [u8; 3] {
+    let n = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or(0);
+    [(n >> 16) as u8, (n >> 8) as u8, n as u8]
+}
+
+impl SubtitleStyle {
+    pub fn is_empty(&self) -> bool {
+        self.font.is_none()
+            && self.size.is_none()
+            && self.color.is_none()
+            && self.outline.is_none()
+            && self.background.is_none()
+            && self.margin.is_none()
+    }
+
+    /// Text height as a fraction of the picture height.
+    pub fn text_fraction(&self) -> f64 {
+        self.size.unwrap_or(0.055)
+    }
+
+    pub fn ink(&self) -> [u8; 3] {
+        self.color
+            .as_deref()
+            .and_then(css_color)
+            .map(|c| rgb_of(&c))
+            .unwrap_or([255, 255, 255])
+    }
+
+    /// Outline color and its thickness as a fraction of the text height.
+    /// None draws no outline.
+    pub fn stroke(&self) -> Option<([u8; 3], f64)> {
+        match &self.outline {
+            Some(o) if o.size == Some(0.0) => None,
+            Some(o) => Some((
+                o.color
+                    .as_deref()
+                    .and_then(css_color)
+                    .map(|c| rgb_of(&c))
+                    .unwrap_or([0, 0, 0]),
+                o.size.unwrap_or(0.05),
+            )),
+            None => Some(([0, 0, 0], 0.05)),
+        }
+    }
+
+    /// Background color and opacity. None draws none.
+    pub fn backing(&self) -> Option<([u8; 3], f64)> {
+        let b = self.background.as_ref()?;
+        Some((
+            css_color(&b.color).map(|c| rgb_of(&c)).unwrap_or([0, 0, 0]),
+            b.opacity.unwrap_or(1.0),
+        ))
+    }
+
+    /// The text block's width in a picture of this width and height.
+    pub fn wrap_width(&self, picture_width: f64, picture_height: f64) -> f64 {
+        let inset = self.margin.unwrap_or(0.05);
+        (picture_width * (1.0 - 2.0 * inset)).max(self.text_fraction() * picture_height)
+    }
+
+    /// The top of a text block `lines` tall.
+    pub fn block_top(&self, place: Place, picture_height: f64, lines: f64) -> f64 {
+        match (self.margin, place) {
+            (Some(m), Place::Top) => picture_height * m,
+            (Some(m), Place::Bottom) => picture_height * (1.0 - m) - lines,
+            (_, Place::Middle) => picture_height * 0.5 - lines / 2.0,
+            (None, Place::Top) => picture_height * 0.2 - lines / 2.0,
+            (None, Place::Bottom) => picture_height * 0.8 - lines / 2.0,
+        }
+    }
+}
+
 /// A subtitle track: cues shown over the picture, one language or use.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SubtitleTrack {
@@ -988,6 +1126,9 @@ pub struct SubtitleTrack {
     /// Shown in the viewer. One subtitle track at a time is.
     pub shown: bool,
     pub locked: bool,
+    /// How it looks burned in and in an IMSC1 file.
+    #[serde(default, skip_serializing_if = "SubtitleStyle::is_empty")]
+    pub style: SubtitleStyle,
     /// Sorted by `start`; cues may overlap.
     pub cues: Vec<Cue>,
 }
@@ -1038,6 +1179,7 @@ impl SubtitleTrack {
             language: None,
             shown: false,
             locked: false,
+            style: SubtitleStyle::default(),
             cues: Vec::new(),
         }
     }

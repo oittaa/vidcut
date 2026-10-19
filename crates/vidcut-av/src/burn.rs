@@ -4,7 +4,7 @@ use cosmic_text::{
     Align, Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, Style, SwashCache,
     UnderlineStyle, Weight, Wrap,
 };
-use vidcut_core::model::Place;
+use vidcut_core::model::{Place, SubtitleStyle};
 use vidcut_core::subtitles::{Tag, Token, tokens};
 
 use crate::error::{Error, Result};
@@ -75,10 +75,8 @@ fn hex_color(hex: &str) -> Option<Color> {
     Some(Color::rgb(part(0)?, part(2)?, part(4)?))
 }
 
-fn spans(text: &str) -> Vec<(String, Attrs<'static>)> {
-    let base = Attrs::new()
-        .family(Family::SansSerif)
-        .color(Color::rgb(255, 255, 255));
+fn spans<'a>(text: &str, family: Family<'a>, color: Color) -> Vec<(String, Attrs<'a>)> {
+    let base = Attrs::new().family(family).color(color);
     let (mut italic, mut bold, mut under) = (0u32, 0u32, 0u32);
     let mut colors: Vec<Color> = Vec::new();
     let mut out = Vec::new();
@@ -103,9 +101,7 @@ fn spans(text: &str) -> Vec<(String, Attrs<'static>)> {
             Token::Open(Tag::I) => italic += 1,
             Token::Open(Tag::B) => bold += 1,
             Token::Open(Tag::U) => under += 1,
-            Token::Open(Tag::Color(hex)) => {
-                colors.push(hex_color(&hex).unwrap_or(Color::rgb(255, 255, 255)))
-            }
+            Token::Open(Tag::Color(hex)) => colors.push(hex_color(&hex).unwrap_or(color)),
             Token::Close(Tag::I) => italic = italic.saturating_sub(1),
             Token::Close(Tag::B) => bold = bold.saturating_sub(1),
             Token::Close(Tag::U) => under = under.saturating_sub(1),
@@ -148,14 +144,46 @@ fn dilate(alpha: &[f32], w: usize, h: usize, radius: f32) -> Vec<f32> {
     out
 }
 
-fn block(text: &str, place: Place, width: u32, height: u32, f: &mut Fonts) -> Option<Sprite> {
-    let size = (height as f32 * SIZE).max(1.0);
-    let wrap = (width as f32 * WIDTH).max(size);
+fn over(dst: [f32; 4], src: [f32; 4]) -> [f32; 4] {
+    let a = src[3] + dst[3] * (1.0 - src[3]);
+    if a <= 0.0 {
+        return [0.0; 4];
+    }
+    let mut out = [0.0; 4];
+    for i in 0..3 {
+        out[i] = (src[i] * src[3] + dst[i] * dst[3] * (1.0 - src[3])) / a;
+    }
+    out[3] = a;
+    out
+}
+
+fn block(
+    text: &str,
+    place: Place,
+    width: u32,
+    height: u32,
+    style: &SubtitleStyle,
+    f: &mut Fonts,
+) -> Option<Sprite> {
+    let size = match style.size {
+        Some(s) => (height as f32 * s as f32).max(1.0),
+        None => (height as f32 * SIZE).max(1.0),
+    };
+    let wrap = match style.margin {
+        Some(_) => (style.wrap_width(f64::from(width), f64::from(height)) as f32).max(1.0),
+        None => (width as f32 * WIDTH).max(size),
+    };
     let mut buffer = Buffer::new(&mut f.system, Metrics::new(size, size * LINE));
     buffer.set_wrap(Wrap::WordOrGlyph);
     buffer.set_size(Some(wrap), None);
-    let spans = spans(text);
-    let base = Attrs::new().family(Family::SansSerif);
+    let family = match style.font.as_deref() {
+        Some(name) => Family::Name(name),
+        None => Family::SansSerif,
+    };
+    let [tr, tg, tb] = style.ink();
+    let ink = Color::rgb(tr, tg, tb);
+    let spans = spans(text, family, ink);
+    let base = Attrs::new().family(family);
     buffer.set_rich_text(
         spans.iter().map(|(s, a)| (s.as_str(), a.clone())),
         &base,
@@ -167,8 +195,35 @@ fn block(text: &str, place: Place, width: u32, height: u32, f: &mut Fonts) -> Op
     if lines <= 0.0 {
         return None;
     }
-    let outline = size * OUTLINE;
+    let outline = match style.outline.as_ref().and_then(|o| o.size) {
+        Some(s) => size * s as f32,
+        None => size * OUTLINE,
+    };
     let pad = outline.ceil() as i32 + 2;
+    let slack = (size * 0.15).ceil() as i32;
+    let bands: Vec<(i32, i32, i32, i32)> = if style.background.is_some() {
+        buffer
+            .layout_runs()
+            .filter_map(|run| {
+                let mut x0 = i32::MAX;
+                let mut x1 = i32::MIN;
+                for g in run.glyphs {
+                    x0 = x0.min(g.x.floor() as i32 - slack);
+                    x1 = x1.max((g.x + g.w).ceil() as i32 + slack);
+                }
+                (x1 > x0).then(|| {
+                    (
+                        x0,
+                        run.line_top.floor() as i32 - slack,
+                        x1,
+                        (run.line_top + run.line_height).ceil() as i32 + slack,
+                    )
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let (cw, ch) = (wrap.ceil() as i32 + 2 * pad, lines.ceil() as i32 + 2 * pad);
     let (w, h) = (cw as usize, ch as usize);
     let mut canvas = vec![[0.0f32; 4]; w * h];
@@ -198,17 +253,57 @@ fn block(text: &str, place: Place, width: u32, height: u32, f: &mut Fonts) -> Op
         },
     );
     let alpha: Vec<f32> = canvas.iter().map(|p| p[3]).collect();
-    let ring = dilate(&alpha, w, h, outline);
+    let ring = if style.stroke().is_some() {
+        dilate(&alpha, w, h, outline)
+    } else {
+        vec![0.0; alpha.len()]
+    };
+    let outline_rgb = style.stroke().map(|(c, _)| c).unwrap_or([0, 0, 0]);
+    let backing = style.backing();
+    let plain = backing.is_none() && outline_rgb == [0, 0, 0];
     let rgba: Vec<[f32; 4]> = canvas
         .iter()
         .zip(&ring)
-        .map(|(p, &o)| {
-            let a = p[3] + o * (1.0 - p[3]);
-            if a <= 0.0 {
-                [0.0; 4]
-            } else {
-                [p[0] / a, p[1] / a, p[2] / a, a]
+        .enumerate()
+        .map(|(i, (p, &o))| {
+            if plain {
+                let a = p[3] + o * (1.0 - p[3]);
+                return if a <= 0.0 {
+                    [0.0; 4]
+                } else {
+                    [p[0] / a, p[1] / a, p[2] / a, a]
+                };
             }
+            let (x, y) = ((i % w) as i32 - pad, (i / w) as i32 - pad);
+            let bg = backing.and_then(|(c, a)| {
+                bands
+                    .iter()
+                    .any(|&(x0, y0, x1, y1)| x >= x0 && x < x1 && y >= y0 && y < y1)
+                    .then(|| {
+                        [
+                            f32::from(c[0]) / 255.0,
+                            f32::from(c[1]) / 255.0,
+                            f32::from(c[2]) / 255.0,
+                            a as f32,
+                        ]
+                    })
+            });
+            let text_a = p[3];
+            let text = if text_a > 0.0 {
+                [p[0] / text_a, p[1] / text_a, p[2] / text_a, text_a]
+            } else {
+                [0.0; 4]
+            };
+            let under = over(
+                bg.unwrap_or([0.0; 4]),
+                [
+                    f32::from(outline_rgb[0]) / 255.0,
+                    f32::from(outline_rgb[1]) / 255.0,
+                    f32::from(outline_rgb[2]) / 255.0,
+                    o,
+                ],
+            );
+            over(under, text)
         })
         .collect();
     let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
@@ -224,13 +319,18 @@ fn block(text: &str, place: Place, width: u32, height: u32, f: &mut Fonts) -> Op
     if x1 <= x0 || y1 <= y0 {
         return None;
     }
-    let centre = match place {
-        Place::Top => 0.2,
-        Place::Middle => 0.5,
-        Place::Bottom => 0.8,
-    } * height as f32;
+    let text_top = if style.margin.is_none() {
+        let centre = match place {
+            Place::Top => 0.2,
+            Place::Middle => 0.5,
+            Place::Bottom => 0.8,
+        };
+        centre * height as f32 - lines / 2.0
+    } else {
+        style.block_top(place, f64::from(height), f64::from(lines)) as f32
+    };
     let left = ((width as f32 - wrap) / 2.0).round() as i32 - pad;
-    let top = (centre - lines / 2.0).round() as i32 - pad;
+    let top = text_top.round() as i32 - pad;
     let crop = (y0..y1)
         .flat_map(|y| rgba[y * w + x0..y * w + x1].iter().copied())
         .collect();
@@ -243,7 +343,7 @@ fn block(text: &str, place: Place, width: u32, height: u32, f: &mut Fonts) -> Op
     })
 }
 
-pub fn draw(cues: &[(&str, Place)], width: u32, height: u32) -> Vec<Sprite> {
+pub fn draw(cues: &[(&str, Place)], width: u32, height: u32, style: &SubtitleStyle) -> Vec<Sprite> {
     let mut f = fonts().lock().unwrap_or_else(|e| e.into_inner());
     [Place::Top, Place::Middle, Place::Bottom]
         .into_iter()
@@ -256,7 +356,7 @@ pub fn draw(cues: &[(&str, Place)], width: u32, height: u32) -> Vec<Sprite> {
             if text.is_empty() {
                 return None;
             }
-            block(&text.join("\n"), place, width, height, &mut f)
+            block(&text.join("\n"), place, width, height, style, &mut f)
         })
         .collect()
 }
