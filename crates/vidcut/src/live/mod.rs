@@ -1384,6 +1384,33 @@ impl Live {
                 ..
             } => (clips.to_vec(), true, *detect == Detect::Speech, *download),
             Request::EditDetectSceneCuts { clips, .. } => (clips.to_vec(), false, false, false),
+            Request::EditRippleDeleteWords { words, quiet: true } => {
+                let context = p.time_context(playhead);
+                let spans: Vec<(i64, i64)> = words
+                    .iter()
+                    .filter_map(|w| {
+                        Some((
+                            context.resolve(&w.start).ok()?,
+                            context.resolve(&w.end).ok()?,
+                        ))
+                    })
+                    .collect();
+                let near = p.settings.fps.as_f64().round() as i64;
+                let solo = p.any_solo();
+                let clips = p
+                    .tracks
+                    .iter()
+                    .filter(|t| t.audible(solo))
+                    .flat_map(|t| &t.clips)
+                    .filter(|c| {
+                        spans
+                            .iter()
+                            .any(|&(s, e)| c.start <= e + near && c.end() >= s - near)
+                    })
+                    .map(|c| c.id.clone())
+                    .collect();
+                (clips, true, false, false)
+            }
             _ => return None,
         };
         let mut needed = Vec::new();

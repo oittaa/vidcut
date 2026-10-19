@@ -15,6 +15,10 @@ use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
 
 const PAUSE: f64 = 1.0;
+const FILLERS: [&str; 22] = [
+    "um", "umm", "uh", "uhh", "uhm", "er", "erm", "ah", "eh", "ehm", "hmm", "hm", "mm", "mhm",
+    "äh", "ähm", "öh", "öhm", "öö", "ää", "euh", "heu",
+];
 const FOUND: Color32 = Color32::from_rgba_premultiplied(110, 90, 20, 140);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,6 +81,7 @@ enum Act {
     Copy,
     Marker,
     RemoveSilences,
+    Fillers,
     Transcribe(Vec<String>),
 }
 
@@ -95,7 +100,9 @@ pub(super) struct TranscriptionUi {
     moved: bool,
     search: String,
     found: Option<usize>,
-    scroll_to: Option<usize>,
+    scroll_to: Option<(usize, bool)>,
+    hold: bool,
+    followed: Option<usize>,
 }
 
 impl TranscriptionUi {
@@ -248,6 +255,13 @@ fn sentence(items: &[Item], at: usize) -> (usize, usize) {
     (a, b)
 }
 
+fn filler(text: &str) -> bool {
+    let word = text
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .to_lowercase();
+    FILLERS.contains(&word.as_str())
+}
+
 fn left_out(item: &Item, spans: &[(i64, i64)]) -> bool {
     spans.iter().any(|&(a, b)| item.start >= a && item.end <= b)
 }
@@ -278,8 +292,9 @@ fn layout(
             job.append(" ", 0.0, gap);
             count += 1;
         }
-        let mut f = TextFormat::simple(font, if item.silence { c.text_dim } else { c.text });
-        f.italics = item.silence;
+        let dim = item.silence || filler(&item.text);
+        let mut f = TextFormat::simple(font, if dim { c.text_dim } else { c.text });
+        f.italics = dim;
         if left_out(item, &look.left_out) {
             f.color = c.marked;
             f.strikethrough = Stroke::new(1.5, c.marked);
@@ -450,6 +465,11 @@ impl Workspace {
             Some(Shown::Media(_)) => self.snap.source_at().map(|(_, f)| f),
             None => None,
         };
+        let playing = match &shown {
+            Some(Shown::Timeline) => self.snap.timeline.playing,
+            Some(Shown::Media(_)) => self.snap.source.playing,
+            None => false,
+        };
         let tc = |ws: &Workspace, f: i64| match shown {
             Some(Shown::Timeline) => ws.tc(f),
             _ => ws.src_tc(f),
@@ -495,6 +515,35 @@ impl Workspace {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(&title).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let mut follow = !t.hold;
+                        if ui
+                            .checkbox(&mut follow, "Follow")
+                            .on_hover_text(
+                                "While playing, keep the word under the playhead in view",
+                            )
+                            .changed()
+                        {
+                            t.hold = !follow;
+                        }
+                        let fillers = items.as_ref().map_or(0, |i| {
+                            i.iter().filter(|x| !x.silence && filler(&x.text)).count()
+                        });
+                        if ui
+                            .add_enabled(
+                                fillers > 0,
+                                egui::Button::new(format!("Delete Filler Words ({fillers})")),
+                            )
+                            .on_hover_text(match shown {
+                                Some(Shown::Timeline) => {
+                                    "Ripple delete every um, uh, er and the like, at the quiet \
+                                     points around them"
+                                }
+                                _ => "Leave every um, uh, er and the like out of the edits",
+                            })
+                            .clicked()
+                        {
+                            acts.push(Act::Fillers);
+                        }
                         let silences = items.as_ref().is_some_and(|i| i.iter().any(|x| x.silence));
                         if ui
                             .add_enabled(silences, egui::Button::new("Remove Silent Portions"))
@@ -575,6 +624,10 @@ impl Workspace {
                             width: width as i32,
                         };
                         let now = playhead.and_then(|f| at_frame(items, f));
+                        if !t.hold && playing && now.is_some() && now != t.followed {
+                            t.scroll_to = now.map(|i| (i, false));
+                        }
+                        t.followed = now;
                         match &mut t.look {
                             Some((l, paras)) if *l == look => {
                                 for para in paras.iter_mut() {
@@ -617,8 +670,11 @@ impl Workspace {
                                         para.galley.clone(),
                                         theme::colors().text,
                                     );
-                                    if t.scroll_to.is_some_and(|i| para.items.contains(&i)) {
-                                        ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                                    if let Some((i, center)) = t.scroll_to
+                                        && para.items.contains(&i)
+                                    {
+                                        let align = center.then_some(egui::Align::Center);
+                                        ui.scroll_to_rect(rect, align);
                                         t.scroll_to = None;
                                     }
                                     placed.push((k, rect));
@@ -752,7 +808,7 @@ impl Workspace {
                     t.found = Some(i);
                     t.selection = Some((i, i));
                     t.anchor = Some(i);
-                    t.scroll_to = Some(i);
+                    t.scroll_to = Some((i, true));
                     acts.push(Act::Seek(items[i].start));
                 }
             }
@@ -823,16 +879,23 @@ impl Workspace {
                         }),
                     ),
                     None => {
-                        self.send("edit.ripple_delete_words", json!({ "words": [span(a, b)] }));
+                        self.send(
+                            "edit.ripple_delete_words",
+                            json!({ "words": [span(a, b)], "quiet": true }),
+                        );
                         t.selection = None;
                         t.anchor = None;
                     }
                 }
             }
-            Act::RemoveSilences => {
+            Act::RemoveSilences | Act::Fillers => {
+                let fillers = matches!(act, Act::Fillers);
                 let words: Vec<Value> = items
                     .iter()
-                    .filter(|i| i.silence)
+                    .filter(|i| match fillers {
+                        true => !i.silence && filler(&i.text),
+                        false => i.silence,
+                    })
                     .map(|i| span(i.start, i.end))
                     .collect();
                 if words.is_empty() {
@@ -841,7 +904,10 @@ impl Workspace {
                 match media {
                     Some(m) => self.send("media.leave_out", json!({ "media": m, "words": words })),
                     None => {
-                        self.send("edit.ripple_delete_words", json!({ "words": words }));
+                        self.send(
+                            "edit.ripple_delete_words",
+                            json!({ "words": words, "quiet": true }),
+                        );
                         t.selection = None;
                         t.anchor = None;
                     }

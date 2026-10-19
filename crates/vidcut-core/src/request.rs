@@ -691,7 +691,15 @@ pub enum Request {
     /// out of every unlocked track and the rest closes up, whether or not
     /// ripple is on. A dry run says what would go and changes nothing.
     #[serde(rename = "edit.ripple_delete_words")]
-    EditRippleDeleteWords { words: Vec<SpokenWord> },
+    EditRippleDeleteWords {
+        words: Vec<SpokenWord>,
+        /// Move each cut's edges to the quietest frame boundary within about
+        /// a tenth of a second, in the sound of the tracks heard there, so the
+        /// words beside a cut keep their starts and ends. Levels not measured
+        /// yet are measured first.
+        #[serde(default)]
+        quiet: bool,
+    },
     /// Detect Scene Cuts: split `clips` where their shots change.
     #[serde(rename = "edit.detect_scene_cuts")]
     EditDetectSceneCuts {

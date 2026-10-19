@@ -1644,6 +1644,51 @@ fn media_sound_plan(p: &Project, m: &Media, stream: u32) -> Result<RenderPlan> {
     Ok(plan)
 }
 
+const QUIET_REACH: f64 = 0.12;
+
+fn quiet_edges(p: &Project, env: &dyn Env, spans: &[(i64, i64)]) -> Result<Vec<(i64, i64)>> {
+    let fps = p.settings.fps;
+    let reach = ((fps.as_f64() * QUIET_REACH).round() as i64).max(1);
+    let solo = p.any_solo();
+    let mut sources = Vec::new();
+    for t in p.tracks.iter().filter(|t| t.audible(solo)) {
+        for c in &t.clips {
+            let Some(a) = &c.audio else { continue };
+            let near = spans
+                .iter()
+                .any(|&(s, e)| c.start <= e + reach && c.end() >= s - reach);
+            if c.is_block() || !near {
+                continue;
+            }
+            let m = p
+                .media(&c.media)
+                .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
+            let (_, origin) = p.media_origin(&c.media)?;
+            sources.push((
+                Span::of_clip(c, origin, fps),
+                env.audio_levels(m, a.stream)?,
+                a.gain_db,
+            ));
+        }
+    }
+    let heard: Vec<analysis::Heard> = sources
+        .iter()
+        .map(|(span, levels, gain_db)| analysis::Heard {
+            span,
+            levels,
+            gain_db: *gain_db,
+        })
+        .collect();
+    Ok(spans
+        .iter()
+        .map(|&(s, e)| {
+            let a = analysis::quietest(&heard, s, (s - reach).max(0)..=(s + reach).min(e - 1));
+            let b = analysis::quietest(&heard, e, (e - reach).max(a + 1)..=e + reach);
+            (a, b)
+        })
+        .collect())
+}
+
 fn transcript_json(stream: u32, s: &Speech) -> Value {
     json!({
         "stream": stream,
@@ -2834,7 +2879,7 @@ fn mutate(
                 "warnings": warnings,
             })
         }
-        Request::EditRippleDeleteWords { words } => {
+        Request::EditRippleDeleteWords { words, quiet } => {
             if words.is_empty() {
                 return Err(Error::usage("name the words to cut"));
             }
@@ -2844,6 +2889,10 @@ fn mutate(
                 let end = resolve(p, &w.end, playhead)?;
                 spans.push((start, end));
             }
+            let spans = match quiet {
+                true => quiet_edges(p, env, &spans)?,
+                false => spans,
+            };
             let removed = ops::cut_ranges(p, &spans)?;
             json!({
                 "removed": removed
