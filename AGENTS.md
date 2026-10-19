@@ -56,3 +56,7 @@ Each fact lives in one doc; the others link to it. The design docs name what a r
 - [docs/design/](docs/design/README.md): how vidcut is built, with charts; start there.
 - [docs/tools.md](docs/tools.md): debug and test tools; [docs/gotchas.md](docs/gotchas.md): FFmpeg, driver and library behavior vidcut works around.
 - [docs/roadmap.md](docs/roadmap.md): what comes next; [docs/todo/](docs/todo/): open work, one file per item.
+
+## Cloud agents
+
+Ubuntu 26.04's FFmpeg 8.0 is the one `pkg-config` finds. FFmpeg 8.1.3 and the newest release are already built at `/opt/ffmpeg/8.1` and `/opt/ffmpeg/9.0.2`. [docs/tools.md](docs/tools.md) says how `scripts/with-ffmpeg.sh` selects one.

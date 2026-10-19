@@ -7,6 +7,9 @@
 #   build-ffmpeg.sh release PREFIX   the release in release.env (official tarball, sha256 checked)
 #   build-ffmpeg.sh COMMIT PREFIX    a commit of FFmpeg's git (the master canary)
 #
+# VIDCUT_FFMPEG_VERSION names a COMMIT build. A shallow fetch has no tag,
+# so without it the version string is the commit.
+#
 # Afterwards: PKG_CONFIG_PATH=PREFIX/lib/pkgconfig, LD_LIBRARY_PATH=PREFIX/lib.
 set -euo pipefail
 
@@ -36,6 +39,9 @@ else
   cd src
   git fetch --quiet --depth 1 https://github.com/FFmpeg/FFmpeg.git "$source_ref"
   git checkout --quiet FETCH_HEAD
+  if [[ -n "${VIDCUT_FFMPEG_VERSION:-}" ]]; then
+    printf '%s\n' "$VIDCUT_FFMPEG_VERSION" > VERSION
+  fi
 fi
 
 # Ubuntu's FFmpeg (`ffmpeg -buildconf`) enables much more; these are the
