@@ -16,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 use serde_json::{Value, json};
 use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue};
 use vidcut_core::model::{Clip, Format};
+use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
     Client, ClientKind, Detect, DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget,
@@ -33,7 +34,7 @@ use crate::env::AvEnv;
 use crate::ipc::{self, Instance};
 use crate::paths;
 use crate::threads::Work;
-use player::Player;
+use player::{Player, skipped_to};
 use project::OpenProject;
 use workers::Workers;
 
@@ -265,6 +266,7 @@ pub(crate) enum Msg {
         result: Result<Response>,
     },
     Audition(Option<Audition>),
+    Skip(Option<Vec<ClipSpans>>),
     Shutdown,
 }
 
@@ -272,6 +274,7 @@ pub struct Audition {
     pub timeline: Box<Project>,
     pub at: i64,
     pub speed: f64,
+    pub skips: Option<Vec<(i64, i64)>>,
 }
 
 #[derive(Clone)]
@@ -307,6 +310,10 @@ impl Handle {
 
     pub fn audition(&self, audition: Option<Audition>) {
         let _ = self.tx.send(Msg::Audition(audition));
+    }
+
+    pub fn skip(&self, parts: Option<Vec<ClipSpans>>) {
+        let _ = self.tx.send(Msg::Skip(parts));
     }
 
     pub fn request_drag(&self, method: &str, params: Value) {
@@ -483,6 +490,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         tape: Arc::new(Vec::new()),
         tape_media: None,
         player,
+        skipping: None,
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
@@ -730,6 +738,7 @@ struct Live {
     tape: Arc<Vec<TapeEntry>>,
     tape_media: Option<String>,
     player: Player,
+    skipping: Option<Vec<ClipSpans>>,
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
@@ -882,6 +891,7 @@ impl Live {
                 reply,
             } => self.request(envelope, origin, project, reply),
             Msg::Audition(a) => changed = self.audition(a),
+            Msg::Skip(parts) => changed = self.set_skipping(parts),
             Msg::Picture => {
                 self.player.picture_landed();
                 self.present_due();
@@ -1359,6 +1369,7 @@ impl Live {
         let p = self.project.as_ref()?.project();
         let playhead = Some(self.player.position(TIMELINE));
         let (clips, sound, speech) = match &envelope.request {
+            Request::EditRippleDeleteSilence { parts: Some(_), .. } => return None,
             Request::EditRippleDeleteSilence { clips, detect, .. } => {
                 (clips.to_vec(), true, *detect == Detect::Speech)
             }
@@ -2077,7 +2088,7 @@ impl Live {
                         "speed must be non-zero, within ±{MAX_SPEED}"
                     ))));
                 }
-                self.player.play(speed);
+                self.play(speed);
                 Step::Now(Ok(self.state_response()))
             }
             Request::PlayerPause { viewer } => {
@@ -2094,7 +2105,7 @@ impl Live {
                 if self.player.playing() {
                     self.player.pause();
                 } else {
-                    self.player.play(1.0);
+                    self.play(1.0);
                 }
                 Step::Now(Ok(self.state_response()))
             }
@@ -2802,6 +2813,45 @@ impl Live {
         }
     }
 
+    fn play(&mut self, speed: f64) {
+        if !(self.viewer == ViewerMode::Timeline && self.play_skipping(speed)) {
+            self.player.play(speed);
+        }
+    }
+
+    fn play_skipping(&mut self, speed: f64) -> bool {
+        let (Some(parts), Some(open)) = (&self.skipping, &self.project) else {
+            return false;
+        };
+        let p = open.project();
+        let mut q = p.clone();
+        if vidcut_core::ops::remove_parts(&mut q, parts).is_err() {
+            return false;
+        }
+        let skips = vidcut_core::ops::removed_time(p, parts);
+        let at = skipped_to(&skips, self.player.position(TIMELINE));
+        self.audition(Some(Audition {
+            timeline: Box::new(q),
+            at,
+            speed,
+            skips: Some(skips),
+        }))
+    }
+
+    fn set_skipping(&mut self, parts: Option<Vec<ClipSpans>>) -> bool {
+        self.skipping = parts;
+        let skipping = self.player.skipping();
+        let starts = self.skipping.is_some()
+            && self.viewer == ViewerMode::Timeline
+            && !self.player.auditioning();
+        if self.player.playing() && (skipping || starts) {
+            let speed = self.player.snap(TIMELINE).speed;
+            self.play(speed);
+            return true;
+        }
+        skipping && self.player.end_audition().is_some()
+    }
+
     fn audition(&mut self, audition: Option<Audition>) -> bool {
         let Some(a) = audition else {
             return self.player.end_audition().is_some();
@@ -2811,10 +2861,12 @@ impl Live {
             return false;
         };
         let mut plan = self.preview_plan(plan);
-        plan.video = vec![render::VideoPiece::Black {
-            frames: plan.frames,
-        }];
-        self.player.audition(plan, a.at, a.speed).is_some()
+        if a.skips.is_none() {
+            plan.video = vec![render::VideoPiece::Black {
+                frames: plan.frames,
+            }];
+        }
+        self.player.audition(plan, a.at, a.speed, a.skips).is_some()
     }
 
     fn preview_plan(&self, mut plan: RenderPlan) -> RenderPlan {
