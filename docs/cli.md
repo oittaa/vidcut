@@ -125,7 +125,7 @@ The schema describes parameters, not results. Commonly read:
 | `proxy generate` | `proxies[]`: `media`, `path`, `made_with` (how it was decoded and encoded), `copies` |
 | `subtitles export` | `path`, `track`, `format`, `cues` (how many), `warnings` (an IMSC1 file's cues with more lines than their region holds) |
 | `subtitles transcribe` | `track`, `cues` (their ids), `from`, `to`, `heard` (the tracks heard that have sound), `model`, `device` (the GPU or `CPU`), `language`, `timing` (`words`, `phrases`, or `pauses` for a model without times), `pieces`, `longest_piece` (seconds), `warnings` |
-| `analyze words` | `words[]`: `text`, `start`, `end` (timeline frames), `joined` (no space before it). The rest as `subtitles transcribe`, without cues. A model that doesn't time words is an error. With `--media` or `--clips`, one entry for each: `media` or `clip` and `track`, `words[]` (source frames for a media), `model`, `language` |
+| `analyze words` | `words[]`: `text`, `start`, `end` (timeline frames), `joined` (no space before it). The rest as `subtitles transcribe`, without cues. A model that doesn't time words is an error. With `--media` (and `--stream`, else the first stream transcribed) or `--clips`, one entry for each: `media` or `clip` and `track`, `words[]` (source frames for a media), `model`, `language` |
 | `media transcribe` | `media[]`: `media`, `stream`, `model`, `device`, `language`, `timing`, `words` (how many), `warnings` |
 | `media leave-out` | `left_out`: the media's spans left out, after the change |
 | `edit ripple-delete-words` | `removed[]`: `start`, `end` (the spans taken out, touching ones joined), `frames` |

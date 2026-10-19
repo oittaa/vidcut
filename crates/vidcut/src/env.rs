@@ -299,6 +299,7 @@ impl Env for AvEnv {
         asked: &Asked,
     ) -> Result<Arc<Speech>> {
         let speech = self.transcribe(plan, asked)?;
+        vidcut_core::transcript::spoken(&speech).map_err(Error::invalid)?;
         let (file, origin) = transcript_file(media, stream);
         let bytes = serde_json::to_vec(&*speech).map_err(|e| Error::internal(e.to_string()))?;
         let part = file.with_extension("part");

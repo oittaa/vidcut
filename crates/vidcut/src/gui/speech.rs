@@ -375,6 +375,9 @@ impl Workspace {
                     }));
                     ui.add_space(4.0);
                     ui.label("Model");
+                    if transcribing && !s.model.times_words() {
+                        s.model = SpeechModel::default();
+                    }
                     for (i, (model, note)) in MODELS.iter().enumerate() {
                         let f = transcribe::file_of(*model);
                         let size = transcribe::size(f.bytes);
@@ -386,8 +389,14 @@ impl Workspace {
                             SpeechModel::ParakeetUltra => format!("{} (default)", f.title),
                             _ => f.title.to_string(),
                         };
+                        let usable = !transcribing || model.times_words();
                         ui.horizontal(|ui| {
-                            ui.radio_value(&mut s.model, *model, title);
+                            ui.add_enabled_ui(usable, |ui| {
+                                ui.radio_value(&mut s.model, *model, title)
+                                    .on_disabled_hover_text(
+                                        "It doesn't time each word, which cutting by words needs",
+                                    );
+                            });
                             ui.label(dim(have));
                         });
                         ui.indent(("speech-model-note", i), |ui| ui.label(dim(*note)));

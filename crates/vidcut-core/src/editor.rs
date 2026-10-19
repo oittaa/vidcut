@@ -4845,7 +4845,18 @@ pub fn query(
                 language: language.clone(),
                 download: *download,
             };
+            if model_file.is_none() && !asked.model.times_words() {
+                return Err(Error::invalid(format!(
+                    "{} doesn't time each word, and Transcribe Audio keeps only words \
+                     with their times: use parakeet-ultra",
+                    serde_json::to_value(asked.model)
+                        .ok()
+                        .and_then(|v| v.as_str().map(String::from))
+                        .unwrap_or_default()
+                )));
+            }
             let mut out = Vec::new();
+            let mut warnings = Vec::new();
             for id in media.to_vec() {
                 let m = p
                     .media(&id)
@@ -4870,12 +4881,14 @@ pub fn query(
                 v["media"] = json!(id);
                 v["device"] = json!(speech.device);
                 v["warnings"] = json!(speech.warnings);
+                warnings.extend(speech.warnings.iter().map(|w| format!("{}: {w}", m.name)));
                 out.push(v);
             }
-            json!({ "media": out })
+            json!({ "media": out, "warnings": warnings })
         }
         Request::AnalyzeWords {
             media,
+            stream,
             clips,
             range,
             tracks,
@@ -4896,7 +4909,12 @@ pub fn query(
                 for target in targets(p, media, clips, playhead, true)? {
                     let m = target.media(p)?;
                     let stream = match &target {
-                        Target::Media(_) => 0,
+                        Target::Media(m) => match stream {
+                            Some(s) => *s,
+                            None => (0..m.info.audio.len() as u32)
+                                .find(|s| env.transcript(m, *s).ok().flatten().is_some())
+                                .unwrap_or(0),
+                        },
                         Target::Clip(c) => c
                             .audio
                             .as_ref()

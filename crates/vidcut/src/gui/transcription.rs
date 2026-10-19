@@ -31,7 +31,7 @@ struct Asked {
     clips: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct Item {
     start: i64,
     end: i64,
@@ -191,7 +191,7 @@ fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Vec<Item> {
         {
             out.push(silence(end, w.start));
         }
-        last = Some(w.end);
+        last = Some(last.map_or(w.end, |end| end.max(w.end)));
         out.push(w);
     }
     if let (Some((_, b)), Some(end)) = (bounds, last)
@@ -415,9 +415,13 @@ impl Workspace {
             let items = answer
                 .map(|r| Arc::new(parse(&r.result, pause, bounds)))
                 .map_err(|e| e.message);
-            let same =
-                matches!((&t.shown, &items), (Some((a, Ok(_))), Ok(_)) if a.shown == asked.shown);
-            if !same || asked.shown == Shown::Timeline {
+            let keep = match (&t.shown, &items) {
+                (Some((a, Ok(old))), Ok(new)) if a.shown == asked.shown => {
+                    asked.shown != Shown::Timeline || old == new
+                }
+                _ => false,
+            };
+            if !keep {
                 t.selection = None;
                 t.anchor = None;
                 t.found = None;
@@ -895,6 +899,9 @@ impl Workspace {
                 }
                 if method != "edit.append" {
                     params["at"] = json!(format!("{at}f"));
+                }
+                if method == "edit.place_on_top" {
+                    params["use_marks"] = json!(false);
                 }
                 at += b - a;
                 json!({ "method": method, "params": params })
