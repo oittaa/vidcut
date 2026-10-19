@@ -11,6 +11,7 @@ mod help;
 mod history;
 mod import;
 mod mixer;
+mod onscreen;
 pub mod picture;
 mod pool;
 mod preferences;

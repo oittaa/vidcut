@@ -216,10 +216,10 @@ Ctrl+Z / Ctrl+Shift+Z, unlimited. Edit > History lists the last twenty steps, ne
 ### 8.14 Titles (pp. 762–764, 1176–1178)
 
 - **Adding** (pp. 762–763, 1176): title clips are dragged from the Titles browser onto either timeline like any clip, 5 s long by default (p. 763), and are moved, trimmed and superimposed like clips. vidcut: Add Title in Timeline Actions or the Timeline menu puts one at the playhead (deviation X52). Details: D65, D66.
-- **Editing** (pp. 763–764, 1176): double-clicking a title's text in the viewer edits it there, and the Video Inspector sets its fonts, colors, drop shadows and backgrounds (p. 764). vidcut: the Title window (X52).
+- **Editing** (pp. 763–764, 1176): double-clicking a title's text in the viewer edits it there, and the Video Inspector sets its fonts, colors, drop shadows and backgrounds (p. 764). Clicking the text in the viewer gives onscreen controls for its Position, Zoom and Rotation; dragging snaps to the frame's centre and thirds, Shift keeps to one axis and Option turns snapping off (pp. 763–764). vidcut: the Title window, which double-clicking a title in the viewer opens, and the viewer's controls (X52).
 - **Kinds** (p. 1178): L, M and R Lower 3rd put two lines at the bottom left, middle or right of title safe, which is 90% of the picture by default (p. 1178); Text is one body of text; Scroll moves its text from the bottom of the picture to the top, the clip's length setting its speed. vidcut has these five, with words styled apart by markup (X53), placed by a point in fractions of the picture (X54), a scroll's motion and line spacing its own (X55). Details: D65; in OTIO files, D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
-- **Out:** Text+ and Fusion titles (p. 1178); Transform, Cropping, Speed and Composite's blend modes on titles (pp. 763, 1176); the viewer's onscreen controls and their snapping (pp. 763–764); animation and keyframes; the Titles browser and Hover Scrub Preview (p. 762); safe area overlays (p. 1177). The rest: [todo/titles.md](todo/titles.md).
+- **Out:** Text+ and Fusion titles (p. 1178); Transform, Cropping, Speed and Composite's blend modes on titles (pp. 763, 1176); animation and keyframes; the Titles browser and Hover Scrub Preview (p. 762); safe area overlays (p. 1177). The rest: [todo/titles.md](todo/titles.md).
 
 ## 9. Audio (pp. 642, 649–650, 743, 771, 773)
 

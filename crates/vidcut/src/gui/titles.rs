@@ -126,6 +126,20 @@ impl TitleDialog {
     }
 }
 
+impl TitleDialog {
+    pub(super) fn clip(&self) -> &str {
+        &self.clip
+    }
+
+    pub(super) fn placed(&mut self, t: &Title) {
+        self.across = percent(t.position.map(|p| p[0]));
+        self.down = percent(t.position.map(|p| p[1]));
+        self.zoom = percent(t.zoom);
+        self.rotation = plain(t.rotation);
+        self.shown = None;
+    }
+}
+
 const SHADOW_INK: &str = "#000000";
 
 fn byte_at(text: &str, chars: usize) -> usize {
