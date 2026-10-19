@@ -14,11 +14,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{Value, json};
-use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue};
+use vidcut_core::editor::{Env, clip_parts, media_context, resolve_clip, resolve_cue};
 use vidcut_core::model::{Clip, Format};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    Client, ClientKind, Detect, DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget,
+    Client, ClientKind, ClipPart, Detect, DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget,
     TimelineOptions, TrimSide, ViewerMode,
 };
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
@@ -33,7 +33,7 @@ use crate::env::AvEnv;
 use crate::ipc::{self, Instance};
 use crate::paths;
 use crate::threads::Work;
-use player::Player;
+use player::{Player, skipped_to};
 use project::OpenProject;
 use workers::Workers;
 
@@ -272,6 +272,7 @@ pub struct Audition {
     pub timeline: Box<Project>,
     pub at: i64,
     pub speed: f64,
+    pub skips: Option<Vec<(i64, i64)>>,
 }
 
 #[derive(Clone)]
@@ -1359,6 +1360,7 @@ impl Live {
         let p = self.project.as_ref()?.project();
         let playhead = Some(self.player.position(TIMELINE));
         let (clips, sound, speech) = match &envelope.request {
+            Request::EditRippleDeleteSilence { parts: Some(_), .. } => return None,
             Request::EditRippleDeleteSilence { clips, detect, .. } => {
                 (clips.to_vec(), true, *detect == Detect::Speech)
             }
@@ -2067,7 +2069,11 @@ impl Live {
                 Ok(motion) => self.shown(motion),
                 Err(e) => Step::Now(Err(e)),
             },
-            Request::PlayerPlay { speed, viewer } => {
+            Request::PlayerPlay {
+                speed,
+                viewer,
+                without,
+            } => {
                 if let Some(v) = viewer {
                     self.set_viewer(v);
                 }
@@ -2076,6 +2082,12 @@ impl Live {
                     return Step::Now(Err(Error::usage(format!(
                         "speed must be non-zero, within ±{MAX_SPEED}"
                     ))));
+                }
+                if let Some(parts) = without {
+                    return Step::Now(
+                        self.play_without(&parts, speed)
+                            .map(|_| self.state_response()),
+                    );
                 }
                 self.player.play(speed);
                 Step::Now(Ok(self.state_response()))
@@ -2802,6 +2814,31 @@ impl Live {
         }
     }
 
+    fn play_without(&mut self, parts: &[ClipPart], speed: f64) -> Result<()> {
+        let p = self
+            .project
+            .as_ref()
+            .ok_or_else(no_project)?
+            .project()
+            .clone();
+        let playhead = self.player.position(TIMELINE);
+        let parts = clip_parts(&p, parts, Some(playhead))?;
+        let mut q = p.clone();
+        vidcut_core::ops::remove_parts(&mut q, &parts)?;
+        let skips = vidcut_core::ops::removed_time(&p, &parts);
+        self.set_viewer(ViewerMode::Timeline);
+        let played = self.audition(Some(Audition {
+            timeline: Box::new(q),
+            at: skipped_to(&skips, playhead),
+            speed,
+            skips: Some(skips),
+        }));
+        match played {
+            true => Ok(()),
+            false => Err(Error::invalid("the timeline isn't loaded in the player")),
+        }
+    }
+
     fn audition(&mut self, audition: Option<Audition>) -> bool {
         let Some(a) = audition else {
             return self.player.end_audition().is_some();
@@ -2811,10 +2848,12 @@ impl Live {
             return false;
         };
         let mut plan = self.preview_plan(plan);
-        plan.video = vec![render::VideoPiece::Black {
-            frames: plan.frames,
-        }];
-        self.player.audition(plan, a.at, a.speed).is_some()
+        if a.skips.is_none() {
+            plan.video = vec![render::VideoPiece::Black {
+                frames: plan.frames,
+            }];
+        }
+        self.player.audition(plan, a.at, a.speed, a.skips).is_some()
     }
 
     fn preview_plan(&self, mut plan: RenderPlan) -> RenderPlan {

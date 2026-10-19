@@ -26,6 +26,8 @@ vidcut-core reaches media only through the `Env` trait. `AvEnv` implements it on
 | `analyze.loudness` | `Env::loudness` of the flattened timeline | none |
 | `timeline.boring` | none: clip lengths | `analysis::boring` |
 
+Given `parts`, `edit.ripple_delete_silence` measures nothing: it checks that each part lies inside its clip and apart from the clip's others, and cuts them (`editor::clip_parts` checks the same for `player.play`'s `without`).
+
 ## Speech
 
 Ripple Delete Silence with `detect: speech` cuts what isn't speech. vidcut-av's `transcribe::voice_activity` mixes one audio stream in one channel at 16 kHz through `AudioMix`, as transcription listens (`listen`), and feeds it to the built-in Silero VAD on the CPU in pieces. `VoiceActivity` keeps its speech probability for each of the VAD's frames (32 ms). `analysis::non_speech` finds the speech in the clip's part of them by Silero's own rule, which transcribe.cpp ports: speech starts at a frame at or above the threshold, and ends at a frame more than 0.15 below it when no frame reaches the threshold again within Minimum to Trip; speech no longer than Shortest Speech doesn't count. What lies between is cut, less Pre Head and Post Tail, as for silence (`analysis::silent_parts`).

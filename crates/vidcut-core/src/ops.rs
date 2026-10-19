@@ -760,7 +760,9 @@ pub fn split_clip(p: &mut Project, id: &str, at: &[i64]) -> Result<Vec<String>> 
     Ok(created)
 }
 
-pub fn remove_parts(p: &mut Project, parts: &[(String, Vec<(i64, i64)>)]) -> Result<Vec<String>> {
+pub type ClipSpans = (String, Vec<(i64, i64)>);
+
+pub fn remove_parts(p: &mut Project, parts: &[ClipSpans]) -> Result<Vec<String>> {
     let mut doomed = Vec::new();
     for (id, spans) in parts {
         let edges: Vec<i64> = spans.iter().flat_map(|&(a, b)| [a, b]).collect();
@@ -777,6 +779,30 @@ pub fn remove_parts(p: &mut Project, parts: &[(String, Vec<(i64, i64)>)]) -> Res
         delete_clips(p, &doomed, true)?;
     }
     Ok(doomed)
+}
+
+pub fn removed_time(p: &Project, parts: &[ClipSpans]) -> Vec<(i64, i64)> {
+    let main = &p.tracks[main_index(p)];
+    let mut spans: Vec<(i64, i64)> = parts
+        .iter()
+        .filter(|(id, _)| main.clips.iter().any(|c| &c.id == id))
+        .flat_map(|(_, spans)| spans.iter().copied())
+        .chain(
+            parts
+                .iter()
+                .flat_map(|(_, spans)| spans.iter().copied())
+                .filter(|&(a, _)| main_empty_from(p, a)),
+        )
+        .collect();
+    spans.sort_unstable();
+    let mut out: Vec<(i64, i64)> = Vec::new();
+    for (a, b) in spans {
+        match out.last_mut() {
+            Some(last) if a <= last.1 => last.1 = last.1.max(b),
+            _ => out.push((a, b)),
+        }
+    }
+    out
 }
 
 pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {

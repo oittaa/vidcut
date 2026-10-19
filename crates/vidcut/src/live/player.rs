@@ -47,6 +47,7 @@ pub struct Player {
     presenting: Option<Presenting>,
     landed: bool,
     auditioning: bool,
+    skips: Option<Vec<(i64, i64)>>,
     looping: (bool, Option<(i64, i64)>),
     muted: bool,
     scrubbing: bool,
@@ -83,6 +84,7 @@ impl Player {
             presenting: None,
             landed: false,
             auditioning: false,
+            skips: None,
             looping: (false, None),
             muted: false,
             scrubbing: true,
@@ -113,6 +115,9 @@ impl Player {
 
     pub fn position(&self, id: PlayerId) -> i64 {
         let c = &self.contents[id.index()];
+        if let (Some(skips), Some(e)) = (&self.skips, self.engine_of(id)) {
+            return unskipped(skips, e.status().position).clamp(0, c.frames.max(0));
+        }
         match self.engine_of(id).filter(|_| !self.auditioning) {
             Some(e) => e.status().position.clamp(0, c.frames.max(0)),
             None => c.position,
@@ -280,7 +285,13 @@ impl Player {
         engine.prepare(other.plan.clone().map(|p| (p, other.position)));
     }
 
-    pub fn audition(&mut self, mut plan: RenderPlan, at: i64, speed: f64) -> Option<u64> {
+    pub fn audition(
+        &mut self,
+        mut plan: RenderPlan,
+        at: i64,
+        speed: f64,
+        skips: Option<Vec<(i64, i64)>>,
+    ) -> Option<u64> {
         if self.active != PlayerId::Timeline || (plan.sample_rate, plan.channels) != self.format {
             return None;
         }
@@ -292,6 +303,7 @@ impl Player {
         }
         with_end(&mut plan);
         let at = at.clamp(0, plan.frames - 1);
+        self.skips = skips;
         if engine.set_plan_at(plan, at).is_err() {
             return self.end_audition();
         }
@@ -307,6 +319,12 @@ impl Player {
         }
         if let Some(e) = self.shown_engine() {
             e.pause();
+        }
+        if let Some(skips) = self.skips.take()
+            && let Some(at) = self.shown_engine().map(|e| e.status().position)
+        {
+            let c = &mut self.contents[PlayerId::Timeline.index()];
+            c.position = unskipped(&skips, at).clamp(0, c.frames.max(0));
         }
         let at = self.contents[PlayerId::Timeline.index()].position;
         let shown = self.play_shown(Some(at));
@@ -341,6 +359,7 @@ impl Player {
     pub fn unload(&mut self, id: PlayerId) {
         if id == PlayerId::Timeline {
             self.auditioning = false;
+            self.skips = None;
         }
         self.contents[id.index()] = Content::default();
         if !self.is_loaded(id.other()) {
@@ -647,4 +666,27 @@ fn with_end(plan: &mut RenderPlan) {
     }
     plan.frames += 1;
     plan.range.1 += 1;
+}
+
+pub fn skipped_to(skips: &[(i64, i64)], frame: i64) -> i64 {
+    let mut out = frame;
+    for &(a, b) in skips {
+        if b <= frame {
+            out -= b - a;
+        } else if a <= frame {
+            out -= frame - a;
+        }
+    }
+    out
+}
+
+pub fn unskipped(skips: &[(i64, i64)], frame: i64) -> i64 {
+    let mut out = frame;
+    for &(a, b) in skips {
+        if a > out {
+            break;
+        }
+        out += b - a;
+    }
+    out
 }

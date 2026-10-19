@@ -763,8 +763,11 @@ impl Workspace {
             }
         }
 
+        let on_stripe = self.timeline.drag.is_none()
+            && self.stripe_hover(ui, &p, &layout.lower, &layout.lower_scale);
         if self.timeline.drag.is_none()
             && before.is_none()
+            && !on_stripe
             && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
         {
             for (rows, scale, area) in [
@@ -873,14 +876,19 @@ impl Workspace {
             if swallowed {
                 continue;
             }
-            if resp.drag_started() {
+            let striped =
+                !is_upper && self.stripe_press(ui, resp, &p, &layout.lower, &layout.lower_scale);
+            if resp.drag_started() && !striped {
                 self.start_drag(ui, &p, is_upper, &layout);
             }
             self.wheel(ui, resp, &p, is_upper, &layout, now);
-            self.clicks(ui, resp, &p, is_upper, &layout);
+            if !striped {
+                self.clicks(ui, resp, &p, is_upper, &layout);
+            }
         }
         self.end_swipe(ui.ctx(), now);
         self.run_drag(ui, &p, &layout, now);
+        self.stripe_drag(ui, &p, &layout.lower_scale);
         if let Some(d) = &self.timeline.drag {
             let (rows, scale) = if d.upper {
                 (&layout.upper, &layout.upper_scale)
@@ -2161,6 +2169,7 @@ impl Workspace {
         if pressed(Key::W) && !input.modifiers.command {
             self.toggle_dynamic();
         }
+        self.silence_keys(input);
     }
 
     pub(crate) fn nudge_edit(&mut self, side: Side, by: i64) {

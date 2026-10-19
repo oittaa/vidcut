@@ -535,10 +535,18 @@ pub enum Request {
     EditSlide { clip: ClipRef, by: TimeSpec },
     /// Ripple Delete Silence: cut the silent parts out of `clips` and close the
     /// gaps, as one undo step. `dry_run` reports the parts without cutting (the
-    /// red stripes).
+    /// red stripes, `removed`). `parts` cuts a list of them instead, edited
+    /// as the stripes are (deviation X48): the dry run's `removed` with
+    /// parts left out to keep them and `start` or `end` moved to trim them.
     #[serde(rename = "edit.ripple_delete_silence")]
     EditRippleDeleteSilence {
         clips: OneOrMany<ClipRef>,
+        /// Cut exactly these parts and find none: each `start..end`
+        /// (timeline frames, `end` excluded) inside its `clip`, one of
+        /// `clips`, and parts of a clip apart. `detect` and its settings are
+        /// then unused.
+        #[serde(default)]
+        parts: Option<Vec<ClipPart>>,
         /// What counts as silence.
         #[serde(default)]
         detect: Detect,
@@ -1146,6 +1154,12 @@ pub enum Request {
         speed: Option<f64>,
         #[serde(default)]
         viewer: Option<ViewerMode>,
+        /// Play the timeline, from the playhead, as `edit.ripple_delete_silence`
+        /// with these `parts` would leave it, changing nothing (what Ripple
+        /// Delete Silence's Play does, deviation X48): the playhead skips
+        /// them. A pause or a seek ends it.
+        #[serde(default)]
+        without: Option<Vec<ClipPart>>,
     },
     #[serde(rename = "player.pause")]
     PlayerPause {
@@ -1543,6 +1557,15 @@ pub enum SubtitleFormat {
     Vtt,
     /// TTML, written as IMSC1 (`.ttml`).
     Ttml,
+}
+
+/// A part of a clip Ripple Delete Silence cuts: timeline frames
+/// `start..end`, `end` excluded.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ClipPart {
+    pub clip: ClipRef,
+    pub start: TimeSpec,
+    pub end: TimeSpec,
 }
 
 /// What Ripple Delete Silence counts as silence (deviation X47).
