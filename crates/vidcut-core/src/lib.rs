@@ -51,4 +51,6 @@ mod test_support;
 #[cfg(test)]
 mod tracks_tests;
 #[cfg(test)]
+mod transcript_cut_tests;
+#[cfg(test)]
 mod versions_tests;

@@ -839,6 +839,36 @@ pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
     Ok(())
 }
 
+pub fn cut_ranges(p: &mut Project, spans: &[(i64, i64)]) -> Result<Vec<(i64, i64)>> {
+    if spans.is_empty() {
+        return Err(Error::usage("name the words to cut"));
+    }
+    let mut spans = spans.to_vec();
+    spans.sort_unstable();
+    let mut merged: Vec<(i64, i64)> = Vec::new();
+    for (s, e) in spans {
+        if e <= s {
+            return Err(Error::invalid("a word ends at or before it starts"));
+        }
+        if let Some((_, b)) = merged.last_mut()
+            && s <= *b
+        {
+            *b = (*b).max(e);
+        } else {
+            merged.push((s, e));
+        }
+    }
+    let saved = p.settings.ripple_on;
+    p.settings.ripple_on = true;
+    let cut = merged
+        .iter()
+        .rev()
+        .try_for_each(|&(s, e)| delete_range(p, s, e, false));
+    p.settings.ripple_on = saved;
+    cut?;
+    Ok(merged)
+}
+
 pub fn delete_range(p: &mut Project, a: i64, b: i64, lift: bool) -> Result<()> {
     if a >= b {
         return Err(Error::usage(format!("empty range {a}..{b}")));

@@ -79,10 +79,15 @@ pub fn print(method: &str, r: &Response, json: bool) {
             if let Some(frames) = r.result.get("frames") {
                 println!("  removed  {frames} frames in {} parts", removed.len());
                 for part in removed {
+                    let at = |tc: &str, frame: &str| {
+                        part[tc]
+                            .as_str()
+                            .map_or_else(|| format!("{}f", part[frame]), String::from)
+                    };
                     println!(
                         "    {} -> {}  {}",
-                        part["start_tc"].as_str().unwrap_or_default(),
-                        part["end_tc"].as_str().unwrap_or_default(),
+                        at("start_tc", "start"),
+                        at("end_tc", "end"),
                         part["clip"].as_str().unwrap_or_default()
                     );
                 }
@@ -591,6 +596,39 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     println!("  {how}");
                 }
                 print_copies(&p["copies"]);
+            }
+        }
+        "analyze.words" => {
+            let v = &r.result;
+            for w in v["warnings"].as_array().into_iter().flatten() {
+                eprintln!("vidcut: warning: {}", w.as_str().unwrap_or_default());
+            }
+            let words = v["words"].as_array().map_or(0, Vec::len);
+            println!(
+                "{words} word(s), {} on {}, language {}",
+                v["model"].as_str().unwrap_or_default(),
+                v["device"].as_str().unwrap_or_default(),
+                v["language"].as_str().unwrap_or("not told")
+            );
+            for w in v["words"].as_array().into_iter().flatten() {
+                println!(
+                    "  {}f–{}f  {}",
+                    w["start"],
+                    w["end"],
+                    w["text"].as_str().unwrap_or_default()
+                );
+            }
+        }
+        "edit.ripple_delete_words" => {
+            let verb = if r.dry_run { "would cut" } else { "cut" };
+            println!(
+                "{verb} {} frame(s) in {} span(s) (rev {})",
+                r.result["frames"],
+                r.result["removed"].as_array().map_or(0, Vec::len),
+                r.rev
+            );
+            for part in r.result["removed"].as_array().into_iter().flatten() {
+                println!("  {}f–{}f", part["start"], part["end"]);
             }
         }
         "subtitles.transcribe" => {

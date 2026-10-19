@@ -195,6 +195,14 @@ pub fn describe_at(
         "subtitles.join" => format!("Join {}", d.cues("cues")),
         "subtitles.import" => format!("Import subtitles {}", d.file("path")),
         "subtitles.export" => format!("Export subtitles to {}", d.file("out")),
+        "analyze.words" if d.params["range"].is_string() => {
+            format!("Words in {}", d.range("range"))
+        }
+        "analyze.words" => "Words in the speech".into(),
+        "edit.ripple_delete_words" => format!(
+            "Ripple Delete {} word(s)",
+            d.params["words"].as_array().map_or(0, Vec::len)
+        ),
         "subtitles.transcribe" if d.params["range"].is_string() => {
             format!("Create Subtitles from Audio in {}", d.range("range"))
         }

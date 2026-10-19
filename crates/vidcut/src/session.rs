@@ -209,7 +209,7 @@ pub fn run_with(
                 Request::ProxyGenerate { .. } if !envelope.dry_run => {
                     work_first(&store, &envelope, &env, hooks, "vidcut-proxies")?;
                 }
-                Request::SubtitlesTranscribe { .. } => {
+                Request::SubtitlesTranscribe { .. } | Request::AnalyzeWords { .. } => {
                     work_first(&store, &envelope, &env, hooks, "vidcut-transcribe")?;
                 }
                 Request::SubtitlesRetime { .. } => {

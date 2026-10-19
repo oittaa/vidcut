@@ -100,7 +100,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
 const GROUPS: &[(&str, &str)] = &[
     (
         "analyze",
-        "Measure media or clips: silences, shots, black, loudness",
+        "Measure media or clips: silences, shots, black, loudness, the words said",
     ),
     ("bins", "Media Pool bins"),
     ("clip", "Clip properties"),
