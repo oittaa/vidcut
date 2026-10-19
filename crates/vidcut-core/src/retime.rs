@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
@@ -41,6 +41,14 @@ pub struct LinedUp {
     pub clarity: Option<f64>,
     pub clear: bool,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unlined {
+    Silent,
+    Throughout,
+}
+
+pub type Lined = Result<LinedUp, Unlined>;
 
 struct Ramps {
     lo: f64,
@@ -176,15 +184,18 @@ pub fn line_up(
     extent: (f64, f64),
     cues: &[(f64, f64)],
     max_offset: f64,
-) -> Option<LinedUp> {
+) -> Lined {
     let len = extent.1 - extent.0;
     let spoken: f64 = speech
         .iter()
         .map(|&(a, b)| b.min(extent.1) - a.max(extent.0))
         .filter(|d| *d > 0.0)
         .sum();
-    if cues.is_empty() || len <= 0.0 || spoken <= 0.0 || spoken >= len {
-        return None;
+    if cues.is_empty() || len <= 0.0 || spoken <= 0.0 {
+        return Err(Unlined::Silent);
+    }
+    if spoken >= len {
+        return Err(Unlined::Throughout);
     }
     let mean = spoken / len;
     let shows = Shows {
@@ -225,7 +236,7 @@ pub fn line_up(
         .unwrap_or(0);
     let j = rival(&curve, k);
     let (peak, other) = (curve[k], curve[j]);
-    Some(LinedUp {
+    Ok(LinedUp {
         offset: shows.shift(k),
         speed,
         ratio,
@@ -368,15 +379,16 @@ pub fn anchors(cues: &[String], words: &[Spoken]) -> Vec<Anchor> {
         }
     }
     let mut found: HashMap<usize, Anchor> = HashMap::new();
-    let mut ends: HashMap<usize, f64> = HashMap::new();
     for (i, j, k) in blocks(&a, &b) {
         if k < RUN {
             continue;
         }
+        let mut begun = HashSet::new();
         for m in 0..k {
             let (cue, first, last) = of[i + m];
             let (start, end) = times[j + m];
             if first {
+                begun.insert(cue);
                 found.insert(
                     cue,
                     Anchor {
@@ -386,18 +398,16 @@ pub fn anchors(cues: &[String], words: &[Spoken]) -> Vec<Anchor> {
                     },
                 );
             }
-            if last {
-                ends.insert(cue, end);
+            if last
+                && begun.contains(&cue)
+                && let Some(x) = found.get_mut(&cue)
+                && end > x.start
+            {
+                x.end = Some(end);
             }
         }
     }
-    let mut out: Vec<Anchor> = found
-        .into_values()
-        .map(|mut x| {
-            x.end = ends.get(&x.cue).copied().filter(|&e| e > x.start);
-            x
-        })
-        .collect();
+    let mut out: Vec<Anchor> = found.into_values().collect();
     out.sort_by_key(|x| x.cue);
     out
 }

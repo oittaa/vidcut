@@ -915,8 +915,8 @@ pub enum Request {
     /// answer says how clearly the best offset stands out from the next
     /// best more than 2 s away; when it isn't 1.25 times as high, nothing
     /// moves and the error gives the numbers. With `words`, Parakeet Ultra
-    /// also hears the speech, and the cues whose first word starts a run of
-    /// 3 or more words it heard check the result. Then the simplest
+    /// also hears the speech, and the cues whose first word is in a run of 3
+    /// or more words matching what it heard check the result. Then the simplest
     /// correction that puts 90% of them within 0.5 s of their words wins:
     /// one offset, an offset and a speed, an offset for each section between
     /// jumps, or else each of those cues moved to its words. A dry run

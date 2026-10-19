@@ -5098,7 +5098,19 @@ fn signed(secs: f64) -> String {
     format!("{secs:+.2} s")
 }
 
-fn unclear(track: &str, lined: Option<&retime::LinedUp>, matched: Option<usize>) -> Error {
+fn unheard(track: &str, why: retime::Unlined) -> String {
+    match why {
+        retime::Unlined::Silent => {
+            format!("no speech was heard on the timeline to line {track}'s cues up with")
+        }
+        retime::Unlined::Throughout => format!(
+            "the timeline's speech runs from its start to its end, without a pause to line \
+             {track}'s cues up with"
+        ),
+    }
+}
+
+fn unclear(track: &str, lined: &retime::Lined, matched: Option<usize>) -> Error {
     let words = match matched {
         Some(n) => format!(
             "; only {n} cue(s) matched the words heard, {} needed",
@@ -5107,8 +5119,11 @@ fn unclear(track: &str, lined: Option<&retime::LinedUp>, matched: Option<usize>)
         None => "; `words` may match them by their words".into(),
     };
     Error::invalid(match lined {
-        None => format!("no speech was heard on the timeline to line {track}'s cues up with"),
-        Some(l) => format!(
+        Err(retime::Unlined::Silent) if matched.is_none() => {
+            unheard(track, retime::Unlined::Silent)
+        }
+        Err(why) => format!("{}. Nothing moved{words}", unheard(track, *why)),
+        Ok(l) => format!(
             "the speech doesn't line up clearly with {track}'s cues: the best offset, {}, scores \
              {:.3}, and the next best, {}, {:.3}: {} times as high, where {} is needed. Nothing \
              moved{words}",
@@ -5179,7 +5194,7 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
     }
     let speech = heard_speech(p, env)?;
     let lined = retime::line_up(&speech, (0.0, p.end() as f64 / fps), &cues, max);
-    let clear = lined.filter(|l| l.clear);
+    let clear = lined.ok().filter(|l| l.clear);
     let mut warnings = Vec::new();
     let mut words = Value::Null;
     let mut chosen_errors = None;
@@ -5203,8 +5218,9 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
         let anchors = retime::anchors(&texts, &retime::spoken(&heard.said));
         let levels = retime::levels(&cues, &anchors);
         let matched: HashSet<usize> = anchors.iter().map(|a| a.cue).collect();
-        let checked =
-            lined.and_then(|l| retime::errors(&retime::Plan::lined(&l, &cues), &cues, &anchors));
+        let checked = lined
+            .ok()
+            .and_then(|l| retime::errors(&retime::Plan::lined(&l, &cues), &cues, &anchors));
         let enough = anchors.len() >= retime::MIN_ANCHORS;
         let chosen = levels
             .iter()
@@ -5229,6 +5245,12 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
         });
         match (enough, clear) {
             (true, _) => {
+                if let Err(why) = lined {
+                    warnings.push(format!(
+                        "{}: the words alone placed them",
+                        unheard(&id, why)
+                    ));
+                }
                 chosen_errors = Some(levels[chosen].errors);
                 levels[chosen].plan.clone()
             }
@@ -5239,12 +5261,12 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
                 ));
                 retime::Plan::lined(&l, &cues)
             }
-            (false, None) => return Err(unclear(&id, lined.as_ref(), Some(anchors.len()))),
+            (false, None) => return Err(unclear(&id, &lined, Some(anchors.len()))),
         }
     } else {
         match clear {
             Some(l) => retime::Plan::lined(&l, &cues),
-            None => return Err(unclear(&id, lined.as_ref(), None)),
+            None => return Err(unclear(&id, &lined, None)),
         }
     };
     let old: Vec<(String, i64, i64)> = p.subtitles[ti]
@@ -5287,7 +5309,7 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
     Ok(json!({
         "track": id,
         "cues": cues.len(),
-        "speech": lined.map(|l| json!({
+        "speech": lined.ok().map(|l| json!({
             "offset": rounded(l.offset),
             "speed": l.speed,
             "ratio": l.ratio,
