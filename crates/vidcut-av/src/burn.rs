@@ -547,6 +547,7 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
     let bottom = match t.kind {
         TitleKind::Text => y,
         TitleKind::LowerThird => y + t.text_fraction() * SubtitleStyle::LINE * (zoom - 1.0),
+        TitleKind::Scroll => 1.0,
     };
     let left = (x * w) as f32 - across as f32 * look.wrap;
     let top = (bottom * h) as f32 - down as f32 * lines;
@@ -828,6 +829,7 @@ fn layout(pixel: format::Pixel) -> Result<Layout> {
 
 fn visit(
     sprites: &[Sprite],
+    (dx, dy): (i32, i32),
     (w, h): (i32, i32),
     c: &Comp,
     coding: &Coding,
@@ -835,16 +837,20 @@ fn visit(
 ) {
     let (sw, sh) = (1i32 << c.log2w, 1i32 << c.log2h);
     for s in sprites {
-        let x0 = s.x.max(0) / sw;
-        let y0 = s.y.max(0) / sh;
-        let x1 = ((s.x + s.width as i32).min(w) + sw - 1) / sw;
-        let y1 = ((s.y + s.height as i32).min(h) + sh - 1) / sh;
+        let (sx0, sy0) = (s.x + dx, s.y + dy);
+        let x0 = sx0.max(0) / sw;
+        let y0 = sy0.max(0) / sh;
+        let x1 = ((sx0 + s.width as i32).min(w) + sw - 1) / sw;
+        let y1 = ((sy0 + s.height as i32).min(h) + sh - 1) / sh;
+        if x1 <= x0 || y1 <= y0 {
+            continue;
+        }
         for cy in y0..y1 {
             for cx in x0..x1 {
                 let (mut a, mut rgb, mut n) = (0.0f32, [0.0f32; 3], 0.0f32);
                 for y in cy * sh..(cy * sh + sh).min(h) {
                     for x in cx * sw..(cx * sw + sw).min(w) {
-                        let p = s.at(x, y);
+                        let p = s.at(x - dx, y - dy);
                         a += p[3];
                         for i in 0..3 {
                             rgb[i] += p[i] * p[3];
@@ -893,7 +899,7 @@ fn mask(c: &Comp) -> u32 {
     }
 }
 
-pub(crate) fn blend(f: &mut frame::Video, sprites: &[Sprite]) -> Result<()> {
+pub(crate) fn blend_at(f: &mut frame::Video, sprites: &[Sprite], shift: (i32, i32)) -> Result<()> {
     let layout = layout(f.format())?;
     // SAFETY: a live frame.
     let ret = unsafe { ffi::av_frame_make_writable(f.as_mut_ptr()) };
@@ -912,7 +918,7 @@ pub(crate) fn blend(f: &mut frame::Video, sprites: &[Sprite]) -> Result<()> {
             let raw = f.as_mut_ptr();
             ((*raw).data[c.plane], (*raw).linesize[c.plane] as isize)
         };
-        visit(sprites, size, c, &coding, |x, y, target, a| {
+        visit(sprites, shift, size, c, &coding, |x, y, target, a| {
             // SAFETY: `visit` keeps `x` and `y` inside the component's plane.
             unsafe {
                 let row = data.offset(y as isize * stride);
@@ -932,6 +938,7 @@ pub(crate) fn overlay(
     pixel: format::Pixel,
     like: &frame::Video,
     sprites: &[Sprite],
+    shift: (i32, i32),
 ) -> Result<(frame::Video, frame::Video)> {
     let layout = layout(pixel)?;
     let (w, h) = (like.width(), like.height());
@@ -957,6 +964,7 @@ pub(crate) fn overlay(
             |old: u32, v: f32| (old & !mask) | (((v.round().max(0.0) as u32) << c.shift) & mask);
         visit(
             sprites,
+            shift,
             (w as i32, h as i32),
             c,
             &coding,

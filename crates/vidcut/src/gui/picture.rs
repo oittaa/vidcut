@@ -458,13 +458,13 @@ impl Letters {
         }
     }
 
-    fn place(&self, gpu: &Gpu, size: (u32, u32)) {
+    fn place(&self, gpu: &Gpu, size: (u32, u32), dy: i32) {
         let p = &self.picture;
         let (fw, fh) = (f64::from(p.frame.0.max(1)), f64::from(p.frame.1.max(1)));
         let (sx, sy) = (f64::from(size.0) / fw, f64::from(size.1) / fh);
         let place = [
             f64::from(p.left) * sx,
-            f64::from(p.top) * sy,
+            f64::from(p.top + dy) * sy,
             f64::from(p.width) * sx,
             f64::from(p.height) * sy,
         ];
@@ -480,7 +480,7 @@ fn same_titles(a: &[TitleOver], b: &[TitleOver]) -> bool {
     a.len() == b.len()
         && a.iter()
             .zip(b)
-            .all(|(x, y)| x.above == y.above && Arc::ptr_eq(&x.picture, &y.picture))
+            .all(|(x, y)| x.above == y.above && x.dy == y.dy && Arc::ptr_eq(&x.picture, &y.picture))
 }
 
 #[derive(Default)]
@@ -619,7 +619,11 @@ impl Screen {
             }
         }
         for l in &self.letters {
-            l.place(gpu, size);
+            let dy = titles
+                .iter()
+                .find(|t| Arc::ptr_eq(&t.picture, &l.picture))
+                .map_or(0, |t| t.dy);
+            l.place(gpu, size, dy);
         }
         let target = self.target.as_ref().expect("made above");
         {

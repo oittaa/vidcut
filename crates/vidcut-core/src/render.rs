@@ -63,8 +63,49 @@ pub enum VideoPiece {
     /// a mix.
     Titled {
         under: Box<VideoPiece>,
-        titles: Vec<Title>,
+        titles: Vec<ShownTitle>,
     },
+}
+
+/// A title of a [`VideoPiece::Titled`], with where its clip's frames are
+/// when it moves.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ShownTitle {
+    pub title: Title,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<Run>,
+}
+
+/// Where a piece is in a moving title's clip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Run {
+    /// Frames of the clip before the piece's first.
+    pub at: i64,
+    /// The clip's length in frames.
+    pub of: i64,
+}
+
+impl Run {
+    pub fn after(&self, k: i64) -> Self {
+        Self {
+            at: self.at + k,
+            ..*self
+        }
+    }
+
+    pub fn top(&self, k: i64, picture: f64, tall: f64) -> f64 {
+        let t = ((self.at + k) as f64 + 0.5) / self.of.max(1) as f64;
+        picture - t * (picture + tall)
+    }
+}
+
+impl ShownTitle {
+    pub fn after(&self, k: i64) -> Self {
+        Self {
+            title: self.title.clone(),
+            run: self.run.map(|r| r.after(k)),
+        }
+    }
 }
 
 /// A picture over the others of a [`VideoPiece::Mix`], at a level its
@@ -248,7 +289,7 @@ impl VideoPiece {
         }
     }
 
-    pub fn titles(&self) -> Vec<(usize, &Title)> {
+    pub fn titles(&self) -> Vec<(usize, &ShownTitle)> {
         match self {
             Self::Mix { under, .. } => under.titles(),
             Self::Titled { under, titles } => {
@@ -276,7 +317,7 @@ impl VideoPiece {
         }
     }
 
-    fn with_title(self, t: Title) -> VideoPiece {
+    fn with_title(self, t: ShownTitle) -> VideoPiece {
         match self {
             Self::Titled { under, mut titles } => {
                 titles.push(t);
@@ -325,7 +366,7 @@ impl VideoPiece {
             },
             Self::Titled { under, titles } => Self::Titled {
                 under: Box::new(under.part(k, frames)),
-                titles: titles.clone(),
+                titles: titles.iter().map(|t| t.after(k)).collect(),
             },
         }
     }
@@ -371,7 +412,10 @@ impl VideoPiece {
                     under: u2,
                     titles: t2,
                 },
-            ) => titles == t2 && under.goes_on_as(u2),
+            ) => {
+                let k = self.frames();
+                titles.iter().map(|t| t.after(k)).eq(t2.iter().cloned()) && under.goes_on_as(u2)
+            }
             _ => false,
         }
     }
@@ -672,7 +716,7 @@ pub(crate) fn paced(
 
 enum Layer {
     Picture(VideoPiece, Option<Ramp>),
-    Title(Title),
+    Title(ShownTitle),
 }
 
 pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
@@ -772,13 +816,17 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                     }
                 }
             }
-            if let Some(title) = t
+            if let Some((c, title)) = t
                 .clip_covering(x)
                 .map(|ci| &t.clips[ci])
                 .filter(|c| titled(t, c))
-                .and_then(|c| c.title.clone())
+                .and_then(|c| Some((c, c.title.clone()?)))
             {
-                stack.push(Layer::Title(title));
+                let run = title.moves().then(|| Run {
+                    at: x - c.start,
+                    of: c.duration,
+                });
+                stack.push(Layer::Title(ShownTitle { title, run }));
             }
         }
         let mut piece = VideoPiece::Black { frames: y - x };

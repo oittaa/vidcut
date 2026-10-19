@@ -30,8 +30,13 @@ pub fn checked(t: &Title) -> Result<Title> {
     }
     if t.kind == TitleKind::Text && t.align.is_some() {
         return Err(Error::invalid(
-            "align is a lower third's: left, middle or right",
+            "align is a lower third's or a scroll's: left, middle or right",
         ));
+    }
+    if t.kind == TitleKind::Scroll
+        && (t.zoom.is_some_and(|z| z != 1.0) || t.rotation.is_some_and(|r| r != 0.0))
+    {
+        return Err(Error::invalid("a scroll has no zoom or rotation"));
     }
     if let Some(at) = t.position
         && !at.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))
