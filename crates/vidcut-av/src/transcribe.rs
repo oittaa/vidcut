@@ -1,8 +1,8 @@
 use std::ffi::{CString, c_int, c_void};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use sha2::{Digest, Sha256};
@@ -86,9 +86,140 @@ pub const PARAKEET_ULTRA: File = File {
     ],
 };
 
-pub const VAD_NAME: &str = "silero-vad-v6.2-F32.gguf";
+pub const SILERO_VAD: File = File {
+    name: "silero-vad-v6.2-F32.gguf",
+    title: "Silero VAD v6.2",
+    repo: "handy-computer/silero-vad-v6.2-gguf",
+    revision: "a9b2d61c20ae4ddf3644edb34969e8185a485448",
+    bytes: 1_241_056,
+    sha256: "0d871a800c420fdd5d1b17a3aea4296d1c39608f0ff4a9295eb76457eb1c88e6",
+    gpu_gb: 0,
+    languages: &[],
+};
 
-pub const VAD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/silero-vad-v6.2-F32.gguf"));
+const TRANSCRIBE: &str = "0.4.0";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Runtime {
+    pub lane: &'static str,
+    pub bytes: u64,
+    pub sha256: &'static str,
+    pub library: &'static str,
+}
+
+impl Runtime {
+    fn archive(&self) -> String {
+        format!("transcribe-native-{TRANSCRIBE}-{}.tar.gz", self.lane)
+    }
+
+    fn url(&self) -> String {
+        format!(
+            "https://github.com/handy-computer/transcribe.cpp/releases/download/v{TRANSCRIBE}/{}",
+            self.archive()
+        )
+    }
+
+    fn home(&self, dir: &Path) -> PathBuf {
+        dir.join(format!("transcribe-{TRANSCRIBE}"))
+    }
+
+    fn present(&self, dir: &Path) -> bool {
+        self.home(dir).join(self.library).is_file()
+    }
+}
+
+#[cfg(all(windows, target_arch = "x86_64"))]
+pub const RUNTIME: Option<Runtime> = Some(Runtime {
+    lane: "windows-x86_64-cpu-vulkan",
+    bytes: 18_036_555,
+    sha256: "9d5bd89f720d7979323e73f5220fe50fad5e38a7b0c2525225d453bd09adf2b0",
+    library: "transcribe.dll",
+});
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub const RUNTIME: Option<Runtime> = Some(Runtime {
+    lane: "macos-arm64-metal",
+    bytes: 2_475_842,
+    sha256: "eeae15ef08cfbfdd059238765a1a0f790dd39e2f0fdb05bfbb601e183286f6d7",
+    library: "libtranscribe.dylib",
+});
+
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+pub const RUNTIME: Option<Runtime> = Some(Runtime {
+    lane: "macos-x86_64-cpu",
+    bytes: 1_600_612,
+    sha256: "e4da34c9cebd8b31ca2c1049296430ff7af1a851db436e23e08d3d66e09b7d0f",
+    library: "libtranscribe.dylib",
+});
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub const RUNTIME: Option<Runtime> = Some(Runtime {
+    lane: "linux-x86_64-cpu-vulkan",
+    bytes: 22_546_161,
+    sha256: "f229adb9018bb7e33042137f92942022a5d76bfc5e16efd7a11cc9b115e86ea2",
+    library: "libtranscribe.so",
+});
+
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+pub const RUNTIME: Option<Runtime> = Some(Runtime {
+    lane: "linux-aarch64-cpu-vulkan",
+    bytes: 18_122_209,
+    sha256: "af7ee108923b74d3e727309ce4992714a25872ea77c6247da8be9a0ed54275dd",
+    library: "libtranscribe.so",
+});
+
+#[cfg(not(any(
+    all(windows, target_arch = "x86_64"),
+    all(
+        target_os = "macos",
+        any(target_arch = "aarch64", target_arch = "x86_64")
+    ),
+    all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    )
+)))]
+pub const RUNTIME: Option<Runtime> = None;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Need {
+    pub title: String,
+    pub bytes: u64,
+}
+
+fn needed_for(dir: &Path, model: Option<&File>, vad: bool) -> Vec<Need> {
+    let mut out = Vec::new();
+    if let Some(r) = RUNTIME.filter(|r| !r.present(dir)) {
+        out.push(Need {
+            title: "transcribe.cpp's library".into(),
+            bytes: r.bytes,
+        });
+    }
+    let files = vad.then_some(&SILERO_VAD).into_iter().chain(model);
+    for f in files.filter(|f| !present(dir, f)) {
+        out.push(Need {
+            title: f.title.into(),
+            bytes: f.bytes,
+        });
+    }
+    out
+}
+
+pub fn needed(dir: &Path, model: Option<&File>) -> Vec<Need> {
+    needed_for(dir, model, true)
+}
+
+pub fn listed(needs: &[Need]) -> String {
+    let names: Vec<String> = needs
+        .iter()
+        .map(|n| format!("{} ({})", n.title, size(n.bytes)))
+        .collect();
+    match names.as_slice() {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
 
 pub fn file_of(model: SpeechModel) -> &'static File {
     match model {
@@ -132,19 +263,119 @@ pub fn longest_piece(
     }
 }
 
-fn init() {
+fn network() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         crate::init();
         // SAFETY: FFmpeg's network setup, called once before any network protocol is used.
         unsafe { ffi::avformat_network_init() };
-        if !crate::debug() {
-            tc::disable_logging();
-        }
-        if !vulkan_loader() {
-            let _ = tc::init_backends_with(None::<&Path>, tc::BackendMask::CPU);
-        }
     });
+}
+
+fn start(dir: &Path, runtime: &Runtime) -> Result<()> {
+    static STARTED: Mutex<bool> = Mutex::new(false);
+    let mut started = STARTED.lock().unwrap_or_else(PoisonError::into_inner);
+    if *started {
+        return Ok(());
+    }
+    let home = runtime.home(dir);
+    let longest = std::fs::read_dir(&home)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().as_os_str().len())
+        .max()
+        .unwrap_or(0);
+    if cfg!(windows) && longest >= 260 {
+        return Err(Error::Invalid(format!(
+            "transcribe.cpp's library is in {}, where its files' paths pass the 260 characters \
+             Windows loads from: set XDG_CACHE_HOME to a shorter folder",
+            home.display()
+        )));
+    }
+    transcribe_cpp_sys::load(&home.join(runtime.library))
+        .map_err(|e| Error::Invalid(format!("transcribe.cpp's library: {e}")))?;
+    if !crate::debug() {
+        tc::disable_logging();
+    }
+    let allowed = match vulkan_loader() {
+        true => tc::BackendMask::ALL,
+        false => tc::BackendMask::CPU,
+    };
+    tc::init_backends_with(None::<&Path>, allowed).map_err(tc_error)?;
+    *started = true;
+    Ok(())
+}
+
+fn get_ready(dir: &Path, model: Option<&File>, vad: bool, download: bool) -> Result<()> {
+    network();
+    let Some(runtime) = RUNTIME else {
+        return Err(Error::Missing(
+            "transcribe.cpp publishes no library for this system, so speech can't be heard here"
+                .into(),
+        ));
+    };
+    let needs = needed_for(dir, model, vad);
+    if !needs.is_empty() && !download {
+        let own = match model.is_some_and(|f| !present(dir, f)) {
+            true => ", or name a model file of your own with model_file",
+            false => "",
+        };
+        let total: u64 = needs.iter().map(|n| n.bytes).sum();
+        return Err(Error::Missing(format!(
+            "{} {} on this computer yet: pass download (--download) to download {} ({}) into {}, \
+             each checked against its SHA-256{own}",
+            listed(&needs),
+            if needs.len() == 1 { "isn't" } else { "aren't" },
+            if needs.len() == 1 { "it" } else { "them" },
+            size(total),
+            dir.display()
+        )));
+    }
+    if !runtime.present(dir) {
+        let archive = fetch(
+            &Fetch {
+                url: runtime.url(),
+                name: runtime.archive(),
+                bytes: runtime.bytes,
+                sha256: runtime.sha256,
+            },
+            dir,
+        )?;
+        unpack(&archive, &runtime, dir)?;
+    }
+    for f in vad.then_some(&SILERO_VAD).into_iter().chain(model) {
+        if !present(dir, f) {
+            fetch(&Fetch::of(f), dir)?;
+        }
+    }
+    start(dir, &runtime)
+}
+
+fn unpack(archive: &Path, runtime: &Runtime, dir: &Path) -> Result<()> {
+    let home = runtime.home(dir);
+    let part = dir.join(format!("transcribe-{TRANSCRIBE}.part"));
+    let _ = std::fs::remove_dir_all(&part);
+    std::fs::create_dir_all(&part)?;
+    let gz = flate2::read::GzDecoder::new(std::fs::File::open(archive)?);
+    tar::Archive::new(gz).unpack(&part)?;
+    let inner = std::iter::once(part.clone())
+        .chain(
+            std::fs::read_dir(&part)?
+                .filter_map(|e| e.ok())
+                .map(|e| e.path()),
+        )
+        .find(|d| d.join(runtime.library).is_file())
+        .ok_or_else(|| {
+            Error::Invalid(format!(
+                "{}: no {} in it",
+                archive.display(),
+                runtime.library
+            ))
+        })?;
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::rename(&inner, &home)?;
+    let _ = std::fs::remove_dir_all(&part);
+    let _ = std::fs::remove_file(archive);
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -184,46 +415,17 @@ pub fn present(dir: &Path, f: &File) -> bool {
     std::fs::metadata(dir.join(f.name)).is_ok_and(|m| m.len() == f.bytes)
 }
 
-pub fn missing(asked: &Asked, dir: &Path) -> Option<&'static File> {
-    let f = file_of(asked.model);
-    (asked.model_file.is_none() && !present(dir, f)).then_some(f)
-}
-
-fn vad_file(dir: &Path) -> Result<PathBuf> {
-    let path = dir.join(VAD_NAME);
-    if std::fs::read(&path).is_ok_and(|b| b == VAD) {
-        return Ok(path);
-    }
-    std::fs::create_dir_all(dir)?;
-    let part = dir.join(format!("{VAD_NAME}.part"));
-    std::fs::write(&part, VAD)?;
-    std::fs::rename(&part, &path)?;
-    Ok(path)
-}
-
 fn files(asked: &Asked, dir: &Path) -> Result<(PathBuf, PathBuf)> {
-    if let Some(f) = missing(asked, dir) {
-        if !asked.download {
-            return Err(Error::Missing(format!(
-                "{} ({}, {}) isn't on this computer yet: pass download (--download) to download \
-                 it from Hugging Face into {}, checked against SHA-256, or name a file of your \
-                 own with model_file",
-                f.title,
-                f.name,
-                size(f.bytes),
-                dir.display()
-            )));
-        }
-        download(f, dir)?;
-    }
+    let wanted = asked.model_file.is_none().then(|| file_of(asked.model));
+    get_ready(dir, wanted, asked.vad_file.is_none(), asked.download)?;
     let model = asked
         .model_file
         .clone()
         .unwrap_or_else(|| dir.join(file_of(asked.model).name));
-    let vad = match &asked.vad_file {
-        Some(f) => f.clone(),
-        None => vad_file(dir)?,
-    };
+    let vad = asked
+        .vad_file
+        .clone()
+        .unwrap_or_else(|| dir.join(SILERO_VAD.name));
     for path in [&model, &vad] {
         if !path.is_file() {
             return Err(Error::Missing(format!("{}: no such file", path.display())));
@@ -282,8 +484,7 @@ fn open(url: &str, stop: &Arc<AtomicBool>) -> Result<Connection> {
     };
     if opened == ffi::AVERROR_PROTOCOL_NOT_FOUND {
         return Err(Error::Missing(format!(
-            "this FFmpeg can't download over HTTPS: download {url} yourself and name the file \
-             with model_file"
+            "this FFmpeg can't download over HTTPS: download {url} yourself"
         )));
     }
     if opened < 0 {
@@ -292,14 +493,31 @@ fn open(url: &str, stop: &Arc<AtomicBool>) -> Result<Connection> {
     Ok(Connection(ctx))
 }
 
-fn download(f: &File, dir: &Path) -> Result<()> {
-    init();
+struct Fetch {
+    url: String,
+    name: String,
+    bytes: u64,
+    sha256: &'static str,
+}
+
+impl Fetch {
+    fn of(f: &File) -> Self {
+        Self {
+            url: f.url(),
+            name: f.name.to_string(),
+            bytes: f.bytes,
+            sha256: f.sha256,
+        }
+    }
+}
+
+fn fetch(f: &Fetch, dir: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
-    let target = dir.join(f.name);
+    let target = dir.join(&f.name);
     let part = dir.join(format!("{}.part", f.name));
     let stop = crate::cancel::current().unwrap_or_default();
     let started = Instant::now();
-    let url = f.url();
+    let url = f.url.clone();
     let mut hash = Sha256::new();
     let mut have = 0u64;
     if let Ok(mut old) = std::fs::File::open(&part)
@@ -322,14 +540,16 @@ fn download(f: &File, dir: &Path) -> Result<()> {
         if at != have as i64 {
             (hash, have) = (Sha256::new(), 0);
             drop(connection);
-            return download_from(f, &target, &part, open(&url, &stop)?, hash, have, started);
+            download_from(f, &target, &part, open(&url, &stop)?, hash, have, started)?;
+            return Ok(target);
         }
     }
-    download_from(f, &target, &part, connection, hash, have, started)
+    download_from(f, &target, &part, connection, hash, have, started)?;
+    Ok(target)
 }
 
 fn download_from(
-    f: &File,
+    f: &Fetch,
     target: &Path,
     part: &Path,
     connection: Connection,
@@ -357,7 +577,7 @@ fn download_from(
             if crate::cancel::cancelled() {
                 return Err(Error::Invalid(CANCELLED.into()));
             }
-            return Err(ffmpeg_error(format!("downloading {}", f.url()), n));
+            return Err(ffmpeg_error(format!("downloading {}", f.url), n));
         }
         let n = n as usize;
         out.write_all(&buf[..n])?;
@@ -381,9 +601,7 @@ fn download_from(
         let _ = std::fs::remove_file(part);
         return Err(Error::Invalid(format!(
             "{}: downloaded {have} bytes with SHA-256 {digest}, expected {} bytes with {}",
-            f.url(),
-            f.bytes,
-            f.sha256
+            f.url, f.bytes, f.sha256
         )));
     }
     std::fs::rename(part, target)?;
@@ -437,8 +655,13 @@ fn vad_model(vad: &Path) -> Result<tc::Model> {
     .map_err(tc_error)
 }
 
-pub fn voice_activity(media: &Media, stream: u32, models: &Path) -> Result<VoiceActivity> {
-    init();
+pub fn voice_activity(
+    media: &Media,
+    stream: u32,
+    models: &Path,
+    download: bool,
+) -> Result<VoiceActivity> {
+    get_ready(models, None, true, download)?;
     let started = Instant::now();
     let a = media
         .info
@@ -463,7 +686,7 @@ pub fn voice_activity(media: &Media, stream: u32, models: &Path) -> Result<Voice
         speed: 1.0,
         fade: None,
     }];
-    let model = vad_model(&vad_file(models)?)?;
+    let model = vad_model(&models.join(SILERO_VAD.name))?;
     let frame = model.vad_info().map_err(tc_error)?.frame_samples.max(1);
     let mut session = model.vad_session().map_err(tc_error)?;
     let mut speech = Vec::new();
@@ -684,7 +907,6 @@ fn said_of(r: &tc::Transcript, piece: (i64, i64), stretches: &[(i64, i64)]) -> V
 }
 
 pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result<Speech> {
-    init();
     let started = Instant::now();
     let (model_path, vad_path) = files(asked, options.models)?;
     let pcm = heard_plan(plan, &model_path, started)?;

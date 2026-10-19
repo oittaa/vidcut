@@ -6,9 +6,6 @@
 build-essential
 pkg-config
 nasm
-# transcribe.cpp (transcribe-cpp-sys) builds with CMake; its Vulkan backend
-# needs libvulkan-dev, glslc and spirv-headers, below
-cmake
 # bindgen (ffmpeg-sys-next), and FFmpeg's CUDA filters compiled for the GPU
 # without the CUDA toolkit (scale_cuda, pad_cuda, bwdif_cuda: --enable-cuda-llvm)
 clang
@@ -28,8 +25,7 @@ libffmpeg-nvenc-dev
 # VAAPI encoders
 libva-dev
 libdrm-dev
-# libplacebo on Vulkan; FFmpeg's own Vulkan shaders and transcribe.cpp's
-# compile at build time
+# libplacebo on Vulkan; FFmpeg's own Vulkan shaders compile at build time
 libplacebo-dev
 libvulkan-dev
 glslc

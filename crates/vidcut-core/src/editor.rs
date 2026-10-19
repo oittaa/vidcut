@@ -146,8 +146,13 @@ pub trait Env {
         Err(Error::usage("speech is transcribed by the vidcut program"))
     }
 
-    fn voice_activity(&self, media: &Media, stream: u32) -> Result<Arc<VoiceActivity>> {
-        let _ = (media, stream);
+    fn voice_activity(
+        &self,
+        media: &Media,
+        stream: u32,
+        download: bool,
+    ) -> Result<Arc<VoiceActivity>> {
+        let _ = (media, stream, download);
         Err(Error::usage("speech is detected by the vidcut program"))
     }
 
@@ -2271,6 +2276,7 @@ fn mutate(
             pre_head,
             post_tail,
             min,
+            download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let parts = match given {
@@ -2289,8 +2295,14 @@ fn mutate(
                         if c.is_block() || c.speed() == 0.0 {
                             continue;
                         }
-                        let found =
-                            silent_parts(p, env, &Target::Clip(c), &settings, speech.as_ref())?;
+                        let found = silent_parts(
+                            p,
+                            env,
+                            &Target::Clip(c),
+                            &settings,
+                            speech.as_ref(),
+                            *download,
+                        )?;
                         if !found.is_empty() {
                             parts.push((id.clone(), found));
                         }
@@ -4828,6 +4840,7 @@ pub fn query(
             speech_threshold,
             min_speech,
             min,
+            download,
         } => {
             let settings = SilenceSettings {
                 threshold_db: *threshold_db,
@@ -4838,7 +4851,7 @@ pub fn query(
             let speech = speech_settings(p, *detect, *speech_threshold, min_speech)?;
             let mut out = Vec::new();
             for target in targets(p, media, clips, playhead, true)? {
-                let ranges = silent_parts(p, env, &target, &settings, speech.as_ref())?;
+                let ranges = silent_parts(p, env, &target, &settings, speech.as_ref(), *download)?;
                 out.push(target.json(p, json!({ "ranges": target.ranges(p, &ranges) })));
             }
             json!(out)
@@ -5108,6 +5121,7 @@ fn silent_parts(
     target: &Target<'_>,
     settings: &SilenceSettings,
     speech: Option<&SpeechSettings>,
+    download: bool,
 ) -> Result<Vec<(i64, i64)>> {
     let m = target.media(p)?;
     let (stream, gain) = match target {
@@ -5128,7 +5142,7 @@ fn silent_parts(
     let span = target.span(p)?;
     Ok(match speech {
         Some(speech) => {
-            let va = env.voice_activity(m, stream)?;
+            let va = env.voice_activity(m, stream, download)?;
             analysis::non_speech_parts(&span, &va, settings, speech)
         }
         None => {
@@ -5138,7 +5152,12 @@ fn silent_parts(
     })
 }
 
-fn heard_speech(p: &Project, env: &dyn Env, heard: &[String]) -> Result<Vec<(f64, f64)>> {
+fn heard_speech(
+    p: &Project,
+    env: &dyn Env,
+    heard: &[String],
+    download: bool,
+) -> Result<Vec<(f64, f64)>> {
     let fps = p.settings.fps;
     let f = fps.as_f64();
     let frames = |secs: f64| (secs * f).round() as i64;
@@ -5170,7 +5189,7 @@ fn heard_speech(p: &Project, env: &dyn Env, heard: &[String]) -> Result<Vec<(f64
         }
         let (_, origin) = p.media_origin(&c.media)?;
         let span = Span::of_clip(c, origin, fps);
-        let va = env.voice_activity(m, a.stream)?;
+        let va = env.voice_activity(m, a.stream, download)?;
         let mut at = span.start;
         for (x, y) in analysis::non_speech_parts(&span, &va, &settings, &speech)
             .into_iter()
@@ -5301,7 +5320,7 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
         return Err(Error::usage("max_offset: longer than 0"));
     }
     let heard = heard_tracks(p, r.tracks)?;
-    let speech = heard_speech(p, env, &heard)?;
+    let speech = heard_speech(p, env, &heard, r.download)?;
     let lined = retime::line_up(&speech, (0.0, p.end() as f64 / fps), &cues, max);
     let clear = lined.ok().filter(|l| l.clear);
     let mut warnings = Vec::new();

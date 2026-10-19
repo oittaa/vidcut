@@ -216,11 +216,16 @@ impl Env for AvEnv {
         )
     }
 
-    fn voice_activity(&self, media: &Media, stream: u32) -> Result<Arc<VoiceActivity>> {
+    fn voice_activity(
+        &self,
+        media: &Media,
+        stream: u32,
+        download: bool,
+    ) -> Result<Arc<VoiceActivity>> {
         measured(
             &VOICES,
             analysis_file(media, &format!("speech{stream}")),
-            || vidcut_av::transcribe::voice_activity(media, stream, &paths::models_dir()),
+            || vidcut_av::transcribe::voice_activity(media, stream, &paths::models_dir(), download),
             VoiceActivity::to_bytes,
             VoiceActivity::from_bytes,
         )
