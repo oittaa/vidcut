@@ -640,7 +640,7 @@ impl Workspace {
                             }));
                             if s.language.is_some() {
                                 ui.label(dim(
-                                    "Words kept in another language are transcribed again",
+                                    "A file whose words weren't made in this language is transcribed again",
                                 ));
                             }
                         }
