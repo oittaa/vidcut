@@ -900,7 +900,7 @@ pub struct TitleStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
     /// Text height as a fraction of the picture height, above 0 and at most
-    /// 1/2. Usual: 0.08 for `text`, 0.06 for a lower third.
+    /// 1/2. Usual: 96/1080 (about 0.089) for `text`, 0.06 for a lower third.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
@@ -966,11 +966,15 @@ impl Title {
         }
     }
 
-    pub fn text_fraction(&self) -> f64 {
-        self.style.size.unwrap_or(match self.kind {
-            TitleKind::Text => 0.08,
+    pub fn usual_size(kind: TitleKind) -> f64 {
+        match kind {
+            TitleKind::Text => 96.0 / 1080.0,
             TitleKind::LowerThird => 0.06,
-        })
+        }
+    }
+
+    pub fn text_fraction(&self) -> f64 {
+        self.style.size.unwrap_or(Self::usual_size(self.kind))
     }
 
     pub fn ink(&self) -> [u8; 3] {

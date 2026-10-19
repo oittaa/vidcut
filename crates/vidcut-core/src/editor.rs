@@ -3701,6 +3701,11 @@ fn place_imported(
                 frames: k.frames,
                 tracks: Vec::new(),
             });
+            let title = c
+                .title_from
+                .as_ref()
+                .and_then(|r| otio::titles::from_editor(r, p.settings.height))
+                .or_else(|| c.title.clone());
             let id = clip_id(p, &c.id);
             clips.push(id.clone());
             made.insert(c.key, (id.clone(), track_of(&c.track)));
@@ -3719,7 +3724,7 @@ fn place_imported(
                 generator: c.generator.as_ref().map(|reference| Generator {
                     reference: reference.clone().into(),
                 }),
-                title: c.title.clone(),
+                title,
                 compound,
                 speed: c.speed.clone(),
                 color: color(c),

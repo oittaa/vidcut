@@ -68,6 +68,14 @@ FFmpeg, driver, OS and library behavior vidcut works around: the quirk, what it 
 - **WASAPI doesn't move a stream to a new default output** (cpal 0.18). macOS and PipeWire move a stream on the default to the new default device by themselves. On Windows, cpal hears the change but keeps the stream on the old device and reports `StreamInvalidated`, or `DeviceNotAvailable` once the old device is gone. `player::output::follow` opens the stream again on the new default.
 - **cpal's `device_by_id` misses ALSA's devices** (0.18): it adds a device number to the id it looks for (`sysdefault:CARD=PCH,DEV=0`), which the listed ids lack, so a device chosen from the list would play on the default without a word. `output_by_id` finds the device among those listed, by its listed id.
 
+## Resolve's OTIO files
+
+Measured in Resolve Studio 21.1.1 through its scripting API, by importing titles from OTIO files and exporting stills.
+
+- **Resolve draws a title read from a file at a pixel a point**, at any picture size, while its own titles have 1/1080 of the picture's height a point. At 3840×2160 its own 96-point title is twice as tall as the same title read back from its own export. `otio::titles` reads and writes a point as a pixel of the picture, as Resolve's import does, so a title vidcut writes looks the same in Resolve and comes back the same; a title made in Resolve on a picture other than 1080 lines tall comes in at another size, in vidcut as in Resolve.
+- **Resolve draws no stroke on a title read from a file.** It keeps `strokeSize` and `strokeColor` and writes them back, but draws nothing at 4, 8 or 16, and it drops `-qt-stroke` styles from the rich text. In two of seven imports it also set the first title's `strokeSize` to 1 and its `strokeColor` to black, whatever the file said; one of those files, imported again, kept its values, and the cause wasn't found. A title's outline doesn't show in Resolve.
+- **Resolve drops metadata it doesn't know**, the clip's `vidcut` key among it, so a title comes back from Resolve by its parameters alone.
+
 ## transcribe.cpp and its models
 
 - **Qwen3-ASR gives no times** (transcribe.cpp 0.4.0): one segment spans each run. Spread over the speech of a long run, its text drifts from the words: against Parakeet Ultra's word times on `nasa-speech-1979`, 90% of the cue starts were within 2.9 s with pieces of up to 3 min, 2.2 s at 30 s, and 0.7 s at 10 s, as close as Whisper large-v3's own phrase times. `transcribe::longest_piece` gives a model without times pieces of 10 s at the most.
