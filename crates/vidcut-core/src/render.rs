@@ -63,8 +63,57 @@ pub enum VideoPiece {
     /// a mix.
     Titled {
         under: Box<VideoPiece>,
-        titles: Vec<Title>,
+        titles: Vec<ShownTitle>,
     },
+}
+
+/// A title of a [`VideoPiece::Titled`], with where its clip's frames are
+/// when it moves.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ShownTitle {
+    pub title: Title,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<Run>,
+    /// How a dissolve at its clip's edge fades it in or out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade: Option<Ramp>,
+}
+
+/// Where a piece is in a moving title's clip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Run {
+    /// Frames of the clip before the piece's first.
+    pub at: i64,
+    /// The clip's length in frames.
+    pub of: i64,
+}
+
+impl Run {
+    pub fn after(&self, k: i64) -> Self {
+        Self {
+            at: self.at + k,
+            ..*self
+        }
+    }
+
+    pub fn top(&self, k: i64, picture: f64, tall: f64) -> f64 {
+        let t = ((self.at + k) as f64 + 0.5) / self.of.max(1) as f64;
+        picture - t * (picture + tall)
+    }
+}
+
+impl ShownTitle {
+    pub fn after(&self, k: i64) -> Self {
+        Self {
+            title: self.title.clone(),
+            run: self.run.map(|r| r.after(k)),
+            fade: self.fade.map(|r| r.after(k)),
+        }
+    }
+
+    pub fn alpha(&self) -> f64 {
+        self.title.opaque() * self.fade.map_or(1.0, |r| r.level(0))
+    }
 }
 
 /// A picture over the others of a [`VideoPiece::Mix`], at a level its
@@ -248,7 +297,7 @@ impl VideoPiece {
         }
     }
 
-    pub fn titles(&self) -> Vec<(usize, &Title)> {
+    pub fn titles(&self) -> Vec<(usize, &ShownTitle)> {
         match self {
             Self::Mix { under, .. } => under.titles(),
             Self::Titled { under, titles } => {
@@ -276,7 +325,7 @@ impl VideoPiece {
         }
     }
 
-    fn with_title(self, t: Title) -> VideoPiece {
+    fn with_title(self, t: ShownTitle) -> VideoPiece {
         match self {
             Self::Titled { under, mut titles } => {
                 titles.push(t);
@@ -325,7 +374,7 @@ impl VideoPiece {
             },
             Self::Titled { under, titles } => Self::Titled {
                 under: Box::new(under.part(k, frames)),
-                titles: titles.clone(),
+                titles: titles.iter().map(|t| t.after(k)).collect(),
             },
         }
     }
@@ -371,7 +420,10 @@ impl VideoPiece {
                     under: u2,
                     titles: t2,
                 },
-            ) => titles == t2 && under.goes_on_as(u2),
+            ) => {
+                let k = self.frames();
+                titles.iter().map(|t| t.after(k)).eq(t2.iter().cloned()) && under.goes_on_as(u2)
+            }
             _ => false,
         }
     }
@@ -672,7 +724,7 @@ pub(crate) fn paced(
 
 enum Layer {
     Picture(VideoPiece, Option<Ramp>),
-    Title(Title),
+    Title(ShownTitle),
 }
 
 pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
@@ -772,13 +824,40 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                     }
                 }
             }
-            if let Some(title) = t
-                .clip_covering(x)
-                .map(|ci| &t.clips[ci])
-                .filter(|c| titled(t, c))
-                .and_then(|c| c.title.clone())
-            {
-                stack.push(Layer::Title(title));
+            let shown = |c: &Clip, fade: Option<Ramp>| {
+                let title = c.title.clone()?;
+                let run = title.moves().then(|| Run {
+                    at: x - c.start,
+                    of: c.duration,
+                });
+                Some(ShownTitle { title, run, fade })
+            };
+            match played.iter().find(|d| d.frames.0 <= x && x < d.frames.1) {
+                Some(d) => {
+                    let ramp = |falling| Ramp {
+                        at: x - d.frames.0,
+                        of: d.frames.1 - d.frames.0,
+                        falling,
+                    };
+                    for (c, falling) in [(d.before, true), (d.after, false)] {
+                        if let Some(s) = c
+                            .filter(|c| titled(t, c))
+                            .and_then(|c| shown(c, Some(ramp(falling))))
+                        {
+                            stack.push(Layer::Title(s));
+                        }
+                    }
+                }
+                None => {
+                    if let Some(s) = t
+                        .clip_covering(x)
+                        .map(|ci| &t.clips[ci])
+                        .filter(|c| titled(t, c))
+                        .and_then(|c| shown(c, None))
+                    {
+                        stack.push(Layer::Title(s));
+                    }
+                }
             }
         }
         let mut piece = VideoPiece::Black { frames: y - x };

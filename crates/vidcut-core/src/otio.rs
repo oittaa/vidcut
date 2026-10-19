@@ -347,6 +347,16 @@ pub fn export(
     span: Option<(i64, i64)>,
     locations: Locations,
 ) -> Result<Value> {
+    export_drawn(p, name, span, locations, &|_| titles::Drawn::default())
+}
+
+pub fn export_drawn(
+    p: &Project,
+    name: &str,
+    span: Option<(i64, i64)>,
+    locations: Locations,
+    drawn: &dyn Fn(&Title) -> titles::Drawn,
+) -> Result<Value> {
     let fps = p.settings.fps;
     let rate = fps.as_f64();
     let (a, b) = span.unwrap_or((0, p.end()));
@@ -373,7 +383,7 @@ pub fn export(
             None => (
                 source as f64,
                 match (&c.title, &c.generator) {
-                    (Some(t), _) => titles::reference(t),
+                    (Some(t), _) => titles::reference(t, p.settings.height, &drawn(t)),
                     (None, Some(g)) => (*g.reference).clone(),
                     (None, None) => Value::Null,
                 },
@@ -505,6 +515,10 @@ pub fn export(
                         x.written(c.source_at(s), s > c.start, e < c.end())
                     }),
                 );
+                let effects = match &c.title {
+                    Some(t) => titles::with_opacity(t, effects),
+                    None => effects,
+                };
                 let mut it = match &c.compound {
                     Some(k) => block(c, k, &label, c.source_at(s), e - s, effects),
                     None => item(
@@ -894,6 +908,7 @@ pub struct ImportedClip {
     pub audio_effects: Vec<Value>,
     pub generator: Option<Value>,
     pub title: Option<Title>,
+    pub title_from: Option<Value>,
     pub compound: Option<Compound>,
     pub speed: Option<Speed>,
     pub color: Option<String>,
@@ -948,6 +963,7 @@ impl ImportedClip {
             audio_effects: Vec::new(),
             generator: None,
             title: None,
+            title_from: None,
             compound: None,
             speed: None,
             color: clip_color(item),
@@ -1592,7 +1608,11 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 c.speed = speed;
                 if stack {
                     c.compound = Some(compound_of(item, fps));
-                } else if let Some(t) = titles::read(item, reference) {
+                } else if let Some(mut t) = titles::read(item, reference, titles::UNKNOWN_HEIGHT) {
+                    let opacity = titles::take_opacity(&mut c.effects);
+                    if item["metadata"][VIDCUT].get("title").is_none() {
+                        t.opacity = opacity;
+                    }
                     if c.name == reference["name"].as_str().unwrap_or_default()
                         || c.name == t.label()
                     {
@@ -1600,6 +1620,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     }
                     if item["metadata"][VIDCUT].get("title").is_none() {
                         read_titles.push(item["name"].as_str().unwrap_or("title").to_string());
+                        c.title_from = Some(reference.clone());
                     }
                     c.title = Some(t);
                 } else {
@@ -1639,6 +1660,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         audio_effects: Vec::new(),
                         generator: None,
                         title: None,
+                        title_from: None,
                         compound: None,
                         speed,
                         color: clip_color(item),
@@ -1800,6 +1822,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 audio_effects: effects,
                 generator: None,
                 title: None,
+                title_from: None,
                 compound: None,
                 speed,
                 color: clip_color(item),
@@ -1893,8 +1916,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     read_titles.dedup();
     if !read_titles.is_empty() {
         warnings.push(format!(
-            "titles read without what vidcut's titles lack (rich text, a size for each line, \
-             drop shadows, zoom and rotation): {}",
+            "titles read without what vidcut's titles lack (rich text, a size, zoom or \
+             rotation for each line, keyframes): {}",
             read_titles.join(", ")
         ));
     }

@@ -145,7 +145,7 @@ A file is missing when `Env::present` says so; a path absolute only on the other
 
 ## Titles
 
-A clip with a `title` is a title ([spec §8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)): no media, no audio, any length, on a video track. `Clip::is_generator` and `Clip::is_block` count it, so edits treat it as a carried generator, and it has no speed. Its `Title` holds a `TitleKind` (`text` or `lower_third`), a lower third's `TitleAlign`, its lines, a `TitleStyle` and an optional `position`, the point its anchor goes to (`Title::place`, `Title::anchor`; [spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `ops::titles` holds the edits; `ops::titles::checked` is the check `titles.add`, `titles.set` and `validate::violations` share, and it takes the style's font, size, colors, outline and background through the subtitle style's (`checked_font`, `checked_size`, `checked_color`, `checked_outline`, `checked_background`).
+A clip with a `title` is a title ([spec §8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)): no media, no audio, any length, on a video track. `Clip::is_generator` and `Clip::is_block` count it, so edits treat it as a carried generator, and it has no speed. Its `Title` holds a `TitleKind` (`text`, `lower_third` or `scroll`), a lower third's or a scroll's `TitleAlign`, its lines, with markup that `rich::spans` reads into `Span`s, a `TitleStyle` and an optional `position`, the point its anchor goes to (`Title::place`, `Title::anchor`; [spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `ops::titles` holds the edits; `ops::titles::checked` is the check `titles.add`, `titles.set` and `validate::violations` share, and it takes the style's font, size, colors, outline and background through the subtitle style's (`checked_font`, `checked_size`, `checked_color`, `checked_outline`, `checked_background`).
 
 ## OpenTimelineIO
 
@@ -190,7 +190,7 @@ flowchart LR
 |---|---|
 | clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`: keyframes stay on their source frames (the `from` field of `Effects`, set by `carry`) and fades at the clip's ends through splits; the clip volume's level is the gain |
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` once it no longer fits; dissolves and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
-| `GeneratorReference` | a title when it is vidcut's or Resolve's Text or lower third (`otio::titles::read`), else `Generator`, a block that plays as a gap |
+| `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`), else `Generator`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 

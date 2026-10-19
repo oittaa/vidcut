@@ -428,7 +428,7 @@ impl Letters {
         }
         let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vidcut title"),
-            size: 16,
+            size: 32,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -458,15 +458,19 @@ impl Letters {
         }
     }
 
-    fn place(&self, gpu: &Gpu, size: (u32, u32)) {
+    fn place(&self, gpu: &Gpu, size: (u32, u32), dy: i32, alpha: f32) {
         let p = &self.picture;
         let (fw, fh) = (f64::from(p.frame.0.max(1)), f64::from(p.frame.1.max(1)));
         let (sx, sy) = (f64::from(size.0) / fw, f64::from(size.1) / fh);
         let place = [
             f64::from(p.left) * sx,
-            f64::from(p.top) * sy,
+            f64::from(p.top + dy) * sy,
             f64::from(p.width) * sx,
             f64::from(p.height) * sy,
+            f64::from(alpha),
+            0.0,
+            0.0,
+            0.0,
         ];
         let bytes: Vec<u8> = place
             .iter()
@@ -478,9 +482,12 @@ impl Letters {
 
 fn same_titles(a: &[TitleOver], b: &[TitleOver]) -> bool {
     a.len() == b.len()
-        && a.iter()
-            .zip(b)
-            .all(|(x, y)| x.above == y.above && Arc::ptr_eq(&x.picture, &y.picture))
+        && a.iter().zip(b).all(|(x, y)| {
+            x.above == y.above
+                && x.dy == y.dy
+                && x.alpha == y.alpha
+                && Arc::ptr_eq(&x.picture, &y.picture)
+        })
 }
 
 #[derive(Default)]
@@ -619,7 +626,11 @@ impl Screen {
             }
         }
         for l in &self.letters {
-            l.place(gpu, size);
+            let (dy, alpha) = titles
+                .iter()
+                .find(|t| Arc::ptr_eq(&t.picture, &l.picture))
+                .map_or((0, 1.0), |t| (t.dy, t.alpha));
+            l.place(gpu, size, dy, alpha);
         }
         let target = self.target.as_ref().expect("made above");
         {

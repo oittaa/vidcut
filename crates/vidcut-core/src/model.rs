@@ -844,15 +844,20 @@ pub struct Generator {
 /// keeps the usual look.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Title {
-    /// `text`, one block of text, or `lower_third`, two lines at the bottom
-    /// of the title-safe area.
+    /// `text`, one block of text, `lower_third`, two lines at the bottom
+    /// of the title-safe area, or `scroll`, lines that rise from below the
+    /// picture to above it over the clip.
     #[serde(default, skip_serializing_if = "TitleKind::is_text")]
     pub kind: TitleKind,
-    /// Where a lower third sits: `left`, `middle` or `right`. Usual: left.
+    /// How a lower third or a scroll lines up: `left`, `middle` or `right`.
+    /// Usual: left for a lower third, middle for a scroll.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<TitleAlign>,
-    /// Its lines, separated by `\n`: two at most for a lower third. Plain
-    /// text: no markup.
+    /// Its lines, separated by `\n`: two at most for a lower third. `<b>`,
+    /// `<i>`, `<u>` and `<font color="…" face="…" size="…">` style the words
+    /// between them apart from the rest, `size` a fraction of the picture
+    /// height like the style's; `&lt;`, `&gt;` and `&amp;` stand for `<`,
+    /// `>` and `&`.
     pub text: String,
     #[serde(default, skip_serializing_if = "TitleStyle::is_empty")]
     pub style: TitleStyle,
@@ -861,18 +866,33 @@ pub struct Title {
     /// 0.5]`), a lower third's bottom left, middle or right corner by its
     /// `align` (usual: 10%, 50% or 90% across and 88% down, so that its
     /// lower line's top sits about a fifth up the picture: `[0.1, 0.88]`,
-    /// `[0.5, 0.88]` and `[0.9, 0.88]`).
+    /// `[0.5, 0.88]` and `[0.9, 0.88]`). A scroll's `x` is where its lines'
+    /// left edge, middle or right edge goes by its `align` (usual: 5%, 50%
+    /// or 95% across); its `y` is not used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
+    /// How much larger its text is drawn, from 1/4 to 4, about the middle of
+    /// a `text` title or the point where a lower third's lines meet; a
+    /// scroll has none. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<f64>,
+    /// Degrees it is turned counterclockwise, with its background and
+    /// shadow, about the same point as `zoom`. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<f64>,
+    /// How opaque the whole title is, from 0 to 1. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
 }
 
-/// What kind of title: one block of text, or a lower third.
+/// What kind of title: one block of text, a lower third, or a scroll.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TitleKind {
     #[default]
     Text,
     LowerThird,
+    Scroll,
 }
 
 impl TitleKind {
@@ -881,8 +901,8 @@ impl TitleKind {
     }
 }
 
-/// Where a lower third sits at the bottom of the title-safe area, and how
-/// its lines line up.
+/// Where a lower third sits at the bottom of the title-safe area, or a
+/// scroll across the picture, and how their lines line up.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TitleAlign {
@@ -900,7 +920,7 @@ pub struct TitleStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
     /// Text height as a fraction of the picture height, above 0 and at most
-    /// 1/2. Usual: 0.08 for `text`, 0.06 for a lower third.
+    /// 1/2. Usual: 96/1080 (about 0.089) for `text`, 0.06 for a lower third.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
@@ -913,6 +933,53 @@ pub struct TitleStyle {
     /// A box behind the whole block of text. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<SubtitleBackground>,
+    /// A soft copy of the text behind it, over its background. Usual: none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<TitleShadow>,
+}
+
+/// A title's drop shadow. A field left out keeps the usual look.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct TitleShadow {
+    /// `#rrggbb`, `#rgb` or a name such as `navy`. Usual: black.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// From 0 to 1. Usual: 0.75.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+    /// `[x, y]`: how far it falls right and down, as fractions of the
+    /// picture's width and height, each from -1/2 to 1/2. Usual: `[0.003,
+    /// 0.005]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<[f64; 2]>,
+    /// How soft its edge is, from 0 (sharp) to 100, where the blur's radius
+    /// is about 3% of the picture height. Usual: 20.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur: Option<f64>,
+}
+
+impl TitleShadow {
+    pub const OPACITY: f64 = 0.75;
+    pub const OFFSET: [f64; 2] = [0.003, 0.005];
+    pub const BLUR: f64 = 20.0;
+    pub const BLUR_PER_PICTURE: f64 = 3300.0;
+    pub const GAIN: f64 = 1.24;
+
+    pub fn ink(&self) -> [u8; 3] {
+        paint(self.color.as_deref(), [0, 0, 0])
+    }
+
+    pub fn alpha(&self) -> f64 {
+        self.opacity.unwrap_or(Self::OPACITY)
+    }
+
+    pub fn shift(&self) -> [f64; 2] {
+        self.offset.unwrap_or(Self::OFFSET)
+    }
+
+    pub fn softness(&self) -> f64 {
+        self.blur.unwrap_or(Self::BLUR)
+    }
 }
 
 impl TitleStyle {
@@ -933,6 +1000,9 @@ impl Title {
             text: text.into(),
             style: TitleStyle::default(),
             position: None,
+            zoom: None,
+            rotation: None,
+            opacity: None,
         }
     }
 
@@ -940,15 +1010,20 @@ impl Title {
         match self.kind {
             TitleKind::Text => TitleAlign::Middle,
             TitleKind::LowerThird => self.align.unwrap_or_default(),
+            TitleKind::Scroll => self.align.unwrap_or(TitleAlign::Middle),
         }
     }
 
     pub fn usual_position(kind: TitleKind, align: TitleAlign) -> [f64; 2] {
+        let edge = (1.0 - Self::SAFE) / 2.0;
         match (kind, align) {
             (TitleKind::Text, _) => [0.5, 0.5],
             (TitleKind::LowerThird, TitleAlign::Left) => [Self::LOWER_IN, Self::LOWER_DOWN],
             (TitleKind::LowerThird, TitleAlign::Middle) => [0.5, Self::LOWER_DOWN],
             (TitleKind::LowerThird, TitleAlign::Right) => [1.0 - Self::LOWER_IN, Self::LOWER_DOWN],
+            (TitleKind::Scroll, TitleAlign::Left) => [edge, 0.5],
+            (TitleKind::Scroll, TitleAlign::Middle) => [0.5, 0.5],
+            (TitleKind::Scroll, TitleAlign::Right) => [1.0 - edge, 0.5],
         }
     }
 
@@ -958,19 +1033,31 @@ impl Title {
     }
 
     pub fn anchor(&self) -> [f64; 2] {
-        match (self.kind, self.align()) {
-            (TitleKind::Text, _) => [0.5, 0.5],
-            (TitleKind::LowerThird, TitleAlign::Left) => [0.0, 1.0],
-            (TitleKind::LowerThird, TitleAlign::Middle) => [0.5, 1.0],
-            (TitleKind::LowerThird, TitleAlign::Right) => [1.0, 1.0],
+        let across = match self.align() {
+            TitleAlign::Left => 0.0,
+            TitleAlign::Middle => 0.5,
+            TitleAlign::Right => 1.0,
+        };
+        match self.kind {
+            TitleKind::Text => [0.5, 0.5],
+            TitleKind::LowerThird => [across, 1.0],
+            TitleKind::Scroll => [across, 0.0],
         }
     }
 
-    pub fn text_fraction(&self) -> f64 {
-        self.style.size.unwrap_or(match self.kind {
-            TitleKind::Text => 0.08,
+    pub fn usual_size(kind: TitleKind) -> f64 {
+        match kind {
+            TitleKind::Text | TitleKind::Scroll => 96.0 / 1080.0,
             TitleKind::LowerThird => 0.06,
-        })
+        }
+    }
+
+    pub fn moves(&self) -> bool {
+        self.kind == TitleKind::Scroll
+    }
+
+    pub fn text_fraction(&self) -> f64 {
+        self.style.size.unwrap_or(Self::usual_size(self.kind))
     }
 
     pub fn ink(&self) -> [u8; 3] {
@@ -989,8 +1076,38 @@ impl Title {
         (picture_width * Self::SAFE).max(self.text_fraction() * picture_height)
     }
 
+    pub fn scale(&self) -> f64 {
+        self.zoom.unwrap_or(1.0)
+    }
+
+    pub fn turn(&self) -> f64 {
+        self.rotation.unwrap_or(0.0)
+    }
+
+    pub fn opaque(&self) -> f64 {
+        self.opacity.unwrap_or(1.0)
+    }
+
+    pub fn pivot(&self) -> [f64; 2] {
+        let [x, y] = self.place();
+        match self.kind {
+            TitleKind::Text | TitleKind::Scroll => [x, y],
+            TitleKind::LowerThird => [x, y - self.lower_line()],
+        }
+    }
+
+    pub fn lower_line(&self) -> f64 {
+        let lines = crate::rich::lines(&self.text);
+        let base = self.text_fraction();
+        let size = lines
+            .last()
+            .map_or(base, |line| crate::rich::largest(line, base));
+        size * SubtitleStyle::LINE
+    }
+
     pub fn label(&self) -> String {
-        let line = self.text.lines().find(|l| !l.trim().is_empty());
+        let text = crate::rich::plain(&self.text);
+        let line = text.lines().find(|l| !l.trim().is_empty());
         line.map_or_else(|| "Title".to_string(), |l| l.trim().to_string())
     }
 }

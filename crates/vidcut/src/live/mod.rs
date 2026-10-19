@@ -267,8 +267,18 @@ pub(crate) enum Msg {
     },
     Audition(Option<Audition>),
     Skip(Option<Vec<ClipSpans>>),
-    PreviewTitle(Option<(String, Title)>),
+    PreviewTitle(Option<TitlePreview>),
     Shutdown,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TitlePreview {
+    Clip(String, Title),
+    Over {
+        title: Title,
+        at: i64,
+        fraction: f64,
+    },
 }
 
 pub struct Audition {
@@ -318,7 +328,21 @@ impl Handle {
     }
 
     pub fn preview_title(&self, title: Option<(String, Title)>) {
-        let _ = self.tx.send(Msg::PreviewTitle(title));
+        let _ = self.tx.send(Msg::PreviewTitle(
+            title.map(|(id, t)| TitlePreview::Clip(id, t)),
+        ));
+    }
+
+    pub fn preview_free_title(&self, title: Option<(Title, i64, f64)>) {
+        let _ = self
+            .tx
+            .send(Msg::PreviewTitle(title.map(|(title, at, fraction)| {
+                TitlePreview::Over {
+                    title,
+                    at,
+                    fraction,
+                }
+            })));
     }
 
     pub fn request_drag(&self, method: &str, params: Value) {
@@ -751,7 +775,7 @@ struct Live {
     tape_media: Option<String>,
     player: Player,
     skipping: Option<Vec<ClipSpans>>,
-    title_preview: Option<(String, Title)>,
+    title_preview: Option<TitlePreview>,
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
@@ -3000,24 +3024,53 @@ impl Live {
 
     fn refresh_timeline_at(&mut self, at: Option<i64>) -> Option<u64> {
         let mut p = self.project.as_ref()?.project().clone();
-        if let Some((id, title)) = &self.title_preview
-            && let Some((t, c)) = p.find_clip(id)
-            && p.tracks[t].clips[c].title.is_some()
-        {
-            p.tracks[t].clips[c].title = Some(title.clone());
+        let mut scrolled: Option<(Title, (i64, i64), i64)> = None;
+        match &self.title_preview {
+            Some(TitlePreview::Clip(id, title)) => {
+                if let Some((t, c)) = p.find_clip(id)
+                    && p.tracks[t].clips[c].title.is_some()
+                {
+                    p.tracks[t].clips[c].title = Some(title.clone());
+                }
+            }
+            Some(TitlePreview::Over {
+                title,
+                at,
+                fraction,
+            }) => {
+                let len = vidcut_core::ops::titles::default_length(&p);
+                if let Ok((id, _)) = vidcut_core::ops::titles::add(&mut p, None, *at, len, title)
+                    && let Some(c) = p.clip(&id)
+                    && let Some(t) = c.title.as_ref().filter(|t| t.moves())
+                {
+                    let off = (fraction * len as f64).round() as i64 - (at - c.start);
+                    scrolled = Some((t.clone(), (c.start, c.end()), off));
+                }
+            }
+            None => {}
         }
         let end = p.end();
         if end == 0 {
             self.player.unload(TIMELINE);
             return None;
         }
-        let (plan, lanes) = match render::flatten_lanes(&p, 0, end) {
+        let (mut plan, lanes) = match render::flatten_lanes(&p, 0, end) {
             Ok(planned) => planned,
             Err(e) => {
                 self.notice(format!("timeline preview: {}", e.message), true);
                 return None;
             }
         };
+        if let Some((t, (a, b), off)) = &scrolled {
+            let mut from = 0;
+            for piece in &mut plan.video {
+                let frames = piece.frames();
+                if from < *b && from + frames > *a {
+                    scroll_by(piece, t, *off);
+                }
+                from += frames;
+            }
+        }
         let plan = self.preview_plan(plan);
         self.timeline_loaded_at = Some(Instant::now());
         self.player.load(TIMELINE, plan, lanes, at)
@@ -3536,6 +3589,28 @@ fn job_notes(tx: &Sender<Msg>, id: &str) -> vidcut_av::progress::Noting {
             note,
         });
     }))
+}
+
+fn scroll_by(piece: &mut render::VideoPiece, t: &Title, off: i64) {
+    match piece {
+        render::VideoPiece::Titled { under, titles } => {
+            for r in titles
+                .iter_mut()
+                .filter(|s| s.title == *t)
+                .filter_map(|s| s.run.as_mut())
+            {
+                r.at += off;
+            }
+            scroll_by(under, t, off);
+        }
+        render::VideoPiece::Mix { under, over } => {
+            scroll_by(under, t, off);
+            for o in over {
+                scroll_by(&mut o.piece, t, off);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn no_project() -> Error {

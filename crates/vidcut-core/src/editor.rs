@@ -2955,6 +2955,9 @@ fn mutate(
             align,
             style,
             position,
+            zoom,
+            rotation,
+            opacity,
             at,
             duration,
             track,
@@ -2973,6 +2976,9 @@ fn mutate(
                 text: text.clone(),
                 style: style.clone().unwrap_or_default(),
                 position: *position,
+                zoom: *zoom,
+                rotation: *rotation,
+                opacity: *opacity,
             };
             let (id, track) = ops::titles::add(p, track.as_deref(), start, frames, &title)?;
             json!({ "clip": id, "track": track })
@@ -2984,6 +2990,9 @@ fn mutate(
             align,
             style,
             position,
+            zoom,
+            rotation,
+            opacity,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
             let change = ops::titles::TitleChange {
@@ -2992,6 +3001,9 @@ fn mutate(
                 align: *align,
                 style: style.clone(),
                 position: position.as_deref().map(ops::titles::position).transpose()?,
+                zoom: *zoom,
+                rotation: *rotation,
+                opacity: *opacity,
             };
             ops::titles::set(p, &id, &change)?;
             Value::Null
@@ -3894,6 +3906,15 @@ fn place_imported(
                 frames: k.frames,
                 tracks: Vec::new(),
             });
+            let title = c
+                .title_from
+                .as_ref()
+                .and_then(|r| otio::titles::from_editor(r, p.settings.height))
+                .map(|mut t| {
+                    t.opacity = c.title.as_ref().and_then(|x| x.opacity);
+                    t
+                })
+                .or_else(|| c.title.clone());
             let id = clip_id(p, &c.id);
             clips.push(id.clone());
             made.insert(c.key, (id.clone(), track_of(&c.track)));
@@ -3912,7 +3933,7 @@ fn place_imported(
                 generator: c.generator.as_ref().map(|reference| Generator {
                     reference: reference.clone().into(),
                 }),
-                title: c.title.clone(),
+                title,
                 compound,
                 speed: c.speed.clone(),
                 color: color(c),

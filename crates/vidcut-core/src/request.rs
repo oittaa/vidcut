@@ -1144,22 +1144,26 @@ pub enum Request {
     #[serde(rename = "titles.add")]
     TitlesAdd {
         /// Its lines, separated by a line break: two at most for a lower
-        /// third. Plain text.
+        /// third. `<b>`, `<i>`, `<u>` and `<font color="…" face="…"
+        /// size="…">` style words apart; `&lt;`, `&gt;` and `&amp;` stand for
+        /// `<`, `>` and `&`.
         text: String,
-        /// `text` (the default) or `lower_third`.
+        /// `text` (the default), `lower_third` or `scroll`.
         #[serde(default)]
         kind: Option<TitleKind>,
-        /// A lower third's place: `left` (the default), `middle` or
-        /// `right`.
+        /// How a lower third or a scroll lines up: `left`, `middle` or
+        /// `right` (a lower third's default left, a scroll's middle).
         #[serde(default)]
         align: Option<TitleAlign>,
         /// Its look: `font` (a family name), `size` (the text height as a
         /// fraction of the picture height, above 0, at most 1/2), `color`
         /// (`#rrggbb`, `#rgb` or a name such as `yellow`), `outline` (a
         /// color and a `size` as a fraction of the text height, from 0 to
-        /// 1/10, `0` drawing none) and `background` (a color and an
-        /// `opacity` from 0 to 1, a box behind the whole text). A field
-        /// left out keeps the usual look.
+        /// 1/10, `0` drawing none), `background` (a color and an `opacity`
+        /// from 0 to 1, a box behind the whole text) and `shadow` (a
+        /// `color`, an `opacity` from 0 to 1, an `offset` `[x, y]` right and
+        /// down as fractions of the picture, and a `blur` from 0 to 100). A
+        /// field left out keeps the usual look.
         #[serde(default)]
         style: Option<TitleStyle>,
         /// Where it goes, `[x, y]` as fractions of the picture from its top
@@ -1167,6 +1171,15 @@ pub enum Request {
         /// `align`. Default: the kind's usual place.
         #[serde(default)]
         position: Option<[f64; 2]>,
+        /// How much larger its text is drawn, from 1/4 to 4. Default: 1.
+        #[serde(default)]
+        zoom: Option<f64>,
+        /// Degrees turned counterclockwise. Default: 0.
+        #[serde(default)]
+        rotation: Option<f64>,
+        /// How opaque the whole title is, from 0 to 1. Default: 1.
+        #[serde(default)]
+        opacity: Option<f64>,
         #[serde(default)]
         at: Option<TimeSpec>,
         #[serde(default)]
@@ -1193,6 +1206,16 @@ pub enum Request {
         /// usual place.
         #[serde(default)]
         position: Option<Vec<f64>>,
+        /// How much larger its text is drawn, from 1/4 to 4; 1 for the usual
+        /// size.
+        #[serde(default)]
+        zoom: Option<f64>,
+        /// Degrees turned counterclockwise; 0 for none.
+        #[serde(default)]
+        rotation: Option<f64>,
+        /// How opaque the whole title is, from 0 to 1.
+        #[serde(default)]
+        opacity: Option<f64>,
     },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.
@@ -2019,6 +2042,9 @@ pub enum GuiPanel {
     /// The Transcription window: the words of the source clip or the
     /// timeline, from their media's transcripts.
     Transcription,
+    /// The Titles tab, in the Media Pool's place: the kinds of title to
+    /// drag onto the timeline.
+    Titles,
 }
 
 /// Media Pool sort orders.

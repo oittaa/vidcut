@@ -109,6 +109,7 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
 
 struct Lettering {
     place: vec4<f32>,
+    fade: vec4<f32>,
 };
 
 @group(0) @binding(5) var<uniform> lettering: Lettering;
@@ -131,5 +132,5 @@ fn fs_title(in: Out) -> @location(0) vec4<f32> {
             sum += textureSampleLevel(letters, bilinear, first + vec2<f32>(f32(i), f32(j)) * step, 0.0);
         }
     }
-    return sum / f32(taps.x * taps.y);
+    return sum / f32(taps.x * taps.y) * lettering.fade.x;
 }

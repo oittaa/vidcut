@@ -4,7 +4,9 @@ use cosmic_text::{
     Align, Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, Style, SwashCache,
     UnderlineStyle, Weight, Wrap,
 };
-use vidcut_core::model::{Place, SubtitleStyle, Title, TitleAlign};
+use vidcut_core::model::{
+    Place, SubtitleStyle, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle,
+};
 use vidcut_core::subtitles::{Tag, Token, rgb, tokens};
 
 use crate::error::{Error, Result};
@@ -19,6 +21,8 @@ const FAMILIES: &[&str] = &[
     "Arial",
     "Liberation Sans",
 ];
+
+pub(crate) type Placing = ((i32, i32), f32);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sprite {
@@ -44,24 +48,32 @@ struct Fonts {
     cache: SwashCache,
 }
 
+fn installed_usual(system: &FontSystem) -> Option<&'static str> {
+    FAMILIES.iter().copied().find(|name| {
+        system
+            .db()
+            .faces()
+            .any(|f| f.families.iter().any(|(n, _)| n == name))
+    })
+}
+
 fn fonts() -> &'static Mutex<Fonts> {
     static FONTS: OnceLock<Mutex<Fonts>> = OnceLock::new();
     FONTS.get_or_init(|| {
         let mut system = FontSystem::new();
-        let installed = FAMILIES.iter().find(|name| {
-            system
-                .db()
-                .faces()
-                .any(|f| f.families.iter().any(|(n, _)| n == *name))
-        });
-        if let Some(name) = installed {
-            system.db_mut().set_sans_serif_family(*name);
+        if let Some(name) = installed_usual(&system) {
+            system.db_mut().set_sans_serif_family(name);
         }
         Mutex::new(Fonts {
             system,
             cache: SwashCache::new(),
         })
     })
+}
+
+pub fn usual_family() -> Option<String> {
+    let f = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    installed_usual(&f.system).map(str::to_string)
 }
 
 pub fn families() -> Vec<String> {
@@ -180,8 +192,101 @@ struct Look<'a> {
     ink: [u8; 3],
     stroke: Option<([u8; 3], f64)>,
     backing: Option<([u8; 3], f64)>,
+    shadow: Option<Shade>,
     boxed: bool,
-    rich: bool,
+    markup: Markup,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Markup {
+    Cues,
+    Title(f32),
+}
+
+fn installed(f: &Fonts, name: &str) -> Option<String> {
+    f.system.db().faces().find_map(|face| {
+        face.families
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(n, _)| n.clone())
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Shade {
+    ink: [u8; 3],
+    opacity: f32,
+    shift: (i32, i32),
+    sigma: f32,
+}
+
+fn radii(sigma: f32) -> [usize; 3] {
+    let n = 3.0;
+    let ideal = (12.0 * sigma * sigma / n + 1.0).sqrt();
+    let mut low = ideal.floor() as i32;
+    if low % 2 == 0 {
+        low -= 1;
+    }
+    let low = low.max(1);
+    let lw = low as f32;
+    let m =
+        ((12.0 * sigma * sigma - n * lw * lw - 4.0 * n * lw - 3.0 * n) / (-4.0 * lw - 4.0)).round();
+    let mut out = [0; 3];
+    for (i, r) in out.iter_mut().enumerate() {
+        let width = if (i as f32) < m { low } else { low + 2 };
+        *r = ((width - 1) / 2) as usize;
+    }
+    out
+}
+
+fn box_pass(src: &[f32], dst: &mut [f32], w: usize, h: usize, r: usize, across: bool) {
+    let (lines, len, step, stride) = if across { (h, w, 1, w) } else { (w, h, w, 1) };
+    let scale = 1.0 / (2 * r + 1) as f32;
+    for l in 0..lines {
+        let base = l * stride;
+        let at = |i: isize| -> f32 {
+            if i < 0 || i >= len as isize {
+                0.0
+            } else {
+                src[base + i as usize * step]
+            }
+        };
+        let mut sum: f32 = (-(r as isize)..=r as isize).map(at).sum();
+        for i in 0..len {
+            dst[base + i * step] = sum * scale;
+            sum += at(i as isize + r as isize + 1) - at(i as isize - r as isize);
+        }
+    }
+}
+
+fn soften(alpha: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
+    let mut a = alpha.to_vec();
+    if sigma < 0.5 {
+        return a;
+    }
+    let mut b = vec![0.0; a.len()];
+    for r in radii(sigma) {
+        box_pass(&a, &mut b, w, h, r, true);
+        box_pass(&b, &mut a, w, h, r, false);
+    }
+    a
+}
+
+fn shifted(alpha: &[f32], w: usize, h: usize, (dx, dy): (i32, i32)) -> Vec<f32> {
+    let mut out = vec![0.0; alpha.len()];
+    for y in 0..h as i32 {
+        let sy = y - dy;
+        if sy < 0 || sy >= h as i32 {
+            continue;
+        }
+        for x in 0..w as i32 {
+            let sx = x - dx;
+            if sx >= 0 && sx < w as i32 {
+                out[y as usize * w + x as usize] = alpha[sy as usize * w + sx as usize];
+            }
+        }
+    }
+    out
 }
 
 fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
@@ -193,25 +298,43 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
     );
     buffer.set_wrap(Wrap::WordOrGlyph);
     buffer.set_size(Some(wrap), None);
-    let installed = look.font.and_then(|name| {
-        f.system.db().faces().find_map(|face| {
-            face.families
-                .iter()
-                .find(|(n, _)| n.eq_ignore_ascii_case(name))
-                .map(|(n, _)| n.clone())
-        })
-    });
-    let family = match installed.as_deref() {
+    let installed_family = look.font.and_then(|name| installed(f, name));
+    let family = match installed_family.as_deref() {
         Some(name) => Family::Name(name),
         None => Family::SansSerif,
     };
-    let spans = if look.rich {
-        spans(text, family, color(look.ink))
-    } else {
-        vec![(
-            text.to_string(),
-            Attrs::new().family(family).color(color(look.ink)),
-        )]
+    let runs = match look.markup {
+        Markup::Title(_) => vidcut_core::rich::spans(text),
+        Markup::Cues => Vec::new(),
+    };
+    let faces: Vec<Option<String>> = runs
+        .iter()
+        .map(|r| r.look.face.as_deref().and_then(|n| installed(f, n)))
+        .collect();
+    let spans = match look.markup {
+        Markup::Cues => spans(text, family, color(look.ink)),
+        Markup::Title(per) => runs
+            .iter()
+            .zip(&faces)
+            .map(|(r, face)| {
+                let ink = r.look.color.as_deref().and_then(rgb).unwrap_or(look.ink);
+                let mut a = Attrs::new()
+                    .family(face.as_deref().map_or(family, Family::Name))
+                    .color(color(ink));
+                if r.look.bold {
+                    a = a.weight(Weight::BOLD);
+                }
+                if r.look.italic {
+                    a = a.style(Style::Italic);
+                }
+                if r.look.underline {
+                    a = a.underline(UnderlineStyle::Single);
+                }
+                let px = r.look.size.map_or(size, |s| (s as f32 * per).max(1.0));
+                a = a.metrics(Metrics::new(px, px * SubtitleStyle::LINE as f32));
+                (r.text.clone(), a)
+            })
+            .collect(),
     };
     let base = Attrs::new().family(family);
     buffer.set_rich_text(
@@ -229,11 +352,14 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
     let backing = look.backing;
     let outline = stroke.map_or(0.0, |(_, s)| size * s as f32);
     let slack = (size * SubtitleStyle::PADDING as f32).ceil() as i32;
+    let reach = look.shadow.map_or(0, |s| {
+        s.shift.0.abs().max(s.shift.1.abs()) + (3.0 * s.sigma).ceil() as i32 + 1
+    });
     let pad = if backing.is_some() {
         (outline.ceil() as i32 + 2).max(slack)
     } else {
         outline.ceil() as i32 + 2
-    };
+    } + reach;
     let mut bands: Vec<(i32, i32, i32, i32)> = if backing.is_some() {
         buffer
             .layout_runs()
@@ -298,6 +424,21 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
         Some((rgb, _)) => (dilate(&alpha, w, h, outline), rgb),
         None => (vec![0.0; alpha.len()], [0, 0, 0]),
     };
+    let shade: Vec<f32> = match look.shadow {
+        Some(s) => {
+            let shape: Vec<f32> = alpha
+                .iter()
+                .zip(&ring)
+                .map(|(&a, &o)| a + o * (1.0 - a))
+                .collect();
+            let gain = TitleShadow::GAIN as f32;
+            soften(&shifted(&shape, w, h, s.shift), w, h, s.sigma)
+                .into_iter()
+                .map(|v| (v * gain).min(1.0) * s.opacity)
+                .collect()
+        }
+        None => Vec::new(),
+    };
     let rgba: Vec<[f32; 4]> = canvas
         .iter()
         .zip(&ring)
@@ -316,7 +457,11 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
             } else {
                 [0.0; 4]
             };
-            over(over(bg, unit(edge, o)), text)
+            let behind = match look.shadow {
+                Some(sh) => over(bg, unit(sh.ink, shade[i])),
+                None => bg,
+            };
+            over(over(behind, unit(edge, o)), text)
         })
         .collect();
     let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
@@ -370,8 +515,9 @@ fn block(
         ink: style.ink(),
         stroke: style.stroke(),
         backing: style.backing(),
+        shadow: None,
         boxed: false,
-        rich: true,
+        markup: Markup::Cues,
     };
     let (sprite, lines) = lay_out(text, &look, f)?;
     let text_top = style.block_top(place, f64::from(height), f64::from(lines)) as f32;
@@ -402,11 +548,12 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
     }
     let mut f = fonts().lock().unwrap_or_else(|e| e.into_inner());
     let (w, h) = (f64::from(width), f64::from(height));
-    let size = (height as f32 * t.text_fraction() as f32).max(1.0);
+    let zoom = t.scale();
+    let size = (h * t.text_fraction() * zoom).max(1.0) as f32;
     let look = Look {
         font: t.style.font.as_deref(),
         size,
-        wrap: (t.wrap_width(w, h) as f32).max(size),
+        wrap: ((t.wrap_width(w, h) * zoom) as f32).max(size),
         align: match t.align() {
             TitleAlign::Left => Align::Left,
             TitleAlign::Middle => Align::Center,
@@ -415,17 +562,121 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
         ink: t.ink(),
         stroke: t.stroke(),
         backing: t.backing(),
+        shadow: t.style.shadow.as_ref().map(|s| {
+            let [dx, dy] = s.shift();
+            Shade {
+                ink: s.ink(),
+                opacity: s.alpha() as f32,
+                shift: ((dx * w).round() as i32, (dy * h).round() as i32),
+                sigma: (s.softness() * h / TitleShadow::BLUR_PER_PICTURE) as f32,
+            }
+        }),
         boxed: true,
-        rich: false,
+        markup: Markup::Title((h * zoom) as f32),
     };
     let Some((sprite, lines)) = lay_out(&t.text, &look, &mut f) else {
         return Vec::new();
     };
     let [x, y] = t.place();
     let [across, down] = t.anchor();
+    let bottom = match t.kind {
+        TitleKind::Text => y,
+        TitleKind::LowerThird => y + t.lower_line() * (zoom - 1.0),
+        TitleKind::Scroll => 1.0,
+    };
     let left = (x * w) as f32 - across as f32 * look.wrap;
-    let top = (y * h) as f32 - down as f32 * lines;
-    vec![placed(sprite, left, top)]
+    let top = (bottom * h) as f32 - down as f32 * lines;
+    let sprite = placed(sprite, left, top);
+    let [px, py] = t.pivot();
+    vec![turned(sprite, ((px * w) as f32, (py * h) as f32), t.turn())]
+}
+
+fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
+    if degrees == 0.0 || s.width == 0 || s.height == 0 {
+        return s;
+    }
+    let (sin, cos) = (
+        degrees.to_radians().sin() as f32,
+        degrees.to_radians().cos() as f32,
+    );
+    let forward = |x: f32, y: f32| {
+        let (u, v) = (x - px, y - py);
+        (px + u * cos + v * sin, py - u * sin + v * cos)
+    };
+    let (x0, y0) = (s.x as f32, s.y as f32);
+    let (x1, y1) = (x0 + s.width as f32, y0 + s.height as f32);
+    let corners = [
+        forward(x0, y0),
+        forward(x1, y0),
+        forward(x0, y1),
+        forward(x1, y1),
+    ];
+    let lo_x = corners.iter().map(|c| c.0).fold(f32::MAX, f32::min).floor() as i32;
+    let hi_x = corners.iter().map(|c| c.0).fold(f32::MIN, f32::max).ceil() as i32;
+    let lo_y = corners.iter().map(|c| c.1).fold(f32::MAX, f32::min).floor() as i32;
+    let hi_y = corners.iter().map(|c| c.1).fold(f32::MIN, f32::max).ceil() as i32;
+    let (ow, oh) = ((hi_x - lo_x).max(1) as usize, (hi_y - lo_y).max(1) as usize);
+    let held = |x: i32, y: i32| -> [f32; 4] {
+        let p = s.at(x, y);
+        [p[0] * p[3], p[1] * p[3], p[2] * p[3], p[3]]
+    };
+    let mut rgba = vec![[0.0f32; 4]; ow * oh];
+    for oy in 0..oh {
+        for ox in 0..ow {
+            let (u, v) = (
+                lo_x as f32 + ox as f32 + 0.5 - px,
+                lo_y as f32 + oy as f32 + 0.5 - py,
+            );
+            let (sx, sy) = (px + u * cos - v * sin - 0.5, py + u * sin + v * cos - 0.5);
+            let (fx, fy) = (sx.floor(), sy.floor());
+            let (ax, ay) = (sx - fx, sy - fy);
+            let (ix, iy) = (fx as i32, fy as i32);
+            let mut p = [0.0f32; 4];
+            for (dx, dy, k) in [
+                (0, 0, (1.0 - ax) * (1.0 - ay)),
+                (1, 0, ax * (1.0 - ay)),
+                (0, 1, (1.0 - ax) * ay),
+                (1, 1, ax * ay),
+            ] {
+                let q = held(ix + dx, iy + dy);
+                for c in 0..4 {
+                    p[c] += q[c] * k;
+                }
+            }
+            rgba[oy * ow + ox] = if p[3] > 0.0 {
+                [p[0] / p[3], p[1] / p[3], p[2] / p[3], p[3]]
+            } else {
+                [0.0; 4]
+            };
+        }
+    }
+    Sprite {
+        x: lo_x,
+        y: lo_y,
+        width: ow as u32,
+        height: oh as u32,
+        rgba,
+    }
+}
+
+pub fn backing_box(t: &Title, width: u32, height: u32) -> Option<[f64; 4]> {
+    t.backing()?;
+    let upright = Title {
+        rotation: None,
+        style: TitleStyle {
+            shadow: None,
+            ..t.style.clone()
+        },
+        ..t.clone()
+    };
+    let s = title(&upright, width, height).into_iter().next()?;
+    let (w, h) = (f64::from(width), f64::from(height));
+    Some([
+        f64::from(s.x) / w,
+        f64::from(s.y) / h,
+        f64::from(s.width) / w,
+        f64::from(s.height) / h,
+    ])
 }
 
 impl Sprite {
@@ -613,6 +864,7 @@ fn layout(pixel: format::Pixel) -> Result<Layout> {
 
 fn visit(
     sprites: &[Sprite],
+    ((dx, dy), alpha): Placing,
     (w, h): (i32, i32),
     c: &Comp,
     coding: &Coding,
@@ -620,16 +872,20 @@ fn visit(
 ) {
     let (sw, sh) = (1i32 << c.log2w, 1i32 << c.log2h);
     for s in sprites {
-        let x0 = s.x.max(0) / sw;
-        let y0 = s.y.max(0) / sh;
-        let x1 = ((s.x + s.width as i32).min(w) + sw - 1) / sw;
-        let y1 = ((s.y + s.height as i32).min(h) + sh - 1) / sh;
+        let (sx0, sy0) = (s.x + dx, s.y + dy);
+        let x0 = sx0.max(0) / sw;
+        let y0 = sy0.max(0) / sh;
+        let x1 = ((sx0 + s.width as i32).min(w) + sw - 1) / sw;
+        let y1 = ((sy0 + s.height as i32).min(h) + sh - 1) / sh;
+        if x1 <= x0 || y1 <= y0 {
+            continue;
+        }
         for cy in y0..y1 {
             for cx in x0..x1 {
                 let (mut a, mut rgb, mut n) = (0.0f32, [0.0f32; 3], 0.0f32);
                 for y in cy * sh..(cy * sh + sh).min(h) {
                     for x in cx * sw..(cx * sw + sw).min(w) {
-                        let p = s.at(x, y);
+                        let p = s.at(x - dx, y - dy);
                         a += p[3];
                         for i in 0..3 {
                             rgb[i] += p[i] * p[3];
@@ -646,7 +902,7 @@ fn visit(
                 } else {
                     coding.codes(color, c.depth)[c.role]
                 };
-                each(cx as usize, cy as usize, target, a / n);
+                each(cx as usize, cy as usize, target, a / n * alpha);
             }
         }
     }
@@ -678,7 +934,7 @@ fn mask(c: &Comp) -> u32 {
     }
 }
 
-pub(crate) fn blend(f: &mut frame::Video, sprites: &[Sprite]) -> Result<()> {
+pub(crate) fn blend_at(f: &mut frame::Video, sprites: &[Sprite], shift: Placing) -> Result<()> {
     let layout = layout(f.format())?;
     // SAFETY: a live frame.
     let ret = unsafe { ffi::av_frame_make_writable(f.as_mut_ptr()) };
@@ -697,7 +953,7 @@ pub(crate) fn blend(f: &mut frame::Video, sprites: &[Sprite]) -> Result<()> {
             let raw = f.as_mut_ptr();
             ((*raw).data[c.plane], (*raw).linesize[c.plane] as isize)
         };
-        visit(sprites, size, c, &coding, |x, y, target, a| {
+        visit(sprites, shift, size, c, &coding, |x, y, target, a| {
             // SAFETY: `visit` keeps `x` and `y` inside the component's plane.
             unsafe {
                 let row = data.offset(y as isize * stride);
@@ -717,6 +973,7 @@ pub(crate) fn overlay(
     pixel: format::Pixel,
     like: &frame::Video,
     sprites: &[Sprite],
+    shift: Placing,
 ) -> Result<(frame::Video, frame::Video)> {
     let layout = layout(pixel)?;
     let (w, h) = (like.width(), like.height());
@@ -742,6 +999,7 @@ pub(crate) fn overlay(
             |old: u32, v: f32| (old & !mask) | (((v.round().max(0.0) as u32) << c.shift) & mask);
         visit(
             sprites,
+            shift,
             (w as i32, h as i32),
             c,
             &coding,

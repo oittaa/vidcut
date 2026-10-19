@@ -283,7 +283,12 @@ pub fn timeline(
             "preset": null, "format": format.name(), "outputs": [summary], "notes": notes,
         }));
     };
-    let doc = otio::export(p, name, span, locations)?;
+    let family = vidcut_av::burn::usual_family();
+    let drawn = |t: &vidcut_core::model::Title| otio::titles::Drawn {
+        family: family.clone(),
+        backing: vidcut_av::burn::backing_box(t, p.settings.width, p.settings.height),
+    };
+    let doc = otio::export_drawn(p, name, span, locations, &drawn)?;
     let text =
         serde_json::to_string_pretty(&doc).map_err(|e| Error::internal(e.to_string()))? + "\n";
     match format {

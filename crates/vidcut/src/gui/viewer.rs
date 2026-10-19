@@ -281,6 +281,9 @@ impl Workspace {
             let styling = self.timeline.track_dialog.as_ref();
             super::subtitles::paint_cues(&painter, picture, p, player.position, typing, styling);
         }
+        if mode == ViewerMode::Timeline && offline.is_none() && played.is_some() {
+            self.title_controls(ui, &area_resp, picture);
+        }
         if let Some(name) = offline {
             painter.rect_filled(picture, CornerRadius::ZERO, theme::colors().offline);
             let text = RichText::new(format!("Media Offline\n{name}"))
