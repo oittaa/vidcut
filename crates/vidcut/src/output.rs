@@ -79,10 +79,15 @@ pub fn print(method: &str, r: &Response, json: bool) {
             if let Some(frames) = r.result.get("frames") {
                 println!("  removed  {frames} frames in {} parts", removed.len());
                 for part in removed {
+                    let at = |tc: &str, frame: &str| {
+                        part[tc]
+                            .as_str()
+                            .map_or_else(|| format!("{}f", part[frame]), String::from)
+                    };
                     println!(
                         "    {} -> {}  {}",
-                        part["start_tc"].as_str().unwrap_or_default(),
-                        part["end_tc"].as_str().unwrap_or_default(),
+                        at("start_tc", "start"),
+                        at("end_tc", "end"),
                         part["clip"].as_str().unwrap_or_default()
                     );
                 }
