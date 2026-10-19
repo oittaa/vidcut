@@ -5,9 +5,8 @@ use crate::model::{
     SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleAlign, TitleKind, TitleStyle,
 };
 
-pub const POINTS_PER_PICTURE: f64 = 1200.0;
 pub const STROKE_PER_TEXT: f64 = 160.0;
-const LINE_GAP: f64 = 0.02;
+pub const UNKNOWN_HEIGHT: u32 = 1080;
 const USUAL_FAMILY: &str = "Open Sans";
 
 const HEAD: &str = "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\np, li { white-space: pre-wrap; }\n</style></head><body style=\" font-family:'MS Shell Dlg 2'; font-size:8.25pt; font-weight:400; font-style:normal;\">\n";
@@ -71,7 +70,7 @@ fn html(
                 "<p{align} style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; \
                  margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:{spacing}; \
                  -qt-line-height-type: line-distance;\"><span style=\" font-family:'{family}'; \
-                 font-size:{}pt; font-weight:504; color:{color};\">{}</span></p>",
+                 font-size:{}pt; font-weight:400; color:{color};\">{}</span></p>",
                 number(points),
                 escaped(line)
             )
@@ -145,23 +144,37 @@ fn rich_text(lines: &[&str], blob: String, anchor: u32, at: [f64; 2], usual: [f6
     )
 }
 
-pub fn reference(t: &Title) -> Value {
+#[derive(Debug, Clone, Default)]
+pub struct Drawn {
+    pub family: Option<String>,
+    pub backing: Option<[f64; 4]>,
+}
+
+pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
     let (kind, name) = kind_of(t);
-    let family = t.style.font.as_deref().unwrap_or(USUAL_FAMILY);
+    let family = t
+        .style
+        .font
+        .as_deref()
+        .or(drawn.family.as_deref())
+        .unwrap_or(USUAL_FAMILY);
     let size = t.text_fraction();
-    let points = size * POINTS_PER_PICTURE;
+    let points = size * f64::from(height);
     let color = hex(t.ink());
     let line = size * SubtitleStyle::LINE;
     let [x, y] = t.place();
     let lines: Vec<&str> = t.text.lines().collect();
-    let mut groups = match t.kind {
-        TitleKind::Text => vec![rich_text(
-            &lines,
-            html(&lines, Some("center"), 0, family, points, &color),
-            4,
-            [rounded(x), rounded(1.0 - y)],
-            [0.5, 0.5],
-        )],
+    let (mut groups, hold) = match t.kind {
+        TitleKind::Text => (
+            vec![rich_text(
+                &lines,
+                html(&lines, Some("center"), 0, family, points, &color),
+                4,
+                [rounded(x), rounded(1.0 - y)],
+                [0.5, 0.5],
+            )],
+            [x, 1.0 - y],
+        ),
         TitleKind::LowerThird => {
             let (align, column, usual_x) = match t.align() {
                 TitleAlign::Left => (None, 0, 0.1),
@@ -173,23 +186,26 @@ pub fn reference(t: &Title) -> Value {
                 [only] => ("", *only),
                 [first, second, ..] => (*first, *second),
             };
-            let low = 1.0 - y + line;
-            vec![
-                rich_text(
-                    &[lower],
-                    html(&[lower], align, 1, family, points, &color),
-                    column,
-                    [rounded(x), rounded(low)],
-                    [usual_x, 0.2],
-                ),
-                rich_text(
-                    &[upper],
-                    html(&[upper], align, 0, family, points, &color),
-                    6 + column,
-                    [rounded(x), rounded(low + LINE_GAP)],
-                    [usual_x, 0.22],
-                ),
-            ]
+            let meet = 1.0 - y + line;
+            (
+                vec![
+                    rich_text(
+                        &[upper],
+                        html(&[upper], align, 1, family, points, &color),
+                        column,
+                        [rounded(x), rounded(meet)],
+                        [usual_x, 0.2],
+                    ),
+                    rich_text(
+                        &[lower],
+                        html(&[lower], align, 0, family, points, &color),
+                        6 + column,
+                        [rounded(x), rounded(meet)],
+                        [usual_x, 0.22],
+                    ),
+                ],
+                [x, meet],
+            )
         }
     };
     groups.push(group(
@@ -246,16 +262,30 @@ pub fn reference(t: &Title) -> Value {
             plain("strokeOutsideOnly", json!(false), json!(false), "Bool"),
         ],
     ));
-    let (back_color, opacity, height) = match t.backing() {
+    let (back_color, opacity, extent, center, corner) = match t.backing() {
         Some((rgb, a)) => {
-            let rows = lines.len().max(1) as f64;
+            let [left, top, w, h] = drawn.backing.unwrap_or_else(|| {
+                let rows = lines.len().max(1) as f64;
+                let h = rows * line + 2.0 * SubtitleStyle::PADDING * size;
+                let top = match t.kind {
+                    TitleKind::Text => y - h / 2.0,
+                    TitleKind::LowerThird => y + SubtitleStyle::PADDING * size - h,
+                };
+                let middle = if t.kind == TitleKind::Text { x } else { 0.5 };
+                [middle - Title::SAFE / 2.0, top, Title::SAFE, h]
+            });
             (
                 hex(rgb),
                 (a * 100.0).round() as i64,
-                rounded(rows * line + 2.0 * SubtitleStyle::PADDING * size).min(2.0),
+                [rounded(w).min(2.0), rounded(h).min(2.0)],
+                [
+                    rounded(left + w / 2.0 - hold[0]),
+                    rounded(1.0 - (top + h / 2.0) - hold[1]),
+                ],
+                0.0,
             )
         }
-        None => ("#000000".into(), 50, 0.0),
+        None => ("#000000".into(), 50, [0.9, 0.0], [0.0, 0.0], 1.0 / 27.0),
     };
     groups.push(group(
         "Background",
@@ -280,19 +310,19 @@ pub fn reference(t: &Title) -> Value {
                 30.0,
             ),
             ranged(
-                keyed("backgroundWidth", json!(0.9), json!(0.9), "Double"),
+                keyed("backgroundWidth", json!(extent[0]), json!(0.9), "Double"),
                 0.0,
                 2.0,
             ),
             ranged(
-                keyed("backgroundHeight", json!(height), json!(0.0), "Double"),
+                keyed("backgroundHeight", json!(extent[1]), json!(0.0), "Double"),
                 0.0,
                 2.0,
             ),
             ranged(
                 keyed(
                     "backgroundCornerRadius",
-                    json!(1.0 / 27.0),
+                    json!(corner),
                     json!(1.0 / 27.0),
                     "Double",
                 ),
@@ -301,7 +331,7 @@ pub fn reference(t: &Title) -> Value {
             ),
             keyed(
                 "backgroundCenter",
-                json!([0.0, 0.0]),
+                json!(center),
                 json!([0.0, 0.0]),
                 "POINTF",
             ),
@@ -474,35 +504,34 @@ fn clamped(v: f64) -> f64 {
     rounded(v).clamp(0.0, 1.0)
 }
 
-pub fn read(item: &Value, reference: &Value) -> Option<Title> {
+pub fn read(item: &Value, reference: &Value, height: u32) -> Option<Title> {
     if let Some(raw) = item["metadata"][VIDCUT].get("title")
         && let Ok(t) = serde_json::from_value::<Title>(raw.clone())
         && let Ok(t) = crate::ops::titles::checked(&t)
     {
         return Some(t);
     }
-    from_editor(reference)
+    from_editor(reference, height)
 }
 
-pub fn from_editor(reference: &Value) -> Option<Title> {
+pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let (kind, align) = kind_named(reference["generator_kind"].as_str()?)?;
     let all = groups(reference);
     let texts = named(&all, "Rich Text");
     let first = *texts.first()?;
     let read_of = |g: &Value| read_html(value(g, "title blob").as_str().unwrap_or(""));
-    let anchor_of = |g: &Value| value(g, "anchor").as_u64().unwrap_or(4);
+    let row = |g: &Value| (value(g, "anchor").as_u64().unwrap_or(4) / 3).min(2);
     let (lines, style_from, at, lowered) = match kind {
         TitleKind::Text => {
             let r = read_of(first);
             let at = point(value(first, "position")).unwrap_or([0.5, 0.5]);
-            (r.lines.clone(), r, at, false)
+            (r.lines.clone(), r, at, None)
         }
         TitleKind::LowerThird => {
-            let second = texts.get(1).copied();
-            let (lower, upper) = match second {
-                Some(s) if anchor_of(first) / 3 == 2 && anchor_of(s) / 3 == 0 => (s, Some(first)),
-                Some(s) => (first, Some(s)),
-                None => (first, None),
+            let (upper, lower) = match texts.get(1).copied() {
+                Some(s) if row(first) == 2 && row(s) != 2 => (Some(s), first),
+                Some(s) => (Some(first), s),
+                None => (None, first),
             };
             let low = read_of(lower);
             let high = upper.map(read_of).unwrap_or_default();
@@ -511,14 +540,14 @@ pub fn from_editor(reference: &Value) -> Option<Title> {
                 .into_iter()
                 .filter(|l| !l.is_empty())
                 .collect();
-            let at = point(value(lower, "position")).unwrap_or([0.1, 0.2]);
+            let at = point(value(lower, "position")).unwrap_or([0.1, 0.22]);
             let style_from = if high.points.is_some() { high } else { low };
-            (lines, style_from, at, true)
+            (lines, style_from, at, Some(row(lower)))
         }
     };
     let size = style_from
         .points
-        .map(|p| p / POINTS_PER_PICTURE)
+        .map(|p| p / f64::from(height.max(1)))
         .filter(|s| crate::ops::subtitles::checked_size(Some(*s), "title").is_ok());
     let font = style_from
         .family
@@ -567,8 +596,8 @@ pub fn from_editor(reference: &Value) -> Option<Title> {
     };
     let [x, from_bottom] = at;
     let mut y = 1.0 - from_bottom;
-    if lowered {
-        y += title.text_fraction() * SubtitleStyle::LINE;
+    if let Some(row) = lowered {
+        y += row as f64 / 2.0 * title.text_fraction() * SubtitleStyle::LINE;
     }
     title.position = Some([clamped(x), clamped(y)]);
     crate::ops::titles::checked(&title).ok()

@@ -44,24 +44,32 @@ struct Fonts {
     cache: SwashCache,
 }
 
+fn installed_usual(system: &FontSystem) -> Option<&'static str> {
+    FAMILIES.iter().copied().find(|name| {
+        system
+            .db()
+            .faces()
+            .any(|f| f.families.iter().any(|(n, _)| n == name))
+    })
+}
+
 fn fonts() -> &'static Mutex<Fonts> {
     static FONTS: OnceLock<Mutex<Fonts>> = OnceLock::new();
     FONTS.get_or_init(|| {
         let mut system = FontSystem::new();
-        let installed = FAMILIES.iter().find(|name| {
-            system
-                .db()
-                .faces()
-                .any(|f| f.families.iter().any(|(n, _)| n == *name))
-        });
-        if let Some(name) = installed {
-            system.db_mut().set_sans_serif_family(*name);
+        if let Some(name) = installed_usual(&system) {
+            system.db_mut().set_sans_serif_family(name);
         }
         Mutex::new(Fonts {
             system,
             cache: SwashCache::new(),
         })
     })
+}
+
+pub fn usual_family() -> Option<String> {
+    let f = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    installed_usual(&f.system).map(str::to_string)
 }
 
 pub fn families() -> Vec<String> {
@@ -426,6 +434,18 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
     let left = (x * w) as f32 - across as f32 * look.wrap;
     let top = (y * h) as f32 - down as f32 * lines;
     vec![placed(sprite, left, top)]
+}
+
+pub fn backing_box(t: &Title, width: u32, height: u32) -> Option<[f64; 4]> {
+    t.backing()?;
+    let s = title(t, width, height).into_iter().next()?;
+    let (w, h) = (f64::from(width), f64::from(height));
+    Some([
+        f64::from(s.x) / w,
+        f64::from(s.y) / h,
+        f64::from(s.width) / w,
+        f64::from(s.height) / h,
+    ])
 }
 
 impl Sprite {

@@ -291,11 +291,10 @@ impl Workspace {
                 }
                 let lower = d.kind == TitleKind::LowerThird;
                 let usual = Title::usual_position(d.kind, d.align);
-                let size_hint = if lower {
-                    "6% of the picture"
-                } else {
-                    "8% of the picture"
-                };
+                let size_hint = format!(
+                    "{}% of the picture",
+                    percent(Some(Title::usual_size(d.kind)))
+                );
                 let across_hint = format!("{}%", percent(Some(usual[0])));
                 let down_hint = format!("{}%", percent(Some(usual[1])));
                 egui::Grid::new("title-style-fields").show(ui, |ui| {
@@ -311,7 +310,7 @@ impl Workspace {
                     changed |= row(ui, "Font", &mut d.font, "Open Sans");
                     changed |= font_list(ui, "title-font", &mut d.font, &d.families);
                     ui.end_row();
-                    changed |= row(ui, "Size", &mut d.size, size_hint);
+                    changed |= row(ui, "Size", &mut d.size, &size_hint);
                     ui.end_row();
                     changed |= row(ui, "Color", &mut d.color, "#ffffff");
                     changed |= swatch(ui, &mut d.color, [255, 255, 255]);
