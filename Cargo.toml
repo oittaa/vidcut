@@ -119,7 +119,7 @@ ffmpeg-next = { version = "9.0", default-features = false, features = [
 ] }
 # On wgpu (below): the viewer's pictures are textures the GUI's own GPU
 # shader converts.
-eframe = { version = "0.36", default-features = false, features = [
+eframe = { version = "0.37", default-features = false, features = [
     "accesskit",
     "default_fonts",
     "wgpu_no_default_features",
