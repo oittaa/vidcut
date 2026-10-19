@@ -38,7 +38,7 @@ pub struct SilenceDialog {
     asked: Option<(Value, Ask)>,
     found_for: Option<Value>,
     held: Option<(usize, Edge)>,
-    previewing: Option<(bool, Vec<Stripe>)>,
+    skipped: Option<Vec<Stripe>>,
 }
 
 impl SilenceDialog {
@@ -58,7 +58,7 @@ impl SilenceDialog {
             asked: None,
             found_for: None,
             held: None,
-            previewing: None,
+            skipped: None,
         }
     }
 
@@ -96,6 +96,17 @@ impl SilenceDialog {
         self.cut()
             .map(|s| json!({ "clip": s.clip, "start": s.start, "end": s.end }))
             .collect()
+    }
+
+    pub fn spans(&self) -> Vec<ops::ClipSpans> {
+        let mut out: Vec<ops::ClipSpans> = Vec::new();
+        for s in self.cut() {
+            match out.iter_mut().find(|(c, _)| *c == s.clip) {
+                Some((_, spans)) => spans.push((s.start, s.end)),
+                None => out.push((s.clip.clone(), vec![(s.start, s.end)])),
+            }
+        }
+        out
     }
 
     pub fn remove_params(&self) -> Value {
@@ -487,9 +498,6 @@ impl Workspace {
         if clips.is_empty() {
             return;
         }
-        if let Some(mut old) = self.timeline.silence.take() {
-            self.silence_preview(&mut old, false);
-        }
         self.timeline.silence = Some(SilenceDialog::new(clips));
     }
 
@@ -536,9 +544,9 @@ impl Workspace {
                 Ask::send(&self.live, ctx, "edit.ripple_delete_silence", dry),
             ));
         }
-        self.preview_tick(&mut d);
+        self.silence_skips(&mut d);
         let mut open = true;
-        let (mut remove, mut cancel, mut play) = (false, false, None);
+        let (mut remove, mut cancel) = (false, false);
         let fps = self.fps().as_f64().max(1.0);
         let what = match d.clips.as_slice() {
             [one] => one.clone(),
@@ -663,20 +671,12 @@ impl Workspace {
                 ui.label(status);
                 ui.label(dim(
                     "Click a stripe to keep it, or drag its edges. [ and ] go to the previous \
-                     and next, X keeps or cuts the one at the playhead.",
+                     and next, X keeps or cuts the one at the playhead. Play and Space skip \
+                     the red stripes.",
                 ));
                 ui.label(dim("Cuts are de-clicked with 3 ms fades."));
                 let ready = d.current() && all > 0;
-                let playing = d.previewing.is_some();
                 ui.horizontal(|ui| {
-                    let label = if playing { "Stop" } else { "Play" };
-                    if ui
-                        .add_enabled(ready || playing, egui::Button::new(label))
-                        .on_hover_text("Plays from the playhead with the red stripes cut out")
-                        .clicked()
-                    {
-                        play = Some(!playing);
-                    }
                     if ui
                         .add_enabled(ready, egui::Button::new("Keep All"))
                         .clicked()
@@ -697,11 +697,8 @@ impl Workspace {
                     cancel = ui.button("Cancel").clicked();
                 });
             });
-        if let Some(on) = play {
-            self.silence_preview(&mut d, on);
-        }
         if remove || cancel || !open {
-            self.silence_preview(&mut d, false);
+            self.live.skip(None);
         }
         if remove {
             self.send("edit.ripple_delete_silence", d.remove_params());
@@ -710,32 +707,13 @@ impl Workspace {
         }
     }
 
-    fn preview_tick(&mut self, d: &mut SilenceDialog) {
-        let Some((played, shown)) = d.previewing.as_mut() else {
-            return;
-        };
-        let playing = self.snap.timeline.playing;
-        let ended = *played && !playing;
-        *played |= playing;
-        let changed = *shown != d.stripes;
-        if ended {
-            d.previewing = None;
-            self.send("player.pause", json!({}));
-        } else if changed && d.held.is_none() {
-            self.silence_preview(d, true);
-        }
-    }
-
-    fn silence_preview(&mut self, d: &mut SilenceDialog, on: bool) {
-        if !on {
-            if d.previewing.take().is_some() {
-                self.send("player.pause", json!({}));
-            }
+    fn silence_skips(&mut self, d: &mut SilenceDialog) {
+        if d.held.is_some() || d.skipped.as_ref() == Some(&d.stripes) {
             return;
         }
-        let without = d.cut_parts();
-        self.send("player.play", json!({ "speed": 1.0, "without": without }));
-        d.previewing = Some((false, d.stripes.clone()));
+        d.skipped = Some(d.stripes.clone());
+        let spans = d.spans();
+        self.live.skip((!spans.is_empty()).then_some(spans));
     }
 
     pub(crate) fn silence_keys(&mut self, input: &egui::InputState) {

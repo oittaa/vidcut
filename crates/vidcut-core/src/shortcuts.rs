@@ -73,7 +73,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Play or stop",
         Some(
             "In Dynamic Trim, it plays from 2 seconds before the playhead to 2 seconds after \
-             and puts the playhead back, or stops a trim.",
+             and puts the playhead back, or stops a trim. While Ripple Delete Silence is \
+             open, playing skips the red stripes.",
         ),
     ),
     key(

@@ -26,7 +26,7 @@ vidcut-core reaches media only through the `Env` trait. `AvEnv` implements it on
 | `analyze.loudness` | `Env::loudness` of the flattened timeline | none |
 | `timeline.boring` | none: clip lengths | `analysis::boring` |
 
-Given `parts`, `edit.ripple_delete_silence` measures nothing: it checks that each part lies inside its clip and apart from the clip's others, and cuts them (`editor::clip_parts` checks the same for `player.play`'s `without`).
+Given `parts`, `edit.ripple_delete_silence` measures nothing: it checks that each part lies inside its clip and apart from the clip's others, and cuts them.
 
 ## Speech
 

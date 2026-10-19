@@ -1154,12 +1154,6 @@ pub enum Request {
         speed: Option<f64>,
         #[serde(default)]
         viewer: Option<ViewerMode>,
-        /// Play the timeline, from the playhead, as `edit.ripple_delete_silence`
-        /// with these `parts` would leave it, changing nothing (what Ripple
-        /// Delete Silence's Play does, deviation X48): the playhead skips
-        /// them. A pause or a seek ends it.
-        #[serde(default)]
-        without: Option<Vec<ClipPart>>,
     },
     #[serde(rename = "player.pause")]
     PlayerPause {

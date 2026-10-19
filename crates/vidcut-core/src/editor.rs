@@ -4987,21 +4987,6 @@ fn speech_settings(
     }))
 }
 
-pub fn clip_parts(
-    p: &Project,
-    given: &[ClipPart],
-    playhead: Option<i64>,
-) -> Result<Vec<ops::ClipSpans>> {
-    let mut ids: Vec<String> = Vec::new();
-    for g in given {
-        let id = resolve_clip(p, &g.clip, playhead)?;
-        if !ids.contains(&id) {
-            ids.push(id);
-        }
-    }
-    given_parts(p, given, &ids, playhead)
-}
-
 fn given_parts(
     p: &Project,
     given: &[ClipPart],

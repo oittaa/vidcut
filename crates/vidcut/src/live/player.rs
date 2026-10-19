@@ -313,6 +313,10 @@ impl Player {
         Some(self.motion)
     }
 
+    pub fn skipping(&self) -> bool {
+        self.skips.is_some()
+    }
+
     pub fn end_audition(&mut self) -> Option<u64> {
         if !std::mem::take(&mut self.auditioning) {
             return None;
