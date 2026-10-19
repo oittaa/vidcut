@@ -1162,6 +1162,22 @@ impl Workspace {
         }
     }
 
+    pub(crate) fn trim_drawn(&self, p: &Project) -> Option<(Project, i64)> {
+        self.dynamic_drawn(p).or_else(|| self.strip_drawn(p))
+    }
+
+    pub(crate) fn strip_drawn(&self, p: &Project) -> Option<(Project, i64)> {
+        let (e, by) = self.timeline.strip_drag?;
+        let selected = self.timeline.edit?;
+        if (selected.at, selected.track) != (e.at, e.track) {
+            return None;
+        }
+        let mut trimmed = p.clone();
+        let mode = self.timeline.options.dynamic_mode;
+        let at = dynamic_preview(&mut trimmed, &DynamicTarget::Edit(e), mode, by).ok()?;
+        Some((trimmed, at))
+    }
+
     pub(crate) fn dynamic_drawn(&self, p: &Project) -> Option<(Project, i64)> {
         let pending = self.timeline.dynamic.as_ref()?.pending;
         if pending == 0 {

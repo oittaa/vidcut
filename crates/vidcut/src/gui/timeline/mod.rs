@@ -202,6 +202,7 @@ pub struct TimelineView {
     pub silence: Option<tools::SilenceDialog>,
     pub boring_dialog: Option<(f64, i64)>,
     pub dynamic: Option<tools::Dynamic>,
+    pub strip_drag: Option<(EditSel, i64)>,
     pub landing: Option<(i64, Instant, i64)>,
     pub heard: bool,
     pub layout: Option<Layout>,
@@ -241,6 +242,7 @@ impl Default for TimelineView {
             silence: None,
             boring_dialog: None,
             dynamic: None,
+            strip_drag: None,
             landing: None,
             heard: false,
             layout: None,
@@ -420,7 +422,7 @@ impl Workspace {
         };
         self.history_update(ui.ctx());
         self.timeline_toolbar(ui, &p);
-        let trimmed = self.dynamic_drawn(&p);
+        let trimmed = self.trim_drawn(&p);
         let before = match trimmed {
             None => self.history_shown(),
             Some(_) => None,
@@ -2575,7 +2577,7 @@ impl Workspace {
     pub fn drawn_cut_media(&mut self) -> Option<(bool, bool)> {
         self.timeline.edit?;
         let p = self.shown_project()?;
-        Some(match self.dynamic_drawn(&p) {
+        Some(match self.trim_drawn(&p) {
             Some((q, at)) => self.cut_media(&q, Some(at)),
             None => self.cut_media(&p, None),
         })

@@ -165,6 +165,10 @@ impl Workspace {
             };
             Some((*side, by, r.drag_stopped()))
         });
+        self.timeline.strip_drag = match active {
+            Some((side, by, false)) if by != 0 => Some((EditSel { side, ..e }, by)),
+            _ => None,
+        };
         let shift = |side: Side| match active {
             Some((s, by, _)) if s == side || s == Side::Both => by,
             _ => 0,
