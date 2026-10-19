@@ -442,7 +442,9 @@ pub fn export(
             .and_then(otio_clip_color)
     };
     let (mut video_tracks, mut audio_tracks) = (Vec::new(), Vec::new());
-    let mut groups = 0;
+    let mut groups: i64 = 0;
+    let links = compound_links(p, a, b);
+    let mut given = HashMap::new();
     for t in &p.tracks {
         let (mut video, mut audio) = (Vec::new(), Vec::new());
         let (mut tv, mut ta) = (a, a);
@@ -511,6 +513,9 @@ pub fn export(
                 };
                 if let Some(x) = shown_color(c) {
                     it["color"] = x;
+                }
+                if let Some(k) = &c.compound {
+                    tie(&mut it, c, k, &links, &mut given, &mut groups);
                 }
                 video.push(it);
                 if let Some(x) = transitions::tail(p, &edits, c, false, e, rate) {
@@ -581,7 +586,9 @@ pub fn export(
                             x.written(c.source_at(s), s > c.start, e < c.end())
                         }),
                     );
-                    audio.push(block(c, k, &label, c.source_at(s), e - s, effects));
+                    let mut it = block(c, k, &label, c.source_at(s), e - s, effects);
+                    tie(&mut it, c, k, &links, &mut given, &mut groups);
+                    audio.push(it);
                     ta = e;
                 }
             }
@@ -758,6 +765,76 @@ fn compound_item(
     v["enabled"] = json!(c.enabled);
     v["metadata"][VIDCUT] = json!({ "clip": c.id, "color": c.color });
     v
+}
+
+fn sequence_id(k: &Compound) -> Option<&str> {
+    k.stack["metadata"][EDITOR]["Sequence ID"].as_str()
+}
+
+fn sequence_of(k: &Compound) -> String {
+    sequence_id(k).map_or_else(
+        || {
+            let h = crate::fingerprint::short_digest(k.stack.to_string().as_bytes());
+            format!(
+                "{{{}-{}-{}-{}-{}}}",
+                &h[..8],
+                &h[8..12],
+                &h[12..16],
+                &h[16..20],
+                &h[20..]
+            )
+        },
+        str::to_string,
+    )
+}
+
+type Links<'a> = HashMap<&'a str, (usize, String)>;
+
+fn compound_links(p: &Project, a: i64, b: i64) -> Links<'_> {
+    let blocks = |picture: bool| {
+        p.tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .filter(move |c| c.video == picture && c.start.max(a) < c.end().min(b))
+            .filter_map(|c| Some((c, c.compound.as_ref()?)))
+    };
+    let mut links = HashMap::new();
+    for (n, (c, k)) in blocks(true).enumerate() {
+        let same = |(s, j): &(&Clip, &Compound)| {
+            !links.contains_key(s.id.as_str())
+                && (s.start, s.duration, s.source_in) == (c.start, c.duration, c.source_in)
+                && s.speed().to_bits() == c.speed().to_bits()
+                && sequence_id(j) == sequence_id(k)
+        };
+        if let Some((s, _)) = blocks(false).find(same) {
+            let id = sequence_of(k);
+            links.insert(s.id.as_str(), (n, id.clone()));
+            links.insert(c.id.as_str(), (n, id));
+        }
+    }
+    links
+}
+
+fn tie(
+    it: &mut Value,
+    c: &Clip,
+    k: &Compound,
+    links: &Links,
+    given: &mut HashMap<usize, i64>,
+    groups: &mut i64,
+) {
+    let editor = &mut it["metadata"][EDITOR];
+    match links.get(c.id.as_str()) {
+        Some((n, id)) => {
+            let g = *given.entry(*n).or_insert_with(|| {
+                *groups += 1;
+                *groups
+            });
+            editor["Sequence ID"] = json!(id);
+            editor["Link Group ID"] = json!(g);
+        }
+        None => editor["Sequence ID"] = json!(sequence_of(k)),
+    }
 }
 
 pub fn compound_kind(k: &Compound) -> String {

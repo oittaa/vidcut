@@ -119,13 +119,16 @@ ffmpeg-next = { version = "9.0", default-features = false, features = [
 ] }
 # On wgpu (below): the viewer's pictures are textures the GUI's own GPU
 # shader converts.
-eframe = { version = "0.36", default-features = false, features = [
+eframe = { version = "0.37", default-features = false, features = [
     "accesskit",
     "default_fonts",
     "wgpu_no_default_features",
     "wayland",
     "x11",
 ] }
+# eframe's egui, with the emoji fonts the viewer's transport, the pool and the
+# mixer draw their symbols from.
+egui = { version = "0.37", default-features = false, features = ["monochrome_emoji_fonts"] }
 # The GPU the GUI draws with (eframe's renderer) and the viewer's pictures
 # are converted on: Vulkan on Linux and Windows, Metal on macOS, DX12 on
 # Windows. No OpenGL backend.
@@ -155,7 +158,7 @@ shlex = "2.0"
 # timeline. Pure Rust (zlib-rs), MIT.
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # Reads TTML subtitle files (DFXP, IMSC1). MIT or Apache-2.0.
-roxmltree = "0.20"
+roxmltree = "0.21"
 # Checks media already unpacked from a bundle against its CRC-32.
 crc32fast = "1.5"
 # SHA-256: media fingerprints, to tell a moved file from another one when

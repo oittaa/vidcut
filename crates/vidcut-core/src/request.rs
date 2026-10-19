@@ -73,9 +73,9 @@ pub enum Request {
         #[serde(default)]
         fps: Option<Rational>,
     },
-    /// Bring a folder in as a bin, with a bin inside it for each folder in it
-    /// that holds media. Files that aren't media are skipped and listed;
-    /// returns the bin, the media ids and the skipped files.
+    /// Bring a folder in as a bin, with a bin inside it for each folder in it.
+    /// Files that aren't media are skipped and listed; returns the bin, the
+    /// media ids and the skipped files.
     #[serde(rename = "media.add_folder")]
     MediaAddFolder {
         path: PathBuf,

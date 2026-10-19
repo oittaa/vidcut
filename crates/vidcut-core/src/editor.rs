@@ -2873,6 +2873,7 @@ fn add_folder(
         out.skip(&folder.path, e);
         return Ok(());
     }
+    ops::add_bin(p, bin)?;
     let runs: HashMap<PathBuf, ImageSequence> = match out.sequence {
         true => folder.runs_here().into_iter().collect(),
         false => HashMap::new(),
@@ -2907,7 +2908,6 @@ fn add_folder(
                 continue;
             }
         };
-        ops::add_bin(p, bin)?;
         let id = add_media(p, files, probed);
         ops::move_media(p, std::slice::from_ref(&id), bin)?;
         if !out.media.contains(&id) {

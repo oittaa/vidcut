@@ -157,7 +157,7 @@ const SYSTEM_MONO: &[&str] = if cfg!(windows) {
 
 fn font_definitions(f: &Fonts) -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();
-    egui_phosphor::add_to_fonts(&mut defs, egui_phosphor::Variant::Regular);
+    add_phosphor(&mut defs);
     for (family, wanted, system, fallback) in [
         (FontFamily::Proportional, &f.ui, SYSTEM_UI, "Geist"),
         (FontFamily::Monospace, &f.mono, SYSTEM_MONO, "Geist Mono"),
@@ -181,21 +181,43 @@ fn font_definitions(f: &Fonts) -> egui::FontDefinitions {
     defs
 }
 
+fn add_phosphor(defs: &mut egui::FontDefinitions) {
+    let name = "phosphor";
+    defs.font_data.insert(
+        name.into(),
+        Arc::new(egui::FontData::from_static(
+            egui_phosphor::Variant::Regular.font_bytes(),
+        )),
+    );
+    let mut keys = defs
+        .families
+        .get(&FontFamily::Proportional)
+        .cloned()
+        .unwrap_or_default();
+    keys.insert(keys.len().min(1), name.into());
+    defs.families.insert(FontFamily::Name(name.into()), keys);
+    if let Some(font_keys) = defs.families.get_mut(&FontFamily::Proportional) {
+        let at = font_keys.len().min(1);
+        font_keys.insert(at, name.into());
+    }
+}
+
 fn font(name: &str) -> Option<egui::FontData> {
-    let (data, index) = match built_in_font(name) {
-        Some(data) => (Cow::Borrowed(data), 0),
-        None => installed_font(name)?,
+    let (y_offset_factor, mut data) = if let Some(bytes) = built_in_font(name) {
+        (centering(bytes, 0), egui::FontData::from_static(bytes))
+    } else {
+        let (owned, index) = installed_font(name)?;
+        let y_offset_factor = centering(&owned, index);
+        let mut data = egui::FontData::from_owned(owned.into_owned());
+        data.index = index;
+        (y_offset_factor, data)
     };
-    let tweak = egui::FontTweak {
-        y_offset_factor: centering(&data, index),
+    data.tweak = egui::FontTweak {
+        y_offset_factor,
         coords: egui::epaint::text::VariationCoords::new([(b"wght", 400.0)]),
         ..Default::default()
     };
-    Some(egui::FontData {
-        font: data,
-        index,
-        tweak,
-    })
+    Some(data)
 }
 
 fn built_in_font(name: &str) -> Option<&'static [u8]> {

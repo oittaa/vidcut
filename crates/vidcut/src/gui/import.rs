@@ -272,7 +272,7 @@ impl Workspace {
             return;
         };
         let mut done = None;
-        let modal = egui::Modal::new(egui::Id::new("import-numbered-images")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("import-numbered-images")).show(ctx, |ui| {
             ui.set_max_width(480.0);
             ui.label(egui::RichText::new("Numbered images").strong());
             for run in choice.runs.iter().take(6) {
