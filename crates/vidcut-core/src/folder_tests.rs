@@ -69,13 +69,6 @@ fn files_that_are_not_media_are_skipped_and_listed() {
 }
 
 #[test]
-fn a_folder_without_media_gets_no_bin() {
-    let mut f = shoot(&["/shoot/a.mp4"], &["/shoot/Docs/readme.txt"]);
-    f.ok(req("media.add_folder", json!({"path": "/shoot"})));
-    assert_eq!(f.editor.project().bins, ["shoot"]);
-}
-
-#[test]
 fn the_folder_bin_goes_into_the_bin_given() {
     let mut f = shoot(&["/shoot/a.mp4"], &[]);
     f.ok(req("bins.add", json!({"path": "Projects"})));

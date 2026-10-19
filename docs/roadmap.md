@@ -14,4 +14,4 @@ They decide what gets built and tested.
 
 ## What comes next
 
-Open work is in [docs/todo/](todo/), one file per item, each with a **When:** line. The interchange comes first (use case 1), then the smaller items, then macOS.
+Open work is in [docs/todo/](todo/), one file per item, each with a **When:** line. With the interchange in place (use case 1), the smaller items come next, then macOS.
