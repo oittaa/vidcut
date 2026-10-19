@@ -192,6 +192,41 @@ fn is_wide(c: char) -> bool {
         0x1100..=0x11FF | 0x2E80..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF | 0x20000..=0x3FFFF)
 }
 
+pub fn spoken(speech: &Speech) -> std::result::Result<Vec<Word>, String> {
+    match speech.timing {
+        Timing::Words => Ok(speech
+            .said
+            .iter()
+            .flat_map(|s| s.words.iter().cloned())
+            .filter(|w| !w.text.trim().is_empty() && w.end > w.start)
+            .collect()),
+        Timing::Phrases => Err(format!("{} times phrases, not words", speech.model)),
+        Timing::Pauses => Err(format!("{} has no word times", speech.model)),
+    }
+}
+
+pub fn word_frames(
+    words: &[Word],
+    fps: Rational,
+    origin: i64,
+    end: i64,
+) -> Vec<(String, i64, i64)> {
+    let mut out = Vec::new();
+    for w in words {
+        let start = origin + fps.secs_to_frames(w.start);
+        if start >= end {
+            continue;
+        }
+        let start = start.max(origin).max(0);
+        let stop = (origin + fps.secs_to_frames(w.end)).clamp(start + 1, end.max(start + 1));
+        if stop <= start {
+            continue;
+        }
+        out.push((w.text.clone(), start, stop));
+    }
+    out
+}
+
 pub fn words(said: &Said) -> Vec<Word> {
     if !said.words.is_empty() {
         return said.words.clone();

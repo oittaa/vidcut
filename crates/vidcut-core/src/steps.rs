@@ -282,7 +282,8 @@ pub fn category(kind: &str) -> &'static str {
         | "edit.delete_range"
         | "edit.close_gap"
         | "edit.ripple_delete_silence"
-        | "edit.cut" => "Deletes",
+        | "edit.cut"
+        | "subtitles.cut" => "Deletes",
         "edit.move" => "Moves",
         "edit.dissolve" | "edit.remove_transition" => "Dissolves",
         k if k.starts_with("markers.") || k.starts_with("marks.") || k.contains(".marks.") => {

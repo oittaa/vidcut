@@ -920,6 +920,48 @@ pub enum Request {
         #[serde(default)]
         download: bool,
     },
+    /// The words said in the mix of the tracks heard (`tracks`) over
+    /// `range`, each with the time the model gave it. Same hearing as
+    /// `subtitles.transcribe`, and it adds no cues. A model that times
+    /// phrases, or none at all, is refused: its estimates are not word
+    /// times. Parakeet Ultra times words. Qwen3-ASR does once its aligner
+    /// runs, and Whisper large-v3 once transcribe.cpp times its words.
+    #[serde(rename = "subtitles.words")]
+    SubtitlesWords {
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        /// The tracks heard, such as `["A1"]`, muted or not; the others
+        /// aren't. Default: the tracks playback hears, those not muted, or
+        /// the soloed ones.
+        #[serde(default)]
+        tracks: Option<Vec<String>>,
+        /// Default: `parakeet-ultra`.
+        #[serde(default)]
+        model: Option<SpeechModel>,
+        /// A transcribe.cpp GGUF model file to use instead of `model`'s.
+        #[serde(default)]
+        model_file: Option<PathBuf>,
+        /// A Silero VAD model file (GGUF, or whisper.cpp's `.bin`) to find
+        /// the speech with, instead of the one built into vidcut.
+        #[serde(default)]
+        vad_file: Option<PathBuf>,
+        /// The language spoken, as a code such as `en` or `fi`. Default: the
+        /// model tells it from the longest stretch of speech.
+        #[serde(default)]
+        language: Option<String>,
+        /// Download the model files this computer doesn't have yet from
+        /// Hugging Face, each checked against its SHA-256. Without it, a
+        /// missing file is an error that says what would be downloaded.
+        #[serde(default)]
+        download: bool,
+    },
+    /// Take these words out of the timeline. Each is a `start` and `end`
+    /// from `subtitles.words` (its `text` is ignored). Touching or
+    /// overlapping spans are one cut. The spans come out of every unlocked
+    /// track and the rest closes up, whether or not ripple is on. A dry
+    /// run says what would go and changes nothing.
+    #[serde(rename = "subtitles.cut")]
+    SubtitlesCut { words: Vec<SpokenWord> },
     /// Re-time a subtitle track to the timeline's speech. Where the built-in
     /// voice-activity model hears speech is lined up with where the cues
     /// show, so it needs no words and works for any language, translations
@@ -1573,6 +1615,16 @@ pub enum SubtitleTimeBase {
     Label,
 }
 
+/// A word from `subtitles.words`, sent back to `subtitles.cut`. The cut
+/// uses `start` and `end`; `text` is ignored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SpokenWord {
+    #[serde(default)]
+    pub text: String,
+    pub start: TimeSpec,
+    pub end: TimeSpec,
+}
+
 /// A speech recognition model, a GGUF file transcribe.cpp runs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub enum SpeechModel {
@@ -2067,6 +2119,7 @@ impl Request {
                     | Self::MarkersList {}
                     | Self::SubtitlesList { .. }
                     | Self::SubtitlesExport { .. }
+                    | Self::SubtitlesWords { .. }
                     | Self::MediaList {}
                     | Self::MediaGet { .. }
                     | Self::Probe { .. }
@@ -2111,6 +2164,11 @@ impl Request {
             | Self::SubtitlesImport { path, .. }
             | Self::SubtitlesExport { out: path, .. } => vec![path],
             Self::SubtitlesTranscribe {
+                model_file,
+                vad_file,
+                ..
+            }
+            | Self::SubtitlesWords {
                 model_file,
                 vad_file,
                 ..

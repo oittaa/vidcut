@@ -2467,7 +2467,7 @@ impl Live {
                 };
                 Step::Encode(Box::new(encode), Box::new(envelope), title, "proxy")
             }
-            Request::SubtitlesTranscribe { .. } => {
+            Request::SubtitlesTranscribe { .. } | Request::SubtitlesWords { .. } => {
                 let Some(open) = &self.project else {
                     return Step::Now(Err(no_project()));
                 };
@@ -2481,8 +2481,15 @@ impl Live {
                         .apply(copy, &env, None)
                         .map(drop)
                 };
-                let title = "Create Subtitles from Audio".to_string();
-                Step::Encode(Box::new(hear), Box::new(envelope), title, "subtitles")
+                let words = matches!(envelope.request, Request::SubtitlesWords { .. });
+                let title = if words {
+                    "Words in the speech"
+                } else {
+                    "Create Subtitles from Audio"
+                }
+                .to_string();
+                let kind = if words { "words" } else { "subtitles" };
+                Step::Encode(Box::new(hear), Box::new(envelope), title, kind)
             }
             Request::SubtitlesRetime { .. } => {
                 let Some(open) = &self.project else {
@@ -3477,6 +3484,9 @@ fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
         *at = TimeSpec::Frames(f);
     }
     if let Request::SubtitlesTranscribe {
+        range: Some(range), ..
+    }
+    | Request::SubtitlesWords {
         range: Some(range), ..
     } = &mut envelope.request
         && let Ok((a, b)) = context.range(range)

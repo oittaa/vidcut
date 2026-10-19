@@ -146,7 +146,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("storyboard", "Storyboards: a labeled picture of every shot"),
     (
         "subtitles",
-        "Subtitle cues: transcribe the speech, import and export SRT, WebVTT and TTML, add and change cues",
+        "Subtitle cues: transcribe the speech, the words and their times, cut those words, import and export SRT, WebVTT and TTML, add and change cues",
     ),
     ("tape", "The Source Tape"),
     ("tape.marks", "The Source Tape's In and Out marks"),
