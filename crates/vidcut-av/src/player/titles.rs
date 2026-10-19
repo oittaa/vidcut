@@ -38,18 +38,22 @@ impl Titles {
         let now = kept.clock;
         let mut out = Vec::with_capacity(wanted.len());
         let mut all = true;
-        for (above, title) in wanted {
+        for (above, shown) in wanted {
             match kept
                 .entries
                 .iter_mut()
-                .find(|e| e.size == size && e.title == *title)
+                .find(|e| e.size == size && e.title == shown.title)
             {
                 Some(e) => {
                     e.used = now;
                     if let Some(p) = &e.picture {
+                        let dy = shown.run.map_or(0, |r| {
+                            r.top(0, f64::from(size.1), f64::from(p.height)).round() as i32 - p.top
+                        });
                         out.push(TitleOver {
                             above,
                             picture: p.clone(),
+                            dy,
                         });
                     }
                 }
@@ -65,13 +69,13 @@ impl Titles {
             let kept = lock(&self.kept);
             plan.titles_at(t)
                 .into_iter()
-                .filter(|(_, title)| {
+                .filter(|(_, shown)| {
                     !kept
                         .entries
                         .iter()
-                        .any(|e| e.size == size && e.title == **title)
+                        .any(|e| e.size == size && e.title == shown.title)
                 })
-                .map(|(_, title)| title.clone())
+                .map(|(_, shown)| shown.title)
                 .collect()
         };
         if missing.is_empty() {

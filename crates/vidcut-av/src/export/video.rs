@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vidcut_core::model::{ColorSpace, Hdr, SubtitleStyle, Title};
-use vidcut_core::render::{Image, VideoPiece, WHOLE};
+use vidcut_core::render::{Image, ShownTitle, VideoPiece, WHOLE};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
@@ -422,7 +422,7 @@ struct Burner {
 #[derive(Default)]
 struct Drawn {
     sprites: Vec<crate::burn::Sprite>,
-    on_gpu: Option<crate::cuda::burn::Overlay>,
+    on_gpu: Option<(crate::cuda::burn::Overlay, (i32, i32))>,
 }
 
 impl Drawn {
@@ -439,6 +439,7 @@ impl Drawn {
         output: &Output,
         gpu_failed: &mut bool,
         what: &str,
+        shift: (i32, i32),
     ) -> Result<frame::Video> {
         if self.sprites.is_empty() {
             return Ok(f);
@@ -446,11 +447,11 @@ impl Drawn {
         match (Place::of(&f), output) {
             (Place::Memory, _) => {
                 let mut f = f;
-                crate::burn::blend(&mut f, &self.sprites)?;
+                crate::burn::blend_at(&mut f, &self.sprites, shift)?;
                 Ok(f)
             }
             (Place::Cuda, Output::Cuda { frames, .. }) if !*gpu_failed => {
-                match self.on_cuda(frames, &f) {
+                match self.on_cuda(frames, &f, shift) {
                     Ok(out) => Ok(out),
                     Err(e) => {
                         crate::debug!(
@@ -458,12 +459,12 @@ impl Drawn {
                             "the GPU won't draw {what}, the CPU draws them: {e}"
                         );
                         *gpu_failed = true;
-                        self.in_memory(&f, Some(frames))
+                        self.in_memory(&f, Some(frames), shift)
                     }
                 }
             }
-            (_, Output::Cuda { frames, .. }) => self.in_memory(&f, Some(frames)),
-            _ => self.in_memory(&f, None),
+            (_, Output::Cuda { frames, .. }) => self.in_memory(&f, Some(frames), shift),
+            _ => self.in_memory(&f, None, shift),
         }
     }
 
@@ -471,20 +472,23 @@ impl Drawn {
         &mut self,
         frames: &crate::cuda::CudaFrames,
         f: &frame::Video,
+        shift: (i32, i32),
     ) -> Result<frame::Video> {
-        if self.on_gpu.is_none() {
-            self.on_gpu = Some(crate::cuda::burn::Overlay::new(frames, f, &self.sprites)?);
+        if self.on_gpu.as_ref().is_none_or(|(_, at)| *at != shift) {
+            let overlay = crate::cuda::burn::Overlay::new(frames, f, &self.sprites, shift)?;
+            self.on_gpu = Some((overlay, shift));
         }
-        crate::cuda::burn::burn(frames, f, self.on_gpu.as_ref().expect("made"))
+        crate::cuda::burn::burn(frames, f, &self.on_gpu.as_ref().expect("made").0)
     }
 
     fn in_memory(
         &self,
         f: &frame::Video,
         up: Option<&crate::cuda::CudaFrames>,
+        shift: (i32, i32),
     ) -> Result<frame::Video> {
         let mut m = crate::hw::download(f)?;
-        crate::burn::blend(&mut m, &self.sprites)?;
+        crate::burn::blend_at(&mut m, &self.sprites, shift)?;
         match up {
             Some(frames) => frames.upload(&m),
             None => Ok(m),
@@ -517,12 +521,12 @@ impl Burner {
             self.size = size;
         }
         self.drawn
-            .over(f, output, &mut self.gpu_failed, "subtitles")
+            .over(f, output, &mut self.gpu_failed, "subtitles", (0, 0))
     }
 }
 
-struct KeptTitles {
-    titles: Vec<Title>,
+struct KeptTitle {
+    title: Title,
     size: (u32, u32),
     drawn: Drawn,
     used: bool,
@@ -530,33 +534,45 @@ struct KeptTitles {
 
 #[derive(Default)]
 struct Titles {
-    kept: Vec<KeptTitles>,
+    kept: Vec<KeptTitle>,
     gpu_failed: bool,
 }
 
 impl Titles {
-    fn draw(&mut self, f: frame::Video, titles: &[Title], output: &Output) -> Result<frame::Video> {
+    fn draw(
+        &mut self,
+        mut f: frame::Video,
+        titles: &[ShownTitle],
+        output: &Output,
+    ) -> Result<frame::Video> {
         let size = (f.width(), f.height());
-        let at = self
-            .kept
-            .iter()
-            .position(|k| k.size == size && k.titles == titles);
-        let at = at.unwrap_or_else(|| {
-            let sprites = titles
+        for shown in titles {
+            let at = self
+                .kept
                 .iter()
-                .flat_map(|t| crate::burn::title(t, size.0, size.1))
-                .collect();
-            self.kept.push(KeptTitles {
-                titles: titles.to_vec(),
-                size,
-                drawn: Drawn::of(sprites),
-                used: false,
+                .position(|k| k.size == size && k.title == shown.title);
+            let at = at.unwrap_or_else(|| {
+                self.kept.push(KeptTitle {
+                    title: shown.title.clone(),
+                    size,
+                    drawn: Drawn::of(crate::burn::title(&shown.title, size.0, size.1)),
+                    used: false,
+                });
+                self.kept.len() - 1
             });
-            self.kept.len() - 1
-        });
-        let k = &mut self.kept[at];
-        k.used = true;
-        k.drawn.over(f, output, &mut self.gpu_failed, "titles")
+            let k = &mut self.kept[at];
+            k.used = true;
+            let dy = match (shown.run, k.drawn.sprites.first()) {
+                (Some(r), Some(s)) => {
+                    r.top(0, f64::from(size.1), f64::from(s.height)).round() as i32 - s.y
+                }
+                _ => 0,
+            };
+            f = k
+                .drawn
+                .over(f, output, &mut self.gpu_failed, "titles", (0, dy))?;
+        }
+        Ok(f)
     }
 
     fn shown(&mut self) {
@@ -736,13 +752,14 @@ impl VideoFrames {
         let Some(layers) = self.next_layers()? else {
             return Ok(None);
         };
-        let titles: Vec<(usize, Title)> = self
+        let k = (self.k - 1).max(0);
+        let titles: Vec<(usize, ShownTitle)> = self
             .pieces
             .get(self.piece)
             .map(|p| {
                 p.titles()
                     .into_iter()
-                    .map(|(n, t)| (n, t.clone()))
+                    .map(|(n, t)| (n, t.after(k)))
                     .collect()
             })
             .unwrap_or_default();
@@ -754,7 +771,11 @@ impl VideoFrames {
         }
     }
 
-    fn compose(&mut self, layers: Vec<Layer>, titles: &[(usize, Title)]) -> Result<frame::Video> {
+    fn compose(
+        &mut self,
+        layers: Vec<Layer>,
+        titles: &[(usize, ShownTitle)],
+    ) -> Result<frame::Video> {
         let mut rest = layers.into_iter();
         let mut below: Option<Layer> = None;
         let mut taken = 0;

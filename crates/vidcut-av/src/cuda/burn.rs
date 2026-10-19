@@ -145,10 +145,11 @@ impl Overlay {
         frames: &CudaFrames,
         like: &frame::Video,
         sprites: &[crate::burn::Sprite],
+        shift: (i32, i32),
     ) -> Result<Self> {
         // SAFETY: the pool is a live CUDA frames context.
         let sw = unsafe { (*((*frames.as_ptr()).data as *const ffi::AVHWFramesContext)).sw_format };
-        let (color, alpha) = crate::burn::overlay(sw.into(), like, sprites)?;
+        let (color, alpha) = crate::burn::overlay(sw.into(), like, sprites, shift)?;
         Ok(Self {
             color: frames.upload(&color)?,
             alpha: frames.upload(&alpha)?,

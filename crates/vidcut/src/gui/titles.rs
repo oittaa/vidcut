@@ -82,7 +82,7 @@ impl TitleDialog {
     fn load(&mut self, t: &Title) {
         let s = &t.style;
         self.kind = t.kind;
-        self.align = t.align.unwrap_or_default();
+        self.align = t.align();
         self.text = t.text.clone();
         self.font = s.font.clone().unwrap_or_default();
         self.size = percent(s.size);
@@ -201,19 +201,18 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     )?;
     let across = kept_number(&d.across, stored.position.map(|p| p[0]), "position")?;
     let down = kept_number(&d.down, stored.position.map(|p| p[1]), "position")?;
+    let scroll = d.kind == TitleKind::Scroll;
     let position = match (across, down) {
+        (Some(x), _) if scroll => Some([x, stored.position.map_or(0.5, |p| p[1])]),
+        (None, _) if scroll => None,
         (Some(x), Some(y)) => Some([x, y]),
         (None, None) => None,
         _ => return Err("a position takes both numbers, or neither for the usual place".into()),
     };
     let align = match d.kind {
         TitleKind::Text => None,
-        TitleKind::LowerThird
-            if stored.kind == TitleKind::LowerThird && stored.align() == d.align =>
-        {
-            stored.align
-        }
-        TitleKind::LowerThird => Some(d.align),
+        k if stored.kind == k && stored.align() == d.align => stored.align,
+        _ => Some(d.align),
     };
     let title = Title {
         kind: d.kind,
@@ -233,8 +232,16 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
             shadow: shadow_of(d, s.shadow.as_ref())?,
         },
         position,
-        zoom: kept_number(&d.zoom, stored.zoom, "zoom")?,
-        rotation: kept_plain(&d.rotation, stored.rotation, "rotation")?,
+        zoom: if scroll {
+            None
+        } else {
+            kept_number(&d.zoom, stored.zoom, "zoom")?
+        },
+        rotation: if scroll {
+            None
+        } else {
+            kept_plain(&d.rotation, stored.rotation, "rotation")?
+        },
     };
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
 }
@@ -247,7 +254,7 @@ fn changes(clip: &str, t: &Title, stored: &Title) -> Option<Value> {
     if t.kind != stored.kind {
         params["kind"] = json!(t.kind);
     }
-    if t.kind == TitleKind::LowerThird && t.align() != stored.align() {
+    if t.kind != TitleKind::Text && (t.kind != stored.kind || t.align() != stored.align()) {
         params["align"] = json!(t.align());
     }
     if t.style != stored.style {
@@ -358,6 +365,7 @@ impl Workspace {
                     None => ui.label(dim("Adding…")),
                 };
                 let save = ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::Enter));
+                let before = d.kind;
                 ui.horizontal(|ui| {
                     ui.label("Kind");
                     changed |= ui
@@ -366,8 +374,18 @@ impl Workspace {
                     changed |= ui
                         .radio_value(&mut d.kind, TitleKind::LowerThird, "Lower Third")
                         .changed();
+                    changed |= ui
+                        .radio_value(&mut d.kind, TitleKind::Scroll, "Scroll")
+                        .changed();
                 });
-                ui.add_enabled_ui(d.kind == TitleKind::LowerThird, |ui| {
+                if d.kind != before {
+                    d.align = Title {
+                        kind: d.kind,
+                        ..Title::new("")
+                    }
+                    .align();
+                }
+                ui.add_enabled_ui(d.kind != TitleKind::Text, |ui| {
                     ui.horizontal(|ui| {
                         ui.label("Align");
                         for (align, label) in ALIGNS {
@@ -386,7 +404,7 @@ impl Workspace {
                     r.request_focus();
                     d.focus = false;
                 }
-                let lower = d.kind == TitleKind::LowerThird;
+                let scroll = d.kind == TitleKind::Scroll;
                 let usual = Title::usual_position(d.kind, d.align);
                 let size_hint = format!(
                     "{}% of the picture",
@@ -439,23 +457,35 @@ impl Workspace {
                     ui.end_row();
                     changed |= row(ui, "Across", &mut d.across, &across_hint);
                     ui.end_row();
-                    changed |= row(ui, "Down", &mut d.down, &down_hint);
-                    ui.end_row();
-                    changed |= row(ui, "Zoom", &mut d.zoom, "100%");
-                    ui.end_row();
-                    changed |= row(ui, "Rotation", &mut d.rotation, "0°");
-                    ui.end_row();
+                    if !scroll {
+                        changed |= row(ui, "Down", &mut d.down, &down_hint);
+                        ui.end_row();
+                        changed |= row(ui, "Zoom", &mut d.zoom, "100%");
+                        ui.end_row();
+                        changed |= row(ui, "Rotation", &mut d.rotation, "0°");
+                        ui.end_row();
+                    }
                 });
-                ui.label(dim(if lower {
-                    "Across and Down place the lower third's corner, as percents of the \
-                     picture; it grows and turns about the point where its lines meet. \
-                     A shadow's Across and Down are percents of the picture too, and its \
-                     blur from 0 to 100. An empty field keeps the usual look"
-                } else {
-                    "Across and Down place the middle of the text, as percents of the \
-                     picture; it grows and turns about that point. A shadow's Across and \
-                     Down are percents of the picture too, and its blur from 0 to 100. An \
-                     empty field keeps the usual look"
+                ui.label(dim(match d.kind {
+                    TitleKind::LowerThird => {
+                        "Across and Down place the lower third's corner, as percents of the \
+                         picture; it grows and turns about the point where its lines meet. \
+                         A shadow's Across and Down are percents of the picture too, and its \
+                         blur from 0 to 100. An empty field keeps the usual look"
+                    }
+                    TitleKind::Scroll => {
+                        "Across places the lines' left edge, middle or right edge by Align, \
+                         as a percent of the picture; the lines rise from below the picture \
+                         to above it over the clip. A shadow's Across and Down are percents \
+                         of the picture, and its blur from 0 to 100. An empty field keeps the \
+                         usual look"
+                    }
+                    TitleKind::Text => {
+                        "Across and Down place the middle of the text, as percents of the \
+                         picture; it grows and turns about that point. A shadow's Across and \
+                         Down are percents of the picture too, and its blur from 0 to 100. An \
+                         empty field keeps the usual look"
+                    }
                 }));
                 if !d.error.is_empty() {
                     ui.colored_label(ui.visuals().error_fg_color, &d.error);

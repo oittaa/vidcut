@@ -18,6 +18,7 @@ fn kind_of(t: &Title) -> (&'static str, &'static str) {
         (TitleKind::LowerThird, TitleAlign::Left) => ("Rich Lower Left", "Left Lower Third"),
         (TitleKind::LowerThird, TitleAlign::Middle) => ("Rich Lower Middle", "Middle Lower Third"),
         (TitleKind::LowerThird, TitleAlign::Right) => ("Rich Lower Right", "Right Lower Third"),
+        (TitleKind::Scroll, _) => ("Scroll", "Scroll"),
     }
 }
 
@@ -31,8 +32,60 @@ fn kind_named(kind: &str) -> Option<(TitleKind, Option<TitleAlign>)> {
         "Rich Lower Left" => Some((TitleKind::LowerThird, Some(TitleAlign::Left))),
         "Rich Lower Middle" => Some((TitleKind::LowerThird, Some(TitleAlign::Middle))),
         "Rich Lower Right" => Some((TitleKind::LowerThird, Some(TitleAlign::Right))),
+        "Scroll" => Some((TitleKind::Scroll, None)),
         _ => None,
     }
+}
+
+fn scrolling(t: &Title, family: &str, points: f64, color: &str) -> Vec<Value> {
+    let [x, _] = t.place();
+    let (across, alignment) = match t.align() {
+        TitleAlign::Left => (x + 0.5, 0),
+        TitleAlign::Middle => (x, 1),
+        TitleAlign::Right => (x - 0.5, 2),
+    };
+    vec![
+        group(
+            "Text",
+            6,
+            0,
+            vec![
+                plain("text", json!(t.text), json!("Scroll Title"), "String"),
+                keyed(
+                    "position",
+                    json!([rounded(across), 0.5]),
+                    json!([0.51, 0.5]),
+                    "POINTF",
+                ),
+            ],
+        ),
+        group(
+            "Formatting",
+            7,
+            0,
+            vec![
+                plain(
+                    "font",
+                    json!(format!("{family},-1,58,5,50,0,0,0,0,0")),
+                    json!("Open Sans,-1,58,5,63,0,0,0,0,0"),
+                    "String",
+                ),
+                ranged(
+                    plain(
+                        "size",
+                        json!(points.round().clamp(24.0, 4096.0) as i64),
+                        json!(216),
+                        "Int",
+                    ),
+                    24.0,
+                    4096.0,
+                ),
+                plain("alignment", json!(alignment), json!(0), "UInt"),
+                plain("anchor", json!(4), json!(4), "UInt"),
+                plain("color", json!(color), json!("#ffffff"), "Color"),
+            ],
+        ),
+    ]
 }
 
 fn hex([r, g, b]: [u8; 3]) -> String {
@@ -174,6 +227,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
     let [x, y] = t.place();
     let lines: Vec<&str> = t.text.lines().collect();
     let (mut groups, hold) = match t.kind {
+        TitleKind::Scroll => (scrolling(t, family, points, &color), None),
         TitleKind::Text => (
             vec![rich_text(
                 t,
@@ -183,7 +237,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
                 [rounded(x), rounded(1.0 - y)],
                 [0.5, 0.5],
             )],
-            [x, 1.0 - y],
+            Some([x, 1.0 - y]),
         ),
         TitleKind::LowerThird => {
             let (align, column, usual_x) = match t.align() {
@@ -216,7 +270,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
                         [usual_x, 0.22],
                     ),
                 ],
-                [x, meet],
+                Some([x, meet]),
             )
         }
     };
@@ -262,7 +316,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
         ),
     };
     let usual_stroke = if t.kind == TitleKind::Text { 1 } else { 0 };
-    groups.push(group(
+    let stroked = group(
         "Stroke",
         28,
         1,
@@ -280,14 +334,17 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
             ),
             plain("strokeOutsideOnly", json!(false), json!(false), "Bool"),
         ],
-    ));
+    );
+    if t.kind != TitleKind::Scroll {
+        groups.push(stroked);
+    }
     let (back_color, opacity, extent, center, corner) = match t.backing() {
         Some((rgb, a)) => {
             let [left, top, w, h] = drawn.backing.unwrap_or_else(|| {
                 let rows = lines.len().max(1) as f64;
                 let h = rows * line + 2.0 * SubtitleStyle::PADDING * size;
                 let top = match t.kind {
-                    TitleKind::Text => y - h / 2.0,
+                    TitleKind::Text | TitleKind::Scroll => y - h / 2.0,
                     TitleKind::LowerThird => y + SubtitleStyle::PADDING * size - h,
                 };
                 let middle = if t.kind == TitleKind::Text { x } else { 0.5 };
@@ -297,10 +354,12 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
                 hex(rgb),
                 (a * 100.0).round() as i64,
                 [rounded(w).min(2.0), rounded(h).min(2.0)],
-                [
-                    rounded(left + w / 2.0 - hold[0]),
-                    rounded(1.0 - (top + h / 2.0) - hold[1]),
-                ],
+                hold.map_or([0.0, 0.0], |[ax, ay]| {
+                    [
+                        rounded(left + w / 2.0 - ax),
+                        rounded(1.0 - (top + h / 2.0) - ay),
+                    ]
+                }),
                 0.0,
             )
         }
@@ -514,6 +573,91 @@ fn read_html(blob: &str) -> Read {
     read
 }
 
+fn backing_of(all: &[&Value]) -> Option<SubtitleBackground> {
+    named(all, "Background").first().and_then(|g| {
+        (value(g, "backgroundHeight").as_f64().unwrap_or(0.0) > 0.0).then(|| SubtitleBackground {
+            color: value(g, "backgroundColor")
+                .as_str()
+                .unwrap_or("#000000")
+                .to_string(),
+            opacity: value(g, "backgroundOpacity")
+                .as_f64()
+                .map(|o| (o / 100.0).clamp(0.0, 1.0)),
+        })
+    })
+}
+
+fn shadow_of(all: &[&Value]) -> Option<TitleShadow> {
+    named(all, "Drop Shadow").first().and_then(|g| {
+        let [dx, dy] = point(value(g, "shadow offset"))?;
+        (dx != 0.0 || dy != 0.0).then(|| TitleShadow {
+            color: value(g, "shadow color")
+                .as_str()
+                .filter(|c| crate::ops::subtitles::checked_color(Some(c), "shadow").is_ok())
+                .map(str::to_string),
+            opacity: value(g, "shadow opacity")
+                .as_f64()
+                .map(|o| (o / 100.0).clamp(0.0, 1.0)),
+            offset: Some([
+                rounded(dx.clamp(-0.5, 0.5)),
+                rounded((-dy).clamp(-0.5, 0.5)),
+            ]),
+            blur: value(g, "shadow").as_f64().map(|b| b.clamp(0.0, 100.0)),
+        })
+    })
+}
+
+fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
+    let text_group = *named(all, "Text").first()?;
+    let looks = named(all, "Formatting").first().copied();
+    let text = value(text_group, "text").as_str()?.replace("\r\n", "\n");
+    let look = |id: &str| looks.map_or(&Value::Null, |g| value(g, id));
+    let align = match look("alignment").as_u64() {
+        Some(1) => TitleAlign::Middle,
+        Some(2) => TitleAlign::Right,
+        _ => TitleAlign::Left,
+    };
+    let across = point(value(text_group, "position")).map_or(0.51, |p| p[0]);
+    let x = match align {
+        TitleAlign::Left => across - 0.5,
+        TitleAlign::Middle => across,
+        TitleAlign::Right => across + 0.5,
+    };
+    let font = look("font")
+        .as_str()
+        .and_then(|f| f.split(',').next())
+        .map(str::to_string)
+        .filter(|f| crate::ops::subtitles::checked_font(Some(f), "title").is_ok());
+    let size = look("size")
+        .as_f64()
+        .map(|p| p / f64::from(height.max(1)))
+        .filter(|s| crate::ops::subtitles::checked_size(Some(*s), "title").is_ok());
+    let color = look("color")
+        .as_str()
+        .map(str::to_string)
+        .filter(|c| crate::ops::subtitles::checked_color(Some(c), "title").is_ok());
+    let title = Title {
+        kind: TitleKind::Scroll,
+        align: Some(align),
+        text,
+        style: TitleStyle {
+            font,
+            size,
+            color,
+            outline: Some(SubtitleOutline {
+                color: None,
+                size: Some(0.0),
+            }),
+            background: backing_of(all),
+            shadow: shadow_of(all),
+        },
+        position: Some([clamped(x), 0.5]),
+        zoom: None,
+        rotation: None,
+    };
+    crate::ops::titles::checked(&title).ok()
+}
+
 fn point(v: &Value) -> Option<[f64; 2]> {
     let a = v.as_array()?;
     Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?])
@@ -536,11 +680,15 @@ pub fn read(item: &Value, reference: &Value, height: u32) -> Option<Title> {
 pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let (kind, align) = kind_named(reference["generator_kind"].as_str()?)?;
     let all = groups(reference);
+    if kind == TitleKind::Scroll {
+        return from_scroll(&all, height);
+    }
     let texts = named(&all, "Rich Text");
     let first = *texts.first()?;
     let read_of = |g: &Value| read_html(value(g, "title blob").as_str().unwrap_or(""));
     let row = |g: &Value| (value(g, "anchor").as_u64().unwrap_or(4) / 3).min(2);
     let (lines, style_from, at, lowered, turned_by) = match kind {
+        TitleKind::Scroll => return None,
         TitleKind::Text => {
             let r = read_of(first);
             let at = point(value(first, "position")).unwrap_or([0.5, 0.5]);
@@ -597,34 +745,8 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             }
         }
     });
-    let background = named(&all, "Background").first().and_then(|g| {
-        (value(g, "backgroundHeight").as_f64().unwrap_or(0.0) > 0.0).then(|| SubtitleBackground {
-            color: value(g, "backgroundColor")
-                .as_str()
-                .unwrap_or("#000000")
-                .to_string(),
-            opacity: value(g, "backgroundOpacity")
-                .as_f64()
-                .map(|o| (o / 100.0).clamp(0.0, 1.0)),
-        })
-    });
-    let shadow = named(&all, "Drop Shadow").first().and_then(|g| {
-        let [dx, dy] = point(value(g, "shadow offset"))?;
-        (dx != 0.0 || dy != 0.0).then(|| TitleShadow {
-            color: value(g, "shadow color")
-                .as_str()
-                .filter(|c| crate::ops::subtitles::checked_color(Some(c), "shadow").is_ok())
-                .map(str::to_string),
-            opacity: value(g, "shadow opacity")
-                .as_f64()
-                .map(|o| (o / 100.0).clamp(0.0, 1.0)),
-            offset: Some([
-                rounded(dx.clamp(-0.5, 0.5)),
-                rounded((-dy).clamp(-0.5, 0.5)),
-            ]),
-            blur: value(g, "shadow").as_f64().map(|b| b.clamp(0.0, 100.0)),
-        })
-    });
+    let background = backing_of(&all);
+    let shadow = shadow_of(&all);
     let mut title = Title {
         kind,
         align,
