@@ -170,11 +170,12 @@ flowchart LR
 | clip | `Clip.2`, its source range from the media's start timecode |
 | media | `ExternalReference` by plain path, relative in a bundle; a still one frame long, its clips from source 0; an image sequence an `ImageSequenceReference` at its rate |
 | Clip Color | the item's `color` |
+| title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 | markers | the top-level stack's, with their lengths |
 
 | Metadata | Holds |
 |---|---|
-| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `source_in` and `skip` for stills and speeds, which the source range rounds |
+| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `source_in` and `skip` for stills and speeds, which the source range rounds; a title's `Title` |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO`, which other editors read | `Link Group ID`, `Channels`, a clip volume effect, and `Media In` on reversed clips; on compound clips a `Sequence ID`, kept or made from the compound's content, and a `Link Group ID` joining the picture and sound of one compound at the same place (`compound_links`); `Locked`, `SoloOn` and `Audio Type` on tracks; `Note` on markers |
 
@@ -188,7 +189,7 @@ flowchart LR
 |---|---|
 | clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`: keyframes stay on their source frames (the `from` field of `Effects`, set by `carry`) and fades at the clip's ends through splits; the clip volume's level is the gain |
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` once it no longer fits; dissolves and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
-| `GeneratorReference` | `Generator`, a block that plays as a gap |
+| `GeneratorReference` | a title when it is vidcut's or Resolve's Text or lower third (`otio::titles::read`), else `Generator`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 

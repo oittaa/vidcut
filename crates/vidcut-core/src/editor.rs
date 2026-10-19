@@ -3551,7 +3551,7 @@ fn place_imported(
                 generator: c.generator.as_ref().map(|reference| Generator {
                     reference: reference.clone().into(),
                 }),
-                title: None,
+                title: c.title.clone(),
                 compound,
                 speed: c.speed.clone(),
                 color: color(c),
