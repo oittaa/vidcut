@@ -1336,30 +1336,31 @@ impl Workspace {
                     .is_none_or(|p| p.tracks.iter().all(|t| t.clips.is_empty()));
                 let flatten = self.export.flatten;
                 let mut choice = None;
-                let modal = egui::Modal::new(egui::Id::new("otio-import-choice")).show(ctx, |ui| {
-                    ui.label(format!(
-                        "Import {}:",
-                        path.file_name()
-                            .map_or(String::new(), |n| n.to_string_lossy().into_owned())
-                    ));
-                    ui.horizontal(|ui| {
-                        if ui.button("Append to the Timeline").clicked() {
-                            choice = Some(Some(ImportMode::Append));
-                        }
-                        if !empty && ui.button("Replace the Timeline").clicked() {
-                            choice = Some(Some(ImportMode::Replace));
-                        }
-                        if !flatten && ui.button("As a Compound Clip").clicked() {
-                            choice = Some(Some(ImportMode::Compound));
-                        }
-                        if ui.button("Media Only").clicked() {
-                            choice = Some(Some(ImportMode::Media));
-                        }
-                        if ui.button("Cancel").clicked() {
-                            choice = Some(None);
-                        }
+                let modal =
+                    egui::Modal::new(egui::Id::unique("otio-import-choice")).show(ctx, |ui| {
+                        ui.label(format!(
+                            "Import {}:",
+                            path.file_name()
+                                .map_or(String::new(), |n| n.to_string_lossy().into_owned())
+                        ));
+                        ui.horizontal(|ui| {
+                            if ui.button("Append to the Timeline").clicked() {
+                                choice = Some(Some(ImportMode::Append));
+                            }
+                            if !empty && ui.button("Replace the Timeline").clicked() {
+                                choice = Some(Some(ImportMode::Replace));
+                            }
+                            if !flatten && ui.button("As a Compound Clip").clicked() {
+                                choice = Some(Some(ImportMode::Compound));
+                            }
+                            if ui.button("Media Only").clicked() {
+                                choice = Some(Some(ImportMode::Media));
+                            }
+                            if ui.button("Cancel").clicked() {
+                                choice = Some(None);
+                            }
+                        });
                     });
-                });
                 if choice.is_none() && escape_cancels(ctx, &modal) {
                     choice = Some(None);
                 }
@@ -1375,19 +1376,20 @@ impl Workspace {
                 message,
             } => {
                 let mut choice = None;
-                let modal = egui::Modal::new(egui::Id::new("otio-missing-media")).show(ctx, |ui| {
-                    ui.set_max_width(520.0);
-                    ui.label(&message);
-                    ui.label(dim("Choose a folder to look in (subfolders too)."));
-                    ui.horizontal(|ui| {
-                        if ui.button("Choose Folder…").clicked() {
-                            choice = Some(true);
-                        }
-                        if ui.button("Cancel").clicked() {
-                            choice = Some(false);
-                        }
+                let modal =
+                    egui::Modal::new(egui::Id::unique("otio-missing-media")).show(ctx, |ui| {
+                        ui.set_max_width(520.0);
+                        ui.label(&message);
+                        ui.label(dim("Choose a folder to look in (subfolders too)."));
+                        ui.horizontal(|ui| {
+                            if ui.button("Choose Folder…").clicked() {
+                                choice = Some(true);
+                            }
+                            if ui.button("Cancel").clicked() {
+                                choice = Some(false);
+                            }
+                        });
                     });
-                });
                 if choice.is_none() && escape_cancels(ctx, &modal) {
                     choice = Some(false);
                 }
@@ -1511,7 +1513,7 @@ impl Workspace {
             self.export.confirm_quit = false;
             return;
         }
-        let modal = egui::Modal::new(egui::Id::new("quit-while-exporting")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("quit-while-exporting")).show(ctx, |ui| {
             ui.label(format!(
                 "{running} job(s) still running. Quitting cancels them."
             ));

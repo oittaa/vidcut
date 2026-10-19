@@ -304,7 +304,7 @@ impl Workspace {
             return;
         }
         let mut choice = None;
-        let modal = egui::Modal::new(egui::Id::new("reset-vidcut")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("reset-vidcut")).show(ctx, |ui| {
             ui.set_max_width(420.0);
             ui.label(RichText::new("Reset vidcut?").strong());
             ui.label(

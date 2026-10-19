@@ -122,13 +122,16 @@ ffmpeg-next = { version = "9.0", default-features = false, features = [
 ] }
 # On wgpu (below): the viewer's pictures are textures the GUI's own GPU
 # shader converts.
-eframe = { version = "0.36", default-features = false, features = [
+eframe = { version = "0.37", default-features = false, features = [
     "accesskit",
     "default_fonts",
     "wgpu_no_default_features",
     "wayland",
     "x11",
 ] }
+# eframe's egui, with the emoji fonts the viewer's transport, the pool and the
+# mixer draw their symbols from.
+egui = { version = "0.37", default-features = false, features = ["monochrome_emoji_fonts"] }
 # The GPU the GUI draws with (eframe's renderer) and the viewer's pictures
 # are converted on: Vulkan on Linux and Windows, Metal on macOS, DX12 on
 # Windows. No OpenGL backend.

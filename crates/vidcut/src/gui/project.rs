@@ -76,7 +76,7 @@ impl Format {
     }
 
     fn edit_start(&mut self, ui: &mut egui::Ui) {
-        egui::Grid::new(ui.id().with("start"))
+        egui::Grid::new(ui.scope_id().with("start"))
             .num_columns(2)
             .spacing([12.0, 8.0])
             .show(ui, |ui| {
@@ -110,7 +110,7 @@ impl Format {
                         .on_hover_text("Any timecode, like 00:59:30:00 (drop-frame 01:00:00;00)");
                     r.widget_info(|| {
                         egui::WidgetInfo::labeled(
-                            egui::WidgetType::TextEdit,
+                            egui::Role::TextInput,
                             true,
                             "Start timecode value",
                         )
@@ -127,7 +127,7 @@ impl Format {
     }
 
     fn edit(&mut self, ui: &mut egui::Ui, rate_enabled: bool) {
-        egui::Grid::new(ui.id().with("format"))
+        egui::Grid::new(ui.scope_id().with("format"))
             .num_columns(2)
             .spacing([12.0, 8.0])
             .show(ui, |ui| {
@@ -160,7 +160,7 @@ impl Format {
                             )
                             .on_hover_text(name);
                         r.widget_info(|| {
-                            egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, name)
+                            egui::WidgetInfo::labeled(egui::Role::SpinButton, true, name)
                         });
                         *side += *side % 2;
                         if name == "Width" {
@@ -197,7 +197,7 @@ impl Format {
                             );
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(
-                                egui::WidgetType::TextEdit,
+                                egui::Role::TextInput,
                                 true,
                                 "Frame rate value",
                             )
@@ -348,7 +348,7 @@ impl Workspace {
         self.project_ui.otio = match state {
             OpenOtio::Taken(f) => {
                 let mut choice = None;
-                let modal = egui::Modal::new(egui::Id::new("otio-open-taken")).show(ctx, |ui| {
+                let modal = egui::Modal::new(egui::Id::unique("otio-open-taken")).show(ctx, |ui| {
                     ui.label(format!(
                         "{} is already there. Open it, or save the project from {} under another name.",
                         file_name(&f.target),

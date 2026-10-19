@@ -507,9 +507,7 @@ impl Workspace {
                 let hold = held.get(i).copied().unwrap_or(level);
                 let (rect, resp) =
                     ui.allocate_exact_size(vec2(BAR_W, height.max(1.0)), egui::Sense::hover());
-                resp.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label)
-                });
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, label));
                 meter(ui.painter(), rect, level, hold);
             }
         });

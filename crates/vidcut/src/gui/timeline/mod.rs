@@ -38,8 +38,7 @@ pub struct EditSel {
 }
 
 pub(crate) fn repaint_in(ctx: &egui::Context, wait: Duration) {
-    let early = ctx.input(|i| Duration::try_from_secs_f32(i.predicted_dt).unwrap_or_default());
-    ctx.request_repaint_after(wait + early);
+    ctx.request_repaint_after(wait);
 }
 
 pub(crate) fn audio_edit_outgoing(t: &Track, at: i64) -> Option<String> {
@@ -304,7 +303,7 @@ mod icon {
 
 fn icon_toggle(ui: &mut egui::Ui, icon: &str, name: &str, on: bool, tip: &str) -> egui::Response {
     let r = ui.add(egui::Button::selectable(on, RichText::new(icon).size(15.0)));
-    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, name));
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, name));
     r.on_hover_text(tip)
 }
 
@@ -320,7 +319,7 @@ fn header_button(
         at,
         egui::Button::selectable(lit, RichText::new(icon).size(13.0)),
     );
-    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, lit, name));
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, lit, name));
     r.on_hover_text(tip)
 }
 
@@ -328,7 +327,7 @@ fn icon_menu(ui: &mut egui::Ui, icon: &str, name: &str, menu: impl FnOnce(&mut e
     let r = ui
         .menu_button(RichText::new(icon).size(15.0), menu)
         .response;
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
     r.on_hover_text(name);
 }
 
@@ -427,7 +426,7 @@ impl Workspace {
         );
         let upper_resp = ui.allocate_rect(upper_rect, Sense::click_and_drag());
         upper_resp.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Timeline overview")
+            egui::WidgetInfo::labeled(egui::Role::Unknown, true, "Timeline overview")
         });
         let lower_resp = ui.allocate_rect(lower_rect, Sense::click_and_drag());
 
@@ -695,7 +694,7 @@ impl Workspace {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::None);
                 let painter = ui.ctx().layer_painter(egui::LayerId::new(
                     egui::Order::Tooltip,
-                    egui::Id::new("timeline-pointer"),
+                    egui::Id::unique("timeline-pointer"),
                 ));
                 paint::trim_pointer(&painter, pos, kind);
             }
@@ -792,7 +791,7 @@ impl Workspace {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::None);
                     let painter = ui.ctx().layer_painter(egui::LayerId::new(
                         egui::Order::Tooltip,
-                        egui::Id::new("timeline-pointer"),
+                        egui::Id::unique("timeline-pointer"),
                     ));
                     paint::trim_pointer(&painter, pos, kind);
                 } else if let Hit::Slip(_) = what {
@@ -928,9 +927,7 @@ impl Workspace {
                 let on = self.is_target(&t.id);
                 let r = ui.selectable_label(on, RichText::new(&t.id).small());
                 let name = format!("Target {}", t.id);
-                r.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &name)
-                });
+                r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, &name));
                 let r = r.on_hover_text(format!("Edit functions put clips on {}", t.id));
                 if r.clicked() {
                     self.target = (t.id != MAIN).then(|| t.id.clone());
@@ -1874,7 +1871,7 @@ impl Workspace {
         };
         let painter = ui.ctx().layer_painter(egui::LayerId::new(
             egui::Order::Tooltip,
-            egui::Id::new("timeline-drag-tip"),
+            egui::Id::unique("timeline-drag-tip"),
         ));
         let galley = painter.layout_no_wrap(text, FontId::monospace(11.0), Color32::WHITE);
         let at = pos + vec2(14.0, -24.0);
@@ -1929,7 +1926,7 @@ impl Workspace {
         {
             let painter = ctx.layer_painter(egui::LayerId::new(
                 egui::Order::Tooltip,
-                egui::Id::new("bin-drag"),
+                egui::Id::unique("bin-drag"),
             ));
             let galley = painter.layout_no_wrap(text, FontId::proportional(12.0), Color32::WHITE);
             let at = pos + vec2(12.0, 10.0);
@@ -1954,7 +1951,7 @@ impl Workspace {
             .map_or(media.clone(), |m| m.name.clone());
         let painter = ctx.layer_painter(egui::LayerId::new(
             egui::Order::Tooltip,
-            egui::Id::new("media-drag"),
+            egui::Id::unique("media-drag"),
         ));
         let text = format!(
             "{}  {}",

@@ -864,7 +864,7 @@ impl Workspace {
                 .add_enabled(enabled, egui::Button::new(RichText::new(icon).size(14.0)))
                 .on_hover_text(&tip)
                 .on_disabled_hover_text(&tip);
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &tip));
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, &tip));
             if r.clicked() {
                 self.nudge_edit(side, by);
             }
