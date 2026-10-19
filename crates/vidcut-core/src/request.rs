@@ -907,6 +907,41 @@ pub enum Request {
         #[serde(default)]
         download: bool,
     },
+    /// Re-time a subtitle track to the timeline's speech. Where the built-in
+    /// voice-activity model hears speech is lined up with where the cues
+    /// show, so it needs no words and works for any language, translations
+    /// too: one offset, and a speed change where one fits better, snapped
+    /// to a frame-rate ratio such as 25/23.976 when it is near one. The
+    /// answer says how clearly the best offset stands out from the next
+    /// best more than 2 s away; when it isn't 1.25 times as high, nothing
+    /// moves and the error gives the numbers. With `words`, Parakeet Ultra
+    /// also hears the speech, and the cues whose first word starts a run of
+    /// 3 or more words it heard check the result. Then the simplest
+    /// correction that puts 90% of them within 0.5 s of their words wins:
+    /// one offset, an offset and a speed, an offset for each section between
+    /// jumps, or else each of those cues moved to its words. A dry run
+    /// answers the same and moves nothing. Muted tracks aren't heard.
+    #[serde(rename = "subtitles.retime")]
+    SubtitlesRetime {
+        /// Default: the shown subtitle track.
+        #[serde(default)]
+        track: Option<String>,
+        /// Also match the cues' words to the words Parakeet Ultra hears.
+        #[serde(default)]
+        words: bool,
+        /// The language spoken, as a code such as `en`, for `words`.
+        /// Default: the model tells it from the longest stretch of speech.
+        #[serde(default)]
+        language: Option<String>,
+        /// The largest offset looked for, earlier or later. Default: 60 s.
+        #[serde(default)]
+        max_offset: Option<TimeSpec>,
+        /// Download Parakeet Ultra for `words` if this computer doesn't have
+        /// it yet, checked against its SHA-256. Without it, a missing model
+        /// is an error that says what would be downloaded.
+        #[serde(default)]
+        download: bool,
+    },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.
     #[serde(rename = "export.plan")]

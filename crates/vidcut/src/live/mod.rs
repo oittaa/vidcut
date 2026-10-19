@@ -2473,6 +2473,21 @@ impl Live {
                 let title = "Create Subtitles from Audio".to_string();
                 Step::Encode(Box::new(hear), Box::new(envelope), title, "subtitles")
             }
+            Request::SubtitlesRetime { .. } => {
+                let Some(open) = &self.project else {
+                    return Step::Now(Err(no_project()));
+                };
+                let (project, path) = (open.project().clone(), open.store.path().to_path_buf());
+                let copy = envelope.clone();
+                let hear = move || {
+                    let env = AvEnv::for_project(&path);
+                    vidcut_core::Editor::new(project, Default::default())
+                        .apply(copy, &env, None)
+                        .map(drop)
+                };
+                let title = "Re-time Subtitles to Speech".to_string();
+                Step::Encode(Box::new(hear), Box::new(envelope), title, "retime")
+            }
             Request::TimelineImport {
                 path: Some(path),
                 unpack,

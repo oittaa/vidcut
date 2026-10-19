@@ -210,6 +210,9 @@ pub fn run_with(
                 Request::SubtitlesTranscribe { .. } => {
                     work_first(&store, &envelope, &env, hooks, "vidcut-transcribe")?;
                 }
+                Request::SubtitlesRetime { .. } => {
+                    work_first(&store, &envelope, &env, hooks, "vidcut-retime")?;
+                }
                 _ => {}
             }
             if envelope.request.is_mutation() {

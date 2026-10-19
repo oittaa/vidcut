@@ -189,6 +189,10 @@ pub fn describe_at(
             format!("Create Subtitles from Audio in {}", d.range("range"))
         }
         "subtitles.transcribe" => "Create Subtitles from Audio".into(),
+        "subtitles.retime" if d.params["track"].is_string() => {
+            format!("Re-time {} to the speech", d.text("track"))
+        }
+        "subtitles.retime" => "Re-time subtitles to the speech".into(),
         "export.start" => format!("Export {}", d.file("output")),
         "export.plan" => format!("Plan an export to {}", d.file("output")),
         "frame.render" => format!("Render the frame at {}", d.time("at")),

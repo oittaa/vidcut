@@ -154,7 +154,7 @@ fn report(path: &Path, stage: Stage, done: i64, total: i64, started: Instant) {
     crate::progress::report(path, Progress::stage(stage, done, total, started.elapsed()));
 }
 
-fn size(bytes: u64) -> String {
+pub fn size(bytes: u64) -> String {
     match bytes {
         b if b >= 1_000_000_000 => format!("{:.1} GB", b as f64 / 1e9),
         b if b >= 1_000_000 => format!("{:.0} MB", b as f64 / 1e6),
@@ -162,7 +162,7 @@ fn size(bytes: u64) -> String {
     }
 }
 
-fn present(dir: &Path, f: &File) -> bool {
+pub fn present(dir: &Path, f: &File) -> bool {
     std::fs::metadata(dir.join(f.name)).is_ok_and(|m| m.len() == f.bytes)
 }
 

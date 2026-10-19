@@ -7,7 +7,6 @@ Subtitles made from the timeline's speech, corrected on a subtitle track and exp
 What it would take:
 - **Create Subtitles from Audio in the GUI:** in Timeline Actions, with its options, the model download's question and its progress.
 - **Styles:** a track's font, size, color, outline, background and margin, written to IMSC1 and drawn when it is burned in ([spec D61](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-- **Re-timing a subtitle file to the speech:** the aligner places an imported file's text on the audio; `nasa-roman-presser-captions`, which aren't aligned with the speech, are the case to check it on. The aligner has no Finnish.
 - **Cutting by transcript:** the words with their times as a request's answer, and a request that removes words. It needs word times: Parakeet Ultra's, or Qwen3-ASR's from the aligner; Whisper's only once transcribe.cpp gives them.
 - **Later:** paid services (xAI, Google) behind the same interface, asking each time before audio leaves the computer.
 

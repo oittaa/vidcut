@@ -22,8 +22,9 @@ use crate::otio;
 use crate::render::RenderPlan;
 use crate::request::{
     Changes, Client, ClientKind, ClipRef, Detect, Envelope, ImportMode, NewTrack, OneOrMany,
-    ProjectSet, Request, Response, SourceParams,
+    ProjectSet, Request, Response, SourceParams, SpeechModel,
 };
+use crate::retime;
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
 use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode};
 use crate::transcript::{self, Speech};
@@ -2699,6 +2700,23 @@ fn mutate(
                 "warnings": warnings,
             })
         }
+        Request::SubtitlesRetime {
+            track,
+            words,
+            language,
+            max_offset,
+            download,
+        } => retime_subtitles(
+            p,
+            env,
+            &Retime {
+                track: track.as_deref(),
+                words: *words,
+                language: language.as_ref(),
+                max_offset: max_offset.as_ref(),
+                download: *download,
+            },
+        )?,
         Request::TimelineImport {
             path,
             otio,
@@ -5010,6 +5028,282 @@ fn silent_parts(
             analysis::silent_parts(&span, &levels, gain, settings)
         }
     })
+}
+
+fn heard_speech(p: &Project, env: &dyn Env) -> Result<Vec<(f64, f64)>> {
+    let fps = p.settings.fps;
+    let f = fps.as_f64();
+    let frames = |secs: f64| (secs * f).round() as i64;
+    let settings = SilenceSettings {
+        threshold_db: 0.0,
+        pre_head: 0,
+        post_tail: 0,
+        min: frames(retime::SHORTEST_PAUSE).max(1),
+    };
+    let speech = SpeechSettings {
+        threshold: retime::SPEECH,
+        min_speech: frames(retime::SHORTEST_SPEECH),
+    };
+    let any_solo = p.any_solo();
+    let mut found = Vec::new();
+    for c in p
+        .tracks
+        .iter()
+        .filter(|t| t.audible(any_solo))
+        .flat_map(|t| &t.clips)
+    {
+        let Some(a) = c.audio.as_ref().filter(|a| !a.muted) else {
+            continue;
+        };
+        let Some(m) = p.media(&c.media).filter(|m| !m.info.audio.is_empty()) else {
+            continue;
+        };
+        if c.is_block() || c.pace().speed == 0.0 {
+            continue;
+        }
+        let (_, origin) = p.media_origin(&c.media)?;
+        let span = Span::of_clip(c, origin, fps);
+        let va = env.voice_activity(m, a.stream)?;
+        let mut at = span.start;
+        for (x, y) in analysis::non_speech_parts(&span, &va, &settings, &speech)
+            .into_iter()
+            .chain([(span.end, span.end)])
+        {
+            if x > at {
+                found.push((at as f64 / f, x as f64 / f));
+            }
+            at = at.max(y);
+        }
+    }
+    found.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+    for (a, b) in found {
+        match merged.last_mut() {
+            Some(last) if a <= last.1 => last.1 = last.1.max(b),
+            _ => merged.push((a, b)),
+        }
+    }
+    Ok(merged)
+}
+
+struct Retime<'a> {
+    track: Option<&'a str>,
+    words: bool,
+    language: Option<&'a String>,
+    max_offset: Option<&'a TimeSpec>,
+    download: bool,
+}
+
+fn signed(secs: f64) -> String {
+    format!("{secs:+.2} s")
+}
+
+fn unclear(track: &str, lined: Option<&retime::LinedUp>, matched: Option<usize>) -> Error {
+    let words = match matched {
+        Some(n) => format!(
+            "; only {n} cue(s) matched the words heard, {} needed",
+            retime::MIN_ANCHORS
+        ),
+        None => "; `words` may match them by their words".into(),
+    };
+    Error::invalid(match lined {
+        None => format!("no speech was heard on the timeline to line {track}'s cues up with"),
+        Some(l) => format!(
+            "the speech doesn't line up clearly with {track}'s cues: the best offset, {}, scores \
+             {:.3}, and the next best, {}, {:.3}: {} times as high, where {} is needed. Nothing \
+             moved{words}",
+            signed(l.offset),
+            l.peak,
+            signed(l.rival_offset),
+            l.rival,
+            l.clarity.map_or("more".into(), |c| format!("{c:.2}")),
+            retime::CLEAR
+        ),
+    })
+}
+
+fn rounded(x: f64) -> f64 {
+    (x * 1000.0).round() / 1000.0
+}
+
+fn errors_json(e: Option<retime::Errors>) -> Value {
+    e.map_or(Value::Null, |e| {
+        json!({
+            "median": rounded(e.median),
+            "p90": rounded(e.p90),
+            "within": rounded(e.within),
+        })
+    })
+}
+
+fn plan_json(plan: &retime::Plan, cues: &[(f64, f64)]) -> Value {
+    let counts = plan.counts(cues);
+    json!({
+        "kind": plan.kind,
+        "speed": plan.speed,
+        "ratio": plan.ratio,
+        "offset": (plan.sections.len() == 1).then(|| rounded(plan.sections[0].offset)),
+        "sections": plan.sections.iter().zip(counts).map(|(s, n)| json!({
+            "from": rounded(s.from),
+            "offset": rounded(s.offset),
+            "cues": n,
+        })).collect::<Vec<_>>(),
+        "snapped": plan.snapped.len(),
+    })
+}
+
+fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Value> {
+    let ti = match r.track {
+        Some(id) => p
+            .subtitle_index(id)
+            .ok_or_else(|| Error::not_found(format!("no subtitle track {id}")))?,
+        None => ops::subtitles::shown(p)?,
+    };
+    ops::subtitles::unlocked(p, ti)?;
+    let fps = p.settings.fps.as_f64();
+    let id = p.subtitles[ti].id.clone();
+    let cues: Vec<(f64, f64)> = p.subtitles[ti]
+        .cues
+        .iter()
+        .map(|c| (c.start as f64 / fps, c.end() as f64 / fps))
+        .collect();
+    if cues.is_empty() {
+        return Err(Error::invalid(format!("{id} has no cues to re-time")));
+    }
+    let max = match r.max_offset {
+        Some(t) => length(p, t)? as f64 / fps,
+        None => retime::MAX_OFFSET,
+    };
+    if max <= 0.0 {
+        return Err(Error::usage("max_offset: longer than 0"));
+    }
+    let speech = heard_speech(p, env)?;
+    let lined = retime::line_up(&speech, (0.0, p.end() as f64 / fps), &cues, max);
+    let clear = lined.filter(|l| l.clear);
+    let mut warnings = Vec::new();
+    let mut words = Value::Null;
+    let mut chosen_errors = None;
+    let plan = if r.words {
+        let heard = env.transcribe(
+            &sound_plan(p, 0, p.end())?,
+            &transcript::Asked {
+                model: SpeechModel::ParakeetUltra,
+                model_file: None,
+                vad_file: None,
+                language: r.language.cloned(),
+                download: r.download,
+            },
+        )?;
+        warnings.extend(heard.warnings.iter().cloned());
+        let texts: Vec<String> = p.subtitles[ti]
+            .cues
+            .iter()
+            .map(|c| crate::subtitles::plain(&c.text))
+            .collect();
+        let anchors = retime::anchors(&texts, &retime::spoken(&heard.said));
+        let levels = retime::levels(&cues, &anchors);
+        let matched: HashSet<usize> = anchors.iter().map(|a| a.cue).collect();
+        let checked =
+            lined.and_then(|l| retime::errors(&retime::Plan::lined(&l, &cues), &cues, &anchors));
+        let enough = anchors.len() >= retime::MIN_ANCHORS;
+        let chosen = levels
+            .iter()
+            .position(|l| l.fits)
+            .unwrap_or(levels.len().saturating_sub(1));
+        words = json!({
+            "model": heard.model,
+            "device": heard.device,
+            "language": heard.language,
+            "matched": anchors.len(),
+            "unmatched": p.subtitles[ti].cues.iter().enumerate()
+                .filter(|(i, _)| !matched.contains(i))
+                .map(|(_, c)| c.id.clone())
+                .collect::<Vec<_>>(),
+            "speech_errors": errors_json(checked),
+            "levels": levels.iter().map(|l| {
+                let mut v = plan_json(&l.plan, &cues);
+                v["errors"] = errors_json(Some(l.errors));
+                v["fits"] = json!(l.fits);
+                v
+            }).collect::<Vec<_>>(),
+        });
+        match (enough, clear) {
+            (true, _) => {
+                chosen_errors = Some(levels[chosen].errors);
+                levels[chosen].plan.clone()
+            }
+            (false, Some(l)) => {
+                warnings.push(format!(
+                    "only {} cue(s) matched the words heard, too few to check the speech's offset",
+                    anchors.len()
+                ));
+                retime::Plan::lined(&l, &cues)
+            }
+            (false, None) => return Err(unclear(&id, lined.as_ref(), Some(anchors.len()))),
+        }
+    } else {
+        match clear {
+            Some(l) => retime::Plan::lined(&l, &cues),
+            None => return Err(unclear(&id, lined.as_ref(), None)),
+        }
+    };
+    let old: Vec<(String, i64, i64)> = p.subtitles[ti]
+        .cues
+        .iter()
+        .map(|c| (c.id.clone(), c.start, c.end()))
+        .collect();
+    let (mut moved, mut cut, mut removed) = (0, 0, Vec::new());
+    for (i, (cue, s0, e0)) in old.into_iter().enumerate() {
+        let (s, e) = plan.map(i, cues[i]);
+        let (s, e) = ((s * fps).round() as i64, (e * fps).round() as i64);
+        if e <= 0 {
+            removed.push(cue);
+            continue;
+        }
+        if s < 0 {
+            cut += 1;
+        }
+        let s = s.max(0);
+        let e = e.max(s + 1);
+        if (s, e) != (s0, e0) {
+            ops::subtitles::set_cue(p, &cue, None, Some(s), Some(e), None)?;
+            moved += 1;
+        }
+    }
+    if !removed.is_empty() {
+        warnings.push(format!(
+            "{} cue(s) would end before the timeline starts, removed",
+            removed.len()
+        ));
+        ops::subtitles::remove_cues(p, &removed)?;
+    }
+    if cut > 0 {
+        warnings.push(format!(
+            "{cut} cue(s) would start before the timeline starts, cut to its start"
+        ));
+    }
+    let mut correction = plan_json(&plan, &cues);
+    correction["errors"] = errors_json(chosen_errors);
+    Ok(json!({
+        "track": id,
+        "cues": cues.len(),
+        "speech": lined.map(|l| json!({
+            "offset": rounded(l.offset),
+            "speed": l.speed,
+            "ratio": l.ratio,
+            "peak": rounded(l.peak),
+            "rival": rounded(l.rival),
+            "rival_offset": rounded(l.rival_offset),
+            "clarity": l.clarity.map(rounded),
+            "clear": l.clear,
+            "needed": retime::CLEAR,
+        })),
+        "words": words,
+        "correction": correction,
+        "moved": moved,
+        "removed": removed,
+        "warnings": warnings,
+    }))
 }
 
 fn scene_cuts(

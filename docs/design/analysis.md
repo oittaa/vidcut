@@ -64,6 +64,30 @@ flowchart TD
 
 **Why** this piece length (`transcribe::longest_piece`): Qwen3-ASR's memory grows with the length it hears, so its pieces are sized from the GPU's memory (`Gpu::memory_mb`); a model without times needs short pieces to place its words; Whisper large-v3 loops in long ones ([gotchas](../gotchas.md#transcribecpp-and-its-models)). Parakeet Ultra is the default (`SpeechModel`): it gives real word times now, where Qwen3-ASR's are estimates without transcribe.cpp's aligner. No CUDA: its backend and NVIDIA's runtime add about 930 MB, and it was slower than Vulkan for two of the three models.
 
+## Re-timing subtitles
+
+Re-time to Speech (`subtitles.retime`) moves a subtitle track's cues to the timeline's speech. It measures with the two above and decides in vidcut-core's `retime`.
+
+```mermaid
+flowchart TD
+  req["subtitles.retime"] --> heard["heard_speech: each clip heard<br>Env::voice_activity, analysis::non_speech_parts"]
+  heard --> line["retime::line_up<br>the speech against where the cues show"]
+  line -- "words" --> asr["Env::transcribe<br>Parakeet Ultra, the whole timeline"]
+  asr --> anchors["retime::anchors<br>runs of 3 words or more"]
+  anchors --> levels["retime::levels<br>offset, speed, sections, words"]
+  line -- "no words, clear" --> plan["retime::Plan"]
+  levels -- "the first that fits" --> plan
+  plan --> set["ops::subtitles::set_cue"]
+```
+
+- **Speech** is where each heard clip's cached voice activity is speech by Silero's rule with its defaults (`SPEECH` 0.5, `SHORTEST_SPEECH` 0.25 s, `SHORTEST_PAUSE` 0.1 s), on the timeline through the clip (`Span`).
+- **Lining up** (`retime::line_up`) scores each offset, every 10 ms up to `max_offset`, by the cross-correlation of the speech, less its mean, with where the cues show. It is summed exactly, as the trapezoid each speech stretch and cue make against the offset (`Ramps`), not sampled. Speeds from 0.95 to 1.05 are tried in steps that move the last cue 0.25 s, then a tenth of that around the best. A speed within 0.25 s of 1 or of a frame-rate ratio over the track snaps to it (`retime::snap`), and stays only when it scores above speed 1. The best offset is clear when it scores `CLEAR` (1.25) times the highest other peak more than 2 s from it.
+- **Words** (`retime::anchors`): the cues' text and the words heard, as lower-case letters and digits, are matched in order by their longest common runs, as Python's difflib does without its junk heuristic. A cue whose first word is in a run of `RUN` (3) words or more is anchored at that word's start, and at its last word's end when that one matched too.
+- **Levels** (`retime::levels`) fit the anchors' offsets (the word's start less the cue's): their median; a Theil–Sen line, its speed snapped as above; sections, each starting where 5 anchors in a row sit more than 0.5 s from the last section's offset and within 0.5 s of their own median; and last, each anchored cue at its words, the others as in their section. The first that puts 90% of the anchors within `FIT` (0.5 s) wins. Under `MIN_ANCHORS` (10) the words decide nothing, and a clear offset from the speech stands.
+- **In a GUI** it runs as a job (`Step::Encode`) on a copy, so the VAD and the transcription run off the core's thread; the edit then finds both cached.
+
+**Why** the speech first, not the words: where speech is doesn't depend on its language, so a translated file lines up as well as the original. **Why** 1.25: over the NASA press conference and its captions (nasa-roman-presser in the media manifest), lined up in 5-minute windows, the one window whose offset was wrong scored 1.09 times its next peak, and the last, 76 s long, 1.07 though right; the other ten scored 1.38 or more. The whole file scored 2.03 at +2.94 s, where Parakeet Ultra's words put it at +3.02 s.
+
 ## Caches
 
 An `Origin` is a file's path, size and modification time (`fingerprint::origin`). Its name names the cache file; its text is stamped into it (`Origin::stamp`) and checked on read (`Origin::check`), so a changed file misses. The cache dir is `dirs::cache`.
@@ -95,6 +119,7 @@ On disk only `thumbs` has a size limit (`thumbcache::evict`, least recently used
 - `crates/vidcut-core/src/dirs.rs`
 - `crates/vidcut-av/src/analysis.rs`
 - `crates/vidcut-core/src/transcript.rs`
+- `crates/vidcut-core/src/retime.rs`
 - `crates/vidcut-av/src/transcribe.rs`
 - `crates/vidcut-av/src/light.rs`
 - `crates/vidcut-av/src/waveform.rs`

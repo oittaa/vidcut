@@ -30,7 +30,7 @@ fn index(p: &Project, id: &str) -> Result<usize> {
         .ok_or_else(|| Error::not_found(format!("no subtitle track {id}")))
 }
 
-fn unlocked(p: &Project, ti: usize) -> Result<()> {
+pub fn unlocked(p: &Project, ti: usize) -> Result<()> {
     let t = &p.subtitles[ti];
     if t.locked {
         return Err(Error::invalid(format!("subtitle track {} is locked", t.id)));
