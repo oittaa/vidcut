@@ -38,6 +38,8 @@ pub struct TrackDialog {
     opacity: String,
     margin: String,
     error: String,
+    families: Vec<String>,
+    preview: Option<SubtitleStyle>,
 }
 
 pub(super) enum Files {
@@ -176,6 +178,42 @@ fn style_of(d: &TrackDialog, stored: &SubtitleStyle) -> Result<SubtitleStyle, St
     vidcut_core::ops::subtitles::checked_style(&style).map_err(|e| e.message)
 }
 
+fn swatch(ui: &mut egui::Ui, text: &mut String, usual: [u8; 3]) -> bool {
+    let mut rgb = vidcut_core::subtitles::color(text)
+        .and_then(|c| vidcut_core::subtitles::rgb(&c))
+        .unwrap_or(usual);
+    let changed = ui.color_edit_button_srgb(&mut rgb).changed();
+    if changed {
+        let [r, g, b] = rgb;
+        *text = format!("#{r:02x}{g:02x}{b:02x}");
+    }
+    changed
+}
+
+fn font_list(ui: &mut egui::Ui, font: &mut String, families: &[String]) -> bool {
+    let mut changed = false;
+    if families.is_empty() {
+        return changed;
+    }
+    egui::ComboBox::from_id_salt("subtitle-font")
+        .selected_text("")
+        .width(0.0)
+        .show_ui(ui, |ui| {
+            for name in families {
+                if ui
+                    .selectable_label(font.trim().eq_ignore_ascii_case(name), name)
+                    .clicked()
+                {
+                    *font = name.clone();
+                    changed = true;
+                }
+            }
+        })
+        .response
+        .on_hover_text("Installed fonts");
+    changed
+}
+
 fn slot(tag: &Tag) -> usize {
     match tag {
         Tag::I => 0,
@@ -214,11 +252,15 @@ pub(super) fn paint_cues(
     p: &Project,
     frame: i64,
     typing: Option<&CueDialog>,
+    styling: Option<&TrackDialog>,
 ) {
     let Some(t) = p.subtitles.iter().find(|t| t.shown) else {
         return;
     };
-    let style = &t.style;
+    let style = match styling {
+        Some(d) if d.track == t.id => d.preview.as_ref().unwrap_or(&t.style),
+        _ => &t.style,
+    };
     let (w, h) = (f64::from(picture.width()), f64::from(picture.height()));
     let size = (picture.height() * style.text_fraction() as f32).max(8.0);
     let width = style.wrap_width(w, h) as f32;
@@ -366,6 +408,8 @@ impl Workspace {
             opacity: percent(s.background.as_ref().and_then(|b| b.opacity)),
             margin: percent(s.margin),
             error: String::new(),
+            families: vidcut_av::burn::families(),
+            preview: None,
         });
     }
 
@@ -507,6 +551,7 @@ impl Workspace {
                 });
                 ui.label(dim("Exported subtitle files are named with these"));
                 ui.add_space(8.0);
+                let mut changed = false;
                 egui::Grid::new("subtitle-style-fields").show(ui, |ui| {
                     let mut row =
                         |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
@@ -517,17 +562,32 @@ impl Workspace {
                                     .min_size(egui::vec2(240.0, 0.0)),
                             );
                             enter |= r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                            ui.end_row();
+                            r.changed()
                         };
-                    row(ui, "Font", &mut d.font, "Open Sans");
-                    row(ui, "Size", &mut d.size, "5.5% of the picture");
-                    row(ui, "Color", &mut d.color, "#ffffff");
-                    row(ui, "Outline", &mut d.outline, "#000000");
-                    row(ui, "Outline size", &mut d.outline_size, "5% of the text");
-                    row(ui, "Background", &mut d.background, "none");
-                    row(ui, "Opacity", &mut d.opacity, "100%");
-                    row(ui, "Margin", &mut d.margin, "5%");
+                    changed |= row(ui, "Font", &mut d.font, "Open Sans");
+                    changed |= font_list(ui, &mut d.font, &d.families);
+                    ui.end_row();
+                    changed |= row(ui, "Size", &mut d.size, "5.5% of the picture");
+                    ui.end_row();
+                    changed |= row(ui, "Color", &mut d.color, "#ffffff");
+                    changed |= swatch(ui, &mut d.color, [255, 255, 255]);
+                    ui.end_row();
+                    changed |= row(ui, "Outline", &mut d.outline, "#000000");
+                    changed |= swatch(ui, &mut d.outline, [0, 0, 0]);
+                    ui.end_row();
+                    changed |= row(ui, "Outline size", &mut d.outline_size, "5% of the text");
+                    ui.end_row();
+                    changed |= row(ui, "Background", &mut d.background, "none");
+                    changed |= swatch(ui, &mut d.background, [0, 0, 0]);
+                    ui.end_row();
+                    changed |= row(ui, "Opacity", &mut d.opacity, "100%");
+                    ui.end_row();
+                    changed |= row(ui, "Margin", &mut d.margin, "none: centered at 80% or 20%");
+                    ui.end_row();
                 });
+                if changed {
+                    d.preview = style_of(&d, &t.style).ok();
+                }
                 ui.label(dim(
                     "Burned in, and written to an IMSC1 file. An empty field keeps the usual look",
                 ));

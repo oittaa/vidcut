@@ -64,6 +64,19 @@ fn fonts() -> &'static Mutex<Fonts> {
     })
 }
 
+pub fn families() -> Vec<String> {
+    let f = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let mut names: Vec<String> = f
+        .system
+        .db()
+        .faces()
+        .filter_map(|face| face.families.first().map(|(n, _)| n.clone()))
+        .collect();
+    names.sort_by_cached_key(|n| n.to_lowercase());
+    names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    names
+}
+
 fn color([r, g, b]: [u8; 3]) -> Color {
     Color::rgb(r, g, b)
 }

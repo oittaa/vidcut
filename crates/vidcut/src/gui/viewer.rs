@@ -278,7 +278,8 @@ impl Workspace {
             && let Some(p) = self.project()
         {
             let typing = self.timeline.cue_dialog.as_ref();
-            super::subtitles::paint_cues(&painter, picture, p, player.position, typing);
+            let styling = self.timeline.track_dialog.as_ref();
+            super::subtitles::paint_cues(&painter, picture, p, player.position, typing, styling);
         }
         if let Some(name) = offline {
             painter.rect_filled(picture, CornerRadius::ZERO, theme::colors().offline);
