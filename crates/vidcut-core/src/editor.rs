@@ -1684,6 +1684,7 @@ fn clip_speech(
         warnings: Vec::new(),
     };
     let mut media = Vec::new();
+    let mut devices: Vec<String> = Vec::new();
     let mut kept: HashMap<(String, u32), Arc<Speech>> = HashMap::new();
     let mut placed = Vec::new();
     for (track, t) in p.tracks.iter().enumerate() {
@@ -1711,26 +1712,29 @@ fn clip_speech(
             let said = match kept.get(&key) {
                 Some(s) => s.clone(),
                 None => {
-                    let saved = env.transcript(m, sound.stream)?.filter(|s| asked.made(s));
-                    let fresh = saved.is_none();
-                    let s = match saved {
+                    let s = match env.transcript(m, sound.stream)?.filter(|s| asked.made(s)) {
                         Some(s) => s,
                         None => {
                             let plan = media_sound_plan(p, m, sound.stream)?;
                             env.transcribe_media(m, sound.stream, &plan, asked)?
                         }
                     };
-                    if fresh {
-                        speech.device = s.device.clone();
-                        speech.pieces += s.pieces;
-                        speech.longest_piece = speech.longest_piece.max(s.longest_piece);
-                        speech
-                            .warnings
-                            .extend(s.warnings.iter().map(|w| format!("{}: {w}", m.name)));
+                    if !s.device.is_empty() && !devices.contains(&s.device) {
+                        devices.push(s.device.clone());
                     }
-                    media.push(
-                        json!({ "media": m.id, "stream": sound.stream, "transcribed": fresh }),
-                    );
+                    speech.pieces += s.pieces;
+                    speech.longest_piece = speech.longest_piece.max(s.longest_piece);
+                    speech
+                        .warnings
+                        .extend(s.warnings.iter().map(|w| format!("{}: {w}", m.name)));
+                    media.push(json!({
+                        "media": m.id,
+                        "stream": sound.stream,
+                        "model": s.model,
+                        "device": s.device,
+                        "language": s.language,
+                        "words": transcript::spoken(&s).map_or(0, |w| w.len()),
+                    }));
                     kept.insert(key, s.clone());
                     s
                 }
@@ -1753,6 +1757,7 @@ fn clip_speech(
             }
         }
     }
+    speech.device = devices.join(", ");
     let chosen = first_heard(placed);
     if speech.language.is_none() {
         let mut counts: HashMap<&str, usize> = HashMap::new();
