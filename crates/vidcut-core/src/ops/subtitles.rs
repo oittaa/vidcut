@@ -97,7 +97,7 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
                 None
             } else if t.chars().count() > 200
                 || t.chars()
-                    .any(|c| c.is_control() || matches!(c, '<' | '>' | '&' | '"' | ','))
+                    .any(|c| c.is_control() || matches!(c, '<' | '>' | '&' | '"' | '\'' | ','))
             {
                 return Err(Error::invalid(
                     "a subtitle font is a family name, at most 200 characters",

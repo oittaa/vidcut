@@ -741,6 +741,9 @@ fn layout(cues: &[Timed], style: &SubtitleStyle) -> ([Region; 3], Vec<String>) {
 
 fn style_attrs(style: &SubtitleStyle) -> String {
     let font = match &style.font {
+        Some(f) if f.contains(char::is_whitespace) => {
+            format!("'{}',proportionalSansSerif", escape_xml(f))
+        }
         Some(f) => format!("{},proportionalSansSerif", escape_xml(f)),
         None => "proportionalSansSerif".into(),
     };
