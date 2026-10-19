@@ -224,3 +224,8 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Resolve:** its OpenTimelineIO, FCPXML, FCP 7 XML, EDL and CSV exports leave the subtitle tracks out (Studio 21.1.1); a subtitle file in an OpenTimelineIO file it imports makes the import fail.
 - **vidcut:** an OpenTimelineIO export writes an SRT beside it for each subtitle track with cues, in its timecode, ready for Insert Selected Subtitles to Timeline Using Timecode; a whole timeline's file also holds the cues for vidcut. `export.start` writes subtitle files beside media when asked (`subtitles`).
 - **Why:** subtitles made in vidcut should reach the editor that finishes the program.
+
+## X43. Subtitles go into any container, and burn in from any track
+- **Resolve:** the Deliver page's subtitle Format is a separate file, Burn into video (the selected track) or As embedded captions: CEA-608 in MXF OP1A and QuickTime, or several tracks as subtitle streams or CEA-608 or EAS708 captions in QuickTime and MXF, by the Codec pop-up (Text, CEA-608) (pp. 1247–1248).
+- **vidcut:** `subtitles_as` on `export.start`, and Subtitles in the Export dialog: `file`, `stream` or `burn`. A stream is text in every container vidcut writes that holds one: mov_text in MP4, MOV and M4A, SubRip in Matroska, WebVTT in WebM, a stream for each track named (default: the shown track), with its name and language, the shown track's the default stream. `burn` draws one track, the shown one unless another is named ([D60](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). No CEA-608 or MXF.
+- **Why:** text streams are what players read in the containers vidcut writes; CEA-608 is a broadcast format of 32-character lines, and vidcut writes no MXF.

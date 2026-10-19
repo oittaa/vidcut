@@ -1,3 +1,4 @@
+mod languages;
 mod srt;
 mod text;
 mod ttml;
@@ -9,7 +10,8 @@ use crate::error::{Error, Result};
 use crate::model::{Place, Settings};
 use crate::request::SubtitleFormat;
 
-pub use text::{Encoding, plain};
+pub use languages::three_letter;
+pub use text::{Encoding, Tag, Token, plain, tokens};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Timed {

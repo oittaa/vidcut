@@ -2,7 +2,7 @@
 
 **When:** next.
 
-Subtitles made from the timeline's speech, corrected on a subtitle track and exported. Subtitle tracks, cues and subtitle files are in ([spec §8.12](../cut-page-spec.md#812-subtitles-pp-645646-702-12271248)), from the CLI, IPC and MCP; Create Subtitles from Audio (p. 1234) and the rest below are not.
+Subtitles made from the timeline's speech, corrected on a subtitle track and exported. Subtitle tracks, cues, subtitle files, and streams and burning in in the export are in ([spec §8.12](../cut-page-spec.md#812-subtitles-pp-645646-702-12271248)), from the CLI, IPC and MCP, and the Export dialog; Create Subtitles from Audio (p. 1234) and the rest below are not.
 
 What it would take:
 - **Transcription on the computer:** [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) (MIT, on ggml) built into vidcut through the `transcribe-cpp` crate, on the GPU (rule 9): Vulkan on Windows and Linux, Metal on macOS.
@@ -16,9 +16,8 @@ What it would take:
   - **Voice activity:** transcribe.cpp's Silero VAD model, downloaded with the first model.
   - **Small GPUs:** Parakeet Ultra, 740 MB at Q8, 25 languages, word times.
   - Kept in the cache dir, which `vidcut reset` empties. Downloaded only after asking, and checked against a SHA-256, or a file the user names. Parakeet Ultra's CC BY 4.0 asks for attribution.
-- **The GUI:** subtitle tracks on the timeline, cues drawn on them and in the viewer, moved, trimmed and typed with the mouse and keys; Add Subtitle Track, Add Subtitle, Import Subtitle and Export Subtitle in the menus; subtitle files in the Export dialog.
-- **Styles:** a track's font, size, color, outline, background and margin, written to IMSC1.
-- **In the export:** a subtitle stream (mov_text in MP4 and MOV, SubRip in Matroska, WebVTT in WebM), or burned in on the GPU.
+- **The GUI:** subtitle tracks on the timeline, cues drawn on them and in the viewer, moved, trimmed and typed with the mouse and keys; Add Subtitle Track, Add Subtitle, Import Subtitle and Export Subtitle in the menus.
+- **Styles:** a track's font, size, color, outline, background and margin, written to IMSC1 and drawn when it is burned in ([spec D60](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Re-timing a subtitle file to the speech:** the aligner places an imported file's text on the audio; `nasa-roman-presser-captions`, which aren't aligned with the speech, are the case to check it on. The aligner has no Finnish.
 - **Cutting by transcript:** the words with their times as a request's answer, and a request that removes words. It needs word times: Parakeet Ultra's, or Qwen3-ASR's from the aligner; Whisper's only once transcribe.cpp gives them.
 - **Later:** paid services (xAI, Google) behind the same interface, asking each time before audio leaves the computer.

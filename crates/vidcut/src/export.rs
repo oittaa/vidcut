@@ -13,7 +13,7 @@ use vidcut_core::export::{
 };
 use vidcut_core::otio::{self, Locations};
 use vidcut_core::render::{self, RenderPlan};
-use vidcut_core::request::ExportParams;
+use vidcut_core::request::{ExportParams, SubtitlesAs};
 use vidcut_core::time::{TimeContext, TimeSpec};
 use vidcut_core::{Error, ErrorCode, Project, Result};
 
@@ -216,6 +216,15 @@ pub fn timeline(
             format.name()
         )));
     }
+    if params
+        .subtitles_as
+        .is_some_and(|how| how != SubtitlesAs::File)
+    {
+        return Err(Error::usage(format!(
+            "an .{} export has no picture or streams: its subtitles go beside it as files",
+            format.name()
+        )));
+    }
     if params.output.exists() && !params.overwrite {
         return Err(Error::invalid(format!(
             "{} exists; pass overwrite to replace it",
@@ -330,6 +339,12 @@ pub fn subtitles_beside(
     params: &ExportParams,
 ) -> Result<Vec<vidcut_core::subtitles::Beside>> {
     let mut all = Vec::new();
+    if params
+        .subtitles_as
+        .is_some_and(|how| how != SubtitlesAs::File)
+    {
+        return Ok(all);
+    }
     for o in &prepared.outputs {
         all.extend(vidcut_core::subtitles::beside(
             p,
@@ -372,6 +387,117 @@ pub struct Output {
     pub settings: ExportSettings,
     pub color: Option<ColorChoice>,
     pub metadata: Option<vidcut_core::export::metadata::MetadataChoice>,
+    pub subtitles: engine::subtitles::Subtitles,
+}
+
+fn subtitle_tracks(p: &Project, params: &ExportParams, how: SubtitlesAs) -> Result<Vec<usize>> {
+    let chosen: Vec<usize> = match &params.subtitles {
+        Some(ids) => ids
+            .iter()
+            .map(|id| {
+                p.subtitle_index(id)
+                    .ok_or_else(|| Error::not_found(format!("no subtitle track {id}")))
+            })
+            .collect::<Result<_>>()?,
+        None => p
+            .subtitles
+            .iter()
+            .position(|t| t.shown)
+            .into_iter()
+            .collect(),
+    };
+    let what = match how {
+        SubtitlesAs::Burn => "burn in",
+        _ => "put in the file",
+    };
+    if chosen.is_empty() {
+        return Err(Error::invalid(format!(
+            "no subtitle track is shown to {what}; name one in subtitles"
+        )));
+    }
+    if how == SubtitlesAs::Burn && chosen.len() > 1 {
+        return Err(Error::usage(
+            "subtitles burn in one track at a time; name one in subtitles",
+        ));
+    }
+    Ok(chosen)
+}
+
+fn subtitle_track(p: &Project, ti: usize, (a, b): (i64, i64)) -> engine::subtitles::Track {
+    let t = &p.subtitles[ti];
+    engine::subtitles::Track {
+        id: t.id.clone(),
+        name: t.display_name(),
+        language: t.language.clone(),
+        shown: t.shown,
+        cues: t
+            .cues
+            .iter()
+            .filter(|c| c.start < b && c.end() > a && !c.text.trim().is_empty())
+            .map(|c| engine::subtitles::Cue {
+                start: c.start.max(a) - a,
+                end: c.end().min(b) - a,
+                text: c.text.clone(),
+                place: c.place,
+            })
+            .collect(),
+    }
+}
+
+fn add_subtitles(
+    p: &Project,
+    params: &ExportParams,
+    settings: &ExportSettings,
+    outputs: &mut [Output],
+) -> Result<()> {
+    let how = params.subtitles_as.unwrap_or(SubtitlesAs::File);
+    if how == SubtitlesAs::File {
+        return Ok(());
+    }
+    if params.subtitle_format.is_some() {
+        return Err(Error::usage(
+            "subtitle_format is for subtitle files; a stream takes the container's format",
+        ));
+    }
+    let tracks = subtitle_tracks(p, params, how)?;
+    match how {
+        SubtitlesAs::Stream if settings.container.subtitle_codec().is_none() => {
+            let burn = if settings.video.is_some() {
+                ", or burn the subtitles in"
+            } else {
+                ""
+            };
+            return Err(Error::usage(format!(
+                ".{} files hold no subtitle streams: export to .mp4, .mov, .m4a, .mkv or \
+                 .webm{burn}",
+                settings.container.extension()
+            )));
+        }
+        SubtitlesAs::Burn if settings.video.is_none() => {
+            return Err(Error::usage(
+                "an export without video has no picture to burn subtitles into",
+            ));
+        }
+        _ => {}
+    }
+    for o in outputs {
+        let range = o.plan.range;
+        let made: Vec<engine::subtitles::Track> = tracks
+            .iter()
+            .map(|&ti| subtitle_track(p, ti, range))
+            .collect();
+        o.subtitles = match how {
+            SubtitlesAs::Burn => engine::subtitles::Subtitles {
+                streams: Vec::new(),
+                burn: made.into_iter().next(),
+            },
+            _ => engine::subtitles::Subtitles {
+                streams: made,
+                burn: None,
+            },
+        };
+    }
+    Ok(())
 }
 
 pub struct Prepared {
@@ -509,6 +635,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
                 settings: settings.clone(),
                 color: None,
                 metadata: None,
+                subtitles: Default::default(),
             });
         }
         if outputs.is_empty() {
@@ -521,8 +648,10 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             settings: settings.clone(),
             color: None,
             metadata: None,
+            subtitles: Default::default(),
         });
     }
+    add_subtitles(p, params, &settings, &mut outputs)?;
     for o in &outputs {
         if o.path.exists() && !params.overwrite {
             return Err(Error::invalid(format!(
@@ -815,16 +944,28 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
         "settings": prepared.settings,
         "video_encoder": video_encoder,
         "notes": notes(prepared, available),
-        "outputs": prepared.outputs.iter().map(|o| json!({
-            "path": o.path,
-            "frames": o.plan.frames,
-            "range": o.plan.range,
-            "video_pieces": o.plan.video.len(),
-            "audio_lanes": o.plan.audio.len(),
-            "color": o.color,
-            "metadata": o.metadata,
-            "plan": o.plan,
-        })).collect::<Vec<_>>(),
+        "outputs": prepared.outputs.iter().map(|o| {
+            let mut out = json!({
+                "path": o.path,
+                "frames": o.plan.frames,
+                "range": o.plan.range,
+                "video_pieces": o.plan.video.len(),
+                "audio_lanes": o.plan.audio.len(),
+                "color": o.color,
+                "metadata": o.metadata,
+                "plan": o.plan,
+            });
+            let codec = o.settings.container.subtitle_codec();
+            if !o.subtitles.streams.is_empty() {
+                out["subtitle_streams"] = json!(o.subtitles.streams.iter().map(|t| json!({
+                    "track": t.id, "codec": codec, "cues": t.cues.len(),
+                })).collect::<Vec<_>>());
+            }
+            if let Some(t) = &o.subtitles.burn {
+                out["burned_in"] = json!({ "track": t.id, "cues": t.cues.len() });
+            }
+            out
+        }).collect::<Vec<_>>(),
     })
 }
 
@@ -1022,6 +1163,7 @@ pub fn run(
             &o.path,
             available,
             decoder,
+            &o.subtitles,
             cancel,
             &mut |pr| progress(i, &o.path, pr),
         )
