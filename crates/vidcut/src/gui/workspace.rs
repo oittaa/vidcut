@@ -1347,8 +1347,8 @@ impl Workspace {
             if self.pool_focus {
                 let selected = self.snap.selection.media.clone();
                 self.removing = (!selected.is_empty()).then_some(selected);
-            } else if !self.delete_transition() {
-                self.delete(m.alt);
+            } else {
+                self.delete_key(m.alt);
             }
         }
         if pressed(Key::Z) && m.command {
@@ -1590,7 +1590,10 @@ impl Workspace {
         }
     }
 
-    fn delete(&self, lift: bool) {
+    pub(super) fn delete_key(&self, lift: bool) {
+        if self.delete_transition() {
+            return;
+        }
         let Some(p) = self.project() else { return };
         if let (Some(a), Some(b)) = (p.marks.mark_in, p.marks.mark_out) {
             self.send(
@@ -1598,18 +1601,7 @@ impl Workspace {
                 json!({ "range": format!("{a}f..{b}f"), "lift": lift }),
             );
         } else {
-            if !self.snap.selection.clips.is_empty() {
-                self.send(
-                    "edit.delete",
-                    json!({ "clips": self.snap.selection.clips, "lift": lift }),
-                );
-            }
-            if !self.snap.selection.cues.is_empty() {
-                self.send(
-                    "subtitles.remove",
-                    json!({ "cues": self.snap.selection.cues }),
-                );
-            }
+            self.delete_selected(lift);
         }
     }
 

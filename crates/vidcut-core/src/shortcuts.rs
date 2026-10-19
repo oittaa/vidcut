@@ -233,8 +233,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Ctrl", "B"],
         "Split at the playhead",
         Some(
-            "Ctrl+\\ does the same. With subtitles selected, it splits those the playhead is \
-             over.",
+            "Ctrl+\\ does the same. It splits the selected clips and subtitles the playhead is \
+             over, or with nothing selected, every clip there.",
         ),
     ),
     key(

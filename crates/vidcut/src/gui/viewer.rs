@@ -274,11 +274,7 @@ impl Workspace {
             && offline.is_none()
             && let Some(p) = self.project()
         {
-            let typing = self
-                .timeline
-                .cue_dialog
-                .as_ref()
-                .map(|d| (d.cue.as_str(), d.text.as_str()));
+            let typing = self.timeline.cue_dialog.as_ref();
             super::subtitles::paint_cues(&painter, picture, p, player.position, typing);
         }
         if let Some(name) = offline {

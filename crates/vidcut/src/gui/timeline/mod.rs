@@ -1858,15 +1858,15 @@ impl Workspace {
                     .collect();
             }
         } else {
-            self.timeline.edit = None;
-            self.send(
-                "selection.set",
-                json!({ "clips": [id.to_string()], "cues": [] }),
-            );
-            return;
+            sel = vec![id.to_string()];
         }
         self.timeline.edit = None;
-        self.send("selection.set", json!({ "clips": sel }));
+        let params = if mods.command {
+            json!({ "clips": sel })
+        } else {
+            json!({ "clips": sel, "cues": [] })
+        };
+        self.send("selection.set", params);
     }
 
     fn clip_menu(&mut self, ui: &mut egui::Ui, c: &vidcut_core::model::Clip) {

@@ -228,7 +228,7 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 
 ## X43. A subtitle's text is typed in its own window
 - **Resolve:** a selected subtitle's text is typed in the Captions panel of the Inspector, and shows on the clip as it is typed (p. 1233).
-- **vidcut:** double-clicking a cue, Enter with one selected, Edit Subtitle… in its right-click menu, or Add Subtitle opens a Subtitle window with its text and position. The text shows on the cue and in the viewer as it is typed, and goes in as one change on Done (Ctrl+Enter); Cancel leaves the cue as it was.
+- **vidcut:** double-clicking a cue, Enter with one selected, Edit Subtitle… in its right-click menu, or Add Subtitle opens a Subtitle window with its text and position. The text shows on the cue and in the viewer as it is typed, and the position in the viewer as it is picked; both go in as one change on Done (Ctrl+Enter), or when another subtitle is opened in the window. Cancel leaves the cue as it was.
 - **Why:** vidcut has no Inspector, and one change per subtitle keeps typing out of the undo history.
 
 ## X44. Add Subtitle uses the shown subtitle track

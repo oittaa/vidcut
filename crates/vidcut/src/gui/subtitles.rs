@@ -16,7 +16,7 @@ use super::workspace::{Workspace, dim};
 pub struct CueDialog {
     pub cue: String,
     pub text: String,
-    place: Place,
+    pub place: Place,
     loaded: bool,
     focus: bool,
 }
@@ -118,7 +118,7 @@ pub(super) fn paint_cues(
     picture: Rect,
     p: &Project,
     frame: i64,
-    typing: Option<(&str, &str)>,
+    typing: Option<&CueDialog>,
 ) {
     let Some(t) = p.subtitles.iter().find(|t| t.shown) else {
         return;
@@ -134,12 +134,12 @@ pub(super) fn paint_cues(
     for (place, _) in PLACES {
         let galleys: Vec<_> = on
             .iter()
-            .filter(|c| c.place == place)
-            .map(|c| {
-                let text = match typing {
-                    Some((id, text)) if id == c.id => text,
-                    _ => c.text.as_str(),
-                };
+            .map(|c| match typing {
+                Some(d) if d.cue == c.id => (d.text.as_str(), d.place),
+                _ => (c.text.as_str(), c.place),
+            })
+            .filter(|&(_, at)| at == place)
+            .map(|(text, _)| {
                 let (plain, bold) = jobs(text, size, width);
                 (painter.layout_job(plain), painter.layout_job(bold))
             })

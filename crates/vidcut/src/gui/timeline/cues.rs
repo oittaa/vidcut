@@ -41,18 +41,33 @@ pub struct CueMenu {
     pub cue: Option<String>,
 }
 
-fn bands(cues: &[Cue]) -> Vec<Option<bool>> {
-    let mut out = Vec::with_capacity(cues.len());
-    let mut reach = i64::MIN;
-    let mut lanes = [i64::MIN; 2];
-    for (i, c) in cues.iter().enumerate() {
-        let before = c.start < reach;
-        let after = cues.get(i + 1).is_some_and(|n| n.start < c.end());
-        reach = reach.max(c.end());
-        let lower = c.start < lanes[0] && lanes[1] <= lanes[0];
-        let lane = &mut lanes[usize::from(lower)];
-        *lane = (*lane).max(c.end());
-        out.push((before || after).then_some(lower));
+fn lanes(cues: &[Cue]) -> Vec<(usize, usize)> {
+    let mut out = vec![(0, 1); cues.len()];
+    let mut i = 0;
+    while i < cues.len() {
+        let mut ends: Vec<i64> = Vec::new();
+        let mut reach = i64::MIN;
+        let mut j = i;
+        while j < cues.len() && (j == i || cues[j].start < reach) {
+            let c = &cues[j];
+            let lane = match ends.iter().position(|&e| e <= c.start) {
+                Some(l) => {
+                    ends[l] = c.end();
+                    l
+                }
+                None => {
+                    ends.push(c.end());
+                    ends.len() - 1
+                }
+            };
+            out[j].0 = lane;
+            reach = reach.max(c.end());
+            j += 1;
+        }
+        for o in &mut out[i..j] {
+            o.1 = ends.len();
+        }
+        i = j;
     }
     out
 }
@@ -64,20 +79,21 @@ pub fn placed<'a>(
 ) -> impl Iterator<Item = (&'a Cue, Rect)> + 'a {
     let scale = *scale;
     let (a, b) = scale.visible(row.left(), row.right());
-    let mid = row.center().y.round();
-    bands(&t.cues)
+    lanes(&t.cues)
         .into_iter()
         .zip(&t.cues)
         .filter(move |(_, c)| c.end() >= a && c.start <= b)
-        .map(move |(band, c)| {
+        .map(move |((lane, count), c)| {
             let x0 = scale.xf(c.start);
             let x1 = scale.xf(c.end()).max(x0 + 1.0);
-            let ys = match band {
-                None => row.y_range(),
-                Some(false) => Rangef::new(row.top(), mid - 1.0),
-                Some(true) => Rangef::new(mid, row.bottom()),
+            let h = (row.height() + 1.0) / count as f32;
+            let top = (row.top() + h * lane as f32).round();
+            let bottom = if lane + 1 == count {
+                row.bottom()
+            } else {
+                (row.top() + h * (lane + 1) as f32).round() - 1.0
             };
-            (c, Rect::from_x_y_ranges(x0..=x1, ys))
+            (c, Rect::from_x_y_ranges(x0..=x1, Rangef::new(top, bottom)))
         })
 }
 
@@ -102,6 +118,17 @@ pub fn hit(t: &SubtitleTrack, scale: &Scale, row: Rect, pos: Pos2) -> Option<Cue
         }
     }
     None
+}
+
+fn command(method: &str, params: Value) -> Value {
+    json!({ "method": method, "params": params })
+}
+
+fn unlocked(p: &Project, cues: &[String]) -> Vec<String> {
+    cues.iter()
+        .filter(|q| p.find_cue(q).is_some_and(|(t, _)| !p.subtitles[t].locked))
+        .cloned()
+        .collect()
 }
 
 pub fn one_line(text: &str) -> String {
@@ -268,7 +295,7 @@ impl Workspace {
         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
         let painter = ui.ctx().layer_painter(egui::LayerId::new(
             egui::Order::Tooltip,
-            egui::Id::new("timeline-pointer"),
+            egui::Id::unique("timeline-pointer"),
         ));
         paint::trim_pointer(&painter, pos, kind);
     }
@@ -288,10 +315,12 @@ impl Workspace {
             .subtitle_track(&row.track)
             .and_then(|t| hit(t, scale, row.rect.rect, pos))
             .map(|h| h.cue().to_string());
-        if let Some(id) = &cue
-            && !self.snap.selection.cues.contains(id)
-        {
-            self.send("selection.set", json!({ "cues": [id], "clips": [] }));
+        if let Some(id) = &cue {
+            self.timeline.transition = None;
+            self.timeline.edit = None;
+            if !self.snap.selection.cues.contains(id) {
+                self.send("selection.set", json!({ "cues": [id], "clips": [] }));
+            }
         }
         self.timeline.cue_menu = Some(CueMenu {
             upper,
@@ -406,12 +435,18 @@ impl Workspace {
                     (Place::Bottom, "Bottom"),
                 ] {
                     if ui.radio(c.place == place, label).clicked() {
-                        self.send_each(
-                            "subtitles.set",
-                            cues.iter()
-                                .map(|q| json!({ "cue": q, "place": place }))
+                        self.send_all(
+                            unlocked(p, &cues)
+                                .iter()
+                                .map(|q| {
+                                    command("subtitles.set", json!({ "cue": q, "place": place }))
+                                })
                                 .collect(),
-                            "place subtitles",
+                            &format!(
+                                "Show {} subtitles at the {}",
+                                cues.len(),
+                                label.to_lowercase()
+                            ),
                         );
                         ui.close();
                     }
@@ -425,7 +460,7 @@ impl Workspace {
                 )
                 .clicked()
             {
-                self.send("subtitles.split", json!({ "cue": id, "at": at }));
+                self.split_at_playhead();
                 ui.close();
             }
             let track = p.find_cue(id).map(|(t, _)| t);
@@ -440,7 +475,7 @@ impl Workspace {
                 ui.close();
             }
             if ui.button("Delete  (Delete)").clicked() {
-                self.send("subtitles.remove", json!({ "cues": cues }));
+                self.delete_key(false);
                 ui.close();
             }
             ui.separator();
@@ -463,21 +498,42 @@ impl Workspace {
         }
     }
 
-    pub(super) fn send_each(&self, method: &str, params: Vec<Value>, label: &str) {
-        match params.as_slice() {
+    fn send_all(&self, commands: Vec<Value>, label: &str) {
+        match commands.as_slice() {
             [] => {}
-            [one] => self.send(method, one.clone()),
-            many => self.send(
-                "apply",
-                json!({
-                    "commands": many
-                        .iter()
-                        .map(|p| json!({ "method": method, "params": p }))
-                        .collect::<Vec<_>>(),
-                    "label": label,
-                }),
+            [one] => self.send(
+                one["method"].as_str().unwrap_or_default(),
+                one["params"].clone(),
             ),
+            _ => self.send("apply", json!({ "commands": commands, "label": label })),
         }
+    }
+
+    pub(crate) fn delete_selected(&self, lift: bool) {
+        let Some(p) = self.project() else {
+            return;
+        };
+        let cues = unlocked(p, &self.snap.selection.cues);
+        let clips = &self.snap.selection.clips;
+        let mut commands = Vec::new();
+        if !cues.is_empty() {
+            commands.push(command("subtitles.remove", json!({ "cues": cues })));
+        }
+        if !clips.is_empty() {
+            commands.push(command(
+                "edit.delete",
+                json!({ "clips": clips, "lift": lift }),
+            ));
+        }
+        let verb = if lift { "Lift" } else { "Delete" };
+        self.send_all(
+            commands,
+            &format!(
+                "{verb} {} clip(s) and {} subtitle(s)",
+                clips.len(),
+                cues.len()
+            ),
+        );
     }
 
     pub(crate) fn add_subtitle(&mut self, ctx: &egui::Context, track: Option<&str>) {
@@ -489,26 +545,23 @@ impl Workspace {
     }
 
     pub(crate) fn split_at_playhead(&self) {
+        let Some(p) = self.project() else {
+            return;
+        };
         let at = self.snap.timeline.position;
-        let cues: Vec<Value> = self
-            .project()
-            .map(|p| {
-                self.snap
-                    .selection
-                    .cues
-                    .iter()
-                    .filter(|q| p.cue(q).is_some_and(|c| c.start < at && at < c.end()))
-                    .map(|q| json!({ "cue": q, "at": at }))
-                    .collect()
-            })
-            .unwrap_or_default();
-        if self.snap.selection.cues.is_empty() || !self.snap.selection.clips.is_empty() {
-            self.send(
-                "edit.split",
-                json!({ "at": at, "clips": self.snap.selection.clips }),
+        let selection = &self.snap.selection;
+        let mut commands: Vec<Value> = unlocked(p, &selection.cues)
+            .iter()
+            .filter(|q| p.cue(q).is_some_and(|c| c.start < at && at < c.end()))
+            .map(|q| command("subtitles.split", json!({ "cue": q, "at": at })))
+            .collect();
+        if selection.cues.is_empty() || !selection.clips.is_empty() {
+            commands.insert(
+                0,
+                command("edit.split", json!({ "at": at, "clips": selection.clips })),
             );
         }
-        self.send_each("subtitles.split", cues, "split subtitles");
+        self.send_all(commands, &format!("Split at {}", p.settings.timecode(at)));
     }
 
     pub(super) fn subtitle_header(&mut self, ui: &mut egui::Ui, rect: Rect, t: &SubtitleTrack) {
