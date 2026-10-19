@@ -1642,7 +1642,16 @@ impl Live {
         }
         let kind = j.kind;
         match result {
-            Ok(_) => self.notice(format!("{kind} {id} finished"), false),
+            Ok(r) => {
+                self.notice(format!("{kind} {id} finished"), false);
+                let told = r.result["warnings"].as_array().into_iter().flatten();
+                for w in told
+                    .filter_map(Value::as_str)
+                    .chain(r.warnings.iter().map(String::as_str))
+                {
+                    self.notice(format!("{kind} {id}: {w}"), false);
+                }
+            }
             Err(e) if e.code == vidcut_core::ErrorCode::Cancelled => {
                 self.notice(format!("{kind} {id} cancelled"), false)
             }
