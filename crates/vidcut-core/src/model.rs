@@ -268,6 +268,33 @@ pub struct Media {
     /// says in their place, for a file whose tags are wrong.
     #[serde(default, skip_serializing_if = "ColorSpace::is_tagged")]
     pub color_space: ColorSpace,
+    /// Source frames the Transcription window leaves out of its edits
+    /// (`media.leave_out`), each `[start, end)`, in order and apart.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub left_out: Vec<(i64, i64)>,
+}
+
+pub fn uncovered(a: i64, b: i64, spans: &[(i64, i64)]) -> Vec<(i64, i64)> {
+    let mut spans = spans.to_vec();
+    spans.sort_unstable();
+    let mut out = Vec::new();
+    let mut at = a;
+    for (s, e) in spans {
+        if e <= at || s >= b {
+            continue;
+        }
+        if s > at {
+            out.push((at, s));
+        }
+        at = e;
+        if at >= b {
+            break;
+        }
+    }
+    if at < b {
+        out.push((at, b));
+    }
+    out
 }
 
 /// How a media item's pictures' colors are read.

@@ -2070,6 +2070,20 @@ fn mutate(
             }
             Value::Null
         }
+        Request::MediaLeaveOut { media, words, back } => {
+            if words.is_empty() {
+                return Err(Error::usage("name the words to leave out"));
+            }
+            let mut spans = Vec::with_capacity(words.len());
+            for w in words {
+                spans.push((
+                    resolve(p, &w.start, playhead)?,
+                    resolve(p, &w.end, playhead)?,
+                ));
+            }
+            let left_out = ops::leave_out(p, media, &spans, *back)?;
+            json!({ "left_out": left_out })
+        }
         Request::EditAppend(src) => {
             let sources = resolve_sources(p, src)?;
             clip_ids(&ops::append_block(p, &sources)?)
@@ -3009,6 +3023,7 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         marks: Default::default(),
         bin: String::new(),
         color_space: Default::default(),
+        left_out: Vec::new(),
         sequence: probed.sequence,
         proxy: None,
         color: None,
@@ -5765,6 +5780,9 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
         .collect();
     if !transcripts.is_empty() {
         v["transcripts"] = json!(transcripts);
+    }
+    if !m.left_out.is_empty() {
+        v["left_out"] = json!(m.left_out);
     }
     v
 }

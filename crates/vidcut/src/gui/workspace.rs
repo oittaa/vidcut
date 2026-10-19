@@ -112,6 +112,7 @@ pub struct Workspace {
     pub(super) tiles: Option<super::tiles::Tiles>,
     pub(super) shuttle: super::shuttle::Shuttle,
     pub(super) speech: super::speech::SpeechUi,
+    pub(super) transcription: super::transcription::TranscriptionUi,
 }
 
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
@@ -200,6 +201,7 @@ impl Workspace {
             )),
             shuttle: Default::default(),
             speech: Default::default(),
+            transcription: Default::default(),
         }
     }
 
@@ -230,6 +232,7 @@ impl Workspace {
             GuiPanel::Preferences => self.open_preferences(ctx),
             GuiPanel::Help => self.help.open = true,
             GuiPanel::History => self.history.show(),
+            GuiPanel::Transcription => self.transcription.open = true,
         }
     }
 
@@ -273,6 +276,7 @@ impl Workspace {
             GuiPanel::Preferences => self.preferences.open = false,
             GuiPanel::Help => self.help.open = false,
             GuiPanel::History => self.history.close(),
+            GuiPanel::Transcription => self.transcription.open = false,
         }
     }
 
@@ -288,6 +292,7 @@ impl Workspace {
             (GuiPanel::Preferences, self.preferences.open),
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
+            (GuiPanel::Transcription, self.transcription.open),
         ];
         live::GuiState {
             edit: self.edit_point(),
@@ -863,6 +868,11 @@ impl Workspace {
                 if self.project().is_some() {
                     ui.toggle_value(&mut self.show_mixer, "Mixer")
                         .on_hover_text("Track faders, mute, solo and meters");
+                    ui.toggle_value(&mut self.transcription.open, "Transcription")
+                        .on_hover_text(
+                            "The words said in the source clip or the timeline: go to them, \
+                             mark them, cut them",
+                        );
                     let mut open = self.history.open;
                     if ui
                         .toggle_value(&mut open, "History")
@@ -1140,6 +1150,9 @@ impl Workspace {
         }
         if ctx.egui_wants_keyboard_input() {
             return;
+        }
+        if self.transcription.over {
+            self.transcription.take_keys(ctx);
         }
         if self.asking() {
             ctx.input_mut(|i| {
@@ -1688,6 +1701,7 @@ impl Workspace {
         self.relink_window(&ctx);
         self.remove_media_window(&ctx);
         self.speech_window(&ctx);
+        self.transcription_window(&ctx);
         let panel = theme::colors().panel;
         egui::Panel::top("top").frame(theme::bar()).show(ui, |ui| {
             theme::decorated(ui, Deco::Bar, |ui| self.top_bar(ui))
