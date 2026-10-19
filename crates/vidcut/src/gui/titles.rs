@@ -131,6 +131,10 @@ impl TitleDialog {
         &self.clip
     }
 
+    pub(super) fn previewing(&self) -> Option<(String, Title)> {
+        self.shown.clone().map(|t| (self.clip.clone(), t))
+    }
+
     pub(super) fn placed(&mut self, t: &Title) {
         self.across = percent(t.position.map(|p| p[0]));
         self.down = percent(t.position.map(|p| p[1]));

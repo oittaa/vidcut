@@ -8,5 +8,3 @@ vidcut has Text, lower-third and Scroll titles with words styled apart, shadows,
 - **More kinds:** Text+ and Fusion titles (p. 1178). Resolve writes Text+ as a `MissingReference` with nothing of the title in it, so it can't come over.
 - **Transform, Cropping, Speed and Composite's blend modes** on title clips (pp. 763, 1176).
 - **Animation and keyframes.**
-- **A Titles browser tab** with Hover Scrub Preview (p. 762).
-- **Thumbnails** of title clips on the timeline.

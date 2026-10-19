@@ -267,8 +267,18 @@ pub(crate) enum Msg {
     },
     Audition(Option<Audition>),
     Skip(Option<Vec<ClipSpans>>),
-    PreviewTitle(Option<(String, Title)>),
+    PreviewTitle(Option<TitlePreview>),
     Shutdown,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TitlePreview {
+    Clip(String, Title),
+    Over {
+        title: Title,
+        at: i64,
+        fraction: f64,
+    },
 }
 
 pub struct Audition {
@@ -318,7 +328,21 @@ impl Handle {
     }
 
     pub fn preview_title(&self, title: Option<(String, Title)>) {
-        let _ = self.tx.send(Msg::PreviewTitle(title));
+        let _ = self.tx.send(Msg::PreviewTitle(
+            title.map(|(id, t)| TitlePreview::Clip(id, t)),
+        ));
+    }
+
+    pub fn preview_free_title(&self, title: Option<(Title, i64, f64)>) {
+        let _ = self
+            .tx
+            .send(Msg::PreviewTitle(title.map(|(title, at, fraction)| {
+                TitlePreview::Over {
+                    title,
+                    at,
+                    fraction,
+                }
+            })));
     }
 
     pub fn request_drag(&self, method: &str, params: Value) {
@@ -751,7 +775,7 @@ struct Live {
     tape_media: Option<String>,
     player: Player,
     skipping: Option<Vec<ClipSpans>>,
-    title_preview: Option<(String, Title)>,
+    title_preview: Option<TitlePreview>,
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
@@ -3000,11 +3024,24 @@ impl Live {
 
     fn refresh_timeline_at(&mut self, at: Option<i64>) -> Option<u64> {
         let mut p = self.project.as_ref()?.project().clone();
-        if let Some((id, title)) = &self.title_preview
-            && let Some((t, c)) = p.find_clip(id)
-            && p.tracks[t].clips[c].title.is_some()
-        {
-            p.tracks[t].clips[c].title = Some(title.clone());
+        match &self.title_preview {
+            Some(TitlePreview::Clip(id, title)) => {
+                if let Some((t, c)) = p.find_clip(id)
+                    && p.tracks[t].clips[c].title.is_some()
+                {
+                    p.tracks[t].clips[c].title = Some(title.clone());
+                }
+            }
+            Some(TitlePreview::Over {
+                title,
+                at,
+                fraction,
+            }) => {
+                let len = vidcut_core::ops::titles::default_length(&p);
+                let start = (at - (fraction * len as f64).round() as i64).max(0);
+                let _ = vidcut_core::ops::titles::add(&mut p, None, start, len, title);
+            }
+            None => {}
         }
         let end = p.end();
         if end == 0 {

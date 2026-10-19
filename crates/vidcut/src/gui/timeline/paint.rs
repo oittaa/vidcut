@@ -34,6 +34,7 @@ pub struct Assets<'a> {
     pub tiles: Option<&'a Tiles>,
     pub missing: &'a HashSet<String>,
     pub pool: &'a HashMap<&'a str, &'a Media>,
+    pub titles: &'a HashMap<String, egui::TextureId>,
 }
 
 pub type Placed = HashMap<String, Vec<(i64, usize)>>;
@@ -341,6 +342,17 @@ fn clip(
         );
         if let Some(t) = tint {
             painter.rect_filled(parted(video), corners, t.gamma_multiply(0.35));
+        }
+        if let Some(tex) = assets.titles.get(c.id.as_str()) {
+            let inner = video.shrink2(vec2(1.0, 1.0));
+            let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
+            let w = (inner.height() * aspect).min(inner.width());
+            painter.with_clip_rect(inner).image(
+                *tex,
+                Rect::from_min_size(inner.min, vec2(w, inner.height())),
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
         }
     }
     if c.compound.is_some() && !c.video {

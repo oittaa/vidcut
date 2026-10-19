@@ -79,6 +79,8 @@ pub struct Workspace {
     pub(super) show_log: bool,
     pub(super) log_edits_only: bool,
     pub(super) hover: Option<(String, i64)>,
+    pub(super) titles: super::title_browser::Browser,
+    pub(super) title_thumbs: super::title_browser::Thumbs,
     pub(super) scrub: Option<(PlayerId, i64)>,
     pub(super) recent: Vec<PathBuf>,
     pub(super) flash: Option<(String, std::time::Instant)>,
@@ -163,6 +165,8 @@ impl Workspace {
             show_log: false,
             log_edits_only: true,
             hover: None,
+            titles: Default::default(),
+            title_thumbs: Default::default(),
             scrub: None,
             recent: recent_projects(),
             flash: None,
@@ -233,6 +237,7 @@ impl Workspace {
             GuiPanel::Help => self.help.open = true,
             GuiPanel::History => self.history.show(),
             GuiPanel::Transcription => self.transcription.open = true,
+            GuiPanel::Titles => self.titles.open = true,
         }
     }
 
@@ -277,6 +282,7 @@ impl Workspace {
             GuiPanel::Help => self.help.open = false,
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
+            GuiPanel::Titles => self.titles.open = false,
         }
     }
 
@@ -293,6 +299,7 @@ impl Workspace {
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
+            (GuiPanel::Titles, self.titles.open),
         ];
         live::GuiState {
             edit: self.edit_point(),
@@ -1757,7 +1764,15 @@ impl Workspace {
             .min_size(260.0)
             .frame(theme::card(panel))
             .show(ui, |ui| {
-                theme::decorated(ui, Deco::Card, |ui| self.pool_panel(ui))
+                theme::decorated(ui, Deco::Card, |ui| {
+                    self.left_tabs(ui);
+                    if self.titles.open {
+                        self.titles_panel(ui);
+                    } else {
+                        self.end_title_hover();
+                        self.pool_panel(ui);
+                    }
+                })
             });
         if self.history.open {
             egui::Panel::left("history")

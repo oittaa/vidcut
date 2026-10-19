@@ -74,6 +74,11 @@ pub enum Gesture {
     Bin {
         path: String,
     },
+    Title {
+        kind: vidcut_core::model::TitleKind,
+        align: Option<vidcut_core::model::TitleAlign>,
+        len: i64,
+    },
     CueMove {
         cues: Vec<String>,
         from: String,
@@ -234,6 +239,7 @@ impl Drag {
                 &hovered,
             ),
             Gesture::Bin { .. } => Preview::default(),
+            Gesture::Title { kind, align, len } => title_preview(ctx, pos, *kind, *align, *len),
             Gesture::Trim {
                 clip,
                 edge,
@@ -540,6 +546,48 @@ fn overwrite_move(
         ghost: Some((ghost, ghost + len)),
         snapped,
         row: Some(dest.to_string()),
+        ..Preview::default()
+    }
+}
+
+fn title_preview(
+    ctx: &Ctx,
+    pos: Pos2,
+    kind: vidcut_core::model::TitleKind,
+    align: Option<vidcut_core::model::TitleAlign>,
+    len: i64,
+) -> Preview {
+    let Some(dest) = ctx
+        .rows
+        .target(ctx.project, pos.y)
+        .filter(|_| ctx.rows.reaches(pos))
+        .filter(|d| d.starts_with('V'))
+    else {
+        return Preview::default();
+    };
+    let raw = ctx.scale.boundary(pos.x).max(0);
+    let (at, snapped) = match ctx.snap {
+        Some(s) => s.snap_block(raw, len, &ctx.scale, SNAP_PX),
+        None => (raw, None),
+    };
+    let at = at.max(0);
+    let sample = crate::gui::title_browser::sample(kind, align);
+    let mut params = json!({ "text": sample.text, "at": at, "duration": len });
+    if kind != vidcut_core::model::TitleKind::Text {
+        params["kind"] = json!(kind);
+    }
+    if let Some(a) = align {
+        params["align"] = json!(a);
+    }
+    if ctx.project.track(&dest).is_some() {
+        params["track"] = json!(dest);
+    }
+    Preview {
+        request: request("titles.add", params),
+        target: Target::Overwrite(at, at + len),
+        ghost: Some((at, at + len)),
+        snapped,
+        row: Some(dest),
         ..Preview::default()
     }
 }
