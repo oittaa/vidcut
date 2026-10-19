@@ -17,7 +17,7 @@ What it would take:
   - **Small GPUs:** Parakeet Ultra, 740 MB at Q8, 25 languages, word times.
   - Kept in the cache dir, which `vidcut reset` empties. Downloaded only after asking, and checked against a SHA-256, or a file the user names. Parakeet Ultra's CC BY 4.0 asks for attribution.
 - **The GUI:** subtitle tracks on the timeline, cues drawn on them and in the viewer, moved, trimmed and typed with the mouse and keys; Add Subtitle Track, Add Subtitle, Import Subtitle and Export Subtitle in the menus.
-- **Styles:** a track's font, size, color, outline, background and margin, written to IMSC1 and drawn when it is burned in ([spec D60](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Styles:** a track's font, size, color, outline, background and margin, written to IMSC1 and drawn when it is burned in ([spec D61](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Re-timing a subtitle file to the speech:** the aligner places an imported file's text on the audio; `nasa-roman-presser-captions`, which aren't aligned with the speech, are the case to check it on. The aligner has no Finnish.
 - **Cutting by transcript:** the words with their times as a request's answer, and a request that removes words. It needs word times: Parakeet Ultra's, or Qwen3-ASR's from the aligner; Whisper's only once transcribe.cpp gives them.
 - **Later:** paid services (xAI, Google) behind the same interface, asking each time before audio leaves the computer.

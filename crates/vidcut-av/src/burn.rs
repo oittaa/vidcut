@@ -490,6 +490,14 @@ unsafe fn write(at: *mut u8, bytes: usize, v: u32) {
     unsafe { std::ptr::copy_nonoverlapping(v.to_le_bytes().as_ptr(), at, bytes) };
 }
 
+fn mask(c: &Comp) -> u32 {
+    if c.depth >= 32 {
+        u32::MAX
+    } else {
+        ((1u32 << c.depth) - 1) << c.shift
+    }
+}
+
 pub(crate) fn blend(f: &mut frame::Video, sprites: &[Sprite]) -> Result<()> {
     let layout = layout(f.format())?;
     // SAFETY: a live frame.
@@ -503,11 +511,7 @@ pub(crate) fn blend(f: &mut frame::Video, sprites: &[Sprite]) -> Result<()> {
     let coding = Coding::of(f, layout.rgb);
     let size = (f.width() as i32, f.height() as i32);
     for c in &layout.comps {
-        let mask = if c.depth >= 32 {
-            u32::MAX
-        } else {
-            ((1u32 << c.depth) - 1) << c.shift
-        };
+        let mask = mask(c);
         // SAFETY: the plane's pointer and stride of a writable frame in memory.
         let (data, stride) = unsafe {
             let raw = f.as_mut_ptr();
@@ -546,27 +550,37 @@ pub(crate) fn overlay(
     let coding = Coding::of(like, layout.rgb);
     for c in &layout.comps {
         let top = ((1u32 << c.depth) - 1) as f32;
-        let planes = [&mut color, &mut alpha].map(|f| {
+        let mask = mask(c);
+        let [(colors, color_stride), (covers, cover_stride)] = [&mut color, &mut alpha].map(|f| {
             // SAFETY: the plane's pointer and stride of a frame in memory.
             unsafe {
                 let raw = f.as_mut_ptr();
                 ((*raw).data[c.plane], (*raw).linesize[c.plane] as isize)
             }
         });
+        let put =
+            |old: u32, v: f32| (old & !mask) | (((v.round().max(0.0) as u32) << c.shift) & mask);
         visit(
             sprites,
             (w as i32, h as i32),
             c,
             &coding,
             |x, y, target, a| {
-                for ((data, stride), v) in planes.iter().zip([target, a * top]) {
-                    // SAFETY: `visit` keeps `x` and `y` inside the component's plane.
-                    unsafe {
-                        let row = data.offset(y as isize * stride);
-                        let (at, bytes) = sample(row, c, x);
-                        let old = read(at, bytes);
-                        write(at, bytes, old | ((v.round().max(0.0) as u32) << c.shift));
-                    }
+                // SAFETY: `visit` keeps `x` and `y` inside the component's plane.
+                unsafe {
+                    let (color_at, bytes) = sample(colors.offset(y as isize * color_stride), c, x);
+                    let (cover_at, _) = sample(covers.offset(y as isize * cover_stride), c, x);
+                    let (color_old, cover_old) = (read(color_at, bytes), read(cover_at, bytes));
+                    let under = ((color_old & mask) >> c.shift) as f32;
+                    let below = ((cover_old & mask) >> c.shift) as f32 / top;
+                    let cover = a + below * (1.0 - a);
+                    let value = if cover > 0.0 {
+                        (target * a + under * below * (1.0 - a)) / cover
+                    } else {
+                        0.0
+                    };
+                    write(color_at, bytes, put(color_old, value));
+                    write(cover_at, bytes, put(cover_old, cover * top));
                 }
             },
         );
