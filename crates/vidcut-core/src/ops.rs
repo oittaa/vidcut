@@ -14,7 +14,9 @@ use serde_json::json;
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, ClipAudio, Marker, Project, Speed, Track, TrackClip, TrackKind};
+use crate::model::{
+    Clip, ClipAudio, ColorSpace, Marker, Project, Speed, Track, TrackClip, TrackKind,
+};
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
 
@@ -1589,6 +1591,21 @@ fn check_clip_color(color: &str) -> Result<()> {
         "\"{color}\" isn't a clip color. Use one of these: {}",
         names.join(", ")
     )))
+}
+
+pub fn set_media_color_space(p: &mut Project, ids: &[String], space: ColorSpace) -> Result<()> {
+    for id in ids {
+        let m = p
+            .media
+            .iter_mut()
+            .find(|m| m.id == *id)
+            .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+        if m.info.video.is_none() {
+            return Err(Error::invalid(format!("{id} has no pictures")));
+        }
+        m.color_space = space;
+    }
+    Ok(())
 }
 
 pub fn set_media_color(p: &mut Project, ids: &[String], color: Option<String>) -> Result<()> {

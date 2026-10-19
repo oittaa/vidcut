@@ -1,12 +1,54 @@
 use std::sync::Mutex;
 
-use vidcut_core::model::Hdr;
+use vidcut_core::model::{ColorSpace, Hdr};
 
 use crate::ffmpeg::{ffi, format, frame};
 
 pub const REFERENCE_WHITE: f64 = 203.0;
 
 const PEAK: f64 = 1000.0;
+
+pub fn retag(f: &mut frame::Video, space: ColorSpace) {
+    use ffi::AVColorPrimaries as P;
+    use ffi::AVColorSpace as S;
+    use ffi::AVColorTransferCharacteristic as T;
+    use ffi::AVFrameSideDataType as D;
+    let (primaries, transfer, matrix) = match space {
+        ColorSpace::Tagged => return,
+        ColorSpace::Bt709 => (P::AVCOL_PRI_BT709, T::AVCOL_TRC_BT709, S::AVCOL_SPC_BT709),
+        ColorSpace::Bt601 => (
+            P::AVCOL_PRI_SMPTE170M,
+            T::AVCOL_TRC_SMPTE170M,
+            S::AVCOL_SPC_SMPTE170M,
+        ),
+        ColorSpace::Pq => (
+            P::AVCOL_PRI_BT2020,
+            T::AVCOL_TRC_SMPTE2084,
+            S::AVCOL_SPC_BT2020_NCL,
+        ),
+        ColorSpace::Hlg => (
+            P::AVCOL_PRI_BT2020,
+            T::AVCOL_TRC_ARIB_STD_B67,
+            S::AVCOL_SPC_BT2020_NCL,
+        ),
+    };
+    let raw = unsafe { f.as_mut_ptr() };
+    // SAFETY: the frame's own color fields and side data, changed while only this holds it.
+    unsafe {
+        (*raw).color_primaries = primaries;
+        (*raw).color_trc = transfer;
+        (*raw).colorspace = matrix;
+        for kind in [
+            D::AV_FRAME_DATA_MASTERING_DISPLAY_METADATA,
+            D::AV_FRAME_DATA_CONTENT_LIGHT_LEVEL,
+            D::AV_FRAME_DATA_DYNAMIC_HDR_PLUS,
+            D::AV_FRAME_DATA_DOVI_RPU_BUFFER,
+            D::AV_FRAME_DATA_DOVI_METADATA,
+        ] {
+            ffi::av_frame_remove_side_data(raw, kind);
+        }
+    }
+}
 
 pub fn hdr_of(f: &frame::Video) -> Option<Hdr> {
     hdr_of_transfer(unsafe { (*f.as_ptr()).color_trc })

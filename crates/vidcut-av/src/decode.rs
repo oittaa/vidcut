@@ -223,6 +223,7 @@ pub struct VideoReader {
     kind: Option<crate::hw::Kind>,
     decoding: Arc<Decoding>,
     standalone: Option<standalone::Standalone>,
+    color_space: vidcut_core::model::ColorSpace,
     _open: Opened,
 }
 
@@ -1034,6 +1035,7 @@ impl VideoReader {
             kind: on.map(|(kind, ..)| kind),
             decoding: Arc::default(),
             standalone,
+            color_space: Default::default(),
             _open: open,
         })
     }
@@ -1111,14 +1113,25 @@ impl VideoReader {
         }
     }
 
+    pub fn set_color_space(&mut self, space: vidcut_core::model::ColorSpace) {
+        self.color_space = space;
+    }
+
+    pub fn color_space(&self) -> vidcut_core::model::ColorSpace {
+        self.color_space
+    }
+
     pub fn next_frame(&mut self) -> Result<Option<frame::Video>> {
         loop {
-            let Some(frame) = self.next_progressive()? else {
+            let Some(mut frame) = self.next_progressive()? else {
                 return Ok(None);
             };
             match (self.min_pts, frame.pts()) {
                 (Some(min), Some(pts)) if pts < min => continue,
-                _ => return Ok(Some(frame)),
+                _ => {
+                    crate::color::retag(&mut frame, self.color_space);
+                    return Ok(Some(frame));
+                }
             }
         }
     }

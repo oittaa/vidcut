@@ -264,6 +264,51 @@ pub struct Media {
     /// Relinking checks the files it finds against it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fingerprint: Option<String>,
+    /// How its pictures' colors are read: as the file's tags say, or as this
+    /// says in their place, for a file whose tags are wrong.
+    #[serde(default, skip_serializing_if = "ColorSpace::is_tagged")]
+    pub color_space: ColorSpace,
+}
+
+/// How a media item's pictures' colors are read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ColorSpace {
+    /// As the file's color tags say.
+    #[default]
+    Tagged,
+    /// SDR in BT.709, as HD video is.
+    Bt709,
+    /// SDR in BT.601, as SD video is.
+    Bt601,
+    /// HDR in BT.2100 PQ, as HDR10 is.
+    Pq,
+    /// HDR in BT.2100 HLG.
+    Hlg,
+}
+
+impl ColorSpace {
+    pub fn is_tagged(&self) -> bool {
+        *self == Self::Tagged
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Tagged => "tagged",
+            Self::Bt709 => "bt709",
+            Self::Bt601 => "bt601",
+            Self::Pq => "pq",
+            Self::Hlg => "hlg",
+        }
+    }
+
+    pub fn hdr(self) -> Option<Hdr> {
+        match self {
+            Self::Pq => Some(Hdr::Pq),
+            Self::Hlg => Some(Hdr::Hlg),
+            _ => None,
+        }
+    }
 }
 
 /// A playback proxy of a pool item: an easy-to-play file whose frames carry
@@ -292,6 +337,18 @@ impl Proxy {
 }
 
 impl Media {
+    pub fn video_as_read(&self) -> Option<VideoInfo> {
+        let mut v = self.info.video.clone()?;
+        if !self.color_space.is_tagged() {
+            v.hdr = self.color_space.hdr();
+            v.mastering = None;
+            v.light = None;
+            v.hdr10plus = false;
+            v.dolby_vision = None;
+        }
+        Some(v)
+    }
+
     pub fn is_still(&self) -> bool {
         self.info.video.as_ref().is_some_and(|v| v.still)
     }

@@ -49,6 +49,7 @@ struct Seen {
     size: u64,
     mtime_ns: i64,
     origin: Origin,
+    color_space: vidcut_core::model::ColorSpace,
 }
 
 impl Seen {
@@ -58,6 +59,7 @@ impl Seen {
             size: m.size,
             mtime_ns: m.mtime_ns,
             origin: paths::media_origin(m),
+            color_space: m.color_space,
         }
     }
 
@@ -65,6 +67,7 @@ impl Seen {
         self.path.as_os_str() == m.path.as_os_str()
             && self.size == m.size
             && self.mtime_ns == m.mtime_ns
+            && self.color_space == m.color_space
     }
 }
 
@@ -264,7 +267,7 @@ impl Tiles {
                     Some(seen) if seen.is(m) => seen.origin.clone(),
                     _ => paths::media_origin(m),
                 };
-                let path = thumbcache::tile_block(&origin, key.height, block);
+                let path = thumbcache::tile_block(&origin, key.height, block, m.color_space);
                 (BlockFile { path, origin }, limit)
             }),
         })

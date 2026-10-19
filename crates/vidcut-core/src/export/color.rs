@@ -282,6 +282,7 @@ mod tests {
             source_frame: 0,
             frames,
             image: None,
+            color_space: Default::default(),
         }
     }
 

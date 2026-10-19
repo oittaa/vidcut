@@ -667,6 +667,7 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
                     THUMB_SIZE.0,
                     THUMB_SIZE.1,
                     decoder,
+                    media.color_space,
                 ),
                 None => vidcut_av::thumbs::filmstrip(
                     &input,
@@ -674,6 +675,7 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
                     THUMB_SIZE.0,
                     THUMB_SIZE.1,
                     decoder,
+                    media.color_space,
                 ),
             }
             .map_err(|e| e.to_string())?;

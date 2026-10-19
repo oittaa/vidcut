@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Media, Project, TrackKind};
+use crate::model::{Clip, ColorSpace, Media, Project, TrackKind};
 use crate::otio::transitions;
 use crate::time::Rational;
 
@@ -43,6 +43,9 @@ pub enum VideoPiece {
         /// How it walks its source: frame `k` shows [`VideoPiece::position`].
         #[serde(default, skip_serializing_if = "Pace::is_normal")]
         pace: Pace,
+        /// How its pictures' colors are read: the media's `color_space`.
+        #[serde(default, skip_serializing_if = "ColorSpace::is_tagged")]
+        color_space: ColorSpace,
     },
     Black {
         frames: i64,
@@ -239,6 +242,7 @@ impl VideoPiece {
                 origin,
                 image,
                 pace,
+                color_space,
                 ..
             } => {
                 let still = matches!(image, Some(Image::Still));
@@ -250,6 +254,7 @@ impl VideoPiece {
                     frames,
                     image: image.clone(),
                     pace: if still { *pace } else { pace.after(k) },
+                    color_space: *color_space,
                 }
             }
             Self::Black { .. } => Self::Black { frames },
@@ -657,6 +662,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
             frames: y - x,
             image: image_of(m),
             pace: c.pace().after(x - c.start),
+            color_space: m.color_space,
         })
     };
     let mut video = Vec::new();
@@ -910,6 +916,7 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
             source_frame: at,
             frames: 1,
             image: p.media_image(media),
+            color_space: m.color_space,
         },
         None => VideoPiece::Black { frames: 1 },
     })
@@ -948,6 +955,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     source_frame: 0,
                     frames,
                     image: image_of(m),
+                    color_space: m.color_space,
                 },
             );
         } else {
