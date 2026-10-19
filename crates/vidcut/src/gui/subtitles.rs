@@ -351,7 +351,7 @@ impl Workspace {
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut d.name)
                             .hint_text(&d.hint)
-                            .desired_width(240.0),
+                            .min_size(egui::vec2(240.0, 0.0)),
                     );
                     enter |= r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                     ui.end_row();
@@ -359,7 +359,7 @@ impl Workspace {
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut d.language)
                             .hint_text("en, pt-BR, …")
-                            .desired_width(240.0),
+                            .min_size(egui::vec2(240.0, 0.0)),
                     );
                     enter |= r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                     ui.end_row();
