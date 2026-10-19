@@ -522,12 +522,42 @@ impl Workspace {
         }
     }
 
+    fn send_batch(&self, p: &Project, commands: Vec<Value>) {
+        let names: Vec<String> = commands
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let name = vidcut_core::describe::describe(
+                    c["method"].as_str().unwrap_or_default(),
+                    &c["params"],
+                    Some(p),
+                );
+                match (i, name.chars().next()) {
+                    (0, _) | (_, None) => name,
+                    (_, Some(first)) => first.to_lowercase().chain(name.chars().skip(1)).collect(),
+                }
+            })
+            .collect();
+        let label = match names.as_slice() {
+            [rest @ .., last] if !rest.is_empty() => format!("{}, and {last}", rest.join(", ")),
+            _ => names.concat(),
+        };
+        self.send_all(commands, &label);
+    }
+
     pub(crate) fn delete_selected(&self, lift: bool) {
         let Some(p) = self.project() else {
             return;
         };
-        let cues = unlocked(p, &self.snap.selection.cues);
-        let clips = unlocked_clips(p, &self.snap.selection.clips, None);
+        let selection = &self.snap.selection;
+        let cues = unlocked(p, &selection.cues);
+        let (cues, clips) = if selection.clips.is_empty() {
+            (selection.cues.clone(), Vec::new())
+        } else if cues.is_empty() {
+            (Vec::new(), selection.clips.clone())
+        } else {
+            (cues, unlocked_clips(p, &selection.clips, None))
+        };
         let mut commands = Vec::new();
         if !cues.is_empty() {
             commands.push(command("subtitles.remove", json!({ "cues": cues })));
@@ -538,15 +568,7 @@ impl Workspace {
                 json!({ "clips": clips, "lift": lift }),
             ));
         }
-        let verb = if lift { "Lift" } else { "Delete" };
-        self.send_all(
-            commands,
-            &format!(
-                "{verb} {} clip(s) and {} subtitle(s)",
-                clips.len(),
-                cues.len()
-            ),
-        );
+        self.send_batch(p, commands);
     }
 
     pub(crate) fn add_subtitle(&mut self, ctx: &egui::Context, track: Option<&str>) {
@@ -563,19 +585,27 @@ impl Workspace {
         };
         let at = self.snap.timeline.position;
         let selection = &self.snap.selection;
-        let mut commands: Vec<Value> = unlocked(p, &selection.cues)
-            .iter()
-            .filter(|q| p.cue(q).is_some_and(|c| c.start < at && at < c.end()))
-            .map(|q| command("subtitles.split", json!({ "cue": q, "at": at })))
-            .collect();
-        let clips = unlocked_clips(p, &selection.clips, Some(at));
-        if selection.cues.is_empty() || !clips.is_empty() {
-            commands.insert(
-                0,
-                command("edit.split", json!({ "at": at, "clips": clips })),
-            );
-        }
-        self.send_all(commands, &format!("Split at {}", p.settings.timecode(at)));
+        let under = |cues: &[String]| -> Vec<Value> {
+            cues.iter()
+                .filter(|q| p.cue(q).is_some_and(|c| c.start < at && at < c.end()))
+                .map(|q| command("subtitles.split", json!({ "cue": q, "at": at })))
+                .collect()
+        };
+        let split = |clips: &[String]| command("edit.split", json!({ "at": at, "clips": clips }));
+        let commands = if selection.cues.is_empty() {
+            vec![split(&selection.clips)]
+        } else if selection.clips.is_empty() {
+            under(&selection.cues)
+        } else {
+            let cues = under(&unlocked(p, &selection.cues));
+            let clips = unlocked_clips(p, &selection.clips, Some(at));
+            match (cues.is_empty(), clips.is_empty()) {
+                (true, _) => vec![split(&selection.clips)],
+                (false, true) => cues,
+                (false, false) => std::iter::once(split(&clips)).chain(cues).collect(),
+            }
+        };
+        self.send_batch(p, commands);
     }
 
     pub(super) fn subtitle_header(&mut self, ui: &mut egui::Ui, rect: Rect, t: &SubtitleTrack) {
