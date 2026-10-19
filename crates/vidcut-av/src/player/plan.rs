@@ -172,7 +172,7 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             color_space.key()
         )
         .into(),
-        VideoPiece::Black { .. } | VideoPiece::Mix { .. } => {
+        VideoPiece::Black { .. } | VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => {
             format!("black|{}x{}", plan.width, plan.height).into()
         }
     }

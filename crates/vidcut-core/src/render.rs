@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, ColorSpace, Media, Project, TrackKind};
+use crate::model::{Clip, ColorSpace, Media, Project, Title, TrackKind};
 use crate::otio::transitions;
 use crate::time::Rational;
 
@@ -51,11 +51,19 @@ pub enum VideoPiece {
         frames: i64,
     },
     /// Pictures over each other while a dissolve plays (decision D50):
-    /// `under`, then each of `over` on top of it at its level. Each is a
-    /// source or black, as long as the piece.
+    /// `under`, then each of `over` on top of it at its level, each as long
+    /// as the piece. `under` is a source, black or a titled picture; each
+    /// of `over` a source or black.
     Mix {
         under: Box<VideoPiece>,
         over: Vec<Over>,
+    },
+    /// Titles over a picture (decision D65): `under`, then each of
+    /// `titles` drawn on top of it in order. `under` is a source, black or
+    /// a mix.
+    Titled {
+        under: Box<VideoPiece>,
+        titles: Vec<Title>,
     },
 }
 
@@ -212,25 +220,72 @@ impl VideoPiece {
     pub fn frames(&self) -> i64 {
         match self {
             Self::Source { frames, .. } | Self::Black { frames } => *frames,
-            Self::Mix { under, .. } => under.frames(),
+            Self::Mix { under, .. } | Self::Titled { under, .. } => under.frames(),
         }
     }
 
     pub fn layers(&self) -> Vec<(&VideoPiece, Option<Ramp>)> {
         match self {
-            Self::Mix { under, over } => std::iter::once((under.as_ref(), None))
+            Self::Mix { under, over } => under
+                .layers()
+                .into_iter()
                 .chain(over.iter().map(|o| (&o.piece, Some(o.ramp))))
                 .collect(),
+            Self::Titled { under, .. } => under.layers(),
             _ => vec![(self, None)],
         }
     }
 
     pub fn layers_mut(&mut self) -> Vec<&mut VideoPiece> {
         match self {
-            Self::Mix { under, over } => std::iter::once(under.as_mut())
+            Self::Mix { under, over } => under
+                .layers_mut()
+                .into_iter()
                 .chain(over.iter_mut().map(|o| &mut o.piece))
                 .collect(),
+            Self::Titled { under, .. } => under.layers_mut(),
             _ => vec![self],
+        }
+    }
+
+    pub fn titles(&self) -> Vec<(usize, &Title)> {
+        match self {
+            Self::Mix { under, .. } => under.titles(),
+            Self::Titled { under, titles } => {
+                let below = under.layers().len();
+                under
+                    .titles()
+                    .into_iter()
+                    .chain(titles.iter().map(|t| (below, t)))
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn with_over(self, o: Over) -> VideoPiece {
+        match self {
+            Self::Mix { under, mut over } => {
+                over.push(o);
+                Self::Mix { under, over }
+            }
+            under => Self::Mix {
+                under: Box::new(under),
+                over: vec![o],
+            },
+        }
+    }
+
+    fn with_title(self, t: Title) -> VideoPiece {
+        match self {
+            Self::Titled { under, mut titles } => {
+                titles.push(t);
+                Self::Titled { under, titles }
+            }
+            under => Self::Titled {
+                under: Box::new(under),
+                titles: vec![t],
+            },
         }
     }
 
@@ -267,6 +322,10 @@ impl VideoPiece {
                         ramp: o.ramp.after(k),
                     })
                     .collect(),
+            },
+            Self::Titled { under, titles } => Self::Titled {
+                under: Box::new(under.part(k, frames)),
+                titles: titles.clone(),
             },
         }
     }
@@ -306,6 +365,13 @@ impl VideoPiece {
                         .zip(o2)
                         .all(|(a, b)| a.ramp.after(k) == b.ramp && a.piece.goes_on_as(&b.piece))
             }
+            (
+                Self::Titled { under, titles },
+                Self::Titled {
+                    under: u2,
+                    titles: t2,
+                },
+            ) => titles == t2 && under.goes_on_as(u2),
             _ => false,
         }
     }
@@ -319,6 +385,7 @@ impl VideoPiece {
                     o.piece.lengthen(more);
                 }
             }
+            Self::Titled { under, .. } => under.lengthen(more),
         }
     }
 }
@@ -409,7 +476,7 @@ impl VideoPiece {
                 source_frame, pace, ..
             } => source_frame + pace.offset(k),
             VideoPiece::Black { .. } => 0,
-            VideoPiece::Mix { under, .. } => under.position(k),
+            VideoPiece::Mix { under, .. } | VideoPiece::Titled { under, .. } => under.position(k),
         }
     }
 }
@@ -603,6 +670,11 @@ pub(crate) fn paced(
     })
 }
 
+enum Layer {
+    Picture(VideoPiece, Option<Ramp>),
+    Title(Title),
+}
+
 pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
     flatten_lanes(p, a, b).map(|(plan, _)| plan)
 }
@@ -626,6 +698,8 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
     let visible = |t: &crate::model::Track, c: &Clip| {
         t.video_enabled && c.enabled && c.video && !c.is_block()
     };
+    let titled =
+        |t: &crate::model::Track, c: &Clip| t.video_enabled && c.enabled && c.title.is_some();
     let tracks: Vec<_> = p
         .tracks
         .iter()
@@ -640,7 +714,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         for c in t
             .clips
             .iter()
-            .filter(|c| c.end() > a && c.start < b && visible(t, c))
+            .filter(|c| c.end() > a && c.start < b && (visible(t, c) || titled(t, c)))
         {
             cuts.push(c.start.max(a));
             cuts.push(c.end().min(b));
@@ -668,7 +742,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
     let mut video = Vec::new();
     for w in cuts.windows(2) {
         let (x, y) = (w[0], w[1]);
-        let mut stack: Vec<(VideoPiece, Option<Ramp>)> = Vec::new();
+        let mut stack: Vec<Layer> = Vec::new();
         for (t, played) in tracks.iter().zip(&dissolves) {
             let shows = |c: &&Clip| visible(t, c);
             match played.iter().find(|d| d.frames.0 <= x && x < d.frames.1) {
@@ -680,50 +754,42 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                     };
                     match (d.before.filter(shows), d.after.filter(shows)) {
                         (Some(f), Some(g)) => {
-                            stack = vec![(picture(f, x, y)?, None)];
-                            stack.push((picture(g, x, y)?, Some(ramp(false))));
+                            stack = vec![Layer::Picture(picture(f, x, y)?, None)];
+                            stack.push(Layer::Picture(picture(g, x, y)?, Some(ramp(false))));
                         }
-                        (Some(f), None) => stack.push((picture(f, x, y)?, Some(ramp(true)))),
-                        (None, Some(g)) => stack.push((picture(g, x, y)?, Some(ramp(false)))),
+                        (Some(f), None) => {
+                            stack.push(Layer::Picture(picture(f, x, y)?, Some(ramp(true))));
+                        }
+                        (None, Some(g)) => {
+                            stack.push(Layer::Picture(picture(g, x, y)?, Some(ramp(false))));
+                        }
                         (None, None) => {}
                     }
                 }
                 None => {
                     if let Some(c) = t.clip_covering(x).map(|ci| &t.clips[ci]).filter(shows) {
-                        stack = vec![(picture(c, x, y)?, None)];
+                        stack = vec![Layer::Picture(picture(c, x, y)?, None)];
                     }
                 }
             }
-        }
-        let mut layers = stack.into_iter();
-        let under = match layers.next() {
-            Some((piece, None)) => piece,
-            first => {
-                layers = first
-                    .into_iter()
-                    .chain(layers)
-                    .collect::<Vec<_>>()
-                    .into_iter();
-                VideoPiece::Black { frames: y - x }
+            if let Some(title) = t
+                .clip_covering(x)
+                .map(|ci| &t.clips[ci])
+                .filter(|c| titled(t, c))
+                .and_then(|c| c.title.clone())
+            {
+                stack.push(Layer::Title(title));
             }
-        };
-        let over: Vec<Over> = layers
-            .map(|(piece, ramp)| Over {
-                piece,
-                ramp: ramp.expect("only the first is shown whole"),
-            })
-            .collect();
-        push_video(
-            &mut video,
-            if over.is_empty() {
-                under
-            } else {
-                VideoPiece::Mix {
-                    under: Box::new(under),
-                    over,
-                }
-            },
-        );
+        }
+        let mut piece = VideoPiece::Black { frames: y - x };
+        for layer in stack {
+            piece = match layer {
+                Layer::Picture(shown, None) => shown,
+                Layer::Picture(shown, Some(ramp)) => piece.with_over(Over { piece: shown, ramp }),
+                Layer::Title(t) => piece.with_title(t),
+            };
+        }
+        push_video(&mut video, piece);
     }
 
     let any_solo = p.any_solo();
@@ -1269,6 +1335,7 @@ mod tests {
                         .collect();
                     format!("{} over {}", over.join(", "), one(under))
                 }
+                VideoPiece::Titled { under, .. } => one(under),
             }
         }
         plan.video.iter().map(one).collect()
@@ -1399,7 +1466,7 @@ mod tests {
                     ..
                 } => (format!("{media}@{source_frame}"), *frames),
                 VideoPiece::Black { frames } => ("black".into(), *frames),
-                VideoPiece::Mix { .. } => ("mix".into(), v.frames()),
+                VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => ("mix".into(), v.frames()),
             })
             .collect();
         assert_eq!(kinds, vec![("m1@0".into(), 100), ("black".into(), 100)]);
