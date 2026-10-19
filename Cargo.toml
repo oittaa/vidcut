@@ -121,9 +121,11 @@ ffmpeg-next = { version = "9.0", default-features = false, features = [
     "software-scaling",
 ] }
 # On wgpu (below): the viewer's pictures are textures the GUI's own GPU
-# shader converts.
+# shader converts. `clipboard` puts Ctrl+C and Ctrl+X on the system's
+# clipboard and pastes from it.
 eframe = { version = "0.37", default-features = false, features = [
     "accesskit",
+    "clipboard",
     "default_fonts",
     "wgpu_no_default_features",
     "wayland",
