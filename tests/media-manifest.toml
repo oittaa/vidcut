@@ -147,3 +147,19 @@ url = "https://www.gutenberg.org/files/44892/44892-0.txt"
 license = "Project Gutenberg: 'Public domain in the USA.', https://www.gutenberg.org/ebooks/44892; Swift's book translated by Samuli Suomalainen (1850-1907)"
 purpose = "the text gulliver-fi reads: Samuli Suomalainen's translation, the one the reading names and LibriVox links, the whole book, UTF-8 without a byte order mark, CRLF, 234327 bytes. Section 13 is TOINEN OSA's VIIDES LUKU, lines 2930-3031, 717 words with its heading: transcription's reference text in Finnish. Not compared word for word with the reading"
 sha256 = "909de2ca45f8c576ae96c8f8668881ece0a9953f57a07141ce5f972a15e7cc5e"
+
+[[clip]]
+name = "quijote-es"
+file = "quijote_vol1_19_cervantes.mp3"
+url = "https://archive.org/download/don_quijote_vol1_0706_librivox/quijote_vol1_19_cervantes.mp3"
+license = "Public domain in the USA: 'LibriVox recordings are Public Domain in the USA', https://librivox.org/don-quijote-vol-1-by-miguel-de-cervantes-saavedra/; archive.org gives http://creativecommons.org/licenses/publicdomain/, https://archive.org/details/don_quijote_vol1_0706_librivox"
+purpose = "Spanish speech: section 36, 'Capítulo L', of LibriVox's reading of Don Quijote 1, read by Nessi. VBR MP3, 922.88 s, 14766080 bytes (archive.org's MD5 f08f4d2f65ad5f8413552b70216a392a); archive.org numbers the file 19. quijote-es-text has its text"
+sha256 = "68964de9195c77bf792c83a1c5e110f2bbb21502630560c722cac736317769ab"
+
+[[clip]]
+name = "quijote-es-text"
+file = "2000-0.txt"
+url = "https://www.gutenberg.org/files/2000/2000-0.txt"
+license = "Project Gutenberg: 'Public domain in the USA.', https://www.gutenberg.org/ebooks/2000"
+purpose = "the text quijote-es reads, the one LibriVox links for that reading: Gutenberg's Don Quijote, both parts, UTF-8 with a byte order mark, CRLF, 2226045 bytes. Section 36 is the first part's Capítulo L, lines 17190-17418, 2460 words with its heading: transcription's reference text in Spanish. Not compared word for word with the reading"
+sha256 = "392270e534c66988d6e949ba0f9a64117969fde0f2aebbc6efef3314e23e4385"
