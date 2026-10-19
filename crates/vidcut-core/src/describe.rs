@@ -804,6 +804,7 @@ impl Words<'_> {
             }
         }
         for (language, words) in p["fillers"].as_object().into_iter().flatten() {
+            let language = language.trim().to_lowercase();
             parts.push(match words.is_null() {
                 true => format!("{language} filler words reset"),
                 false => format!("{language} filler words"),
