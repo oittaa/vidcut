@@ -311,7 +311,7 @@ impl Workspace {
         let press = ui.input(|i| i.pointer.press_origin().filter(|_| i.pointer.any_pressed()));
         let snap = self.snap.clone();
         let project = snap.project();
-        let search_id = egui::Id::new("pool-search");
+        let search_id = egui::Id::unique("pool-search");
         if !ui.ctx().memory(|m| m.has_focus(search_id)) && self.search != snap.pool.search {
             self.search = snap.pool.search.clone();
         }
@@ -406,8 +406,11 @@ impl Workspace {
             .min_scrolled_height(height)
             .auto_shrink([false, false])
             .show_viewport(ui, |ui, viewport| {
-                let background =
-                    ui.interact(ui.max_rect(), ui.id().with("background"), Sense::click());
+                let background = ui.interact(
+                    ui.max_rect(),
+                    ui.scope_id().with("background"),
+                    Sense::click(),
+                );
                 if let Some(p) = project {
                     background.context_menu(|ui| {
                         if ui.button("New Bin").clicked() {
@@ -638,7 +641,11 @@ impl Workspace {
     }
 
     fn folder_tile(&mut self, ui: &mut egui::Ui, rect: Rect, p: &Project, path: &str) {
-        let resp = ui.interact(rect, ui.id().with(("bin", path)), Sense::click_and_drag());
+        let resp = ui.interact(
+            rect,
+            ui.scope_id().with(("bin", path)),
+            Sense::click_and_drag(),
+        );
         let picture = Rect::from_min_size(rect.min, TILE);
         let painter = ui.painter_at(rect);
         painter.rect_filled(picture, CornerRadius::same(3), theme::colors().track);
@@ -661,7 +668,7 @@ impl Workspace {
             );
         }
         self.drop_highlight(ui, picture, path);
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, leaf(path)));
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, leaf(path)));
         let resp = resp.on_hover_text(format!(
             "{path}\nDouble-click opens the bin; drag it onto another bin to move it"
         ));
@@ -784,7 +791,7 @@ impl Workspace {
     fn tile(&mut self, ui: &mut egui::Ui, rect: Rect, m: &Media) {
         let resp = ui.interact(
             rect,
-            ui.id().with(("media", &m.id)),
+            ui.scope_id().with(("media", &m.id)),
             Sense::click_and_drag(),
         );
         let picture = Rect::from_min_size(rect.min, TILE);
@@ -845,7 +852,7 @@ impl Workspace {
         let width = rect.width();
         let resp = ui.interact(
             rect,
-            ui.id().with(("media", &m.id)),
+            ui.scope_id().with(("media", &m.id)),
             Sense::click_and_drag(),
         );
         let header = Rect::from_min_size(rect.min, vec2(width, HEADER - 2.0));
@@ -1438,7 +1445,7 @@ impl Workspace {
                 .count()
         });
         let mut done = None;
-        let modal = egui::Modal::new(egui::Id::new("remove-media")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::unique("remove-media")).show(ctx, |ui| {
             ui.set_max_width(420.0);
             let items = match ids.len() {
                 1 => "1 item".to_string(),

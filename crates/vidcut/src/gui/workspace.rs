@@ -628,7 +628,7 @@ impl Workspace {
                 .small(),
             )
             .on_hover_text("Dismiss");
-        close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Dismiss"));
+        close.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Dismiss"));
         if close.clicked() {
             self.notices_done = n.seq;
             return;
