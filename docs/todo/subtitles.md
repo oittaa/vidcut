@@ -2,10 +2,9 @@
 
 **When:** next.
 
-Subtitles made from the timeline's speech, corrected on a subtitle track and exported. Subtitle tracks, cues, subtitle files, Create Subtitles from Audio, and streams and burning in in the export are in ([spec §8.12](../cut-page-spec.md#812-subtitles-pp-645646-702-12271248)), from the CLI, IPC and MCP, and all but Create Subtitles from Audio in the GUI; the rest below is not.
+Subtitles made from the timeline's speech, corrected on a subtitle track and exported. Subtitle tracks, cues, subtitle files, Create Subtitles from Audio, and streams and burning in in the export are in ([spec §8.12](../cut-page-spec.md#812-subtitles-pp-645646-702-12271248)), from the GUI, the CLI, IPC and MCP; the rest below is not.
 
 What it would take:
-- **Create Subtitles from Audio in the GUI:** in Timeline Actions, with its options, the model download's question and its progress.
 - **Styles:** a track's font, size, color, outline, background and margin, written to IMSC1 and drawn when it is burned in ([spec D61](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Re-timing a subtitle file to the speech:** the aligner places an imported file's text on the audio; `nasa-roman-presser-captions`, which aren't aligned with the speech, are the case to check it on. The aligner has no Finnish.
 - **Cutting by transcript:** the words with their times as a request's answer, and a request that removes words. It needs word times: Parakeet Ultra's, or Qwen3-ASR's from the aligner; Whisper's only once transcribe.cpp gives them.

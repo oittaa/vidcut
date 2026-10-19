@@ -33,7 +33,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - **Viewer:** mode buttons top-left, Duration field top-right; along the bottom (p. 640) the jog control, Previous Edit, Stop, Play, Next Edit, Loop, Mark In, Mark Out and timecode; an audio meter on the right (p. 642).
 - **Timeline menus** (pp. 645–646):
   - Timeline Options: Ripple On, Snap, Fixed Playhead, Trim to Audio, Trim with Safe Edit, Display Clip Names, Durations and Status, Minimize Subtitle Track, Boring Detector.
-  - Timeline Actions: Add Video/Audio/Subtitle Track, Split Clips, Join Match Edit Clips, Add Marker, Detect Scene Cuts, Add Dissolve to All Edits, Clear Transition from All Edits (vidcut: Add Subtitle too, deviation X44).
+  - Timeline Actions: Add Video/Audio/Subtitle Track, Split Clips, Join Match Edit Clips, Add Marker, Detect Scene Cuts, Add Dissolve to All Edits, Clear Transition from All Edits (vidcut: Add Subtitle too, deviation X44, and Create Subtitles from Audio, X46).
   - Edit Actions: Trim Start to Playhead, Trim End to Playhead.
 - **Timeline buttons** (p. 649): Ripple On, Dynamic Trim, Split, Marker.
 - **Upper timeline:** track-number buttons to its left select the target track; the Audio Only and Video Only toggles sit there too (pp. 643, 694).
@@ -201,7 +201,7 @@ Ctrl+Z / Ctrl+Shift+Z, unlimited. Edit > History lists the last twenty steps, ne
 - **Import** (pp. 1230–1231): `.srt`, `.srtx`, `.vtt`, `.xml` and `.ttml` files come into the Media Pool as subtitle clips. Insert Selected Subtitles to Timeline Using Timecode puts each cue at its timecode; dragging one onto the timeline puts its first cue where it is dropped. Details: D58; deviations X40, X41.
 - **Export** (pp. 1247–1248): File > Export Subtitle, or a subtitle track header's Export Subtitle, writes a track as SRT or WebVTT. On the Deliver page a render writes each chosen track as a file beside it (IMSC1, DFXP, SRT, WebVTT), burns the shown track in, or embeds it. Details: D58, D61; deviations X42, X45.
 - **Create Subtitles from Audio** (pp. 1234–1235): transcribes the speech of the timeline's In–Out range, or of all of it, onto the highest subtitle track, made when there is none. Its options: the language (Auto finds it), a caption preset, the characters per line (42), one or two lines, and the frames between subtitles (0). A muted track isn't heard. Details: D62; deviation X46.
-- **Out:** styles (the track's, a cue's, a word's) and style presets, caption presets, fades, subtitle regions, linking subtitles to clips, Fusion and animated subtitles, word timing, find and replace, QC thresholds, the Captions list, hiding subtitle tracks from the timeline (pp. 1228–1229, 1231–1232, 1237–1244). Track styles and the Create Subtitles from Audio dialog: [todo/subtitles.md](todo/subtitles.md).
+- **Out:** styles (the track's, a cue's, a word's) and style presets, caption presets, fades, subtitle regions, linking subtitles to clips, Fusion and animated subtitles, word timing, find and replace, QC thresholds, the Captions list, hiding subtitle tracks from the timeline (pp. 1228–1229, 1231–1232, 1237–1244). Track styles: [todo/subtitles.md](todo/subtitles.md).
 
 ## 9. Audio (pp. 642, 649–650, 743, 771, 773)
 

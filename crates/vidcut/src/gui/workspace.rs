@@ -111,6 +111,7 @@ pub struct Workspace {
     pub(super) folders: super::folders::Folders,
     pub(super) tiles: Option<super::tiles::Tiles>,
     pub(super) shuttle: super::shuttle::Shuttle,
+    pub(super) speech: super::speech::SpeechUi,
 }
 
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
@@ -198,6 +199,7 @@ impl Workspace {
                 &crate::preferences::load().unwrap_or_default().thumbnails,
             )),
             shuttle: Default::default(),
+            speech: Default::default(),
         }
     }
 
@@ -797,6 +799,13 @@ impl Workspace {
                 {
                     self.send("player.audio_scrubbing", json!({ "on": on }));
                 }
+                ui.add_enabled_ui(self.snap.project.is_some(), |ui| {
+                    ui.menu_button("AI Tools", |ui| {
+                        if ui.button("Create Subtitles from Audio…").clicked() {
+                            self.open_speech();
+                        }
+                    });
+                });
             });
             ui.separator();
             if self.snap.project.is_some() {
@@ -1662,6 +1671,7 @@ impl Workspace {
         self.import_window(&ctx);
         self.relink_window(&ctx);
         self.remove_media_window(&ctx);
+        self.speech_window(&ctx);
         let panel = theme::colors().panel;
         egui::Panel::top("top").frame(theme::bar()).show(ui, |ui| {
             theme::decorated(ui, Deco::Bar, |ui| self.top_bar(ui))
