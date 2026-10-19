@@ -17,6 +17,7 @@ mod project;
 mod relink;
 mod shared;
 mod shuttle;
+mod speech;
 mod subtitles;
 mod theme;
 mod tiles;

@@ -27,6 +27,7 @@ pub struct File {
     pub bytes: u64,
     pub sha256: &'static str,
     pub gpu_gb: u64,
+    pub languages: &'static [&'static str],
 }
 
 impl File {
@@ -46,6 +47,10 @@ pub const QWEN3_ASR: File = File {
     bytes: 2_185_030_624,
     sha256: "9a0d81792dfea2d5f278b8a63deb3ea6e02139ce42c2301f32ea19c4f77526b7",
     gpu_gb: 8,
+    languages: &[
+        "zh", "en", "yue", "ar", "de", "fr", "es", "pt", "id", "it", "ko", "ru", "th", "vi", "ja",
+        "tr", "hi", "ms", "nl", "sv", "da", "fi", "pl", "cs", "fil", "fa", "el", "ro", "hu", "mk",
+    ],
 };
 
 pub const WHISPER_LARGE_V3: File = File {
@@ -56,6 +61,15 @@ pub const WHISPER_LARGE_V3: File = File {
     bytes: 1_668_741_440,
     sha256: "2fa1a5f179f8a511a53e2108db270aa4af3ce08cd976af4180e2854666bb4ba3",
     gpu_gb: 4,
+    languages: &[
+        "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca", "cs", "cy",
+        "da", "de", "el", "en", "es", "et", "eu", "fa", "fi", "fo", "fr", "gl", "gu", "haw", "ha",
+        "he", "hi", "hr", "ht", "hu", "hy", "id", "is", "it", "ja", "jw", "ka", "kk", "km", "kn",
+        "ko", "la", "lb", "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt",
+        "my", "ne", "nl", "nn", "no", "oc", "pa", "pl", "ps", "pt", "ro", "ru", "sa", "sd", "si",
+        "sk", "sl", "sn", "so", "sq", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tk", "tl",
+        "tr", "tt", "uk", "ur", "uz", "vi", "yi", "yo", "yue", "zh",
+    ],
 };
 
 pub const PARAKEET_ULTRA: File = File {
@@ -66,6 +80,10 @@ pub const PARAKEET_ULTRA: File = File {
     bytes: 740_363_168,
     sha256: "007a59761e9258779f189df396b50d12b83bb5b79e66df4b955c230d2f2a0a59",
     gpu_gb: 2,
+    languages: &[
+        "en", "de", "fr", "es", "it", "pt", "ru", "uk", "hr", "sl", "lv", "lt", "et", "fi", "sv",
+        "da", "nl", "pl", "cs", "sk", "hu", "ro", "bg", "el", "mt",
+    ],
 };
 
 pub const VAD_NAME: &str = "silero-vad-v6.2-F32.gguf";
@@ -154,7 +172,7 @@ fn report(path: &Path, stage: Stage, done: i64, total: i64, started: Instant) {
     crate::progress::report(path, Progress::stage(stage, done, total, started.elapsed()));
 }
 
-fn size(bytes: u64) -> String {
+pub fn size(bytes: u64) -> String {
     match bytes {
         b if b >= 1_000_000_000 => format!("{:.1} GB", b as f64 / 1e9),
         b if b >= 1_000_000 => format!("{:.0} MB", b as f64 / 1e6),
@@ -162,7 +180,7 @@ fn size(bytes: u64) -> String {
     }
 }
 
-fn present(dir: &Path, f: &File) -> bool {
+pub fn present(dir: &Path, f: &File) -> bool {
     std::fs::metadata(dir.join(f.name)).is_ok_and(|m| m.len() == f.bytes)
 }
 
@@ -566,11 +584,11 @@ fn load(path: &Path, gpu: bool, warnings: &mut Vec<String>) -> Result<Loaded> {
 }
 
 fn gigabytes(mb: f64) -> String {
-    let gb = format!("{:.1}", mb / 1024.0);
+    let gb = format!("{:.1}", (mb / 1024.0 * 10.0).floor() / 10.0);
     gb.trim_end_matches(".0").to_string()
 }
 
-fn short_of_memory(f: &File) -> Option<String> {
+pub fn short_of_memory(f: &File) -> Option<String> {
     let have = crate::gpus::in_use()?.memory_mb?;
     (have < f.gpu_gb * 1024).then(|| {
         format!(
@@ -676,7 +694,9 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
         .map(|c| (c.iter().map(|s| s * s).sum::<f32>() / c.len() as f32).sqrt())
         .collect();
     let mut warnings = Vec::new();
+    report(&model_path, Stage::Loading, 0, 0, started);
     let loaded = load(&model_path, options.gpu, &mut warnings)?;
+    crate::cancel::stop()?;
     if loaded.gpu
         && asked.model_file.is_none()
         && let Some(warning) = short_of_memory(file_of(asked.model))

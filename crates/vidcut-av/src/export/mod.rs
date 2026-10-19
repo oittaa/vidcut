@@ -52,6 +52,7 @@ pub struct Progress {
 pub enum Stage {
     Downloading,
     Listening,
+    Loading,
     Transcribing,
 }
 
