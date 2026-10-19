@@ -30,6 +30,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
         method,
         "media.list"
             | "media.get"
+            | "media.transcribe"
             | "project.get"
             | "project.summary"
             | "project.create"
@@ -603,19 +604,58 @@ pub fn print(method: &str, r: &Response, json: bool) {
             for w in v["warnings"].as_array().into_iter().flatten() {
                 eprintln!("vidcut: warning: {}", w.as_str().unwrap_or_default());
             }
-            let words = v["words"].as_array().map_or(0, Vec::len);
-            println!(
-                "{words} word(s), {} on {}, language {}",
-                v["model"].as_str().unwrap_or_default(),
-                v["device"].as_str().unwrap_or_default(),
-                v["language"].as_str().unwrap_or("not told")
-            );
-            for w in v["words"].as_array().into_iter().flatten() {
+            let print_words = |words: &Value| {
+                for w in words.as_array().into_iter().flatten() {
+                    println!(
+                        "  {}f–{}f  {}",
+                        w["start"],
+                        w["end"],
+                        w["text"].as_str().unwrap_or_default()
+                    );
+                }
+            };
+            match v.as_array() {
+                Some(each) => {
+                    for e in each {
+                        let of = match e["clip"].as_str() {
+                            Some(clip) => {
+                                format!("{clip} on {}", e["track"].as_str().unwrap_or(""))
+                            }
+                            None => e["media"].as_str().unwrap_or_default().to_string(),
+                        };
+                        println!(
+                            "{of}: {} word(s), {}, language {}",
+                            e["words"].as_array().map_or(0, Vec::len),
+                            e["model"].as_str().unwrap_or_default(),
+                            e["language"].as_str().unwrap_or("not told")
+                        );
+                        print_words(&e["words"]);
+                    }
+                }
+                None => {
+                    println!(
+                        "{} word(s), {} on {}, language {}",
+                        v["words"].as_array().map_or(0, Vec::len),
+                        v["model"].as_str().unwrap_or_default(),
+                        v["device"].as_str().unwrap_or_default(),
+                        v["language"].as_str().unwrap_or("not told")
+                    );
+                    print_words(&v["words"]);
+                }
+            }
+        }
+        "media.transcribe" => {
+            for m in r.result["media"].as_array().into_iter().flatten() {
+                for w in m["warnings"].as_array().into_iter().flatten() {
+                    eprintln!("vidcut: warning: {}", w.as_str().unwrap_or_default());
+                }
                 println!(
-                    "  {}f–{}f  {}",
-                    w["start"],
-                    w["end"],
-                    w["text"].as_str().unwrap_or_default()
+                    "{}: {} word(s), {} on {}, language {}",
+                    m["media"].as_str().unwrap_or_default(),
+                    m["words"],
+                    m["model"].as_str().unwrap_or_default(),
+                    m["device"].as_str().unwrap_or_default(),
+                    m["language"].as_str().unwrap_or("not told")
                 );
             }
         }

@@ -156,6 +156,22 @@ pub trait Env {
         Err(Error::usage("speech is detected by the vidcut program"))
     }
 
+    fn transcript(&self, media: &Media, stream: u32) -> Result<Option<Arc<Speech>>> {
+        let _ = (media, stream);
+        Ok(None)
+    }
+
+    fn transcribe_media(
+        &self,
+        media: &Media,
+        stream: u32,
+        plan: &RenderPlan,
+        asked: &transcript::Asked,
+    ) -> Result<Arc<Speech>> {
+        let _ = (media, stream, plan, asked);
+        Err(Error::usage("speech is transcribed by the vidcut program"))
+    }
+
     fn proxy_dir(&self) -> PathBuf;
 
     fn generate_proxy(
@@ -1613,6 +1629,29 @@ fn sound_plan(p: &Project, a: i64, b: i64, heard: &[String]) -> Result<RenderPla
         t.solo = false;
     }
     crate::render::flatten(&q, a, b)
+}
+
+fn media_sound_plan(p: &Project, m: &Media, stream: u32) -> Result<RenderPlan> {
+    let mut q = p.clone();
+    q.settings.sample_rate = transcript::RATE;
+    q.settings.channels = 1;
+    let (mut plan, _) = crate::render::tape(&q, std::slice::from_ref(&m.id))?;
+    for piece in plan.audio.iter_mut().flatten() {
+        if let crate::render::AudioPiece::Source { stream: s, .. } = piece {
+            *s = stream;
+        }
+    }
+    Ok(plan)
+}
+
+fn transcript_json(stream: u32, s: &Speech) -> Value {
+    json!({
+        "stream": stream,
+        "model": s.model,
+        "language": s.language,
+        "timing": s.timing,
+        "words": s.said.iter().map(|x| transcript::words(x).len()).sum::<usize>(),
+    })
 }
 
 fn ctx(p: &Project, playhead: Option<i64>) -> TimeContext {
@@ -4766,7 +4805,55 @@ pub fn query(
                     .collect::<Vec<_>>()
             )
         }
+        Request::MediaTranscribe {
+            media,
+            stream,
+            model,
+            model_file,
+            vad_file,
+            language,
+            download,
+            again,
+        } => {
+            let asked = transcript::Asked {
+                model: model.unwrap_or_default(),
+                model_file: model_file.clone(),
+                vad_file: vad_file.clone(),
+                language: language.clone(),
+                download: *download,
+            };
+            let mut out = Vec::new();
+            for id in media.to_vec() {
+                let m = p
+                    .media(&id)
+                    .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+                match m.info.audio.len() {
+                    0 => return Err(Error::invalid(format!("{id} has no sound"))),
+                    n if *stream as usize >= n => {
+                        return Err(Error::invalid(format!(
+                            "{id} has {n} sound stream(s), counted from 0"
+                        )));
+                    }
+                    _ => {}
+                }
+                let speech = match env.transcript(m, *stream)?.filter(|_| !*again) {
+                    Some(kept) => kept,
+                    None => {
+                        let plan = media_sound_plan(p, m, *stream)?;
+                        env.transcribe_media(m, *stream, &plan, &asked)?
+                    }
+                };
+                let mut v = transcript_json(*stream, &speech);
+                v["media"] = json!(id);
+                v["device"] = json!(speech.device);
+                v["warnings"] = json!(speech.warnings);
+                out.push(v);
+            }
+            json!({ "media": out })
+        }
         Request::AnalyzeWords {
+            media,
+            clips,
             range,
             tracks,
             model,
@@ -4775,6 +4862,49 @@ pub fn query(
             language,
             download,
         } => {
+            if media.is_some() || clips.is_some() {
+                if range.is_some() || tracks.is_some() {
+                    return Err(Error::usage(
+                        "`media` and `clips` read transcripts, `range` and `tracks` hear the \
+                         timeline: give one or the other",
+                    ));
+                }
+                let mut out = Vec::new();
+                for target in targets(p, media, clips, playhead, true)? {
+                    let m = target.media(p)?;
+                    let stream = match &target {
+                        Target::Media(_) => 0,
+                        Target::Clip(c) => c
+                            .audio
+                            .as_ref()
+                            .map(|a| a.stream)
+                            .ok_or_else(|| Error::invalid(format!("{} has no sound", c.id)))?,
+                    };
+                    let speech = env.transcript(m, stream)?.ok_or_else(|| {
+                        Error::invalid(format!(
+                            "{} has no transcript: transcribe it first (media.transcribe)",
+                            m.id
+                        ))
+                    })?;
+                    let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
+                    let words: Vec<Value> = analysis::words_in(&target.span(p)?, &timed)
+                        .into_iter()
+                        .map(|(i, a, b)| {
+                            let w = &timed[i];
+                            json!({ "text": w.text, "start": a, "end": b, "joined": w.joined })
+                        })
+                        .collect();
+                    out.push(target.json(
+                        p,
+                        json!({
+                            "words": words,
+                            "model": speech.model,
+                            "language": speech.language,
+                        }),
+                    ));
+                }
+                return Ok(json!(out));
+            }
             let (a, b) = transcribed_range(p, range.as_ref(), playhead)?;
             let heard = heard_tracks(p, tracks.as_deref())?;
             let speech = env.transcribe(
@@ -5612,6 +5742,15 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
         };
         let frames = tc.frames_at(fps).round() as i64;
         v["timecode"] = json!(format_timecode(frames, fps, 0, tc.drop_frame));
+    }
+    let transcripts: Vec<Value> = (0..m.info.audio.len() as u32)
+        .filter_map(|s| {
+            let kept = env.transcript(m, s).ok().flatten()?;
+            Some(transcript_json(s, &kept))
+        })
+        .collect();
+    if !transcripts.is_empty() {
+        v["transcripts"] = json!(transcripts);
     }
     v
 }

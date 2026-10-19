@@ -100,6 +100,7 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
             | "proxy.generate"
             | "subtitles.transcribe"
             | "analyze.words"
+            | "media.transcribe"
             | "subtitles.retime"
     ) {
         let _ = ctrlc::set_handler(|| CANCEL.store(true, Ordering::Relaxed));

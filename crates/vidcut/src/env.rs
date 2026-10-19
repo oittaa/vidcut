@@ -64,6 +64,7 @@ type Memo<T> = LazyLock<Mutex<HashMap<(PathBuf, Origin), Arc<T>>>>;
 static LEVELS: Memo<AudioLevels> = LazyLock::new(Default::default);
 static PICTURES: Memo<PictureStats> = LazyLock::new(Default::default);
 static VOICES: Memo<VoiceActivity> = LazyLock::new(Default::default);
+static TRANSCRIPTS: Memo<Speech> = LazyLock::new(Default::default);
 
 static MADE_WITH: LazyLock<Mutex<HashMap<PathBuf, (String, vidcut_core::editor::Copied)>>> =
     LazyLock::new(Default::default);
@@ -100,6 +101,14 @@ fn measured<T>(
     let value = Arc::new(value);
     lock().insert(key, value.clone());
     Ok(value)
+}
+
+fn transcript_file(media: &Media, stream: u32) -> (PathBuf, Origin) {
+    analysis_file(media, &format!("words{stream}"))
+}
+
+pub fn transcribed(media: &Media) -> bool {
+    (0..media.info.audio.len() as u32).any(|s| transcript_file(media, s).0.is_file())
 }
 
 fn analysis_file(media: &Media, what: &str) -> (PathBuf, Origin) {
@@ -261,6 +270,47 @@ impl Env for AvEnv {
             memo.clear();
         }
         memo.insert(key, speech.clone());
+        Ok(speech)
+    }
+
+    fn transcript(&self, media: &Media, stream: u32) -> Result<Option<Arc<Speech>>> {
+        let lock = || TRANSCRIPTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = transcript_file(media, stream);
+        if let Some(s) = lock().get(&key) {
+            return Ok(Some(s.clone()));
+        }
+        let (file, origin) = &key;
+        let Some(speech) = std::fs::read(file)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Speech>(origin.check(&b)?).ok())
+        else {
+            return Ok(None);
+        };
+        let speech = Arc::new(speech);
+        lock().insert(key, speech.clone());
+        Ok(Some(speech))
+    }
+
+    fn transcribe_media(
+        &self,
+        media: &Media,
+        stream: u32,
+        plan: &RenderPlan,
+        asked: &Asked,
+    ) -> Result<Arc<Speech>> {
+        let speech = self.transcribe(plan, asked)?;
+        let (file, origin) = transcript_file(media, stream);
+        let bytes = serde_json::to_vec(&*speech).map_err(|e| Error::internal(e.to_string()))?;
+        let part = file.with_extension("part");
+        file.parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(&part, origin.stamp(&bytes)))
+            .and_then(|()| std::fs::rename(&part, &file))
+            .map_err(|e| Error::media(format!("{}: {e}", file.display())))?;
+        TRANSCRIPTS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert((file, origin), speech.clone());
         Ok(speech)
     }
 

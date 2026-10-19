@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::request::SpeechModel;
 use crate::time::Rational;
@@ -18,7 +18,7 @@ pub struct Asked {
     pub download: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Timing {
     Words,
@@ -26,7 +26,7 @@ pub enum Timing {
     Pauses,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Speech {
     pub model: String,
     pub device: String,
@@ -38,7 +38,7 @@ pub struct Speech {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Said {
     pub start: f64,
     pub end: f64,
@@ -47,7 +47,7 @@ pub struct Said {
     pub speech: Vec<(f64, f64)>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Word {
     pub start: f64,
     pub end: f64,
