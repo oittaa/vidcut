@@ -638,17 +638,26 @@ impl Player {
             }
             None => false,
         };
+        let (position, glide) = match (&status, &self.skips) {
+            (Some(s), Some(skips)) => (
+                unskipped(skips, s.position).clamp(0, c.frames.max(0)),
+                s.glide,
+            ),
+            (Some(s), None) if !self.auditioning => (s.position.clamp(0, c.frames.max(0)), s.glide),
+            _ => (c.position, None),
+        };
         PlayerSnap {
             loaded: c.plan.is_some(),
             muted: self.muted,
             frames: c.frames,
-            position: self.position(id),
+            position,
             ready,
             playing: status.as_ref().is_some_and(|s| s.playing),
             speed: status.as_ref().map_or(0.0, |s| s.speed),
             hwdec: hwdec(status.as_ref().map_or(c.decoder, |s| s.decoder)).into(),
             error: c.error.clone().or_else(|| status.and_then(|s| s.error)),
             lanes: c.lanes.iter().map(|l| l.track.clone()).collect(),
+            glide,
         }
     }
 }
