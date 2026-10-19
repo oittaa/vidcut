@@ -62,14 +62,9 @@ pub const PARAKEET_ULTRA: File = File {
     sha256: "007a59761e9258779f189df396b50d12b83bb5b79e66df4b955c230d2f2a0a59",
 };
 
-pub const SILERO_VAD: File = File {
-    name: "silero-vad-v6.2-F32.gguf",
-    title: "the Silero VAD model",
-    repo: "handy-computer/silero-vad-v6.2-gguf",
-    revision: "a9b2d61c20ae4ddf3644edb34969e8185a485448",
-    bytes: 1_241_056,
-    sha256: "0d871a800c420fdd5d1b17a3aea4296d1c39608f0ff4a9295eb76457eb1c88e6",
-};
+pub const VAD_NAME: &str = "silero-vad-v6.2-F32.gguf";
+
+pub const VAD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/silero-vad-v6.2-F32.gguf"));
 
 pub fn file_of(model: SpeechModel) -> &'static File {
     match model {
@@ -165,47 +160,46 @@ fn present(dir: &Path, f: &File) -> bool {
     std::fs::metadata(dir.join(f.name)).is_ok_and(|m| m.len() == f.bytes)
 }
 
-pub fn missing(asked: &Asked, dir: &Path) -> Vec<&'static File> {
-    let mut wanted = Vec::new();
-    if asked.model_file.is_none() && !present(dir, file_of(asked.model)) {
-        wanted.push(file_of(asked.model));
+pub fn missing(asked: &Asked, dir: &Path) -> Option<&'static File> {
+    let f = file_of(asked.model);
+    (asked.model_file.is_none() && !present(dir, f)).then_some(f)
+}
+
+fn vad_file(dir: &Path) -> Result<PathBuf> {
+    let path = dir.join(VAD_NAME);
+    if std::fs::read(&path).is_ok_and(|b| b == VAD) {
+        return Ok(path);
     }
-    if asked.vad_file.is_none() && !present(dir, &SILERO_VAD) {
-        wanted.push(&SILERO_VAD);
-    }
-    wanted
+    std::fs::create_dir_all(dir)?;
+    let part = dir.join(format!("{VAD_NAME}.part"));
+    std::fs::write(&part, VAD)?;
+    std::fs::rename(&part, &path)?;
+    Ok(path)
 }
 
 fn files(asked: &Asked, dir: &Path) -> Result<(PathBuf, PathBuf)> {
-    let wanted = missing(asked, dir);
-    if !wanted.is_empty() && !asked.download {
-        let list: Vec<String> = wanted
-            .iter()
-            .map(|f| format!("{} ({}, {})", f.title, f.name, size(f.bytes)))
-            .collect();
-        let (verb, them) = match wanted.len() {
-            1 => ("isn't", "it"),
-            _ => ("aren't", "them"),
-        };
-        return Err(Error::Missing(format!(
-            "{} {verb} on this computer yet: pass download (--download) to download {them} from \
-             Hugging Face into {}, checked against SHA-256, or name files of your own with \
-             model_file and vad_file",
-            list.join(" and "),
-            dir.display()
-        )));
-    }
-    for f in wanted {
+    if let Some(f) = missing(asked, dir) {
+        if !asked.download {
+            return Err(Error::Missing(format!(
+                "{} ({}, {}) isn't on this computer yet: pass download (--download) to download \
+                 it from Hugging Face into {}, checked against SHA-256, or name a file of your \
+                 own with model_file",
+                f.title,
+                f.name,
+                size(f.bytes),
+                dir.display()
+            )));
+        }
         download(f, dir)?;
     }
     let model = asked
         .model_file
         .clone()
         .unwrap_or_else(|| dir.join(file_of(asked.model).name));
-    let vad = asked
-        .vad_file
-        .clone()
-        .unwrap_or_else(|| dir.join(SILERO_VAD.name));
+    let vad = match &asked.vad_file {
+        Some(f) => f.clone(),
+        None => vad_file(dir)?,
+    };
     for path in [&model, &vad] {
         if !path.is_file() {
             return Err(Error::Missing(format!("{}: no such file", path.display())));
@@ -265,7 +259,7 @@ fn open(url: &str, stop: &Arc<AtomicBool>) -> Result<Connection> {
     if opened == ffi::AVERROR_PROTOCOL_NOT_FOUND {
         return Err(Error::Missing(format!(
             "this FFmpeg can't download over HTTPS: download {url} yourself and name the file \
-             with model_file or vad_file"
+             with model_file"
         )));
     }
     if opened < 0 {

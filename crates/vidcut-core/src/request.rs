@@ -861,7 +861,7 @@ pub enum Request {
         #[serde(default)]
         model_file: Option<PathBuf>,
         /// A Silero VAD model file (GGUF, or whisper.cpp's `.bin`) to find
-        /// the speech with, instead of the one downloaded with the models.
+        /// the speech with, instead of the one built into vidcut.
         #[serde(default)]
         vad_file: Option<PathBuf>,
         /// The language spoken, as a code such as `en` or `fi`. Default: the

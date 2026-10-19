@@ -13,7 +13,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - editing and trimming, constant speed changes (D48)
 - dissolves: cross dissolves, fades to and from black, audio cross fades (§8.11)
 - clip/track audio levels and waveforms
-- subtitle tracks: cues, subtitle files in and out (§8.12)
+- subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - Quick Export, plus our Export dialog
 
 **Out of scope (out):**
@@ -21,7 +21,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - color, Fusion, Smart Reframe, Close Up
 - Sync Bin, Multi Source, Source Overwrite, Live Overwrite
 - Replay, voiceover
-- AI tools: transcription (Create Subtitles from Audio), voice/dialogue tools
+- AI tools other than Create Subtitles from Audio: voice/dialogue tools
 - Mixer FX, Paste Attributes, guides
 - interchange formats: DRT, AAF, XML
 

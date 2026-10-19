@@ -28,6 +28,9 @@ transcribe-cpp = { workspace = true, features = ["vulkan"] }
 windows-sys.workspace = true
 windows.workspace = true
 
+[build-dependencies]
+sha2.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 
