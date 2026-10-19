@@ -4,6 +4,7 @@ mod app;
 mod cells;
 pub mod export;
 mod file_manager;
+mod fillers;
 mod folders;
 mod gate;
 mod help;

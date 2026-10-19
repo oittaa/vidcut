@@ -187,6 +187,11 @@ pub trait Env {
         crate::preferences::Proxies::default()
     }
 
+    fn fillers(&self, language: &str) -> Option<Vec<String>> {
+        let _ = language;
+        None
+    }
+
     fn remove_proxy_file(&self, path: &Path) -> Result<()> {
         match std::fs::remove_file(path) {
             Ok(()) => Ok(()),
@@ -1719,9 +1724,22 @@ fn filler_language(
         })
 }
 
-fn word_json(w: &transcript::Word, start: i64, end: i64, filler_language: Option<&str>) -> Value {
+fn filler_words(p: &Project, env: &dyn Env, language: Option<&str>) -> (Vec<String>, &'static str) {
+    let Some(language) = language else {
+        return (Vec::new(), "built_in");
+    };
+    if let Some(words) = p.settings.fillers.get(language) {
+        return (words.clone(), "project");
+    }
+    if let Some(words) = env.fillers(language) {
+        return (words, "preferences");
+    }
+    (transcript::built_in_fillers(language), "built_in")
+}
+
+fn word_json(w: &transcript::Word, start: i64, end: i64, fillers: &[String]) -> Value {
     let mut v = json!({ "text": w.text, "start": start, "end": end, "joined": w.joined });
-    if filler_language.is_some_and(|l| transcript::is_filler(&w.text, l)) {
+    if transcript::is_filler(&w.text, fillers) {
         v["filler"] = json!(true);
     }
     v
@@ -4648,6 +4666,9 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
     if let Some(on) = set.use_proxies {
         p.settings.use_proxies = on;
     }
+    if let Some(fillers) = &set.fillers {
+        crate::preferences::set_fillers(&mut p.settings.fillers, fillers)?;
+    }
     Ok(())
 }
 
@@ -5105,9 +5126,10 @@ pub fn query(
                     })?;
                     let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
                     let tongue = filler_language(language, &speech, &timed);
+                    let (fillers, fillers_from) = filler_words(p, env, tongue.as_deref());
                     let words: Vec<Value> = analysis::words_in(&target.span(p)?, &timed)
                         .into_iter()
-                        .map(|(i, a, b)| word_json(&timed[i], a, b, tongue.as_deref()))
+                        .map(|(i, a, b)| word_json(&timed[i], a, b, &fillers))
                         .collect();
                     out.push(target.json(
                         p,
@@ -5116,6 +5138,8 @@ pub fn query(
                             "model": speech.model,
                             "language": speech.language,
                             "filler_language": tongue,
+                            "filler_words": fillers,
+                            "fillers_from": fillers_from,
                         }),
                     ));
                 }
@@ -5135,12 +5159,13 @@ pub fn query(
             )?;
             let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
             let tongue = filler_language(&None, &speech, &timed);
+            let (fillers, fillers_from) = filler_words(p, env, tongue.as_deref());
             let words: Vec<Value> = timed
                 .iter()
                 .flat_map(|w| {
                     transcript::word_frames(std::slice::from_ref(w), p.settings.fps, a, b)
                         .into_iter()
-                        .map(|(_, start, end)| word_json(w, start, end, tongue.as_deref()))
+                        .map(|(_, start, end)| word_json(w, start, end, &fillers))
                 })
                 .collect();
             let mut warnings = speech.warnings.clone();
@@ -5156,6 +5181,8 @@ pub fn query(
                 "device": speech.device,
                 "language": speech.language,
                 "filler_language": tongue,
+                "filler_words": fillers,
+                "fillers_from": fillers_from,
                 "timing": speech.timing,
                 "pieces": speech.pieces,
                 "longest_piece": speech.longest_piece,

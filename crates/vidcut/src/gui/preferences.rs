@@ -31,6 +31,7 @@ pub(super) struct PreferencesUi {
     reset_presets_and_themes: bool,
     resetting: Option<Ask>,
     forgotten: Option<super::workspace::ViewState>,
+    fillers: super::fillers::FillerEditor,
 }
 
 const LABEL: f32 = 170.0;
@@ -167,6 +168,12 @@ impl Workspace {
         self.preferences.listing = Some(rx);
     }
 
+    pub(super) fn reread_preferences(&mut self, ctx: &egui::Context) {
+        if self.preferences.open && self.preferences.ask.is_none() {
+            self.preferences.ask = Some(Ask::send(&self.live, ctx, "preferences.get", json!({})));
+        }
+    }
+
     pub(super) fn preferences_window(&mut self, ctx: &egui::Context) {
         self.reset_answered(ctx);
         self.reset_window(ctx);
@@ -175,10 +182,12 @@ impl Workspace {
         if !ui_state.open {
             return;
         }
+        let mut reread = false;
         if let Some(answer) = ui_state.ask.as_ref().and_then(Ask::take) {
             ui_state.ask = None;
             match answer {
                 Ok(r) => {
+                    reread = true;
                     let p = &r.result["preferences"];
                     let n = |v: &Value| v.as_u64().unwrap_or(0).to_string();
                     ui_state.limit = n(&p["thumbnails"]["cache_limit_mb"]);
@@ -278,6 +287,7 @@ impl Workspace {
                             project: project.as_deref(),
                         };
                         proxies(ui, &state, busy, ui_state, &folders, &mut patch);
+                        fillers(ui, &state, busy, ui_state, &mut patch);
                         if let Some(e) = &ui_state.error {
                             ui.label(RichText::new(e).color(theme::colors().error));
                         }
@@ -328,6 +338,9 @@ impl Workspace {
         }
         if let Some(p) = patch {
             ui_state.ask = Some(Ask::send(&self.live, ctx, "preferences.set", p));
+        }
+        if reread {
+            self.transcription.preferences_changed();
         }
     }
 
@@ -820,6 +833,32 @@ fn thumbnails(
                 });
                 ui.end_row();
             });
+        },
+    );
+}
+
+fn fillers(
+    ui: &mut egui::Ui,
+    state: &Value,
+    busy: bool,
+    ui_state: &mut PreferencesUi,
+    patch: &mut Option<Value>,
+) {
+    let lists: super::fillers::Lists =
+        serde_json::from_value(state["preferences"]["transcripts"]["fillers"].clone())
+            .unwrap_or_default();
+    card(
+        ui,
+        "Filler Words",
+        "The words the Transcription window marks as fillers and Delete Filler Words takes \
+         out, in every project without its own list, which the Transcription window sets.",
+        |ui| {
+            ui_state.fillers.scope = super::fillers::Scope::All;
+            if let Some(change) =
+                super::fillers::editor(ui, &mut ui_state.fillers, None, &lists, busy)
+            {
+                *patch = Some(change.request().1);
+            }
         },
     );
 }

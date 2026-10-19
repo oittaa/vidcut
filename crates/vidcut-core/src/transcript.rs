@@ -274,8 +274,27 @@ pub fn language_of<'a>(texts: impl Iterator<Item = &'a str>) -> Option<&'static 
     (*best > 0).then_some(COMMON[k].0)
 }
 
-pub fn is_filler(text: &str, language: &str) -> bool {
-    fillers(language).contains(&bare(text).as_str())
+pub fn built_in_fillers(language: &str) -> Vec<String> {
+    fillers(language).iter().map(|w| w.to_string()).collect()
+}
+
+pub fn is_filler(text: &str, fillers: &[String]) -> bool {
+    let word = bare(text);
+    fillers.contains(&word)
+}
+
+pub fn filler_list(words: &[String]) -> std::result::Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for w in words {
+        if w.trim().chars().any(char::is_whitespace) {
+            return Err(format!("a filler word is one word: {:?}", w.trim()));
+        }
+        let w = bare(w);
+        if !w.is_empty() && !out.contains(&w) {
+            out.push(w);
+        }
+    }
+    Ok(out)
 }
 
 pub fn spoken(speech: &Speech) -> std::result::Result<Vec<Word>, String> {

@@ -315,6 +315,10 @@ impl Env for AvEnv {
         Ok(speech)
     }
 
+    fn fillers(&self, language: &str) -> Option<Vec<String>> {
+        crate::preferences::fillers(language)
+    }
+
     fn proxy_rules(&self) -> vidcut_core::preferences::Proxies {
         crate::preferences::load()
             .map(|p| p.proxies)

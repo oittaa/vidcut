@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
@@ -14,6 +15,14 @@ pub fn load() -> Result<Preferences> {
     let p = read()?;
     vidcut_av::gpus::choose(&p.gpu.device);
     Ok(p)
+}
+
+pub fn filler_lists() -> BTreeMap<String, Vec<String>> {
+    read().map(|p| p.transcripts.fillers).unwrap_or_default()
+}
+
+pub fn fillers(language: &str) -> Option<Vec<String>> {
+    filler_lists().remove(language)
 }
 
 fn read() -> Result<Preferences> {
