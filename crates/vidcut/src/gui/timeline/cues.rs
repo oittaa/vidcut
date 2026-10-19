@@ -131,6 +131,19 @@ fn unlocked(p: &Project, cues: &[String]) -> Vec<String> {
         .collect()
 }
 
+fn unlocked_clips(p: &Project, clips: &[String], at: Option<i64>) -> Vec<String> {
+    clips
+        .iter()
+        .filter(|id| {
+            p.find_clip(id).is_some_and(|(t, c)| {
+                let clip = &p.tracks[t].clips[c];
+                !p.tracks[t].locked && at.is_none_or(|at| clip.start < at && at < clip.end())
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 pub fn one_line(text: &str) -> String {
     vidcut_core::subtitles::plain(text)
         .lines()
@@ -514,7 +527,7 @@ impl Workspace {
             return;
         };
         let cues = unlocked(p, &self.snap.selection.cues);
-        let clips = &self.snap.selection.clips;
+        let clips = unlocked_clips(p, &self.snap.selection.clips, None);
         let mut commands = Vec::new();
         if !cues.is_empty() {
             commands.push(command("subtitles.remove", json!({ "cues": cues })));
@@ -555,16 +568,11 @@ impl Workspace {
             .filter(|q| p.cue(q).is_some_and(|c| c.start < at && at < c.end()))
             .map(|q| command("subtitles.split", json!({ "cue": q, "at": at })))
             .collect();
-        let clip_under = selection.clips.iter().any(|id| {
-            p.find_clip(id).is_some_and(|(t, c)| {
-                let (track, clip) = (&p.tracks[t], &p.tracks[t].clips[c]);
-                !track.locked && clip.start < at && at < clip.end()
-            })
-        });
-        if selection.cues.is_empty() || clip_under {
+        let clips = unlocked_clips(p, &selection.clips, Some(at));
+        if selection.cues.is_empty() || !clips.is_empty() {
             commands.insert(
                 0,
-                command("edit.split", json!({ "at": at, "clips": selection.clips })),
+                command("edit.split", json!({ "at": at, "clips": clips })),
             );
         }
         self.send_all(commands, &format!("Split at {}", p.settings.timecode(at)));
