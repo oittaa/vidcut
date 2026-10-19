@@ -89,7 +89,7 @@ fn cutting_words_closes_the_gap_with_ripple_off() {
     f.append("m1", 0, 100);
     f.ok(req("project.set", json!({"ripple_on": false})));
     let r = f.ok(req(
-        "subtitles.cut",
+        "edit.ripple_delete_words",
         json!({
             "words": [
                 {"text": "one", "start": 10, "end": 20},

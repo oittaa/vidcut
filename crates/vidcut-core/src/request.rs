@@ -312,6 +312,41 @@ pub enum Request {
         #[serde(default)]
         range: Option<RangeSpec>,
     },
+    /// The words said in the mix of the tracks heard (`tracks`) over
+    /// `range`, each with the timeline frames the model gave it, for
+    /// `edit.ripple_delete_words`. It hears as `subtitles.transcribe` does
+    /// and adds no cues. Only a model that times words: Parakeet Ultra
+    /// does. Whisper large-v3 times phrases and Qwen3-ASR gives no times,
+    /// so they are refused rather than have estimates cut as words.
+    #[serde(rename = "analyze.words")]
+    AnalyzeWords {
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        /// The tracks heard, such as `["A1"]`, muted or not; the others
+        /// aren't. Default: the tracks playback hears, those not muted, or
+        /// the soloed ones.
+        #[serde(default)]
+        tracks: Option<Vec<String>>,
+        /// Default: `parakeet-ultra`.
+        #[serde(default)]
+        model: Option<SpeechModel>,
+        /// A transcribe.cpp GGUF model file to use instead of `model`'s.
+        #[serde(default)]
+        model_file: Option<PathBuf>,
+        /// A Silero VAD model file (GGUF, or whisper.cpp's `.bin`) to find
+        /// the speech with, instead of the one built into vidcut.
+        #[serde(default)]
+        vad_file: Option<PathBuf>,
+        /// The language spoken, as a code such as `en` or `fi`. Default: the
+        /// model tells it from the longest stretch of speech.
+        #[serde(default)]
+        language: Option<String>,
+        /// Download the model files this computer doesn't have yet from
+        /// Hugging Face, each checked against its SHA-256. Without it, a
+        /// missing file is an error that says what would be downloaded.
+        #[serde(default)]
+        download: bool,
+    },
     /// Import an OpenTimelineIO timeline: an `.otio` file, an `.otioz` bundle
     /// (its media are unpacked first) or an `.otiod` bundle folder, as other
     /// editors write them. Its media join the pool, and its tracks go on V1,
@@ -589,6 +624,13 @@ pub enum Request {
         #[serde(default)]
         download: bool,
     },
+    /// Ripple Delete Words: take these words out of the timeline. Each is a
+    /// `start` and `end` from `analyze.words` (its other fields are
+    /// ignored). Touching or overlapping spans are one cut. The spans come
+    /// out of every unlocked track and the rest closes up, whether or not
+    /// ripple is on. A dry run says what would go and changes nothing.
+    #[serde(rename = "edit.ripple_delete_words")]
+    EditRippleDeleteWords { words: Vec<SpokenWord> },
     /// Detect Scene Cuts: split `clips` where their shots change.
     #[serde(rename = "edit.detect_scene_cuts")]
     EditDetectSceneCuts {
@@ -940,48 +982,6 @@ pub enum Request {
         #[serde(default)]
         download: bool,
     },
-    /// The words said in the mix of the tracks heard (`tracks`) over
-    /// `range`, each with the time the model gave it. Same hearing as
-    /// `subtitles.transcribe`, and it adds no cues. A model that times
-    /// phrases, or none at all, is refused: its estimates are not word
-    /// times. Parakeet Ultra times words. Qwen3-ASR does once its aligner
-    /// runs, and Whisper large-v3 once transcribe.cpp times its words.
-    #[serde(rename = "subtitles.words")]
-    SubtitlesWords {
-        #[serde(default)]
-        range: Option<RangeSpec>,
-        /// The tracks heard, such as `["A1"]`, muted or not; the others
-        /// aren't. Default: the tracks playback hears, those not muted, or
-        /// the soloed ones.
-        #[serde(default)]
-        tracks: Option<Vec<String>>,
-        /// Default: `parakeet-ultra`.
-        #[serde(default)]
-        model: Option<SpeechModel>,
-        /// A transcribe.cpp GGUF model file to use instead of `model`'s.
-        #[serde(default)]
-        model_file: Option<PathBuf>,
-        /// A Silero VAD model file (GGUF, or whisper.cpp's `.bin`) to find
-        /// the speech with, instead of the one built into vidcut.
-        #[serde(default)]
-        vad_file: Option<PathBuf>,
-        /// The language spoken, as a code such as `en` or `fi`. Default: the
-        /// model tells it from the longest stretch of speech.
-        #[serde(default)]
-        language: Option<String>,
-        /// Download the model files this computer doesn't have yet from
-        /// Hugging Face, each checked against its SHA-256. Without it, a
-        /// missing file is an error that says what would be downloaded.
-        #[serde(default)]
-        download: bool,
-    },
-    /// Take these words out of the timeline. Each is a `start` and `end`
-    /// from `subtitles.words` (its `text` is ignored). Touching or
-    /// overlapping spans are one cut. The spans come out of every unlocked
-    /// track and the rest closes up, whether or not ripple is on. A dry
-    /// run says what would go and changes nothing.
-    #[serde(rename = "subtitles.cut")]
-    SubtitlesCut { words: Vec<SpokenWord> },
     /// Re-time a subtitle track to the timeline's speech. Where the built-in
     /// voice-activity model hears speech is lined up with where the cues
     /// show, so it needs no words and works for any language, translations
@@ -1636,8 +1636,8 @@ pub enum SubtitleTimeBase {
     Label,
 }
 
-/// A word from `subtitles.words`, sent back to `subtitles.cut`. The cut
-/// uses `start` and `end`; `text` is ignored.
+/// A word from `analyze.words`, sent back to `edit.ripple_delete_words`.
+/// The cut uses `start` and `end`; `text` is ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SpokenWord {
     #[serde(default)]
@@ -2140,7 +2140,7 @@ impl Request {
                     | Self::MarkersList {}
                     | Self::SubtitlesList { .. }
                     | Self::SubtitlesExport { .. }
-                    | Self::SubtitlesWords { .. }
+                    | Self::AnalyzeWords { .. }
                     | Self::MediaList {}
                     | Self::MediaGet { .. }
                     | Self::Probe { .. }
@@ -2189,7 +2189,7 @@ impl Request {
                 vad_file,
                 ..
             }
-            | Self::SubtitlesWords {
+            | Self::AnalyzeWords {
                 model_file,
                 vad_file,
                 ..

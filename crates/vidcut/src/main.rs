@@ -99,7 +99,7 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
         "export.start"
             | "proxy.generate"
             | "subtitles.transcribe"
-            | "subtitles.words"
+            | "analyze.words"
             | "subtitles.retime"
     ) {
         let _ = ctrlc::set_handler(|| CANCEL.store(true, Ordering::Relaxed));

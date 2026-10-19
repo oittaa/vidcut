@@ -593,7 +593,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 print_copies(&p["copies"]);
             }
         }
-        "subtitles.words" => {
+        "analyze.words" => {
             let v = &r.result;
             for w in v["warnings"].as_array().into_iter().flatten() {
                 eprintln!("vidcut: warning: {}", w.as_str().unwrap_or_default());
@@ -614,7 +614,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 );
             }
         }
-        "subtitles.cut" => {
+        "edit.ripple_delete_words" => {
             let verb = if r.dry_run { "would cut" } else { "cut" };
             println!(
                 "{verb} {} frame(s) in {} span(s) (rev {})",

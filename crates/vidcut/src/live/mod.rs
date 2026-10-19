@@ -2472,7 +2472,7 @@ impl Live {
                 };
                 Step::Encode(Box::new(encode), Box::new(envelope), title, "proxy")
             }
-            Request::SubtitlesTranscribe { .. } | Request::SubtitlesWords { .. } => {
+            Request::SubtitlesTranscribe { .. } | Request::AnalyzeWords { .. } => {
                 let Some(open) = &self.project else {
                     return Step::Now(Err(no_project()));
                 };
@@ -2486,7 +2486,7 @@ impl Live {
                         .apply(copy, &env, None)
                         .map(drop)
                 };
-                let words = matches!(envelope.request, Request::SubtitlesWords { .. });
+                let words = matches!(envelope.request, Request::AnalyzeWords { .. });
                 let title = if words {
                     "Words in the speech"
                 } else {
@@ -3492,7 +3492,7 @@ fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
     if let Request::SubtitlesTranscribe {
         range: Some(range), ..
     }
-    | Request::SubtitlesWords {
+    | Request::AnalyzeWords {
         range: Some(range), ..
     } = &mut envelope.request
         && let Ok((a, b)) = context.range(range)

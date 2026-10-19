@@ -2773,7 +2773,7 @@ fn mutate(
                 "warnings": warnings,
             })
         }
-        Request::SubtitlesCut { words } => {
+        Request::EditRippleDeleteWords { words } => {
             if words.is_empty() {
                 return Err(Error::usage("name the words to cut"));
             }
@@ -4766,7 +4766,7 @@ pub fn query(
                     .collect::<Vec<_>>()
             )
         }
-        Request::SubtitlesWords {
+        Request::AnalyzeWords {
             range,
             tracks,
             model,
@@ -4788,15 +4788,22 @@ pub fn query(
                 },
             )?;
             let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
-            let frames = transcript::word_frames(&timed, p.settings.fps, a, b);
+            let words: Vec<Value> = timed
+                .iter()
+                .flat_map(|w| {
+                    transcript::word_frames(std::slice::from_ref(w), p.settings.fps, a, b)
+                        .into_iter()
+                        .map(|(text, start, end)| {
+                            json!({ "text": text, "start": start, "end": end, "joined": w.joined })
+                        })
+                })
+                .collect();
             let mut warnings = speech.warnings.clone();
-            if frames.is_empty() {
+            if words.is_empty() {
                 warnings.push("no speech found".into());
             }
             json!({
-                "words": frames.iter().map(|(text, start, end)| json!({
-                    "text": text, "start": start, "end": end,
-                })).collect::<Vec<_>>(),
+                "words": words,
                 "from": a,
                 "to": b,
                 "heard": sounding(p, &heard),
