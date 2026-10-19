@@ -21,7 +21,6 @@ pub struct Retime {
     words: bool,
     hear: Hear,
     heard: Vec<String>,
-    have: bool,
     asked: Option<(Key, Ask)>,
     found: Option<(Key, Value)>,
     error: Option<(Key, String)>,
@@ -75,13 +74,11 @@ fn errors(e: &Value) -> String {
 
 impl Workspace {
     pub(crate) fn open_retime(&mut self, track: &str) {
-        let dir = crate::paths::models_dir();
         self.timeline.retime = Some(Retime {
             track: track.to_string(),
             words: false,
             hear: Hear::default(),
             heard: Vec::new(),
-            have: transcribe::present(&dir, &transcribe::PARAKEET_ULTRA),
             asked: None,
             found: None,
             error: None,
@@ -219,13 +216,11 @@ impl Workspace {
                     d.error = Some((key.clone(), e.message));
                 }
             }
-            if key.words {
-                d.have =
-                    transcribe::present(&crate::paths::models_dir(), &transcribe::PARAKEET_ULTRA);
-            }
             d.asked = None;
         }
         let file = &transcribe::PARAKEET_ULTRA;
+        let dir = crate::paths::models_dir();
+        let needs = transcribe::needed(&dir, d.words.then_some(file));
         let name = t.display_name();
         let mut open = true;
         let (mut find, mut apply, mut cancel) = (false, false, false);
@@ -266,7 +261,7 @@ impl Workspace {
                          hears, finds where the offset jumps, and can move each of them to its \
                          words",
                     ));
-                    if !d.have {
+                    if !transcribe::present(&dir, file) {
                         ui.label(dim(format!(
                             "{}, downloaded from Hugging Face when first used",
                             transcribe::size(file.bytes)
@@ -289,14 +284,16 @@ impl Workspace {
                         ui.label(dim("Find shows what it would do before anything moves."));
                     }
                 }
+                if !needs.is_empty() {
+                    ui.label(dim(format!(
+                        "Find first downloads {}, checked against SHA-256",
+                        transcribe::listed(&needs)
+                    )));
+                }
                 ui.horizontal(|ui| {
-                    let label = match d.words && !d.have {
-                        true => format!(
-                            "Download {} ({}) and Find",
-                            file.title,
-                            transcribe::size(file.bytes)
-                        ),
-                        false => "Find".into(),
+                    let label = match needs.is_empty() {
+                        true => "Find".to_string(),
+                        false => "Download and Find".to_string(),
                     };
                     find = ui
                         .add_enabled(
@@ -311,7 +308,7 @@ impl Workspace {
                 });
             });
         if find {
-            let mut dry = d.params(d.words && !d.have);
+            let mut dry = d.params(!needs.is_empty());
             dry["dry_run"] = json!(true);
             d.found = None;
             d.error = None;

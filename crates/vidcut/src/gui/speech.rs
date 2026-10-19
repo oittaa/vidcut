@@ -481,10 +481,10 @@ impl Workspace {
                     });
                 });
             });
+        let dir = crate::paths::models_dir();
         if create {
-            let dir = crate::paths::models_dir();
             d.have[index(s.model)] = transcribe::present(&dir, file);
-            if d.have[index(s.model)] {
+            if transcribe::needed(&dir, Some(file)).is_empty() {
                 let settings = s.clone();
                 self.create_subtitles(&settings, &heard, false);
                 return;
@@ -492,16 +492,19 @@ impl Workspace {
             d.asking = true;
         }
         if d.asking {
+            let needs = transcribe::needed(&dir, Some(file));
+            let total: u64 = needs.iter().map(|n| n.bytes).sum();
             let mut answer = None;
             let modal = egui::Modal::new(egui::Id::unique("speech-download")).show(ctx, |ui| {
                 ui.set_max_width(420.0);
-                ui.heading(format!("Download {}?", file.title));
+                ui.heading(format!("Download {}?", transcribe::size(total)));
                 ui.label(format!(
-                    "{} isn't on this computer yet. vidcut downloads it once, {} from Hugging \
-                     Face, checks it against its SHA-256 and keeps it in {}.",
-                    file.title,
-                    transcribe::size(file.bytes),
-                    crate::paths::models_dir().display()
+                    "Hearing speech needs {}, not on this computer yet. vidcut downloads {} once, \
+                     checks each against its SHA-256 and keeps {} in {}.",
+                    transcribe::listed(&needs),
+                    if needs.len() == 1 { "it" } else { "them" },
+                    if needs.len() == 1 { "it" } else { "them" },
+                    dir.display()
                 ));
                 ui.label(dim("Jobs shows the download's progress, and can cancel it"));
                 ui.horizontal(|ui| {

@@ -173,10 +173,20 @@ sha2 = "0.11"
 # The player's audio output (ALSA on Linux, which PipeWire and PulseAudio
 # serve). Apache-2.0; needs libasound2-dev to build.
 cpal = "0.18"
-# Speech to text on this computer: transcribe.cpp on ggml, built from source
-# with CMake and linked in, on Vulkan (Windows, Linux) or Metal (macOS). MIT.
-# Exact version: its library checks the binding's version at load.
+# Speech to text on this computer: transcribe.cpp on ggml. MIT. Exact
+# version: its library checks the binding's version at load. Nothing of it
+# is built: crates/transcribe-cpp-sys (patched in below) calls the prebuilt
+# library transcribe.cpp publishes for each system, which vidcut downloads
+# on first use, on Vulkan (Windows, Linux) or Metal (macOS).
 transcribe-cpp = { version = "=0.4.0", default-features = false }
+transcribe-cpp-sys = { path = "crates/transcribe-cpp-sys", version = "=0.4.0" }
+# Unpacking that library's .tar.gz on first use, with zlib-rs as zip does.
+# MIT or Apache-2.0.
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+tar = { version = "0.4", default-features = false }
+
+[patch.crates-io]
+transcribe-cpp-sys = { path = "crates/transcribe-cpp-sys" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
