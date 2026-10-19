@@ -18,7 +18,7 @@ const MODELS: [(SpeechModel, &str); 3] = [
     ),
     (
         SpeechModel::Qwen3Asr,
-        "30 languages; its times are estimates, most within a second of the words",
+        "30 languages; its times are estimates",
     ),
 ];
 
