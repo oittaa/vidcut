@@ -64,6 +64,7 @@ fn jobs(text: &str, size: f32, width: f32) -> (LayoutJob, LayoutJob) {
                 let color = colors.last().copied().unwrap_or(Color32::WHITE);
                 let format = |color: Color32| egui::TextFormat {
                     font_id: FontId::proportional(size),
+                    line_height: Some(size * 1.31),
                     color,
                     italics: depth[0] > 0,
                     underline: if depth[2] > 0 {
@@ -123,8 +124,7 @@ pub(super) fn paint_cues(
     let Some(t) = p.subtitles.iter().find(|t| t.shown) else {
         return;
     };
-    let size = (picture.height() * 0.05).max(8.0);
-    let margin = picture.height() * 0.06;
+    let size = (picture.height() * 0.055).max(8.0);
     let width = picture.width() * 0.9;
     let on: Vec<&Cue> = t
         .cues
@@ -144,21 +144,17 @@ pub(super) fn paint_cues(
                 (painter.layout_job(plain), painter.layout_job(bold))
             })
             .collect();
-        let gap = size * 0.3;
-        let total: f32 = galleys
-            .iter()
-            .map(|(g, _)| g.rect.height() + gap)
-            .sum::<f32>()
-            - gap;
-        let mut top = match place {
-            Place::Top => picture.top() + margin,
-            Place::Middle => picture.center().y - total / 2.0,
-            Place::Bottom => picture.bottom() - margin - total,
+        let total: f32 = galleys.iter().map(|(g, _)| g.rect.height()).sum();
+        let middle = match place {
+            Place::Top => 0.2,
+            Place::Middle => 0.5,
+            Place::Bottom => 0.8,
         };
+        let mut top = picture.top() + picture.height() * middle - total / 2.0;
         for (plain, bold) in galleys {
             let r = plain.rect;
             let at = pos2(picture.center().x - r.center().x, top - r.top());
-            let edge = (size / 14.0).max(1.0);
+            let edge = (size / 20.0).max(1.0);
             for (dx, dy) in [
                 (-1.0, -1.0),
                 (0.0, -1.0),
@@ -177,7 +173,7 @@ pub(super) fn paint_cues(
             }
             painter.galley(at, plain, Color32::WHITE);
             painter.galley(at + vec2(size / 28.0, 0.0), bold, Color32::WHITE);
-            top += r.height() + gap;
+            top += r.height();
         }
     }
 }
