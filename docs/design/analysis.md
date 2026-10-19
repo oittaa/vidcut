@@ -97,11 +97,11 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 
 | What | Where | Key |
 |---|---|---|
-| pool filmstrips, timeline tiles | `thumbs` (`thumbcache`) | origin, size, frames |
+| pool filmstrips, timeline tiles | `thumbs` (`thumbcache`) | origin, size, frames, input color space |
 | waveforms | `waveforms` | origin, channels |
 | audio levels, voice activity, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
-| light, for HDR metadata | `analysis` (`light::cache_in`) | origin |
-| proxies | `proxies.folder` (`Proxies::folder_in`): `proxies` beside the project unless set (in the cache dir without a project); an absolute folder is shared by every project | content (`paths::proxy_origin`), size, codec |
+| light, for HDR metadata | `analysis` (`light::cache_in`) | origin, input color space |
+| proxies | `proxies.folder` (`Proxies::folder_in`): `proxies` beside the project unless set (in the cache dir without a project); an absolute folder is shared by every project | content (`paths::proxy_origin`), size, codec, input color space |
 | GPU encoders that work | `encoders.json` (`export::detected`) | FFmpeg, system and GPUs |
 | proxy codecs the GPU decoder plays | `plays.json` (`export::plays`) | the same, per GPU |
 | clips for decoder tests | `decoder-tests` | none |

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use vidcut_core::fingerprint::Origin;
-use vidcut_core::model::{Hdr, LightLevel};
+use vidcut_core::model::{ColorSpace, Hdr, LightLevel};
 use vidcut_core::render::{Image, VideoPiece};
 use vidcut_core::time::Rational;
 
@@ -103,6 +103,7 @@ pub struct Span {
     pub input: Input,
     pub from: f64,
     pub to: f64,
+    pub color_space: ColorSpace,
 }
 
 impl Span {
@@ -112,6 +113,7 @@ impl Span {
             origin,
             frames,
             image,
+            color_space,
             ..
         } = piece
         else {
@@ -123,6 +125,7 @@ impl Span {
                 input,
                 from: f64::NEG_INFINITY,
                 to: f64::INFINITY,
+                color_space: *color_space,
             });
         }
         let target = |pos| crate::export::video::target(fps, *origin, pos);
@@ -131,6 +134,7 @@ impl Span {
             input,
             from: target(a.min(b)),
             to: target(a.max(b) + 1),
+            color_space: *color_space,
         })
     }
 }
@@ -520,6 +524,7 @@ fn measure(
         Some(gpu) => VideoReader::open_gpu_or_cpu(&span.input, gpu)?,
         None => VideoReader::open_input(&span.input)?,
     };
+    reader.set_color_space(span.color_space);
     let tb = reader.time_base();
     let tick = f64::from(tb.numerator()) / f64::from(tb.denominator());
     if span.from.is_finite()
@@ -614,7 +619,7 @@ pub fn cache_in(dir: PathBuf) {
     let _ = CACHE.set(dir);
 }
 
-fn origin(input: &Input) -> Origin {
+fn origin(input: &Input, space: ColorSpace) -> Origin {
     let path = input.path();
     let meta = std::fs::metadata(path).ok();
     let size = meta.as_ref().map_or(0, std::fs::Metadata::len);
@@ -623,7 +628,7 @@ fn origin(input: &Input) -> Origin {
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_nanos() as i64);
     let origin = vidcut_core::fingerprint::origin(path, size, mtime);
-    match input {
+    let origin = match input {
         Input::File(_) => origin,
         Input::Sequence {
             first,
@@ -632,6 +637,13 @@ fn origin(input: &Input) -> Origin {
         } => Origin {
             name: format!("{}-{first}-{num}-{den}", origin.name).into(),
             text: format!("{} {first} {num}/{den}", origin.text).into(),
+        },
+    };
+    match space {
+        ColorSpace::Tagged => origin,
+        s => Origin {
+            name: format!("{}-{}", origin.name, s.key()).into(),
+            text: format!("{} {}", origin.text, s.key()).into(),
         },
     }
 }
@@ -703,7 +715,7 @@ pub fn analysis(
     progress: &mut dyn FnMut(f64),
 ) -> Result<Option<Arc<LightAnalysis>>> {
     static MEMORY: OnceLock<Mutex<HashMap<Origin, Arc<LightAnalysis>>>> = OnceLock::new();
-    let origin = origin(&span.input);
+    let origin = origin(&span.input, span.color_space);
     let memory = MEMORY.get_or_init(Default::default);
     let file = CACHE
         .get()
@@ -786,11 +798,14 @@ mod tests {
 
     #[test]
     fn a_sequences_measurement_is_kept_by_its_first_picture_and_rate() {
-        let o = origin(&Input::Sequence {
-            pattern: PathBuf::from("/media/f_%04d.exr"),
-            first: 1,
-            rate: (24, 1),
-        });
+        let o = origin(
+            &Input::Sequence {
+                pattern: PathBuf::from("/media/f_%04d.exr"),
+                first: 1,
+                rate: (24, 1),
+            },
+            ColorSpace::Tagged,
+        );
         assert_eq!(&*o.name, "b4484e138e19524d2c01555ddf04af59-0-0-1-24-1");
         assert_eq!(&*o.text, "0 0 /media/f_%04d.exr 1 24/1");
     }

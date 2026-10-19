@@ -938,6 +938,7 @@ mod tests {
             sequence: None,
             proxy: None,
             color: None,
+            color_space: Default::default(),
             fingerprint: None,
         }
     }

@@ -673,7 +673,7 @@ fn picture_kind(p: &Project, piece: &render::VideoPiece) -> PictureKind {
         return PictureKind::default();
     };
     p.media(media)
-        .and_then(|m| m.info.video.as_ref())
+        .and_then(|m| m.video_as_read())
         .map_or(PictureKind::default(), |v| PictureKind {
             hdr: v.hdr,
             depth: vidcut_av::probe::pixel_depth(&v.pix_fmt),
@@ -685,7 +685,7 @@ fn piece_meta(p: &Project, piece: &render::VideoPiece) -> PieceMeta {
         return PieceMeta::default();
     };
     p.media(media)
-        .and_then(|m| m.info.video.as_ref())
+        .and_then(|m| m.video_as_read())
         .map_or(PieceMeta::default(), |v| PieceMeta {
             hdr: v.hdr,
             mastering: v.mastering,
@@ -707,7 +707,7 @@ pub fn fill_hdr_metadata(p: &mut Project, ids: &[String]) {
             && v.light.is_none()
             && !v.hdr10plus
             && v.dolby_vision.is_none();
-        if !bare || !ids.contains(&m.id) || m.sequence.is_some() {
+        if !bare || !ids.contains(&m.id) || m.sequence.is_some() || !m.color_space.is_tagged() {
             continue;
         }
         let decoder =

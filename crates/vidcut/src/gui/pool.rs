@@ -1388,6 +1388,33 @@ impl Workspace {
                     ui.close();
                 }
             });
+            if let Some(v) = &m.info.video {
+                use vidcut_core::model::{ColorSpace, Hdr};
+                let tagged = match v.hdr {
+                    Some(Hdr::Pq) => "As Tagged (BT.2100 PQ)",
+                    Some(Hdr::Hlg) => "As Tagged (BT.2100 HLG)",
+                    None => "As Tagged (SDR)",
+                };
+                ui.menu_button("Input Color Space", |ui| {
+                    for (space, label) in [
+                        (ColorSpace::Tagged, tagged),
+                        (ColorSpace::Bt709, "BT.709 (SDR, HD)"),
+                        (ColorSpace::Bt601, "BT.601 (SDR, SD)"),
+                        (ColorSpace::Pq, "BT.2100 PQ (HDR10)"),
+                        (ColorSpace::Hlg, "BT.2100 HLG"),
+                    ] {
+                        if ui.radio(m.color_space == space, label).clicked() {
+                            self.send("media.set", json!({ "media": ids, "color_space": space }));
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "How its pictures' colors are read. Pick one for a file whose color tags are \
+                     wrong; the viewer, thumbnails and exports follow it",
+                );
+            }
             if let Some(p) = self.project_shared() {
                 ui.menu_button("Move to Bin", |ui| {
                     for (path, depth) in bin_list(&p) {

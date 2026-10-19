@@ -2014,9 +2014,21 @@ fn mutate(
             m.name = name.clone();
             Value::Null
         }
-        Request::MediaSet { media, color } => {
-            let color = (!color.is_empty()).then(|| color.clone());
-            ops::set_media_color(p, &media.to_vec(), color)?;
+        Request::MediaSet {
+            media,
+            color,
+            color_space,
+        } => {
+            if color.is_none() && color_space.is_none() {
+                return Err(Error::usage("give color, color_space or both"));
+            }
+            if let Some(color) = color {
+                let color = (!color.is_empty()).then(|| color.clone());
+                ops::set_media_color(p, &media.to_vec(), color)?;
+            }
+            if let Some(space) = color_space {
+                ops::set_media_color_space(p, &media.to_vec(), *space)?;
+            }
             Value::Null
         }
         Request::EditAppend(src) => {
@@ -2930,6 +2942,7 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         info: probed.info,
         marks: Default::default(),
         bin: String::new(),
+        color_space: Default::default(),
         sequence: probed.sequence,
         proxy: None,
         color: None,
@@ -4512,6 +4525,7 @@ fn proxy_generate(
             width: made.width,
             height: made.height,
             codec: made.codec,
+            color_space: item.color_space,
         };
         let m = p.media.iter_mut().find(|m| m.id == id).expect("checked");
         if let Some(old) = m.proxy.take()
@@ -5479,7 +5493,8 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
         "video": m.info.video.as_ref().map(|v| {
             let (width, height) = v.display_size();
             json!({ "width": width, "height": height, "fps": v.fps.to_string(), "codec": v.codec,
-                    "rotation": v.rotation, "fields": v.fields, "hdr": v.hdr })
+                    "rotation": v.rotation, "fields": v.fields,
+                    "hdr": m.video_as_read().and_then(|r| r.hdr) })
         }),
         "audio_streams": m.info.audio.len(),
     });
@@ -5494,6 +5509,9 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
     }
     if let Some(c) = &m.color {
         v["color"] = json!(c);
+    }
+    if !m.color_space.is_tagged() {
+        v["color_space"] = json!(m.color_space);
     }
     if m.is_still() {
         v["still"] = json!(true);

@@ -83,7 +83,7 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 
 ## X14. Color is set per export, not managed
 - **Resolve:** color management gives the timeline a color space; media come in through input transforms and tone mapping, and the output space is chosen for delivery (pp. 230–239).
-- **vidcut:** no timeline color space and no grading. Each export picks SDR, PQ or HLG from the footage it shows unless told ([D44](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), and converts each clip to it from its own tags ([D35](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)); the viewer uses the same math.
+- **vidcut:** no timeline color space and no grading. Each export picks SDR, PQ or HLG from the footage it shows unless told ([D44](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), and converts each clip to it from its own tags, or its media's Input Color Space where they are wrong ([D35](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)); the viewer uses the same math.
 - **Why:** vidcut cuts; grading belongs elsewhere. Mixed phone, camera and screen footage comes out right without color settings, and a phone's HDR video stays HDR.
 
 ## X15. The Smart Indicator holds still

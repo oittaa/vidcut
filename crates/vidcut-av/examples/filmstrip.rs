@@ -7,7 +7,8 @@ fn main() {
     let started = std::time::Instant::now();
     let input = vidcut_av::decode::Input::File(file.clone());
     let (images, times) =
-        vidcut_av::thumbs::filmstrip(&input, count, 192, 108, gpu.as_ref()).unwrap();
+        vidcut_av::thumbs::filmstrip(&input, count, 192, 108, gpu.as_ref(), Default::default())
+            .unwrap();
     println!(
         "{} pictures ({}x{}) in {:.0} ms, decoding on {}",
         images.len(),

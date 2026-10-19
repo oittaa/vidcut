@@ -37,6 +37,16 @@ pub fn describe_at(
         "media.set" if d.text("color").is_empty() => {
             format!("Clear the color of {}", d.media("media"))
         }
+        "media.set" if d.params["color"].is_null() => {
+            let space = match d.text("color_space").as_str() {
+                "bt709" => "BT.709",
+                "bt601" => "BT.601",
+                "pq" => "BT.2100 PQ",
+                "hlg" => "BT.2100 HLG",
+                _ => "its tags say",
+            };
+            format!("Read the colors of {} as {space}", d.media("media"))
+        }
         "media.set" => format!("Color {} {}", d.media("media"), d.text("color")),
         "media.marks.set" => format!("Source marks of {}: {}", d.media("media"), d.in_out()),
         "media.marks.clear" => format!("Clear the source marks of {}", d.media("media")),

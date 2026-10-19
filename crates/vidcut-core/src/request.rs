@@ -126,7 +126,14 @@ pub enum Request {
     MediaSet {
         media: OneOrMany<String>,
         /// A color as `clip.set` takes it. Empty string clears it.
-        color: String,
+        #[serde(default)]
+        color: Option<String>,
+        /// How its pictures' colors are read: `tagged`, as the file says, or
+        /// `bt709`, `bt601`, `pq` or `hlg` in place of the file's tags, for a
+        /// file whose tags are wrong. The viewer, thumbnails and exports
+        /// follow it.
+        #[serde(default)]
+        color_space: Option<crate::model::ColorSpace>,
     },
     /// Set a media item's source In and/or Out (I/O in a source viewer or over
     /// a pool thumbnail). Source time, `out` exclusive. Edits without a `range`

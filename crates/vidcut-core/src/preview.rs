@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::model::Project;
+use crate::model::{ColorSpace, Project};
 use crate::render::{RenderPlan, VideoPiece};
 
 pub fn apply_proxies(
@@ -14,7 +14,11 @@ pub fn apply_proxies(
     }
     for piece in plan.video.iter_mut().flat_map(VideoPiece::layers_mut) {
         let VideoPiece::Source {
-            media, path, image, ..
+            media,
+            path,
+            image,
+            color_space,
+            ..
         } = piece
         else {
             continue;
@@ -26,6 +30,7 @@ pub fn apply_proxies(
         if exists(&file) {
             *path = file;
             *image = None;
+            *color_space = ColorSpace::Tagged;
         }
     }
 }
