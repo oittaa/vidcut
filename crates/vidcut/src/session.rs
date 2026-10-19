@@ -65,6 +65,7 @@ pub fn run_with(
             envelope.request.method()
         )));
     }
+    let dry_run = envelope.dry_run;
     let mut response = match &envelope.request {
         Request::Schema { method } => answer(schema(method.as_deref())?),
         Request::Doctor {} => answer(doctor()),
@@ -229,6 +230,7 @@ pub fn run_with(
         }
     };
     response.via = "headless".into();
+    response.dry_run |= dry_run;
     Ok(response)
 }
 
