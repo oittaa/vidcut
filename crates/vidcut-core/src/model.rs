@@ -854,9 +854,9 @@ pub struct Title {
     /// Where it goes, as fractions of the picture's width and height from
     /// its top left: the middle of a `text` title's block (usual: `[0.5,
     /// 0.5]`), a lower third's bottom left, middle or right corner by its
-    /// `align` (usual: the corners and the middle of the bottom of the
-    /// title-safe area, 90% of the picture: `[0.05, 0.95]`, `[0.5, 0.95]`
-    /// and `[0.95, 0.95]`).
+    /// `align` (usual: 10%, 50% or 90% across and 88% down, so that its
+    /// lower line's top sits about a fifth up the picture: `[0.1, 0.88]`,
+    /// `[0.5, 0.88]` and `[0.9, 0.88]`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
 }
@@ -918,6 +918,8 @@ impl TitleStyle {
 
 impl Title {
     pub const SAFE: f64 = 0.9;
+    pub const LOWER_IN: f64 = 0.1;
+    pub const LOWER_DOWN: f64 = 0.88;
 
     pub fn new(text: impl Into<String>) -> Self {
         Self {
@@ -937,12 +939,11 @@ impl Title {
     }
 
     pub fn usual_position(kind: TitleKind, align: TitleAlign) -> [f64; 2] {
-        let edge = (1.0 - Self::SAFE) / 2.0;
         match (kind, align) {
             (TitleKind::Text, _) => [0.5, 0.5],
-            (TitleKind::LowerThird, TitleAlign::Left) => [edge, 1.0 - edge],
-            (TitleKind::LowerThird, TitleAlign::Middle) => [0.5, 1.0 - edge],
-            (TitleKind::LowerThird, TitleAlign::Right) => [1.0 - edge, 1.0 - edge],
+            (TitleKind::LowerThird, TitleAlign::Left) => [Self::LOWER_IN, Self::LOWER_DOWN],
+            (TitleKind::LowerThird, TitleAlign::Middle) => [0.5, Self::LOWER_DOWN],
+            (TitleKind::LowerThird, TitleAlign::Right) => [1.0 - Self::LOWER_IN, Self::LOWER_DOWN],
         }
     }
 
