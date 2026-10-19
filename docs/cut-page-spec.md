@@ -33,7 +33,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - **Viewer:** mode buttons top-left, Duration field top-right; along the bottom (p. 640) the jog control, Previous Edit, Stop, Play, Next Edit, Loop, Mark In, Mark Out and timecode; an audio meter on the right (p. 642).
 - **Timeline menus** (pp. 645–646):
   - Timeline Options: Ripple On, Snap, Fixed Playhead, Trim to Audio, Trim with Safe Edit, Display Clip Names, Durations and Status, Minimize Subtitle Track, Boring Detector.
-  - Timeline Actions: Add Video/Audio/Subtitle Track, Split Clips, Join Match Edit Clips, Add Marker, Detect Scene Cuts, Add Dissolve to All Edits, Clear Transition from All Edits (vidcut: Add Subtitle too, deviation X44, and Create Subtitles from Audio, X46).
+  - Timeline Actions: Add Video/Audio/Subtitle Track, Split Clips, Join Match Edit Clips, Add Marker, Detect Scene Cuts, Add Dissolve to All Edits, Clear Transition from All Edits (vidcut: Add Subtitle too, deviation X44, Create Subtitles from Audio, X46, Re-time Subtitles to Speech, X49, and Ripple Delete Silence).
   - Edit Actions: Trim Start to Playhead, Trim End to Playhead.
 - **Timeline buttons** (p. 649): Ripple On, Dynamic Trim, Split, Marker.
 - **Upper timeline:** track-number buttons to its left select the target track; the Audio Only and Video Only toggles sit there too (pp. 643, 694).
