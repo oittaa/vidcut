@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -69,6 +69,10 @@ pub struct Settings {
     /// (decision D41). Export, frames, analysis and OTIO ignore this.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub use_proxies: bool,
+    /// Filler words this project marks, per language code, each list in
+    /// place of the preferences' or the built-in one (`project.set`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fillers: BTreeMap<String, Vec<String>>,
 }
 
 impl Default for Settings {
@@ -85,6 +89,7 @@ impl Default for Settings {
             auto_format: true,
             still_secs: 5.0,
             use_proxies: false,
+            fillers: BTreeMap::new(),
         }
     }
 }

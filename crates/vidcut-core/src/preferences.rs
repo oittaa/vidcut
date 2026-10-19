@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -17,6 +18,17 @@ pub struct Preferences {
     pub player: Player,
     pub thumbnails: Thumbnails,
     pub proxies: Proxies,
+    pub transcripts: Transcripts,
+}
+
+/// Transcripts: the filler words the Transcription window marks and Delete
+/// Filler Words takes out, per language code (`en`, `fi`), each list in place
+/// of the built-in one for that language. A project's own list goes before
+/// these.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Transcripts {
+    pub fillers: BTreeMap<String, Vec<String>>,
 }
 
 /// How the GUI looks.
@@ -227,6 +239,17 @@ pub struct PreferencesPatch {
     pub thumbnails: Option<ThumbnailsPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxies: Option<ProxiesPatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcripts: Option<TranscriptsPatch>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TranscriptsPatch {
+    /// Filler words per language code: a list replaces that language's,
+    /// `null` goes back to the built-in one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fillers: Option<BTreeMap<String, Option<Vec<String>>>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -296,6 +319,30 @@ pub struct ThumbnailsPatch {
     pub cache_limit_mb: Option<u64>,
 }
 
+pub fn set_fillers(
+    lists: &mut BTreeMap<String, Vec<String>>,
+    changes: &BTreeMap<String, Option<Vec<String>>>,
+) -> Result<()> {
+    for (language, words) in changes {
+        let language = language.trim().to_lowercase();
+        if language.is_empty() {
+            return Err(Error::usage(
+                "filler words need a language code, such as `en`",
+            ));
+        }
+        match words {
+            Some(words) => {
+                let words = crate::transcript::filler_list(words).map_err(Error::usage)?;
+                lists.insert(language, words);
+            }
+            None => {
+                lists.remove(&language);
+            }
+        }
+    }
+    Ok(())
+}
+
 impl PreferencesPatch {
     pub fn from_pairs(pairs: &[String]) -> Result<Self> {
         let mut root = Value::Object(Default::default());
@@ -361,6 +408,9 @@ impl Preferences {
             if let Some(f) = &x.folder {
                 p.folder = f.clone();
             }
+        }
+        if let Some(fillers) = patch.transcripts.as_ref().and_then(|t| t.fillers.as_ref()) {
+            set_fillers(&mut p.transcripts.fillers, fillers)?;
         }
         p.check()?;
         Ok(p)

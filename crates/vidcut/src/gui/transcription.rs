@@ -10,6 +10,7 @@ use vidcut_core::model::{Project, uncovered};
 use vidcut_core::request::ViewerMode;
 
 use super::export::{Ask, near_center};
+use super::fillers::{FillerEditor, Lists, Scope};
 use super::theme;
 use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
@@ -30,6 +31,7 @@ struct Asked {
     transcribed: usize,
     clips: Vec<String>,
     fillers_in: Option<String>,
+    preferred: Arc<Lists>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -103,6 +105,9 @@ pub(super) struct TranscriptionUi {
     followed: Option<usize>,
     fillers_in: Option<String>,
     detected: Option<String>,
+    editing: Option<FillerEditor>,
+    saving: Option<(Scope, Ask)>,
+    edit_error: Option<String>,
 }
 
 impl TranscriptionUi {
@@ -340,6 +345,7 @@ impl Workspace {
         } else {
             t.over = false;
             t.keys.clear();
+            t.editing = None;
         }
         self.transcription = t;
     }
@@ -385,12 +391,14 @@ impl Workspace {
         let (shown, clips, missing) = self.shown_source(&p);
         let fps = p.settings.fps.as_f64();
         let pause = (fps * PAUSE).round() as i64;
+        let preferred = self.snap.fillers.clone();
         let want = shown.clone().map(|shown| Asked {
             shown,
             rev: p.rev,
             transcribed: Arc::as_ptr(&self.snap.transcribed) as usize,
             clips: clips.clone(),
             fillers_in: t.fillers_in.clone(),
+            preferred: preferred.clone(),
         });
         let have_words = match &want {
             Some(Asked {
@@ -600,6 +608,19 @@ impl Workspace {
                             "Whose filler words are marked. Auto: the transcript's language, or \
                              the one its commonest words belong to",
                         );
+                    if ui
+                        .button("Edit…")
+                        .on_hover_text("Change the filler words, for this project or for all")
+                        .clicked()
+                    {
+                        let language = t
+                            .fillers_in
+                            .clone()
+                            .or_else(|| t.detected.clone())
+                            .unwrap_or_else(|| "en".into());
+                        t.editing = Some(FillerEditor::new(language, Scope::Project));
+                        t.edit_error = None;
+                    }
                 });
                 if !missing.is_empty() {
                     ui.horizontal_wrapped(|ui| {
@@ -848,6 +869,7 @@ impl Workspace {
         }
         t.open = open;
         t.over = over;
+        self.filler_words_window(ctx, t, &p.settings.fillers, &preferred);
         if let Some(items) = items {
             for act in acts {
                 let m = media.as_ref().map(|m| m.id.as_str());
@@ -859,6 +881,53 @@ impl Workspace {
                     self.open_transcribe(ids);
                 }
             }
+        }
+    }
+
+    fn filler_words_window(
+        &mut self,
+        ctx: &egui::Context,
+        t: &mut TranscriptionUi,
+        project: &Lists,
+        preferred: &Lists,
+    ) {
+        if let Some((scope, ask)) = &t.saving
+            && let Some(answer) = ask.take()
+        {
+            match answer {
+                Ok(_) => {
+                    t.edit_error = None;
+                    if *scope == Scope::All {
+                        self.reread_preferences(ctx);
+                    }
+                }
+                Err(e) => t.edit_error = Some(e.message),
+            }
+            t.saving = None;
+        }
+        let Some(e) = &mut t.editing else { return };
+        let mut open = true;
+        let mut change = None;
+        egui::Window::new("Filler Words")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_pos(near_center(ctx, 420.0, 220.0))
+            .show(ctx, |ui| {
+                ui.set_width(400.0);
+                change =
+                    super::fillers::editor(ui, e, Some(project), preferred, t.saving.is_some());
+                if let Some(error) = &t.edit_error {
+                    ui.label(RichText::new(error).color(theme::colors().error));
+                }
+            });
+        if !open {
+            t.editing = None;
+            t.edit_error = None;
+        }
+        if let Some(change) = change {
+            let (method, params) = change.request();
+            t.saving = Some((change.scope, Ask::send(&self.live, ctx, method, params)));
         }
     }
 

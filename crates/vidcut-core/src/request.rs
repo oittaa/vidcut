@@ -2154,6 +2154,11 @@ pub struct ProjectSet {
     /// Play fresh proxies in the preview. Export still reads the originals.
     #[serde(default)]
     pub use_proxies: Option<bool>,
+    /// Filler words of this project, per language code (`{"en": ["um",
+    /// "uh"]}`): a list replaces the preferences' or built-in one for that
+    /// language, `null` goes back to them.
+    #[serde(default)]
+    pub fillers: Option<std::collections::BTreeMap<String, Option<Vec<String>>>>,
 }
 
 /// One value or a list (`"c1"` or `["c1", "c2"]`).
