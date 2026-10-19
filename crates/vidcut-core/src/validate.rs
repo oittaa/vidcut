@@ -164,6 +164,9 @@ pub fn violations(p: &Project) -> Vec<String> {
         if p.subtitles[..i].iter().any(|o| o.shown) && t.shown {
             v.push(format!("{} is shown with another subtitle track", t.id));
         }
+        if let Err(e) = crate::ops::subtitles::checked_style(&t.style) {
+            v.push(format!("{}: {}", t.id, e.message));
+        }
         let mut prev = None;
         for c in &t.cues {
             if !ids.insert(c.id.as_str()) {

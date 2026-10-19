@@ -291,6 +291,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     o["clips"]
                 );
             }
+            print_notes(&r.result["notes"]);
         }
         "export.plan" => {
             let s = &r.result["settings"];

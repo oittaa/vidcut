@@ -1036,6 +1036,117 @@ fn is_one_frame(frames: &i64) -> bool {
     *frames == 1
 }
 
+/// How a subtitle track looks burned in, and in an IMSC1 file. A field
+/// left out keeps the usual look.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct SubtitleStyle {
+    /// Font family. The burn-in uses it when that font is installed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<String>,
+    /// Text height as a fraction of the picture height, above 0 and at most
+    /// 1/2. Usual: 0.055.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Outline color and thickness. Usual: black, a twentieth of the text
+    /// height.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline: Option<SubtitleOutline>,
+    /// A box behind each line of text. Usual: none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<SubtitleBackground>,
+    /// Inset from the left and right, as a fraction of the picture width,
+    /// and from the top or bottom for a cue placed there, as a fraction of
+    /// the height. Usual: wrapped at 90% of the width, the block centered
+    /// at 80%, 50% or 20% of the height.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin: Option<f64>,
+}
+
+/// An outline around a subtitle track's text.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct SubtitleOutline {
+    /// `#rrggbb`, `#rgb` or a name. Usual: black.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Thickness as a fraction of the text height, from 0 to 1/10. Usual:
+    /// 0.05. `0` draws none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+}
+
+/// A box behind a subtitle track's text.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SubtitleBackground {
+    /// `#rrggbb`, `#rgb` or a name.
+    pub color: String,
+    /// From 0 to 1. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+}
+
+impl SubtitleStyle {
+    pub const LINE: f64 = 1.31;
+    pub const PADDING: f64 = 0.15;
+
+    pub fn is_empty(&self) -> bool {
+        self.font.is_none()
+            && self.size.is_none()
+            && self.color.is_none()
+            && self.outline.is_none()
+            && self.background.is_none()
+            && self.margin.is_none()
+    }
+
+    pub fn text_fraction(&self) -> f64 {
+        self.size.unwrap_or(0.055)
+    }
+
+    pub fn ink(&self) -> [u8; 3] {
+        paint(self.color.as_deref(), [255, 255, 255])
+    }
+
+    pub fn stroke(&self) -> Option<([u8; 3], f64)> {
+        let o = self.outline.as_ref();
+        let size = o.and_then(|o| o.size).unwrap_or(0.05);
+        (size > 0.0).then(|| (paint(o.and_then(|o| o.color.as_deref()), [0, 0, 0]), size))
+    }
+
+    pub fn backing(&self) -> Option<([u8; 3], f64)> {
+        let b = self.background.as_ref()?;
+        Some((paint(Some(&b.color), [0, 0, 0]), b.opacity.unwrap_or(1.0)))
+    }
+
+    pub fn inset(&self) -> f64 {
+        self.margin.unwrap_or(0.05)
+    }
+
+    pub fn wrap_width(&self, picture_width: f64, picture_height: f64) -> f64 {
+        (picture_width * (1.0 - 2.0 * self.inset())).max(self.text_fraction() * picture_height)
+    }
+
+    pub fn anchor(&self, place: Place) -> (f64, f64) {
+        match (self.margin, place) {
+            (Some(m), Place::Top) => (m, 0.0),
+            (Some(m), Place::Bottom) => (1.0 - m, 1.0),
+            (_, Place::Middle) => (0.5, 0.5),
+            (None, Place::Top) => (0.2, 0.5),
+            (None, Place::Bottom) => (0.8, 0.5),
+        }
+    }
+
+    pub fn block_top(&self, place: Place, picture_height: f64, lines: f64) -> f64 {
+        let (at, above) = self.anchor(place);
+        picture_height * at - lines * above
+    }
+}
+
+fn paint(hex: Option<&str>, usual: [u8; 3]) -> [u8; 3] {
+    hex.and_then(crate::subtitles::rgb).unwrap_or(usual)
+}
+
 /// A subtitle track: cues shown over the picture, one language or use.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SubtitleTrack {
@@ -1051,6 +1162,9 @@ pub struct SubtitleTrack {
     /// Shown in the viewer. One subtitle track at a time is.
     pub shown: bool,
     pub locked: bool,
+    /// How it looks burned in and in an IMSC1 file.
+    #[serde(default, skip_serializing_if = "SubtitleStyle::is_empty")]
+    pub style: SubtitleStyle,
     /// Sorted by `start`; cues may overlap.
     pub cues: Vec<Cue>,
 }
@@ -1101,6 +1215,7 @@ impl SubtitleTrack {
             language: None,
             shown: false,
             locked: false,
+            style: SubtitleStyle::default(),
             cues: Vec::new(),
         }
     }

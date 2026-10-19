@@ -4,7 +4,9 @@ use eframe::egui::{
     self, Align, Color32, FontId, Key, Painter, Rect, Stroke, pos2, text::LayoutJob, vec2,
 };
 use serde_json::json;
-use vidcut_core::model::{Cue, Place, Project, SubtitleTrack};
+use vidcut_core::model::{
+    Cue, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle, SubtitleTrack,
+};
 use vidcut_core::subtitles::{Tag, Token};
 
 use super::export::{Ask, Picked};
@@ -27,6 +29,17 @@ pub struct TrackDialog {
     name: String,
     language: String,
     hint: String,
+    font: String,
+    size: String,
+    color: String,
+    outline: String,
+    outline_size: String,
+    background: String,
+    opacity: String,
+    margin: String,
+    error: String,
+    families: Vec<String>,
+    preview: Option<SubtitleStyle>,
 }
 
 pub(super) enum Files {
@@ -53,7 +66,7 @@ const PLACES: [(Place, &str); 3] = [
     (Place::Top, "Top"),
 ];
 
-fn jobs(text: &str, size: f32, width: f32) -> (LayoutJob, LayoutJob) {
+fn jobs(text: &str, size: f32, width: f32, base: Color32) -> (LayoutJob, LayoutJob) {
     let mut plain = LayoutJob::default();
     let mut bold = LayoutJob::default();
     let mut colors: Vec<Color32> = Vec::new();
@@ -61,10 +74,10 @@ fn jobs(text: &str, size: f32, width: f32) -> (LayoutJob, LayoutJob) {
     for token in vidcut_core::subtitles::tokens(text) {
         match token {
             Token::Text(t) => {
-                let color = colors.last().copied().unwrap_or(Color32::WHITE);
+                let color = colors.last().copied().unwrap_or(base);
                 let format = |color: Color32| egui::TextFormat {
                     font_id: FontId::proportional(size),
-                    line_height: Some(size * 1.31),
+                    line_height: Some(size * SubtitleStyle::LINE as f32),
                     color,
                     italics: depth[0] > 0,
                     underline: if depth[2] > 0 {
@@ -82,7 +95,7 @@ fn jobs(text: &str, size: f32, width: f32) -> (LayoutJob, LayoutJob) {
                 };
                 bold.append(&t, 0.0, format(shown));
             }
-            Token::Open(Tag::Color(c)) => colors.push(hex(&c).unwrap_or(Color32::WHITE)),
+            Token::Open(Tag::Color(c)) => colors.push(hex(&c).unwrap_or(base)),
             Token::Close(Tag::Color(_)) => {
                 colors.pop();
             }
@@ -100,6 +113,107 @@ fn jobs(text: &str, size: f32, width: f32) -> (LayoutJob, LayoutJob) {
     (plain, bold)
 }
 
+fn percent(v: Option<f64>) -> String {
+    let Some(n) = v else {
+        return String::new();
+    };
+    let p = n * 100.0;
+    let s = format!("{p:.3}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn number(raw: &str, what: &str) -> Result<Option<f64>, String> {
+    let t = raw.trim().trim_end_matches('%').trim();
+    if t.is_empty() {
+        return Ok(None);
+    }
+    t.parse::<f64>()
+        .map(|n| Some(n / 100.0))
+        .map_err(|_| format!("{what} is a percent, such as 5.5"))
+}
+
+fn field(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    (!t.is_empty()).then(|| t.to_string())
+}
+
+fn kept_number(shown: &str, stored: Option<f64>, what: &str) -> Result<Option<f64>, String> {
+    if shown.trim() == percent(stored) {
+        Ok(stored)
+    } else {
+        number(shown, what)
+    }
+}
+
+fn style_of(d: &TrackDialog, stored: &SubtitleStyle) -> Result<SubtitleStyle, String> {
+    let background = match field(&d.background) {
+        Some(color) => Some(SubtitleBackground {
+            color,
+            opacity: kept_number(
+                &d.opacity,
+                stored.background.as_ref().and_then(|b| b.opacity),
+                "opacity",
+            )?,
+        }),
+        None if d.opacity.trim().is_empty() => None,
+        None => return Err("a background needs a color".into()),
+    };
+    let outline_color = field(&d.outline);
+    let outline_size = kept_number(
+        &d.outline_size,
+        stored.outline.as_ref().and_then(|o| o.size),
+        "outline size",
+    )?;
+    let style = SubtitleStyle {
+        font: field(&d.font),
+        size: kept_number(&d.size, stored.size, "size")?,
+        color: field(&d.color),
+        outline: (outline_color.is_some() || outline_size.is_some()).then_some(SubtitleOutline {
+            color: outline_color,
+            size: outline_size,
+        }),
+        background,
+        margin: kept_number(&d.margin, stored.margin, "margin")?,
+    };
+    vidcut_core::ops::subtitles::checked_style(&style).map_err(|e| e.message)
+}
+
+fn swatch(ui: &mut egui::Ui, text: &mut String, usual: [u8; 3]) -> bool {
+    let mut rgb = vidcut_core::subtitles::color(text)
+        .and_then(|c| vidcut_core::subtitles::rgb(&c))
+        .unwrap_or(usual);
+    let changed = ui.color_edit_button_srgb(&mut rgb).changed();
+    if changed {
+        let [r, g, b] = rgb;
+        *text = format!("#{r:02x}{g:02x}{b:02x}");
+    }
+    changed
+}
+
+fn font_list(ui: &mut egui::Ui, font: &mut String, families: &[String]) -> bool {
+    let mut changed = false;
+    if families.is_empty() {
+        return changed;
+    }
+    egui::ComboBox::from_id_salt("subtitle-font")
+        .selected_text("")
+        .width(0.0)
+        .show_ui(ui, |ui| {
+            for name in families {
+                if ui
+                    .selectable_label(font.trim().eq_ignore_ascii_case(name), name)
+                    .clicked()
+                {
+                    *font = name.clone();
+                    changed = true;
+                }
+            }
+        })
+        .response
+        .on_hover_text("Installed fonts");
+    changed
+}
+
 fn slot(tag: &Tag) -> usize {
     match tag {
         Tag::I => 0,
@@ -109,9 +223,27 @@ fn slot(tag: &Tag) -> usize {
 }
 
 fn hex(c: &str) -> Option<Color32> {
-    let c = c.strip_prefix('#')?;
-    let v = u32::from_str_radix(c, 16).ok()?;
-    (c.len() == 6).then(|| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8))
+    vidcut_core::subtitles::rgb(c).map(|[r, g, b]| Color32::from_rgb(r, g, b))
+}
+
+fn fill_union(painter: &Painter, boxes: &[Rect], color: Color32) {
+    let mut edges: Vec<f32> = boxes.iter().flat_map(|b| [b.top(), b.bottom()]).collect();
+    edges.sort_by(f32::total_cmp);
+    edges.dedup();
+    let mut mesh = egui::Mesh::default();
+    for pair in edges.windows(2) {
+        let span = boxes
+            .iter()
+            .filter(|b| b.top() <= pair[0] && b.bottom() >= pair[1])
+            .fold(Rect::NOTHING, |all, b| all.union(*b));
+        if span.is_positive() {
+            mesh.add_colored_rect(
+                Rect::from_x_y_ranges(span.x_range(), pair[0]..=pair[1]),
+                color,
+            );
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 pub(super) fn paint_cues(
@@ -120,12 +252,30 @@ pub(super) fn paint_cues(
     p: &Project,
     frame: i64,
     typing: Option<&CueDialog>,
+    styling: Option<&TrackDialog>,
 ) {
     let Some(t) = p.subtitles.iter().find(|t| t.shown) else {
         return;
     };
-    let size = (picture.height() * 0.055).max(8.0);
-    let width = picture.width() * 0.9;
+    let style = match styling {
+        Some(d) if d.track == t.id => d.preview.as_ref().unwrap_or(&t.style),
+        _ => &t.style,
+    };
+    let (w, h) = (f64::from(picture.width()), f64::from(picture.height()));
+    let size = (picture.height() * style.text_fraction() as f32).max(8.0);
+    let width = style.wrap_width(w, h) as f32;
+    let [r, g, b] = style.ink();
+    let ink = Color32::from_rgb(r, g, b);
+    let outline = style.stroke().map(|([r, g, b], s)| {
+        (
+            Color32::from_rgba_unmultiplied(r, g, b, 220),
+            (size * s as f32).max(1.0),
+        )
+    });
+    let backing = style.backing().map(|([r, g, b], a)| {
+        Color32::from_rgba_unmultiplied(r, g, b, (a.clamp(0.0, 1.0) * 255.0).round() as u8)
+    });
+    let pad = (size * SubtitleStyle::PADDING as f32).ceil();
     let on: Vec<&Cue> = t
         .cues
         .iter()
@@ -140,40 +290,55 @@ pub(super) fn paint_cues(
             })
             .filter(|&(_, at)| at == place)
             .map(|(text, _)| {
-                let (plain, bold) = jobs(text, size, width);
+                let (plain, bold) = jobs(text, size, width, ink);
                 (painter.layout_job(plain), painter.layout_job(bold))
             })
             .collect();
         let total: f32 = galleys.iter().map(|(g, _)| g.rect.height()).sum();
-        let middle = match place {
-            Place::Top => 0.2,
-            Place::Middle => 0.5,
-            Place::Bottom => 0.8,
-        };
-        let mut top = picture.top() + picture.height() * middle - total / 2.0;
-        for (plain, bold) in galleys {
-            let r = plain.rect;
-            let at = pos2(picture.center().x - r.center().x, top - r.top());
-            let edge = (size / 20.0).max(1.0);
-            for (dx, dy) in [
-                (-1.0, -1.0),
-                (0.0, -1.0),
-                (1.0, -1.0),
-                (-1.0, 0.0),
-                (1.0, 0.0),
-                (-1.0, 1.0),
-                (0.0, 1.0),
-                (1.0, 1.0),
-            ] {
-                painter.galley_with_override_text_color(
-                    at + vec2(dx, dy) * edge,
-                    plain.clone(),
-                    Color32::from_black_alpha(220),
-                );
+        let mut top = picture.top() + style.block_top(place, h, f64::from(total)) as f32;
+        let placed: Vec<_> = galleys
+            .into_iter()
+            .map(|(plain, bold)| {
+                let r = plain.rect;
+                let at = pos2(picture.center().x - r.center().x, top - r.top());
+                top += r.height();
+                (at, plain, bold)
+            })
+            .collect();
+        if let Some(color) = backing {
+            let boxes: Vec<Rect> = placed
+                .iter()
+                .flat_map(|(at, plain, _)| {
+                    plain
+                        .rows
+                        .iter()
+                        .filter(|row| !row.glyphs.is_empty())
+                        .map(|row| row.rect().translate(at.to_vec2()).expand(pad))
+                })
+                .collect();
+            fill_union(painter, &boxes, color);
+        }
+        for (at, plain, bold) in placed {
+            if let Some((color, edge)) = outline {
+                for (dx, dy) in [
+                    (-1.0, -1.0),
+                    (0.0, -1.0),
+                    (1.0, -1.0),
+                    (-1.0, 0.0),
+                    (1.0, 0.0),
+                    (-1.0, 1.0),
+                    (0.0, 1.0),
+                    (1.0, 1.0),
+                ] {
+                    painter.galley_with_override_text_color(
+                        at + vec2(dx, dy) * edge,
+                        plain.clone(),
+                        color,
+                    );
+                }
             }
-            painter.galley(at, plain, Color32::WHITE);
-            painter.galley(at + vec2(size / 28.0, 0.0), bold, Color32::WHITE);
-            top += r.height();
+            painter.galley(at, plain, ink);
+            painter.galley(at + vec2(size / 28.0, 0.0), bold, ink);
         }
     }
 }
@@ -220,11 +385,31 @@ impl Workspace {
     }
 
     pub(crate) fn open_track_dialog(&mut self, t: &SubtitleTrack) {
+        let s = &t.style;
         self.timeline.track_dialog = Some(TrackDialog {
             track: t.id.clone(),
             name: t.name.clone().unwrap_or_default(),
             language: t.language.clone().unwrap_or_default(),
             hint: t.display_name(),
+            font: s.font.clone().unwrap_or_default(),
+            size: percent(s.size),
+            color: s.color.clone().unwrap_or_default(),
+            outline: s
+                .outline
+                .as_ref()
+                .and_then(|o| o.color.clone())
+                .unwrap_or_default(),
+            outline_size: percent(s.outline.as_ref().and_then(|o| o.size)),
+            background: s
+                .background
+                .as_ref()
+                .map(|b| b.color.clone())
+                .unwrap_or_default(),
+            opacity: percent(s.background.as_ref().and_then(|b| b.opacity)),
+            margin: percent(s.margin),
+            error: String::new(),
+            families: vidcut_av::burn::families(),
+            preview: None,
         });
     }
 
@@ -365,6 +550,50 @@ impl Workspace {
                     ui.end_row();
                 });
                 ui.label(dim("Exported subtitle files are named with these"));
+                ui.add_space(8.0);
+                let mut changed = false;
+                egui::Grid::new("subtitle-style-fields").show(ui, |ui| {
+                    let mut row =
+                        |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
+                            ui.label(label);
+                            let r = ui.add(
+                                egui::TextEdit::singleline(text)
+                                    .hint_text(hint)
+                                    .min_size(egui::vec2(240.0, 0.0)),
+                            );
+                            enter |= r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                            r.changed()
+                        };
+                    changed |= row(ui, "Font", &mut d.font, "Open Sans");
+                    changed |= font_list(ui, &mut d.font, &d.families);
+                    ui.end_row();
+                    changed |= row(ui, "Size", &mut d.size, "5.5% of the picture");
+                    ui.end_row();
+                    changed |= row(ui, "Color", &mut d.color, "#ffffff");
+                    changed |= swatch(ui, &mut d.color, [255, 255, 255]);
+                    ui.end_row();
+                    changed |= row(ui, "Outline", &mut d.outline, "#000000");
+                    changed |= swatch(ui, &mut d.outline, [0, 0, 0]);
+                    ui.end_row();
+                    changed |= row(ui, "Outline size", &mut d.outline_size, "5% of the text");
+                    ui.end_row();
+                    changed |= row(ui, "Background", &mut d.background, "none");
+                    changed |= swatch(ui, &mut d.background, [0, 0, 0]);
+                    ui.end_row();
+                    changed |= row(ui, "Opacity", &mut d.opacity, "100%");
+                    ui.end_row();
+                    changed |= row(ui, "Margin", &mut d.margin, "none: centered at 80% or 20%");
+                    ui.end_row();
+                });
+                if changed {
+                    d.preview = style_of(&d, &t.style).ok();
+                }
+                ui.label(dim(
+                    "Burned in, and written to an IMSC1 file. An empty field keeps the usual look",
+                ));
+                if !d.error.is_empty() {
+                    ui.colored_label(ui.visuals().error_fg_color, &d.error);
+                }
                 ui.horizontal(|ui| {
                     if ui.button("Done").clicked() || enter {
                         let mut params = json!({ "track": d.track });
@@ -374,10 +603,19 @@ impl Workspace {
                         if d.language.trim() != t.language.as_deref().unwrap_or_default() {
                             params["language"] = json!(d.language.trim());
                         }
-                        if params.as_object().is_some_and(|o| o.len() > 1) {
-                            self.send("track.set", params);
+                        match style_of(&d, &t.style) {
+                            Ok(style) => {
+                                if style != t.style {
+                                    params["style"] =
+                                        serde_json::to_value(&style).unwrap_or(json!({}));
+                                }
+                                if params.as_object().is_some_and(|o| o.len() > 1) {
+                                    self.send("track.set", params);
+                                }
+                                done = true;
+                            }
+                            Err(e) => d.error = e,
                         }
-                        done = true;
                     }
                     if ui.button("Cancel").clicked() {
                         done = true;
@@ -503,11 +741,15 @@ impl Workspace {
             Files::Exporting(ask) => match ask.take() {
                 None => Some(Files::Exporting(ask)),
                 Some(Ok(r)) => {
-                    self.say(format!(
+                    let mut said = format!(
                         "Wrote {} ({} subtitles)",
                         r.result["path"].as_str().unwrap_or_default(),
                         r.result["cues"]
-                    ));
+                    );
+                    for w in r.result["warnings"].as_array().into_iter().flatten() {
+                        said.push_str(&format!("; {}", w.as_str().unwrap_or_default()));
+                    }
+                    self.say(said);
                     None
                 }
                 Some(Err(e)) => {

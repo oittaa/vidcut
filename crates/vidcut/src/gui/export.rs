@@ -1952,6 +1952,13 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
                 ui.label(dim(format!("… and {} more", outputs.len() - 4)));
             }
             for note in plan["notes"].as_array().into_iter().flatten() {
+                if note["code"] == "subtitles_cut_off" {
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        note["message"].as_str().unwrap_or_default(),
+                    );
+                    continue;
+                }
                 if note["code"] != "hdr_tone_mapped" {
                     continue;
                 }

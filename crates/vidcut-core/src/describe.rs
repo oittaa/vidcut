@@ -815,6 +815,9 @@ impl Words<'_> {
         if let Some(n) = p["name"].as_str() {
             parts.push(format!("named \u{201c}{n}\u{201d}"));
         }
+        if p["style"].is_object() {
+            parts.push("style".to_string());
+        }
         match p["color"].as_str() {
             Some("") => parts.push("no color".to_string()),
             Some(c) => parts.push(c.to_string()),
