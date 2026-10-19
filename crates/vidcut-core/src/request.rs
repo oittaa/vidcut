@@ -1053,7 +1053,9 @@ pub enum Request {
     #[serde(rename = "preferences.set")]
     PreferencesSet(crate::preferences::PreferencesPatch),
     /// Put the preferences back to the defaults. The file is written anew,
-    /// and the old one is kept next to it as `preferences.toml.bak`.
+    /// and the old one is kept next to it as `preferences.toml.bak`, or
+    /// `preferences.toml.bak.2` and on when that is taken: a backup is never
+    /// replaced.
     #[serde(rename = "preferences.reset")]
     PreferencesReset {},
     /// The keyboard shortcuts, one action each, with a few plain words

@@ -466,7 +466,12 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 );
             }
             if let Some(b) = r.result["backup"].as_str() {
-                println!("the old preferences are in {b}");
+                let verb = if r.dry_run {
+                    "would be kept in"
+                } else {
+                    "are in"
+                };
+                println!("the old preferences {verb} {b}");
             }
             for t in r.result["themes"].as_array().into_iter().flatten() {
                 let from = match (t["error"].as_str(), t["path"].as_str()) {

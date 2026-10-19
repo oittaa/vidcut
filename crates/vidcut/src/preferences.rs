@@ -161,7 +161,7 @@ static SETTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 pub fn reset(dry_run: bool) -> Result<Value> {
     let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
     let path = path();
-    let backup = path.exists().then(|| path.with_extension("toml.bak"));
+    let backup = path.exists().then(|| free_backup(&path));
     let p = Preferences::default();
     if !dry_run {
         if let Some(b) = &backup {
@@ -173,6 +173,14 @@ pub fn reset(dry_run: bool) -> Result<Value> {
     let mut v = describe(&p);
     v["backup"] = json!(backup);
     Ok(v)
+}
+
+fn free_backup(path: &std::path::Path) -> PathBuf {
+    let first = path.with_extension("toml.bak");
+    std::iter::once(first.clone())
+        .chain((2..).map(|n| path.with_extension(format!("toml.bak.{n}"))))
+        .find(|p| !p.exists())
+        .unwrap_or(first)
 }
 
 pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
