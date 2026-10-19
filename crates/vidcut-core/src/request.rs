@@ -1434,15 +1434,32 @@ pub struct ExportParams {
     /// see `jobs.*`).
     #[serde(default)]
     pub background: bool,
-    /// Subtitle files beside the output, one for each of these subtitle
-    /// tracks (`S1`). Beside media they start at zero; beside a timeline
-    /// file (`.otio`) they are in its timecode. Default: none beside media,
-    /// every track with cues beside a timeline file.
+    /// The subtitle tracks (`S1`) that go out with the export, as
+    /// `subtitles_as` says. Files beside media start at zero; beside a
+    /// timeline file (`.otio`) they are in its timecode. Default: as files,
+    /// none beside media and every track with cues beside a timeline file;
+    /// as a stream or burned in, the shown track.
     #[serde(default)]
     pub subtitles: Option<Vec<String>>,
+    /// How `subtitles` go out with media. Default: `file`.
+    #[serde(default)]
+    pub subtitles_as: Option<SubtitlesAs>,
     /// The subtitle files' format. Default: SRT.
     #[serde(default)]
     pub subtitle_format: Option<SubtitleFormat>,
+}
+
+/// How subtitle tracks go out with an export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SubtitlesAs {
+    /// A file beside the output for each track (`subtitle_format`).
+    File,
+    /// A subtitle stream in the output for each track: mov_text in MP4, MOV
+    /// and M4A, SubRip in Matroska, WebVTT in WebM.
+    Stream,
+    /// One track drawn into the picture.
+    Burn,
 }
 
 /// What kind of track `track.add` makes.

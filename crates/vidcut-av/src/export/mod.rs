@@ -6,6 +6,7 @@ pub(crate) mod mix;
 pub(crate) mod normalize;
 pub mod renderer;
 pub mod still;
+pub mod subtitles;
 pub mod video;
 pub(crate) mod worker;
 
@@ -28,6 +29,7 @@ use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use audio::AudioMix;
 use encode::{AudioEncoder, Availability, Upload};
 use make::Output;
+use subtitles::{BurnNote, StreamNote, SubtitleOut, Subtitles};
 use video::VideoFrames;
 use worker::{Inbox, Worker};
 
@@ -169,6 +171,10 @@ pub struct Report {
     pub tried: Vec<Tried>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<SourceNote>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub subtitle_streams: Vec<StreamNote>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub burned_in: Option<BurnNote>,
 }
 
 pub fn probed_metadata<'a>(
@@ -360,15 +366,20 @@ pub fn run(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
-    run_decoding_on(plan, settings, output, available, None, cancel, progress)
+    let none = Subtitles::default();
+    run_decoding_on(
+        plan, settings, output, available, None, &none, cancel, progress,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_decoding_on(
     plan: &RenderPlan,
     settings: &ExportSettings,
     output: &Path,
     available: &Availability,
     decoder: Option<&crate::hw::GpuDecoder>,
+    subtitles: &Subtitles,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
@@ -410,7 +421,7 @@ pub fn run_decoding_on(
     }
     let part = partial_path(output);
     let result = encode(
-        plan, settings, &part, output, available, decoder, cancel, progress,
+        plan, settings, &part, output, available, decoder, subtitles, cancel, progress,
     );
     match result.map(|r| Report {
         color: chosen,
@@ -498,12 +509,14 @@ fn first_run(
     mut encoder: encoder::Video,
     (w, h): (u32, u32),
     decoder: Option<&crate::hw::GpuDecoder>,
+    burn: Vec<subtitles::Cue>,
     cancel: &AtomicBool,
     started: Instant,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Option<String>> {
-    let mut frames =
-        VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr).with_dynamic(enc.dynamic);
+    let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr)
+        .with_dynamic(enc.dynamic)
+        .with_burn(burn);
     if let Some(d) = decoder {
         frames = frames.decode_on(d.clone());
     }
@@ -755,30 +768,41 @@ enum Out {
         picture: frame::Video,
         t35: Option<Vec<u8>>,
     },
-    Sound(Vec<f32>),
+    Sound(i64, Vec<f32>),
 }
 
 struct Writer {
     octx: format::context::Output,
     video: Option<VideoOut>,
     audio: Option<AudioOut>,
+    subtitles: Vec<SubtitleOut>,
 }
 
 impl Writer {
+    fn subtitles_until(&mut self, j: i64) -> Result<()> {
+        for s in &mut self.subtitles {
+            s.write_until(&mut self.octx, j)?;
+        }
+        Ok(())
+    }
+
     fn run(mut self, mut outs: Inbox<Out>) -> Result<()> {
         while let Some(out) = outs.recv()? {
             match out {
                 Out::Picture { j, picture, t35 } => {
+                    self.subtitles_until(j)?;
                     let v = self.video.as_mut().expect("a video encoder");
                     v.encode(&mut self.octx, j, picture, t35)?;
                 }
-                Out::Sound(samples) => {
+                Out::Sound(j, samples) => {
+                    self.subtitles_until(j)?;
                     let a = self.audio.as_mut().expect("an audio encoder");
                     a.fifo.extend_from_slice(&samples);
                     a.encode(&mut self.octx, false)?;
                 }
             }
         }
+        self.subtitles_until(i64::MAX)?;
         if let Some(a) = self.audio.as_mut() {
             a.encode(&mut self.octx, true)?;
             a.encoder
@@ -804,10 +828,12 @@ fn encode(
     output: &Path,
     available: &Availability,
     decoder: Option<&crate::hw::GpuDecoder>,
+    subs: &Subtitles,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
     let started = Instant::now();
+    let burn = || subs.burn.as_ref().map_or_else(Vec::new, |t| t.cues.clone());
     let fps = ffmpeg::Rational(plan.fps.num() as i32, plan.fps.den() as i32);
     let times = (fps.invert(), Some(fps));
     let mut octx = format::output_as(part, settings.container.muxer())
@@ -903,6 +929,7 @@ fn encode(
                         encoder,
                         (w, h),
                         decoder,
+                        burn(),
                         cancel,
                         started,
                         progress,
@@ -938,7 +965,8 @@ fn encode(
             let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, pixel, enc.hdr)
                 .output(output)
                 .with_dynamic(enc.dynamic)
-                .with_light(light);
+                .with_light(light)
+                .with_burn(burn());
             if let Some(d) = decoder {
                 frames = frames.decode_on(d.clone());
             }
@@ -1060,6 +1088,26 @@ fn encode(
         None => (None, None),
     };
 
+    let mut subtitle_outs = Vec::new();
+    let mut subtitle_streams = Vec::new();
+    for track in &subs.streams {
+        let (out, note) = SubtitleOut::add(&mut octx, track, plan.fps)?;
+        subtitle_outs.push(out);
+        subtitle_streams.push(note);
+    }
+    let burned_in = match (&subs.burn, &video) {
+        (Some(t), Some(_)) => Some(BurnNote {
+            track: t.id.clone(),
+            cues: t.cues.len(),
+        }),
+        (Some(_), None) => {
+            return Err(Error::Invalid(
+                "an export without video has no picture to burn subtitles into".into(),
+            ));
+        }
+        (None, _) => None,
+    };
+
     let mut opts = ffmpeg::Dictionary::new();
     if matches!(settings.container.muxer(), "mp4" | "mov" | "ipod") {
         opts.set("movflags", "+faststart");
@@ -1079,6 +1127,9 @@ fn encode(
     if let Some(a) = audio_out.as_mut() {
         a.stream_tb = octx.stream(a.stream).expect("audio stream").time_base();
     }
+    for s in &mut subtitle_outs {
+        s.opened(&octx);
+    }
     let audio_encoder = audio_out.as_ref().map(|a| a.spec.name.clone());
 
     let holds = worker::AHEAD * (usize::from(video.is_some()) + usize::from(mix.is_some())).max(1);
@@ -1086,6 +1137,7 @@ fn encode(
         octx,
         video: video_out,
         audio: audio_out,
+        subtitles: subtitle_outs,
     };
     let mut writing = Worker::spawn(holds, move |outs| writer.run(outs))?;
     let mut produced = 0i64;
@@ -1103,7 +1155,7 @@ fn encode(
                 let until = plan.fps.frame_to_sample(j + 1, plan.sample_rate);
                 let samples = mix.read((until - produced) as usize)?;
                 produced = until;
-                writing.send(Out::Sound(samples))?;
+                writing.send(Out::Sound(j, samples))?;
             }
             progress(Progress {
                 frames: j + 1,
@@ -1149,5 +1201,7 @@ fn encode(
         color: None,
         metadata: None,
         copies: Default::default(),
+        subtitle_streams,
+        burned_in,
     })
 }

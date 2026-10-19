@@ -388,6 +388,94 @@ pub struct VideoFrames {
     last_dolby_vision: frame::Video,
     cuda_mix_failed: Option<String>,
     sources: Vec<super::SourceNote>,
+    burn: Option<Burner>,
+}
+
+struct Burner {
+    cues: Vec<super::subtitles::Cue>,
+    frame: i64,
+    showing: Vec<usize>,
+    size: (u32, u32),
+    sprites: Vec<crate::burn::Sprite>,
+    on_gpu: Option<crate::cuda::burn::Overlay>,
+    gpu_failed: bool,
+}
+
+impl Burner {
+    fn burn(&mut self, f: frame::Video, output: &Output) -> Result<frame::Video> {
+        let j = self.frame;
+        self.frame += 1;
+        let showing: Vec<usize> = self
+            .cues
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.start <= j && j < c.end)
+            .map(|(i, _)| i)
+            .collect();
+        if showing.is_empty() {
+            return Ok(f);
+        }
+        let size = (f.width(), f.height());
+        if showing != self.showing || size != self.size {
+            let cues: Vec<(&str, vidcut_core::model::Place)> = showing
+                .iter()
+                .map(|&i| (self.cues[i].text.as_str(), self.cues[i].place))
+                .collect();
+            self.sprites = crate::burn::draw(&cues, size.0, size.1);
+            self.showing = showing;
+            self.size = size;
+            self.on_gpu = None;
+        }
+        if self.sprites.is_empty() {
+            return Ok(f);
+        }
+        match (Place::of(&f), output) {
+            (Place::Memory, _) => {
+                let mut f = f;
+                crate::burn::blend(&mut f, &self.sprites)?;
+                Ok(f)
+            }
+            (Place::Cuda, Output::Cuda { frames, .. }) if !self.gpu_failed => {
+                match self.on_cuda(frames, &f) {
+                    Ok(out) => Ok(out),
+                    Err(e) => {
+                        crate::debug!(
+                            "decoding",
+                            "the GPU won't draw subtitles, the CPU draws them: {e}"
+                        );
+                        self.gpu_failed = true;
+                        self.in_memory(&f, Some(frames))
+                    }
+                }
+            }
+            (_, Output::Cuda { frames, .. }) => self.in_memory(&f, Some(frames)),
+            _ => self.in_memory(&f, None),
+        }
+    }
+
+    fn on_cuda(
+        &mut self,
+        frames: &crate::cuda::CudaFrames,
+        f: &frame::Video,
+    ) -> Result<frame::Video> {
+        if self.on_gpu.is_none() {
+            self.on_gpu = Some(crate::cuda::burn::Overlay::new(frames, f, &self.sprites)?);
+        }
+        crate::cuda::burn::burn(frames, f, self.on_gpu.as_ref().expect("made"))
+    }
+
+    fn in_memory(
+        &self,
+        f: &frame::Video,
+        up: Option<&crate::cuda::CudaFrames>,
+    ) -> Result<frame::Video> {
+        let mut m = crate::hw::download(f)?;
+        crate::burn::blend(&mut m, &self.sprites)?;
+        match up {
+            Some(frames) => frames.upload(&m),
+            None => Ok(m),
+        }
+    }
 }
 
 impl VideoFrames {
@@ -425,7 +513,21 @@ impl VideoFrames {
             last_dolby_vision: frame::Video::empty(),
             cuda_mix_failed: None,
             sources: Vec::new(),
+            burn: None,
         }
+    }
+
+    pub fn with_burn(mut self, cues: Vec<super::subtitles::Cue>) -> Self {
+        self.burn = (!cues.is_empty()).then(|| Burner {
+            cues,
+            frame: 0,
+            showing: Vec::new(),
+            size: (0, 0),
+            sprites: Vec::new(),
+            on_gpu: None,
+            gpu_failed: false,
+        });
+        self
     }
 
     pub fn sources(&self) -> &[super::SourceNote] {
@@ -544,11 +646,16 @@ impl VideoFrames {
         let Some(layers) = self.next_layers()? else {
             return Ok(None);
         };
-        if layers.len() == 1 {
+        let f = if layers.len() == 1 {
             let only = layers.into_iter().next().expect("one");
-            return Ok(Some(only.frame.expect("a frame's only picture")));
+            only.frame.expect("a frame's only picture")
+        } else {
+            self.mix(layers)?
+        };
+        match self.burn.as_mut() {
+            Some(b) => b.burn(f, self.maker.output()).map(Some),
+            None => Ok(Some(f)),
         }
-        self.mix(layers).map(Some)
     }
 
     pub(crate) fn next_layers(&mut self) -> Result<Option<Vec<Layer>>> {
@@ -587,7 +694,11 @@ impl VideoFrames {
     }
 
     pub fn skip_frame(&mut self) -> Result<bool> {
-        Ok(self.next(false)?.is_some())
+        let skipped = self.next(false)?.is_some();
+        if skipped && let Some(b) = self.burn.as_mut() {
+            b.frame += 1;
+        }
+        Ok(skipped)
     }
 
     fn next(&mut self, picture: bool) -> Result<Option<Option<Vec<Layer>>>> {

@@ -10,6 +10,7 @@ license.workspace = true
 vidcut-core.workspace = true
 ash.workspace = true
 ffmpeg-next.workspace = true
+cosmic-text.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
