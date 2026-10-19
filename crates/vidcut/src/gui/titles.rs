@@ -36,6 +36,10 @@ pub struct TitleDialog {
     shown: Option<Title>,
     loaded: bool,
     focus: bool,
+    selection: (usize, usize),
+    word_color: String,
+    word_size: String,
+    word_font: String,
 }
 
 const ALIGNS: [(TitleAlign, &str); 3] = [
@@ -69,6 +73,10 @@ impl TitleDialog {
             rotation: String::new(),
             error: String::new(),
             families: vidcut_av::burn::families(),
+            selection: (0, 0),
+            word_color: "#ffd700".to_string(),
+            word_size: String::new(),
+            word_font: String::new(),
             shown: None,
             loaded: false,
             focus: true,
@@ -116,6 +124,31 @@ impl TitleDialog {
 }
 
 const SHADOW_INK: &str = "#000000";
+
+fn byte_at(text: &str, chars: usize) -> usize {
+    text.char_indices()
+        .nth(chars)
+        .map_or(text.len(), |(i, _)| i)
+}
+
+fn styled(text: &str, (a, b): (usize, usize), open: &str, close: &str) -> String {
+    let (a, b) = if a == b {
+        (0, text.len())
+    } else {
+        (byte_at(text, a), byte_at(text, b))
+    };
+    format!("{}{open}{}{close}{}", &text[..a], &text[a..b], &text[b..])
+}
+
+fn unstyled(text: &str, (a, b): (usize, usize)) -> String {
+    let (a, b) = if a == b {
+        (0, text.len())
+    } else {
+        (byte_at(text, a), byte_at(text, b))
+    };
+    let middle = vidcut_core::rich::escape(&vidcut_core::rich::plain(&text[a..b]));
+    format!("{}{middle}{}", &text[..a], &text[b..])
+}
 
 fn plain(v: Option<f64>) -> String {
     v.map_or_else(String::new, |n| {
@@ -393,13 +426,65 @@ impl Workspace {
                         }
                     });
                 });
-                let r = ui.add(
-                    egui::TextEdit::multiline(&mut d.text)
-                        .desired_rows(3)
-                        .desired_width(380.0)
-                        .hint_text("Its text; Enter starts a new line"),
-                );
+                let out = egui::TextEdit::multiline(&mut d.text)
+                    .desired_rows(3)
+                    .desired_width(380.0)
+                    .hint_text("Its text; Enter starts a new line")
+                    .show(ui);
+                if let Some(range) = out.cursor_range {
+                    let r = range.as_sorted_char_range();
+                    d.selection = (r.start.0, r.end.0);
+                }
+                let r = out.response.response;
                 changed |= r.changed();
+                ui.horizontal_wrapped(|ui| {
+                    let wrap = |d: &mut TitleDialog, open: String, close: &str| {
+                        d.text = styled(&d.text, d.selection, &open, close);
+                        d.selection = (0, 0);
+                        true
+                    };
+                    if ui.button("B").on_hover_text("Bold").clicked() {
+                        changed |= wrap(&mut d, "<b>".into(), "</b>");
+                    }
+                    if ui.button("I").on_hover_text("Italic").clicked() {
+                        changed |= wrap(&mut d, "<i>".into(), "</i>");
+                    }
+                    if ui.button("U").on_hover_text("Underline").clicked() {
+                        changed |= wrap(&mut d, "<u>".into(), "</u>");
+                    }
+                    swatch(ui, &mut d.word_color, [255, 215, 0]);
+                    if ui.button("Color").clicked()
+                        && let Some(c) = vidcut_core::subtitles::color(&d.word_color)
+                    {
+                        changed |= wrap(&mut d, format!("<font color=\"{c}\">"), "</font>");
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(&mut d.word_size)
+                            .hint_text("size %")
+                            .desired_width(56.0),
+                    );
+                    if ui.button("Size").clicked()
+                        && let Ok(Some(s)) = kept_number(&d.word_size, None, "size")
+                    {
+                        changed |= wrap(&mut d, format!("<font size=\"{s}\">"), "</font>");
+                    }
+                    let mut face = d.word_font.clone();
+                    font_list(ui, "title-word-font", &mut face, &d.families);
+                    d.word_font = face;
+                    if ui.button("Font").clicked() && !d.word_font.trim().is_empty() {
+                        let f = vidcut_core::rich::escape(d.word_font.trim()).replace('"', "");
+                        changed |= wrap(&mut d, format!("<font face=\"{f}\">"), "</font>");
+                    }
+                    if ui
+                        .button("Plain")
+                        .on_hover_text("Takes the styles off the words")
+                        .clicked()
+                    {
+                        d.text = unstyled(&d.text, d.selection);
+                        d.selection = (0, 0);
+                        changed = true;
+                    }
+                });
                 if d.focus {
                     r.request_focus();
                     d.focus = false;

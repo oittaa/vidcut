@@ -5,6 +5,7 @@ use crate::model::{
     SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleAlign, TitleKind, TitleShadow,
     TitleStyle,
 };
+use crate::rich::{self, Look, Span};
 
 pub const STROKE_PER_TEXT: f64 = 160.0;
 pub const UNKNOWN_HEIGHT: u32 = 1080;
@@ -50,7 +51,12 @@ fn scrolling(t: &Title, family: &str, points: f64, color: &str) -> Vec<Value> {
             6,
             0,
             vec![
-                plain("text", json!(t.text), json!("Scroll Title"), "String"),
+                plain(
+                    "text",
+                    json!(rich::plain(&t.text)),
+                    json!("Scroll Title"),
+                    "String",
+                ),
                 keyed(
                     "position",
                     json!([rounded(across), 0.5]),
@@ -108,29 +114,67 @@ fn escaped(text: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn html(
-    lines: &[&str],
-    align: Option<&str>,
-    spacing: u8,
-    family: &str,
-    points: f64,
-    color: &str,
-) -> String {
+struct Base<'a> {
+    family: &'a str,
+    size: f64,
+    height: f64,
+    color: &'a str,
+}
+
+fn span_html(text: &str, look: &Look, base: &Base) -> String {
+    let family = look.face.as_deref().unwrap_or(base.family);
+    let points = look.size.unwrap_or(base.size) * base.height;
+    let color = look
+        .color
+        .as_deref()
+        .map_or_else(|| base.color.to_string(), str::to_string);
+    let weight = if look.bold { 700 } else { 400 };
+    let italic = if look.italic {
+        " font-style:italic;"
+    } else {
+        ""
+    };
+    let under = if look.underline {
+        " text-decoration: underline;"
+    } else {
+        ""
+    };
+    format!(
+        "<span style=\" font-family:'{family}'; font-size:{}pt; font-weight:{weight};{italic}{under} \
+         color:{color};\">{}</span>",
+        number(points),
+        escaped(text)
+    )
+}
+
+fn html(lines: &[&[Span]], align: Option<&str>, spacing: u8, base: &Base) -> String {
     let align = align.map_or(String::new(), |a| format!(" align=\"{a}\""));
     let paragraphs: Vec<String> = lines
         .iter()
         .map(|line| {
+            let spans: String = if line.is_empty() {
+                span_html("", &Look::default(), base)
+            } else {
+                line.iter()
+                    .map(|s| span_html(&s.text, &s.look, base))
+                    .collect()
+            };
             format!(
                 "<p{align} style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; \
                  margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:{spacing}; \
-                 -qt-line-height-type: line-distance;\"><span style=\" font-family:'{family}'; \
-                 font-size:{}pt; font-weight:400; color:{color};\">{}</span></p>",
-                number(points),
-                escaped(line)
+                 -qt-line-height-type: line-distance;\">{spans}</p>"
             )
         })
         .collect();
     format!("{HEAD}{}</body></html>", paragraphs.join("\n"))
+}
+
+fn plain_lines(lines: &[&[Span]]) -> String {
+    lines
+        .iter()
+        .map(|l| l.iter().map(|s| s.text.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn plain(id: &str, value: Value, usual: Value, variant: &str) -> Value {
@@ -167,7 +211,7 @@ fn group(name: &str, kind: u32, shown: u32, parameters: Vec<Value>) -> Value {
 
 fn rich_text(
     t: &Title,
-    lines: &[&str],
+    lines: &[&[Span]],
     blob: String,
     anchor: u32,
     at: [f64; 2],
@@ -182,7 +226,7 @@ fn rich_text(
         vec![
             plain(
                 "rich text",
-                json!(lines.join("\n")),
+                json!(plain_lines(lines)),
                 json!("Title"),
                 "String",
             ),
@@ -225,14 +269,21 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
     let color = hex(t.ink());
     let line = size * SubtitleStyle::LINE;
     let [x, y] = t.place();
-    let lines: Vec<&str> = t.text.lines().collect();
+    let spanned = rich::lines(&t.text);
+    let lines: Vec<&[Span]> = spanned.iter().map(Vec::as_slice).collect();
+    let base = Base {
+        family,
+        size,
+        height: f64::from(height),
+        color: &color,
+    };
     let (mut groups, hold) = match t.kind {
         TitleKind::Scroll => (scrolling(t, family, points, &color), None),
         TitleKind::Text => (
             vec![rich_text(
                 t,
                 &lines,
-                html(&lines, Some("center"), 0, family, points, &color),
+                html(&lines, Some("center"), 0, &base),
                 4,
                 [rounded(x), rounded(1.0 - y)],
                 [0.5, 0.5],
@@ -245,18 +296,19 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
                 TitleAlign::Middle => (Some("center"), 1, 0.5),
                 TitleAlign::Right => (Some("right"), 2, 0.9),
             };
+            let none: &[Span] = &[];
             let (upper, lower) = match lines.as_slice() {
-                [] => ("", ""),
-                [only] => ("", *only),
+                [] => (none, none),
+                [only] => (none, *only),
                 [first, second, ..] => (*first, *second),
             };
-            let meet = 1.0 - y + line;
+            let meet = 1.0 - y + t.lower_line();
             (
                 vec![
                     rich_text(
                         t,
                         &[upper],
-                        html(&[upper], align, 1, family, points, &color),
+                        html(&[upper], align, 1, &base),
                         column,
                         [rounded(x), rounded(meet)],
                         [usual_x, 0.2],
@@ -264,7 +316,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
                     rich_text(
                         t,
                         &[lower],
-                        html(&[lower], align, 0, family, points, &color),
+                        html(&[lower], align, 0, &base),
                         6 + column,
                         [rounded(x), rounded(meet)],
                         [usual_x, 0.22],
@@ -462,12 +514,74 @@ fn value<'a>(group: &'a Value, id: &str) -> &'a Value {
         })
 }
 
-#[derive(Debug, Default)]
-struct Read {
-    lines: Vec<String>,
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Styled {
     family: Option<String>,
     points: Option<f64>,
     color: Option<String>,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+}
+
+#[derive(Debug, Default)]
+struct Read {
+    lines: Vec<Vec<(String, Styled)>>,
+    family: Option<String>,
+    points: Option<f64>,
+    color: Option<String>,
+}
+
+fn styled(style: &str) -> Styled {
+    Styled {
+        family: style_value(style, "font-family").map(|f| f.trim_matches(['\'', '"']).to_string()),
+        points: style_value(style, "font-size")
+            .and_then(|s| s.strip_suffix("pt"))
+            .and_then(|s| s.trim().parse().ok()),
+        color: style_value(style, "color").map(str::to_string),
+        bold: style_value(style, "font-weight")
+            .and_then(|w| w.parse::<u32>().ok())
+            .is_some_and(|w| w >= 600),
+        italic: style_value(style, "font-style") == Some("italic"),
+        underline: style_value(style, "text-decoration").is_some_and(|d| d.contains("underline")),
+    }
+}
+
+fn markup(
+    line: &[(String, Styled)],
+    family: Option<&str>,
+    points: Option<f64>,
+    color: Option<&str>,
+    height: f64,
+) -> String {
+    let spans: Vec<Span> = line
+        .iter()
+        .map(|(text, st)| Span {
+            text: text.clone(),
+            look: Look {
+                bold: st.bold,
+                italic: st.italic,
+                underline: st.underline,
+                color: st
+                    .color
+                    .as_deref()
+                    .filter(|c| Some(*c) != color)
+                    .and_then(crate::subtitles::color),
+                face: st
+                    .family
+                    .as_deref()
+                    .filter(|f| Some(*f) != family)
+                    .filter(|f| crate::ops::subtitles::checked_font(Some(f), "title").is_ok())
+                    .map(str::to_string),
+                size: st
+                    .points
+                    .filter(|p| Some(*p) != points)
+                    .map(|p| rounded(p / height))
+                    .filter(|s| *s > 0.0 && *s <= 0.5),
+            },
+        })
+        .collect();
+    rich::write(&spans, &Look::default())
 }
 
 fn entities(text: &str) -> String {
@@ -533,41 +647,54 @@ fn read_html(blob: &str) -> Read {
         let inner = &after[open + 1..];
         let close = inner.find("</p>").unwrap_or(inner.len());
         let paragraph = &inner[..close];
-        let mut text = String::new();
+        let mut line: Vec<(String, Styled)> = Vec::new();
+        let mut stack: Vec<Styled> = Vec::new();
         let mut cursor = paragraph;
+        let put = |text: String, st: &Styled, line: &mut Vec<(String, Styled)>| {
+            if text.is_empty() {
+                return;
+            }
+            match line.last_mut() {
+                Some((t, last)) if last == st => t.push_str(&text),
+                _ => line.push((text, st.clone())),
+            }
+        };
+        let mut lines: Vec<Vec<(String, Styled)>> = Vec::new();
         while let Some(t) = cursor.find('<') {
-            text.push_str(&entities(&cursor[..t]));
+            let current = stack.last().cloned().unwrap_or_default();
+            put(entities(&cursor[..t]), &current, &mut line);
             let Some(end) = cursor[t..].find('>') else {
                 cursor = "";
                 break;
             };
             let tag = &cursor[t + 1..t + end];
             if tag.starts_with("br") {
-                text.push('\n');
-            }
-            if let Some(style) = tag
-                .strip_prefix("span")
-                .and_then(|s| s.split_once("style=\""))
-                .and_then(|(_, s)| s.split_once('"'))
-                .map(|(s, _)| s)
-            {
+                lines.push(std::mem::take(&mut line));
+            } else if tag.starts_with("/span") {
+                stack.pop();
+            } else if let Some(rest) = tag.strip_prefix("span") {
+                let style = rest
+                    .split_once("style=\"")
+                    .and_then(|(_, s)| s.split_once('"'))
+                    .map_or("", |(s, _)| s);
+                let st = styled(style);
                 if read.family.is_none() {
-                    read.family = style_value(style, "font-family")
-                        .map(|f| f.trim_matches(['\'', '"']).to_string());
+                    read.family.clone_from(&st.family);
                 }
                 if read.points.is_none() {
-                    read.points = style_value(style, "font-size")
-                        .and_then(|s| s.strip_suffix("pt"))
-                        .and_then(|s| s.trim().parse().ok());
+                    read.points = st.points;
                 }
                 if read.color.is_none() {
-                    read.color = style_value(style, "color").map(str::to_string);
+                    read.color.clone_from(&st.color);
                 }
+                stack.push(st);
             }
             cursor = &cursor[t + end + 1..];
         }
-        text.push_str(&entities(cursor));
-        read.lines.extend(text.split('\n').map(str::to_string));
+        let current = stack.last().cloned().unwrap_or_default();
+        put(entities(cursor), &current, &mut line);
+        lines.push(line);
+        read.lines.extend(lines);
         rest = &inner[(close + 4).min(inner.len())..];
     }
     read
@@ -687,12 +814,27 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let first = *texts.first()?;
     let read_of = |g: &Value| read_html(value(g, "title blob").as_str().unwrap_or(""));
     let row = |g: &Value| (value(g, "anchor").as_u64().unwrap_or(4) / 3).min(2);
+    let h = f64::from(height.max(1));
+    let marked = |r: &Read, base: &Read| -> Vec<String> {
+        r.lines
+            .iter()
+            .map(|l| {
+                markup(
+                    l,
+                    base.family.as_deref(),
+                    base.points,
+                    base.color.as_deref(),
+                    h,
+                )
+            })
+            .collect()
+    };
     let (lines, style_from, at, lowered, turned_by) = match kind {
         TitleKind::Scroll => return None,
         TitleKind::Text => {
             let r = read_of(first);
             let at = point(value(first, "position")).unwrap_or([0.5, 0.5]);
-            (r.lines.clone(), r, at, None, first)
+            (marked(&r, &r), r, at, None, first)
         }
         TitleKind::LowerThird => {
             let (upper, lower) = match texts.get(1).copied() {
@@ -702,13 +844,15 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             };
             let low = read_of(lower);
             let high = upper.map(read_of).unwrap_or_default();
-            let text = |r: &Read| r.lines.join(" ").trim().to_string();
+            let style_from = if high.points.is_some() { high } else { low };
+            let low = read_of(lower);
+            let high = upper.map(read_of).unwrap_or_default();
+            let text = |r: &Read| marked(r, &style_from).join(" ").trim().to_string();
             let lines: Vec<String> = [text(&high), text(&low)]
                 .into_iter()
                 .filter(|l| !l.is_empty())
                 .collect();
             let at = point(value(lower, "position")).unwrap_or([0.1, 0.22]);
-            let style_from = if high.points.is_some() { high } else { low };
             (lines, style_from, at, Some(row(lower)), lower)
         }
     };
@@ -722,7 +866,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         .map(rounded);
     let size = style_from
         .points
-        .map(|p| p / f64::from(height.max(1)))
+        .map(|p| p / h)
         .filter(|s| crate::ops::subtitles::checked_size(Some(*s), "title").is_ok());
     let font = style_from
         .family
@@ -766,7 +910,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let [x, from_bottom] = at;
     let mut y = 1.0 - from_bottom;
     if let Some(row) = lowered {
-        y += row as f64 / 2.0 * title.text_fraction() * SubtitleStyle::LINE;
+        y += row as f64 / 2.0 * title.lower_line();
     }
     title.position = Some([clamped(x), clamped(y)]);
     crate::ops::titles::checked(&title).ok()
