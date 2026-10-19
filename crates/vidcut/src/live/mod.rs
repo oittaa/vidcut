@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{Value, json};
-use vidcut_core::editor::{Env, media_context, resolve_clip};
+use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue};
 use vidcut_core::model::{Clip, Format};
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
@@ -106,6 +106,7 @@ pub struct TimelineState {
     pub boring: bool,
     pub boring_secs: f64,
     pub jump_frames: i64,
+    pub minimize_subtitles: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
@@ -2174,6 +2175,7 @@ impl Live {
             }
             Request::SelectionSet {
                 clips,
+                cues,
                 media,
                 edit,
                 track,
@@ -2221,7 +2223,11 @@ impl Live {
                     None if clear => Some(OneOrMany::Many(Vec::new())),
                     c => c,
                 };
-                if let Err(e) = self.set_selection(clips, media) {
+                let cues = match cues {
+                    None if clear => Some(OneOrMany::Many(Vec::new())),
+                    c => c,
+                };
+                if let Err(e) = self.set_selection(clips, cues, media) {
                     return Step::Now(Err(e));
                 }
                 if changes.is_empty() {
@@ -2669,6 +2675,7 @@ impl Live {
         let media: HashSet<String> = p.media.iter().map(|m| m.id.clone()).collect();
         self.selection.media.retain(|m| media.contains(m));
         self.selection.clips.retain(|c| p.clip(c).is_some());
+        self.selection.cues.retain(|c| p.cue(c).is_some());
         if self
             .source_media
             .as_ref()
@@ -3017,6 +3024,7 @@ impl Live {
     fn set_selection(
         &mut self,
         clips: Option<OneOrMany<String>>,
+        cues: Option<OneOrMany<String>>,
         media: Option<OneOrMany<String>>,
     ) -> Result<()> {
         let open = self.project.as_ref().ok_or_else(no_project)?;
@@ -3030,6 +3038,14 @@ impl Live {
                     .collect::<Result<Vec<_>>>()
             })
             .transpose()?;
+        let cues = cues
+            .map(|c| {
+                c.to_vec()
+                    .iter()
+                    .map(|r| resolve_cue(p, r, playhead))
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?;
         if let Some(m) = &media {
             for id in m.to_vec() {
                 p.media(&id)
@@ -3039,6 +3055,10 @@ impl Live {
         if let Some(mut c) = clips {
             c.dedup();
             self.selection.clips = c;
+        }
+        if let Some(mut c) = cues {
+            c.dedup();
+            self.selection.cues = c;
         }
         if let Some(m) = media {
             self.selection.media = m.to_vec();

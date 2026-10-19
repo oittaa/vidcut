@@ -232,7 +232,10 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Clips,
         &["Ctrl", "B"],
         "Split at the playhead",
-        Some("Ctrl+\\ does the same."),
+        Some(
+            "Ctrl+\\ does the same. With subtitles selected, it splits those the playhead is \
+             over.",
+        ),
     ),
     key(
         Clips,
@@ -250,8 +253,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Delete"],
         "Delete",
         Some(
-            "Removes the selected clips. On Track 1 the gap closes: Track 1 holds the main \
-             story and never has holes. Backspace does the same. With a dissolve selected, it \
+            "Removes the selected clips and subtitles. On Track 1 the gap closes: Track 1 holds \
+             the main story and never has holes. Backspace does the same. With a dissolve selected, it \
              removes the dissolve and its Cross Fade. After a click in the Media Pool, it \
              removes the selected media from the pool instead, after asking.",
         ),
@@ -294,10 +297,19 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Some("A speed in percent, played backward, or one frame held still."),
     ),
     key(
+        Clips,
+        &["Enter"],
+        "Edit the selected subtitle",
+        Some("Opens its text and position in the Subtitle window; Ctrl+Enter there is Done."),
+    ),
+    key(
         Trim,
         &["Ctrl", "A"],
         "Select all",
-        Some("Every clip on the timeline. After a click in the Media Pool, all it shows."),
+        Some(
+            "Every clip and subtitle on the timeline. After a click in the Media Pool, all it \
+             shows.",
+        ),
     ),
     key(Trim, &["Ctrl", "Shift", "A"], "Select nothing", None),
     key(

@@ -9,7 +9,7 @@ use crate::error::{Error, Result};
 use crate::model::{Place, Settings};
 use crate::request::SubtitleFormat;
 
-pub use text::{Encoding, plain};
+pub use text::{Encoding, Tag, Token, plain, tokens};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Timed {

@@ -1175,16 +1175,21 @@ pub enum Request {
         #[serde(default)]
         search: Option<String>,
     },
-    /// The timeline clips, pool media and edit point selected (`edit`).
+    /// The timeline clips, subtitle cues, pool media and edit point selected
+    /// (`edit`).
     #[serde(rename = "selection.get")]
     SelectionGet {},
-    /// Select timeline clips, pool media or an edit point (omitted parts
-    /// stay as they are). `,` and `.`, Ctrl+T and Dynamic Trim act on the
-    /// edit.
+    /// Select timeline clips, subtitle cues, pool media or an edit point
+    /// (omitted parts stay as they are). `,` and `.`, Ctrl+T and Dynamic
+    /// Trim act on the edit.
     #[serde(rename = "selection.set")]
     SelectionSet {
         #[serde(default)]
         clips: Option<OneOrMany<ClipRef>>,
+        /// Subtitle cues (`q3`, or `S1@15s`). Delete removes them, Ctrl+B
+        /// splits those under the playhead.
+        #[serde(default)]
+        cues: Option<OneOrMany<String>>,
         #[serde(default)]
         media: Option<OneOrMany<String>>,
         /// Select the edit point of `track` nearest this time, as V does
@@ -1200,8 +1205,8 @@ pub enum Request {
         /// does.
         #[serde(default)]
         side: Option<TrimSide>,
-        /// Deselect the timeline's clips and edit first, as Ctrl+Shift+A
-        /// does.
+        /// Deselect the timeline's clips, cues and edit first, as
+        /// Ctrl+Shift+A does.
         #[serde(default)]
         clear: bool,
     },
@@ -1525,6 +1530,9 @@ pub struct TimelineOptions {
     /// Its Jump Cuts: clips shorter than this many frames, 1 to 120.
     #[serde(default)]
     pub jump_frames: Option<i64>,
+    /// Minimize Subtitle Track: the subtitle tracks drawn shorter.
+    #[serde(default)]
+    pub minimize_subtitles: Option<bool>,
 }
 
 /// What Dynamic Trim does with selected clips.

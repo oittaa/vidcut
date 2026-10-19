@@ -74,6 +74,18 @@ pub enum Gesture {
     Bin {
         path: String,
     },
+    CueMove {
+        cues: Vec<String>,
+        from: String,
+        grab: f64,
+        start: i64,
+        len: i64,
+    },
+    CueTrim {
+        cue: String,
+        edge: Edge,
+        from: i64,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -274,6 +286,16 @@ impl Drag {
                 audio_roll_preview(ctx, *from + moved(ctx, self.press, pos), outgoing, *from)
             }
             Gesture::Marquee { additive } => marquee_preview(ctx, self.press, pos, *additive),
+            Gesture::CueMove {
+                cues,
+                from,
+                grab,
+                start,
+                len,
+            } => cue_move_preview(ctx, pos, cues, from, *grab, (*start, *len)),
+            Gesture::CueTrim { cue, edge, from } => {
+                cue_trim_preview(ctx, *from + moved(ctx, self.press, pos), cue, *edge)
+            }
             Gesture::Marker { id, from } => {
                 let (to, snapped) = ctx.snapped(ctx.scale.boundary(pos.x).max(0));
                 Preview {
@@ -753,15 +775,94 @@ fn audio_roll_preview(ctx: &Ctx, target: i64, outgoing: &str, from: i64) -> Prev
     }
 }
 
+fn cue_move_preview(
+    ctx: &Ctx,
+    pos: Pos2,
+    cues: &[String],
+    from: &str,
+    grab: f64,
+    (start, len): (i64, i64),
+) -> Preview {
+    let p = ctx.project;
+    let one_track = cues.iter().all(|c| {
+        p.find_cue(c)
+            .is_some_and(|(t, _)| p.subtitles[t].id == from)
+    });
+    let dest = ctx
+        .rows
+        .at(pos.y)
+        .map(|r| r.track.as_str())
+        .filter(|t| one_track && p.subtitle_track(t).is_some_and(|s| !s.locked))
+        .unwrap_or(from)
+        .to_string();
+    let raw = (start + (ctx.scale.frame(pos.x) - grab).round() as i64).max(0);
+    let (at, snapped) = match ctx.snap {
+        Some(s) => s.snap_block(raw, len, &ctx.scale, SNAP_PX),
+        None => (raw, None),
+    };
+    let by = at.max(0) - start;
+    let mut params = json!({ "cues": cues, "by": by });
+    if dest != from {
+        params["track"] = json!(dest);
+    }
+    Preview {
+        request: (by != 0 || dest != from)
+            .then(|| request("subtitles.move", params))
+            .flatten(),
+        ghost: Some((start + by, start + by + len)),
+        snapped,
+        delta: Some((by, None)),
+        row: Some(dest),
+        ..Preview::default()
+    }
+}
+
+fn cue_trim_preview(ctx: &Ctx, target: i64, cue: &str, edge: Edge) -> Preview {
+    let Some((ti, ci)) = ctx.project.find_cue(cue) else {
+        return Preview::default();
+    };
+    let c = &ctx.project.subtitles[ti].cues[ci];
+    let (target, snapped) = ctx.snapped(target);
+    let (start, end) = match edge {
+        Edge::Head => (target.clamp(0, c.end() - 1), c.end()),
+        Edge::Tail => (c.start, target.max(c.start + 1)),
+    };
+    let (key, value, delta) = match edge {
+        Edge::Head => ("start", start, start - c.start),
+        Edge::Tail => ("end", end, end - c.end()),
+    };
+    Preview {
+        request: (delta != 0)
+            .then(|| request("subtitles.set", json!({ "cue": cue, key: value })))
+            .flatten(),
+        ghost: Some((start, end)),
+        snapped,
+        delta: Some((delta, Some(end - start))),
+        row: Some(ctx.project.subtitles[ti].id.clone()),
+        ..Preview::default()
+    }
+}
+
 fn marquee_preview(ctx: &Ctx, press: Pos2, pos: Pos2, additive: bool) -> Preview {
     let rect = Rect::from_two_pos(press, pos);
     let (a, b) = ctx.scale.visible(rect.left(), rect.right());
-    let mut clips: Vec<String> = if additive {
-        ctx.selected.to_vec()
+    let (mut clips, mut cues): (Vec<String>, Vec<String>) = if additive {
+        ctx.selected
+            .iter()
+            .cloned()
+            .partition(|id| ctx.project.cue(id).is_none())
     } else {
-        Vec::new()
+        (Vec::new(), Vec::new())
     };
     for row in &ctx.rows.rows {
+        if let Some(t) = ctx.project.subtitle_track(&row.track) {
+            for (c, r) in super::cues::placed(t, &ctx.scale, row.rect.rect) {
+                if r.intersects(rect) && !cues.contains(&c.id) {
+                    cues.push(c.id.clone());
+                }
+            }
+            continue;
+        }
         let Some(t) = ctx.project.track(&row.track) else {
             continue;
         };
@@ -776,7 +877,7 @@ fn marquee_preview(ctx: &Ctx, press: Pos2, pos: Pos2, additive: bool) -> Preview
         }
     }
     Preview {
-        request: request("selection.set", json!({ "clips": clips })),
+        request: request("selection.set", json!({ "clips": clips, "cues": cues })),
         marquee: Some(rect),
         ..Preview::default()
     }
