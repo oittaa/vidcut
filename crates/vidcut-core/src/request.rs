@@ -695,11 +695,11 @@ pub enum Request {
         words: Vec<SpokenWord>,
         /// Move each cut's edges to the quietest frame boundary nearby, in the
         /// sound of the tracks heard there, as far as the clips' transcripts
-        /// show the words: inward by at most a third of the word at that edge,
-        /// so the words cut always lose their middles, and outward only into
-        /// the pause beside it, up to the next word, within about a tenth of a
-        /// second. Without a transcript the edges stay. Levels not measured
-        /// yet are measured first.
+        /// show the words: inward no further than a third into any word
+        /// wholly inside the cut, so the words cut always lose their middles,
+        /// and outward only into the pause beside it, up to the next word,
+        /// within about a tenth of a second. Without a transcript the edges
+        /// stay. Levels not measured yet are measured first.
         #[serde(default)]
         quiet: bool,
         /// Clear the timeline In and Out in the same step, as the

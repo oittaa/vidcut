@@ -1689,12 +1689,13 @@ fn quiet_edges(p: &Project, env: &dyn Env, spans: &[(i64, i64)]) -> Result<Vec<(
     Ok(spans
         .iter()
         .map(|&(s, e)| {
-            let inside = known.iter().filter(|w| w.0 < e && w.1 > s);
+            let inside = known.iter().filter(|w| s <= w.0 && w.1 <= e);
             let first = inside
                 .clone()
-                .min_by_key(|w| w.0)
-                .map_or(0, |w| (w.1 - w.0) / 3);
-            let last = inside.max_by_key(|w| w.1).map_or(0, |w| (w.1 - w.0) / 3);
+                .map(|w| w.0 - s + (w.1 - w.0) / 3)
+                .min()
+                .unwrap_or(0);
+            let last = inside.map(|w| e - w.1 + (w.1 - w.0) / 3).min().unwrap_or(0);
             let before = known.iter().filter(|w| w.1 <= s).map(|w| w.1).max();
             let after = known.iter().filter(|w| w.0 >= e).map(|w| w.0).min();
             let from = before.map_or(s, |end| end.max(s - reach)).max(0);
