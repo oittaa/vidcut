@@ -215,6 +215,7 @@ pub struct TimelineView {
     pub cue_dialog: Option<crate::gui::subtitles::CueDialog>,
     pub track_dialog: Option<crate::gui::subtitles::TrackDialog>,
     pub(super) files: Option<crate::gui::subtitles::Files>,
+    pub(super) retime: Option<crate::gui::retime::Retime>,
 }
 
 impl Default for TimelineView {
@@ -252,6 +253,7 @@ impl Default for TimelineView {
             cue_dialog: None,
             track_dialog: None,
             files: None,
+            retime: None,
         }
     }
 }
@@ -1202,6 +1204,22 @@ impl Workspace {
             .clicked()
         {
             self.send("edit.detect_scene_cuts", json!({ "clips": selected }));
+            ui.close();
+        }
+        let shown = vidcut_core::ops::subtitles::shown(p)
+            .ok()
+            .map(|i| &p.subtitles[i])
+            .filter(|t| !t.cues.is_empty());
+        if ui
+            .add_enabled(
+                shown.is_some(),
+                egui::Button::new("Re-time Subtitles to Speech…"),
+            )
+            .on_hover_text("Move the shown subtitle track's subtitles to where the speech is")
+            .clicked()
+            && let Some(t) = shown
+        {
+            self.open_retime(&t.id);
             ui.close();
         }
     }

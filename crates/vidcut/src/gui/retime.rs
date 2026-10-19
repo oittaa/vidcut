@@ -1,0 +1,289 @@
+use eframe::egui::{self, RichText};
+use serde_json::{Value, json};
+use vidcut_av::transcribe;
+
+use super::export::{Ask, near_center};
+use super::theme;
+use super::workspace::{Workspace, dim};
+
+const LISTED: usize = 200;
+
+#[derive(Debug)]
+pub struct Retime {
+    track: String,
+    words: bool,
+    have: bool,
+    asked: Option<(bool, Ask)>,
+    found: Option<(bool, Value)>,
+    error: Option<(bool, String)>,
+}
+
+impl Retime {
+    fn params(&self, download: bool) -> Value {
+        let mut p = json!({ "track": self.track, "words": self.words });
+        if download {
+            p["download"] = json!(true);
+        }
+        p
+    }
+
+    fn current(&self) -> Option<&Value> {
+        self.found
+            .as_ref()
+            .filter(|(words, _)| *words == self.words)
+            .map(|(_, v)| v)
+    }
+}
+
+fn secs(v: &Value) -> String {
+    format!("{:+.2} s", v.as_f64().unwrap_or_default())
+}
+
+fn speed(c: &Value) -> Option<String> {
+    let s = c["speed"].as_f64().filter(|&s| s != 1.0)?;
+    Some(match c["ratio"].as_str() {
+        Some(r) => format!("{r} the speed (×{s:.5})"),
+        None => format!("×{s:.5} the speed"),
+    })
+}
+
+fn errors(e: &Value) -> String {
+    format!(
+        "median {:.2} s, 90% within {:.2} s, {:.1}% within 0.5 s",
+        e["median"].as_f64().unwrap_or_default(),
+        e["p90"].as_f64().unwrap_or_default(),
+        e["within"].as_f64().unwrap_or_default() * 100.0
+    )
+}
+
+impl Workspace {
+    pub(crate) fn open_retime(&mut self, track: &str) {
+        let dir = crate::paths::models_dir();
+        self.timeline.retime = Some(Retime {
+            track: track.to_string(),
+            words: false,
+            have: transcribe::present(&dir, &transcribe::PARAKEET_ULTRA),
+            asked: None,
+            found: None,
+            error: None,
+        });
+    }
+
+    fn correction_text(&self, c: &Value) -> String {
+        let sections = c["sections"].as_array().cloned().unwrap_or_default();
+        let fps = self.fps().as_f64().max(1.0);
+        let mut text = match sections.as_slice() {
+            [one] => format!("Moves them by {}", secs(&one["offset"])),
+            many => format!(
+                "Moves them by section: {}",
+                many.iter()
+                    .map(|s| format!(
+                        "{} from {}",
+                        secs(&s["offset"]),
+                        self.tc((s["from"].as_f64().unwrap_or_default() * fps).round() as i64)
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        };
+        if let Some(s) = speed(c) {
+            text.push_str(&format!(", at {s}"));
+        }
+        if let Some(n) = c["snapped"].as_u64().filter(|&n| n > 0) {
+            text = format!("{n} matched subtitle(s) go to their words. The others: {text}");
+        }
+        text
+    }
+
+    fn preview(&self, ui: &mut egui::Ui, v: &Value) {
+        let s = &v["speech"];
+        if s.is_object() {
+            let mut line = format!("Speech: best offset {}", secs(&s["offset"]));
+            if let Some(sp) = speed(s) {
+                line.push_str(&format!(" at {sp}"));
+            }
+            let clarity = s["clarity"]
+                .as_f64()
+                .map_or("far above".into(), |c| format!("{c:.2} times"));
+            ui.label(line);
+            ui.label(dim(format!(
+                "Its peak, {:.3}, is {clarity} the next best ({}, {:.3}); {} times is needed",
+                s["peak"].as_f64().unwrap_or_default(),
+                secs(&s["rival_offset"]),
+                s["rival"].as_f64().unwrap_or_default(),
+                s["needed"]
+            )));
+        }
+        let w = &v["words"];
+        if w.is_object() {
+            ui.label(format!(
+                "Words: {} of {} subtitles matched ({}, {})",
+                w["matched"],
+                v["cues"],
+                w["model"].as_str().unwrap_or_default(),
+                w["language"].as_str().unwrap_or("language not told")
+            ));
+            if w["speech_errors"].is_object() {
+                ui.label(dim(format!(
+                    "After the speech's offset: {}",
+                    errors(&w["speech_errors"])
+                )));
+            }
+        }
+        ui.label(RichText::new(self.correction_text(&v["correction"])).strong());
+        if v["correction"]["errors"].is_object() {
+            ui.label(dim(format!(
+                "Matched subtitles after it: {}",
+                errors(&v["correction"]["errors"])
+            )));
+        }
+        ui.label(dim(format!(
+            "{} of {} subtitles move",
+            v["moved"], v["cues"]
+        )));
+        for warning in v["warnings"].as_array().into_iter().flatten() {
+            ui.label(
+                RichText::new(format!("⚠ {}", warning.as_str().unwrap_or_default()))
+                    .color(ui.visuals().warn_fg_color),
+            );
+        }
+        let unmatched: Vec<&str> = w["unmatched"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        if unmatched.is_empty() {
+            return;
+        }
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        egui::CollapsingHeader::new(format!("{} didn't match", unmatched.len()))
+            .id_salt("retime-unmatched")
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(160.0)
+                    .show(ui, |ui| {
+                        for id in unmatched.iter().take(LISTED) {
+                            let Some(c) = p.cue(id) else { continue };
+                            let text = vidcut_core::subtitles::plain(&c.text).replace('\n', " ");
+                            ui.label(format!("{}  {text}", self.tc(c.start)));
+                        }
+                        if unmatched.len() > LISTED {
+                            ui.label(dim(format!("and {} more", unmatched.len() - LISTED)));
+                        }
+                    });
+            });
+    }
+
+    pub(super) fn retime_window(&mut self, ctx: &egui::Context) {
+        let Some(mut d) = self.timeline.retime.take() else {
+            return;
+        };
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let Some(t) = p.subtitle_track(&d.track) else {
+            return;
+        };
+        if let Some((words, ask)) = &d.asked
+            && let Some(result) = ask.take()
+        {
+            match result {
+                Ok(r) => {
+                    d.found = Some((*words, r.result));
+                    d.error = None;
+                }
+                Err(e) => {
+                    d.found = None;
+                    d.error = Some((*words, e.message));
+                }
+            }
+            if *words {
+                d.have =
+                    transcribe::present(&crate::paths::models_dir(), &transcribe::PARAKEET_ULTRA);
+            }
+            d.asked = None;
+        }
+        let file = &transcribe::PARAKEET_ULTRA;
+        let name = t.display_name();
+        let mut open = true;
+        let (mut find, mut apply, mut cancel) = (false, false, false);
+        egui::Window::new("Re-time Subtitles to Speech")
+            .collapsible(false)
+            .resizable(false)
+            .default_pos(near_center(ctx, 460.0, 360.0))
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.set_max_width(460.0);
+                ui.label(dim(format!(
+                    "Lines up where the timeline's speech is heard with where {name}'s subtitles \
+                     show, and moves them to fit: an offset, and a speed change where one fits \
+                     better. It needs no words, so any language works, translations too."
+                )));
+                ui.add_space(4.0);
+                ui.add_enabled_ui(d.asked.is_none(), |ui| {
+                    ui.checkbox(&mut d.words, format!("Also match words ({})", file.title));
+                });
+                ui.indent("retime-words-note", |ui| {
+                    ui.label(dim(
+                        "Hears the words too: checks the result on the subtitles whose words it \
+                         hears, finds where the offset jumps, and can move each of them to its \
+                         words",
+                    ));
+                    if !d.have {
+                        ui.label(dim(format!(
+                            "{}, downloaded from Hugging Face when first used",
+                            transcribe::size(file.bytes)
+                        )));
+                    }
+                });
+                ui.separator();
+                match (&d.error, d.current(), d.asked.is_some()) {
+                    (_, _, true) => {
+                        ui.label(dim("Finding… Jobs shows the progress, and can cancel it"));
+                    }
+                    (Some((words, e)), _, false) if *words == d.words => {
+                        ui.label(RichText::new(e).color(theme::colors().error));
+                    }
+                    (_, Some(v), false) => {
+                        let v = v.clone();
+                        self.preview(ui, &v);
+                    }
+                    _ => {
+                        ui.label(dim("Find shows what it would do before anything moves."));
+                    }
+                }
+                ui.horizontal(|ui| {
+                    let label = match d.words && !d.have {
+                        true => format!(
+                            "Download {} ({}) and Find",
+                            file.title,
+                            transcribe::size(file.bytes)
+                        ),
+                        false => "Find".into(),
+                    };
+                    find = ui
+                        .add_enabled(d.asked.is_none(), egui::Button::new(label))
+                        .clicked();
+                    let ready = d.asked.is_none()
+                        && d.current().is_some_and(|v| v["moved"].as_u64() > Some(0));
+                    apply = ui.add_enabled(ready, egui::Button::new("Apply")).clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+        if find {
+            let mut dry = d.params(d.words && !d.have);
+            dry["dry_run"] = json!(true);
+            d.found = None;
+            d.error = None;
+            d.asked = Some((d.words, Ask::send(&self.live, ctx, "subtitles.retime", dry)));
+        }
+        if apply {
+            self.send("subtitles.retime", d.params(false));
+        } else if open && !cancel {
+            self.timeline.retime = Some(d);
+        }
+    }
+}

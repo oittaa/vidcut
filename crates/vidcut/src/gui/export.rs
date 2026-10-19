@@ -1726,6 +1726,7 @@ fn job_method(j: &JobInfo) -> Option<&'static str> {
         "export" => Some("export.start"),
         "proxy" => Some("proxy.generate"),
         "subtitles" => Some("subtitles.transcribe"),
+        "retime" => Some("subtitles.retime"),
         _ => None,
     }
 }

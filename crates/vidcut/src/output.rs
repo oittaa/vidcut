@@ -603,6 +603,58 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 v["longest_piece"].as_f64().unwrap_or_default()
             );
         }
+        "subtitles.retime" => {
+            let v = &r.result;
+            for w in v["warnings"].as_array().into_iter().flatten() {
+                eprintln!("vidcut: warning: {}", w.as_str().unwrap_or_default());
+            }
+            let verb = if r.dry_run { "would move" } else { "moved" };
+            println!(
+                "{verb} {} of {} cue(s) on {}: {} (rev {})",
+                v["moved"],
+                v["cues"],
+                v["track"].as_str().unwrap_or_default(),
+                retime_correction(&v["correction"]),
+                r.rev
+            );
+            let s = &v["speech"];
+            if s.is_object() {
+                println!(
+                    "  speech: {}, scoring {} against {} at {}: {} times as high, {} needed",
+                    retime_secs(&s["offset"]),
+                    s["peak"],
+                    s["rival"],
+                    retime_secs(&s["rival_offset"]),
+                    s["clarity"]
+                        .as_f64()
+                        .map_or("far".into(), |c| format!("{c:.2}")),
+                    s["needed"]
+                );
+            }
+            let w = &v["words"];
+            if w.is_object() {
+                let matched = w["matched"].as_u64().unwrap_or(0);
+                println!(
+                    "  words: {matched} of {} cue(s) matched, heard by {} on {}, language {}",
+                    v["cues"],
+                    w["model"].as_str().unwrap_or_default(),
+                    w["device"].as_str().unwrap_or_default(),
+                    w["language"].as_str().unwrap_or("not told")
+                );
+                if w["speech_errors"].is_object() {
+                    println!(
+                        "  after the speech's offset: {}",
+                        retime_errors(&w["speech_errors"])
+                    );
+                }
+                if v["correction"]["errors"].is_object() {
+                    println!(
+                        "  after the correction: {}",
+                        retime_errors(&v["correction"]["errors"])
+                    );
+                }
+            }
+        }
         "proxy.remove" => {
             let cleared = r.result["cleared"].as_array().cloned().unwrap_or_default();
             let ids: Vec<&str> = cleared.iter().filter_map(|v| v.as_str()).collect();
@@ -836,6 +888,47 @@ fn edit_point(e: &Value) -> String {
 fn clock(secs: f64) -> String {
     let s = secs.max(0.0).round() as u64;
     format!("{}:{:02}", s / 60, s % 60)
+}
+
+fn retime_secs(v: &Value) -> String {
+    format!("{:+.2} s", v.as_f64().unwrap_or_default())
+}
+
+fn retime_errors(e: &Value) -> String {
+    format!(
+        "median {:.2} s, 90% within {:.2} s, {:.1}% within 0.5 s",
+        e["median"].as_f64().unwrap_or_default(),
+        e["p90"].as_f64().unwrap_or_default(),
+        e["within"].as_f64().unwrap_or_default() * 100.0
+    )
+}
+
+fn retime_correction(c: &Value) -> String {
+    let speed = match (c["speed"].as_f64(), c["ratio"].as_str()) {
+        (Some(s), Some(r)) if s != 1.0 => format!(" at {r} the speed (×{s:.5})"),
+        (Some(s), None) if s != 1.0 => format!(" at ×{s:.5} the speed"),
+        _ => String::new(),
+    };
+    let sections = c["sections"].as_array().cloned().unwrap_or_default();
+    let base = match sections.as_slice() {
+        [one] => format!("{}{speed}", retime_secs(&one["offset"])),
+        many => format!(
+            "{} sections{speed}: {}",
+            many.len(),
+            many.iter()
+                .map(|s| format!(
+                    "{} from {}",
+                    retime_secs(&s["offset"]),
+                    clock(s["from"].as_f64().unwrap_or_default())
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    match c["snapped"].as_u64().unwrap_or(0) {
+        0 => base,
+        n => format!("{n} cue(s) to their words, the others {base}"),
+    }
 }
 
 fn job_line(j: &Value) -> String {

@@ -509,6 +509,14 @@ impl Workspace {
             self.export_subtitle(ui.ctx(), Some(track));
             ui.close();
         }
+        if ui
+            .button("Re-time to Speech…")
+            .on_hover_text("Move this track's subtitles to where the timeline's speech is")
+            .clicked()
+        {
+            self.open_retime(track);
+            ui.close();
+        }
     }
 
     fn send_all(&self, commands: Vec<Value>, label: &str) {

@@ -15,6 +15,7 @@ mod pool;
 mod preferences;
 mod project;
 mod relink;
+mod retime;
 mod shared;
 mod shuttle;
 mod speech;

@@ -244,6 +244,7 @@ impl Workspace {
         self.cue_window(ctx);
         self.track_window(ctx);
         self.subtitle_files(ctx);
+        self.retime_window(ctx);
     }
 
     fn cue_window(&mut self, ctx: &egui::Context) {
