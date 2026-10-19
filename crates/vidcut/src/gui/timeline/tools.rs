@@ -56,6 +56,7 @@ pub struct SilenceDialog {
     skipped: Option<Vec<Stripe>>,
     undone: Vec<Shot>,
     redone: Vec<Shot>,
+    download: bool,
 }
 
 impl SilenceDialog {
@@ -78,6 +79,7 @@ impl SilenceDialog {
             skipped: None,
             undone: Vec::new(),
             redone: Vec::new(),
+            download: false,
         }
     }
 
@@ -94,6 +96,9 @@ impl SilenceDialog {
             Detect::Speech => {
                 p["speech_threshold"] = json!(self.speech_threshold);
                 p["min_speech"] = json!(format!("{}s", self.min_speech));
+                if self.download {
+                    p["download"] = json!(true);
+                }
             }
         }
         p
@@ -628,7 +633,11 @@ impl Workspace {
             d.asked = None;
         }
         let params = d.params();
-        if d.asked.is_none() && !d.current() {
+        let needs = match d.detect == Detect::Speech && !d.download {
+            true => vidcut_av::transcribe::needed(&crate::paths::models_dir(), None),
+            false => Vec::new(),
+        };
+        if d.asked.is_none() && !d.current() && needs.is_empty() {
             let mut dry = params.clone();
             dry["dry_run"] = json!(true);
             d.asked = Some((
@@ -769,7 +778,18 @@ impl Workspace {
                         ))
                     }
                 };
-                ui.label(status);
+                if needs.is_empty() {
+                    ui.label(status);
+                } else {
+                    ui.label(dim(format!(
+                        "Speech is heard with {}, not on this computer yet: downloaded once, \
+                         each checked against its SHA-256.",
+                        vidcut_av::transcribe::listed(&needs)
+                    )));
+                    if ui.button("Download and Find").clicked() {
+                        d.download = true;
+                    }
+                }
                 ui.label(dim(
                     "Click a stripe to keep it, or drag its edges. [ and ] go to the previous \
                      and next, X keeps or cuts the one at the playhead. Play and Space play \
@@ -1140,6 +1160,22 @@ impl Workspace {
             Some(speed) => self.dynamic_start(speed, now),
             None => {}
         }
+    }
+
+    pub(crate) fn trim_drawn(&self, p: &Project) -> Option<(Project, i64)> {
+        self.dynamic_drawn(p).or_else(|| self.strip_drawn(p))
+    }
+
+    pub(crate) fn strip_drawn(&self, p: &Project) -> Option<(Project, i64)> {
+        let (e, by) = self.timeline.strip_drag?;
+        let selected = self.timeline.edit?;
+        if (selected.at, selected.track) != (e.at, e.track) {
+            return None;
+        }
+        let mut trimmed = p.clone();
+        let mode = self.timeline.options.dynamic_mode;
+        let at = dynamic_preview(&mut trimmed, &DynamicTarget::Edit(e), mode, by).ok()?;
+        Some((trimmed, at))
     }
 
     pub(crate) fn dynamic_drawn(&self, p: &Project) -> Option<(Project, i64)> {

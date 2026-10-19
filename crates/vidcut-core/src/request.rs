@@ -126,7 +126,14 @@ pub enum Request {
     MediaSet {
         media: OneOrMany<String>,
         /// A color as `clip.set` takes it. Empty string clears it.
-        color: String,
+        #[serde(default)]
+        color: Option<String>,
+        /// How its pictures' colors are read: `tagged`, as the file says, or
+        /// `bt709`, `bt601`, `pq` or `hlg` in place of the file's tags, for a
+        /// file whose tags are wrong. The viewer, thumbnails and exports
+        /// follow it.
+        #[serde(default)]
+        color_space: Option<crate::model::ColorSpace>,
     },
     /// Set a media item's source In and/or Out (I/O in a source viewer or over
     /// a pool thumbnail). Source time, `out` exclusive. Edits without a `range`
@@ -264,6 +271,12 @@ pub enum Request {
         /// The shortest silence reported.
         #[serde(default = "silence_min")]
         min: TimeSpec,
+        /// `detect: speech` hears with transcribe.cpp's library and Silero VAD:
+        /// download them if this computer doesn't have them yet, each checked
+        /// against its SHA-256. Without it, a missing one is an error that
+        /// says what would be downloaded.
+        #[serde(default)]
+        download: bool,
     },
     /// Shot changes (as Detect Scene Cuts finds them) in `media`, in `clips`,
     /// or in every clip with video: the first frame of each new shot with its
@@ -569,6 +582,12 @@ pub enum Request {
         /// The shortest silence removed ("minimum to trip").
         #[serde(default = "silence_min")]
         min: TimeSpec,
+        /// `detect: speech` hears with transcribe.cpp's library and Silero VAD:
+        /// download them if this computer doesn't have them yet, each checked
+        /// against its SHA-256. Without it, a missing one is an error that
+        /// says what would be downloaded.
+        #[serde(default)]
+        download: bool,
     },
     /// Detect Scene Cuts: split `clips` where their shots change.
     #[serde(rename = "edit.detect_scene_cuts")]
@@ -914,9 +933,10 @@ pub enum Request {
         /// Frames left between a cue and the next, 0 to 10.
         #[serde(default)]
         gap: u32,
-        /// Download the model files this computer doesn't have yet from
-        /// Hugging Face, each checked against its SHA-256. Without it, a
-        /// missing file is an error that says what would be downloaded.
+        /// Download what this computer doesn't have yet: transcribe.cpp's
+        /// library, Silero VAD and the model, each checked against its
+        /// SHA-256. Without it, a missing one is an error that says what
+        /// would be downloaded.
         #[serde(default)]
         download: bool,
     },
@@ -997,9 +1017,10 @@ pub enum Request {
         /// The largest offset looked for, earlier or later. Default: 60 s.
         #[serde(default)]
         max_offset: Option<TimeSpec>,
-        /// Download Parakeet Ultra for `words` if this computer doesn't have
-        /// it yet, checked against its SHA-256. Without it, a missing model
-        /// is an error that says what would be downloaded.
+        /// Download what hearing needs if this computer doesn't have it yet:
+        /// transcribe.cpp's library and Silero VAD, and Parakeet Ultra for
+        /// `words`, each checked against its SHA-256. Without it, a missing
+        /// one is an error that says what would be downloaded.
         #[serde(default)]
         download: bool,
     },

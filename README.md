@@ -21,10 +21,10 @@ Where vidcut differs from the Cut page: [docs/deviations.md](docs/deviations.md)
 **Linux:** Ubuntu 26.04 (or similar) with FFmpeg:
 
 ```bash
-sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev cmake libvulkan-dev glslc spirv-headers rustup
+sudo apt install libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev libavdevice-dev libasound2-dev libclang-dev rustup
 ```
 
-**Windows 10 or 11:** Visual Studio 2022 or its Build Tools with the C++ workload, CMake (Visual Studio's C++ CMake tools, or `winget install Kitware.CMake`), LLVM, the Vulkan SDK, and an FFmpeg build with headers and import libraries, such as BtbN's shared GPL build:
+**Windows 10 or 11:** Visual Studio 2022 or its Build Tools with the C++ workload, LLVM, and an FFmpeg build with headers and import libraries, such as BtbN's shared GPL build:
 
 ```bash
 winget install BtbN.FFmpeg.GPL.Shared.9.0
@@ -32,21 +32,18 @@ winget install BtbN.FFmpeg.GPL.Shared.9.0
 ```bash
 winget install LLVM.LLVM
 ```
-```bash
-winget install KhronosGroup.VulkanSDK
-```
 
 Set `FFMPEG_DIR` to the FFmpeg folder (with `bin`, `include` and `lib`) and put its `bin` on `PATH`. If the build doesn't find libclang, set `LIBCLANG_PATH` to `C:\Program Files\LLVM\bin`.
 
 **macOS:** with `$(brew --prefix rustup)/bin` on `PATH` and `$(brew --prefix ffmpeg-full)/lib/pkgconfig` on `PKG_CONFIG_PATH`:
 
 ```bash
-brew install ffmpeg-full rustup cmake
+brew install ffmpeg-full rustup
 ```
 
 On a Mac the full test gate and an app bundle are still open ([todo](docs/todo/macos.md)).
 
-vidcut works with FFmpeg 8.0 up to 9.0, decodes on the GPU where it can (NVDEC, VA-API, Direct3D 11, VideoToolbox), and needs nothing else at run time but the Vulkan loader on Linux (libvulkan1) and the Visual C++ runtime on Windows, which Visual Studio installs. The GUI draws with Vulkan, Direct3D 12 or Metal and plays sound through ALSA (served by PipeWire or PulseAudio), WASAPI or Core Audio. Speech is transcribed by [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp), built in, on Vulkan or Metal. The build downloads the Silero VAD model it embeds (1.2 MB, checked against its SHA-256) with CMake; without a network, set `VIDCUT_SILERO_VAD` to a copy of [that file](https://huggingface.co/handy-computer/silero-vad-v6.2-gguf/blob/a9b2d61c20ae4ddf3644edb34969e8185a485448/silero-vad-v6.2-F32.gguf). `rust-toolchain.toml` pins the Rust version; rustup fetches it on the first build.
+vidcut works with FFmpeg 8.0 up to 9.0, decodes on the GPU where it can (NVDEC, VA-API, Direct3D 11, VideoToolbox), and needs nothing else at run time but the Vulkan loader on Linux (libvulkan1) and the Visual C++ runtime on Windows, which Visual Studio installs. The GUI draws with Vulkan, Direct3D 12 or Metal and plays sound through ALSA (served by PipeWire or PulseAudio), WASAPI or Core Audio. Speech is heard with [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp)'s prebuilt library, on Vulkan or Metal, and Silero VAD: nothing of them is built. vidcut downloads them into its cache folder the first time speech is used, after asking (in scripts, `download`): 18 MB on Windows, 23 MB on Linux, 2.5 MB on a Mac with Apple silicon, and 1.2 MB, each checked against its SHA-256. `rust-toolchain.toml` pins the Rust version; rustup fetches it on the first build.
 
 ## Build and run
 

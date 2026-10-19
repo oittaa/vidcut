@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use vidcut_core::fingerprint::Origin;
-use vidcut_core::model::Media;
+use vidcut_core::model::{ColorSpace, Media};
 
 pub fn config_dir() -> PathBuf {
     vidcut_core::dirs::config()
@@ -28,9 +28,16 @@ pub fn proxy_origin(media: &Media) -> Origin {
         }
         None => vidcut_core::fingerprint::file(&media.path).ok(),
     });
-    match content {
+    let origin = match content {
         Some(content) => content_origin(&content, media.size, media.mtime_ns),
         None => media_origin(media),
+    };
+    match media.color_space {
+        ColorSpace::Tagged => origin,
+        s => Origin {
+            name: format!("{}-{}", origin.name, s.key()).into(),
+            text: format!("{} {}", origin.text, s.key()).into(),
+        },
     }
 }
 

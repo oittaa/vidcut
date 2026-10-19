@@ -30,7 +30,7 @@ Given `parts`, `edit.ripple_delete_silence` measures nothing: it checks that eac
 
 ## Speech
 
-Ripple Delete Silence with `detect: speech` cuts what isn't speech. vidcut-av's `transcribe::voice_activity` mixes one audio stream in one channel at 16 kHz through `AudioMix`, as transcription listens (`listen`), and feeds it to the built-in Silero VAD on the CPU in pieces. `VoiceActivity` keeps its speech probability for each of the VAD's frames (32 ms). `analysis::non_speech` finds the speech in the clip's part of them by Silero's own rule, which transcribe.cpp ports: speech starts at a frame at or above the threshold, and ends at a frame more than 0.15 below it when no frame reaches the threshold again within Minimum to Trip; speech no longer than Shortest Speech doesn't count. What lies between is cut, less Pre Head and Post Tail, as for silence (`analysis::silent_parts`).
+Ripple Delete Silence with `detect: speech` cuts what isn't speech. vidcut-av's `transcribe::voice_activity` mixes one audio stream in one channel at 16 kHz through `AudioMix`, as transcription listens (`listen`), and feeds it to Silero VAD on the CPU in pieces. `VoiceActivity` keeps its speech probability for each of the VAD's frames (32 ms). `analysis::non_speech` finds the speech in the clip's part of them by Silero's own rule, which transcribe.cpp ports: speech starts at a frame at or above the threshold, and ends at a frame more than 0.15 below it when no frame reaches the threshold again within Minimum to Trip; speech no longer than Shortest Speech doesn't count. What lies between is cut, less Pre Head and Post Tail, as for silence (`analysis::silent_parts`).
 
 **Why** probabilities, not transcribe.cpp's segments: those depend on the threshold and the lengths, so each change in the dialog would run the VAD over the whole file again; the probabilities are measured once, cached like the levels, and decided again at once.
 
@@ -42,7 +42,7 @@ Ripple Delete Silence with `detect: speech` cuts what isn't speech. vidcut-av's 
 
 ## Transcription
 
-Create Subtitles from Audio (`subtitles.transcribe`) splits the same way. The editor flattens the range of the tracks heard (`heard_tracks`: the request's `tracks`, or those playback hears) in one channel at 16 kHz (`RATE`), as an export would mix it, and asks `Env::transcribe` for what was said; vidcut-av's `transcribe::transcribe` hears it with transcribe.cpp, built in through the `transcribe-cpp` crate, and vidcut-core makes the cues.
+Create Subtitles from Audio (`subtitles.transcribe`) splits the same way. The editor flattens the range of the tracks heard (`heard_tracks`: the request's `tracks`, or those playback hears) in one channel at 16 kHz (`RATE`), as an export would mix it, and asks `Env::transcribe` for what was said; vidcut-av's `transcribe::transcribe` hears it with transcribe.cpp's prebuilt library through the `transcribe_cpp` crate, and vidcut-core makes the cues.
 
 ```mermaid
 flowchart TD
@@ -50,7 +50,7 @@ flowchart TD
   plan --> env["Env::transcribe<br>AvEnv, memo HEARD"]
   env -- "miss" --> files["transcribe::missing, download<br>models folder in the cache dir"]
   files --> mix["AudioMix: the samples"]
-  mix --> vad["Silero VAD, built in, on the CPU<br>speech stretches"]
+  mix --> vad["Silero VAD on the CPU<br>speech stretches"]
   vad --> pieces["transcript::pieces<br>up to transcribe::longest_piece"]
   pieces --> asr["the model on the GPU<br>Vulkan or Metal; the CPU when off"]
   asr --> said["Speech: what was said, with its times"]
@@ -58,9 +58,9 @@ flowchart TD
   cues --> track["ops::subtitles::add_cue<br>the highest subtitle track"]
 ```
 
-- **Model files** are pinned in `transcribe::File`: Hugging Face repository, revision, size, SHA-256 and the languages the model's metadata lists. They live in the cache dir's `models` folder (`paths::models_dir`), which `vidcut reset` empties. `transcribe::missing` says whether the speech model is there; without `download` the request fails with DEPENDENCY, saying what it would fetch. `transcribe::download` reads it through FFmpeg's HTTPS (`avio_open2`), goes on from a `.part` file left before, and keeps the file only when its size and SHA-256 match. `model_file` and `vad_file` name files instead.
-- **The GUI's dialog** (`Workspace::speech_window`) asks `transcribe::present` and `transcribe::short_of_memory` before it sends the request, so it can ask before a download and warn before the run; the run is a job like the CLI's.
-- **The Silero VAD model is built in** (`transcribe::VAD`): vidcut-av's `build.rs` fetches the pinned file with CMake (which builds transcribe.cpp) into its `OUT_DIR`, or copies the one `VIDCUT_SILERO_VAD` names, and checks its SHA-256 before the crate embeds it. transcribe.cpp loads models only from files, so `vad_file` writes the bytes into the `models` folder when they aren't there, after a reset too. A named speech model needs no network.
+- **Model files** are pinned in `transcribe::File`: Hugging Face repository, revision, size, SHA-256 and the languages the model's metadata lists. They live in the cache dir's `models` folder (`paths::models_dir`), which `vidcut reset` empties. `transcribe::needed` says what of transcribe.cpp's library, Silero VAD and the speech model isn't there; without `download` the request fails with DEPENDENCY, saying what it would fetch. `transcribe::fetch` reads each through FFmpeg's HTTPS (`avio_open2`), goes on from a `.part` file left before, and keeps the file only when its size and SHA-256 match. `model_file` and `vad_file` name files instead.
+- **The GUI's dialog** (`Workspace::speech_window`) asks `transcribe::needed` and `transcribe::short_of_memory` before it sends the request, so it can ask before a download and warn before the run; the run is a job like the CLI's.
+- **transcribe.cpp's library is downloaded, not built** (`transcribe::RUNTIME`): the prebuilt bundle transcribe.cpp publishes for this system (Windows and Linux on Vulkan, macOS on Metal), pinned by size and SHA-256 and unpacked into the `models` folder (`transcribe::unpack`). crates/transcribe-cpp-sys stands in for the crate of that name (patched in by the workspace): the bindings that crate ships, rewritten by scripts/transcribe-sys.py so that each function calls the library `transcribe::start` loads (`transcribe_cpp_sys::load`), which then starts the backends beside it. Silero VAD is a pinned file like the models (`transcribe::SILERO_VAD`). `transcribe::get_ready` gets them before anything is heard, for `subtitles.transcribe`, `subtitles.retime`, and `edit.ripple_delete_silence` and `analyze.silence` with `detect: speech`, each of which takes `download`.
 - **Pieces:** a model hears a piece at once. `transcript::pieces` puts the VAD's speech stretches together, with a little padding, up to the longest piece, and ends a piece at the longest pause in its second half; a stretch longer than a piece is cut where the sound is quietest. Each piece's times shift back by its start.
 - **The GPU** is the one `gpus::in_use` names, found among transcribe.cpp's devices by its PCI slot or name; a failure to load there falls back to the CPU with a warning. `gpu.acceleration` off puts the model on the CPU. The longest piece goes first, and the language it finds is given to the rest.
 - **Cues:** `transcript::cues` breaks the words into sentences and at pauses, splits a sentence too long for one cue into even parts, and wraps the lines. Words carry the model's times where it gives them; a model without times has its text spread over the speech of its piece by `transcript::spread` ([spec D62](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
@@ -98,11 +98,11 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 
 | What | Where | Key |
 |---|---|---|
-| pool filmstrips, timeline tiles | `thumbs` (`thumbcache`) | origin, size, frames |
+| pool filmstrips, timeline tiles | `thumbs` (`thumbcache`) | origin, size, frames, input color space |
 | waveforms | `waveforms` | origin, channels |
 | audio levels, voice activity, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
-| light, for HDR metadata | `analysis` (`light::cache_in`) | origin |
-| proxies | `proxies.folder` (`Proxies::folder_in`): `proxies` beside the project unless set (in the cache dir without a project); an absolute folder is shared by every project | content (`paths::proxy_origin`), size, codec |
+| light, for HDR metadata | `analysis` (`light::cache_in`) | origin, input color space |
+| proxies | `proxies.folder` (`Proxies::folder_in`): `proxies` beside the project unless set (in the cache dir without a project); an absolute folder is shared by every project | content (`paths::proxy_origin`), size, codec, input color space |
 | GPU encoders that work | `encoders.json` (`export::detected`) | FFmpeg, system and GPUs |
 | proxy codecs the GPU decoder plays | `plays.json` (`export::plays`) | the same, per GPU |
 | clips for decoder tests | `decoder-tests` | none |

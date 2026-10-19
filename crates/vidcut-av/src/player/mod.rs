@@ -156,6 +156,14 @@ pub struct Status {
     pub decoder: Option<Decoder>,
     pub failed: Option<i64>,
     pub error: Option<String>,
+    pub glide: Option<Glide>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Glide {
+    pub fraction: f64,
+    pub rate: f64,
+    pub at: Instant,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -374,6 +382,23 @@ impl Shared {
         let s = heard.unwrap_or(from as f64).clamp(0.0, end);
         let ended = ctl.looping.is_none() && if speed > 0.0 { s >= end } else { s <= 0.0 };
         (ctl.plan.frame_at_sample(s.floor() as i64), ended)
+    }
+
+    fn glide(&self, ctl: &Control, now: Instant) -> Option<Glide> {
+        let Mode::Playing { speed, epoch, .. } = ctl.mode else {
+            return None;
+        };
+        let plan = &ctl.plan;
+        let s = self
+            .clock_sample(epoch, now)?
+            .clamp(0.0, plan.samples as f64);
+        let t = plan.frame_at_sample(s.floor() as i64);
+        let (a, b) = (plan.sample(t) as f64, plan.sample(t + 1) as f64);
+        Some(Glide {
+            fraction: ((s - a) / (b - a).max(1.0)).clamp(0.0, 1.0),
+            rate: plan.fps().as_f64() * speed,
+            at: now,
+        })
     }
 
     fn heard_first(&self, ctl: &Control, epoch: u64) {
@@ -1023,9 +1048,11 @@ impl Player {
     }
 
     pub fn status(&self) -> Status {
-        let (id, prepared, position, mode, range, error) = {
+        let (id, prepared, position, mode, range, error, glide) = {
             let mut ctl = self.shared.control();
-            let position = self.shared.position(&mut ctl, Instant::now());
+            let now = Instant::now();
+            let position = self.shared.position(&mut ctl, now);
+            let glide = self.shared.glide(&ctl, now);
             let plan = &ctl.plan.plan;
             (
                 ctl.plan.id(position),
@@ -1034,6 +1061,7 @@ impl Player {
                 ctl.mode,
                 (plan.range.0, plan.range.0 + plan.frames),
                 ctl.error.clone(),
+                glide,
             )
         };
         let device = lock(&self.shared.device).clone();
@@ -1057,6 +1085,7 @@ impl Player {
             decoder: p.decoder,
             failed: *lock(&self.shared.failed),
             error: device.or(error),
+            glide,
         }
     }
 

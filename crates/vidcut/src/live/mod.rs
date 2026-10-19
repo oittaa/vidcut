@@ -667,6 +667,7 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
                     THUMB_SIZE.0,
                     THUMB_SIZE.1,
                     decoder,
+                    media.color_space,
                 ),
                 None => vidcut_av::thumbs::filmstrip(
                     &input,
@@ -674,6 +675,7 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
                     THUMB_SIZE.0,
                     THUMB_SIZE.1,
                     decoder,
+                    media.color_space,
                 ),
             }
             .map_err(|e| e.to_string())?;
@@ -1368,12 +1370,15 @@ impl Live {
     fn measuring(&self, envelope: &Envelope) -> Option<Measure> {
         let p = self.project.as_ref()?.project();
         let playhead = Some(self.player.position(TIMELINE));
-        let (clips, sound, speech) = match &envelope.request {
+        let (clips, sound, speech, download) = match &envelope.request {
             Request::EditRippleDeleteSilence { parts: Some(_), .. } => return None,
-            Request::EditRippleDeleteSilence { clips, detect, .. } => {
-                (clips.to_vec(), true, *detect == Detect::Speech)
-            }
-            Request::EditDetectSceneCuts { clips, .. } => (clips.to_vec(), false, false),
+            Request::EditRippleDeleteSilence {
+                clips,
+                detect,
+                download,
+                ..
+            } => (clips.to_vec(), true, *detect == Detect::Speech, *download),
+            Request::EditDetectSceneCuts { clips, .. } => (clips.to_vec(), false, false, false),
             _ => return None,
         };
         let mut needed = Vec::new();
@@ -1392,7 +1397,7 @@ impl Live {
             use vidcut_core::Env;
             for (m, stream) in &needed {
                 match stream {
-                    Some(s) if speech => AvEnv::new().voice_activity(m, *s).map(drop)?,
+                    Some(s) if speech => AvEnv::new().voice_activity(m, *s, download).map(drop)?,
                     Some(s) => AvEnv::new().audio_levels(m, *s).map(drop)?,
                     None => AvEnv::new().picture_stats(m).map(drop)?,
                 }
@@ -2779,15 +2784,16 @@ impl Live {
         let channels = open.project().settings.channels;
         for m in media {
             let version = media_version(&m);
-            if m.info.video.is_some() && self.thumbs_wanted.get(&m.id) != Some(&version) {
-                self.thumbs_wanted.insert(m.id.clone(), version.clone());
+            let pictures = format!("{version}|{}", m.color_space.key());
+            if m.info.video.is_some() && self.thumbs_wanted.get(&m.id) != Some(&pictures) {
+                self.thumbs_wanted.insert(m.id.clone(), pictures.clone());
                 if self.thumbs.contains_key(&m.id) {
                     let mut map = (*self.thumbs).clone();
                     map.remove(&m.id);
                     self.thumbs = Arc::new(map);
                 }
                 let (tx, id, media) = (self.tx.clone(), m.id.clone(), m.clone());
-                let wanted = version.clone();
+                let wanted = pictures;
                 self.workers.run(move || {
                     let _ = tx.send(Msg::Thumbs {
                         media: id,
