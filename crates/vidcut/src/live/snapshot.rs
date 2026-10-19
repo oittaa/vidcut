@@ -51,6 +51,8 @@ pub struct PlayerSnap {
     pub hwdec: String,
     pub error: Option<String>,
     pub lanes: Vec<String>,
+    #[serde(skip)]
+    pub glide: Option<vidcut_av::player::Glide>,
 }
 
 #[derive(Debug, Clone)]
