@@ -348,12 +348,19 @@ impl Workspace {
                 let mut enter = false;
                 egui::Grid::new("subtitle-track-fields").show(ui, |ui| {
                     ui.label("Name");
-                    let r = ui.add(egui::TextEdit::singleline(&mut d.name).hint_text(&d.hint));
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut d.name)
+                            .hint_text(&d.hint)
+                            .desired_width(240.0),
+                    );
                     enter |= r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                     ui.end_row();
                     ui.label("Language");
-                    let r = ui
-                        .add(egui::TextEdit::singleline(&mut d.language).hint_text("en, pt-BR, …"));
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut d.language)
+                            .hint_text("en, pt-BR, …")
+                            .desired_width(240.0),
+                    );
                     enter |= r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                     ui.end_row();
                 });
