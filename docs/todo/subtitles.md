@@ -10,7 +10,7 @@ What it would take:
 - **Cutting by transcript:** the words with their times as a request's answer, and a request that removes words. It needs word times: Parakeet Ultra's, or Qwen3-ASR's from the aligner; Whisper's only once transcribe.cpp gives them.
 - **Later:** paid services (xAI, Google) behind the same interface, asking each time before audio leaves the computer.
 
-Test media in the [manifest](../../tests/media-manifest.toml): `tos-subtitles-en`, `tos-subtitles-ja`, `tos-subtitles-he`, `tos-music-fx` (no speech), `nasa-speech-1979`, `nasa-roman-presser`, `nasa-roman-presser-captions`.
+Test media in the [manifest](../../tests/media-manifest.toml): `tos-subtitles-en`, `tos-subtitles-ja`, `tos-subtitles-he`, `tos-music-fx` (no speech), `nasa-speech-1979`, `nasa-roman-presser`, `nasa-roman-presser-captions`, `gulliver-fi` (Finnish speech) and `gulliver-fi-text` (its text).
 
 ## Measured
 
