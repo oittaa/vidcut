@@ -257,9 +257,10 @@ impl Workspace {
                 });
                 ui.indent("retime-words-note", |ui| {
                     ui.label(dim(
-                        "Hears the words too: checks the result on the subtitles whose words it \
-                         hears, finds where the offset jumps, and can move each of them to its \
-                         words",
+                        "Reads the words too, those kept for each clip's file, transcribing and \
+                         keeping a file's that aren't: checks the result on the subtitles whose \
+                         words it finds, finds where the offset jumps, and can move each of them \
+                         to its words",
                     ));
                     if !transcribe::present(&dir, file) {
                         ui.label(dim(format!(

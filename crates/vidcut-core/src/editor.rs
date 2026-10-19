@@ -21,8 +21,8 @@ use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
 use crate::render::RenderPlan;
 use crate::request::{
-    Changes, Client, ClientKind, ClipPart, ClipRef, Detect, Envelope, ImportMode, NewTrack,
-    OneOrMany, ProjectSet, Request, Response, SourceParams, SpeechModel,
+    Changes, Client, ClientKind, ClipPart, ClipRef, Detect, Envelope, HearFrom, ImportMode,
+    NewTrack, OneOrMany, ProjectSet, Request, Response, SourceParams, SpeechModel,
 };
 use crate::retime;
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
@@ -1636,6 +1636,186 @@ fn sound_plan(p: &Project, a: i64, b: i64, heard: &[String]) -> Result<RenderPla
     crate::render::flatten(&q, a, b)
 }
 
+fn hears_media(hear: Option<HearFrom>, asked: &transcript::Asked) -> Result<bool> {
+    let can = asked.model_file.is_none() && asked.model.times_words();
+    match hear {
+        Some(HearFrom::Media) if !can => Err(Error::invalid(
+            "hear: media keeps each file's words with their times, which only parakeet-ultra \
+             gives: use it without a model_file, or hear the mix (hear: mix)",
+        )),
+        Some(h) => Ok(h == HearFrom::Media),
+        None => Ok(can),
+    }
+}
+
+fn device_json(s: &Speech) -> Value {
+    match s.device.is_empty() {
+        true => Value::Null,
+        false => json!(s.device),
+    }
+}
+
+#[derive(Clone)]
+struct Placed {
+    track: usize,
+    clip: String,
+    start: i64,
+    end: i64,
+    word: transcript::Word,
+    language: Option<String>,
+}
+
+fn clip_speech(
+    p: &Project,
+    env: &dyn Env,
+    (a, b): (i64, i64),
+    heard: &[String],
+    asked: &transcript::Asked,
+) -> Result<(Speech, Vec<Value>)> {
+    let fps = p.settings.fps;
+    let mut speech = Speech {
+        model: asked.model_name(),
+        device: String::new(),
+        language: asked.language.clone(),
+        timing: transcript::Timing::Words,
+        pieces: 0,
+        longest_piece: 0.0,
+        said: Vec::new(),
+        warnings: Vec::new(),
+    };
+    let mut media = Vec::new();
+    let mut kept: HashMap<(String, u32), Arc<Speech>> = HashMap::new();
+    let mut placed = Vec::new();
+    for (track, t) in p.tracks.iter().enumerate() {
+        if !heard.contains(&t.id) {
+            continue;
+        }
+        for c in &t.clips {
+            let (Some(sound), Some((from, to))) = (&c.audio, c.audio_range()) else {
+                continue;
+            };
+            if !c.enabled || sound.muted || to <= a || from >= b {
+                continue;
+            }
+            if c.is_block() {
+                speech.warnings.push(format!(
+                    "{}: a compound clip's sound is heard only in the mix (hear: mix)",
+                    c.id
+                ));
+                continue;
+            }
+            let m = p
+                .media(&c.media)
+                .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
+            let key = (m.id.clone(), sound.stream);
+            let said = match kept.get(&key) {
+                Some(s) => s.clone(),
+                None => {
+                    let saved = env.transcript(m, sound.stream)?.filter(|s| asked.made(s));
+                    let fresh = saved.is_none();
+                    let s = match saved {
+                        Some(s) => s,
+                        None => {
+                            let plan = media_sound_plan(p, m, sound.stream)?;
+                            env.transcribe_media(m, sound.stream, &plan, asked)?
+                        }
+                    };
+                    if fresh {
+                        speech.device = s.device.clone();
+                        speech.pieces += s.pieces;
+                        speech.longest_piece = speech.longest_piece.max(s.longest_piece);
+                        speech
+                            .warnings
+                            .extend(s.warnings.iter().map(|w| format!("{}: {w}", m.name)));
+                    }
+                    media.push(
+                        json!({ "media": m.id, "stream": sound.stream, "transcribed": fresh }),
+                    );
+                    kept.insert(key, s.clone());
+                    s
+                }
+            };
+            let timed = transcript::spoken(&said).map_err(Error::invalid)?;
+            let (_, origin) = p.media_origin(&c.media)?;
+            let span = Span::of_clip(c, origin, fps);
+            for (i, start, end) in analysis::words_between(&span, (from, to), &timed) {
+                let middle = (start + end) / 2;
+                if (a..b).contains(&middle) {
+                    placed.push(Placed {
+                        track,
+                        clip: c.id.clone(),
+                        start,
+                        end,
+                        word: timed[i].clone(),
+                        language: said.language.clone(),
+                    });
+                }
+            }
+        }
+    }
+    let chosen = first_heard(placed);
+    if speech.language.is_none() {
+        let mut counts: HashMap<&str, usize> = HashMap::new();
+        for w in &chosen {
+            if let Some(l) = &w.language {
+                *counts.entry(l).or_default() += 1;
+            }
+        }
+        speech.language = counts
+            .into_iter()
+            .max_by_key(|(l, n)| (*n, *l))
+            .map(|(l, _)| l.to_string());
+    }
+    let rate = fps.as_f64();
+    let words: Vec<transcript::Word> = chosen
+        .iter()
+        .enumerate()
+        .map(|(i, w)| transcript::Word {
+            start: (w.start - a) as f64 / rate,
+            end: (w.end - a) as f64 / rate,
+            text: w.word.text.clone(),
+            joined: w.word.joined && i > 0 && chosen[i - 1].clip == w.clip,
+        })
+        .collect();
+    if let Some((start, end)) = words
+        .first()
+        .zip(words.last())
+        .map(|(f, l)| (f.start, l.end))
+    {
+        speech.said.push(transcript::Said {
+            start,
+            end,
+            text: String::new(),
+            words,
+            speech: Vec::new(),
+        });
+    }
+    Ok((speech, media))
+}
+
+fn first_heard(mut placed: Vec<Placed>) -> Vec<Placed> {
+    placed.sort_by_key(|w| (w.track, w.start));
+    let mut chosen: Vec<Placed> = Vec::new();
+    for track in placed.chunk_by(|x, y| x.track == y.track) {
+        let longest = chosen.iter().map(|k| k.end - k.start).max().unwrap_or(0);
+        let fresh: Vec<Placed> = track
+            .iter()
+            .filter(|w| {
+                let before = chosen.partition_point(|k| k.start < w.end);
+                !chosen[..before]
+                    .iter()
+                    .rev()
+                    .take_while(|k| k.start + longest > w.start)
+                    .any(|k| k.end > w.start && transcript::same_word(&k.word.text, &w.word.text))
+            })
+            .cloned()
+            .collect();
+        chosen.extend(fresh);
+        chosen.sort_by_key(|w| w.start);
+    }
+    chosen
+}
+
 fn media_sound_plan(p: &Project, m: &Media, stream: u32) -> Result<RenderPlan> {
     let mut q = p.clone();
     q.settings.sample_rate = transcript::RATE;
@@ -2908,6 +3088,7 @@ fn mutate(
             chars,
             lines,
             gap,
+            hear,
             download,
         } => {
             if !(1..=60).contains(chars) {
@@ -2921,16 +3102,24 @@ fn mutate(
             }
             let (a, b) = transcribed_range(p, range.as_ref(), playhead)?;
             let heard = heard_tracks(p, tracks.as_deref())?;
-            let speech = env.transcribe(
-                &sound_plan(p, a, b, &heard)?,
-                &transcript::Asked {
-                    model: model.unwrap_or_default(),
-                    model_file: model_file.clone(),
-                    vad_file: vad_file.clone(),
-                    language: language.clone(),
-                    download: *download,
-                },
-            )?;
+            let asked = transcript::Asked {
+                model: model.unwrap_or_default(),
+                model_file: model_file.clone(),
+                vad_file: vad_file.clone(),
+                language: language.clone(),
+                download: *download,
+            };
+            let from_media = hears_media(*hear, &asked)?;
+            let (speech, media) = match from_media {
+                true => {
+                    let (s, media) = clip_speech(p, env, (a, b), &heard, &asked)?;
+                    (Arc::new(s), json!(media))
+                }
+                false => (
+                    env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?,
+                    Value::Null,
+                ),
+            };
             let made = transcript::cues(
                 &speech.said,
                 p.settings.fps,
@@ -2974,8 +3163,10 @@ fn mutate(
                 "cues": ids,
                 "from": a, "to": b,
                 "heard": sounding(p, &heard),
+                "hear": if from_media { "media" } else { "mix" },
+                "media": media,
                 "model": speech.model,
-                "device": speech.device,
+                "device": device_json(&speech),
                 "language": speech.language,
                 "timing": speech.timing,
                 "pieces": speech.pieces,
@@ -3018,6 +3209,7 @@ fn mutate(
             track,
             tracks,
             words,
+            hear,
             language,
             max_offset,
             download,
@@ -3028,6 +3220,7 @@ fn mutate(
                 track: track.as_deref(),
                 tracks: tracks.as_deref(),
                 words: *words,
+                hear: *hear,
                 language: language.as_ref(),
                 max_offset: max_offset.as_ref(),
                 download: *download,
@@ -5068,7 +5261,10 @@ pub fn query(
                     }
                     _ => {}
                 }
-                let speech = match env.transcript(m, *stream)?.filter(|_| !*again) {
+                let speech = match env
+                    .transcript(m, *stream)?
+                    .filter(|s| !*again && asked.made(s))
+                {
                     Some(kept) => kept,
                     None => {
                         let plan = media_sound_plan(p, m, *stream)?;
@@ -5670,6 +5866,7 @@ struct Retime<'a> {
     track: Option<&'a str>,
     tracks: Option<&'a [String]>,
     words: bool,
+    hear: Option<HearFrom>,
     language: Option<&'a String>,
     max_offset: Option<&'a TimeSpec>,
     download: bool,
@@ -5781,16 +5978,23 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
     let mut words = Value::Null;
     let mut chosen_errors = None;
     let plan = if r.words {
-        let heard = env.transcribe(
-            &sound_plan(p, 0, p.end(), &heard)?,
-            &transcript::Asked {
-                model: SpeechModel::ParakeetUltra,
-                model_file: None,
-                vad_file: None,
-                language: r.language.cloned(),
-                download: r.download,
-            },
-        )?;
+        let asked = transcript::Asked {
+            model: SpeechModel::ParakeetUltra,
+            model_file: None,
+            vad_file: None,
+            language: r.language.cloned(),
+            download: r.download,
+        };
+        let (heard, media) = match hears_media(r.hear, &asked)? {
+            true => {
+                let (s, media) = clip_speech(p, env, (0, p.end()), &heard, &asked)?;
+                (Arc::new(s), json!(media))
+            }
+            false => (
+                env.transcribe(&sound_plan(p, 0, p.end(), &heard)?, &asked)?,
+                Value::Null,
+            ),
+        };
         warnings.extend(heard.warnings.iter().cloned());
         let texts: Vec<String> = p.subtitles[ti]
             .cues
@@ -5809,8 +6013,9 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
             .position(|l| l.fits)
             .unwrap_or(levels.len().saturating_sub(1));
         words = json!({
+            "media": media,
             "model": heard.model,
-            "device": heard.device,
+            "device": device_json(&heard),
             "language": heard.language,
             "matched": anchors.len(),
             "unmatched": p.subtitles[ti].cues.iter().enumerate()

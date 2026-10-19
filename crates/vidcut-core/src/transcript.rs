@@ -18,6 +18,26 @@ pub struct Asked {
     pub download: bool,
 }
 
+impl Asked {
+    pub fn model_name(&self) -> String {
+        match &self.model_file {
+            Some(f) => f.file_name().map_or_else(
+                || f.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            ),
+            None => self.model.title().to_string(),
+        }
+    }
+
+    pub fn made(&self, speech: &Speech) -> bool {
+        speech.model == self.model_name()
+            && self
+                .language
+                .as_ref()
+                .is_none_or(|l| speech.language.as_ref() == Some(l))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Timing {
@@ -276,6 +296,10 @@ pub fn language_of<'a>(texts: impl Iterator<Item = &'a str>) -> Option<&'static 
 
 pub fn built_in_fillers(language: &str) -> Vec<String> {
     fillers(language).iter().map(|w| w.to_string()).collect()
+}
+
+pub fn same_word(a: &str, b: &str) -> bool {
+    bare(a) == bare(b)
 }
 
 pub fn is_filler(text: &str, fillers: &[String]) -> bool {
