@@ -853,8 +853,11 @@ pub struct Title {
     /// Usual: left for a lower third, middle for a scroll.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<TitleAlign>,
-    /// Its lines, separated by `\n`: two at most for a lower third. Plain
-    /// text: no markup.
+    /// Its lines, separated by `\n`: two at most for a lower third. `<b>`,
+    /// `<i>`, `<u>` and `<font color="…" face="…" size="…">` style the words
+    /// between them apart from the rest, `size` a fraction of the picture
+    /// height like the style's; `&lt;`, `&gt;` and `&amp;` stand for `<`,
+    /// `>` and `&`.
     pub text: String,
     #[serde(default, skip_serializing_if = "TitleStyle::is_empty")]
     pub style: TitleStyle,
@@ -1081,12 +1084,22 @@ impl Title {
         let [x, y] = self.place();
         match self.kind {
             TitleKind::Text | TitleKind::Scroll => [x, y],
-            TitleKind::LowerThird => [x, y - self.text_fraction() * SubtitleStyle::LINE],
+            TitleKind::LowerThird => [x, y - self.lower_line()],
         }
     }
 
+    pub fn lower_line(&self) -> f64 {
+        let lines = crate::rich::lines(&self.text);
+        let base = self.text_fraction();
+        let size = lines
+            .last()
+            .map_or(base, |line| crate::rich::largest(line, base));
+        size * SubtitleStyle::LINE
+    }
+
     pub fn label(&self) -> String {
-        let line = self.text.lines().find(|l| !l.trim().is_empty());
+        let text = crate::rich::plain(&self.text);
+        let line = text.lines().find(|l| !l.trim().is_empty());
         line.map_or_else(|| "Title".to_string(), |l| l.trim().to_string())
     }
 }

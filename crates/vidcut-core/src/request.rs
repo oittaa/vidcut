@@ -1130,13 +1130,15 @@ pub enum Request {
     #[serde(rename = "titles.add")]
     TitlesAdd {
         /// Its lines, separated by a line break: two at most for a lower
-        /// third. Plain text.
+        /// third. `<b>`, `<i>`, `<u>` and `<font color="…" face="…"
+        /// size="…">` style words apart; `&lt;`, `&gt;` and `&amp;` stand for
+        /// `<`, `>` and `&`.
         text: String,
-        /// `text` (the default) or `lower_third`.
+        /// `text` (the default), `lower_third` or `scroll`.
         #[serde(default)]
         kind: Option<TitleKind>,
-        /// A lower third's place: `left` (the default), `middle` or
-        /// `right`.
+        /// How a lower third or a scroll lines up: `left`, `middle` or
+        /// `right` (a lower third's default left, a scroll's middle).
         #[serde(default)]
         align: Option<TitleAlign>,
         /// Its look: `font` (a family name), `size` (the text height as a

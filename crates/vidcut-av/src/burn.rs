@@ -192,7 +192,22 @@ struct Look<'a> {
     backing: Option<([u8; 3], f64)>,
     shadow: Option<Shade>,
     boxed: bool,
-    rich: bool,
+    markup: Markup,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Markup {
+    Cues,
+    Title(f32),
+}
+
+fn installed(f: &Fonts, name: &str) -> Option<String> {
+    f.system.db().faces().find_map(|face| {
+        face.families
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(n, _)| n.clone())
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -281,25 +296,43 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
     );
     buffer.set_wrap(Wrap::WordOrGlyph);
     buffer.set_size(Some(wrap), None);
-    let installed = look.font.and_then(|name| {
-        f.system.db().faces().find_map(|face| {
-            face.families
-                .iter()
-                .find(|(n, _)| n.eq_ignore_ascii_case(name))
-                .map(|(n, _)| n.clone())
-        })
-    });
-    let family = match installed.as_deref() {
+    let installed_family = look.font.and_then(|name| installed(f, name));
+    let family = match installed_family.as_deref() {
         Some(name) => Family::Name(name),
         None => Family::SansSerif,
     };
-    let spans = if look.rich {
-        spans(text, family, color(look.ink))
-    } else {
-        vec![(
-            text.to_string(),
-            Attrs::new().family(family).color(color(look.ink)),
-        )]
+    let runs = match look.markup {
+        Markup::Title(_) => vidcut_core::rich::spans(text),
+        Markup::Cues => Vec::new(),
+    };
+    let faces: Vec<Option<String>> = runs
+        .iter()
+        .map(|r| r.look.face.as_deref().and_then(|n| installed(f, n)))
+        .collect();
+    let spans = match look.markup {
+        Markup::Cues => spans(text, family, color(look.ink)),
+        Markup::Title(per) => runs
+            .iter()
+            .zip(&faces)
+            .map(|(r, face)| {
+                let ink = r.look.color.as_deref().and_then(rgb).unwrap_or(look.ink);
+                let mut a = Attrs::new()
+                    .family(face.as_deref().map_or(family, Family::Name))
+                    .color(color(ink));
+                if r.look.bold {
+                    a = a.weight(Weight::BOLD);
+                }
+                if r.look.italic {
+                    a = a.style(Style::Italic);
+                }
+                if r.look.underline {
+                    a = a.underline(UnderlineStyle::Single);
+                }
+                let px = r.look.size.map_or(size, |s| (s as f32 * per).max(1.0));
+                a = a.metrics(Metrics::new(px, px * SubtitleStyle::LINE as f32));
+                (r.text.clone(), a)
+            })
+            .collect(),
     };
     let base = Attrs::new().family(family);
     buffer.set_rich_text(
@@ -482,7 +515,7 @@ fn block(
         backing: style.backing(),
         shadow: None,
         boxed: false,
-        rich: true,
+        markup: Markup::Cues,
     };
     let (sprite, lines) = lay_out(text, &look, f)?;
     let text_top = style.block_top(place, f64::from(height), f64::from(lines)) as f32;
@@ -537,7 +570,7 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
             }
         }),
         boxed: true,
-        rich: false,
+        markup: Markup::Title((h * zoom) as f32),
     };
     let Some((sprite, lines)) = lay_out(&t.text, &look, &mut f) else {
         return Vec::new();
@@ -546,7 +579,7 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
     let [across, down] = t.anchor();
     let bottom = match t.kind {
         TitleKind::Text => y,
-        TitleKind::LowerThird => y + t.text_fraction() * SubtitleStyle::LINE * (zoom - 1.0),
+        TitleKind::LowerThird => y + t.lower_line() * (zoom - 1.0),
         TitleKind::Scroll => 1.0,
     };
     let left = (x * w) as f32 - across as f32 * look.wrap;

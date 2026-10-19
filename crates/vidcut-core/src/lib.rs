@@ -17,6 +17,7 @@ pub mod preview;
 pub mod render;
 pub mod request;
 pub mod retime;
+pub mod rich;
 pub mod sequence;
 pub mod shortcuts;
 pub mod steps;
