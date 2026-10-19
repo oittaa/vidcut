@@ -270,6 +270,22 @@ pub struct Shown {
     pub frame: i64,
     pub picture: Arc<Picture>,
     pub exact: bool,
+    pub titles: Vec<TitleOver>,
+}
+
+pub struct TitlePicture {
+    pub left: i32,
+    pub top: i32,
+    pub width: u32,
+    pub height: u32,
+    pub frame: (u32, u32),
+    pub rgba: Vec<u8>,
+}
+
+#[derive(Clone)]
+pub struct TitleOver {
+    pub above: usize,
+    pub picture: Arc<TitlePicture>,
 }
 
 #[cfg(test)]

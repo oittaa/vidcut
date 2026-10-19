@@ -550,6 +550,7 @@ mod tests {
             name: None,
             effects: None,
             generator: None,
+            title: None,
             compound: None,
             speed: None,
             color: None,

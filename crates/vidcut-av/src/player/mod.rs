@@ -6,6 +6,7 @@ mod plan;
 mod ring;
 mod scrub;
 mod store;
+mod titles;
 mod video;
 
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -15,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use vidcut_core::render::RenderPlan;
 
-pub use frame::{Layout, Over, Picture, Shown};
+pub use frame::{Layout, Over, Picture, Shown, TitleOver, TitlePicture};
 pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,
@@ -323,6 +324,7 @@ pub(crate) struct Shared {
     gpu_memory: std::sync::OnceLock<u64>,
     heard_epoch: std::sync::atomic::AtomicU64,
     levels: Mutex<std::collections::VecDeque<Level>>,
+    pub(crate) titles: titles::Titles,
 }
 
 pub(crate) struct Level {
@@ -614,6 +616,10 @@ impl Shared {
             f();
         }
     }
+
+    pub(crate) fn drew_titles(&self) {
+        self.prepared();
+    }
 }
 
 pub struct Player {
@@ -682,6 +688,7 @@ impl Player {
             gpu_memory: std::sync::OnceLock::new(),
             heard_epoch: std::sync::atomic::AtomicU64::new(0),
             levels: Mutex::new(std::collections::VecDeque::new()),
+            titles: titles::Titles::default(),
         });
         shared.apply_video_budget();
         output.start(source)?;
@@ -909,7 +916,7 @@ impl Player {
     }
 
     pub fn present(&self, now: Instant) -> Option<Shown> {
-        let (id, pos, speed, clock, plan_gen) = {
+        let (id, pos, speed, clock, plan_gen, plan) = {
             let mut ctl = self.shared.control();
             let pos = self.shared.position(&mut ctl, now);
             let (speed, clock) = match ctl.mode {
@@ -918,8 +925,16 @@ impl Player {
                 }
                 Mode::Paused { .. } => (0.0, None),
             };
-            (ctl.plan.id(pos), pos, speed, clock, ctl.plan_gen)
+            (
+                ctl.plan.id(pos),
+                pos,
+                speed,
+                clock,
+                ctl.plan_gen,
+                ctl.plan.clone(),
+            )
         };
+        let (titles, drawn) = self.shared.titles.shown(&plan, pos);
         let picture = self.shared.store.get(&id);
         let landed = lock(&self.shared.landed).clone();
         let mut p = lock(&self.shared.presenter);
@@ -932,7 +947,8 @@ impl Player {
                 let shown = Shown {
                     frame: pos,
                     picture,
-                    exact: true,
+                    exact: drawn,
+                    titles,
                 };
                 p.shown = Some(shown.clone());
                 p.shown_landing = landed.0;
@@ -950,11 +966,13 @@ impl Player {
                         frame: pos,
                         picture,
                         exact: false,
+                        titles: titles.clone(),
                     });
                 }
                 p.shown.clone().map(|s| Shown {
                     frame: pos,
                     exact: false,
+                    titles,
                     ..s
                 })
             }

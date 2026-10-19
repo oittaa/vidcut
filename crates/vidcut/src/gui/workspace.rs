@@ -823,6 +823,14 @@ impl Workspace {
                     self.send("player.audio_scrubbing", json!({ "on": on }));
                 }
                 ui.add_enabled_ui(self.snap.project.is_some(), |ui| {
+                    if ui
+                        .button("Add Title")
+                        .on_hover_text("A 5-second title at the playhead, over the tracks below it")
+                        .clicked()
+                    {
+                        self.add_title(ui.ctx());
+                        ui.close();
+                    }
                     ui.menu_button("AI Tools", |ui| {
                         if ui.button("Create Subtitles from Audio…").clicked() {
                             self.open_speech();

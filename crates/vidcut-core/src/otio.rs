@@ -4,13 +4,14 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Compound, Marks, Media, Project, Speed, TrackKind};
+use crate::model::{Clip, Compound, Marks, Media, Project, Speed, Title, TrackKind};
 use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
 use crate::time::Rational;
 
 pub mod effects;
 #[cfg(test)]
 mod tests;
+pub mod titles;
 pub mod transitions;
 
 const VIDCUT: &str = "vidcut";
@@ -371,9 +372,11 @@ pub fn export(
             ),
             None => (
                 source as f64,
-                c.generator
-                    .as_ref()
-                    .map_or(Value::Null, |g| (*g.reference).clone()),
+                match (&c.title, &c.generator) {
+                    (Some(t), _) => titles::reference(t),
+                    (None, Some(g)) => (*g.reference).clone(),
+                    (None, None) => Value::Null,
+                },
             ),
         };
         with(
@@ -459,6 +462,7 @@ pub fn export(
                 .name
                 .clone()
                 .or_else(|| m.map(|m| m.name.clone()))
+                .or_else(|| c.title.as_ref().map(|t| titles::name(t).to_string()))
                 .unwrap_or_default();
             let (s, e) = (c.start.max(a), c.end().min(b));
             let shows = c.video && e > s;
@@ -476,6 +480,9 @@ pub fn export(
                     video.push(x);
                 }
                 let mut meta = json!({ "clip": c.id, "media": c.media, "color": c.color });
+                if let Some(t) = &c.title {
+                    meta["title"] = json!(t);
+                }
                 if let Some(au) = &c.audio {
                     meta["stream"] = json!(au.stream);
                     meta["gain_db"] = json!(au.gain_db);
@@ -886,6 +893,7 @@ pub struct ImportedClip {
     pub effects: Vec<Value>,
     pub audio_effects: Vec<Value>,
     pub generator: Option<Value>,
+    pub title: Option<Title>,
     pub compound: Option<Compound>,
     pub speed: Option<Speed>,
     pub color: Option<String>,
@@ -907,7 +915,7 @@ impl ImportedClip {
     }
 
     pub fn is_block(&self) -> bool {
-        self.generator.is_some() || self.compound.is_some()
+        self.generator.is_some() || self.title.is_some() || self.compound.is_some()
     }
 
     fn block(
@@ -939,6 +947,7 @@ impl ImportedClip {
             effects: Vec::new(),
             audio_effects: Vec::new(),
             generator: None,
+            title: None,
             compound: None,
             speed: None,
             color: clip_color(item),
@@ -1553,6 +1562,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     };
     let (video_tracks, audio_tracks) = (of_kind("Video"), of_kind("Audio"));
     let mut warnings = Vec::new();
+    let mut read_titles: Vec<String> = Vec::new();
     let fps = file_rate(tl, &tracks)?;
     let start_tc = time(&tl["global_start_time"]).map_or(0, |(v, r)| frames(v, r, fps));
     let mut markers = Vec::new();
@@ -1582,6 +1592,16 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 c.speed = speed;
                 if stack {
                     c.compound = Some(compound_of(item, fps));
+                } else if let Some(t) = titles::read(item, reference) {
+                    if c.name == reference["name"].as_str().unwrap_or_default()
+                        || c.name == t.label()
+                    {
+                        c.name.clear();
+                    }
+                    if item["metadata"][VIDCUT].get("title").is_none() {
+                        read_titles.push(item["name"].as_str().unwrap_or("title").to_string());
+                    }
+                    c.title = Some(t);
                 } else {
                     c.generator = Some(reference.clone());
                 }
@@ -1618,6 +1638,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         effects,
                         audio_effects: Vec::new(),
                         generator: None,
+                        title: None,
                         compound: None,
                         speed,
                         color: clip_color(item),
@@ -1778,6 +1799,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 effects: Vec::new(),
                 audio_effects: effects,
                 generator: None,
+                title: None,
                 compound: None,
                 speed,
                 color: clip_color(item),
@@ -1866,6 +1888,15 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         if !made.contains(&c.name.as_str()) {
             made.push(&c.name);
         }
+    }
+    read_titles.sort();
+    read_titles.dedup();
+    if !read_titles.is_empty() {
+        warnings.push(format!(
+            "titles read without what vidcut's titles lack (rich text, a size for each line, \
+             drop shadows, zoom and rotation): {}",
+            read_titles.join(", ")
+        ));
     }
     if !made.is_empty() {
         warnings.push(format!(

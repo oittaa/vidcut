@@ -715,6 +715,11 @@ pub struct Clip {
     /// no audio, and any length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generator: Option<Generator>,
+    /// A title (decision D65): its text drawn over the picture of the
+    /// tracks below it, on a video track. It has no media (`media` is
+    /// empty) and no audio, and any length.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<Title>,
     /// A compound clip or nested timeline another editor made, carried
     /// (deviation X9): a block that plays as a gap, with no media and no
     /// audio. On an audio track it stands for the nested timeline's sound
@@ -830,6 +835,161 @@ pub struct Generator {
     pub reference: Kept,
 }
 
+/// A title: text drawn over the picture (decision D65). A field left out
+/// keeps the usual look.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Title {
+    /// `text`, one block of text, or `lower_third`, two lines at the bottom
+    /// of the title-safe area.
+    #[serde(default, skip_serializing_if = "TitleKind::is_text")]
+    pub kind: TitleKind,
+    /// Where a lower third sits: `left`, `middle` or `right`. Usual: left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub align: Option<TitleAlign>,
+    /// Its lines, separated by `\n`: two at most for a lower third. Plain
+    /// text: no markup.
+    pub text: String,
+    #[serde(default, skip_serializing_if = "TitleStyle::is_empty")]
+    pub style: TitleStyle,
+    /// Where it goes, as fractions of the picture's width and height from
+    /// its top left: the middle of a `text` title's block (usual: `[0.5,
+    /// 0.5]`), a lower third's bottom left, middle or right corner by its
+    /// `align` (usual: 10%, 50% or 90% across and 88% down, so that its
+    /// lower line's top sits about a fifth up the picture: `[0.1, 0.88]`,
+    /// `[0.5, 0.88]` and `[0.9, 0.88]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f64; 2]>,
+}
+
+/// What kind of title: one block of text, or a lower third.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TitleKind {
+    #[default]
+    Text,
+    LowerThird,
+}
+
+impl TitleKind {
+    pub fn is_text(&self) -> bool {
+        *self == Self::Text
+    }
+}
+
+/// Where a lower third sits at the bottom of the title-safe area, and how
+/// its lines line up.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum TitleAlign {
+    #[default]
+    Left,
+    Middle,
+    Right,
+}
+
+/// How a title looks. A field left out keeps the usual look.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct TitleStyle {
+    /// Font family, used when that font is installed. Usual: the burned-in
+    /// subtitles' font.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<String>,
+    /// Text height as a fraction of the picture height, above 0 and at most
+    /// 1/2. Usual: 0.08 for `text`, 0.06 for a lower third.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Outline color and thickness. Usual: black, a twentieth of the text
+    /// height.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline: Option<SubtitleOutline>,
+    /// A box behind the whole block of text. Usual: none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<SubtitleBackground>,
+}
+
+impl TitleStyle {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+impl Title {
+    pub const SAFE: f64 = 0.9;
+    pub const LOWER_IN: f64 = 0.1;
+    pub const LOWER_DOWN: f64 = 0.88;
+
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            kind: TitleKind::Text,
+            align: None,
+            text: text.into(),
+            style: TitleStyle::default(),
+            position: None,
+        }
+    }
+
+    pub fn align(&self) -> TitleAlign {
+        match self.kind {
+            TitleKind::Text => TitleAlign::Middle,
+            TitleKind::LowerThird => self.align.unwrap_or_default(),
+        }
+    }
+
+    pub fn usual_position(kind: TitleKind, align: TitleAlign) -> [f64; 2] {
+        match (kind, align) {
+            (TitleKind::Text, _) => [0.5, 0.5],
+            (TitleKind::LowerThird, TitleAlign::Left) => [Self::LOWER_IN, Self::LOWER_DOWN],
+            (TitleKind::LowerThird, TitleAlign::Middle) => [0.5, Self::LOWER_DOWN],
+            (TitleKind::LowerThird, TitleAlign::Right) => [1.0 - Self::LOWER_IN, Self::LOWER_DOWN],
+        }
+    }
+
+    pub fn place(&self) -> [f64; 2] {
+        self.position
+            .unwrap_or_else(|| Self::usual_position(self.kind, self.align()))
+    }
+
+    pub fn anchor(&self) -> [f64; 2] {
+        match (self.kind, self.align()) {
+            (TitleKind::Text, _) => [0.5, 0.5],
+            (TitleKind::LowerThird, TitleAlign::Left) => [0.0, 1.0],
+            (TitleKind::LowerThird, TitleAlign::Middle) => [0.5, 1.0],
+            (TitleKind::LowerThird, TitleAlign::Right) => [1.0, 1.0],
+        }
+    }
+
+    pub fn text_fraction(&self) -> f64 {
+        self.style.size.unwrap_or(match self.kind {
+            TitleKind::Text => 0.08,
+            TitleKind::LowerThird => 0.06,
+        })
+    }
+
+    pub fn ink(&self) -> [u8; 3] {
+        paint(self.style.color.as_deref(), [255, 255, 255])
+    }
+
+    pub fn stroke(&self) -> Option<([u8; 3], f64)> {
+        stroke_of(self.style.outline.as_ref())
+    }
+
+    pub fn backing(&self) -> Option<([u8; 3], f64)> {
+        backing_of(self.style.background.as_ref())
+    }
+
+    pub fn wrap_width(&self, picture_width: f64, picture_height: f64) -> f64 {
+        (picture_width * Self::SAFE).max(self.text_fraction() * picture_height)
+    }
+
+    pub fn label(&self) -> String {
+        let line = self.text.lines().find(|l| !l.trim().is_empty());
+        line.map_or_else(|| "Title".to_string(), |l| l.trim().to_string())
+    }
+}
+
 /// A compound clip or nested timeline from another editor's file
 /// (deviation X9).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -896,11 +1056,11 @@ impl Clip {
     }
 
     pub fn is_generator(&self) -> bool {
-        self.generator.is_some()
+        self.generator.is_some() || self.title.is_some()
     }
 
     pub fn is_block(&self) -> bool {
-        self.generator.is_some() || self.compound.is_some()
+        self.is_generator() || self.compound.is_some()
     }
 
     pub fn end(&self) -> i64 {
@@ -1092,7 +1252,7 @@ pub struct SubtitleStyle {
     pub margin: Option<f64>,
 }
 
-/// An outline around a subtitle track's text.
+/// An outline around a subtitle track's or a title's text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct SubtitleOutline {
     /// `#rrggbb`, `#rgb` or a name. Usual: black.
@@ -1104,7 +1264,7 @@ pub struct SubtitleOutline {
     pub size: Option<f64>,
 }
 
-/// A box behind a subtitle track's text.
+/// A box behind a subtitle track's or a title's text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SubtitleBackground {
     /// `#rrggbb`, `#rgb` or a name.
@@ -1136,14 +1296,11 @@ impl SubtitleStyle {
     }
 
     pub fn stroke(&self) -> Option<([u8; 3], f64)> {
-        let o = self.outline.as_ref();
-        let size = o.and_then(|o| o.size).unwrap_or(0.05);
-        (size > 0.0).then(|| (paint(o.and_then(|o| o.color.as_deref()), [0, 0, 0]), size))
+        stroke_of(self.outline.as_ref())
     }
 
     pub fn backing(&self) -> Option<([u8; 3], f64)> {
-        let b = self.background.as_ref()?;
-        Some((paint(Some(&b.color), [0, 0, 0]), b.opacity.unwrap_or(1.0)))
+        backing_of(self.background.as_ref())
     }
 
     pub fn inset(&self) -> f64 {
@@ -1172,6 +1329,16 @@ impl SubtitleStyle {
 
 fn paint(hex: Option<&str>, usual: [u8; 3]) -> [u8; 3] {
     hex.and_then(crate::subtitles::rgb).unwrap_or(usual)
+}
+
+fn stroke_of(o: Option<&SubtitleOutline>) -> Option<([u8; 3], f64)> {
+    let size = o.and_then(|o| o.size).unwrap_or(0.05);
+    (size > 0.0).then(|| (paint(o.and_then(|o| o.color.as_deref()), [0, 0, 0]), size))
+}
+
+fn backing_of(b: Option<&SubtitleBackground>) -> Option<([u8; 3], f64)> {
+    let b = b?;
+    Some((paint(Some(&b.color), [0, 0, 0]), b.opacity.unwrap_or(1.0)))
 }
 
 /// A subtitle track: cues shown over the picture, one language or use.
@@ -1390,10 +1557,10 @@ impl Project {
     }
 
     pub fn source_range(&self, c: &Clip) -> Option<Range<i64>> {
-        match (&c.compound, &c.generator) {
-            (Some(k), _) => Some(0..k.frames),
-            (None, Some(_)) => None,
-            (None, None) => self.media(&c.media).map(|m| self.media_range(m, c)),
+        match &c.compound {
+            Some(k) => Some(0..k.frames),
+            None if c.is_generator() => None,
+            None => self.media(&c.media).map(|m| self.media_range(m, c)),
         }
     }
 

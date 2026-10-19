@@ -46,6 +46,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("subtitles.join", &["cues"]),
     ("subtitles.import", &["path"]),
     ("subtitles.export", &["out"]),
+    ("titles.list", &["track"]),
+    ("titles.add", &["text"]),
+    ("titles.set", &["clip"]),
     ("edit.append", &["media"]),
     ("edit.smart_insert", &["media"]),
     ("edit.insert", &["media"]),
@@ -151,6 +154,10 @@ const GROUPS: &[(&str, &str)] = &[
     ("tape", "The Source Tape"),
     ("tape.marks", "The Source Tape's In and Out marks"),
     (
+        "titles",
+        "Titles: text over the picture, as clips on the video tracks",
+    ),
+    (
         "timeline",
         "The timeline: clips and gaps, edit points, the Boring Detector, OTIO import",
     ),
@@ -236,6 +243,18 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "track.set",
         "vidcut track set A1 --volume-db -6 --name Music\n  vidcut track set V2 --locked true\n  vidcut track set A2 --solo true",
+    ),
+    (
+        "titles.add",
+        "vidcut titles add \"Opening night\" --at 10s\n  \
+         vidcut titles add \"Ada Lovelace\" --kind lower_third --align right --at 1m --duration 4s\n  \
+         vidcut titles add \"The end\" --at 2m --position 0.5,0.8 --style '{\"color\":\"yellow\",\"size\":0.1}'",
+    ),
+    (
+        "titles.set",
+        "vidcut titles set c4 --text \"Opening night\"\n  \
+         vidcut titles set V2@10s --kind lower_third --align middle\n  \
+         vidcut titles set c4 --position 0.5,0.2",
     ),
     (
         "export.start",

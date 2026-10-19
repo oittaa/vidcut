@@ -113,7 +113,7 @@ fn jobs(text: &str, size: f32, width: f32, base: Color32) -> (LayoutJob, LayoutJ
     (plain, bold)
 }
 
-fn percent(v: Option<f64>) -> String {
+pub(super) fn percent(v: Option<f64>) -> String {
     let Some(n) = v else {
         return String::new();
     };
@@ -132,12 +132,16 @@ fn number(raw: &str, what: &str) -> Result<Option<f64>, String> {
         .map_err(|_| format!("{what} is a percent, such as 5.5"))
 }
 
-fn field(raw: &str) -> Option<String> {
+pub(super) fn field(raw: &str) -> Option<String> {
     let t = raw.trim();
     (!t.is_empty()).then(|| t.to_string())
 }
 
-fn kept_number(shown: &str, stored: Option<f64>, what: &str) -> Result<Option<f64>, String> {
+pub(super) fn kept_number(
+    shown: &str,
+    stored: Option<f64>,
+    what: &str,
+) -> Result<Option<f64>, String> {
     if shown.trim() == percent(stored) {
         Ok(stored)
     } else {
@@ -178,7 +182,7 @@ fn style_of(d: &TrackDialog, stored: &SubtitleStyle) -> Result<SubtitleStyle, St
     vidcut_core::ops::subtitles::checked_style(&style).map_err(|e| e.message)
 }
 
-fn swatch(ui: &mut egui::Ui, text: &mut String, usual: [u8; 3]) -> bool {
+pub(super) fn swatch(ui: &mut egui::Ui, text: &mut String, usual: [u8; 3]) -> bool {
     let mut rgb = vidcut_core::subtitles::color(text)
         .and_then(|c| vidcut_core::subtitles::rgb(&c))
         .unwrap_or(usual);
@@ -190,12 +194,17 @@ fn swatch(ui: &mut egui::Ui, text: &mut String, usual: [u8; 3]) -> bool {
     changed
 }
 
-fn font_list(ui: &mut egui::Ui, font: &mut String, families: &[String]) -> bool {
+pub(super) fn font_list(
+    ui: &mut egui::Ui,
+    salt: &str,
+    font: &mut String,
+    families: &[String],
+) -> bool {
     let mut changed = false;
     if families.is_empty() {
         return changed;
     }
-    egui::ComboBox::from_id_salt("subtitle-font")
+    egui::ComboBox::from_id_salt(salt)
         .selected_text("")
         .width(0.0)
         .show_ui(ui, |ui| {
@@ -565,7 +574,7 @@ impl Workspace {
                             r.changed()
                         };
                     changed |= row(ui, "Font", &mut d.font, "Open Sans");
-                    changed |= font_list(ui, &mut d.font, &d.families);
+                    changed |= font_list(ui, "subtitle-font", &mut d.font, &d.families);
                     ui.end_row();
                     changed |= row(ui, "Size", &mut d.size, "5.5% of the picture");
                     ui.end_row();
