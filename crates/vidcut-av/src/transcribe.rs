@@ -41,7 +41,7 @@ impl File {
 
 pub const QWEN3_ASR: File = File {
     name: "Qwen3-ASR-1.7B-Q8_0.gguf",
-    title: "Qwen3-ASR 1.7B",
+    title: SpeechModel::Qwen3Asr.title(),
     repo: "handy-computer/Qwen3-ASR-1.7B-gguf",
     revision: "0e0a596e3959c3f3f2ab7d443a5b6f0f4a4bba6f",
     bytes: 2_185_030_624,
@@ -55,7 +55,7 @@ pub const QWEN3_ASR: File = File {
 
 pub const WHISPER_LARGE_V3: File = File {
     name: "whisper-large-v3-Q8_0.gguf",
-    title: "Whisper large-v3",
+    title: SpeechModel::WhisperLargeV3.title(),
     repo: "handy-computer/whisper-large-v3-gguf",
     revision: "274ad1d1cf680b7ee53cc70f78461394cd3a344b",
     bytes: 1_668_741_440,
@@ -74,7 +74,7 @@ pub const WHISPER_LARGE_V3: File = File {
 
 pub const PARAKEET_ULTRA: File = File {
     name: "parakeet-ultra-Q8_0.gguf",
-    title: "Parakeet Ultra",
+    title: SpeechModel::ParakeetUltra.title(),
     repo: "handy-computer/parakeet-ultra-gguf",
     revision: "a1539be1b849ea7463b88343e5277b373d0c4ea9",
     bytes: 740_363_168,
@@ -1013,15 +1013,8 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
         .flatten()
         .filter(|s| !s.text.is_empty() || !s.words.is_empty())
         .collect();
-    let model = match &asked.model_file {
-        Some(f) => f.file_name().map_or_else(
-            || f.display().to_string(),
-            |n| n.to_string_lossy().into_owned(),
-        ),
-        None => file_of(asked.model).title.to_string(),
-    };
     Ok(Speech {
-        model,
+        model: asked.model_name(),
         device: loaded.device,
         language,
         timing: timing_of(caps.max_timestamp_kind),

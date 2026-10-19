@@ -123,8 +123,9 @@ pub enum Request {
     /// Transcribe Audio: hear each pool item's own sound (`stream`, counted
     /// from 0) and keep its words, with their times, with the media, for
     /// `analyze.words` with `media` or `clips` and the Transcription window.
-    /// A media already transcribed keeps its transcript unless `again`. Only
-    /// a model that times words is kept: Parakeet Ultra; the others are
+    /// A transcript kept from before is used unless `again`, or another
+    /// model or another `language` made it, when the new one replaces it.
+    /// Only a model that times words is kept: Parakeet Ultra; the others are
     /// refused. It runs as a job. A transcript is kept with vidcut's other
     /// measurements of the file, so a changed file has none.
     #[serde(rename = "media.transcribe")]
@@ -1021,12 +1022,11 @@ pub enum Request {
         #[serde(default)]
         overwrite: bool,
     },
-    /// Create Subtitles from Audio: transcribe the speech in the mix of the
-    /// tracks heard (`tracks`) over `range` (default: In–Out when both are
-    /// set, else everything) on this computer, on the GPU unless the
-    /// preferences turn it off, and add it as cues to a subtitle track. The
-    /// model files are downloaded once, into the cache folder, when
-    /// `download` allows it.
+    /// Create Subtitles from Audio: transcribe the speech of the tracks heard
+    /// (`tracks`) over `range` (default: In–Out when both are set, else
+    /// everything) on this computer, on the GPU unless the preferences turn
+    /// it off, and add it as cues to a subtitle track. The model files are
+    /// downloaded once, into the cache folder, when `download` allows it.
     #[serde(rename = "subtitles.transcribe")]
     SubtitlesTranscribe {
         #[serde(default)]
@@ -1063,6 +1063,15 @@ pub enum Request {
         /// Frames left between a cue and the next, 0 to 10.
         #[serde(default)]
         gap: u32,
+        /// `media`: the words of each heard clip's file, kept from before when
+        /// the same model made them in the language asked, else transcribed
+        /// and kept (Transcribe Audio), placed through the clips. Where two
+        /// tracks have the same word at once, the first track's is kept (V1,
+        /// V2, …, then A1, A2, …). `mix`: the mix of the tracks heard over
+        /// `range`, which keeps nothing. Default: `media` with a model that
+        /// times words and no `model_file`, else `mix`.
+        #[serde(default)]
+        hear: Option<HearFrom>,
         /// Download what this computer doesn't have yet: transcribe.cpp's
         /// library, Silero VAD and the model, each checked against its
         /// SHA-256. Without it, a missing one is an error that says what
@@ -1077,9 +1086,10 @@ pub enum Request {
     /// to a frame-rate ratio such as 25/23.976 when it is near one. The
     /// answer says how clearly the best offset stands out from the next
     /// best more than 2 s away; when it isn't 1.25 times as high, nothing
-    /// moves and the error gives the numbers. With `words`, Parakeet Ultra
-    /// also hears the speech, and the cues whose first word is in a run of 3
-    /// or more words matching what it heard check the result. Then the simplest
+    /// moves and the error gives the numbers. With `words`, the speech's
+    /// words are read too, as `subtitles.transcribe` reads them (`hear`) with
+    /// Parakeet Ultra, and the cues whose first word is in a run of 3 or more
+    /// words matching them check the result. Then the simplest
     /// correction that puts 90% of them within 0.5 s of their words wins:
     /// one offset, an offset and a speed, an offset for each section between
     /// jumps, or else each of those cues moved to its words. A dry run
@@ -1098,6 +1108,10 @@ pub enum Request {
         /// Also match the cues' words to the words Parakeet Ultra hears.
         #[serde(default)]
         words: bool,
+        /// For `words`: `media` (the default), each heard clip's file's words,
+        /// or `mix`, as `subtitles.transcribe` takes it.
+        #[serde(default)]
+        hear: Option<HearFrom>,
         /// The language spoken, as a code such as `en`, for `words`.
         /// Default: the model tells it from the longest stretch of speech.
         #[serde(default)]
@@ -1850,6 +1864,25 @@ impl SpeechModel {
     pub fn times_words(self) -> bool {
         self == Self::ParakeetUltra
     }
+
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::ParakeetUltra => "Parakeet Ultra",
+            Self::Qwen3Asr => "Qwen3-ASR 1.7B",
+            Self::WhisperLargeV3 => "Whisper large-v3",
+        }
+    }
+}
+
+/// Where speech is heard from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum HearFrom {
+    /// Each heard clip's file on its own, as Transcribe Audio hears it, its
+    /// words kept with the file and placed through the clip.
+    Media,
+    /// The mix of the tracks heard.
+    Mix,
 }
 
 /// A subtitle file format.

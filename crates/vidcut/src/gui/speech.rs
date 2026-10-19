@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use eframe::egui::{self, RichText};
 use serde_json::json;
@@ -40,6 +40,7 @@ struct Settings {
     chars: u32,
     lines: u32,
     gap: u32,
+    from_media: bool,
 }
 
 impl Default for Settings {
@@ -52,6 +53,7 @@ impl Default for Settings {
             chars: 42,
             lines: 1,
             gap: 0,
+            from_media: true,
         }
     }
 }
@@ -121,6 +123,43 @@ fn marked(p: &Project) -> Option<(i64, i64)> {
     match (p.marks.mark_in, p.marks.mark_out) {
         (Some(a), Some(b)) if b > a => Some((a, b)),
         _ => None,
+    }
+}
+
+fn untranscribed(
+    p: &Project,
+    heard: &[String],
+    (a, b): (i64, i64),
+    kept: &HashSet<String>,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for t in p.tracks.iter().filter(|t| heard.contains(&t.id)) {
+        for c in &t.clips {
+            let (Some(sound), Some((from, to))) = (&c.audio, c.audio_range()) else {
+                continue;
+            };
+            if c.enabled
+                && !sound.muted
+                && !c.is_block()
+                && to > a
+                && from < b
+                && !kept.contains(&c.media)
+                && !out.contains(&c.media)
+            {
+                out.push(c.media.clone());
+            }
+        }
+    }
+    out
+}
+
+fn length(secs: f64) -> String {
+    let s = secs.round() as u64;
+    match (s / 3600, s / 60 % 60, s % 60) {
+        (0, 0, s) => format!("{s} s"),
+        (0, m, 0) => format!("{m} min"),
+        (0, m, s) => format!("{m} min {s} s"),
+        (h, m, _) => format!("{h} h {m} min"),
     }
 }
 
@@ -309,6 +348,7 @@ impl Workspace {
             "chars": s.chars,
             "lines": s.lines,
             "gap": s.gap,
+            "hear": if s.from_media && s.model.times_words() { "media" } else { "mix" },
         });
         if let Some(l) = &s.language {
             params["language"] = json!(l);
@@ -478,6 +518,41 @@ impl Workspace {
                             ui.label("Hear");
                             heard = d.hear.ui(ui, &p);
                             ui.end_row();
+                            ui.label("Words from");
+                            ui.vertical(|ui| {
+                                let can = s.model.times_words();
+                                let mut media = s.from_media && can;
+                                ui.add_enabled_ui(can, |ui| {
+                                    if ui
+                                        .radio(media, "Each clip's file")
+                                        .on_hover_text(
+                                            "Words kept for a file are used; a file without \
+                                             them is transcribed and keeps them, for the \
+                                             Transcription window and next time",
+                                        )
+                                        .on_disabled_hover_text(
+                                            "Only Parakeet Ultra times each word, which placing \
+                                             a file's words through its clips needs",
+                                        )
+                                        .clicked()
+                                    {
+                                        media = true;
+                                    }
+                                });
+                                if ui
+                                    .radio(!media, "The timeline's mix")
+                                    .on_hover_text(
+                                        "Hears the tracks mixed over the range; nothing is kept",
+                                    )
+                                    .clicked()
+                                {
+                                    media = false;
+                                }
+                                if can {
+                                    s.from_media = media;
+                                }
+                            });
+                            ui.end_row();
                             ui.label("Track");
                             let highest = p.subtitles.last();
                             let shown = match (&s.onto, highest) {
@@ -542,6 +617,33 @@ impl Workspace {
                                 self.tc(b - 1)
                             )),
                         };
+                        if s.from_media && s.model.times_words() && !heard.is_empty() {
+                            let missing = untranscribed(&p, &heard, (a, b), &self.snap.transcribed);
+                            let secs: f64 = missing
+                                .iter()
+                                .filter_map(|id| p.media(id))
+                                .map(|m| m.info.duration)
+                                .sum();
+                            let names: Vec<String> = missing
+                                .iter()
+                                .map(|id| {
+                                    p.media(id).map_or_else(|| id.clone(), |m| m.name.clone())
+                                })
+                                .collect();
+                            ui.label(dim(match missing.len() {
+                                0 => "Uses the words kept for each clip's file".to_string(),
+                                _ => format!(
+                                    "Transcribes {} first, {} in all, and keeps the words",
+                                    listed(&names),
+                                    length(secs)
+                                ),
+                            }));
+                            if s.language.is_some() {
+                                ui.label(dim(
+                                    "A file whose words weren't made in this language is transcribed again",
+                                ));
+                            }
+                        }
                     }
                     ui.label(dim("Jobs shows its progress, and can cancel it"));
                     ui.horizontal(|ui| {

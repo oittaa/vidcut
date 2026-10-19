@@ -219,6 +219,14 @@ fn level_at(heard: &[Heard], frame: i64) -> f64 {
 }
 
 pub fn words_in(span: &Span, words: &[crate::transcript::Word]) -> Vec<(usize, i64, i64)> {
+    words_between(span, (span.start, span.end), words)
+}
+
+pub fn words_between(
+    span: &Span,
+    (from, to): (i64, i64),
+    words: &[crate::transcript::Word],
+) -> Vec<(usize, i64, i64)> {
     if span.pace.speed == 0.0 {
         return Vec::new();
     }
@@ -230,11 +238,11 @@ pub fn words_in(span: &Span, words: &[crate::transcript::Word]) -> Vec<(usize, i
             let b = span.frame(span.origin + w.end);
             let (a, b) = (a.min(b), a.max(b));
             let middle = (a + b) / 2.0;
-            if middle < span.start as f64 || middle >= span.end as f64 {
+            if middle < from as f64 || middle >= to as f64 {
                 return None;
             }
-            let start = (a.round() as i64).max(span.start);
-            let end = (b.round() as i64).max(start + 1).min(span.end);
+            let start = (a.round() as i64).max(from);
+            let end = (b.round() as i64).max(start + 1).min(to);
             (end > start).then_some((i, start, end))
         })
         .collect()
