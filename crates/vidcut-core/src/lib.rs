@@ -22,6 +22,7 @@ pub mod steps;
 pub mod store;
 pub mod subtitles;
 pub mod time;
+pub mod transcript;
 pub mod validate;
 
 pub use editor::{Editor, Env, History, ProbedMedia};

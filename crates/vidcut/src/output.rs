@@ -578,6 +578,31 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 print_copies(&p["copies"]);
             }
         }
+        "subtitles.transcribe" => {
+            let v = &r.result;
+            for w in v["warnings"].as_array().into_iter().flatten() {
+                eprintln!("vidcut: warning: {}", w.as_str().unwrap_or_default());
+            }
+            let cues = v["cues"].as_array().map_or(0, Vec::len);
+            let verb = if r.dry_run { "would add" } else { "added" };
+            match v["track"].as_str() {
+                Some(track) => println!("{verb} {cues} cue(s) on {track} (rev {})", r.rev),
+                None => println!("no speech found (rev {})", r.rev),
+            }
+            let timing = match v["timing"].as_str() {
+                Some("words") => "its words",
+                Some("phrases") => "its phrases",
+                _ => "the pauses",
+            };
+            println!(
+                "  {} on {}, language {}, timed by {timing}, {} piece(s) of up to {:.0} s",
+                v["model"].as_str().unwrap_or_default(),
+                v["device"].as_str().unwrap_or_default(),
+                v["language"].as_str().unwrap_or("not told"),
+                v["pieces"],
+                v["longest_piece"].as_f64().unwrap_or_default()
+            );
+        }
         "proxy.remove" => {
             let cleared = r.result["cleared"].as_array().cloned().unwrap_or_default();
             let ids: Vec<&str> = cleared.iter().filter_map(|v| v.as_str()).collect();

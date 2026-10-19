@@ -60,7 +60,7 @@ The registry (`ipc::registry`) is a folder in the user's runtime dir: each GUI w
 
 ## Headless
 
-`session::run_with` refuses live requests, answers projectless ones itself, and otherwise opens the project's `Store`. A mutation runs in `Store::transact`: take the lock (`Store::lock`), load the project and its history, `Editor::apply`, save if the revision moved. A query needs no lock. `proxy.generate` encodes on a copy first, outside the lock (spec D41).
+`session::run_with` refuses live requests, answers projectless ones itself, and otherwise opens the project's `Store`. A mutation runs in `Store::transact`: take the lock (`Store::lock`), load the project and its history, `Editor::apply`, save if the revision moved. A query needs no lock. `proxy.generate` encodes on a copy first, outside the lock (spec D41), and `subtitles.transcribe` transcribes on one (`work_first`); inside the lock their edit finds the work done.
 
 ## Live
 

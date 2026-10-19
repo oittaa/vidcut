@@ -33,9 +33,10 @@ test: ## The unit tests alone
 hooks: ## Run check before every commit (once per clone)
 	git config core.hooksPath .githooks
 
-doctor: ## Check Rust, pkg-config and FFmpeg, then show the GPUs and encoders
+doctor: ## Check Rust, pkg-config, CMake and FFmpeg, then show the GPUs and encoders
 	@command -v cargo >/dev/null || { echo "cargo is missing: install rustup (README.md, Requirements)"; exit 1; }
 	@command -v pkg-config >/dev/null || { echo "pkg-config is missing (README.md, Requirements)"; exit 1; }
+	@command -v cmake >/dev/null || { echo "cmake is missing: transcribe.cpp builds with it (README.md, Requirements)"; exit 1; }
 	@pkg-config --atleast-version=62 libavcodec || { echo "pkg-config finds no FFmpeg 8.0 or newer (libavcodec 62): $$(pkg-config --modversion libavcodec 2>/dev/null || echo none). See README.md, Requirements"; exit 1; }
 	@echo "$$(cargo --version), FFmpeg's libavcodec $$(pkg-config --modversion libavcodec)"
 	@if [ -x "$(VIDCUT)" ]; then "$(VIDCUT)" doctor; else echo "make build, then make doctor shows the GPUs, encoders and audio devices"; fi

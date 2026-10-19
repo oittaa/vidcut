@@ -117,7 +117,10 @@ const GROUPS: &[(&str, &str)] = &[
         "The running GUI: its window, command log, screenshots, panels, target track and timeline view",
     ),
     ("history", "Undo and redo, across runs"),
-    ("jobs", "Export and proxy jobs of the running GUI"),
+    (
+        "jobs",
+        "Export, proxy and transcription jobs of the running GUI",
+    ),
     ("keys", "Keyboard shortcuts"),
     ("markers", "Timeline markers"),
     ("marks", "Timeline In and Out marks"),
@@ -143,7 +146,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("storyboard", "Storyboards: a labeled picture of every shot"),
     (
         "subtitles",
-        "Subtitle cues: import and export SRT, WebVTT and TTML, add and change cues",
+        "Subtitle cues: transcribe the speech, import and export SRT, WebVTT and TTML, add and change cues",
     ),
     ("tape", "The Source Tape"),
     ("tape.marks", "The Source Tape's In and Out marks"),

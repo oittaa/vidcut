@@ -24,6 +24,7 @@ use crate::request::{
 };
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
 use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode};
+use crate::transcript::{self, Speech};
 use crate::validate;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -136,6 +137,11 @@ pub trait Env {
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>>;
 
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness>;
+
+    fn transcribe(&self, plan: &RenderPlan, asked: &transcript::Asked) -> Result<Arc<Speech>> {
+        let _ = (plan, asked);
+        Err(Error::usage("speech is transcribed by the vidcut program"))
+    }
 
     fn proxy_dir(&self) -> PathBuf;
 
@@ -1536,6 +1542,31 @@ fn diff(before: &Project, after: &Project) -> Changes {
     c
 }
 
+fn transcribed_range(
+    p: &Project,
+    range: Option<&crate::time::RangeSpec>,
+    playhead: Option<i64>,
+) -> Result<(i64, i64)> {
+    let (a, b) = match range {
+        Some(r) => ctx(p, playhead).range(r)?,
+        None => match (p.marks.mark_in, p.marks.mark_out) {
+            (Some(a), Some(b)) => (a, b),
+            _ => (0, p.end()),
+        },
+    };
+    if b <= a {
+        return Err(Error::invalid("nothing to transcribe: the range is empty"));
+    }
+    Ok((a, b))
+}
+
+fn sound_plan(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
+    let mut q = p.clone();
+    q.settings.sample_rate = transcript::RATE;
+    q.settings.channels = 1;
+    crate::render::flatten(&q, a, b)
+}
+
 fn ctx(p: &Project, playhead: Option<i64>) -> TimeContext {
     p.time_context(playhead)
 }
@@ -2571,6 +2602,89 @@ fn mutate(
                 "time_base_why": placed.why,
                 "moved_by": format!("{:+.3}s", 0.0 - placed.offset as f64 / fps),
                 "moved_by_frames": -placed.offset,
+                "warnings": warnings,
+            })
+        }
+        Request::SubtitlesTranscribe {
+            range,
+            model,
+            model_file,
+            vad_file,
+            language,
+            track,
+            chars,
+            lines,
+            gap,
+            download,
+        } => {
+            if !(1..=60).contains(chars) {
+                return Err(Error::usage("chars: 1 to 60 characters per line"));
+            }
+            if !(1..=2).contains(lines) {
+                return Err(Error::usage("lines: 1 or 2"));
+            }
+            if *gap > 10 {
+                return Err(Error::usage("gap: 0 to 10 frames"));
+            }
+            let (a, b) = transcribed_range(p, range.as_ref(), playhead)?;
+            let speech = env.transcribe(
+                &sound_plan(p, a, b)?,
+                &transcript::Asked {
+                    model: model.unwrap_or_default(),
+                    model_file: model_file.clone(),
+                    vad_file: vad_file.clone(),
+                    language: language.clone(),
+                    download: *download,
+                },
+            )?;
+            let made = transcript::cues(
+                &speech.said,
+                p.settings.fps,
+                transcript::Layout {
+                    chars: *chars as usize,
+                    lines: *lines as usize,
+                    gap: i64::from(*gap),
+                },
+            );
+            let mut warnings = speech.warnings.clone();
+            let made: Vec<_> = made.into_iter().filter(|m| a + m.start < b).collect();
+            let mut ids = Vec::new();
+            let mut on = None;
+            if made.is_empty() {
+                warnings.push("no speech found".into());
+            } else {
+                let ti = match track {
+                    Some(t) => ops::subtitles::target(p, Some(t))?,
+                    None if p.subtitles.is_empty() => ops::subtitles::target(p, None)?,
+                    None => p.subtitles.len() - 1,
+                };
+                if p.subtitles[ti].language.is_none() {
+                    p.subtitles[ti].language = speech.language.clone();
+                }
+                for m in &made {
+                    let (start, end) = (a + m.start, (a + m.end).min(b));
+                    ids.push(ops::subtitles::add_cue(
+                        p,
+                        ti,
+                        start,
+                        Some(end.max(start + 1)),
+                        None,
+                        &m.text,
+                        None,
+                    )?);
+                }
+                on = Some(p.subtitles[ti].id.clone());
+            }
+            json!({
+                "track": on,
+                "cues": ids,
+                "from": a, "to": b,
+                "model": speech.model,
+                "device": speech.device,
+                "language": speech.language,
+                "timing": speech.timing,
+                "pieces": speech.pieces,
+                "longest_piece": speech.longest_piece,
                 "warnings": warnings,
             })
         }
