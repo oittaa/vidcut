@@ -174,6 +174,7 @@ pub fn run_with(
         Request::PreferencesGet {} => answer(crate::preferences::get()?),
         Request::KeysList {} => answer(shortcuts()),
         Request::PreferencesSet(patch) => answer(crate::preferences::set(patch, envelope.dry_run)?),
+        Request::PreferencesReset {} => answer(crate::preferences::reset(envelope.dry_run)?),
         Request::ExportStart(params) if params.background => {
             return Err(Error::no_instance(
                 "background exports run in a vidcut GUI (they would stop with this \

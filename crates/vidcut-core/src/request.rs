@@ -1052,6 +1052,10 @@ pub enum Request {
     /// thumbnail cache off empties it, and a lower limit evicts at once.
     #[serde(rename = "preferences.set")]
     PreferencesSet(crate::preferences::PreferencesPatch),
+    /// Put the preferences back to the defaults. The file is written anew,
+    /// and the old one is kept next to it as `preferences.toml.bak`.
+    #[serde(rename = "preferences.reset")]
+    PreferencesReset {},
     /// The keyboard shortcuts, one action each, with a few plain words
     /// where the action's name doesn't say what it does (spec §11). Ctrl
     /// and Alt are Cmd and Option on macOS.
@@ -2043,6 +2047,7 @@ impl Request {
                 | Self::DecodersList {}
                 | Self::PreferencesGet {}
                 | Self::PreferencesSet(_)
+                | Self::PreferencesReset {}
                 | Self::KeysList {}
         )
     }
@@ -2087,6 +2092,7 @@ impl Request {
                     | Self::DecodersList {}
                     | Self::PreferencesGet {}
                     | Self::PreferencesSet(_)
+                    | Self::PreferencesReset {}
                     | Self::KeysList {}
                     | Self::EditCopy { .. }
             )

@@ -452,11 +452,21 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 );
             }
         }
-        "preferences.get" | "preferences.set" => {
+        "preferences.get" | "preferences.set" | "preferences.reset" => {
             let mut lines = Vec::new();
             flatten("", &r.result["preferences"], &mut lines);
             for line in lines {
                 println!("{line}");
+            }
+            for key in r.result["ignored"].as_array().into_iter().flatten() {
+                println!(
+                    "{} is left out: it isn't a preference any more, and goes from the file when \
+                     a preference changes",
+                    key.as_str().unwrap_or_default()
+                );
+            }
+            if let Some(b) = r.result["backup"].as_str() {
+                println!("the old preferences are in {b}");
             }
             for t in r.result["themes"].as_array().into_iter().flatten() {
                 let from = match (t["error"].as_str(), t["path"].as_str()) {

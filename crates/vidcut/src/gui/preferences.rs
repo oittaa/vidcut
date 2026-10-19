@@ -232,6 +232,7 @@ impl Workspace {
         let dialogs = self.dialogs.clone();
         let display = self.display.clone();
         let height = ctx.content_rect().height() * 0.85;
+        let mut reset = false;
         egui::Window::new("Preferences")
             .collapsible(false)
             .resizable(false)
@@ -239,10 +240,26 @@ impl Workspace {
             .open(&mut open)
             .show(ctx, |ui| {
                 let Some(state) = ui_state.state.clone() else {
-                    match &ui_state.error {
-                        Some(e) => ui.label(RichText::new(e).color(theme::colors().error)),
-                        None => ui.spinner(),
+                    let Some(e) = &ui_state.error else {
+                        ui.spinner();
+                        return;
                     };
+                    ui.label(RichText::new(e).color(theme::colors().error));
+                    ui.horizontal(|ui| {
+                        if ui
+                            .button("Show in Folder")
+                            .on_hover_text("The preferences file, to fix by hand")
+                            .clicked()
+                        {
+                            super::file_manager::show(&crate::preferences::path());
+                        }
+                        reset = ui
+                            .add_enabled(ui_state.ask.is_none(), egui::Button::new("Reset Preferences"))
+                            .on_hover_text(
+                                "Back to the defaults; the old file is kept as preferences.toml.bak",
+                            )
+                            .clicked();
+                    });
                     return;
                 };
                 let busy = ui_state.ask.is_some() || ui_state.resetting.is_some();
@@ -263,6 +280,19 @@ impl Workspace {
                         proxies(ui, &state, busy, ui_state, &folders, &mut patch);
                         if let Some(e) = &ui_state.error {
                             ui.label(RichText::new(e).color(theme::colors().error));
+                        }
+                        let ignored: Vec<&str> = state["ignored"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(Value::as_str)
+                            .collect();
+                        if !ignored.is_empty() {
+                            ui.label(dim(format!(
+                                "Left out of the preferences file, as they aren't preferences any \
+                                 more: {}. They go from the file when a preference changes.",
+                                ignored.join(", ")
+                            )));
                         }
                         let path = state["path"].as_str().unwrap_or_default();
                         ui.horizontal(|ui| {
@@ -293,6 +323,9 @@ impl Workspace {
                     });
             });
         ui_state.open = open;
+        if reset {
+            ui_state.ask = Some(Ask::send(&self.live, ctx, "preferences.reset", json!({})));
+        }
         if let Some(p) = patch {
             ui_state.ask = Some(Ask::send(&self.live, ctx, "preferences.set", p));
         }

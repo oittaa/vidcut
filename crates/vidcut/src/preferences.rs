@@ -17,21 +17,71 @@ pub fn load() -> Result<Preferences> {
 }
 
 fn read() -> Result<Preferences> {
+    read_noting().map(|(p, _)| p)
+}
+
+fn read_noting() -> Result<(Preferences, Vec<String>)> {
     let path = path();
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Preferences::default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((Preferences::default(), Vec::new()));
+        }
         Err(e) => return Err(Error::internal(format!("{}: {e}", path.display()))),
     };
-    let p: Preferences = toml::from_str(&text).map_err(|e| {
+    let bad = |e: &dyn std::fmt::Display| {
         Error::usage(format!(
-            "{}: {e}; fix it, or delete it to start from the defaults",
+            "{}: {e}; fix it, or reset the preferences to the defaults (Reset Preferences in \
+             File > Preferences, or vidcut preferences reset)",
             path.display()
         ))
-    })?;
+    };
+    let (p, ignored) = match toml::from_str::<Preferences>(&text) {
+        Ok(p) => (p, Vec::new()),
+        Err(strict) => {
+            let mut table: toml::Table = toml::from_str(&text).map_err(|e| bad(&e))?;
+            let ignored = prune(&mut table, &known(), "");
+            if ignored.is_empty() {
+                return Err(bad(&strict));
+            }
+            let p = toml::Value::Table(table)
+                .try_into()
+                .map_err(|e: toml::de::Error| bad(&e))?;
+            (p, ignored)
+        }
+    };
     p.check()
         .map_err(|e| Error::usage(format!("{}: {}", path.display(), e.message)))?;
-    Ok(p)
+    Ok((p, ignored))
+}
+
+fn known() -> toml::Table {
+    match toml::Value::try_from(Preferences::default()) {
+        Ok(toml::Value::Table(t)) => t,
+        _ => toml::Table::new(),
+    }
+}
+
+fn prune(table: &mut toml::Table, known: &toml::Table, at: &str) -> Vec<String> {
+    let mut ignored = Vec::new();
+    table.retain(|key, value| {
+        let name = match at {
+            "" => key.to_string(),
+            _ => format!("{at}.{key}"),
+        };
+        match (known.get(key), value) {
+            (None, _) => {
+                ignored.push(name);
+                false
+            }
+            (Some(toml::Value::Table(k)), toml::Value::Table(t)) => {
+                ignored.extend(prune(t, k, &name));
+                true
+            }
+            _ => true,
+        }
+    });
+    ignored
 }
 
 pub fn gpu_acceleration() -> bool {
@@ -99,11 +149,33 @@ pub fn player_budget() -> vidcut_av::player::Budget {
 }
 
 pub fn get() -> Result<Value> {
-    Ok(describe(&load()?))
+    let (p, ignored) = read_noting()?;
+    vidcut_av::gpus::choose(&p.gpu.device);
+    let mut v = describe(&p);
+    v["ignored"] = json!(ignored);
+    Ok(v)
+}
+
+static SETTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub fn reset(dry_run: bool) -> Result<Value> {
+    let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+    let path = path();
+    let backup = path.exists().then(|| path.with_extension("toml.bak"));
+    let p = Preferences::default();
+    if !dry_run {
+        if let Some(b) = &backup {
+            std::fs::copy(&path, b)
+                .map_err(|e| Error::internal(format!("{}: {e}", b.display())))?;
+        }
+        write(&p)?;
+    }
+    let mut v = describe(&p);
+    v["backup"] = json!(backup);
+    Ok(v)
 }
 
 pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
-    static SETTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
     let mut patch = patch.clone();
     if let Some(theme) = patch.appearance.as_mut().and_then(|a| a.theme.as_mut()) {
@@ -117,6 +189,11 @@ pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
     if dry_run {
         return Ok(describe(&p));
     }
+    write(&p)?;
+    Ok(describe(&p))
+}
+
+fn write(p: &Preferences) -> Result<()> {
     let path = path();
     let dir = path.parent().expect("in the config dir");
     let text = format!(
@@ -138,7 +215,7 @@ pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
         thumbcache::clear()
             .map_err(|e| Error::internal(format!("{}: {e}", thumbcache::dir().display())))?;
     }
-    Ok(describe(&p))
+    Ok(())
 }
 
 fn system_look() -> Value {
