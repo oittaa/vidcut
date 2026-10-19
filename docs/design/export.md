@@ -105,9 +105,15 @@ GUI media exports are `background`. Quick Export lists the presets marked `quick
 
 An `.otio`, `.otioz` or `.otiod` output (`export::timeline_format`) writes the edit, not pictures ([deviation X9](../deviations.md#x9-opentimelineio-interchange)). `export::timeline` takes only a range, `overwrite` and the subtitle files, and writes `otio::export`'s document through the partial path; a bundle adds the media used (`bundle::plan`, `bundle::write`), with byte progress and cancel. In the GUI an `.otio` runs as a task (`Live::project_task`), a bundle as a job.
 
-## Subtitle files
+## Subtitles
 
-`subtitles` names the subtitle tracks to write beside the output, as SRT unless `subtitle_format` says otherwise; a timeline export writes every track with cues when it isn't given. `subtitles::beside` names each file after the output, with the track's language, or with its name when there are several, and cuts its cues to the output's range: from zero beside media (`export::subtitles_beside`, one set per output of a `per_clip` export), in the timeline's timecode beside a timeline file ([spec D58](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). An existing file stops the export before it starts unless `overwrite` is set (`export::refuse_existing`); `export::write_subtitles` writes them through partial paths after the output is done, and the answer lists them.
+`subtitles_as` says how the tracks `subtitles` names go out with media ([deviation X45](../deviations.md#x45-subtitles-go-into-any-container-and-burn-in-from-any-track)): as files beside it (the default), as streams in it, or burned into the picture. Streams and burning in take the shown track unless `subtitles` names others. `export::prepare` refuses a container without subtitle streams, burning in without video or more than one track to burn, and gives each output the cues of its range, in its own frames (`subtitles::Subtitles`).
+
+**Files.** `subtitles` names the subtitle tracks to write beside the output, as SRT unless `subtitle_format` says otherwise; a timeline export writes every track with cues when it isn't given. `subtitles::beside` names each file after the output, with the track's language, or with its name when there are several, and cuts its cues to the output's range: from zero beside media (`export::subtitles_beside`, one set per output of a `per_clip` export), in the timeline's timecode beside a timeline file ([spec D58](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). An existing file stops the export before it starts unless `overwrite` is set (`export::refuse_existing`); `export::write_subtitles` writes them through partial paths after the output is done, and the answer lists them.
+
+**Streams.** `SubtitleOut::add` opens FFmpeg's encoder for the container (mov_text in MP4, MOV and M4A, SubRip in Matroska, WebVTT in WebM), encodes every cue before the header is written, and adds the stream with the track's name and its language as an ISO 639-2 code (`three_letter`); the shown track's stream is the default. `subtitles::dialog` turns a cue's markup into the override codes the encoders read. Overlapping cues become one cue for each stretch of time (`subtitles::segments`): mov_text samples can't overlap, and Matroska's keep one stretch per place. A cue's place reaches SubRip as an alignment tag and WebVTT as a `line` setting; mov_text has none. The `Writer` writes a track's packets as the frames reach their start.
+
+**Burning in** ([spec D61](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `VideoFrames::with_burn` draws the cues over every picture they span, in both runs of a two-pass encode. `burn::draw` lays out the cues showing with cosmic-text (shaping, right-to-left text, the system's fonts for scripts the first lacks) and draws one picture for each place, kept while those cues show. A picture in memory takes it with `burn::blend`, in its own layout, matrix, range and transfer. NVENC's CUDA frames take it on the GPU (`cuda::burn`): the cue's colors and coverage go up once as two frames (`Overlay`), each place laid over the ones before as `burn::blend` lays them, and a kernel mixes them into a copy of each frame. Other GPUs' frames come down while a cue shows ([gpu](gpu.md)).
 
 ## Proxies
 
@@ -130,6 +136,9 @@ Automatic tries DNxHR LB, ProRes Proxy, AV1, HEVC and H.264 in four rounds: made
 - `crates/vidcut-core/src/render.rs`
 - `crates/vidcut-core/src/subtitles.rs`
 - `crates/vidcut-av/src/export/mod.rs`
+- `crates/vidcut-av/src/export/subtitles.rs`
+- `crates/vidcut-av/src/burn.rs`
+- `crates/vidcut-av/src/cuda/burn.rs`
 - `crates/vidcut-av/src/export/encode.rs`
 - `crates/vidcut-av/src/export/worker.rs`
 - `crates/vidcut-av/src/export/ahead.rs`

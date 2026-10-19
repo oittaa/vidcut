@@ -7,7 +7,7 @@ use vidcut_core::export::{
     AudioCodec, AudioSettings, Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode,
     VideoCodec, VideoSettings, apply_overrides, validate,
 };
-use vidcut_core::request::ImportMode;
+use vidcut_core::request::{ImportMode, SubtitleFormat, SubtitlesAs};
 use vidcut_core::{Envelope, Error, Response};
 
 use super::folders::Kind;
@@ -263,6 +263,9 @@ struct Dialog {
     plan_result: Option<std::result::Result<Value, String>>,
     error: Option<String>,
     save: Option<SavePreset>,
+    subtitles: Option<SubtitlesAs>,
+    subtitle_tracks: Vec<String>,
+    subtitle_format: SubtitleFormat,
 }
 
 struct SavePreset {
@@ -446,6 +449,9 @@ impl Dialog {
             plan_result: None,
             error: None,
             save: None,
+            subtitles: None,
+            subtitle_tracks: Vec::new(),
+            subtitle_format: SubtitleFormat::Srt,
         }
     }
 
@@ -499,6 +505,16 @@ impl Dialog {
         }
         if self.overwrite {
             p["overwrite"] = json!(true);
+        }
+        if let Some(how) = self.subtitles
+            && !self.subtitle_tracks.is_empty()
+        {
+            p["subtitles"] = json!(self.subtitle_tracks);
+            if how != SubtitlesAs::File {
+                p["subtitles_as"] = json!(how);
+            } else if self.subtitle_format != SubtitleFormat::Srt {
+                p["subtitle_format"] = json!(self.subtitle_format);
+            }
         }
         p
     }
@@ -779,6 +795,13 @@ impl Workspace {
         });
         let marks = self.marks_set();
         let in_out = self.project().map(|p| p.marks.clone()).unwrap_or_default();
+        let subtitle_tracks: Vec<(String, String, bool)> =
+            self.project().map_or_else(Vec::new, |p| {
+                p.subtitles
+                    .iter()
+                    .map(|t| (t.id.clone(), t.display_name(), t.shown))
+                    .collect()
+            });
         if let Some(p) = &d.picking
             && let Some(choice) = p.take()
         {
@@ -861,6 +884,10 @@ impl Workspace {
                         let can = &self.export.encodable;
                         settings_form(ui, &mut d, can, (width, height), (rate, channels));
                         ui.separator();
+                        if !subtitle_tracks.is_empty() {
+                            subtitles_form(ui, &mut d, &subtitle_tracks);
+                            ui.separator();
+                        }
                         ui.horizontal(|ui| {
                             ui.label("Range");
                             ui.radio_value(&mut d.range, RangeChoice::All, "Whole timeline");
@@ -2085,6 +2112,109 @@ fn choice<T: PartialEq>(
         Some(why) => r.on_disabled_hover_text(why),
         None => r,
     }
+}
+
+fn subtitles_form(ui: &mut egui::Ui, d: &mut Dialog, tracks: &[(String, String, bool)]) {
+    let mut on = d.subtitles.is_some();
+    if ui.checkbox(&mut on, "Export subtitles").changed() {
+        d.subtitles = on.then_some(SubtitlesAs::File);
+        if on && d.subtitle_tracks.is_empty() {
+            let shown = tracks.iter().find(|t| t.2).or(tracks.first());
+            d.subtitle_tracks = shown.map(|t| t.0.clone()).into_iter().collect();
+        }
+    }
+    let Some(mut how) = d.subtitles else {
+        return;
+    };
+    egui::Grid::new("export-subtitles")
+        .num_columns(2)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            ui.label("As");
+            ui.horizontal(|ui| {
+                choice(
+                    ui,
+                    &mut how,
+                    SubtitlesAs::File,
+                    "Separate files".into(),
+                    None,
+                );
+                let stream_why = d.settings.container.subtitle_codec().is_none().then(|| {
+                    format!(
+                        ".{} files hold no subtitle streams",
+                        d.settings.container.extension()
+                    )
+                });
+                choice(
+                    ui,
+                    &mut how,
+                    SubtitlesAs::Stream,
+                    "Embedded in the file".into(),
+                    stream_why,
+                );
+                let burn_why = d
+                    .settings
+                    .video
+                    .is_none()
+                    .then(|| "an export without video has no picture to burn them into".into());
+                choice(
+                    ui,
+                    &mut how,
+                    SubtitlesAs::Burn,
+                    "Burned into the video".into(),
+                    burn_why,
+                );
+            });
+            ui.end_row();
+            if how == SubtitlesAs::File {
+                ui.label("Files");
+                ui.horizontal(|ui| {
+                    for (format, name) in [
+                        (SubtitleFormat::Srt, "SRT"),
+                        (SubtitleFormat::Vtt, "WebVTT"),
+                        (SubtitleFormat::Ttml, "TTML (IMSC1)"),
+                    ] {
+                        ui.selectable_value(&mut d.subtitle_format, format, name);
+                    }
+                });
+                ui.end_row();
+            }
+            ui.label(if how == SubtitlesAs::Burn {
+                "Track"
+            } else {
+                "Tracks"
+            });
+            ui.horizontal_wrapped(|ui| {
+                let mut chosen = d.subtitle_tracks.clone();
+                for (id, name, _) in tracks {
+                    if how == SubtitlesAs::Burn {
+                        let on = chosen.first() == Some(id);
+                        if ui.radio(on, name).clicked() {
+                            chosen = vec![id.clone()];
+                        }
+                    } else {
+                        let mut on = chosen.contains(id);
+                        if ui.checkbox(&mut on, name).changed() {
+                            if on {
+                                chosen.push(id.clone());
+                            } else {
+                                chosen.retain(|c| c != id);
+                            }
+                        }
+                    }
+                }
+                if how == SubtitlesAs::Burn {
+                    chosen.truncate(1);
+                }
+                d.subtitle_tracks = tracks
+                    .iter()
+                    .filter(|t| chosen.contains(&t.0))
+                    .map(|t| t.0.clone())
+                    .collect();
+            });
+            ui.end_row();
+        });
+    d.subtitles = Some(how);
 }
 
 fn settings_form(

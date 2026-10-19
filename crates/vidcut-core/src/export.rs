@@ -51,6 +51,15 @@ impl Container {
         }
     }
 
+    pub fn subtitle_codec(self) -> Option<&'static str> {
+        match self {
+            Self::Mp4 | Self::Mov | Self::M4a => Some("mov_text"),
+            Self::Mkv => Some("subrip"),
+            Self::Webm => Some("webvtt"),
+            Self::Mp3 | Self::Flac | Self::Wav | Self::Ogg => None,
+        }
+    }
+
     pub fn audio_only(self) -> bool {
         matches!(
             self,
