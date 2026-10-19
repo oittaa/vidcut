@@ -1,6 +1,4 @@
-
 pub const PUBLIC_HEADER_HASH: &str = "98540564cd329b85";
-
 
 pub const TRANSCRIBE_BACKEND_MASK_CPU: u32 = 1;
 pub const TRANSCRIBE_BACKEND_MASK_METAL: u32 = 2;
@@ -42,14 +40,24 @@ impl transcribe_status {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct transcribe_status(pub ::std::os::raw::c_uint);
-pub unsafe fn transcribe_status_string(status: ::std::os::raw::c_int) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_status_string.expect("transcribe_status_string"))(status) }
+pub unsafe fn transcribe_status_string(
+    status: ::std::os::raw::c_int,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_status_string
+            .expect("transcribe_status_string"))(status)
+    }
 }
 pub unsafe fn transcribe_version() -> *const ::std::os::raw::c_char {
     unsafe { (crate::api().transcribe_version.expect("transcribe_version"))() }
 }
 pub unsafe fn transcribe_version_commit() -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_version_commit.expect("transcribe_version_commit"))() }
+    unsafe {
+        (crate::api()
+            .transcribe_version_commit
+            .expect("transcribe_version_commit"))()
+    }
 }
 impl transcribe_abi_struct {
     pub const TRANSCRIBE_ABI_MODEL_LOAD_PARAMS: transcribe_abi_struct = transcribe_abi_struct(0);
@@ -88,10 +96,18 @@ impl transcribe_abi_struct {
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct transcribe_abi_struct(pub ::std::os::raw::c_uint);
 pub unsafe fn transcribe_abi_struct_size(which: transcribe_abi_struct) -> usize {
-    unsafe { (crate::api().transcribe_abi_struct_size.expect("transcribe_abi_struct_size"))(which) }
+    unsafe {
+        (crate::api()
+            .transcribe_abi_struct_size
+            .expect("transcribe_abi_struct_size"))(which)
+    }
 }
 pub unsafe fn transcribe_abi_struct_align(which: transcribe_abi_struct) -> usize {
-    unsafe { (crate::api().transcribe_abi_struct_align.expect("transcribe_abi_struct_align"))(which) }
+    unsafe {
+        (crate::api()
+            .transcribe_abi_struct_align
+            .expect("transcribe_abi_struct_align"))(which)
+    }
 }
 impl transcribe_log_level {
     pub const TRANSCRIBE_LOG_LEVEL_NONE: transcribe_log_level = transcribe_log_level(0);
@@ -111,7 +127,10 @@ pub type transcribe_log_callback = ::std::option::Option<
         userdata: *mut ::std::os::raw::c_void,
     ),
 >;
-pub unsafe fn transcribe_log_set(cb: transcribe_log_callback, userdata: *mut ::std::os::raw::c_void) {
+pub unsafe fn transcribe_log_set(
+    cb: transcribe_log_callback,
+    userdata: *mut ::std::os::raw::c_void,
+) {
     unsafe { (crate::api().transcribe_log_set.expect("transcribe_log_set"))(cb, userdata) }
 }
 impl transcribe_task {
@@ -190,8 +209,16 @@ const _: () = {
     ["Offset of field: transcribe_ext::kind"]
         [::std::mem::offset_of!(transcribe_ext, kind) - 8usize];
 };
-pub unsafe fn transcribe_ext_check(ext: *const transcribe_ext, expected_kind: u32, min_size: u64) -> transcribe_status {
-    unsafe { (crate::api().transcribe_ext_check.expect("transcribe_ext_check"))(ext, expected_kind, min_size) }
+pub unsafe fn transcribe_ext_check(
+    ext: *const transcribe_ext,
+    expected_kind: u32,
+    min_size: u64,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_ext_check
+            .expect("transcribe_ext_check"))(ext, expected_kind, min_size)
+    }
 }
 impl transcribe_ext_slot {
     pub const TRANSCRIBE_EXT_SLOT_RUN: transcribe_ext_slot = transcribe_ext_slot(0);
@@ -201,8 +228,16 @@ impl transcribe_ext_slot {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct transcribe_ext_slot(pub ::std::os::raw::c_uint);
-pub unsafe fn transcribe_model_accepts_ext_kind(model: *const transcribe_model, slot: transcribe_ext_slot, kind: u32) -> bool {
-    unsafe { (crate::api().transcribe_model_accepts_ext_kind.expect("transcribe_model_accepts_ext_kind"))(model, slot, kind) }
+pub unsafe fn transcribe_model_accepts_ext_kind(
+    model: *const transcribe_model,
+    slot: transcribe_ext_slot,
+    kind: u32,
+) -> bool {
+    unsafe {
+        (crate::api()
+            .transcribe_model_accepts_ext_kind
+            .expect("transcribe_model_accepts_ext_kind"))(model, slot, kind)
+    }
 }
 impl transcribe_backend_request {
     pub const TRANSCRIBE_BACKEND_AUTO: transcribe_backend_request = transcribe_backend_request(0);
@@ -217,11 +252,21 @@ impl transcribe_backend_request {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct transcribe_backend_request(pub ::std::os::raw::c_uint);
-pub unsafe fn transcribe_init_backends(artifact_dir: *const ::std::os::raw::c_char) -> transcribe_status {
-    unsafe { (crate::api().transcribe_init_backends.expect("transcribe_init_backends"))(artifact_dir) }
+pub unsafe fn transcribe_init_backends(
+    artifact_dir: *const ::std::os::raw::c_char,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_init_backends
+            .expect("transcribe_init_backends"))(artifact_dir)
+    }
 }
 pub unsafe fn transcribe_init_backends_default() -> transcribe_status {
-    unsafe { (crate::api().transcribe_init_backends_default.expect("transcribe_init_backends_default"))() }
+    unsafe {
+        (crate::api()
+            .transcribe_init_backends_default
+            .expect("transcribe_init_backends_default"))()
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -244,13 +289,27 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_backend_init_params, allowed_backends) - 16usize];
 };
 pub unsafe fn transcribe_backend_init_params_init(p: *mut transcribe_backend_init_params) {
-    unsafe { (crate::api().transcribe_backend_init_params_init.expect("transcribe_backend_init_params_init"))(p) }
+    unsafe {
+        (crate::api()
+            .transcribe_backend_init_params_init
+            .expect("transcribe_backend_init_params_init"))(p)
+    }
 }
-pub unsafe fn transcribe_init_backends_ex(params: *const transcribe_backend_init_params) -> transcribe_status {
-    unsafe { (crate::api().transcribe_init_backends_ex.expect("transcribe_init_backends_ex"))(params) }
+pub unsafe fn transcribe_init_backends_ex(
+    params: *const transcribe_backend_init_params,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_init_backends_ex
+            .expect("transcribe_init_backends_ex"))(params)
+    }
 }
 pub unsafe fn transcribe_allowed_backends() -> u32 {
-    unsafe { (crate::api().transcribe_allowed_backends.expect("transcribe_allowed_backends"))() }
+    unsafe {
+        (crate::api()
+            .transcribe_allowed_backends
+            .expect("transcribe_allowed_backends"))()
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -259,10 +318,18 @@ pub struct transcribe_device {
 }
 pub type transcribe_device_t = *mut transcribe_device;
 pub unsafe fn transcribe_device_count() -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_device_count.expect("transcribe_device_count"))() }
+    unsafe {
+        (crate::api()
+            .transcribe_device_count
+            .expect("transcribe_device_count"))()
+    }
 }
 pub unsafe fn transcribe_device_get(index: ::std::os::raw::c_int) -> transcribe_device_t {
-    unsafe { (crate::api().transcribe_device_get.expect("transcribe_device_get"))(index) }
+    unsafe {
+        (crate::api()
+            .transcribe_device_get
+            .expect("transcribe_device_get"))(index)
+    }
 }
 impl transcribe_device_type {
     pub const TRANSCRIBE_DEVICE_TYPE_CPU: transcribe_device_type = transcribe_device_type(0);
@@ -308,16 +375,35 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_device_info, device_type) - 56usize];
 };
 pub unsafe fn transcribe_device_info_init(p: *mut transcribe_device_info) {
-    unsafe { (crate::api().transcribe_device_info_init.expect("transcribe_device_info_init"))(p) }
+    unsafe {
+        (crate::api()
+            .transcribe_device_info_init
+            .expect("transcribe_device_info_init"))(p)
+    }
 }
-pub unsafe fn transcribe_device_get_info(device: transcribe_device_t, out: *mut transcribe_device_info) -> transcribe_status {
-    unsafe { (crate::api().transcribe_device_get_info.expect("transcribe_device_get_info"))(device, out) }
+pub unsafe fn transcribe_device_get_info(
+    device: transcribe_device_t,
+    out: *mut transcribe_device_info,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_device_get_info
+            .expect("transcribe_device_get_info"))(device, out)
+    }
 }
 pub unsafe fn transcribe_backend_available(kind: transcribe_backend_request) -> bool {
-    unsafe { (crate::api().transcribe_backend_available.expect("transcribe_backend_available"))(kind) }
+    unsafe {
+        (crate::api()
+            .transcribe_backend_available
+            .expect("transcribe_backend_available"))(kind)
+    }
 }
 pub unsafe fn transcribe_model_device(model: *const transcribe_model) -> transcribe_device_t {
-    unsafe { (crate::api().transcribe_model_device.expect("transcribe_model_device"))(model) }
+    unsafe {
+        (crate::api()
+            .transcribe_model_device
+            .expect("transcribe_model_device"))(model)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -340,7 +426,11 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_model_load_params, device) - 16usize];
 };
 pub unsafe fn transcribe_model_load_params_init(params: *mut transcribe_model_load_params) {
-    unsafe { (crate::api().transcribe_model_load_params_init.expect("transcribe_model_load_params_init"))(params) }
+    unsafe {
+        (crate::api()
+            .transcribe_model_load_params_init
+            .expect("transcribe_model_load_params_init"))(params)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -366,7 +456,11 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_session_params, n_ctx) - 16usize];
 };
 pub unsafe fn transcribe_session_params_init(params: *mut transcribe_session_params) {
-    unsafe { (crate::api().transcribe_session_params_init.expect("transcribe_session_params_init"))(params) }
+    unsafe {
+        (crate::api()
+            .transcribe_session_params_init
+            .expect("transcribe_session_params_init"))(params)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -424,7 +518,11 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_run_params, prefix) - 96usize];
 };
 pub unsafe fn transcribe_run_params_init(params: *mut transcribe_run_params) {
-    unsafe { (crate::api().transcribe_run_params_init.expect("transcribe_run_params_init"))(params) }
+    unsafe {
+        (crate::api()
+            .transcribe_run_params_init
+            .expect("transcribe_run_params_init"))(params)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -473,7 +571,11 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_capabilities, translate_target_languages) - 48usize];
 };
 pub unsafe fn transcribe_capabilities_init(out: *mut transcribe_capabilities) {
-    unsafe { (crate::api().transcribe_capabilities_init.expect("transcribe_capabilities_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_capabilities_init
+            .expect("transcribe_capabilities_init"))(out)
+    }
 }
 impl transcribe_role {
     pub const TRANSCRIBE_ROLE_ASR: transcribe_role = transcribe_role(1);
@@ -485,10 +587,21 @@ impl transcribe_role {
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct transcribe_role(pub ::std::os::raw::c_uint);
 pub unsafe fn transcribe_model_roles(model: *const transcribe_model) -> u32 {
-    unsafe { (crate::api().transcribe_model_roles.expect("transcribe_model_roles"))(model) }
+    unsafe {
+        (crate::api()
+            .transcribe_model_roles
+            .expect("transcribe_model_roles"))(model)
+    }
 }
-pub unsafe fn transcribe_model_get_capabilities(model: *const transcribe_model, out_caps: *mut transcribe_capabilities) -> transcribe_status {
-    unsafe { (crate::api().transcribe_model_get_capabilities.expect("transcribe_model_get_capabilities"))(model, out_caps) }
+pub unsafe fn transcribe_model_get_capabilities(
+    model: *const transcribe_model,
+    out_caps: *mut transcribe_capabilities,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_model_get_capabilities
+            .expect("transcribe_model_get_capabilities"))(model, out_caps)
+    }
 }
 impl transcribe_feature {
     pub const TRANSCRIBE_FEATURE_INITIAL_PROMPT: transcribe_feature = transcribe_feature(0);
@@ -506,58 +619,163 @@ impl transcribe_feature {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct transcribe_feature(pub ::std::os::raw::c_uint);
-pub unsafe fn transcribe_model_supports(model: *const transcribe_model, feature: transcribe_feature) -> bool {
-    unsafe { (crate::api().transcribe_model_supports.expect("transcribe_model_supports"))(model, feature) }
+pub unsafe fn transcribe_model_supports(
+    model: *const transcribe_model,
+    feature: transcribe_feature,
+) -> bool {
+    unsafe {
+        (crate::api()
+            .transcribe_model_supports
+            .expect("transcribe_model_supports"))(model, feature)
+    }
 }
-pub unsafe fn transcribe_model_arch_string(model: *const transcribe_model) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_model_arch_string.expect("transcribe_model_arch_string"))(model) }
+pub unsafe fn transcribe_model_arch_string(
+    model: *const transcribe_model,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_model_arch_string
+            .expect("transcribe_model_arch_string"))(model)
+    }
 }
-pub unsafe fn transcribe_model_variant_string(model: *const transcribe_model) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_model_variant_string.expect("transcribe_model_variant_string"))(model) }
+pub unsafe fn transcribe_model_variant_string(
+    model: *const transcribe_model,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_model_variant_string
+            .expect("transcribe_model_variant_string"))(model)
+    }
 }
-pub unsafe fn transcribe_model_backend(model: *const transcribe_model) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_model_backend.expect("transcribe_model_backend"))(model) }
+pub unsafe fn transcribe_model_backend(
+    model: *const transcribe_model,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_model_backend
+            .expect("transcribe_model_backend"))(model)
+    }
 }
-pub unsafe fn transcribe_model_meta_val_str(model: *const transcribe_model, key: *const ::std::os::raw::c_char) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_model_meta_val_str.expect("transcribe_model_meta_val_str"))(model, key) }
+pub unsafe fn transcribe_model_meta_val_str(
+    model: *const transcribe_model,
+    key: *const ::std::os::raw::c_char,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_model_meta_val_str
+            .expect("transcribe_model_meta_val_str"))(model, key)
+    }
 }
-pub unsafe fn transcribe_model_load_file(path: *const ::std::os::raw::c_char, params: *const transcribe_model_load_params, out_model: *mut *mut transcribe_model) -> transcribe_status {
-    unsafe { (crate::api().transcribe_model_load_file.expect("transcribe_model_load_file"))(path, params, out_model) }
+pub unsafe fn transcribe_model_load_file(
+    path: *const ::std::os::raw::c_char,
+    params: *const transcribe_model_load_params,
+    out_model: *mut *mut transcribe_model,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_model_load_file
+            .expect("transcribe_model_load_file"))(path, params, out_model)
+    }
 }
 pub unsafe fn transcribe_model_free(model: *mut transcribe_model) {
-    unsafe { (crate::api().transcribe_model_free.expect("transcribe_model_free"))(model) }
+    unsafe {
+        (crate::api()
+            .transcribe_model_free
+            .expect("transcribe_model_free"))(model)
+    }
 }
-pub unsafe fn transcribe_session_init(model: *mut transcribe_model, params: *const transcribe_session_params, out_session: *mut *mut transcribe_session) -> transcribe_status {
-    unsafe { (crate::api().transcribe_session_init.expect("transcribe_session_init"))(model, params, out_session) }
+pub unsafe fn transcribe_session_init(
+    model: *mut transcribe_model,
+    params: *const transcribe_session_params,
+    out_session: *mut *mut transcribe_session,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_session_init
+            .expect("transcribe_session_init"))(model, params, out_session)
+    }
 }
 pub unsafe fn transcribe_session_free(session: *mut transcribe_session) {
-    unsafe { (crate::api().transcribe_session_free.expect("transcribe_session_free"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_session_free
+            .expect("transcribe_session_free"))(session)
+    }
 }
-pub unsafe fn transcribe_open(path: *const ::std::os::raw::c_char, load_params: *const transcribe_model_load_params, session_params: *const transcribe_session_params, out_session: *mut *mut transcribe_session) -> transcribe_status {
-    unsafe { (crate::api().transcribe_open.expect("transcribe_open"))(path, load_params, session_params, out_session) }
+pub unsafe fn transcribe_open(
+    path: *const ::std::os::raw::c_char,
+    load_params: *const transcribe_model_load_params,
+    session_params: *const transcribe_session_params,
+    out_session: *mut *mut transcribe_session,
+) -> transcribe_status {
+    unsafe {
+        (crate::api().transcribe_open.expect("transcribe_open"))(
+            path,
+            load_params,
+            session_params,
+            out_session,
+        )
+    }
 }
 pub unsafe fn transcribe_close(session: *mut transcribe_session) {
     unsafe { (crate::api().transcribe_close.expect("transcribe_close"))(session) }
 }
 pub unsafe fn transcribe_get_model(session: *const transcribe_session) -> *const transcribe_model {
-    unsafe { (crate::api().transcribe_get_model.expect("transcribe_get_model"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_get_model
+            .expect("transcribe_get_model"))(session)
+    }
 }
-pub unsafe fn transcribe_run(session: *mut transcribe_session, pcm: *const f32, n_samples: ::std::os::raw::c_int, params: *const transcribe_run_params) -> transcribe_status {
-    unsafe { (crate::api().transcribe_run.expect("transcribe_run"))(session, pcm, n_samples, params) }
+pub unsafe fn transcribe_run(
+    session: *mut transcribe_session,
+    pcm: *const f32,
+    n_samples: ::std::os::raw::c_int,
+    params: *const transcribe_run_params,
+) -> transcribe_status {
+    unsafe {
+        (crate::api().transcribe_run.expect("transcribe_run"))(session, pcm, n_samples, params)
+    }
 }
-pub unsafe fn transcribe_run_batch(session: *mut transcribe_session, pcm: *const *const f32, n_samples: *const ::std::os::raw::c_int, n: ::std::os::raw::c_int, params: *const transcribe_run_params) -> transcribe_status {
-    unsafe { (crate::api().transcribe_run_batch.expect("transcribe_run_batch"))(session, pcm, n_samples, n, params) }
+pub unsafe fn transcribe_run_batch(
+    session: *mut transcribe_session,
+    pcm: *const *const f32,
+    n_samples: *const ::std::os::raw::c_int,
+    n: ::std::os::raw::c_int,
+    params: *const transcribe_run_params,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_run_batch
+            .expect("transcribe_run_batch"))(session, pcm, n_samples, n, params)
+    }
 }
 pub type transcribe_abort_callback =
     ::std::option::Option<unsafe extern "C" fn(user_data: *mut ::std::os::raw::c_void) -> bool>;
-pub unsafe fn transcribe_set_abort_callback(session: *mut transcribe_session, cb: transcribe_abort_callback, user_data: *mut ::std::os::raw::c_void) {
-    unsafe { (crate::api().transcribe_set_abort_callback.expect("transcribe_set_abort_callback"))(session, cb, user_data) }
+pub unsafe fn transcribe_set_abort_callback(
+    session: *mut transcribe_session,
+    cb: transcribe_abort_callback,
+    user_data: *mut ::std::os::raw::c_void,
+) {
+    unsafe {
+        (crate::api()
+            .transcribe_set_abort_callback
+            .expect("transcribe_set_abort_callback"))(session, cb, user_data)
+    }
 }
 pub unsafe fn transcribe_was_aborted(session: *const transcribe_session) -> bool {
-    unsafe { (crate::api().transcribe_was_aborted.expect("transcribe_was_aborted"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_was_aborted
+            .expect("transcribe_was_aborted"))(session)
+    }
 }
 pub unsafe fn transcribe_was_truncated(session: *const transcribe_session) -> bool {
-    unsafe { (crate::api().transcribe_was_truncated.expect("transcribe_was_truncated"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_was_truncated
+            .expect("transcribe_was_truncated"))(session)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -583,10 +801,21 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_session_limits, max_kv_bytes) - 24usize];
 };
 pub unsafe fn transcribe_session_limits_init(out: *mut transcribe_session_limits) {
-    unsafe { (crate::api().transcribe_session_limits_init.expect("transcribe_session_limits_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_session_limits_init
+            .expect("transcribe_session_limits_init"))(out)
+    }
 }
-pub unsafe fn transcribe_session_get_limits(session: *const transcribe_session, out: *mut transcribe_session_limits) -> transcribe_status {
-    unsafe { (crate::api().transcribe_session_get_limits.expect("transcribe_session_get_limits"))(session, out) }
+pub unsafe fn transcribe_session_get_limits(
+    session: *const transcribe_session,
+    out: *mut transcribe_session_limits,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_session_get_limits
+            .expect("transcribe_session_get_limits"))(session, out)
+    }
 }
 impl transcribe_stream_state {
     pub const TRANSCRIBE_STREAM_IDLE: transcribe_stream_state = transcribe_stream_state(0);
@@ -632,7 +861,11 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_stream_params, stable_prefix_agreement_n) - 20usize];
 };
 pub unsafe fn transcribe_stream_params_init(params: *mut transcribe_stream_params) {
-    unsafe { (crate::api().transcribe_stream_params_init.expect("transcribe_stream_params_init"))(params) }
+    unsafe {
+        (crate::api()
+            .transcribe_stream_params_init
+            .expect("transcribe_stream_params_init"))(params)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -673,7 +906,11 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_stream_update, tentative_changed) - 41usize];
 };
 pub unsafe fn transcribe_stream_update_init(out: *mut transcribe_stream_update) {
-    unsafe { (crate::api().transcribe_stream_update_init.expect("transcribe_stream_update_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_stream_update_init
+            .expect("transcribe_stream_update_init"))(out)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -710,43 +947,127 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_stream_text, raw_tentative_start_bytes) - 56usize];
 };
 pub unsafe fn transcribe_stream_text_init(out: *mut transcribe_stream_text) {
-    unsafe { (crate::api().transcribe_stream_text_init.expect("transcribe_stream_text_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_stream_text_init
+            .expect("transcribe_stream_text_init"))(out)
+    }
 }
-pub unsafe fn transcribe_stream_get_text(session: *const transcribe_session, out: *mut transcribe_stream_text) -> transcribe_status {
-    unsafe { (crate::api().transcribe_stream_get_text.expect("transcribe_stream_get_text"))(session, out) }
+pub unsafe fn transcribe_stream_get_text(
+    session: *const transcribe_session,
+    out: *mut transcribe_stream_text,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_stream_get_text
+            .expect("transcribe_stream_get_text"))(session, out)
+    }
 }
-pub unsafe fn transcribe_stream_begin(session: *mut transcribe_session, run_params: *const transcribe_run_params, stream_params: *const transcribe_stream_params) -> transcribe_status {
-    unsafe { (crate::api().transcribe_stream_begin.expect("transcribe_stream_begin"))(session, run_params, stream_params) }
+pub unsafe fn transcribe_stream_begin(
+    session: *mut transcribe_session,
+    run_params: *const transcribe_run_params,
+    stream_params: *const transcribe_stream_params,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_stream_begin
+            .expect("transcribe_stream_begin"))(session, run_params, stream_params)
+    }
 }
-pub unsafe fn transcribe_stream_feed(session: *mut transcribe_session, pcm: *const f32, n_samples: ::std::os::raw::c_int, update: *mut transcribe_stream_update) -> transcribe_status {
-    unsafe { (crate::api().transcribe_stream_feed.expect("transcribe_stream_feed"))(session, pcm, n_samples, update) }
+pub unsafe fn transcribe_stream_feed(
+    session: *mut transcribe_session,
+    pcm: *const f32,
+    n_samples: ::std::os::raw::c_int,
+    update: *mut transcribe_stream_update,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_stream_feed
+            .expect("transcribe_stream_feed"))(session, pcm, n_samples, update)
+    }
 }
-pub unsafe fn transcribe_stream_finalize(session: *mut transcribe_session, update: *mut transcribe_stream_update) -> transcribe_status {
-    unsafe { (crate::api().transcribe_stream_finalize.expect("transcribe_stream_finalize"))(session, update) }
+pub unsafe fn transcribe_stream_finalize(
+    session: *mut transcribe_session,
+    update: *mut transcribe_stream_update,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_stream_finalize
+            .expect("transcribe_stream_finalize"))(session, update)
+    }
 }
 pub unsafe fn transcribe_stream_reset(session: *mut transcribe_session) {
-    unsafe { (crate::api().transcribe_stream_reset.expect("transcribe_stream_reset"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_stream_reset
+            .expect("transcribe_stream_reset"))(session)
+    }
 }
-pub unsafe fn transcribe_stream_get_state(session: *const transcribe_session) -> transcribe_stream_state {
-    unsafe { (crate::api().transcribe_stream_get_state.expect("transcribe_stream_get_state"))(session) }
+pub unsafe fn transcribe_stream_get_state(
+    session: *const transcribe_session,
+) -> transcribe_stream_state {
+    unsafe {
+        (crate::api()
+            .transcribe_stream_get_state
+            .expect("transcribe_stream_get_state"))(session)
+    }
 }
-pub unsafe fn transcribe_stream_revision(session: *const transcribe_session) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_stream_revision.expect("transcribe_stream_revision"))(session) }
+pub unsafe fn transcribe_stream_revision(
+    session: *const transcribe_session,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_stream_revision
+            .expect("transcribe_stream_revision"))(session)
+    }
 }
-pub unsafe fn transcribe_stream_n_committed_segments(session: *const transcribe_session) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_stream_n_committed_segments.expect("transcribe_stream_n_committed_segments"))(session) }
+pub unsafe fn transcribe_stream_n_committed_segments(
+    session: *const transcribe_session,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_stream_n_committed_segments
+            .expect("transcribe_stream_n_committed_segments"))(session)
+    }
 }
-pub unsafe fn transcribe_stream_n_committed_words(session: *const transcribe_session) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_stream_n_committed_words.expect("transcribe_stream_n_committed_words"))(session) }
+pub unsafe fn transcribe_stream_n_committed_words(
+    session: *const transcribe_session,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_stream_n_committed_words
+            .expect("transcribe_stream_n_committed_words"))(session)
+    }
 }
-pub unsafe fn transcribe_stream_n_committed_tokens(session: *const transcribe_session) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_stream_n_committed_tokens.expect("transcribe_stream_n_committed_tokens"))(session) }
+pub unsafe fn transcribe_stream_n_committed_tokens(
+    session: *const transcribe_session,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_stream_n_committed_tokens
+            .expect("transcribe_stream_n_committed_tokens"))(session)
+    }
 }
-pub unsafe fn transcribe_stream_last_status(session: *const transcribe_session) -> transcribe_status {
-    unsafe { (crate::api().transcribe_stream_last_status.expect("transcribe_stream_last_status"))(session) }
+pub unsafe fn transcribe_stream_last_status(
+    session: *const transcribe_session,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_stream_last_status
+            .expect("transcribe_stream_last_status"))(session)
+    }
 }
-pub unsafe fn transcribe_tokenize(model: *const transcribe_model, text: *const ::std::os::raw::c_char, tokens: *mut i32, n_max: usize) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_tokenize.expect("transcribe_tokenize"))(model, text, tokens, n_max) }
+pub unsafe fn transcribe_tokenize(
+    model: *const transcribe_model,
+    text: *const ::std::os::raw::c_char,
+    tokens: *mut i32,
+    n_max: usize,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_tokenize
+            .expect("transcribe_tokenize"))(model, text, tokens, n_max)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -773,37 +1094,88 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_timings, decode_ms) - 20usize];
 };
 pub unsafe fn transcribe_timings_init(out: *mut transcribe_timings) {
-    unsafe { (crate::api().transcribe_timings_init.expect("transcribe_timings_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_timings_init
+            .expect("transcribe_timings_init"))(out)
+    }
 }
-pub unsafe fn transcribe_get_timings(session: *const transcribe_session, out_timings: *mut transcribe_timings) -> transcribe_status {
-    unsafe { (crate::api().transcribe_get_timings.expect("transcribe_get_timings"))(session, out_timings) }
+pub unsafe fn transcribe_get_timings(
+    session: *const transcribe_session,
+    out_timings: *mut transcribe_timings,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_get_timings
+            .expect("transcribe_get_timings"))(session, out_timings)
+    }
 }
 pub unsafe fn transcribe_print_timings(session: *const transcribe_session) {
-    unsafe { (crate::api().transcribe_print_timings.expect("transcribe_print_timings"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_print_timings
+            .expect("transcribe_print_timings"))(session)
+    }
 }
 pub unsafe fn transcribe_reset_timings(session: *mut transcribe_session) {
-    unsafe { (crate::api().transcribe_reset_timings.expect("transcribe_reset_timings"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_reset_timings
+            .expect("transcribe_reset_timings"))(session)
+    }
 }
-pub unsafe fn transcribe_full_text(session: *const transcribe_session) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_full_text.expect("transcribe_full_text"))(session) }
+pub unsafe fn transcribe_full_text(
+    session: *const transcribe_session,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_full_text
+            .expect("transcribe_full_text"))(session)
+    }
 }
-pub unsafe fn transcribe_raw_text(session: *const transcribe_session) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_raw_text.expect("transcribe_raw_text"))(session) }
+pub unsafe fn transcribe_raw_text(
+    session: *const transcribe_session,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_raw_text
+            .expect("transcribe_raw_text"))(session)
+    }
 }
-pub unsafe fn transcribe_returned_timestamp_kind(session: *const transcribe_session) -> transcribe_timestamp_kind {
-    unsafe { (crate::api().transcribe_returned_timestamp_kind.expect("transcribe_returned_timestamp_kind"))(session) }
+pub unsafe fn transcribe_returned_timestamp_kind(
+    session: *const transcribe_session,
+) -> transcribe_timestamp_kind {
+    unsafe {
+        (crate::api()
+            .transcribe_returned_timestamp_kind
+            .expect("transcribe_returned_timestamp_kind"))(session)
+    }
 }
 pub unsafe fn transcribe_n_segments(session: *const transcribe_session) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_n_segments.expect("transcribe_n_segments"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_n_segments
+            .expect("transcribe_n_segments"))(session)
+    }
 }
 pub unsafe fn transcribe_n_words(session: *const transcribe_session) -> ::std::os::raw::c_int {
     unsafe { (crate::api().transcribe_n_words.expect("transcribe_n_words"))(session) }
 }
 pub unsafe fn transcribe_n_tokens(session: *const transcribe_session) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_n_tokens.expect("transcribe_n_tokens"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_n_tokens
+            .expect("transcribe_n_tokens"))(session)
+    }
 }
-pub unsafe fn transcribe_detected_language(session: *const transcribe_session) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_detected_language.expect("transcribe_detected_language"))(session) }
+pub unsafe fn transcribe_detected_language(
+    session: *const transcribe_session,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_detected_language
+            .expect("transcribe_detected_language"))(session)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -842,7 +1214,11 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_segment, speaker_id) - 48usize];
 };
 pub unsafe fn transcribe_segment_init(out: *mut transcribe_segment) {
-    unsafe { (crate::api().transcribe_segment_init.expect("transcribe_segment_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_segment_init
+            .expect("transcribe_segment_init"))(out)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -875,7 +1251,11 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_word, text) - 40usize];
 };
 pub unsafe fn transcribe_word_init(out: *mut transcribe_word) {
-    unsafe { (crate::api().transcribe_word_init.expect("transcribe_word_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_word_init
+            .expect("transcribe_word_init"))(out)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -910,16 +1290,44 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_token, text) - 40usize];
 };
 pub unsafe fn transcribe_token_init(out: *mut transcribe_token) {
-    unsafe { (crate::api().transcribe_token_init.expect("transcribe_token_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_token_init
+            .expect("transcribe_token_init"))(out)
+    }
 }
-pub unsafe fn transcribe_get_segment(session: *const transcribe_session, i: ::std::os::raw::c_int, out: *mut transcribe_segment) -> transcribe_status {
-    unsafe { (crate::api().transcribe_get_segment.expect("transcribe_get_segment"))(session, i, out) }
+pub unsafe fn transcribe_get_segment(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+    out: *mut transcribe_segment,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_get_segment
+            .expect("transcribe_get_segment"))(session, i, out)
+    }
 }
-pub unsafe fn transcribe_get_word(session: *const transcribe_session, i: ::std::os::raw::c_int, out: *mut transcribe_word) -> transcribe_status {
-    unsafe { (crate::api().transcribe_get_word.expect("transcribe_get_word"))(session, i, out) }
+pub unsafe fn transcribe_get_word(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+    out: *mut transcribe_word,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_get_word
+            .expect("transcribe_get_word"))(session, i, out)
+    }
 }
-pub unsafe fn transcribe_get_token(session: *const transcribe_session, i: ::std::os::raw::c_int, out: *mut transcribe_token) -> transcribe_status {
-    unsafe { (crate::api().transcribe_get_token.expect("transcribe_get_token"))(session, i, out) }
+pub unsafe fn transcribe_get_token(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+    out: *mut transcribe_token,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_get_token
+            .expect("transcribe_get_token"))(session, i, out)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -948,58 +1356,189 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_speaker_segment, p) - 28usize];
 };
 pub unsafe fn transcribe_speaker_segment_init(out: *mut transcribe_speaker_segment) {
-    unsafe { (crate::api().transcribe_speaker_segment_init.expect("transcribe_speaker_segment_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_speaker_segment_init
+            .expect("transcribe_speaker_segment_init"))(out)
+    }
 }
-pub unsafe fn transcribe_n_speaker_segments(session: *const transcribe_session) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_n_speaker_segments.expect("transcribe_n_speaker_segments"))(session) }
+pub unsafe fn transcribe_n_speaker_segments(
+    session: *const transcribe_session,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_n_speaker_segments
+            .expect("transcribe_n_speaker_segments"))(session)
+    }
 }
-pub unsafe fn transcribe_get_speaker_segment(session: *const transcribe_session, i: ::std::os::raw::c_int, out: *mut transcribe_speaker_segment) -> transcribe_status {
-    unsafe { (crate::api().transcribe_get_speaker_segment.expect("transcribe_get_speaker_segment"))(session, i, out) }
+pub unsafe fn transcribe_get_speaker_segment(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+    out: *mut transcribe_speaker_segment,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_get_speaker_segment
+            .expect("transcribe_get_speaker_segment"))(session, i, out)
+    }
 }
-pub unsafe fn transcribe_batch_n_results(session: *const transcribe_session) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_batch_n_results.expect("transcribe_batch_n_results"))(session) }
+pub unsafe fn transcribe_batch_n_results(
+    session: *const transcribe_session,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_n_results
+            .expect("transcribe_batch_n_results"))(session)
+    }
 }
-pub unsafe fn transcribe_batch_status(session: *const transcribe_session, i: ::std::os::raw::c_int) -> transcribe_status {
-    unsafe { (crate::api().transcribe_batch_status.expect("transcribe_batch_status"))(session, i) }
+pub unsafe fn transcribe_batch_status(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_status
+            .expect("transcribe_batch_status"))(session, i)
+    }
 }
-pub unsafe fn transcribe_batch_full_text(session: *const transcribe_session, i: ::std::os::raw::c_int) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_batch_full_text.expect("transcribe_batch_full_text"))(session, i) }
+pub unsafe fn transcribe_batch_full_text(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_full_text
+            .expect("transcribe_batch_full_text"))(session, i)
+    }
 }
-pub unsafe fn transcribe_batch_raw_text(session: *const transcribe_session, i: ::std::os::raw::c_int) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_batch_raw_text.expect("transcribe_batch_raw_text"))(session, i) }
+pub unsafe fn transcribe_batch_raw_text(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_raw_text
+            .expect("transcribe_batch_raw_text"))(session, i)
+    }
 }
-pub unsafe fn transcribe_batch_returned_timestamp_kind(session: *const transcribe_session, i: ::std::os::raw::c_int) -> transcribe_timestamp_kind {
-    unsafe { (crate::api().transcribe_batch_returned_timestamp_kind.expect("transcribe_batch_returned_timestamp_kind"))(session, i) }
+pub unsafe fn transcribe_batch_returned_timestamp_kind(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+) -> transcribe_timestamp_kind {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_returned_timestamp_kind
+            .expect("transcribe_batch_returned_timestamp_kind"))(session, i)
+    }
 }
-pub unsafe fn transcribe_batch_detected_language(session: *const transcribe_session, i: ::std::os::raw::c_int) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_batch_detected_language.expect("transcribe_batch_detected_language"))(session, i) }
+pub unsafe fn transcribe_batch_detected_language(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_detected_language
+            .expect("transcribe_batch_detected_language"))(session, i)
+    }
 }
-pub unsafe fn transcribe_batch_n_segments(session: *const transcribe_session, i: ::std::os::raw::c_int) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_batch_n_segments.expect("transcribe_batch_n_segments"))(session, i) }
+pub unsafe fn transcribe_batch_n_segments(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_n_segments
+            .expect("transcribe_batch_n_segments"))(session, i)
+    }
 }
-pub unsafe fn transcribe_batch_n_words(session: *const transcribe_session, i: ::std::os::raw::c_int) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_batch_n_words.expect("transcribe_batch_n_words"))(session, i) }
+pub unsafe fn transcribe_batch_n_words(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_n_words
+            .expect("transcribe_batch_n_words"))(session, i)
+    }
 }
-pub unsafe fn transcribe_batch_n_tokens(session: *const transcribe_session, i: ::std::os::raw::c_int) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_batch_n_tokens.expect("transcribe_batch_n_tokens"))(session, i) }
+pub unsafe fn transcribe_batch_n_tokens(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_n_tokens
+            .expect("transcribe_batch_n_tokens"))(session, i)
+    }
 }
-pub unsafe fn transcribe_batch_get_segment(session: *const transcribe_session, i: ::std::os::raw::c_int, j: ::std::os::raw::c_int, out: *mut transcribe_segment) -> transcribe_status {
-    unsafe { (crate::api().transcribe_batch_get_segment.expect("transcribe_batch_get_segment"))(session, i, j, out) }
+pub unsafe fn transcribe_batch_get_segment(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+    j: ::std::os::raw::c_int,
+    out: *mut transcribe_segment,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_get_segment
+            .expect("transcribe_batch_get_segment"))(session, i, j, out)
+    }
 }
-pub unsafe fn transcribe_batch_get_word(session: *const transcribe_session, i: ::std::os::raw::c_int, j: ::std::os::raw::c_int, out: *mut transcribe_word) -> transcribe_status {
-    unsafe { (crate::api().transcribe_batch_get_word.expect("transcribe_batch_get_word"))(session, i, j, out) }
+pub unsafe fn transcribe_batch_get_word(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+    j: ::std::os::raw::c_int,
+    out: *mut transcribe_word,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_get_word
+            .expect("transcribe_batch_get_word"))(session, i, j, out)
+    }
 }
-pub unsafe fn transcribe_batch_get_token(session: *const transcribe_session, i: ::std::os::raw::c_int, j: ::std::os::raw::c_int, out: *mut transcribe_token) -> transcribe_status {
-    unsafe { (crate::api().transcribe_batch_get_token.expect("transcribe_batch_get_token"))(session, i, j, out) }
+pub unsafe fn transcribe_batch_get_token(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+    j: ::std::os::raw::c_int,
+    out: *mut transcribe_token,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_get_token
+            .expect("transcribe_batch_get_token"))(session, i, j, out)
+    }
 }
-pub unsafe fn transcribe_batch_n_speaker_segments(session: *const transcribe_session, i: ::std::os::raw::c_int) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_batch_n_speaker_segments.expect("transcribe_batch_n_speaker_segments"))(session, i) }
+pub unsafe fn transcribe_batch_n_speaker_segments(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_n_speaker_segments
+            .expect("transcribe_batch_n_speaker_segments"))(session, i)
+    }
 }
-pub unsafe fn transcribe_batch_get_speaker_segment(session: *const transcribe_session, i: ::std::os::raw::c_int, j: ::std::os::raw::c_int, out: *mut transcribe_speaker_segment) -> transcribe_status {
-    unsafe { (crate::api().transcribe_batch_get_speaker_segment.expect("transcribe_batch_get_speaker_segment"))(session, i, j, out) }
+pub unsafe fn transcribe_batch_get_speaker_segment(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+    j: ::std::os::raw::c_int,
+    out: *mut transcribe_speaker_segment,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_get_speaker_segment
+            .expect("transcribe_batch_get_speaker_segment"))(session, i, j, out)
+    }
 }
-pub unsafe fn transcribe_batch_get_timings(session: *const transcribe_session, i: ::std::os::raw::c_int, out: *mut transcribe_timings) -> transcribe_status {
-    unsafe { (crate::api().transcribe_batch_get_timings.expect("transcribe_batch_get_timings"))(session, i, out) }
+pub unsafe fn transcribe_batch_get_timings(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+    out: *mut transcribe_timings,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_batch_get_timings
+            .expect("transcribe_batch_get_timings"))(session, i, out)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1060,37 +1599,108 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_diarize_params, family) - 8usize];
 };
 pub unsafe fn transcribe_diarize_info_init(out: *mut transcribe_diarize_info) {
-    unsafe { (crate::api().transcribe_diarize_info_init.expect("transcribe_diarize_info_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_diarize_info_init
+            .expect("transcribe_diarize_info_init"))(out)
+    }
 }
-pub unsafe fn transcribe_diarize_session_params_init(params: *mut transcribe_diarize_session_params) {
-    unsafe { (crate::api().transcribe_diarize_session_params_init.expect("transcribe_diarize_session_params_init"))(params) }
+pub unsafe fn transcribe_diarize_session_params_init(
+    params: *mut transcribe_diarize_session_params,
+) {
+    unsafe {
+        (crate::api()
+            .transcribe_diarize_session_params_init
+            .expect("transcribe_diarize_session_params_init"))(params)
+    }
 }
 pub unsafe fn transcribe_diarize_params_init(params: *mut transcribe_diarize_params) {
-    unsafe { (crate::api().transcribe_diarize_params_init.expect("transcribe_diarize_params_init"))(params) }
+    unsafe {
+        (crate::api()
+            .transcribe_diarize_params_init
+            .expect("transcribe_diarize_params_init"))(params)
+    }
 }
-pub unsafe fn transcribe_diarize_get_info(model: *const transcribe_model, out: *mut transcribe_diarize_info) -> transcribe_status {
-    unsafe { (crate::api().transcribe_diarize_get_info.expect("transcribe_diarize_get_info"))(model, out) }
+pub unsafe fn transcribe_diarize_get_info(
+    model: *const transcribe_model,
+    out: *mut transcribe_diarize_info,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_diarize_get_info
+            .expect("transcribe_diarize_get_info"))(model, out)
+    }
 }
-pub unsafe fn transcribe_diarize_session_init(model: *mut transcribe_model, params: *const transcribe_diarize_session_params, out_session: *mut *mut transcribe_diarize_session) -> transcribe_status {
-    unsafe { (crate::api().transcribe_diarize_session_init.expect("transcribe_diarize_session_init"))(model, params, out_session) }
+pub unsafe fn transcribe_diarize_session_init(
+    model: *mut transcribe_model,
+    params: *const transcribe_diarize_session_params,
+    out_session: *mut *mut transcribe_diarize_session,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_diarize_session_init
+            .expect("transcribe_diarize_session_init"))(model, params, out_session)
+    }
 }
 pub unsafe fn transcribe_diarize_session_free(session: *mut transcribe_diarize_session) {
-    unsafe { (crate::api().transcribe_diarize_session_free.expect("transcribe_diarize_session_free"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_diarize_session_free
+            .expect("transcribe_diarize_session_free"))(session)
+    }
 }
-pub unsafe fn transcribe_diarize_set_abort_callback(session: *mut transcribe_diarize_session, cb: transcribe_abort_callback, user_data: *mut ::std::os::raw::c_void) {
-    unsafe { (crate::api().transcribe_diarize_set_abort_callback.expect("transcribe_diarize_set_abort_callback"))(session, cb, user_data) }
+pub unsafe fn transcribe_diarize_set_abort_callback(
+    session: *mut transcribe_diarize_session,
+    cb: transcribe_abort_callback,
+    user_data: *mut ::std::os::raw::c_void,
+) {
+    unsafe {
+        (crate::api()
+            .transcribe_diarize_set_abort_callback
+            .expect("transcribe_diarize_set_abort_callback"))(session, cb, user_data)
+    }
 }
-pub unsafe fn transcribe_diarize_run(session: *mut transcribe_diarize_session, pcm: *const f32, n_samples: ::std::os::raw::c_int, params: *const transcribe_diarize_params) -> transcribe_status {
-    unsafe { (crate::api().transcribe_diarize_run.expect("transcribe_diarize_run"))(session, pcm, n_samples, params) }
+pub unsafe fn transcribe_diarize_run(
+    session: *mut transcribe_diarize_session,
+    pcm: *const f32,
+    n_samples: ::std::os::raw::c_int,
+    params: *const transcribe_diarize_params,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_diarize_run
+            .expect("transcribe_diarize_run"))(session, pcm, n_samples, params)
+    }
 }
-pub unsafe fn transcribe_diarize_n_segments(session: *const transcribe_diarize_session) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_diarize_n_segments.expect("transcribe_diarize_n_segments"))(session) }
+pub unsafe fn transcribe_diarize_n_segments(
+    session: *const transcribe_diarize_session,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_diarize_n_segments
+            .expect("transcribe_diarize_n_segments"))(session)
+    }
 }
-pub unsafe fn transcribe_diarize_get_segment(session: *const transcribe_diarize_session, i: ::std::os::raw::c_int, out: *mut transcribe_speaker_segment) -> transcribe_status {
-    unsafe { (crate::api().transcribe_diarize_get_segment.expect("transcribe_diarize_get_segment"))(session, i, out) }
+pub unsafe fn transcribe_diarize_get_segment(
+    session: *const transcribe_diarize_session,
+    i: ::std::os::raw::c_int,
+    out: *mut transcribe_speaker_segment,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_diarize_get_segment
+            .expect("transcribe_diarize_get_segment"))(session, i, out)
+    }
 }
-pub unsafe fn transcribe_diarize_get_timings(session: *const transcribe_diarize_session, out: *mut transcribe_timings) -> transcribe_status {
-    unsafe { (crate::api().transcribe_diarize_get_timings.expect("transcribe_diarize_get_timings"))(session, out) }
+pub unsafe fn transcribe_diarize_get_timings(
+    session: *const transcribe_diarize_session,
+    out: *mut transcribe_timings,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_diarize_get_timings
+            .expect("transcribe_diarize_get_timings"))(session, out)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1209,52 +1819,151 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_langid_candidate, logit) - 36usize];
 };
 pub unsafe fn transcribe_langid_info_init(out: *mut transcribe_langid_info) {
-    unsafe { (crate::api().transcribe_langid_info_init.expect("transcribe_langid_info_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_langid_info_init
+            .expect("transcribe_langid_info_init"))(out)
+    }
 }
 pub unsafe fn transcribe_langid_session_params_init(params: *mut transcribe_langid_session_params) {
-    unsafe { (crate::api().transcribe_langid_session_params_init.expect("transcribe_langid_session_params_init"))(params) }
+    unsafe {
+        (crate::api()
+            .transcribe_langid_session_params_init
+            .expect("transcribe_langid_session_params_init"))(params)
+    }
 }
 pub unsafe fn transcribe_langid_params_init(params: *mut transcribe_langid_params) {
-    unsafe { (crate::api().transcribe_langid_params_init.expect("transcribe_langid_params_init"))(params) }
+    unsafe {
+        (crate::api()
+            .transcribe_langid_params_init
+            .expect("transcribe_langid_params_init"))(params)
+    }
 }
 pub unsafe fn transcribe_langid_result_init(out: *mut transcribe_langid_result) {
-    unsafe { (crate::api().transcribe_langid_result_init.expect("transcribe_langid_result_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_langid_result_init
+            .expect("transcribe_langid_result_init"))(out)
+    }
 }
 pub unsafe fn transcribe_langid_candidate_init(out: *mut transcribe_langid_candidate) {
-    unsafe { (crate::api().transcribe_langid_candidate_init.expect("transcribe_langid_candidate_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_langid_candidate_init
+            .expect("transcribe_langid_candidate_init"))(out)
+    }
 }
-pub unsafe fn transcribe_langid_get_info(model: *const transcribe_model, out: *mut transcribe_langid_info) -> transcribe_status {
-    unsafe { (crate::api().transcribe_langid_get_info.expect("transcribe_langid_get_info"))(model, out) }
+pub unsafe fn transcribe_langid_get_info(
+    model: *const transcribe_model,
+    out: *mut transcribe_langid_info,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_langid_get_info
+            .expect("transcribe_langid_get_info"))(model, out)
+    }
 }
-pub unsafe fn transcribe_langid_label_code(model: *const transcribe_model, i: i32) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_langid_label_code.expect("transcribe_langid_label_code"))(model, i) }
+pub unsafe fn transcribe_langid_label_code(
+    model: *const transcribe_model,
+    i: i32,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_langid_label_code
+            .expect("transcribe_langid_label_code"))(model, i)
+    }
 }
-pub unsafe fn transcribe_langid_label_name(model: *const transcribe_model, i: i32) -> *const ::std::os::raw::c_char {
-    unsafe { (crate::api().transcribe_langid_label_name.expect("transcribe_langid_label_name"))(model, i) }
+pub unsafe fn transcribe_langid_label_name(
+    model: *const transcribe_model,
+    i: i32,
+) -> *const ::std::os::raw::c_char {
+    unsafe {
+        (crate::api()
+            .transcribe_langid_label_name
+            .expect("transcribe_langid_label_name"))(model, i)
+    }
 }
-pub unsafe fn transcribe_langid_label_index(model: *const transcribe_model, code_or_alias: *const ::std::os::raw::c_char) -> i32 {
-    unsafe { (crate::api().transcribe_langid_label_index.expect("transcribe_langid_label_index"))(model, code_or_alias) }
+pub unsafe fn transcribe_langid_label_index(
+    model: *const transcribe_model,
+    code_or_alias: *const ::std::os::raw::c_char,
+) -> i32 {
+    unsafe {
+        (crate::api()
+            .transcribe_langid_label_index
+            .expect("transcribe_langid_label_index"))(model, code_or_alias)
+    }
 }
-pub unsafe fn transcribe_langid_session_init(model: *mut transcribe_model, params: *const transcribe_langid_session_params, out_session: *mut *mut transcribe_langid_session) -> transcribe_status {
-    unsafe { (crate::api().transcribe_langid_session_init.expect("transcribe_langid_session_init"))(model, params, out_session) }
+pub unsafe fn transcribe_langid_session_init(
+    model: *mut transcribe_model,
+    params: *const transcribe_langid_session_params,
+    out_session: *mut *mut transcribe_langid_session,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_langid_session_init
+            .expect("transcribe_langid_session_init"))(model, params, out_session)
+    }
 }
 pub unsafe fn transcribe_langid_session_free(session: *mut transcribe_langid_session) {
-    unsafe { (crate::api().transcribe_langid_session_free.expect("transcribe_langid_session_free"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_langid_session_free
+            .expect("transcribe_langid_session_free"))(session)
+    }
 }
-pub unsafe fn transcribe_langid_set_abort_callback(session: *mut transcribe_langid_session, cb: transcribe_abort_callback, user_data: *mut ::std::os::raw::c_void) {
-    unsafe { (crate::api().transcribe_langid_set_abort_callback.expect("transcribe_langid_set_abort_callback"))(session, cb, user_data) }
+pub unsafe fn transcribe_langid_set_abort_callback(
+    session: *mut transcribe_langid_session,
+    cb: transcribe_abort_callback,
+    user_data: *mut ::std::os::raw::c_void,
+) {
+    unsafe {
+        (crate::api()
+            .transcribe_langid_set_abort_callback
+            .expect("transcribe_langid_set_abort_callback"))(session, cb, user_data)
+    }
 }
-pub unsafe fn transcribe_langid_run(session: *mut transcribe_langid_session, pcm: *const f32, n_samples: ::std::os::raw::c_int, params: *const transcribe_langid_params) -> transcribe_status {
-    unsafe { (crate::api().transcribe_langid_run.expect("transcribe_langid_run"))(session, pcm, n_samples, params) }
+pub unsafe fn transcribe_langid_run(
+    session: *mut transcribe_langid_session,
+    pcm: *const f32,
+    n_samples: ::std::os::raw::c_int,
+    params: *const transcribe_langid_params,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_langid_run
+            .expect("transcribe_langid_run"))(session, pcm, n_samples, params)
+    }
 }
-pub unsafe fn transcribe_langid_get_result(session: *const transcribe_langid_session, out: *mut transcribe_langid_result) -> transcribe_status {
-    unsafe { (crate::api().transcribe_langid_get_result.expect("transcribe_langid_get_result"))(session, out) }
+pub unsafe fn transcribe_langid_get_result(
+    session: *const transcribe_langid_session,
+    out: *mut transcribe_langid_result,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_langid_get_result
+            .expect("transcribe_langid_get_result"))(session, out)
+    }
 }
-pub unsafe fn transcribe_langid_get_candidate(session: *const transcribe_langid_session, i: ::std::os::raw::c_int, out: *mut transcribe_langid_candidate) -> transcribe_status {
-    unsafe { (crate::api().transcribe_langid_get_candidate.expect("transcribe_langid_get_candidate"))(session, i, out) }
+pub unsafe fn transcribe_langid_get_candidate(
+    session: *const transcribe_langid_session,
+    i: ::std::os::raw::c_int,
+    out: *mut transcribe_langid_candidate,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_langid_get_candidate
+            .expect("transcribe_langid_get_candidate"))(session, i, out)
+    }
 }
-pub unsafe fn transcribe_langid_get_timings(session: *const transcribe_langid_session, out: *mut transcribe_timings) -> transcribe_status {
-    unsafe { (crate::api().transcribe_langid_get_timings.expect("transcribe_langid_get_timings"))(session, out) }
+pub unsafe fn transcribe_langid_get_timings(
+    session: *const transcribe_langid_session,
+    out: *mut transcribe_timings,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_langid_get_timings
+            .expect("transcribe_langid_get_timings"))(session, out)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1276,8 +1985,14 @@ const _: () = {
     )
         - 16usize];
 };
-pub unsafe fn transcribe_moonshine_streaming_stream_ext_init(ext: *mut transcribe_moonshine_streaming_stream_ext) {
-    unsafe { (crate::api().transcribe_moonshine_streaming_stream_ext_init.expect("transcribe_moonshine_streaming_stream_ext_init"))(ext) }
+pub unsafe fn transcribe_moonshine_streaming_stream_ext_init(
+    ext: *mut transcribe_moonshine_streaming_stream_ext,
+) {
+    unsafe {
+        (crate::api()
+            .transcribe_moonshine_streaming_stream_ext_init
+            .expect("transcribe_moonshine_streaming_stream_ext_init"))(ext)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1297,7 +2012,11 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_parakeet_stream_ext, att_context_right) - 16usize];
 };
 pub unsafe fn transcribe_parakeet_stream_ext_init(ext: *mut transcribe_parakeet_stream_ext) {
-    unsafe { (crate::api().transcribe_parakeet_stream_ext_init.expect("transcribe_parakeet_stream_ext_init"))(ext) }
+    unsafe {
+        (crate::api()
+            .transcribe_parakeet_stream_ext_init
+            .expect("transcribe_parakeet_stream_ext_init"))(ext)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1322,8 +2041,14 @@ const _: () = {
     ["Offset of field: transcribe_parakeet_buffered_stream_ext::right_ms"]
         [::std::mem::offset_of!(transcribe_parakeet_buffered_stream_ext, right_ms) - 24usize];
 };
-pub unsafe fn transcribe_parakeet_buffered_stream_ext_init(ext: *mut transcribe_parakeet_buffered_stream_ext) {
-    unsafe { (crate::api().transcribe_parakeet_buffered_stream_ext_init.expect("transcribe_parakeet_buffered_stream_ext_init"))(ext) }
+pub unsafe fn transcribe_parakeet_buffered_stream_ext_init(
+    ext: *mut transcribe_parakeet_buffered_stream_ext,
+) {
+    unsafe {
+        (crate::api()
+            .transcribe_parakeet_buffered_stream_ext_init
+            .expect("transcribe_parakeet_buffered_stream_ext_init"))(ext)
+    }
 }
 impl transcribe_sortformer_preset {
     pub const TRANSCRIBE_SORTFORMER_PRESET_DEFAULT: transcribe_sortformer_preset =
@@ -1356,7 +2081,11 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_sortformer_diarize_ext, preset) - 16usize];
 };
 pub unsafe fn transcribe_sortformer_diarize_ext_init(ext: *mut transcribe_sortformer_diarize_ext) {
-    unsafe { (crate::api().transcribe_sortformer_diarize_ext_init.expect("transcribe_sortformer_diarize_ext_init"))(ext) }
+    unsafe {
+        (crate::api()
+            .transcribe_sortformer_diarize_ext_init
+            .expect("transcribe_sortformer_diarize_ext_init"))(ext)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1471,55 +2200,155 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_vad_segment, end_sample) - 16usize];
 };
 pub unsafe fn transcribe_vad_info_init(out: *mut transcribe_vad_info) {
-    unsafe { (crate::api().transcribe_vad_info_init.expect("transcribe_vad_info_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_vad_info_init
+            .expect("transcribe_vad_info_init"))(out)
+    }
 }
 pub unsafe fn transcribe_vad_session_params_init(params: *mut transcribe_vad_session_params) {
-    unsafe { (crate::api().transcribe_vad_session_params_init.expect("transcribe_vad_session_params_init"))(params) }
+    unsafe {
+        (crate::api()
+            .transcribe_vad_session_params_init
+            .expect("transcribe_vad_session_params_init"))(params)
+    }
 }
 pub unsafe fn transcribe_vad_params_init(params: *mut transcribe_vad_params) {
-    unsafe { (crate::api().transcribe_vad_params_init.expect("transcribe_vad_params_init"))(params) }
+    unsafe {
+        (crate::api()
+            .transcribe_vad_params_init
+            .expect("transcribe_vad_params_init"))(params)
+    }
 }
 pub unsafe fn transcribe_vad_result_init(out: *mut transcribe_vad_result) {
-    unsafe { (crate::api().transcribe_vad_result_init.expect("transcribe_vad_result_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_vad_result_init
+            .expect("transcribe_vad_result_init"))(out)
+    }
 }
 pub unsafe fn transcribe_vad_segment_init(out: *mut transcribe_vad_segment) {
-    unsafe { (crate::api().transcribe_vad_segment_init.expect("transcribe_vad_segment_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_vad_segment_init
+            .expect("transcribe_vad_segment_init"))(out)
+    }
 }
-pub unsafe fn transcribe_vad_get_info(model: *const transcribe_model, out: *mut transcribe_vad_info) -> transcribe_status {
-    unsafe { (crate::api().transcribe_vad_get_info.expect("transcribe_vad_get_info"))(model, out) }
+pub unsafe fn transcribe_vad_get_info(
+    model: *const transcribe_model,
+    out: *mut transcribe_vad_info,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_vad_get_info
+            .expect("transcribe_vad_get_info"))(model, out)
+    }
 }
-pub unsafe fn transcribe_vad_session_init(model: *mut transcribe_model, params: *const transcribe_vad_session_params, out_session: *mut *mut transcribe_vad_session) -> transcribe_status {
-    unsafe { (crate::api().transcribe_vad_session_init.expect("transcribe_vad_session_init"))(model, params, out_session) }
+pub unsafe fn transcribe_vad_session_init(
+    model: *mut transcribe_model,
+    params: *const transcribe_vad_session_params,
+    out_session: *mut *mut transcribe_vad_session,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_vad_session_init
+            .expect("transcribe_vad_session_init"))(model, params, out_session)
+    }
 }
 pub unsafe fn transcribe_vad_session_free(session: *mut transcribe_vad_session) {
-    unsafe { (crate::api().transcribe_vad_session_free.expect("transcribe_vad_session_free"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_vad_session_free
+            .expect("transcribe_vad_session_free"))(session)
+    }
 }
-pub unsafe fn transcribe_vad_set_abort_callback(session: *mut transcribe_vad_session, cb: transcribe_abort_callback, user_data: *mut ::std::os::raw::c_void) {
-    unsafe { (crate::api().transcribe_vad_set_abort_callback.expect("transcribe_vad_set_abort_callback"))(session, cb, user_data) }
+pub unsafe fn transcribe_vad_set_abort_callback(
+    session: *mut transcribe_vad_session,
+    cb: transcribe_abort_callback,
+    user_data: *mut ::std::os::raw::c_void,
+) {
+    unsafe {
+        (crate::api()
+            .transcribe_vad_set_abort_callback
+            .expect("transcribe_vad_set_abort_callback"))(session, cb, user_data)
+    }
 }
-pub unsafe fn transcribe_vad_run(session: *mut transcribe_vad_session, pcm: *const f32, n_samples: ::std::os::raw::c_int, params: *const transcribe_vad_params) -> transcribe_status {
-    unsafe { (crate::api().transcribe_vad_run.expect("transcribe_vad_run"))(session, pcm, n_samples, params) }
+pub unsafe fn transcribe_vad_run(
+    session: *mut transcribe_vad_session,
+    pcm: *const f32,
+    n_samples: ::std::os::raw::c_int,
+    params: *const transcribe_vad_params,
+) -> transcribe_status {
+    unsafe {
+        (crate::api().transcribe_vad_run.expect("transcribe_vad_run"))(
+            session, pcm, n_samples, params,
+        )
+    }
 }
-pub unsafe fn transcribe_vad_stream_feed(session: *mut transcribe_vad_session, pcm: *const f32, n_samples: ::std::os::raw::c_int) -> transcribe_status {
-    unsafe { (crate::api().transcribe_vad_stream_feed.expect("transcribe_vad_stream_feed"))(session, pcm, n_samples) }
+pub unsafe fn transcribe_vad_stream_feed(
+    session: *mut transcribe_vad_session,
+    pcm: *const f32,
+    n_samples: ::std::os::raw::c_int,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_vad_stream_feed
+            .expect("transcribe_vad_stream_feed"))(session, pcm, n_samples)
+    }
 }
-pub unsafe fn transcribe_vad_stream_flush(session: *mut transcribe_vad_session) -> transcribe_status {
-    unsafe { (crate::api().transcribe_vad_stream_flush.expect("transcribe_vad_stream_flush"))(session) }
+pub unsafe fn transcribe_vad_stream_flush(
+    session: *mut transcribe_vad_session,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_vad_stream_flush
+            .expect("transcribe_vad_stream_flush"))(session)
+    }
 }
 pub unsafe fn transcribe_vad_stream_reset(session: *mut transcribe_vad_session) {
-    unsafe { (crate::api().transcribe_vad_stream_reset.expect("transcribe_vad_stream_reset"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_vad_stream_reset
+            .expect("transcribe_vad_stream_reset"))(session)
+    }
 }
-pub unsafe fn transcribe_vad_get_result(session: *const transcribe_vad_session, out: *mut transcribe_vad_result) -> transcribe_status {
-    unsafe { (crate::api().transcribe_vad_get_result.expect("transcribe_vad_get_result"))(session, out) }
+pub unsafe fn transcribe_vad_get_result(
+    session: *const transcribe_vad_session,
+    out: *mut transcribe_vad_result,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_vad_get_result
+            .expect("transcribe_vad_get_result"))(session, out)
+    }
 }
 pub unsafe fn transcribe_vad_probs(session: *const transcribe_vad_session) -> *const f32 {
-    unsafe { (crate::api().transcribe_vad_probs.expect("transcribe_vad_probs"))(session) }
+    unsafe {
+        (crate::api()
+            .transcribe_vad_probs
+            .expect("transcribe_vad_probs"))(session)
+    }
 }
-pub unsafe fn transcribe_vad_get_segment(session: *const transcribe_vad_session, i: ::std::os::raw::c_int, out: *mut transcribe_vad_segment) -> transcribe_status {
-    unsafe { (crate::api().transcribe_vad_get_segment.expect("transcribe_vad_get_segment"))(session, i, out) }
+pub unsafe fn transcribe_vad_get_segment(
+    session: *const transcribe_vad_session,
+    i: ::std::os::raw::c_int,
+    out: *mut transcribe_vad_segment,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_vad_get_segment
+            .expect("transcribe_vad_get_segment"))(session, i, out)
+    }
 }
-pub unsafe fn transcribe_vad_get_timings(session: *const transcribe_vad_session, out: *mut transcribe_timings) -> transcribe_status {
-    unsafe { (crate::api().transcribe_vad_get_timings.expect("transcribe_vad_get_timings"))(session, out) }
+pub unsafe fn transcribe_vad_get_timings(
+    session: *const transcribe_vad_session,
+    out: *mut transcribe_timings,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_vad_get_timings
+            .expect("transcribe_vad_get_timings"))(session, out)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1546,8 +2375,14 @@ const _: () = {
     )
         - 20usize];
 };
-pub unsafe fn transcribe_voxtral_realtime_stream_ext_init(ext: *mut transcribe_voxtral_realtime_stream_ext) {
-    unsafe { (crate::api().transcribe_voxtral_realtime_stream_ext_init.expect("transcribe_voxtral_realtime_stream_ext_init"))(ext) }
+pub unsafe fn transcribe_voxtral_realtime_stream_ext_init(
+    ext: *mut transcribe_voxtral_realtime_stream_ext,
+) {
+    unsafe {
+        (crate::api()
+            .transcribe_voxtral_realtime_stream_ext_init
+            .expect("transcribe_voxtral_realtime_stream_ext_init"))(ext)
+    }
 }
 impl transcribe_whisper_prompt_condition {
     pub const TRANSCRIBE_WHISPER_PROMPT_FIRST_SEGMENT: transcribe_whisper_prompt_condition =
@@ -1612,7 +2447,11 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_whisper_run_ext, max_initial_timestamp) - 76usize];
 };
 pub unsafe fn transcribe_whisper_run_ext_init(ext: *mut transcribe_whisper_run_ext) {
-    unsafe { (crate::api().transcribe_whisper_run_ext_init.expect("transcribe_whisper_run_ext_init"))(ext) }
+    unsafe {
+        (crate::api()
+            .transcribe_whisper_run_ext_init
+            .expect("transcribe_whisper_run_ext_init"))(ext)
+    }
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1653,163 +2492,601 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_whisper_chunk_trace, n_fallbacks) - 44usize];
 };
 pub unsafe fn transcribe_whisper_chunk_trace_init(out: *mut transcribe_whisper_chunk_trace) {
-    unsafe { (crate::api().transcribe_whisper_chunk_trace_init.expect("transcribe_whisper_chunk_trace_init"))(out) }
+    unsafe {
+        (crate::api()
+            .transcribe_whisper_chunk_trace_init
+            .expect("transcribe_whisper_chunk_trace_init"))(out)
+    }
 }
-pub unsafe fn transcribe_get_whisper_chunk_count(session: *const transcribe_session) -> ::std::os::raw::c_int {
-    unsafe { (crate::api().transcribe_get_whisper_chunk_count.expect("transcribe_get_whisper_chunk_count"))(session) }
+pub unsafe fn transcribe_get_whisper_chunk_count(
+    session: *const transcribe_session,
+) -> ::std::os::raw::c_int {
+    unsafe {
+        (crate::api()
+            .transcribe_get_whisper_chunk_count
+            .expect("transcribe_get_whisper_chunk_count"))(session)
+    }
 }
-pub unsafe fn transcribe_get_whisper_chunk_trace(session: *const transcribe_session, i: ::std::os::raw::c_int, out_trace: *mut transcribe_whisper_chunk_trace) -> transcribe_status {
-    unsafe { (crate::api().transcribe_get_whisper_chunk_trace.expect("transcribe_get_whisper_chunk_trace"))(session, i, out_trace) }
+pub unsafe fn transcribe_get_whisper_chunk_trace(
+    session: *const transcribe_session,
+    i: ::std::os::raw::c_int,
+    out_trace: *mut transcribe_whisper_chunk_trace,
+) -> transcribe_status {
+    unsafe {
+        (crate::api()
+            .transcribe_get_whisper_chunk_trace
+            .expect("transcribe_get_whisper_chunk_trace"))(session, i, out_trace)
+    }
 }
 
 pub struct Api {
-    transcribe_status_string: Option<unsafe extern "C" fn(status: ::std::os::raw::c_int) -> *const ::std::os::raw::c_char>,
+    transcribe_status_string: Option<
+        unsafe extern "C" fn(status: ::std::os::raw::c_int) -> *const ::std::os::raw::c_char,
+    >,
     transcribe_version: Option<unsafe extern "C" fn() -> *const ::std::os::raw::c_char>,
     transcribe_version_commit: Option<unsafe extern "C" fn() -> *const ::std::os::raw::c_char>,
     transcribe_abi_struct_size: Option<unsafe extern "C" fn(which: transcribe_abi_struct) -> usize>,
-    transcribe_abi_struct_align: Option<unsafe extern "C" fn(which: transcribe_abi_struct) -> usize>,
-    transcribe_log_set: Option<unsafe extern "C" fn(cb: transcribe_log_callback, userdata: *mut ::std::os::raw::c_void)>,
-    transcribe_ext_check: Option<unsafe extern "C" fn(ext: *const transcribe_ext, expected_kind: u32, min_size: u64) -> transcribe_status>,
-    transcribe_model_accepts_ext_kind: Option<unsafe extern "C" fn(model: *const transcribe_model, slot: transcribe_ext_slot, kind: u32) -> bool>,
-    transcribe_init_backends: Option<unsafe extern "C" fn(artifact_dir: *const ::std::os::raw::c_char) -> transcribe_status>,
+    transcribe_abi_struct_align:
+        Option<unsafe extern "C" fn(which: transcribe_abi_struct) -> usize>,
+    transcribe_log_set: Option<
+        unsafe extern "C" fn(cb: transcribe_log_callback, userdata: *mut ::std::os::raw::c_void),
+    >,
+    transcribe_ext_check: Option<
+        unsafe extern "C" fn(
+            ext: *const transcribe_ext,
+            expected_kind: u32,
+            min_size: u64,
+        ) -> transcribe_status,
+    >,
+    transcribe_model_accepts_ext_kind: Option<
+        unsafe extern "C" fn(
+            model: *const transcribe_model,
+            slot: transcribe_ext_slot,
+            kind: u32,
+        ) -> bool,
+    >,
+    transcribe_init_backends: Option<
+        unsafe extern "C" fn(artifact_dir: *const ::std::os::raw::c_char) -> transcribe_status,
+    >,
     transcribe_init_backends_default: Option<unsafe extern "C" fn() -> transcribe_status>,
-    transcribe_backend_init_params_init: Option<unsafe extern "C" fn(p: *mut transcribe_backend_init_params)>,
-    transcribe_init_backends_ex: Option<unsafe extern "C" fn(params: *const transcribe_backend_init_params) -> transcribe_status>,
+    transcribe_backend_init_params_init:
+        Option<unsafe extern "C" fn(p: *mut transcribe_backend_init_params)>,
+    transcribe_init_backends_ex: Option<
+        unsafe extern "C" fn(params: *const transcribe_backend_init_params) -> transcribe_status,
+    >,
     transcribe_allowed_backends: Option<unsafe extern "C" fn() -> u32>,
     transcribe_device_count: Option<unsafe extern "C" fn() -> ::std::os::raw::c_int>,
-    transcribe_device_get: Option<unsafe extern "C" fn(index: ::std::os::raw::c_int) -> transcribe_device_t>,
+    transcribe_device_get:
+        Option<unsafe extern "C" fn(index: ::std::os::raw::c_int) -> transcribe_device_t>,
     transcribe_device_info_init: Option<unsafe extern "C" fn(p: *mut transcribe_device_info)>,
-    transcribe_device_get_info: Option<unsafe extern "C" fn(device: transcribe_device_t, out: *mut transcribe_device_info) -> transcribe_status>,
-    transcribe_backend_available: Option<unsafe extern "C" fn(kind: transcribe_backend_request) -> bool>,
-    transcribe_model_device: Option<unsafe extern "C" fn(model: *const transcribe_model) -> transcribe_device_t>,
-    transcribe_model_load_params_init: Option<unsafe extern "C" fn(params: *mut transcribe_model_load_params)>,
-    transcribe_session_params_init: Option<unsafe extern "C" fn(params: *mut transcribe_session_params)>,
+    transcribe_device_get_info: Option<
+        unsafe extern "C" fn(
+            device: transcribe_device_t,
+            out: *mut transcribe_device_info,
+        ) -> transcribe_status,
+    >,
+    transcribe_backend_available:
+        Option<unsafe extern "C" fn(kind: transcribe_backend_request) -> bool>,
+    transcribe_model_device:
+        Option<unsafe extern "C" fn(model: *const transcribe_model) -> transcribe_device_t>,
+    transcribe_model_load_params_init:
+        Option<unsafe extern "C" fn(params: *mut transcribe_model_load_params)>,
+    transcribe_session_params_init:
+        Option<unsafe extern "C" fn(params: *mut transcribe_session_params)>,
     transcribe_run_params_init: Option<unsafe extern "C" fn(params: *mut transcribe_run_params)>,
     transcribe_capabilities_init: Option<unsafe extern "C" fn(out: *mut transcribe_capabilities)>,
     transcribe_model_roles: Option<unsafe extern "C" fn(model: *const transcribe_model) -> u32>,
-    transcribe_model_get_capabilities: Option<unsafe extern "C" fn(model: *const transcribe_model, out_caps: *mut transcribe_capabilities) -> transcribe_status>,
-    transcribe_model_supports: Option<unsafe extern "C" fn(model: *const transcribe_model, feature: transcribe_feature) -> bool>,
-    transcribe_model_arch_string: Option<unsafe extern "C" fn(model: *const transcribe_model) -> *const ::std::os::raw::c_char>,
-    transcribe_model_variant_string: Option<unsafe extern "C" fn(model: *const transcribe_model) -> *const ::std::os::raw::c_char>,
-    transcribe_model_backend: Option<unsafe extern "C" fn(model: *const transcribe_model) -> *const ::std::os::raw::c_char>,
-    transcribe_model_meta_val_str: Option<unsafe extern "C" fn(model: *const transcribe_model, key: *const ::std::os::raw::c_char) -> *const ::std::os::raw::c_char>,
-    transcribe_model_load_file: Option<unsafe extern "C" fn(path: *const ::std::os::raw::c_char, params: *const transcribe_model_load_params, out_model: *mut *mut transcribe_model) -> transcribe_status>,
+    transcribe_model_get_capabilities: Option<
+        unsafe extern "C" fn(
+            model: *const transcribe_model,
+            out_caps: *mut transcribe_capabilities,
+        ) -> transcribe_status,
+    >,
+    transcribe_model_supports: Option<
+        unsafe extern "C" fn(model: *const transcribe_model, feature: transcribe_feature) -> bool,
+    >,
+    transcribe_model_arch_string: Option<
+        unsafe extern "C" fn(model: *const transcribe_model) -> *const ::std::os::raw::c_char,
+    >,
+    transcribe_model_variant_string: Option<
+        unsafe extern "C" fn(model: *const transcribe_model) -> *const ::std::os::raw::c_char,
+    >,
+    transcribe_model_backend: Option<
+        unsafe extern "C" fn(model: *const transcribe_model) -> *const ::std::os::raw::c_char,
+    >,
+    transcribe_model_meta_val_str: Option<
+        unsafe extern "C" fn(
+            model: *const transcribe_model,
+            key: *const ::std::os::raw::c_char,
+        ) -> *const ::std::os::raw::c_char,
+    >,
+    transcribe_model_load_file: Option<
+        unsafe extern "C" fn(
+            path: *const ::std::os::raw::c_char,
+            params: *const transcribe_model_load_params,
+            out_model: *mut *mut transcribe_model,
+        ) -> transcribe_status,
+    >,
     transcribe_model_free: Option<unsafe extern "C" fn(model: *mut transcribe_model)>,
-    transcribe_session_init: Option<unsafe extern "C" fn(model: *mut transcribe_model, params: *const transcribe_session_params, out_session: *mut *mut transcribe_session) -> transcribe_status>,
+    transcribe_session_init: Option<
+        unsafe extern "C" fn(
+            model: *mut transcribe_model,
+            params: *const transcribe_session_params,
+            out_session: *mut *mut transcribe_session,
+        ) -> transcribe_status,
+    >,
     transcribe_session_free: Option<unsafe extern "C" fn(session: *mut transcribe_session)>,
-    transcribe_open: Option<unsafe extern "C" fn(path: *const ::std::os::raw::c_char, load_params: *const transcribe_model_load_params, session_params: *const transcribe_session_params, out_session: *mut *mut transcribe_session) -> transcribe_status>,
+    transcribe_open: Option<
+        unsafe extern "C" fn(
+            path: *const ::std::os::raw::c_char,
+            load_params: *const transcribe_model_load_params,
+            session_params: *const transcribe_session_params,
+            out_session: *mut *mut transcribe_session,
+        ) -> transcribe_status,
+    >,
     transcribe_close: Option<unsafe extern "C" fn(session: *mut transcribe_session)>,
-    transcribe_get_model: Option<unsafe extern "C" fn(session: *const transcribe_session) -> *const transcribe_model>,
-    transcribe_run: Option<unsafe extern "C" fn(session: *mut transcribe_session, pcm: *const f32, n_samples: ::std::os::raw::c_int, params: *const transcribe_run_params) -> transcribe_status>,
-    transcribe_run_batch: Option<unsafe extern "C" fn(session: *mut transcribe_session, pcm: *const *const f32, n_samples: *const ::std::os::raw::c_int, n: ::std::os::raw::c_int, params: *const transcribe_run_params) -> transcribe_status>,
-    transcribe_set_abort_callback: Option<unsafe extern "C" fn(session: *mut transcribe_session, cb: transcribe_abort_callback, user_data: *mut ::std::os::raw::c_void)>,
-    transcribe_was_aborted: Option<unsafe extern "C" fn(session: *const transcribe_session) -> bool>,
-    transcribe_was_truncated: Option<unsafe extern "C" fn(session: *const transcribe_session) -> bool>,
-    transcribe_session_limits_init: Option<unsafe extern "C" fn(out: *mut transcribe_session_limits)>,
-    transcribe_session_get_limits: Option<unsafe extern "C" fn(session: *const transcribe_session, out: *mut transcribe_session_limits) -> transcribe_status>,
-    transcribe_stream_params_init: Option<unsafe extern "C" fn(params: *mut transcribe_stream_params)>,
+    transcribe_get_model:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> *const transcribe_model>,
+    transcribe_run: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_session,
+            pcm: *const f32,
+            n_samples: ::std::os::raw::c_int,
+            params: *const transcribe_run_params,
+        ) -> transcribe_status,
+    >,
+    transcribe_run_batch: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_session,
+            pcm: *const *const f32,
+            n_samples: *const ::std::os::raw::c_int,
+            n: ::std::os::raw::c_int,
+            params: *const transcribe_run_params,
+        ) -> transcribe_status,
+    >,
+    transcribe_set_abort_callback: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_session,
+            cb: transcribe_abort_callback,
+            user_data: *mut ::std::os::raw::c_void,
+        ),
+    >,
+    transcribe_was_aborted:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> bool>,
+    transcribe_was_truncated:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> bool>,
+    transcribe_session_limits_init:
+        Option<unsafe extern "C" fn(out: *mut transcribe_session_limits)>,
+    transcribe_session_get_limits: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            out: *mut transcribe_session_limits,
+        ) -> transcribe_status,
+    >,
+    transcribe_stream_params_init:
+        Option<unsafe extern "C" fn(params: *mut transcribe_stream_params)>,
     transcribe_stream_update_init: Option<unsafe extern "C" fn(out: *mut transcribe_stream_update)>,
     transcribe_stream_text_init: Option<unsafe extern "C" fn(out: *mut transcribe_stream_text)>,
-    transcribe_stream_get_text: Option<unsafe extern "C" fn(session: *const transcribe_session, out: *mut transcribe_stream_text) -> transcribe_status>,
-    transcribe_stream_begin: Option<unsafe extern "C" fn(session: *mut transcribe_session, run_params: *const transcribe_run_params, stream_params: *const transcribe_stream_params) -> transcribe_status>,
-    transcribe_stream_feed: Option<unsafe extern "C" fn(session: *mut transcribe_session, pcm: *const f32, n_samples: ::std::os::raw::c_int, update: *mut transcribe_stream_update) -> transcribe_status>,
-    transcribe_stream_finalize: Option<unsafe extern "C" fn(session: *mut transcribe_session, update: *mut transcribe_stream_update) -> transcribe_status>,
+    transcribe_stream_get_text: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            out: *mut transcribe_stream_text,
+        ) -> transcribe_status,
+    >,
+    transcribe_stream_begin: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_session,
+            run_params: *const transcribe_run_params,
+            stream_params: *const transcribe_stream_params,
+        ) -> transcribe_status,
+    >,
+    transcribe_stream_feed: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_session,
+            pcm: *const f32,
+            n_samples: ::std::os::raw::c_int,
+            update: *mut transcribe_stream_update,
+        ) -> transcribe_status,
+    >,
+    transcribe_stream_finalize: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_session,
+            update: *mut transcribe_stream_update,
+        ) -> transcribe_status,
+    >,
     transcribe_stream_reset: Option<unsafe extern "C" fn(session: *mut transcribe_session)>,
-    transcribe_stream_get_state: Option<unsafe extern "C" fn(session: *const transcribe_session) -> transcribe_stream_state>,
-    transcribe_stream_revision: Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
-    transcribe_stream_n_committed_segments: Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
-    transcribe_stream_n_committed_words: Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
-    transcribe_stream_n_committed_tokens: Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
-    transcribe_stream_last_status: Option<unsafe extern "C" fn(session: *const transcribe_session) -> transcribe_status>,
-    transcribe_tokenize: Option<unsafe extern "C" fn(model: *const transcribe_model, text: *const ::std::os::raw::c_char, tokens: *mut i32, n_max: usize) -> ::std::os::raw::c_int>,
+    transcribe_stream_get_state:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> transcribe_stream_state>,
+    transcribe_stream_revision:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
+    transcribe_stream_n_committed_segments:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
+    transcribe_stream_n_committed_words:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
+    transcribe_stream_n_committed_tokens:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
+    transcribe_stream_last_status:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> transcribe_status>,
+    transcribe_tokenize: Option<
+        unsafe extern "C" fn(
+            model: *const transcribe_model,
+            text: *const ::std::os::raw::c_char,
+            tokens: *mut i32,
+            n_max: usize,
+        ) -> ::std::os::raw::c_int,
+    >,
     transcribe_timings_init: Option<unsafe extern "C" fn(out: *mut transcribe_timings)>,
-    transcribe_get_timings: Option<unsafe extern "C" fn(session: *const transcribe_session, out_timings: *mut transcribe_timings) -> transcribe_status>,
+    transcribe_get_timings: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            out_timings: *mut transcribe_timings,
+        ) -> transcribe_status,
+    >,
     transcribe_print_timings: Option<unsafe extern "C" fn(session: *const transcribe_session)>,
     transcribe_reset_timings: Option<unsafe extern "C" fn(session: *mut transcribe_session)>,
-    transcribe_full_text: Option<unsafe extern "C" fn(session: *const transcribe_session) -> *const ::std::os::raw::c_char>,
-    transcribe_raw_text: Option<unsafe extern "C" fn(session: *const transcribe_session) -> *const ::std::os::raw::c_char>,
-    transcribe_returned_timestamp_kind: Option<unsafe extern "C" fn(session: *const transcribe_session) -> transcribe_timestamp_kind>,
-    transcribe_n_segments: Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
-    transcribe_n_words: Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
-    transcribe_n_tokens: Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
-    transcribe_detected_language: Option<unsafe extern "C" fn(session: *const transcribe_session) -> *const ::std::os::raw::c_char>,
+    transcribe_full_text: Option<
+        unsafe extern "C" fn(session: *const transcribe_session) -> *const ::std::os::raw::c_char,
+    >,
+    transcribe_raw_text: Option<
+        unsafe extern "C" fn(session: *const transcribe_session) -> *const ::std::os::raw::c_char,
+    >,
+    transcribe_returned_timestamp_kind: Option<
+        unsafe extern "C" fn(session: *const transcribe_session) -> transcribe_timestamp_kind,
+    >,
+    transcribe_n_segments:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
+    transcribe_n_words:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
+    transcribe_n_tokens:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
+    transcribe_detected_language: Option<
+        unsafe extern "C" fn(session: *const transcribe_session) -> *const ::std::os::raw::c_char,
+    >,
     transcribe_segment_init: Option<unsafe extern "C" fn(out: *mut transcribe_segment)>,
     transcribe_word_init: Option<unsafe extern "C" fn(out: *mut transcribe_word)>,
     transcribe_token_init: Option<unsafe extern "C" fn(out: *mut transcribe_token)>,
-    transcribe_get_segment: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int, out: *mut transcribe_segment) -> transcribe_status>,
-    transcribe_get_word: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int, out: *mut transcribe_word) -> transcribe_status>,
-    transcribe_get_token: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int, out: *mut transcribe_token) -> transcribe_status>,
-    transcribe_speaker_segment_init: Option<unsafe extern "C" fn(out: *mut transcribe_speaker_segment)>,
-    transcribe_n_speaker_segments: Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
-    transcribe_get_speaker_segment: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int, out: *mut transcribe_speaker_segment) -> transcribe_status>,
-    transcribe_batch_n_results: Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
-    transcribe_batch_status: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int) -> transcribe_status>,
-    transcribe_batch_full_text: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int) -> *const ::std::os::raw::c_char>,
-    transcribe_batch_raw_text: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int) -> *const ::std::os::raw::c_char>,
-    transcribe_batch_returned_timestamp_kind: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int) -> transcribe_timestamp_kind>,
-    transcribe_batch_detected_language: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int) -> *const ::std::os::raw::c_char>,
-    transcribe_batch_n_segments: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int) -> ::std::os::raw::c_int>,
-    transcribe_batch_n_words: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int) -> ::std::os::raw::c_int>,
-    transcribe_batch_n_tokens: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int) -> ::std::os::raw::c_int>,
-    transcribe_batch_get_segment: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int, j: ::std::os::raw::c_int, out: *mut transcribe_segment) -> transcribe_status>,
-    transcribe_batch_get_word: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int, j: ::std::os::raw::c_int, out: *mut transcribe_word) -> transcribe_status>,
-    transcribe_batch_get_token: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int, j: ::std::os::raw::c_int, out: *mut transcribe_token) -> transcribe_status>,
-    transcribe_batch_n_speaker_segments: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int) -> ::std::os::raw::c_int>,
-    transcribe_batch_get_speaker_segment: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int, j: ::std::os::raw::c_int, out: *mut transcribe_speaker_segment) -> transcribe_status>,
-    transcribe_batch_get_timings: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int, out: *mut transcribe_timings) -> transcribe_status>,
+    transcribe_get_segment: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+            out: *mut transcribe_segment,
+        ) -> transcribe_status,
+    >,
+    transcribe_get_word: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+            out: *mut transcribe_word,
+        ) -> transcribe_status,
+    >,
+    transcribe_get_token: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+            out: *mut transcribe_token,
+        ) -> transcribe_status,
+    >,
+    transcribe_speaker_segment_init:
+        Option<unsafe extern "C" fn(out: *mut transcribe_speaker_segment)>,
+    transcribe_n_speaker_segments:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
+    transcribe_get_speaker_segment: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+            out: *mut transcribe_speaker_segment,
+        ) -> transcribe_status,
+    >,
+    transcribe_batch_n_results:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
+    transcribe_batch_status: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+        ) -> transcribe_status,
+    >,
+    transcribe_batch_full_text: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+        ) -> *const ::std::os::raw::c_char,
+    >,
+    transcribe_batch_raw_text: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+        ) -> *const ::std::os::raw::c_char,
+    >,
+    transcribe_batch_returned_timestamp_kind: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+        ) -> transcribe_timestamp_kind,
+    >,
+    transcribe_batch_detected_language: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+        ) -> *const ::std::os::raw::c_char,
+    >,
+    transcribe_batch_n_segments: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int,
+    >,
+    transcribe_batch_n_words: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int,
+    >,
+    transcribe_batch_n_tokens: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int,
+    >,
+    transcribe_batch_get_segment: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+            j: ::std::os::raw::c_int,
+            out: *mut transcribe_segment,
+        ) -> transcribe_status,
+    >,
+    transcribe_batch_get_word: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+            j: ::std::os::raw::c_int,
+            out: *mut transcribe_word,
+        ) -> transcribe_status,
+    >,
+    transcribe_batch_get_token: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+            j: ::std::os::raw::c_int,
+            out: *mut transcribe_token,
+        ) -> transcribe_status,
+    >,
+    transcribe_batch_n_speaker_segments: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int,
+    >,
+    transcribe_batch_get_speaker_segment: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+            j: ::std::os::raw::c_int,
+            out: *mut transcribe_speaker_segment,
+        ) -> transcribe_status,
+    >,
+    transcribe_batch_get_timings: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+            out: *mut transcribe_timings,
+        ) -> transcribe_status,
+    >,
     transcribe_diarize_info_init: Option<unsafe extern "C" fn(out: *mut transcribe_diarize_info)>,
-    transcribe_diarize_session_params_init: Option<unsafe extern "C" fn(params: *mut transcribe_diarize_session_params)>,
-    transcribe_diarize_params_init: Option<unsafe extern "C" fn(params: *mut transcribe_diarize_params)>,
-    transcribe_diarize_get_info: Option<unsafe extern "C" fn(model: *const transcribe_model, out: *mut transcribe_diarize_info) -> transcribe_status>,
-    transcribe_diarize_session_init: Option<unsafe extern "C" fn(model: *mut transcribe_model, params: *const transcribe_diarize_session_params, out_session: *mut *mut transcribe_diarize_session) -> transcribe_status>,
-    transcribe_diarize_session_free: Option<unsafe extern "C" fn(session: *mut transcribe_diarize_session)>,
-    transcribe_diarize_set_abort_callback: Option<unsafe extern "C" fn(session: *mut transcribe_diarize_session, cb: transcribe_abort_callback, user_data: *mut ::std::os::raw::c_void)>,
-    transcribe_diarize_run: Option<unsafe extern "C" fn(session: *mut transcribe_diarize_session, pcm: *const f32, n_samples: ::std::os::raw::c_int, params: *const transcribe_diarize_params) -> transcribe_status>,
-    transcribe_diarize_n_segments: Option<unsafe extern "C" fn(session: *const transcribe_diarize_session) -> ::std::os::raw::c_int>,
-    transcribe_diarize_get_segment: Option<unsafe extern "C" fn(session: *const transcribe_diarize_session, i: ::std::os::raw::c_int, out: *mut transcribe_speaker_segment) -> transcribe_status>,
-    transcribe_diarize_get_timings: Option<unsafe extern "C" fn(session: *const transcribe_diarize_session, out: *mut transcribe_timings) -> transcribe_status>,
+    transcribe_diarize_session_params_init:
+        Option<unsafe extern "C" fn(params: *mut transcribe_diarize_session_params)>,
+    transcribe_diarize_params_init:
+        Option<unsafe extern "C" fn(params: *mut transcribe_diarize_params)>,
+    transcribe_diarize_get_info: Option<
+        unsafe extern "C" fn(
+            model: *const transcribe_model,
+            out: *mut transcribe_diarize_info,
+        ) -> transcribe_status,
+    >,
+    transcribe_diarize_session_init: Option<
+        unsafe extern "C" fn(
+            model: *mut transcribe_model,
+            params: *const transcribe_diarize_session_params,
+            out_session: *mut *mut transcribe_diarize_session,
+        ) -> transcribe_status,
+    >,
+    transcribe_diarize_session_free:
+        Option<unsafe extern "C" fn(session: *mut transcribe_diarize_session)>,
+    transcribe_diarize_set_abort_callback: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_diarize_session,
+            cb: transcribe_abort_callback,
+            user_data: *mut ::std::os::raw::c_void,
+        ),
+    >,
+    transcribe_diarize_run: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_diarize_session,
+            pcm: *const f32,
+            n_samples: ::std::os::raw::c_int,
+            params: *const transcribe_diarize_params,
+        ) -> transcribe_status,
+    >,
+    transcribe_diarize_n_segments: Option<
+        unsafe extern "C" fn(session: *const transcribe_diarize_session) -> ::std::os::raw::c_int,
+    >,
+    transcribe_diarize_get_segment: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_diarize_session,
+            i: ::std::os::raw::c_int,
+            out: *mut transcribe_speaker_segment,
+        ) -> transcribe_status,
+    >,
+    transcribe_diarize_get_timings: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_diarize_session,
+            out: *mut transcribe_timings,
+        ) -> transcribe_status,
+    >,
     transcribe_langid_info_init: Option<unsafe extern "C" fn(out: *mut transcribe_langid_info)>,
-    transcribe_langid_session_params_init: Option<unsafe extern "C" fn(params: *mut transcribe_langid_session_params)>,
-    transcribe_langid_params_init: Option<unsafe extern "C" fn(params: *mut transcribe_langid_params)>,
+    transcribe_langid_session_params_init:
+        Option<unsafe extern "C" fn(params: *mut transcribe_langid_session_params)>,
+    transcribe_langid_params_init:
+        Option<unsafe extern "C" fn(params: *mut transcribe_langid_params)>,
     transcribe_langid_result_init: Option<unsafe extern "C" fn(out: *mut transcribe_langid_result)>,
-    transcribe_langid_candidate_init: Option<unsafe extern "C" fn(out: *mut transcribe_langid_candidate)>,
-    transcribe_langid_get_info: Option<unsafe extern "C" fn(model: *const transcribe_model, out: *mut transcribe_langid_info) -> transcribe_status>,
-    transcribe_langid_label_code: Option<unsafe extern "C" fn(model: *const transcribe_model, i: i32) -> *const ::std::os::raw::c_char>,
-    transcribe_langid_label_name: Option<unsafe extern "C" fn(model: *const transcribe_model, i: i32) -> *const ::std::os::raw::c_char>,
-    transcribe_langid_label_index: Option<unsafe extern "C" fn(model: *const transcribe_model, code_or_alias: *const ::std::os::raw::c_char) -> i32>,
-    transcribe_langid_session_init: Option<unsafe extern "C" fn(model: *mut transcribe_model, params: *const transcribe_langid_session_params, out_session: *mut *mut transcribe_langid_session) -> transcribe_status>,
-    transcribe_langid_session_free: Option<unsafe extern "C" fn(session: *mut transcribe_langid_session)>,
-    transcribe_langid_set_abort_callback: Option<unsafe extern "C" fn(session: *mut transcribe_langid_session, cb: transcribe_abort_callback, user_data: *mut ::std::os::raw::c_void)>,
-    transcribe_langid_run: Option<unsafe extern "C" fn(session: *mut transcribe_langid_session, pcm: *const f32, n_samples: ::std::os::raw::c_int, params: *const transcribe_langid_params) -> transcribe_status>,
-    transcribe_langid_get_result: Option<unsafe extern "C" fn(session: *const transcribe_langid_session, out: *mut transcribe_langid_result) -> transcribe_status>,
-    transcribe_langid_get_candidate: Option<unsafe extern "C" fn(session: *const transcribe_langid_session, i: ::std::os::raw::c_int, out: *mut transcribe_langid_candidate) -> transcribe_status>,
-    transcribe_langid_get_timings: Option<unsafe extern "C" fn(session: *const transcribe_langid_session, out: *mut transcribe_timings) -> transcribe_status>,
-    transcribe_moonshine_streaming_stream_ext_init: Option<unsafe extern "C" fn(ext: *mut transcribe_moonshine_streaming_stream_ext)>,
-    transcribe_parakeet_stream_ext_init: Option<unsafe extern "C" fn(ext: *mut transcribe_parakeet_stream_ext)>,
-    transcribe_parakeet_buffered_stream_ext_init: Option<unsafe extern "C" fn(ext: *mut transcribe_parakeet_buffered_stream_ext)>,
-    transcribe_sortformer_diarize_ext_init: Option<unsafe extern "C" fn(ext: *mut transcribe_sortformer_diarize_ext)>,
+    transcribe_langid_candidate_init:
+        Option<unsafe extern "C" fn(out: *mut transcribe_langid_candidate)>,
+    transcribe_langid_get_info: Option<
+        unsafe extern "C" fn(
+            model: *const transcribe_model,
+            out: *mut transcribe_langid_info,
+        ) -> transcribe_status,
+    >,
+    transcribe_langid_label_code: Option<
+        unsafe extern "C" fn(
+            model: *const transcribe_model,
+            i: i32,
+        ) -> *const ::std::os::raw::c_char,
+    >,
+    transcribe_langid_label_name: Option<
+        unsafe extern "C" fn(
+            model: *const transcribe_model,
+            i: i32,
+        ) -> *const ::std::os::raw::c_char,
+    >,
+    transcribe_langid_label_index: Option<
+        unsafe extern "C" fn(
+            model: *const transcribe_model,
+            code_or_alias: *const ::std::os::raw::c_char,
+        ) -> i32,
+    >,
+    transcribe_langid_session_init: Option<
+        unsafe extern "C" fn(
+            model: *mut transcribe_model,
+            params: *const transcribe_langid_session_params,
+            out_session: *mut *mut transcribe_langid_session,
+        ) -> transcribe_status,
+    >,
+    transcribe_langid_session_free:
+        Option<unsafe extern "C" fn(session: *mut transcribe_langid_session)>,
+    transcribe_langid_set_abort_callback: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_langid_session,
+            cb: transcribe_abort_callback,
+            user_data: *mut ::std::os::raw::c_void,
+        ),
+    >,
+    transcribe_langid_run: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_langid_session,
+            pcm: *const f32,
+            n_samples: ::std::os::raw::c_int,
+            params: *const transcribe_langid_params,
+        ) -> transcribe_status,
+    >,
+    transcribe_langid_get_result: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_langid_session,
+            out: *mut transcribe_langid_result,
+        ) -> transcribe_status,
+    >,
+    transcribe_langid_get_candidate: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_langid_session,
+            i: ::std::os::raw::c_int,
+            out: *mut transcribe_langid_candidate,
+        ) -> transcribe_status,
+    >,
+    transcribe_langid_get_timings: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_langid_session,
+            out: *mut transcribe_timings,
+        ) -> transcribe_status,
+    >,
+    transcribe_moonshine_streaming_stream_ext_init:
+        Option<unsafe extern "C" fn(ext: *mut transcribe_moonshine_streaming_stream_ext)>,
+    transcribe_parakeet_stream_ext_init:
+        Option<unsafe extern "C" fn(ext: *mut transcribe_parakeet_stream_ext)>,
+    transcribe_parakeet_buffered_stream_ext_init:
+        Option<unsafe extern "C" fn(ext: *mut transcribe_parakeet_buffered_stream_ext)>,
+    transcribe_sortformer_diarize_ext_init:
+        Option<unsafe extern "C" fn(ext: *mut transcribe_sortformer_diarize_ext)>,
     transcribe_vad_info_init: Option<unsafe extern "C" fn(out: *mut transcribe_vad_info)>,
-    transcribe_vad_session_params_init: Option<unsafe extern "C" fn(params: *mut transcribe_vad_session_params)>,
+    transcribe_vad_session_params_init:
+        Option<unsafe extern "C" fn(params: *mut transcribe_vad_session_params)>,
     transcribe_vad_params_init: Option<unsafe extern "C" fn(params: *mut transcribe_vad_params)>,
     transcribe_vad_result_init: Option<unsafe extern "C" fn(out: *mut transcribe_vad_result)>,
     transcribe_vad_segment_init: Option<unsafe extern "C" fn(out: *mut transcribe_vad_segment)>,
-    transcribe_vad_get_info: Option<unsafe extern "C" fn(model: *const transcribe_model, out: *mut transcribe_vad_info) -> transcribe_status>,
-    transcribe_vad_session_init: Option<unsafe extern "C" fn(model: *mut transcribe_model, params: *const transcribe_vad_session_params, out_session: *mut *mut transcribe_vad_session) -> transcribe_status>,
+    transcribe_vad_get_info: Option<
+        unsafe extern "C" fn(
+            model: *const transcribe_model,
+            out: *mut transcribe_vad_info,
+        ) -> transcribe_status,
+    >,
+    transcribe_vad_session_init: Option<
+        unsafe extern "C" fn(
+            model: *mut transcribe_model,
+            params: *const transcribe_vad_session_params,
+            out_session: *mut *mut transcribe_vad_session,
+        ) -> transcribe_status,
+    >,
     transcribe_vad_session_free: Option<unsafe extern "C" fn(session: *mut transcribe_vad_session)>,
-    transcribe_vad_set_abort_callback: Option<unsafe extern "C" fn(session: *mut transcribe_vad_session, cb: transcribe_abort_callback, user_data: *mut ::std::os::raw::c_void)>,
-    transcribe_vad_run: Option<unsafe extern "C" fn(session: *mut transcribe_vad_session, pcm: *const f32, n_samples: ::std::os::raw::c_int, params: *const transcribe_vad_params) -> transcribe_status>,
-    transcribe_vad_stream_feed: Option<unsafe extern "C" fn(session: *mut transcribe_vad_session, pcm: *const f32, n_samples: ::std::os::raw::c_int) -> transcribe_status>,
-    transcribe_vad_stream_flush: Option<unsafe extern "C" fn(session: *mut transcribe_vad_session) -> transcribe_status>,
+    transcribe_vad_set_abort_callback: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_vad_session,
+            cb: transcribe_abort_callback,
+            user_data: *mut ::std::os::raw::c_void,
+        ),
+    >,
+    transcribe_vad_run: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_vad_session,
+            pcm: *const f32,
+            n_samples: ::std::os::raw::c_int,
+            params: *const transcribe_vad_params,
+        ) -> transcribe_status,
+    >,
+    transcribe_vad_stream_feed: Option<
+        unsafe extern "C" fn(
+            session: *mut transcribe_vad_session,
+            pcm: *const f32,
+            n_samples: ::std::os::raw::c_int,
+        ) -> transcribe_status,
+    >,
+    transcribe_vad_stream_flush:
+        Option<unsafe extern "C" fn(session: *mut transcribe_vad_session) -> transcribe_status>,
     transcribe_vad_stream_reset: Option<unsafe extern "C" fn(session: *mut transcribe_vad_session)>,
-    transcribe_vad_get_result: Option<unsafe extern "C" fn(session: *const transcribe_vad_session, out: *mut transcribe_vad_result) -> transcribe_status>,
-    transcribe_vad_probs: Option<unsafe extern "C" fn(session: *const transcribe_vad_session) -> *const f32>,
-    transcribe_vad_get_segment: Option<unsafe extern "C" fn(session: *const transcribe_vad_session, i: ::std::os::raw::c_int, out: *mut transcribe_vad_segment) -> transcribe_status>,
-    transcribe_vad_get_timings: Option<unsafe extern "C" fn(session: *const transcribe_vad_session, out: *mut transcribe_timings) -> transcribe_status>,
-    transcribe_voxtral_realtime_stream_ext_init: Option<unsafe extern "C" fn(ext: *mut transcribe_voxtral_realtime_stream_ext)>,
-    transcribe_whisper_run_ext_init: Option<unsafe extern "C" fn(ext: *mut transcribe_whisper_run_ext)>,
-    transcribe_whisper_chunk_trace_init: Option<unsafe extern "C" fn(out: *mut transcribe_whisper_chunk_trace)>,
-    transcribe_get_whisper_chunk_count: Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
-    transcribe_get_whisper_chunk_trace: Option<unsafe extern "C" fn(session: *const transcribe_session, i: ::std::os::raw::c_int, out_trace: *mut transcribe_whisper_chunk_trace) -> transcribe_status>,
+    transcribe_vad_get_result: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_vad_session,
+            out: *mut transcribe_vad_result,
+        ) -> transcribe_status,
+    >,
+    transcribe_vad_probs:
+        Option<unsafe extern "C" fn(session: *const transcribe_vad_session) -> *const f32>,
+    transcribe_vad_get_segment: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_vad_session,
+            i: ::std::os::raw::c_int,
+            out: *mut transcribe_vad_segment,
+        ) -> transcribe_status,
+    >,
+    transcribe_vad_get_timings: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_vad_session,
+            out: *mut transcribe_timings,
+        ) -> transcribe_status,
+    >,
+    transcribe_voxtral_realtime_stream_ext_init:
+        Option<unsafe extern "C" fn(ext: *mut transcribe_voxtral_realtime_stream_ext)>,
+    transcribe_whisper_run_ext_init:
+        Option<unsafe extern "C" fn(ext: *mut transcribe_whisper_run_ext)>,
+    transcribe_whisper_chunk_trace_init:
+        Option<unsafe extern "C" fn(out: *mut transcribe_whisper_chunk_trace)>,
+    transcribe_get_whisper_chunk_count:
+        Option<unsafe extern "C" fn(session: *const transcribe_session) -> ::std::os::raw::c_int>,
+    transcribe_get_whisper_chunk_trace: Option<
+        unsafe extern "C" fn(
+            session: *const transcribe_session,
+            i: ::std::os::raw::c_int,
+            out_trace: *mut transcribe_whisper_chunk_trace,
+        ) -> transcribe_status,
+    >,
 }
 
 impl Api {
@@ -1820,32 +3097,77 @@ impl Api {
                 transcribe_version: lib.get(c"transcribe_version").ok().map(|s| *s),
                 transcribe_version_commit: lib.get(c"transcribe_version_commit").ok().map(|s| *s),
                 transcribe_abi_struct_size: lib.get(c"transcribe_abi_struct_size").ok().map(|s| *s),
-                transcribe_abi_struct_align: lib.get(c"transcribe_abi_struct_align").ok().map(|s| *s),
+                transcribe_abi_struct_align: lib
+                    .get(c"transcribe_abi_struct_align")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_log_set: lib.get(c"transcribe_log_set").ok().map(|s| *s),
                 transcribe_ext_check: lib.get(c"transcribe_ext_check").ok().map(|s| *s),
-                transcribe_model_accepts_ext_kind: lib.get(c"transcribe_model_accepts_ext_kind").ok().map(|s| *s),
+                transcribe_model_accepts_ext_kind: lib
+                    .get(c"transcribe_model_accepts_ext_kind")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_init_backends: lib.get(c"transcribe_init_backends").ok().map(|s| *s),
-                transcribe_init_backends_default: lib.get(c"transcribe_init_backends_default").ok().map(|s| *s),
-                transcribe_backend_init_params_init: lib.get(c"transcribe_backend_init_params_init").ok().map(|s| *s),
-                transcribe_init_backends_ex: lib.get(c"transcribe_init_backends_ex").ok().map(|s| *s),
-                transcribe_allowed_backends: lib.get(c"transcribe_allowed_backends").ok().map(|s| *s),
+                transcribe_init_backends_default: lib
+                    .get(c"transcribe_init_backends_default")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_backend_init_params_init: lib
+                    .get(c"transcribe_backend_init_params_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_init_backends_ex: lib
+                    .get(c"transcribe_init_backends_ex")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_allowed_backends: lib
+                    .get(c"transcribe_allowed_backends")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_device_count: lib.get(c"transcribe_device_count").ok().map(|s| *s),
                 transcribe_device_get: lib.get(c"transcribe_device_get").ok().map(|s| *s),
-                transcribe_device_info_init: lib.get(c"transcribe_device_info_init").ok().map(|s| *s),
+                transcribe_device_info_init: lib
+                    .get(c"transcribe_device_info_init")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_device_get_info: lib.get(c"transcribe_device_get_info").ok().map(|s| *s),
-                transcribe_backend_available: lib.get(c"transcribe_backend_available").ok().map(|s| *s),
+                transcribe_backend_available: lib
+                    .get(c"transcribe_backend_available")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_model_device: lib.get(c"transcribe_model_device").ok().map(|s| *s),
-                transcribe_model_load_params_init: lib.get(c"transcribe_model_load_params_init").ok().map(|s| *s),
-                transcribe_session_params_init: lib.get(c"transcribe_session_params_init").ok().map(|s| *s),
+                transcribe_model_load_params_init: lib
+                    .get(c"transcribe_model_load_params_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_session_params_init: lib
+                    .get(c"transcribe_session_params_init")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_run_params_init: lib.get(c"transcribe_run_params_init").ok().map(|s| *s),
-                transcribe_capabilities_init: lib.get(c"transcribe_capabilities_init").ok().map(|s| *s),
+                transcribe_capabilities_init: lib
+                    .get(c"transcribe_capabilities_init")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_model_roles: lib.get(c"transcribe_model_roles").ok().map(|s| *s),
-                transcribe_model_get_capabilities: lib.get(c"transcribe_model_get_capabilities").ok().map(|s| *s),
+                transcribe_model_get_capabilities: lib
+                    .get(c"transcribe_model_get_capabilities")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_model_supports: lib.get(c"transcribe_model_supports").ok().map(|s| *s),
-                transcribe_model_arch_string: lib.get(c"transcribe_model_arch_string").ok().map(|s| *s),
-                transcribe_model_variant_string: lib.get(c"transcribe_model_variant_string").ok().map(|s| *s),
+                transcribe_model_arch_string: lib
+                    .get(c"transcribe_model_arch_string")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_model_variant_string: lib
+                    .get(c"transcribe_model_variant_string")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_model_backend: lib.get(c"transcribe_model_backend").ok().map(|s| *s),
-                transcribe_model_meta_val_str: lib.get(c"transcribe_model_meta_val_str").ok().map(|s| *s),
+                transcribe_model_meta_val_str: lib
+                    .get(c"transcribe_model_meta_val_str")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_model_load_file: lib.get(c"transcribe_model_load_file").ok().map(|s| *s),
                 transcribe_model_free: lib.get(c"transcribe_model_free").ok().map(|s| *s),
                 transcribe_session_init: lib.get(c"transcribe_session_init").ok().map(|s| *s),
@@ -1855,25 +3177,58 @@ impl Api {
                 transcribe_get_model: lib.get(c"transcribe_get_model").ok().map(|s| *s),
                 transcribe_run: lib.get(c"transcribe_run").ok().map(|s| *s),
                 transcribe_run_batch: lib.get(c"transcribe_run_batch").ok().map(|s| *s),
-                transcribe_set_abort_callback: lib.get(c"transcribe_set_abort_callback").ok().map(|s| *s),
+                transcribe_set_abort_callback: lib
+                    .get(c"transcribe_set_abort_callback")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_was_aborted: lib.get(c"transcribe_was_aborted").ok().map(|s| *s),
                 transcribe_was_truncated: lib.get(c"transcribe_was_truncated").ok().map(|s| *s),
-                transcribe_session_limits_init: lib.get(c"transcribe_session_limits_init").ok().map(|s| *s),
-                transcribe_session_get_limits: lib.get(c"transcribe_session_get_limits").ok().map(|s| *s),
-                transcribe_stream_params_init: lib.get(c"transcribe_stream_params_init").ok().map(|s| *s),
-                transcribe_stream_update_init: lib.get(c"transcribe_stream_update_init").ok().map(|s| *s),
-                transcribe_stream_text_init: lib.get(c"transcribe_stream_text_init").ok().map(|s| *s),
+                transcribe_session_limits_init: lib
+                    .get(c"transcribe_session_limits_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_session_get_limits: lib
+                    .get(c"transcribe_session_get_limits")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_stream_params_init: lib
+                    .get(c"transcribe_stream_params_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_stream_update_init: lib
+                    .get(c"transcribe_stream_update_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_stream_text_init: lib
+                    .get(c"transcribe_stream_text_init")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_stream_get_text: lib.get(c"transcribe_stream_get_text").ok().map(|s| *s),
                 transcribe_stream_begin: lib.get(c"transcribe_stream_begin").ok().map(|s| *s),
                 transcribe_stream_feed: lib.get(c"transcribe_stream_feed").ok().map(|s| *s),
                 transcribe_stream_finalize: lib.get(c"transcribe_stream_finalize").ok().map(|s| *s),
                 transcribe_stream_reset: lib.get(c"transcribe_stream_reset").ok().map(|s| *s),
-                transcribe_stream_get_state: lib.get(c"transcribe_stream_get_state").ok().map(|s| *s),
+                transcribe_stream_get_state: lib
+                    .get(c"transcribe_stream_get_state")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_stream_revision: lib.get(c"transcribe_stream_revision").ok().map(|s| *s),
-                transcribe_stream_n_committed_segments: lib.get(c"transcribe_stream_n_committed_segments").ok().map(|s| *s),
-                transcribe_stream_n_committed_words: lib.get(c"transcribe_stream_n_committed_words").ok().map(|s| *s),
-                transcribe_stream_n_committed_tokens: lib.get(c"transcribe_stream_n_committed_tokens").ok().map(|s| *s),
-                transcribe_stream_last_status: lib.get(c"transcribe_stream_last_status").ok().map(|s| *s),
+                transcribe_stream_n_committed_segments: lib
+                    .get(c"transcribe_stream_n_committed_segments")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_stream_n_committed_words: lib
+                    .get(c"transcribe_stream_n_committed_words")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_stream_n_committed_tokens: lib
+                    .get(c"transcribe_stream_n_committed_tokens")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_stream_last_status: lib
+                    .get(c"transcribe_stream_last_status")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_tokenize: lib.get(c"transcribe_tokenize").ok().map(|s| *s),
                 transcribe_timings_init: lib.get(c"transcribe_timings_init").ok().map(|s| *s),
                 transcribe_get_timings: lib.get(c"transcribe_get_timings").ok().map(|s| *s),
@@ -1881,88 +3236,244 @@ impl Api {
                 transcribe_reset_timings: lib.get(c"transcribe_reset_timings").ok().map(|s| *s),
                 transcribe_full_text: lib.get(c"transcribe_full_text").ok().map(|s| *s),
                 transcribe_raw_text: lib.get(c"transcribe_raw_text").ok().map(|s| *s),
-                transcribe_returned_timestamp_kind: lib.get(c"transcribe_returned_timestamp_kind").ok().map(|s| *s),
+                transcribe_returned_timestamp_kind: lib
+                    .get(c"transcribe_returned_timestamp_kind")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_n_segments: lib.get(c"transcribe_n_segments").ok().map(|s| *s),
                 transcribe_n_words: lib.get(c"transcribe_n_words").ok().map(|s| *s),
                 transcribe_n_tokens: lib.get(c"transcribe_n_tokens").ok().map(|s| *s),
-                transcribe_detected_language: lib.get(c"transcribe_detected_language").ok().map(|s| *s),
+                transcribe_detected_language: lib
+                    .get(c"transcribe_detected_language")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_segment_init: lib.get(c"transcribe_segment_init").ok().map(|s| *s),
                 transcribe_word_init: lib.get(c"transcribe_word_init").ok().map(|s| *s),
                 transcribe_token_init: lib.get(c"transcribe_token_init").ok().map(|s| *s),
                 transcribe_get_segment: lib.get(c"transcribe_get_segment").ok().map(|s| *s),
                 transcribe_get_word: lib.get(c"transcribe_get_word").ok().map(|s| *s),
                 transcribe_get_token: lib.get(c"transcribe_get_token").ok().map(|s| *s),
-                transcribe_speaker_segment_init: lib.get(c"transcribe_speaker_segment_init").ok().map(|s| *s),
-                transcribe_n_speaker_segments: lib.get(c"transcribe_n_speaker_segments").ok().map(|s| *s),
-                transcribe_get_speaker_segment: lib.get(c"transcribe_get_speaker_segment").ok().map(|s| *s),
+                transcribe_speaker_segment_init: lib
+                    .get(c"transcribe_speaker_segment_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_n_speaker_segments: lib
+                    .get(c"transcribe_n_speaker_segments")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_get_speaker_segment: lib
+                    .get(c"transcribe_get_speaker_segment")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_batch_n_results: lib.get(c"transcribe_batch_n_results").ok().map(|s| *s),
                 transcribe_batch_status: lib.get(c"transcribe_batch_status").ok().map(|s| *s),
                 transcribe_batch_full_text: lib.get(c"transcribe_batch_full_text").ok().map(|s| *s),
                 transcribe_batch_raw_text: lib.get(c"transcribe_batch_raw_text").ok().map(|s| *s),
-                transcribe_batch_returned_timestamp_kind: lib.get(c"transcribe_batch_returned_timestamp_kind").ok().map(|s| *s),
-                transcribe_batch_detected_language: lib.get(c"transcribe_batch_detected_language").ok().map(|s| *s),
-                transcribe_batch_n_segments: lib.get(c"transcribe_batch_n_segments").ok().map(|s| *s),
+                transcribe_batch_returned_timestamp_kind: lib
+                    .get(c"transcribe_batch_returned_timestamp_kind")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_batch_detected_language: lib
+                    .get(c"transcribe_batch_detected_language")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_batch_n_segments: lib
+                    .get(c"transcribe_batch_n_segments")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_batch_n_words: lib.get(c"transcribe_batch_n_words").ok().map(|s| *s),
                 transcribe_batch_n_tokens: lib.get(c"transcribe_batch_n_tokens").ok().map(|s| *s),
-                transcribe_batch_get_segment: lib.get(c"transcribe_batch_get_segment").ok().map(|s| *s),
+                transcribe_batch_get_segment: lib
+                    .get(c"transcribe_batch_get_segment")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_batch_get_word: lib.get(c"transcribe_batch_get_word").ok().map(|s| *s),
                 transcribe_batch_get_token: lib.get(c"transcribe_batch_get_token").ok().map(|s| *s),
-                transcribe_batch_n_speaker_segments: lib.get(c"transcribe_batch_n_speaker_segments").ok().map(|s| *s),
-                transcribe_batch_get_speaker_segment: lib.get(c"transcribe_batch_get_speaker_segment").ok().map(|s| *s),
-                transcribe_batch_get_timings: lib.get(c"transcribe_batch_get_timings").ok().map(|s| *s),
-                transcribe_diarize_info_init: lib.get(c"transcribe_diarize_info_init").ok().map(|s| *s),
-                transcribe_diarize_session_params_init: lib.get(c"transcribe_diarize_session_params_init").ok().map(|s| *s),
-                transcribe_diarize_params_init: lib.get(c"transcribe_diarize_params_init").ok().map(|s| *s),
-                transcribe_diarize_get_info: lib.get(c"transcribe_diarize_get_info").ok().map(|s| *s),
-                transcribe_diarize_session_init: lib.get(c"transcribe_diarize_session_init").ok().map(|s| *s),
-                transcribe_diarize_session_free: lib.get(c"transcribe_diarize_session_free").ok().map(|s| *s),
-                transcribe_diarize_set_abort_callback: lib.get(c"transcribe_diarize_set_abort_callback").ok().map(|s| *s),
+                transcribe_batch_n_speaker_segments: lib
+                    .get(c"transcribe_batch_n_speaker_segments")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_batch_get_speaker_segment: lib
+                    .get(c"transcribe_batch_get_speaker_segment")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_batch_get_timings: lib
+                    .get(c"transcribe_batch_get_timings")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_diarize_info_init: lib
+                    .get(c"transcribe_diarize_info_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_diarize_session_params_init: lib
+                    .get(c"transcribe_diarize_session_params_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_diarize_params_init: lib
+                    .get(c"transcribe_diarize_params_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_diarize_get_info: lib
+                    .get(c"transcribe_diarize_get_info")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_diarize_session_init: lib
+                    .get(c"transcribe_diarize_session_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_diarize_session_free: lib
+                    .get(c"transcribe_diarize_session_free")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_diarize_set_abort_callback: lib
+                    .get(c"transcribe_diarize_set_abort_callback")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_diarize_run: lib.get(c"transcribe_diarize_run").ok().map(|s| *s),
-                transcribe_diarize_n_segments: lib.get(c"transcribe_diarize_n_segments").ok().map(|s| *s),
-                transcribe_diarize_get_segment: lib.get(c"transcribe_diarize_get_segment").ok().map(|s| *s),
-                transcribe_diarize_get_timings: lib.get(c"transcribe_diarize_get_timings").ok().map(|s| *s),
-                transcribe_langid_info_init: lib.get(c"transcribe_langid_info_init").ok().map(|s| *s),
-                transcribe_langid_session_params_init: lib.get(c"transcribe_langid_session_params_init").ok().map(|s| *s),
-                transcribe_langid_params_init: lib.get(c"transcribe_langid_params_init").ok().map(|s| *s),
-                transcribe_langid_result_init: lib.get(c"transcribe_langid_result_init").ok().map(|s| *s),
-                transcribe_langid_candidate_init: lib.get(c"transcribe_langid_candidate_init").ok().map(|s| *s),
+                transcribe_diarize_n_segments: lib
+                    .get(c"transcribe_diarize_n_segments")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_diarize_get_segment: lib
+                    .get(c"transcribe_diarize_get_segment")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_diarize_get_timings: lib
+                    .get(c"transcribe_diarize_get_timings")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_langid_info_init: lib
+                    .get(c"transcribe_langid_info_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_langid_session_params_init: lib
+                    .get(c"transcribe_langid_session_params_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_langid_params_init: lib
+                    .get(c"transcribe_langid_params_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_langid_result_init: lib
+                    .get(c"transcribe_langid_result_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_langid_candidate_init: lib
+                    .get(c"transcribe_langid_candidate_init")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_langid_get_info: lib.get(c"transcribe_langid_get_info").ok().map(|s| *s),
-                transcribe_langid_label_code: lib.get(c"transcribe_langid_label_code").ok().map(|s| *s),
-                transcribe_langid_label_name: lib.get(c"transcribe_langid_label_name").ok().map(|s| *s),
-                transcribe_langid_label_index: lib.get(c"transcribe_langid_label_index").ok().map(|s| *s),
-                transcribe_langid_session_init: lib.get(c"transcribe_langid_session_init").ok().map(|s| *s),
-                transcribe_langid_session_free: lib.get(c"transcribe_langid_session_free").ok().map(|s| *s),
-                transcribe_langid_set_abort_callback: lib.get(c"transcribe_langid_set_abort_callback").ok().map(|s| *s),
+                transcribe_langid_label_code: lib
+                    .get(c"transcribe_langid_label_code")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_langid_label_name: lib
+                    .get(c"transcribe_langid_label_name")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_langid_label_index: lib
+                    .get(c"transcribe_langid_label_index")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_langid_session_init: lib
+                    .get(c"transcribe_langid_session_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_langid_session_free: lib
+                    .get(c"transcribe_langid_session_free")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_langid_set_abort_callback: lib
+                    .get(c"transcribe_langid_set_abort_callback")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_langid_run: lib.get(c"transcribe_langid_run").ok().map(|s| *s),
-                transcribe_langid_get_result: lib.get(c"transcribe_langid_get_result").ok().map(|s| *s),
-                transcribe_langid_get_candidate: lib.get(c"transcribe_langid_get_candidate").ok().map(|s| *s),
-                transcribe_langid_get_timings: lib.get(c"transcribe_langid_get_timings").ok().map(|s| *s),
-                transcribe_moonshine_streaming_stream_ext_init: lib.get(c"transcribe_moonshine_streaming_stream_ext_init").ok().map(|s| *s),
-                transcribe_parakeet_stream_ext_init: lib.get(c"transcribe_parakeet_stream_ext_init").ok().map(|s| *s),
-                transcribe_parakeet_buffered_stream_ext_init: lib.get(c"transcribe_parakeet_buffered_stream_ext_init").ok().map(|s| *s),
-                transcribe_sortformer_diarize_ext_init: lib.get(c"transcribe_sortformer_diarize_ext_init").ok().map(|s| *s),
+                transcribe_langid_get_result: lib
+                    .get(c"transcribe_langid_get_result")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_langid_get_candidate: lib
+                    .get(c"transcribe_langid_get_candidate")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_langid_get_timings: lib
+                    .get(c"transcribe_langid_get_timings")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_moonshine_streaming_stream_ext_init: lib
+                    .get(c"transcribe_moonshine_streaming_stream_ext_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_parakeet_stream_ext_init: lib
+                    .get(c"transcribe_parakeet_stream_ext_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_parakeet_buffered_stream_ext_init: lib
+                    .get(c"transcribe_parakeet_buffered_stream_ext_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_sortformer_diarize_ext_init: lib
+                    .get(c"transcribe_sortformer_diarize_ext_init")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_vad_info_init: lib.get(c"transcribe_vad_info_init").ok().map(|s| *s),
-                transcribe_vad_session_params_init: lib.get(c"transcribe_vad_session_params_init").ok().map(|s| *s),
+                transcribe_vad_session_params_init: lib
+                    .get(c"transcribe_vad_session_params_init")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_vad_params_init: lib.get(c"transcribe_vad_params_init").ok().map(|s| *s),
                 transcribe_vad_result_init: lib.get(c"transcribe_vad_result_init").ok().map(|s| *s),
-                transcribe_vad_segment_init: lib.get(c"transcribe_vad_segment_init").ok().map(|s| *s),
+                transcribe_vad_segment_init: lib
+                    .get(c"transcribe_vad_segment_init")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_vad_get_info: lib.get(c"transcribe_vad_get_info").ok().map(|s| *s),
-                transcribe_vad_session_init: lib.get(c"transcribe_vad_session_init").ok().map(|s| *s),
-                transcribe_vad_session_free: lib.get(c"transcribe_vad_session_free").ok().map(|s| *s),
-                transcribe_vad_set_abort_callback: lib.get(c"transcribe_vad_set_abort_callback").ok().map(|s| *s),
+                transcribe_vad_session_init: lib
+                    .get(c"transcribe_vad_session_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_vad_session_free: lib
+                    .get(c"transcribe_vad_session_free")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_vad_set_abort_callback: lib
+                    .get(c"transcribe_vad_set_abort_callback")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_vad_run: lib.get(c"transcribe_vad_run").ok().map(|s| *s),
                 transcribe_vad_stream_feed: lib.get(c"transcribe_vad_stream_feed").ok().map(|s| *s),
-                transcribe_vad_stream_flush: lib.get(c"transcribe_vad_stream_flush").ok().map(|s| *s),
-                transcribe_vad_stream_reset: lib.get(c"transcribe_vad_stream_reset").ok().map(|s| *s),
+                transcribe_vad_stream_flush: lib
+                    .get(c"transcribe_vad_stream_flush")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_vad_stream_reset: lib
+                    .get(c"transcribe_vad_stream_reset")
+                    .ok()
+                    .map(|s| *s),
                 transcribe_vad_get_result: lib.get(c"transcribe_vad_get_result").ok().map(|s| *s),
                 transcribe_vad_probs: lib.get(c"transcribe_vad_probs").ok().map(|s| *s),
                 transcribe_vad_get_segment: lib.get(c"transcribe_vad_get_segment").ok().map(|s| *s),
                 transcribe_vad_get_timings: lib.get(c"transcribe_vad_get_timings").ok().map(|s| *s),
-                transcribe_voxtral_realtime_stream_ext_init: lib.get(c"transcribe_voxtral_realtime_stream_ext_init").ok().map(|s| *s),
-                transcribe_whisper_run_ext_init: lib.get(c"transcribe_whisper_run_ext_init").ok().map(|s| *s),
-                transcribe_whisper_chunk_trace_init: lib.get(c"transcribe_whisper_chunk_trace_init").ok().map(|s| *s),
-                transcribe_get_whisper_chunk_count: lib.get(c"transcribe_get_whisper_chunk_count").ok().map(|s| *s),
-                transcribe_get_whisper_chunk_trace: lib.get(c"transcribe_get_whisper_chunk_trace").ok().map(|s| *s),
+                transcribe_voxtral_realtime_stream_ext_init: lib
+                    .get(c"transcribe_voxtral_realtime_stream_ext_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_whisper_run_ext_init: lib
+                    .get(c"transcribe_whisper_run_ext_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_whisper_chunk_trace_init: lib
+                    .get(c"transcribe_whisper_chunk_trace_init")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_get_whisper_chunk_count: lib
+                    .get(c"transcribe_get_whisper_chunk_count")
+                    .ok()
+                    .map(|s| *s),
+                transcribe_get_whisper_chunk_trace: lib
+                    .get(c"transcribe_get_whisper_chunk_trace")
+                    .ok()
+                    .map(|s| *s),
             }
         }
     }

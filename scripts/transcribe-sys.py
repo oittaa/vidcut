@@ -11,14 +11,18 @@ for example in ~/.cargo/registry/src/*/transcribe-cpp-sys-0.4.0/. The
 types and constants are kept as they are, comments left out. Each
 `extern "C"` function becomes a function of the same signature that calls
 the symbol of that name from the loaded library (Api), and panics naming
-it if the library has none.
+it if the library has none. The file is formatted with rustfmt as
+`cargo fmt` does (edition 2024), so the same bindings give the same file,
+byte for byte.
 """
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "crates" / "transcribe-cpp-sys" / "src" / "transcribe_sys.rs"
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "crates" / "transcribe-cpp-sys" / "src" / "transcribe_sys.rs"
 BLOCK = re.compile(r'unsafe extern "C" \{\s*pub fn (\w+)\((.*?)\)\s*(?:->\s*([^;]+?))?\s*;\s*\}', re.S)
 
 
@@ -75,6 +79,7 @@ def main():
     )
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_bytes(body.encode("utf-8"))
+    subprocess.run(["rustfmt", "--edition", "2024", str(OUT)], cwd=ROOT, check=True)
     print(f"{OUT}: {len(functions)} functions")
 
 
