@@ -2009,6 +2009,9 @@ pub enum GuiPanel {
     /// The Transcription window: the words of the source clip or the
     /// timeline, from their media's transcripts.
     Transcription,
+    /// The Titles tab, in the Media Pool's place: the kinds of title to
+    /// drag onto the timeline.
+    Titles,
 }
 
 /// Media Pool sort orders.

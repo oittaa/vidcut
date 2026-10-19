@@ -547,12 +547,14 @@ impl Workspace {
         let thumbs = std::mem::take(&mut self.thumbs);
         let tiles = self.tiles.take();
         let (waveforms, missing) = (self.snap.waveforms.clone(), self.snap.missing.clone());
+        let title_thumbs = self.title_thumbs.prepare(ui.ctx(), drawn).clone();
         let assets = Assets {
             thumbs: &thumbs,
             waveforms: &waveforms,
             tiles: tiles.as_ref(),
             missing: &missing,
             pool: &pool,
+            titles: &title_thumbs,
         };
         let look = self.look();
         let smart = (end > 0).then(|| ops::nearest_edit(drawn, playhead));
@@ -1625,7 +1627,10 @@ impl Workspace {
             self.timeline.snap_flipped = false;
             return;
         }
-        if matches!(d.drag.gesture, Gesture::Media { .. }) {
+        if matches!(
+            d.drag.gesture,
+            Gesture::Media { .. } | Gesture::Title { .. }
+        ) {
             d.upper = layout.upper.area.expand(8.0).contains(pos);
         }
         let moving: Vec<String> = match &d.drag.gesture {
@@ -2101,6 +2106,28 @@ impl Workspace {
         });
     }
 
+    pub(crate) fn start_title_drag(
+        &mut self,
+        p: &Project,
+        kind: vidcut_core::model::TitleKind,
+        align: Option<vidcut_core::model::TitleAlign>,
+        press: Pos2,
+    ) {
+        self.timeline.snap_flipped = false;
+        self.timeline.drag = Some(ActiveDrag {
+            drag: Drag::new(
+                Gesture::Title {
+                    kind,
+                    align,
+                    len: vidcut_core::ops::titles::default_length(p),
+                },
+                press,
+            ),
+            upper: false,
+            preview: Preview::default(),
+        });
+    }
+
     pub(crate) fn media_drag_overlay(&self, ctx: &egui::Context) {
         if let Some(text) = self.bin_drag_label()
             && let Some(pos) = ctx.input(|i| i.pointer.latest_pos())
@@ -2120,16 +2147,26 @@ impl Workspace {
             return;
         }
         let Some(d) = &self.timeline.drag else { return };
-        let Gesture::Media { media, range, .. } = &d.drag.gesture else {
-            return;
+        let (name, range) = match &d.drag.gesture {
+            Gesture::Media { media, range, .. } => (
+                self.project()
+                    .and_then(|p| p.media(media))
+                    .map_or(media.clone(), |m| m.name.clone()),
+                *range,
+            ),
+            Gesture::Title { kind, align, len } => (
+                crate::gui::title_browser::KINDS
+                    .iter()
+                    .find(|(_, k, a)| k == kind && a == align)
+                    .map_or("Title", |(label, ..)| label)
+                    .to_string(),
+                (0, *len),
+            ),
+            _ => return,
         };
         let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) else {
             return;
         };
-        let name = self
-            .project()
-            .and_then(|p| p.media(media))
-            .map_or(media.clone(), |m| m.name.clone());
         let painter = ctx.layer_painter(egui::LayerId::new(
             egui::Order::Tooltip,
             egui::Id::unique("media-drag"),
