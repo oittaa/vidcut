@@ -32,6 +32,7 @@ pub struct TileKey {
 
 pub struct Job {
     key: TileKey,
+    epoch: u64,
     width: u32,
     fps: Rational,
     pieces: Vec<VideoPiece>,
@@ -95,6 +96,7 @@ struct Queue {
 pub struct Tiles {
     kept: HashMap<(String, u32), BTreeMap<i64, Kept>>,
     versions: HashMap<String, Seen>,
+    epochs: HashMap<String, u64>,
     clock: u64,
     bytes: usize,
     budget: usize,
@@ -104,8 +106,8 @@ pub struct Tiles {
     missing: HashSet<TileKey>,
     pub proxies: Arc<Path>,
     queue: Arc<Queue>,
-    results: Receiver<(TileKey, Image)>,
-    sender: Sender<(TileKey, Image)>,
+    results: Receiver<(TileKey, u64, Image)>,
+    sender: Sender<(TileKey, u64, Image)>,
     started: bool,
     workers: Vec<std::thread::JoinHandle<()>>,
 }
@@ -116,6 +118,7 @@ impl Tiles {
         let mut tiles = Self {
             kept: HashMap::new(),
             versions: HashMap::new(),
+            epochs: HashMap::new(),
             clock: 0,
             bytes: 0,
             budget: MEMORY,
@@ -170,7 +173,10 @@ impl Tiles {
                 }
             }
         }
-        while let Ok((key, image)) = self.results.try_recv() {
+        while let Ok((key, epoch, image)) = self.results.try_recv() {
+            if self.epochs.get(&key.media).copied().unwrap_or(0) != epoch {
+                continue;
+            }
             let texture = ctx.load_texture(
                 format!("tile-{}-{}-{}", key.media, key.frame, key.height),
                 egui::ColorImage::from_rgba_unmultiplied(
@@ -249,15 +255,23 @@ impl Tiles {
             && (path != &proxy || image.is_some())
         {
             let mut from_proxy = piece.clone();
-            if let VideoPiece::Source { path, image, .. } = &mut from_proxy {
+            if let VideoPiece::Source {
+                path,
+                image,
+                color_space,
+                ..
+            } = &mut from_proxy
+            {
                 *path = proxy;
                 *image = None;
+                *color_space = Default::default();
             }
             pieces.push(from_proxy);
         }
         pieces.push(piece);
         Some(Job {
             key: key.clone(),
+            epoch: self.epochs.get(&key.media).copied().unwrap_or(0),
             width,
             fps: p.settings.fps,
             pieces,
@@ -307,6 +321,7 @@ impl Tiles {
     }
 
     fn forget(&mut self, media: &str) {
+        *self.epochs.entry(media.to_string()).or_default() += 1;
         let gone: Vec<(String, u32)> = self
             .kept
             .keys()
@@ -422,7 +437,7 @@ fn reader_waits(idle: Duration) -> Option<Duration> {
 
 type Block = Vec<(i64, Image)>;
 
-fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Context) {
+fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egui::Context) {
     static TRIMMED: Mutex<Option<Instant>> = Mutex::new(None);
     let _cancel = vidcut_av::cancel::Guard::set(queue.cancel.clone());
     let reader_for = |d: &GpuDecoding| match d.own_decoder() {
@@ -499,7 +514,7 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, Image)>, ctx: &egui::Co
         match picture {
             Some(p) => {
                 drop(w);
-                if done.send((job.key, p)).is_err() {
+                if done.send((job.key, job.epoch, p)).is_err() {
                     return;
                 }
                 ctx.request_repaint();

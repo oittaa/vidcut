@@ -328,6 +328,10 @@ pub struct Proxy {
     pub height: u32,
     /// Encoder name, e.g. `h264`.
     pub codec: String,
+    /// [`Media::color_space`] when the proxy was made. A different one means
+    /// the proxy is stale.
+    #[serde(default, skip_serializing_if = "ColorSpace::is_tagged")]
+    pub color_space: ColorSpace,
 }
 
 impl Proxy {
@@ -359,9 +363,11 @@ impl Media {
     }
 
     pub fn fresh_proxy(&self) -> Option<&Proxy> {
-        self.proxy
-            .as_ref()
-            .filter(|p| p.source_size == self.size && p.source_mtime_ns == self.mtime_ns)
+        self.proxy.as_ref().filter(|p| {
+            p.source_size == self.size
+                && p.source_mtime_ns == self.mtime_ns
+                && p.color_space == self.color_space
+        })
     }
 }
 

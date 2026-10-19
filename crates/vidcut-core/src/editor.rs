@@ -4525,6 +4525,7 @@ fn proxy_generate(
             width: made.width,
             height: made.height,
             codec: made.codec,
+            color_space: item.color_space,
         };
         let m = p.media.iter_mut().find(|m| m.id == id).expect("checked");
         if let Some(old) = m.proxy.take()

@@ -1115,6 +1115,9 @@ impl VideoReader {
 
     pub fn set_color_space(&mut self, space: vidcut_core::model::ColorSpace) {
         self.color_space = space;
+        if let Some(f) = self.pending.as_mut() {
+            crate::color::retag(f, space);
+        }
     }
 
     pub fn color_space(&self) -> vidcut_core::model::ColorSpace {
