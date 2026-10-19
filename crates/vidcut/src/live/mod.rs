@@ -1368,12 +1368,15 @@ impl Live {
     fn measuring(&self, envelope: &Envelope) -> Option<Measure> {
         let p = self.project.as_ref()?.project();
         let playhead = Some(self.player.position(TIMELINE));
-        let (clips, sound, speech) = match &envelope.request {
+        let (clips, sound, speech, download) = match &envelope.request {
             Request::EditRippleDeleteSilence { parts: Some(_), .. } => return None,
-            Request::EditRippleDeleteSilence { clips, detect, .. } => {
-                (clips.to_vec(), true, *detect == Detect::Speech)
-            }
-            Request::EditDetectSceneCuts { clips, .. } => (clips.to_vec(), false, false),
+            Request::EditRippleDeleteSilence {
+                clips,
+                detect,
+                download,
+                ..
+            } => (clips.to_vec(), true, *detect == Detect::Speech, *download),
+            Request::EditDetectSceneCuts { clips, .. } => (clips.to_vec(), false, false, false),
             _ => return None,
         };
         let mut needed = Vec::new();
@@ -1392,7 +1395,7 @@ impl Live {
             use vidcut_core::Env;
             for (m, stream) in &needed {
                 match stream {
-                    Some(s) if speech => AvEnv::new().voice_activity(m, *s).map(drop)?,
+                    Some(s) if speech => AvEnv::new().voice_activity(m, *s, download).map(drop)?,
                     Some(s) => AvEnv::new().audio_levels(m, *s).map(drop)?,
                     None => AvEnv::new().picture_stats(m).map(drop)?,
                 }

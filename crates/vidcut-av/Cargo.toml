@@ -18,19 +18,14 @@ cpal.workspace = true
 libloading.workspace = true
 libc.workspace = true
 sha2.workspace = true
-
-[target.'cfg(target_os = "macos")'.dependencies]
-transcribe-cpp = { workspace = true, features = ["metal"] }
-
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-transcribe-cpp = { workspace = true, features = ["vulkan"] }
+transcribe-cpp.workspace = true
+transcribe-cpp-sys.workspace = true
+flate2.workspace = true
+tar.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 windows.workspace = true
-
-[build-dependencies]
-sha2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
