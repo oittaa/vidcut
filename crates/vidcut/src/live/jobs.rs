@@ -3,7 +3,7 @@ use std::time::{Instant, SystemTime};
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use vidcut_av::export::{AudioNote, Note, Progress, SourceNote, Tried, VideoNote};
+use vidcut_av::export::{AudioNote, Note, Progress, SourceNote, Stage, Tried, VideoNote};
 use vidcut_core::Error;
 use vidcut_core::editor::Copied;
 use vidcut_core::export::color::ColorChoice;
@@ -40,6 +40,8 @@ pub struct JobInfo {
     pub pass: u8,
     pub passes: u8,
     pub measuring: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage: Option<Stage>,
     pub progress: f64,
     pub elapsed: f64,
     pub eta: Option<f64>,
@@ -143,6 +145,7 @@ impl JobInfo {
             pass: 1,
             passes: 1,
             measuring: false,
+            stage: None,
             progress: 0.0,
             elapsed: 0.0,
             eta: None,
@@ -155,9 +158,15 @@ impl JobInfo {
         }
     }
 
-    pub(crate) fn proxies(id: String, origin: &'static str, params: Value, title: String) -> Self {
+    pub(crate) fn task(
+        id: String,
+        kind: &'static str,
+        origin: &'static str,
+        params: Value,
+        title: String,
+    ) -> Self {
         Self {
-            kind: "proxy",
+            kind,
             title,
             ..Self::new(id, origin, params)
         }
@@ -183,6 +192,7 @@ impl JobInfo {
 
     pub(crate) fn progressed(&mut self, output: usize, p: Progress) {
         self.measuring = p.measuring;
+        self.stage = p.stage;
         if p.measuring {
             self.elapsed = self.clock.elapsed().as_secs_f64();
             self.progress = p.frames as f64 / p.total.max(1) as f64;

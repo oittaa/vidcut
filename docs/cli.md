@@ -75,7 +75,7 @@ An error is `{"error": {"code": "NOT_FOUND", "message": "…"}}` with `--json`. 
 | 7 | `MEDIA` | media missing or unreadable |
 | 8 | `EXPORT` | encoding or writing failed |
 | 9 | `CANCELLED` | Ctrl-C or `jobs cancel` |
-| 10 | `DEPENDENCY` | FFmpeg lacks a part (`vidcut doctor`) |
+| 10 | `DEPENDENCY` | FFmpeg lacks a part (`vidcut doctor`), or a speech model isn't downloaded yet (`--download`) |
 
 ## Safe automation
 
@@ -95,7 +95,7 @@ When a GUI has the project open (`vidcut -p FILE` starts one), commands for it r
 - Requests needing no project (`schema`, `doctor`, `reset`, `probe`, `project create`, presets, encoders, decoders, preferences, keys) run here.
 - Live-only requests (`player`, `viewer`, `selection`, `pool`, `mixer preview`, `gui`, `jobs`, `project open`) and `export start --background` fail with `NO_INSTANCE` without a GUI.
 - The CLI makes paths absolute before sending, those in `apply` too.
-- Ctrl-C cancels a headless export or proxy encode, leaving no partial file; ending the CLI cancels its call to a GUI.
+- Ctrl-C cancels a headless export, proxy encode or transcription, leaving no partial file but a model download's `.part`, which the next download goes on from; ending the CLI cancels its call to a GUI.
 - Other programs may speak JSON-RPC 2.0 to a GUI's socket, one request per line.
 
 ## MCP
@@ -123,6 +123,7 @@ The schema describes parameters, not results. Commonly read:
 | `export start` | `outputs[]`: `frames`, `video_encoder`, `gpu_frames` (made on the GPU), `gpu_decoded`, `copies` (GPU frames copied `down` and `up`), `color` and `metadata` (what was chosen, and `why`), `tried` (video encoders that didn't open, and why), `sources` (each file and how it was decoded). `notes[]`: `code`, `message` |
 | `export start --background`, `jobs get` | `id`, `state` (`queued`, `running`, `done`, `failed`, `cancelled`), `progress` (0–1), `result`, `error`, and `details` as it runs: `video` (`encoder`, `device`, `pixel`, `bits`, `passes`, `gpu_frames_in`), `audio`, `color`, `metadata`, `tried`, `sources`, `gpu_frames`, `gpu_decoded`, `copied`, `fps` |
 | `proxy generate` | `proxies[]`: `media`, `path`, `made_with` (how it was decoded and encoded), `copies` |
+| `subtitles transcribe` | `track`, `cues` (their ids), `from`, `to`, `model`, `device` (the GPU or `CPU`), `language`, `timing` (`words`, `phrases`, or `pauses` for a model without times), `pieces`, `longest_piece` (seconds), `warnings` |
 | `media list`, `media get` | `missing` (the file is gone), `proxy`: `file`, `path` (in this computer's proxy folder), `width`, `height`, `codec`, `stale` (made from another version of the file), `missing` (its file is gone) |
 | `media add-folder` | `bin` (the folder's), `media` (in the folder's order), `skipped[]`: `path`, `why` |
 | `media relink` | `relinked`, `different` (with `why`), `not_found` |

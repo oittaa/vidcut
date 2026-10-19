@@ -185,6 +185,10 @@ pub fn describe_at(
         "subtitles.join" => format!("Join {}", d.cues("cues")),
         "subtitles.import" => format!("Import subtitles {}", d.file("path")),
         "subtitles.export" => format!("Export subtitles to {}", d.file("out")),
+        "subtitles.transcribe" if d.params["range"].is_string() => {
+            format!("Create Subtitles from Audio in {}", d.range("range"))
+        }
+        "subtitles.transcribe" => "Create Subtitles from Audio".into(),
         "export.start" => format!("Export {}", d.file("output")),
         "export.plan" => format!("Plan an export to {}", d.file("output")),
         "frame.render" => format!("Render the frame at {}", d.time("at")),
