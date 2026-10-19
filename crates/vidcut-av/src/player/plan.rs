@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use vidcut_core::model::Title;
 use vidcut_core::render::{Image, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
@@ -126,6 +127,19 @@ impl Plan {
             over: (!over.is_empty()).then(|| over.into()),
             small: false,
         }
+    }
+
+    pub(crate) fn titles_at(&self, t: i64) -> Vec<(usize, &Title)> {
+        let (i, _) = self.locate(t);
+        self.plan
+            .video
+            .get(i)
+            .map(VideoPiece::titles)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn size(&self) -> (u32, u32) {
+        (self.plan.width, self.plan.height)
     }
 
     pub(crate) fn pieces_from(&self, t: i64) -> Vec<VideoPiece> {
