@@ -180,7 +180,7 @@ sequenceDiagram
 ## Code
 
 - `crates/vidcut/src/gui/app.rs`, `crates/vidcut/src/gui/workspace.rs`, `crates/vidcut/src/gui/export.rs`
-- `crates/vidcut/src/gui/video.rs`, `crates/vidcut/src/gui/gate.rs`, `crates/vidcut/src/gui/cells.rs`, `crates/vidcut/src/gui/tiles.rs`, `crates/vidcut/src/gui/trim_strips.rs`, `crates/vidcut/src/gui/timeline/`, `crates/vidcut/src/gui/subtitles.rs`
+- `crates/vidcut/src/gui/video.rs`, `crates/vidcut/src/gui/gate.rs`, `crates/vidcut/src/gui/cells.rs`, `crates/vidcut/src/gui/tiles.rs`, `crates/vidcut/src/gui/trim_strips.rs`, `crates/vidcut/src/gui/timeline/`, `crates/vidcut/src/gui/subtitles.rs`, `crates/vidcut/src/gui/speech.rs`
 - `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/snapshot.rs`, `crates/vidcut/src/live/project.rs`, `crates/vidcut/src/live/jobs.rs`
 - `crates/vidcut/src/live/missing.rs`, `crates/vidcut/src/live/workers.rs`, `crates/vidcut/src/live/player.rs`
 - `crates/vidcut/src/ipc/server.rs`, `crates/vidcut/src/ipc/registry.rs`

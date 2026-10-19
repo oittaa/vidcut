@@ -1155,6 +1155,14 @@ impl Workspace {
             self.add_subtitle(ui.ctx(), None);
             ui.close();
         }
+        if ui
+            .button("Create Subtitles from Audio…")
+            .on_hover_text("Transcribe the timeline's speech into subtitles, on this computer")
+            .clicked()
+        {
+            self.open_speech();
+            ui.close();
+        }
         ui.separator();
         if ui
             .button("Clear Transition from All Edits")
