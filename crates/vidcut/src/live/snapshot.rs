@@ -176,6 +176,7 @@ pub struct Snapshot {
     pub thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     pub missing: Arc<HashSet<String>>,
     pub transcribed: Arc<HashSet<String>>,
+    pub fillers: Arc<std::collections::BTreeMap<String, Vec<String>>>,
     pub lost_proxies: Arc<HashMap<String, PathBuf>>,
     pub proxy_dir: Arc<Path>,
     pub waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,

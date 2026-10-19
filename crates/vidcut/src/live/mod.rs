@@ -450,6 +450,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
         transcribed: Arc::new(HashSet::new()),
+        fillers: Arc::default(),
         lost_proxies: Arc::new(HashMap::new()),
         proxy_dir: Arc::from(Path::new("")),
         waveforms: Arc::new(HashMap::new()),
@@ -508,6 +509,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
         transcribed: Arc::new(HashSet::new()),
+        fillers: Arc::new(crate::preferences::filler_lists()),
         lost_proxies: Arc::new(HashMap::new()),
         proxy_dir: Arc::from(Path::new("")),
         missing_watch: missing::MissingWatch::start(tx.clone()),
@@ -760,6 +762,7 @@ struct Live {
     thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     missing: Arc<HashSet<String>>,
     transcribed: Arc<HashSet<String>>,
+    fillers: Arc<std::collections::BTreeMap<String, Vec<String>>>,
     lost_proxies: Arc<HashMap<String, PathBuf>>,
     proxy_dir: Arc<Path>,
     missing_watch: missing::MissingWatch,
@@ -957,6 +960,11 @@ impl Live {
                     .player
                     .follow_decoding(crate::preferences::gpu_decoding());
                 changed |= self.player.follow_audio(crate::preferences::audio_device());
+                let fillers = crate::preferences::filler_lists();
+                if *self.fillers != fillers {
+                    self.fillers = Arc::new(fillers);
+                    changed = true;
+                }
                 self.player.set_budget(crate::preferences::player_budget());
                 self.follow_theme();
                 if self.project.is_some() && self.proxy_folder() != *self.proxy_dir {
@@ -1220,6 +1228,7 @@ impl Live {
             thumbs: self.thumbs.clone(),
             missing: self.missing.clone(),
             transcribed: self.transcribed.clone(),
+            fillers: self.fillers.clone(),
             lost_proxies: self.lost_proxies.clone(),
             proxy_dir: self.proxy_dir.clone(),
             waveforms: self.waveforms.clone(),

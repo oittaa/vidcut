@@ -803,6 +803,12 @@ impl Words<'_> {
                 parts.push(format!("{} {}", key.replace('_', " "), self.text(key)));
             }
         }
+        for (language, words) in p["fillers"].as_object().into_iter().flatten() {
+            parts.push(match words.is_null() {
+                true => format!("{language} filler words reset"),
+                false => format!("{language} filler words"),
+            });
+        }
         if parts.is_empty() {
             "unchanged".into()
         } else {

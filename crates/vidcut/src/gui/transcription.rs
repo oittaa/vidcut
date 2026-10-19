@@ -105,17 +105,12 @@ pub(super) struct TranscriptionUi {
     followed: Option<usize>,
     fillers_in: Option<String>,
     detected: Option<String>,
-    preferred: Option<Arc<Lists>>,
     editing: Option<FillerEditor>,
     saving: Option<(Scope, Ask)>,
     edit_error: Option<String>,
 }
 
 impl TranscriptionUi {
-    pub(super) fn preferences_changed(&mut self) {
-        self.preferred = None;
-    }
-
     pub(super) fn take_keys(&mut self, ctx: &egui::Context) {
         let keys = &mut self.keys;
         ctx.input_mut(|i| {
@@ -396,10 +391,7 @@ impl Workspace {
         let (shown, clips, missing) = self.shown_source(&p);
         let fps = p.settings.fps.as_f64();
         let pause = (fps * PAUSE).round() as i64;
-        let preferred = t
-            .preferred
-            .get_or_insert_with(|| Arc::new(crate::preferences::filler_lists()))
-            .clone();
+        let preferred = self.snap.fillers.clone();
         let want = shown.clone().map(|shown| Asked {
             shown,
             rev: p.rev,
@@ -906,7 +898,6 @@ impl Workspace {
                 Ok(_) => {
                     t.edit_error = None;
                     if *scope == Scope::All {
-                        t.preferred = None;
                         self.reread_preferences(ctx);
                     }
                 }

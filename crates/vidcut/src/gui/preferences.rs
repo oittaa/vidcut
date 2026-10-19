@@ -182,12 +182,10 @@ impl Workspace {
         if !ui_state.open {
             return;
         }
-        let mut reread = false;
         if let Some(answer) = ui_state.ask.as_ref().and_then(Ask::take) {
             ui_state.ask = None;
             match answer {
                 Ok(r) => {
-                    reread = true;
                     let p = &r.result["preferences"];
                     let n = |v: &Value| v.as_u64().unwrap_or(0).to_string();
                     ui_state.limit = n(&p["thumbnails"]["cache_limit_mb"]);
@@ -338,9 +336,6 @@ impl Workspace {
         }
         if let Some(p) = patch {
             ui_state.ask = Some(Ask::send(&self.live, ctx, "preferences.set", p));
-        }
-        if reread {
-            self.transcription.preferences_changed();
         }
     }
 
