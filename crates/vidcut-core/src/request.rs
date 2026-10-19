@@ -854,7 +854,7 @@ pub enum Request {
     SubtitlesTranscribe {
         #[serde(default)]
         range: Option<RangeSpec>,
-        /// Default: `qwen3-asr`.
+        /// Default: `parakeet-ultra`.
         #[serde(default)]
         model: Option<SpeechModel>,
         /// A transcribe.cpp GGUF model file to use instead of `model`'s.
@@ -1491,19 +1491,21 @@ pub enum SubtitleTimeBase {
 /// A speech recognition model, a GGUF file transcribe.cpp runs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub enum SpeechModel {
-    /// Qwen3-ASR 1.7B (Apache-2.0), 2.2 GB: 30 languages. It gives no times
-    /// of its own, so each cue's time comes from the pauses in the speech.
+    /// Parakeet Ultra by Moondream (CC BY 4.0), 740 MB, the default: 25
+    /// European languages, times per word; small GPUs run it too.
     #[default]
+    #[serde(rename = "parakeet-ultra")]
+    ParakeetUltra,
+    /// Qwen3-ASR 1.7B (Apache-2.0), 2.2 GB: 30 languages. It gives no times
+    /// until transcribe.cpp runs its aligner, so its text is spread over the
+    /// speech in pieces of 10 s at the most, and its cues' times are
+    /// estimates.
     #[serde(rename = "qwen3-asr")]
     Qwen3Asr,
     /// Whisper large-v3 (Apache-2.0), 1.7 GB: 100 languages, times per
     /// phrase.
     #[serde(rename = "whisper-large-v3")]
     WhisperLargeV3,
-    /// Parakeet Ultra by Moondream (CC BY 4.0), 740 MB, for small GPUs: 25
-    /// European languages, times per word.
-    #[serde(rename = "parakeet-ultra")]
-    ParakeetUltra,
 }
 
 /// A subtitle file format.

@@ -56,7 +56,7 @@ flowchart TD
 - **The GPU** is the one `gpus::in_use` names, found among transcribe.cpp's devices by its PCI slot or name; a failure to load there falls back to the CPU with a warning. `gpu.acceleration` off puts the model on the CPU. The longest piece goes first, and the language it finds is given to the rest.
 - **Cues:** `transcript::cues` breaks the words into sentences and at pauses, splits a sentence too long for one cue into even parts, and wraps the lines. Words carry the model's times where it gives them; a model without times has its text spread over the speech of its piece by `transcript::spread` ([spec D62](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
-**Why** this piece length (`transcribe::longest_piece`): Qwen3-ASR's memory grows with the length it hears, so its pieces are sized from the GPU's memory (`Gpu::memory_mb`); a model without times needs short pieces to place its words; Whisper large-v3 loops in long ones ([gotchas](../gotchas.md#transcribecpp-and-its-models)). No CUDA: its backend and NVIDIA's runtime add about 930 MB, and it was slower than Vulkan for two of the three models.
+**Why** this piece length (`transcribe::longest_piece`): Qwen3-ASR's memory grows with the length it hears, so its pieces are sized from the GPU's memory (`Gpu::memory_mb`); a model without times needs short pieces to place its words; Whisper large-v3 loops in long ones ([gotchas](../gotchas.md#transcribecpp-and-its-models)). Parakeet Ultra is the default (`SpeechModel`): it gives real word times now, where Qwen3-ASR's are estimates without transcribe.cpp's aligner. No CUDA: its backend and NVIDIA's runtime add about 930 MB, and it was slower than Vulkan for two of the three models.
 
 ## Caches
 

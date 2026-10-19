@@ -30,5 +30,5 @@ GPU memory: the RTX 4080 SUPER's at the most, sampled with `nvidia-smi` during t
 
 ## Open
 
-- **The aligner in transcribe.cpp** ([#200](https://github.com/handy-computer/transcribe.cpp/issues/200)): Qwen3-ForcedAligner-0.6B (11 languages, up to 5 min a pass). Until it runs there, Qwen3-ASR gives no word times, and the English default's cues are timed by the pauses in the speech.
+- **The aligner in transcribe.cpp** ([#200](https://github.com/handy-computer/transcribe.cpp/issues/200)): Qwen3-ForcedAligner-0.6B (11 languages, up to 5 min a pass). Until it runs there, Qwen3-ASR gives no word times: its cues' times are estimates, its text spread over the speech, so Parakeet Ultra, with word times, is the default. Qwen3-ASR becomes the English default again once it has word times.
 - **Cloud:** which services, and when.
