@@ -61,8 +61,17 @@ pub fn violations(p: &Project) -> Vec<String> {
                     || c.audio.is_some()
                     || c.video != video
                     || (c.is_generator() && c.compound.is_some())
+                    || (c.title.is_some() && c.generator.is_some())
                 {
                     v.push(format!("{}: a block with media, audio or no place", c.id));
+                }
+                if let Some(title) = &c.title {
+                    if t.kind != TrackKind::Video {
+                        v.push(format!("{}: a title on audio track {}", c.id, t.id));
+                    }
+                    if let Err(e) = crate::ops::titles::checked(title) {
+                        v.push(format!("{}: {}", c.id, e.message));
+                    }
                 }
                 let (lo, hi) = c.shown();
                 if let Some(k) = &c.compound

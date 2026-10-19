@@ -15,7 +15,7 @@ use crate::folder::Folder;
 use crate::history::HistoryFile;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marks, Media,
-    MediaInfo, Project, Proxy, Track, TrackKind, Transition, VideoInfo,
+    MediaInfo, Project, Proxy, Title, Track, TrackKind, Transition, VideoInfo,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -2614,6 +2614,53 @@ fn mutate(
             let id = ops::subtitles::add_cue(p, ti, start, end, duration, text, *place)?;
             json!({ "cue": id, "track": p.subtitles[ti].id })
         }
+        Request::TitlesAdd {
+            text,
+            kind,
+            align,
+            style,
+            position,
+            at,
+            duration,
+            track,
+        } => {
+            let start = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => need(playhead, "at")?,
+            };
+            let frames = match duration {
+                Some(d) => length(p, d)?,
+                None => ops::titles::default_length(p),
+            };
+            let title = Title {
+                kind: kind.unwrap_or_default(),
+                align: *align,
+                text: text.clone(),
+                style: style.clone().unwrap_or_default(),
+                position: *position,
+            };
+            let (id, track) = ops::titles::add(p, track.as_deref(), start, frames, &title)?;
+            json!({ "clip": id, "track": track })
+        }
+        Request::TitlesSet {
+            clip,
+            text,
+            kind,
+            align,
+            style,
+            position,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let change = ops::titles::TitleChange {
+                text: text.clone(),
+                kind: *kind,
+                align: *align,
+                style: style.clone(),
+                position: position.as_deref().map(ops::titles::position).transpose()?,
+            };
+            ops::titles::set(p, &id, &change)?;
+            Value::Null
+        }
         Request::SubtitlesSet {
             cue,
             text,
@@ -3504,6 +3551,7 @@ fn place_imported(
                 generator: c.generator.as_ref().map(|reference| Generator {
                     reference: reference.clone().into(),
                 }),
+                title: None,
                 compound,
                 speed: c.speed.clone(),
                 color: color(c),
@@ -3601,6 +3649,7 @@ fn place_imported(
             name,
             effects,
             generator: None,
+            title: None,
             compound: None,
             speed: c.speed.clone(),
             color: color(c),
@@ -4738,6 +4787,38 @@ pub fn query(
                 .collect::<Vec<_>>()
         ),
         Request::BinsList {} => json!(p.bins),
+        Request::TitlesList { track, range } => {
+            let (a, b) = match range {
+                Some(r) => ctx(p, playhead).range(r)?,
+                None => (0, i64::MAX),
+            };
+            if let Some(id) = track
+                && p.track(id).is_none_or(|t| t.kind != TrackKind::Video)
+            {
+                return Err(Error::not_found(format!("no video track {id}")));
+            }
+            json!(
+                p.tracks
+                    .iter()
+                    .filter(|t| track.as_ref().is_none_or(|id| *id == t.id))
+                    .flat_map(|t| t.clips.iter().map(move |c| (t, c)))
+                    .filter(|(_, c)| c.start < b && c.end() > a)
+                    .filter_map(|(t, c)| {
+                        let title = c.title.as_ref()?;
+                        Some(json!({
+                            "clip": c.id,
+                            "track": t.id,
+                            "start": c.start,
+                            "end": c.end(),
+                            "start_tc": tc(c.start),
+                            "end_tc": tc(c.end()),
+                            "enabled": c.enabled,
+                            "title": title,
+                        }))
+                    })
+                    .collect::<Vec<_>>()
+            )
+        }
         Request::SubtitlesList { track, range } => {
             let (a, b) = match range {
                 Some(r) => ctx(p, playhead).range(r)?,
@@ -5652,6 +5733,9 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
     }
     if let Some(g) = &c.generator {
         v["generator"] = json!(otio::generator_kind(g));
+    }
+    if let Some(t) = &c.title {
+        v["title"] = json!(t);
     }
     if let Some(k) = &c.compound {
         v["compound"] = json!(otio::compound_kind(k));

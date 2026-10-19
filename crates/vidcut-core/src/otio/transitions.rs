@@ -195,10 +195,10 @@ impl<'a> Cuts<'a> {
 }
 
 fn source_range(p: &Project, cuts: &Cuts, c: &Clip) -> Option<Range<i64>> {
-    match (&c.compound, &c.generator) {
-        (None, None) => cuts.pool.get(c.media.as_str()).map(|m| p.media_range(m, c)),
-        _ => p.source_range(c),
+    if c.is_block() {
+        return p.source_range(c);
     }
+    cuts.pool.get(c.media.as_str()).map(|m| p.media_range(m, c))
 }
 
 fn place(p: &Project, cuts: &Cuts, t: &Transition) -> Option<i64> {

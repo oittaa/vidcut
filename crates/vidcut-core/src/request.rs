@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::export::{EncoderChoice, ExportSettings};
-use crate::model::{Place, SubtitleStyle, TrackClip};
+use crate::model::{Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle, TrackClip};
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
 
@@ -1035,6 +1035,74 @@ pub enum Request {
         /// one is an error that says what would be downloaded.
         #[serde(default)]
         download: bool,
+    },
+
+    /// Title clips with their times in frames: every video track's, or
+    /// `track`'s; those in `range` only, if given.
+    #[serde(rename = "titles.list")]
+    TitlesList {
+        #[serde(default)]
+        track: Option<String>,
+        #[serde(default)]
+        range: Option<RangeSpec>,
+    },
+    /// Add a title clip: `text` drawn over the picture of the tracks below
+    /// it, from `at` (default: the playhead) for `duration` (default: 5 s).
+    /// On `track` (default: the video track above the highest one with
+    /// clips in those frames, made when there is none, or V1 when nothing
+    /// is there), over what is there. Returns its clip id.
+    #[serde(rename = "titles.add")]
+    TitlesAdd {
+        /// Its lines, separated by a line break: two at most for a lower
+        /// third. Plain text.
+        text: String,
+        /// `text` (the default) or `lower_third`.
+        #[serde(default)]
+        kind: Option<TitleKind>,
+        /// A lower third's place: `left` (the default), `middle` or
+        /// `right`.
+        #[serde(default)]
+        align: Option<TitleAlign>,
+        /// Its look: `font` (a family name), `size` (the text height as a
+        /// fraction of the picture height, above 0, at most 1/2), `color`
+        /// (`#rrggbb`, `#rgb` or a name such as `yellow`), `outline` (a
+        /// color and a `size` as a fraction of the text height, from 0 to
+        /// 1/10, `0` drawing none) and `background` (a color and an
+        /// `opacity` from 0 to 1, a box behind the whole text). A field
+        /// left out keeps the usual look.
+        #[serde(default)]
+        style: Option<TitleStyle>,
+        /// Where it goes, `[x, y]` as fractions of the picture from its top
+        /// left: a `text` title's middle, a lower third's corner by its
+        /// `align`. Default: the kind's usual place.
+        #[serde(default)]
+        position: Option<[f64; 2]>,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        #[serde(default)]
+        duration: Option<TimeSpec>,
+        #[serde(default)]
+        track: Option<String>,
+    },
+    /// Change a title clip (`c3`, or `V2@15s` for the clip on V2 at 15 s):
+    /// each field given replaces its own. A `style` replaces the whole
+    /// style, a field left out going back to the usual look. Switching to
+    /// `text` drops the `align`. Moves and trims are `edit.*`'s.
+    #[serde(rename = "titles.set")]
+    TitlesSet {
+        clip: ClipRef,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        kind: Option<TitleKind>,
+        #[serde(default)]
+        align: Option<TitleAlign>,
+        #[serde(default)]
+        style: Option<TitleStyle>,
+        /// `[x, y]` as fractions of the picture, or `[]` for the kind's
+        /// usual place.
+        #[serde(default)]
+        position: Option<Vec<f64>>,
     },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.
@@ -2151,6 +2219,7 @@ impl Request {
                     | Self::MarksGet {}
                     | Self::MarkersList {}
                     | Self::SubtitlesList { .. }
+                    | Self::TitlesList { .. }
                     | Self::SubtitlesExport { .. }
                     | Self::AnalyzeWords { .. }
                     | Self::MediaList {}

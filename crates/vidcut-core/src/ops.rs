@@ -2,6 +2,7 @@ mod dissolve;
 pub mod filmstrip;
 mod follow;
 pub mod subtitles;
+pub mod titles;
 mod tracks;
 
 use std::collections::{BTreeMap, HashSet};
@@ -241,6 +242,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         name: None,
         effects: None,
         generator: None,
+        title: None,
         compound: None,
         speed: None,
         color: None,
@@ -1414,6 +1416,11 @@ pub fn change_speed(
         let c = p
             .clip(id)
             .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+        if c.title.is_some() {
+            return Err(Error::invalid(format!(
+                "{id} is a title: it has no speed to change"
+            )));
+        }
         if c.is_generator() {
             return Err(Error::invalid(format!(
                 "{id} is a generator from another editor: it has no speed to change"

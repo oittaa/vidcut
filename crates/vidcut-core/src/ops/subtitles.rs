@@ -88,71 +88,86 @@ fn paint(value: &str, what: &str) -> Result<String> {
         .ok_or_else(|| Error::invalid(format!("{what} is #rrggbb, #rgb or a name such as yellow")))
 }
 
-pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
-    let font = match &style.font {
-        None => None,
-        Some(s) => {
-            let t = s.trim();
-            if t.is_empty() {
-                None
-            } else if t.chars().count() > 200
-                || t.chars()
-                    .any(|c| c.is_control() || matches!(c, '<' | '>' | '&' | '"' | '\'' | ','))
-            {
-                return Err(Error::invalid(
-                    "a subtitle font is a family name, at most 200 characters",
-                ));
-            } else {
-                Some(t.to_string())
-            }
-        }
+pub(crate) fn checked_font(font: Option<&str>, what: &str) -> Result<Option<String>> {
+    let Some(s) = font else {
+        return Ok(None);
     };
-    let size = match style.size {
+    let t = s.trim();
+    if t.is_empty() {
+        Ok(None)
+    } else if t.chars().count() > 200
+        || t.chars()
+            .any(|c| c.is_control() || matches!(c, '<' | '>' | '&' | '"' | '\'' | ','))
+    {
+        Err(Error::invalid(format!(
+            "a {what} font is a family name, at most 200 characters"
+        )))
+    } else {
+        Ok(Some(t.to_string()))
+    }
+}
+
+pub(crate) fn checked_size(size: Option<f64>, what: &str) -> Result<Option<f64>> {
+    match size {
+        None => Ok(None),
+        Some(s) if fraction(s, f64::MIN_POSITIVE, 0.5, true) => Ok(Some(s)),
+        Some(_) => Err(Error::invalid(format!(
+            "a {what} size is a fraction of the picture height, above 0 and at most 1/2"
+        ))),
+    }
+}
+
+pub(crate) fn checked_color(color: Option<&str>, what: &str) -> Result<Option<String>> {
+    color
+        .map(|c| paint(c, &format!("a {what} color")))
+        .transpose()
+}
+
+pub(crate) fn checked_outline(
+    outline: Option<&SubtitleOutline>,
+) -> Result<Option<SubtitleOutline>> {
+    let Some(o) = outline else {
+        return Ok(None);
+    };
+    let color = match &o.color {
         None => None,
-        Some(s) if fraction(s, f64::MIN_POSITIVE, 0.5, true) => Some(s),
+        Some(c) => Some(paint(c, "an outline color")?),
+    };
+    let size = match o.size {
+        None => None,
+        Some(s) if s.is_finite() && (0.0..=0.10).contains(&s) => Some(s),
         Some(_) => {
             return Err(Error::invalid(
-                "a subtitle size is a fraction of the picture height, above 0 and at most 1/2",
+                "an outline's thickness is a fraction of the text height, from 0 to 1/10",
             ));
         }
     };
-    let color = match &style.color {
-        None => None,
-        Some(c) => Some(paint(c, "a subtitle color")?),
+    Ok((color.is_some() || size.is_some()).then_some(SubtitleOutline { color, size }))
+}
+
+pub(crate) fn checked_background(
+    background: Option<&SubtitleBackground>,
+) -> Result<Option<SubtitleBackground>> {
+    let Some(b) = background else {
+        return Ok(None);
     };
-    let outline = match &style.outline {
+    let color = paint(&b.color, "a background color")?;
+    let opacity = match b.opacity {
         None => None,
-        Some(o) => {
-            let color = match &o.color {
-                None => None,
-                Some(c) => Some(paint(c, "an outline color")?),
-            };
-            let size = match o.size {
-                None => None,
-                Some(s) if s.is_finite() && (0.0..=0.10).contains(&s) => Some(s),
-                Some(_) => {
-                    return Err(Error::invalid(
-                        "an outline's thickness is a fraction of the text height, from 0 to 1/10",
-                    ));
-                }
-            };
-            (color.is_some() || size.is_some()).then_some(SubtitleOutline { color, size })
+        Some(o) if fraction(o, 0.0, 1.0, true) => (o < 1.0).then_some(o),
+        Some(_) => {
+            return Err(Error::invalid("a background opacity is from 0 to 1"));
         }
     };
-    let background = match &style.background {
-        None => None,
-        Some(b) => {
-            let color = paint(&b.color, "a background color")?;
-            let opacity = match b.opacity {
-                None => None,
-                Some(o) if fraction(o, 0.0, 1.0, true) => (o < 1.0).then_some(o),
-                Some(_) => {
-                    return Err(Error::invalid("a background opacity is from 0 to 1"));
-                }
-            };
-            Some(SubtitleBackground { color, opacity })
-        }
-    };
+    Ok(Some(SubtitleBackground { color, opacity }))
+}
+
+pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
+    let font = checked_font(style.font.as_deref(), "subtitle")?;
+    let size = checked_size(style.size, "subtitle")?;
+    let color = checked_color(style.color.as_deref(), "subtitle")?;
+    let outline = checked_outline(style.outline.as_ref())?;
+    let background = checked_background(style.background.as_ref())?;
     let margin = match style.margin {
         None => None,
         Some(m) if fraction(m, 0.0, 0.5, false) => Some(m),
