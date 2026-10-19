@@ -27,6 +27,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - FFmpeg's build (`scripts/ffmpeg/build-ffmpeg.sh`) is a cached image layer. `VIDCUT_FFMPEG_MASTER=COMMIT` pins master.
 - Each target's build takes about 5.5 GB, the images about 3 GB. To free them: `docker volume rm $(docker volume ls -q -f name=vidcut-ffmpeg)` and `docker image rm vidcut-ffmpeg:lts vidcut-ffmpeg:release vidcut-ffmpeg:master`.
 - A newer release: put its version and tarball sha256 in `scripts/ffmpeg/release.env` (the steps are there).
+- Where those builds are already installed, `scripts/with-ffmpeg.sh 8.1 -- cargo test -p vidcut-av --lib` (also `9.0.2` and `lts`) selects one. `lts` is Ubuntu 26.04's FFmpeg 8.0, the default `pkg-config` finds. `8.1` is FFmpeg 8.1.3 at `/opt/ffmpeg/8.1`. `9.0.2` and `release` select the release in `scripts/ffmpeg/release.env`, at `/opt/ffmpeg/9.0.2`. `8.1` and that release get the linker wrapper and a cargo target directory of their own, as `ffmpeg-host.sh` does.
 
 **The macOS build, checked from Windows:** `cargo clippy --target aarch64-apple-darwin --workspace --all-targets -- -D warnings`, after `rustup target add aarch64-apple-darwin`. Nothing is linked or run. With `FFMPEG_DIR` set as usual, it needs macOS's C headers from Zig (`winget install zig.zig`): set `BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin="-isystem ZIG/lib/include -isystem ZIG/lib/libc/include/any-macos-any"`, ZIG being the folder with `zig.exe`.
 
