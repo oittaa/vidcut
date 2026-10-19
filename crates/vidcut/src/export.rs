@@ -277,8 +277,11 @@ pub fn timeline(
         summary["files"] = json!(items.iter().map(|i| i.files.len()).sum::<usize>());
         summary["bytes"] = json!(items.iter().map(|i| i.bytes).sum::<u64>());
     }
+    let notes = subtitle_notes(&subtitles);
     let Some(writing) = write else {
-        return Ok(json!({ "preset": null, "format": format.name(), "outputs": [summary] }));
+        return Ok(json!({
+            "preset": null, "format": format.name(), "outputs": [summary], "notes": notes,
+        }));
     };
     let doc = otio::export(p, name, span, locations)?;
     let text =
@@ -301,7 +304,7 @@ pub fn timeline(
         )?,
     }
     write_subtitles(&subtitles)?;
-    Ok(json!({ "outputs": [summary] }))
+    Ok(json!({ "outputs": [summary], "notes": notes }))
 }
 
 pub fn refuse_existing(files: &[vidcut_core::subtitles::Beside], overwrite: bool) -> Result<()> {
@@ -318,9 +321,30 @@ pub fn subtitle_files(files: &[vidcut_core::subtitles::Beside]) -> Value {
     json!(
         files
             .iter()
-            .map(|f| json!({ "path": f.path, "track": f.track, "cues": f.cues }))
+            .map(|f| {
+                let mut v = json!({ "path": f.path, "track": f.track, "cues": f.cues });
+                if !f.warnings.is_empty() {
+                    v["warnings"] = json!(f.warnings);
+                }
+                v
+            })
             .collect::<Vec<_>>()
     )
+}
+
+pub fn subtitle_notes(files: &[vidcut_core::subtitles::Beside]) -> Vec<Value> {
+    files
+        .iter()
+        .flat_map(|f| {
+            let name = f
+                .path
+                .file_name()
+                .map_or(String::new(), |n| n.to_string_lossy().into_owned());
+            f.warnings.iter().map(
+                move |w| json!({ "code": "subtitles_cut_off", "message": format!("{name}: {w}") }),
+            )
+        })
+        .collect()
 }
 
 pub fn write_subtitles(files: &[vidcut_core::subtitles::Beside]) -> Result<()> {

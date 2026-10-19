@@ -6,7 +6,6 @@ use eframe::egui::{
 use serde_json::json;
 use vidcut_core::model::{
     Cue, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle, SubtitleTrack,
-    css_color,
 };
 use vidcut_core::subtitles::{Tag, Token};
 
@@ -76,7 +75,7 @@ fn jobs(text: &str, size: f32, width: f32, base: Color32) -> (LayoutJob, LayoutJ
                 let color = colors.last().copied().unwrap_or(base);
                 let format = |color: Color32| egui::TextFormat {
                     font_id: FontId::proportional(size),
-                    line_height: Some(size * 1.31),
+                    line_height: Some(size * SubtitleStyle::LINE as f32),
                     color,
                     italics: depth[0] > 0,
                     underline: if depth[2] > 0 {
@@ -131,18 +130,9 @@ fn number(raw: &str, what: &str) -> Result<Option<f64>, String> {
         .map_err(|_| format!("{what} is a percent, such as 5.5"))
 }
 
-fn paint_color(raw: &str, what: &str) -> Result<Option<String>, String> {
+fn field(raw: &str) -> Option<String> {
     let t = raw.trim();
-    if t.is_empty() {
-        return Ok(None);
-    }
-    css_color(t)
-        .map(Some)
-        .ok_or_else(|| format!("{what} is #rrggbb"))
-}
-
-fn same_text(shown: &str, stored: Option<&str>) -> bool {
-    shown.trim() == stored.unwrap_or("")
+    (!t.is_empty()).then(|| t.to_string())
 }
 
 fn kept_number(shown: &str, stored: Option<f64>, what: &str) -> Result<Option<f64>, String> {
@@ -153,52 +143,29 @@ fn kept_number(shown: &str, stored: Option<f64>, what: &str) -> Result<Option<f6
     }
 }
 
-fn kept_color(shown: &str, stored: Option<&str>, what: &str) -> Result<Option<String>, String> {
-    if same_text(shown, stored) {
-        Ok(stored.map(str::to_string))
-    } else {
-        paint_color(shown, what)
-    }
-}
-
 fn style_of(d: &TrackDialog, stored: &SubtitleStyle) -> Result<SubtitleStyle, String> {
-    let background = if same_text(
-        &d.background,
-        stored.background.as_ref().map(|b| b.color.as_str()),
-    ) && d.opacity.trim()
-        == percent(stored.background.as_ref().and_then(|b| b.opacity))
-    {
-        stored.background.clone()
-    } else if d.background.trim().is_empty() {
-        if !d.opacity.trim().is_empty() {
-            return Err("a background needs a color".into());
-        }
-        None
-    } else {
-        Some(SubtitleBackground {
-            color: paint_color(&d.background, "a background color")?.unwrap_or_default(),
-            opacity: number(&d.opacity, "opacity")?,
-        })
+    let background = match field(&d.background) {
+        Some(color) => Some(SubtitleBackground {
+            color,
+            opacity: kept_number(
+                &d.opacity,
+                stored.background.as_ref().and_then(|b| b.opacity),
+                "opacity",
+            )?,
+        }),
+        None if d.opacity.trim().is_empty() => None,
+        None => return Err("a background needs a color".into()),
     };
-    let outline_color = kept_color(
-        &d.outline,
-        stored.outline.as_ref().and_then(|o| o.color.as_deref()),
-        "an outline color",
-    )?;
+    let outline_color = field(&d.outline);
     let outline_size = kept_number(
         &d.outline_size,
         stored.outline.as_ref().and_then(|o| o.size),
         "outline size",
     )?;
     let style = SubtitleStyle {
-        font: if same_text(&d.font, stored.font.as_deref()) {
-            stored.font.clone()
-        } else {
-            let t = d.font.trim();
-            (!t.is_empty()).then(|| t.to_string())
-        },
+        font: field(&d.font),
         size: kept_number(&d.size, stored.size, "size")?,
-        color: kept_color(&d.color, stored.color.as_deref(), "a color")?,
+        color: field(&d.color),
         outline: (outline_color.is_some() || outline_size.is_some()).then_some(SubtitleOutline {
             color: outline_color,
             size: outline_size,
@@ -218,9 +185,27 @@ fn slot(tag: &Tag) -> usize {
 }
 
 fn hex(c: &str) -> Option<Color32> {
-    let c = c.strip_prefix('#')?;
-    let v = u32::from_str_radix(c, 16).ok()?;
-    (c.len() == 6).then(|| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8))
+    vidcut_core::subtitles::rgb(c).map(|[r, g, b]| Color32::from_rgb(r, g, b))
+}
+
+fn fill_union(painter: &Painter, boxes: &[Rect], color: Color32) {
+    let mut edges: Vec<f32> = boxes.iter().flat_map(|b| [b.top(), b.bottom()]).collect();
+    edges.sort_by(f32::total_cmp);
+    edges.dedup();
+    let mut mesh = egui::Mesh::default();
+    for pair in edges.windows(2) {
+        let span = boxes
+            .iter()
+            .filter(|b| b.top() <= pair[0] && b.bottom() >= pair[1])
+            .fold(Rect::NOTHING, |all, b| all.union(*b));
+        if span.is_positive() {
+            mesh.add_colored_rect(
+                Rect::from_x_y_ranges(span.x_range(), pair[0]..=pair[1]),
+                color,
+            );
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 pub(super) fn paint_cues(
@@ -234,29 +219,21 @@ pub(super) fn paint_cues(
         return;
     };
     let style = &t.style;
-    let size = (picture.height()
-        * match style.size {
-            Some(s) => s as f32,
-            None => 0.055,
-        })
-    .max(8.0);
-    let width = match style.margin {
-        None => picture.width() * 0.9,
-        Some(_) => style.wrap_width(f64::from(picture.width()), f64::from(picture.height())) as f32,
-    };
+    let (w, h) = (f64::from(picture.width()), f64::from(picture.height()));
+    let size = (picture.height() * style.text_fraction() as f32).max(8.0);
+    let width = style.wrap_width(w, h) as f32;
     let [r, g, b] = style.ink();
     let ink = Color32::from_rgb(r, g, b);
-    let edge = match &style.outline {
-        Some(o) if o.size == Some(0.0) => 0.0,
-        Some(o) => (size * o.size.unwrap_or(0.05) as f32).max(1.0),
-        None => (size / 20.0).max(1.0),
-    };
-    let outline = style
-        .stroke()
-        .map(|(c, _)| Color32::from_rgba_unmultiplied(c[0], c[1], c[2], 220));
-    let backing = style.backing().map(|(c, a)| {
-        Color32::from_rgba_unmultiplied(c[0], c[1], c[2], (a.clamp(0.0, 1.0) * 255.0).round() as u8)
+    let outline = style.stroke().map(|([r, g, b], s)| {
+        (
+            Color32::from_rgba_unmultiplied(r, g, b, 220),
+            (size * s as f32).max(1.0),
+        )
     });
+    let backing = style.backing().map(|([r, g, b], a)| {
+        Color32::from_rgba_unmultiplied(r, g, b, (a.clamp(0.0, 1.0) * 255.0).round() as u8)
+    });
+    let pad = (size * SubtitleStyle::PADDING as f32).ceil();
     let on: Vec<&Cue> = t
         .cues
         .iter()
@@ -276,39 +253,31 @@ pub(super) fn paint_cues(
             })
             .collect();
         let total: f32 = galleys.iter().map(|(g, _)| g.rect.height()).sum();
-        let mut top = if style.margin.is_none() {
-            let middle = match place {
-                Place::Top => 0.2,
-                Place::Middle => 0.5,
-                Place::Bottom => 0.8,
-            };
-            picture.top() + picture.height() * middle - total / 2.0
-        } else {
-            picture.top()
-                + style.block_top(place, f64::from(picture.height()), f64::from(total)) as f32
-        };
-        for (plain, bold) in galleys {
-            let r = plain.rect;
-            let at = pos2(picture.center().x - r.center().x, top - r.top());
-            if let Some(color) = backing {
-                let slack = (size * 0.15).ceil();
-                for row in &plain.rows {
-                    let ink = row.visuals.mesh_bounds;
-                    if ink.width() <= 0.0 || ink.height() <= 0.0 {
-                        continue;
-                    }
-                    let slot = row.rect().translate(at.to_vec2());
-                    let line = ink
-                        .translate(row.pos.to_vec2())
-                        .translate(at.to_vec2())
-                        .expand(slack)
-                        .intersect(slot);
-                    if line.width() > 0.0 && line.height() > 0.0 {
-                        painter.rect_filled(line, 0.0, color);
-                    }
-                }
-            }
-            if let Some(color) = outline {
+        let mut top = picture.top() + style.block_top(place, h, f64::from(total)) as f32;
+        let placed: Vec<_> = galleys
+            .into_iter()
+            .map(|(plain, bold)| {
+                let r = plain.rect;
+                let at = pos2(picture.center().x - r.center().x, top - r.top());
+                top += r.height();
+                (at, plain, bold)
+            })
+            .collect();
+        if let Some(color) = backing {
+            let boxes: Vec<Rect> = placed
+                .iter()
+                .flat_map(|(at, plain, _)| {
+                    plain
+                        .rows
+                        .iter()
+                        .filter(|row| !row.glyphs.is_empty())
+                        .map(|row| row.rect().translate(at.to_vec2()).expand(pad))
+                })
+                .collect();
+            fill_union(painter, &boxes, color);
+        }
+        for (at, plain, bold) in placed {
+            if let Some((color, edge)) = outline {
                 for (dx, dy) in [
                     (-1.0, -1.0),
                     (0.0, -1.0),
@@ -328,7 +297,6 @@ pub(super) fn paint_cues(
             }
             painter.galley(at, plain, ink);
             painter.galley(at + vec2(size / 28.0, 0.0), bold, ink);
-            top += r.height();
         }
     }
 }
@@ -713,11 +681,15 @@ impl Workspace {
             Files::Exporting(ask) => match ask.take() {
                 None => Some(Files::Exporting(ask)),
                 Some(Ok(r)) => {
-                    self.say(format!(
+                    let mut said = format!(
                         "Wrote {} ({} subtitles)",
                         r.result["path"].as_str().unwrap_or_default(),
                         r.result["cues"]
-                    ));
+                    );
+                    for w in r.result["warnings"].as_array().into_iter().flatten() {
+                        said.push_str(&format!("; {}", w.as_str().unwrap_or_default()));
+                    }
+                    self.say(said);
                     None
                 }
                 Some(Err(e)) => {

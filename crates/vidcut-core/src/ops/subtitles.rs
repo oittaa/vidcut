@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use crate::error::{Error, Result};
 use crate::model::{
     Cue, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle, SubtitleTrack,
-    css_color,
 };
 use crate::request::SubtitleTimeBase;
 use crate::subtitles::{self, Read, Timed};
@@ -79,6 +78,16 @@ fn fraction(value: f64, low: f64, high: f64, closed: bool) -> bool {
     value.is_finite() && value >= low && (if closed { value <= high } else { value < high })
 }
 
+fn paint(value: &str, what: &str) -> Result<String> {
+    let v = value.trim().to_ascii_lowercase();
+    let digits = v.strip_prefix('#').unwrap_or(&v);
+    let alpha = v.starts_with("rgba(")
+        || (matches!(digits.len(), 4 | 8) && digits.bytes().all(|b| b.is_ascii_hexdigit()));
+    subtitles::color(&v)
+        .filter(|_| !alpha)
+        .ok_or_else(|| Error::invalid(format!("{what} is #rrggbb, #rgb or a name such as yellow")))
+}
+
 pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
     let font = match &style.font {
         None => None,
@@ -88,7 +97,7 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
                 None
             } else if t.chars().count() > 200
                 || t.chars()
-                    .any(|c| c.is_control() || matches!(c, '<' | '>' | '&' | '"'))
+                    .any(|c| c.is_control() || matches!(c, '<' | '>' | '&' | '"' | ','))
             {
                 return Err(Error::invalid(
                     "a subtitle font is a family name, at most 200 characters",
@@ -100,25 +109,23 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
     };
     let size = match style.size {
         None => None,
-        Some(s) if s.is_finite() && s > 0.0 => Some(s),
+        Some(s) if fraction(s, f64::MIN_POSITIVE, 0.5, true) => Some(s),
         Some(_) => {
             return Err(Error::invalid(
-                "a subtitle size is a fraction of the picture height, above 0",
+                "a subtitle size is a fraction of the picture height, above 0 and at most 1/2",
             ));
         }
     };
     let color = match &style.color {
         None => None,
-        Some(c) => Some(css_color(c).ok_or_else(|| Error::invalid("a subtitle color is #rrggbb"))?),
+        Some(c) => Some(paint(c, "a subtitle color")?),
     };
     let outline = match &style.outline {
         None => None,
         Some(o) => {
             let color = match &o.color {
                 None => None,
-                Some(c) => Some(
-                    css_color(c).ok_or_else(|| Error::invalid("an outline color is #rrggbb"))?,
-                ),
+                Some(c) => Some(paint(c, "an outline color")?),
             };
             let size = match o.size {
                 None => None,
@@ -135,8 +142,7 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
     let background = match &style.background {
         None => None,
         Some(b) => {
-            let color = css_color(&b.color)
-                .ok_or_else(|| Error::invalid("a background color is #rrggbb"))?;
+            let color = paint(&b.color, "a background color")?;
             let opacity = match b.opacity {
                 None => None,
                 Some(o) if fraction(o, 0.0, 1.0, true) => (o < 1.0).then_some(o),
@@ -156,20 +162,14 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
             ));
         }
     };
-    let built = SubtitleStyle {
+    Ok(SubtitleStyle {
         font,
         size,
         color,
         outline,
         background,
         margin,
-    };
-    if !built.fits_two_lines() {
-        return Err(Error::invalid(
-            "two lines of this size do not fit between the margins",
-        ));
-    }
-    Ok(built)
+    })
 }
 
 pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {

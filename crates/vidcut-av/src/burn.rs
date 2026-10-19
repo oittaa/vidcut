@@ -5,15 +5,10 @@ use cosmic_text::{
     UnderlineStyle, Weight, Wrap,
 };
 use vidcut_core::model::{Place, SubtitleStyle};
-use vidcut_core::subtitles::{Tag, Token, tokens};
+use vidcut_core::subtitles::{Tag, Token, rgb, tokens};
 
 use crate::error::{Error, Result};
 use crate::ffmpeg::{ffi, format, frame};
-
-const SIZE: f32 = 0.055;
-const LINE: f32 = 1.31;
-const OUTLINE: f32 = 0.05;
-const WIDTH: f32 = 0.9;
 
 const FAMILIES: &[&str] = &[
     "Open Sans",
@@ -69,14 +64,21 @@ fn fonts() -> &'static Mutex<Fonts> {
     })
 }
 
-fn hex_color(hex: &str) -> Option<Color> {
-    let hex = hex.trim_start_matches('#');
-    let part = |at: usize| u8::from_str_radix(hex.get(at..at + 2)?, 16).ok();
-    Some(Color::rgb(part(0)?, part(2)?, part(4)?))
+fn color([r, g, b]: [u8; 3]) -> Color {
+    Color::rgb(r, g, b)
 }
 
-fn spans<'a>(text: &str, family: Family<'a>, color: Color) -> Vec<(String, Attrs<'a>)> {
-    let base = Attrs::new().family(family).color(color);
+fn unit([r, g, b]: [u8; 3], a: f32) -> [f32; 4] {
+    [
+        f32::from(r) / 255.0,
+        f32::from(g) / 255.0,
+        f32::from(b) / 255.0,
+        a,
+    ]
+}
+
+fn spans<'a>(text: &str, family: Family<'a>, ink: Color) -> Vec<(String, Attrs<'a>)> {
+    let base = Attrs::new().family(family).color(ink);
     let (mut italic, mut bold, mut under) = (0u32, 0u32, 0u32);
     let mut colors: Vec<Color> = Vec::new();
     let mut out = Vec::new();
@@ -101,7 +103,7 @@ fn spans<'a>(text: &str, family: Family<'a>, color: Color) -> Vec<(String, Attrs
             Token::Open(Tag::I) => italic += 1,
             Token::Open(Tag::B) => bold += 1,
             Token::Open(Tag::U) => under += 1,
-            Token::Open(Tag::Color(hex)) => colors.push(hex_color(&hex).unwrap_or(color)),
+            Token::Open(Tag::Color(hex)) => colors.push(rgb(&hex).map_or(ink, color)),
             Token::Close(Tag::I) => italic = italic.saturating_sub(1),
             Token::Close(Tag::B) => bold = bold.saturating_sub(1),
             Token::Close(Tag::U) => under = under.saturating_sub(1),
@@ -165,15 +167,12 @@ fn block(
     style: &SubtitleStyle,
     f: &mut Fonts,
 ) -> Option<Sprite> {
-    let size = match style.size {
-        Some(s) => (height as f32 * s as f32).max(1.0),
-        None => (height as f32 * SIZE).max(1.0),
-    };
-    let wrap = match style.margin {
-        Some(_) => (style.wrap_width(f64::from(width), f64::from(height)) as f32).max(1.0),
-        None => (width as f32 * WIDTH).max(size),
-    };
-    let mut buffer = Buffer::new(&mut f.system, Metrics::new(size, size * LINE));
+    let size = (height as f32 * style.text_fraction() as f32).max(1.0);
+    let wrap = (style.wrap_width(f64::from(width), f64::from(height)) as f32).max(size);
+    let mut buffer = Buffer::new(
+        &mut f.system,
+        Metrics::new(size, size * SubtitleStyle::LINE as f32),
+    );
     buffer.set_wrap(Wrap::WordOrGlyph);
     buffer.set_size(Some(wrap), None);
     let installed = style.font.as_deref().and_then(|name| {
@@ -188,9 +187,7 @@ fn block(
         Some(name) => Family::Name(name),
         None => Family::SansSerif,
     };
-    let [tr, tg, tb] = style.ink();
-    let ink = Color::rgb(tr, tg, tb);
-    let spans = spans(text, family, ink);
+    let spans = spans(text, family, color(style.ink()));
     let base = Attrs::new().family(family);
     buffer.set_rich_text(
         spans.iter().map(|(s, a)| (s.as_str(), a.clone())),
@@ -203,17 +200,16 @@ fn block(
     if lines <= 0.0 {
         return None;
     }
-    let outline = match style.outline.as_ref().and_then(|o| o.size) {
-        Some(s) => size * s as f32,
-        None => size * OUTLINE,
-    };
-    let slack = (size * 0.15).ceil() as i32;
-    let pad = if style.background.is_some() {
+    let stroke = style.stroke();
+    let backing = style.backing();
+    let outline = stroke.map_or(0.0, |(_, s)| size * s as f32);
+    let slack = (size * SubtitleStyle::PADDING as f32).ceil() as i32;
+    let pad = if backing.is_some() {
         (outline.ceil() as i32 + 2).max(slack)
     } else {
         outline.ceil() as i32 + 2
     };
-    let bands: Vec<(i32, i32, i32, i32)> = if style.background.is_some() {
+    let bands: Vec<(i32, i32, i32, i32)> = if backing.is_some() {
         buffer
             .layout_runs()
             .filter_map(|run| {
@@ -265,57 +261,29 @@ fn block(
         },
     );
     let alpha: Vec<f32> = canvas.iter().map(|p| p[3]).collect();
-    let ring = if style.stroke().is_some() {
-        dilate(&alpha, w, h, outline)
-    } else {
-        vec![0.0; alpha.len()]
+    let (ring, edge) = match stroke {
+        Some((rgb, _)) => (dilate(&alpha, w, h, outline), rgb),
+        None => (vec![0.0; alpha.len()], [0, 0, 0]),
     };
-    let outline_rgb = style.stroke().map(|(c, _)| c).unwrap_or([0, 0, 0]);
-    let backing = style.backing();
-    let plain = backing.is_none() && outline_rgb == [0, 0, 0];
     let rgba: Vec<[f32; 4]> = canvas
         .iter()
         .zip(&ring)
         .enumerate()
         .map(|(i, (p, &o))| {
-            if plain {
-                let a = p[3] + o * (1.0 - p[3]);
-                return if a <= 0.0 {
-                    [0.0; 4]
-                } else {
-                    [p[0] / a, p[1] / a, p[2] / a, a]
-                };
-            }
             let (x, y) = ((i % w) as i32 - pad, (i / w) as i32 - pad);
-            let bg = backing.and_then(|(c, a)| {
-                bands
-                    .iter()
-                    .any(|&(x0, y0, x1, y1)| x >= x0 && x < x1 && y >= y0 && y < y1)
-                    .then(|| {
-                        [
-                            f32::from(c[0]) / 255.0,
-                            f32::from(c[1]) / 255.0,
-                            f32::from(c[2]) / 255.0,
-                            a as f32,
-                        ]
-                    })
-            });
-            let text_a = p[3];
-            let text = if text_a > 0.0 {
-                [p[0] / text_a, p[1] / text_a, p[2] / text_a, text_a]
+            let bg = backing
+                .filter(|_| {
+                    bands
+                        .iter()
+                        .any(|&(x0, y0, x1, y1)| x >= x0 && x < x1 && y >= y0 && y < y1)
+                })
+                .map_or([0.0; 4], |(c, a)| unit(c, a as f32));
+            let text = if p[3] > 0.0 {
+                [p[0] / p[3], p[1] / p[3], p[2] / p[3], p[3]]
             } else {
                 [0.0; 4]
             };
-            let under = over(
-                bg.unwrap_or([0.0; 4]),
-                [
-                    f32::from(outline_rgb[0]) / 255.0,
-                    f32::from(outline_rgb[1]) / 255.0,
-                    f32::from(outline_rgb[2]) / 255.0,
-                    o,
-                ],
-            );
-            over(under, text)
+            over(over(bg, unit(edge, o)), text)
         })
         .collect();
     let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
@@ -331,16 +299,7 @@ fn block(
     if x1 <= x0 || y1 <= y0 {
         return None;
     }
-    let text_top = if style.margin.is_none() {
-        let centre = match place {
-            Place::Top => 0.2,
-            Place::Middle => 0.5,
-            Place::Bottom => 0.8,
-        };
-        centre * height as f32 - lines / 2.0
-    } else {
-        style.block_top(place, f64::from(height), f64::from(lines)) as f32
-    };
+    let text_top = style.block_top(place, f64::from(height), f64::from(lines)) as f32;
     let left = ((width as f32 - wrap) / 2.0).round() as i32 - pad;
     let top = text_top.round() as i32 - pad;
     let crop = (y0..y1)

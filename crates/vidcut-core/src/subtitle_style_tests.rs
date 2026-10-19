@@ -62,7 +62,7 @@ fn a_subtitle_size_past_half_the_picture_is_refused() {
     .unwrap_err();
     assert_eq!(
         err.to_string(),
-        "two lines of this size do not fit between the margins"
+        "a subtitle size is a fraction of the picture height, above 0 and at most 1/2"
     );
 }
 
@@ -89,7 +89,10 @@ fn a_project_file_refuses_a_style_track_set_would_refuse() {
     p.subtitles[0].style.size = Some(40.0);
     assert_eq!(
         crate::validate::violations(&p),
-        vec!["S1: two lines of this size do not fit between the margins".to_string()]
+        vec![
+            "S1: a subtitle size is a fraction of the picture height, above 0 and at most 1/2"
+                .to_string()
+        ]
     );
 }
 
@@ -135,7 +138,8 @@ fn an_imsc1_file_writes_the_track_style() {
             positions: true,
             style: &style,
         },
-    );
+    )
+    .text;
     assert_eq!(
         text,
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -147,15 +151,16 @@ fn an_imsc1_file_writes_the_track_style() {
          ttp:timeBase=\"media\" ttp:frameRate=\"25\" ttp:cellResolution=\"100 100\">\n\
          \x20 <head>\n\
          \x20   <styling>\n\
-         \x20     <style xml:id=\"s\" tts:color=\"#ffcc00\" tts:fontFamily=\"Arial\" \
-         tts:fontSize=\"400%\" tts:lineHeight=\"131%\" tts:textAlign=\"center\"/>\n\
+         \x20     <style xml:id=\"s\" tts:color=\"#ffcc00\" \
+         tts:fontFamily=\"Arial,proportionalSansSerif\" tts:fontSize=\"400%\" \
+         tts:lineHeight=\"131%\" tts:textAlign=\"center\"/>\n\
          \x20   </styling>\n\
          \x20   <layout>\n\
-         \x20     <region xml:id=\"bottom\" tts:origin=\"8% 64%\" tts:extent=\"84% 28%\" \
+         \x20     <region xml:id=\"bottom\" tts:origin=\"8% 28.2%\" tts:extent=\"84% 63.8%\" \
          tts:displayAlign=\"after\"/>\n\
-         \x20     <region xml:id=\"middle\" tts:origin=\"8% 36%\" tts:extent=\"84% 28%\" \
+         \x20     <region xml:id=\"middle\" tts:origin=\"8% 0%\" tts:extent=\"84% 100%\" \
          tts:displayAlign=\"center\"/>\n\
-         \x20     <region xml:id=\"top\" tts:origin=\"8% 8%\" tts:extent=\"84% 28%\" \
+         \x20     <region xml:id=\"top\" tts:origin=\"8% 8%\" tts:extent=\"84% 63.8%\" \
          tts:displayAlign=\"before\"/>\n\
          \x20   </layout>\n\
          \x20 </head>\n\
@@ -200,7 +205,8 @@ fn a_styled_file_keeps_each_cues_place() {
             positions: true,
             style: &style,
         },
-    );
+    )
+    .text;
     let (read, _, _) =
         crate::subtitles::parse(text.as_bytes(), std::path::Path::new("cues.ttml")).unwrap();
     assert_eq!(

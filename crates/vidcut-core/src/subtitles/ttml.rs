@@ -563,6 +563,9 @@ fn paragraph(text: &str) -> String {
     out
 }
 
+const GRID: f64 = 100_000.0;
+const PLACES: [Place; 3] = [Place::Top, Place::Middle, Place::Bottom];
+
 fn rate_attr(frame_rate: Option<f64>) -> String {
     match frame_rate {
         Some(r) if (r - r.round()).abs() < 1e-6 => format!(" ttp:frameRate=\"{}\"", r.round()),
@@ -584,61 +587,187 @@ fn plain_number(x: f64) -> String {
     }
 }
 
-fn regions(style: &SubtitleStyle) -> String {
-    let r = style.imsc_regions();
-    let p = |n| r.percent(n);
-    format!(
-        "      <region xml:id=\"bottom\" tts:origin=\"{}% {}%\" tts:extent=\"{}% {}%\" \
-         tts:displayAlign=\"after\"/>\n      <region xml:id=\"middle\" tts:origin=\"{}% {}%\" \
-         tts:extent=\"{}% {}%\" tts:displayAlign=\"center\"/>\n      <region xml:id=\"top\" \
-         tts:origin=\"{}% {}%\" tts:extent=\"{}% {}%\" tts:displayAlign=\"before\"/>\n    ",
-        p(r.x),
-        p(r.bot_y),
-        p(r.w),
-        p(r.bot_h),
-        p(r.x),
-        p(r.mid_y),
-        p(r.w),
-        p(r.mid_h),
-        p(r.x),
-        p(r.top_y),
-        p(r.w),
-        p(r.top_h),
-    )
+fn percent(units: i64) -> String {
+    plain_number(units as f64 / 1000.0)
+}
+
+fn hex([r, g, b]: [u8; 3]) -> String {
+    format!("#{r:02x}{g:02x}{b:02x}")
+}
+
+fn slot(place: Place) -> usize {
+    match place {
+        Place::Top => 0,
+        Place::Middle => 1,
+        Place::Bottom => 2,
+    }
+}
+
+fn name(place: Place) -> &'static str {
+    match place {
+        Place::Top => "top",
+        Place::Middle => "middle",
+        Place::Bottom => "bottom",
+    }
+}
+
+fn stacks(cues: &[Timed]) -> (Vec<usize>, [[bool; 3]; 3]) {
+    let lines = |c: &Timed| c.text.split('\n').count();
+    let mut order: Vec<usize> = (0..cues.len()).collect();
+    order.sort_by(|&a, &b| cues[a].start.total_cmp(&cues[b].start));
+    let mut stacked = vec![0; cues.len()];
+    let mut together = [[false; 3]; 3];
+    let mut showing: Vec<usize> = Vec::new();
+    for i in order {
+        let c = &cues[i];
+        showing.retain(|&j| cues[j].end > c.start);
+        stacked[i] = lines(c);
+        for &j in &showing {
+            let (a, b) = (slot(cues[j].place), slot(c.place));
+            if a == b {
+                stacked[i] += lines(&cues[j]);
+            } else {
+                together[a.min(b)][a.max(b)] = true;
+            }
+        }
+        showing.push(i);
+    }
+    (stacked, together)
+}
+
+struct Region {
+    top: i64,
+    height: i64,
+    align: &'static str,
+}
+
+fn layout(cues: &[Timed], style: &SubtitleStyle) -> ([Region; 3], Vec<String>) {
+    let line = style.text_fraction() * SubtitleStyle::LINE;
+    let (stacked, together) = stacks(cues);
+    let mut need = [0.0f64; 3];
+    for (c, &n) in cues.iter().zip(&stacked) {
+        let s = slot(c.place);
+        need[s] = need[s].max(n as f64 * line);
+    }
+    let anchors = PLACES.map(|p| style.anchor(p));
+    let mut h = [0, 1, 2].map(|s| {
+        let (at, above) = anchors[s];
+        let below = if above < 1.0 {
+            (1.0 - at) / (1.0 - above)
+        } else {
+            f64::INFINITY
+        };
+        let fits = below.min(if above > 0.0 {
+            at / above
+        } else {
+            f64::INFINITY
+        });
+        let tilt = 0.5 - above;
+        let read = match PLACES[s] {
+            Place::Top if tilt > 0.0 => (0.399 - at) / tilt,
+            Place::Bottom if tilt < 0.0 => (at - 0.601) / -tilt,
+            _ => f64::INFINITY,
+        };
+        if need[s] <= read {
+            read.min(fits)
+        } else {
+            fits
+        }
+    });
+    for (a, b) in [(0, 1), (1, 2), (0, 2)] {
+        if !together[a][b] {
+            continue;
+        }
+        let (ka, kb) = (1.0 - anchors[a].1, anchors[b].1);
+        let gap = anchors[b].0 - anchors[a].0 - 1.0 / GRID;
+        let want = ka * h[a] + kb * h[b];
+        if want <= gap {
+            continue;
+        }
+        let kept = [need[a].min(h[a]), need[b].min(h[b])];
+        let firm = ka * kept[0] + kb * kept[1];
+        let (fa, fb) = if firm <= gap {
+            let k = (gap - firm) / (want - firm);
+            (
+                kept[0] + k * (h[a] - kept[0]),
+                kept[1] + k * (h[b] - kept[1]),
+            )
+        } else {
+            let k = gap.max(0.0) / firm;
+            (kept[0] * k, kept[1] * k)
+        };
+        h[a] = fa;
+        h[b] = fb;
+    }
+    let regions = [0, 1, 2].map(|s| {
+        let (at, above) = anchors[s];
+        let y0 = at - above * h[s];
+        let top = (y0 * GRID - 1e-6).ceil().max(0.0) as i64;
+        let bottom = ((y0 + h[s]) * GRID + 1e-6).floor().min(GRID) as i64;
+        Region {
+            top,
+            height: (bottom - top).max(0),
+            align: if above < 0.25 {
+                "before"
+            } else if above > 0.75 {
+                "after"
+            } else {
+                "center"
+            },
+        }
+    });
+    let mut warnings = Vec::new();
+    for (s, region) in regions.iter().enumerate() {
+        let room = region.height as f64 / GRID;
+        let over: Vec<&Timed> = cues
+            .iter()
+            .zip(&stacked)
+            .filter(|&(c, &n)| slot(c.place) == s && n as f64 * line > room + 2.0 / GRID)
+            .map(|(c, _)| c)
+            .collect();
+        if let Some(first) = over.iter().min_by(|a, b| a.start.total_cmp(&b.start)) {
+            warnings.push(format!(
+                "{} cue(s) at the {} need more lines than the IMSC1 file's region there holds \
+                 ({}), the first at {}; players may cut them off",
+                over.len(),
+                name(PLACES[s]),
+                (room / line + 1e-9).floor(),
+                clock(first.start, '.')
+            ));
+        }
+    }
+    (regions, warnings)
 }
 
 fn style_attrs(style: &SubtitleStyle) -> String {
-    let color = style.color.clone().unwrap_or_else(|| "#ffffff".into());
-    let font = style
-        .font
-        .clone()
-        .unwrap_or_else(|| "proportionalSansSerif".into());
-    let size = plain_number(style.text_fraction() * 10_000.0);
+    let font = match &style.font {
+        Some(f) => format!("{},proportionalSansSerif", escape_xml(f)),
+        None => "proportionalSansSerif".into(),
+    };
     let mut attrs = format!(
-        "tts:color=\"{}\" tts:fontFamily=\"{}\" tts:fontSize=\"{size}%\" \
-         tts:lineHeight=\"131%\" tts:textAlign=\"center\"",
-        escape_xml(&color),
-        escape_xml(&font)
+        "tts:color=\"{}\" tts:fontFamily=\"{font}\" tts:fontSize=\"{}%\" tts:lineHeight=\"{}%\" \
+         tts:textAlign=\"center\"",
+        hex(style.ink()),
+        plain_number(style.text_fraction() * 10_000.0),
+        plain_number(SubtitleStyle::LINE * 100.0),
     );
-    if let Some((rgb, frac)) = style.stroke() {
+    if let Some((rgb, size)) = style.stroke() {
         attrs.push_str(&format!(
-            " tts:textOutline=\"#{:02x}{:02x}{:02x} {}%\"",
-            rgb[0],
-            rgb[1],
-            rgb[2],
-            plain_number(frac * 100.0)
+            " tts:textOutline=\"{} {}%\"",
+            hex(rgb),
+            plain_number(size * 100.0)
         ));
     }
     attrs
 }
 
-fn background_color(style: &SubtitleStyle) -> Option<String> {
+fn background(style: &SubtitleStyle) -> Option<String> {
     let (rgb, opacity) = style.backing()?;
-    let aa = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
-    Some(if aa == 255 {
-        format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])
+    let alpha = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Some(if alpha == 255 {
+        hex(rgb)
     } else {
-        format!("#{:02x}{:02x}{:02x}{aa:02x}", rgb[0], rgb[1], rgb[2])
+        format!("{}{alpha:02x}", hex(rgb))
     })
 }
 
@@ -647,37 +776,40 @@ pub fn write(
     language: Option<&str>,
     frame_rate: Option<f64>,
     style: &SubtitleStyle,
-) -> String {
-    if style.is_empty() {
-        return write_plain(cues, language, frame_rate);
-    }
-    let lang = language.unwrap_or("");
-    let cells = " ttp:cellResolution=\"100 100\"";
-    let regions = regions(style);
-    let background = background_color(style);
+) -> (String, Vec<String>) {
+    let (placed, warnings) = layout(cues, style);
+    let inset = (style.inset() * GRID).round() as i64;
+    let regions: String = [Place::Bottom, Place::Middle, Place::Top]
+        .into_iter()
+        .map(|p| {
+            let r = &placed[slot(p)];
+            format!(
+                "      <region xml:id=\"{}\" tts:origin=\"{}% {}%\" tts:extent=\"{}% {}%\" \
+                 tts:displayAlign=\"{}\"/>\n",
+                name(p),
+                percent(inset),
+                percent(r.top),
+                percent(GRID as i64 - 2 * inset),
+                percent(r.height),
+                r.align
+            )
+        })
+        .collect();
     let mut out = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tt xml:lang=\"{}\" \
          xmlns=\"http://www.w3.org/ns/ttml\" xmlns:ttp=\"{TTP}\" xmlns:tts=\"{TTS}\" \
          xmlns:ittp=\"http://www.w3.org/ns/ttml/profile/imsc1#parameter\" \
          ttp:profile=\"http://www.w3.org/ns/ttml/profile/imsc1/text\" \
-         ttp:timeBase=\"media\"{rate}{cells}>\n  <head>\n    <styling>\n      <style xml:id=\"s\" \
-         {attrs}/>\n    </styling>\n    <layout>\n{regions}</layout>\n  </head>\n  <body style=\"s\">\n    <div>\n",
-        escape_xml(lang),
-        rate = rate_attr(frame_rate),
-        attrs = style_attrs(style),
+         ttp:timeBase=\"media\"{} ttp:cellResolution=\"100 100\">\n  <head>\n    <styling>\n      \
+         <style xml:id=\"s\" {}/>\n    </styling>\n    <layout>\n{regions}    </layout>\n  \
+         </head>\n  <body style=\"s\">\n    <div>\n",
+        escape_xml(language.unwrap_or("")),
+        rate_attr(frame_rate),
+        style_attrs(style),
     );
-    push_cues(&mut out, cues, background.as_deref());
-    out
-}
-
-fn push_cues(out: &mut String, cues: &[Timed], background: Option<&str>) {
+    let background = background(style);
     for c in cues {
-        let region = match c.place {
-            Place::Bottom => "bottom",
-            Place::Middle => "middle",
-            Place::Top => "top",
-        };
-        let text = match background {
+        let text = match &background {
             Some(color) => format!(
                 "<span tts:backgroundColor=\"{color}\">{}</span>",
                 paragraph(&c.text)
@@ -685,52 +817,12 @@ fn push_cues(out: &mut String, cues: &[Timed], background: Option<&str>) {
             None => paragraph(&c.text),
         };
         out.push_str(&format!(
-            "      <p begin=\"{}\" end=\"{}\" region=\"{region}\">{text}</p>\n",
-            clock(c.start, '.'),
-            clock(c.end, '.')
-        ));
-    }
-    out.push_str("    </div>\n  </body>\n</tt>\n");
-}
-
-fn write_plain(cues: &[Timed], language: Option<&str>, frame_rate: Option<f64>) -> String {
-    let lang = language.unwrap_or("");
-    let rate = match frame_rate {
-        Some(r) if (r - r.round()).abs() < 1e-6 => format!(" ttp:frameRate=\"{}\"", r.round()),
-        Some(r) => format!(
-            " ttp:frameRate=\"{}\" ttp:frameRateMultiplier=\"1000 1001\"",
-            (r * 1001.0 / 1000.0).round()
-        ),
-        None => String::new(),
-    };
-    let mut out = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tt xml:lang=\"{}\" \
-         xmlns=\"http://www.w3.org/ns/ttml\" xmlns:ttp=\"{TTP}\" xmlns:tts=\"{TTS}\" \
-         xmlns:ittp=\"http://www.w3.org/ns/ttml/profile/imsc1#parameter\" \
-         ttp:profile=\"http://www.w3.org/ns/ttml/profile/imsc1/text\" \
-         ttp:timeBase=\"media\"{rate}>\n  <head>\n    <styling>\n      <style xml:id=\"s\" \
-         tts:color=\"#ffffff\" tts:fontFamily=\"proportionalSansSerif\" tts:fontSize=\"100%\" \
-         tts:textAlign=\"center\" tts:textOutline=\"#000000 5%\"/>\n    </styling>\n    \
-         <layout>\n      <region xml:id=\"bottom\" tts:origin=\"10% 70%\" tts:extent=\"80% 20%\" \
-         tts:displayAlign=\"after\"/>\n      <region xml:id=\"middle\" tts:origin=\"10% 40%\" \
-         tts:extent=\"80% 20%\" tts:displayAlign=\"center\"/>\n      <region xml:id=\"top\" \
-         tts:origin=\"10% 10%\" tts:extent=\"80% 20%\" tts:displayAlign=\"before\"/>\n    \
-         </layout>\n  </head>\n  <body style=\"s\">\n    <div>\n",
-        escape_xml(lang)
-    );
-    for c in cues {
-        let region = match c.place {
-            Place::Bottom => "bottom",
-            Place::Middle => "middle",
-            Place::Top => "top",
-        };
-        out.push_str(&format!(
-            "      <p begin=\"{}\" end=\"{}\" region=\"{region}\">{}</p>\n",
+            "      <p begin=\"{}\" end=\"{}\" region=\"{}\">{text}</p>\n",
             clock(c.start, '.'),
             clock(c.end, '.'),
-            paragraph(&c.text)
+            name(c.place)
         ));
     }
     out.push_str("    </div>\n  </body>\n</tt>\n");
-    out
+    (out, warnings)
 }

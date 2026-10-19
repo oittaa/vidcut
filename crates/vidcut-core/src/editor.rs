@@ -4775,7 +4775,7 @@ pub fn query(
             };
             let cues = ops::subtitles::collect(p, ti, span, timecode.unwrap_or(true));
             let t = &p.subtitles[ti];
-            let text = crate::subtitles::write(
+            let written = crate::subtitles::write(
                 &cues,
                 format,
                 &crate::subtitles::Writing {
@@ -4786,9 +4786,14 @@ pub fn query(
                 },
             );
             if !dry_run {
-                env.write_file(out, text.as_bytes())?;
+                env.write_file(out, written.text.as_bytes())?;
             }
-            json!({ "path": out, "track": t.id, "format": format, "cues": cues.len() })
+            let mut answer =
+                json!({ "path": out, "track": t.id, "format": format, "cues": cues.len() });
+            if !written.warnings.is_empty() {
+                answer["warnings"] = json!(written.warnings);
+            }
+            answer
         }
         Request::MarkersList {} => json!(
             p.markers

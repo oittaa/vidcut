@@ -980,10 +980,11 @@ pub struct SubtitleStyle {
     /// Font family. The burn-in uses it when that font is installed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
-    /// Text height as a fraction of the picture height. Usual: 0.055.
+    /// Text height as a fraction of the picture height, above 0 and at most
+    /// 1/2. Usual: 0.055.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
-    /// `#rrggbb`. Usual: white.
+    /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     /// Outline color and thickness. Usual: black, a twentieth of the text
@@ -1004,11 +1005,11 @@ pub struct SubtitleStyle {
 /// An outline around a subtitle track's text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct SubtitleOutline {
-    /// `#rrggbb`. Usual: black.
+    /// `#rrggbb`, `#rgb` or a name. Usual: black.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Thickness as a fraction of the text height. Usual: 0.05. `0` draws
-    /// none.
+    /// Thickness as a fraction of the text height, from 0 to 1/10. Usual:
+    /// 0.05. `0` draws none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
 }
@@ -1016,35 +1017,17 @@ pub struct SubtitleOutline {
 /// A box behind a subtitle track's text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SubtitleBackground {
-    /// `#rrggbb`.
+    /// `#rrggbb`, `#rgb` or a name.
     pub color: String,
     /// From 0 to 1. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
 }
 
-/// `#rgb` or `#rrggbb`, as `#rrggbb`.
-pub fn css_color(value: &str) -> Option<String> {
-    let hex = value.trim().strip_prefix('#').unwrap_or(value.trim());
-    if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        return None;
-    }
-    match hex.len() {
-        3 => {
-            let d: Vec<char> = hex.chars().collect();
-            Some(format!("#{0}{0}{1}{1}{2}{2}", d[0], d[1], d[2]).to_ascii_lowercase())
-        }
-        6 => Some(format!("#{hex}").to_ascii_lowercase()),
-        _ => None,
-    }
-}
-
-fn rgb_of(hex: &str) -> [u8; 3] {
-    let n = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or(0);
-    [(n >> 16) as u8, (n >> 8) as u8, n as u8]
-}
-
 impl SubtitleStyle {
+    pub const LINE: f64 = 1.31;
+    pub const PADDING: f64 = 0.15;
+
     pub fn is_empty(&self) -> bool {
         self.font.is_none()
             && self.size.is_none()
@@ -1054,131 +1037,51 @@ impl SubtitleStyle {
             && self.margin.is_none()
     }
 
-    /// Text height as a fraction of the picture height.
     pub fn text_fraction(&self) -> f64 {
         self.size.unwrap_or(0.055)
     }
 
     pub fn ink(&self) -> [u8; 3] {
-        self.color
-            .as_deref()
-            .and_then(css_color)
-            .map(|c| rgb_of(&c))
-            .unwrap_or([255, 255, 255])
+        paint(self.color.as_deref(), [255, 255, 255])
     }
 
-    /// Outline color and its thickness as a fraction of the text height.
-    /// None draws no outline.
     pub fn stroke(&self) -> Option<([u8; 3], f64)> {
-        match &self.outline {
-            Some(o) if o.size == Some(0.0) => None,
-            Some(o) => Some((
-                o.color
-                    .as_deref()
-                    .and_then(css_color)
-                    .map(|c| rgb_of(&c))
-                    .unwrap_or([0, 0, 0]),
-                o.size.unwrap_or(0.05),
-            )),
-            None => Some(([0, 0, 0], 0.05)),
-        }
+        let o = self.outline.as_ref();
+        let size = o.and_then(|o| o.size).unwrap_or(0.05);
+        (size > 0.0).then(|| (paint(o.and_then(|o| o.color.as_deref()), [0, 0, 0]), size))
     }
 
-    /// Background color and opacity. None draws none.
     pub fn backing(&self) -> Option<([u8; 3], f64)> {
         let b = self.background.as_ref()?;
-        Some((
-            css_color(&b.color).map(|c| rgb_of(&c)).unwrap_or([0, 0, 0]),
-            b.opacity.unwrap_or(1.0),
-        ))
+        Some((paint(Some(&b.color), [0, 0, 0]), b.opacity.unwrap_or(1.0)))
     }
 
-    /// The text block's width in a picture of this width and height.
+    pub fn inset(&self) -> f64 {
+        self.margin.unwrap_or(0.05)
+    }
+
     pub fn wrap_width(&self, picture_width: f64, picture_height: f64) -> f64 {
-        let inset = self.margin.unwrap_or(0.05);
-        (picture_width * (1.0 - 2.0 * inset)).max(self.text_fraction() * picture_height)
+        (picture_width * (1.0 - 2.0 * self.inset())).max(self.text_fraction() * picture_height)
     }
 
-    /// Lines are this many times the text height.
-    pub const LINE: f64 = 1.31;
-
-    /// Height of each IMSC1 region, as a fraction of the picture. The three
-    /// regions do not overlap, and each one's middle is where a reader puts
-    /// top, middle and bottom.
-    pub fn region_band(&self) -> f64 {
-        self.imsc_regions().top_h as f64 / 1000.0
-    }
-
-    /// Two lines fit in `region_band`.
-    pub fn fits_two_lines(&self) -> bool {
-        self.text_fraction() * Self::LINE * 2.0 <= self.region_band() + 1e-9
-    }
-
-    /// Region edges in tenths of a percent (1000 is the whole picture).
-    pub fn imsc_regions(&self) -> ImscRegions {
-        let inset = self.margin.unwrap_or(0.10) * 100.0;
-        let x = tenth(inset);
-        let top0 = x;
-        let bot1 = tenth(100.0 - inset);
-        let span = (bot1 - top0) / 3;
-        let top_limit = (tenth(40.0 - 0.5) - top0) * 2;
-        let bot_limit = (bot1 - tenth(60.0 + 0.5)) * 2;
-        let mut h = span.min(top_limit).min(bot_limit).max(0);
-        while h > 0 && (2 * top0 + h >= 800 || 2 * bot1 - h <= 1200 || bot1 - h < top0 + h) {
-            h -= 1;
-        }
-        ImscRegions {
-            x,
-            w: 1000 - 2 * x,
-            top_y: top0,
-            top_h: h,
-            mid_y: top0 + h,
-            mid_h: (bot1 - h) - (top0 + h),
-            bot_y: bot1 - h,
-            bot_h: h,
-        }
-    }
-
-    /// The top of a text block `lines` tall.
-    pub fn block_top(&self, place: Place, picture_height: f64, lines: f64) -> f64 {
+    pub fn anchor(&self, place: Place) -> (f64, f64) {
         match (self.margin, place) {
-            (Some(m), Place::Top) => picture_height * m,
-            (Some(m), Place::Bottom) => picture_height * (1.0 - m) - lines,
-            (_, Place::Middle) => picture_height * 0.5 - lines / 2.0,
-            (None, Place::Top) => picture_height * 0.2 - lines / 2.0,
-            (None, Place::Bottom) => picture_height * 0.8 - lines / 2.0,
+            (Some(m), Place::Top) => (m, 0.0),
+            (Some(m), Place::Bottom) => (1.0 - m, 1.0),
+            (_, Place::Middle) => (0.5, 0.5),
+            (None, Place::Top) => (0.2, 0.5),
+            (None, Place::Bottom) => (0.8, 0.5),
         }
     }
-}
 
-fn tenth(percent: f64) -> i32 {
-    (percent * 10.0).round() as i32
-}
-
-/// One IMSC1 layout: horizontal inset and the three regions, in tenths of a percent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ImscRegions {
-    pub x: i32,
-    pub w: i32,
-    pub top_y: i32,
-    pub top_h: i32,
-    pub mid_y: i32,
-    pub mid_h: i32,
-    pub bot_y: i32,
-    pub bot_h: i32,
-}
-
-impl ImscRegions {
-    pub fn percent(self, tenths: i32) -> String {
-        let neg = tenths < 0;
-        let t = tenths.abs();
-        let s = if t % 10 == 0 {
-            format!("{}", t / 10)
-        } else {
-            format!("{}.{}", t / 10, t % 10)
-        };
-        if neg { format!("-{s}") } else { s }
+    pub fn block_top(&self, place: Place, picture_height: f64, lines: f64) -> f64 {
+        let (at, above) = self.anchor(place);
+        picture_height * at - lines * above
     }
+}
+
+fn paint(hex: Option<&str>, usual: [u8; 3]) -> [u8; 3] {
+    hex.and_then(crate::subtitles::rgb).unwrap_or(usual)
 }
 
 /// A subtitle track: cues shown over the picture, one language or use.
