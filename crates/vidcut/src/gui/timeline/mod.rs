@@ -215,6 +215,8 @@ pub struct TimelineView {
     pub(super) adding: Option<crate::gui::export::Ask>,
     pub cue_dialog: Option<crate::gui::subtitles::CueDialog>,
     pub track_dialog: Option<crate::gui::subtitles::TrackDialog>,
+    pub(super) adding_title: Option<crate::gui::export::Ask>,
+    pub title_dialog: Option<crate::gui::titles::TitleDialog>,
     pub(super) files: Option<crate::gui::subtitles::Files>,
     pub(super) retime: Option<crate::gui::retime::Retime>,
 }
@@ -254,6 +256,8 @@ impl Default for TimelineView {
             adding: None,
             cue_dialog: None,
             track_dialog: None,
+            adding_title: None,
+            title_dialog: None,
             files: None,
             retime: None,
         }
@@ -917,6 +921,7 @@ impl Workspace {
         self.silence_window(ui.ctx());
         self.boring_window(ui.ctx());
         self.subtitle_windows(ui.ctx());
+        self.title_windows(ui.ctx());
         self.dynamic_tick(ui.ctx());
     }
 
@@ -1153,6 +1158,14 @@ impl Workspace {
         }
         if ui.button("Add Marker  (M)").clicked() {
             self.send("markers.add", json!({ "at": at }));
+            ui.close();
+        }
+        if ui
+            .button("Add Title")
+            .on_hover_text("A 5-second title at the playhead, over the tracks below it")
+            .clicked()
+        {
+            self.add_title(ui.ctx());
             ui.close();
         }
         if ui
@@ -1803,6 +1816,10 @@ impl Workspace {
                 }
             } else if let Some((track, at)) = faded {
                 self.select_transition(track, at);
+            } else if let Hit::Clip(id) | Hit::Slip(id) = &what
+                && p.clip(id).is_some_and(|c| c.title.is_some())
+            {
+                self.open_title(id);
             } else if let Hit::Roll { outgoing, .. } | Hit::Edge(outgoing, Edge::Tail) = &what
                 && let Some(c) = p.clip(outgoing)
                 && let Some(track) = TrackRef::of_clip(p, outgoing)
@@ -1918,6 +1935,10 @@ impl Workspace {
         } else {
             vec![c.id.clone()]
         };
+        if c.title.is_some() && ui.button("Edit Title…").clicked() {
+            self.open_title(&c.id);
+            ui.close();
+        }
         let item = |ui: &mut egui::Ui, label: &str, method: &str, params: Value| {
             if ui.button(label).clicked() {
                 self.send(method, params);
