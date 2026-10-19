@@ -317,6 +317,10 @@ impl Player {
         self.skips.is_some()
     }
 
+    pub fn auditioning(&self) -> bool {
+        self.auditioning
+    }
+
     pub fn end_audition(&mut self) -> Option<u64> {
         if !std::mem::take(&mut self.auditioning) {
             return None;

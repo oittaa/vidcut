@@ -2840,15 +2840,16 @@ impl Live {
 
     fn set_skipping(&mut self, parts: Option<Vec<ClipSpans>>) -> bool {
         self.skipping = parts;
-        if !self.player.skipping() {
-            return false;
-        }
-        if self.player.playing() {
+        let skipping = self.player.skipping();
+        let starts = self.skipping.is_some()
+            && self.viewer == ViewerMode::Timeline
+            && !self.player.auditioning();
+        if self.player.playing() && (skipping || starts) {
             let speed = self.player.snap(TIMELINE).speed;
             self.play(speed);
             return true;
         }
-        self.player.end_audition().is_some()
+        skipping && self.player.end_audition().is_some()
     }
 
     fn audition(&mut self, audition: Option<Audition>) -> bool {

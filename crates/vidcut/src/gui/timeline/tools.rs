@@ -671,8 +671,8 @@ impl Workspace {
                 ui.label(status);
                 ui.label(dim(
                     "Click a stripe to keep it, or drag its edges. [ and ] go to the previous \
-                     and next, X keeps or cuts the one at the playhead. Play and Space skip \
-                     the red stripes.",
+                     and next, X keeps or cuts the one at the playhead. Play and Space play \
+                     the timeline as Remove would leave it.",
                 ));
                 ui.label(dim("Cuts are de-clicked with 3 ms fades."));
                 let ready = d.current() && all > 0;
@@ -819,10 +819,15 @@ impl Workspace {
         };
         let at = scale.boundary(pos.x);
         let s = &mut d.stripes[i];
-        match edge {
-            Edge::Head => s.start = at.clamp(lo, s.end - 1),
-            Edge::Tail => s.end = at.clamp(s.start + 1, hi),
+        let (from, to, edge) = match edge {
+            Edge::Head => (lo, s.end - 1, &mut s.start),
+            Edge::Tail => (s.start + 1, hi, &mut s.end),
+        };
+        if from > to {
+            d.held = None;
+            return;
         }
+        *edge = at.clamp(from, to);
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
 
