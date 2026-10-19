@@ -2917,7 +2917,11 @@ fn mutate(
                 "warnings": warnings,
             })
         }
-        Request::EditRippleDeleteWords { words, quiet } => {
+        Request::EditRippleDeleteWords {
+            words,
+            quiet,
+            clear_marks,
+        } => {
             if words.is_empty() {
                 return Err(Error::usage("name the words to cut"));
             }
@@ -2932,6 +2936,10 @@ fn mutate(
                 false => spans,
             };
             let removed = ops::cut_ranges(p, &spans)?;
+            if *clear_marks {
+                p.marks.mark_in = None;
+                p.marks.mark_out = None;
+            }
             json!({
                 "removed": removed
                     .iter()

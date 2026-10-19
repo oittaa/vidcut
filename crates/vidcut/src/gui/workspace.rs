@@ -1633,7 +1633,9 @@ impl Workspace {
             return;
         }
         let Some(p) = self.project() else { return };
-        if let (Some(a), Some(b)) = (p.marks.mark_in, p.marks.mark_out) {
+        if let (Some(a), Some(b)) = (p.marks.mark_in, p.marks.mark_out)
+            && a < p.end()
+        {
             self.send(
                 "edit.delete_range",
                 json!({ "range": format!("{a}f..{b}f"), "lift": lift }),

@@ -912,9 +912,12 @@ impl Workspace {
                         }),
                     ),
                     None => {
+                        let marked = self.project().is_some_and(|p| {
+                            p.marks.mark_in == Some(a) && p.marks.mark_out == Some(b)
+                        });
                         self.send(
                             "edit.ripple_delete_words",
-                            json!({ "words": [span(a, b)], "quiet": true }),
+                            json!({ "words": [span(a, b)], "quiet": true, "clear_marks": marked }),
                         );
                         t.selection = None;
                         t.anchor = None;

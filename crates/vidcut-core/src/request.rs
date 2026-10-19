@@ -702,6 +702,10 @@ pub enum Request {
         /// yet are measured first.
         #[serde(default)]
         quiet: bool,
+        /// Clear the timeline In and Out in the same step, as the
+        /// Transcription window does when they mark the words it deletes.
+        #[serde(default)]
+        clear_marks: bool,
     },
     /// Detect Scene Cuts: split `clips` where their shots change.
     #[serde(rename = "edit.detect_scene_cuts")]
@@ -1516,8 +1520,9 @@ pub enum Request {
     #[serde(rename = "gui.quit")]
     GuiQuit {},
     /// Open a window for the person at the GUI: `quick_export`, `export`,
-    /// `jobs`, `log`, `mixer`, `preferences`, `history` (the undo history)
-    /// or `help` (the keyboard shortcuts). Answers what `gui.state` does.
+    /// `jobs`, `log`, `mixer`, `preferences`, `history` (the undo history),
+    /// `help` (the keyboard shortcuts) or `transcription` (the words of the
+    /// source clip or the timeline). Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.

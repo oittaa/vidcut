@@ -1384,7 +1384,9 @@ impl Live {
                 ..
             } => (clips.to_vec(), true, *detect == Detect::Speech, *download),
             Request::EditDetectSceneCuts { clips, .. } => (clips.to_vec(), false, false, false),
-            Request::EditRippleDeleteWords { words, quiet: true } => {
+            Request::EditRippleDeleteWords {
+                words, quiet: true, ..
+            } => {
                 let context = p.time_context(playhead);
                 let spans: Vec<(i64, i64)> = words
                     .iter()
