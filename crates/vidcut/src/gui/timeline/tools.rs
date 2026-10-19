@@ -22,6 +22,21 @@ pub struct Stripe {
     pub keep: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct Shot {
+    detect: Detect,
+    threshold_db: f64,
+    speech_threshold: f64,
+    min_speech: f64,
+    pre_head: f64,
+    post_tail: f64,
+    min: f64,
+    stripes: Vec<Stripe>,
+    found: Vec<Stripe>,
+    found_for: Option<Value>,
+    error: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct SilenceDialog {
     pub clips: Vec<String>,
@@ -39,6 +54,8 @@ pub struct SilenceDialog {
     found_for: Option<Value>,
     held: Option<(usize, Edge)>,
     skipped: Option<Vec<Stripe>>,
+    undone: Vec<Shot>,
+    redone: Vec<Shot>,
 }
 
 impl SilenceDialog {
@@ -59,6 +76,8 @@ impl SilenceDialog {
             found_for: None,
             held: None,
             skipped: None,
+            undone: Vec::new(),
+            redone: Vec::new(),
         }
     }
 
@@ -82,6 +101,79 @@ impl SilenceDialog {
 
     pub fn current(&self) -> bool {
         self.found_for.as_ref() == Some(&self.params())
+    }
+
+    fn shot(&self) -> Shot {
+        Shot {
+            detect: self.detect,
+            threshold_db: self.threshold_db,
+            speech_threshold: self.speech_threshold,
+            min_speech: self.min_speech,
+            pre_head: self.pre_head,
+            post_tail: self.post_tail,
+            min: self.min,
+            stripes: self.stripes.clone(),
+            found: self.found.clone(),
+            found_for: self.found_for.clone(),
+            error: self.error.clone(),
+        }
+    }
+
+    fn restore(&mut self, s: Shot) {
+        self.detect = s.detect;
+        self.threshold_db = s.threshold_db;
+        self.speech_threshold = s.speech_threshold;
+        self.min_speech = s.min_speech;
+        self.pre_head = s.pre_head;
+        self.post_tail = s.post_tail;
+        self.min = s.min;
+        self.stripes = s.stripes;
+        self.found = s.found;
+        self.found_for = s.found_for;
+        self.error = s.error;
+        self.asked = None;
+        self.held = None;
+    }
+
+    fn keep(&mut self, before: Shot) {
+        if self.undone.last() != Some(&before) {
+            self.undone.push(before);
+            self.redone.clear();
+        }
+    }
+
+    fn mark(&mut self) {
+        self.keep(self.shot());
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undone.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redone.is_empty()
+    }
+
+    pub fn undo(&mut self) {
+        let now = self.shot();
+        while let Some(s) = self.undone.pop() {
+            if s != now {
+                self.redone.push(now);
+                self.restore(s);
+                return;
+            }
+        }
+    }
+
+    pub fn redo(&mut self) {
+        let now = self.shot();
+        while let Some(s) = self.redone.pop() {
+            if s != now {
+                self.undone.push(now);
+                self.restore(s);
+                return;
+            }
+        }
     }
 
     pub fn edited(&self) -> bool {
@@ -558,6 +650,8 @@ impl Workspace {
             true => ("what isn't speech", "spoken", "Finding speech…"),
         };
         let edited = d.edited();
+        let settled = d.current();
+        let before = d.shot();
         egui::Window::new("Ripple Delete Silence")
             .collapsible(false)
             .resizable(false)
@@ -569,7 +663,8 @@ impl Workspace {
                 )));
                 ui.label(match edited {
                     true => RichText::new(
-                        "Changing a setting finds the stripes again: your edits are lost.",
+                        "Changing a setting finds the stripes again; Ctrl+Z brings your edits \
+                         back.",
                     )
                     .color(theme::colors().accent),
                     false => dim("Changing a setting finds the stripes again."),
@@ -588,6 +683,7 @@ impl Workspace {
                         if speech {
                             ui.add(
                                 egui::DragValue::new(&mut d.speech_threshold)
+                                    .update_while_editing(false)
                                     .range(0.0..=1.0)
                                     .speed(0.01)
                                     .fixed_decimals(2),
@@ -596,6 +692,7 @@ impl Workspace {
                         } else {
                             ui.add(
                                 egui::DragValue::new(&mut d.threshold_db)
+                                    .update_while_editing(false)
                                     .range(-90.0..=0.0)
                                     .speed(0.5)
                                     .suffix(" dB"),
@@ -607,6 +704,7 @@ impl Workspace {
                             ui.label("Shortest Speech");
                             ui.add(
                                 egui::DragValue::new(&mut d.min_speech)
+                                    .update_while_editing(false)
                                     .range(0.0..=5.0)
                                     .speed(0.01)
                                     .suffix(" s"),
@@ -617,6 +715,7 @@ impl Workspace {
                         ui.label("Pre Head");
                         ui.add(
                             egui::DragValue::new(&mut d.pre_head)
+                                .update_while_editing(false)
                                 .range(0.0..=5.0)
                                 .speed(0.01)
                                 .suffix(" s"),
@@ -626,6 +725,7 @@ impl Workspace {
                         ui.label("Post Tail");
                         ui.add(
                             egui::DragValue::new(&mut d.post_tail)
+                                .update_while_editing(false)
                                 .range(0.0..=5.0)
                                 .speed(0.01)
                                 .suffix(" s"),
@@ -635,6 +735,7 @@ impl Workspace {
                         ui.label("Minimum to Trip");
                         ui.add(
                             egui::DragValue::new(&mut d.min)
+                                .update_while_editing(false)
                                 .range(1.0 / fps..=60.0)
                                 .speed(0.01)
                                 .suffix(" s"),
@@ -672,7 +773,8 @@ impl Workspace {
                 ui.label(dim(
                     "Click a stripe to keep it, or drag its edges. [ and ] go to the previous \
                      and next, X keeps or cuts the one at the playhead. Play and Space play \
-                     the timeline as Remove would leave it.",
+                     the timeline as Remove would leave it. Ctrl+Z and Ctrl+Shift+Z undo and \
+                     redo changes to the stripes and the settings.",
                 ));
                 ui.label(dim("Cuts are de-clicked with 3 ms fades."));
                 let ready = d.current() && all > 0;
@@ -681,12 +783,14 @@ impl Workspace {
                         .add_enabled(ready, egui::Button::new("Keep All"))
                         .clicked()
                     {
+                        d.mark();
                         d.stripes.iter_mut().for_each(|s| s.keep = true);
                     }
                     if ui
                         .add_enabled(ready, egui::Button::new("Cut All"))
                         .clicked()
                     {
+                        d.mark();
                         d.stripes.iter_mut().for_each(|s| s.keep = false);
                     }
                 });
@@ -697,6 +801,9 @@ impl Workspace {
                     cancel = ui.button("Cancel").clicked();
                 });
             });
+        if settled && d.params() != params {
+            d.keep(before);
+        }
         if remove || cancel || !open {
             self.live.skip(None);
         }
@@ -727,6 +834,7 @@ impl Workspace {
             && !m.alt
             && let Some(i) = d.at(at)
         {
+            d.mark();
             d.stripes[i].keep ^= true;
         }
         let struck = |k: egui::Key| {
@@ -792,6 +900,9 @@ impl Workspace {
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
             && let Some((i, edge)) = stripe_at(d, p, rows, scale, press, true)
         {
+            if edge.is_some() {
+                d.mark();
+            }
             d.held = edge.map(|e| (i, e));
             return true;
         }
@@ -799,6 +910,7 @@ impl Workspace {
             && let Some(pos) = resp.interact_pointer_pos()
             && let Some((i, _)) = stripe_at(d, p, rows, scale, pos, false)
         {
+            d.mark();
             d.stripes[i].keep ^= true;
             return true;
         }
