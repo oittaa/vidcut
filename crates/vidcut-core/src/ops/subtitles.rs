@@ -100,10 +100,10 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
     };
     let size = match style.size {
         None => None,
-        Some(s) if fraction(s, f64::MIN_POSITIVE, 0.5, true) => Some(s),
+        Some(s) if s.is_finite() && s > 0.0 => Some(s),
         Some(_) => {
             return Err(Error::invalid(
-                "a subtitle size is a fraction of the picture height, above 0 and at most 1/2",
+                "a subtitle size is a fraction of the picture height, above 0",
             ));
         }
     };
@@ -122,10 +122,10 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
             };
             let size = match o.size {
                 None => None,
-                Some(s) if fraction(s, 0.0, 0.5, true) => Some(s),
+                Some(s) if s.is_finite() && (0.0..=0.10).contains(&s) => Some(s),
                 Some(_) => {
                     return Err(Error::invalid(
-                        "an outline's thickness is a fraction of the text height, from 0 to 1/2",
+                        "an outline's thickness is a fraction of the text height, from 0 to 1/10",
                     ));
                 }
             };
@@ -156,14 +156,20 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
             ));
         }
     };
-    Ok(SubtitleStyle {
+    let built = SubtitleStyle {
         font,
         size,
         color,
         outline,
         background,
         margin,
-    })
+    };
+    if !built.fits_two_lines() {
+        return Err(Error::invalid(
+            "two lines of this size do not fit between the margins",
+        ));
+    }
+    Ok(built)
 }
 
 pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {

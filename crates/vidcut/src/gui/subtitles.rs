@@ -141,8 +141,35 @@ fn paint_color(raw: &str, what: &str) -> Result<Option<String>, String> {
         .ok_or_else(|| format!("{what} is #rrggbb"))
 }
 
-fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
-    let background = if d.background.trim().is_empty() {
+fn same_text(shown: &str, stored: Option<&str>) -> bool {
+    shown.trim() == stored.unwrap_or("")
+}
+
+fn kept_number(shown: &str, stored: Option<f64>, what: &str) -> Result<Option<f64>, String> {
+    if shown.trim() == percent(stored) {
+        Ok(stored)
+    } else {
+        number(shown, what)
+    }
+}
+
+fn kept_color(shown: &str, stored: Option<&str>, what: &str) -> Result<Option<String>, String> {
+    if same_text(shown, stored) {
+        Ok(stored.map(str::to_string))
+    } else {
+        paint_color(shown, what)
+    }
+}
+
+fn style_of(d: &TrackDialog, stored: &SubtitleStyle) -> Result<SubtitleStyle, String> {
+    let background = if same_text(
+        &d.background,
+        stored.background.as_ref().map(|b| b.color.as_str()),
+    ) && d.opacity.trim()
+        == percent(stored.background.as_ref().and_then(|b| b.opacity))
+    {
+        stored.background.clone()
+    } else if d.background.trim().is_empty() {
         if !d.opacity.trim().is_empty() {
             return Err("a background needs a color".into());
         }
@@ -153,21 +180,31 @@ fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
             opacity: number(&d.opacity, "opacity")?,
         })
     };
-    let outline_color = paint_color(&d.outline, "an outline color")?;
-    let outline_size = number(&d.outline_size, "outline size")?;
+    let outline_color = kept_color(
+        &d.outline,
+        stored.outline.as_ref().and_then(|o| o.color.as_deref()),
+        "an outline color",
+    )?;
+    let outline_size = kept_number(
+        &d.outline_size,
+        stored.outline.as_ref().and_then(|o| o.size),
+        "outline size",
+    )?;
     let style = SubtitleStyle {
-        font: {
+        font: if same_text(&d.font, stored.font.as_deref()) {
+            stored.font.clone()
+        } else {
             let t = d.font.trim();
             (!t.is_empty()).then(|| t.to_string())
         },
-        size: number(&d.size, "size")?,
-        color: paint_color(&d.color, "a color")?,
+        size: kept_number(&d.size, stored.size, "size")?,
+        color: kept_color(&d.color, stored.color.as_deref(), "a color")?,
         outline: (outline_color.is_some() || outline_size.is_some()).then_some(SubtitleOutline {
             color: outline_color,
             size: outline_size,
         }),
         background,
-        margin: number(&d.margin, "margin")?,
+        margin: kept_number(&d.margin, stored.margin, "margin")?,
     };
     vidcut_core::ops::subtitles::checked_style(&style).map_err(|e| e.message)
 }
@@ -254,13 +291,21 @@ pub(super) fn paint_cues(
             let r = plain.rect;
             let at = pos2(picture.center().x - r.center().x, top - r.top());
             if let Some(color) = backing {
-                let bounds = plain.mesh_bounds;
-                if bounds.width() > 0.0 && bounds.height() > 0.0 {
-                    painter.rect_filled(
-                        bounds.translate(at.to_vec2()).expand((size * 0.15).ceil()),
-                        0.0,
-                        color,
-                    );
+                let slack = (size * 0.15).ceil();
+                for row in &plain.rows {
+                    let ink = row.visuals.mesh_bounds;
+                    if ink.width() <= 0.0 || ink.height() <= 0.0 {
+                        continue;
+                    }
+                    let slot = row.rect().translate(at.to_vec2());
+                    let line = ink
+                        .translate(row.pos.to_vec2())
+                        .translate(at.to_vec2())
+                        .expand(slack)
+                        .intersect(slot);
+                    if line.width() > 0.0 && line.height() > 0.0 {
+                        painter.rect_filled(line, 0.0, color);
+                    }
                 }
             }
             if let Some(color) = outline {
@@ -530,7 +575,7 @@ impl Workspace {
                         if d.language.trim() != t.language.as_deref().unwrap_or_default() {
                             params["language"] = json!(d.language.trim());
                         }
-                        match style_of(&d) {
+                        match style_of(&d, &t.style) {
                             Ok(style) => {
                                 if style != t.style {
                                     params["style"] =

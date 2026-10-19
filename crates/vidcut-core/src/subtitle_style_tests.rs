@@ -62,7 +62,34 @@ fn a_subtitle_size_past_half_the_picture_is_refused() {
     .unwrap_err();
     assert_eq!(
         err.to_string(),
-        "a subtitle size is a fraction of the picture height, above 0 and at most 1/2"
+        "two lines of this size do not fit between the margins"
+    );
+}
+
+#[test]
+fn an_outline_thicker_than_a_tenth_is_refused() {
+    let err = checked_style(&SubtitleStyle {
+        outline: Some(SubtitleOutline {
+            color: None,
+            size: Some(0.2),
+        }),
+        ..SubtitleStyle::default()
+    })
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "an outline's thickness is a fraction of the text height, from 0 to 1/10"
+    );
+}
+
+#[test]
+fn a_project_file_refuses_a_style_track_set_would_refuse() {
+    let mut p = Project::new(Settings::default());
+    add_track(&mut p, None);
+    p.subtitles[0].style.size = Some(40.0);
+    assert_eq!(
+        crate::validate::violations(&p),
+        vec!["S1: two lines of this size do not fit between the margins".to_string()]
     );
 }
 
@@ -117,18 +144,18 @@ fn an_imsc1_file_writes_the_track_style() {
          xmlns:tts=\"http://www.w3.org/ns/ttml#styling\" \
          xmlns:ittp=\"http://www.w3.org/ns/ttml/profile/imsc1#parameter\" \
          ttp:profile=\"http://www.w3.org/ns/ttml/profile/imsc1/text\" \
-         ttp:timeBase=\"media\" ttp:frameRate=\"25\" ttp:cellResolution=\"50 100\">\n\
+         ttp:timeBase=\"media\" ttp:frameRate=\"25\" ttp:cellResolution=\"100 100\">\n\
          \x20 <head>\n\
          \x20   <styling>\n\
          \x20     <style xml:id=\"s\" tts:color=\"#ffcc00\" tts:fontFamily=\"Arial\" \
-         tts:fontSize=\"4c\" tts:textAlign=\"center\"/>\n\
+         tts:fontSize=\"400%\" tts:lineHeight=\"131%\" tts:textAlign=\"center\"/>\n\
          \x20   </styling>\n\
          \x20   <layout>\n\
-         \x20     <region xml:id=\"bottom\" tts:origin=\"8% 0%\" tts:extent=\"84% 92%\" \
+         \x20     <region xml:id=\"bottom\" tts:origin=\"8% 64%\" tts:extent=\"84% 28%\" \
          tts:displayAlign=\"after\"/>\n\
-         \x20     <region xml:id=\"middle\" tts:origin=\"8% 0%\" tts:extent=\"84% 100%\" \
+         \x20     <region xml:id=\"middle\" tts:origin=\"8% 36%\" tts:extent=\"84% 28%\" \
          tts:displayAlign=\"center\"/>\n\
-         \x20     <region xml:id=\"top\" tts:origin=\"8% 8%\" tts:extent=\"84% 92%\" \
+         \x20     <region xml:id=\"top\" tts:origin=\"8% 8%\" tts:extent=\"84% 28%\" \
          tts:displayAlign=\"before\"/>\n\
          \x20   </layout>\n\
          \x20 </head>\n\
@@ -139,5 +166,45 @@ fn an_imsc1_file_writes_the_track_style() {
          \x20   </div>\n\
          \x20 </body>\n\
          </tt>\n"
+    );
+}
+
+#[test]
+fn a_styled_file_keeps_each_cues_place() {
+    let style = checked_style(&style()).unwrap();
+    let text = write(
+        &[
+            Timed {
+                start: 1.0,
+                end: 2.0,
+                text: "Bottom".into(),
+                place: Place::Bottom,
+            },
+            Timed {
+                start: 3.0,
+                end: 4.0,
+                text: "Middle".into(),
+                place: Place::Middle,
+            },
+            Timed {
+                start: 5.0,
+                end: 6.0,
+                text: "Top".into(),
+                place: Place::Top,
+            },
+        ],
+        SubtitleFormat::Ttml,
+        &crate::subtitles::Writing {
+            language: Some("en"),
+            frame_rate: Some(25.0),
+            positions: true,
+            style: &style,
+        },
+    );
+    let (read, _, _) =
+        crate::subtitles::parse(text.as_bytes(), std::path::Path::new("cues.ttml")).unwrap();
+    assert_eq!(
+        read.cues.iter().map(|c| c.place).collect::<Vec<_>>(),
+        vec![Place::Bottom, Place::Middle, Place::Top]
     );
 }

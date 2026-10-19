@@ -687,12 +687,13 @@ pub enum Request {
         /// A subtitle track's look, burned in and written to an IMSC1 file.
         /// Replaces the track's style; a field left out goes back to the
         /// usual look. `font` is a family name. `size` is the text height
-        /// as a fraction of the picture height (above 0, at most 1/2).
-        /// `color` is `#rrggbb`. `outline` is a color and a `size` as a
-        /// fraction of the text height (`0` draws none). `background` is a
-        /// color and an `opacity` from 0 to 1. `margin` is the inset from
-        /// the left and right, and from the top or bottom, as a fraction
-        /// of the picture (from 0 up to but not including 1/2).
+        /// as a fraction of the picture height, above 0. Two lines of it
+        /// have to fit between the margins. `color` is `#rrggbb`. `outline`
+        /// is a color and a `size` as a fraction of the text height, from 0
+        /// to 1/10 (`0` draws none). `background` is a color and an
+        /// `opacity` from 0 to 1. `margin` is the inset from the left and
+        /// right, and from the top or bottom, as a fraction of the picture
+        /// (from 0 up to but not including 1/2).
         #[serde(default)]
         style: Option<SubtitleStyle>,
     },

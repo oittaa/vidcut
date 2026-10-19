@@ -176,7 +176,15 @@ fn block(
     let mut buffer = Buffer::new(&mut f.system, Metrics::new(size, size * LINE));
     buffer.set_wrap(Wrap::WordOrGlyph);
     buffer.set_size(Some(wrap), None);
-    let family = match style.font.as_deref() {
+    let installed = style.font.as_deref().and_then(|name| {
+        f.system.db().faces().find_map(|face| {
+            face.families
+                .iter()
+                .find(|(n, _)| n.eq_ignore_ascii_case(name))
+                .map(|(n, _)| n.clone())
+        })
+    });
+    let family = match installed.as_deref() {
         Some(name) => Family::Name(name),
         None => Family::SansSerif,
     };

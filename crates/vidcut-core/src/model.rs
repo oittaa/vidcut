@@ -1099,6 +1099,46 @@ impl SubtitleStyle {
         (picture_width * (1.0 - 2.0 * inset)).max(self.text_fraction() * picture_height)
     }
 
+    /// Lines are this many times the text height.
+    pub const LINE: f64 = 1.31;
+
+    /// Height of each IMSC1 region, as a fraction of the picture. The three
+    /// regions do not overlap, and each one's middle is where a reader puts
+    /// top, middle and bottom.
+    pub fn region_band(&self) -> f64 {
+        self.imsc_regions().top_h as f64 / 1000.0
+    }
+
+    /// Two lines fit in `region_band`.
+    pub fn fits_two_lines(&self) -> bool {
+        self.text_fraction() * Self::LINE * 2.0 <= self.region_band() + 1e-9
+    }
+
+    /// Region edges in tenths of a percent (1000 is the whole picture).
+    pub fn imsc_regions(&self) -> ImscRegions {
+        let inset = self.margin.unwrap_or(0.10) * 100.0;
+        let x = tenth(inset);
+        let top0 = x;
+        let bot1 = tenth(100.0 - inset);
+        let span = (bot1 - top0) / 3;
+        let top_limit = (tenth(40.0 - 0.5) - top0) * 2;
+        let bot_limit = (bot1 - tenth(60.0 + 0.5)) * 2;
+        let mut h = span.min(top_limit).min(bot_limit).max(0);
+        while h > 0 && (2 * top0 + h >= 800 || 2 * bot1 - h <= 1200 || bot1 - h < top0 + h) {
+            h -= 1;
+        }
+        ImscRegions {
+            x,
+            w: 1000 - 2 * x,
+            top_y: top0,
+            top_h: h,
+            mid_y: top0 + h,
+            mid_h: (bot1 - h) - (top0 + h),
+            bot_y: bot1 - h,
+            bot_h: h,
+        }
+    }
+
     /// The top of a text block `lines` tall.
     pub fn block_top(&self, place: Place, picture_height: f64, lines: f64) -> f64 {
         match (self.margin, place) {
@@ -1108,6 +1148,36 @@ impl SubtitleStyle {
             (None, Place::Top) => picture_height * 0.2 - lines / 2.0,
             (None, Place::Bottom) => picture_height * 0.8 - lines / 2.0,
         }
+    }
+}
+
+fn tenth(percent: f64) -> i32 {
+    (percent * 10.0).round() as i32
+}
+
+/// One IMSC1 layout: horizontal inset and the three regions, in tenths of a percent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImscRegions {
+    pub x: i32,
+    pub w: i32,
+    pub top_y: i32,
+    pub top_h: i32,
+    pub mid_y: i32,
+    pub mid_h: i32,
+    pub bot_y: i32,
+    pub bot_h: i32,
+}
+
+impl ImscRegions {
+    pub fn percent(self, tenths: i32) -> String {
+        let neg = tenths < 0;
+        let t = tenths.abs();
+        let s = if t % 10 == 0 {
+            format!("{}", t / 10)
+        } else {
+            format!("{}.{}", t / 10, t % 10)
+        };
+        if neg { format!("-{s}") } else { s }
     }
 }
 

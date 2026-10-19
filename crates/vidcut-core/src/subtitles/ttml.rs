@@ -584,26 +584,26 @@ fn plain_number(x: f64) -> String {
     }
 }
 
-fn regions(margin: Option<f64>) -> String {
-    let (x, w, top, after) = match margin {
-        None => (10.0, 80.0, 10.0, 90.0),
-        Some(m) => (
-            m * 100.0,
-            (1.0 - 2.0 * m) * 100.0,
-            m * 100.0,
-            (1.0 - m) * 100.0,
-        ),
-    };
+fn regions(style: &SubtitleStyle) -> String {
+    let r = style.imsc_regions();
+    let p = |n| r.percent(n);
     format!(
-        "      <region xml:id=\"bottom\" tts:origin=\"{x}% 0%\" tts:extent=\"{w}% {after}%\" \
-         tts:displayAlign=\"after\"/>\n      <region xml:id=\"middle\" tts:origin=\"{x}% 0%\" \
-         tts:extent=\"{w}% 100%\" tts:displayAlign=\"center\"/>\n      <region xml:id=\"top\" \
-         tts:origin=\"{x}% {top}%\" tts:extent=\"{w}% {below}%\" tts:displayAlign=\"before\"/>\n    ",
-        x = plain_number(x),
-        w = plain_number(w),
-        top = plain_number(top),
-        after = plain_number(after),
-        below = plain_number(100.0 - top),
+        "      <region xml:id=\"bottom\" tts:origin=\"{}% {}%\" tts:extent=\"{}% {}%\" \
+         tts:displayAlign=\"after\"/>\n      <region xml:id=\"middle\" tts:origin=\"{}% {}%\" \
+         tts:extent=\"{}% {}%\" tts:displayAlign=\"center\"/>\n      <region xml:id=\"top\" \
+         tts:origin=\"{}% {}%\" tts:extent=\"{}% {}%\" tts:displayAlign=\"before\"/>\n    ",
+        p(r.x),
+        p(r.bot_y),
+        p(r.w),
+        p(r.bot_h),
+        p(r.x),
+        p(r.mid_y),
+        p(r.w),
+        p(r.mid_h),
+        p(r.x),
+        p(r.top_y),
+        p(r.w),
+        p(r.top_h),
     )
 }
 
@@ -613,12 +613,10 @@ fn style_attrs(style: &SubtitleStyle) -> String {
         .font
         .clone()
         .unwrap_or_else(|| "proportionalSansSerif".into());
-    let size = match style.size {
-        Some(s) => format!("{}c", plain_number(s * 100.0)),
-        None => "100%".into(),
-    };
+    let size = plain_number(style.text_fraction() * 10_000.0);
     let mut attrs = format!(
-        "tts:color=\"{}\" tts:fontFamily=\"{}\" tts:fontSize=\"{size}\" tts:textAlign=\"center\"",
+        "tts:color=\"{}\" tts:fontFamily=\"{}\" tts:fontSize=\"{size}%\" \
+         tts:lineHeight=\"131%\" tts:textAlign=\"center\"",
         escape_xml(&color),
         escape_xml(&font)
     );
@@ -654,11 +652,8 @@ pub fn write(
         return write_plain(cues, language, frame_rate);
     }
     let lang = language.unwrap_or("");
-    let cells = style
-        .size
-        .map(|_| " ttp:cellResolution=\"50 100\"")
-        .unwrap_or("");
-    let regions = regions(style.margin);
+    let cells = " ttp:cellResolution=\"100 100\"";
+    let regions = regions(style);
     let background = background_color(style);
     let mut out = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tt xml:lang=\"{}\" \
