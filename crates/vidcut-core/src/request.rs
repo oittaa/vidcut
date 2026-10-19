@@ -872,16 +872,21 @@ pub enum Request {
         #[serde(default)]
         overwrite: bool,
     },
-    /// Create Subtitles from Audio: transcribe the speech in the timeline's
-    /// mix over `range` (default: In–Out when both are set, else
-    /// everything) on this computer, on the GPU unless the preferences turn
-    /// it off, and add it as cues to a subtitle track. Muted tracks aren't
-    /// heard. The model files are downloaded once, into the cache folder,
-    /// when `download` allows it.
+    /// Create Subtitles from Audio: transcribe the speech in the mix of the
+    /// tracks heard (`tracks`) over `range` (default: In–Out when both are
+    /// set, else everything) on this computer, on the GPU unless the
+    /// preferences turn it off, and add it as cues to a subtitle track. The
+    /// model files are downloaded once, into the cache folder, when
+    /// `download` allows it.
     #[serde(rename = "subtitles.transcribe")]
     SubtitlesTranscribe {
         #[serde(default)]
         range: Option<RangeSpec>,
+        /// The tracks heard, such as `["A1"]`, muted or not; the others
+        /// aren't. Default: the tracks playback hears, those not muted, or
+        /// the soloed ones.
+        #[serde(default)]
+        tracks: Option<Vec<String>>,
         /// Default: `parakeet-ultra`.
         #[serde(default)]
         model: Option<SpeechModel>,
@@ -928,12 +933,18 @@ pub enum Request {
     /// correction that puts 90% of them within 0.5 s of their words wins:
     /// one offset, an offset and a speed, an offset for each section between
     /// jumps, or else each of those cues moved to its words. A dry run
-    /// answers the same and moves nothing. Muted tracks aren't heard.
+    /// answers the same and moves nothing. Only the tracks heard
+    /// (`tracks`) count.
     #[serde(rename = "subtitles.retime")]
     SubtitlesRetime {
         /// Default: the shown subtitle track.
         #[serde(default)]
         track: Option<String>,
+        /// The tracks heard, such as `["A1"]`, muted or not; the others
+        /// aren't. Default: the tracks playback hears, those not muted, or
+        /// the soloed ones.
+        #[serde(default)]
+        tracks: Option<Vec<String>>,
         /// Also match the cues' words to the words Parakeet Ultra hears.
         #[serde(default)]
         words: bool,

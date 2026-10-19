@@ -42,7 +42,7 @@ Ripple Delete Silence with `detect: speech` cuts what isn't speech. vidcut-av's 
 
 ## Transcription
 
-Create Subtitles from Audio (`subtitles.transcribe`) splits the same way. The editor flattens the range in one channel at 16 kHz (`RATE`), as an export would mix it, and asks `Env::transcribe` for what was said; vidcut-av's `transcribe::transcribe` hears it with transcribe.cpp, built in through the `transcribe-cpp` crate, and vidcut-core makes the cues.
+Create Subtitles from Audio (`subtitles.transcribe`) splits the same way. The editor flattens the range of the tracks heard (`heard_tracks`: the request's `tracks`, or those playback hears) in one channel at 16 kHz (`RATE`), as an export would mix it, and asks `Env::transcribe` for what was said; vidcut-av's `transcribe::transcribe` hears it with transcribe.cpp, built in through the `transcribe-cpp` crate, and vidcut-core makes the cues.
 
 ```mermaid
 flowchart TD
@@ -83,7 +83,7 @@ flowchart TD
   plan --> set["ops::subtitles::set_cue"]
 ```
 
-- **Speech** is where each heard clip's cached voice activity is speech by Silero's rule with its defaults (`SPEECH` 0.5, `SHORTEST_SPEECH` 0.25 s, `SHORTEST_PAUSE` 0.1 s), on the timeline through the clip (`Span`).
+- **Speech** is where the cached voice activity of each clip on the tracks heard (`heard_tracks`) is speech by Silero's rule with its defaults (`SPEECH` 0.5, `SHORTEST_SPEECH` 0.25 s, `SHORTEST_PAUSE` 0.1 s), on the timeline through the clip (`Span`).
 - **Lining up** (`retime::line_up`) scores each offset, every 10 ms up to `max_offset`, by the cross-correlation of the speech, less its mean, with where the cues show. It is summed exactly, as the trapezoid each speech stretch and cue make against the offset (`Ramps`), not sampled. Speeds from 0.95 to 1.05 are tried in steps that move the last cue 0.25 s, then a tenth of that around the best. A speed within 0.25 s of 1 or of a frame-rate ratio over the track snaps to it (`retime::snap`), and stays only when it scores above speed 1. The best offset is clear when it scores `CLEAR` (1.25) times the highest other peak more than 2 s from it.
 - **Words** (`retime::anchors`): the cues' text and the words heard, as lower-case letters and digits, are matched in order by their longest common runs, as Python's difflib does without its junk heuristic. A cue whose first word is in a run of `RUN` (3) words or more is anchored at that word's start, and at its last word's end when that word matched in the same run, so that only the cue's own words lie between; otherwise the cue keeps its length.
 - **Levels** (`retime::levels`) fit the anchors' offsets (the word's start less the cue's): their median; a Theil–Sen line, its speed snapped as above; sections, each starting where 5 anchors in a row sit more than 0.5 s from the last section's offset and within 0.5 s of their own median; and last, each anchored cue at its words, the others as in their section. The first that puts 90% of the anchors within `FIT` (0.5 s) wins. Under `MIN_ANCHORS` (10) the words decide nothing, and a clear offset from the speech stands.

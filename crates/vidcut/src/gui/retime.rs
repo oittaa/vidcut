@@ -3,24 +3,40 @@ use serde_json::{Value, json};
 use vidcut_av::transcribe;
 
 use super::export::{Ask, near_center};
+use super::speech::{Hear, listed};
 use super::theme;
 use super::workspace::{Workspace, dim};
 
 const LISTED: usize = 200;
 
+#[derive(Debug, Clone, PartialEq)]
+struct Key {
+    words: bool,
+    heard: Vec<String>,
+}
+
 #[derive(Debug)]
 pub struct Retime {
     track: String,
     words: bool,
+    hear: Hear,
+    heard: Vec<String>,
     have: bool,
-    asked: Option<(bool, Ask)>,
-    found: Option<(bool, Value)>,
-    error: Option<(bool, String)>,
+    asked: Option<(Key, Ask)>,
+    found: Option<(Key, Value)>,
+    error: Option<(Key, String)>,
 }
 
 impl Retime {
+    fn key(&self) -> Key {
+        Key {
+            words: self.words,
+            heard: self.heard.clone(),
+        }
+    }
+
     fn params(&self, download: bool) -> Value {
-        let mut p = json!({ "track": self.track, "words": self.words });
+        let mut p = json!({ "track": self.track, "words": self.words, "tracks": self.heard });
         if download {
             p["download"] = json!(true);
         }
@@ -28,9 +44,10 @@ impl Retime {
     }
 
     fn current(&self) -> Option<&Value> {
+        let key = self.key();
         self.found
             .as_ref()
-            .filter(|(words, _)| *words == self.words)
+            .filter(|(k, _)| *k == key)
             .map(|(_, v)| v)
     }
 }
@@ -62,6 +79,8 @@ impl Workspace {
         self.timeline.retime = Some(Retime {
             track: track.to_string(),
             words: false,
+            hear: Hear::default(),
+            heard: Vec::new(),
             have: transcribe::present(&dir, &transcribe::PARAKEET_ULTRA),
             asked: None,
             found: None,
@@ -187,20 +206,20 @@ impl Workspace {
         let Some(t) = p.subtitle_track(&d.track) else {
             return;
         };
-        if let Some((words, ask)) = &d.asked
+        if let Some((key, ask)) = &d.asked
             && let Some(result) = ask.take()
         {
             match result {
                 Ok(r) => {
-                    d.found = Some((*words, r.result));
+                    d.found = Some((key.clone(), r.result));
                     d.error = None;
                 }
                 Err(e) => {
                     d.found = None;
-                    d.error = Some((*words, e.message));
+                    d.error = Some((key.clone(), e.message));
                 }
             }
-            if *words {
+            if key.words {
                 d.have =
                     transcribe::present(&crate::paths::models_dir(), &transcribe::PARAKEET_ULTRA);
             }
@@ -218,11 +237,26 @@ impl Workspace {
             .show(ctx, |ui| {
                 ui.set_max_width(460.0);
                 ui.label(dim(format!(
-                    "Lines up where the timeline's speech is heard with where {name}'s subtitles \
-                     show, and moves them to fit: an offset, and a speed change where one fits \
-                     better. It needs no words, so any language works, translations too."
+                    "Lines up where speech is heard on the tracks it hears with where {name}'s \
+                     subtitles show, and moves them to fit: an offset, and a speed change where \
+                     one fits better. It needs no words, so any language works, translations too."
                 )));
                 ui.add_space(4.0);
+                ui.add_enabled_ui(d.asked.is_none(), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Hear");
+                        d.heard = d.hear.ui(ui, &p);
+                    });
+                });
+                match d.heard.is_empty() {
+                    true => ui.label(
+                        RichText::new("Tick a track to hear").color(ui.visuals().warn_fg_color),
+                    ),
+                    false => ui.label(dim(format!(
+                        "Hears {} over the whole timeline",
+                        listed(&d.heard)
+                    ))),
+                };
                 ui.add_enabled_ui(d.asked.is_none(), |ui| {
                     ui.checkbox(&mut d.words, format!("Also match words ({})", file.title));
                 });
@@ -244,7 +278,7 @@ impl Workspace {
                     (_, _, true) => {
                         ui.label(dim("Finding… Jobs shows the progress, and can cancel it"));
                     }
-                    (Some((words, e)), _, false) if *words == d.words => {
+                    (Some((key, e)), _, false) if *key == d.key() => {
                         ui.label(RichText::new(e).color(theme::colors().error));
                     }
                     (_, Some(v), false) => {
@@ -265,7 +299,10 @@ impl Workspace {
                         false => "Find".into(),
                     };
                     find = ui
-                        .add_enabled(d.asked.is_none(), egui::Button::new(label))
+                        .add_enabled(
+                            d.asked.is_none() && !d.heard.is_empty(),
+                            egui::Button::new(label),
+                        )
                         .clicked();
                     let ready = d.asked.is_none()
                         && d.current().is_some_and(|v| v["moved"].as_u64() > Some(0));
@@ -278,7 +315,7 @@ impl Workspace {
             dry["dry_run"] = json!(true);
             d.found = None;
             d.error = None;
-            d.asked = Some((d.words, Ask::send(&self.live, ctx, "subtitles.retime", dry)));
+            d.asked = Some((d.key(), Ask::send(&self.live, ctx, "subtitles.retime", dry)));
         }
         if apply {
             self.send("subtitles.retime", d.params(false));

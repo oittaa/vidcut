@@ -1568,10 +1568,45 @@ fn transcribed_range(
     Ok((a, b))
 }
 
-fn sound_plan(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
+fn heard_tracks(p: &Project, tracks: Option<&[String]>) -> Result<Vec<String>> {
+    let Some(list) = tracks else {
+        let solo = p.any_solo();
+        return Ok(p
+            .tracks
+            .iter()
+            .filter(|t| t.audible(solo))
+            .map(|t| t.id.clone())
+            .collect());
+    };
+    if list.is_empty() {
+        return Err(Error::usage("tracks: name at least one track to hear"));
+    }
+    if let Some(id) = list.iter().find(|id| p.track(id).is_none()) {
+        return Err(Error::not_found(format!("tracks: no track {id}")));
+    }
+    Ok(p.tracks
+        .iter()
+        .filter(|t| list.contains(&t.id))
+        .map(|t| t.id.clone())
+        .collect())
+}
+
+fn sounding(p: &Project, heard: &[String]) -> Vec<String> {
+    p.tracks
+        .iter()
+        .filter(|t| heard.contains(&t.id) && t.clips.iter().any(|c| c.audio.is_some()))
+        .map(|t| t.id.clone())
+        .collect()
+}
+
+fn sound_plan(p: &Project, a: i64, b: i64, heard: &[String]) -> Result<RenderPlan> {
     let mut q = p.clone();
     q.settings.sample_rate = transcript::RATE;
     q.settings.channels = 1;
+    for t in &mut q.tracks {
+        t.muted = !heard.contains(&t.id);
+        t.solo = false;
+    }
     crate::render::flatten(&q, a, b)
 }
 
@@ -2630,6 +2665,7 @@ fn mutate(
         }
         Request::SubtitlesTranscribe {
             range,
+            tracks,
             model,
             model_file,
             vad_file,
@@ -2650,8 +2686,9 @@ fn mutate(
                 return Err(Error::usage("gap: 0 to 10 frames"));
             }
             let (a, b) = transcribed_range(p, range.as_ref(), playhead)?;
+            let heard = heard_tracks(p, tracks.as_deref())?;
             let speech = env.transcribe(
-                &sound_plan(p, a, b)?,
+                &sound_plan(p, a, b, &heard)?,
                 &transcript::Asked {
                     model: model.unwrap_or_default(),
                     model_file: model_file.clone(),
@@ -2702,6 +2739,7 @@ fn mutate(
                 "track": on,
                 "cues": ids,
                 "from": a, "to": b,
+                "heard": sounding(p, &heard),
                 "model": speech.model,
                 "device": speech.device,
                 "language": speech.language,
@@ -2713,6 +2751,7 @@ fn mutate(
         }
         Request::SubtitlesRetime {
             track,
+            tracks,
             words,
             language,
             max_offset,
@@ -2722,6 +2761,7 @@ fn mutate(
             env,
             &Retime {
                 track: track.as_deref(),
+                tracks: tracks.as_deref(),
                 words: *words,
                 language: language.as_ref(),
                 max_offset: max_offset.as_ref(),
@@ -5089,7 +5129,7 @@ fn silent_parts(
     })
 }
 
-fn heard_speech(p: &Project, env: &dyn Env) -> Result<Vec<(f64, f64)>> {
+fn heard_speech(p: &Project, env: &dyn Env, heard: &[String]) -> Result<Vec<(f64, f64)>> {
     let fps = p.settings.fps;
     let f = fps.as_f64();
     let frames = |secs: f64| (secs * f).round() as i64;
@@ -5103,12 +5143,11 @@ fn heard_speech(p: &Project, env: &dyn Env) -> Result<Vec<(f64, f64)>> {
         threshold: retime::SPEECH,
         min_speech: frames(retime::SHORTEST_SPEECH),
     };
-    let any_solo = p.any_solo();
     let mut found = Vec::new();
     for c in p
         .tracks
         .iter()
-        .filter(|t| t.audible(any_solo))
+        .filter(|t| heard.contains(&t.id))
         .flat_map(|t| &t.clips)
     {
         let Some(a) = c.audio.as_ref().filter(|a| !a.muted) else {
@@ -5147,6 +5186,7 @@ fn heard_speech(p: &Project, env: &dyn Env) -> Result<Vec<(f64, f64)>> {
 
 struct Retime<'a> {
     track: Option<&'a str>,
+    tracks: Option<&'a [String]>,
     words: bool,
     language: Option<&'a String>,
     max_offset: Option<&'a TimeSpec>,
@@ -5251,7 +5291,8 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
     if max <= 0.0 {
         return Err(Error::usage("max_offset: longer than 0"));
     }
-    let speech = heard_speech(p, env)?;
+    let heard = heard_tracks(p, r.tracks)?;
+    let speech = heard_speech(p, env, &heard)?;
     let lined = retime::line_up(&speech, (0.0, p.end() as f64 / fps), &cues, max);
     let clear = lined.ok().filter(|l| l.clear);
     let mut warnings = Vec::new();
@@ -5259,7 +5300,7 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
     let mut chosen_errors = None;
     let plan = if r.words {
         let heard = env.transcribe(
-            &sound_plan(p, 0, p.end())?,
+            &sound_plan(p, 0, p.end(), &heard)?,
             &transcript::Asked {
                 model: SpeechModel::ParakeetUltra,
                 model_file: None,
@@ -5368,6 +5409,7 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
     Ok(json!({
         "track": id,
         "cues": cues.len(),
+        "heard": sounding(p, &heard),
         "speech": lined.ok().map(|l| json!({
             "offset": rounded(l.offset),
             "speed": l.speed,
