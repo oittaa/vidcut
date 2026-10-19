@@ -226,7 +226,7 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **vidcut:** an OpenTimelineIO export writes an SRT beside it for each subtitle track with cues, in its timecode, ready for Insert Selected Subtitles to Timeline Using Timecode; a whole timeline's file also holds the cues for vidcut. `export.start` writes subtitle files beside media when asked (`subtitles`).
 - **Why:** subtitles made in vidcut should reach the editor that finishes the program.
 
-## X43. Create Subtitles from Audio with open models on this computer
+## X46. Create Subtitles from Audio with open models on this computer
 - **Resolve:** Studio only, from Timeline > AI Tools on the Edit page, with its built-in AI; more languages come as an Extras download (pp. 1234–1235). Its dialog shows the progress; a caption preset styles the result.
 - **vidcut:** `subtitles.transcribe` runs transcribe.cpp on this computer, on the GPU (Vulkan or Metal) unless GPU acceleration is off: Qwen3-ASR 1.7B (the default, 30 languages), Whisper large-v3 (100 languages) or Parakeet Ultra (25 European languages, for small GPUs), or a GGUF file named, with Silero VAD, built in, to find the speech. The speech models are downloaded into the cache folder only when `download` says so, each checked against its SHA-256. The language, the characters per line, one or two lines and the gap are its options, with Resolve's defaults; `track` and `range` pick where. The answer names the model, the device, the language and how the cues were timed. No caption presets.
 - **Why:** the speech never leaves the computer, any build has it, and a script or agent can run it and choose the model.
