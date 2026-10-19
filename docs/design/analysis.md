@@ -20,11 +20,17 @@ vidcut-core reaches media only through the `Env` trait. `AvEnv` implements it on
 
 | Request | Measurement (`Env`) | Decision (`analysis`) |
 |---|---|---|
-| `edit.ripple_delete_silence`, `analyze.silence` | `Env::audio_levels`: peaks of one audio stream | `analysis::silent_parts`; the edit then calls `ops::remove_parts` |
+| `edit.ripple_delete_silence`, `analyze.silence` | `Env::audio_levels`: peaks of one audio stream; with `detect: speech`, `Env::voice_activity`: its speech probabilities | `analysis::silent_parts`, or `analysis::non_speech_parts`; the edit then calls `ops::remove_parts` |
 | `edit.detect_scene_cuts`, `analyze.scenes` | `Env::picture_stats`: the smaller of each frame's difference from the last and the change in that difference; the first frame scores 0 | `analysis::scene_cuts`; the edit then calls `ops::split_clip` |
 | `analyze.black` | `Env::picture_stats`: each frame's black share | `analysis::black_parts` |
 | `analyze.loudness` | `Env::loudness` of the flattened timeline | none |
 | `timeline.boring` | none: clip lengths | `analysis::boring` |
+
+## Speech
+
+Ripple Delete Silence with `detect: speech` cuts what isn't speech. vidcut-av's `transcribe::voice_activity` mixes one audio stream in one channel at 16 kHz through `AudioMix`, as transcription listens (`listen`), and feeds it to the built-in Silero VAD on the CPU in pieces. `VoiceActivity` keeps its speech probability for each of the VAD's frames (32 ms). `analysis::non_speech` finds the speech in the clip's part of them by Silero's own rule, which transcribe.cpp ports: speech starts at a frame at or above the threshold, and ends at a frame more than 0.15 below it when no frame reaches the threshold again within Minimum to Trip; speech no longer than Shortest Speech doesn't count. What lies between is cut, less Pre Head and Post Tail, as for silence (`analysis::silent_parts`).
+
+**Why** probabilities, not transcribe.cpp's segments: those depend on the threshold and the lengths, so each change in the dialog would run the VAD over the whole file again; the probabilities are measured once, cached like the levels, and decided again at once.
 
 ## In a GUI
 
@@ -67,7 +73,7 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 |---|---|---|
 | pool filmstrips, timeline tiles | `thumbs` (`thumbcache`) | origin, size, frames |
 | waveforms | `waveforms` | origin, channels |
-| audio levels, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
+| audio levels, voice activity, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
 | light, for HDR metadata | `analysis` (`light::cache_in`) | origin |
 | proxies | `proxies.folder` (`Proxies::folder_in`): `proxies` beside the project unless set (in the cache dir without a project); an absolute folder is shared by every project | content (`paths::proxy_origin`), size, codec |
 | GPU encoders that work | `encoders.json` (`export::detected`) | FFmpeg, system and GPUs |
@@ -76,7 +82,7 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 | compiled libplacebo shaders | `shaders` (`cuda::keep_shaders_in`) | libplacebo's |
 | speech models | `models` (`paths::models_dir`) | file name, checked by size; SHA-256 when downloaded |
 
-On disk only `thumbs` has a size limit (`thumbcache::evict`, least recently used first), set in the preferences. `Tiles::evict` also drops kept pictures past the tile cache's own budget. Levels, picture stats and light are memoized in the process too, and what was heard (`HEARD`) only there.
+On disk only `thumbs` has a size limit (`thumbcache::evict`, least recently used first), set in the preferences. `Tiles::evict` also drops kept pictures past the tile cache's own budget. Levels, voice activity, picture stats and light are memoized in the process too, and what was heard (`HEARD`) only there.
 
 ## Storyboards
 

@@ -209,7 +209,7 @@ Ctrl+Z / Ctrl+Shift+Z, unlimited. Edit > History lists the last twenty steps, ne
 - **Mixer** (pp. 649–650): a channel strip per track with sound (name, meter, fader in dB, mute and solo) and the mix's meter. Solo silences the tracks that aren't soloed; mute and solo apply to the export too (p. 650). Track pan and FX: out.
 - **Viewer meter** (p. 642): shows what the viewer plays; its speaker button mutes playback only, not the export.
 - **Clip volume:** one gain per clip, and clip mute.
-- **Ripple Delete Silence** (p. 773): Clip > Audio Operations > Ripple Delete Silence on the selected clips (vidcut: the clip's right-click menu or Timeline Actions). Settings: threshold (dB), pre-head, post-tail, minimum to trip. It shows the parts to remove as red stripes; Remove cuts them and closes the gaps, as one undo step (D29; no crossfade option, deviation X11).
+- **Ripple Delete Silence** (p. 773): Clip > Audio Operations > Ripple Delete Silence on the selected clips (vidcut: the clip's right-click menu or Timeline Actions). Settings: threshold (dB), pre-head, post-tail, minimum to trip; vidcut adds Detect, Sound level or Speech (deviation X47). It shows the parts to remove as red stripes; Remove cuts them and closes the gaps, as one undo step (D29; no crossfade option, deviation X11).
 
 ## 10. Quick Export (Ch. 39, pp. 788–790, 4095–4096, 4104–4109)
 

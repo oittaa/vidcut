@@ -227,7 +227,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "edit.ripple_delete_silence",
-        "vidcut edit ripple-delete-silence c1 --dry-run\n  vidcut edit ripple-delete-silence c1 c2 --threshold-db -35 --pre-head 0.2s --post-tail 0.2s",
+        "vidcut edit ripple-delete-silence c1 --dry-run\n  vidcut edit ripple-delete-silence c1 c2 --threshold-db -35 --pre-head 0.2s --post-tail 0.2s\n  vidcut edit ripple-delete-silence c1 --detect speech --speech-threshold 0.6",
     ),
     (
         "edit.paste",
