@@ -1630,6 +1630,48 @@ fn check_clip_color(color: &str) -> Result<()> {
     )))
 }
 
+pub fn leave_out(
+    p: &mut Project,
+    media: &str,
+    spans: &[(i64, i64)],
+    back: bool,
+) -> Result<Vec<(i64, i64)>> {
+    let m = p
+        .media(media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+    let frames = p.media_frames(m);
+    for &(a, b) in spans {
+        if a >= b || a < 0 || b > frames {
+            return Err(Error::invalid(format!(
+                "{a}..{b} isn't inside {media} (0..{frames})"
+            )));
+        }
+    }
+    let m = p
+        .media
+        .iter_mut()
+        .find(|m| m.id == media)
+        .expect("found above");
+    let mut all: Vec<(i64, i64)> = match back {
+        true => m
+            .left_out
+            .iter()
+            .flat_map(|&(a, b)| crate::model::uncovered(a, b, spans))
+            .collect(),
+        false => m.left_out.iter().chain(spans).copied().collect(),
+    };
+    all.sort_unstable();
+    let mut merged: Vec<(i64, i64)> = Vec::new();
+    for (a, b) in all {
+        match merged.last_mut() {
+            Some((_, e)) if a <= *e => *e = (*e).max(b),
+            _ => merged.push((a, b)),
+        }
+    }
+    m.left_out.clone_from(&merged);
+    Ok(merged)
+}
+
 pub fn set_media_color_space(p: &mut Project, ids: &[String], space: ColorSpace) -> Result<()> {
     for id in ids {
         let m = p

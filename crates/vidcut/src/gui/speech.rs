@@ -64,6 +64,8 @@ struct Dialog {
     gpu: bool,
     asking: bool,
     hear: Hear,
+    media: Vec<String>,
+    again: bool,
 }
 
 #[derive(Debug, Default)]
@@ -246,6 +248,16 @@ fn language_label(code: &str) -> String {
 
 impl Workspace {
     pub(crate) fn open_speech(&mut self) {
+        self.open_hearing(Vec::new());
+    }
+
+    pub(crate) fn open_transcribe(&mut self, media: Vec<String>) {
+        if !media.is_empty() {
+            self.open_hearing(media);
+        }
+    }
+
+    fn open_hearing(&mut self, media: Vec<String>) {
         if self.project().is_none() {
             return;
         }
@@ -261,7 +273,25 @@ impl Workspace {
             gpu,
             asking: false,
             hear: Hear::default(),
+            media,
+            again: false,
         });
+    }
+
+    fn transcribe_media(&mut self, s: &Settings, media: &[String], again: bool, download: bool) {
+        let mut params = json!({ "media": media, "model": s.model });
+        if let Some(l) = &s.language {
+            params["language"] = json!(l);
+        }
+        if again {
+            params["again"] = json!(true);
+        }
+        if download {
+            params["download"] = json!(true);
+        }
+        self.send("media.transcribe", params);
+        self.export.show_jobs = true;
+        self.speech.last = Some(s.clone());
     }
 
     fn create_subtitles(&mut self, s: &Settings, heard: &[String], download: bool) {
@@ -314,19 +344,40 @@ impl Workspace {
         let mut heard: Vec<String> = Vec::new();
         let mut open = true;
         let (mut create, mut cancel) = (false, false);
-        egui::Window::new("Create Subtitles from Audio")
+        let transcribing = !d.media.is_empty();
+        let names: Vec<String> = d
+            .media
+            .iter()
+            .map(|id| p.media(id).map_or_else(|| id.clone(), |m| m.name.clone()))
+            .collect();
+        let kept = d.media.iter().any(|id| self.snap.transcribed.contains(id));
+        let title = match transcribing {
+            true => "Transcribe Audio",
+            false => "Create Subtitles from Audio",
+        };
+        egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
             .default_pos(near_center(ctx, 460.0, 420.0))
             .open(&mut open)
             .show(ctx, |ui| {
                 ui.add_enabled_ui(!d.asking, |ui| {
-                    ui.label(dim(
-                        "Transcribes the speech on the tracks it hears, on this computer, and \
-                         adds it as subtitles.",
-                    ));
+                    ui.label(dim(match transcribing {
+                        true => format!(
+                            "Transcribes the sound of {} on this computer and keeps its words \
+                             with their times, for the Transcription window and cutting by \
+                             words.",
+                            listed(&names)
+                        ),
+                        false => "Transcribes the speech on the tracks it hears, on this \
+                                  computer, and adds it as subtitles."
+                            .into(),
+                    }));
                     ui.add_space(4.0);
                     ui.label("Model");
+                    if transcribing && !s.model.times_words() {
+                        s.model = SpeechModel::default();
+                    }
                     for (i, (model, note)) in MODELS.iter().enumerate() {
                         let f = transcribe::file_of(*model);
                         let size = transcribe::size(f.bytes);
@@ -338,8 +389,14 @@ impl Workspace {
                             SpeechModel::ParakeetUltra => format!("{} (default)", f.title),
                             _ => f.title.to_string(),
                         };
+                        let usable = !transcribing || model.times_words();
                         ui.horizontal(|ui| {
-                            ui.radio_value(&mut s.model, *model, title);
+                            ui.add_enabled_ui(usable, |ui| {
+                                ui.radio_value(&mut s.model, *model, title)
+                                    .on_disabled_hover_text(
+                                        "It doesn't time each word, which cutting by words needs",
+                                    );
+                            });
                             ui.label(dim(have));
                         });
                         ui.indent(("speech-model-note", i), |ui| ui.label(dim(*note)));
@@ -385,6 +442,17 @@ impl Workspace {
                                     }
                                 });
                             ui.end_row();
+                            if transcribing {
+                                if kept {
+                                    ui.label("Transcribed");
+                                    ui.checkbox(
+                                        &mut d.again,
+                                        "Transcribe again, replacing the words kept",
+                                    );
+                                    ui.end_row();
+                                }
+                                return;
+                            }
                             ui.label("Range");
                             ui.vertical(|ui| {
                                 let whole = format!("Whole timeline ({})", self.src_tc(p.end()));
@@ -461,21 +529,28 @@ impl Workspace {
                         _ => (0, p.end()),
                     };
                     ui.separator();
-                    match heard.is_empty() {
-                        true => ui.label(
-                            RichText::new("Tick a track to hear").color(ui.visuals().warn_fg_color),
-                        ),
-                        false => ui.label(format!(
-                            "Hears {}, {} – {}",
-                            listed(&heard),
-                            self.tc(a),
-                            self.tc(b - 1)
-                        )),
-                    };
+                    if !transcribing {
+                        match heard.is_empty() {
+                            true => ui.label(
+                                RichText::new("Tick a track to hear")
+                                    .color(ui.visuals().warn_fg_color),
+                            ),
+                            false => ui.label(format!(
+                                "Hears {}, {} – {}",
+                                listed(&heard),
+                                self.tc(a),
+                                self.tc(b - 1)
+                            )),
+                        };
+                    }
                     ui.label(dim("Jobs shows its progress, and can cancel it"));
                     ui.horizontal(|ui| {
+                        let label = if transcribing { "Transcribe" } else { "Create" };
                         create = ui
-                            .add_enabled(!heard.is_empty(), egui::Button::new("Create"))
+                            .add_enabled(
+                                transcribing || !heard.is_empty(),
+                                egui::Button::new(label),
+                            )
                             .clicked();
                         cancel = ui.button("Cancel").clicked();
                     });
@@ -486,7 +561,10 @@ impl Workspace {
             d.have[index(s.model)] = transcribe::present(&dir, file);
             if transcribe::needed(&dir, Some(file)).is_empty() {
                 let settings = s.clone();
-                self.create_subtitles(&settings, &heard, false);
+                match transcribing {
+                    true => self.transcribe_media(&settings, &d.media, d.again, false),
+                    false => self.create_subtitles(&settings, &heard, false),
+                }
                 return;
             }
             d.asking = true;
@@ -508,7 +586,11 @@ impl Workspace {
                 ));
                 ui.label(dim("Jobs shows the download's progress, and can cancel it"));
                 ui.horizontal(|ui| {
-                    if ui.button("Download and Create").clicked() {
+                    let go = match transcribing {
+                        true => "Download and Transcribe",
+                        false => "Download and Create",
+                    };
+                    if ui.button(go).clicked() {
                         answer = Some(true);
                     }
                     if ui.button("Not Now").clicked() {
@@ -522,7 +604,10 @@ impl Workspace {
             match answer {
                 Some(true) => {
                     let settings = d.settings.clone();
-                    self.create_subtitles(&settings, &heard, true);
+                    match transcribing {
+                        true => self.transcribe_media(&settings, &d.media, d.again, true),
+                        false => self.create_subtitles(&settings, &heard, true),
+                    }
                     return;
                 }
                 Some(false) => d.asking = false,

@@ -24,6 +24,7 @@ mod theme;
 mod tiles;
 mod timeline;
 mod titles;
+mod transcription;
 mod trim_strips;
 mod video;
 mod viewer;

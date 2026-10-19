@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Checks the docs against the repository:
+#   - no file has the conflict marks a merge leaves
 #   - every backticked name in docs/design/ exists in crates/
 #   - every relative link in a Markdown file points at a file that exists,
 #     and its #anchor at a heading of that file
@@ -33,6 +34,11 @@ xargs awk '
 ' < "$tmp/docs" > "$tmp/anchors"
 
 status=0
+
+if git grep -n -I -E '^(<<<<<<<|>>>>>>>)( |$)|^=======$' -- . ; then
+  echo "conflict marks left by a merge (above)"
+  status=1
+fi
 
 xargs awk -v paths="$tmp/paths" -v anchors="$tmp/anchors" '
   function norm(p,   n, parts, out, i, k, r) {

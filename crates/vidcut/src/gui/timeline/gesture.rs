@@ -939,6 +939,7 @@ mod tests {
             proxy: None,
             color: None,
             color_space: Default::default(),
+            left_out: Vec::new(),
             fingerprint: None,
         }
     }

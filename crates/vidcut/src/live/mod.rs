@@ -449,6 +449,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         notices: Arc::new(VecDeque::new()),
         thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
+        transcribed: Arc::new(HashSet::new()),
         lost_proxies: Arc::new(HashMap::new()),
         proxy_dir: Arc::from(Path::new("")),
         waveforms: Arc::new(HashMap::new()),
@@ -506,6 +507,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         notice_seq: 0,
         thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
+        transcribed: Arc::new(HashSet::new()),
         lost_proxies: Arc::new(HashMap::new()),
         proxy_dir: Arc::from(Path::new("")),
         missing_watch: missing::MissingWatch::start(tx.clone()),
@@ -757,6 +759,7 @@ struct Live {
     notice_seq: u64,
     thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     missing: Arc<HashSet<String>>,
+    transcribed: Arc<HashSet<String>>,
     lost_proxies: Arc<HashMap<String, PathBuf>>,
     proxy_dir: Arc<Path>,
     missing_watch: missing::MissingWatch,
@@ -947,6 +950,7 @@ impl Live {
                     self.job_ended(&id, &result);
                 }
                 self.finish(job, result);
+                self.refresh_transcribed();
             }
             Msg::PreferencesChanged => {
                 changed = self
@@ -1215,6 +1219,7 @@ impl Live {
             notices: self.notices.clone(),
             thumbs: self.thumbs.clone(),
             missing: self.missing.clone(),
+            transcribed: self.transcribed.clone(),
             lost_proxies: self.lost_proxies.clone(),
             proxy_dir: self.proxy_dir.clone(),
             waveforms: self.waveforms.clone(),
@@ -2464,7 +2469,9 @@ impl Live {
             | Request::AnalyzeSilence { .. }
             | Request::AnalyzeScenes { .. }
             | Request::AnalyzeBlack { .. }
-            | Request::AnalyzeLoudness { .. } => self.project_task(envelope, job),
+            | Request::AnalyzeLoudness { .. }
+            | Request::AnalyzeWords { media: Some(_), .. }
+            | Request::AnalyzeWords { clips: Some(_), .. } => self.project_task(envelope, job),
             Request::EditRippleDeleteSilence { .. } | Request::EditDetectSceneCuts { .. } => {
                 match self.measuring(&envelope) {
                     Some(measure) => Step::Measure(measure, Box::new(envelope)),
@@ -2486,7 +2493,9 @@ impl Live {
                 };
                 Step::Encode(Box::new(encode), Box::new(envelope), title, "proxy")
             }
-            Request::SubtitlesTranscribe { .. } | Request::AnalyzeWords { .. } => {
+            Request::SubtitlesTranscribe { .. }
+            | Request::AnalyzeWords { .. }
+            | Request::MediaTranscribe { .. } => {
                 let Some(open) = &self.project else {
                     return Step::Now(Err(no_project()));
                 };
@@ -2500,15 +2509,12 @@ impl Live {
                         .apply(copy, &env, None)
                         .map(drop)
                 };
-                let words = matches!(envelope.request, Request::AnalyzeWords { .. });
-                let title = if words {
-                    "Words in the speech"
-                } else {
-                    "Create Subtitles from Audio"
-                }
-                .to_string();
-                let kind = if words { "words" } else { "subtitles" };
-                Step::Encode(Box::new(hear), Box::new(envelope), title, kind)
+                let (title, kind) = match &envelope.request {
+                    Request::AnalyzeWords { .. } => ("Words in the speech", "words"),
+                    Request::MediaTranscribe { .. } => ("Transcribe Audio", "transcript"),
+                    _ => ("Create Subtitles from Audio", "subtitles"),
+                };
+                Step::Encode(Box::new(hear), Box::new(envelope), title.into(), kind)
             }
             Request::SubtitlesRetime { .. } => {
                 let Some(open) = &self.project else {
@@ -2792,7 +2798,23 @@ impl Live {
         self.dirty = true;
     }
 
+    fn refresh_transcribed(&mut self) {
+        let Some(open) = &self.project else { return };
+        let now: HashSet<String> = open
+            .project()
+            .media
+            .iter()
+            .filter(|m| crate::env::transcribed(m))
+            .map(|m| m.id.clone())
+            .collect();
+        if *self.transcribed != now {
+            self.transcribed = Arc::new(now);
+            self.dirty = true;
+        }
+    }
+
     fn check_media(&mut self) {
+        self.refresh_transcribed();
         let Some(open) = &self.project else { return };
         let media: Vec<_> = open.project().media.clone();
         let channels = open.project().settings.channels;

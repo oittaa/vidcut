@@ -1013,10 +1013,29 @@ impl Workspace {
         if let Some(px) = &proxy {
             badge(px.badge, px.color, true);
         }
+        let transcribed = self.snap.transcribed.contains(&m.id);
+        if transcribed {
+            let galley = painter.layout_no_wrap(
+                egui_phosphor::regular::CHAT_TEXT.to_string(),
+                egui::FontId::proportional(12.0),
+                theme::colors().text,
+            );
+            let r = Rect::from_min_size(
+                Pos2::new(rect.left() + 3.0, rect.bottom() - galley.size().y - 5.0),
+                galley.size() + vec2(6.0, 2.0),
+            );
+            painter.rect_filled(r, CornerRadius::same(2), theme::colors().panel_dark);
+            painter.galley(r.min + vec2(3.0, 1.0), galley, theme::colors().text);
+        }
         format!(
-            "{}\n{}\n{}{}{}I/O while hovering marks the clip; double-click opens it",
+            "{}\n{}\n{}{}{}{}I/O while hovering marks the clip; double-click opens it",
             m.name,
             m.path.display(),
+            if transcribed {
+                "Transcribed: its words are kept with it\n"
+            } else {
+                ""
+            },
             if missing {
                 "The file is missing: Relink Media finds it, or right-click > Relink…\n"
             } else {
@@ -1360,6 +1379,33 @@ impl Workspace {
             }
             if m.proxy.is_some() && ui.button("Remove Proxy").clicked() {
                 self.send("proxy.remove", json!({ "media": m.id }));
+                ui.close();
+            }
+            if !m.info.audio.is_empty()
+                && ui
+                    .button("Transcribe Audio…")
+                    .on_hover_text(
+                        "Keep the words said in it, with their times, for the Transcription \
+                         window and cutting by words",
+                    )
+                    .clicked()
+            {
+                let ids = match self.snap.selection.media.contains(&m.id) {
+                    true => self
+                        .snap
+                        .selection
+                        .media
+                        .iter()
+                        .filter(|id| {
+                            self.project()
+                                .and_then(|p| p.media(id))
+                                .is_some_and(|x| !x.info.audio.is_empty())
+                        })
+                        .cloned()
+                        .collect(),
+                    false => vec![m.id.clone()],
+                };
+                self.open_transcribe(ids);
                 ui.close();
             }
             if ui

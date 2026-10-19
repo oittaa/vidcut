@@ -120,6 +120,53 @@ pub enum Request {
     },
     #[serde(rename = "media.rename")]
     MediaRename { media: String, name: String },
+    /// Transcribe Audio: hear each pool item's own sound (`stream`, counted
+    /// from 0) and keep its words, with their times, with the media, for
+    /// `analyze.words` with `media` or `clips` and the Transcription window.
+    /// A media already transcribed keeps its transcript unless `again`. Only
+    /// a model that times words is kept: Parakeet Ultra; the others are
+    /// refused. It runs as a job. A transcript is kept with vidcut's other
+    /// measurements of the file, so a changed file has none.
+    #[serde(rename = "media.transcribe")]
+    MediaTranscribe {
+        media: OneOrMany<String>,
+        #[serde(default)]
+        stream: u32,
+        /// Default: `parakeet-ultra`.
+        #[serde(default)]
+        model: Option<SpeechModel>,
+        /// A transcribe.cpp GGUF model file to use instead of `model`'s.
+        #[serde(default)]
+        model_file: Option<PathBuf>,
+        /// A Silero VAD model file (GGUF, or whisper.cpp's `.bin`) to find
+        /// the speech with, instead of the one built into vidcut.
+        #[serde(default)]
+        vad_file: Option<PathBuf>,
+        /// The language spoken, as a code such as `en` or `fi`. Default: the
+        /// model tells it from the longest stretch of speech.
+        #[serde(default)]
+        language: Option<String>,
+        /// Download the model files this computer doesn't have yet from
+        /// Hugging Face, each checked against its SHA-256. Without it, a
+        /// missing file is an error that says what would be downloaded.
+        #[serde(default)]
+        download: bool,
+        /// Hear media that have a transcript again, replacing it.
+        #[serde(default)]
+        again: bool,
+    },
+    /// Leave words of a pool item out of edits, as Delete does in the
+    /// Transcription window on a source clip: their spans (source frames,
+    /// as `analyze.words` gives them with `media`) are struck through there,
+    /// and its Place on Top, Insert and Append edit only the rest of the
+    /// selection. `back` brings them back (Undelete).
+    #[serde(rename = "media.leave_out")]
+    MediaLeaveOut {
+        media: String,
+        words: Vec<SpokenWord>,
+        #[serde(default)]
+        back: bool,
+    },
     /// Set the Clip Color of media items, which their clips show unless
     /// they have their own.
     #[serde(rename = "media.set")]
@@ -312,14 +359,28 @@ pub enum Request {
         #[serde(default)]
         range: Option<RangeSpec>,
     },
-    /// The words said in the mix of the tracks heard (`tracks`) over
-    /// `range`, each with the timeline frames the model gave it, for
-    /// `edit.ripple_delete_words`. It hears as `subtitles.transcribe` does
-    /// and adds no cues. Only a model that times words: Parakeet Ultra
-    /// does. Whisper large-v3 times phrases and Qwen3-ASR gives no times,
-    /// so they are refused rather than have estimates cut as words.
+    /// The words said, each with its frames, for `edit.ripple_delete_words`.
+    /// With `media` or `clips`, from their media's transcripts
+    /// (`media.transcribe`), heard nothing new: the media's source frames,
+    /// or each clip's timeline frames. Otherwise the mix of the tracks heard
+    /// (`tracks`) over `range` is heard now, as `subtitles.transcribe` hears
+    /// it, without adding cues. Only a model that times words: Parakeet
+    /// Ultra does. Whisper large-v3 times phrases and Qwen3-ASR gives no
+    /// times, so their words are refused rather than have estimates cut as
+    /// words.
     #[serde(rename = "analyze.words")]
     AnalyzeWords {
+        /// A pool item: its words in source frames, from its transcript.
+        #[serde(default)]
+        media: Option<String>,
+        /// With `media`: the sound stream whose transcript is read, counted
+        /// from 0. Default: the first one transcribed.
+        #[serde(default)]
+        stream: Option<u32>,
+        /// Clips: the words each one shows, in timeline frames, from its
+        /// media's transcript.
+        #[serde(default)]
+        clips: Option<OneOrMany<ClipRef>>,
         #[serde(default)]
         range: Option<RangeSpec>,
         /// The tracks heard, such as `["A1"]`, muted or not; the others
@@ -1746,6 +1807,12 @@ pub enum SpeechModel {
     WhisperLargeV3,
 }
 
+impl SpeechModel {
+    pub fn times_words(self) -> bool {
+        self == Self::ParakeetUltra
+    }
+}
+
 /// A subtitle file format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -1900,6 +1967,9 @@ pub enum GuiPanel {
     Help,
     /// The undo history.
     History,
+    /// The Transcription window: the words of the source clip or the
+    /// timeline, from their media's transcripts.
+    Transcription,
 }
 
 /// Media Pool sort orders.
@@ -2222,6 +2292,7 @@ impl Request {
                     | Self::TitlesList { .. }
                     | Self::SubtitlesExport { .. }
                     | Self::AnalyzeWords { .. }
+                    | Self::MediaTranscribe { .. }
                     | Self::MediaList {}
                     | Self::MediaGet { .. }
                     | Self::Probe { .. }
@@ -2271,6 +2342,11 @@ impl Request {
                 ..
             }
             | Self::AnalyzeWords {
+                model_file,
+                vad_file,
+                ..
+            }
+            | Self::MediaTranscribe {
                 model_file,
                 vad_file,
                 ..

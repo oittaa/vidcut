@@ -1580,7 +1580,9 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
                         total / 1000
                     )
                 }
-                None if matches!(j.kind, "subtitles" | "words") => "preparing…".into(),
+                None if matches!(j.kind, "subtitles" | "words" | "transcript") => {
+                    "preparing…".into()
+                }
                 None => format!(
                     "{done} / {total} frames{}{}",
                     if j.outputs.len() > 1 {
@@ -1727,6 +1729,7 @@ fn job_method(j: &JobInfo) -> Option<&'static str> {
         "proxy" => Some("proxy.generate"),
         "subtitles" => Some("subtitles.transcribe"),
         "words" => Some("analyze.words"),
+        "transcript" => Some("media.transcribe"),
         "retime" => Some("subtitles.retime"),
         _ => None,
     }
