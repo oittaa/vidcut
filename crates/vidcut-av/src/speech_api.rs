@@ -336,11 +336,9 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             },
         });
     }
-    if reused > 0 {
+    if let Some(note) = kept_note(company, reused, requests.len()) {
         for w in &mut warnings {
-            w.push(format!(
-                "{company}'s reply kept from before was used: nothing was sent or charged"
-            ));
+            w.push(note.clone());
         }
     }
     let longest = requests
@@ -368,17 +366,35 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             false => None,
             true if service_speakers || channel_speakers => Some((run.clone(), service)),
             true if !heard[i].is_empty() => {
-                let (turns, by) = transcribe::speakers_of(
+                let spoken = language.as_deref().or(asked.language.as_deref());
+                match transcribe::speaker_model_ready(
                     options.models,
-                    &heard[i],
-                    options.gpu,
-                    language.as_deref().or(asked.language.as_deref()),
+                    spoken,
                     asked.speaker_model,
-                    started,
-                    &mut warnings[i],
-                )?;
-                transcript::give_speakers(&mut said, &turns);
-                Some((transcribe::run_id(), by))
+                    asked.download,
+                ) {
+                    Err(e) => {
+                        warnings[i].push(format!(
+                            "{company} tells speakers in up to {} minutes of speech, and this \
+                             computer can't past that: {e}",
+                            GOOGLE_LONGEST / 60.0
+                        ));
+                        None
+                    }
+                    Ok(()) => {
+                        let (turns, by) = transcribe::speakers_of(
+                            options.models,
+                            &heard[i],
+                            options.gpu,
+                            spoken,
+                            asked.speaker_model,
+                            started,
+                            &mut warnings[i],
+                        )?;
+                        transcript::give_speakers(&mut said, &turns);
+                        Some((transcribe::run_id(), by))
+                    }
+                }
             }
             true => None,
         };
@@ -398,6 +414,19 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
         });
     }
     Ok(out)
+}
+
+fn kept_note(company: &str, reused: usize, pieces: usize) -> Option<String> {
+    match reused {
+        0 => None,
+        n if n == pieces => Some(format!(
+            "{company}'s reply kept from before was used: nothing was sent or charged"
+        )),
+        n => Some(format!(
+            "{company}'s replies kept from before were used for {n} of {pieces} pieces; the \
+             rest was sent"
+        )),
+    }
 }
 
 fn split(pieces: &[Piece], length: i64, max: i64) -> Vec<(i64, i64)> {
@@ -935,8 +964,18 @@ fn keep_reply(key: &str, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Heard, google_code, google_words, offset, reply_key, xai_words};
+    use super::{Heard, google_code, google_words, kept_note, offset, reply_key, xai_words};
     use serde_json::json;
+
+    #[test]
+    fn a_run_kept_in_part_says_the_rest_was_sent() {
+        assert_eq!(
+            kept_note("Google", 1, 3).as_deref(),
+            Some(
+                "Google's replies kept from before were used for 1 of 3 pieces; the rest was sent"
+            )
+        );
+    }
 
     #[test]
     fn the_order_of_the_settings_doesnt_change_the_reply_key() {

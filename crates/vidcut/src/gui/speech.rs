@@ -143,7 +143,7 @@ fn wanted(s: &Settings) -> Vec<&'static transcribe::File> {
     transcribe::file_of(s.model)
         .into_iter()
         .chain(
-            (s.speakers && s.model != SpeechModel::Xai)
+            (s.speakers && !s.model.paid())
                 .then(|| transcribe::speaker_file(s.language.as_deref(), s.speaker_model)),
         )
         .collect()

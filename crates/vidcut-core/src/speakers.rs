@@ -89,9 +89,23 @@ impl Speakers {
     }
 
     pub fn assign(&mut self, a: Assigned) {
-        self.assigned.retain(|o| {
-            o.media != a.media || o.stream != a.stream || o.end <= a.start || o.start >= a.end
-        });
+        let mut kept = Vec::new();
+        for o in std::mem::take(&mut self.assigned) {
+            if o.media != a.media || o.stream != a.stream || o.end <= a.start || o.start >= a.end {
+                kept.push(o);
+                continue;
+            }
+            if o.start < a.start {
+                kept.push(Assigned {
+                    end: a.start,
+                    ..o.clone()
+                });
+            }
+            if o.end > a.end {
+                kept.push(Assigned { start: a.end, ..o });
+            }
+        }
+        self.assigned = kept;
         if !a.person.is_empty() {
             self.assigned.push(a);
         }

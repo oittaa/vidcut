@@ -125,6 +125,21 @@ fn assigning_no_one_gives_the_words_back_to_their_speaker() {
 }
 
 #[test]
+fn assigning_inside_a_stretch_keeps_the_words_around_it() {
+    let mut s = Speakers::default();
+    let a = |start: f64, end: f64, person: &str| Assigned {
+        media: "m1".into(),
+        stream: 0,
+        start,
+        end,
+        person: person.into(),
+    };
+    s.assign(a(0.0, 10.0, "will"));
+    s.assign(a(4.0, 6.0, "nikki"));
+    assert_eq!(s.assigned_to("m1", 0, 8.0).as_deref(), Some("will"));
+}
+
+#[test]
 fn a_person_made_up_by_name_is_called_that() {
     assert_eq!(Speakers::default().name("Will"), "Will");
 }
