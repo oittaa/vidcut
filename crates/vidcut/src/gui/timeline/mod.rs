@@ -316,17 +316,15 @@ const LOWER_ROWS: [f32; 3] = [100.0, 60.0, 46.0];
 const LOWER_SUBTITLE: f32 = 40.0;
 const LOWER_SUBTITLE_MINIMIZED: f32 = 22.0;
 const LOWER_RULER: f32 = 22.0;
-const HEADER: f32 = 120.0;
+const HEADER: f32 = 150.0;
 const BOX_CONTROL: f32 = 18.0;
 
 mod icon {
     pub use egui_phosphor::regular::{
-        ARROWS_IN_LINE_HORIZONTAL as RIPPLE, ARROWS_IN_LINE_VERTICAL as SHRINK,
-        ARROWS_OUT_LINE_HORIZONTAL as DYNAMIC_TRIM, ARROWS_OUT_LINE_VERTICAL as ENLARGE,
-        BOOKMARK_SIMPLE as MARKER, EYE as VIDEO_ON, EYE_SLASH as VIDEO_OFF,
-        LIGHTNING as TIMELINE_ACTIONS, LOCK_SIMPLE as LOCKED, LOCK_SIMPLE_OPEN as UNLOCKED,
-        MAGNET as SNAP, PENCIL_SIMPLE as EDIT_ACTIONS, SCISSORS as SPLIT,
-        SLIDERS_HORIZONTAL as OPTIONS, SPEAKER_HIGH as AUDIO_ON, SPEAKER_SLASH as AUDIO_OFF,
+        ARROWS_IN_LINE_VERTICAL as SHRINK, ARROWS_OUT_LINE_VERTICAL as ENLARGE,
+        BOOKMARK_SIMPLE as MARKER, EYE as VIDEO_ON, EYE_SLASH as VIDEO_OFF, LOCK_SIMPLE as LOCKED,
+        LOCK_SIMPLE_OPEN as UNLOCKED, MAGNET as SNAP, SCISSORS as SPLIT, SPEAKER_HIGH as AUDIO_ON,
+        SPEAKER_SLASH as AUDIO_OFF,
     };
 }
 
@@ -345,11 +343,10 @@ fn header_button(ui: &mut egui::Ui, at: Rect, icon: &str, name: &str, lit: bool)
     r
 }
 
-fn icon_menu(ui: &mut egui::Ui, icon: &str, name: &str, menu: impl FnOnce(&mut egui::Ui)) {
-    let r = ui
-        .menu_button(RichText::new(icon).size(15.0), menu)
-        .response;
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
+fn word_toggle(ui: &mut egui::Ui, word: &str, name: &str, on: bool) -> egui::Response {
+    let r = ui.add(egui::Button::selectable(on, RichText::new(word).small()));
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, name));
+    r
 }
 
 fn options_path() -> std::path::PathBuf {
@@ -1040,16 +1037,16 @@ impl Workspace {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(upper.shrink(3.0)));
         child.set_clip_rect(upper.intersect(child.clip_rect()));
         child.spacing_mut().item_spacing = vec2(2.0, 2.0);
-        child.spacing_mut().button_padding = vec2(4.0, 1.0);
+        child.spacing_mut().button_padding = vec2(3.0, 1.0);
         child.spacing_mut().interact_size.y = BOX_CONTROL;
         child.horizontal(|ui| {
-            icon_menu(ui, icon::OPTIONS, "Timeline Options", |ui| {
+            ui.menu_button(RichText::new("Options").small(), |ui| {
                 self.options_menu(ui, p)
             });
-            icon_menu(ui, icon::TIMELINE_ACTIONS, "Timeline Actions", |ui| {
+            ui.menu_button(RichText::new("Actions").small(), |ui| {
                 self.timeline_actions_menu(ui, p, false)
             });
-            icon_menu(ui, icon::EDIT_ACTIONS, "Edit Actions", |ui| {
+            ui.menu_button(RichText::new("Edit").small(), |ui| {
                 self.edit_actions_menu(ui)
             });
         });
@@ -1075,15 +1072,10 @@ impl Workspace {
 
     fn timeline_tools(&mut self, ui: &mut egui::Ui, p: &Project) {
         let ripple = p.settings.ripple_on;
-        if icon_toggle(ui, icon::RIPPLE, "Ripple On", ripple).clicked() {
+        if word_toggle(ui, "Ripple", "Ripple On", ripple).clicked() {
             self.send("project.set", json!({ "ripple_on": !ripple }));
         }
-        let r = icon_toggle(
-            ui,
-            icon::DYNAMIC_TRIM,
-            "Dynamic Trim",
-            self.timeline.dynamic.is_some(),
-        );
+        let r = word_toggle(ui, "Trim", "Dynamic Trim", self.timeline.dynamic.is_some());
         if r.clicked() {
             self.toggle_dynamic();
         }
