@@ -9,6 +9,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
     for w in &r.warnings {
         eprintln!("vidcut: warning: {w}");
     }
+    for n in r.result["notes"].as_array().into_iter().flatten() {
+        eprintln!("vidcut: {}", n.as_str().unwrap_or_default());
+    }
     if let Some(()) = live(method, r) {
         return;
     }

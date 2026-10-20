@@ -1374,6 +1374,7 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
         sound_db: (found == FindSpeech::Sound).then_some(floor),
         speakers_by: speakers.as_ref().map(|(_, by)| by.to_string()),
         speakers: speakers.map(|(run, _)| run),
+        notes: Vec::new(),
     })
 }
 

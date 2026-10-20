@@ -86,6 +86,8 @@ pub struct Speech {
     pub speakers: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speakers_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

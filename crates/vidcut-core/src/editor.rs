@@ -1756,6 +1756,7 @@ fn clip_speech(
         sound_db: asked.level(),
         speakers: None,
         speakers_by: None,
+        notes: Vec::new(),
     };
     let mut clips = Vec::new();
     for (track, t) in p.tracks.iter().enumerate() {
@@ -1830,6 +1831,11 @@ fn clip_speech(
         speech
             .warnings
             .extend(s.warnings.iter().map(|w| format!("{}: {w}", m.name)));
+        for n in &s.notes {
+            if !speech.notes.contains(n) {
+                speech.notes.push(n.clone());
+            }
+        }
         media.push(json!({
             "media": m.id,
             "stream": stream,
@@ -3429,6 +3435,7 @@ fn mutate(
                 "pieces": speech.pieces,
                 "longest_piece": speech.longest_piece,
                 "warnings": warnings,
+                "notes": speech.notes,
             })
         }
         Request::SubtitlesTimeWords {
@@ -5748,6 +5755,7 @@ pub fn query(
             let mut out = Vec::new();
             let mut warnings = Vec::new();
             let mut files = Vec::new();
+            let mut notes: Vec<String> = Vec::new();
             for id in media.to_vec() {
                 let m = p
                     .media(&id)
@@ -5806,9 +5814,14 @@ pub fn query(
                 v["device"] = json!(speech.device);
                 v["warnings"] = json!(speech.warnings);
                 warnings.extend(speech.warnings.iter().map(|w| format!("{}: {w}", m.name)));
+                for n in &speech.notes {
+                    if !notes.contains(n) {
+                        notes.push(n.clone());
+                    }
+                }
                 out.push(v);
             }
-            json!({ "media": out, "warnings": warnings })
+            json!({ "media": out, "warnings": warnings, "notes": notes })
         }
         Request::AnalyzeWords {
             media,
@@ -5951,6 +5964,7 @@ pub fn query(
                 "pieces": speech.pieces,
                 "longest_piece": speech.longest_piece,
                 "warnings": warnings,
+                "notes": speech.notes,
             })
         }
         Request::SubtitlesExport {

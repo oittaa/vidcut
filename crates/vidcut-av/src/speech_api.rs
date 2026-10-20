@@ -336,11 +336,9 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             },
         });
     }
-    if let Some(note) = kept_note(company, reused, requests.len()) {
-        for w in &mut warnings {
-            w.push(note.clone());
-        }
-    }
+    let notes: Vec<String> = kept_note(company, reused, requests.len())
+        .into_iter()
+        .collect();
     let longest = requests
         .iter()
         .map(|(a, b)| secs(b - a))
@@ -411,6 +409,7 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             sound_db: found.1,
             speakers_by: speakers.as_ref().map(|(_, by)| by.to_string()),
             speakers: speakers.map(|(run, _)| run),
+            notes: notes.clone(),
         });
     }
     Ok(out)
@@ -420,11 +419,10 @@ fn kept_note(company: &str, reused: usize, pieces: usize) -> Option<String> {
     match reused {
         0 => None,
         n if n == pieces => Some(format!(
-            "{company}'s reply kept from before was used: nothing was sent or charged"
+            "From {company}'s saved reply: nothing sent, nothing charged"
         )),
         n => Some(format!(
-            "{company}'s replies kept from before were used for {n} of {pieces} pieces; the \
-             rest was sent"
+            "{n} of {pieces} pieces from {company}'s saved replies; the rest was sent"
         )),
     }
 }
@@ -973,9 +971,7 @@ mod tests {
     fn a_run_kept_in_part_says_the_rest_was_sent() {
         assert_eq!(
             kept_note("Google", 1, 3).as_deref(),
-            Some(
-                "Google's replies kept from before were used for 1 of 3 pieces; the rest was sent"
-            )
+            Some("1 of 3 pieces from Google's saved replies; the rest was sent")
         );
     }
 

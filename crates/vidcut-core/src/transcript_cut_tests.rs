@@ -19,6 +19,7 @@ fn speech(model: &str, timing: Timing, said: Vec<Said>) -> Speech {
         sound_db: None,
         speakers: None,
         speakers_by: None,
+        notes: Vec::new(),
     }
 }
 
