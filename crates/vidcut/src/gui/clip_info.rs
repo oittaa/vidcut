@@ -359,11 +359,7 @@ impl Workspace {
         let Some(p) = self.project_shared() else {
             return;
         };
-        let id = self
-            .clip_info
-            .media
-            .clone()
-            .or_else(|| self.snap.selection.media.last().cloned());
+        let id = self.clip_info.media.clone().or_else(|| self.chosen_media());
         let m = id.as_deref().and_then(|id| p.media(id)).cloned();
         if let Some(m) = &m {
             let fresh = self

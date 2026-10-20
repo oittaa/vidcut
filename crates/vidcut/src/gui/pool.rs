@@ -179,6 +179,13 @@ pub(super) fn shown_media<'a>(p: &'a Project, view: &PoolView, search: &str) -> 
         .collect()
 }
 
+fn chosen(clicked: Option<&str>, selected: &[String]) -> Option<String> {
+    clicked
+        .filter(|id| selected.iter().any(|s| s == id))
+        .map(String::from)
+        .or_else(|| selected.last().cloned())
+}
+
 fn strip_path() -> std::path::PathBuf {
     crate::paths::config_dir().join("pool.json")
 }
@@ -531,14 +538,12 @@ impl Workspace {
         }
     }
 
+    pub(super) fn chosen_media(&self) -> Option<String> {
+        chosen(self.pool_clicked.as_deref(), &self.snap.selection.media)
+    }
+
     fn metadata_strip(&mut self, ui: &mut egui::Ui, p: &Project) {
-        let m = self
-            .snap
-            .selection
-            .media
-            .last()
-            .and_then(|id| p.media(id))
-            .cloned();
+        let m = self.chosen_media().and_then(|id| p.media(&id).cloned());
         egui::Frame::new()
             .fill(theme::colors().panel_dark)
             .inner_margin(egui::Margin::symmetric(6, 4))
@@ -1488,6 +1493,7 @@ impl Workspace {
             return;
         }
         if resp.clicked() {
+            self.pool_clicked = Some(m.id.clone());
             let mods = resp.ctx.input(|i| i.modifiers);
             let mut selection = self.snap.selection.media.clone();
             if mods.command {
@@ -1943,6 +1949,12 @@ mod tests {
             bin: "Day 1".into(),
             ..PoolView::default()
         }
+    }
+
+    #[test]
+    fn the_strip_shows_the_clip_clicked_last_while_it_is_selected() {
+        let selected = ["m1".to_string(), "m2".into(), "m3".into()];
+        assert_eq!(super::chosen(Some("m1"), &selected).as_deref(), Some("m1"));
     }
 
     #[test]
