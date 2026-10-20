@@ -34,6 +34,7 @@ rfd.workspace = true
 shlex.workspace = true
 zip.workspace = true
 crc32fast.workspace = true
+keyring.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true

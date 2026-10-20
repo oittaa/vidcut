@@ -26,6 +26,7 @@ pub mod probe;
 pub mod progress;
 pub mod proxy;
 pub mod route;
+pub mod speech_api;
 pub(crate) mod stretch;
 pub mod testdata;
 pub mod thumbs;

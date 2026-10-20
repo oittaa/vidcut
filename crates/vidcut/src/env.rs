@@ -55,6 +55,9 @@ fn heard_key(plan: &RenderPlan, asked: &Asked) -> String {
         "language": asked.language,
         "find": asked.find.unwrap_or_default(),
         "sound_db": asked.level(),
+        "speakers": asked.speakers,
+        "xai": asked.xai,
+        "google": asked.google,
     }))
     .unwrap_or_default();
     vidcut_core::fingerprint::digest(&bytes)
@@ -272,15 +275,8 @@ impl Env for AvEnv {
                 "the timeline's sound changed while it was being transcribed; run it again",
             ));
         }
-        let speech = vidcut_av::transcribe::transcribe(
-            plan,
-            asked,
-            &vidcut_av::transcribe::Options {
-                models: &paths::models_dir(),
-                gpu: crate::preferences::gpu_acceleration(),
-            },
-        )
-        .map_err(av_error)?;
+        let speech = vidcut_av::transcribe::transcribe(plan, asked, &speech_options(asked)?)
+            .map_err(av_error)?;
         let speech = Arc::new(speech);
         let mut memo = lock();
         if memo.len() >= HEARD_KEPT {
@@ -321,20 +317,29 @@ impl Env for AvEnv {
         asked: &Asked,
     ) -> Result<Arc<Speech>> {
         let speech = self.transcribe(plan, asked)?;
-        vidcut_core::transcript::spoken(&speech).map_err(Error::invalid)?;
-        let (file, origin) = transcript_file(media, stream);
-        let bytes = serde_json::to_vec(&*speech).map_err(|e| Error::internal(e.to_string()))?;
-        let part = file.with_extension("part");
-        file.parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&part, origin.stamp(&bytes)))
-            .and_then(|()| std::fs::rename(&part, &file))
-            .map_err(|e| Error::media(format!("{}: {e}", file.display())))?;
-        TRANSCRIPTS
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert((file, origin), speech.clone());
-        Ok(speech)
+        keep_transcript(media, stream, speech)
+    }
+
+    fn transcribe_files(
+        &self,
+        files: &[(&Media, u32, &RenderPlan)],
+        asked: &Asked,
+    ) -> Result<Vec<Arc<Speech>>> {
+        if !asked.model.paid() || asked.model_file.is_some() {
+            return files
+                .iter()
+                .map(|(m, s, plan)| self.transcribe_media(m, *s, plan, asked))
+                .collect();
+        }
+        let plans: Vec<&RenderPlan> = files.iter().map(|f| f.2).collect();
+        let speeches =
+            vidcut_av::transcribe::transcribe_files(&plans, asked, &speech_options(asked)?)
+                .map_err(av_error)?;
+        files
+            .iter()
+            .zip(speeches)
+            .map(|((m, s, _), speech)| keep_transcript(m, *s, Arc::new(speech)))
+            .collect()
     }
 
     fn fillers(&self, language: &str) -> Option<Vec<String>> {
@@ -628,6 +633,36 @@ pub fn start_timecode(
             })
         }
     }
+}
+
+fn speech_options(asked: &Asked) -> Result<vidcut_av::transcribe::Options<'static>> {
+    static MODELS: LazyLock<PathBuf> = LazyLock::new(paths::models_dir);
+    let key = match asked.model.paid() && asked.model_file.is_none() {
+        true => crate::services::key(asked.model)?,
+        false => None,
+    };
+    Ok(vidcut_av::transcribe::Options {
+        models: &MODELS,
+        gpu: crate::preferences::gpu_acceleration(),
+        key,
+    })
+}
+
+fn keep_transcript(media: &Media, stream: u32, speech: Arc<Speech>) -> Result<Arc<Speech>> {
+    vidcut_core::transcript::spoken(&speech).map_err(Error::invalid)?;
+    let (file, origin) = transcript_file(media, stream);
+    let bytes = serde_json::to_vec(&*speech).map_err(|e| Error::internal(e.to_string()))?;
+    let part = file.with_extension("part");
+    file.parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(&part, origin.stamp(&bytes)))
+        .and_then(|()| std::fs::rename(&part, &file))
+        .map_err(|e| Error::media(format!("{}: {e}", file.display())))?;
+    TRANSCRIPTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert((file, origin), speech.clone());
+    Ok(speech)
 }
 
 #[cfg(test)]

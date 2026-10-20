@@ -1609,6 +1609,13 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
                     format!("listening · {} / {} s of sound", done / 1000, total / 1000)
                 }
                 Some(Stage::Loading) => "loading the model".into(),
+                Some(Stage::Speakers) => "finding the speakers".into(),
+                Some(Stage::Uploading) => format!(
+                    "uploading · {:.0} / {:.0} MB",
+                    done as f64 / 1e6,
+                    total as f64 / 1e6
+                ),
+                Some(Stage::Waiting) => "waiting for the reply".into(),
                 Some(Stage::Transcribing) => {
                     format!(
                         "transcribing · {} / {} s of speech",

@@ -1863,7 +1863,10 @@ impl Live {
                     .map_or(0.0, |d| d.as_secs_f64()),
                 origin: job.origin.name().into(),
                 method: job.method.clone(),
-                params: job.params.clone(),
+                params: match job.method.as_str() {
+                    "services.set_key" => json!({ "service": job.params["service"] }),
+                    _ => job.params.clone(),
+                },
                 summary: self.summary(&job, &result),
                 ok: result.is_ok(),
                 error: result.as_ref().err().map(|e| e.message.clone()),

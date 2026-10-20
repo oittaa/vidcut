@@ -43,6 +43,40 @@ pub struct Project {
     /// (`Interviews`, `Interviews/Day 1`), sorted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bins: Vec<String>,
+    /// Who speaks: names, the files' speakers joined as one person, and
+    /// words given to another (`speakers.*`).
+    #[serde(default, skip_serializing_if = "Speakers::is_empty")]
+    pub speakers: Speakers,
+}
+
+/// Who speaks in the transcripts the project uses. A transcript numbers
+/// its speakers; a speaker of a paid run over several files has one number
+/// in all of them.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Speakers {
+    /// A person's name, by person (`speakers.list`). Unnamed, a person is
+    /// `Speaker N`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub names: BTreeMap<String, String>,
+    /// The person a file's speaker is, by voice (`m3/0/2`: the media, its
+    /// sound stream and the speaker's number), where it isn't the person its
+    /// transcript gives.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub links: BTreeMap<String, String>,
+    /// Words given to another person, the last one first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assigned: Vec<Assigned>,
+}
+
+/// A file's words given to a person: those whose middle is from `start` to
+/// `end`, in seconds of the file's sound.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Assigned {
+    pub media: String,
+    pub stream: u32,
+    pub start: f64,
+    pub end: f64,
+    pub person: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1736,6 +1770,7 @@ impl Project {
                 cue: 1,
             },
             bins: Vec::new(),
+            speakers: Default::default(),
         }
     }
 

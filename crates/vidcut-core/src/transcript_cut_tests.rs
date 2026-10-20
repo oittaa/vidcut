@@ -17,6 +17,7 @@ fn speech(model: &str, timing: Timing, said: Vec<Said>) -> Speech {
         warnings: Vec::new(),
         found: Default::default(),
         sound_db: None,
+        speakers: None,
     }
 }
 
@@ -26,6 +27,7 @@ fn word(text: &str, start: f64, end: f64) -> Word {
         end,
         text: text.into(),
         joined: false,
+        speaker: None,
     }
 }
 
@@ -152,6 +154,10 @@ fn words_found_at_another_sound_level_arent_used_again() {
         download: false,
         find: Some(FindSpeech::Sound),
         sound_db: Some(-50.0),
+        speakers: false,
+        send: false,
+        xai: None,
+        google: None,
     };
     assert!(!asked.made(&kept));
 }

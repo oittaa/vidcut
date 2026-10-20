@@ -176,6 +176,13 @@ impl ProgressBar {
                     total as f64 / 1e6
                 ),
                 "loading" => eprint!("\r{file}: loading the model   "),
+                "speakers" => eprint!("\r{file}: finding the speakers   "),
+                "uploading" => eprint!(
+                    "\r{file}: uploading {pct:3}% ({:.0}/{:.0} MB, {eta})   ",
+                    frames as f64 / 1e6,
+                    total as f64 / 1e6
+                ),
+                "waiting" => eprint!("\r{file}: waiting for the reply   "),
                 "listening" => eprint!(
                     "\r{file}: listening {pct:3}% ({}/{} s of sound)   ",
                     frames / 1000,

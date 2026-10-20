@@ -261,6 +261,29 @@ fn video_memory_auto_mb(p: &Preferences) -> u64 {
     (vidcut_av::player::Budget::gpu_video(gpu) >> 20) as u64
 }
 
+fn folder_usage(dir: &std::path::Path) -> Value {
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    let mut walk = vec![dir.to_path_buf()];
+    while let Some(d) = walk.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            match e.metadata() {
+                Ok(m) if m.is_dir() => walk.push(e.path()),
+                Ok(m) => {
+                    files += 1;
+                    bytes += m.len();
+                }
+                Err(_) => {}
+            }
+        }
+    }
+    json!({
+        "path": dir,
+        "files": files,
+        "mb": (bytes as f64 / f64::from(1 << 20) * 10.0).round() / 10.0,
+    })
+}
+
 fn describe(p: &Preferences) -> Value {
     use vidcut_core::preferences::ProxyCodec;
     let (files, bytes) = thumbcache::usage();
@@ -298,6 +321,11 @@ fn describe(p: &Preferences) -> Value {
             "mb": (bytes as f64 / f64::from(1 << 20) * 10.0).round() / 10.0,
         },
         "proxy_codecs": codecs,
+        "services": crate::services::describe(&p.services),
+        "cache": {
+            "models": folder_usage(&crate::paths::models_dir()),
+            "replies": folder_usage(&vidcut_av::speech_api::replies_folder()),
+        },
         "gpus": vidcut_av::gpus::list(),
         "gpu_chosen": vidcut_av::gpus::find(vidcut_av::gpus::list(), &p.gpu.device),
         "gpu_automatic": vidcut_av::gpus::automatic(),

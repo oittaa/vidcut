@@ -230,7 +230,10 @@ impl Workspace {
         }
         let file = &transcribe::PARAKEET_ULTRA;
         let dir = crate::paths::models_dir();
-        let needs = transcribe::needed(&dir, d.words.then_some(file));
+        let needs = transcribe::needed(
+            &dir,
+            &d.words.then_some(file).into_iter().collect::<Vec<_>>(),
+        );
         let name = t.display_name();
         let mut open = true;
         let (mut find, mut apply, mut cancel) = (false, false, false);
