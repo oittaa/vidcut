@@ -247,15 +247,7 @@ impl Workspace {
 
     pub(super) fn end_title_hover(&mut self) {
         if self.titles.hovered.take().is_some() {
-            let kept = self
-                .timeline
-                .title_dialog
-                .as_ref()
-                .and_then(|d| d.previewing());
-            match kept {
-                Some(clip_title) => self.live.preview_title(Some(clip_title)),
-                None => self.live.preview_free_title(None),
-            }
+            self.live.preview_free_title(None);
         }
     }
 

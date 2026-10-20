@@ -334,10 +334,10 @@ fn changes(clip: &str, t: &Title, stored: &Title) -> Option<Value> {
 }
 
 impl Workspace {
-    fn title_changes(&self, d: &TitleDialog) -> Option<Value> {
+    fn title_changes(&self, d: &TitleDialog) -> Option<(String, Value, Title)> {
         let stored = self.project()?.clip(&d.clip)?.title.as_ref()?;
         let t = title_of(d, stored).ok()?;
-        changes(&d.clip, &t, stored)
+        Some((d.clip.clone(), changes(&d.clip, &t, stored)?, t))
     }
 
     pub(crate) fn add_title(&mut self, ctx: &egui::Context) {
@@ -352,20 +352,17 @@ impl Workspace {
             d.focus = true;
             return;
         }
-        if let Some(params) = self
+        if let Some((clip, params, t)) = self
             .timeline
             .title_dialog
             .as_ref()
             .and_then(|d| self.title_changes(d))
         {
             self.send("titles.set", params);
+            self.title_landing(&clip, &t);
         }
-        let found = self
-            .project()
-            .and_then(|p| p.clip(id))
-            .and_then(|c| c.title.clone());
+        let found = self.stored_title(id);
         self.timeline.title_dialog = Some(TitleDialog::new(id, found.as_ref()));
-        self.live.preview_title(None);
     }
 
     pub(super) fn title_windows(&mut self, ctx: &egui::Context) {
@@ -382,6 +379,7 @@ impl Workspace {
             }
         }
         self.title_window(ctx);
+        self.sync_title_preview();
     }
 
     fn title_window(&mut self, ctx: &egui::Context) {
@@ -397,10 +395,7 @@ impl Workspace {
         });
         match found {
             Some((_, _, t)) if !d.loaded => d.load(t),
-            None if d.loaded => {
-                self.live.preview_title(None);
-                return;
-            }
+            None if d.loaded => return,
             _ => {}
         }
         let stored = found.map(|(_, _, t)| t.clone());
@@ -608,6 +603,7 @@ impl Workspace {
                             Some((Ok(t), s)) => {
                                 if let Some(params) = changes(&d.clip, &t, s) {
                                     self.send("titles.set", params);
+                                    self.title_landing(&d.clip, &t);
                                 }
                                 done = true;
                             }
@@ -621,17 +617,10 @@ impl Workspace {
                 });
             });
         if changed && let Some(s) = &stored {
-            let preview = title_of(&d, s).ok().filter(|t| t != s);
-            if preview != d.shown {
-                self.live
-                    .preview_title(preview.clone().map(|t| (d.clip.clone(), t)));
-                d.shown = preview;
-            }
+            d.shown = title_of(&d, s).ok().filter(|t| t != s);
         }
         if open && !done {
             self.timeline.title_dialog = Some(d);
-        } else {
-            self.live.preview_title(None);
         }
     }
 }

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vidcut_av::player::{self as engine, AudioOutput, Decoder, PacedOutput, PlaysOn};
+use vidcut_core::model::Title;
 use vidcut_core::render::{AudioPiece, LaneTrack, RenderPlan, VideoPiece};
 
 use super::Renderer;
@@ -99,9 +100,9 @@ impl Player {
         self.contents[id.index()].plan.is_some()
     }
 
-    pub fn nudge_title(&self, nudge: Option<engine::Nudge>) {
+    pub fn preview_title(&self, title: Option<(String, Title)>) {
         if let Some(e) = &self.engine {
-            e.nudge_title(nudge);
+            e.preview_title(title);
         }
     }
 

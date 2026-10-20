@@ -562,9 +562,10 @@ impl Titles {
             });
             let k = &mut self.kept[at];
             k.used = true;
-            let dy = match (shown.run, k.drawn.sprites.first()) {
-                (Some(r), Some(s)) => {
-                    r.top(0, f64::from(size.1), f64::from(s.height)).round() as i32 - s.y
+            let dy = match k.drawn.sprites.first() {
+                Some(s) if shown.title.moves() => {
+                    let top = shown.run.top(0, f64::from(size.1), f64::from(s.height));
+                    top.round() as i32 - s.y
                 }
                 _ => 0,
             };

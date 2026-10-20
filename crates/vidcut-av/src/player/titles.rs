@@ -10,17 +10,7 @@ use super::plan::Plan;
 
 const KEPT: usize = 16;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Nudge {
-    pub clip: String,
-    pub to: Title,
-}
-
-impl Nudge {
-    pub fn fits(from: &Title, to: &Title) -> bool {
-        shape(from) == shape(to)
-    }
-}
+type Preview = Option<(String, Title)>;
 
 fn steady(t: &Title) -> Title {
     Title {
@@ -31,16 +21,11 @@ fn steady(t: &Title) -> Title {
     }
 }
 
-fn shape(t: &Title) -> Title {
-    Title {
-        zoom: None,
-        rotation: None,
-        ..steady(t)
+fn wanted<'a>(preview: &'a Preview, s: &'a ShownTitle) -> &'a Title {
+    match preview {
+        Some((clip, t)) if *clip == s.clip => t,
+        _ => &s.title,
     }
-}
-
-fn aimed<'a>(nudge: Option<&'a Nudge>, s: &ShownTitle) -> Option<&'a Nudge> {
-    nudge.filter(|n| n.clip == s.clip && Nudge::fits(&s.title, &n.to))
 }
 
 struct Entry {
@@ -63,59 +48,36 @@ impl Kept {
             .iter()
             .any(|e| e.size == size && e.title == *key)
     }
-
-    fn like(&self, to: &Title, size: (u32, u32)) -> Option<Title> {
-        let key = steady(to);
-        if self.has(&key, size) {
-            return Some(key);
-        }
-        self.entries
-            .iter()
-            .filter(|e| e.size == size && e.picture.is_some() && shape(&e.title) == shape(to))
-            .max_by_key(|e| e.used)
-            .map(|e| e.title.clone())
-    }
 }
 
 #[derive(Default)]
 pub(crate) struct Titles {
     kept: Mutex<Kept>,
-    nudge: Mutex<Option<Nudge>>,
+    preview: Mutex<Preview>,
 }
 
 impl Titles {
-    pub(crate) fn nudge(&self, n: Option<Nudge>) -> bool {
-        let mut held = lock(&self.nudge);
-        let changed = *held != n;
-        *held = n;
+    pub(crate) fn preview(&self, p: Preview) -> bool {
+        let mut held = lock(&self.preview);
+        let changed = *held != p;
+        *held = p;
         changed
     }
 
     pub(crate) fn shown(&self, plan: &Plan, t: i64) -> (Vec<TitleOver>, bool) {
-        let wanted = plan.titles_at(t);
-        if wanted.is_empty() {
-            return (Vec::new(), true);
-        }
-        let nudge = lock(&self.nudge).clone();
+        let preview = lock(&self.preview).clone();
         let size = plan.size();
         let (w, h) = (f64::from(size.0), f64::from(size.1));
         let mut kept = lock(&self.kept);
         kept.clock += 1;
         let now = kept.clock;
-        let mut out = Vec::with_capacity(wanted.len());
+        let mut out = Vec::new();
         let mut all = true;
-        for (above, shown) in wanted {
-            let (key, to, alpha) = match aimed(nudge.as_ref(), &shown) {
-                Some(n) => (
-                    kept.like(&n.to, size)
-                        .unwrap_or_else(|| steady(&shown.title)),
-                    n.to.clone(),
-                    n.to.opaque() * shown.fade.map_or(1.0, |r| r.level(0)),
-                ),
-                None => (steady(&shown.title), shown.title.clone(), shown.alpha()),
-            };
-            let key = if kept.has(&key, size) {
-                key
+        for (above, shown) in plan.titles_at(t) {
+            let to = wanted(&preview, &shown);
+            let exact = steady(to);
+            let key = if kept.has(&exact, size) {
+                exact
             } else {
                 all = false;
                 match kept.last.get(&shown.clip).filter(|k| kept.has(k, size)) {
@@ -123,35 +85,34 @@ impl Titles {
                     None => continue,
                 }
             };
-            let Some(e) = kept
+            let picture = kept
                 .entries
                 .iter_mut()
                 .find(|e| e.size == size && e.title == key)
-            else {
-                continue;
-            };
-            e.used = now;
-            if let Some(p) = e.picture.clone() {
+                .and_then(|e| {
+                    e.used = now;
+                    e.picture.clone()
+                });
+            if let Some(p) = picture {
                 let [x0, y0] = key.pivot();
                 let [x, y] = to.pivot();
-                let dx = ((x - x0) * w).round() as i32;
-                let dy = match shown.run {
-                    Some(r) => r.top(0, h, f64::from(p.height)).round() as i32 - p.top,
-                    None => ((y - y0) * h).round() as i32,
+                let dy = if to.moves() {
+                    shown.run.top(0, h, f64::from(p.height)).round() as i32 - p.top
+                } else {
+                    ((y - y0) * h).round() as i32
                 };
-                let turn = [
-                    (x * w) as f32,
-                    (y * h) as f32,
-                    (to.scale() / key.scale()) as f32,
-                    (to.turn() - key.turn()).to_radians() as f32,
-                ];
                 out.push(TitleOver {
                     above,
                     picture: p,
-                    dx,
+                    dx: ((x - x0) * w).round() as i32,
                     dy,
-                    turn,
-                    alpha: alpha as f32,
+                    turn: [
+                        (x * w) as f32,
+                        (y * h) as f32,
+                        (to.scale() / key.scale()) as f32,
+                        (to.turn() - key.turn()).to_radians() as f32,
+                    ],
+                    alpha: (to.opaque() * shown.fade.map_or(1.0, |r| r.level(0))) as f32,
                 });
             }
             kept.last.insert(shown.clip.clone(), key);
@@ -161,12 +122,12 @@ impl Titles {
 
     pub(crate) fn draw(&self, plan: &Plan, t: i64) -> bool {
         let size = plan.size();
-        let nudge = lock(&self.nudge).clone();
+        let preview = lock(&self.preview).clone();
         let missing: Vec<Title> = {
             let kept = lock(&self.kept);
             let mut keys: Vec<Title> = Vec::new();
             for (_, shown) in plan.titles_at(t) {
-                let key = steady(aimed(nudge.as_ref(), &shown).map_or(&shown.title, |n| &n.to));
+                let key = steady(wanted(&preview, &shown));
                 if !kept.has(&key, size) && !keys.contains(&key) {
                     keys.push(key);
                 }
