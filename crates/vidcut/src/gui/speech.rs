@@ -74,7 +74,7 @@ impl Default for Settings {
             gap: 0,
             from_media: true,
             look: PLAIN.into(),
-            find: FindSpeech::Voice,
+            find: FindSpeech::Sound,
             sound_db: vidcut_core::transcript::SOUND_DB,
             speakers: false,
             speaker_model: SpeakerModel::Auto,
@@ -1049,7 +1049,7 @@ impl Workspace {
                 if !d.gpu && !s.model.paid() {
                     dialog::note(ui, "Runs on the CPU: GPU acceleration is off");
                 }
-                let unusual = s.find != FindSpeech::Voice
+                let unusual = s.find != FindSpeech::default()
                     || (!transcribing && (s.gap != 0 || !s.from_media))
                     || (s.model == SpeechModel::Xai && s.xai != XaiOptions::default())
                     || !s.keyterms.is_empty()

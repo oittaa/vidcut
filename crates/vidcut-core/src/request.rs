@@ -164,12 +164,12 @@ pub enum Request {
         /// missing file is an error that says what would be downloaded.
         #[serde(default)]
         download: bool,
-        /// How the speech to hear is found: `voice`, the built-in
-        /// voice-activity model (the default), or `sound`, everything louder
-        /// than `sound_db`, for singing and speech over music, which voice
-        /// detection misses. Words kept for a file are used again only when
-        /// they were found the same way, at the same `sound_db`; without
-        /// `find`, either way does.
+        /// How the speech to hear is found: `sound` (the default), everything
+        /// louder than `sound_db`, or `voice`, the built-in voice-activity
+        /// model, which misses singing, speech over music and shouts such as
+        /// a countdown. Words kept for a file are used again only when they
+        /// were found the same way, at the same `sound_db`; without `find`,
+        /// either way does.
         #[serde(default)]
         find: Option<FindSpeech>,
         /// For `find: sound`: sound quieter than this, in dBFS, for half a
@@ -506,12 +506,12 @@ pub enum Request {
         /// missing file is an error that says what would be downloaded.
         #[serde(default)]
         download: bool,
-        /// How the speech to hear is found: `voice`, the built-in
-        /// voice-activity model (the default), or `sound`, everything louder
-        /// than `sound_db`, for singing and speech over music, which voice
-        /// detection misses. Words kept for a file are used again only when
-        /// they were found the same way, at the same `sound_db`; without
-        /// `find`, either way does.
+        /// How the speech to hear is found: `sound` (the default), everything
+        /// louder than `sound_db`, or `voice`, the built-in voice-activity
+        /// model, which misses singing, speech over music and shouts such as
+        /// a countdown. Words kept for a file are used again only when they
+        /// were found the same way, at the same `sound_db`; without `find`,
+        /// either way does.
         #[serde(default)]
         find: Option<FindSpeech>,
         /// For `find: sound`: sound quieter than this, in dBFS, for half a
@@ -1273,12 +1273,12 @@ pub enum Request {
         /// would be downloaded.
         #[serde(default)]
         download: bool,
-        /// How the speech to hear is found: `voice`, the built-in
-        /// voice-activity model (the default), or `sound`, everything louder
-        /// than `sound_db`, for singing and speech over music, which voice
-        /// detection misses. Words kept for a file are used again only when
-        /// they were found the same way, at the same `sound_db`; without
-        /// `find`, either way does.
+        /// How the speech to hear is found: `sound` (the default), everything
+        /// louder than `sound_db`, or `voice`, the built-in voice-activity
+        /// model, which misses singing, speech over music and shouts such as
+        /// a countdown. Words kept for a file are used again only when they
+        /// were found the same way, at the same `sound_db`; without `find`,
+        /// either way does.
         #[serde(default)]
         find: Option<FindSpeech>,
         /// For `find: sound`: sound quieter than this, in dBFS, for half a
@@ -1356,12 +1356,12 @@ pub enum Request {
         /// one is an error that says what would be downloaded.
         #[serde(default)]
         download: bool,
-        /// How the speech to hear is found: `voice`, the built-in
-        /// voice-activity model (the default), or `sound`, everything louder
-        /// than `sound_db`, for singing and speech over music, which voice
-        /// detection misses. Words kept for a file are used again only when
-        /// they were found the same way, at the same `sound_db`; without
-        /// `find`, either way does.
+        /// How the speech to hear is found: `sound` (the default), everything
+        /// louder than `sound_db`, or `voice`, the built-in voice-activity
+        /// model, which misses singing, speech over music and shouts such as
+        /// a countdown. Words kept for a file are used again only when they
+        /// were found the same way, at the same `sound_db`; without `find`,
+        /// either way does.
         #[serde(default)]
         find: Option<FindSpeech>,
         /// For `find: sound`: sound quieter than this, in dBFS, for half a
@@ -1408,12 +1408,12 @@ pub enum Request {
         /// error that says what would be downloaded.
         #[serde(default)]
         download: bool,
-        /// How the speech to hear is found: `voice`, the built-in
-        /// voice-activity model (the default), or `sound`, everything louder
-        /// than `sound_db`, for singing and speech over music, which voice
-        /// detection misses. Words kept for a file are used again only when
-        /// they were found the same way, at the same `sound_db`; without
-        /// `find`, either way does.
+        /// How the speech to hear is found: `sound` (the default), everything
+        /// louder than `sound_db`, or `voice`, the built-in voice-activity
+        /// model, which misses singing, speech over music and shouts such as
+        /// a countdown. Words kept for a file are used again only when they
+        /// were found the same way, at the same `sound_db`; without `find`,
+        /// either way does.
         #[serde(default)]
         find: Option<FindSpeech>,
         /// For `find: sound`: sound quieter than this, in dBFS, for half a
@@ -2150,9 +2150,9 @@ pub struct ExportParams {
 #[serde(rename_all = "lowercase")]
 pub enum FindSpeech {
     /// The built-in voice-activity model hears where people speak.
-    #[default]
     Voice,
     /// All sound louder than a level: singing and speech over music too.
+    #[default]
     Sound,
 }
 
