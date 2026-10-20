@@ -1578,11 +1578,13 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
             }
         }
         JobState::Running => {
+            let telling = j.stage == Some(vidcut_av::export::Stage::Speakers) && j.frames < j.total;
             let text = match j.eta {
                 _ if j.measuring => format!(
                     "measuring light for the HDR metadata · {:.0}%",
                     j.progress * 100.0
                 ),
+                _ if telling => format!("{} elapsed", clock(j.elapsed)),
                 Some(eta) => format!(
                     "{:.0}% · {} elapsed · about {} left",
                     j.progress * 100.0,
@@ -1594,6 +1596,7 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
             ui.add(
                 egui::ProgressBar::new(j.progress as f32)
                     .text(text)
+                    .animate(telling)
                     .desired_width(360.0),
             );
             use vidcut_av::export::Stage;
@@ -1609,7 +1612,9 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
                     format!("listening · {} / {} s of sound", done / 1000, total / 1000)
                 }
                 Some(Stage::Loading) => "loading the model".into(),
-                Some(Stage::Speakers) => "finding the speakers".into(),
+                Some(Stage::Speakers) => {
+                    format!("finding the speakers · {} s of sound", total / 1000)
+                }
                 Some(Stage::Uploading) => format!(
                     "uploading · {:.0} / {:.0} MB",
                     done as f64 / 1e6,

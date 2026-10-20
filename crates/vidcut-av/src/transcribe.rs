@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 use transcribe_cpp as tc;
@@ -298,6 +298,7 @@ pub fn run_id() -> String {
 }
 
 const PAD: f64 = 0.2;
+const TELLING_TICK: Duration = Duration::from_millis(250);
 const UNTIMED: f64 = 10.0;
 const SHORTEST: f64 = 30.0;
 const LONGEST: f64 = 300.0;
@@ -811,17 +812,18 @@ pub(crate) fn speakers_of(
     crate::cancel::stop()?;
     let most = loaded.model.diarize_info().map_err(tc_error)?.max_speakers;
     let mut session = loaded.model.diarize_session().map_err(tc_error)?;
-    let turns: Vec<Turn> = session
-        .run(pcm, &tc::DiarizeOptions::default())
-        .map_err(tc_error)?
-        .iter()
-        .filter(|t| t.speaker_id > 0 && t.t1_ms > t.t0_ms)
-        .map(|t| Turn {
-            start: t.t0_ms as f64 / 1000.0,
-            end: t.t1_ms as f64 / 1000.0,
-            speaker: t.speaker_id as u32,
-        })
-        .collect();
+    let turns: Vec<Turn> = telling(&path, total, started, |token| {
+        session.set_cancel_token(token);
+        session.run(pcm, &tc::DiarizeOptions::default())
+    })?
+    .iter()
+    .filter(|t| t.speaker_id > 0 && t.t1_ms > t.t0_ms)
+    .map(|t| Turn {
+        start: t.t0_ms as f64 / 1000.0,
+        end: t.t1_ms as f64 / 1000.0,
+        speaker: t.speaker_id as u32,
+    })
+    .collect();
     report(&path, Stage::Speakers, total, total, started);
     let could = choice == SpeakerModel::Auto && speaker_file(language, SpeakerModel::Auto) == &MOSS;
     if let Some(w) = full(&turns, most, could) {
@@ -843,15 +845,16 @@ fn moss_turns(
     let loaded = load(&path, gpu, warnings)?;
     crate::cancel::stop()?;
     let mut session = loaded.model.session().map_err(tc_error)?;
-    let heard = session
-        .run(
+    let heard = telling(&path, total, started, |token| {
+        session.set_cancel_token(token);
+        session.run(
             pcm,
             &tc::RunOptions {
                 diarize: tc::Diarize::On,
                 ..Default::default()
             },
         )
-        .map_err(tc_error)?;
+    })?;
     report(&path, Stage::Speakers, total, total, started);
     Ok(heard
         .speaker_segments
@@ -863,6 +866,35 @@ fn moss_turns(
             speaker: t.speaker_id as u32,
         })
         .collect())
+}
+
+fn telling<T: Send>(
+    path: &Path,
+    total: i64,
+    started: Instant,
+    run: impl FnOnce(&tc::CancelToken) -> std::result::Result<T, tc::Error> + Send,
+) -> Result<T> {
+    let token = tc::CancelToken::new();
+    let waiting = std::thread::current();
+    std::thread::scope(|s| {
+        let work = std::thread::Builder::new()
+            .name("vidcut-speakers".into())
+            .spawn_scoped(s, || {
+                let told = run(&token);
+                waiting.unpark();
+                told
+            })?;
+        while !work.is_finished() {
+            if crate::cancel::cancelled() {
+                token.cancel();
+            }
+            report(path, Stage::Speakers, 0, total, started);
+            std::thread::park_timeout(TELLING_TICK);
+        }
+        work.join()
+            .map_err(|_| Error::Invalid("the speaker model's thread panicked".into()))?
+            .map_err(tc_error)
+    })
 }
 
 fn full(turns: &[Turn], most: i32, moss_could: bool) -> Option<String> {

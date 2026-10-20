@@ -1696,6 +1696,7 @@ impl Live {
             let _report = {
                 let (tx, id) = (tx.clone(), id.clone());
                 let mut last = Instant::now() - Duration::from_secs(1);
+                let mut stage = None;
                 let mut file: Option<PathBuf> = None;
                 let mut output = 0;
                 vidcut_av::progress::Guard::set(Box::new(
@@ -1708,10 +1709,14 @@ impl Live {
                             }
                             None => file = Some(out.to_path_buf()),
                         }
-                        if p.frames != p.total && last.elapsed() < Duration::from_millis(100) {
+                        if p.frames != p.total
+                            && p.stage == stage
+                            && last.elapsed() < Duration::from_millis(100)
+                        {
                             return;
                         }
                         last = Instant::now();
+                        stage = p.stage;
                         let _ = tx.send(Msg::JobProgress {
                             id: id.clone(),
                             output,

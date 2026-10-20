@@ -23,6 +23,7 @@ pub struct CueDialog {
     color: String,
     own: bool,
     person_color: String,
+    person_name: String,
     loaded: bool,
     focus: bool,
 }
@@ -34,8 +35,15 @@ impl CueDialog {
         self.speaker = c.speaker.clone();
         self.own = c.color.is_some() || c.speaker.is_none();
         self.color = c.color.clone().unwrap_or_default();
-        self.person_color = person_color(speakers, c.speaker.as_deref());
+        self.take_person(speakers, c.speaker.clone());
         self.loaded = true;
+    }
+
+    fn take_person(&mut self, speakers: &Speakers, person: Option<String>) {
+        self.person_color = person_color(speakers, person.as_deref());
+        self.person_name = person_name(speakers, person.as_deref());
+        self.own = self.own || person.is_none();
+        self.speaker = person;
     }
 
     fn own_color(&self) -> Option<String> {
@@ -67,6 +75,12 @@ pub(crate) struct Typing {
 fn person_color(speakers: &Speakers, person: Option<&str>) -> String {
     person
         .and_then(|k| speakers.colors.get(k).cloned())
+        .unwrap_or_default()
+}
+
+fn person_name(speakers: &Speakers, person: Option<&str>) -> String {
+    person
+        .and_then(|k| speakers.names.get(k).cloned())
         .unwrap_or_default()
 }
 
@@ -314,15 +328,23 @@ impl Workspace {
         if let Some(params) = self.typed(d) {
             self.send("subtitles.set", params);
         }
-        let Some(person) = d.speaker.clone().filter(|_| !d.own) else {
+        let Some(person) = d.speaker.clone() else {
             return;
         };
-        let stored = self
-            .project()
-            .map(|p| person_color(&p.speakers, Some(&person)));
-        if stored.is_some_and(|s| field(&s) != field(&d.person_color)) {
-            let color = field(&d.person_color).unwrap_or_default();
-            self.send("speakers.set", json!({ "person": person, "color": color }));
+        let Some(p) = self.project() else {
+            return;
+        };
+        let mut params = json!({ "person": person });
+        let color = field(&d.person_color);
+        if !d.own && field(&person_color(&p.speakers, Some(&person))) != color {
+            params["color"] = json!(color.unwrap_or_default());
+        }
+        let name = d.person_name.trim();
+        if name != person_name(&p.speakers, Some(&person)) {
+            params["name"] = json!(name);
+        }
+        if params.as_object().is_some_and(|o| o.len() > 1) {
+            self.send("speakers.set", params);
         }
     }
 
@@ -344,6 +366,7 @@ impl Workspace {
             color: String::new(),
             own: true,
             person_color: String::new(),
+            person_name: String::new(),
             loaded: false,
             focus: true,
         };
@@ -532,12 +555,20 @@ impl Workspace {
                                 }
                             }
                             if let Some(k) = picked {
-                                d.person_color = person_color(&p.speakers, k.as_deref());
-                                d.own = d.own || k.is_none();
-                                d.speaker = k;
+                                d.take_person(&p.speakers, k);
                             }
                         });
                 });
+                if let Some(k) = &d.speaker {
+                    dialog::row(ui, "Name", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut d.person_name)
+                                .hint_text(vidcut_core::speakers::Speakers::default().name(k))
+                                .desired_width(200.0),
+                        )
+                        .on_hover_text("Renames them on every subtitle");
+                    });
+                }
                 dialog::row(ui, "Color", |ui| {
                     ui.add_enabled_ui(style.paints() != SpeakerPaint::None, |ui| {
                         let usual = match (style.paints(), &style.words) {
