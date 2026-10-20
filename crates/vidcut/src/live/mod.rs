@@ -523,7 +523,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         player,
         skipping: None,
         title_preview: None,
-        nudging: false,
+        nudged: None,
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
@@ -777,7 +777,7 @@ struct Live {
     player: Player,
     skipping: Option<Vec<ClipSpans>>,
     title_preview: Option<TitlePreview>,
-    nudging: bool,
+    nudged: Option<vidcut_av::player::Nudge>,
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
@@ -942,18 +942,30 @@ impl Live {
                             .as_ref()
                             .and_then(|s| s.project().clip(id))
                             .and_then(|c| c.title.clone())
-                            .filter(|from| vidcut_av::player::Nudge::moves_only(from, to))
+                            .filter(|from| vidcut_av::player::Nudge::fits(from, to))
                             .map(|from| vidcut_av::player::Nudge {
                                 title: from,
                                 to: to.clone(),
+                                settled: false,
                             }),
                         _ => None,
                     };
+                    let let_go = title.is_none();
                     self.title_preview = title;
-                    self.nudging = nudge.is_some();
-                    match nudge {
-                        Some(n) => self.player.nudge_title(Some(n)),
-                        None => self.schedule_timeline(),
+                    match (nudge, self.nudged.take()) {
+                        (Some(n), _) => {
+                            self.player.nudge_title(Some(n.clone()));
+                            self.nudged = Some(n);
+                        }
+                        (None, Some(n)) if let_go => {
+                            self.player
+                                .nudge_title(Some(vidcut_av::player::Nudge { settled: true, ..n }));
+                            self.schedule_timeline();
+                        }
+                        (None, _) => {
+                            self.player.nudge_title(None);
+                            self.schedule_timeline();
+                        }
                     }
                 }
             }
@@ -3092,11 +3104,7 @@ impl Live {
         }
         let plan = self.preview_plan(plan);
         self.timeline_loaded_at = Some(Instant::now());
-        let loaded = self.player.load(TIMELINE, plan, lanes, at);
-        if !self.nudging {
-            self.player.nudge_title(None);
-        }
-        loaded
+        self.player.load(TIMELINE, plan, lanes, at)
     }
 
     fn refresh_source(&mut self) -> Option<u64> {

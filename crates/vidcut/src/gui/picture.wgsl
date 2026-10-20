@@ -110,6 +110,7 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
 struct Lettering {
     place: vec4<f32>,
     fade: vec4<f32>,
+    turn: vec4<f32>,
 };
 
 @group(0) @binding(5) var<uniform> lettering: Lettering;
@@ -117,7 +118,10 @@ struct Lettering {
 
 @fragment
 fn fs_title(in: Out) -> @location(0) vec4<f32> {
-    let px = in.position.xy;
+    let d = in.position.xy - lettering.turn.xy;
+    let c = cos(lettering.turn.w);
+    let s = sin(lettering.turn.w);
+    let px = lettering.turn.xy + vec2<f32>(d.x * c - d.y * s, d.x * s + d.y * c) / lettering.turn.z;
     let rel = (px - lettering.place.xy) / lettering.place.zw;
     if any(rel < vec2<f32>(0.0)) || any(rel >= vec2<f32>(1.0)) {
         discard;

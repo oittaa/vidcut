@@ -13,11 +13,12 @@ const KEPT: usize = 16;
 pub struct Nudge {
     pub title: Title,
     pub to: Title,
+    pub settled: bool,
 }
 
 impl Nudge {
-    pub fn moves_only(from: &Title, to: &Title) -> bool {
-        steady(from) == steady(to)
+    pub fn fits(from: &Title, to: &Title) -> bool {
+        shape(from) == shape(to)
     }
 }
 
@@ -29,13 +30,38 @@ fn steady(t: &Title) -> Title {
     }
 }
 
-fn shown_as(nudge: Option<&Nudge>, s: &ShownTitle) -> (Title, f64) {
-    match nudge.filter(|n| n.title == s.title) {
-        Some(n) => (
-            n.to.clone(),
-            n.to.opaque() * s.fade.map_or(1.0, |r| r.level(0)),
-        ),
-        None => (s.title.clone(), s.alpha()),
+fn shape(t: &Title) -> Title {
+    Title {
+        zoom: None,
+        rotation: None,
+        ..steady(t)
+    }
+}
+
+struct Chosen {
+    from: Title,
+    to: Title,
+    alpha: f64,
+}
+
+fn chosen(nudge: Option<&Nudge>, s: &ShownTitle, drawn: impl Fn(&Title) -> bool) -> Chosen {
+    let fade = s.fade.map_or(1.0, |r| r.level(0));
+    match nudge {
+        Some(n) if !n.settled && n.title == s.title => Chosen {
+            from: n.title.clone(),
+            to: n.to.clone(),
+            alpha: n.to.opaque() * fade,
+        },
+        Some(n) if n.settled && n.to == s.title && !drawn(&steady(&n.to)) => Chosen {
+            from: n.title.clone(),
+            to: n.to.clone(),
+            alpha: s.alpha(),
+        },
+        _ => Chosen {
+            from: s.title.clone(),
+            to: s.title.clone(),
+            alpha: s.alpha(),
+        },
     }
 }
 
@@ -50,6 +76,14 @@ struct Entry {
 struct Kept {
     entries: Vec<Entry>,
     clock: u64,
+}
+
+impl Kept {
+    fn has(&self, key: &Title, size: (u32, u32)) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.size == size && e.title == *key)
+    }
 }
 
 #[derive(Default)]
@@ -80,8 +114,8 @@ impl Titles {
         let mut out = Vec::with_capacity(wanted.len());
         let mut all = true;
         for (above, shown) in wanted {
-            let (title, alpha) = shown_as(nudge.as_ref(), &shown);
-            let key = steady(&title);
+            let c = chosen(nudge.as_ref(), &shown, |k| kept.has(k, size));
+            let key = steady(&c.from);
             match kept
                 .entries
                 .iter_mut()
@@ -90,19 +124,26 @@ impl Titles {
                 Some(e) => {
                     e.used = now;
                     if let Some(p) = &e.picture {
-                        let [x, y] = title.place();
-                        let [x0, y0] = key.place();
+                        let [x0, y0] = key.pivot();
+                        let [x, y] = c.to.pivot();
                         let dx = ((x - x0) * w).round() as i32;
                         let dy = match shown.run {
                             Some(r) => r.top(0, h, f64::from(p.height)).round() as i32 - p.top,
                             None => ((y - y0) * h).round() as i32,
                         };
+                        let turn = [
+                            (x * w) as f32,
+                            (y * h) as f32,
+                            (c.to.scale() / c.from.scale()) as f32,
+                            (c.to.turn() - c.from.turn()).to_radians() as f32,
+                        ];
                         out.push(TitleOver {
                             above,
                             picture: p.clone(),
                             dx,
                             dy,
-                            alpha: alpha as f32,
+                            turn,
+                            alpha: c.alpha as f32,
                         });
                     }
                 }
@@ -114,17 +155,12 @@ impl Titles {
 
     pub(crate) fn draw(&self, plan: &Plan, t: i64) -> bool {
         let size = plan.size();
-        let nudge = lock(&self.nudge).clone();
         let missing: Vec<Title> = {
             let kept = lock(&self.kept);
             let mut keys: Vec<Title> = Vec::new();
             for (_, shown) in plan.titles_at(t) {
-                let key = steady(&shown_as(nudge.as_ref(), &shown).0);
-                let have = kept
-                    .entries
-                    .iter()
-                    .any(|e| e.size == size && e.title == key);
-                if !have && !keys.contains(&key) {
+                let key = steady(&shown.title);
+                if !kept.has(&key, size) && !keys.contains(&key) {
                     keys.push(key);
                 }
             }

@@ -288,6 +288,7 @@ pub struct TitleOver {
     pub picture: Arc<TitlePicture>,
     pub dx: i32,
     pub dy: i32,
+    pub turn: [f32; 4],
     pub alpha: f32,
 }
 
