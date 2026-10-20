@@ -358,7 +358,7 @@ pub enum DynamicTarget {
 
 const LANDING: std::time::Duration = std::time::Duration::from_secs(1);
 
-pub fn landing(at: i64, since: std::time::Duration, from: i64, position: i64) -> Option<i64> {
+pub fn landing<T: PartialEq>(at: T, since: std::time::Duration, from: T, position: T) -> Option<T> {
     (position == from && since < LANDING).then_some(at)
 }
 

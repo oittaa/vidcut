@@ -935,20 +935,28 @@ impl Live {
             Msg::Skip(parts) => changed = self.set_skipping(parts),
             Msg::PreviewTitle(title) => {
                 changed = false;
+                let title = title.map(|t| match t {
+                    TitlePreview::Clip(id, t) => {
+                        let t = vidcut_core::ops::titles::checked(&t).unwrap_or(t);
+                        TitlePreview::Clip(id, t)
+                    }
+                    other => other,
+                });
                 if self.title_preview != title {
                     let nudge = match &title {
-                        Some(TitlePreview::Clip(id, to)) => self
-                            .project
-                            .as_ref()
-                            .and_then(|s| s.project().clip(id))
-                            .and_then(|c| c.title.clone())
-                            .filter(|from| vidcut_av::player::Nudge::fits(from, to))
-                            .map(|from| vidcut_av::player::Nudge {
-                                clip: id.clone(),
-                                title: from,
-                                to: vidcut_core::ops::titles::checked(to)
-                                    .unwrap_or_else(|_| to.clone()),
-                            }),
+                        Some(TitlePreview::Clip(id, to)) => match &self.title_preview {
+                            Some(TitlePreview::Clip(was, from)) if was == id => Some(from.clone()),
+                            _ => self
+                                .project
+                                .as_ref()
+                                .and_then(|s| s.project().clip(id))
+                                .and_then(|c| c.title.clone()),
+                        }
+                        .filter(|from| vidcut_av::player::Nudge::fits(from, to))
+                        .map(|_| vidcut_av::player::Nudge {
+                            clip: id.clone(),
+                            to: to.clone(),
+                        }),
                         _ => None,
                     };
                     let let_go = title.is_none();
@@ -3069,15 +3077,8 @@ impl Live {
     fn refresh_timeline_at(&mut self, at: Option<i64>) -> Option<u64> {
         let mut p = self.project.as_ref()?.project().clone();
         let mut scrolled: Option<(Title, (i64, i64), i64)> = None;
-        if self.title_preview.is_none()
-            && let Some(n) = &self.nudged
-            && p.clip(&n.clip).and_then(|c| c.title.as_ref()) != Some(&n.to)
-        {
-            self.player.nudge_title(None);
-            self.nudged = None;
-        }
         match &self.title_preview {
-            Some(TitlePreview::Clip(id, title)) if self.nudged.is_none() => {
+            Some(TitlePreview::Clip(id, title)) => {
                 if let Some((t, c)) = p.find_clip(id)
                     && p.tracks[t].clips[c].title.is_some()
                 {
@@ -3098,7 +3099,13 @@ impl Live {
                     scrolled = Some((t.clone(), (c.start, c.end()), off));
                 }
             }
-            _ => {}
+            None => {}
+        }
+        if let Some(n) = &self.nudged
+            && p.clip(&n.clip).and_then(|c| c.title.as_ref()) != Some(&n.to)
+        {
+            self.player.nudge_title(None);
+            self.nudged = None;
         }
         let end = p.end();
         if end == 0 {

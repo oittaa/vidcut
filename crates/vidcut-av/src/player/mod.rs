@@ -1111,6 +1111,7 @@ impl Player {
     pub fn nudge_title(&self, nudge: Option<Nudge>) {
         if self.shared.titles.nudge(nudge) {
             self.shared.prepared();
+            self.shared.changed.notify_all();
         }
     }
 
