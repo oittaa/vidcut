@@ -5,7 +5,7 @@ use serde_json::json;
 use vidcut_av::{speech_api, transcribe};
 use vidcut_core::looks::{Look, LookKind, Styled};
 use vidcut_core::model::Project;
-use vidcut_core::request::{FindSpeech, GoogleOptions, SpeechModel, XaiOptions};
+use vidcut_core::request::{FindSpeech, GoogleOptions, SpeakerModel, SpeechModel, XaiOptions};
 
 use super::dialog;
 use super::look_tiles::Tiles;
@@ -55,6 +55,7 @@ struct Settings {
     find: FindSpeech,
     sound_db: f64,
     speakers: bool,
+    speaker_model: SpeakerModel,
     xai: XaiOptions,
     google: GoogleOptions,
     keyterms: String,
@@ -76,6 +77,7 @@ impl Default for Settings {
             find: FindSpeech::Voice,
             sound_db: vidcut_core::transcript::SOUND_DB,
             speakers: false,
+            speaker_model: SpeakerModel::Auto,
             xai: XaiOptions::default(),
             google: GoogleOptions::default(),
             keyterms: String::new(),
@@ -99,6 +101,9 @@ fn hearing(s: &Settings, params: &mut serde_json::Value, send: bool) {
     }
     if s.speakers {
         params["speakers"] = json!(true);
+        if s.speaker_model != SpeakerModel::Auto && !s.model.paid() {
+            params["speaker_model"] = json!(s.speaker_model);
+        }
     }
     if send {
         params["send"] = json!(true);
@@ -139,7 +144,7 @@ fn wanted(s: &Settings) -> Vec<&'static transcribe::File> {
         .into_iter()
         .chain(
             (s.speakers && s.model != SpeechModel::Xai)
-                .then(|| transcribe::speaker_file(s.language.as_deref())),
+                .then(|| transcribe::speaker_file(s.language.as_deref(), s.speaker_model)),
         )
         .collect()
 }
@@ -167,6 +172,18 @@ fn find_rows(ui: &mut egui::Ui, s: &mut Settings) {
 }
 
 fn service_rows(ui: &mut egui::Ui, s: &mut Settings, transcribing: bool) {
+    if s.speakers && !s.model.paid() {
+        dialog::row(ui, "Speakers By", |ui| {
+            dialog::switch(ui, |ui| {
+                ui.selectable_value(&mut s.speaker_model, SpeakerModel::Auto, "Automatic")
+                    .on_hover_text("MOSS in English and Chinese, else Sortformer");
+                ui.selectable_value(&mut s.speaker_model, SpeakerModel::Moss, "MOSS")
+                    .on_hover_text("987 MB: English and Chinese, many speakers");
+                ui.selectable_value(&mut s.speaker_model, SpeakerModel::Sortformer, "Sortformer")
+                    .on_hover_text("139 MB: any language, up to 4 speakers");
+            });
+        });
+    }
     match s.model {
         SpeechModel::Xai => {
             dialog::row(ui, "Key Terms", |ui| {
@@ -293,12 +310,15 @@ fn speakers_row(ui: &mut egui::Ui, s: &mut Settings) {
     let tip = match s.model {
         SpeechModel::Xai => "One numbering across every file heard",
         SpeechModel::Google => "One numbering up to 30 minutes, past that per file",
-        _ if transcribe::speaker_file(s.language.as_deref()) == &transcribe::MOSS => {
+        _ if transcribe::speaker_file(s.language.as_deref(), s.speaker_model)
+            == &transcribe::MOSS =>
+        {
             "MOSS, for English and Chinese, on this computer"
         }
         _ => "Up to 4 in each file, on this computer",
     };
-    let moss = transcribe::speaker_file(s.language.as_deref()) == &transcribe::MOSS;
+    let moss =
+        transcribe::speaker_file(s.language.as_deref(), s.speaker_model) == &transcribe::MOSS;
     let most = match s.model {
         SpeechModel::Xai => "",
         SpeechModel::Google => "up to 8",
@@ -988,6 +1008,7 @@ impl Workspace {
                     || (!transcribing && (s.gap != 0 || !s.from_media))
                     || (s.model == SpeechModel::Xai && s.xai != XaiOptions::default())
                     || !s.keyterms.is_empty()
+                    || s.speaker_model != SpeakerModel::Auto
                     || !s.codes.is_empty();
                 dialog::advanced(ui, "speech-advanced", unusual, |ui| {
                     dialog::form(ui, "speech-advanced-form", |ui| {

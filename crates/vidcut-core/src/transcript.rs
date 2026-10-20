@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::request::{FindSpeech, GoogleOptions, SpeechModel, XaiOptions};
+use crate::request::{FindSpeech, GoogleOptions, SpeakerModel, SpeechModel, XaiOptions};
 use crate::time::Rational;
 
 pub const RATE: u32 = 16_000;
@@ -19,6 +19,7 @@ pub struct Asked {
     pub find: Option<FindSpeech>,
     pub sound_db: Option<f64>,
     pub speakers: bool,
+    pub speaker_model: SpeakerModel,
     pub send: bool,
     pub xai: Option<XaiOptions>,
     pub google: Option<GoogleOptions>,
@@ -53,6 +54,9 @@ impl Asked {
                 speech.found == f && (f == FindSpeech::Voice || speech.sound_db == self.level())
             })
             && (!self.speakers || speech.speakers.is_some())
+            && (!self.speakers
+                || self.speaker_model == SpeakerModel::Auto
+                || speech.speakers_by.as_deref() == Some(self.speaker_model.name()))
     }
 }
 
@@ -80,6 +84,8 @@ pub struct Speech {
     pub sound_db: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speakers: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speakers_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

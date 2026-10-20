@@ -18,6 +18,7 @@ fn speech(model: &str, timing: Timing, said: Vec<Said>) -> Speech {
         found: Default::default(),
         sound_db: None,
         speakers: None,
+        speakers_by: None,
     }
 }
 
@@ -155,6 +156,7 @@ fn words_found_at_another_sound_level_arent_used_again() {
         find: Some(FindSpeech::Sound),
         sound_db: Some(-50.0),
         speakers: false,
+        speaker_model: Default::default(),
         send: false,
         xai: None,
         google: None,

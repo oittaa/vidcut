@@ -10,7 +10,7 @@ use transcribe_cpp as tc;
 use vidcut_core::analysis::VoiceActivity;
 use vidcut_core::model::Media;
 use vidcut_core::render::{AudioPiece, RenderPlan};
-use vidcut_core::request::{FindSpeech, SpeechModel};
+use vidcut_core::request::{FindSpeech, SpeakerModel, SpeechModel};
 use vidcut_core::transcript::{self, Asked, RATE, Said, Speech, Timing, Turn, Word};
 
 use crate::error::{Error, Result};
@@ -119,10 +119,12 @@ pub const MOSS: File = File {
     languages: &["en", "zh"],
 };
 
-pub fn speaker_file(language: Option<&str>) -> &'static File {
-    match language.is_some_and(|l| MOSS.languages.contains(&l)) {
-        true => &MOSS,
-        false => &SORTFORMER,
+pub fn speaker_file(language: Option<&str>, choice: SpeakerModel) -> &'static File {
+    match choice {
+        SpeakerModel::Moss => &MOSS,
+        SpeakerModel::Sortformer => &SORTFORMER,
+        SpeakerModel::Auto if language.is_some_and(|l| MOSS.languages.contains(&l)) => &MOSS,
+        SpeakerModel::Auto => &SORTFORMER,
     }
 }
 
@@ -251,7 +253,7 @@ pub fn wanted(asked: &Asked) -> Vec<&'static File> {
         .into_iter()
         .chain(
             (asked.speakers && !speakers_from_service(asked))
-                .then(|| speaker_file(asked.language.as_deref())),
+                .then(|| speaker_file(asked.language.as_deref(), asked.speaker_model)),
         )
         .collect()
 }
@@ -783,13 +785,14 @@ pub(crate) fn speakers_of(
     pcm: &[f32],
     gpu: bool,
     language: Option<&str>,
+    choice: SpeakerModel,
     started: Instant,
     warnings: &mut Vec<String>,
-) -> Result<Vec<Turn>> {
-    let moss = speaker_file(language) == &MOSS && present(dir, &MOSS);
+) -> Result<(Vec<Turn>, &'static str)> {
+    let moss = speaker_file(language, choice) == &MOSS && present(dir, &MOSS);
     if moss {
         match moss_turns(dir, pcm, gpu, started, warnings) {
-            Ok(turns) => return Ok(turns),
+            Ok(turns) => return Ok((turns, SpeakerModel::Moss.name())),
             Err(e) if present(dir, &SORTFORMER) => {
                 warnings.push(format!("{}: {e}; Sortformer told the speakers", MOSS.title));
             }
@@ -815,10 +818,11 @@ pub(crate) fn speakers_of(
         })
         .collect();
     report(&path, Stage::Speakers, total, total, started);
-    if let Some(w) = full(&turns, most, language) {
+    let could = choice == SpeakerModel::Auto && speaker_file(language, SpeakerModel::Auto) == &MOSS;
+    if let Some(w) = full(&turns, most, could) {
         warnings.push(w);
     }
-    Ok(turns)
+    Ok((turns, SpeakerModel::Sortformer.name()))
 }
 
 fn moss_turns(
@@ -856,11 +860,11 @@ fn moss_turns(
         .collect())
 }
 
-fn full(turns: &[Turn], most: i32, language: Option<&str>) -> Option<String> {
+fn full(turns: &[Turn], most: i32, moss_could: bool) -> Option<String> {
     let mut heard: Vec<u32> = turns.iter().map(|t| t.speaker).collect();
     heard.sort_unstable();
     heard.dedup();
-    let moss = match speaker_file(language) == &MOSS {
+    let moss = match moss_could {
         true => format!(
             ". {} ({}) tells more apart in English and Chinese: transcribe with the language \
              set to download it",
@@ -1297,16 +1301,17 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
                 )
                 .map(String::from)
             });
-            let turns = speakers_of(
+            let (turns, by) = speakers_of(
                 options.models,
                 &pcm,
                 options.gpu,
                 heard_language.as_deref(),
+                asked.speaker_model,
                 started,
                 &mut warnings,
             )?;
             transcript::give_speakers(&mut said, &turns);
-            Some(run_id())
+            Some((run_id(), by))
         }
         false => None,
     };
@@ -1321,7 +1326,8 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
         warnings,
         found,
         sound_db: (found == FindSpeech::Sound).then_some(floor),
-        speakers,
+        speakers_by: speakers.as_ref().map(|(_, by)| by.to_string()),
+        speakers: speakers.map(|(run, _)| run),
     })
 }
 
@@ -1344,21 +1350,27 @@ mod tests {
 
     #[test]
     fn four_speakers_say_more_may_share_numbers() {
-        assert!(full(&[turn(1), turn(2), turn(3), turn(4)], 4, None).is_some());
+        assert!(full(&[turn(1), turn(2), turn(3), turn(4)], 4, false).is_some());
     }
 
     #[test]
     fn three_speakers_say_nothing() {
-        assert_eq!(full(&[turn(1), turn(2), turn(3), turn(1)], 4, None), None);
+        assert_eq!(full(&[turn(1), turn(2), turn(3), turn(1)], 4, false), None);
     }
 
     #[test]
     fn english_and_chinese_take_moss_for_speakers() {
-        assert_eq!(super::speaker_file(Some("en")).name, super::MOSS.name);
+        assert_eq!(
+            super::speaker_file(Some("en"), Default::default()).name,
+            super::MOSS.name
+        );
     }
 
     #[test]
     fn finnish_takes_sortformer_for_speakers() {
-        assert_eq!(super::speaker_file(Some("fi")).name, super::SORTFORMER.name);
+        assert_eq!(
+            super::speaker_file(Some("fi"), Default::default()).name,
+            super::SORTFORMER.name
+        );
     }
 }

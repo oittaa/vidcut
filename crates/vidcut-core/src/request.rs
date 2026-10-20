@@ -184,6 +184,11 @@ pub enum Request {
         /// (`speakers.name`).
         #[serde(default)]
         speakers: bool,
+        /// With `speakers` on this computer, the model that tells them
+        /// apart: `moss` (English and Chinese), `sortformer` (any
+        /// language, up to 4), or `auto`, by the language (the default).
+        #[serde(default)]
+        speaker_model: SpeakerModel,
         /// With the `xai` or `google` model: send the audio to that company.
         /// Without it nothing is uploaded, and the error gives the
         /// duration, the size and the estimated cost.
@@ -506,6 +511,11 @@ pub enum Request {
         /// (`speakers.name`).
         #[serde(default)]
         speakers: bool,
+        /// With `speakers` on this computer, the model that tells them
+        /// apart: `moss` (English and Chinese), `sortformer` (any
+        /// language, up to 4), or `auto`, by the language (the default).
+        #[serde(default)]
+        speaker_model: SpeakerModel,
         /// With the `xai` or `google` model: send the audio to that company.
         /// Without it nothing is uploaded, and the error gives the
         /// duration, the size and the estimated cost.
@@ -1247,6 +1257,11 @@ pub enum Request {
         /// (`speakers.name`).
         #[serde(default)]
         speakers: bool,
+        /// With `speakers` on this computer, the model that tells them
+        /// apart: `moss` (English and Chinese), `sortformer` (any
+        /// language, up to 4), or `auto`, by the language (the default).
+        #[serde(default)]
+        speaker_model: SpeakerModel,
         /// With the `xai` or `google` model: send the audio to that company.
         /// Without it nothing is uploaded, and the error gives the
         /// duration, the size and the estimated cost.
@@ -2218,6 +2233,29 @@ impl SpeechModel {
             Self::Xai => "xAI",
             Self::Google => "Google",
             _ => "",
+        }
+    }
+}
+
+/// The model on this computer that tells speakers apart.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SpeakerModel {
+    /// MOSS-Transcribe-Diarize in English and Chinese, else Sortformer.
+    #[default]
+    Auto,
+    /// MOSS-Transcribe-Diarize, 987 MB: English and Chinese, many speakers.
+    Moss,
+    /// NVIDIA's Sortformer, 139 MB: any language, up to 4 speakers.
+    Sortformer,
+}
+
+impl SpeakerModel {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Moss => "moss",
+            Self::Sortformer => "sortformer",
         }
     }
 }

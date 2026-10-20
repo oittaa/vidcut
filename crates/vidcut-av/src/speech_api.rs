@@ -360,20 +360,25 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             }],
             _ => Vec::new(),
         };
+        let service = match asked.model {
+            SpeechModel::Google => "google",
+            _ => "xai",
+        };
         let speakers = match asked.speakers {
             false => None,
-            true if service_speakers || channel_speakers => Some(run.clone()),
+            true if service_speakers || channel_speakers => Some((run.clone(), service)),
             true if !heard[i].is_empty() => {
-                let turns = transcribe::speakers_of(
+                let (turns, by) = transcribe::speakers_of(
                     options.models,
                     &heard[i],
                     options.gpu,
                     language.as_deref().or(asked.language.as_deref()),
+                    asked.speaker_model,
                     started,
                     &mut warnings[i],
                 )?;
                 transcript::give_speakers(&mut said, &turns);
-                Some(transcribe::run_id())
+                Some((transcribe::run_id(), by))
             }
             true => None,
         };
@@ -388,7 +393,8 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             warnings: std::mem::take(&mut warnings[i]),
             found: found.0,
             sound_db: found.1,
-            speakers,
+            speakers_by: speakers.as_ref().map(|(_, by)| by.to_string()),
+            speakers: speakers.map(|(run, _)| run),
         });
     }
     Ok(out)
