@@ -6,6 +6,7 @@ mod plan;
 mod ring;
 mod scrub;
 mod store;
+mod subtitles;
 mod titles;
 mod video;
 
@@ -22,6 +23,7 @@ pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,
 };
+pub use subtitles::SubtitleView;
 
 use crate::error::{Error, Result};
 use clock::{Heard, Markers};
@@ -326,6 +328,7 @@ pub(crate) struct Shared {
     heard_epoch: std::sync::atomic::AtomicU64,
     levels: Mutex<std::collections::VecDeque<Level>>,
     pub(crate) titles: titles::Titles,
+    pub(crate) subtitles: subtitles::Subtitles,
 }
 
 pub(crate) struct Level {
@@ -690,6 +693,7 @@ impl Player {
             heard_epoch: std::sync::atomic::AtomicU64::new(0),
             levels: Mutex::new(std::collections::VecDeque::new()),
             titles: titles::Titles::default(),
+            subtitles: subtitles::Subtitles::default(),
         });
         shared.apply_video_budget();
         output.start(source)?;
@@ -935,7 +939,10 @@ impl Player {
                 ctl.plan.clone(),
             )
         };
-        let (titles, drawn) = self.shared.titles.shown(&plan, pos);
+        let (mut titles, titled) = self.shared.titles.shown(&plan, pos);
+        let (cues, cued) = self.shared.subtitles.shown(&plan, pos);
+        titles.extend(cues);
+        let drawn = titled && cued;
         let picture = self.shared.store.get(&id);
         let landed = lock(&self.shared.landed).clone();
         let mut p = lock(&self.shared.presenter);
@@ -1110,6 +1117,13 @@ impl Player {
 
     pub fn preview_title(&self, title: Option<(String, Title)>) {
         if self.shared.titles.preview(title) {
+            self.shared.prepared();
+            self.shared.changed.notify_all();
+        }
+    }
+
+    pub fn set_subtitles(&self, view: Option<SubtitleView>) {
+        if self.shared.subtitles.set(view) {
             self.shared.prepared();
             self.shared.changed.notify_all();
         }

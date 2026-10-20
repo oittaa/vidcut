@@ -4,10 +4,18 @@ use eframe::egui::{self, RichText};
 use serde_json::json;
 use vidcut_av::transcribe;
 use vidcut_core::model::Project;
-use vidcut_core::request::SpeechModel;
+use vidcut_core::request::{SpeechModel, SubtitleLook};
 
 use super::export::near_center;
 use super::workspace::{Workspace, dim, escape_cancels};
+
+const LOOKS: [(SubtitleLook, &str); 5] = [
+    (SubtitleLook::Plain, "Plain"),
+    (SubtitleLook::Pop, "Pop: the spoken word yellow and popping"),
+    (SubtitleLook::Highlight, "Highlight the spoken word"),
+    (SubtitleLook::Reveal, "Reveal words as spoken"),
+    (SubtitleLook::Word, "Only the spoken word"),
+];
 
 const MODELS: [(SpeechModel, &str); 3] = [
     (
@@ -41,6 +49,7 @@ struct Settings {
     lines: u32,
     gap: u32,
     from_media: bool,
+    look: SubtitleLook,
 }
 
 impl Default for Settings {
@@ -54,6 +63,19 @@ impl Default for Settings {
             lines: 1,
             gap: 0,
             from_media: true,
+            look: SubtitleLook::Plain,
+        }
+    }
+}
+
+impl Settings {
+    fn take_look(&mut self, look: SubtitleLook) {
+        let (_, chars, lines) = vidcut_core::ops::subtitles::look(look);
+        self.look = look;
+        self.chars = chars;
+        self.lines = lines;
+        if look != SubtitleLook::Plain && self.onto == Onto::Highest {
+            self.onto = Onto::New;
         }
     }
 }
@@ -113,6 +135,7 @@ impl Hear {
 pub struct SpeechUi {
     dialog: Option<Dialog>,
     last: Option<Settings>,
+    word_times: Option<String>,
 }
 
 fn index(model: SpeechModel) -> usize {
@@ -290,6 +313,73 @@ impl Workspace {
         self.open_hearing(Vec::new());
     }
 
+    pub(crate) fn time_words(&mut self, track: &str) {
+        let dir = crate::paths::models_dir();
+        let file = transcribe::file_of(SpeechModel::ParakeetUltra);
+        if transcribe::needed(&dir, Some(file)).is_empty() {
+            self.send("subtitles.time_words", json!({ "track": track }));
+            self.export.show_jobs = true;
+        } else {
+            self.speech.word_times = Some(track.to_string());
+        }
+    }
+
+    fn word_times_window(&mut self, ctx: &egui::Context) {
+        let Some(track) = self.speech.word_times.clone() else {
+            return;
+        };
+        let dir = crate::paths::models_dir();
+        let needs = transcribe::needed(&dir, Some(transcribe::file_of(SpeechModel::ParakeetUltra)));
+        let total: u64 = needs.iter().map(|n| n.bytes).sum();
+        let mut answer = None;
+        let modal = egui::Modal::new(egui::Id::unique("word-times-download")).show(ctx, |ui| {
+            ui.set_max_width(420.0);
+            ui.heading(format!("Download {}?", transcribe::size(total)));
+            ui.label(format!(
+                "Timing words needs {}, not on this computer yet. vidcut downloads {} once, \
+                 checks each against its SHA-256 and keeps {} in {}.",
+                transcribe::listed(&needs),
+                if needs.len() == 1 { "it" } else { "them" },
+                if needs.len() == 1 { "it" } else { "them" },
+                dir.display()
+            ));
+            ui.horizontal(|ui| {
+                if ui.button("Download and Synchronize").clicked() {
+                    answer = Some(true);
+                }
+                if ui.button("Not Now").clicked() {
+                    answer = Some(false);
+                }
+            });
+        });
+        if escape_cancels(ctx, &modal) {
+            answer = Some(false);
+        }
+        match answer {
+            Some(true) => {
+                self.send(
+                    "subtitles.time_words",
+                    json!({ "track": track, "download": true }),
+                );
+                self.export.show_jobs = true;
+                self.speech.word_times = None;
+            }
+            Some(false) => self.speech.word_times = None,
+            None => {}
+        }
+    }
+
+    pub(crate) fn open_animated_speech(&mut self) {
+        self.open_hearing(Vec::new());
+        if let Some(d) = &mut self.speech.dialog
+            && d.settings.look == SubtitleLook::Plain
+        {
+            d.settings.take_look(SubtitleLook::Pop);
+            d.settings.onto = Onto::New;
+            d.settings.model = SpeechModel::ParakeetUltra;
+        }
+    }
+
     pub(crate) fn open_transcribe(&mut self, media: Vec<String>) {
         if !media.is_empty() {
             self.open_hearing(media);
@@ -353,6 +443,9 @@ impl Workspace {
         if let Some(l) = &s.language {
             params["language"] = json!(l);
         }
+        if s.look != SubtitleLook::Plain {
+            params["look"] = json!(s.look);
+        }
         match &s.onto {
             Onto::Highest => {}
             Onto::Track(id) => params["track"] = json!(id),
@@ -367,6 +460,7 @@ impl Workspace {
     }
 
     pub(super) fn speech_window(&mut self, ctx: &egui::Context) {
+        self.word_times_window(ctx);
         let Some(mut d) = self.speech.dialog.take() else {
             return;
         };
@@ -581,6 +675,29 @@ impl Workspace {
                                         s.onto = Onto::New;
                                     }
                                 });
+                            ui.end_row();
+                            ui.label("Look");
+                            let mut look = s.look;
+                            egui::ComboBox::from_id_salt("speech-look")
+                                .selected_text(
+                                    LOOKS
+                                        .iter()
+                                        .find(|(l, _)| *l == look)
+                                        .map_or("", |(_, t)| *t),
+                                )
+                                .show_ui(ui, |ui| {
+                                    for (l, text) in LOOKS {
+                                        ui.selectable_value(&mut look, l, text);
+                                    }
+                                })
+                                .response
+                                .on_hover_text(
+                                    "Animated looks show each word as it is spoken; the track's \
+                                     style can be changed later in its Subtitle Track window",
+                                );
+                            if look != s.look {
+                                s.take_look(look);
+                            }
                             ui.end_row();
                             ui.label("Max Characters per Line");
                             ui.add(egui::DragValue::new(&mut s.chars).range(1..=60));

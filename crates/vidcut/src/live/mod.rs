@@ -268,6 +268,7 @@ pub(crate) enum Msg {
     Audition(Option<Audition>),
     Skip(Option<Vec<ClipSpans>>),
     PreviewTitle(Option<(String, Title)>),
+    Subtitles(Option<vidcut_av::player::SubtitleView>),
     FreeTitle(Option<FreeTitle>),
     Shutdown,
 }
@@ -327,6 +328,10 @@ impl Handle {
 
     pub fn preview_title(&self, title: Option<(String, Title)>) {
         let _ = self.tx.send(Msg::PreviewTitle(title));
+    }
+
+    pub fn show_subtitles(&self, view: Option<vidcut_av::player::SubtitleView>) {
+        let _ = self.tx.send(Msg::Subtitles(view));
     }
 
     pub fn preview_free_title(&self, title: Option<(Title, i64, f64)>) {
@@ -933,6 +938,10 @@ impl Live {
                     self.refresh_timeline();
                 }
                 self.player.preview_title(title);
+            }
+            Msg::Subtitles(view) => {
+                changed = false;
+                self.player.set_subtitles(view);
             }
             Msg::FreeTitle(title) => {
                 changed = false;

@@ -1,14 +1,11 @@
 use std::path::PathBuf;
 
-use eframe::egui::{
-    self, Align, Color32, FontId, Key, Painter, Rect, Stroke, pos2, text::LayoutJob, vec2,
-};
+use eframe::egui::{self, Key};
 use serde_json::json;
 use vidcut_core::model::{
-    Cue, LetterCase, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle,
-    SubtitleTrack, SubtitleWords, WordsShow,
+    LetterCase, Place, SubtitleBackground, SubtitleOutline, SubtitleStyle, SubtitleTrack,
+    SubtitleWords, WordsShow,
 };
-use vidcut_core::subtitles::{Tag, Token};
 
 use super::export::{Ask, Picked};
 use super::folders::Kind;
@@ -62,6 +59,13 @@ const SHOWS: [(Option<WordsShow>, &str); 4] = [
     (Some(WordsShow::Word), "Only the spoken word"),
 ];
 
+pub(crate) type SubtitlesKey = (
+    u64,
+    Option<String>,
+    Option<(String, String, Place)>,
+    Option<SubtitleStyle>,
+);
+
 pub(super) fn format_name(f: vidcut_core::request::SubtitleFormat) -> &'static str {
     match f {
         vidcut_core::request::SubtitleFormat::Srt => "SRT",
@@ -95,53 +99,6 @@ const PLACES: [(Place, &str); 3] = [
     (Place::Middle, "Middle"),
     (Place::Top, "Top"),
 ];
-
-fn jobs(text: &str, size: f32, width: f32, base: Color32) -> (LayoutJob, LayoutJob) {
-    let mut plain = LayoutJob::default();
-    let mut bold = LayoutJob::default();
-    let mut colors: Vec<Color32> = Vec::new();
-    let mut depth = [0usize; 3];
-    for token in vidcut_core::subtitles::tokens(text) {
-        match token {
-            Token::Text(t) => {
-                let color = colors.last().copied().unwrap_or(base);
-                let format = |color: Color32| egui::TextFormat {
-                    font_id: FontId::proportional(size),
-                    line_height: Some(size * SubtitleStyle::LINE as f32),
-                    color,
-                    italics: depth[0] > 0,
-                    underline: if depth[2] > 0 {
-                        Stroke::new((size / 16.0).max(1.0), color)
-                    } else {
-                        Stroke::NONE
-                    },
-                    ..Default::default()
-                };
-                plain.append(&t, 0.0, format(color));
-                let shown = if depth[1] > 0 {
-                    color
-                } else {
-                    Color32::TRANSPARENT
-                };
-                bold.append(&t, 0.0, format(shown));
-            }
-            Token::Open(Tag::Color(c)) => colors.push(hex(&c).unwrap_or(base)),
-            Token::Close(Tag::Color(_)) => {
-                colors.pop();
-            }
-            Token::Open(tag) => depth[slot(&tag)] += 1,
-            Token::Close(tag) => {
-                let i = slot(&tag);
-                depth[i] = depth[i].saturating_sub(1);
-            }
-        }
-    }
-    for job in [&mut plain, &mut bold] {
-        job.wrap.max_width = width;
-        job.halign = Align::Center;
-    }
-    (plain, bold)
-}
 
 pub(super) fn percent(v: Option<f64>) -> String {
     let Some(n) = v else {
@@ -265,135 +222,6 @@ pub(super) fn font_list(
     changed
 }
 
-fn slot(tag: &Tag) -> usize {
-    match tag {
-        Tag::I => 0,
-        Tag::B => 1,
-        _ => 2,
-    }
-}
-
-fn hex(c: &str) -> Option<Color32> {
-    vidcut_core::subtitles::rgb(c).map(|[r, g, b]| Color32::from_rgb(r, g, b))
-}
-
-fn fill_union(painter: &Painter, boxes: &[Rect], color: Color32) {
-    let mut edges: Vec<f32> = boxes.iter().flat_map(|b| [b.top(), b.bottom()]).collect();
-    edges.sort_by(f32::total_cmp);
-    edges.dedup();
-    let mut mesh = egui::Mesh::default();
-    for pair in edges.windows(2) {
-        let span = boxes
-            .iter()
-            .filter(|b| b.top() <= pair[0] && b.bottom() >= pair[1])
-            .fold(Rect::NOTHING, |all, b| all.union(*b));
-        if span.is_positive() {
-            mesh.add_colored_rect(
-                Rect::from_x_y_ranges(span.x_range(), pair[0]..=pair[1]),
-                color,
-            );
-        }
-    }
-    painter.add(egui::Shape::mesh(mesh));
-}
-
-pub(super) fn paint_cues(
-    painter: &Painter,
-    picture: Rect,
-    p: &Project,
-    frame: i64,
-    typing: Option<&CueDialog>,
-    styling: Option<&TrackDialog>,
-) {
-    let Some(t) = p.subtitles.iter().find(|t| t.shown) else {
-        return;
-    };
-    let style = match styling {
-        Some(d) if d.track == t.id => d.preview.as_ref().unwrap_or(&t.style),
-        _ => &t.style,
-    };
-    let (w, h) = (f64::from(picture.width()), f64::from(picture.height()));
-    let size = (picture.height() * style.text_fraction() as f32).max(8.0);
-    let width = style.wrap_width(w, h) as f32;
-    let [r, g, b] = style.ink();
-    let ink = Color32::from_rgb(r, g, b);
-    let outline = style.stroke().map(|([r, g, b], s)| {
-        (
-            Color32::from_rgba_unmultiplied(r, g, b, 220),
-            (size * s as f32).max(1.0),
-        )
-    });
-    let backing = style.backing().map(|([r, g, b], a)| {
-        Color32::from_rgba_unmultiplied(r, g, b, (a.clamp(0.0, 1.0) * 255.0).round() as u8)
-    });
-    let pad = (size * SubtitleStyle::PADDING as f32).ceil();
-    let on: Vec<&Cue> = t
-        .cues
-        .iter()
-        .filter(|c| c.start <= frame && frame < c.end())
-        .collect();
-    for (place, _) in PLACES {
-        let galleys: Vec<_> = on
-            .iter()
-            .map(|c| match typing {
-                Some(d) if d.cue == c.id => (d.text.as_str(), d.place),
-                _ => (c.text.as_str(), c.place),
-            })
-            .filter(|&(_, at)| at == place)
-            .map(|(text, _)| {
-                let (plain, bold) = jobs(text, size, width, ink);
-                (painter.layout_job(plain), painter.layout_job(bold))
-            })
-            .collect();
-        let total: f32 = galleys.iter().map(|(g, _)| g.rect.height()).sum();
-        let mut top = picture.top() + style.block_top(place, h, f64::from(total)) as f32;
-        let placed: Vec<_> = galleys
-            .into_iter()
-            .map(|(plain, bold)| {
-                let r = plain.rect;
-                let at = pos2(picture.center().x - r.center().x, top - r.top());
-                top += r.height();
-                (at, plain, bold)
-            })
-            .collect();
-        if let Some(color) = backing {
-            let boxes: Vec<Rect> = placed
-                .iter()
-                .flat_map(|(at, plain, _)| {
-                    plain
-                        .rows
-                        .iter()
-                        .filter(|row| !row.glyphs.is_empty())
-                        .map(|row| row.rect().translate(at.to_vec2()).expand(pad))
-                })
-                .collect();
-            fill_union(painter, &boxes, color);
-        }
-        for (at, plain, bold) in placed {
-            if let Some((color, edge)) = outline {
-                for (dx, dy) in [
-                    (-1.0, -1.0),
-                    (0.0, -1.0),
-                    (1.0, -1.0),
-                    (-1.0, 0.0),
-                    (1.0, 0.0),
-                    (-1.0, 1.0),
-                    (0.0, 1.0),
-                    (1.0, 1.0),
-                ] {
-                    painter.galley_with_override_text_color(
-                        at + vec2(dx, dy) * edge,
-                        plain.clone(),
-                        color,
-                    );
-                }
-            }
-            painter.galley(at, plain, ink);
-            painter.galley(at + vec2(size / 28.0, 0.0), bold, ink);
-        }
-    }
-}
-
 impl Workspace {
     fn typed(&self, d: &CueDialog) -> Option<serde_json::Value> {
         let cue = self.project()?.cue(&d.cue)?;
@@ -472,6 +300,54 @@ impl Workspace {
             families: vidcut_av::burn::families(),
             preview: None,
         });
+    }
+
+    pub(super) fn sync_subtitles(&mut self) {
+        let Some(p) = self.project() else {
+            return;
+        };
+        let track = p.subtitles.iter().find(|t| t.shown);
+        let typing = self
+            .timeline
+            .cue_dialog
+            .as_ref()
+            .map(|d| (d.cue.clone(), d.text.clone(), d.place));
+        let styling = self
+            .timeline
+            .track_dialog
+            .as_ref()
+            .filter(|d| track.is_some_and(|t| t.id == d.track))
+            .and_then(|d| d.preview.clone());
+        let key = (
+            p.rev,
+            track.map(|t| t.id.clone()),
+            typing.clone(),
+            styling.clone(),
+        );
+        if self.timeline.subtitles_sent.as_ref() == Some(&key) {
+            return;
+        }
+        let view = track.map(|t| {
+            let mut cues = t.cues.clone();
+            if let Some((id, text, place)) = &typing
+                && let Some(c) = cues.iter_mut().find(|c| c.id == *id)
+            {
+                let text = vidcut_core::subtitles::normalize(text);
+                if !c.words.is_empty()
+                    && vidcut_core::subtitles::words(&text).len() != c.words.len()
+                {
+                    c.words = vidcut_core::subtitles::spread_words(&text, c.duration);
+                }
+                c.text = text;
+                c.place = *place;
+            }
+            vidcut_av::player::SubtitleView {
+                style: styling.unwrap_or_else(|| t.style.clone()),
+                cues,
+            }
+        });
+        self.timeline.subtitles_sent = Some(key);
+        self.live.show_subtitles(view);
     }
 
     pub(super) fn subtitle_windows(&mut self, ctx: &egui::Context) {
