@@ -221,6 +221,12 @@ pub enum Request {
         #[serde(default)]
         color: Option<String>,
     },
+    /// Same Person As: `person` becomes `into` everywhere, both as
+    /// `speakers.list` gives them or by name: their cues on every track,
+    /// the files' speakers and words that were theirs. `into` keeps its
+    /// name, and its color, else takes `person`'s.
+    #[serde(rename = "speakers.join")]
+    SpeakersJoin { person: String, into: String },
     /// Make a file's speaker a person: one from `speakers.list`, which joins
     /// them, or a new one. Without `person`, it is again the person its
     /// transcript gives.

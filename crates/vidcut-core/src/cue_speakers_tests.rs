@@ -228,3 +228,48 @@ fn applying_to_all_takes_away_the_speakers_own_cue_colors() {
     let (ti, ci) = f.editor.project().find_cue("q2").unwrap();
     assert_eq!(f.editor.project().subtitles[ti].cues[ci].color, None);
 }
+
+#[test]
+fn joining_gives_a_persons_cues_to_the_other() {
+    let mut f = Fixture::new(&[]);
+    for (at, who) in [("0f", "r1/5"), ("50f", "r1/2")] {
+        f.ok(req(
+            "subtitles.add",
+            json!({"text": "hi", "at": at, "duration": "25f", "speaker": who}),
+        ));
+    }
+    f.ok(req(
+        "speakers.join",
+        json!({"person": "r1/5", "into": "r1/2"}),
+    ));
+    let who: Vec<Option<String>> = f.editor.project().subtitles[0]
+        .cues
+        .iter()
+        .map(|c| c.speaker.clone())
+        .collect();
+    assert_eq!(who, [Some("r1/2".to_string()), Some("r1/2".to_string())]);
+}
+
+#[test]
+fn a_joined_person_keeps_their_own_color() {
+    let mut s = Speakers::default();
+    s.colors.insert("r1/5".into(), "#ff0000".into());
+    s.colors.insert("r1/2".into(), "#00ff00".into());
+    s.join("r1/5", "r1/2", Vec::new());
+    assert_eq!(s.colors.get("r1/2").map(String::as_str), Some("#00ff00"));
+}
+
+#[test]
+fn a_joined_person_without_a_color_takes_the_others() {
+    let mut s = Speakers::default();
+    s.colors.insert("r1/5".into(), "#ff0000".into());
+    s.join("r1/5", "r1/2", Vec::new());
+    assert_eq!(s.colors.get("r1/2").map(String::as_str), Some("#ff0000"));
+}
+
+#[test]
+fn joining_links_the_files_speakers_that_were_them() {
+    let mut s = Speakers::default();
+    s.join("r1/5", "r1/2", vec!["m1/0/5".into()]);
+    assert_eq!(s.person("m1", 0, "r1", 5, 1.0), "r1/2");
+}

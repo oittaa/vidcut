@@ -72,6 +72,22 @@ impl Speakers {
         }
     }
 
+    pub fn join(&mut self, from: &str, into: &str, voices: Vec<String>) {
+        for v in self.links.values_mut().filter(|v| v.as_str() == from) {
+            *v = into.to_string();
+        }
+        for v in voices {
+            self.links.insert(v, into.to_string());
+        }
+        for a in self.assigned.iter_mut().filter(|a| a.person == from) {
+            a.person = into.to_string();
+        }
+        if let Some(c) = self.colors.remove(from) {
+            self.colors.entry(into.to_string()).or_insert(c);
+        }
+        self.names.remove(from);
+    }
+
     pub fn assign(&mut self, a: Assigned) {
         self.assigned.retain(|o| {
             o.media != a.media || o.stream != a.stream || o.end <= a.start || o.start >= a.end

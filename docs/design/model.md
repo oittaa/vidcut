@@ -209,7 +209,7 @@ Preferences are not in the project. They live in `preferences.toml` in the confi
 
 ## Speakers
 
-`Project::speakers` (`Speakers`) says who speaks in the transcripts the project uses, which are kept with the files and number their own speakers (`Speech::speakers` names the run that numbered them). `names` names a person and `colors` gives them a color; `links` makes a file's speaker (its voice: media, stream, number) a person other than its run's; `assigned` gives a file's words between two times to a person, the last one first. All go through the history like any edit (`speakers.set`, `speakers.link`, `speakers.assign`). A cue names its person by the same key (`Cue::speaker`); `Speakers::key_for` finds the person a name names, so a name typed or read from a WebVTT voice becomes a person of its own only when no one has it.
+`Project::speakers` (`Speakers`) says who speaks in the transcripts the project uses, which are kept with the files and number their own speakers (`Speech::speakers` names the run that numbered them). `names` names a person and `colors` gives them a color; `links` makes a file's speaker (its voice: media, stream, number) a person other than its run's; `assigned` gives a file's words between two times to a person, the last one first. All go through the history like any edit (`speakers.set`, `speakers.link`, `speakers.assign`). `speakers.join` makes one person another everywhere (`Speakers::join`): the files' speakers that were theirs are linked to the other, and their cues take the other's key. A cue names its person by the same key (`Cue::speaker`); `Speakers::key_for` finds the person a name names, so a name typed or read from a WebVTT voice becomes a person of its own only when no one has it.
 
 ## Validation
 

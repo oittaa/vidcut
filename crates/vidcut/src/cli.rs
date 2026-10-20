@@ -47,6 +47,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("subtitles.join", &["cues"]),
     ("subtitles.match_speaker", &["cue"]),
     ("speakers.set", &["person"]),
+    ("speakers.join", &["person"]),
     ("subtitles.import", &["path"]),
     ("subtitles.export", &["out"]),
     ("titles.list", &["track"]),

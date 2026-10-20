@@ -3678,6 +3678,47 @@ fn mutate(
                 "color": p.speakers.colors.get(person),
             })
         }
+        Request::SpeakersJoin { person, into } => {
+            let (from, to) = (p.speakers.key_for(person), p.speakers.key_for(into));
+            if from.is_empty() || to.is_empty() {
+                return Err(Error::usage("person and into: people from speakers.list"));
+            }
+            if from == to {
+                return Err(Error::invalid(format!("{from} is {to} already")));
+            }
+            let mut voices = Vec::new();
+            for m in &p.media {
+                for a in &m.info.audio {
+                    let Some(speech) = env.transcript(m, a.index)? else {
+                        continue;
+                    };
+                    let Some(run) = &speech.speakers else {
+                        continue;
+                    };
+                    for n in 1..=transcript::speaker_count(&speech.said) {
+                        let voice = crate::speakers::voice(&m.id, a.index, n);
+                        let is = p.speakers.links.get(&voice).cloned();
+                        if is.unwrap_or_else(|| crate::speakers::heard_person(run, n)) == from {
+                            voices.push(voice);
+                        }
+                    }
+                }
+            }
+            let voiced = voices.len();
+            p.speakers.join(&from, &to, voices);
+            let mut cues = 0;
+            for t in p.subtitles.iter_mut().filter(|t| !t.locked) {
+                for c in t
+                    .cues
+                    .iter_mut()
+                    .filter(|c| c.speaker.as_deref() == Some(&from))
+                {
+                    c.speaker = Some(to.clone());
+                    cues += 1;
+                }
+            }
+            json!({ "person": from, "into": to, "cues": cues, "voices": voiced })
+        }
         Request::SpeakersLink {
             media,
             stream,

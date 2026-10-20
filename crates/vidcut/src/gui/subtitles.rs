@@ -508,6 +508,7 @@ impl Workspace {
                         .width(200.0)
                         .show_ui(ui, |ui| {
                             let mut picked = None;
+                            ui.label(dim("This Subtitle"));
                             if ui.selectable_label(d.speaker.is_none(), "None").clicked() {
                                 picked = Some(None);
                             }
@@ -515,6 +516,24 @@ impl Workspace {
                                 let on = d.speaker.as_deref() == Some(key.as_str());
                                 if ui.selectable_label(on, name).clicked() {
                                     picked = Some(Some(key.clone()));
+                                }
+                            }
+                            let stored = found.and_then(|(_, c)| c.speaker.clone());
+                            let others: Vec<_> = everyone
+                                .iter()
+                                .filter(|(k, _)| Some(k) != stored.as_ref())
+                                .collect();
+                            if let Some(from) = stored.as_ref().filter(|_| !others.is_empty()) {
+                                ui.separator();
+                                ui.label(dim(format!("All of {}'s", p.speakers.name(from))));
+                                for (key, name) in others {
+                                    if ui.selectable_label(false, name).clicked() {
+                                        self.send(
+                                            "speakers.join",
+                                            json!({ "person": from, "into": key }),
+                                        );
+                                        picked = Some(Some(key.clone()));
+                                    }
                                 }
                             }
                             if let Some(k) = picked {
