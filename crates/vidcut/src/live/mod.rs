@@ -552,6 +552,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         gates: HashMap::new(),
         job_replies: HashMap::new(),
         next_job: 1,
+        hearing: 0,
         audio_scrubbing: true,
         looping: false,
         stats: false,
@@ -763,6 +764,9 @@ fn chosen_theme() -> (crate::themes::Theme, Option<String>) {
 const RELOAD_EVERY: Duration = Duration::from_millis(100);
 const OMARCHY_SETTLES: Duration = Duration::from_millis(150);
 
+const HEARS: [&str; 5] = ["subtitles", "words", "transcript", "word_times", "retime"];
+const HEARING_VIDEO: usize = 1 << 30;
+
 struct Live {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -813,6 +817,7 @@ struct Live {
     gates: HashMap<String, Sender<()>>,
     job_replies: HashMap<String, (Job, bool)>,
     next_job: u64,
+    hearing: usize,
     audio_scrubbing: bool,
     looping: bool,
     stats: bool,
@@ -1013,7 +1018,7 @@ impl Live {
                     self.fillers = Arc::new(fillers);
                     changed = true;
                 }
-                self.player.set_budget(crate::preferences::player_budget());
+                self.follow_budget();
                 self.follow_theme();
                 if self.project.is_some() && self.proxy_folder() != *self.proxy_dir {
                     self.project_changed(None);
@@ -1645,6 +1650,14 @@ impl Live {
         self.dirty = true;
     }
 
+    fn follow_budget(&mut self) {
+        let mut budget = crate::preferences::player_budget();
+        if self.hearing > 0 && !vidcut_av::player::SHARED_MEMORY {
+            budget.video = Some(budget.video.map_or(HEARING_VIDEO, |v| v.min(HEARING_VIDEO)));
+        }
+        self.player.set_budget(budget);
+    }
+
     fn start_encode(
         &mut self,
         job: Job,
@@ -1653,6 +1666,10 @@ impl Live {
         title: String,
         kind: &'static str,
     ) {
+        if HEARS.contains(&kind) {
+            self.hearing += 1;
+            self.follow_budget();
+        }
         let id = format!("j{}", self.next_job);
         self.next_job += 1;
         let cancel = job
@@ -1788,6 +1805,14 @@ impl Live {
             self.start_turn(&next);
         }
         self.dirty = true;
+        if self.jobs.iter().any(|j| {
+            j.id == id
+                && HEARS.contains(&j.kind)
+                && matches!(j.state, JobState::Queued | JobState::Running)
+        }) {
+            self.hearing = self.hearing.saturating_sub(1);
+            self.follow_budget();
+        }
         let Some(j) = Arc::make_mut(&mut self.jobs)
             .iter_mut()
             .find(|j| j.id == id)
