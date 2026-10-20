@@ -4,22 +4,23 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use serde_json::{Value, json};
-use vidcut_core::folder::{FRAME_TYPES, IMAGE_TYPES, MEDIA_TYPES, extension};
+use vidcut_core::folder::{FRAME_TYPES, IMAGE_TYPES, MEDIA_TYPES, SUBTITLE_TYPES, extension};
 use vidcut_core::model::ImageSequence;
 use vidcut_core::time::Rational;
 
 use super::workspace::{Workspace, dim, escape_cancels};
 
-fn filters() -> [(&'static str, Vec<&'static str>); 3] {
+fn filters() -> [(&'static str, Vec<&'static str>); 4] {
     [
-        ("all media", [MEDIA_TYPES, IMAGE_TYPES].concat()),
+        ("all media", media_types()),
         ("video and audio", MEDIA_TYPES.to_vec()),
         ("images", IMAGE_TYPES.to_vec()),
+        ("subtitles", SUBTITLE_TYPES.to_vec()),
     ]
 }
 
 pub(super) fn media_types() -> Vec<&'static str> {
-    [MEDIA_TYPES, IMAGE_TYPES].concat()
+    [MEDIA_TYPES, IMAGE_TYPES, SUBTITLE_TYPES].concat()
 }
 
 #[derive(Default)]
@@ -137,7 +138,7 @@ fn request(choice: &Choice) -> Result<(&'static str, Value), String> {
 }
 
 impl Workspace {
-    fn import_from(&self) -> (Option<String>, PathBuf) {
+    pub(super) fn import_from(&self) -> (Option<String>, PathBuf) {
         let bin = Some(self.snap.pool.bin.clone()).filter(|b| !b.is_empty());
         let folder = self
             .folders

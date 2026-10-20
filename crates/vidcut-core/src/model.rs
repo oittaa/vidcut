@@ -277,6 +277,30 @@ pub struct Media {
     /// (`media.leave_out`), each `[start, end)`, in order and apart.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub left_out: Vec<(i64, i64)>,
+    /// A subtitle file (SRT, WebVTT, TTML): what was read from it when it
+    /// was added or relinked. It has no pictures or sound; its cues are read
+    /// again when it is placed on a subtitle track (`subtitles.import` with
+    /// `media`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitles: Option<SubtitleFile>,
+}
+
+/// A subtitle file in the Media Pool.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SubtitleFile {
+    pub format: crate::request::SubtitleFormat,
+    /// The text encoding it was read in, such as UTF-8 or Windows-1252.
+    pub encoding: String,
+    /// How many cues it holds.
+    pub cues: usize,
+    /// The language it names, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// Its first cue's text, without styling.
+    pub first: String,
+    /// What reading it found wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 pub fn uncovered(a: i64, b: i64, spans: &[(i64, i64)]) -> Vec<(i64, i64)> {

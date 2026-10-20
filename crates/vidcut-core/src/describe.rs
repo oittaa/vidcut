@@ -195,6 +195,9 @@ pub fn describe_at(
         "subtitles.join" => format!("Join {}", d.cues("cues")),
         "titles.add" => format!("Title {} at {}", quoted(&d.text("text")), d.time("at")),
         "titles.set" => format!("Change title {}", d.clips("clip")),
+        "subtitles.import" if d.params["media"].is_string() => {
+            format!("Insert subtitles {}", d.media("media"))
+        }
         "subtitles.import" => format!("Import subtitles {}", d.file("path")),
         "subtitles.export" => format!("Export subtitles to {}", d.file("out")),
         "analyze.words" if d.params["range"].is_string() => {

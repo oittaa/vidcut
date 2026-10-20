@@ -205,6 +205,12 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             "an edit can't be both Video Only and Audio Only",
         ));
     }
+    if media.subtitles.is_some() {
+        return Err(Error::invalid(format!(
+            "{} is a subtitle file: put its cues on a subtitle track (subtitles.import with media)",
+            media.id
+        )));
+    }
     let video = media.info.video.is_some() && !src.audio_only;
     let audio = !media.info.audio.is_empty() && !src.video_only;
     if !video && !audio {

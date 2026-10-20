@@ -145,6 +145,20 @@ impl Env for AvEnv {
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_nanos() as i64);
+        if vidcut_core::subtitles::is_file(&canonical) {
+            let bytes = std::fs::read(&canonical)
+                .map_err(|e| Error::media(format!("{}: {e}", path.display())))?;
+            let (info, file) = vidcut_core::subtitles::pool_item(&bytes, &canonical)?;
+            return Ok(ProbedMedia {
+                fingerprint: vidcut_core::fingerprint::file(&canonical).ok(),
+                path: canonical,
+                size: meta.len(),
+                mtime_ns,
+                info,
+                sequence: None,
+                subtitles: Some(file),
+            });
+        }
         let decoder = crate::preferences::gpu_decoding().own_decoder();
         let info = vidcut_av::probe::probe(&canonical, decoder.as_ref())
             .map_err(|e| Error::media(e.to_string()))?;
@@ -155,6 +169,7 @@ impl Env for AvEnv {
             mtime_ns,
             info: convert(&info)?,
             sequence: None,
+            subtitles: None,
         })
     }
 

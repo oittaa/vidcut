@@ -74,6 +74,10 @@ pub enum Gesture {
     Bin {
         path: String,
     },
+    Subtitles {
+        media: String,
+        cues: Vec<(i64, i64)>,
+    },
     Title {
         kind: vidcut_core::model::TitleKind,
         align: Option<vidcut_core::model::TitleAlign>,
@@ -114,6 +118,7 @@ pub struct Preview {
     pub marquee: Option<Rect>,
     pub blocked: bool,
     pub row: Option<String>,
+    pub cues: Vec<(i64, i64)>,
 }
 
 pub struct Ctx<'a> {
@@ -239,6 +244,7 @@ impl Drag {
                 &hovered,
             ),
             Gesture::Bin { .. } => Preview::default(),
+            Gesture::Subtitles { media, cues } => subtitles_preview(ctx, pos, media, cues),
             Gesture::Title { kind, align, len } => title_preview(ctx, pos, *kind, *align, *len),
             Gesture::Trim {
                 clip,
@@ -546,6 +552,32 @@ fn overwrite_move(
         ghost: Some((ghost, ghost + len)),
         snapped,
         row: Some(dest.to_string()),
+        ..Preview::default()
+    }
+}
+
+fn subtitles_preview(ctx: &Ctx, pos: Pos2, media: &str, cues: &[(i64, i64)]) -> Preview {
+    if !ctx.rows.reaches(pos) {
+        return Preview::default();
+    }
+    let dest = ctx.rows.subtitle_target(ctx.project, pos.y);
+    let len = cues.iter().map(|c| c.1).max().unwrap_or(1).max(1);
+    let raw = ctx.scale.boundary(pos.x).max(0);
+    let (at, snapped) = match ctx.snap {
+        Some(s) => s.snap_block(raw, len, &ctx.scale, SNAP_PX),
+        None => (raw, None),
+    };
+    let at = at.max(0);
+    let mut params = json!({ "media": media, "at": format!("{at}f") });
+    if ctx.project.subtitle_index(&dest).is_some() {
+        params["track"] = json!(dest);
+    }
+    Preview {
+        request: request("subtitles.import", params),
+        ghost: Some((at, at + len)),
+        cues: cues.iter().map(|&(a, b)| (at + a, at + b)).collect(),
+        snapped,
+        row: Some(dest),
         ..Preview::default()
     }
 }
@@ -989,6 +1021,7 @@ mod tests {
             color_space: Default::default(),
             left_out: Vec::new(),
             fingerprint: None,
+            subtitles: None,
         }
     }
 
