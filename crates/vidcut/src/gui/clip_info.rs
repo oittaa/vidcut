@@ -406,11 +406,7 @@ impl Workspace {
                 let all = sections(self, m, details);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(&m.name).strong());
-                    if ui
-                        .button("Copy")
-                        .on_hover_text("Copy all of it as text")
-                        .clicked()
-                    {
+                    if ui.button("Copy").clicked() {
                         ui.ctx().copy_text(as_text(&all));
                     }
                 });

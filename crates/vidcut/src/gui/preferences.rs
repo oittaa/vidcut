@@ -80,7 +80,6 @@ struct NumberField<'a> {
     range: std::ops::RangeInclusive<u64>,
     unit: Unit,
     enabled: bool,
-    tip: &'a str,
     refusal: &'a str,
 }
 
@@ -91,8 +90,7 @@ impl NumberField<'_> {
                 self.enabled,
                 egui::TextEdit::singleline(text).desired_width(56.0),
             )
-            .labelled_by(self.label)
-            .on_hover_text(self.tip);
+            .labelled_by(self.label);
         if r.changed() {
             text.retain(|c| {
                 c.is_ascii_digit() || (self.unit == Unit::Gb && matches!(c, '.' | ','))
@@ -284,16 +282,14 @@ impl Workspace {
                     ui.set_max_width(PAGE);
                     ui.add(egui::Label::new(RichText::new(e).color(theme::colors().error)).wrap());
                     ui.horizontal(|ui| {
-                        if ui
-                            .button("Show in Folder")
-                            .on_hover_text("The preferences file, to fix by hand")
-                            .clicked()
-                        {
+                        if ui.button("Show in Folder").clicked() {
                             super::file_manager::show(&crate::preferences::path());
                         }
                         reset = ui
-                            .add_enabled(ui_state.ask.is_none(), egui::Button::new("Reset Preferences"))
-                            .on_hover_text("Back to the defaults, keeping the old file as preferences.toml.bak")
+                            .add_enabled(
+                                ui_state.ask.is_none(),
+                                egui::Button::new("Reset Preferences"),
+                            )
                             .clicked();
                     });
                     return;
@@ -306,7 +302,10 @@ impl Workspace {
                             ui.spacing_mut().button_padding.y = 6.0;
                             for (page, icon, name) in PAGES {
                                 if ui
-                                    .selectable_label(ui_state.page == page, format!("{icon}  {name}"))
+                                    .selectable_label(
+                                        ui_state.page == page,
+                                        format!("{icon}  {name}"),
+                                    )
                                     .clicked()
                                 {
                                     ui_state.page = page;
@@ -327,7 +326,9 @@ impl Workspace {
                                     Page::General => {
                                         general(ui, &state, busy, ui_state, &dialogs, &mut patch)
                                     }
-                                    Page::Gpu => gpu(ui, &state, busy, display.as_deref(), &mut patch),
+                                    Page::Gpu => {
+                                        gpu(ui, &state, busy, display.as_deref(), &mut patch)
+                                    }
                                     Page::Memory => memory(ui, &state, busy, ui_state, &mut patch),
                                     Page::Sound => sound(ui, &state, busy, ui_state, &mut patch),
                                     Page::Cache => cache(ui, &state, busy, ui_state, &mut patch),
@@ -341,7 +342,9 @@ impl Workspace {
                                         };
                                         proxies(ui, &state, busy, ui_state, &folders, &mut patch);
                                     }
-                                    Page::Fillers => fillers(ui, &state, busy, ui_state, &mut patch),
+                                    Page::Fillers => {
+                                        fillers(ui, &state, busy, ui_state, &mut patch)
+                                    }
                                 }
                                 if let Some(e) = &ui_state.error {
                                     ui.add(
@@ -492,11 +495,6 @@ fn general(
                                 if r.clicked() {
                                     pick = name.to_string();
                                 }
-                                if let Some(e) = t["error"].as_str() {
-                                    r.on_disabled_hover_text(e);
-                                } else if let Some(p) = t["path"].as_str() {
-                                    r.on_hover_text(p);
-                                }
                             }
                         });
                 });
@@ -505,7 +503,6 @@ fn general(
                         !busy && ui_state.importing.is_none(),
                         egui::Button::new("Import…"),
                     )
-                    .on_hover_text("Copies a theme file (.toml) into the themes folder")
                     .clicked()
                 {
                     let dialogs = dialogs.clone();
@@ -521,7 +518,7 @@ fn general(
             let path = state["path"].as_str().unwrap_or_default();
             label(ui, "Preferences File");
             ui.horizontal(|ui| {
-                if ui.button("Show in Folder").on_hover_text(path).clicked() {
+                if ui.button("Show in Folder").clicked() {
                     super::file_manager::show(Path::new(path));
                 }
             });
@@ -532,7 +529,6 @@ fn general(
                     ui_state.resetting.is_none(),
                     egui::Button::new("Reset vidcut…"),
                 )
-                .on_hover_text("Back to a fresh install, keeping projects and media")
                 .clicked()
             {
                 ui_state.confirm_reset = true;
@@ -579,7 +575,6 @@ fn gpu(
                         !busy,
                         egui::Checkbox::new(&mut on, "Decode, scale and encode on the GPU"),
                     )
-                    .on_hover_text("Off: everything runs on the CPU, for a troublesome driver")
                     .changed()
                 {
                     *patch = Some(json!({ "gpu": { "acceleration": on } }));
@@ -592,7 +587,6 @@ fn gpu(
                         !busy && on,
                         egui::Checkbox::new(&mut decoding, "Decode on the GPU too"),
                     )
-                    .on_hover_text("Off where a small GPU decodes slower than the CPU")
                     .changed()
                 {
                     *patch = Some(json!({ "gpu": { "decoding": decoding } }));
@@ -651,9 +645,7 @@ fn gpu_choice(
                     let id = g["id"].as_str().unwrap_or_default();
                     ui.selectable_value(&mut pick, id.to_string(), name(g));
                 }
-            })
-            .response
-            .on_hover_text("Automatic: NVIDIA's when there is one, else the first other");
+            });
     });
     if pick != current {
         *patch = Some(json!({ "gpu": { "device": pick } }));
@@ -709,14 +701,13 @@ fn memory(
                     }
                     _ => format!("{} GB", about_gb(video_auto)),
                 };
-                for (key, name, text, auto, about, tip) in [
+                for (key, name, text, auto, about) in [
                     (
                         "memory_mb",
                         "Viewer Pictures",
                         &mut ui_state.player_memory,
                         viewer,
                         None,
-                        "Pictures the CPU decoded, in the computer's memory",
                     ),
                     (
                         "video_memory_mb",
@@ -724,11 +715,10 @@ fn memory(
                         &mut ui_state.video_memory,
                         video,
                         (!gpu_decodes).then_some("Not used while the CPU decodes"),
-                        "Pictures the GPU decoded, kept in its memory",
                     ),
                 ] {
                     let saved = player[key].as_u64().unwrap_or(0);
-                    let label = label(ui, name).on_hover_text(tip);
+                    let label = label(ui, name);
                     ui.horizontal(|ui| {
                         let custom = saved != 0;
                         dialog::switch(ui, |ui| {
@@ -755,7 +745,6 @@ fn memory(
                                 range: 64..=100_000_000,
                                 unit: Unit::Gb,
                                 enabled: !busy,
-                                tip,
                                 refusal: "Custom memory is at least 0.0625 GB (64 MB)",
                             };
                             if let Some(mb) = field.show(ui, text, &mut ui_state.error) {
@@ -824,11 +813,7 @@ fn sound(
                                 for d in devices {
                                     ui.selectable_value(&mut pick, d.id.clone(), &d.name);
                                 }
-                            })
-                            .response
-                            .on_hover_text(
-                                "A device that isn't connected plays on the system's default",
-                            );
+                            });
                     });
                     if pick != chosen {
                         *patch = Some(json!({ "player": { "audio_device": pick } }));
@@ -875,7 +860,6 @@ fn cache(
                 label(ui, "Thumbnails");
                 if ui
                     .add_enabled(!busy, egui::Checkbox::new(&mut disk, "Keep them on disk"))
-                    .on_hover_text("Projects open with their pictures at once; off empties it")
                     .changed()
                 {
                     *patch = Some(json!({ "thumbnails": { "disk_cache": disk } }));
@@ -889,7 +873,6 @@ fn cache(
                         range: 1..=1_000_000,
                         unit: Unit::Plain,
                         enabled: !busy && disk,
-                        tip: "Above it, the pictures used least recently go first",
                         refusal: "The size limit is 1 to 1000000 MB",
                     };
                     if let Some(mb) = field.show(ui, &mut ui_state.limit, &mut ui_state.error) {
@@ -899,8 +882,7 @@ fn cache(
                     ui.label(dim(format!(
                         "Holds {} MB in {} files",
                         cache["mb"], cache["files"]
-                    )))
-                    .on_hover_text(cache["path"].as_str().unwrap_or_default());
+                    )));
                 });
                 ui.end_row();
             });
@@ -944,8 +926,7 @@ fn services(
                             egui::TextEdit::singleline(&mut ui_state.keys[i])
                                 .password(true)
                                 .desired_width(200.0),
-                        )
-                        .on_hover_text(format!("Kept in the keychain; {variable} goes first"));
+                        );
                         let typed = !ui_state.keys[i].trim().is_empty();
                         if ui
                             .add_enabled(!busy && typed, egui::Button::new("Save"))
@@ -970,7 +951,6 @@ fn services(
                     label(ui, "Before Sending");
                     if ui
                         .add_enabled(!busy, egui::Checkbox::new(&mut on, "Ask"))
-                        .on_hover_text("Shows the length and the estimated cost first")
                         .changed()
                     {
                         *patch = Some(json!({ "services": { ask: on } }));
@@ -1045,7 +1025,6 @@ fn proxies(
                         range: 16..=7680,
                         unit: Unit::Plain,
                         enabled: !busy,
-                        tip: "The longest side of a proxy, automatic or not",
                         refusal: "The proxy size is even, from 16 to 7680",
                     };
                     if let Some(n) = field.show(ui, &mut ui_state.size, &mut ui_state.error) {
@@ -1075,7 +1054,6 @@ fn proxies(
                         !busy,
                         egui::Checkbox::new(&mut auto, "Make proxies by themselves, for:"),
                     )
-                    .on_hover_text("While Proxies is on in the Media Pool")
                     .changed()
                 {
                     *patch = Some(json!({ "proxies": { "auto": auto } }));
@@ -1091,7 +1069,6 @@ fn proxies(
                             !busy && auto,
                             egui::Checkbox::new(&mut seq, "Image sequences"),
                         )
-                        .on_hover_text("Every picture is decoded on the CPU as it plays")
                         .changed()
                     {
                         *patch = Some(json!({ "proxies": { "image_sequences": seq } }));
@@ -1109,7 +1086,6 @@ fn proxies(
                         range: 1..=100_000,
                         unit: Unit::Plain,
                         enabled: !busy && auto,
-                        tip: "Pictures with more pixels than this get a proxy",
                         refusal: "The size needs a width and height of at least 1",
                     };
                     let w = field(0).show(ui, &mut ui_state.larger_w, &mut ui_state.error);
@@ -1131,7 +1107,6 @@ fn proxies(
                         range: 1..=100_000,
                         unit: Unit::Plain,
                         enabled: !busy && auto,
-                        tip: "Files averaging more, such as camera formats the GPU can't decode",
                         refusal: "The bitrate is at least 1 Mb/s",
                     };
                     if let Some(n) = field.show(ui, &mut ui_state.mbps, &mut ui_state.error) {
@@ -1160,18 +1135,15 @@ fn folder(
                 !busy,
                 egui::TextEdit::singleline(&mut ui_state.folder).desired_width(230.0),
             )
-            .labelled_by(label.id)
-            .on_hover_text("A folder in each project's folder, or one path for all");
+            .labelled_by(label.id);
         let typed = ui_state.folder.trim();
         if r.lost_focus() && !busy && typed != saved {
             *patch = Some(json!({ "proxies": { "folder": typed } }));
         }
-        let choose = ui
-            .add_enabled(
-                !busy && ui_state.choosing_folder.is_none(),
-                egui::Button::new("Choose…"),
-            )
-            .on_hover_text("Pick a folder for the proxies of every project");
+        let choose = ui.add_enabled(
+            !busy && ui_state.choosing_folder.is_none(),
+            egui::Button::new("Choose…"),
+        );
         if choose.clicked() {
             let dialogs = folders.dialogs.clone();
             let start = match folders.project {
@@ -1189,10 +1161,7 @@ fn folder(
         }
         let default = Proxies::default().folder;
         if Path::new(saved) != default
-            && ui
-                .add_enabled(!busy, egui::Button::new("Reset"))
-                .on_hover_text("A proxies folder in each project's folder")
-                .clicked()
+            && ui.add_enabled(!busy, egui::Button::new("Reset")).clicked()
         {
             *patch = Some(json!({ "proxies": { "folder": default } }));
         }
@@ -1250,15 +1219,12 @@ fn codec(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>
                 for c in &choices {
                     if ui
                         .selectable_label(c["codec"] == current, name(c))
-                        .on_hover_text(how(c))
                         .clicked()
                     {
                         *patch = Some(json!({ "proxies": { "codec": c["codec"] } }));
                     }
                 }
-            })
-            .response
-            .on_hover_text("Automatic: the first the GPU both makes and plays");
+            });
     });
     ui.end_row();
     if let Some(c) = selected {

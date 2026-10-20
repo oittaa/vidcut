@@ -1,4 +1,4 @@
-use eframe::egui::{self, Key};
+use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
 use vidcut_core::model::{Title, TitleAlign, TitleKind};
@@ -346,13 +346,13 @@ impl Workspace {
                         d.selection = (0, 0);
                         true
                     };
-                    if ui.button("B").on_hover_text("Bold").clicked() {
+                    if ui.button(RichText::new("B").strong()).clicked() {
                         changed |= wrap(&mut d, "<b>".into(), "</b>");
                     }
-                    if ui.button("I").on_hover_text("Italic").clicked() {
+                    if ui.button(RichText::new("I").italics()).clicked() {
                         changed |= wrap(&mut d, "<i>".into(), "</i>");
                     }
-                    if ui.button("U").on_hover_text("Underline").clicked() {
+                    if ui.button(RichText::new("U").underline()).clicked() {
                         changed |= wrap(&mut d, "<u>".into(), "</u>");
                     }
                     swatch(ui, &mut d.word_color, [255, 215, 0]);
@@ -378,11 +378,7 @@ impl Workspace {
                         let f = vidcut_core::rich::escape(d.word_font.trim()).replace('"', "");
                         changed |= wrap(&mut d, format!("<font face=\"{f}\">"), "</font>");
                     }
-                    if ui
-                        .button("Plain")
-                        .on_hover_text("Takes the styles off the words")
-                        .clicked()
-                    {
+                    if ui.button("Plain").clicked() {
                         d.text = unstyled(&d.text, d.selection);
                         d.selection = (0, 0);
                         changed = true;

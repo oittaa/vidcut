@@ -154,12 +154,12 @@ impl Workspace {
         ui.horizontal(|ui| {
             self.fit_row(ui, row, |ws, ui, h| match h {
                 Header::Mode(m) => {
-                    let (label, tip) = match m {
-                        ViewerMode::SourceClip => ("Source Clip", "The clip opened from the pool"),
-                        ViewerMode::SourceTape => ("Source Tape", "Every pool clip end to end"),
-                        ViewerMode::Timeline => ("Timeline", "The program (Q toggles)"),
+                    let label = match m {
+                        ViewerMode::SourceClip => "Source Clip",
+                        ViewerMode::SourceTape => "Source Tape",
+                        ViewerMode::Timeline => "Timeline",
                     };
-                    let r = ui.selectable_label(mode == m, label).on_hover_text(tip);
+                    let r = ui.selectable_label(mode == m, label);
                     if r.clicked() {
                         ws.send("viewer.set", json!({ "mode": m }));
                     }
@@ -399,7 +399,7 @@ impl Workspace {
                         .response
                     }
                     TrimRow::Close => {
-                        let r = ui.button("Close").on_hover_text("Esc");
+                        let r = ui.button("Close");
                         if r.clicked() {
                             ws.timeline.edit = None;
                         }
@@ -856,14 +856,14 @@ impl Workspace {
                             .response
                     }
                     T::Previous => {
-                        let r = ui.button(big("⏮")).on_hover_text("Previous edit (Up)");
+                        let r = ui.button(big("⏮"));
                         if r.clicked() {
                             ws.jump_edit(id, false);
                         }
                         r
                     }
                     T::Stop => {
-                        let r = ui.button(big("⏹")).on_hover_text("Stop (K)");
+                        let r = ui.button(big("⏹"));
                         if r.clicked() {
                             ws.send("player.pause", json!({}));
                         }
@@ -871,16 +871,14 @@ impl Workspace {
                     }
                     T::Play => {
                         let play = if player.playing { "⏸" } else { "▶" };
-                        let r = ui
-                            .button(big(play))
-                            .on_hover_text("Play/stop (Space); J/K/L shuttle");
+                        let r = ui.button(big(play));
                         if r.clicked() {
                             ws.send("player.toggle", json!({}));
                         }
                         r
                     }
                     T::Next => {
-                        let r = ui.button(big("⏭")).on_hover_text("Next edit (Down)");
+                        let r = ui.button(big("⏭"));
                         if r.clicked() {
                             ws.jump_edit(id, true);
                         }
@@ -888,32 +886,28 @@ impl Workspace {
                     }
                     T::Loop => {
                         let looping = ws.snap.looping;
-                        let r = ui
-                            .selectable_label(looping, big(egui_phosphor::regular::REPEAT))
-                            .on_hover_text(super::keys(
-                                "Loop (Ctrl+/): from the end back to the start, or from Out back to In",
-                            ));
+                        let r = ui.selectable_label(looping, big(egui_phosphor::regular::REPEAT));
                         if r.clicked() {
                             ws.send("player.loop", json!({ "on": !looping }));
                         }
                         r
                     }
                     T::MarkIn => {
-                        let r = ui.button("Mark In").on_hover_text("I");
+                        let r = ui.button("Mark In");
                         if r.clicked() {
                             ws.mark(true);
                         }
                         r
                     }
                     T::MarkOut => {
-                        let r = ui.button("Mark Out").on_hover_text("O");
+                        let r = ui.button("Mark Out");
                         if r.clicked() {
                             ws.mark(false);
                         }
                         r
                     }
                     T::Clear => {
-                        let r = ui.button("Clear").on_hover_text(super::keys("Alt+X"));
+                        let r = ui.button("Clear");
                         if r.clicked() {
                             ws.clear_marks();
                         }
@@ -962,10 +956,7 @@ impl Workspace {
         };
         for (by, icon, way) in [(-1, "◀|", "a frame earlier"), (1, "|▶", "a frame later")] {
             let tip = format!("{what} {way}");
-            let r = ui
-                .add_enabled(enabled, egui::Button::new(RichText::new(icon).size(14.0)))
-                .on_hover_text(&tip)
-                .on_disabled_hover_text(&tip);
+            let r = ui.add_enabled(enabled, egui::Button::new(RichText::new(icon).size(14.0)));
             r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, &tip));
             if r.clicked() {
                 self.nudge_edit(side, by);
@@ -1028,11 +1019,8 @@ impl Workspace {
                 }
             }
         } else {
-            let r = ui
-                .add(egui::Label::new(RichText::new(&current).font(font)).sense(Sense::click()))
-                .on_hover_text(
-                    "Click (or press =) to go to a timecode; + or - for a relative jump",
-                );
+            let r =
+                ui.add(egui::Label::new(RichText::new(&current).font(font)).sense(Sense::click()));
             if r.clicked() {
                 self.timecode = Some(TimecodeEntry {
                     sign: None,
@@ -1077,15 +1065,10 @@ impl Workspace {
                 r.request_focus();
             }
         } else {
-            let r = ui
-                .add(
-                    egui::Label::new(RichText::new(&current).font(FontId::monospace(13.0)))
-                        .sense(Sense::click()),
-                )
-                .on_hover_text(
-                    "Marked duration; click to change it, moving the Out mark: frames (48), \
-                     a timecode, or + or - to change it by (+12)",
-                );
+            let r = ui.add(
+                egui::Label::new(RichText::new(&current).font(FontId::monospace(13.0)))
+                    .sense(Sense::click()),
+            );
             ui.label(dim("Duration"));
             if r.clicked() {
                 self.duration_text = Some(String::new());

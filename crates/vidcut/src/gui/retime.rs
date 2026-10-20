@@ -243,11 +243,7 @@ impl Workspace {
                     dialog::row(ui, "Track", |ui| ui.label(&name));
                     d.heard = dialog::row(ui, "Hear", |ui| d.hear.ui(ui, &p));
                     dialog::row(ui, "Words", |ui| {
-                        ui.checkbox(&mut d.words, "Match Words Too")
-                            .on_hover_text(format!(
-                                "More exact: reads the words with {}",
-                                file.title
-                            ));
+                        ui.checkbox(&mut d.words, "Match Words Too");
                     });
                 });
             });

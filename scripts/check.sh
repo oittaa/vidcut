@@ -83,7 +83,6 @@ long_text_left=(
   crates/vidcut/src/gui/pool.rs
   crates/vidcut/src/gui/project.rs
   crates/vidcut/src/gui/subtitles.rs
-  crates/vidcut/src/gui/timeline/cues.rs
   crates/vidcut/src/gui/timeline/mod.rs
   crates/vidcut/src/gui/timeline/tools.rs
   crates/vidcut/src/gui/title_browser.rs
@@ -125,6 +124,16 @@ long=$(
 if [[ -n "$long" ]]; then
   echo "GUI text over 12 words (AGENTS.md, rule 12):" >&2
   printf '%s\n' "$long" | sed 's/^/  /' >&2
+  exit 1
+fi
+
+step "no tooltips"
+# A control says what it does by its label and its form, never by a tooltip
+# (AGENTS.md, rule 12).
+tips=$(git grep -n -E 'on_(disabled_)?hover_(text|ui)' -- 'crates/vidcut/src/gui/' || true)
+if [[ -n "$tips" ]]; then
+  echo "tooltips in the GUI (AGENTS.md, rule 12): make the control say it instead" >&2
+  printf '%s\n' "$tips" | sed 's/^/  /' >&2
   exit 1
 fi
 

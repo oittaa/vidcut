@@ -169,15 +169,11 @@ impl Workspace {
                         "{} found by name, but not the same file:",
                         report.different.len()
                     ));
-                    for (i, (_, name, path, why)) in report.different.iter().enumerate() {
+                    for (i, (_, name, _, why)) in report.different.iter().enumerate() {
                         ui.horizontal(|ui| {
-                            ui.label(name).on_hover_text(path.display().to_string());
+                            ui.label(name);
                             ui.label(dim(why));
-                            if ui
-                                .button("Relink Anyway")
-                                .on_hover_text(format!("Use {}", path.display()))
-                                .clicked()
-                            {
+                            if ui.button("Relink Anyway").clicked() {
                                 anyway = Some(i);
                             }
                         });

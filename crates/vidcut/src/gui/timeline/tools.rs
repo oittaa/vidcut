@@ -1047,14 +1047,12 @@ impl Workspace {
                             egui::Slider::new(&mut secs, super::BORING_SECS)
                                 .logarithmic(true)
                                 .suffix(" s"),
-                        )
-                        .on_hover_text("Longer clips show light gray");
+                        );
                         ui.end_row();
                         ui.label("Jump Cuts");
                         ui.add(
                             egui::Slider::new(&mut frames, super::JUMP_FRAMES).suffix(" frames"),
-                        )
-                        .on_hover_text("Shorter clips show red; 2 finds flash frames");
+                        );
                         ui.end_row();
                     });
                 ui.horizontal(|ui| {

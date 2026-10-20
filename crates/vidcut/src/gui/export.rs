@@ -681,12 +681,15 @@ impl Workspace {
                             .as_ref()
                             .and_then(|v| v.height.map(|h| format!("{h}p")))
                             .unwrap_or_else(|| "timeline size".into());
-                        let text = format!(
-                            "{}\n{} · {}",
-                            p.title,
-                            p.settings.container.extension().to_uppercase(),
-                            size
-                        );
+                        let text = match p.unavailable {
+                            Some(_) => format!("{}\nNot available here", p.title),
+                            None => format!(
+                                "{}\n{} · {}",
+                                p.title,
+                                p.settings.container.extension().to_uppercase(),
+                                size
+                            ),
+                        };
                         let r = ui
                             .add_enabled_ui(p.unavailable.is_none(), |ui| {
                                 ui.add_sized(
@@ -694,9 +697,7 @@ impl Workspace {
                                     egui::Button::selectable(selected, text),
                                 )
                             })
-                            .inner
-                            .on_hover_text(&p.description)
-                            .on_disabled_hover_text(p.unavailable.as_deref().unwrap_or_default());
+                            .inner;
                         if r.clicked() {
                             q.selected = Some(p.name.clone());
                             q.error = None;
@@ -864,7 +865,11 @@ impl Workspace {
                                 .width(240.0)
                                 .show_ui(ui, |ui| {
                                     for p in &presets {
-                                        let mark = if p.user { " (yours)" } else { "" };
+                                        let mark = match (p.unavailable.is_some(), p.user) {
+                                            (true, _) => " (not available here)",
+                                            (false, true) => " (yours)",
+                                            (false, false) => "",
+                                        };
                                         let r = ui
                                             .add_enabled_ui(p.unavailable.is_none(), |ui| {
                                                 ui.selectable_label(
@@ -872,11 +877,7 @@ impl Workspace {
                                                     format!("{}{mark}", p.title),
                                                 )
                                             })
-                                            .inner
-                                            .on_hover_text(&p.description)
-                                            .on_disabled_hover_text(
-                                                p.unavailable.as_deref().unwrap_or_default(),
-                                            );
+                                            .inner;
                                         if r.clicked() {
                                             d.use_preset(p);
                                         }
@@ -1216,9 +1217,7 @@ impl Workspace {
             true => RichText::new(label).color(theme::colors().error),
             false => RichText::new(label),
         };
-        let button = ui
-            .toggle_value(&mut self.export.show_jobs, label)
-            .on_hover_text("Exports, proxy encodes and transcriptions, with progress and details");
+        let button = ui.toggle_value(&mut self.export.show_jobs, label);
         let left = self.export.jobs_glow_until - now;
         if left > 0.0 {
             ui.painter().rect_stroke(
@@ -1686,10 +1685,7 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
 
 fn run_again(ui: &mut egui::Ui, j: &JobInfo, send: &impl Fn(&str, Value)) {
     if let Some(method) = job_method(j)
-        && ui
-            .small_button("Run Again")
-            .on_hover_text("Start the same job again")
-            .clicked()
+        && ui.small_button("Run Again").clicked()
     {
         send(method, j.params.clone());
     }
@@ -1734,18 +1730,11 @@ fn job_chips(ui: &mut egui::Ui, j: &JobInfo) {
 
 fn job_details(ui: &mut egui::Ui, j: &JobInfo, rate: Option<f64>, project: Option<&Path>) {
     ui.horizontal(|ui| {
-        if ui
-            .small_button("Copy Details")
-            .on_hover_text("These details as text, for a bug report")
-            .clicked()
-        {
+        if ui.small_button("Copy Details").clicked() {
             ui.ctx().copy_text(details_text(j, rate));
         }
         if let Some(method) = job_method(j)
-            && ui
-                .small_button("Copy as Command")
-                .on_hover_text("A vidcut command that runs this job again from a terminal")
-                .clicked()
+            && ui.small_button("Copy as Command").clicked()
         {
             ui.ctx().copy_text(super::workspace::vidcut_command(
                 project,
@@ -2003,10 +1992,10 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
             }
             let outputs = plan["outputs"].as_array().cloned().unwrap_or_default();
             if let Some(line) = color_line(&outputs) {
-                ui.label(line.0).on_hover_text(line.1);
+                ui.label(line.0);
             }
             if let Some(line) = metadata_line(&outputs) {
-                ui.label(dim(line.0)).on_hover_text(line.1);
+                ui.label(dim(line.0));
             }
             let frames: i64 = outputs.iter().filter_map(|o| o["frames"].as_i64()).sum();
             ui.label(format!("{} file(s), {frames} frames", outputs.len()));
@@ -2039,12 +2028,7 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
                         .flatten()
                         .filter_map(|s| s.as_str().map(String::from))
                         .collect();
-                    if !set.is_empty()
-                        && ui
-                            .small_button("Export HDR")
-                            .on_hover_text(set.join("  "))
-                            .clicked()
-                    {
+                    if !set.is_empty() && ui.small_button("Export HDR").clicked() {
                         action = Some(set);
                     }
                 });
@@ -2126,12 +2110,7 @@ fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value) {
             for p in [None, Some(1), Some(2)] {
                 ui.selectable_value(&mut v.passes, p, label(p));
             }
-        })
-        .response
-        .on_hover_text(
-            "auto: two where the encoder makes them. Two reach the bitrate more closely: \
-             x264, x265 and VP9 encode twice, NVENC looks at each frame twice.",
-        );
+        });
     match planned["passes"]["kind"].as_str() {
         Some("two_runs") => {
             ui.label(dim("first pass"));
@@ -2141,9 +2120,7 @@ fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value) {
                     for f in [FirstPass::Fast, FirstPass::Full] {
                         ui.selectable_value(&mut v.first_pass, f, name(&f));
                     }
-                })
-                .response
-                .on_hover_text("fast: quicker settings for the measuring run");
+                });
         }
         Some("two_inside") => {
             ui.label(dim("first look"));
@@ -2153,11 +2130,7 @@ fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value) {
                     for m in [Multipass::Quarter, Multipass::Full] {
                         ui.selectable_value(&mut v.multipass, m, name(&m));
                     }
-                })
-                .response
-                .on_hover_text(
-                    "NVENC's first pass over each frame: at a quarter or full resolution",
-                );
+                });
         }
         _ => {}
     }
@@ -2176,7 +2149,6 @@ fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value) {
                     .range(0..=max)
                     .suffix(" frames"),
             )
-            .on_hover_text("frames NVENC looks ahead for rate control; 0: none")
             .changed()
         {
             v.lookahead = (n != vidcut_core::export::DEFAULT_LOOKAHEAD).then_some(n);
@@ -2201,15 +2173,10 @@ fn choice<T: PartialEq>(
     text: String,
     why: Option<String>,
 ) -> egui::Response {
-    let r = ui
-        .add_enabled_ui(why.is_none(), |ui| {
-            ui.selectable_value(current, value, text)
-        })
-        .inner;
-    match why {
-        Some(why) => r.on_disabled_hover_text(why),
-        None => r,
-    }
+    ui.add_enabled_ui(why.is_none(), |ui| {
+        ui.selectable_value(current, value, text)
+    })
+    .inner
 }
 
 fn subtitles_form(ui: &mut egui::Ui, d: &mut Dialog, tracks: &[(String, String, bool)]) {
@@ -2440,12 +2407,7 @@ fn settings_form(
                         .add_enabled_ui(!bitrate_only, |ui| {
                             ui.radio_value(&mut by_quality, true, "Quality")
                         })
-                        .inner
-                        .on_disabled_hover_text(format!(
-                            "{} encodes {} only at a bitrate",
-                            v.encoder.title(),
-                            v.codec.title()
-                        ));
+                        .inner;
                     if quality.changed() {
                         v.bitrate = None;
                         v.quality = v.quality.or(Some(20));
@@ -2459,7 +2421,6 @@ fn settings_form(
                         let mut q = v.quality.unwrap_or(20);
                         if ui
                             .add(egui::DragValue::new(&mut q).range(0..=v.codec.worst_quality()))
-                            .on_hover_text("lower is better (CRF / CQ)")
                             .changed()
                         {
                             v.quality = Some(q);
@@ -2538,12 +2499,7 @@ fn settings_form(
                                 ui.selectable_value(&mut v.bit_depth, None, "auto");
                                 ui.selectable_value(&mut v.bit_depth, Some(8), "8");
                                 ui.selectable_value(&mut v.bit_depth, Some(10), "10");
-                            })
-                            .response
-                            .on_hover_text(
-                                "auto: 10 bits for HDR, and when most of the picture has 10 \
-                                 bits or more (not in H.264); else 8",
-                            );
+                            });
                     }
                     if vidcut_core::export::color::carries_hdr(v.codec) {
                         let label = |h: HdrMode| match h {
@@ -2559,13 +2515,7 @@ fn settings_form(
                                 for h in [HdrMode::Auto, HdrMode::Sdr, HdrMode::Pq, HdrMode::Hlg] {
                                     ui.selectable_value(&mut v.hdr, h, label(h));
                                 }
-                            })
-                            .response
-                            .on_hover_text(
-                                "auto: HDR when most of the picture is HDR. SDR: HDR sources \
-                                 are tone-mapped. HDR: BT.2020 in 10 bits, SDR sources with \
-                                 their white at 203 nits.",
-                            );
+                            });
                         if v.hdr.transfer().is_some() && v.bit_depth == Some(8) {
                             v.bit_depth = None;
                         }
@@ -2593,14 +2543,7 @@ fn settings_form(
                                     ] {
                                         ui.selectable_value(&mut v.hdr_metadata, m, label(m));
                                     }
-                                })
-                                .response
-                                .on_hover_text(
-                                    "auto: the sources' mastering display and light levels \
-                                     (PQ), HDR10+ when any picture has it (made for the frames \
-                                     without), and Dolby Vision when every picture has it. \
-                                     Dolby Vision is written by the CPU's encoders.",
-                                );
+                                });
                         }
                     } else if v.hdr.transfer().is_some() {
                         v.hdr = HdrMode::Auto;
@@ -2613,7 +2556,6 @@ fn settings_form(
                                 .hint_text("default")
                                 .desired_width(70.0),
                         )
-                        .on_hover_text("encoder speed preset: slow, p5, 8, …")
                         .changed()
                     {
                         let s = speed.trim();
@@ -2700,14 +2642,7 @@ fn settings_form(
                 ui.label("Loudness");
                 ui.horizontal(|ui| {
                     let mut on = a.loudness.is_some();
-                    if ui
-                        .checkbox(&mut on, "Normalize to")
-                        .on_hover_text(
-                            "Measure the mix (EBU R128) and change it by one gain to this \
-                             loudness, keeping true peaks at or below -1 dBTP. YouTube: -14.",
-                        )
-                        .changed()
-                    {
+                    if ui.checkbox(&mut on, "Normalize to").changed() {
                         a.loudness = on.then_some(-14.0);
                     }
                     if let Some(target) = &mut a.loudness {

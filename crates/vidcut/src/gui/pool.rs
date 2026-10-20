@@ -387,40 +387,28 @@ impl Workspace {
             ui.label(RichText::new("Media Pool").strong());
             if let Some(p) = project {
                 let mut on = p.settings.use_proxies;
-                if ui
-                    .checkbox(&mut on, "Proxies")
-                    .on_hover_text(
-                        "The preview plays a proxy when the source file still matches it. Export always reads the originals.",
-                    )
-                    .changed()
-                {
+                if ui.checkbox(&mut on, "Proxies").changed() {
                     self.send("project.set", json!({ "use_proxies": on }));
                 }
             }
             let missing = snap.missing.len();
             if missing > 0
                 && ui
-                    .button(RichText::new(format!("Relink Media ({missing})")).color(theme::colors().error))
-                    .on_hover_text(format!(
-                        "{missing} file(s) missing. Choose a folder: they are looked for by \
-                         name there and in its subfolders, and each one found is relinked if \
-                         it is the same file (size, streams and fingerprint)"
-                    ))
+                    .button(
+                        RichText::new(format!("Relink Media ({missing})"))
+                            .color(theme::colors().error),
+                    )
                     .clicked()
             {
                 self.relink_missing(ui.ctx());
             }
-            for (mode, name, tip) in [
-                (PoolMode::Thumbnail, "Grid", "Thumbnail view"),
-                (
-                    PoolMode::Filmstrip,
-                    "Filmstrip",
-                    "Each clip as a strip of its pictures",
-                ),
-                (PoolMode::List, "List", "List view"),
+            for (mode, name) in [
+                (PoolMode::Thumbnail, "Grid"),
+                (PoolMode::Filmstrip, "Filmstrip"),
+                (PoolMode::List, "List"),
             ] {
                 let on = snap.pool.view == mode;
-                if ui.selectable_label(on, name).on_hover_text(tip).clicked() && !on {
+                if ui.selectable_label(on, name).clicked() && !on {
                     self.send("pool.set", json!({ "view": mode }));
                 }
             }
@@ -428,11 +416,7 @@ impl Workspace {
                 self.metadata_strip,
                 RichText::new(egui_phosphor::regular::TAG).size(14.0),
             );
-            if ui
-                .add(tag)
-                .on_hover_text("The selected clip's format at a glance, above the clips")
-                .clicked()
-            {
+            if ui.add(tag).clicked() {
                 self.show_metadata_strip(!self.metadata_strip);
             }
             if ui.available_width() >= 120.0 {
@@ -564,11 +548,7 @@ impl Workspace {
                     return;
                 };
                 ui.horizontal(|ui| {
-                    if ui
-                        .small_button(egui_phosphor::regular::INFO)
-                        .on_hover_text("Clip Info: all that is known of it")
-                        .clicked()
-                    {
+                    if ui.small_button(egui_phosphor::regular::INFO).clicked() {
                         self.open_clip_info(Some(m.id.clone()));
                     }
                     ui.label(RichText::new(elide(&m.name, 48)).strong());
@@ -607,8 +587,8 @@ impl Workspace {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
             self.fit_row(ui, row, |ws, ui, item| match item {
-                BinBar::Bins => ui
-                    .menu_button("Bins", |ui| {
+                BinBar::Bins => {
+                    ui.menu_button("Bins", |ui| {
                         for (path, depth) in bin_list(p) {
                             let text = format!("{}{}", "    ".repeat(depth), bin_name(&path));
                             if ui.selectable_label(view.bin == path, text).clicked() {
@@ -623,7 +603,7 @@ impl Workspace {
                         }
                     })
                     .response
-                    .on_hover_text("Open a bin"),
+                }
                 BinBar::Crumb(i) => {
                     let (name, at) = &levels[i];
                     ui.horizontal(|ui| {
@@ -670,12 +650,8 @@ impl Workspace {
                     r
                 }
                 BinBar::Order => {
-                    let (arrow, tip) = if view.descending {
-                        ("⬇", "Descending; click for ascending")
-                    } else {
-                        ("⬆", "Ascending; click for descending")
-                    };
-                    let r = ui.small_button(arrow).on_hover_text(tip);
+                    let arrow = if view.descending { "⬇" } else { "⬆" };
+                    let r = ui.small_button(arrow);
                     if r.clicked() {
                         ws.send("pool.set", json!({ "descending": !view.descending }));
                     }
@@ -815,9 +791,7 @@ impl Workspace {
         }
         self.drop_highlight(ui, picture, path);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, leaf(path)));
-        let resp = resp.on_hover_text(format!(
-            "{path}\nDouble-click opens the bin; drag it onto another bin to move it"
-        ));
+        let resp = resp;
         self.bin_interaction(&resp, path);
     }
 
@@ -828,10 +802,7 @@ impl Workspace {
                 false,
                 format!("📁 {}   {count} clip(s)", elide(leaf(path), 60)),
             )
-            .interact(Sense::drag())
-            .on_hover_text(format!(
-                "{path}\nDouble-click opens the bin; drag it onto another bin to move it"
-            ));
+            .interact(Sense::drag());
         self.drop_highlight(ui, r.rect, path);
         self.bin_interaction(&r, path);
     }
@@ -861,11 +832,7 @@ impl Workspace {
                 });
                 ui.close();
             }
-            if ui
-                .button("Remove Bin")
-                .on_hover_text("Its clips move up a level; none leave the project")
-                .clicked()
-            {
+            if ui.button("Remove Bin").clicked() {
                 self.send("bins.remove", json!({ "path": path }));
                 ui.close();
             }
@@ -971,7 +938,7 @@ impl Workspace {
             painter.circle_filled(picture.right_bottom() + vec2(-9.0, -11.0), 4.5, color);
         }
         self.outline(&painter, picture, m);
-        let tip = self.badges(&painter, picture, m);
+        self.badges(&painter, picture, m);
         let label = |pos: Pos2, text: String, color: Color32| {
             painter.text(
                 pos,
@@ -997,7 +964,7 @@ impl Workspace {
             second,
             theme::colors().text_dim,
         );
-        let resp = resp.on_hover_text(tip);
+        let resp = resp;
         self.media_interaction(&resp, m);
         if resp.hovered() || ui.rect_contains_pointer(picture) {
             let at = Rect::from_min_size(
@@ -1006,7 +973,6 @@ impl Workspace {
             );
             if ui
                 .put(at, egui::Button::new(egui_phosphor::regular::INFO).small())
-                .on_hover_text("Clip Info")
                 .clicked()
             {
                 self.open_clip_info(Some(m.id.clone()));
@@ -1085,8 +1051,7 @@ impl Workspace {
         }
         marks(&painter, film, m, frames, hovered_frame);
         self.outline(&painter, film, m);
-        let tip = self.badges(&painter, film, m);
-        let resp = resp.on_hover_text(tip);
+        self.badges(&painter, film, m);
         self.media_interaction(&resp, m);
     }
 
@@ -1367,7 +1332,7 @@ impl Workspace {
                 };
                 let size = vec2(ui.available_width(), ui.spacing().interact_size.y);
                 let (rect, r) = ui.allocate_exact_size(size, Sense::click());
-                let r = r.on_hover_text("Sort by it; click again to reverse");
+                let r = r;
                 let builder = UiBuilder::new()
                     .max_rect(rect)
                     .layout(egui::Layout::left_to_right(egui::Align::Center));
@@ -1385,10 +1350,7 @@ impl Workspace {
                 0 => {
                     let r = ui
                         .selectable_label(false, format!("📁 {}", elide(leaf(b), 38)))
-                        .interact(Sense::drag())
-                        .on_hover_text(format!(
-                            "{b}\nDouble-click opens the bin; drag it onto another bin to move it"
-                        ));
+                        .interact(Sense::drag());
                     self.drop_highlight(ui, r.rect, b);
                     self.bin_interaction(&r, b);
                 }
@@ -1414,11 +1376,6 @@ impl Workspace {
                     name = name.color(theme::colors().error);
                 }
                 let resp = ui.selectable_label(selected, name).interact(Sense::drag());
-                let resp = if self.snap.missing.contains(&m.id) {
-                    resp.on_hover_text(format!("Missing: {}", m.path.display()))
-                } else {
-                    resp
-                };
                 self.media_interaction(&resp, m);
             }
             1 => {
@@ -1446,10 +1403,7 @@ impl Workspace {
             }
             4 => match video {
                 Some(v) => {
-                    let rate = ui.label(v.fps.decimal());
-                    if !v.fps.is_whole() {
-                        rate.on_hover_text(format!("{} fps", v.fps));
-                    }
+                    ui.label(v.fps.decimal());
                 }
                 None => {
                     ui.label("-");
@@ -1484,8 +1438,7 @@ impl Workspace {
                 &self.snap.proxy_dir,
             ) {
                 Some(px) => {
-                    ui.label(RichText::new(px.column).color(px.color))
-                        .on_hover_text(px.tip);
+                    ui.label(RichText::new(px.column).color(px.color));
                 }
                 None => {
                     ui.label("-");
@@ -1574,20 +1527,12 @@ impl Workspace {
             if m.subtitles.is_some() {
                 if ui
                     .button("Insert Selected Subtitles to Timeline Using Timecode")
-                    .on_hover_text(
-                        "Each cue at its timecode, on a new subtitle track; a file not timed \
-                         in the timeline's timecode from the timeline's start",
-                    )
                     .clicked()
                 {
                     self.insert_subtitles(&m.id);
                     ui.close();
                 }
-                if ui
-                    .button("Relink…")
-                    .on_hover_text("Point it at another file")
-                    .clicked()
-                {
+                if ui.button("Relink…").clicked() {
                     self.relink_one(ui.ctx(), &m.id);
                     ui.close();
                 }
@@ -1626,15 +1571,7 @@ impl Workspace {
                 self.send("proxy.remove", json!({ "media": m.id }));
                 ui.close();
             }
-            if !m.info.audio.is_empty()
-                && ui
-                    .button("Transcribe Audio…")
-                    .on_hover_text(
-                        "Keep the words said in it, with their times, for the Transcription \
-                         window and cutting by words",
-                    )
-                    .clicked()
-            {
+            if !m.info.audio.is_empty() && ui.button("Transcribe Audio…").clicked() {
                 let ids = match self.snap.selection.media.contains(&m.id) {
                     true => self
                         .snap
@@ -1653,11 +1590,7 @@ impl Workspace {
                 self.open_transcribe(ids);
                 ui.close();
             }
-            if ui
-                .button("Relink…")
-                .on_hover_text("Point it at another file")
-                .clicked()
-            {
+            if ui.button("Relink…").clicked() {
                 self.relink_one(ui.ctx(), &m.id);
                 ui.close();
             }
@@ -1708,12 +1641,7 @@ impl Workspace {
                         ui.close();
                     }
                 }
-            })
-            .response
-            .on_hover_text(
-                "How its pictures' colors are read. Pick one for a file whose color tags are \
-                 wrong; the viewer, thumbnails and exports follow it",
-            );
+            });
         }
         if let Some(p) = self.project_shared() {
             ui.menu_button("Move to Bin", |ui| {
@@ -1855,52 +1783,27 @@ impl Workspace {
     fn edit_buttons(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             let buttons = [
-                (
-                    "Smart Insert",
-                    "edit.smart_insert",
-                    "F9: insert at the edit nearest the playhead",
-                ),
-                ("Append", "edit.append", "Shift+F12: after the last clip"),
-                (
-                    "Ripple Overwrite",
-                    "edit.ripple_overwrite",
-                    "Shift+F10: replace the clip under the playhead (or the In–Out range)",
-                ),
+                ("Smart Insert", "edit.smart_insert"),
+                ("Append", "edit.append"),
+                ("Ripple Overwrite", "edit.ripple_overwrite"),
             ];
-            for (label, method, tip) in buttons {
-                if ui.button(label).on_hover_text(tip).clicked() {
+            for (label, method) in buttons {
+                if ui.button(label).clicked() {
                     self.edit_function(method);
                 }
             }
-            if ui
-                .button("Place On Top")
-                .on_hover_text("F12: on the first track above everything at the playhead")
-                .clicked()
-            {
+            if ui.button("Place On Top").clicked() {
                 self.edit_function("edit.place_on_top");
             }
             let at = self.snap.timeline.position;
-            if ui
-                .button("Cut")
-                .on_hover_text(
-                    "Make Track 1's edit nearest the playhead a cut again",
-                )
-                .clicked()
-            {
+            if ui.button("Cut").clicked() {
                 self.send("edit.remove_transition", json!({ "at": at }));
             }
-            if ui
-                .button("Dissolve")
-                .on_hover_text(
-                    "A one-second dissolve on Track 1's edit nearest the playhead; Ctrl+T puts one on the selected edit, else on each edge of the selected clips",
-                )
-                .clicked()
-            {
+            if ui.button("Dissolve").clicked() {
                 self.send("edit.dissolve", json!({ "at": at }));
             }
             if ui
                 .toggle_value(&mut self.video_only, "Video Only")
-                .on_hover_text("Edits take only the picture")
                 .changed()
                 && self.video_only
             {
@@ -1908,7 +1811,6 @@ impl Workspace {
             }
             if ui
                 .toggle_value(&mut self.audio_only, "Audio Only")
-                .on_hover_text("Edits take only the sound")
                 .changed()
                 && self.audio_only
             {

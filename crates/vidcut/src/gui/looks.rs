@@ -149,21 +149,14 @@ impl Workspace {
                         }
                         let on = shown.is_some_and(|s| s.name == l.name);
                         let r = ui.selectable_label(on, &l.name);
-                        let r = match l.description {
-                            "" => r,
-                            d => r.on_hover_text(d),
-                        };
                         if r.clicked() {
                             picked = Some(l.styled.clone());
                         }
                     }
-                })
-                .response
-                .on_hover_text("Built-in looks, then yours");
+                });
             let idle = matches!(picker.step, Step::Choosing) && picker.asking.is_none();
             if ui
                 .add_enabled(idle, egui::Button::new("Save as Look…"))
-                .on_hover_text("Saves this style under a name, to use again")
                 .clicked()
             {
                 let name = shown.filter(|l| !l.built_in).map(|l| l.name.clone());
@@ -174,7 +167,6 @@ impl Workspace {
             let yours = shown.filter(|l| !l.built_in);
             if ui
                 .add_enabled(idle && yours.is_some(), egui::Button::new("Delete"))
-                .on_hover_text("Deletes the look shown, one of yours")
                 .clicked()
                 && let Some(l) = yours
             {

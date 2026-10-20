@@ -105,9 +105,8 @@ impl Format {
                         })
                         .response
                         .labelled_by(label.id);
-                    let r = ui
-                        .add(egui::TextEdit::singleline(&mut self.start).desired_width(100.0))
-                        .on_hover_text("Any timecode, like 00:59:30:00 (drop-frame 01:00:00;00)");
+                    let r =
+                        ui.add(egui::TextEdit::singleline(&mut self.start).desired_width(100.0));
                     r.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::Role::TextInput,
@@ -151,14 +150,12 @@ impl Format {
                         .response
                         .labelled_by(label.id);
                     for (side, name) in [(&mut self.width, "Width"), (&mut self.height, "Height")] {
-                        let r = ui
-                            .add(
-                                egui::DragValue::new(side)
-                                    .range(16..=MAX_SIDE)
-                                    .speed(2.0)
-                                    .suffix(" px"),
-                            )
-                            .on_hover_text(name);
+                        let r = ui.add(
+                            egui::DragValue::new(side)
+                                .range(16..=MAX_SIDE)
+                                .speed(2.0)
+                                .suffix(" px"),
+                        );
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::Role::SpinButton, true, name)
                         });
@@ -190,11 +187,8 @@ impl Format {
                             })
                             .response
                             .labelled_by(label.id);
-                        let r = ui
-                            .add(egui::TextEdit::singleline(&mut self.rate).desired_width(90.0))
-                            .on_hover_text(
-                                "Any rate: 24, 29.97, 30000/1001 or 12.5 frames a second",
-                            );
+                        let r =
+                            ui.add(egui::TextEdit::singleline(&mut self.rate).desired_width(90.0));
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::Role::TextInput,
@@ -213,8 +207,7 @@ impl Format {
                 ui.end_row();
                 if self.fps().is_some_and(Rational::has_drop_frame) {
                     ui.label("Timecode");
-                    ui.checkbox(&mut self.drop_frame, "Drop-frame")
-                        .on_hover_text("01:00:00;00 is an hour of the clock: two frame numbers a minute are skipped (four at 59.94), but every tenth");
+                    ui.checkbox(&mut self.drop_frame, "Drop-frame");
                     ui.end_row();
                 }
             });

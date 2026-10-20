@@ -191,29 +191,6 @@ fn kind_color(kind: ClientKind) -> Color32 {
     }
 }
 
-fn who(c: &Client) -> String {
-    match (&c.name, c.kind) {
-        (Some(n), ClientKind::Gui) => n.clone(),
-        (Some(n), kind) => format!("{n} ({})", kind.name()),
-        (None, ClientKind::File) => "another program, writing the project file".into(),
-        (None, kind) => format!("the {}", kind.name()),
-    }
-}
-
-fn place(p: &Project, spans: &[Span]) -> Option<String> {
-    let s = spans.first()?;
-    let at = p.settings.timecode(s.from);
-    let more = if spans.len() > 1 {
-        format!(" and {} more", spans.len() - 1)
-    } else {
-        String::new()
-    };
-    Some(match &s.track {
-        Some(t) => format!("{t} at {at}{more}"),
-        None => format!("markers at {at}{more}"),
-    })
-}
-
 fn one_line(
     ui: &egui::Ui,
     text: &str,
@@ -403,7 +380,6 @@ impl Workspace {
         let Some(steps) = self.steps() else {
             return;
         };
-        let p = self.snap.project.as_ref().map(|p| p.project.clone());
         let n = steps.line.len();
         let mut start = n.saturating_sub(MENU);
         if steps.done < start {
@@ -437,7 +413,7 @@ impl Workspace {
             if r.hovered() {
                 self.history.hovered = Some(i + 1);
             }
-            let r = r.on_hover_text(step_tip(s, i + 1, done, p.as_deref()));
+            let r = r;
             if r.clicked() {
                 go = Some(i + 1);
             }
@@ -487,7 +463,6 @@ impl Workspace {
         let Some(steps) = self.steps() else {
             return;
         };
-        let p = self.snap.project.as_ref().map(|p| p.project.clone());
         if self.history.seen != Some((steps.done, steps.line.len())) {
             self.history.seen = Some((steps.done, steps.line.len()));
             self.history.follow = true;
@@ -495,9 +470,7 @@ impl Workspace {
         ui.horizontal(|ui| {
             ui.label(RichText::new("History").strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let close = ui
-                    .add(egui::Button::new(icon::X).frame(false))
-                    .on_hover_text("Close the history");
+                let close = ui.add(egui::Button::new(icon::X).frame(false));
                 close.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::Role::Button, true, "Close the history")
                 });
@@ -506,7 +479,7 @@ impl Workspace {
                 }
             });
         });
-        self.history_list(ui, &steps, p.as_deref());
+        self.history_list(ui, &steps);
         let inside = ui.min_rect();
         let clicked = ui.input(|i| {
             i.pointer
@@ -623,32 +596,21 @@ impl Workspace {
         let (kinds, sources) = (&layout.kinds, &layout.sources);
         let n = steps.line.len();
         ui.horizontal(|ui| {
-            let undo = ui
-                .add_enabled(
-                    steps.done > 0,
-                    egui::Button::new(format!("{} Undo", icon::ARROW_COUNTER_CLOCKWISE)),
-                )
-                .on_hover_text(super::keys("Ctrl+Z"));
+            let undo = ui.add_enabled(
+                steps.done > 0,
+                egui::Button::new(format!("{} Undo", icon::ARROW_COUNTER_CLOCKWISE)),
+            );
             if undo.clicked() {
                 self.send("history.undo", json!({}));
             }
-            let redo = ui
-                .add_enabled(
-                    steps.done < n,
-                    egui::Button::new(format!("{} Redo", icon::ARROW_CLOCKWISE)),
-                )
-                .on_hover_text(super::keys("Ctrl+Shift+Z"));
+            let redo = ui.add_enabled(
+                steps.done < n,
+                egui::Button::new(format!("{} Redo", icon::ARROW_CLOCKWISE)),
+            );
             if redo.clicked() {
                 self.send("history.redo", json!({}));
             }
-            if ui
-                .button(format!("{} Mark…", icon::FLAG))
-                .on_hover_text(
-                    "Name the project as it is now, as a version to come back to. Names stay \
-                     with the history",
-                )
-                .clicked()
-            {
+            if ui.button(format!("{} Mark…", icon::FLAG)).clicked() {
                 self.history_name(None);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -692,7 +654,7 @@ impl Workspace {
         });
     }
 
-    fn history_list(&mut self, ui: &mut egui::Ui, steps: &Arc<Steps>, p: Option<&Project>) {
+    fn history_list(&mut self, ui: &mut egui::Ui, steps: &Arc<Steps>) {
         let layout = self.history_layout(steps);
         let (all, rows, paths) = (
             layout.groups.clone(),
@@ -726,7 +688,7 @@ impl Workspace {
         let mut acts = Vec::new();
         area.show_rows(ui, ROW, rows.len(), |ui, range| {
             for k in range {
-                acts.extend(self.history_row(ui, rows[k], steps, &all, &paths, p, now));
+                acts.extend(self.history_row(ui, rows[k], steps, &all, &paths, now));
             }
         });
         let footer = self.history_footer(steps);
@@ -802,7 +764,6 @@ impl Workspace {
         steps: &Steps,
         all: &[Group],
         paths: &[Vec<usize>],
-        p: Option<&Project>,
         now: u64,
     ) -> Vec<Act> {
         let mut acts = Vec::new();
@@ -963,12 +924,6 @@ impl Workspace {
                 if r.double_clicked() {
                     acts.push(Act::Group(g.from));
                 }
-                r.on_hover_text(format!(
-                    "{} by {} in a row. Click to go to the last, ▸ to see them; Undo all goes \
-                     back to before the first",
-                    steps_word(g.to - g.from),
-                    who(&g.by)
-                ));
             }
             Row::Step(i, inner) => {
                 let s = &steps.line[i];
@@ -998,16 +953,12 @@ impl Workspace {
                 if r.hovered() {
                     self.history.hovered = Some(i + 1);
                 }
-                let r = r.on_hover_text(step_tip(s, i + 1, done, p));
+                let r = r;
                 r.context_menu(|ui| {
                     if ui.button("Go Here").clicked() {
                         acts.push(Act::Go(i + 1));
                     }
-                    let revert = ui
-                        .add_enabled(done, egui::Button::new("Revert This Step"))
-                        .on_hover_text(
-                            "Undo this step alone, as a new step, keeping the ones after it",
-                        );
+                    let revert = ui.add_enabled(done, egui::Button::new("Revert This Step"));
                     if revert.clicked() {
                         acts.push(Act::Revert(i + 1));
                     }
@@ -1055,10 +1006,6 @@ impl Workspace {
                         _ => {}
                     }
                 }
-                r.on_hover_text(
-                    "Steps a new change replaced after an undo. Restore this version brings \
-                     them back; the steps that replaced them stay as a version of their own",
-                );
             }
             Row::Twig(bi, k) => {
                 let b = branch(bi);
@@ -1095,7 +1042,7 @@ impl Workspace {
                 if r.clicked() {
                     acts.push(Act::Go(i + 1));
                 }
-                let r = r.on_hover_text(step_tip(s, i + 1, i < steps.done, p));
+                let r = r;
                 r.context_menu(|ui| {
                     if ui.button("Go Here").clicked() {
                         acts.push(Act::Go(i + 1));
@@ -1413,29 +1360,6 @@ fn truncate(text: &str, n: usize) -> String {
     let mut s: String = text.chars().take(n - 1).collect();
     s.push('…');
     s
-}
-
-fn step_tip(s: &Step, n: usize, done: bool, p: Option<&Project>) -> String {
-    let mut lines = vec![s.label.clone()];
-    let mut facts = vec![format!("Step {n}")];
-    if let Some(by) = &s.by {
-        facts.push(format!("by {}", who(by)));
-    }
-    if let Some(t) = s.time.and_then(when::local_time) {
-        facts.push(t.full());
-    }
-    lines.push(facts.join(" · "));
-    if let Some(at) = p.and_then(|p| place(p, &s.spans)) {
-        lines.push(format!("Changed {at}"));
-    }
-    if !s.parts.is_empty() {
-        lines.push(format!("{} commands as one step", s.parts.len()));
-    }
-    if !done {
-        lines.push("Undone: a click redoes up to here".into());
-    }
-    lines.push("Right-click to revert it alone or mark it".into());
-    lines.join("\n")
 }
 
 #[cfg(test)]

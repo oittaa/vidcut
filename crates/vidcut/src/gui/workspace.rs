@@ -129,25 +129,14 @@ fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
     }
 }
 
-fn decoding(hwdec: &str) -> Option<(String, String)> {
-    let gpu = |api: &str| {
-        (
-            format!("decoding on the GPU ({api})"),
-            format!(
-                "The viewer decodes on the graphics card ({api}). File > Preferences: GPU \
-                 turns it off"
-            ),
-        )
-    };
+fn decoding(hwdec: &str) -> Option<String> {
     Some(match hwdec {
         "" => return None,
-        "no" => (
-            "decoding on the CPU".into(),
-            "The viewer decodes in software: GPU acceleration or decoding is off in File > \
-             Preferences, or the GPU can't decode this file"
-                .into(),
+        "no" => "decoding on the CPU".into(),
+        other => format!(
+            "decoding on the GPU ({})",
+            vidcut_av::hw::Kind::named(other).map_or(other, |k| k.label())
         ),
-        other => gpu(vidcut_av::hw::Kind::named(other).map_or(other, |k| k.label())),
     })
 }
 
@@ -646,23 +635,20 @@ impl Workspace {
                 )
             })
             .inner;
-        let close = ui
-            .add(
-                egui::Button::new(
-                    RichText::new(egui_phosphor::regular::X)
-                        .color(theme::colors().text_dim.gamma_multiply(opacity)),
-                )
-                .frame(false)
-                .small(),
+        let close = ui.add(
+            egui::Button::new(
+                RichText::new(egui_phosphor::regular::X)
+                    .color(theme::colors().text_dim.gamma_multiply(opacity)),
             )
-            .on_hover_text("Dismiss");
+            .frame(false)
+            .small(),
+        );
         close.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Dismiss"));
         if close.clicked() {
             self.notices_done = n.seq;
             return;
         }
         let shown = if text.hovered() || close.hovered() {
-            text.on_hover_text(&n.text);
             now - age.min(hold)
         } else {
             shown
@@ -706,23 +692,17 @@ impl Workspace {
                 }
                 if ui
                     .add_enabled(open, egui::Button::new("Import Media Folder…"))
-                    .on_hover_text(FOLDER_HINT)
                     .clicked()
                 {
                     self.import_folder();
                 }
                 if ui
                     .add_enabled(open, egui::Button::new("Import Subtitle…"))
-                    .on_hover_text("SRT, WebVTT or TTML, into the Media Pool")
                     .clicked()
                 {
                     self.import_subtitle(ui.ctx());
                 }
-                if ui
-                    .add_enabled(open, egui::Button::new("New Bin"))
-                    .on_hover_text(super::keys("Shift+Ctrl+N: a bin in the bin the pool shows"))
-                    .clicked()
-                {
+                if ui.add_enabled(open, egui::Button::new("New Bin")).clicked() {
                     self.new_bin();
                 }
                 if ui
@@ -758,7 +738,6 @@ impl Workspace {
                 let subtitles = self.project().is_some_and(|p| !p.subtitles.is_empty());
                 if ui
                     .add_enabled(subtitles, egui::Button::new("Export Subtitle…"))
-                    .on_hover_text("The shown subtitle track, as SRT or WebVTT")
                     .clicked()
                 {
                     self.export_subtitle(ui.ctx(), None);
@@ -833,22 +812,11 @@ impl Workspace {
             });
             ui.menu_button("Timeline", |ui| {
                 let mut on = self.snap.audio_scrubbing;
-                if ui
-                    .checkbox(&mut on, "Audio Scrubbing")
-                    .on_hover_text(
-                        "Shift+S: frame steps and drags of a paused playhead play the sound \
-                         under it",
-                    )
-                    .clicked()
-                {
+                if ui.checkbox(&mut on, "Audio Scrubbing").clicked() {
                     self.send("player.audio_scrubbing", json!({ "on": on }));
                 }
                 ui.add_enabled_ui(self.snap.project.is_some(), |ui| {
-                    if ui
-                        .button("Add Title")
-                        .on_hover_text("A 5-second title at the playhead, over the tracks below it")
-                        .clicked()
-                    {
+                    if ui.button("Add Title").clicked() {
                         self.add_title(ui.ctx());
                         ui.close();
                     }
@@ -891,86 +859,36 @@ impl Workspace {
                 S::Notices => ui.scope(|ui| ws.notices(ui)).response,
                 S::Format => {
                     let p = ws.project().expect("open");
-                    let fps = p.settings.fps;
-                    let format = ui.label(dim(format!(
+                    ui.label(dim(format!(
                         "{}×{}, {} fps",
                         p.settings.width,
                         p.settings.height,
-                        fps.decimal()
-                    )));
-                    if fps.is_whole() {
-                        format
-                    } else {
-                        format.on_hover_text(format!("{fps} fps"))
-                    }
+                        p.settings.fps.decimal()
+                    )))
                 }
                 S::Edited => {
                     let p = ws.project().expect("open");
-                    let revision = format!(
-                        "Revision {}: one up with every change. Scripts give it with \
-                         --if-rev so they never overwrite a newer edit",
-                        p.rev
-                    );
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map_or(0, |d| d.as_millis() as u64);
                     match (p.edited.and_then(local_time), local_time(now)) {
-                        (Some(edited), Some(today)) => ui
-                            .label(dim(edited_text(&edited, &today)))
-                            .on_hover_text(format!(
-                                "Last changed {}, local time\n{revision}",
-                                edited.full()
-                            )),
-                        _ => ui
-                            .label(dim(format!("revision {}", p.rev)))
-                            .on_hover_text(revision),
+                        (Some(edited), Some(today)) => ui.label(dim(edited_text(&edited, &today))),
+                        _ => ui.label(dim(format!("revision {}", p.rev))),
                     }
                 }
-                S::Decoding => {
-                    let (text, tip) = decoding.clone().expect("decoding");
-                    ui.label(dim(text)).on_hover_text(tip)
-                }
-                S::Pid => {
-                    let socket = ws.snap.socket.clone().expect("live");
-                    ui.label(dim(format!("pid {}", ws.snap.pid)))
-                        .on_hover_text(format!(
-                            "Live control: {}\nvidcut CLI commands for this project run here",
-                            socket.display()
-                        ))
-                }
-                S::Version => {
-                    let (short, long) = ws.versions();
-                    ui.label(dim(short)).on_hover_text(long)
-                }
+                S::Decoding => ui.label(dim(decoding.clone().expect("decoding"))),
+                S::Pid => ui.label(dim(format!("pid {}", ws.snap.pid))),
+                S::Version => ui.label(dim(ws.version())),
             });
         });
     }
 
-    fn versions(&self) -> (String, String) {
-        static VERSIONS: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
-        VERSIONS
-            .get_or_init(|| {
-                let mut long = format!(
-                    "vidcut {}\nFFmpeg {}",
-                    env!("CARGO_PKG_VERSION"),
-                    vidcut_av::ffmpeg_version()
-                );
-                for (lib, v) in vidcut_av::library_versions() {
-                    if lib != "version" {
-                        long.push_str(&format!("\n  {lib} {v}"));
-                    }
-                }
-                if let Some(gpu) = &self.display {
-                    long.push_str(&format!("\nDrawing on {gpu}"));
-                }
-                let short = format!(
-                    "vidcut {} · FFmpeg {}",
-                    env!("CARGO_PKG_VERSION"),
-                    vidcut_av::ffmpeg_release()
-                );
-                (short, long)
-            })
-            .clone()
+    fn version(&self) -> String {
+        format!(
+            "vidcut {} · FFmpeg {}",
+            env!("CARGO_PKG_VERSION"),
+            vidcut_av::ffmpeg_release()
+        )
     }
 
     fn start_screen(&mut self, ui: &mut egui::Ui) {
@@ -1027,11 +945,6 @@ impl Workspace {
                     } else {
                         theme::colors().error
                     };
-                    let params = if e.params.as_object().is_some_and(|o| o.is_empty()) {
-                        String::new()
-                    } else {
-                        e.params.to_string()
-                    };
                     let who = match e.origin.as_str() {
                         "ipc" => "script",
                         "session" => "automatic",
@@ -1044,19 +957,16 @@ impl Workspace {
                                     RichText::new(who).small().color(theme::colors().text_dim),
                                 );
                             }
-                            ui.add(
+                            let r = ui.add(
                                 egui::Label::new(RichText::new(&e.summary).small().color(color))
                                     .sense(egui::Sense::click()),
-                            )
+                            );
+                            if let Some(err) = &e.error {
+                                ui.label(RichText::new(err).small().color(color));
+                            }
+                            r
                         })
                         .inner;
-                    let request = format!("{} {}", e.method, params);
-                    let r = match &e.error {
-                        Some(err) => r.on_hover_text(format!("{err}\n{request}")),
-                        None => {
-                            r.on_hover_text(format!("{request}\nclick: copy as a vidcut command"))
-                        }
-                    };
                     if r.clicked() {
                         ui.ctx().copy_text(vidcut_command(
                             project.as_deref(),
@@ -1788,8 +1698,6 @@ enum Status {
 
 const NOTICE_FADE: f64 = 1.0;
 
-pub(super) const FOLDER_HINT: &str = "A folder as a bin, with a bin for each folder in it";
-
 fn recent_projects() -> Vec<PathBuf> {
     std::fs::read_to_string(crate::paths::state_dir().join("recent.json"))
         .ok()
@@ -1870,11 +1778,14 @@ mod tests {
     #[test]
     fn the_status_bar_says_where_the_viewer_decodes() {
         assert_eq!(decoding(""), None);
-        assert_eq!(decoding("no").unwrap().0, "decoding on the CPU");
-        assert_eq!(decoding("nvdec").unwrap().0, "decoding on the GPU (NVDEC)");
+        assert_eq!(decoding("no").as_deref(), Some("decoding on the CPU"));
         assert_eq!(
-            decoding("d3d11va").unwrap().0,
-            "decoding on the GPU (Direct3D 11)"
+            decoding("nvdec").as_deref(),
+            Some("decoding on the GPU (NVDEC)")
+        );
+        assert_eq!(
+            decoding("d3d11va").as_deref(),
+            Some("decoding on the GPU (Direct3D 11)")
         );
     }
 }

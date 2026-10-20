@@ -58,7 +58,6 @@ fn hidden(room: f32, more: f32, sep: f32, slots: &[Slot], leaving: &[usize]) -> 
 fn more_button(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) -> egui::Response {
     ui.menu_button(egui_phosphor::regular::DOTS_THREE, add)
         .response
-        .on_hover_text("More")
 }
 
 struct Run<'a, T> {

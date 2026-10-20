@@ -426,11 +426,7 @@ fn speaker_menu(
                 }
             });
         }
-        if ui
-            .button("Separate")
-            .on_hover_text("This file's speaker on its own")
-            .clicked()
-        {
+        if ui.button("Separate").clicked() {
             let voice = vidcut_core::speakers::voice(&w.media, w.stream, w.speaker);
             acts.push(Act::Link(w.clone(), voice));
             ui.close();
@@ -640,22 +636,12 @@ impl Workspace {
                         r.request_focus();
                     }
                     let mut follow = !t.hold;
-                    if ui
-                        .checkbox(&mut follow, "Follow")
-                        .on_hover_text("While playing, keep the word under the playhead in view")
-                        .changed()
-                    {
+                    if ui.checkbox(&mut follow, "Follow").changed() {
                         t.hold = !follow;
                     }
                     let silences = items.as_ref().is_some_and(|i| i.iter().any(|x| x.silence));
                     if ui
                         .add_enabled(silences, egui::Button::new("Remove Silent Portions"))
-                        .on_hover_text(match shown {
-                            Some(Shown::Timeline) => {
-                                "Ripple delete every pause of a second or more between words"
-                            }
-                            _ => "Leave every pause of a second or more out of the edits",
-                        })
                         .clicked()
                     {
                         acts.push(Act::RemoveSilences);
@@ -672,13 +658,6 @@ impl Workspace {
                             fillers > 0,
                             egui::Button::new(format!("Delete Filler Words ({fillers})")),
                         )
-                        .on_hover_text(match shown {
-                            Some(Shown::Timeline) => {
-                                "Ripple delete every filler word (dimmed in the text), at the \
-                                 quiet points around it"
-                            }
-                            _ => "Leave every filler word (dimmed in the text) out of the edits",
-                        })
                         .clicked()
                     {
                         acts.push(Act::Fillers);
@@ -703,17 +682,8 @@ impl Workspace {
                                     super::speech::language_label(code),
                                 );
                             }
-                        })
-                        .response
-                        .on_hover_text(
-                            "Whose filler words are marked. Auto: the transcript's language, or \
-                             the one its commonest words belong to",
-                        );
-                    if ui
-                        .button("Edit…")
-                        .on_hover_text("Change the filler words, for this project or for all")
-                        .clicked()
-                    {
+                        });
+                    if ui.button("Edit…").clicked() {
                         let language = t
                             .fillers_in
                             .clone()
@@ -919,54 +889,39 @@ impl Workspace {
                 });
                 ui.horizontal_wrapped(|ui| {
                     let any = selected.is_some();
-                    let button = |ui: &mut egui::Ui, label: &str, tip: &str| {
-                        ui.add_enabled(any, egui::Button::new(label))
-                            .on_hover_text(tip)
-                            .clicked()
+                    let button = |ui: &mut egui::Ui, label: &str| {
+                        ui.add_enabled(any, egui::Button::new(label)).clicked()
                     };
                     match shown {
                         Some(Shown::Timeline) => {
-                            if button(ui, "Delete", "Ripple delete these words (Delete)") {
+                            if button(ui, "Delete") {
                                 acts.push(Act::Delete);
                             }
-                            if button(
-                                ui,
-                                "Add Marker",
-                                "A marker over these words, named after them",
-                            ) {
+                            if button(ui, "Add Marker") {
                                 acts.push(Act::Marker);
                             }
                         }
                         Some(Shown::Media(_)) => {
-                            if button(ui, "Delete", "Leave these words out of the edits (Delete)") {
+                            if button(ui, "Delete") {
                                 acts.push(Act::Delete);
                             }
-                            if button(ui, "Undelete", "Bring these words back") {
+                            if button(ui, "Undelete") {
                                 acts.push(Act::Undelete);
                             }
                             ui.separator();
-                            for (label, method, tip) in [
-                                (
-                                    "Place on Top",
-                                    "edit.place_on_top",
-                                    "On a track above, at the playhead",
-                                ),
-                                (
-                                    "Insert",
-                                    "edit.insert",
-                                    "At the timeline In, else the playhead",
-                                ),
-                                ("Append", "edit.append", "After the last clip"),
+                            for (label, method) in [
+                                ("Place on Top", "edit.place_on_top"),
+                                ("Insert", "edit.insert"),
+                                ("Append", "edit.append"),
                             ] {
-                                if button(ui, label, &format!("{tip}, without the words left out"))
-                                {
+                                if button(ui, label) {
                                     acts.push(Act::Edit(method));
                                 }
                             }
                         }
                         None => {}
                     }
-                    if button(ui, "Copy", "Copy these words as text (Ctrl+C)") {
+                    if button(ui, "Copy") {
                         acts.push(Act::Copy);
                     }
                     let one_file =

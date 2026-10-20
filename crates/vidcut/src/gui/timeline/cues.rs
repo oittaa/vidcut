@@ -492,7 +492,6 @@ impl Workspace {
                 cues.len() > 1 && cues.iter().all(|q| p.find_cue(q).map(|(t, _)| t) == track);
             if ui
                 .add_enabled(joinable, egui::Button::new("Join Subtitles"))
-                .on_hover_text("One subtitle from the first one's start to the last one's end")
                 .clicked()
             {
                 self.send("subtitles.join", json!({ "cues": cues }));
@@ -508,11 +507,7 @@ impl Workspace {
     }
 
     fn subtitle_track_items(&mut self, ui: &mut egui::Ui, track: &str) {
-        if ui
-            .button("Add Subtitle")
-            .on_hover_text("A subtitle at the playhead on this track")
-            .clicked()
-        {
+        if ui.button("Add Subtitle").clicked() {
             self.add_subtitle(ui.ctx(), Some(track));
             ui.close();
         }
@@ -520,22 +515,11 @@ impl Workspace {
             self.export_subtitle(ui.ctx(), Some(track));
             ui.close();
         }
-        if ui
-            .button("Re-time to Speech…")
-            .on_hover_text("Move this track's subtitles to where the timeline's speech is")
-            .clicked()
-        {
+        if ui.button("Re-time to Speech…").clicked() {
             self.open_retime(track);
             ui.close();
         }
-        if ui
-            .button("Synchronize Word Timings")
-            .on_hover_text(
-                "Time each word of this track's subtitles to the speech, for words shown as \
-                 they are spoken",
-            )
-            .clicked()
-        {
+        if ui.button("Synchronize Word Timings").clicked() {
             self.time_words(track);
             ui.close();
         }
@@ -553,18 +537,12 @@ impl Workspace {
                     ui.separator();
                 }
                 let r = ui.selectable_label(style.as_ref() == Some(&s.style), &l.name);
-                let r = match l.description {
-                    "" => r,
-                    d => r.on_hover_text(d),
-                };
                 if r.clicked() {
                     self.send("track.set", json!({ "track": track, "look": l.name }));
                     ui.close();
                 }
             }
-        })
-        .response
-        .on_hover_text("This track's style from a look; Name and Style… saves your own");
+        });
     }
 
     fn send_all(&self, commands: Vec<Value>, label: &str) {
@@ -674,16 +652,10 @@ impl Workspace {
                 .max_rect(parts.name.with_min_x(parts.enlarge.left()))
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        let tip = match &t.language {
-            Some(l) => format!("{}, {l}: double-click for its name and style", t.id),
-            None => format!("{}: double-click for its name and style", t.id),
-        };
-        let r = name
-            .add(
-                egui::Button::selectable(false, RichText::new(t.display_name()).strong().small())
-                    .truncate(),
-            )
-            .on_hover_text(tip);
+        let r = name.add(
+            egui::Button::selectable(false, RichText::new(t.display_name()).strong().small())
+                .truncate(),
+        );
         if r.double_clicked() {
             self.open_track_dialog(t);
         }
@@ -710,17 +682,14 @@ impl Workspace {
             }
         });
         let lock = if t.locked {
-            (icon::LOCKED, "Unlock the track")
+            icon::LOCKED
         } else {
-            (icon::UNLOCKED, "Lock the track")
+            icon::UNLOCKED
         };
         let shown = if t.shown {
-            (icon::VIDEO_ON, "Hide its subtitles in the viewer")
+            icon::VIDEO_ON
         } else {
-            (
-                icon::VIDEO_OFF,
-                "Show its subtitles in the viewer, hiding the other subtitle tracks'",
-            )
+            icon::VIDEO_OFF
         };
         let buttons = [
             (
@@ -738,9 +707,9 @@ impl Workspace {
                 parts.toggles[2],
             ),
         ];
-        for (what, lit, (glyph, tip), change, at) in buttons {
+        for (what, lit, glyph, change, at) in buttons {
             let name = format!("{what} {}", t.id);
-            if header_button(&mut child, at, glyph, &name, lit, tip).clicked() {
+            if header_button(&mut child, at, glyph, &name, lit).clicked() {
                 self.send("track.set", change);
             }
         }

@@ -173,7 +173,7 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 
 ## X32. Import Media Folder names what it left out
 - **Resolve:** a file it can't read, a text file or one that only looks like a video, is left out without a word, and a folder without media imports nothing (Studio 21.1.1, through its scripting API).
-- **vidcut:** the result names each file skipped and why; the GUI's notice counts them, names up to five of each kind, and lists each with why when hovered. A folder without media is an error ([D53](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **vidcut:** the result names each file skipped and why; the GUI's notice counts them and names up to five of each kind. A folder without media is an error ([D53](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:** as with [X29](#x29-a-dynamic-trim-run-says-why-it-stopped): a card or render folder imported for an agent to cut must not lose a clip unnoticed.
 
 ## X33. Each undo step says what, where and how much

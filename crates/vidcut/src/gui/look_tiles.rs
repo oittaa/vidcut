@@ -105,10 +105,6 @@ impl Tiles {
                         tile.union(label)
                     })
                     .inner;
-                let r = match look.description {
-                    "" => r,
-                    d => r.on_hover_text(d),
-                };
                 if r.clicked() {
                     took = Some(look);
                 }
