@@ -4290,6 +4290,7 @@ dependencies = [
  "vidcut-core",
  "windows",
  "windows-sys 0.61.2",
+ "zeno",
 ]
 
 [[package]]

@@ -142,28 +142,30 @@ fn spans<'a>(text: &str, family: Family<'a>, ink: Color) -> Vec<(String, Attrs<'
 
 fn dilate(alpha: &[f32], w: usize, h: usize, radius: f32) -> Vec<f32> {
     let reach = radius.ceil() as i32 + 1;
-    let mut out = alpha.to_vec();
-    for dy in -reach..=reach {
-        for dx in -reach..=reach {
+    let disk: Vec<(i32, i32, f32)> = (-reach..=reach)
+        .flat_map(|dy| (-reach..=reach).map(move |dx| (dx, dy)))
+        .filter_map(|(dx, dy)| {
             let weight = (radius + 0.5 - ((dx * dx + dy * dy) as f32).sqrt()).clamp(0.0, 1.0);
-            if weight <= 0.0 || (dx == 0 && dy == 0) {
+            (weight > 0.0 && (dx, dy) != (0, 0)).then_some((dx, dy, weight))
+        })
+        .collect();
+    let (wi, hi) = (w as i32, h as i32);
+    let mut out = alpha.to_vec();
+    for sy in 0..hi {
+        for sx in 0..wi {
+            let a = alpha[(sy * wi + sx) as usize];
+            if a <= 0.0 {
                 continue;
             }
-            for y in 0..h as i32 {
-                let sy = y + dy;
-                if sy < 0 || sy >= h as i32 {
+            for &(dx, dy, weight) in &disk {
+                let (tx, ty) = (sx - dx, sy - dy);
+                if tx < 0 || ty < 0 || tx >= wi || ty >= hi {
                     continue;
                 }
-                let (row, src) = (y as usize * w, sy as usize * w);
-                let (x0, x1) = (
-                    (-dx).max(0) as usize,
-                    (w as i32 - dx.max(0)).max(0) as usize,
-                );
-                for x in x0..x1 {
-                    let v = alpha[src + (x as i32 + dx) as usize] * weight;
-                    if v > out[row + x] {
-                        out[row + x] = v;
-                    }
+                let t = (ty * wi + tx) as usize;
+                let v = a * weight;
+                if v > out[t] {
+                    out[t] = v;
                 }
             }
         }
@@ -289,9 +291,95 @@ fn shifted(alpha: &[f32], w: usize, h: usize, (dx, dy): (i32, i32)) -> Vec<f32> 
     out
 }
 
-fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
+struct Traced {
+    x: i32,
+    y: i32,
+    path: Vec<zeno::Command>,
+    offset: zeno::Vector,
+}
+
+struct Bars(Vec<Traced>);
+
+impl cosmic_text::Renderer for Bars {
+    fn rectangle(&mut self, x: i32, y: i32, w: u32, h: u32, _: Color) {
+        use zeno::Command::{Close, LineTo, MoveTo};
+        let (w, h) = (w as f32, h as f32);
+        self.0.push(Traced {
+            x,
+            y,
+            path: vec![
+                MoveTo([0.0, 0.0].into()),
+                LineTo([w, 0.0].into()),
+                LineTo([w, -h].into()),
+                LineTo([0.0, -h].into()),
+                Close,
+            ],
+            offset: zeno::Vector::ZERO,
+        });
+    }
+
+    fn glyph(&mut self, _: cosmic_text::PhysicalGlyph, _: Color) {}
+}
+
+fn traces(buffer: &Buffer, f: &mut Fonts) -> Option<Vec<Traced>> {
+    let mut bars = Bars(Vec::new());
+    for run in buffer.layout_runs() {
+        for g in run.glyphs {
+            let p = g.physical((0., run.line_y), 1.0);
+            let path = f.cache.get_outline_commands(&mut f.system, p.cache_key)?;
+            bars.0.push(Traced {
+                x: p.x,
+                y: p.y,
+                path: path.to_vec(),
+                offset: zeno::Vector::new(
+                    p.cache_key.x_bin.as_float(),
+                    p.cache_key.y_bin.as_float(),
+                ),
+            });
+        }
+        cosmic_text::render_decoration(&mut bars, &run, Color::rgb(255, 255, 255));
+    }
+    Some(bars.0)
+}
+
+fn stroked(traces: &[Traced], width: f32, into: &mut [f32], w: usize, (left, top): (i32, i32)) {
+    use zeno::{Cap, Format, Join, Mask, Origin, Stroke};
+    let h = into.len() / w;
+    for t in traces {
+        let (mask, at) = Mask::new(&t.path[..])
+            .format(Format::Alpha)
+            .origin(Origin::BottomLeft)
+            .style(Stroke::new(width).join(Join::Round).cap(Cap::Round))
+            .offset(t.offset)
+            .render_offset(t.offset)
+            .inspect(|_, _, _| ())
+            .render();
+        let (mw, mh) = (at.width as i32, at.height as i32);
+        for j in 0..mh {
+            let y = t.y - at.top + j - top;
+            if y < 0 || y >= h as i32 {
+                continue;
+            }
+            for i in 0..mw {
+                let x = t.x + at.left + i - left;
+                if x < 0 || x >= w as i32 {
+                    continue;
+                }
+                let a = f32::from(mask[(j * mw + i) as usize]) / 255.0;
+                let d = &mut into[y as usize * w + x as usize];
+                if a > *d {
+                    *d = a;
+                }
+            }
+        }
+    }
+}
+
+fn lay_out(text: &str, look: &Look) -> Option<(Sprite, f32)> {
     let size = look.size;
     let wrap = look.wrap;
+    let mut held = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let f = &mut *held;
     let mut buffer = Buffer::new(
         &mut f.system,
         Metrics::new(size, size * SubtitleStyle::LINE as f32),
@@ -391,7 +479,19 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
     {
         bands = vec![all];
     }
-    let (cw, ch) = (wrap.ceil() as i32 + 2 * pad, lines.ceil() as i32 + 2 * pad);
+    let (mut gx0, mut gx1) = (i32::MAX, i32::MIN);
+    for run in buffer.layout_runs() {
+        for g in run.glyphs {
+            gx0 = gx0.min(g.x.floor() as i32);
+            gx1 = gx1.max((g.x + g.w).ceil() as i32);
+        }
+    }
+    if gx1 <= gx0 {
+        return None;
+    }
+    let margin = (size * 0.5).ceil() as i32 + pad;
+    let left = gx0 - margin;
+    let (cw, ch) = (gx1 - gx0 + 2 * margin, lines.ceil() as i32 + 2 * pad);
     let (w, h) = (cw as usize, ch as usize);
     let mut canvas = vec![[0.0f32; 4]; w * h];
     buffer.draw(
@@ -406,7 +506,7 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
             let rgb = [color.r(), color.g(), color.b()].map(|c| f32::from(c) / 255.0);
             for py in y..y + bh as i32 {
                 for px in x..x + bw as i32 {
-                    let (cx, cy) = (px + pad, py + pad);
+                    let (cx, cy) = (px - left, py + pad);
                     if cx < 0 || cy < 0 || cx >= cw || cy >= ch {
                         continue;
                     }
@@ -419,10 +519,17 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
             }
         },
     );
+    let traced = stroke.and_then(|_| traces(&buffer, f));
+    drop(held);
     let alpha: Vec<f32> = canvas.iter().map(|p| p[3]).collect();
-    let (ring, edge) = match stroke {
-        Some((rgb, _)) => (dilate(&alpha, w, h, outline), rgb),
-        None => (vec![0.0; alpha.len()], [0, 0, 0]),
+    let (ring, edge) = match (stroke, traced) {
+        (Some((rgb, _)), Some(list)) => {
+            let mut ring = alpha.clone();
+            stroked(&list, 2.0 * outline, &mut ring, w, (left, -pad));
+            (ring, rgb)
+        }
+        (Some((rgb, _)), None) => (dilate(&alpha, w, h, outline), rgb),
+        (None, _) => (vec![0.0; alpha.len()], [0, 0, 0]),
     };
     let shade: Vec<f32> = match look.shadow {
         Some(s) => {
@@ -444,7 +551,7 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
         .zip(&ring)
         .enumerate()
         .map(|(i, (p, &o))| {
-            let (x, y) = ((i % w) as i32 - pad, (i / w) as i32 - pad);
+            let (x, y) = ((i % w) as i32 + left, (i / w) as i32 - pad);
             let bg = backing
                 .filter(|_| {
                     bands
@@ -482,7 +589,7 @@ fn lay_out(text: &str, look: &Look, f: &mut Fonts) -> Option<(Sprite, f32)> {
         .collect();
     Some((
         Sprite {
-            x: x0 as i32 - pad,
+            x: x0 as i32 + left,
             y: y0 as i32 - pad,
             width: (x1 - x0) as u32,
             height: (y1 - y0) as u32,
@@ -504,7 +611,6 @@ fn block(
     width: u32,
     height: u32,
     style: &SubtitleStyle,
-    f: &mut Fonts,
 ) -> Option<Sprite> {
     let size = (height as f32 * style.text_fraction() as f32).max(1.0);
     let look = Look {
@@ -519,13 +625,12 @@ fn block(
         boxed: false,
         markup: Markup::Cues,
     };
-    let (sprite, lines) = lay_out(text, &look, f)?;
+    let (sprite, lines) = lay_out(text, &look)?;
     let text_top = style.block_top(place, f64::from(height), f64::from(lines)) as f32;
     Some(placed(sprite, (width as f32 - look.wrap) / 2.0, text_top))
 }
 
 pub fn draw(cues: &[(&str, Place)], width: u32, height: u32, style: &SubtitleStyle) -> Vec<Sprite> {
-    let mut f = fonts().lock().unwrap_or_else(|e| e.into_inner());
     [Place::Top, Place::Middle, Place::Bottom]
         .into_iter()
         .filter_map(|place| {
@@ -537,7 +642,7 @@ pub fn draw(cues: &[(&str, Place)], width: u32, height: u32, style: &SubtitleSty
             if text.is_empty() {
                 return None;
             }
-            block(&text.join("\n"), place, width, height, style, &mut f)
+            block(&text.join("\n"), place, width, height, style)
         })
         .collect()
 }
@@ -546,7 +651,6 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
     if t.text.trim().is_empty() {
         return Vec::new();
     }
-    let mut f = fonts().lock().unwrap_or_else(|e| e.into_inner());
     let (w, h) = (f64::from(width), f64::from(height));
     let zoom = t.scale();
     let size = (h * t.text_fraction() * zoom).max(1.0) as f32;
@@ -574,7 +678,7 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
         boxed: true,
         markup: Markup::Title((h * zoom) as f32),
     };
-    let Some((sprite, lines)) = lay_out(&t.text, &look, &mut f) else {
+    let Some((sprite, lines)) = lay_out(&t.text, &look) else {
         return Vec::new();
     };
     let [x, y] = t.place();

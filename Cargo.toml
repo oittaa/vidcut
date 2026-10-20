@@ -25,6 +25,9 @@ fontdb = "0.24"
 # Subtitles drawn into exported pictures: shaping, right-to-left text and
 # fallback fonts for every script. MIT or Apache-2.0.
 cosmic-text = "0.19"
+# Title outlines stroked along the glyphs' paths, by the rasterizer
+# cosmic-text draws with. MIT or Apache-2.0.
+zeno = "0.3"
 # Fonts built into the app for themes, the same on every computer: Geist,
 # Geist Mono, Space Grotesk. OFL-1.1, the crates' code MIT. Exact versions:
 # the crates are new.

@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use vidcut_core::model::{Project, Title, TitleKind, TrackKind};
 use vidcut_core::render::Run;
 
+use super::timeline::tools::landing;
 use super::workspace::Workspace;
 
 const GRAB: f32 = 6.0;
@@ -32,6 +33,7 @@ struct Held {
 pub struct Grab {
     selected: Option<String>,
     held: Option<Held>,
+    landed: Option<(String, Title, std::time::Instant, Title)>,
     boxes: Vec<(Title, (u32, u32), [f32; 4])>,
 }
 
@@ -125,15 +127,51 @@ impl Workspace {
         let (w, h) = (f64::from(size.0), f64::from(size.1));
         let scale = vec2(picture.width() / w as f32, picture.height() / h as f32);
         let held = self.timeline.title_grab.held.clone();
+        let landed = self.timeline.title_grab.landed.clone();
+        let previewed = self
+            .timeline
+            .title_dialog
+            .as_ref()
+            .and_then(|d| d.previewing());
+        let mut landing_yet = false;
         let mut out = Vec::new();
         for (clip, stored, start, length) in showing(&p, at) {
-            let title = match &held {
-                Some(hd) if hd.clip == clip => hd.now.clone(),
+            let stored = match &previewed {
+                Some((id, t)) if *id == clip => t.clone(),
                 _ => stored,
             };
-            let Some([x, y, bw, bh]) = self.timeline.title_grab.upright_box(&title, size) else {
+            let title = match &held {
+                Some(hd) if hd.clip == clip => hd.now.clone(),
+                _ => match landed.as_ref().filter(|l| l.0 == clip) {
+                    Some((_, to, since, from)) => {
+                        let shown = landing(to, since.elapsed(), from, &stored).cloned();
+                        landing_yet |= shown.is_some();
+                        shown.unwrap_or(stored)
+                    }
+                    None => stored,
+                },
+            };
+            let base = Title {
+                position: None,
+                zoom: None,
+                rotation: None,
+                opacity: None,
+                ..title.clone()
+            };
+            let Some([bx, by, bw, bh]) = self.timeline.title_grab.upright_box(&base, size) else {
                 continue;
             };
+            let z = title.scale() as f32;
+            let [qx, qy] = base.pivot().map(|v| v as f32);
+            let [rx, ry] = title.pivot().map(|v| v as f32);
+            let (fw, fh) = (w as f32, h as f32);
+            let x = rx * fw + (bx - qx * fw) * z;
+            let y = if title.moves() {
+                by
+            } else {
+                ry * fh + (by - qy * fh) * z
+            };
+            let (bw, bh) = (bw * z, bh * z);
             let dy = if title.moves() {
                 let run = Run {
                     at: at - start,
@@ -172,6 +210,9 @@ impl Workspace {
                 angle,
                 turn_at: top_middle + up,
             });
+        }
+        if !landing_yet {
+            self.timeline.title_grab.landed = None;
         }
         out
     }
@@ -297,18 +338,31 @@ impl Workspace {
         if resp.drag_stopped()
             && let Some(held) = self.timeline.title_grab.held.take()
         {
-            self.live.preview_title(None);
-            if let Some(params) = changed(&held) {
-                self.send("titles.set", params);
-                if let Some(d) = self
-                    .timeline
-                    .title_dialog
-                    .as_mut()
-                    .filter(|d| d.clip() == held.clip)
-                {
-                    d.placed(&held.now);
-                }
+            let params = changed(&held);
+            if let Some(params) = &params {
+                self.send("titles.set", params.clone());
+                self.timeline.title_grab.landed = Some((
+                    held.clip.clone(),
+                    held.now.clone(),
+                    std::time::Instant::now(),
+                    held.title.clone(),
+                ));
             }
+            let kept = match self
+                .timeline
+                .title_dialog
+                .as_mut()
+                .filter(|d| d.clip() == held.clip)
+            {
+                Some(d) => {
+                    if params.is_some() {
+                        d.placed(&held.now);
+                    }
+                    d.previewing()
+                }
+                None => None,
+            };
+            self.live.preview_title(kept);
         }
         if resp.clicked() {
             let hit = pointer.and_then(|p| shapes.iter().find(|s| s.inside(p)));

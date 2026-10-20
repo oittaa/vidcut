@@ -99,6 +99,12 @@ impl Player {
         self.contents[id.index()].plan.is_some()
     }
 
+    pub fn nudge_title(&self, nudge: Option<engine::Nudge>) {
+        if let Some(e) = &self.engine {
+            e.nudge_title(nudge);
+        }
+    }
+
     fn shown_engine(&self) -> Option<&Arc<engine::Player>> {
         self.engine
             .as_ref()

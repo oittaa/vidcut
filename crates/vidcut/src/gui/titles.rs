@@ -140,7 +140,7 @@ impl TitleDialog {
         self.down = percent(t.position.map(|p| p[1]));
         self.zoom = percent(t.zoom);
         self.rotation = plain(t.rotation);
-        self.shown = None;
+        self.shown = self.shown.is_some().then(|| t.clone());
     }
 }
 

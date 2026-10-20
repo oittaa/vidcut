@@ -523,6 +523,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         player,
         skipping: None,
         title_preview: None,
+        nudged: None,
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
@@ -776,6 +777,7 @@ struct Live {
     player: Player,
     skipping: Option<Vec<ClipSpans>>,
     title_preview: Option<TitlePreview>,
+    nudged: Option<vidcut_av::player::Nudge>,
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
@@ -933,9 +935,46 @@ impl Live {
             Msg::Skip(parts) => changed = self.set_skipping(parts),
             Msg::PreviewTitle(title) => {
                 changed = false;
+                let title = title.map(|t| match t {
+                    TitlePreview::Clip(id, t) => {
+                        let t = vidcut_core::ops::titles::checked(&t).unwrap_or(t);
+                        TitlePreview::Clip(id, t)
+                    }
+                    other => other,
+                });
                 if self.title_preview != title {
+                    let nudge = match &title {
+                        Some(TitlePreview::Clip(id, to)) => match &self.title_preview {
+                            Some(TitlePreview::Clip(was, from)) if was == id => Some(from.clone()),
+                            _ => self
+                                .project
+                                .as_ref()
+                                .and_then(|s| s.project().clip(id))
+                                .and_then(|c| c.title.clone()),
+                        }
+                        .filter(|from| vidcut_av::player::Nudge::fits(from, to))
+                        .map(|_| vidcut_av::player::Nudge {
+                            clip: id.clone(),
+                            to: to.clone(),
+                        }),
+                        _ => None,
+                    };
+                    let let_go = title.is_none();
                     self.title_preview = title;
-                    self.schedule_timeline();
+                    match (nudge, self.nudged.take()) {
+                        (Some(n), _) => {
+                            self.player.nudge_title(Some(n.clone()));
+                            self.nudged = Some(n);
+                        }
+                        (None, Some(held)) if let_go => {
+                            self.nudged = Some(held);
+                            self.schedule_timeline();
+                        }
+                        (None, _) => {
+                            self.player.nudge_title(None);
+                            self.schedule_timeline();
+                        }
+                    }
                 }
             }
             Msg::Picture => {
@@ -3061,6 +3100,12 @@ impl Live {
                 }
             }
             None => {}
+        }
+        if let Some(n) = &self.nudged
+            && p.clip(&n.clip).and_then(|c| c.title.as_ref()) != Some(&n.to)
+        {
+            self.player.nudge_title(None);
+            self.nudged = None;
         }
         let end = p.end();
         if end == 0 {
