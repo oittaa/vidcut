@@ -74,7 +74,7 @@ impl Default for Settings {
             gap: 0,
             from_media: true,
             look: PLAIN.into(),
-            find: FindSpeech::Voice,
+            find: FindSpeech::Sound,
             sound_db: vidcut_core::transcript::SOUND_DB,
             speakers: false,
             speaker_model: SpeakerModel::Auto,
@@ -208,10 +208,10 @@ fn service_rows(ui: &mut egui::Ui, s: &mut Settings, transcribing: bool) {
                     s.xai.filler_words = (!keep).then_some(false);
                 }
             });
-            dialog::row(ui, "Voice Threshold", |ui| {
+            dialog::row(ui, "Skip Non-Speech", |ui| {
                 let mut own = s.xai.vad_threshold.is_some();
                 ui.checkbox(&mut own, "")
-                    .on_hover_text("Off: xAI's 0.5, or 0 when found by sound level");
+                    .on_hover_text("Higher skips more; 0 keeps everything");
                 let mut v = s.xai.vad_threshold.unwrap_or(0.5);
                 ui.add_enabled(
                     own,
@@ -1049,7 +1049,7 @@ impl Workspace {
                 if !d.gpu && !s.model.paid() {
                     dialog::note(ui, "Runs on the CPU: GPU acceleration is off");
                 }
-                let unusual = s.find != FindSpeech::Voice
+                let unusual = s.find != FindSpeech::default()
                     || (!transcribing && (s.gap != 0 || !s.from_media))
                     || (s.model == SpeechModel::Xai && s.xai != XaiOptions::default())
                     || !s.keyterms.is_empty()

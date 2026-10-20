@@ -41,7 +41,8 @@ impl Asked {
     }
 
     pub fn level(&self) -> Option<f64> {
-        (self.find == Some(FindSpeech::Sound)).then(|| self.sound_db.unwrap_or(SOUND_DB))
+        (self.find.unwrap_or_default() == FindSpeech::Sound)
+            .then(|| self.sound_db.unwrap_or(SOUND_DB))
     }
 
     pub fn made(&self, speech: &Speech) -> bool {
