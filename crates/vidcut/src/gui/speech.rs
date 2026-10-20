@@ -1,31 +1,29 @@
 use std::collections::{HashMap, HashSet};
 
-use eframe::egui::{self, RichText};
+use eframe::egui;
 use serde_json::json;
 use vidcut_av::transcribe;
 use vidcut_core::looks::{Look, LookKind, Styled};
 use vidcut_core::model::Project;
 use vidcut_core::request::{FindSpeech, SpeechModel};
 
-use super::export::near_center;
+use super::dialog;
+use super::look_tiles::Tiles;
+use super::theme;
 use super::workspace::{Workspace, dim, escape_cancels};
 
 const PLAIN: &str = "Plain";
-const POP: &str = "Pop";
 
 const MODELS: [(SpeechModel, &str); 3] = [
     (
         SpeechModel::ParakeetUltra,
-        "25 European languages, a time for each word",
+        "25 European languages · times each word",
     ),
     (
         SpeechModel::WhisperLargeV3,
-        "100 languages, a time for each phrase",
+        "100 languages · times each phrase",
     ),
-    (
-        SpeechModel::Qwen3Asr,
-        "30 languages; its times are estimates",
-    ),
+    (SpeechModel::Qwen3Asr, "30 languages · estimated times"),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -75,34 +73,172 @@ fn found_by(s: &Settings, params: &mut serde_json::Value) {
     }
 }
 
-fn find_speech(ui: &mut egui::Ui, s: &mut Settings) {
-    egui::CollapsingHeader::new("Advanced")
-        .id_salt("speech-advanced")
-        .default_open(s.find != FindSpeech::Voice)
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Find speech by");
-                ui.radio_value(&mut s.find, FindSpeech::Voice, "Voice")
-                    .on_hover_text("The voice detection hears where people speak: best for talk");
-                ui.radio_value(&mut s.find, FindSpeech::Sound, "Sound level")
-                    .on_hover_text(
-                        "Everything louder than the level is heard: singing and speech over \
-                         music too, which voice detection misses",
-                    );
-            });
-            if s.find == FindSpeech::Sound {
-                ui.horizontal(|ui| {
-                    ui.label("Quieter than");
-                    ui.add(
-                        egui::DragValue::new(&mut s.sound_db)
-                            .range(-80.0..=-10.0)
-                            .speed(0.5)
-                            .suffix(" dBFS"),
-                    );
-                    ui.label(dim("for half a second is silence"));
+fn find_rows(ui: &mut egui::Ui, s: &mut Settings) {
+    dialog::row(ui, "Find Speech By", |ui| {
+        dialog::switch(ui, |ui| {
+            ui.selectable_value(&mut s.find, FindSpeech::Voice, "Voice")
+                .on_hover_text("Where people speak; misses singing");
+            ui.selectable_value(&mut s.find, FindSpeech::Sound, "Sound Level")
+                .on_hover_text("All sound above a level: singing and speech over music");
+        });
+    });
+    if s.find == FindSpeech::Sound {
+        dialog::row(ui, "Silence Below", |ui| {
+            ui.add(
+                egui::DragValue::new(&mut s.sound_db)
+                    .range(-80.0..=-10.0)
+                    .speed(0.5)
+                    .suffix(" dBFS"),
+            )
+            .on_hover_text("Quieter than this for half a second is silence");
+        });
+    }
+}
+
+fn model_choice(ui: &mut egui::Ui, s: &mut Settings, have: &[bool; 3], words_only: bool) {
+    let c = theme::colors();
+    let body = egui::TextStyle::Body.resolve(ui.style());
+    let small = egui::TextStyle::Small.resolve(ui.style());
+    egui::ComboBox::from_id_salt("speech-model")
+        .selected_text(transcribe::file_of(s.model).title)
+        .width(170.0)
+        .show_ui(ui, |ui| {
+            for (i, (model, note)) in MODELS.iter().enumerate() {
+                let f = transcribe::file_of(*model);
+                let size = match have[i] {
+                    true => transcribe::size(f.bytes),
+                    false => format!("{} download", transcribe::size(f.bytes)),
+                };
+                let mut job = egui::text::LayoutJob::default();
+                job.append(f.title, 0.0, egui::TextFormat::simple(body.clone(), c.text));
+                job.append(
+                    &format!("\n{note} · {size}"),
+                    0.0,
+                    egui::TextFormat::simple(small.clone(), c.text_dim),
+                );
+                ui.add_enabled_ui(!words_only || model.times_words(), |ui| {
+                    ui.selectable_value(&mut s.model, *model, job)
+                        .on_disabled_hover_text(
+                            "Doesn't time each word, which cutting by words needs",
+                        );
                 });
             }
         });
+    if !have[index(s.model)] {
+        ui.label(dim(format!(
+            "{} download",
+            transcribe::size(transcribe::file_of(s.model).bytes)
+        )));
+    }
+}
+
+fn language_choice(ui: &mut egui::Ui, s: &mut Settings) {
+    let shown = s.language.as_deref().map_or("Auto".into(), language_label);
+    egui::ComboBox::from_id_salt("speech-language")
+        .selected_text(shown)
+        .width(170.0)
+        .height(320.0)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut s.language, None, "Auto");
+            let mut known: Vec<&str> = transcribe::file_of(s.model).languages.to_vec();
+            known.sort_by_key(|c| language_label(c));
+            for code in known {
+                ui.selectable_value(
+                    &mut s.language,
+                    Some(code.to_string()),
+                    language_label(code),
+                );
+            }
+        });
+}
+
+fn track_choice(ui: &mut egui::Ui, s: &mut Settings, p: &Project) {
+    let highest = p.subtitles.last();
+    let shown = match (&s.onto, highest) {
+        (Onto::Highest, Some(t)) => t.display_name(),
+        (Onto::Track(id), _) => p
+            .subtitle_track(id)
+            .map_or_else(|| id.clone(), |t| t.display_name()),
+        (Onto::New, _) | (Onto::Highest, None) => "New Track".into(),
+    };
+    egui::ComboBox::from_id_salt("speech-track")
+        .selected_text(shown)
+        .width(170.0)
+        .show_ui(ui, |ui| {
+            for t in p.subtitles.iter().rev() {
+                let on = match &s.onto {
+                    Onto::Highest => highest.is_some_and(|h| h.id == t.id),
+                    Onto::Track(id) => *id == t.id,
+                    Onto::New => false,
+                };
+                if ui.selectable_label(on, t.display_name()).clicked() {
+                    s.onto = Onto::Track(t.id.clone());
+                }
+            }
+            let new = s.onto == Onto::New || (s.onto == Onto::Highest && highest.is_none());
+            if ui.selectable_label(new, "New Track").clicked() {
+                s.onto = Onto::New;
+            }
+        });
+}
+
+fn words_from(ui: &mut egui::Ui, s: &mut Settings) {
+    let can = s.model.times_words();
+    let mut media = s.from_media && can;
+    dialog::switch(ui, |ui| {
+        ui.add_enabled_ui(can, |ui| {
+            if ui
+                .selectable_label(media, "Each File")
+                .on_hover_text("Each clip's file, transcribed once and kept")
+                .on_disabled_hover_text("Needs a model that times each word")
+                .clicked()
+            {
+                media = true;
+            }
+        });
+        if ui
+            .selectable_label(!media, "Timeline Mix")
+            .on_hover_text("The tracks mixed over the range; nothing is kept")
+            .clicked()
+        {
+            media = false;
+        }
+    });
+    if can {
+        s.from_media = media;
+    }
+}
+
+fn ask_download(
+    ctx: &egui::Context,
+    id: &str,
+    needs: &[transcribe::Need],
+    go: &str,
+) -> Option<bool> {
+    let total: u64 = needs.iter().map(|n| n.bytes).sum();
+    let mut answer = None;
+    let modal = egui::Modal::new(egui::Id::unique(id)).show(ctx, |ui| {
+        ui.set_width(dialog::WIDTH);
+        ui.spacing_mut().item_spacing.y = 8.0;
+        ui.heading(format!("Download {}?", transcribe::size(total)));
+        ui.add(egui::Label::new(transcribe::listed(needs)).wrap());
+        dialog::note(
+            ui,
+            format!("Kept in {}", crate::paths::models_dir().display()),
+        );
+        dialog::footer(ui, |ui| {
+            if dialog::main_button(ui, go, true) {
+                answer = Some(true);
+            }
+            if ui.button("Not Now").clicked() {
+                answer = Some(false);
+            }
+        });
+    });
+    if escape_cancels(ctx, &modal) {
+        answer = Some(false);
+    }
+    answer
 }
 
 impl Settings {
@@ -131,7 +267,6 @@ struct Dialog {
     asking: bool,
     hear: Hear,
     media: Vec<String>,
-    again: bool,
 }
 
 #[derive(Debug, Default)]
@@ -177,15 +312,8 @@ impl Hear {
 pub struct SpeechUi {
     dialog: Option<Dialog>,
     last: Option<Settings>,
-    animated: Option<String>,
     word_times: Option<String>,
-}
-
-fn animated<'a>(looks: &'a [Look], name: &str) -> Option<&'a Look> {
-    looks
-        .iter()
-        .find(|l| l.name.eq_ignore_ascii_case(name))
-        .filter(|l| matches!(&l.styled, Styled::Subtitles(s) if s.style.words.is_some()))
+    tiles: Tiles,
 }
 
 fn index(model: SpeechModel) -> usize {
@@ -233,6 +361,13 @@ fn length(secs: f64) -> String {
         (0, m, 0) => format!("{m} min"),
         (0, m, s) => format!("{m} min {s} s"),
         (h, m, _) => format!("{h} h {m} min"),
+    }
+}
+
+fn files(n: usize) -> String {
+    match n {
+        1 => "1 file".into(),
+        n => format!("{n} files"),
     }
 }
 
@@ -380,32 +515,12 @@ impl Workspace {
         };
         let dir = crate::paths::models_dir();
         let needs = transcribe::needed(&dir, Some(transcribe::file_of(SpeechModel::ParakeetUltra)));
-        let total: u64 = needs.iter().map(|n| n.bytes).sum();
-        let mut answer = None;
-        let modal = egui::Modal::new(egui::Id::unique("word-times-download")).show(ctx, |ui| {
-            ui.set_max_width(420.0);
-            ui.heading(format!("Download {}?", transcribe::size(total)));
-            ui.label(format!(
-                "Timing words needs {}, not on this computer yet. vidcut downloads {} once, \
-                 checks each against its SHA-256 and keeps {} in {}.",
-                transcribe::listed(&needs),
-                if needs.len() == 1 { "it" } else { "them" },
-                if needs.len() == 1 { "it" } else { "them" },
-                dir.display()
-            ));
-            ui.horizontal(|ui| {
-                if ui.button("Download and Synchronize").clicked() {
-                    answer = Some(true);
-                }
-                if ui.button("Not Now").clicked() {
-                    answer = Some(false);
-                }
-            });
-        });
-        if escape_cancels(ctx, &modal) {
-            answer = Some(false);
-        }
-        match answer {
+        match ask_download(
+            ctx,
+            "word-times-download",
+            &needs,
+            "Download and Synchronize",
+        ) {
             Some(true) => {
                 self.send(
                     "subtitles.time_words",
@@ -416,21 +531,6 @@ impl Workspace {
             }
             Some(false) => self.speech.word_times = None,
             None => {}
-        }
-    }
-
-    pub(crate) fn open_animated_speech(&mut self) {
-        self.open_hearing(Vec::new());
-        let looks = self.looks.of(LookKind::Subtitles).to_vec();
-        if let Some(d) = &mut self.speech.dialog {
-            let look = animated(&looks, &d.settings.look)
-                .or_else(|| animated(&looks, self.speech.animated.as_deref()?))
-                .or_else(|| animated(&looks, POP));
-            if let Some(look) = look {
-                d.settings.take_look(look);
-            }
-            d.settings.onto = Onto::New;
-            d.settings.model = SpeechModel::ParakeetUltra;
         }
     }
 
@@ -458,7 +558,6 @@ impl Workspace {
             asking: false,
             hear: Hear::default(),
             media,
-            again: false,
         });
     }
 
@@ -514,9 +613,6 @@ impl Workspace {
         self.send("subtitles.transcribe", params);
         self.export.show_jobs = true;
         self.speech.last = Some(s.clone());
-        if animated(self.looks.of(LookKind::Subtitles), &s.look).is_some() {
-            self.speech.animated = Some(s.look.clone());
-        }
     }
 
     pub(super) fn speech_window(&mut self, ctx: &egui::Context) {
@@ -528,6 +624,7 @@ impl Workspace {
             return;
         };
         let looks = self.looks.of(LookKind::Subtitles).to_vec();
+        let mut tiles = std::mem::take(&mut self.speech.tiles);
         let s = &mut d.settings;
         if let Onto::Track(id) = &s.onto
             && p.subtitle_index(id).is_none()
@@ -540,317 +637,177 @@ impl Workspace {
         let mut open = true;
         let (mut create, mut cancel) = (false, false);
         let transcribing = !d.media.is_empty();
+        if transcribing && !s.model.times_words() {
+            s.model = SpeechModel::default();
+        }
+        if s.language
+            .as_deref()
+            .is_some_and(|l| !file.languages.contains(&l))
+        {
+            s.language = None;
+        }
         let names: Vec<String> = d
             .media
             .iter()
             .map(|id| p.media(id).map_or_else(|| id.clone(), |m| m.name.clone()))
             .collect();
-        let kept = d.media.iter().any(|id| self.snap.transcribed.contains(id));
+        let kept = d
+            .media
+            .iter()
+            .filter(|id| self.snap.transcribed.contains(*id))
+            .count();
+        let again = transcribing && kept == d.media.len();
         let title = match transcribing {
             true => "Transcribe Audio",
             false => "Create Subtitles from Audio",
         };
-        egui::Window::new(title)
-            .collapsible(false)
-            .resizable(false)
-            .default_pos(near_center(ctx, 460.0, 420.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.add_enabled_ui(!d.asking, |ui| {
-                    ui.label(dim(match transcribing {
-                        true => format!(
-                            "Transcribes the sound of {} on this computer and keeps its words \
-                             with their times, for the Transcription window and cutting by \
-                             words.",
-                            listed(&names)
-                        ),
-                        false => "Transcribes the speech on the tracks it hears, on this \
-                                  computer, and adds it as subtitles."
-                            .into(),
-                    }));
-                    ui.add_space(4.0);
-                    ui.label("Model");
-                    if transcribing && !s.model.times_words() {
-                        s.model = SpeechModel::default();
+        dialog::window(ctx, title, &mut open, |ui| {
+            ui.add_enabled_ui(!d.asking, |ui| {
+                if transcribing {
+                    let secs: f64 = d
+                        .media
+                        .iter()
+                        .filter_map(|id| p.media(id))
+                        .map(|m| m.info.duration)
+                        .sum();
+                    let what = match names.as_slice() {
+                        [one] => one.clone(),
+                        many => files(many.len()),
+                    };
+                    ui.add(egui::Label::new(dim(format!("{what} · {}", length(secs)))).truncate())
+                        .on_hover_text(names.join("\n"));
+                } else if let Some(l) = tiles.show(ui, &looks, &s.look) {
+                    s.take_look(l);
+                }
+                dialog::form(ui, "speech-form", |ui| {
+                    dialog::row(ui, "Model", |ui| model_choice(ui, s, &d.have, transcribing));
+                    dialog::row(ui, "Language", |ui| language_choice(ui, s));
+                    if transcribing {
+                        return;
                     }
-                    for (i, (model, note)) in MODELS.iter().enumerate() {
-                        let f = transcribe::file_of(*model);
-                        let size = transcribe::size(f.bytes);
-                        let have = match d.have[i] {
-                            true => format!("{size}, on this computer"),
-                            false => format!("{size}, downloaded when first used"),
-                        };
-                        let title = match model {
-                            SpeechModel::ParakeetUltra => format!("{} (default)", f.title),
-                            _ => f.title.to_string(),
-                        };
-                        let usable = !transcribing || model.times_words();
-                        ui.horizontal(|ui| {
-                            ui.add_enabled_ui(usable, |ui| {
-                                ui.radio_value(&mut s.model, *model, title)
-                                    .on_disabled_hover_text(
-                                        "It doesn't time each word, which cutting by words needs",
-                                    );
-                            });
-                            ui.label(dim(have));
-                        });
-                        ui.indent(("speech-model-note", i), |ui| ui.label(dim(*note)));
-                    }
-                    if s.language
-                        .as_deref()
-                        .is_some_and(|l| !transcribe::file_of(s.model).languages.contains(&l))
-                    {
-                        s.language = None;
-                    }
-                    if let Some(w) = &d.short[index(s.model)] {
-                        ui.label(
-                            RichText::new(format!("⚠ {w}; it runs anyway"))
-                                .color(ui.visuals().warn_fg_color),
-                        );
-                    }
-                    if !d.gpu {
-                        ui.label(dim(
-                            "GPU acceleration is off in Preferences: the model runs on the CPU",
-                        ));
-                    }
-                    ui.separator();
-                    egui::Grid::new("speech-options")
-                        .num_columns(2)
-                        .spacing([12.0, 6.0])
-                        .show(ui, |ui| {
-                            ui.label("Language");
-                            let shown = s.language.as_deref().map_or("Auto".into(), language_label);
-                            egui::ComboBox::from_id_salt("speech-language")
-                                .selected_text(shown)
-                                .height(320.0)
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(&mut s.language, None, "Auto");
-                                    let mut known: Vec<&str> =
-                                        transcribe::file_of(s.model).languages.to_vec();
-                                    known.sort_by_key(|c| language_label(c));
-                                    for code in known {
-                                        ui.selectable_value(
-                                            &mut s.language,
-                                            Some(code.to_string()),
-                                            language_label(code),
-                                        );
-                                    }
-                                });
-                            ui.end_row();
-                            if transcribing {
-                                if kept {
-                                    ui.label("Transcribed");
-                                    ui.checkbox(
-                                        &mut d.again,
-                                        "Transcribe again, replacing the words kept",
-                                    );
-                                    ui.end_row();
-                                }
-                                return;
+                    dialog::row(ui, "Range", |ui| {
+                        let in_out = s.in_out && range.is_some();
+                        dialog::switch(ui, |ui| {
+                            if ui.selectable_label(!in_out, "Whole Timeline").clicked() {
+                                s.in_out = false;
                             }
-                            ui.label("Range");
-                            ui.vertical(|ui| {
-                                let whole = format!("Whole timeline ({})", self.src_tc(p.end()));
-                                if ui.radio(!s.in_out || range.is_none(), whole).clicked() {
-                                    s.in_out = false;
-                                }
-                                let label = match range {
-                                    Some((a, b)) => format!(
-                                        "In–Out, {} – {} ({})",
-                                        self.tc(a),
-                                        self.tc(b - 1),
-                                        self.src_tc(b - a)
-                                    ),
-                                    None => "In–Out (not marked)".into(),
-                                };
-                                ui.add_enabled_ui(range.is_some(), |ui| {
-                                    if ui.radio(s.in_out && range.is_some(), label).clicked() {
-                                        s.in_out = true;
-                                    }
-                                });
-                            });
-                            ui.end_row();
-                            ui.label("Hear");
-                            heard = d.hear.ui(ui, &p);
-                            ui.end_row();
-                            ui.label("Words from");
-                            ui.vertical(|ui| {
-                                let can = s.model.times_words();
-                                let mut media = s.from_media && can;
-                                ui.add_enabled_ui(can, |ui| {
-                                    if ui
-                                        .radio(media, "Each clip's file")
-                                        .on_hover_text(
-                                            "Words kept for a file are used; a file without \
-                                             them is transcribed and keeps them, for the \
-                                             Transcription window and next time",
-                                        )
-                                        .on_disabled_hover_text(
-                                            "Only Parakeet Ultra times each word, which placing \
-                                             a file's words through its clips needs",
-                                        )
-                                        .clicked()
-                                    {
-                                        media = true;
-                                    }
-                                });
+                            ui.add_enabled_ui(range.is_some(), |ui| {
                                 if ui
-                                    .radio(!media, "The timeline's mix")
-                                    .on_hover_text(
-                                        "Hears the tracks mixed over the range; nothing is kept",
-                                    )
+                                    .selectable_label(in_out, "In–Out")
+                                    .on_disabled_hover_text("Mark an In and an Out first")
                                     .clicked()
                                 {
-                                    media = false;
-                                }
-                                if can {
-                                    s.from_media = media;
+                                    s.in_out = true;
                                 }
                             });
-                            ui.end_row();
-                            ui.label("Track");
-                            let highest = p.subtitles.last();
-                            let shown = match (&s.onto, highest) {
-                                (Onto::Highest, Some(t)) => t.display_name(),
-                                (Onto::Track(id), _) => p
-                                    .subtitle_track(id)
-                                    .map_or_else(|| id.clone(), |t| t.display_name()),
-                                (Onto::New, _) | (Onto::Highest, None) => "New Track".into(),
-                            };
-                            egui::ComboBox::from_id_salt("speech-track")
-                                .selected_text(shown)
-                                .show_ui(ui, |ui| {
-                                    for t in p.subtitles.iter().rev() {
-                                        let on = match &s.onto {
-                                            Onto::Highest => highest.is_some_and(|h| h.id == t.id),
-                                            Onto::Track(id) => *id == t.id,
-                                            Onto::New => false,
-                                        };
-                                        if ui.selectable_label(on, t.display_name()).clicked() {
-                                            s.onto = Onto::Track(t.id.clone());
-                                        }
-                                    }
-                                    let new = s.onto == Onto::New
-                                        || (s.onto == Onto::Highest && highest.is_none());
-                                    if ui.selectable_label(new, "New Track").clicked() {
-                                        s.onto = Onto::New;
-                                    }
-                                });
-                            ui.end_row();
-                            ui.label("Look");
-                            let mut took = None;
-                            egui::ComboBox::from_id_salt("speech-look")
-                                .selected_text(s.look.as_str())
-                                .show_ui(ui, |ui| {
-                                    for (i, l) in looks.iter().enumerate() {
-                                        if i > 0 && looks[i - 1].built_in && !l.built_in {
-                                            ui.separator();
-                                        }
-                                        let on = l.name.eq_ignore_ascii_case(&s.look);
-                                        let r = ui.selectable_label(on, &l.name);
-                                        let r = match l.description {
-                                            "" => r,
-                                            d => r.on_hover_text(d),
-                                        };
-                                        if r.clicked() {
-                                            took = Some(l);
-                                        }
-                                    }
-                                })
-                                .response
-                                .on_hover_text(
-                                    "Animated looks show each word as it is spoken; the track's \
-                                     style can be changed later in its Subtitle Track window, \
-                                     where you can also save your own looks",
-                                );
-                            if let Some(l) = took {
-                                s.take_look(l);
-                            }
-                            ui.end_row();
-                            ui.label("Max Characters per Line");
-                            ui.add(egui::DragValue::new(&mut s.chars).range(1..=60));
-                            ui.end_row();
-                            ui.label("Lines");
-                            ui.horizontal(|ui| {
-                                ui.radio_value(&mut s.lines, 1, "Single");
-                                ui.radio_value(&mut s.lines, 2, "Double");
-                            });
-                            ui.end_row();
-                            ui.label("Gap Between Subtitles");
-                            ui.add(
-                                egui::DragValue::new(&mut s.gap)
-                                    .range(0..=10)
-                                    .suffix(" frames"),
-                            );
-                            ui.end_row();
                         });
-                    find_speech(ui, s);
+                        let (a, b) = match range {
+                            Some(marks) if in_out => marks,
+                            _ => (0, p.end()),
+                        };
+                        ui.label(dim(self.src_tc(b - a))).on_hover_text(format!(
+                            "{} – {}",
+                            self.tc(a),
+                            self.tc(b - 1)
+                        ));
+                    });
+                    heard = dialog::row(ui, "Hear", |ui| d.hear.ui(ui, &p));
+                    dialog::row(ui, "Track", |ui| track_choice(ui, s, &p));
+                    dialog::row(ui, "Lines", |ui| {
+                        dialog::switch(ui, |ui| {
+                            ui.selectable_value(&mut s.lines, 1, "Single");
+                            ui.selectable_value(&mut s.lines, 2, "Double");
+                        });
+                        ui.label(dim("up to"));
+                        ui.add(egui::DragValue::new(&mut s.chars).range(1..=60));
+                        ui.label(dim("characters"));
+                    });
+                });
+                if let Some(w) = &d.short[index(s.model)] {
+                    dialog::warn(ui, format!("{w}; it runs anyway"));
+                }
+                if !d.gpu {
+                    dialog::note(ui, "Runs on the CPU: GPU acceleration is off");
+                }
+                let unusual =
+                    s.find != FindSpeech::Voice || (!transcribing && (s.gap != 0 || !s.from_media));
+                dialog::advanced(ui, "speech-advanced", unusual, |ui| {
+                    dialog::form(ui, "speech-advanced-form", |ui| {
+                        if !transcribing {
+                            dialog::row(ui, "Words From", |ui| words_from(ui, s));
+                            dialog::row(ui, "Gap", |ui| {
+                                ui.add(
+                                    egui::DragValue::new(&mut s.gap)
+                                        .range(0..=10)
+                                        .suffix(" frames"),
+                                )
+                                .on_hover_text("Between one subtitle and the next");
+                            });
+                        }
+                        find_rows(ui, s);
+                    });
+                });
+                if transcribing {
+                    match kept {
+                        0 => {}
+                        _ if again => {
+                            dialog::note(ui, "Already transcribed");
+                        }
+                        k => {
+                            dialog::note(
+                                ui,
+                                format!("{k} of {} already transcribed", d.media.len()),
+                            );
+                        }
+                    }
+                } else if heard.is_empty() {
+                    dialog::warn(ui, "Tick a track to hear");
+                } else if s.from_media && s.model.times_words() {
                     let (a, b) = match range {
                         Some(marks) if s.in_out => marks,
                         _ => (0, p.end()),
                     };
-                    ui.separator();
-                    if !transcribing {
-                        match heard.is_empty() {
-                            true => ui.label(
-                                RichText::new("Tick a track to hear")
-                                    .color(ui.visuals().warn_fg_color),
+                    let missing = untranscribed(&p, &heard, (a, b), &self.snap.transcribed);
+                    if !missing.is_empty() {
+                        let secs: f64 = missing
+                            .iter()
+                            .filter_map(|id| p.media(id))
+                            .map(|m| m.info.duration)
+                            .sum();
+                        let names: Vec<String> = missing
+                            .iter()
+                            .map(|id| p.media(id).map_or_else(|| id.clone(), |m| m.name.clone()))
+                            .collect();
+                        dialog::note(
+                            ui,
+                            format!(
+                                "Transcribes {} first ({})",
+                                files(missing.len()),
+                                length(secs)
                             ),
-                            false => ui.label(format!(
-                                "Hears {}, {} – {}",
-                                listed(&heard),
-                                self.tc(a),
-                                self.tc(b - 1)
-                            )),
-                        };
-                        if s.from_media && s.model.times_words() && !heard.is_empty() {
-                            let missing = untranscribed(&p, &heard, (a, b), &self.snap.transcribed);
-                            let secs: f64 = missing
-                                .iter()
-                                .filter_map(|id| p.media(id))
-                                .map(|m| m.info.duration)
-                                .sum();
-                            let names: Vec<String> = missing
-                                .iter()
-                                .map(|id| {
-                                    p.media(id).map_or_else(|| id.clone(), |m| m.name.clone())
-                                })
-                                .collect();
-                            ui.label(dim(match missing.len() {
-                                0 => "Uses the words kept for each clip's file".to_string(),
-                                _ => format!(
-                                    "Transcribes {} first, {} in all, and keeps the words",
-                                    listed(&names),
-                                    length(secs)
-                                ),
-                            }));
-                            if s.language.is_some() {
-                                ui.label(dim(
-                                    "A file whose words weren't made in this language is transcribed again",
-                                ));
-                            }
-                        }
+                        )
+                        .on_hover_text(names.join("\n"));
                     }
-                    ui.label(dim("Jobs shows its progress, and can cancel it"));
-                    ui.horizontal(|ui| {
-                        let label = if transcribing { "Transcribe" } else { "Create" };
-                        create = ui
-                            .add_enabled(
-                                transcribing || !heard.is_empty(),
-                                egui::Button::new(label),
-                            )
-                            .clicked();
-                        cancel = ui.button("Cancel").clicked();
-                    });
+                }
+                dialog::footer(ui, |ui| {
+                    let label = match (transcribing, again) {
+                        (true, true) => "Transcribe Again",
+                        (true, false) => "Transcribe",
+                        (false, _) => "Create",
+                    };
+                    create = dialog::main_button(ui, label, transcribing || !heard.is_empty());
+                    cancel = ui.button("Cancel").clicked();
                 });
             });
+        });
+        self.speech.tiles = tiles;
         let dir = crate::paths::models_dir();
         if create {
             d.have[index(s.model)] = transcribe::present(&dir, file);
             if transcribe::needed(&dir, Some(file)).is_empty() {
                 let settings = s.clone();
                 match transcribing {
-                    true => self.transcribe_media(&settings, &d.media, d.again, false),
+                    true => self.transcribe_media(&settings, &d.media, again, false),
                     false => self.create_subtitles(&settings, &heard, false),
                 }
                 return;
@@ -859,41 +816,15 @@ impl Workspace {
         }
         if d.asking {
             let needs = transcribe::needed(&dir, Some(file));
-            let total: u64 = needs.iter().map(|n| n.bytes).sum();
-            let mut answer = None;
-            let modal = egui::Modal::new(egui::Id::unique("speech-download")).show(ctx, |ui| {
-                ui.set_max_width(420.0);
-                ui.heading(format!("Download {}?", transcribe::size(total)));
-                ui.label(format!(
-                    "Hearing speech needs {}, not on this computer yet. vidcut downloads {} once, \
-                     checks each against its SHA-256 and keeps {} in {}.",
-                    transcribe::listed(&needs),
-                    if needs.len() == 1 { "it" } else { "them" },
-                    if needs.len() == 1 { "it" } else { "them" },
-                    dir.display()
-                ));
-                ui.label(dim("Jobs shows the download's progress, and can cancel it"));
-                ui.horizontal(|ui| {
-                    let go = match transcribing {
-                        true => "Download and Transcribe",
-                        false => "Download and Create",
-                    };
-                    if ui.button(go).clicked() {
-                        answer = Some(true);
-                    }
-                    if ui.button("Not Now").clicked() {
-                        answer = Some(false);
-                    }
-                });
-            });
-            if escape_cancels(ctx, &modal) {
-                answer = Some(false);
-            }
-            match answer {
+            let go = match transcribing {
+                true => "Download and Transcribe",
+                false => "Download and Create",
+            };
+            match ask_download(ctx, "speech-download", &needs, go) {
                 Some(true) => {
                     let settings = d.settings.clone();
                     match transcribing {
-                        true => self.transcribe_media(&settings, &d.media, d.again, true),
+                        true => self.transcribe_media(&settings, &d.media, again, true),
                         false => self.create_subtitles(&settings, &heard, true),
                     }
                     return;
@@ -905,5 +836,25 @@ impl Workspace {
         if open && !cancel {
             self.speech.dialog = Some(d);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{files, length};
+
+    #[test]
+    fn one_file_is_singular() {
+        assert_eq!(files(1), "1 file");
+    }
+
+    #[test]
+    fn several_files_are_plural() {
+        assert_eq!(files(3), "3 files");
+    }
+
+    #[test]
+    fn a_length_under_an_hour_reads_in_minutes_and_seconds() {
+        assert_eq!(length(754.4), "12 min 34 s");
     }
 }

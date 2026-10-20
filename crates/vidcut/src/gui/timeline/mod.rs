@@ -1206,23 +1206,8 @@ impl Workspace {
             self.add_subtitle(ui.ctx(), None);
             ui.close();
         }
-        if ui
-            .button("Create Subtitles from Audio…")
-            .on_hover_text("Transcribe the timeline's speech into subtitles, on this computer")
-            .clicked()
-        {
+        if ui.button("Create Subtitles from Audio…").clicked() {
             self.open_speech();
-            ui.close();
-        }
-        if ui
-            .button("Create Animated Subtitles…")
-            .on_hover_text(
-                "Subtitles from the speech, a few words at a time, the spoken word yellow and \
-                 popping",
-            )
-            .clicked()
-        {
-            self.open_animated_speech();
             ui.close();
         }
         let shown = vidcut_core::ops::subtitles::shown(p)
