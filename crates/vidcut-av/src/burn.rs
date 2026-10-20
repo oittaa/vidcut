@@ -670,7 +670,7 @@ fn block(
     width: u32,
     height: u32,
     style: &SubtitleStyle,
-) -> Vec<Sprite> {
+) -> (Option<Sprite>, Option<Sprite>) {
     let (w, h) = (f64::from(width), f64::from(height));
     let size = (height as f32 * style.text_fraction() as f32).max(1.0);
     let bold = style.bold == Some(true);
@@ -693,12 +693,15 @@ fn block(
         style: style.clone(),
     };
     let Some(laid) = laid_line(line, &look) else {
-        return Vec::new();
+        return (None, None);
     };
     let left = (width as f32 - look.wrap) / 2.0;
     let top = style.block_top(place, h, f64::from(laid.lines)) as f32;
-    let mut out = vec![placed(laid.sprite, left, top)];
-    if let Some((cx, cy)) = laid.popped {
+    let drawn = placed(laid.sprite, left, top);
+    let Some((cx, cy)) = laid.popped else {
+        return (Some(drawn), None);
+    };
+    {
         let word: Vec<Piece> = pieces
             .iter()
             .filter(|p| p.popped)
@@ -715,26 +718,33 @@ fn block(
             markup: Markup::Pieces(&word, bold),
             ..look
         };
-        if let Some(l) = lay_out(&big) {
-            out.push(placed(
+        let popped = lay_out(&big).map(|l| {
+            placed(
                 l.sprite,
                 left + cx - big.wrap / 2.0,
                 top + cy - l.lines / 2.0,
-            ));
-        }
+            )
+        });
+        (Some(drawn), popped)
     }
-    out
 }
 
-pub fn draw(
-    cues: &[(&Shown, Place)],
-    width: u32,
-    height: u32,
-    style: &SubtitleStyle,
-) -> Vec<Sprite> {
-    [Place::Top, Place::Middle, Place::Bottom]
-        .into_iter()
-        .flat_map(|place| {
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Drawing {
+    pub lines: Vec<Sprite>,
+    pub pops: Vec<Sprite>,
+}
+
+impl Drawing {
+    pub fn all(self) -> Vec<Sprite> {
+        self.lines.into_iter().chain(self.pops).collect()
+    }
+}
+
+pub fn draw(cues: &[(&Shown, Place)], width: u32, height: u32, style: &SubtitleStyle) -> Drawing {
+    let mut drawing = Drawing::default();
+    for place in [Place::Top, Place::Middle, Place::Bottom] {
+        let (line, pop) = {
             let here: Vec<&Shown> = cues
                 .iter()
                 .filter(|(s, p)| *p == place && !s.pieces.is_empty())
@@ -752,11 +762,14 @@ pub fn draw(
             }
             let pop = here.iter().map(|s| s.pop).fold(1.0, f64::max);
             match pieces.is_empty() {
-                true => Vec::new(),
+                true => (None, None),
                 false => block(&pieces, pop, place, width, height, style),
             }
-        })
-        .collect()
+        };
+        drawing.lines.extend(line);
+        drawing.pops.extend(pop);
+    }
+    drawing
 }
 
 pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {

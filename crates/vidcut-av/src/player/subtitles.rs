@@ -121,6 +121,7 @@ impl Subtitles {
         let (w, h) = key.size;
         let cues: Vec<(&Words, Place)> = key.cues.iter().map(|(s, p)| (s, *p)).collect();
         let pictures: Vec<Arc<TitlePicture>> = crate::burn::draw(&cues, w, h, &key.style)
+            .all()
             .into_iter()
             .map(|s| {
                 Arc::new(TitlePicture {
