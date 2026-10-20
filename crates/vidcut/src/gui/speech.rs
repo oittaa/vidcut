@@ -607,6 +607,47 @@ fn heard_files(
     out
 }
 
+fn asked_of(s: &Settings) -> vidcut_core::transcript::Asked {
+    vidcut_core::transcript::Asked {
+        model: s.model,
+        model_file: None,
+        vad_file: None,
+        language: s.language.clone(),
+        download: false,
+        find: Some(s.find),
+        sound_db: (s.find == FindSpeech::Sound && s.sound_db != vidcut_core::transcript::SOUND_DB)
+            .then_some(s.sound_db),
+        speakers: s.speakers,
+        speaker_model: match s.model.paid() {
+            true => SpeakerModel::Auto,
+            false => s.speaker_model,
+        },
+        send: false,
+        xai: None,
+        google: None,
+    }
+}
+
+fn kept_for(p: &Project, s: &Settings, media: &[String]) -> Vec<String> {
+    use vidcut_core::Env;
+    let env = crate::env::AvEnv::new();
+    let asked = asked_of(s);
+    media
+        .iter()
+        .filter(|id| {
+            p.media(id).is_some_and(|m| {
+                m.info.audio.iter().any(|a| {
+                    env.transcript(m, a.index)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|t| asked.made(&t))
+                })
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 fn duration(p: &Project, media: &[String]) -> f64 {
     media
         .iter()
@@ -1104,12 +1145,13 @@ impl Workspace {
         }
         if create && s.model.paid() && !d.paid {
             let (secs, what) = self.upload_size(&p, &s, &d, &heard);
-            match d.ready.ask[index(s.model)] {
-                true => {
+            match (secs > 0.0, d.ready.ask[index(s.model)]) {
+                (false, _) => {}
+                (true, true) => {
                     d.paying = Some((secs, what));
                     create = false;
                 }
-                false => d.paid = true,
+                (true, false) => d.paid = true,
             }
         }
         let dir = crate::paths::models_dir();
@@ -1187,7 +1229,13 @@ impl Workspace {
         };
         match s.each_file(marked(p).is_some()) {
             true => {
-                let media = heard_files(p, heard, (a, b), skip);
+                let mut media = heard_files(p, heard, (a, b), skip);
+                let kept = kept_for(p, s, &media);
+                match kept.len() == media.len() {
+                    true => media.clear(),
+                    false if !s.speakers => media.retain(|m| !kept.contains(m)),
+                    false => {}
+                }
                 (duration(p, &media), files(media.len()))
             }
             false => ((b - a) as f64 / p.settings.fps.as_f64(), "The mix".into()),
