@@ -75,6 +75,7 @@ pub struct FakeEnv {
     pub fingerprints: HashMap<PathBuf, String>,
     pub lost_proxies: HashSet<PathBuf>,
     pub others: Vec<PathBuf>,
+    pub looks: Option<PathBuf>,
 }
 
 pub fn levels(secs: f64, loud: &[(f64, f64)]) -> AudioLevels {
@@ -317,6 +318,13 @@ impl Env for FakeEnv {
 
     fn proxy_present(&self, path: &Path) -> bool {
         !self.lost_proxies.contains(path)
+    }
+
+    fn looks(&self, kind: crate::looks::LookKind) -> crate::looks::Listing {
+        self.looks
+            .as_deref()
+            .map(|dir| crate::looks::read(dir, kind))
+            .unwrap_or_default()
     }
 }
 

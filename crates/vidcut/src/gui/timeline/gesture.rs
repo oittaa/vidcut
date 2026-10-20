@@ -79,8 +79,7 @@ pub enum Gesture {
         cues: Vec<(i64, i64)>,
     },
     Title {
-        kind: vidcut_core::model::TitleKind,
-        align: Option<vidcut_core::model::TitleAlign>,
+        template: Box<crate::gui::title_browser::Template>,
         len: i64,
     },
     CueMove {
@@ -245,7 +244,7 @@ impl Drag {
             ),
             Gesture::Bin { .. } => Preview::default(),
             Gesture::Subtitles { media, cues } => subtitles_preview(ctx, pos, media, cues),
-            Gesture::Title { kind, align, len } => title_preview(ctx, pos, *kind, *align, *len),
+            Gesture::Title { template, len } => title_preview(ctx, pos, template, *len),
             Gesture::Trim {
                 clip,
                 edge,
@@ -585,8 +584,7 @@ fn subtitles_preview(ctx: &Ctx, pos: Pos2, media: &str, cues: &[(i64, i64)]) -> 
 fn title_preview(
     ctx: &Ctx,
     pos: Pos2,
-    kind: vidcut_core::model::TitleKind,
-    align: Option<vidcut_core::model::TitleAlign>,
+    template: &crate::gui::title_browser::Template,
     len: i64,
 ) -> Preview {
     let Some(dest) = ctx
@@ -603,14 +601,9 @@ fn title_preview(
         None => (raw, None),
     };
     let at = at.max(0);
-    let sample = crate::gui::title_browser::sample(kind, align);
-    let mut params = json!({ "text": sample.text, "at": at, "duration": len });
-    if kind != vidcut_core::model::TitleKind::Text {
-        params["kind"] = json!(kind);
-    }
-    if let Some(a) = align {
-        params["align"] = json!(a);
-    }
+    let mut params = template.params();
+    params["at"] = json!(at);
+    params["duration"] = json!(len);
     if ctx.project.track(&dest).is_some() {
         params["track"] = json!(dest);
     }

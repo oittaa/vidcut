@@ -1794,6 +1794,7 @@ impl Live {
                 "export.plan"
                     | "presets.list"
                     | "presets.get"
+                    | "looks.list"
                     | "encoders.list"
                     | "jobs.list"
                     | "preferences.get"

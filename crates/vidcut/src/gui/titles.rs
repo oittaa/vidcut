@@ -1,32 +1,21 @@
 use eframe::egui::{self, Key};
 use serde_json::{Value, json};
-use vidcut_core::model::{
-    SubtitleBackground, SubtitleOutline, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle,
-};
+use vidcut_core::looks::{LookKind, Styled, TitleLook};
+use vidcut_core::model::{Title, TitleAlign, TitleKind};
 
 use super::export::Ask;
 use super::keys;
-use super::subtitles::{field, font_list, kept_number, percent, swatch};
+use super::looks::{Parts, Picker, TextFields, kept_plain, plain};
+use super::subtitles::{font_list, kept_number, percent, swatch};
 use super::workspace::{Workspace, dim};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TitleDialog {
     clip: String,
     kind: TitleKind,
     align: TitleAlign,
     text: String,
-    font: String,
-    size: String,
-    color: String,
-    outline: String,
-    outline_size: String,
-    background: String,
-    opacity: String,
-    shadow: String,
-    shadow_opacity: String,
-    shadow_across: String,
-    shadow_down: String,
-    shadow_blur: String,
+    fields: TextFields,
     across: String,
     down: String,
     zoom: String,
@@ -41,6 +30,8 @@ pub struct TitleDialog {
     word_color: String,
     word_size: String,
     word_font: String,
+    base: Option<Title>,
+    picker: Option<Picker>,
 }
 
 const ALIGNS: [(TitleAlign, &str); 3] = [
@@ -56,18 +47,7 @@ impl TitleDialog {
             kind: TitleKind::Text,
             align: TitleAlign::Left,
             text: String::new(),
-            font: String::new(),
-            size: String::new(),
-            color: String::new(),
-            outline: String::new(),
-            outline_size: String::new(),
-            background: String::new(),
-            opacity: String::new(),
-            shadow: String::new(),
-            shadow_opacity: String::new(),
-            shadow_across: String::new(),
-            shadow_down: String::new(),
-            shadow_blur: String::new(),
+            fields: TextFields::default(),
             across: String::new(),
             down: String::new(),
             zoom: String::new(),
@@ -82,6 +62,8 @@ impl TitleDialog {
             shown: None,
             loaded: false,
             focus: true,
+            base: None,
+            picker: None,
         };
         if let Some(t) = t {
             d.load(t);
@@ -90,33 +72,11 @@ impl TitleDialog {
     }
 
     fn load(&mut self, t: &Title) {
-        let s = &t.style;
         self.kind = t.kind;
         self.align = t.align();
         self.text = t.text.clone();
-        self.font = s.font.clone().unwrap_or_default();
-        self.size = percent(s.size);
-        self.color = s.color.clone().unwrap_or_default();
-        self.outline = s
-            .outline
-            .as_ref()
-            .and_then(|o| o.color.clone())
-            .unwrap_or_default();
-        self.outline_size = percent(s.outline.as_ref().and_then(|o| o.size));
-        self.background = s
-            .background
-            .as_ref()
-            .map(|b| b.color.clone())
-            .unwrap_or_default();
-        self.opacity = percent(s.background.as_ref().and_then(|b| b.opacity));
-        let shade = s.shadow.as_ref();
-        self.shadow = shade.map_or_else(String::new, |h| {
-            h.color.clone().unwrap_or_else(|| SHADOW_INK.to_string())
-        });
-        self.shadow_opacity = percent(shade.and_then(|h| h.opacity));
-        self.shadow_across = percent(shade.and_then(|h| h.offset).map(|o| o[0]));
-        self.shadow_down = percent(shade.and_then(|h| h.offset).map(|o| o[1]));
-        self.shadow_blur = plain(shade.and_then(|h| h.blur));
+        self.fields = TextFields::load(&Parts::of_title(&t.style));
+        self.base = Some(t.clone());
         self.across = percent(t.position.map(|p| p[0]));
         self.down = percent(t.position.map(|p| p[1]));
         self.zoom = percent(t.zoom);
@@ -144,8 +104,6 @@ impl TitleDialog {
     }
 }
 
-const SHADOW_INK: &str = "#000000";
-
 fn byte_at(text: &str, chars: usize) -> usize {
     text.char_indices()
         .nth(chars)
@@ -171,88 +129,9 @@ fn unstyled(text: &str, (a, b): (usize, usize)) -> String {
     format!("{}{middle}{}", &text[..a], &text[b..])
 }
 
-fn plain(v: Option<f64>) -> String {
-    v.map_or_else(String::new, |n| {
-        let s = format!("{n:.3}");
-        s.trim_end_matches('0').trim_end_matches('.').to_string()
-    })
-}
-
-fn kept_plain(shown: &str, stored: Option<f64>, what: &str) -> Result<Option<f64>, String> {
-    if shown.trim() == plain(stored) {
-        return Ok(stored);
-    }
-    let t = shown.trim().trim_end_matches('°').trim();
-    if t.is_empty() {
-        return Ok(None);
-    }
-    t.parse::<f64>()
-        .map(Some)
-        .map_err(|_| format!("{what} is a number, such as 20"))
-}
-
-fn shadow_of(d: &TitleDialog, stored: Option<&TitleShadow>) -> Result<Option<TitleShadow>, String> {
-    let rest = [
-        &d.shadow_opacity,
-        &d.shadow_across,
-        &d.shadow_down,
-        &d.shadow_blur,
-    ];
-    let Some(color) = field(&d.shadow) else {
-        return if rest.iter().all(|f| f.trim().is_empty()) {
-            Ok(None)
-        } else {
-            Err("a shadow needs a color".into())
-        };
-    };
-    let color = match stored {
-        Some(h) if h.color.is_none() && color.eq_ignore_ascii_case(SHADOW_INK) => None,
-        _ => Some(color),
-    };
-    let offset = stored.and_then(|h| h.offset);
-    let across = kept_number(&d.shadow_across, offset.map(|o| o[0]), "shadow offset")?;
-    let down = kept_number(&d.shadow_down, offset.map(|o| o[1]), "shadow offset")?;
-    let offset = match (across, down) {
-        (Some(x), Some(y)) => Some([x, y]),
-        (None, None) => None,
-        _ => {
-            return Err(
-                "a shadow's offset takes both numbers, or neither for the usual one".into(),
-            );
-        }
-    };
-    Ok(Some(TitleShadow {
-        color,
-        opacity: kept_number(
-            &d.shadow_opacity,
-            stored.and_then(|h| h.opacity),
-            "shadow opacity",
-        )?,
-        offset,
-        blur: kept_plain(&d.shadow_blur, stored.and_then(|h| h.blur), "blur")?,
-    }))
-}
-
 fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
-    let s = &stored.style;
-    let background = match field(&d.background) {
-        Some(color) => Some(SubtitleBackground {
-            color,
-            opacity: kept_number(
-                &d.opacity,
-                s.background.as_ref().and_then(|b| b.opacity),
-                "opacity",
-            )?,
-        }),
-        None if d.opacity.trim().is_empty() => None,
-        None => return Err("a background needs a color".into()),
-    };
-    let outline_color = field(&d.outline);
-    let outline_size = kept_number(
-        &d.outline_size,
-        s.outline.as_ref().and_then(|o| o.size),
-        "outline size",
-    )?;
+    let stored = d.base.as_ref().unwrap_or(stored);
+    let style = d.fields.parts(&Parts::of_title(&stored.style))?.title();
     let across = kept_number(&d.across, stored.position.map(|p| p[0]), "position")?;
     let down = kept_number(&d.down, stored.position.map(|p| p[1]), "position")?;
     let scroll = d.kind == TitleKind::Scroll;
@@ -272,19 +151,7 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         kind: d.kind,
         align,
         text: d.text.clone(),
-        style: TitleStyle {
-            font: field(&d.font),
-            size: kept_number(&d.size, s.size, "size")?,
-            color: field(&d.color),
-            outline: (outline_color.is_some() || outline_size.is_some()).then_some(
-                SubtitleOutline {
-                    color: outline_color,
-                    size: outline_size,
-                },
-            ),
-            background,
-            shadow: shadow_of(d, s.shadow.as_ref())?,
-        },
+        style,
         position,
         zoom: if scroll {
             None
@@ -362,6 +229,7 @@ impl Workspace {
             self.title_landing(&clip, &t);
         }
         let found = self.stored_title(id);
+        self.looks.reread();
         self.timeline.title_dialog = Some(TitleDialog::new(id, found.as_ref()));
     }
 
@@ -418,6 +286,21 @@ impl Workspace {
                     None => ui.label(dim("Adding…")),
                 };
                 let save = ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::Enter));
+                if let Some(s) = stored.as_ref() {
+                    let current = title_of(&d, s).map(|t| Styled::Titles(TitleLook::of(&t)));
+                    let mut picker = d.picker.take().unwrap_or_else(|| {
+                        Picker::new(
+                            LookKind::Titles,
+                            self.looks.of(LookKind::Titles),
+                            &Styled::Titles(TitleLook::of(s)),
+                        )
+                    });
+                    if let Some(Styled::Titles(l)) = self.look_picker(ui, &mut picker, current) {
+                        d.load(&l.on(&d.text));
+                        changed = true;
+                    }
+                    d.picker = Some(picker);
+                }
                 let before = d.kind;
                 ui.horizontal(|ui| {
                     ui.label("Kind");
@@ -517,11 +400,8 @@ impl Workspace {
                 );
                 let across_hint = format!("{}%", percent(Some(usual[0])));
                 let down_hint = format!("{}%", percent(Some(usual[1])));
-                let shadow_opacity = format!("{}%", percent(Some(TitleShadow::OPACITY)));
-                let shadow_across = format!("{}%", percent(Some(TitleShadow::OFFSET[0])));
-                let shadow_down = format!("{}%", percent(Some(TitleShadow::OFFSET[1])));
-                let shadow_blur = plain(Some(TitleShadow::BLUR));
                 egui::Grid::new("title-style-fields").show(ui, |ui| {
+                    changed |= d.fields.rows(ui, "title", &d.families, &size_hint).0;
                     let row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
                         ui.label(label);
                         ui.add(
@@ -531,35 +411,6 @@ impl Workspace {
                         )
                         .changed()
                     };
-                    changed |= row(ui, "Font", &mut d.font, "Open Sans");
-                    changed |= font_list(ui, "title-font", &mut d.font, &d.families);
-                    ui.end_row();
-                    changed |= row(ui, "Size", &mut d.size, &size_hint);
-                    ui.end_row();
-                    changed |= row(ui, "Color", &mut d.color, "#ffffff");
-                    changed |= swatch(ui, &mut d.color, [255, 255, 255]);
-                    ui.end_row();
-                    changed |= row(ui, "Outline", &mut d.outline, "#000000");
-                    changed |= swatch(ui, &mut d.outline, [0, 0, 0]);
-                    ui.end_row();
-                    changed |= row(ui, "Outline size", &mut d.outline_size, "5% of the text");
-                    ui.end_row();
-                    changed |= row(ui, "Background", &mut d.background, "none");
-                    changed |= swatch(ui, &mut d.background, [0, 0, 0]);
-                    ui.end_row();
-                    changed |= row(ui, "Opacity", &mut d.opacity, "100%");
-                    ui.end_row();
-                    changed |= row(ui, "Shadow", &mut d.shadow, "none");
-                    changed |= swatch(ui, &mut d.shadow, [0, 0, 0]);
-                    ui.end_row();
-                    changed |= row(ui, "Shadow opacity", &mut d.shadow_opacity, &shadow_opacity);
-                    ui.end_row();
-                    changed |= row(ui, "Shadow across", &mut d.shadow_across, &shadow_across);
-                    ui.end_row();
-                    changed |= row(ui, "Shadow down", &mut d.shadow_down, &shadow_down);
-                    ui.end_row();
-                    changed |= row(ui, "Shadow blur", &mut d.shadow_blur, &shadow_blur);
-                    ui.end_row();
                     changed |= row(ui, "Across", &mut d.across, &across_hint);
                     ui.end_row();
                     if !scroll {

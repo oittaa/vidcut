@@ -851,6 +851,9 @@ impl Words<'_> {
         if p["style"].is_object() {
             parts.push("style".to_string());
         }
+        if let Some(l) = p["look"].as_str() {
+            parts.push(format!("look {l}"));
+        }
         match p["color"].as_str() {
             Some("") => parts.push("no color".to_string()),
             Some(c) => parts.push(c.to_string()),

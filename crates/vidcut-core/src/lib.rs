@@ -8,6 +8,7 @@ pub mod export;
 pub mod fingerprint;
 pub mod folder;
 mod history;
+pub mod looks;
 pub mod model;
 pub mod ops;
 pub mod otio;
@@ -43,6 +44,8 @@ mod folder_tests;
 mod history_tests;
 #[cfg(test)]
 mod images_tests;
+#[cfg(test)]
+mod looks_tests;
 #[cfg(test)]
 mod ops_tests;
 #[cfg(test)]

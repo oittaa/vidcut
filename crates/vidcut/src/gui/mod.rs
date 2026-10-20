@@ -10,6 +10,7 @@ mod gate;
 mod help;
 mod history;
 mod import;
+mod looks;
 mod mixer;
 mod onscreen;
 pub mod picture;

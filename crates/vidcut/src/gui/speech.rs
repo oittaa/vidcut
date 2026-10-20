@@ -3,19 +3,15 @@ use std::collections::{HashMap, HashSet};
 use eframe::egui::{self, RichText};
 use serde_json::json;
 use vidcut_av::transcribe;
+use vidcut_core::looks::{Look, LookKind, Styled};
 use vidcut_core::model::Project;
-use vidcut_core::request::{SpeechModel, SubtitleLook};
+use vidcut_core::request::SpeechModel;
 
 use super::export::near_center;
 use super::workspace::{Workspace, dim, escape_cancels};
 
-const LOOKS: [(SubtitleLook, &str); 5] = [
-    (SubtitleLook::Plain, "Plain"),
-    (SubtitleLook::Pop, "Pop: the spoken word yellow and popping"),
-    (SubtitleLook::Highlight, "Highlight the spoken word"),
-    (SubtitleLook::Reveal, "Reveal words as spoken"),
-    (SubtitleLook::Word, "Only the spoken word"),
-];
+const PLAIN: &str = "Plain";
+const POP: &str = "Pop";
 
 const MODELS: [(SpeechModel, &str); 3] = [
     (
@@ -49,7 +45,7 @@ struct Settings {
     lines: u32,
     gap: u32,
     from_media: bool,
-    look: SubtitleLook,
+    look: String,
 }
 
 impl Default for Settings {
@@ -63,18 +59,23 @@ impl Default for Settings {
             lines: 1,
             gap: 0,
             from_media: true,
-            look: SubtitleLook::Plain,
+            look: PLAIN.into(),
         }
     }
 }
 
 impl Settings {
-    fn take_look(&mut self, look: SubtitleLook) {
-        let (_, chars, lines) = vidcut_core::ops::subtitles::look(look);
-        self.look = look;
-        self.chars = chars;
-        self.lines = lines;
-        if look != SubtitleLook::Plain && self.onto == Onto::Highest {
+    fn plain(&self) -> bool {
+        self.look.eq_ignore_ascii_case(PLAIN)
+    }
+
+    fn take_look(&mut self, look: &Look) {
+        if let Styled::Subtitles(l) = &look.styled {
+            self.chars = l.chars();
+            self.lines = l.lines();
+        }
+        self.look = look.name.clone();
+        if !self.plain() && self.onto == Onto::Highest {
             self.onto = Onto::New;
         }
     }
@@ -371,10 +372,18 @@ impl Workspace {
 
     pub(crate) fn open_animated_speech(&mut self) {
         self.open_hearing(Vec::new());
-        if let Some(d) = &mut self.speech.dialog
-            && d.settings.look == SubtitleLook::Plain
-        {
-            d.settings.take_look(SubtitleLook::Pop);
+        let looks = self.looks.of(LookKind::Subtitles).to_vec();
+        let animated = |name: &str| {
+            looks
+                .iter()
+                .find(|l| l.name.eq_ignore_ascii_case(name))
+                .filter(|l| matches!(&l.styled, Styled::Subtitles(s) if s.style.words.is_some()))
+        };
+        if let Some(d) = &mut self.speech.dialog {
+            let look = animated(&d.settings.look).or_else(|| animated(POP));
+            if let Some(look) = look {
+                d.settings.take_look(look);
+            }
             d.settings.onto = Onto::New;
             d.settings.model = SpeechModel::ParakeetUltra;
         }
@@ -392,6 +401,7 @@ impl Workspace {
         }
         let dir = crate::paths::models_dir();
         let gpu = crate::preferences::gpu_acceleration();
+        self.looks.reread();
         let file = |i: usize| transcribe::file_of(MODELS[i].0);
         self.speech.dialog = Some(Dialog {
             settings: self.speech.last.clone().unwrap_or_default(),
@@ -443,7 +453,7 @@ impl Workspace {
         if let Some(l) = &s.language {
             params["language"] = json!(l);
         }
-        if s.look != SubtitleLook::Plain {
+        if !s.plain() {
             params["look"] = json!(s.look);
         }
         match &s.onto {
@@ -467,6 +477,7 @@ impl Workspace {
         let Some(p) = self.project_shared() else {
             return;
         };
+        let looks = self.looks.of(LookKind::Subtitles).to_vec();
         let s = &mut d.settings;
         if let Onto::Track(id) = &s.onto
             && p.subtitle_index(id).is_none()
@@ -677,26 +688,33 @@ impl Workspace {
                                 });
                             ui.end_row();
                             ui.label("Look");
-                            let mut look = s.look;
+                            let mut took = None;
                             egui::ComboBox::from_id_salt("speech-look")
-                                .selected_text(
-                                    LOOKS
-                                        .iter()
-                                        .find(|(l, _)| *l == look)
-                                        .map_or("", |(_, t)| *t),
-                                )
+                                .selected_text(s.look.as_str())
                                 .show_ui(ui, |ui| {
-                                    for (l, text) in LOOKS {
-                                        ui.selectable_value(&mut look, l, text);
+                                    for (i, l) in looks.iter().enumerate() {
+                                        if i > 0 && looks[i - 1].built_in && !l.built_in {
+                                            ui.separator();
+                                        }
+                                        let on = l.name.eq_ignore_ascii_case(&s.look);
+                                        let r = ui.selectable_label(on, &l.name);
+                                        let r = match l.description {
+                                            "" => r,
+                                            d => r.on_hover_text(d),
+                                        };
+                                        if r.clicked() {
+                                            took = Some(l);
+                                        }
                                     }
                                 })
                                 .response
                                 .on_hover_text(
                                     "Animated looks show each word as it is spoken; the track's \
-                                     style can be changed later in its Subtitle Track window",
+                                     style can be changed later in its Subtitle Track window, \
+                                     where you can also save your own looks",
                                 );
-                            if look != s.look {
-                                s.take_look(look);
+                            if let Some(l) = took {
+                                s.take_look(l);
                             }
                             ui.end_row();
                             ui.label("Max Characters per Line");

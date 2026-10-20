@@ -28,7 +28,7 @@ pub(super) struct PreferencesUi {
     importing: Option<Picked>,
     choosing_folder: Option<Picked>,
     confirm_reset: bool,
-    reset_presets_and_themes: bool,
+    reset_saved: bool,
     resetting: Option<Ask>,
     forgotten: Option<super::workspace::ViewState>,
     fillers: super::fillers::FillerEditor,
@@ -326,7 +326,7 @@ impl Workspace {
                             .clicked()
                         {
                             ui_state.confirm_reset = true;
-                            ui_state.reset_presets_and_themes = false;
+                            ui_state.reset_saved = false;
                         }
                     });
             });
@@ -359,8 +359,8 @@ impl Workspace {
                  vidcut made in its own cache go. This can't be undone.",
             ));
             ui.checkbox(
-                &mut ui_state.reset_presets_and_themes,
-                "Also delete my presets and themes",
+                &mut ui_state.reset_saved,
+                "Also delete my presets, themes and looks",
             );
             ui.horizontal(|ui| {
                 if ui
@@ -379,11 +379,11 @@ impl Workspace {
         }
         match choice {
             Some(true) => {
-                let presets_and_themes = ui_state.reset_presets_and_themes;
+                let saved = ui_state.reset_saved;
                 ui_state.confirm_reset = false;
                 let forgotten = self.forget_view_state();
                 self.preferences.forgotten = Some(forgotten);
-                let params = json!({ "presets_and_themes": presets_and_themes });
+                let params = json!({ "saved": saved });
                 self.preferences.resetting = Some(Ask::send(&self.live, ctx, "reset", params));
             }
             Some(false) => ui_state.confirm_reset = false,
