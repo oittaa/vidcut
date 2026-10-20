@@ -17,6 +17,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("midnight", include_str!("../themes/midnight.toml")),
     ("studio", include_str!("../themes/studio.toml")),
     ("native", include_str!("../themes/native.toml")),
+    ("omarchy", include_str!("../themes/omarchy.toml")),
     ("native-dark", include_str!("../themes/native-dark.toml")),
     ("native-light", include_str!("../themes/native-light.toml")),
     ("classic", include_str!("../themes/classic.toml")),
@@ -27,10 +28,18 @@ const BUILT_IN: &[(&str, &str)] = &[
 pub struct Theme {
     pub title: String,
     pub light: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors_from: Option<ColorsFrom>,
     pub colors: Colors,
     pub shape: Shape,
     pub fonts: Fonts,
     pub decoration: Decoration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorsFrom {
+    Omarchy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -188,7 +197,7 @@ fn to_hex(c: Color32) -> String {
     }
 }
 
-fn parse_color(text: &str) -> Option<Color32> {
+pub(crate) fn parse_color(text: &str) -> Option<Color32> {
     let digits = text.strip_prefix('#')?;
     if !matches!(digits.len(), 6 | 8) || !digits.is_ascii() {
         return None;
@@ -236,7 +245,19 @@ pub fn load(name: &str) -> Result<Theme> {
     load_with(name, &crate::look::current())
 }
 
+pub fn colors_from(name: &str) -> Option<ColorsFrom> {
+    written(name, &crate::look::current()).ok()?.colors_from
+}
+
 fn load_with(name: &str, look: &Look) -> Result<Theme> {
+    let mut theme = written(name, look)?;
+    if theme.colors_from == Some(ColorsFrom::Omarchy) {
+        crate::omarchy::apply(&mut theme)?;
+    }
+    Ok(theme)
+}
+
+fn written(name: &str, look: &Look) -> Result<Theme> {
     check_name(name)?;
     let path = user_path(name);
     match std::fs::read_to_string(&path) {
@@ -443,6 +464,14 @@ mod tests {
         assert_eq!(
             (t.light, t.colors.panel),
             (true, Color32::from_rgb(0xFA, 0xFA, 0xFA))
+        );
+    }
+
+    #[test]
+    fn the_omarchy_theme_takes_its_colors_from_omarchy() {
+        assert_eq!(
+            builtin("omarchy", &DARK).unwrap().colors_from,
+            Some(ColorsFrom::Omarchy)
         );
     }
 

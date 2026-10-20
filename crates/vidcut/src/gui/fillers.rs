@@ -115,8 +115,7 @@ pub(super) fn editor(
             .desired_width(f32::INFINITY),
     );
     ui.label(dim(format!(
-        "Words apart by spaces or commas; capitals and the punctuation around a word don't \
-         matter. In use: {from}."
+        "Spaces or commas between words; case doesn't matter. In use: {from}."
     )));
     let typed: Vec<String> = e
         .text

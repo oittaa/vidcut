@@ -1,8 +1,10 @@
 #[cfg(any(target_os = "linux", windows))]
 mod acquire;
 mod app;
+mod bar;
 mod cells;
 mod clip_info;
+mod dialog;
 pub mod export;
 mod file_manager;
 mod fillers;
@@ -11,6 +13,7 @@ mod gate;
 mod help;
 mod history;
 mod import;
+mod look_tiles;
 mod looks;
 mod mixer;
 mod onscreen;

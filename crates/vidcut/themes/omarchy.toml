@@ -1,0 +1,100 @@
+# Omarchy: the desktop's current Omarchy theme. colors_from takes `light`
+# and the colors from its colors.toml and follows a theme change, so a copy
+# of this file keeps following it. Without Omarchy this is Tokyo Night, and
+# Catppuccin Latte in [light_mode] while the computer is in light mode.
+
+title = "Omarchy"
+light = false
+colors_from = "omarchy"
+
+[colors]
+background = "#13141C"
+panel = "#1A1B26"
+panel_dark = "#0E0E14"
+track = "#13141C"
+track_target = "#292E42"
+panel_target = "#4D6293"
+text = "#A9B1D6"
+text_dim = "#565F89"
+accent = "#7AA2F7"
+playhead = "#FF7A93"
+clip = "#5D7AB8"
+clip_disabled = "#414868"
+offline = "#F7768E"
+audio = "#769856"
+generator = "#816CAC"
+compound = "#A58354"
+marked = "#292E4250"
+error = "#FF7A93"
+ok = "#9ECE6A"
+selection = "#292E42"
+selected_text = "#C0CAF5"
+field = "#0E0E14"
+faint = "#24283B"
+line = "#414868"
+button = "#24283B"
+button_line = "#414868"
+button_hovered = "#373B51"
+button_pressed = "#404E75"
+shadow = "#000000A0"
+
+[shape]
+corners = 6
+windows = 10
+menus = 8
+panels = 8
+clips = 3
+gap = 4
+padding = 10
+bar_padding = [8, 5]
+spacing = [8, 6]
+button_padding = [10, 5]
+button_height = 26
+buttons = "filled"
+panel_border = true
+shadow = [0, 8, 20]
+
+[fonts]
+ui = ["JetBrainsMono Nerd Font", "JetBrains Mono", "system"]
+mono = ["JetBrainsMono Nerd Font", "JetBrains Mono", "system"]
+size = 13.5
+small = 11
+heading = 16
+mono_size = 12.5
+
+[decoration]
+style = "none"
+
+[light_mode]
+light = true
+
+[light_mode.colors]
+background = "#E3E4E8"
+panel = "#EFF1F5"
+panel_dark = "#D7D8DC"
+track = "#E3E4E8"
+track_target = "#CCD0DA"
+panel_target = "#7EA0E6"
+text = "#4C4F69"
+text_dim = "#9CA0B0"
+accent = "#1E66F5"
+playhead = "#D20F39"
+clip = "#5D90F5"
+clip_disabled = "#ACB0BE"
+offline = "#D20F39"
+audio = "#75B868"
+generator = "#EC9BD8"
+compound = "#E4AC5E"
+marked = "#CCD0DA50"
+error = "#D20F39"
+ok = "#40A02B"
+selection = "#CCD0DA"
+selected_text = "#4C4F69"
+field = "#D7D8DC"
+faint = "#DCE0E8"
+line = "#ACB0BE"
+button = "#DCE0E8"
+button_line = "#ACB0BE"
+button_hovered = "#C8CCD6"
+button_pressed = "#9BB2E2"
+shadow = "#00000038"

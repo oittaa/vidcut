@@ -7,6 +7,7 @@ pub mod ipc;
 pub mod live;
 pub mod look;
 pub mod mcp;
+mod omarchy;
 pub mod output;
 pub mod paths;
 pub mod preferences;

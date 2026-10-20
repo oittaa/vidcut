@@ -1183,8 +1183,7 @@ impl Workspace {
         }
     }
 
-    pub(super) fn jobs_button(&mut self, ui: &mut egui::Ui) {
-        let now = ui.input(|i| i.time);
+    pub(super) fn watch_jobs(&mut self, now: f64) {
         let mut changed = false;
         let mut failed = false;
         for j in self.snap.jobs.iter() {
@@ -1204,7 +1203,11 @@ impl Workspace {
         if failed && !self.export.show_jobs {
             self.export.jobs_failed_unseen = true;
         }
-        let running = jobs.iter().filter(|j| j.unfinished()).count();
+    }
+
+    pub(super) fn jobs_button(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        let now = ui.input(|i| i.time);
+        let running = self.snap.jobs.iter().filter(|j| j.unfinished()).count();
         let label = match running {
             0 => "Jobs".to_string(),
             n => format!("Jobs ({n})"),
@@ -1231,6 +1234,7 @@ impl Workspace {
             );
             super::timeline::repaint_in(ui.ctx(), std::time::Duration::from_millis(33));
         }
+        button
     }
 
     fn jobs_window(&mut self, ctx: &egui::Context) {
