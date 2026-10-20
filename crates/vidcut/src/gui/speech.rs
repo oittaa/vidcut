@@ -1066,7 +1066,7 @@ impl Workspace {
             }
         }
         if create && s.model.paid() && !d.paid {
-            let (secs, what) = self.upload_size(&p, &s, &d, &heard, again);
+            let (secs, what) = self.upload_size(&p, &s, &d, &heard);
             match d.ready.ask[index(s.model)] {
                 true => {
                     d.paying = Some((secs, what));
@@ -1130,13 +1130,9 @@ impl Workspace {
         s: &Settings,
         d: &Dialog,
         heard: &[String],
-        again: bool,
     ) -> (f64, String) {
-        let none = HashSet::new();
-        let skip = match s.speakers || again {
-            true => &none,
-            false => &self.snap.transcribed,
-        };
+        let skip = HashSet::new();
+        let skip = &skip;
         if !d.media.is_empty() {
             let media: Vec<String> = d
                 .media
