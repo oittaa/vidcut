@@ -136,7 +136,15 @@ impl Hear {
 pub struct SpeechUi {
     dialog: Option<Dialog>,
     last: Option<Settings>,
+    animated: Option<String>,
     word_times: Option<String>,
+}
+
+fn animated<'a>(looks: &'a [Look], name: &str) -> Option<&'a Look> {
+    looks
+        .iter()
+        .find(|l| l.name.eq_ignore_ascii_case(name))
+        .filter(|l| matches!(&l.styled, Styled::Subtitles(s) if s.style.words.is_some()))
 }
 
 fn index(model: SpeechModel) -> usize {
@@ -373,14 +381,10 @@ impl Workspace {
     pub(crate) fn open_animated_speech(&mut self) {
         self.open_hearing(Vec::new());
         let looks = self.looks.of(LookKind::Subtitles).to_vec();
-        let animated = |name: &str| {
-            looks
-                .iter()
-                .find(|l| l.name.eq_ignore_ascii_case(name))
-                .filter(|l| matches!(&l.styled, Styled::Subtitles(s) if s.style.words.is_some()))
-        };
         if let Some(d) = &mut self.speech.dialog {
-            let look = animated(&d.settings.look).or_else(|| animated(POP));
+            let look = animated(&looks, &d.settings.look)
+                .or_else(|| animated(&looks, self.speech.animated.as_deref()?))
+                .or_else(|| animated(&looks, POP));
             if let Some(look) = look {
                 d.settings.take_look(look);
             }
@@ -467,6 +471,9 @@ impl Workspace {
         self.send("subtitles.transcribe", params);
         self.export.show_jobs = true;
         self.speech.last = Some(s.clone());
+        if animated(self.looks.of(LookKind::Subtitles), &s.look).is_some() {
+            self.speech.animated = Some(s.look.clone());
+        }
     }
 
     pub(super) fn speech_window(&mut self, ctx: &egui::Context) {
