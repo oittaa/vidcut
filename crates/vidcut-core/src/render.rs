@@ -71,6 +71,7 @@ pub enum VideoPiece {
 /// when it moves.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ShownTitle {
+    pub clip: String,
     pub title: Title,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<Run>,
@@ -105,6 +106,7 @@ impl Run {
 impl ShownTitle {
     pub fn after(&self, k: i64) -> Self {
         Self {
+            clip: self.clip.clone(),
             title: self.title.clone(),
             run: self.run.map(|r| r.after(k)),
             fade: self.fade.map(|r| r.after(k)),
@@ -724,7 +726,7 @@ pub(crate) fn paced(
 
 enum Layer {
     Picture(VideoPiece, Option<Ramp>),
-    Title(ShownTitle),
+    Title(Box<ShownTitle>),
 }
 
 pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
@@ -830,7 +832,12 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                     at: x - c.start,
                     of: c.duration,
                 });
-                Some(ShownTitle { title, run, fade })
+                Some(ShownTitle {
+                    clip: c.id.clone(),
+                    title,
+                    run,
+                    fade,
+                })
             };
             match played.iter().find(|d| d.frames.0 <= x && x < d.frames.1) {
                 Some(d) => {
@@ -844,7 +851,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                             .filter(|c| titled(t, c))
                             .and_then(|c| shown(c, Some(ramp(falling))))
                         {
-                            stack.push(Layer::Title(s));
+                            stack.push(Layer::Title(Box::new(s)));
                         }
                     }
                 }
@@ -855,7 +862,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                         .filter(|c| titled(t, c))
                         .and_then(|c| shown(c, None))
                     {
-                        stack.push(Layer::Title(s));
+                        stack.push(Layer::Title(Box::new(s)));
                     }
                 }
             }
@@ -865,7 +872,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
             piece = match layer {
                 Layer::Picture(shown, None) => shown,
                 Layer::Picture(shown, Some(ramp)) => piece.with_over(Over { piece: shown, ramp }),
-                Layer::Title(t) => piece.with_title(t),
+                Layer::Title(t) => piece.with_title(*t),
             };
         }
         push_video(&mut video, piece);

@@ -944,9 +944,10 @@ impl Live {
                             .and_then(|c| c.title.clone())
                             .filter(|from| vidcut_av::player::Nudge::fits(from, to))
                             .map(|from| vidcut_av::player::Nudge {
+                                clip: id.clone(),
                                 title: from,
-                                to: to.clone(),
-                                settled: false,
+                                to: vidcut_core::ops::titles::checked(to)
+                                    .unwrap_or_else(|_| to.clone()),
                             }),
                         _ => None,
                     };
@@ -957,9 +958,8 @@ impl Live {
                             self.player.nudge_title(Some(n.clone()));
                             self.nudged = Some(n);
                         }
-                        (None, Some(n)) if let_go => {
-                            self.player
-                                .nudge_title(Some(vidcut_av::player::Nudge { settled: true, ..n }));
+                        (None, Some(held)) if let_go => {
+                            self.nudged = Some(held);
                             self.schedule_timeline();
                         }
                         (None, _) => {
@@ -3056,8 +3056,15 @@ impl Live {
     fn refresh_timeline_at(&mut self, at: Option<i64>) -> Option<u64> {
         let mut p = self.project.as_ref()?.project().clone();
         let mut scrolled: Option<(Title, (i64, i64), i64)> = None;
+        if self.title_preview.is_none()
+            && let Some(n) = &self.nudged
+            && p.clip(&n.clip).and_then(|c| c.title.as_ref()) != Some(&n.to)
+        {
+            self.player.nudge_title(None);
+            self.nudged = None;
+        }
         match &self.title_preview {
-            Some(TitlePreview::Clip(id, title)) => {
+            Some(TitlePreview::Clip(id, title)) if self.nudged.is_none() => {
                 if let Some((t, c)) = p.find_clip(id)
                     && p.tracks[t].clips[c].title.is_some()
                 {
@@ -3078,7 +3085,7 @@ impl Live {
                     scrolled = Some((t.clone(), (c.start, c.end()), off));
                 }
             }
-            None => {}
+            _ => {}
         }
         let end = p.end();
         if end == 0 {

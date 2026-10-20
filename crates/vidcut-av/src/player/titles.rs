@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use vidcut_core::model::{Title, TitleKind};
+use vidcut_core::model::Title;
 use vidcut_core::render::ShownTitle;
 
 use super::frame::{TitleOver, TitlePicture};
@@ -11,9 +11,9 @@ const KEPT: usize = 16;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Nudge {
+    pub clip: String,
     pub title: Title,
     pub to: Title,
-    pub settled: bool,
 }
 
 impl Nudge {
@@ -25,7 +25,7 @@ impl Nudge {
 fn steady(t: &Title) -> Title {
     Title {
         position: None,
-        rotation: t.rotation.filter(|_| t.kind == TitleKind::Scroll),
+        rotation: None,
         opacity: None,
         ..t.clone()
     }
@@ -46,17 +46,15 @@ struct Chosen {
 }
 
 fn chosen(nudge: Option<&Nudge>, s: &ShownTitle, drawn: impl Fn(&Title) -> bool) -> Chosen {
-    let fade = s.fade.map_or(1.0, |r| r.level(0));
     match nudge {
-        Some(n) if !n.settled && n.title == s.title => Chosen {
-            from: n.title.clone(),
+        Some(n) if s.clip == n.clip && (s.title == n.title || s.title == n.to) => Chosen {
+            from: if drawn(&steady(&n.to)) {
+                n.to.clone()
+            } else {
+                n.title.clone()
+            },
             to: n.to.clone(),
-            alpha: n.to.opaque() * fade,
-        },
-        Some(n) if n.settled && n.to == s.title && !drawn(&steady(&n.to)) => Chosen {
-            from: n.title.clone(),
-            to: n.to.clone(),
-            alpha: s.alpha(),
+            alpha: n.to.opaque() * s.fade.map_or(1.0, |r| r.level(0)),
         },
         _ => Chosen {
             from: s.title.clone(),
