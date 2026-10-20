@@ -78,11 +78,9 @@ step "short GUI text"
 # are skipped.
 long_text_left=(
   crates/vidcut/src/gui/export.rs
-  crates/vidcut/src/gui/fillers.rs
   crates/vidcut/src/gui/history.rs
   crates/vidcut/src/gui/picture.rs
   crates/vidcut/src/gui/pool.rs
-  crates/vidcut/src/gui/preferences.rs
   crates/vidcut/src/gui/project.rs
   crates/vidcut/src/gui/subtitles.rs
   crates/vidcut/src/gui/timeline/cues.rs

@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, RichText};
+use egui_phosphor::regular as icon;
 use serde_json::{Value, json};
 use vidcut_core::preferences::Proxies;
 
+use super::dialog;
 use super::export::{Ask, Picked, near_center};
 use super::theme;
 use super::workspace::Workspace;
@@ -32,9 +34,34 @@ pub(super) struct PreferencesUi {
     resetting: Option<Ask>,
     forgotten: Option<super::workspace::ViewState>,
     fillers: super::fillers::FillerEditor,
+    page: Page,
 }
 
-const LABEL: f32 = 170.0;
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Page {
+    #[default]
+    General,
+    Gpu,
+    Memory,
+    Sound,
+    Thumbnails,
+    Proxies,
+    Fillers,
+}
+
+const PAGES: [(Page, &str, &str); 7] = [
+    (Page::General, icon::GEAR_SIX, "General"),
+    (Page::Gpu, icon::GRAPHICS_CARD, "GPU"),
+    (Page::Memory, icon::MEMORY, "Memory"),
+    (Page::Sound, icon::SPEAKER_HIGH, "Sound"),
+    (Page::Thumbnails, icon::IMAGES, "Thumbnails"),
+    (Page::Proxies, icon::FILM_STRIP, "Proxies"),
+    (Page::Fillers, icon::CHAT_TEXT, "Filler Words"),
+];
+
+const LABEL: f32 = 140.0;
+const SIDEBAR: f32 = 150.0;
+const PAGE: f32 = 500.0;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Unit {
@@ -122,21 +149,17 @@ fn mb_of(text: &str) -> Option<u64> {
     (gb.is_finite() && gb >= 0.0).then(|| (gb * 1024.0).round() as u64)
 }
 
-fn card(ui: &mut egui::Ui, title: &str, about: &str, add: impl FnOnce(&mut egui::Ui)) {
-    let c = theme::colors();
-    egui::Frame::new()
-        .fill(c.faint)
-        .stroke(egui::Stroke::new(1.0, c.line))
-        .corner_radius(6)
-        .inner_margin(egui::Margin::symmetric(14, 12))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(RichText::new(title).strong().size(16.0));
-            ui.label(RichText::new(about).color(c.text_dim));
-            ui.add_space(8.0);
-            add(ui);
-        });
+fn page(ui: &mut egui::Ui, title: &str, about: &str, add: impl FnOnce(&mut egui::Ui)) {
+    ui.label(RichText::new(title).strong().size(18.0));
+    if !about.is_empty() {
+        dialog::note(ui, about);
+    }
     ui.add_space(10.0);
+    add(ui);
+}
+
+fn label(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    ui.label(dim(text))
 }
 
 fn grid(ui: &mut egui::Ui, id: &str, add: impl FnOnce(&mut egui::Ui)) {
@@ -238,12 +261,14 @@ impl Workspace {
         }
         let dialogs = self.dialogs.clone();
         let display = self.display.clone();
-        let height = ctx.content_rect().height() * 0.85;
+        let height = (ctx.content_rect().height() * 0.7).clamp(240.0, 420.0);
         let mut reset = false;
         egui::Window::new("Preferences")
             .collapsible(false)
             .resizable(false)
-            .default_pos(near_center(ctx, 640.0, height))
+            .default_pos(near_center(ctx, SIDEBAR + PAGE + 40.0, height))
+            .min_width(SIDEBAR + PAGE + 16.0)
+            .max_width(SIDEBAR + PAGE + 16.0)
             .open(&mut open)
             .show(ctx, |ui| {
                 let Some(state) = ui_state.state.clone() else {
@@ -251,7 +276,8 @@ impl Workspace {
                         ui.spinner();
                         return;
                     };
-                    ui.label(RichText::new(e).color(theme::colors().error));
+                    ui.set_max_width(PAGE);
+                    ui.add(egui::Label::new(RichText::new(e).color(theme::colors().error)).wrap());
                     ui.horizontal(|ui| {
                         if ui
                             .button("Show in Folder")
@@ -262,73 +288,66 @@ impl Workspace {
                         }
                         reset = ui
                             .add_enabled(ui_state.ask.is_none(), egui::Button::new("Reset Preferences"))
-                            .on_hover_text(
-                                "Back to the defaults; the old file is kept next to it, as preferences.toml.bak",
-                            )
+                            .on_hover_text("Back to the defaults, keeping the old file as preferences.toml.bak")
                             .clicked();
                     });
                     return;
                 };
                 let busy = ui_state.ask.is_some() || ui_state.resetting.is_some();
-                egui::ScrollArea::vertical()
-                    .max_height(height)
-                    .min_scrolled_height(height)
-                    .show(ui, |ui| {
-                        ui.set_width(620.0);
-                        appearance(ui, &state, busy, ui_state, &dialogs, &mut patch);
-                        gpu(ui, &state, busy, display.as_deref(), &mut patch);
-                        memory(ui, &state, busy, ui_state, &mut patch);
-                        sound(ui, &state, busy, ui_state, &mut patch);
-                        thumbnails(ui, &state, busy, ui_state, &mut patch);
-                        let folders = Folders {
-                            dialogs: &dialogs,
-                            project: project.as_deref(),
-                        };
-                        proxies(ui, &state, busy, ui_state, &folders, &mut patch);
-                        fillers(ui, &state, busy, ui_state, &mut patch);
-                        if let Some(e) = &ui_state.error {
-                            ui.label(RichText::new(e).color(theme::colors().error));
-                        }
-                        let ignored: Vec<&str> = state["ignored"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .filter_map(Value::as_str)
-                            .collect();
-                        if !ignored.is_empty() {
-                            ui.label(dim(format!(
-                                "Left out of the preferences file, as they aren't preferences any \
-                                 more: {}. They go from the file when a preference changes.",
-                                ignored.join(", ")
-                            )));
-                        }
-                        let path = state["path"].as_str().unwrap_or_default();
-                        ui.horizontal(|ui| {
-                            if ui
-                                .button("Show in Folder")
-                                .on_hover_text("The preferences file, which you can also edit")
-                                .clicked()
-                            {
-                                super::file_manager::show(std::path::Path::new(path));
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(SIDEBAR);
+                        ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                            ui.spacing_mut().button_padding.y = 6.0;
+                            for (page, icon, name) in PAGES {
+                                if ui
+                                    .selectable_label(ui_state.page == page, format!("{icon}  {name}"))
+                                    .clicked()
+                                {
+                                    ui_state.page = page;
+                                }
                             }
-                            ui.label(dim(path).small());
                         });
-                        ui.add_space(8.0);
-                        if ui
-                            .add_enabled(
-                                ui_state.resetting.is_none(),
-                                egui::Button::new("Reset vidcut…"),
-                            )
-                            .on_hover_text(
-                                "Back to a fresh install: preferences, caches, undo histories, \
-                                 recent projects, view settings",
-                            )
-                            .clicked()
-                        {
-                            ui_state.confirm_reset = true;
-                            ui_state.reset_saved = false;
-                        }
                     });
+                    ui.separator();
+                    ui.vertical(|ui| {
+                        ui.set_min_size(egui::vec2(PAGE, height));
+                        egui::ScrollArea::vertical()
+                            .max_height(height)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.set_width(PAGE - 16.0);
+                                ui.spacing_mut().item_spacing.y = 8.0;
+                                match ui_state.page {
+                                    Page::General => {
+                                        general(ui, &state, busy, ui_state, &dialogs, &mut patch)
+                                    }
+                                    Page::Gpu => gpu(ui, &state, busy, display.as_deref(), &mut patch),
+                                    Page::Memory => memory(ui, &state, busy, ui_state, &mut patch),
+                                    Page::Sound => sound(ui, &state, busy, ui_state, &mut patch),
+                                    Page::Thumbnails => {
+                                        thumbnails(ui, &state, busy, ui_state, &mut patch)
+                                    }
+                                    Page::Proxies => {
+                                        let folders = Folders {
+                                            dialogs: &dialogs,
+                                            project: project.as_deref(),
+                                        };
+                                        proxies(ui, &state, busy, ui_state, &folders, &mut patch);
+                                    }
+                                    Page::Fillers => fillers(ui, &state, busy, ui_state, &mut patch),
+                                }
+                                if let Some(e) = &ui_state.error {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(e).color(theme::colors().error),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
+                            });
+                    });
+                });
             });
         ui_state.open = open;
         if reset {
@@ -346,23 +365,25 @@ impl Workspace {
         }
         let mut choice = None;
         let modal = egui::Modal::new(egui::Id::unique("reset-vidcut")).show(ctx, |ui| {
-            ui.set_max_width(420.0);
-            ui.label(RichText::new("Reset vidcut?").strong());
-            ui.label(
-                "This deletes the preferences, the thumbnails, waveforms, measurements, \
-                 encoder detection and shaders, the undo histories (but those of open \
-                 projects), the recent projects, view settings, the window's size and place, \
-                 and remembered folders.",
+            ui.set_width(dialog::WIDTH);
+            ui.spacing_mut().item_spacing.y = 8.0;
+            ui.heading("Reset vidcut?");
+            ui.add(
+                egui::Label::new(
+                    "Deletes the preferences, caches, undo histories, recent projects and view \
+                     settings.",
+                )
+                .wrap(),
             );
-            ui.label(dim(
-                "Projects, media, a proxy folder you set and the proxies in it stay; proxies \
-                 vidcut made in its own cache go. This can't be undone.",
-            ));
+            dialog::note(
+                ui,
+                "Projects, media and your proxy folder stay. It can't be undone.",
+            );
             ui.checkbox(
                 &mut ui_state.reset_saved,
                 "Also delete my presets, themes and looks",
             );
-            ui.horizontal(|ui| {
+            dialog::footer(ui, |ui| {
                 if ui
                     .button(RichText::new("Reset").color(theme::colors().error))
                     .clicked()
@@ -417,7 +438,7 @@ impl Workspace {
     }
 }
 
-fn appearance(
+fn general(
     ui: &mut egui::Ui,
     state: &Value,
     busy: bool,
@@ -425,8 +446,8 @@ fn appearance(
     dialogs: &std::sync::Arc<dyn super::export::Dialogs>,
     patch: &mut Option<Value>,
 ) {
-    card(ui, "Appearance", "How vidcut looks.", |ui| {
-        grid(ui, "preferences-appearance", |ui| {
+    page(ui, "General", "", |ui| {
+        grid(ui, "preferences-general", |ui| {
             let chosen = state["preferences"]["appearance"]["theme"]
                 .as_str()
                 .unwrap_or_default()
@@ -441,7 +462,7 @@ fn appearance(
                     .to_string()
             };
             let mut pick = chosen.clone();
-            ui.label("Theme");
+            label(ui, "Theme");
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(!busy, |ui| {
                     egui::ComboBox::from_id_salt("preferences-theme")
@@ -469,10 +490,7 @@ fn appearance(
                         !busy && ui_state.importing.is_none(),
                         egui::Button::new("Import…"),
                     )
-                    .on_hover_text(
-                        "Choose a theme file (.toml). It is copied into the themes folder and \
-                         shown",
-                    )
+                    .on_hover_text("Copies a theme file (.toml) into the themes folder")
                     .clicked()
                 {
                     let dialogs = dialogs.clone();
@@ -485,7 +503,43 @@ fn appearance(
                 *patch = Some(json!({ "appearance": { "theme": pick } }));
             }
             ui.end_row();
+            let path = state["path"].as_str().unwrap_or_default();
+            label(ui, "Preferences File");
+            ui.horizontal(|ui| {
+                if ui.button("Show in Folder").on_hover_text(path).clicked() {
+                    super::file_manager::show(Path::new(path));
+                }
+            });
+            ui.end_row();
+            label(ui, "Reset");
+            if ui
+                .add_enabled(
+                    ui_state.resetting.is_none(),
+                    egui::Button::new("Reset vidcut…"),
+                )
+                .on_hover_text("Back to a fresh install, keeping projects and media")
+                .clicked()
+            {
+                ui_state.confirm_reset = true;
+                ui_state.reset_saved = false;
+            }
+            ui.end_row();
         });
+        let ignored: Vec<&str> = state["ignored"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        if !ignored.is_empty() {
+            dialog::note(
+                ui,
+                format!(
+                    "No longer preferences, dropped at the next change: {}",
+                    ignored.join(", ")
+                ),
+            );
+        }
     });
 }
 
@@ -496,47 +550,39 @@ fn gpu(
     display: Option<&str>,
     patch: &mut Option<Value>,
 ) {
-    card(
+    page(
         ui,
         "GPU",
-        "The graphics card decodes, scales and encodes video in the viewer, exports and proxies.",
+        "Decoding, scaling and encoding on the graphics card",
         |ui| {
             grid(ui, "preferences-gpu", |ui| {
                 let mut on = state["preferences"]["gpu"]["acceleration"] != false;
-                ui.label("Acceleration");
+                label(ui, "Acceleration");
                 if ui
                     .add_enabled(
                         !busy,
                         egui::Checkbox::new(&mut on, "Decode, scale and encode on the GPU"),
                     )
-                    .on_hover_text(
-                        "Turn off to do everything on the CPU, if a graphics driver causes \
-                         trouble",
-                    )
+                    .on_hover_text("Off: everything runs on the CPU, for a troublesome driver")
                     .changed()
                 {
                     *patch = Some(json!({ "gpu": { "acceleration": on } }));
                 }
                 ui.end_row();
                 let mut decoding = state["preferences"]["gpu"]["decoding"] != false;
-                ui.label("Decoding");
+                label(ui, "Decoding");
                 if ui
                     .add_enabled(
                         !busy && on,
                         egui::Checkbox::new(&mut decoding, "Decode on the GPU too"),
                     )
-                    .on_hover_text(
-                        "Decode H.264, HEVC, AV1 and VP9 on the graphics card in the viewer, \
-                         exports and proxies, and all but H.264 in the timeline's pictures. Turn \
-                         off where a small GPU decodes more slowly than the CPU: the CPU decodes \
-                         and scales, and the GPU only encodes",
-                    )
+                    .on_hover_text("Off where a small GPU decodes slower than the CPU")
                     .changed()
                 {
                     *patch = Some(json!({ "gpu": { "decoding": decoding } }));
                 }
                 ui.end_row();
-                ui.label("GPU in use");
+                label(ui, "GPU in Use");
                 let gpus = state["gpus"].as_array().cloned().unwrap_or_default();
                 let name = |g: &Value| g["name"].as_str().unwrap_or_default().to_string();
                 if !on {
@@ -581,6 +627,8 @@ fn gpu_choice(
     ui.add_enabled_ui(!busy, |ui| {
         egui::ComboBox::from_id_salt("preferences-gpu-device")
             .selected_text(shown)
+            .width(300.0)
+            .truncate()
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut pick, String::new(), &automatic);
                 for g in gpus {
@@ -589,11 +637,7 @@ fn gpu_choice(
                 }
             })
             .response
-            .on_hover_text(
-                "The graphics card that decodes and encodes. Automatic: NVIDIA's when there is \
-                 one, else the first other. A card is known by its model and its slot, so the \
-                 choice holds on every system this computer starts",
-            );
+            .on_hover_text("Automatic: NVIDIA's when there is one, else the first other");
     });
     if pick != current {
         *patch = Some(json!({ "gpu": { "device": pick } }));
@@ -607,10 +651,10 @@ fn memory(
     ui_state: &mut PreferencesUi,
     patch: &mut Option<Value>,
 ) {
-    card(
+    page(
         ui,
         "Memory",
-        "Decoded pictures kept around the playhead, so stepping and playing back wait less.",
+        "Pictures kept around the playhead, so stepping and playback wait less",
         |ui| {
             grid(ui, "preferences-memory", |ui| {
                 let player = &state["preferences"]["player"];
@@ -652,7 +696,7 @@ fn memory(
                 for (key, name, text, auto, about, tip) in [
                     (
                         "memory_mb",
-                        "Viewer pictures",
+                        "Viewer Pictures",
                         &mut ui_state.player_memory,
                         viewer,
                         None,
@@ -668,24 +712,26 @@ fn memory(
                     ),
                 ] {
                     let saved = player[key].as_u64().unwrap_or(0);
-                    let label = ui.label(name).on_hover_text(tip);
+                    let label = label(ui, name).on_hover_text(tip);
                     ui.horizontal(|ui| {
                         let custom = saved != 0;
-                        if ui
-                            .add_enabled(!busy, egui::Button::selectable(!custom, "Automatic"))
-                            .clicked()
-                            && custom
-                        {
-                            *patch = Some(json!({ "player": { key: 0 } }));
-                        }
-                        if ui
-                            .add_enabled(!busy, egui::Button::selectable(custom, "Custom"))
-                            .clicked()
-                            && !custom
-                            && let Some(mb) = mb_of(text)
-                        {
-                            *patch = Some(json!({ "player": { key: mb.max(64) } }));
-                        }
+                        dialog::switch(ui, |ui| {
+                            if ui
+                                .add_enabled(!busy, egui::Button::selectable(!custom, "Automatic"))
+                                .clicked()
+                                && custom
+                            {
+                                *patch = Some(json!({ "player": { key: 0 } }));
+                            }
+                            if ui
+                                .add_enabled(!busy, egui::Button::selectable(custom, "Custom"))
+                                .clicked()
+                                && !custom
+                                && let Some(mb) = mb_of(text)
+                            {
+                                *patch = Some(json!({ "player": { key: mb.max(64) } }));
+                            }
+                        });
                         if custom {
                             let field = NumberField {
                                 label: label.id,
@@ -701,7 +747,7 @@ fn memory(
                             }
                             ui.label("GB");
                         } else {
-                            ui.add(egui::Label::new(dim(auto)).wrap());
+                            ui.label(dim(auto));
                         }
                     });
                     ui.end_row();
@@ -723,13 +769,13 @@ fn sound(
     ui_state: &PreferencesUi,
     patch: &mut Option<Value>,
 ) {
-    card(ui, "Sound", "Where the viewer's sound plays.", |ui| {
+    page(ui, "Sound", "Where the viewer's sound plays", |ui| {
         grid(ui, "preferences-sound", |ui| {
             let chosen = state["preferences"]["player"]["audio_device"]
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
-            ui.label("Output");
+            label(ui, "Output");
             match &ui_state.audio_outputs {
                 None => {
                     ui.spinner();
@@ -751,6 +797,8 @@ fn sound(
                     ui.add_enabled_ui(!busy, |ui| {
                         egui::ComboBox::from_id_salt("preferences-audio-device")
                             .selected_text(shown)
+                            .width(300.0)
+                            .truncate()
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(
                                     &mut pick,
@@ -763,8 +811,7 @@ fn sound(
                             })
                             .response
                             .on_hover_text(
-                                "The system's default follows the system. A chosen device \
-                                 that isn't connected plays on the default",
+                                "A device that isn't connected plays on the system's default",
                             );
                     });
                     if pick != chosen {
@@ -786,27 +833,23 @@ fn thumbnails(
 ) {
     let thumbs = &state["preferences"]["thumbnails"];
     let cache = &state["thumbnail_cache"];
-    card(
+    page(
         ui,
         "Thumbnails",
-        "The Media Pool's thumbnails and the pictures in the timeline's clips.",
+        "The Media Pool's thumbnails and the pictures in the timeline's clips",
         |ui| {
             grid(ui, "preferences-thumbnails", |ui| {
                 let mut disk = thumbs["disk_cache"] == true;
-                ui.label("Disk cache");
+                label(ui, "Disk Cache");
                 if ui
                     .add_enabled(!busy, egui::Checkbox::new(&mut disk, "Keep them on disk"))
-                    .on_hover_text(format!(
-                        "Projects open with their pictures shown, without decoding every clip \
-                         again ({}). Turning this off empties the cache.",
-                        cache["path"].as_str().unwrap_or_default()
-                    ))
+                    .on_hover_text("Projects open with their pictures at once; off empties it")
                     .changed()
                 {
                     *patch = Some(json!({ "thumbnails": { "disk_cache": disk } }));
                 }
                 ui.end_row();
-                let label = ui.label("Size limit");
+                let label = label(ui, "Size Limit");
                 ui.horizontal(|ui| {
                     let field = NumberField {
                         label: label.id,
@@ -824,7 +867,8 @@ fn thumbnails(
                     ui.label(dim(format!(
                         "Holds {} MB in {} files",
                         cache["mb"], cache["files"]
-                    )));
+                    )))
+                    .on_hover_text(cache["path"].as_str().unwrap_or_default());
                 });
                 ui.end_row();
             });
@@ -842,11 +886,10 @@ fn fillers(
     let lists: super::fillers::Lists =
         serde_json::from_value(state["preferences"]["transcripts"]["fillers"].clone())
             .unwrap_or_default();
-    card(
+    page(
         ui,
         "Filler Words",
-        "The words the Transcription window marks as fillers and Delete Filler Words takes \
-         out, in every project without its own list, which the Transcription window sets.",
+        "Words Delete Filler Words takes out, unless a project has its own",
         |ui| {
             ui_state.fillers.scope = super::fillers::Scope::All;
             if let Some(change) =
@@ -878,18 +921,17 @@ fn proxies(
     patch: &mut Option<Value>,
 ) {
     let proxies = &state["preferences"]["proxies"];
-    card(
+    page(
         ui,
         "Proxies",
-        "Smaller copies the viewer plays instead of heavy media. Exports always read the \
-         originals.",
+        "Smaller copies the viewer plays; exports read the originals",
         |ui| {
             grid(ui, "preferences-proxies", |ui| {
-                let label = ui.label("Size");
+                let size = label(ui, "Size");
                 ui.horizontal(|ui| {
                     let saved = proxies["size"].as_u64().unwrap_or(960);
                     let field = NumberField {
-                        label: label.id,
+                        label: size.id,
                         saved,
                         range: 16..=7680,
                         unit: Unit::Plain,
@@ -918,17 +960,13 @@ fn proxies(
                     patch,
                 );
                 let mut auto = proxies["auto"] == true;
-                ui.label("Automatic");
+                label(ui, "Automatic");
                 if ui
                     .add_enabled(
                         !busy,
                         egui::Checkbox::new(&mut auto, "Make proxies by themselves, for:"),
                     )
-                    .on_hover_text(
-                        "While Proxies is on in the Media Pool: for the media you import that \
-                         these rules pick, for the pool's when you turn Proxies on, and again \
-                         when a proxy's file is gone",
-                    )
+                    .on_hover_text("While Proxies is on in the Media Pool")
                     .changed()
                 {
                     *patch = Some(json!({ "proxies": { "auto": auto } }));
@@ -984,8 +1022,7 @@ fn proxies(
                         range: 1..=100_000,
                         unit: Unit::Plain,
                         enabled: !busy && auto,
-                        tip: "Files averaging more get a proxy: camera and editing formats the \
-                              GPU can't decode",
+                        tip: "Files averaging more, such as camera formats the GPU can't decode",
                         refusal: "The bitrate is at least 1 Mb/s",
                     };
                     if let Some(n) = field.show(ui, &mut ui_state.mbps, &mut ui_state.error) {
@@ -1007,20 +1044,15 @@ fn folder(
     folders: &Folders,
     patch: &mut Option<Value>,
 ) {
-    let label = ui.label("Folder");
+    let label = label(ui, "Folder");
     ui.horizontal(|ui| {
         let r = ui
             .add_enabled(
                 !busy,
-                egui::TextEdit::singleline(&mut ui_state.folder).desired_width(280.0),
+                egui::TextEdit::singleline(&mut ui_state.folder).desired_width(230.0),
             )
             .labelled_by(label.id)
-            .on_hover_text(
-                "Where this computer keeps proxies: a folder in the project's folder, or an \
-                 absolute path. Every project shares an absolute one, so a file used in several \
-                 projects gets one proxy. Proxies are looked for here: after a change, move \
-                 them here or let them be made again",
-            );
+            .on_hover_text("A folder in each project's folder, or one path for all");
         let typed = ui_state.folder.trim();
         if r.lost_focus() && !busy && typed != saved {
             *patch = Some(json!({ "proxies": { "folder": typed } }));
@@ -1101,7 +1133,7 @@ fn codec(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>
         }
     };
     let selected = choices.iter().find(|c| c["codec"] == current);
-    ui.label("Codec");
+    label(ui, "Codec");
     ui.add_enabled_ui(!busy, |ui| {
         egui::ComboBox::from_id_salt("proxy-codec")
             .selected_text(selected.map_or(current.to_string(), name))
@@ -1117,15 +1149,7 @@ fn codec(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>
                 }
             })
             .response
-            .on_hover_text(
-                "Automatic: the first of DNxHR LB, ProRes Proxy, AV1, HEVC and H.264 that the GPU \
-                 makes and plays. Else the first the GPU plays, else the first it makes, else \
-                 DNxHR LB in software. ProRes Proxy and DNxHR LB make every frame a keyframe: a \
-                 jump decodes one frame instead of up to 60, but the files are many times \
-                 larger. A Mac's GPU and NVIDIA's make ProRes Proxy and show it from GPU memory. \
-                 AV1 files are the smallest. Made in software (SVT-AV1), they take longer than \
-                 H.264 with x264",
-            );
+            .on_hover_text("Automatic: the first the GPU both makes and plays");
     });
     ui.end_row();
     if let Some(c) = selected {
