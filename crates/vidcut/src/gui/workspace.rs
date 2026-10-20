@@ -865,47 +865,47 @@ impl Workspace {
     }
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
+        use Status as S;
+        let decoding = decoding(&self.snap.active().hwdec);
+        let open = self.project().is_some();
+        let right: Vec<Status> = [
+            open.then_some(S::Format),
+            open.then_some(S::Edited),
+            decoding.is_some().then_some(S::Decoding),
+            self.snap.socket.is_some().then_some(S::Pid),
+            Some(S::Version),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let row = super::row::Row {
+            left: &[],
+            fill: Some((S::Notices, egui::Align::Min)),
+            right: &right,
+            leaving: &[S::Pid, S::Decoding, S::Format, S::Edited, S::Version],
+            group: |s| s as u8,
+        };
+        let dim = |text: String| RichText::new(text).color(theme::colors().text_dim);
         ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                static VERSIONS: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
-                let (short, long) = VERSIONS.get_or_init(|| {
-                    let mut long = format!(
-                        "vidcut {}\nFFmpeg {}",
-                        env!("CARGO_PKG_VERSION"),
-                        vidcut_av::ffmpeg_version()
-                    );
-                    for (lib, v) in vidcut_av::library_versions() {
-                        if lib != "version" {
-                            long.push_str(&format!("\n  {lib} {v}"));
-                        }
-                    }
-                    if let Some(gpu) = &self.display {
-                        long.push_str(&format!("\nDrawing on {gpu}"));
-                    }
-                    let short = format!(
-                        "vidcut {} · FFmpeg {}",
-                        env!("CARGO_PKG_VERSION"),
-                        vidcut_av::ffmpeg_release()
-                    );
-                    (short, long)
-                });
-                let dim = |text: String| RichText::new(text).color(theme::colors().text_dim);
-                ui.label(dim(short.clone())).on_hover_text(long.as_str());
-                if let Some(socket) = &self.snap.socket {
-                    ui.separator();
-                    ui.label(dim(format!("pid {}", self.snap.pid)))
-                        .on_hover_text(format!(
-                            "Live control: {}\nvidcut CLI commands for this project run here",
-                            socket.display()
-                        ));
-                }
-                if let Some((text, tip)) = decoding(&self.snap.active().hwdec) {
-                    ui.separator();
-                    ui.label(dim(text)).on_hover_text(tip);
-                }
-                if let Some(p) = self.project() {
+            self.fit_row(ui, row, |ws, ui, s| match s {
+                S::Notices => ui.scope(|ui| ws.notices(ui)).response,
+                S::Format => {
+                    let p = ws.project().expect("open");
                     let fps = p.settings.fps;
-                    ui.separator();
+                    let format = ui.label(dim(format!(
+                        "{}×{}, {} fps",
+                        p.settings.width,
+                        p.settings.height,
+                        fps.decimal()
+                    )));
+                    if fps.is_whole() {
+                        format
+                    } else {
+                        format.on_hover_text(format!("{fps} fps"))
+                    }
+                }
+                S::Edited => {
+                    let p = ws.project().expect("open");
                     let revision = format!(
                         "Revision {}: one up with every change. Scripts give it with \
                          --if-rev so they never overwrite a newer edit",
@@ -915,34 +915,62 @@ impl Workspace {
                         .duration_since(std::time::UNIX_EPOCH)
                         .map_or(0, |d| d.as_millis() as u64);
                     match (p.edited.and_then(local_time), local_time(now)) {
-                        (Some(edited), Some(today)) => {
-                            ui.label(dim(edited_text(&edited, &today)))
-                                .on_hover_text(format!(
-                                    "Last changed {}, local time\n{revision}",
-                                    edited.full()
-                                ));
-                        }
-                        _ => {
-                            ui.label(dim(format!("revision {}", p.rev)))
-                                .on_hover_text(revision);
-                        }
-                    }
-                    ui.separator();
-                    let format = ui.label(dim(format!(
-                        "{}×{}, {} fps",
-                        p.settings.width,
-                        p.settings.height,
-                        fps.decimal()
-                    )));
-                    if !fps.is_whole() {
-                        format.on_hover_text(format!("{fps} fps"));
+                        (Some(edited), Some(today)) => ui
+                            .label(dim(edited_text(&edited, &today)))
+                            .on_hover_text(format!(
+                                "Last changed {}, local time\n{revision}",
+                                edited.full()
+                            )),
+                        _ => ui
+                            .label(dim(format!("revision {}", p.rev)))
+                            .on_hover_text(revision),
                     }
                 }
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    self.notices(ui);
-                });
+                S::Decoding => {
+                    let (text, tip) = decoding.clone().expect("decoding");
+                    ui.label(dim(text)).on_hover_text(tip)
+                }
+                S::Pid => {
+                    let socket = ws.snap.socket.clone().expect("live");
+                    ui.label(dim(format!("pid {}", ws.snap.pid)))
+                        .on_hover_text(format!(
+                            "Live control: {}\nvidcut CLI commands for this project run here",
+                            socket.display()
+                        ))
+                }
+                S::Version => {
+                    let (short, long) = ws.versions();
+                    ui.label(dim(short)).on_hover_text(long)
+                }
             });
         });
+    }
+
+    fn versions(&self) -> (String, String) {
+        static VERSIONS: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
+        VERSIONS
+            .get_or_init(|| {
+                let mut long = format!(
+                    "vidcut {}\nFFmpeg {}",
+                    env!("CARGO_PKG_VERSION"),
+                    vidcut_av::ffmpeg_version()
+                );
+                for (lib, v) in vidcut_av::library_versions() {
+                    if lib != "version" {
+                        long.push_str(&format!("\n  {lib} {v}"));
+                    }
+                }
+                if let Some(gpu) = &self.display {
+                    long.push_str(&format!("\nDrawing on {gpu}"));
+                }
+                let short = format!(
+                    "vidcut {} · FFmpeg {}",
+                    env!("CARGO_PKG_VERSION"),
+                    vidcut_av::ffmpeg_release()
+                );
+                (short, long)
+            })
+            .clone()
     }
 
     fn start_screen(&mut self, ui: &mut egui::Ui) {
@@ -1746,6 +1774,16 @@ impl Workspace {
         }
         self.media_drag_overlay(&ctx);
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Status {
+    Notices,
+    Format,
+    Edited,
+    Decoding,
+    Pid,
+    Version,
 }
 
 const NOTICE_FADE: f64 = 1.0;

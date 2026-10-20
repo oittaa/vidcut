@@ -301,6 +301,15 @@ fn marks(painter: &egui::Painter, rect: Rect, m: &Media, frames: i64, hovered: O
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BinBar {
+    Bins,
+    Crumb(usize),
+    SortLabel,
+    Sort,
+    Order,
+}
+
 fn sort_label(s: PoolSort) -> &'static str {
     match s {
         PoolSort::Added => "Added",
@@ -578,72 +587,100 @@ impl Workspace {
 
     fn bin_bar(&mut self, ui: &mut egui::Ui, p: &Project) {
         let view = self.snap.pool.clone();
+        let mut levels = vec![("Master".to_string(), String::new())];
+        for name in view.bin.split('/').filter(|s| !s.is_empty()) {
+            let at = join(&levels[levels.len() - 1].1, name);
+            levels.push((name.to_string(), at));
+        }
+        let last = levels.len() - 1;
+        let left: Vec<BinBar> = std::iter::once(BinBar::Bins)
+            .chain((0..last).map(BinBar::Crumb))
+            .collect();
+        let leaving: Vec<BinBar> = (0..last).map(BinBar::Crumb).collect();
+        let row = super::row::Row {
+            left: &left,
+            fill: Some((BinBar::Crumb(last), egui::Align::Min)),
+            right: &[BinBar::SortLabel, BinBar::Sort, BinBar::Order],
+            leaving: &leaving,
+            group: |_| 0,
+        };
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
-            ui.menu_button("Bins", |ui| {
-                for (path, depth) in bin_list(p) {
-                    let text = format!("{}{}", "    ".repeat(depth), bin_name(&path));
-                    if ui.selectable_label(view.bin == path, text).clicked() {
-                        self.send("pool.set", json!({ "bin": path }));
-                        ui.close();
-                    }
-                }
-                ui.separator();
-                if ui.button("New Bin").clicked() {
-                    self.send("bins.add", json!({ "path": new_bin(p, &view.bin) }));
-                    ui.close();
-                }
-            })
-            .response
-            .on_hover_text("Open a bin");
-            let mut at = String::new();
-            let levels =
-                std::iter::once("Master").chain(view.bin.split('/').filter(|s| !s.is_empty()));
-            for (i, name) in levels.enumerate() {
-                if i > 0 {
-                    ui.label(dim("›"));
-                    at = join(&at, name);
-                }
-                let here = at == view.bin;
-                let text = if here {
-                    RichText::new(name).strong()
-                } else {
-                    RichText::new(name)
-                };
-                let r = ui.add(egui::Button::new(text).frame(false));
-                self.drop_highlight(ui, r.rect, &at);
-                if r.clicked() && !here {
-                    self.send("pool.set", json!({ "bin": at }));
-                }
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let (arrow, tip) = if view.descending {
-                    ("⬇", "Descending; click for ascending")
-                } else {
-                    ("⬆", "Ascending; click for descending")
-                };
-                if ui.small_button(arrow).on_hover_text(tip).clicked() {
-                    self.send("pool.set", json!({ "descending": !view.descending }));
-                }
-                let mut sort = view.sort;
-                egui::ComboBox::from_id_salt("pool-sort")
-                    .selected_text(sort_label(sort))
-                    .width(76.0)
-                    .show_ui(ui, |ui| {
-                        for s in [
-                            PoolSort::Added,
-                            PoolSort::Name,
-                            PoolSort::Duration,
-                            PoolSort::Date,
-                            PoolSort::Timecode,
-                        ] {
-                            ui.selectable_value(&mut sort, s, sort_label(s));
+            self.fit_row(ui, row, |ws, ui, item| match item {
+                BinBar::Bins => ui
+                    .menu_button("Bins", |ui| {
+                        for (path, depth) in bin_list(p) {
+                            let text = format!("{}{}", "    ".repeat(depth), bin_name(&path));
+                            if ui.selectable_label(view.bin == path, text).clicked() {
+                                ws.send("pool.set", json!({ "bin": path }));
+                                ui.close();
+                            }
                         }
-                    });
-                if sort != view.sort {
-                    self.send("pool.set", json!({ "sort": sort }));
+                        ui.separator();
+                        if ui.button("New Bin").clicked() {
+                            ws.send("bins.add", json!({ "path": new_bin(p, &view.bin) }));
+                            ui.close();
+                        }
+                    })
+                    .response
+                    .on_hover_text("Open a bin"),
+                BinBar::Crumb(i) => {
+                    let (name, at) = &levels[i];
+                    ui.horizontal(|ui| {
+                        if i > 0 && !egui::containers::menu::is_in_menu(ui) {
+                            ui.label(dim("›"));
+                        }
+                        let here = *at == view.bin;
+                        let text = if here {
+                            RichText::new(name).strong()
+                        } else {
+                            RichText::new(name)
+                        };
+                        let r = ui.add(egui::Button::new(text).frame(false).truncate());
+                        if !ui.is_sizing_pass() {
+                            ws.drop_highlight(ui, r.rect, at);
+                        }
+                        if r.clicked() && !here {
+                            ws.send("pool.set", json!({ "bin": at }));
+                        }
+                    })
+                    .response
                 }
-                ui.label(dim("Sort"));
+                BinBar::SortLabel => ui.label(dim("Sort")),
+                BinBar::Sort => {
+                    let mut sort = view.sort;
+                    let r = egui::ComboBox::from_id_salt("pool-sort")
+                        .selected_text(sort_label(sort))
+                        .width(76.0)
+                        .show_ui(ui, |ui| {
+                            for s in [
+                                PoolSort::Added,
+                                PoolSort::Name,
+                                PoolSort::Duration,
+                                PoolSort::Date,
+                                PoolSort::Timecode,
+                            ] {
+                                ui.selectable_value(&mut sort, s, sort_label(s));
+                            }
+                        })
+                        .response;
+                    if sort != view.sort {
+                        ws.send("pool.set", json!({ "sort": sort }));
+                    }
+                    r
+                }
+                BinBar::Order => {
+                    let (arrow, tip) = if view.descending {
+                        ("⬇", "Descending; click for ascending")
+                    } else {
+                        ("⬆", "Ascending; click for descending")
+                    };
+                    let r = ui.small_button(arrow).on_hover_text(tip);
+                    if r.clicked() {
+                        ws.send("pool.set", json!({ "descending": !view.descending }));
+                    }
+                    r
+                }
             });
         });
     }

@@ -1,5 +1,6 @@
 use eframe::egui::{self, RichText};
 
+use super::row::Row;
 use super::theme;
 use super::workspace::{FOLDER_HINT, Workspace};
 
@@ -18,11 +19,14 @@ enum Item {
     Help,
 }
 
-const ORDER: [Item; 11] = [
+const LEFT: [Item; 4] = [
     Item::Import,
     Item::ImportFolder,
     Item::QuickExport,
     Item::Export,
+];
+
+const RIGHT: [Item; 7] = [
     Item::NoPreview,
     Item::Jobs,
     Item::History,
@@ -46,72 +50,19 @@ const LEAVING: [Item; 11] = [
     Item::NoPreview,
 ];
 
-impl Item {
-    fn left(self) -> bool {
-        matches!(
-            self,
-            Item::Import | Item::ImportFolder | Item::QuickExport | Item::Export
-        )
-    }
-}
-
-fn overflow(room: f32, more: f32, widths: &[f32]) -> usize {
-    let mut need: f32 = widths.iter().sum();
-    if need <= room {
-        return 0;
-    }
-    need += more;
-    for (n, w) in widths.iter().enumerate() {
-        if need <= room {
-            return n;
-        }
-        need -= w;
-    }
-    widths.len()
-}
-
-fn more_button(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) -> egui::Response {
-    ui.menu_button(egui_phosphor::regular::DOTS_THREE, add)
-        .response
-        .on_hover_text("The buttons the window is too narrow for")
-}
-
 impl Workspace {
     pub(super) fn bar_buttons(&mut self, ui: &mut egui::Ui) {
         self.watch_jobs(ui.input(|i| i.time));
-        let items: Vec<Item> = LEAVING.into_iter().filter(|&i| self.bar_has(i)).collect();
-        let gap = ui.spacing().item_spacing.x;
-        let mut sizer = ui.new_child(egui::UiBuilder::new().sizing_pass().invisible());
-        let widths: Vec<f32> = items
-            .iter()
-            .map(|&i| self.bar_item(&mut sizer, i).rect.width() + gap)
-            .collect();
-        let more = more_button(&mut sizer, |_| {}).rect.width() + gap;
-        let hidden = &items[..overflow(ui.available_width(), more, &widths)];
-        let shown = |i: &Item| items.contains(i) && !hidden.contains(i);
-        for i in ORDER.into_iter().filter(|i| i.left() && shown(i)) {
-            self.bar_item(ui, i);
-        }
-        let right = egui::UiBuilder::new()
-            .scope_id(egui::Id::unique("top-bar-right"))
-            .layout(egui::Layout::right_to_left(egui::Align::Center));
-        ui.scope_builder(right, |ui| {
-            if !hidden.is_empty() {
-                more_button(ui, |ui| {
-                    let mut after_left = false;
-                    for i in ORDER.into_iter().filter(|i| hidden.contains(i)) {
-                        if after_left && !i.left() {
-                            ui.separator();
-                        }
-                        after_left = i.left();
-                        self.bar_item(ui, i);
-                    }
-                });
-            }
-            for i in ORDER.into_iter().rev().filter(|i| !i.left() && shown(i)) {
-                self.bar_item(ui, i);
-            }
-        });
+        let left: Vec<Item> = LEFT.into_iter().filter(|&i| self.bar_has(i)).collect();
+        let right: Vec<Item> = RIGHT.into_iter().filter(|&i| self.bar_has(i)).collect();
+        let row = Row {
+            left: &left,
+            fill: None,
+            right: &right,
+            leaving: &LEAVING,
+            group: |i| u8::from(RIGHT.contains(&i)),
+        };
+        self.fit_row(ui, row, Self::bar_item);
     }
 
     fn bar_has(&self, item: Item) -> bool {
@@ -185,25 +136,5 @@ impl Workspace {
                 .toggle_value(&mut self.help.open, "Help")
                 .on_hover_text("Keyboard shortcuts, with what the less obvious ones do (F1)"),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::overflow;
-
-    #[test]
-    fn a_bar_that_fits_hides_nothing() {
-        assert_eq!(overflow(100.0, 10.0, &[30.0, 30.0, 30.0]), 0);
-    }
-
-    #[test]
-    fn a_narrow_bar_hides_until_the_rest_and_the_menu_fit() {
-        assert_eq!(overflow(80.0, 10.0, &[30.0, 30.0, 30.0]), 1);
-    }
-
-    #[test]
-    fn a_bar_too_narrow_for_any_hides_all() {
-        assert_eq!(overflow(5.0, 10.0, &[30.0, 30.0, 30.0]), 3);
     }
 }
