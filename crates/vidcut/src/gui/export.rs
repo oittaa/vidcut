@@ -1266,6 +1266,15 @@ impl Workspace {
                                     ui.label(dim(format!("{} · {from}", j.id)));
                                 });
                                 job_chips(ui, j);
+                                for w in job_warnings(j) {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(format!("⚠ {w}"))
+                                                .color(ui.visuals().warn_fg_color),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
                                 job_view(ui, j, |method, params| self.send(method, params));
                                 egui::CollapsingHeader::new("Details")
                                     .id_salt(("job-details", &j.id))
@@ -1744,6 +1753,16 @@ fn job_details(ui: &mut egui::Ui, j: &JobInfo, rate: Option<f64>, project: Optio
                 ui.end_row();
             }
         });
+}
+
+fn job_warnings(j: &JobInfo) -> Vec<String> {
+    j.result
+        .as_ref()
+        .and_then(|r| r["warnings"].as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|w| w.as_str().map(String::from))
+        .collect()
 }
 
 fn job_method(j: &JobInfo) -> Option<&'static str> {
