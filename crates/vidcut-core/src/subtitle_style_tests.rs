@@ -133,6 +133,7 @@ fn an_imsc1_file_writes_the_track_style() {
             text: "Hi".into(),
             place: Place::Bottom,
             words: Vec::new(),
+            speaker: None,
         }],
         SubtitleFormat::Ttml,
         &crate::subtitles::Writing {
@@ -188,6 +189,7 @@ fn a_styled_file_keeps_each_cues_place() {
                 text: "Bottom".into(),
                 place: Place::Bottom,
                 words: Vec::new(),
+                speaker: None,
             },
             Timed {
                 start: 3.0,
@@ -195,6 +197,7 @@ fn a_styled_file_keeps_each_cues_place() {
                 text: "Middle".into(),
                 place: Place::Middle,
                 words: Vec::new(),
+                speaker: None,
             },
             Timed {
                 start: 5.0,
@@ -202,6 +205,7 @@ fn a_styled_file_keeps_each_cues_place() {
                 text: "Top".into(),
                 place: Place::Top,
                 words: Vec::new(),
+                speaker: None,
             },
         ],
         SubtitleFormat::Ttml,

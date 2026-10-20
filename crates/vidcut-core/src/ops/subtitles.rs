@@ -195,6 +195,7 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
         case: style.case,
         shadow,
         words,
+        speaker_color: style.speaker_color,
     })
 }
 
@@ -369,9 +370,58 @@ pub fn add_cue(
             text,
             place: place.unwrap_or_default(),
             words,
+            speaker: None,
+            color: None,
         },
     );
     Ok(id)
+}
+
+pub fn set_who(
+    p: &mut Project,
+    id: &str,
+    speaker: Option<&str>,
+    color: Option<&str>,
+) -> Result<()> {
+    let (ti, ci) = find(p, id)?;
+    unlocked(p, ti)?;
+    let color = match color.map(str::trim) {
+        None => None,
+        Some("") => Some(None),
+        Some(c) => Some(Some(paint(c, "a cue color")?)),
+    };
+    let speaker = speaker
+        .map(str::trim)
+        .map(|s| (!s.is_empty()).then(|| p.speakers.key_for(s)));
+    let c = &mut p.subtitles[ti].cues[ci];
+    if let Some(s) = speaker {
+        c.speaker = s;
+    }
+    if let Some(col) = color {
+        c.color = col;
+    }
+    Ok(())
+}
+
+pub fn match_speaker(p: &mut Project, id: &str) -> Result<Vec<String>> {
+    let (ti, ci) = find(p, id)?;
+    unlocked(p, ti)?;
+    let like = p.subtitles[ti].cues[ci].clone();
+    let Some(who) = like.speaker.clone() else {
+        return Err(Error::invalid(format!("{id} has no speaker")));
+    };
+    let mut changed = Vec::new();
+    for c in &mut p.subtitles[ti].cues {
+        if c.id != like.id
+            && c.speaker.as_deref() == Some(who.as_str())
+            && (c.place != like.place || c.color != like.color)
+        {
+            c.place = like.place;
+            c.color = like.color.clone();
+            changed.push(c.id.clone());
+        }
+    }
+    Ok(changed)
 }
 
 pub fn scaled_words(words: &[i64], from: i64, to: i64) -> Vec<i64> {
@@ -731,6 +781,7 @@ pub fn import(
             .map(|&w| frames_of(p, w, base) - offset - s)
             .collect();
         let id = p.alloc_cue_id();
+        let speaker = c.speaker.as_deref().map(|n| p.speakers.key_for(n));
         place_cue(
             &mut p.subtitles[ti],
             Cue {
@@ -740,6 +791,8 @@ pub fn import(
                 words: fitted(&text, duration, words),
                 text,
                 place: c.place,
+                speaker,
+                color: None,
             },
         );
         count += 1;
@@ -773,6 +826,7 @@ pub fn collect(p: &Project, ti: usize, range: (i64, i64), timecode: bool) -> Vec
             text: c.text.clone(),
             place: c.place,
             words: Vec::new(),
+            speaker: c.speaker.as_deref().map(|k| p.speakers.name(k)),
         })
         .collect()
 }

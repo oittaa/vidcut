@@ -546,6 +546,7 @@ impl Burner {
                     &self.style,
                     j - c.start,
                     self.fps,
+                    c.color.as_deref(),
                 );
                 (i, s)
             })

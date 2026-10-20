@@ -45,6 +45,8 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("subtitles.remove", &["cues"]),
     ("subtitles.split", &["cue"]),
     ("subtitles.join", &["cues"]),
+    ("subtitles.match_speaker", &["cue"]),
+    ("speakers.set", &["person"]),
     ("subtitles.import", &["path"]),
     ("subtitles.export", &["out"]),
     ("titles.list", &["track"]),
@@ -154,7 +156,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("services", "The paid speech services' keys: xAI and Google"),
     (
         "speakers",
-        "Who speaks in the transcripts: names, files' speakers joined, words reassigned",
+        "Who speaks: names, colors, files' speakers joined, words reassigned",
     ),
     ("storyboard", "Storyboards: a labeled picture of every shot"),
     (

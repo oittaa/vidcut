@@ -282,6 +282,26 @@ fn ass_place(block: &str) -> Option<Place> {
     }
 }
 
+pub fn voice(raw: &str) -> Option<String> {
+    let mut rest = raw;
+    while let Some(at) = rest.find('<') {
+        rest = &rest[at..];
+        match raw_tag(rest) {
+            Some(tag) if tag.name == "v" && !tag.closing => {
+                let name = tag
+                    .rest
+                    .trim_start_matches(|c: char| !c.is_whitespace())
+                    .trim();
+                let (name, _) = markup(name, Dialect::Vtt, &[]);
+                return (!name.is_empty()).then_some(name);
+            }
+            Some(tag) => rest = &rest[tag.len..],
+            None => rest = &rest[1..],
+        }
+    }
+    None
+}
+
 pub fn markup(
     raw: &str,
     dialect: Dialect,

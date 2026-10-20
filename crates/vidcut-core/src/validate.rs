@@ -190,10 +190,18 @@ pub fn violations(p: &Project) -> Vec<String> {
             if let Err(e) = crate::ops::subtitles::checked_words(&c.text, c.duration, &c.words) {
                 v.push(format!("{}: {}", c.id, e.message));
             }
+            if let Err(e) = crate::ops::subtitles::checked_color(c.color.as_deref(), "cue") {
+                v.push(format!("{}: {}", c.id, e.message));
+            }
             if prev.is_some_and(|s| c.start < s) {
                 v.push(format!("{}: out of order on {}", c.id, t.id));
             }
             prev = Some(c.start);
+        }
+    }
+    for (person, color) in &p.speakers.colors {
+        if let Err(e) = crate::ops::subtitles::checked_color(Some(color), "person's") {
+            v.push(format!("{person}: {}", e.message));
         }
     }
     if let (Some(i), Some(o)) = (p.marks.mark_in, p.marks.mark_out)

@@ -1,5 +1,5 @@
 use super::text::{Tag, Token, render, tokens};
-use crate::model::{LetterCase, SubtitleStyle, WordsShow};
+use crate::model::{LetterCase, SpeakerPaint, SubtitleStyle, WordsShow};
 
 pub const POP_SECS: f64 = 0.2;
 pub const HIGHLIGHT: &str = "#ffd400";
@@ -106,10 +106,24 @@ fn by_word(pieces: Vec<Piece>) -> Vec<(Piece, Option<usize>)> {
     out
 }
 
-pub fn shown(text: &str, words: &[i64], style: &SubtitleStyle, frame: i64, fps: f64) -> Shown {
+pub fn shown(
+    text: &str,
+    words: &[i64],
+    style: &SubtitleStyle,
+    frame: i64,
+    fps: f64,
+    paint: Option<&str>,
+) -> Shown {
+    let at_once = style.words.is_none() || words.is_empty();
+    let paints = style.paints();
+    let whole = paint
+        .filter(|_| paints == SpeakerPaint::Text || (paints == SpeakerPaint::Spoken && at_once));
     let mut all = pieces(text);
     for p in &mut all {
         p.text = cased(&p.text, style.case);
+        if p.color.is_none() {
+            p.color = whole.map(String::from);
+        }
     }
     let still = Shown {
         pieces: all.clone(),
@@ -125,10 +139,14 @@ pub fn shown(text: &str, words: &[i64], style: &SubtitleStyle, frame: i64, fps: 
     }
     let spoken = words.iter().rposition(|&w| w <= frame);
     let show = how.show.unwrap_or_default();
-    let color = match (&how.color, show) {
-        (Some(c), _) => Some(c.clone()),
-        (None, WordsShow::Highlight) => Some(HIGHLIGHT.to_string()),
-        (None, _) => None,
+    let color = match (
+        paint.filter(|_| paints == SpeakerPaint::Spoken),
+        how.color.as_deref(),
+        show,
+    ) {
+        (Some(c), _, _) | (None, Some(c), _) => Some(c.to_string()),
+        (None, None, WordsShow::Highlight) => Some(HIGHLIGHT.to_string()),
+        (None, None, _) => None,
     };
     let length = (POP_SECS * fps).round().max(1.0) as i64;
     let step = spoken

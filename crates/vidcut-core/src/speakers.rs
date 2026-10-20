@@ -1,3 +1,4 @@
+use crate::model::Cue;
 pub use crate::model::{Assigned, Speakers};
 use crate::transcript::Word;
 
@@ -11,7 +12,26 @@ pub fn heard_person(run: &str, speaker: u32) -> String {
 
 impl Speakers {
     pub fn is_empty(&self) -> bool {
-        self.names.is_empty() && self.links.is_empty() && self.assigned.is_empty()
+        self.names.is_empty()
+            && self.links.is_empty()
+            && self.assigned.is_empty()
+            && self.colors.is_empty()
+    }
+
+    pub fn key_for(&self, person: &str) -> String {
+        let person = person.trim();
+        self.names
+            .iter()
+            .find(|(_, n)| n.as_str() == person)
+            .map_or_else(|| person.to_string(), |(k, _)| k.clone())
+    }
+
+    pub fn color_of(&self, cue: &Cue) -> Option<String> {
+        cue.color.clone().or_else(|| {
+            cue.speaker
+                .as_ref()
+                .and_then(|k| self.colors.get(k).cloned())
+        })
     }
 
     pub fn assigned_to(&self, media: &str, stream: u32, at: f64) -> Option<String> {

@@ -140,6 +140,7 @@ pub struct Made {
     pub end: i64,
     pub text: String,
     pub words: Vec<i64>,
+    pub speaker: Option<u32>,
 }
 
 pub const FLAC_MB_PER_MINUTE: f64 = 1.0;
@@ -553,6 +554,14 @@ fn split(sentence: Vec<Word>, chars: usize, lines: usize) -> Vec<Vec<Word>> {
     sentence.into_iter().map(|w| vec![w]).collect()
 }
 
+pub fn speaker_count(said: &[Said]) -> u32 {
+    said.iter()
+        .flat_map(|s| s.words.iter())
+        .filter_map(|w| w.speaker)
+        .max()
+        .unwrap_or(0)
+}
+
 pub fn cues(said: &[Said], fps: Rational, layout: Layout) -> Vec<Made> {
     let chars = layout.chars.max(1);
     let lines = layout.lines.max(1);
@@ -578,6 +587,7 @@ pub fn cues(said: &[Said], fps: Rational, layout: Layout) -> Vec<Made> {
                 end: fps.secs_to_frames(last.end).max(start + shortest),
                 text: wrap(g, chars).join("\n"),
                 words,
+                speaker: first.speaker,
             })
         })
         .collect();

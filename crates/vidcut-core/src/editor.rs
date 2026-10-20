@@ -1741,7 +1741,7 @@ fn clip_speech(
     heard: &[String],
     asked: &transcript::Asked,
     transcribe: bool,
-) -> Result<(Speech, Vec<Value>)> {
+) -> Result<(Speech, Vec<Value>, Vec<String>)> {
     let fps = p.settings.fps;
     let mut speech = Speech {
         model: asked.model_name(),
@@ -1880,7 +1880,7 @@ fn clip_speech(
             .map(|(l, _)| l.to_string());
     }
     let rate = fps.as_f64();
-    let mut people: Vec<&String> = Vec::new();
+    let mut people: Vec<String> = Vec::new();
     let words: Vec<transcript::Word> = chosen
         .iter()
         .enumerate()
@@ -1890,8 +1890,8 @@ fn clip_speech(
             text: w.word.text.clone(),
             joined: w.word.joined && i > 0 && chosen[i - 1].clip == w.clip,
             speaker: w.person.as_ref().map(|k| {
-                let n = people.iter().position(|o| *o == k).unwrap_or_else(|| {
-                    people.push(k);
+                let n = people.iter().position(|o| o == k).unwrap_or_else(|| {
+                    people.push(k.clone());
                     people.len() - 1
                 });
                 n as u32 + 1
@@ -1914,7 +1914,7 @@ fn clip_speech(
             speech: Vec::new(),
         });
     }
-    Ok((speech, media))
+    Ok((speech, media, people))
 }
 
 fn first_heard(mut placed: Vec<Placed>) -> Vec<Placed> {
@@ -3070,6 +3070,8 @@ fn mutate(
             track,
             place,
             words,
+            speaker,
+            color,
         } => {
             let start = match at {
                 Some(t) => resolve(p, t, playhead)?,
@@ -3097,6 +3099,7 @@ fn mutate(
                 *place,
                 words.clone().unwrap_or_default(),
             )?;
+            ops::subtitles::set_who(p, &id, speaker.as_deref(), color.as_deref())?;
             json!({ "cue": id, "track": p.subtitles[ti].id })
         }
         Request::TitlesAdd {
@@ -3179,6 +3182,8 @@ fn mutate(
             end,
             place,
             words,
+            speaker,
+            color,
         } => {
             let id = resolve_cue(p, cue, playhead)?;
             let start = start
@@ -3198,7 +3203,12 @@ fn mutate(
             if how == ops::subtitles::Words::Spread {
                 time_from_kept(p, env, &id)?;
             }
+            ops::subtitles::set_who(p, &id, speaker.as_deref(), color.as_deref())?;
             Value::Null
+        }
+        Request::SubtitlesMatchSpeaker { cue } => {
+            let id = resolve_cue(p, cue, playhead)?;
+            json!({ "cues": ops::subtitles::match_speaker(p, &id)? })
         }
         Request::SubtitlesMove {
             cues,
@@ -3338,17 +3348,21 @@ fn mutate(
             };
             let part = a > 0 || b < p.end();
             let from_media = !(hear.is_none() && part) && hears_media(*hear, &asked)?;
-            let (speech, media) = match from_media {
+            let (speech, media, people) = match from_media {
                 true => {
-                    let (s, media) = clip_speech(p, env, (a, b), &heard, &asked, true)?;
-                    (Arc::new(s), json!(media))
+                    let (s, media, people) = clip_speech(p, env, (a, b), &heard, &asked, true)?;
+                    (Arc::new(s), json!(media), people)
                 }
                 false => {
                     upload_check(&asked, (b - a) as f64 / p.settings.fps.as_f64(), "The mix")?;
-                    (
-                        env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?,
-                        Value::Null,
-                    )
+                    let s = env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?;
+                    let people = match &s.speakers {
+                        Some(run) => (1..=transcript::speaker_count(&s.said))
+                            .map(|n| crate::speakers::heard_person(run, n))
+                            .collect(),
+                        None => Vec::new(),
+                    };
+                    (s, Value::Null, people)
                 }
             };
             let made = transcript::cues(
@@ -3384,7 +3398,7 @@ fn mutate(
                 }
                 for m in &made {
                     let (start, end) = (a + m.start, (a + m.end).min(b));
-                    ids.push(ops::subtitles::add_cue(
+                    let id = ops::subtitles::add_cue(
                         p,
                         ti,
                         start,
@@ -3393,7 +3407,10 @@ fn mutate(
                         &m.text,
                         None,
                         m.words.clone(),
-                    )?);
+                    )?;
+                    let who = m.speaker.and_then(|n| people.get(n as usize - 1));
+                    ops::subtitles::set_who(p, &id, who.map(String::as_str), None)?;
+                    ids.push(id);
                 }
                 on = Some(p.subtitles[ti].id.clone());
             }
@@ -3473,7 +3490,7 @@ fn mutate(
             let from_media = hears_media(*hear, &asked)?;
             let (speech, media) = match from_media {
                 true => {
-                    let (s, media) = clip_speech(p, env, (a, b), &heard, &asked, true)?;
+                    let (s, media, _) = clip_speech(p, env, (a, b), &heard, &asked, true)?;
                     (Arc::new(s), json!(media))
                 }
                 false => (
@@ -3629,16 +3646,37 @@ fn mutate(
             }
             json!({ "results": results })
         }
-        Request::SpeakersName { person, name } => {
+        Request::SpeakersSet {
+            person,
+            name,
+            color,
+        } => {
             let person = person.trim();
             if person.is_empty() {
                 return Err(Error::usage("name a person from speakers.list"));
             }
-            match name.trim() {
-                "" => p.speakers.names.remove(person),
-                n => p.speakers.names.insert(person.to_string(), n.to_string()),
+            match color.as_deref().map(str::trim) {
+                None => {}
+                Some("") => {
+                    p.speakers.colors.remove(person);
+                }
+                Some(c) => {
+                    let c = ops::subtitles::checked_color(Some(c), "person's")?;
+                    p.speakers
+                        .colors
+                        .insert(person.to_string(), c.unwrap_or_default());
+                }
+            }
+            match name.as_deref().map(str::trim) {
+                None => None,
+                Some("") => p.speakers.names.remove(person),
+                Some(n) => p.speakers.names.insert(person.to_string(), n.to_string()),
             };
-            json!({ "person": person, "name": p.speakers.name(person) })
+            json!({
+                "person": person,
+                "name": p.speakers.name(person),
+                "color": p.speakers.colors.get(person),
+            })
         }
         Request::SpeakersLink {
             media,
@@ -6065,7 +6103,7 @@ pub fn query(
             )));
         }
         Request::SpeakersList {} => {
-            let mut people: Vec<(String, Vec<Value>, usize)> = Vec::new();
+            let mut people: Vec<(String, Vec<Value>, usize, usize)> = Vec::new();
             for m in &p.media {
                 for a in &m.info.audio {
                     let Some(speech) = env.transcript(m, a.index)? else {
@@ -6079,26 +6117,35 @@ pub fn query(
                         let at = (w.start + w.end) / 2.0;
                         let person = p.speakers.person(&m.id, a.index, run, n, at);
                         let voice = json!({ "media": m.id, "stream": a.index, "speaker": n });
-                        match people.iter_mut().find(|(k, _, _)| *k == person) {
-                            Some((_, voices, words)) => {
+                        match people.iter_mut().find(|(k, _, _, _)| *k == person) {
+                            Some((_, voices, words, _)) => {
                                 *words += 1;
                                 if !voices.contains(&voice) {
                                     voices.push(voice);
                                 }
                             }
-                            None => people.push((person, vec![voice], 1)),
+                            None => people.push((person, vec![voice], 1, 0)),
                         }
                     }
+                }
+            }
+            for c in p.subtitles.iter().flat_map(|t| t.cues.iter()) {
+                let Some(person) = &c.speaker else { continue };
+                match people.iter_mut().find(|(k, _, _, _)| k == person) {
+                    Some((_, _, _, cues)) => *cues += 1,
+                    None => people.push((person.clone(), Vec::new(), 0, 1)),
                 }
             }
             json!({
                 "people": people
                     .into_iter()
-                    .map(|(person, voices, words)| json!({
+                    .map(|(person, voices, words, cues)| json!({
                         "person": person,
                         "name": p.speakers.name(&person),
+                        "color": p.speakers.colors.get(&person),
                         "voices": voices,
                         "words": words,
+                        "cues": cues,
                     }))
                     .collect::<Vec<_>>(),
             })
@@ -6506,7 +6553,7 @@ fn time_from_kept(p: &mut Project, env: &dyn Env, id: &str) -> Result<()> {
         xai: None,
         google: None,
     };
-    let Ok((speech, _)) = clip_speech(p, env, (a, b), &heard, &asked, false) else {
+    let Ok((speech, _, _)) = clip_speech(p, env, (a, b), &heard, &asked, false) else {
         return Ok(());
     };
     if !speech.said.is_empty() {
@@ -6594,7 +6641,7 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
         };
         let (heard, media) = match hears_media(r.hear, &asked)? {
             true => {
-                let (s, media) = clip_speech(p, env, (0, p.end()), &heard, &asked, true)?;
+                let (s, media, _) = clip_speech(p, env, (0, p.end()), &heard, &asked, true)?;
                 (Arc::new(s), json!(media))
             }
             false => (

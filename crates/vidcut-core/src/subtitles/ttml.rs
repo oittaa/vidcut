@@ -304,6 +304,7 @@ impl Walk<'_, '_> {
                 .as_deref()
                 .map_or(Place::Bottom, |r| self.sheet.place(r)),
             words: Vec::new(),
+            speaker: None,
         });
     }
 }

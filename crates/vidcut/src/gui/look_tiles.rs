@@ -19,7 +19,7 @@ fn sample(style: &SubtitleStyle, (w, h): (u32, u32)) -> Vec<Sprite> {
         margin: Some(0.03),
         ..style.clone()
     };
-    let shown = vidcut_core::subtitles::shown(SAMPLE, &SAMPLE_WORDS, &style, 0, 30.0);
+    let shown = vidcut_core::subtitles::shown(SAMPLE, &SAMPLE_WORDS, &style, 0, 30.0, None);
     vidcut_av::burn::draw(&[(&shown, Place::Middle)], w, h, &style).all()
 }
 

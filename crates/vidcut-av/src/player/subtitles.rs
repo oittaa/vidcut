@@ -58,8 +58,14 @@ fn key_at(view: &SubtitleView, plan: &Plan, t: i64) -> Option<Key> {
         .iter()
         .filter(|c| c.start <= t && t < c.end())
         .map(|c| {
-            let words =
-                vidcut_core::subtitles::shown(&c.text, &c.words, &view.style, t - c.start, fps);
+            let words = vidcut_core::subtitles::shown(
+                &c.text,
+                &c.words,
+                &view.style,
+                t - c.start,
+                fps,
+                c.color.as_deref(),
+            );
             (words, c.place)
         })
         .filter(|(w, _)| !w.pieces.is_empty())

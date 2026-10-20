@@ -66,6 +66,10 @@ pub struct Speakers {
     /// Words given to another person, the last one first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assigned: Vec<Assigned>,
+    /// A person's color, by person (`speakers.set`), which their cues are
+    /// painted with as their subtitle track's `speaker_color` says.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub colors: BTreeMap<String, String>,
 }
 
 /// A file's words given to a person: those whose middle is from `start` to
@@ -1510,6 +1514,21 @@ pub struct SubtitleStyle {
     /// without word times shows all at once. Usual: all at once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub words: Option<SubtitleWords>,
+    /// What a cue's color, its own or its speaker's, paints: `text`, all of
+    /// it but the words colored in it; `spoken`, the spoken word, or all of
+    /// a cue whose words show at once; or `none`. Usual: `spoken` with
+    /// `words`, else `text`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_color: Option<SpeakerPaint>,
+}
+
+/// What a cue's own or its speaker's color paints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SpeakerPaint {
+    Text,
+    Spoken,
+    None,
 }
 
 /// Letters drawn all as capitals or all as small letters.
@@ -1589,6 +1608,15 @@ impl SubtitleStyle {
             && self.case.is_none()
             && self.shadow.is_none()
             && self.words.is_none()
+            && self.speaker_color.is_none()
+    }
+
+    pub fn paints(&self) -> SpeakerPaint {
+        match (self.speaker_color, &self.words) {
+            (Some(p), _) => p,
+            (None, Some(_)) => SpeakerPaint::Spoken,
+            (None, None) => SpeakerPaint::Text,
+        }
     }
 
     pub fn text_fraction(&self) -> f64 {
@@ -1686,6 +1714,14 @@ pub struct Cue {
     /// by spaces and line breaks. Empty when its words have no times.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub words: Vec<i64>,
+    /// The person saying it, as `speakers.list` gives them. Create
+    /// Subtitles from Audio sets it when it tells the speakers apart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+    /// Its own color, `#rrggbb`, instead of its speaker's, painted as the
+    /// track's `speaker_color` says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 /// Where a cue shows on the picture.

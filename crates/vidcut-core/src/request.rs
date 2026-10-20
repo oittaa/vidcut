@@ -181,7 +181,7 @@ pub enum Request {
         /// each file (NVIDIA's Sortformer); with `xai`, one numbering across
         /// every file heard; with `google`, the same up to 30 minutes of
         /// speech, past that this computer's. The project names them
-        /// (`speakers.name`).
+        /// (`speakers.set`).
         #[serde(default)]
         speakers: bool,
         /// With `speakers` on this computer, the model that tells them
@@ -204,14 +204,23 @@ pub enum Request {
         #[serde(default)]
         again: bool,
     },
-    /// The people speaking in the transcripts of the project's media: each
-    /// with its name, the files' speakers it is, and how many words.
+    /// The people speaking in the transcripts of the project's media and
+    /// on its cues: each with its name, its color, the files' speakers it
+    /// is, and how many words and cues.
     #[serde(rename = "speakers.list")]
     SpeakersList {},
-    /// Name a person (`speakers.list`). An empty name forgets it, back to
-    /// `Speaker N`.
-    #[serde(rename = "speakers.name")]
-    SpeakersName { person: String, name: String },
+    /// Name a person (`speakers.list`), or give them the color their cues
+    /// are painted with (the subtitle track's `speaker_color`).
+    #[serde(rename = "speakers.set")]
+    SpeakersSet {
+        person: String,
+        /// Their name. `""` forgets it, back to `Speaker N`.
+        #[serde(default)]
+        name: Option<String>,
+        /// `#rrggbb`, `#rgb` or a name such as `yellow`. `""` takes it away.
+        #[serde(default)]
+        color: Option<String>,
+    },
     /// Make a file's speaker a person: one from `speakers.list`, which joins
     /// them, or a new one. Without `person`, it is again the person its
     /// transcript gives.
@@ -508,7 +517,7 @@ pub enum Request {
         /// each file (NVIDIA's Sortformer); with `xai`, one numbering across
         /// every file heard; with `google`, the same up to 30 minutes of
         /// speech, past that this computer's. The project names them
-        /// (`speakers.name`).
+        /// (`speakers.set`).
         #[serde(default)]
         speakers: bool,
         /// With `speakers` on this computer, the model that tells them
@@ -1071,10 +1080,17 @@ pub enum Request {
         /// and line breaks.
         #[serde(default)]
         words: Option<Vec<i64>>,
+        /// The person saying it, as `speakers.list` gives them, or a name.
+        #[serde(default)]
+        speaker: Option<String>,
+        /// Its own color instead of its speaker's: `#rrggbb`, `#rgb` or a
+        /// name such as `yellow`.
+        #[serde(default)]
+        color: Option<String>,
     },
     /// Change a cue (`q3`, or `S1@15s` for the cue on S1 at 15 s): its text,
-    /// its start or end (each moves that edge alone), where it shows, or its
-    /// words' times. Moving an edge keeps each word on its frame. New text
+    /// its start or end (each moves that edge alone), where it shows, its
+    /// words' times, its speaker or its own color. Moving an edge keeps each word on its frame. New text
     /// with as many words keeps their times; with another number of words,
     /// they are read again from the words kept for the clips' files under
     /// it, as `subtitles.time_words` reads them, else spread over the cue by
@@ -1094,7 +1110,19 @@ pub enum Request {
         /// order: one for each word of its text. `[]` clears them.
         #[serde(default)]
         words: Option<Vec<i64>>,
+        /// The person saying it, as `speakers.list` gives them, or a name.
+        /// `""` takes it away.
+        #[serde(default)]
+        speaker: Option<String>,
+        /// Its own color instead of its speaker's: `#rrggbb`, `#rgb` or a
+        /// name such as `yellow`. `""` goes back to its speaker's.
+        #[serde(default)]
+        color: Option<String>,
     },
+    /// Give every other cue of `cue`'s speaker on its track the place and
+    /// own color `cue` has. Returns the cues changed.
+    #[serde(rename = "subtitles.match_speaker")]
+    SubtitlesMatchSpeaker { cue: String },
     /// Move cues by `by` (`+12f`, `-1s`) or so the first starts at `to`; with
     /// `track`, onto that subtitle track.
     #[serde(rename = "subtitles.move")]
@@ -1255,7 +1283,7 @@ pub enum Request {
         /// each file (NVIDIA's Sortformer); with `xai`, one numbering across
         /// every file heard; with `google`, the same up to 30 minutes of
         /// speech, past that this computer's. The project names them
-        /// (`speakers.name`).
+        /// (`speakers.set`).
         #[serde(default)]
         speakers: bool,
         /// With `speakers` on this computer, the model that tells them

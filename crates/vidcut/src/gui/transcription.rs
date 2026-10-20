@@ -1089,7 +1089,7 @@ impl Workspace {
         match act {
             Act::Transcribe(ids) => self.open_transcribe(ids),
             Act::Name(person, name) => {
-                self.send("speakers.name", json!({ "person": person, "name": name }));
+                self.send("speakers.set", json!({ "person": person, "name": name }));
             }
             Act::Link(w, person) => self.send(
                 "speakers.link",

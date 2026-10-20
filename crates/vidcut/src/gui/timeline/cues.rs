@@ -163,11 +163,13 @@ fn hatch(painter: &Painter, rect: Rect) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn paint_track(
     painter: &Painter,
     tr: &TrackRect,
     scale: &Scale,
     t: &SubtitleTrack,
+    speakers: &vidcut_core::speakers::Speakers,
     selected: &HashSet<&str>,
     compact: bool,
     typing: Option<(&str, &str)>,
@@ -193,6 +195,14 @@ pub fn paint_track(
             r
         };
         painter.rect_filled(r, theme::clip_corners(), fill);
+        if let Some([red, green, blue]) = speakers
+            .color_of(c)
+            .as_deref()
+            .and_then(vidcut_core::subtitles::rgb)
+        {
+            let stripe = r.with_min_y(r.bottom() - (r.height() / 5.0).clamp(2.0, 4.0));
+            painter.rect_filled(stripe, 0.0, Color32::from_rgb(red, green, blue));
+        }
         if selected.contains(c.id.as_str()) {
             painter.rect_stroke(
                 r,

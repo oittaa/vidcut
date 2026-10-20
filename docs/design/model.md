@@ -73,6 +73,7 @@ classDiagram
     id
     start, duration
     text, place
+    words, speaker, color
   }
   class Title {
     kind, align
@@ -137,7 +138,7 @@ A file is missing when `Env::present` says so; a path absolute only on the other
 
 ## Subtitles
 
-`Project::subtitles` holds the subtitle tracks, S1 nearest the video; one is `shown` at a time. A `Cue` spans whole frames like a clip; its `text` is lines with `<i>`, `<b>`, `<u>` and `<font color>` around words, `Place` says where on the picture it goes, and `words` the frame each of its words starts on, counted from its start ([spec D70](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). Cues of a track are sorted by start and may overlap. A track's `SubtitleStyle` is its font, size, color, outline, background and margin ([spec D61](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), its bold face, letter case and shadow, and `SubtitleWords`, how its words show as they are spoken ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `ops::subtitles` holds the edits, and `editor::resolve_cue` reads a cue reference: its id, or a track and a time (S1@15s).
+`Project::subtitles` holds the subtitle tracks, S1 nearest the video; one is `shown` at a time. A `Cue` spans whole frames like a clip; its `text` is lines with `<i>`, `<b>`, `<u>` and `<font color>` around words, `Place` says where on the picture it goes, and `words` the frame each of its words starts on, counted from its start ([spec D70](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)); `speaker` is the person saying it and `color` its own color over the person's ([deviation X63](../deviations.md#x63-subtitles-keep-their-speaker-painted-in-the-persons-color)), which `Speakers::color_of` resolves. Cues of a track are sorted by start and may overlap. A track's `SubtitleStyle` is its font, size, color, outline, background and margin ([spec D61](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), its bold face, letter case and shadow, `SubtitleWords`, how its words show as they are spoken ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), and `SpeakerPaint`, what a cue's color paints (`SubtitleStyle::paints`; `subtitles::shown` applies it). `ops::subtitles` holds the edits, and `editor::resolve_cue` reads a cue reference: its id, or a track and a time (S1@15s).
 
 **Cues follow Track 1** ([spec D57](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `follow::follow`, which moves the clips of the other tracks after an edit on Track 1, also calls `ops::subtitles::remap` with its frame mapping, and `ops::delete_range` with the range's. `remap` maps each frame of a cue and the frame after it: a frame survives when it has a place and the next frame doesn't land on the same one (a deleted frame lands where the next kept one does, or nowhere). The surviving frames, in runs, are the cue's new spans; the first keeps its id, the others get new ones. Each word's frame goes through the same mapping, a word on a removed frame starting on the next frame kept, and each span counts its words from its own start. A locked subtitle track is left alone.
 
@@ -208,7 +209,7 @@ Preferences are not in the project. They live in `preferences.toml` in the confi
 
 ## Speakers
 
-`Project::speakers` (`Speakers`) says who speaks in the transcripts the project uses, which are kept with the files and number their own speakers (`Speech::speakers` names the run that numbered them). `names` names a person; `links` makes a file's speaker (its voice: media, stream, number) a person other than its run's; `assigned` gives a file's words between two times to a person, the last one first. All three go through the history like any edit (`speakers.name`, `speakers.link`, `speakers.assign`).
+`Project::speakers` (`Speakers`) says who speaks in the transcripts the project uses, which are kept with the files and number their own speakers (`Speech::speakers` names the run that numbered them). `names` names a person and `colors` gives them a color; `links` makes a file's speaker (its voice: media, stream, number) a person other than its run's; `assigned` gives a file's words between two times to a person, the last one first. All go through the history like any edit (`speakers.set`, `speakers.link`, `speakers.assign`). A cue names its person by the same key (`Cue::speaker`); `Speakers::key_for` finds the person a name names, so a name typed or read from a WebVTT voice becomes a person of its own only when no one has it.
 
 ## Validation
 

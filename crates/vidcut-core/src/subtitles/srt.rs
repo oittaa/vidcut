@@ -61,6 +61,7 @@ pub fn read(source: &str) -> Read {
                 text: text::clean(&body),
                 place: place.unwrap_or_default(),
                 words: Vec::new(),
+                speaker: None,
             });
         }
     };

@@ -15,6 +15,7 @@ pub struct Cue {
     pub text: String,
     pub place: Place,
     pub words: Vec<i64>,
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -173,6 +174,7 @@ pub(crate) fn segments(cues: &[Cue], by_place: bool) -> Vec<Cue> {
                     text,
                     place,
                     words: Vec::new(),
+                    color: None,
                 }),
             }
         }

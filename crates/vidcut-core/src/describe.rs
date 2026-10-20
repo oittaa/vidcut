@@ -193,6 +193,7 @@ pub fn describe_at(
         "subtitles.remove" => format!("Remove {}", d.cues("cues")),
         "subtitles.split" => format!("Split {} at {}", d.cues("cue"), d.time("at")),
         "subtitles.join" => format!("Join {}", d.cues("cues")),
+        "subtitles.match_speaker" => format!("Match the speaker's cues to {}", d.cues("cue")),
         "titles.add" => format!("Title {} at {}", quoted(&d.text("text")), d.time("at")),
         "titles.set" => format!("Change title {}", d.clips("clip")),
         "subtitles.import" if d.params["media"].is_string() => {
