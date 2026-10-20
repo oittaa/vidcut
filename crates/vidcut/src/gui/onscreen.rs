@@ -417,7 +417,7 @@ impl Workspace {
                 egui::PopupAnchor::Pointer,
             )
             .gap(12.0)
-            .show(|ui| ui.label(zoom));
+            .show(|ui| ui.add(egui::Label::new(zoom).extend()));
         }
         self.sync_title_preview();
         self.paint_title_controls(ui, picture, &shapes, pointer);
