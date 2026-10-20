@@ -30,6 +30,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
         method,
         "media.list"
             | "media.get"
+            | "media.details"
             | "media.transcribe"
             | "project.get"
             | "project.summary"
@@ -784,6 +785,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
         }
         "timeline.get" => timeline(&r.result),
         "media.list" => media_list(&r.result),
+        "media.details" => media_details(&r.result),
         "project.summary" => summary(&r.result),
         "timeline.at" => {
             println!(
@@ -1352,5 +1354,56 @@ fn print_notes(notes: &Value) {
             format!("; to keep it HDR: {}", set.join(" "))
         };
         println!("note: {}{hint}", n["message"].as_str().unwrap_or_default());
+    }
+}
+
+fn media_details(v: &Value) {
+    let text = |v: &Value| v.as_str().unwrap_or_default().to_string();
+    let rate = |v: &Value| {
+        v.as_u64()
+            .map_or(String::new(), |b| format!(", {:.1} Mb/s", b as f64 / 1e6))
+    };
+    println!("{} ({} bytes)", text(&v["path"]), v["size"]);
+    println!("  {}{}", text(&v["format"]), rate(&v["bit_rate"]));
+    for (k, t) in v["tags"].as_object().into_iter().flatten() {
+        println!("  {k}: {}", text(t));
+    }
+    for s in v["streams"].as_array().into_iter().flatten() {
+        let mut parts = vec![text(&s["codec"])];
+        for key in [
+            "profile",
+            "pix_fmt",
+            "chroma",
+            "layout",
+            "sample_format",
+            "language",
+        ] {
+            if let Some(x) = s[key].as_str() {
+                parts.push(x.to_string());
+            }
+        }
+        if let Some(b) = s["bits"].as_u64() {
+            parts.push(format!("{b} bits"));
+        }
+        if let Some(r) = s["sample_rate"].as_u64() {
+            parts.push(format!("{r} Hz"));
+        }
+        let color: Vec<String> = ["primaries", "transfer", "matrix", "range"]
+            .iter()
+            .filter_map(|k| s[*k].as_str().map(String::from))
+            .collect();
+        if !color.is_empty() {
+            parts.push(format!("color {}", color.join("/")));
+        }
+        println!(
+            "  #{} {}: {}{}",
+            s["index"],
+            text(&s["kind"]),
+            parts.join(", "),
+            rate(&s["bit_rate"])
+        );
+        for (k, t) in s["tags"].as_object().into_iter().flatten() {
+            println!("    {k}: {}", text(t));
+        }
     }
 }

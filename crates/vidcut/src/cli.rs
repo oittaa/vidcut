@@ -15,6 +15,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("media.add", &["paths"]),
     ("media.add_folder", &["path"]),
     ("media.get", &["media"]),
+    ("media.details", &["media"]),
     ("media.move", &["media"]),
     ("media.remove", &["media"]),
     ("media.relink", &["media", "path"]),

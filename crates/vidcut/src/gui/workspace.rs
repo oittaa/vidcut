@@ -115,6 +115,8 @@ pub struct Workspace {
     pub(super) shuttle: super::shuttle::Shuttle,
     pub(super) speech: super::speech::SpeechUi,
     pub(super) transcription: super::transcription::TranscriptionUi,
+    pub(super) clip_info: super::clip_info::ClipInfo,
+    pub(super) metadata_strip: bool,
 }
 
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
@@ -206,6 +208,8 @@ impl Workspace {
             shuttle: Default::default(),
             speech: Default::default(),
             transcription: Default::default(),
+            clip_info: Default::default(),
+            metadata_strip: super::pool::strip_kept(),
         }
     }
 
@@ -238,6 +242,8 @@ impl Workspace {
             GuiPanel::History => self.history.show(),
             GuiPanel::Transcription => self.transcription.open = true,
             GuiPanel::Titles => self.titles.open = true,
+            GuiPanel::Metadata => self.show_metadata_strip(true),
+            GuiPanel::ClipInfo => self.open_clip_info(None),
         }
     }
 
@@ -283,6 +289,8 @@ impl Workspace {
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
             GuiPanel::Titles => self.titles.open = false,
+            GuiPanel::Metadata => self.show_metadata_strip(false),
+            GuiPanel::ClipInfo => self.clip_info.open = false,
         }
     }
 
@@ -300,6 +308,8 @@ impl Workspace {
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
             (GuiPanel::Titles, self.titles.open),
+            (GuiPanel::Metadata, self.metadata_strip),
+            (GuiPanel::ClipInfo, self.clip_info.open),
         ];
         live::GuiState {
             edit: self.edit_point(),
@@ -1729,6 +1739,7 @@ impl Workspace {
         self.remove_media_window(&ctx);
         self.speech_window(&ctx);
         self.transcription_window(&ctx);
+        self.clip_info_window(&ctx);
         let panel = theme::colors().panel;
         egui::Panel::top("top").frame(theme::bar()).show(ui, |ui| {
             theme::decorated(ui, Deco::Bar, |ui| self.top_bar(ui))

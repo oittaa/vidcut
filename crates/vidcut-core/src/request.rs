@@ -97,6 +97,14 @@ pub enum Request {
     MediaList {},
     #[serde(rename = "media.get")]
     MediaGet { media: String },
+    /// What a pool item's file says about itself, read from it again: the
+    /// container's format, bit rate and tags (creation time, camera make and
+    /// model, encoder), and each stream's codec and profile, bit rate, pixel
+    /// format, bits, chroma subsampling, color tags, sample rate, channel
+    /// layout, language and tags. An image sequence answers for its first
+    /// picture.
+    #[serde(rename = "media.details")]
+    MediaDetails { media: String },
     /// Remove from the pool; `force` also deletes the clips that use it.
     #[serde(rename = "media.remove")]
     MediaRemove {
@@ -1703,8 +1711,10 @@ pub enum Request {
     GuiQuit {},
     /// Open a window for the person at the GUI: `quick_export`, `export`,
     /// `jobs`, `log`, `mixer`, `preferences`, `history` (the undo history),
-    /// `help` (the keyboard shortcuts) or `transcription` (the words of the
-    /// source clip or the timeline). Answers what `gui.state` does.
+    /// `help` (the keyboard shortcuts), `transcription` (the words of the
+    /// source clip or the timeline), `metadata` (the strip at the top of the
+    /// Media Pool) or `clip_info` (the media selected in the pool). Answers
+    /// what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
@@ -2130,6 +2140,12 @@ pub enum GuiPanel {
     /// The Transcription window: the words of the source clip or the
     /// timeline, from their media's transcripts.
     Transcription,
+    /// The metadata strip at the top of the Media Pool: the selected
+    /// media's format at a glance.
+    Metadata,
+    /// Clip Info: all that is known of the media selected in the pool, its
+    /// file read again (`media.details`).
+    ClipInfo,
     /// The Titles tab, in the Media Pool's place: the kinds of title to
     /// drag onto the timeline.
     Titles,
@@ -2455,6 +2471,7 @@ impl Request {
                     | Self::MediaTranscribe { .. }
                     | Self::MediaList {}
                     | Self::MediaGet { .. }
+                    | Self::MediaDetails { .. }
                     | Self::Probe { .. }
                     | Self::TimelineGet { .. }
                     | Self::TimelineAt { .. }
