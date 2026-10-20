@@ -17,6 +17,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("midnight", include_str!("../themes/midnight.toml")),
     ("studio", include_str!("../themes/studio.toml")),
     ("native", include_str!("../themes/native.toml")),
+    ("omarchy", include_str!("../themes/omarchy.toml")),
     ("native-dark", include_str!("../themes/native-dark.toml")),
     ("native-light", include_str!("../themes/native-light.toml")),
     ("classic", include_str!("../themes/classic.toml")),
@@ -188,7 +189,7 @@ fn to_hex(c: Color32) -> String {
     }
 }
 
-fn parse_color(text: &str) -> Option<Color32> {
+pub(crate) fn parse_color(text: &str) -> Option<Color32> {
     let digits = text.strip_prefix('#')?;
     if !matches!(digits.len(), 6 | 8) || !digits.is_ascii() {
         return None;
@@ -243,7 +244,13 @@ fn load_with(name: &str, look: &Look) -> Result<Theme> {
         Ok(text) => {
             parse(&text, name, look).map_err(|e| Error::usage(format!("{}: {e}", path.display())))
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => builtin(name, look),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let mut theme = builtin(name, look)?;
+            if name == "omarchy" {
+                crate::omarchy::apply(&mut theme);
+            }
+            Ok(theme)
+        }
         Err(e) => Err(Error::usage(format!("{}: {e}", path.display()))),
     }
 }
@@ -444,6 +451,20 @@ mod tests {
             (t.light, t.colors.panel),
             (true, Color32::from_rgb(0xFA, 0xFA, 0xFA))
         );
+    }
+
+    #[test]
+    fn the_omarchy_theme_is_tokyo_night_in_the_dark() {
+        let theme = builtin("omarchy", &DARK).unwrap();
+        let painted = crate::omarchy::palette(crate::omarchy::TOKYO_NIGHT, false).unwrap();
+        assert_eq!((theme.light, theme.colors), (painted.light, painted.colors));
+    }
+
+    #[test]
+    fn the_omarchy_theme_is_catppuccin_latte_in_the_light() {
+        let theme = builtin("omarchy", &LIGHT).unwrap();
+        let painted = crate::omarchy::palette(crate::omarchy::CATPPUCCIN_LATTE, false).unwrap();
+        assert_eq!((theme.light, theme.colors), (painted.light, painted.colors));
     }
 
     #[test]

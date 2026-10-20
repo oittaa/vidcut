@@ -503,6 +503,12 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let mut live = Live {
         _preferences: project::watch(&preferences, tx.clone(), || Msg::PreferencesChanged),
         _themes: project::watch_dir(&themes, tx.clone(), || Msg::PreferencesChanged),
+        _omarchy: {
+            let tx = tx.clone();
+            crate::omarchy::watch(move || {
+                let _ = tx.send(Msg::PreferencesChanged);
+            })
+        },
         theme,
         theme_error: theme_error.clone(),
         tx: tx.clone(),
@@ -758,6 +764,7 @@ struct Live {
     rx: Receiver<Msg>,
     _preferences: Option<notify::RecommendedWatcher>,
     _themes: Option<notify::RecommendedWatcher>,
+    _omarchy: Option<notify::RecommendedWatcher>,
     theme: Arc<crate::themes::Theme>,
     theme_error: Option<String>,
     shared: Arc<Mutex<Arc<Snapshot>>>,

@@ -123,7 +123,7 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 
 ## X22. Themes
 - **Resolve:** none: one dark gray look.
-- **vidcut:** nine built-in themes and your own TOML files. Native, the default, follows the computer's light or dark mode and accent color; Classic is a flat dark gray like the Cut page's. Preferences or `preferences set appearance.theme=…` switch at once.
+- **vidcut:** ten built-in themes and your own TOML files. Native, the default, follows the computer's light or dark mode and accent color; Omarchy follows that desktop's current theme; Classic is a flat dark gray like the Cut page's. Preferences or `preferences set appearance.theme=…` switch at once.
 - **Why:** a desktop app is expected to offer a few looks for long sessions. Every theme keeps the Cut page's layout and what its colors mean.
 
 ## X23. A Keyboard Shortcuts window
