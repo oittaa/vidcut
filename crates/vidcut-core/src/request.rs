@@ -4,6 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::export::{EncoderChoice, ExportSettings};
+use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle, TrackClip};
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -808,7 +809,7 @@ pub enum Request {
     },
     /// Track header toggles (lock, mute, video on or off) and the mixer (solo,
     /// volume in dB). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
-    /// `language` and `style`.
+    /// `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
     TrackSet {
         track: String,
@@ -850,6 +851,10 @@ pub enum Request {
         /// how large it starts, from 1 to 2.
         #[serde(default)]
         style: Option<SubtitleStyle>,
+        /// A subtitle look's name, built in or yours (`looks.list`), whose
+        /// style replaces the track's. Not with `style`.
+        #[serde(default)]
+        look: Option<String>,
     },
     /// Enable/disable video (D), mute, gain (dB, -60..24), name and Clip
     /// Color.
@@ -1092,13 +1097,15 @@ pub enum Request {
         /// else the highest one, or a new one when there is none.
         #[serde(default)]
         track: Option<String>,
-        /// A look for the track, which sets its style and the usual
-        /// `chars` and `lines`: `pop`, the spoken word yellow and popping,
-        /// in bold capitals, 20 characters on one line; `highlight`, the
-        /// spoken word yellow; `reveal`, each word shown as it is spoken;
-        /// `word`, only the spoken word, large; `plain`, the usual style.
+        /// A subtitle look's name, built in or yours (`looks.list`), which
+        /// sets the track's style and the usual `chars` and `lines`. Built
+        /// in: `Pop`, the spoken word yellow and popping, in bold capitals,
+        /// 20 characters on one line; `Highlight`, the spoken word yellow;
+        /// `Reveal`, each word shown as it is spoken; `Word`, only the
+        /// spoken word, large; `Plain`, the usual style. Names match
+        /// whatever their case.
         #[serde(default)]
-        look: Option<SubtitleLook>,
+        look: Option<String>,
         /// Characters per line, 1 to 60. Default: `look`'s, else 42.
         #[serde(default)]
         chars: Option<u32>,
@@ -1265,6 +1272,11 @@ pub enum Request {
         /// How opaque the whole title is, from 0 to 1. Default: 1.
         #[serde(default)]
         opacity: Option<f64>,
+        /// A title look's name, built in or yours (`looks.list`): the title
+        /// starts from its kind, align, style, place, zoom, rotation and
+        /// opacity, and the fields given go on top.
+        #[serde(default)]
+        look: Option<String>,
         #[serde(default)]
         at: Option<TimeSpec>,
         #[serde(default)]
@@ -1275,7 +1287,8 @@ pub enum Request {
     /// Change a title clip (`c3`, or `V2@15s` for the clip on V2 at 15 s):
     /// each field given replaces its own. A `style` replaces the whole
     /// style, a field left out going back to the usual look. Switching to
-    /// `text` drops the `align`. Moves and trims are `edit.*`'s.
+    /// `text` drops the `align`. A `look` replaces all but the text, and the
+    /// other fields given go on top. Moves and trims are `edit.*`'s.
     #[serde(rename = "titles.set")]
     TitlesSet {
         clip: ClipRef,
@@ -1301,6 +1314,9 @@ pub enum Request {
         /// How opaque the whole title is, from 0 to 1.
         #[serde(default)]
         opacity: Option<f64>,
+        /// A title look's name, built in or yours (`looks.list`).
+        #[serde(default)]
+        look: Option<String>,
     },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.
@@ -1374,6 +1390,37 @@ pub enum Request {
     /// Delete a user preset.
     #[serde(rename = "presets.delete")]
     PresetsDelete { name: String },
+    /// Looks: named styles for subtitle tracks and titles, built in and
+    /// yours, `kind`'s only if given. A look file that can't be read is left
+    /// out and listed in `refused` with why.
+    #[serde(rename = "looks.list")]
+    LooksList {
+        #[serde(default)]
+        kind: Option<LookKind>,
+    },
+    /// Save one of your looks (`~/.config/vidcut/looks/subtitles/NAME.toml`
+    /// or `looks/titles/NAME.toml`, on Windows in `%APPDATA%\vidcut`, on
+    /// macOS in `~/Library/Application Support/vidcut`): `subtitles`, a
+    /// track's `style` with the `chars` and `lines` Create Subtitles from
+    /// Audio uses, or `titles`, a title's `kind`, `align`, `style`,
+    /// `position`, `zoom`, `rotation` and `opacity`, without its text, as
+    /// `titles.add` takes them. Built-in looks can't be replaced.
+    #[serde(rename = "looks.save")]
+    LooksSave {
+        /// Up to 64 characters, without `/ \ : * ? " < > |`; names match
+        /// whatever their case.
+        name: String,
+        #[serde(default)]
+        subtitles: Option<SubtitleLook>,
+        #[serde(default)]
+        titles: Option<TitleLook>,
+        /// Replace your look of that name.
+        #[serde(default)]
+        overwrite: bool,
+    },
+    /// Delete one of your looks. Built-in looks can't be deleted.
+    #[serde(rename = "looks.delete")]
+    LooksDelete { kind: LookKind, name: String },
     /// Which GPU encoders work here (cached; `refresh` re-tests).
     #[serde(rename = "encoders.list")]
     EncodersList {
@@ -1818,9 +1865,9 @@ pub enum Request {
     /// `--dry-run` lists what would go.
     #[serde(rename = "reset")]
     Reset {
-        /// Also delete your presets and themes.
+        /// Also delete what you saved: presets, themes and looks.
         #[serde(default)]
-        presets_and_themes: bool,
+        saved: bool,
     },
 }
 
@@ -1876,17 +1923,6 @@ pub struct ExportParams {
     /// The subtitle files' format. Default: SRT.
     #[serde(default)]
     pub subtitle_format: Option<SubtitleFormat>,
-}
-
-/// A subtitle track's look from `subtitles.transcribe`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum SubtitleLook {
-    Plain,
-    Pop,
-    Highlight,
-    Reveal,
-    Word,
 }
 
 /// How subtitle tracks go out with an export.
@@ -2444,6 +2480,9 @@ impl Request {
                 | Self::PresetsGet { .. }
                 | Self::PresetsSave { .. }
                 | Self::PresetsDelete { .. }
+                | Self::LooksList { .. }
+                | Self::LooksSave { .. }
+                | Self::LooksDelete { .. }
                 | Self::EncodersList { .. }
                 | Self::DecodersList {}
                 | Self::PreferencesGet {}
@@ -2493,6 +2532,9 @@ impl Request {
                     | Self::PresetsGet { .. }
                     | Self::PresetsSave { .. }
                     | Self::PresetsDelete { .. }
+                    | Self::LooksList { .. }
+                    | Self::LooksSave { .. }
+                    | Self::LooksDelete { .. }
                     | Self::EncodersList { .. }
                     | Self::DecodersList {}
                     | Self::PreferencesGet {}

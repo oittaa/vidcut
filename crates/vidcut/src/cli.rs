@@ -126,6 +126,10 @@ const GROUPS: &[(&str, &str)] = &[
         "Export, proxy and transcription jobs of the running GUI",
     ),
     ("keys", "Keyboard shortcuts"),
+    (
+        "looks",
+        "Looks: named styles for subtitle tracks and titles, built-in and your own",
+    ),
     ("markers", "Timeline markers"),
     ("marks", "Timeline In and Out marks"),
     ("media", "The Media Pool"),

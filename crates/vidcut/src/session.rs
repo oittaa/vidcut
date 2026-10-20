@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Value, json};
 use vidcut_av::export::Progress;
+use vidcut_core::looks;
 use vidcut_core::model::Format;
 use vidcut_core::store::{Store, state_dir};
 use vidcut_core::{Editor, Envelope, Error, ErrorCode, Project, Request, Response, Result};
@@ -29,6 +30,21 @@ fn shortcuts() -> Value {
     json!({ "shortcuts": list })
 }
 use crate::export;
+
+fn list_looks(kind: Option<looks::LookKind>) -> Value {
+    let (mut found, mut refused) = (Vec::new(), Vec::new());
+    for k in kind.map_or(looks::LookKind::ALL.to_vec(), |k| vec![k]) {
+        let listing = looks::all(&AvEnv::new(), k);
+        found.extend(listing.looks.iter().map(looks::Look::json));
+        refused.extend(
+            listing
+                .refused
+                .iter()
+                .map(|r| json!({ "kind": k, "name": r.name, "path": r.path, "why": r.why })),
+        );
+    }
+    json!({ "looks": found, "refused": refused })
+}
 
 pub struct Hooks<'a> {
     pub cancel: &'a Arc<AtomicBool>,
@@ -69,9 +85,7 @@ pub fn run_with(
     let mut response = match &envelope.request {
         Request::Schema { method } => answer(schema(method.as_deref())?),
         Request::Doctor {} => answer(doctor()),
-        Request::Reset { presets_and_themes } => {
-            answer(crate::reset::run(*presets_and_themes, envelope.dry_run)?)
-        }
+        Request::Reset { saved } => answer(crate::reset::run(*saved, envelope.dry_run)?),
         Request::ProjectCreate {
             path,
             from,
@@ -160,6 +174,30 @@ pub fn run_with(
             dry_run: envelope.dry_run,
         })?),
         Request::PresetsDelete { name } => answer(export::delete_preset(name, envelope.dry_run)?),
+        Request::LooksList { kind } => answer(list_looks(*kind)),
+        Request::LooksSave {
+            name,
+            subtitles,
+            titles,
+            overwrite,
+        } => {
+            let styled = match (subtitles, titles) {
+                (Some(s), None) => looks::Styled::Subtitles(s.clone()),
+                (None, Some(t)) => looks::Styled::Titles(t.clone()),
+                _ => {
+                    return Err(Error::usage(
+                        "looks.save needs exactly one of `subtitles` and `titles`",
+                    ));
+                }
+            };
+            let (look, path) =
+                looks::save(&looks::dir(), name, &styled, *overwrite, envelope.dry_run)?;
+            answer(json!({ "look": look.json(), "path": path }))
+        }
+        Request::LooksDelete { kind, name } => {
+            let path = looks::delete(&looks::dir(), *kind, name, envelope.dry_run)?;
+            answer(json!({ "deleted": name.trim(), "kind": kind, "path": path }))
+        }
         Request::EncodersList { refresh } => {
             let detected = export::detected(*refresh);
             let mut answer_json = json!(detected);

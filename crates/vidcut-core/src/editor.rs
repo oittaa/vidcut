@@ -198,6 +198,11 @@ pub trait Env {
         None
     }
 
+    fn looks(&self, kind: crate::looks::LookKind) -> crate::looks::Listing {
+        let _ = kind;
+        crate::looks::Listing::default()
+    }
+
     fn remove_proxy_file(&self, path: &Path) -> Result<()> {
         match std::fs::remove_file(path) {
             Ok(()) => Ok(()),
@@ -2864,11 +2869,18 @@ fn mutate(
             shown,
             language,
             style,
+            look,
             muted: None,
             solo: None,
             volume_db: None,
             video_enabled: None,
         } if track.starts_with('S') => {
+            let style = match (style, look) {
+                (Some(_), Some(_)) => return Err(Error::usage("give style or look, not both")),
+                (Some(s), None) => Some(ops::subtitles::checked_style(s)?),
+                (None, Some(l)) => Some(crate::looks::subtitle_look(env, l)?.style),
+                (None, None) => None,
+            };
             let props = ops::subtitles::TrackProps {
                 locked: *locked,
                 name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
@@ -2876,26 +2888,25 @@ fn mutate(
                 language: language
                     .as_ref()
                     .map(|l| (!l.trim().is_empty()).then(|| l.trim().to_string())),
-                style: style
-                    .as_ref()
-                    .map(ops::subtitles::checked_style)
-                    .transpose()?,
+                style,
             };
             ops::subtitles::set_track(p, track, &props)?;
             Value::Null
         }
         Request::TrackSet { track, .. } if track.starts_with('S') => {
             return Err(Error::usage(
-                "a subtitle track takes locked, name, shown, language and style",
+                "a subtitle track takes locked, name, shown, language, style and look",
             ));
         }
         Request::TrackSet { shown: Some(_), .. }
         | Request::TrackSet {
             language: Some(_), ..
         }
-        | Request::TrackSet { style: Some(_), .. } => {
+        | Request::TrackSet { style: Some(_), .. }
+        | Request::TrackSet { look: Some(_), .. } => {
             return Err(Error::usage(
-                "shown, language and style are a subtitle track's",
+                "shown, language, style and look are a subtitle track's; a title takes a look \
+                 with titles.set",
             ));
         }
         Request::TrackSet {
@@ -2990,6 +3001,7 @@ fn mutate(
             zoom,
             rotation,
             opacity,
+            look,
             at,
             duration,
             track,
@@ -3002,16 +3014,24 @@ fn mutate(
                 Some(d) => length(p, d)?,
                 None => ops::titles::default_length(p),
             };
-            let title = Title {
-                kind: kind.unwrap_or_default(),
-                align: *align,
-                text: text.clone(),
-                style: style.clone().unwrap_or_default(),
-                position: *position,
-                zoom: *zoom,
-                rotation: *rotation,
-                opacity: *opacity,
+            let base = match look {
+                Some(l) => crate::looks::title_look(env, l)?.on(text),
+                None => Title::new(text.clone()),
             };
+            let title = ops::titles::changed(
+                &base,
+                &ops::titles::TitleChange {
+                    text: None,
+                    kind: *kind,
+                    align: *align,
+                    style: style.clone(),
+                    position: position.map(Some),
+                    zoom: *zoom,
+                    rotation: *rotation,
+                    opacity: *opacity,
+                    look: None,
+                },
+            );
             let (id, track) = ops::titles::add(p, track.as_deref(), start, frames, &title)?;
             json!({ "clip": id, "track": track })
         }
@@ -3025,6 +3045,7 @@ fn mutate(
             zoom,
             rotation,
             opacity,
+            look,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
             let change = ops::titles::TitleChange {
@@ -3036,6 +3057,10 @@ fn mutate(
                 zoom: *zoom,
                 rotation: *rotation,
                 opacity: *opacity,
+                look: look
+                    .as_deref()
+                    .map(|l| crate::looks::title_look(env, l))
+                    .transpose()?,
             };
             ops::titles::set(p, &id, &change)?;
             Value::Null
@@ -3163,10 +3188,15 @@ fn mutate(
             hear,
             download,
         } => {
-            let looked = look.map(ops::subtitles::look);
-            let chars = &chars.or(looked.as_ref().map(|l| l.1)).unwrap_or(42);
-            let lines = &lines.or(looked.as_ref().map(|l| l.2)).unwrap_or(1);
-            let style = looked.map(|l| l.0);
+            let looked = look
+                .as_deref()
+                .map(|l| crate::looks::subtitle_look(env, l))
+                .transpose()?;
+            let chars = &chars
+                .or(looked.as_ref().and_then(|l| l.chars))
+                .unwrap_or(42);
+            let lines = &lines.or(looked.as_ref().and_then(|l| l.lines)).unwrap_or(1);
+            let style = looked.map(|l| l.style);
             if !(1..=60).contains(chars) {
                 return Err(Error::usage("chars: 1 to 60 characters per line"));
             }
@@ -5752,6 +5782,9 @@ pub fn query(
         | Request::PresetsGet { .. }
         | Request::PresetsSave { .. }
         | Request::PresetsDelete { .. }
+        | Request::LooksList { .. }
+        | Request::LooksSave { .. }
+        | Request::LooksDelete { .. }
         | Request::EncodersList { .. }
         | Request::DecodersList {} => {
             return Err(Error::internal(format!(

@@ -5,6 +5,7 @@ use eframe::egui::{
     StrokeKind, pos2, vec2,
 };
 use serde_json::{Value, json};
+use vidcut_core::looks::{LookKind, Styled};
 use vidcut_core::model::{Cue, Place, Project, SubtitleTrack};
 use vidcut_core::ops::Edge;
 
@@ -528,6 +529,32 @@ impl Workspace {
             self.time_words(track);
             ui.close();
         }
+        let style = self
+            .project()
+            .and_then(|p| p.subtitle_track(track))
+            .map(|t| t.style.clone());
+        let looks = self.looks.of(LookKind::Subtitles).to_vec();
+        ui.menu_button("Apply Look", |ui| {
+            for (i, l) in looks.iter().enumerate() {
+                let Styled::Subtitles(s) = &l.styled else {
+                    continue;
+                };
+                if i > 0 && looks[i - 1].built_in && !l.built_in {
+                    ui.separator();
+                }
+                let r = ui.selectable_label(style.as_ref() == Some(&s.style), &l.name);
+                let r = match l.description {
+                    "" => r,
+                    d => r.on_hover_text(d),
+                };
+                if r.clicked() {
+                    self.send("track.set", json!({ "track": track, "look": l.name }));
+                    ui.close();
+                }
+            }
+        })
+        .response
+        .on_hover_text("This track's style from a look; Name and Style… saves your own");
     }
 
     fn send_all(&self, commands: Vec<Value>, label: &str) {
@@ -638,8 +665,8 @@ impl Workspace {
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         let tip = match &t.language {
-            Some(l) => format!("{}, {l}: double-click to rename", t.id),
-            None => format!("{}: double-click to rename", t.id),
+            Some(l) => format!("{}, {l}: double-click for its name and style", t.id),
+            None => format!("{}: double-click for its name and style", t.id),
         };
         let r = name
             .add(
@@ -652,7 +679,7 @@ impl Workspace {
         }
         r.context_menu(|ui| {
             self.subtitle_track_items(ui, &t.id);
-            if ui.button("Rename Track…").clicked() {
+            if ui.button("Name and Style…").clicked() {
                 self.open_track_dialog(t);
                 ui.close();
             }

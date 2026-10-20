@@ -19,7 +19,7 @@ impl Dirs {
     }
 }
 
-pub fn run(presets_and_themes: bool, dry_run: bool) -> Result<Value> {
+pub fn run(saved: bool, dry_run: bool) -> Result<Value> {
     let running = crate::ipc::registry::list();
     if let Some(other) = running.iter().find(|i| i.pid != std::process::id()) {
         return Err(Error::conflict(format!(
@@ -35,8 +35,8 @@ pub fn run(presets_and_themes: bool, dry_run: bool) -> Result<Value> {
         .filter_map(|p| vidcut_core::store::Store::open(&p).ok())
         .map(|s| s.history_path().to_path_buf())
         .collect();
-    if !presets_and_themes {
-        keep.extend([dirs.config.join("presets"), dirs.config.join("themes")]);
+    if !saved {
+        keep.extend(["presets", "themes", "looks"].map(|d| dirs.config.join(d)));
     }
     if let Ok(p) = crate::preferences::load()
         && p.proxies.folder.is_absolute()

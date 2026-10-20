@@ -2,14 +2,15 @@ use std::path::PathBuf;
 
 use eframe::egui::{self, Key};
 use serde_json::json;
+use vidcut_core::looks::{LookKind, Styled, SubtitleLook};
 use vidcut_core::model::{
-    LetterCase, Place, SubtitleBackground, SubtitleOutline, SubtitleStyle, SubtitleTrack,
-    SubtitleWords, WordsShow,
+    LetterCase, Place, SubtitleStyle, SubtitleTrack, SubtitleWords, WordsShow,
 };
 
 use super::export::{Ask, Picked};
 use super::folders::Kind;
 use super::keys;
+use super::looks::{Parts, Picker, TextFields};
 use super::workspace::{Workspace, dim};
 
 #[derive(Debug, Clone)]
@@ -21,29 +22,41 @@ pub struct CueDialog {
     focus: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TrackDialog {
     track: String,
     name: String,
     language: String,
     hint: String,
-    font: String,
-    size: String,
-    color: String,
-    outline: String,
-    outline_size: String,
-    background: String,
-    opacity: String,
+    fields: TextFields,
     margin: String,
     bold: bool,
     case: Option<LetterCase>,
-    shadow: bool,
     show: Option<WordsShow>,
     spoken: String,
     pop: String,
+    base: SubtitleStyle,
     error: String,
     families: Vec<String>,
     preview: Option<SubtitleStyle>,
+    picker: Picker,
+}
+
+impl TrackDialog {
+    fn load(&mut self, s: &SubtitleStyle) {
+        self.fields = TextFields::load(&Parts::of_subtitles(s));
+        self.margin = percent(s.margin);
+        self.bold = s.bold == Some(true);
+        self.case = s.case;
+        self.show = s.words.as_ref().map(|w| w.show.unwrap_or_default());
+        self.spoken = s
+            .words
+            .as_ref()
+            .and_then(|w| w.color.clone())
+            .unwrap_or_default();
+        self.pop = percent(s.words.as_ref().and_then(|w| w.pop));
+        self.base = s.clone();
+    }
 }
 
 const CASES: [(Option<LetterCase>, &str); 3] = [
@@ -136,25 +149,9 @@ pub(super) fn kept_number(
     }
 }
 
-fn style_of(d: &TrackDialog, stored: &SubtitleStyle) -> Result<SubtitleStyle, String> {
-    let background = match field(&d.background) {
-        Some(color) => Some(SubtitleBackground {
-            color,
-            opacity: kept_number(
-                &d.opacity,
-                stored.background.as_ref().and_then(|b| b.opacity),
-                "opacity",
-            )?,
-        }),
-        None if d.opacity.trim().is_empty() => None,
-        None => return Err("a background needs a color".into()),
-    };
-    let outline_color = field(&d.outline);
-    let outline_size = kept_number(
-        &d.outline_size,
-        stored.outline.as_ref().and_then(|o| o.size),
-        "outline size",
-    )?;
+fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
+    let stored = &d.base;
+    let parts = d.fields.parts(&Parts::of_subtitles(stored))?;
     let words = match d.show {
         Some(show) => Some(SubtitleWords {
             show: Some(show),
@@ -164,18 +161,15 @@ fn style_of(d: &TrackDialog, stored: &SubtitleStyle) -> Result<SubtitleStyle, St
         None => None,
     };
     let style = SubtitleStyle {
-        font: field(&d.font),
-        size: kept_number(&d.size, stored.size, "size")?,
-        color: field(&d.color),
-        outline: (outline_color.is_some() || outline_size.is_some()).then_some(SubtitleOutline {
-            color: outline_color,
-            size: outline_size,
-        }),
-        background,
+        font: parts.font,
+        size: parts.size,
+        color: parts.color,
+        outline: parts.outline,
+        background: parts.background,
         margin: kept_number(&d.margin, stored.margin, "margin")?,
         bold: d.bold.then_some(true),
         case: d.case,
-        shadow: d.shadow.then(|| stored.shadow.clone().unwrap_or_default()),
+        shadow: parts.shadow,
         words,
     };
     vidcut_core::ops::subtitles::checked_style(&style).map_err(|e| e.message)
@@ -264,42 +258,36 @@ impl Workspace {
     }
 
     pub(crate) fn open_track_dialog(&mut self, t: &SubtitleTrack) {
-        let s = &t.style;
-        self.timeline.track_dialog = Some(TrackDialog {
+        self.looks.reread();
+        let styled = Styled::Subtitles(SubtitleLook {
+            style: t.style.clone(),
+            ..SubtitleLook::default()
+        });
+        let picker = Picker::new(
+            LookKind::Subtitles,
+            self.looks.of(LookKind::Subtitles),
+            &styled,
+        );
+        let mut d = TrackDialog {
             track: t.id.clone(),
             name: t.name.clone().unwrap_or_default(),
             language: t.language.clone().unwrap_or_default(),
             hint: t.display_name(),
-            font: s.font.clone().unwrap_or_default(),
-            size: percent(s.size),
-            color: s.color.clone().unwrap_or_default(),
-            outline: s
-                .outline
-                .as_ref()
-                .and_then(|o| o.color.clone())
-                .unwrap_or_default(),
-            outline_size: percent(s.outline.as_ref().and_then(|o| o.size)),
-            background: s
-                .background
-                .as_ref()
-                .map(|b| b.color.clone())
-                .unwrap_or_default(),
-            opacity: percent(s.background.as_ref().and_then(|b| b.opacity)),
-            margin: percent(s.margin),
-            bold: s.bold == Some(true),
-            case: s.case,
-            shadow: s.shadow.is_some(),
-            show: s.words.as_ref().map(|w| w.show.unwrap_or_default()),
-            spoken: s
-                .words
-                .as_ref()
-                .and_then(|w| w.color.clone())
-                .unwrap_or_default(),
-            pop: percent(s.words.as_ref().and_then(|w| w.pop)),
+            fields: TextFields::default(),
+            margin: String::new(),
+            bold: false,
+            case: None,
+            show: None,
+            spoken: String::new(),
+            pop: String::new(),
+            base: SubtitleStyle::default(),
             error: String::new(),
             families: vidcut_av::burn::families(),
             preview: None,
-        });
+            picker,
+        };
+        d.load(&t.style);
+        self.timeline.track_dialog = Some(d);
     }
 
     pub(super) fn sync_subtitles(&mut self) {
@@ -489,7 +477,22 @@ impl Workspace {
                 ui.label(dim("Exported subtitle files are named with these"));
                 ui.add_space(8.0);
                 let mut changed = false;
+                let current = style_of(&d).map(|style| {
+                    Styled::Subtitles(SubtitleLook {
+                        style,
+                        ..SubtitleLook::default()
+                    })
+                });
+                if let Some(Styled::Subtitles(l)) = self.look_picker(ui, &mut d.picker, current) {
+                    d.load(&l.style);
+                    changed = true;
+                }
                 egui::Grid::new("subtitle-style-fields").show(ui, |ui| {
+                    let (c, e) = d
+                        .fields
+                        .rows(ui, "subtitle", &d.families, "5.5% of the picture");
+                    changed |= c;
+                    enter |= e;
                     let mut row =
                         |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
                             ui.label(label);
@@ -501,30 +504,11 @@ impl Workspace {
                             enter |= r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                             r.changed()
                         };
-                    changed |= row(ui, "Font", &mut d.font, "Open Sans");
-                    changed |= font_list(ui, "subtitle-font", &mut d.font, &d.families);
-                    ui.end_row();
-                    changed |= row(ui, "Size", &mut d.size, "5.5% of the picture");
-                    ui.end_row();
-                    changed |= row(ui, "Color", &mut d.color, "#ffffff");
-                    changed |= swatch(ui, &mut d.color, [255, 255, 255]);
-                    ui.end_row();
-                    changed |= row(ui, "Outline", &mut d.outline, "#000000");
-                    changed |= swatch(ui, &mut d.outline, [0, 0, 0]);
-                    ui.end_row();
-                    changed |= row(ui, "Outline size", &mut d.outline_size, "5% of the text");
-                    ui.end_row();
-                    changed |= row(ui, "Background", &mut d.background, "none");
-                    changed |= swatch(ui, &mut d.background, [0, 0, 0]);
-                    ui.end_row();
-                    changed |= row(ui, "Opacity", &mut d.opacity, "100%");
-                    ui.end_row();
                     changed |= row(ui, "Margin", &mut d.margin, "none: centered at 80% or 20%");
                     ui.end_row();
                     ui.label("Letters");
                     ui.horizontal(|ui| {
                         changed |= ui.checkbox(&mut d.bold, "Bold").changed();
-                        changed |= ui.checkbox(&mut d.shadow, "Shadow").changed();
                         for (case, label) in CASES {
                             changed |= ui.radio_value(&mut d.case, case, label).changed();
                         }
@@ -558,7 +542,7 @@ impl Workspace {
                     }
                 });
                 if changed {
-                    d.preview = style_of(&d, &t.style).ok();
+                    d.preview = style_of(&d).ok();
                 }
                 ui.label(dim(
                     "Burned in, and written to an IMSC1 file. An empty field keeps the usual look",
@@ -575,7 +559,7 @@ impl Workspace {
                         if d.language.trim() != t.language.as_deref().unwrap_or_default() {
                             params["language"] = json!(d.language.trim());
                         }
-                        match style_of(&d, &t.style) {
+                        match style_of(&d) {
                             Ok(style) => {
                                 if style != t.style {
                                     params["style"] =
