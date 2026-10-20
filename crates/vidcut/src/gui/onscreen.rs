@@ -1,4 +1,4 @@
-use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2, pos2, vec2};
+use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use serde_json::{Value, json};
 use vidcut_core::model::{Project, Title, TitleKind, TrackKind};
 use vidcut_core::render::Run;
@@ -48,7 +48,7 @@ struct Shown {
 }
 
 impl Shown {
-    fn inside(&self, p: Pos2) -> bool {
+    fn within(&self, p: Pos2, margin: f32) -> bool {
         let (sin, cos) = self.angle.sin_cos();
         let d = p - self.pivot;
         let back = self.pivot + vec2(d.x * cos - d.y * sin, d.x * sin + d.y * cos);
@@ -56,17 +56,42 @@ impl Shown {
             let d = q - self.pivot;
             self.pivot + vec2(d.x * cos - d.y * sin, d.x * sin + d.y * cos)
         };
-        let r = Rect::from_points(&self.corners.map(upright)).expand(GRAB);
+        let r = Rect::from_points(&self.corners.map(upright)).expand(margin);
         r.contains(back)
     }
 
-    fn corner(&self, p: Pos2) -> bool {
-        self.title.kind != TitleKind::Scroll
-            && self.corners.iter().any(|c| c.distance(p) <= GRAB * 1.6)
+    fn inside(&self, p: Pos2) -> bool {
+        self.within(p, GRAB)
     }
 
-    fn turner(&self, p: Pos2) -> bool {
-        self.title.kind != TitleKind::Scroll && self.turn_at.distance(p) <= GRAB * 1.6
+    fn near(&self, p: Pos2) -> bool {
+        self.within(p, LIFT + GRAB * 1.6)
+    }
+
+    fn grip(&self, p: Pos2) -> Option<Hold> {
+        let handles = self.title.kind != TitleKind::Scroll;
+        if handles && self.turn_at.distance(p) <= GRAB * 1.6 {
+            Some(Hold::Turn)
+        } else if handles && self.corners.iter().any(|c| c.distance(p) <= GRAB * 1.6) {
+            Some(Hold::Zoom)
+        } else {
+            self.inside(p).then_some(Hold::Move)
+        }
+    }
+
+    fn cursor(&self, hold: Hold, p: Pos2) -> CursorIcon {
+        match hold {
+            Hold::Move => CursorIcon::Move,
+            Hold::Turn => CursorIcon::PointingHand,
+            Hold::Zoom => {
+                let d = p - self.corners[0].lerp(self.corners[2], 0.5);
+                if d.x * d.y > 0.0 {
+                    CursorIcon::ResizeNwSe
+                } else {
+                    CursorIcon::ResizeNeSw
+                }
+            }
+        }
     }
 }
 
@@ -316,39 +341,39 @@ impl Workspace {
         let pointer = ui.input(|i| i.pointer.hover_pos());
         let (shift, free) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
         let selected = self.timeline.title_grab.selected.clone();
-        let chosen = selected
-            .as_ref()
-            .and_then(|id| shapes.iter().find(|s| &s.clip == id));
+        let grip = |p: Pos2| {
+            shapes
+                .iter()
+                .filter(|s| Some(&s.clip) == selected.as_ref())
+                .chain(&shapes)
+                .find_map(|s| Some((s, s.grip(p)?)))
+        };
+        let cursor = match &self.timeline.title_grab.held {
+            Some(h) => shapes
+                .iter()
+                .find(|s| s.clip == h.clip)
+                .zip(pointer)
+                .map(|(s, p)| s.cursor(h.hold, p)),
+            None => pointer
+                .filter(|_| resp.hovered())
+                .and_then(|p| grip(p).map(|(s, hold)| s.cursor(hold, p))),
+        };
+        if let Some(c) = cursor {
+            ui.ctx().set_cursor_icon(c);
+        }
         if resp.drag_started()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
+            && let Some((s, hold)) = grip(press)
         {
-            let grabbed = chosen
-                .and_then(|s| {
-                    if s.turner(press) {
-                        Some((s, Hold::Turn))
-                    } else if s.corner(press) {
-                        Some((s, Hold::Zoom))
-                    } else {
-                        None
-                    }
-                })
-                .or_else(|| {
-                    shapes
-                        .iter()
-                        .find(|s| s.inside(press))
-                        .map(|s| (s, Hold::Move))
-                });
-            if let Some((s, hold)) = grabbed {
-                self.timeline.title_grab.selected = Some(s.clip.clone());
-                self.timeline.title_grab.held = Some(Held {
-                    clip: s.clip.clone(),
-                    hold,
-                    from: press,
-                    title: s.title.clone(),
-                    now: s.title.clone(),
-                    guides: (None, None),
-                });
-            }
+            self.timeline.title_grab.selected = Some(s.clip.clone());
+            self.timeline.title_grab.held = Some(Held {
+                clip: s.clip.clone(),
+                hold,
+                from: press,
+                title: s.title.clone(),
+                now: s.title.clone(),
+                guides: (None, None),
+            });
         }
         if let (Some(held), Some(to)) = (self.timeline.title_grab.held.clone(), pointer)
             && resp.dragged()
@@ -381,6 +406,19 @@ impl Workspace {
         {
             self.open_title(&id);
         }
+        if let Some(h) = &self.timeline.title_grab.held
+            && h.hold == Hold::Zoom
+        {
+            let zoom = format!("{:.0}%", h.now.scale() * 100.0);
+            egui::Tooltip::always_open(
+                ui.ctx().clone(),
+                ui.layer_id(),
+                resp.id,
+                egui::PopupAnchor::Pointer,
+            )
+            .gap(12.0)
+            .show(|ui| ui.label(zoom));
+        }
         self.sync_title_preview();
         self.paint_title_controls(ui, picture, &shapes, pointer);
     }
@@ -398,7 +436,7 @@ impl Workspace {
         let held = self.timeline.title_grab.held.as_ref();
         for s in shapes {
             let chosen = Some(s.clip.as_str()) == selected;
-            let hovered = pointer.is_some_and(|p| s.inside(p));
+            let hovered = pointer.is_some_and(|p| s.near(p));
             if !chosen && !hovered {
                 continue;
             }
@@ -406,7 +444,7 @@ impl Workspace {
             for i in 0..4 {
                 painter.line_segment([s.corners[i], s.corners[(i + 1) % 4]], stroke);
             }
-            if chosen && s.title.kind != TitleKind::Scroll {
+            if s.title.kind != TitleKind::Scroll {
                 for c in s.corners {
                     painter.rect_filled(
                         Rect::from_center_size(c, Vec2::splat(GRAB * 1.4)),
