@@ -70,6 +70,40 @@ pub fn sniff(source: &str) -> Option<SubtitleFormat> {
     }
 }
 
+pub fn is_file(path: &Path) -> bool {
+    format_of(path).is_some()
+}
+
+pub fn pool_item(
+    bytes: &[u8],
+    path: &Path,
+) -> Result<(crate::model::MediaInfo, crate::model::SubtitleFile)> {
+    let (read, format, encoding) = parse(bytes, path)?;
+    let first = read
+        .cues
+        .iter()
+        .min_by(|a, b| a.start.total_cmp(&b.start))
+        .ok_or_else(|| Error::invalid(format!("{}: no cues", path.display())))?;
+    let end = read.cues.iter().map(|c| c.end).fold(first.end, f64::max);
+    let info = crate::model::MediaInfo {
+        format: extension(format).to_string(),
+        duration: end,
+        start_time: first.start,
+        video: None,
+        audio: Vec::new(),
+        timecode: None,
+    };
+    let file = crate::model::SubtitleFile {
+        format,
+        encoding: encoding.name().to_string(),
+        cues: read.cues.len(),
+        language: read.language.clone(),
+        first: plain(&first.text),
+        warnings: read.warnings.clone(),
+    };
+    Ok((info, file))
+}
+
 pub fn parse(bytes: &[u8], path: &Path) -> Result<(Read, SubtitleFormat, Encoding)> {
     let (source, encoding) = text::decode(bytes);
     let format = sniff(&source).or_else(|| format_of(path)).ok_or_else(|| {

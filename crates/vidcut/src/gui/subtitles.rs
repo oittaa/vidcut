@@ -42,9 +42,18 @@ pub struct TrackDialog {
     preview: Option<SubtitleStyle>,
 }
 
+pub(super) fn format_name(f: vidcut_core::request::SubtitleFormat) -> &'static str {
+    match f {
+        vidcut_core::request::SubtitleFormat::Srt => "SRT",
+        vidcut_core::request::SubtitleFormat::Vtt => "WebVTT",
+        vidcut_core::request::SubtitleFormat::Ttml => "TTML",
+    }
+}
+
 pub(super) enum Files {
     PickImport(Picked),
     Importing(Ask, PathBuf),
+    Added(String, String),
     PickExport(Picked, String),
     Exporting(Ask),
 }
@@ -54,6 +63,7 @@ impl std::fmt::Debug for Files {
         f.write_str(match self {
             Self::PickImport(_) => "PickImport",
             Self::Importing(..) => "Importing",
+            Self::Added(..) => "Added",
             Self::PickExport(..) => "PickExport",
             Self::Exporting(_) => "Exporting",
         })
@@ -698,8 +708,10 @@ impl Workspace {
                 Some(None) => None,
                 Some(Some(path)) => {
                     self.folders.remember(Kind::Media, &path);
+                    let (bin, _) = self.import_from();
+                    let params = json!({ "paths": [path], "bin": bin });
                     Some(Files::Importing(
-                        Ask::send(&self.live, ctx, "subtitles.import", json!({ "path": path })),
+                        Ask::send(&self.live, ctx, "media.add", params),
                         path,
                     ))
                 }
@@ -710,27 +722,37 @@ impl Workspace {
                     let name = path
                         .file_name()
                         .map_or(String::new(), |n| n.to_string_lossy().into_owned());
-                    self.say(format!(
-                        "Imported {} subtitle(s) from {name} onto {}",
-                        r.result["cues"],
-                        r.result["track"].as_str().unwrap_or_default()
-                    ));
-                    let warnings: Vec<String> = r.result["warnings"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|w| w.as_str().map(String::from))
-                        .collect();
-                    if !warnings.is_empty() {
-                        self.show_import_warnings(name, warnings);
-                    }
-                    None
+                    let id = r.result["media"][0]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string();
+                    Some(Files::Added(id, name))
                 }
                 Some(Err(e)) => {
                     self.say(format!("Import Subtitle: {}", e.message));
                     None
                 }
             },
+            Files::Added(id, name) => {
+                let Some(s) = self
+                    .project()
+                    .and_then(|p| p.media(&id))
+                    .and_then(|m| m.subtitles.clone())
+                else {
+                    self.timeline.files = Some(Files::Added(id, name));
+                    return;
+                };
+                self.say(format!(
+                    "Imported {name} into the Media Pool, {} subtitle(s): drag it onto a \
+                     subtitle track, or right-click it > Insert Selected Subtitles to Timeline \
+                     Using Timecode",
+                    s.cues
+                ));
+                if !s.warnings.is_empty() {
+                    self.show_import_warnings(name, s.warnings);
+                }
+                None
+            }
             Files::PickExport(picked, track) => match picked.take() {
                 None => Some(Files::PickExport(picked, track)),
                 Some(None) => None,

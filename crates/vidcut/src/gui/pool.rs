@@ -230,6 +230,33 @@ fn no_pictures(painter: &egui::Painter, rect: Rect, m: &Media) {
     );
 }
 
+fn subtitle_card(painter: &egui::Painter, rect: Rect, m: &Media) {
+    let Some(s) = &m.subtitles else { return };
+    let c = theme::colors();
+    let text = painter.layout(
+        elide(&s.first.replace('\n', " "), 90),
+        egui::FontId::proportional(12.0),
+        c.text,
+        rect.width() - 16.0,
+    );
+    painter.galley(rect.center() - text.size() / 2.0, text, c.text);
+    let icon = painter.layout_no_wrap(
+        egui_phosphor::regular::SUBTITLES.to_string(),
+        egui::FontId::proportional(14.0),
+        c.text,
+    );
+    let r = Rect::from_min_size(
+        Pos2::new(rect.left() + 3.0, rect.bottom() - icon.size().y - 5.0),
+        icon.size() + vec2(6.0, 2.0),
+    );
+    painter.rect_filled(r, CornerRadius::same(2), c.panel_dark);
+    painter.galley(r.min + vec2(3.0, 1.0), icon, c.text);
+}
+
+fn subtitle_frames(p: &Project, m: &Media) -> i64 {
+    ((m.info.duration - m.info.start_time).max(0.0) * p.settings.fps.as_f64()).round() as i64
+}
+
 fn marks(painter: &egui::Painter, rect: Rect, m: &Media, frames: i64, hovered: Option<i64>) {
     if frames <= 0 {
         return;
@@ -542,10 +569,12 @@ impl Workspace {
     }
 
     fn dragging_media(&self) -> bool {
-        self.timeline
-            .drag
-            .as_ref()
-            .is_some_and(|d| matches!(d.drag.gesture, Gesture::Media { .. }))
+        self.timeline.drag.as_ref().is_some_and(|d| {
+            matches!(
+                d.drag.gesture,
+                Gesture::Media { .. } | Gesture::Subtitles { .. }
+            )
+        })
     }
 
     fn dragged_bin(&self) -> Option<&str> {
@@ -814,6 +843,7 @@ impl Workspace {
                     .unwrap_or_else(|| t.textures[0].id());
                 painter.image(shown, r, FULL, Color32::WHITE);
             }
+            _ if m.subtitles.is_some() => subtitle_card(&painter, picture, m),
             _ if m.info.video.is_none() && ui.is_rect_visible(rect) => {
                 self.sound(&painter, picture, m);
             }
@@ -839,9 +869,15 @@ impl Workspace {
             elide(&m.name, 28),
             theme::colors().text,
         );
+        let second = match (&m.subtitles, self.project()) {
+            (Some(s), Some(p)) => {
+                format!("{} cues · {}", s.cues, self.src_tc(subtitle_frames(p, m)))
+            }
+            _ => self.src_tc(hovered_frame.unwrap_or(frames)),
+        };
         label(
             Pos2::new(picture.left(), picture.bottom() + 16.0),
-            self.src_tc(hovered_frame.unwrap_or(frames)),
+            second,
             theme::colors().text_dim,
         );
         let resp = resp.on_hover_text(tip);
@@ -867,7 +903,12 @@ impl Workspace {
             painter.rect_filled(header, CornerRadius::same(2), color.gamma_multiply(0.6));
         }
         let font = egui::FontId::proportional(12.0);
-        let time = self.src_tc(hovered_frame.unwrap_or(frames));
+        let time = match (&m.subtitles, self.project()) {
+            (Some(s), Some(p)) => {
+                format!("{} cues · {}", s.cues, self.src_tc(subtitle_frames(p, m)))
+            }
+            _ => self.src_tc(hovered_frame.unwrap_or(frames)),
+        };
         let time = painter.layout_no_wrap(time, font.clone(), theme::colors().text_dim);
         let room = ((width - time.size().x - 16.0) / 6.5).max(3.0) as usize;
         let name = painter.layout_no_wrap(elide(&m.name, room), font, theme::colors().text);
@@ -908,6 +949,7 @@ impl Workspace {
                     }
                 }
             }
+            _ if m.subtitles.is_some() => subtitle_card(&painter, film, m),
             _ if m.info.video.is_none() => self.sound(&painter, film, m),
             _ => no_pictures(&painter, film, m),
         }
@@ -1027,8 +1069,30 @@ impl Workspace {
             painter.rect_filled(r, CornerRadius::same(2), theme::colors().panel_dark);
             painter.galley(r.min + vec2(3.0, 1.0), galley, theme::colors().text);
         }
+        let subtitles = m.subtitles.as_ref().map_or(String::new(), |s| {
+            let mut text = format!(
+                "Subtitles: {}, {}, {} cue(s){}\n",
+                crate::gui::subtitles::format_name(s.format),
+                s.encoding,
+                s.cues,
+                s.language
+                    .as_deref()
+                    .map_or(String::new(), |l| format!(", {l}"))
+            );
+            for w in &s.warnings {
+                text.push_str(&format!("{w}\n"));
+            }
+            text
+        });
+        let how = match m.subtitles {
+            Some(_) => {
+                "Drag it onto a subtitle track, or right-click > Insert Selected Subtitles to \
+                 Timeline Using Timecode"
+            }
+            None => "I/O while hovering marks the clip; double-click opens it",
+        };
         format!(
-            "{}\n{}\n{}{}{}{}I/O while hovering marks the clip; double-click opens it",
+            "{}\n{}\n{subtitles}{}{}{}{}{how}",
             m.name,
             m.path.display(),
             if transcribed {
@@ -1228,7 +1292,10 @@ impl Workspace {
                 self.media_interaction(&resp, m);
             }
             1 => {
-                let frames = self.project().map_or(0, |p| p.media_frames(m));
+                let frames = self.project().map_or(0, |p| match m.subtitles {
+                    Some(_) => subtitle_frames(p, m),
+                    None => p.media_frames(m),
+                });
                 ui.label(self.src_tc(frames));
             }
             2 => {
@@ -1258,13 +1325,27 @@ impl Workspace {
                     ui.label("-");
                 }
             },
-            5 => {
-                ui.label(video.map_or("-", |v| v.codec.as_str()));
-            }
+            5 => match &m.subtitles {
+                Some(s) => {
+                    let mut text = format!(
+                        "{}, {} cues",
+                        crate::gui::subtitles::format_name(s.format),
+                        s.cues
+                    );
+                    if let Some(l) = &s.language {
+                        text.push_str(&format!(", {l}"));
+                    }
+                    ui.label(text);
+                }
+                None => {
+                    ui.label(video.map_or("-", |v| v.codec.as_str()));
+                }
+            },
             6 => {
-                ui.label(match m.info.audio.first() {
-                    Some(a) => format!("{} {} ch", a.codec, a.channels),
-                    None => "none".into(),
+                ui.label(match (m.info.audio.first(), &m.subtitles) {
+                    (Some(a), _) => format!("{} {} ch", a.codec, a.channels),
+                    (None, Some(_)) => "-".into(),
+                    (None, None) => "none".into(),
                 });
             }
             7 => match proxy_state(
@@ -1295,6 +1376,13 @@ impl Workspace {
 
     fn media_interaction(&mut self, resp: &egui::Response, m: &Media) {
         if resp.drag_started()
+            && m.subtitles.is_some()
+            && let Some(press) = resp.ctx.input(|i| i.pointer.press_origin())
+        {
+            self.start_subtitle_drag(&m.id, press);
+            return;
+        }
+        if resp.drag_started()
             && let Some(press) = resp.ctx.input(|i| i.pointer.press_origin())
         {
             let frames = self.project().map_or(0, |p| p.media_frames(m));
@@ -1306,7 +1394,9 @@ impl Workspace {
             return;
         }
         if resp.double_clicked() {
-            self.send("viewer.load", json!({ "media": m.id }));
+            if m.subtitles.is_none() {
+                self.send("viewer.load", json!({ "media": m.id }));
+            }
             return;
         }
         if resp.clicked() {
@@ -1334,7 +1424,7 @@ impl Workspace {
                 selection = vec![m.id.clone()];
             }
             self.send("selection.set", json!({ "media": selection }));
-            if !mods.command && !mods.shift {
+            if !mods.command && !mods.shift && m.subtitles.is_none() {
                 match self.snap.viewer {
                     ViewerMode::SourceClip => self.send("viewer.load", json!({ "media": m.id })),
                     ViewerMode::SourceTape => {
@@ -1350,6 +1440,30 @@ impl Workspace {
             }
         }
         resp.context_menu(|ui| {
+            if m.subtitles.is_some() {
+                if ui
+                    .button("Insert Selected Subtitles to Timeline Using Timecode")
+                    .on_hover_text(
+                        "Each cue at its timecode, on a new subtitle track; a file not timed \
+                         in the timeline's timecode from the timeline's start",
+                    )
+                    .clicked()
+                {
+                    self.insert_subtitles(&m.id);
+                    ui.close();
+                }
+                if ui
+                    .button("Relink…")
+                    .on_hover_text("Point it at another file")
+                    .clicked()
+                {
+                    self.relink_one(ui.ctx(), &m.id);
+                    ui.close();
+                }
+                ui.separator();
+                self.pool_item_menu(ui, m);
+                return;
+            }
             if ui.button("Open in Viewer").clicked() {
                 self.send("viewer.load", json!({ "media": m.id }));
                 ui.close();
@@ -1417,93 +1531,128 @@ impl Workspace {
                 ui.close();
             }
             ui.separator();
-            let ids = if self.snap.selection.media.contains(&m.id) {
-                self.snap.selection.media.clone()
-            } else {
-                vec![m.id.clone()]
-            };
-            let current = self.project().and_then(|p| {
-                let colors = ids
-                    .iter()
-                    .map(|id| p.media(id).and_then(|m| m.color.as_deref()));
-                theme::same_color(colors).map(str::to_string)
-            });
-            ui.menu_button("Clip Color", |ui| {
-                if let Some(color) = theme::clip_color_menu(ui, current.as_deref()) {
-                    self.send("media.set", json!({ "media": ids, "color": color }));
-                    ui.close();
-                }
-            });
-            if let Some(v) = &m.info.video {
-                use vidcut_core::model::{ColorSpace, Hdr};
-                let tagged = match v.hdr {
-                    Some(Hdr::Pq) => "As Tagged (BT.2100 PQ)",
-                    Some(Hdr::Hlg) => "As Tagged (BT.2100 HLG)",
-                    None => "As Tagged (SDR)",
-                };
-                ui.menu_button("Input Color Space", |ui| {
-                    for (space, label) in [
-                        (ColorSpace::Tagged, tagged),
-                        (ColorSpace::Bt709, "BT.709 (SDR, HD)"),
-                        (ColorSpace::Bt601, "BT.601 (SDR, SD)"),
-                        (ColorSpace::Pq, "BT.2100 PQ (HDR10)"),
-                        (ColorSpace::Hlg, "BT.2100 HLG"),
-                    ] {
-                        if ui.radio(m.color_space == space, label).clicked() {
-                            self.send("media.set", json!({ "media": ids, "color_space": space }));
-                            ui.close();
-                        }
-                    }
-                })
-                .response
-                .on_hover_text(
-                    "How its pictures' colors are read. Pick one for a file whose color tags are \
-                     wrong; the viewer, thumbnails and exports follow it",
-                );
-            }
-            if let Some(p) = self.project_shared() {
-                ui.menu_button("Move to Bin", |ui| {
-                    for (path, depth) in bin_list(&p) {
-                        let text = format!("{}{}", "    ".repeat(depth), bin_name(&path));
-                        let here = ids.len() == 1 && m.bin == path;
-                        if ui.add_enabled(!here, egui::Button::new(text)).clicked() {
-                            self.send("media.move", json!({ "media": ids, "bin": path }));
-                            ui.close();
-                        }
-                    }
-                });
-                if ui.button("Create Bin With Selected Clips").clicked() {
-                    let bin = new_bin(&p, &self.snap.pool.bin);
-                    self.send(
-                        "apply",
-                        json!({
-                            "label": "Create Bin With Selected Clips",
-                            "commands": [
-                                { "method": "bins.add", "params": { "path": bin } },
-                                { "method": "media.move", "params": { "media": ids, "bin": bin } },
-                            ],
-                        }),
-                    );
-                    ui.close();
-                }
-                ui.separator();
-            }
-            let used = self.project().is_some_and(|p| {
-                p.tracks
-                    .iter()
-                    .flat_map(|t| &t.clips)
-                    .any(|c| c.media == m.id)
-            });
-            let label = if used {
-                "Remove from Pool (and its clips)"
-            } else {
-                "Remove from Pool"
-            };
-            if ui.button(label).clicked() {
-                self.send("media.remove", json!({ "media": m.id, "force": used }));
+            self.pool_item_menu(ui, m);
+        });
+    }
+
+    fn pool_item_menu(&mut self, ui: &mut egui::Ui, m: &Media) {
+        let ids = if self.snap.selection.media.contains(&m.id) {
+            self.snap.selection.media.clone()
+        } else {
+            vec![m.id.clone()]
+        };
+        let current = self.project().and_then(|p| {
+            let colors = ids
+                .iter()
+                .map(|id| p.media(id).and_then(|m| m.color.as_deref()));
+            theme::same_color(colors).map(str::to_string)
+        });
+        ui.menu_button("Clip Color", |ui| {
+            if let Some(color) = theme::clip_color_menu(ui, current.as_deref()) {
+                self.send("media.set", json!({ "media": ids, "color": color }));
                 ui.close();
             }
         });
+        if let Some(v) = &m.info.video {
+            use vidcut_core::model::{ColorSpace, Hdr};
+            let tagged = match v.hdr {
+                Some(Hdr::Pq) => "As Tagged (BT.2100 PQ)",
+                Some(Hdr::Hlg) => "As Tagged (BT.2100 HLG)",
+                None => "As Tagged (SDR)",
+            };
+            ui.menu_button("Input Color Space", |ui| {
+                for (space, label) in [
+                    (ColorSpace::Tagged, tagged),
+                    (ColorSpace::Bt709, "BT.709 (SDR, HD)"),
+                    (ColorSpace::Bt601, "BT.601 (SDR, SD)"),
+                    (ColorSpace::Pq, "BT.2100 PQ (HDR10)"),
+                    (ColorSpace::Hlg, "BT.2100 HLG"),
+                ] {
+                    if ui.radio(m.color_space == space, label).clicked() {
+                        self.send("media.set", json!({ "media": ids, "color_space": space }));
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text(
+                "How its pictures' colors are read. Pick one for a file whose color tags are \
+                 wrong; the viewer, thumbnails and exports follow it",
+            );
+        }
+        if let Some(p) = self.project_shared() {
+            ui.menu_button("Move to Bin", |ui| {
+                for (path, depth) in bin_list(&p) {
+                    let text = format!("{}{}", "    ".repeat(depth), bin_name(&path));
+                    let here = ids.len() == 1 && m.bin == path;
+                    if ui.add_enabled(!here, egui::Button::new(text)).clicked() {
+                        self.send("media.move", json!({ "media": ids, "bin": path }));
+                        ui.close();
+                    }
+                }
+            });
+            if ui.button("Create Bin With Selected Clips").clicked() {
+                let bin = new_bin(&p, &self.snap.pool.bin);
+                self.send(
+                    "apply",
+                    json!({
+                        "label": "Create Bin With Selected Clips",
+                        "commands": [
+                            { "method": "bins.add", "params": { "path": bin } },
+                            { "method": "media.move", "params": { "media": ids, "bin": bin } },
+                        ],
+                    }),
+                );
+                ui.close();
+            }
+            ui.separator();
+        }
+        let used = self.project().is_some_and(|p| {
+            p.tracks
+                .iter()
+                .flat_map(|t| &t.clips)
+                .any(|c| c.media == m.id)
+        });
+        let label = if used {
+            "Remove from Pool (and its clips)"
+        } else {
+            "Remove from Pool"
+        };
+        if ui.button(label).clicked() {
+            self.send("media.remove", json!({ "media": m.id, "force": used }));
+            ui.close();
+        }
+    }
+
+    fn insert_subtitles(&mut self, id: &str) {
+        let ids: Vec<String> = match self.snap.selection.media.iter().any(|x| x == id) {
+            true => self
+                .snap
+                .selection
+                .media
+                .iter()
+                .filter(|x| {
+                    self.project()
+                        .and_then(|p| p.media(x))
+                        .is_some_and(|m| m.subtitles.is_some())
+                })
+                .cloned()
+                .collect(),
+            false => vec![id.to_string()],
+        };
+        match ids.as_slice() {
+            [one] => self.send("subtitles.import", json!({ "media": one })),
+            _ => self.send(
+                "apply",
+                json!({
+                    "label": "Insert Selected Subtitles to Timeline Using Timecode",
+                    "commands": ids
+                        .iter()
+                        .map(|m| json!({ "method": "subtitles.import", "params": { "media": m } }))
+                        .collect::<Vec<_>>(),
+                }),
+            ),
+        }
     }
 
     pub(super) fn remove_media_window(&mut self, ctx: &egui::Context) {
