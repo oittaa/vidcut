@@ -123,13 +123,13 @@ impl Titles {
     pub(crate) fn draw(&self, plan: &Plan, t: i64) -> bool {
         let size = plan.size();
         let preview = lock(&self.preview).clone();
-        let missing: Vec<Title> = {
+        let missing: Vec<(String, Title)> = {
             let kept = lock(&self.kept);
-            let mut keys: Vec<Title> = Vec::new();
+            let mut keys: Vec<(String, Title)> = Vec::new();
             for (_, shown) in plan.titles_at(t) {
                 let key = steady(wanted(&preview, &shown));
-                if !kept.has(&key, size) && !keys.contains(&key) {
-                    keys.push(key);
+                if !kept.has(&key, size) && !keys.iter().any(|(_, k)| *k == key) {
+                    keys.push((shown.clip.clone(), key));
                 }
             }
             keys
@@ -137,11 +137,12 @@ impl Titles {
         if missing.is_empty() {
             return false;
         }
-        for title in missing {
+        for (clip, title) in missing {
             let picture = drawn(&title, size);
             let mut kept = lock(&self.kept);
             kept.clock += 1;
             let used = kept.clock;
+            kept.last.insert(clip, title.clone());
             kept.entries.push(Entry {
                 title,
                 size,
