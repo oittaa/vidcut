@@ -59,6 +59,8 @@ pub enum Request {
     },
 
     /// Add files to the media pool (probing them); returns their media ids.
+    /// A subtitle file (SRT, WebVTT, TTML) becomes a subtitle item, with no
+    /// pictures or sound, for `subtitles.import` with `media`.
     #[serde(rename = "media.add")]
     MediaAdd {
         paths: Vec<PathBuf>,
@@ -74,8 +76,9 @@ pub enum Request {
         fps: Option<Rational>,
     },
     /// Bring a folder in as a bin, with a bin inside it for each folder in it.
-    /// Files that aren't media are skipped and listed; returns the bin, the
-    /// media ids and the skipped files.
+    /// Subtitle files come in too, as with `media.add`. Files that aren't
+    /// media are skipped and listed; returns the bin, the media ids and the
+    /// skipped files.
     #[serde(rename = "media.add_folder")]
     MediaAddFolder {
         path: PathBuf,
@@ -981,10 +984,18 @@ pub enum Request {
     SubtitlesJoin { cues: OneOrMany<String> },
     /// Put a subtitle file's cues on a subtitle track: SRT, WebVTT, or TTML
     /// (`.ttml`, `.dfxp`, `.xml`, IMSC1 too), in UTF-8, UTF-16 or
-    /// Windows-1252. Each time goes to the nearest frame.
+    /// Windows-1252, a file (`path`) or a subtitle item in the pool (`media`),
+    /// whose file is read again. Each time goes to the nearest frame. The
+    /// answer's `placed` says how: `at`, `timecode` (the file's times read as
+    /// the timeline's timecode) or `start` (counted from the timeline's
+    /// start).
     #[serde(rename = "subtitles.import")]
     SubtitlesImport {
-        path: PathBuf,
+        #[serde(default)]
+        path: Option<PathBuf>,
+        /// A subtitle item in the pool, instead of `path`.
+        #[serde(default)]
+        media: Option<String>,
         /// The subtitle track to add them to. Default: a new one, named after
         /// the file, in the file's language when it names one, and shown.
         #[serde(default)]
@@ -2414,8 +2425,8 @@ impl Request {
             }
             Self::MediaAddFolder { path, .. }
             | Self::Probe { path }
-            | Self::SubtitlesImport { path, .. }
             | Self::SubtitlesExport { out: path, .. } => vec![path],
+            Self::SubtitlesImport { path, .. } => path.iter_mut().collect(),
             Self::SubtitlesTranscribe {
                 model_file,
                 vad_file,

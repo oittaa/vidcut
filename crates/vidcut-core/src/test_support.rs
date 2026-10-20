@@ -169,6 +169,7 @@ impl Env for FakeEnv {
             info,
             sequence: None,
             fingerprint: self.fingerprints.get(path).cloned(),
+            subtitles: None,
         })
     }
 
@@ -191,6 +192,7 @@ impl Env for FakeEnv {
             info,
             sequence: Some(s.clone()),
             fingerprint: self.fingerprints.get(first).cloned(),
+            subtitles: None,
         })
     }
 

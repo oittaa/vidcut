@@ -699,7 +699,7 @@ impl Workspace {
                 }
                 if ui
                     .add_enabled(open, egui::Button::new("Import Subtitle…"))
-                    .on_hover_text("SRT, WebVTT or TTML, onto a new subtitle track")
+                    .on_hover_text("SRT, WebVTT or TTML, into the Media Pool")
                     .clicked()
                 {
                     self.import_subtitle(ui.ctx());

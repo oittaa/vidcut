@@ -38,6 +38,7 @@ pub struct ProbedMedia {
     pub info: MediaInfo,
     pub sequence: Option<ImageSequence>,
     pub fingerprint: Option<String>,
+    pub subtitles: Option<crate::model::SubtitleFile>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -3060,13 +3061,27 @@ fn mutate(
         }
         Request::SubtitlesImport {
             path,
+            media,
             track,
             at,
             timecode,
             time_base,
         } => {
-            let bytes = env.read_file(path)?;
-            let (read, format, encoding) = crate::subtitles::parse(&bytes, path)?;
+            let path = match (path, media) {
+                (Some(path), None) => path.clone(),
+                (None, Some(id)) => {
+                    let m = p
+                        .media(id)
+                        .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+                    if m.subtitles.is_none() {
+                        return Err(Error::invalid(format!("{id} isn't a subtitle file")));
+                    }
+                    m.path.clone()
+                }
+                _ => return Err(Error::usage("name the subtitle file: path or media")),
+            };
+            let bytes = env.read_file(&path)?;
+            let (read, format, encoding) = crate::subtitles::parse(&bytes, &path)?;
             let at = at.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
             let name = path
                 .file_stem()
@@ -3085,6 +3100,7 @@ fn mutate(
             json!({
                 "track": placed.track,
                 "cues": placed.cues,
+                "placed": placed.placed,
                 "format": format,
                 "encoding": encoding.name(),
                 "time_base": placed.time_base,
@@ -3399,6 +3415,7 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         proxy: None,
         color: None,
         fingerprint: probed.fingerprint,
+        subtitles: probed.subtitles,
     });
     files.note(p, p.media.len() - 1);
     id
@@ -3447,7 +3464,7 @@ fn add_folder(
         if taken.contains(file) {
             continue;
         }
-        if !crate::folder::is_media(file) {
+        if !crate::folder::is_media(file) && !crate::subtitles::is_file(file) {
             out.skip(file, crate::folder::NOT_MEDIA);
             continue;
         }
@@ -3457,6 +3474,10 @@ fn add_folder(
         };
         let probed = match probed {
             Ok(probed) => probed,
+            Err(_) if crate::folder::extension(file) == "xml" => {
+                out.skip(file, crate::folder::NOT_MEDIA);
+                continue;
+            }
             Err(e) => {
                 match runs.get(file) {
                     Some(s) => out.skip(&folder.path.join(s.display()), &e.message),
@@ -3604,6 +3625,9 @@ fn differs(m: &Media, probed: &ProbedMedia) -> Option<String> {
         }
         _ => {}
     }
+    if m.subtitles.is_some() != probed.subtitles.is_some() {
+        return Some("a subtitle file and a media file".into());
+    }
     if probed.size != m.size {
         return Some(format!("{} bytes, not {}", probed.size, m.size));
     }
@@ -3695,6 +3719,7 @@ fn replace_file(
     m.info = probed.info;
     m.sequence = probed.sequence;
     m.fingerprint = probed.fingerprint;
+    m.subtitles = probed.subtitles;
     if p.media(id).map(|m| p.media_frames(m)) != Some(frames) {
         forget_tape_marks(p, id);
     }
@@ -6178,6 +6203,9 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
         }),
         "audio_streams": m.info.audio.len(),
     });
+    if let Some(s) = &m.subtitles {
+        v["subtitles"] = json!(s);
+    }
     if !env.present(m) {
         v["missing"] = json!(true);
     }

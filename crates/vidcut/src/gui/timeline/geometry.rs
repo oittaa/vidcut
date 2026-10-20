@@ -223,9 +223,16 @@ impl Rows {
         }
     }
 
+    pub fn subtitle_target(&self, p: &Project, y: f32) -> String {
+        match self.at(y) {
+            Some(r) if is_subtitle(&r.track) => r.track.clone(),
+            _ => format!("S{}", p.subtitles.len() + 1),
+        }
+    }
+
     pub fn phantom(&self, track: &str) -> TrackRect {
         let (top, bottom) = self.span();
-        let rect = if track.starts_with('V') {
+        let rect = if track.starts_with('V') || is_subtitle(track) {
             Rect::from_min_max(
                 pos2(
                     self.area.left(),

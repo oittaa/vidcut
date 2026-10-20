@@ -2010,6 +2010,19 @@ impl Live {
                 n => format!("Detect Scene Cuts: split at {n} shot changes"),
             },
             "media.add_folder" => folder_notice(&r.result),
+            "subtitles.import"
+                if r.result["placed"] == "start"
+                    && self
+                        .project
+                        .as_ref()
+                        .is_some_and(|p| p.project().settings.start_tc > 0) =>
+            {
+                format!(
+                    "{} subtitle(s) on {}, from the timeline's start: the file isn't timed in                      the timeline's timecode",
+                    r.result["cues"],
+                    r.result["track"].as_str().unwrap_or_default()
+                )
+            }
             "edit.ripple_delete_silence" => match count("removed") {
                 0 => "Ripple Delete Silence: no silences in the selected clips".to_string(),
                 n => {

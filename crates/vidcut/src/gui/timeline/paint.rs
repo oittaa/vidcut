@@ -731,6 +731,13 @@ pub fn preview(painter: &Painter, rows: &Rows, scale: &Scale, p: &Project, pv: &
         }
         Target::Append | Target::None => {}
     }
+    for &(a, b) in &pv.cues {
+        painter.rect_filled(
+            span(a, b).shrink2(vec2(0.5, rect.height() * 0.2)),
+            CornerRadius::same(2),
+            theme::colors().accent.gamma_multiply(0.7),
+        );
+    }
     if let Some((a, b)) = pv.ghost {
         painter.rect_stroke(
             span(a, b).shrink(1.0),

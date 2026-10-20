@@ -472,6 +472,7 @@ pub fn join_cues(p: &mut Project, ids: &[String]) -> Result<String> {
 pub struct Imported {
     pub track: String,
     pub cues: usize,
+    pub placed: &'static str,
     pub offset: i64,
     pub before_zero: usize,
     pub time_base: SubtitleTimeBase,
@@ -574,10 +575,13 @@ pub fn import(
         .map(|c| (frames_of(p, c.start, base), frames_of(p, c.end, base)))
         .collect();
     let first = spans.iter().map(|s| s.0).min().expect("cues");
-    let offset = match (at, timecode) {
-        (Some(at), _) => first - at,
-        (None, Some(false)) => 0,
-        (None, forced) => timecode_offset(p, first, forced == Some(true)),
+    let (offset, placed) = match (at, timecode) {
+        (Some(at), _) => (first - at, "at"),
+        (None, Some(false)) => (0, "start"),
+        (None, forced) => match timecode_offset(p, first, forced == Some(true)) {
+            0 => (0, "start"),
+            o => (o, "timecode"),
+        },
     };
     let ti = match track {
         Some(id) => target(p, Some(id))?,
@@ -614,6 +618,7 @@ pub fn import(
     Ok(Imported {
         track: p.subtitles[ti].id.clone(),
         cues: count,
+        placed,
         offset,
         before_zero,
         time_base: base,

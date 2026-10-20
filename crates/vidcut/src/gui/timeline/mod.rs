@@ -1615,7 +1615,7 @@ impl Workspace {
             return;
         }
         if released
-            && let Gesture::Media { media, .. } = &d.drag.gesture
+            && let Gesture::Media { media, .. } | Gesture::Subtitles { media, .. } = &d.drag.gesture
             && let Some(bin) = self.bin_target_at(pos)
         {
             let ids = if self.snap.selection.media.contains(media) {
@@ -1629,7 +1629,7 @@ impl Workspace {
         }
         if matches!(
             d.drag.gesture,
-            Gesture::Media { .. } | Gesture::Title { .. }
+            Gesture::Media { .. } | Gesture::Title { .. } | Gesture::Subtitles { .. }
         ) {
             d.upper = layout.upper.area.expand(8.0).contains(pos);
         }
@@ -2106,6 +2106,50 @@ impl Workspace {
         });
     }
 
+    pub(crate) fn start_subtitle_drag(&mut self, media: &str, press: Pos2) {
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let Some(m) = p.media(media) else { return };
+        let read = std::fs::read(&m.path)
+            .map_err(|e| e.to_string())
+            .and_then(|b| vidcut_core::subtitles::parse(&b, &m.path).map_err(|e| e.message));
+        let read = match read {
+            Ok((read, ..)) => read,
+            Err(e) => {
+                self.say(format!("{}: {e}", m.name));
+                return;
+            }
+        };
+        let first = read
+            .cues
+            .iter()
+            .map(|c| c.start)
+            .fold(f64::INFINITY, f64::min);
+        let fps = p.settings.fps.as_f64();
+        let frame = |t: f64| ((t - first) * fps).round() as i64;
+        let cues: Vec<(i64, i64)> = read
+            .cues
+            .iter()
+            .map(|c| (frame(c.start), frame(c.end).max(frame(c.start) + 1)))
+            .collect();
+        if cues.is_empty() {
+            return;
+        }
+        self.timeline.snap_flipped = false;
+        self.timeline.drag = Some(ActiveDrag {
+            drag: Drag::new(
+                Gesture::Subtitles {
+                    media: media.to_string(),
+                    cues,
+                },
+                press,
+            ),
+            upper: false,
+            preview: Preview::default(),
+        });
+    }
+
     pub(crate) fn start_title_drag(
         &mut self,
         p: &Project,
@@ -2153,6 +2197,12 @@ impl Workspace {
                     .and_then(|p| p.media(media))
                     .map_or(media.clone(), |m| m.name.clone()),
                 *range,
+            ),
+            Gesture::Subtitles { media, cues } => (
+                self.project()
+                    .and_then(|p| p.media(media))
+                    .map_or(media.clone(), |m| m.name.clone()),
+                (0, cues.iter().map(|c| c.1).max().unwrap_or(0)),
             ),
             Gesture::Title { kind, align, len } => (
                 crate::gui::title_browser::KINDS
