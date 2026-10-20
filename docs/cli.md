@@ -75,7 +75,7 @@ An error is `{"error": {"code": "NOT_FOUND", "message": "…"}}` with `--json`. 
 | 7 | `MEDIA` | media missing or unreadable |
 | 8 | `EXPORT` | encoding or writing failed |
 | 9 | `CANCELLED` | Ctrl-C or `jobs cancel` |
-| 10 | `DEPENDENCY` | FFmpeg lacks a part (`vidcut doctor`), or a speech model isn't downloaded yet (`--download`) |
+| 10 | `DEPENDENCY` | FFmpeg lacks a part (`vidcut doctor`), a speech model isn't downloaded yet (`--download`), or audio would go to a paid service without `--send` |
 
 ## Safe automation
 
@@ -85,6 +85,7 @@ An error is `{"error": {"code": "NOT_FOUND", "message": "…"}}` with `--json`. 
   - One `{"method": …, "params": {…}}` per line (blank and `//` lines skipped), or one JSON array.
   - `apply` and the `history` commands that change the history can't be batched; `--if-rev` and `--dry-run` go on the command line.
 - Processes editing one project take its lock in turn ([design/requests.md](design/requests.md)).
+- The paid speech models (`--model xai`, `--model google`) upload only with `--send`; without it the error gives the length, the size and the estimated cost. `vidcut services set-key --service xai` reads the key from standard input, so it stays out of the shell's history.
 
 ## Live control of a running GUI
 

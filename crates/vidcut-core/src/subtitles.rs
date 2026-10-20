@@ -22,6 +22,7 @@ pub struct Timed {
     pub text: String,
     pub place: Place,
     pub words: Vec<f64>,
+    pub speaker: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

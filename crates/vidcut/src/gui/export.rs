@@ -1279,6 +1279,9 @@ impl Workspace {
                                         .wrap(),
                                     );
                                 }
+                                for n in job_lines(j, "notes") {
+                                    ui.add(egui::Label::new(dim(n)).wrap());
+                                }
                                 job_view(ui, j, |method, params| self.send(method, params));
                                 egui::CollapsingHeader::new("Details")
                                     .id_salt(("job-details", &j.id))
@@ -1578,11 +1581,13 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
             }
         }
         JobState::Running => {
+            let telling = j.stage == Some(vidcut_av::export::Stage::Speakers) && j.frames < j.total;
             let text = match j.eta {
                 _ if j.measuring => format!(
                     "measuring light for the HDR metadata · {:.0}%",
                     j.progress * 100.0
                 ),
+                _ if telling => format!("{} elapsed", clock(j.elapsed)),
                 Some(eta) => format!(
                     "{:.0}% · {} elapsed · about {} left",
                     j.progress * 100.0,
@@ -1594,6 +1599,7 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
             ui.add(
                 egui::ProgressBar::new(j.progress as f32)
                     .text(text)
+                    .animate(telling)
                     .desired_width(360.0),
             );
             use vidcut_av::export::Stage;
@@ -1609,6 +1615,15 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
                     format!("listening · {} / {} s of sound", done / 1000, total / 1000)
                 }
                 Some(Stage::Loading) => "loading the model".into(),
+                Some(Stage::Speakers) => {
+                    format!("finding the speakers · {} s of sound", total / 1000)
+                }
+                Some(Stage::Uploading) => format!(
+                    "uploading · {:.0} / {:.0} MB",
+                    done as f64 / 1e6,
+                    total as f64 / 1e6
+                ),
+                Some(Stage::Waiting) => "waiting for the reply".into(),
                 Some(Stage::Transcribing) => {
                     format!(
                         "transcribing · {} / {} s of speech",
@@ -1760,9 +1775,13 @@ fn job_details(ui: &mut egui::Ui, j: &JobInfo, rate: Option<f64>, project: Optio
 }
 
 fn job_warnings(j: &JobInfo) -> Vec<String> {
+    job_lines(j, "warnings")
+}
+
+fn job_lines(j: &JobInfo, field: &str) -> Vec<String> {
     j.result
         .as_ref()
-        .and_then(|r| r["warnings"].as_array())
+        .and_then(|r| r[field].as_array())
         .into_iter()
         .flatten()
         .filter_map(|w| w.as_str().map(String::from))

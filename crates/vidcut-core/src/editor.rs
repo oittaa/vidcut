@@ -178,6 +178,17 @@ pub trait Env {
         Err(Error::usage("speech is transcribed by the vidcut program"))
     }
 
+    fn transcribe_files(
+        &self,
+        files: &[(&Media, u32, &RenderPlan)],
+        asked: &transcript::Asked,
+    ) -> Result<Vec<Arc<Speech>>> {
+        files
+            .iter()
+            .map(|(m, s, plan)| self.transcribe_media(m, *s, plan, asked))
+            .collect()
+    }
+
     fn proxy_dir(&self) -> PathBuf;
 
     fn generate_proxy(
@@ -1659,6 +1670,52 @@ fn hears_media(hear: Option<HearFrom>, asked: &transcript::Asked) -> Result<bool
     }
 }
 
+fn sound_secs(m: &Media, stream: u32) -> f64 {
+    match m.info.audio.iter().find(|a| a.index == stream) {
+        Some(a) if a.duration > 0.0 => a.duration,
+        _ => m.info.duration,
+    }
+}
+
+fn channels_of(asked: &transcript::Asked, m: &Media, stream: u32) -> u16 {
+    let multichannel =
+        asked.model == SpeechModel::Xai && asked.xai.as_ref().is_some_and(|x| x.multichannel);
+    match multichannel {
+        true => m
+            .info
+            .audio
+            .iter()
+            .find(|a| a.index == stream)
+            .map_or(1, |a| a.channels.clamp(1, 8)),
+        false => 1,
+    }
+}
+
+fn file_count(n: usize) -> String {
+    match n {
+        1 => "1 file".into(),
+        n => format!("{n} files"),
+    }
+}
+
+fn upload_check(asked: &transcript::Asked, secs: f64, what: &str) -> Result<()> {
+    if !asked.model.paid() || asked.send {
+        return Ok(());
+    }
+    Err(Error::new(
+        crate::error::ErrorCode::Dependency,
+        format!(
+            "{what} would be sent to {}: {} of audio, about {:.0} MB, {} at ${:.2} an hour. \
+             Pass send (--send) to upload it",
+            asked.model.company(),
+            crate::subtitles::clock(secs, '.'),
+            transcript::upload_mb(secs, 1).ceil(),
+            transcript::dollars(transcript::cost(asked.model, secs)),
+            asked.model.dollars_per_hour()
+        ),
+    ))
+}
+
 fn device_json(s: &Speech) -> Value {
     match s.device.is_empty() {
         true => Value::Null,
@@ -1674,6 +1731,7 @@ struct Placed {
     end: i64,
     word: transcript::Word,
     language: Option<String>,
+    person: Option<String>,
 }
 
 fn clip_speech(
@@ -1683,7 +1741,7 @@ fn clip_speech(
     heard: &[String],
     asked: &transcript::Asked,
     transcribe: bool,
-) -> Result<(Speech, Vec<Value>)> {
+) -> Result<(Speech, Vec<Value>, Vec<String>)> {
     let fps = p.settings.fps;
     let mut speech = Speech {
         model: asked.model_name(),
@@ -1696,11 +1754,11 @@ fn clip_speech(
         warnings: Vec::new(),
         found: asked.find.unwrap_or_default(),
         sound_db: asked.level(),
+        speakers: None,
+        speakers_by: None,
+        notes: Vec::new(),
     };
-    let mut media = Vec::new();
-    let mut devices: Vec<String> = Vec::new();
-    let mut kept: HashMap<(String, u32), Arc<Speech>> = HashMap::new();
-    let mut placed = Vec::new();
+    let mut clips = Vec::new();
     for (track, t) in p.tracks.iter().enumerate() {
         if !heard.contains(&t.id) {
             continue;
@@ -1722,53 +1780,94 @@ fn clip_speech(
             let m = p
                 .media(&c.media)
                 .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
-            let key = (m.id.clone(), sound.stream);
-            let said = match kept.get(&key) {
-                Some(s) => s.clone(),
-                None => {
-                    let s = match env.transcript(m, sound.stream)?.filter(|s| asked.made(s)) {
-                        Some(s) => s,
-                        None if !transcribe => continue,
-                        None => {
-                            let plan = media_sound_plan(p, m, sound.stream)?;
-                            env.transcribe_media(m, sound.stream, &plan, asked)?
-                        }
-                    };
-                    if !s.device.is_empty() && !devices.contains(&s.device) {
-                        devices.push(s.device.clone());
-                    }
-                    speech.pieces += s.pieces;
-                    speech.longest_piece = speech.longest_piece.max(s.longest_piece);
-                    speech
-                        .warnings
-                        .extend(s.warnings.iter().map(|w| format!("{}: {w}", m.name)));
-                    media.push(json!({
-                        "media": m.id,
-                        "stream": sound.stream,
-                        "model": s.model,
-                        "device": s.device,
-                        "language": s.language,
-                        "words": transcript::spoken(&s).map_or(0, |w| w.len()),
-                    }));
-                    kept.insert(key, s.clone());
-                    s
-                }
-            };
-            let timed = transcript::spoken(&said).map_err(Error::invalid)?;
-            let (_, origin) = p.media_origin(&c.media)?;
-            let span = Span::of_clip(c, origin, fps);
-            for (i, start, end) in analysis::words_between(&span, (from, to), &timed) {
-                let middle = (start + end) / 2;
-                if (a..b).contains(&middle) {
-                    placed.push(Placed {
-                        track,
-                        clip: c.id.clone(),
-                        start,
-                        end,
-                        word: timed[i].clone(),
-                        language: said.language.clone(),
-                    });
-                }
+            clips.push((track, c, m, sound.stream, (from, to)));
+        }
+    }
+    let mut files: Vec<(&Media, u32)> = Vec::new();
+    for &(_, _, m, stream, _) in &clips {
+        if !files.iter().any(|(f, s)| f.id == m.id && *s == stream) {
+            files.push((m, stream));
+        }
+    }
+    let mut kept: Vec<Option<Arc<Speech>>> = files
+        .iter()
+        .map(|(m, s)| Ok(env.transcript(m, *s)?.filter(|t| asked.made(t))))
+        .collect::<Result<_>>()?;
+    if transcribe && kept.iter().any(Option::is_none) {
+        if asked.model.paid() && asked.speakers {
+            kept.iter_mut().for_each(|k| *k = None);
+        }
+        let missing: Vec<usize> = (0..files.len()).filter(|&i| kept[i].is_none()).collect();
+        let secs = missing
+            .iter()
+            .map(|&i| sound_secs(files[i].0, files[i].1))
+            .sum();
+        upload_check(asked, secs, &file_count(missing.len()))?;
+        let plans = missing
+            .iter()
+            .map(|&i| {
+                let (m, s) = files[i];
+                media_sound_plan(p, m, s, channels_of(asked, m, s))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let asking: Vec<_> = missing
+            .iter()
+            .zip(&plans)
+            .map(|(&i, plan)| (files[i].0, files[i].1, plan))
+            .collect();
+        for (&i, s) in missing.iter().zip(env.transcribe_files(&asking, asked)?) {
+            kept[i] = Some(s);
+        }
+    }
+    let mut media = Vec::new();
+    let mut devices: Vec<String> = Vec::new();
+    for ((m, stream), s) in files.iter().zip(&kept) {
+        let Some(s) = s else { continue };
+        if !s.device.is_empty() && !devices.contains(&s.device) {
+            devices.push(s.device.clone());
+        }
+        speech.pieces += s.pieces;
+        speech.longest_piece = speech.longest_piece.max(s.longest_piece);
+        speech
+            .warnings
+            .extend(s.warnings.iter().map(|w| format!("{}: {w}", m.name)));
+        for n in &s.notes {
+            if !speech.notes.contains(n) {
+                speech.notes.push(n.clone());
+            }
+        }
+        media.push(json!({
+            "media": m.id,
+            "stream": stream,
+            "model": s.model,
+            "device": s.device,
+            "language": s.language,
+            "words": transcript::spoken(s).map_or(0, |w| w.len()),
+        }));
+    }
+    let mut placed = Vec::new();
+    for (track, c, m, stream, (from, to)) in clips {
+        let at = files.iter().position(|(f, s)| f.id == m.id && *s == stream);
+        let Some(said) = at.and_then(|i| kept[i].as_ref()) else {
+            continue;
+        };
+        let timed = transcript::spoken(said).map_err(Error::invalid)?;
+        let (_, origin) = p.media_origin(&c.media)?;
+        let span = Span::of_clip(c, origin, fps);
+        for (i, start, end) in analysis::words_between(&span, (from, to), &timed) {
+            let middle = (start + end) / 2;
+            if (a..b).contains(&middle) {
+                let w = &timed[i];
+                let person = p.speakers.word(&m.id, stream, said.speakers.as_deref(), w);
+                placed.push(Placed {
+                    track,
+                    clip: c.id.clone(),
+                    start,
+                    end,
+                    word: w.clone(),
+                    language: said.language.clone(),
+                    person,
+                });
             }
         }
     }
@@ -1787,6 +1886,7 @@ fn clip_speech(
             .map(|(l, _)| l.to_string());
     }
     let rate = fps.as_f64();
+    let mut people: Vec<String> = Vec::new();
     let words: Vec<transcript::Word> = chosen
         .iter()
         .enumerate()
@@ -1795,8 +1895,18 @@ fn clip_speech(
             end: (w.end - a) as f64 / rate,
             text: w.word.text.clone(),
             joined: w.word.joined && i > 0 && chosen[i - 1].clip == w.clip,
+            speaker: w.person.as_ref().map(|k| {
+                let n = people.iter().position(|o| o == k).unwrap_or_else(|| {
+                    people.push(k.clone());
+                    people.len() - 1
+                });
+                n as u32 + 1
+            }),
         })
         .collect();
+    if !people.is_empty() {
+        speech.speakers = Some("timeline".into());
+    }
     if let Some((start, end)) = words
         .first()
         .zip(words.last())
@@ -1810,7 +1920,7 @@ fn clip_speech(
             speech: Vec::new(),
         });
     }
-    Ok((speech, media))
+    Ok((speech, media, people))
 }
 
 fn first_heard(mut placed: Vec<Placed>) -> Vec<Placed> {
@@ -1836,10 +1946,10 @@ fn first_heard(mut placed: Vec<Placed>) -> Vec<Placed> {
     chosen
 }
 
-fn media_sound_plan(p: &Project, m: &Media, stream: u32) -> Result<RenderPlan> {
+fn media_sound_plan(p: &Project, m: &Media, stream: u32, channels: u16) -> Result<RenderPlan> {
     let mut q = p.clone();
     q.settings.sample_rate = transcript::RATE;
-    q.settings.channels = 1;
+    q.settings.channels = channels;
     let (mut plan, _) = crate::render::tape(&q, std::slice::from_ref(&m.id))?;
     for piece in plan.audio.iter_mut().flatten() {
         if let crate::render::AudioPiece::Source { stream: s, .. } = piece {
@@ -2966,6 +3076,8 @@ fn mutate(
             track,
             place,
             words,
+            speaker,
+            color,
         } => {
             let start = match at {
                 Some(t) => resolve(p, t, playhead)?,
@@ -2993,6 +3105,7 @@ fn mutate(
                 *place,
                 words.clone().unwrap_or_default(),
             )?;
+            ops::subtitles::set_who(p, &id, speaker.as_deref(), color.as_deref())?;
             json!({ "cue": id, "track": p.subtitles[ti].id })
         }
         Request::TitlesAdd {
@@ -3075,6 +3188,8 @@ fn mutate(
             end,
             place,
             words,
+            speaker,
+            color,
         } => {
             let id = resolve_cue(p, cue, playhead)?;
             let start = start
@@ -3094,7 +3209,12 @@ fn mutate(
             if how == ops::subtitles::Words::Spread {
                 time_from_kept(p, env, &id)?;
             }
+            ops::subtitles::set_who(p, &id, speaker.as_deref(), color.as_deref())?;
             Value::Null
+        }
+        Request::SubtitlesMatchSpeaker { cue } => {
+            let id = resolve_cue(p, cue, playhead)?;
+            json!({ "cues": ops::subtitles::match_speaker(p, &id)? })
         }
         Request::SubtitlesMove {
             cues,
@@ -3192,6 +3312,11 @@ fn mutate(
             download,
             find,
             sound_db,
+            speakers,
+            speaker_model,
+            send,
+            xai,
+            google,
         } => {
             let looked = look
                 .as_deref()
@@ -3221,17 +3346,30 @@ fn mutate(
                 download: *download,
                 find: *find,
                 sound_db: *sound_db,
+                speakers: *speakers,
+                speaker_model: *speaker_model,
+                send: *send,
+                xai: xai.clone(),
+                google: google.clone(),
             };
-            let from_media = hears_media(*hear, &asked)?;
-            let (speech, media) = match from_media {
+            let part = a > 0 || b < p.end();
+            let from_media = !(hear.is_none() && part) && hears_media(*hear, &asked)?;
+            let (speech, media, people) = match from_media {
                 true => {
-                    let (s, media) = clip_speech(p, env, (a, b), &heard, &asked, true)?;
-                    (Arc::new(s), json!(media))
+                    let (s, media, people) = clip_speech(p, env, (a, b), &heard, &asked, true)?;
+                    (Arc::new(s), json!(media), people)
                 }
-                false => (
-                    env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?,
-                    Value::Null,
-                ),
+                false => {
+                    upload_check(&asked, (b - a) as f64 / p.settings.fps.as_f64(), "The mix")?;
+                    let s = env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?;
+                    let people = match &s.speakers {
+                        Some(run) => (1..=transcript::speaker_count(&s.said))
+                            .map(|n| crate::speakers::heard_person(run, n))
+                            .collect(),
+                        None => Vec::new(),
+                    };
+                    (s, Value::Null, people)
+                }
             };
             let made = transcript::cues(
                 &speech.said,
@@ -3266,7 +3404,7 @@ fn mutate(
                 }
                 for m in &made {
                     let (start, end) = (a + m.start, (a + m.end).min(b));
-                    ids.push(ops::subtitles::add_cue(
+                    let id = ops::subtitles::add_cue(
                         p,
                         ti,
                         start,
@@ -3275,7 +3413,10 @@ fn mutate(
                         &m.text,
                         None,
                         m.words.clone(),
-                    )?);
+                    )?;
+                    let who = m.speaker.and_then(|n| people.get(n as usize - 1));
+                    ops::subtitles::set_who(p, &id, who.map(String::as_str), None)?;
+                    ids.push(id);
                 }
                 on = Some(p.subtitles[ti].id.clone());
             }
@@ -3294,6 +3435,7 @@ fn mutate(
                 "pieces": speech.pieces,
                 "longest_piece": speech.longest_piece,
                 "warnings": warnings,
+                "notes": speech.notes,
             })
         }
         Request::SubtitlesTimeWords {
@@ -3346,11 +3488,16 @@ fn mutate(
                 download: *download,
                 find: *find,
                 sound_db: *sound_db,
+                speakers: false,
+                speaker_model: Default::default(),
+                send: false,
+                xai: None,
+                google: None,
             };
             let from_media = hears_media(*hear, &asked)?;
             let (speech, media) = match from_media {
                 true => {
-                    let (s, media) = clip_speech(p, env, (a, b), &heard, &asked, true)?;
+                    let (s, media, _) = clip_speech(p, env, (a, b), &heard, &asked, true)?;
                     (Arc::new(s), json!(media))
                 }
                 false => (
@@ -3505,6 +3652,119 @@ fn mutate(
                 })?);
             }
             json!({ "results": results })
+        }
+        Request::SpeakersSet {
+            person,
+            name,
+            color,
+        } => {
+            let person = person.trim();
+            if person.is_empty() {
+                return Err(Error::usage("name a person from speakers.list"));
+            }
+            match color.as_deref().map(str::trim) {
+                None => {}
+                Some("") => {
+                    p.speakers.colors.remove(person);
+                }
+                Some(c) => {
+                    let c = ops::subtitles::checked_color(Some(c), "person's")?;
+                    p.speakers
+                        .colors
+                        .insert(person.to_string(), c.unwrap_or_default());
+                }
+            }
+            match name.as_deref().map(str::trim) {
+                None => None,
+                Some("") => p.speakers.names.remove(person),
+                Some(n) => p.speakers.names.insert(person.to_string(), n.to_string()),
+            };
+            json!({
+                "person": person,
+                "name": p.speakers.name(person),
+                "color": p.speakers.colors.get(person),
+            })
+        }
+        Request::SpeakersJoin { person, into } => {
+            let (from, to) = (p.speakers.key_for(person), p.speakers.key_for(into));
+            if from.is_empty() || to.is_empty() {
+                return Err(Error::usage("person and into: people from speakers.list"));
+            }
+            if from == to {
+                return Err(Error::invalid(format!("{from} is {to} already")));
+            }
+            let mut voices = Vec::new();
+            for m in &p.media {
+                for a in &m.info.audio {
+                    let Some(speech) = env.transcript(m, a.index)? else {
+                        continue;
+                    };
+                    let Some(run) = &speech.speakers else {
+                        continue;
+                    };
+                    for n in 1..=transcript::speaker_count(&speech.said) {
+                        let voice = crate::speakers::voice(&m.id, a.index, n);
+                        let is = p.speakers.links.get(&voice).cloned();
+                        if is.unwrap_or_else(|| crate::speakers::heard_person(run, n)) == from {
+                            voices.push(voice);
+                        }
+                    }
+                }
+            }
+            let voiced = voices.len();
+            p.speakers.join(&from, &to, voices);
+            let mut cues = 0;
+            for t in p.subtitles.iter_mut().filter(|t| !t.locked) {
+                for c in t
+                    .cues
+                    .iter_mut()
+                    .filter(|c| c.speaker.as_deref() == Some(&from))
+                {
+                    c.speaker = Some(to.clone());
+                    cues += 1;
+                }
+            }
+            json!({ "person": from, "into": to, "cues": cues, "voices": voiced })
+        }
+        Request::SpeakersLink {
+            media,
+            stream,
+            speaker,
+            person,
+        } => {
+            if p.media(media).is_none() {
+                return Err(Error::not_found(format!("no media {media}")));
+            }
+            let voice = crate::speakers::voice(media, *stream, *speaker);
+            match person.as_deref().map(str::trim) {
+                Some("") => return Err(Error::usage("person: a name from speakers.list")),
+                Some(k) => p.speakers.links.insert(voice.clone(), k.to_string()),
+                None => p.speakers.links.remove(&voice),
+            };
+            json!({ "voice": voice, "person": p.speakers.links.get(&voice) })
+        }
+        Request::SpeakersAssign {
+            media,
+            stream,
+            start,
+            end,
+            person,
+        } => {
+            if p.media(media).is_none() {
+                return Err(Error::not_found(format!("no media {media}")));
+            }
+            if !(start.is_finite() && end.is_finite() && end > start) {
+                return Err(Error::usage("start and end: seconds, end after start"));
+            }
+            let person = person.as_deref().map(str::trim).unwrap_or_default();
+            p.speakers.assign(crate::speakers::Assigned {
+                media: media.clone(),
+                stream: *stream,
+                start: *start,
+                end: *end,
+                person: person.to_string(),
+            });
+            json!({ "media": media, "stream": stream, "start": start, "end": end, "person": person })
         }
         other => {
             return Err(Error::internal(format!(
@@ -5462,6 +5722,11 @@ pub fn query(
             find,
             sound_db,
             again,
+            speakers,
+            speaker_model,
+            send,
+            xai,
+            google,
         } => {
             let asked = transcript::Asked {
                 model: model.unwrap_or_default(),
@@ -5471,6 +5736,11 @@ pub fn query(
                 download: *download,
                 find: *find,
                 sound_db: *sound_db,
+                speakers: *speakers,
+                speaker_model: *speaker_model,
+                send: *send,
+                xai: xai.clone(),
+                google: google.clone(),
             };
             if model_file.is_none() && !asked.model.times_words() {
                 return Err(Error::invalid(format!(
@@ -5484,6 +5754,8 @@ pub fn query(
             }
             let mut out = Vec::new();
             let mut warnings = Vec::new();
+            let mut files = Vec::new();
+            let mut notes: Vec<String> = Vec::new();
             for id in media.to_vec() {
                 let m = p
                     .media(&id)
@@ -5497,24 +5769,59 @@ pub fn query(
                     }
                     _ => {}
                 }
-                let speech = match env
-                    .transcript(m, *stream)?
-                    .filter(|s| !*again && asked.made(s))
-                {
-                    Some(kept) => kept,
-                    None => {
-                        let plan = media_sound_plan(p, m, *stream)?;
-                        env.transcribe_media(m, *stream, &plan, &asked)?
-                    }
-                };
+                files.push(m);
+            }
+            let mut heard: Vec<Option<Arc<Speech>>> = files
+                .iter()
+                .map(|m| {
+                    Ok(env
+                        .transcript(m, *stream)?
+                        .filter(|s| !*again && asked.made(s)))
+                })
+                .collect::<Result<_>>()?;
+            if asked.model.paid() && asked.speakers && heard.iter().any(Option::is_none) {
+                heard.iter_mut().for_each(|h| *h = None);
+            }
+            let missing: Vec<usize> = (0..files.len()).filter(|&i| heard[i].is_none()).collect();
+            if !missing.is_empty() {
+                let secs = missing.iter().map(|&i| sound_secs(files[i], *stream)).sum();
+                upload_check(&asked, secs, &file_count(missing.len()))?;
+                let plans = missing
+                    .iter()
+                    .map(|&i| {
+                        media_sound_plan(
+                            p,
+                            files[i],
+                            *stream,
+                            channels_of(&asked, files[i], *stream),
+                        )
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let asking: Vec<_> = missing
+                    .iter()
+                    .zip(&plans)
+                    .map(|(&i, plan)| (files[i], *stream, plan))
+                    .collect();
+                for (&i, s) in missing.iter().zip(env.transcribe_files(&asking, &asked)?) {
+                    heard[i] = Some(s);
+                }
+            }
+            for (m, speech) in files.iter().zip(heard) {
+                let Some(speech) = speech else { continue };
+                let id = &m.id;
                 let mut v = transcript_json(*stream, &speech);
                 v["media"] = json!(id);
                 v["device"] = json!(speech.device);
                 v["warnings"] = json!(speech.warnings);
                 warnings.extend(speech.warnings.iter().map(|w| format!("{}: {w}", m.name)));
+                for n in &speech.notes {
+                    if !notes.contains(n) {
+                        notes.push(n.clone());
+                    }
+                }
                 out.push(v);
             }
-            json!({ "media": out, "warnings": warnings })
+            json!({ "media": out, "warnings": warnings, "notes": notes })
         }
         Request::AnalyzeWords {
             media,
@@ -5529,6 +5836,11 @@ pub fn query(
             download,
             find,
             sound_db,
+            speakers,
+            speaker_model,
+            send,
+            xai,
+            google,
         } => {
             if media.is_some() || clips.is_some() {
                 if range.is_some() || tracks.is_some() {
@@ -5564,11 +5876,26 @@ pub fn query(
                     let (fillers, fillers_from) = filler_words(p, env, tongue.as_deref());
                     let words: Vec<Value> = analysis::words_in(&target.span(p)?, &timed)
                         .into_iter()
-                        .map(|(i, a, b)| word_json(&timed[i], a, b, &fillers))
+                        .map(|(i, a, b)| {
+                            let w = &timed[i];
+                            let mut v = word_json(w, a, b, &fillers);
+                            v["file_time"] = json!([w.start, w.end]);
+                            let run = speech.speakers.as_deref();
+                            if let Some(person) = p.speakers.word(&m.id, stream, run, w) {
+                                if let Some(n) = w.speaker {
+                                    v["speaker"] = json!(n);
+                                }
+                                v["name"] = json!(p.speakers.name(&person));
+                                v["person"] = json!(person);
+                            }
+                            v
+                        })
                         .collect();
                     out.push(target.json(
                         p,
                         json!({
+                            "media": m.id,
+                            "stream": stream,
                             "words": words,
                             "model": speech.model,
                             "language": speech.language,
@@ -5582,18 +5909,22 @@ pub fn query(
             }
             let (a, b) = transcribed_range(p, range.as_ref(), playhead)?;
             let heard = heard_tracks(p, tracks.as_deref())?;
-            let speech = env.transcribe(
-                &sound_plan(p, a, b, &heard)?,
-                &transcript::Asked {
-                    model: model.unwrap_or_default(),
-                    model_file: model_file.clone(),
-                    vad_file: vad_file.clone(),
-                    language: language.clone(),
-                    download: *download,
-                    find: *find,
-                    sound_db: *sound_db,
-                },
-            )?;
+            let asked = transcript::Asked {
+                model: model.unwrap_or_default(),
+                model_file: model_file.clone(),
+                vad_file: vad_file.clone(),
+                language: language.clone(),
+                download: *download,
+                find: *find,
+                sound_db: *sound_db,
+                speakers: *speakers,
+                speaker_model: *speaker_model,
+                send: *send,
+                xai: xai.clone(),
+                google: google.clone(),
+            };
+            upload_check(&asked, (b - a) as f64 / p.settings.fps.as_f64(), "The mix")?;
+            let speech = env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?;
             let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
             let tongue = filler_language(&None, &speech, &timed);
             let (fillers, fillers_from) = filler_words(p, env, tongue.as_deref());
@@ -5602,7 +5933,16 @@ pub fn query(
                 .flat_map(|w| {
                     transcript::word_frames(std::slice::from_ref(w), p.settings.fps, a, b)
                         .into_iter()
-                        .map(|(_, start, end)| word_json(w, start, end, &fillers))
+                        .map(|(_, start, end)| {
+                            let mut v = word_json(w, start, end, &fillers);
+                            if let (Some(n), Some(run)) = (w.speaker, &speech.speakers) {
+                                let person = crate::speakers::heard_person(run, n);
+                                v["speaker"] = json!(n);
+                                v["name"] = json!(p.speakers.name(&person));
+                                v["person"] = json!(person);
+                            }
+                            v
+                        })
                 })
                 .collect();
             let mut warnings = speech.warnings.clone();
@@ -5624,6 +5964,7 @@ pub fn query(
                 "pieces": speech.pieces,
                 "longest_piece": speech.longest_piece,
                 "warnings": warnings,
+                "notes": speech.notes,
             })
         }
         Request::SubtitlesExport {
@@ -5815,6 +6156,54 @@ pub fn query(
                 "{} is answered by the session, not the editor",
                 request.method()
             )));
+        }
+        Request::SpeakersList {} => {
+            let mut people: Vec<(String, Vec<Value>, usize, usize)> = Vec::new();
+            for m in &p.media {
+                for a in &m.info.audio {
+                    let Some(speech) = env.transcript(m, a.index)? else {
+                        continue;
+                    };
+                    let Some(run) = &speech.speakers else {
+                        continue;
+                    };
+                    for w in speech.said.iter().flat_map(|s| s.words.iter()) {
+                        let Some(n) = w.speaker else { continue };
+                        let at = (w.start + w.end) / 2.0;
+                        let person = p.speakers.person(&m.id, a.index, run, n, at);
+                        let voice = json!({ "media": m.id, "stream": a.index, "speaker": n });
+                        match people.iter_mut().find(|(k, _, _, _)| *k == person) {
+                            Some((_, voices, words, _)) => {
+                                *words += 1;
+                                if !voices.contains(&voice) {
+                                    voices.push(voice);
+                                }
+                            }
+                            None => people.push((person, vec![voice], 1, 0)),
+                        }
+                    }
+                }
+            }
+            for c in p.subtitles.iter().flat_map(|t| t.cues.iter()) {
+                let Some(person) = &c.speaker else { continue };
+                match people.iter_mut().find(|(k, _, _, _)| k == person) {
+                    Some((_, _, _, cues)) => *cues += 1,
+                    None => people.push((person.clone(), Vec::new(), 0, 1)),
+                }
+            }
+            json!({
+                "people": people
+                    .into_iter()
+                    .map(|(person, voices, words, cues)| json!({
+                        "person": person,
+                        "name": p.speakers.name(&person),
+                        "color": p.speakers.colors.get(&person),
+                        "voices": voices,
+                        "words": words,
+                        "cues": cues,
+                    }))
+                    .collect::<Vec<_>>(),
+            })
         }
         other => {
             return Err(Error::internal(format!(
@@ -6213,8 +6602,13 @@ fn time_from_kept(p: &mut Project, env: &dyn Env, id: &str) -> Result<()> {
         download: false,
         find: None,
         sound_db: None,
+        speakers: false,
+        speaker_model: Default::default(),
+        send: false,
+        xai: None,
+        google: None,
     };
-    let Ok((speech, _)) = clip_speech(p, env, (a, b), &heard, &asked, false) else {
+    let Ok((speech, _, _)) = clip_speech(p, env, (a, b), &heard, &asked, false) else {
         return Ok(());
     };
     if !speech.said.is_empty() {
@@ -6294,10 +6688,15 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
             download: r.download,
             find: r.find,
             sound_db: r.sound_db,
+            speakers: false,
+            speaker_model: Default::default(),
+            send: false,
+            xai: None,
+            google: None,
         };
         let (heard, media) = match hears_media(r.hear, &asked)? {
             true => {
-                let (s, media) = clip_speech(p, env, (0, p.end()), &heard, &asked, true)?;
+                let (s, media, _) = clip_speech(p, env, (0, p.end()), &heard, &asked, true)?;
                 (Arc::new(s), json!(media))
             }
             false => (

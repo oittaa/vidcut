@@ -12,6 +12,7 @@ pub mod output;
 pub mod paths;
 pub mod preferences;
 pub mod reset;
+pub mod services;
 pub mod session;
 pub mod storyboard;
 pub mod system;

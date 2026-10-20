@@ -54,6 +54,9 @@ pub enum Stage {
     Listening,
     Loading,
     Transcribing,
+    Speakers,
+    Uploading,
+    Waiting,
 }
 
 #[derive(Debug, Clone, Serialize)]

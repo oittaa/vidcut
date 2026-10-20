@@ -21,6 +21,7 @@ pub mod retime;
 pub mod rich;
 pub mod sequence;
 pub mod shortcuts;
+pub mod speakers;
 pub mod steps;
 pub mod store;
 pub mod subtitles;
@@ -39,6 +40,8 @@ mod analysis_tests;
 #[cfg(test)]
 mod animated_subtitles_tests;
 #[cfg(test)]
+mod cue_speakers_tests;
+#[cfg(test)]
 mod folder_tests;
 #[cfg(test)]
 mod history_tests;
@@ -52,6 +55,8 @@ mod ops_tests;
 mod proxy_tests;
 #[cfg(test)]
 mod relink_tests;
+#[cfg(test)]
+mod speakers_tests;
 #[cfg(test)]
 mod subtitle_style_tests;
 #[cfg(test)]

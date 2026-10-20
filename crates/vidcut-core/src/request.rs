@@ -176,9 +176,83 @@ pub enum Request {
         /// second or more is silence and isn't heard. Default: -40.
         #[serde(default)]
         sound_db: Option<f64>,
+        /// Give each word its speaker. On this computer, in English and
+        /// Chinese MOSS-Transcribe-Diarize tells them apart, else up to 4 in
+        /// each file (NVIDIA's Sortformer); with `xai`, one numbering across
+        /// every file heard; with `google`, the same up to 30 minutes of
+        /// speech, past that this computer's. The project names them
+        /// (`speakers.set`).
+        #[serde(default)]
+        speakers: bool,
+        /// With `speakers` on this computer, the model that tells them
+        /// apart: `moss` (English and Chinese), `sortformer` (any
+        /// language, up to 4), or `auto`, by the language (the default).
+        #[serde(default)]
+        speaker_model: SpeakerModel,
+        /// With the `xai` or `google` model: send the audio to that company.
+        /// Without it nothing is uploaded, and the error gives the
+        /// duration, the size and the estimated cost.
+        #[serde(default)]
+        send: bool,
+        /// xAI's options, for the `xai` model.
+        #[serde(default)]
+        xai: Option<XaiOptions>,
+        /// Gemini's options, for the `google` model.
+        #[serde(default)]
+        google: Option<GoogleOptions>,
         /// Hear media that have a transcript again, replacing it.
         #[serde(default)]
         again: bool,
+    },
+    /// The people speaking in the transcripts of the project's media and
+    /// on its cues: each with its name, its color, the files' speakers it
+    /// is, and how many words and cues.
+    #[serde(rename = "speakers.list")]
+    SpeakersList {},
+    /// Name a person (`speakers.list`), or give them the color their cues
+    /// are painted with (the subtitle track's `speaker_color`).
+    #[serde(rename = "speakers.set")]
+    SpeakersSet {
+        person: String,
+        /// Their name. `""` forgets it, back to `Speaker N`.
+        #[serde(default)]
+        name: Option<String>,
+        /// `#rrggbb`, `#rgb` or a name such as `yellow`. `""` takes it away.
+        #[serde(default)]
+        color: Option<String>,
+    },
+    /// Same Person As: `person` becomes `into` everywhere, both as
+    /// `speakers.list` gives them or by name: their cues on every track,
+    /// the files' speakers and words that were theirs. `into` keeps its
+    /// name, and its color, else takes `person`'s.
+    #[serde(rename = "speakers.join")]
+    SpeakersJoin { person: String, into: String },
+    /// Make a file's speaker a person: one from `speakers.list`, which joins
+    /// them, or a new one. Without `person`, it is again the person its
+    /// transcript gives.
+    #[serde(rename = "speakers.link")]
+    SpeakersLink {
+        media: String,
+        #[serde(default)]
+        stream: u32,
+        /// The speaker's number in the file's transcript.
+        speaker: u32,
+        #[serde(default)]
+        person: Option<String>,
+    },
+    /// Assign To: give a file's words whose middle is from `start` to `end`,
+    /// in seconds of its sound (`analyze.words` gives each word's
+    /// `file_time`), to a person. Without `person`, they are again their
+    /// speaker's.
+    #[serde(rename = "speakers.assign")]
+    SpeakersAssign {
+        media: String,
+        #[serde(default)]
+        stream: u32,
+        start: f64,
+        end: f64,
+        #[serde(default)]
+        person: Option<String>,
     },
     /// Leave words of a pool item out of edits, as Delete does in the
     /// Transcription window on a source clip: their spans (source frames,
@@ -444,6 +518,30 @@ pub enum Request {
         /// second or more is silence and isn't heard. Default: -40.
         #[serde(default)]
         sound_db: Option<f64>,
+        /// Give each word its speaker. On this computer, in English and
+        /// Chinese MOSS-Transcribe-Diarize tells them apart, else up to 4 in
+        /// each file (NVIDIA's Sortformer); with `xai`, one numbering across
+        /// every file heard; with `google`, the same up to 30 minutes of
+        /// speech, past that this computer's. The project names them
+        /// (`speakers.set`).
+        #[serde(default)]
+        speakers: bool,
+        /// With `speakers` on this computer, the model that tells them
+        /// apart: `moss` (English and Chinese), `sortformer` (any
+        /// language, up to 4), or `auto`, by the language (the default).
+        #[serde(default)]
+        speaker_model: SpeakerModel,
+        /// With the `xai` or `google` model: send the audio to that company.
+        /// Without it nothing is uploaded, and the error gives the
+        /// duration, the size and the estimated cost.
+        #[serde(default)]
+        send: bool,
+        /// xAI's options, for the `xai` model.
+        #[serde(default)]
+        xai: Option<XaiOptions>,
+        /// Gemini's options, for the `google` model.
+        #[serde(default)]
+        google: Option<GoogleOptions>,
     },
     /// Import an OpenTimelineIO timeline: an `.otio` file, an `.otioz` bundle
     /// (its media are unpacked first) or an `.otiod` bundle folder, as other
@@ -988,10 +1086,17 @@ pub enum Request {
         /// and line breaks.
         #[serde(default)]
         words: Option<Vec<i64>>,
+        /// The person saying it, as `speakers.list` gives them, or a name.
+        #[serde(default)]
+        speaker: Option<String>,
+        /// Its own color instead of its speaker's: `#rrggbb`, `#rgb` or a
+        /// name such as `yellow`.
+        #[serde(default)]
+        color: Option<String>,
     },
     /// Change a cue (`q3`, or `S1@15s` for the cue on S1 at 15 s): its text,
-    /// its start or end (each moves that edge alone), where it shows, or its
-    /// words' times. Moving an edge keeps each word on its frame. New text
+    /// its start or end (each moves that edge alone), where it shows, its
+    /// words' times, its speaker or its own color. Moving an edge keeps each word on its frame. New text
     /// with as many words keeps their times; with another number of words,
     /// they are read again from the words kept for the clips' files under
     /// it, as `subtitles.time_words` reads them, else spread over the cue by
@@ -1011,7 +1116,20 @@ pub enum Request {
         /// order: one for each word of its text. `[]` clears them.
         #[serde(default)]
         words: Option<Vec<i64>>,
+        /// The person saying it, as `speakers.list` gives them, or a name.
+        /// `""` takes it away.
+        #[serde(default)]
+        speaker: Option<String>,
+        /// Its own color instead of its speaker's: `#rrggbb`, `#rgb` or a
+        /// name such as `yellow`. `""` goes back to its speaker's.
+        #[serde(default)]
+        color: Option<String>,
     },
+    /// Apply to All: `cue`'s own color becomes its speaker's, and every cue
+    /// of that speaker on its track takes its place and drops a color of
+    /// its own. Returns the cues changed.
+    #[serde(rename = "subtitles.match_speaker")]
+    SubtitlesMatchSpeaker { cue: String },
     /// Move cues by `by` (`+12f`, `-1s`) or so the first starts at `to`; with
     /// `track`, onto that subtitle track.
     #[serde(rename = "subtitles.move")]
@@ -1144,8 +1262,9 @@ pub enum Request {
         /// and kept (Transcribe Audio), placed through the clips. Where two
         /// tracks have the same word at once, the first track's is kept (V1,
         /// V2, …, then A1, A2, …). `mix`: the mix of the tracks heard over
-        /// `range`, which keeps nothing. Default: `media` with a model that
-        /// times words and no `model_file`, else `mix`.
+        /// `range`, which keeps nothing. Default: `media` over the whole
+        /// timeline with a model that times words and no `model_file`; else
+        /// `mix`, so a part of a long recording is all that is heard.
         #[serde(default)]
         hear: Option<HearFrom>,
         /// Download what this computer doesn't have yet: transcribe.cpp's
@@ -1166,6 +1285,30 @@ pub enum Request {
         /// second or more is silence and isn't heard. Default: -40.
         #[serde(default)]
         sound_db: Option<f64>,
+        /// Give each word its speaker. On this computer, in English and
+        /// Chinese MOSS-Transcribe-Diarize tells them apart, else up to 4 in
+        /// each file (NVIDIA's Sortformer); with `xai`, one numbering across
+        /// every file heard; with `google`, the same up to 30 minutes of
+        /// speech, past that this computer's. The project names them
+        /// (`speakers.set`).
+        #[serde(default)]
+        speakers: bool,
+        /// With `speakers` on this computer, the model that tells them
+        /// apart: `moss` (English and Chinese), `sortformer` (any
+        /// language, up to 4), or `auto`, by the language (the default).
+        #[serde(default)]
+        speaker_model: SpeakerModel,
+        /// With the `xai` or `google` model: send the audio to that company.
+        /// Without it nothing is uploaded, and the error gives the
+        /// duration, the size and the estimated cost.
+        #[serde(default)]
+        send: bool,
+        /// xAI's options, for the `xai` model.
+        #[serde(default)]
+        xai: Option<XaiOptions>,
+        /// Gemini's options, for the `google` model.
+        #[serde(default)]
+        google: Option<GoogleOptions>,
     },
     /// Re-time a subtitle track to the timeline's speech. Where the built-in
     /// voice-activity model hears speech is lined up with where the cues
@@ -1511,6 +1654,19 @@ pub enum Request {
     /// and Alt are Cmd and Option on macOS.
     #[serde(rename = "keys.list")]
     KeysList {},
+    /// Keep a paid speech service's key in the system's keychain (macOS
+    /// Keychain, Windows Credential Manager, the Secret Service on Linux).
+    /// Without `key`, the CLI reads it from standard input. The key never
+    /// goes into a file, a log or an answer.
+    #[serde(rename = "services.set_key")]
+    ServicesSetKey {
+        service: SpeechService,
+        #[serde(default)]
+        key: Option<String>,
+    },
+    /// Take a paid speech service's key out of the system's keychain.
+    #[serde(rename = "services.remove_key")]
+    ServicesRemoveKey { service: SpeechService },
 
     #[serde(rename = "history.undo")]
     HistoryUndo {
@@ -1928,6 +2084,10 @@ pub enum Request {
         /// Also delete what you saved: presets, themes and looks.
         #[serde(default)]
         saved: bool,
+        /// Keep what was downloaded or paid for: the speech models, and the
+        /// paid services' replies kept to use again.
+        #[serde(default)]
+        keep_downloads: bool,
     },
 }
 
@@ -2063,11 +2223,35 @@ pub enum SpeechModel {
     /// phrase. It wants a GPU with 4 GB.
     #[serde(rename = "whisper-large-v3")]
     WhisperLargeV3,
+    /// xAI's `grok-voice-transcribe-2.0`, on xAI's servers: 38 languages,
+    /// times per word, $0.10 per hour of audio (October 2026). Everything
+    /// heard goes in one request, 500 MB at most. It needs an xAI key and
+    /// `send`.
+    #[serde(rename = "xai")]
+    Xai,
+    /// Google's `gemini-3.5-transcribe`, on Google's servers: 85 languages
+    /// and more, times per word, about $0.30 per hour of audio (October
+    /// 2026), 30 minutes of speech per request. It needs a Gemini key and
+    /// `send`.
+    #[serde(rename = "google")]
+    Google,
 }
 
 impl SpeechModel {
     pub fn times_words(self) -> bool {
-        self == Self::ParakeetUltra
+        matches!(self, Self::ParakeetUltra | Self::Xai | Self::Google)
+    }
+
+    pub fn paid(self) -> bool {
+        matches!(self, Self::Xai | Self::Google)
+    }
+
+    pub fn dollars_per_hour(self) -> f64 {
+        match self {
+            Self::Xai => 0.10,
+            Self::Google => 0.30,
+            _ => 0.0,
+        }
     }
 
     pub const fn title(self) -> &'static str {
@@ -2075,8 +2259,100 @@ impl SpeechModel {
             Self::ParakeetUltra => "Parakeet Ultra",
             Self::Qwen3Asr => "Qwen3-ASR 1.7B",
             Self::WhisperLargeV3 => "Whisper large-v3",
+            Self::Xai => "xAI Grok Transcribe",
+            Self::Google => "Gemini 3.5 Transcribe",
         }
     }
+
+    pub const fn company(self) -> &'static str {
+        match self {
+            Self::Xai => "xAI",
+            Self::Google => "Google",
+            _ => "",
+        }
+    }
+}
+
+/// The model on this computer that tells speakers apart.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SpeakerModel {
+    /// MOSS-Transcribe-Diarize in English and Chinese, else Sortformer.
+    #[default]
+    Auto,
+    /// MOSS-Transcribe-Diarize, 987 MB: English and Chinese, many speakers.
+    Moss,
+    /// NVIDIA's Sortformer, 139 MB: any language, up to 4 speakers.
+    Sortformer,
+}
+
+impl SpeakerModel {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Moss => "moss",
+            Self::Sortformer => "sortformer",
+        }
+    }
+}
+
+/// A paid speech service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SpeechService {
+    Xai,
+    Google,
+}
+
+impl SpeechService {
+    pub fn model(self) -> SpeechModel {
+        match self {
+            Self::Xai => SpeechModel::Xai,
+            Self::Google => SpeechModel::Google,
+        }
+    }
+}
+
+/// xAI's speech-to-text options, by xAI's own names.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct XaiOptions {
+    /// Default: `grok-voice-transcribe-2.0`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Names and words to bias the transcript toward: 100 at most, 50
+    /// characters each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keyterm: Vec<String>,
+    /// Numbers as digits ("$100" for "one hundred dollars"). It needs
+    /// `language`, and works in Arabic, Chinese, English, French, German,
+    /// Japanese, Portuguese, Russian, Spanish, Swedish and Vietnamese.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub format: bool,
+    /// Keep filler words such as "uh" and "um". Default: true, so Delete
+    /// Filler Words finds them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filler_words: Option<bool>,
+    /// xAI's own voice gate, 0 to 1: quieter speech is skipped, and 0
+    /// hears everything sent. Default: 0 with `find: sound`, so singing
+    /// isn't dropped again, else xAI's 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vad_threshold: Option<f64>,
+    /// Each channel of the sound on its own, up to 8, the words merged by
+    /// time; with `speakers`, a word's speaker is its channel.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multichannel: bool,
+}
+
+/// Gemini's transcription options, by Google's own names.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GoogleOptions {
+    /// Default: `gemini-3.5-transcribe`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The languages spoken, as BCP-47 codes such as `fi-FI`, for speech
+    /// that switches between them. Default: `language`, else Gemini tells.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub language_codes: Vec<String>,
 }
 
 /// Where speech is heard from.
@@ -2560,6 +2836,8 @@ impl Request {
                 | Self::PreferencesSet(_)
                 | Self::PreferencesReset {}
                 | Self::KeysList {}
+                | Self::ServicesSetKey { .. }
+                | Self::ServicesRemoveKey { .. }
         )
     }
 
@@ -2568,6 +2846,7 @@ impl Request {
             && !matches!(
                 self,
                 Self::ProjectGet {}
+                    | Self::SpeakersList {}
                     | Self::ProjectSummary {}
                     | Self::ProjectCreate { .. }
                     | Self::TrackList {}
@@ -2612,6 +2891,8 @@ impl Request {
                     | Self::PreferencesSet(_)
                     | Self::PreferencesReset {}
                     | Self::KeysList {}
+                    | Self::ServicesSetKey { .. }
+                    | Self::ServicesRemoveKey { .. }
                     | Self::EditCopy { .. }
             )
     }

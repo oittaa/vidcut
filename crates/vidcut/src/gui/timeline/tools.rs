@@ -634,7 +634,7 @@ impl Workspace {
         }
         let params = d.params();
         let needs = match d.detect == Detect::Speech && !d.download {
-            true => vidcut_av::transcribe::needed(&crate::paths::models_dir(), None),
+            true => vidcut_av::transcribe::needed(&crate::paths::models_dir(), &[]),
             false => Vec::new(),
         };
         if d.asked.is_none() && !d.current() && needs.is_empty() {

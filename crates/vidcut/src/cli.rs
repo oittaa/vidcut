@@ -45,6 +45,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("subtitles.remove", &["cues"]),
     ("subtitles.split", &["cue"]),
     ("subtitles.join", &["cues"]),
+    ("subtitles.match_speaker", &["cue"]),
+    ("speakers.set", &["person"]),
+    ("speakers.join", &["person"]),
     ("subtitles.import", &["path"]),
     ("subtitles.export", &["out"]),
     ("titles.list", &["track"]),
@@ -150,6 +153,11 @@ const GROUPS: &[(&str, &str)] = &[
     (
         "selection",
         "The GUI's selection: timeline clips, subtitle cues, pool media and an edit point",
+    ),
+    ("services", "The paid speech services' keys: xAI and Google"),
+    (
+        "speakers",
+        "Who speaks: names, colors, files' speakers joined, words reassigned",
     ),
     ("storyboard", "Storyboards: a labeled picture of every shot"),
     (
@@ -855,6 +863,13 @@ impl Cli {
                     if let Some(v) = value(m, p)? {
                         params.insert(p.name.clone(), v);
                     }
+                }
+                if method.name == "services.set_key" && !params.contains_key("key") {
+                    let mut key = String::new();
+                    std::io::stdin()
+                        .read_line(&mut key)
+                        .map_err(|e| Error::usage(format!("stdin: {e}")))?;
+                    params.insert("key".into(), Value::String(key.trim().to_string()));
                 }
                 Request::from_parts(&method.name, Some(Value::Object(params)))
                     .map_err(Error::usage)?

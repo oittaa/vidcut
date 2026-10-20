@@ -4,12 +4,13 @@ use eframe::egui::{self, Key};
 use serde_json::json;
 use vidcut_core::looks::{LookKind, Styled, SubtitleLook};
 use vidcut_core::model::{
-    LetterCase, Place, SubtitleStyle, SubtitleTrack, SubtitleWords, WordsShow,
+    Cue, LetterCase, Place, Project, SpeakerPaint, Speakers, SubtitleStyle, SubtitleTrack,
+    SubtitleWords, WordsShow,
 };
 
+use super::dialog;
 use super::export::{Ask, Picked};
 use super::folders::Kind;
-use super::keys;
 use super::looks::{Parts, Picker, TextFields};
 use super::workspace::{Workspace, dim};
 
@@ -18,8 +19,69 @@ pub struct CueDialog {
     pub cue: String,
     pub text: String,
     pub place: Place,
+    speaker: Option<String>,
+    color: String,
+    person_name: String,
     loaded: bool,
     focus: bool,
+}
+
+impl CueDialog {
+    fn load(&mut self, speakers: &Speakers, c: &Cue) {
+        self.text = c.text.clone();
+        self.place = c.place;
+        self.color = c.color.clone().unwrap_or_default();
+        self.take_person(speakers, c.speaker.clone());
+        self.loaded = true;
+    }
+
+    fn take_person(&mut self, speakers: &Speakers, person: Option<String>) {
+        self.person_name = person_name(speakers, person.as_deref());
+        self.speaker = person;
+    }
+
+    fn typing(&self) -> Typing {
+        Typing {
+            cue: self.cue.clone(),
+            text: self.text.clone(),
+            place: self.place,
+            speaker: self.speaker.clone(),
+            color: field(&self.color),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Typing {
+    cue: String,
+    text: String,
+    place: Place,
+    speaker: Option<String>,
+    color: Option<String>,
+}
+
+fn person_name(speakers: &Speakers, person: Option<&str>) -> String {
+    person
+        .and_then(|k| speakers.names.get(k).cloned())
+        .unwrap_or_default()
+}
+
+fn people(p: &Project) -> Vec<(String, String)> {
+    let mut keys: Vec<&String> = p
+        .subtitles
+        .iter()
+        .flat_map(|t| t.cues.iter().filter_map(|c| c.speaker.as_ref()))
+        .chain(p.speakers.names.keys())
+        .chain(p.speakers.colors.keys())
+        .collect();
+    keys.sort();
+    keys.dedup();
+    let mut out: Vec<(String, String)> = keys
+        .into_iter()
+        .map(|k| (k.clone(), p.speakers.name(k)))
+        .collect();
+    out.sort_by(|a, b| a.1.cmp(&b.1));
+    out
 }
 
 #[derive(Debug)]
@@ -35,6 +97,7 @@ pub struct TrackDialog {
     show: Option<WordsShow>,
     spoken: String,
     pop: String,
+    paint: Option<SpeakerPaint>,
     base: SubtitleStyle,
     error: String,
     families: Vec<String>,
@@ -55,6 +118,7 @@ impl TrackDialog {
             .and_then(|w| w.color.clone())
             .unwrap_or_default();
         self.pop = percent(s.words.as_ref().and_then(|w| w.pop));
+        self.paint = s.speaker_color;
         self.base = s.clone();
     }
 }
@@ -72,12 +136,14 @@ const SHOWS: [(Option<WordsShow>, &str); 4] = [
     (Some(WordsShow::Word), "Only the spoken word"),
 ];
 
-pub(crate) type SubtitlesKey = (
-    u64,
-    Option<String>,
-    Option<(String, String, Place)>,
-    Option<SubtitleStyle>,
-);
+const PAINTS: [(Option<SpeakerPaint>, &str); 4] = [
+    (None, "Usual"),
+    (Some(SpeakerPaint::Text), "Color the text"),
+    (Some(SpeakerPaint::Spoken), "Color the spoken word"),
+    (Some(SpeakerPaint::None), "No colors"),
+];
+
+pub(crate) type SubtitlesKey = (u64, Option<String>, Option<Typing>, Option<SubtitleStyle>);
 
 pub(super) fn format_name(f: vidcut_core::request::SubtitleFormat) -> &'static str {
     match f {
@@ -171,6 +237,7 @@ fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
         case: d.case,
         shadow: parts.shadow,
         words,
+        speaker_color: d.paint,
     };
     vidcut_core::ops::subtitles::checked_style(&style).map_err(|e| e.message)
 }
@@ -226,10 +293,33 @@ impl Workspace {
         if d.place != cue.place {
             params["place"] = json!(d.place);
         }
+        if d.speaker != cue.speaker {
+            params["speaker"] = json!(d.speaker.clone().unwrap_or_default());
+        }
+        let own = field(&d.color);
+        if own != cue.color {
+            params["color"] = json!(own.unwrap_or_default());
+        }
         params
             .as_object()
             .is_some_and(|o| o.len() > 1)
             .then_some(params)
+    }
+
+    fn save_cue(&mut self, d: &CueDialog) {
+        if let Some(params) = self.typed(d) {
+            self.send("subtitles.set", params);
+        }
+        let Some(person) = d.speaker.clone() else {
+            return;
+        };
+        let stored = self
+            .project()
+            .map(|p| person_name(&p.speakers, Some(&person)));
+        let name = d.person_name.trim();
+        if stored.is_some_and(|s| s != name) {
+            self.send("speakers.set", json!({ "person": person, "name": name }));
+        }
     }
 
     pub(crate) fn open_cue(&mut self, id: &str) {
@@ -239,22 +329,25 @@ impl Workspace {
             d.focus = true;
             return;
         }
-        if let Some(params) = self
-            .timeline
-            .cue_dialog
-            .as_ref()
-            .and_then(|d| self.typed(d))
-        {
-            self.send("subtitles.set", params);
+        if let Some(d) = self.timeline.cue_dialog.clone() {
+            self.save_cue(&d);
         }
-        let found = self.project().and_then(|p| p.cue(id)).cloned();
-        self.timeline.cue_dialog = Some(CueDialog {
+        let mut d = CueDialog {
             cue: id.to_string(),
-            text: found.as_ref().map(|c| c.text.clone()).unwrap_or_default(),
-            place: found.as_ref().map(|c| c.place).unwrap_or_default(),
-            loaded: found.is_some(),
+            text: String::new(),
+            place: Place::default(),
+            speaker: None,
+            color: String::new(),
+            person_name: String::new(),
+            loaded: false,
             focus: true,
-        });
+        };
+        if let Some(p) = self.project()
+            && let Some(c) = p.cue(id)
+        {
+            d.load(&p.speakers, c);
+        }
+        self.timeline.cue_dialog = Some(d);
     }
 
     pub(crate) fn open_track_dialog(&mut self, t: &SubtitleTrack) {
@@ -280,6 +373,7 @@ impl Workspace {
             show: None,
             spoken: String::new(),
             pop: String::new(),
+            paint: None,
             base: SubtitleStyle::default(),
             error: String::new(),
             families: vidcut_av::burn::families(),
@@ -295,11 +389,7 @@ impl Workspace {
             return;
         };
         let track = p.subtitles.iter().find(|t| t.shown);
-        let typing = self
-            .timeline
-            .cue_dialog
-            .as_ref()
-            .map(|d| (d.cue.clone(), d.text.clone(), d.place));
+        let typing = self.timeline.cue_dialog.as_ref().map(CueDialog::typing);
         let styling = self
             .timeline
             .track_dialog
@@ -317,17 +407,22 @@ impl Workspace {
         }
         let view = track.map(|t| {
             let mut cues = t.cues.clone();
-            if let Some((id, text, place)) = &typing
-                && let Some(c) = cues.iter_mut().find(|c| c.id == *id)
+            if let Some(ty) = &typing
+                && let Some(c) = cues.iter_mut().find(|c| c.id == ty.cue)
             {
-                let text = vidcut_core::subtitles::normalize(text);
+                let text = vidcut_core::subtitles::normalize(&ty.text);
                 if !c.words.is_empty()
                     && vidcut_core::subtitles::words(&text).len() != c.words.len()
                 {
                     c.words = vidcut_core::subtitles::spread_words(&text, c.duration);
                 }
                 c.text = text;
-                c.place = *place;
+                c.place = ty.place;
+                c.speaker = ty.speaker.clone();
+                c.color = ty.color.clone();
+            }
+            for c in &mut cues {
+                c.color = p.speakers.color_of(c);
             }
             vidcut_av::player::SubtitleView {
                 style: styling.unwrap_or_else(|| t.style.clone()),
@@ -368,70 +463,159 @@ impl Workspace {
             .find_cue(&d.cue)
             .map(|(t, c)| (&p.subtitles[t], &p.subtitles[t].cues[c]));
         match found {
-            Some((_, cue)) if !d.loaded => {
-                d.text = cue.text.clone();
-                d.place = cue.place;
-                d.loaded = true;
-            }
+            Some((_, cue)) if !d.loaded => d.load(&p.speakers, cue),
             None if d.loaded => return,
             _ => {}
         }
+        let everyone = people(&p);
         let mut open = true;
         let mut done = false;
-        egui::Window::new("Subtitle")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                match found {
-                    Some((track, cue)) => ui.label(dim(format!(
-                        "{}   {} – {}   ({})",
-                        track.display_name(),
-                        self.tc(cue.start),
-                        self.tc(cue.end()),
-                        self.src_tc(cue.duration)
-                    ))),
-                    None => ui.label(dim("Adding…")),
-                };
-                let save = ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::Enter));
-                let r = ui.add(
-                    egui::TextEdit::multiline(&mut d.text)
-                        .desired_rows(3)
-                        .desired_width(380.0)
-                        .hint_text("Its text; Enter starts a new line"),
-                );
-                if d.focus {
-                    r.request_focus();
-                    d.focus = false;
-                }
-                ui.label(dim(
-                    "<i>, <b>, <u> and <font color=\"#ffcc00\"> around words style them",
-                ));
-                ui.horizontal(|ui| {
-                    ui.label("Position");
-                    for (place, label) in PLACES {
-                        ui.radio_value(&mut d.place, place, label);
-                    }
+        dialog::window(ctx, "Subtitle", &mut open, |ui| {
+            match found {
+                Some((track, cue)) => ui.label(dim(format!(
+                    "{}   {} – {}   ({})",
+                    track.display_name(),
+                    self.tc(cue.start),
+                    self.tc(cue.end()),
+                    self.src_tc(cue.duration)
+                ))),
+                None => ui.label(dim("Adding…")),
+            };
+            let save = ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::Enter));
+            let r = ui.add(
+                egui::TextEdit::multiline(&mut d.text)
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("Its text; Enter starts a new line"),
+            );
+            if d.focus {
+                r.request_focus();
+                d.focus = false;
+            }
+            dialog::note(
+                ui,
+                "<i>, <b>, <u> and <font color=\"#ffcc00\"> around words style them",
+            );
+            let style = found.map(|(t, _)| t.style.clone()).unwrap_or_default();
+            dialog::form(ui, "cue-form", |ui| {
+                dialog::row(ui, "Speaker", |ui| {
+                    let name = d
+                        .speaker
+                        .as_deref()
+                        .map_or("None".into(), |k| p.speakers.name(k));
+                    egui::ComboBox::from_id_salt("cue-speaker")
+                        .selected_text(name)
+                        .width(200.0)
+                        .show_ui(ui, |ui| {
+                            let mut picked = None;
+                            ui.label(dim("This Subtitle"));
+                            if ui.selectable_label(d.speaker.is_none(), "None").clicked() {
+                                picked = Some(None);
+                            }
+                            for (key, name) in &everyone {
+                                let on = d.speaker.as_deref() == Some(key.as_str());
+                                if ui.selectable_label(on, name).clicked() {
+                                    picked = Some(Some(key.clone()));
+                                }
+                            }
+                            let stored = found.and_then(|(_, c)| c.speaker.clone());
+                            let others: Vec<_> = everyone
+                                .iter()
+                                .filter(|(k, _)| Some(k) != stored.as_ref())
+                                .collect();
+                            if let Some(from) = stored.as_ref().filter(|_| !others.is_empty()) {
+                                ui.separator();
+                                ui.label(dim(format!("All of {}'s", p.speakers.name(from))));
+                                for (key, name) in others {
+                                    if ui.selectable_label(false, name).clicked() {
+                                        self.send(
+                                            "speakers.join",
+                                            json!({ "person": from, "into": key }),
+                                        );
+                                        picked = Some(Some(key.clone()));
+                                    }
+                                }
+                            }
+                            if let Some(k) = picked {
+                                d.take_person(&p.speakers, k);
+                            }
+                        });
                 });
-                ui.horizontal(|ui| {
-                    if ui.button(keys("Done  (Ctrl+Enter)")).clicked() || save {
-                        if let Some(params) = self.typed(&d) {
-                            self.send("subtitles.set", params);
+                if let Some(k) = &d.speaker {
+                    dialog::row(ui, "Name", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut d.person_name)
+                                .hint_text(vidcut_core::speakers::Speakers::default().name(k))
+                                .desired_width(200.0),
+                        )
+                        .on_hover_text("Renames them on every subtitle");
+                    });
+                }
+                dialog::row(ui, "Color", |ui| {
+                    ui.add_enabled_ui(style.paints() != SpeakerPaint::None, |ui| {
+                        let track = match (style.paints(), &style.words) {
+                            (SpeakerPaint::Spoken, Some(w)) => w
+                                .color
+                                .as_deref()
+                                .and_then(vidcut_core::subtitles::rgb)
+                                .unwrap_or([255, 212, 0]),
+                            _ => style.ink(),
+                        };
+                        let usual = d
+                            .speaker
+                            .as_ref()
+                            .and_then(|k| p.speakers.colors.get(k))
+                            .and_then(|c| vidcut_core::subtitles::rgb(c))
+                            .unwrap_or(track);
+                        swatch(ui, &mut d.color, usual);
+                        if ui
+                            .add_enabled(!d.color.is_empty(), egui::Button::new("Clear"))
+                            .on_hover_text("Back to the speaker's color")
+                            .clicked()
+                        {
+                            d.color.clear();
                         }
-                        done = true;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        done = true;
-                    }
-                    if ui
-                        .add_enabled(found.is_some(), egui::Button::new("Delete Subtitle"))
-                        .clicked()
-                    {
-                        self.send("subtitles.remove", json!({ "cues": [d.cue] }));
-                        done = true;
-                    }
+                    })
+                    .response
+                    .on_disabled_hover_text("Off in the track's Speakers setting");
+                });
+                dialog::row(ui, "Position", |ui| {
+                    dialog::switch(ui, |ui| {
+                        for (place, label) in PLACES {
+                            ui.selectable_value(&mut d.place, place, label);
+                        }
+                    });
                 });
             });
+            dialog::footer(ui, |ui| {
+                if dialog::main_button(ui, "Done", true) || save {
+                    self.save_cue(&d);
+                    done = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    done = true;
+                }
+                if ui
+                    .add_enabled(found.is_some(), egui::Button::new("Delete"))
+                    .clicked()
+                {
+                    self.send("subtitles.remove", json!({ "cues": [d.cue] }));
+                    done = true;
+                }
+                if let Some(k) = d.speaker.clone().filter(|_| found.is_some()) {
+                    let label = format!("Apply to All of {}'s", p.speakers.name(&k));
+                    if ui
+                        .button(label)
+                        .on_hover_text("All their subtitles take this position and color")
+                        .clicked()
+                    {
+                        self.save_cue(&d);
+                        self.send("subtitles.match_speaker", json!({ "cue": d.cue }));
+                        d.color.clear();
+                    }
+                }
+            });
+        });
         if open && !done {
             self.timeline.cue_dialog = Some(d);
         }
@@ -540,6 +724,24 @@ impl Workspace {
                         changed |= row(ui, "Pop", &mut d.pop, "100%: none, up to 200%");
                         ui.end_row();
                     }
+                    ui.label("Speakers");
+                    egui::ComboBox::from_id_salt("subtitle-speakers")
+                        .selected_text(
+                            PAINTS
+                                .iter()
+                                .find(|(s, _)| *s == d.paint)
+                                .map_or("", |(_, l)| *l),
+                        )
+                        .width(240.0)
+                        .show_ui(ui, |ui| {
+                            for (paint, label) in PAINTS {
+                                changed |=
+                                    ui.selectable_value(&mut d.paint, paint, label).changed();
+                            }
+                        })
+                        .response
+                        .on_hover_text("Usual: the spoken word with Words, else the text");
+                    ui.end_row();
                 });
                 if changed {
                     d.preview = style_of(&d).ok();

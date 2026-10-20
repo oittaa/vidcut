@@ -19,7 +19,7 @@ impl Dirs {
     }
 }
 
-pub fn run(saved: bool, dry_run: bool) -> Result<Value> {
+pub fn run(saved: bool, keep_downloads: bool, dry_run: bool) -> Result<Value> {
     let running = crate::ipc::registry::list();
     if let Some(other) = running.iter().find(|i| i.pid != std::process::id()) {
         return Err(Error::conflict(format!(
@@ -37,6 +37,10 @@ pub fn run(saved: bool, dry_run: bool) -> Result<Value> {
         .collect();
     if !saved {
         keep.extend(["presets", "themes", "looks"].map(|d| dirs.config.join(d)));
+    }
+    if keep_downloads {
+        keep.push(crate::paths::models_dir());
+        keep.push(vidcut_av::speech_api::replies_folder());
     }
     if let Ok(p) = crate::preferences::load()
         && p.proxies.folder.is_absolute()

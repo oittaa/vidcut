@@ -552,6 +552,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         gates: HashMap::new(),
         job_replies: HashMap::new(),
         next_job: 1,
+        hearing: 0,
         audio_scrubbing: true,
         looping: false,
         stats: false,
@@ -763,6 +764,9 @@ fn chosen_theme() -> (crate::themes::Theme, Option<String>) {
 const RELOAD_EVERY: Duration = Duration::from_millis(100);
 const OMARCHY_SETTLES: Duration = Duration::from_millis(150);
 
+const HEARS: [&str; 5] = ["subtitles", "words", "transcript", "word_times", "retime"];
+const HEARING_VIDEO: usize = 1 << 30;
+
 struct Live {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -813,6 +817,7 @@ struct Live {
     gates: HashMap<String, Sender<()>>,
     job_replies: HashMap<String, (Job, bool)>,
     next_job: u64,
+    hearing: usize,
     audio_scrubbing: bool,
     looping: bool,
     stats: bool,
@@ -997,11 +1002,12 @@ impl Live {
                         (job, result)
                     }
                 };
+                let ended = encode.is_some();
                 if let Some(id) = encode {
                     self.job_ended(&id, &result);
                 }
                 self.finish(job, result);
-                self.refresh_transcribed();
+                self.refresh_transcribed(ended);
             }
             Msg::PreferencesChanged => {
                 changed = self
@@ -1013,7 +1019,7 @@ impl Live {
                     self.fillers = Arc::new(fillers);
                     changed = true;
                 }
-                self.player.set_budget(crate::preferences::player_budget());
+                self.follow_budget();
                 self.follow_theme();
                 if self.project.is_some() && self.proxy_folder() != *self.proxy_dir {
                     self.project_changed(None);
@@ -1645,6 +1651,14 @@ impl Live {
         self.dirty = true;
     }
 
+    fn follow_budget(&mut self) {
+        let mut budget = crate::preferences::player_budget();
+        if self.hearing > 0 && !vidcut_av::player::SHARED_MEMORY {
+            budget.video = Some(budget.video.map_or(HEARING_VIDEO, |v| v.min(HEARING_VIDEO)));
+        }
+        self.player.set_budget(budget);
+    }
+
     fn start_encode(
         &mut self,
         job: Job,
@@ -1653,6 +1667,10 @@ impl Live {
         title: String,
         kind: &'static str,
     ) {
+        if HEARS.contains(&kind) {
+            self.hearing += 1;
+            self.follow_budget();
+        }
         let id = format!("j{}", self.next_job);
         self.next_job += 1;
         let cancel = job
@@ -1679,6 +1697,7 @@ impl Live {
             let _report = {
                 let (tx, id) = (tx.clone(), id.clone());
                 let mut last = Instant::now() - Duration::from_secs(1);
+                let mut stage = None;
                 let mut file: Option<PathBuf> = None;
                 let mut output = 0;
                 vidcut_av::progress::Guard::set(Box::new(
@@ -1691,10 +1710,14 @@ impl Live {
                             }
                             None => file = Some(out.to_path_buf()),
                         }
-                        if p.frames != p.total && last.elapsed() < Duration::from_millis(100) {
+                        if p.frames != p.total
+                            && p.stage == stage
+                            && last.elapsed() < Duration::from_millis(100)
+                        {
                             return;
                         }
                         last = Instant::now();
+                        stage = p.stage;
                         let _ = tx.send(Msg::JobProgress {
                             id: id.clone(),
                             output,
@@ -1788,6 +1811,14 @@ impl Live {
             self.start_turn(&next);
         }
         self.dirty = true;
+        if self.jobs.iter().any(|j| {
+            j.id == id
+                && HEARS.contains(&j.kind)
+                && matches!(j.state, JobState::Queued | JobState::Running)
+        }) {
+            self.hearing = self.hearing.saturating_sub(1);
+            self.follow_budget();
+        }
         let Some(j) = Arc::make_mut(&mut self.jobs)
             .iter_mut()
             .find(|j| j.id == id)
@@ -1863,7 +1894,10 @@ impl Live {
                     .map_or(0.0, |d| d.as_secs_f64()),
                 origin: job.origin.name().into(),
                 method: job.method.clone(),
-                params: job.params.clone(),
+                params: match job.method.as_str() {
+                    "services.set_key" => json!({ "service": job.params["service"] }),
+                    _ => job.params.clone(),
+                },
                 summary: self.summary(&job, &result),
                 ok: result.is_ok(),
                 error: result.as_ref().err().map(|e| e.message.clone()),
@@ -2944,7 +2978,7 @@ impl Live {
         self.dirty = true;
     }
 
-    fn refresh_transcribed(&mut self) {
+    fn refresh_transcribed(&mut self, job_ended: bool) {
         let Some(open) = &self.project else { return };
         let now: HashSet<String> = open
             .project()
@@ -2953,14 +2987,14 @@ impl Live {
             .filter(|m| crate::env::transcribed(m))
             .map(|m| m.id.clone())
             .collect();
-        if *self.transcribed != now {
+        if job_ended || *self.transcribed != now {
             self.transcribed = Arc::new(now);
             self.dirty = true;
         }
     }
 
     fn check_media(&mut self) {
-        self.refresh_transcribed();
+        self.refresh_transcribed(false);
         let Some(open) = &self.project else { return };
         let media: Vec<_> = open.project().media.clone();
         let channels = open.project().settings.channels;

@@ -85,7 +85,14 @@ pub fn run_with(
     let mut response = match &envelope.request {
         Request::Schema { method } => answer(schema(method.as_deref())?),
         Request::Doctor {} => answer(doctor()),
-        Request::Reset { saved } => answer(crate::reset::run(*saved, envelope.dry_run)?),
+        Request::Reset {
+            saved,
+            keep_downloads,
+        } => answer(crate::reset::run(
+            *saved,
+            *keep_downloads,
+            envelope.dry_run,
+        )?),
         Request::ProjectCreate {
             path,
             from,
@@ -212,6 +219,14 @@ pub fn run_with(
         }
         Request::PreferencesGet {} => answer(crate::preferences::get()?),
         Request::KeysList {} => answer(shortcuts()),
+        Request::ServicesSetKey { service, key } => answer(crate::services::set_key(
+            *service,
+            key.as_deref(),
+            envelope.dry_run,
+        )?),
+        Request::ServicesRemoveKey { service } => {
+            answer(crate::services::remove_key(*service, envelope.dry_run)?)
+        }
         Request::PreferencesSet(patch) => answer(crate::preferences::set(patch, envelope.dry_run)?),
         Request::PreferencesReset {} => answer(crate::preferences::reset(envelope.dry_run)?),
         Request::ExportStart(params) if params.background => {

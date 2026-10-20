@@ -18,6 +18,7 @@ fn word(text: &str, start: f64, end: f64) -> Word {
         end,
         text: text.into(),
         joined: false,
+        speaker: None,
     }
 }
 

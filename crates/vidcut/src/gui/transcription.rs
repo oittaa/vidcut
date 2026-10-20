@@ -35,6 +35,16 @@ struct Asked {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+struct Who {
+    person: String,
+    name: String,
+    media: String,
+    stream: u32,
+    speaker: u32,
+    file: (f64, f64),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct Item {
     start: i64,
     end: i64,
@@ -42,6 +52,7 @@ struct Item {
     joined: bool,
     silence: bool,
     filler: bool,
+    who: Option<Who>,
 }
 
 type Words = Result<Arc<Vec<Item>>, String>;
@@ -83,6 +94,9 @@ enum Act {
     RemoveSilences,
     Fillers,
     Transcribe(Vec<String>),
+    Name(String, String),
+    Link(Who, String),
+    Assign(Who, f64, String),
 }
 
 #[derive(Debug, Default)]
@@ -108,6 +122,7 @@ pub(super) struct TranscriptionUi {
     editing: Option<FillerEditor>,
     saving: Option<(Scope, Ask)>,
     edit_error: Option<String>,
+    naming: String,
 }
 
 impl TranscriptionUi {
@@ -176,8 +191,25 @@ fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Vec<Item> {
         .as_array()
         .into_iter()
         .flatten()
-        .flat_map(|e| e["words"].as_array().into_iter().flatten())
-        .filter_map(|w| {
+        .flat_map(|e| {
+            e["words"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(move |w| (e, w))
+        })
+        .filter_map(|(e, w)| {
+            let who = w["person"].as_str().map(|person| Who {
+                person: person.to_string(),
+                name: w["name"].as_str().unwrap_or(person).to_string(),
+                media: e["media"].as_str().unwrap_or_default().to_string(),
+                stream: e["stream"].as_u64().unwrap_or(0) as u32,
+                speaker: w["speaker"].as_u64().unwrap_or(0) as u32,
+                file: (
+                    w["file_time"][0].as_f64().unwrap_or(0.0),
+                    w["file_time"][1].as_f64().unwrap_or(0.0),
+                ),
+            });
             Some(Item {
                 start: w["start"].as_i64()?,
                 end: w["end"].as_i64()?,
@@ -185,6 +217,7 @@ fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Vec<Item> {
                 joined: w["joined"].as_bool().unwrap_or(false),
                 silence: false,
                 filler: w["filler"].as_bool().unwrap_or(false),
+                who,
             })
         })
         .collect();
@@ -196,6 +229,7 @@ fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Vec<Item> {
         joined: false,
         silence: true,
         filler: false,
+        who: None,
     };
     let mut out: Vec<Item> = Vec::with_capacity(words.len() * 2);
     let mut last = bounds.map(|(a, _)| a);
@@ -216,10 +250,28 @@ fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Vec<Item> {
     out
 }
 
+fn person(item: &Item) -> Option<&str> {
+    item.who.as_ref().map(|w| w.person.as_str())
+}
+
+fn people(items: &[Item]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for w in items.iter().filter_map(|i| i.who.as_ref()) {
+        if !out.iter().any(|(p, _)| *p == w.person) {
+            out.push((w.person.clone(), w.name.clone()));
+        }
+    }
+    out
+}
+
 fn paragraphs(items: &[Item]) -> Vec<Range<usize>> {
     let mut out = Vec::new();
     let mut start = 0;
     for (i, item) in items.iter().enumerate() {
+        if i > start && !item.silence && person(item) != person(&items[i - 1]) {
+            out.push(start..i);
+            start = i;
+        }
         if item.silence {
             if start < i {
                 out.push(start..i);
@@ -335,6 +387,55 @@ fn hit(p: &Paragraph, at: Vec2) -> usize {
 fn at_frame(items: &[Item], frame: i64) -> Option<usize> {
     let i = items.partition_point(|x| x.start <= frame);
     (i > 0 && frame < items[i - 1].end).then(|| i - 1)
+}
+
+fn speaker_menu(
+    ui: &mut egui::Ui,
+    w: &Who,
+    everyone: &[(String, String)],
+    naming: &mut String,
+    acts: &mut Vec<Act>,
+) {
+    let c = theme::colors();
+    let r = ui.add(
+        egui::Button::new(RichText::new(&w.name).small().strong().color(c.accent)).frame(false),
+    );
+    if r.clicked() {
+        *naming = w.name.clone();
+    }
+    egui::Popup::menu(&r).show(|ui| {
+        ui.horizontal(|ui| {
+            let field = ui.add(egui::TextEdit::singleline(naming).desired_width(140.0));
+            let enter = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+            if ui.button("Rename").clicked() || enter {
+                acts.push(Act::Name(w.person.clone(), naming.trim().to_string()));
+                ui.close();
+            }
+        });
+        if w.speaker == 0 {
+            return;
+        }
+        let others: Vec<_> = everyone.iter().filter(|(p, _)| *p != w.person).collect();
+        if !others.is_empty() {
+            ui.menu_button("Same Person As", |ui| {
+                for (person, name) in others {
+                    if ui.button(name).clicked() {
+                        acts.push(Act::Link(w.clone(), person.clone()));
+                        ui.close();
+                    }
+                }
+            });
+        }
+        if ui
+            .button("Separate")
+            .on_hover_text("This file's speaker on its own")
+            .clicked()
+        {
+            let voice = vidcut_core::speakers::voice(&w.media, w.stream, w.speaker);
+            acts.push(Act::Link(w.clone(), voice));
+            ui.close();
+        }
+    });
 }
 
 impl Workspace {
@@ -700,20 +801,40 @@ impl Workspace {
                             }
                         }
                         let paras = &t.look.as_ref().expect("laid out").1;
+                        let everyone = people(items);
                         egui::ScrollArea::vertical()
                             .id_salt("transcription-text")
                             .auto_shrink([false, false])
                             .max_height(height)
                             .show(ui, |ui| {
                                 visible = ui.clip_rect();
+                                let mut speaking: Option<&str> = None;
                                 for (k, para) in paras.iter().enumerate() {
                                     let first = &items[para.items.start];
                                     if !first.silence {
-                                        ui.label(
-                                            RichText::new(tc(self, first.start))
-                                                .small()
-                                                .color(theme::colors().text_dim),
-                                        );
+                                        let new = first
+                                            .who
+                                            .as_ref()
+                                            .filter(|w| speaking != Some(w.person.as_str()));
+                                        ui.horizontal(|ui| {
+                                            if let Some(w) = new {
+                                                speaker_menu(
+                                                    ui,
+                                                    w,
+                                                    &everyone,
+                                                    &mut t.naming,
+                                                    &mut acts,
+                                                );
+                                            }
+                                            ui.label(
+                                                RichText::new(tc(self, first.start))
+                                                    .small()
+                                                    .color(theme::colors().text_dim),
+                                            );
+                                        });
+                                        if let Some(p) = person(first) {
+                                            speaking = Some(p);
+                                        }
                                     }
                                     let (rect, _) = ui.allocate_exact_size(
                                         para.galley.size(),
@@ -848,6 +969,29 @@ impl Workspace {
                     if button(ui, "Copy", "Copy these words as text (Ctrl+C)") {
                         acts.push(Act::Copy);
                     }
+                    let one_file =
+                        selected
+                            .zip(items.as_ref())
+                            .and_then(|((a, b, _, _), items)| {
+                                let mut whos = items[a..=b].iter().filter_map(|i| i.who.as_ref());
+                                let first = whos.next()?.clone();
+                                let last =
+                                    items[a..=b].iter().rev().find_map(|i| i.who.as_ref())?;
+                                let same = items[a..=b]
+                                    .iter()
+                                    .filter_map(|i| i.who.as_ref())
+                                    .all(|w| w.media == first.media && w.stream == first.stream);
+                                same.then_some((first, last.file.1))
+                            });
+                    if let (Some((first, end)), Some(items)) = (one_file, &items) {
+                        ui.menu_button("Assign To", |ui| {
+                            for (person, name) in people(items) {
+                                if ui.button(name).clicked() {
+                                    acts.push(Act::Assign(first.clone(), end, person));
+                                }
+                            }
+                        });
+                    }
                 });
                 over = ui.ui_contains_pointer();
             });
@@ -944,6 +1088,28 @@ impl Workspace {
         let selected = t.selected(items);
         match act {
             Act::Transcribe(ids) => self.open_transcribe(ids),
+            Act::Name(person, name) => {
+                self.send("speakers.set", json!({ "person": person, "name": name }));
+            }
+            Act::Link(w, person) => self.send(
+                "speakers.link",
+                json!({
+                    "media": w.media,
+                    "stream": w.stream,
+                    "speaker": w.speaker,
+                    "person": person,
+                }),
+            ),
+            Act::Assign(w, end, person) => self.send(
+                "speakers.assign",
+                json!({
+                    "media": w.media,
+                    "stream": w.stream,
+                    "start": w.file.0,
+                    "end": end,
+                    "person": person,
+                }),
+            ),
             Act::Seek(frame) => match media {
                 Some(_) => {
                     let offset = self

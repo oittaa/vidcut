@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::request::{FindSpeech, SpeechModel};
+use crate::request::{FindSpeech, GoogleOptions, SpeakerModel, SpeechModel, XaiOptions};
 use crate::time::Rational;
 
 pub const RATE: u32 = 16_000;
@@ -18,6 +18,11 @@ pub struct Asked {
     pub download: bool,
     pub find: Option<FindSpeech>,
     pub sound_db: Option<f64>,
+    pub speakers: bool,
+    pub speaker_model: SpeakerModel,
+    pub send: bool,
+    pub xai: Option<XaiOptions>,
+    pub google: Option<GoogleOptions>,
 }
 
 impl Asked {
@@ -27,7 +32,11 @@ impl Asked {
                 || f.display().to_string(),
                 |n| n.to_string_lossy().into_owned(),
             ),
-            None => self.model.title().to_string(),
+            None => match (self.model, &self.xai, &self.google) {
+                (SpeechModel::Xai, Some(XaiOptions { model: Some(m), .. }), _)
+                | (SpeechModel::Google, _, Some(GoogleOptions { model: Some(m), .. })) => m.clone(),
+                (m, _, _) => m.title().to_string(),
+            },
         }
     }
 
@@ -44,6 +53,10 @@ impl Asked {
             && self.find.is_none_or(|f| {
                 speech.found == f && (f == FindSpeech::Voice || speech.sound_db == self.level())
             })
+            && (!self.speakers || speech.speakers.is_some())
+            && (!self.speakers
+                || self.speaker_model == SpeakerModel::Auto
+                || speech.speakers_by.as_deref() == Some(self.speaker_model.name()))
     }
 }
 
@@ -69,6 +82,12 @@ pub struct Speech {
     pub found: FindSpeech,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sound_db: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speakers: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speakers_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -86,6 +105,28 @@ pub struct Word {
     pub end: f64,
     pub text: String,
     pub joined: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Turn {
+    pub start: f64,
+    pub end: f64,
+    pub speaker: u32,
+}
+
+pub const NEAREST_TURN: f64 = 1.0;
+
+pub fn give_speakers(said: &mut [Said], turns: &[Turn]) {
+    for w in said.iter_mut().flat_map(|s| s.words.iter_mut()) {
+        let overlap = |t: &Turn| w.end.min(t.end) - w.start.max(t.start);
+        w.speaker = turns
+            .iter()
+            .filter(|t| overlap(t) > -NEAREST_TURN)
+            .max_by(|a, b| overlap(a).total_cmp(&overlap(b)))
+            .map(|t| t.speaker);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +142,24 @@ pub struct Made {
     pub end: i64,
     pub text: String,
     pub words: Vec<i64>,
+    pub speaker: Option<u32>,
+}
+
+pub const FLAC_MB_PER_MINUTE: f64 = 1.0;
+
+pub fn upload_mb(secs: f64, channels: u16) -> f64 {
+    secs / 60.0 * FLAC_MB_PER_MINUTE * f64::from(channels.max(1))
+}
+
+pub fn cost(model: SpeechModel, secs: f64) -> f64 {
+    model.dollars_per_hour() * secs / 3600.0
+}
+
+pub fn dollars(v: f64) -> String {
+    match v {
+        v if v < 0.005 => "less than $0.01".into(),
+        v => format!("about ${v:.2}"),
+    }
 }
 
 pub const SOUND_DB: f64 = -40.0;
@@ -242,6 +301,7 @@ pub fn spread(text: &str, speech: &[(f64, f64)]) -> Vec<Word> {
                 end: at(done / all),
                 text: t.0,
                 joined: t.1,
+                speaker: None,
             }
         })
         .collect()
@@ -435,7 +495,10 @@ fn sentences(words: Vec<Word>) -> Vec<Vec<Word>> {
     let mut out = Vec::new();
     let mut now: Vec<Word> = Vec::new();
     for w in words.into_iter().filter(|w| !w.text.trim().is_empty()) {
-        if now.last().is_some_and(|l| w.start - l.end >= PAUSE) {
+        if now
+            .last()
+            .is_some_and(|l| w.start - l.end >= PAUSE || l.speaker != w.speaker)
+        {
             out.push(std::mem::take(&mut now));
         }
         let ends = ends_sentence(&w.text);
@@ -493,6 +556,14 @@ fn split(sentence: Vec<Word>, chars: usize, lines: usize) -> Vec<Vec<Word>> {
     sentence.into_iter().map(|w| vec![w]).collect()
 }
 
+pub fn speaker_count(said: &[Said]) -> u32 {
+    said.iter()
+        .flat_map(|s| s.words.iter())
+        .filter_map(|w| w.speaker)
+        .max()
+        .unwrap_or(0)
+}
+
 pub fn cues(said: &[Said], fps: Rational, layout: Layout) -> Vec<Made> {
     let chars = layout.chars.max(1);
     let lines = layout.lines.max(1);
@@ -518,6 +589,7 @@ pub fn cues(said: &[Said], fps: Rational, layout: Layout) -> Vec<Made> {
                 end: fps.secs_to_frames(last.end).max(start + shortest),
                 text: wrap(g, chars).join("\n"),
                 words,
+                speaker: first.speaker,
             })
         })
         .collect();

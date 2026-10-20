@@ -10,7 +10,7 @@ A simple, fully scriptable video cutting tool for Linux, Windows and macOS. It b
 - **Export:** Quick Export and an Export dialog, GPU encoding (NVIDIA, AMD, Intel, Apple), background jobs, HDR that follows the footage, loudness normalization.
 - **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts, the Boring Detector.
 - **Titles:** Text titles and lower thirds on the video tracks, edited in their own window, drawn alike in the viewer and the export.
-- **Subtitles:** subtitle tracks; Create Subtitles from Audio, on this computer's GPU; a track re-timed to the speech, in any language; SRT, WebVTT and TTML in and out; in an export as files beside it, streams in it or burned into the picture.
+- **Subtitles:** subtitle tracks; Create Subtitles from Audio, on this computer's GPU or, asked first, with xAI or Google, who speaks too; a track re-timed to the speech, in any language; SRT, WebVTT and TTML in and out; in an export as files beside it, streams in it or burned into the picture.
 - **Interchange:** OpenTimelineIO (`.otio`, `.otioz`, `.otiod`), which also open as projects, with subtitles as SRT beside them.
 - **Scriptable:** every action is a CLI command, a JSON-RPC call on the running app and an MCP tool.
 - **Not included:** effects, other titles, color grading, transitions other than dissolves. Those in another editor's OTIO file are kept and written back.
@@ -76,7 +76,7 @@ With Claude Code: `claude mcp add vidcut -- vidcut mcp -p /path/to/talk.vidcut`.
 | Linux | Windows | macOS | Holds |
 |---|---|---|---|
 | `~/.config/vidcut` | `%APPDATA%\vidcut` | `~/Library/Application Support/vidcut` | preferences, presets, themes |
-| `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | `~/Library/Caches/vidcut` | thumbnails, waveforms, measurements, encoder detection, shaders, speech models |
+| `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | `~/Library/Caches/vidcut` | thumbnails, waveforms, measurements, encoder detection, shaders, speech models, paid speech replies |
 | `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | `~/Library/Application Support/vidcut/state` | undo history, recent projects |
 | `$XDG_RUNTIME_DIR/vidcut` | `%TEMP%\vidcut` | `$TMPDIR/vidcut-UID` | running GUIs |
 
@@ -88,4 +88,4 @@ Read [AGENTS.md](AGENTS.md) first: the rules, the quality gates and the docs. Ho
 
 ## License
 
-vidcut's source code is MIT ([LICENSE](LICENSE)). The fonts it carries, Geist, Geist Mono and Space Grotesk, are under the SIL Open Font License 1.1. vidcut links the FFmpeg libraries, which are LGPL or GPL depending on how they were built; binaries distributed with them must follow their licenses. transcribe.cpp and ggml, built in, are MIT. The Silero VAD model built in is MIT, copyright (c) 2020-present Silero Team ([snakers4/silero-vad](https://github.com/snakers4/silero-vad/blob/5cd7945/LICENSE)), converted to GGUF by handy-computer. The speech models vidcut downloads are GGUF files handy-computer converted: Qwen3-ASR 1.7B and Whisper large-v3 under Apache-2.0, and Parakeet Ultra by Moondream ([moondream/parakeet-ultra](https://huggingface.co/moondream/parakeet-ultra)) under CC BY 4.0.
+vidcut's source code is MIT ([LICENSE](LICENSE)). The fonts it carries, Geist, Geist Mono and Space Grotesk, are under the SIL Open Font License 1.1. vidcut links the FFmpeg libraries, which are LGPL or GPL depending on how they were built; binaries distributed with them must follow their licenses. transcribe.cpp and ggml, built in, are MIT. The Silero VAD model built in is MIT, copyright (c) 2020-present Silero Team ([snakers4/silero-vad](https://github.com/snakers4/silero-vad/blob/5cd7945/LICENSE)), converted to GGUF by handy-computer. The speech models vidcut downloads are GGUF files handy-computer converted: Qwen3-ASR 1.7B and Whisper large-v3 under Apache-2.0, Parakeet Ultra by Moondream ([moondream/parakeet-ultra](https://huggingface.co/moondream/parakeet-ultra)) under CC BY 4.0, NVIDIA's Sortformer speaker model ([nvidia/diar_streaming_sortformer_4spk-v2.1](https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1)) under the NVIDIA Open Model License, and MOSS-Transcribe-Diarize ([OpenMOSS-Team/MOSS-Transcribe-Diarize](https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-Diarize)) under Apache-2.0. vidcut talks HTTPS to xAI and Google with ureq and rustls (MIT or Apache-2.0) and reads keys from the system keychain with keyring (MIT or Apache-2.0).

@@ -67,6 +67,7 @@ pub fn read(source: &str) -> Result<Read> {
             text,
             place: place(&settings),
             words,
+            speaker: text::voice(&raw),
         });
     }
     Ok(Read {
@@ -205,8 +206,13 @@ pub fn write(cues: &[Timed]) -> String {
             Place::Middle => " line:50%",
             Place::Bottom => "",
         };
+        let voice = c
+            .speaker
+            .as_deref()
+            .map(|n| format!("<v {}>", text::escape_xml(n).replace('\n', " ")))
+            .unwrap_or_default();
         out.push_str(&format!(
-            "{} --> {}{settings}\n{}\n\n",
+            "{} --> {}{settings}\n{voice}{}\n\n",
             clock(c.start, '.'),
             clock(c.end, '.'),
             body(&c.text)

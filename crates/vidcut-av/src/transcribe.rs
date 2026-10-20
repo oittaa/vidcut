@@ -3,15 +3,15 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 use transcribe_cpp as tc;
 use vidcut_core::analysis::VoiceActivity;
 use vidcut_core::model::Media;
 use vidcut_core::render::{AudioPiece, RenderPlan};
-use vidcut_core::request::{FindSpeech, SpeechModel};
-use vidcut_core::transcript::{self, Asked, RATE, Said, Speech, Timing, Word};
+use vidcut_core::request::{FindSpeech, SpeakerModel, SpeechModel};
+use vidcut_core::transcript::{self, Asked, RATE, Said, Speech, Timing, Turn, Word};
 
 use crate::error::{Error, Result};
 use crate::export::audio::AudioMix;
@@ -96,6 +96,37 @@ pub const SILERO_VAD: File = File {
     gpu_gb: 0,
     languages: &[],
 };
+
+pub const SORTFORMER: File = File {
+    name: "diar_streaming_sortformer_4spk-v2.1-Q8_0.gguf",
+    title: "Sortformer speaker detection",
+    repo: "handy-computer/diar_streaming_sortformer_4spk-v2.1-gguf",
+    revision: "60ebab3ef7cae9869be0abcde13360347e96ba03",
+    bytes: 139_310_336,
+    sha256: "a5dacdc650790266c7a362e54e6bf51952015487edaa606c4e11632bc32442a9",
+    gpu_gb: 0,
+    languages: &[],
+};
+
+pub const MOSS: File = File {
+    name: "MOSS-Transcribe-Diarize-Q8_0.gguf",
+    title: "MOSS speaker detection",
+    repo: "handy-computer/moss-transcribe-diarize-gguf",
+    revision: "8c603aa6da33a068e39bbd109786f85786a21834",
+    bytes: 986_900_160,
+    sha256: "2f9039f1f06c7795de78f45ec1abea2712e881eb0f5c7ff8a080e66e1a3ce015",
+    gpu_gb: 0,
+    languages: &["en", "zh"],
+};
+
+pub fn speaker_file(language: Option<&str>, choice: SpeakerModel) -> &'static File {
+    match choice {
+        SpeakerModel::Moss => &MOSS,
+        SpeakerModel::Sortformer => &SORTFORMER,
+        SpeakerModel::Auto if language.is_some_and(|l| MOSS.languages.contains(&l)) => &MOSS,
+        SpeakerModel::Auto => &SORTFORMER,
+    }
+}
 
 const TRANSCRIBE: &str = "0.4.0";
 
@@ -187,7 +218,7 @@ pub struct Need {
     pub bytes: u64,
 }
 
-fn needed_for(dir: &Path, model: Option<&File>, vad: bool) -> Vec<Need> {
+fn needed_for(dir: &Path, files: &[&File], vad: bool) -> Vec<Need> {
     let mut out = Vec::new();
     if let Some(r) = RUNTIME.filter(|r| !r.present(dir)) {
         out.push(Need {
@@ -195,8 +226,11 @@ fn needed_for(dir: &Path, model: Option<&File>, vad: bool) -> Vec<Need> {
             bytes: r.bytes,
         });
     }
-    let files = vad.then_some(&SILERO_VAD).into_iter().chain(model);
-    for f in files.filter(|f| !present(dir, f)) {
+    let wanted = vad
+        .then_some(&SILERO_VAD)
+        .into_iter()
+        .chain(files.iter().copied());
+    for f in wanted.filter(|f| !present(dir, f)) {
         out.push(Need {
             title: f.title.into(),
             bytes: f.bytes,
@@ -205,8 +239,36 @@ fn needed_for(dir: &Path, model: Option<&File>, vad: bool) -> Vec<Need> {
     out
 }
 
-pub fn needed(dir: &Path, model: Option<&File>) -> Vec<Need> {
-    needed_for(dir, model, true)
+pub fn needed(dir: &Path, files: &[&File]) -> Vec<Need> {
+    needed_for(dir, files, true)
+}
+
+pub fn wanted(asked: &Asked) -> Vec<&'static File> {
+    let model = asked
+        .model_file
+        .is_none()
+        .then(|| file_of(asked.model))
+        .flatten();
+    model
+        .into_iter()
+        .chain(
+            (asked.speakers && !speakers_from_service(asked))
+                .then(|| speaker_file(asked.language.as_deref(), asked.speaker_model)),
+        )
+        .collect()
+}
+
+fn speakers_from_service(asked: &Asked) -> bool {
+    asked.model_file.is_none() && asked.model.paid()
+}
+
+pub(crate) fn speaker_model_ready(
+    dir: &Path,
+    language: Option<&str>,
+    choice: SpeakerModel,
+    download: bool,
+) -> Result<()> {
+    get_ready(dir, &[speaker_file(language, choice)], false, download)
 }
 
 pub fn listed(needs: &[Need]) -> String {
@@ -221,20 +283,31 @@ pub fn listed(needs: &[Need]) -> String {
     }
 }
 
-pub fn file_of(model: SpeechModel) -> &'static File {
+pub fn file_of(model: SpeechModel) -> Option<&'static File> {
     match model {
-        SpeechModel::Qwen3Asr => &QWEN3_ASR,
-        SpeechModel::WhisperLargeV3 => &WHISPER_LARGE_V3,
-        SpeechModel::ParakeetUltra => &PARAKEET_ULTRA,
+        SpeechModel::Qwen3Asr => Some(&QWEN3_ASR),
+        SpeechModel::WhisperLargeV3 => Some(&WHISPER_LARGE_V3),
+        SpeechModel::ParakeetUltra => Some(&PARAKEET_ULTRA),
+        SpeechModel::Xai | SpeechModel::Google => None,
     }
 }
 
 pub struct Options<'a> {
     pub models: &'a Path,
     pub gpu: bool,
+    pub key: Option<String>,
+}
+
+pub fn run_id() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    format!("r{:x}{:x}", nanos, NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
 const PAD: f64 = 0.2;
+const TELLING_TICK: Duration = Duration::from_millis(250);
 const UNTIMED: f64 = 10.0;
 const SHORTEST: f64 = 30.0;
 const LONGEST: f64 = 300.0;
@@ -305,7 +378,7 @@ fn start(dir: &Path, runtime: &Runtime) -> Result<()> {
     Ok(())
 }
 
-fn get_ready(dir: &Path, model: Option<&File>, vad: bool, download: bool) -> Result<()> {
+fn get_ready(dir: &Path, files: &[&File], vad: bool, download: bool) -> Result<()> {
     network();
     let Some(runtime) = RUNTIME else {
         return Err(Error::Missing(
@@ -313,9 +386,9 @@ fn get_ready(dir: &Path, model: Option<&File>, vad: bool, download: bool) -> Res
                 .into(),
         ));
     };
-    let needs = needed_for(dir, model, vad);
+    let needs = needed_for(dir, files, vad);
     if !needs.is_empty() && !download {
-        let own = match model.is_some_and(|f| !present(dir, f)) {
+        let own = match files.iter().any(|f| !present(dir, f) && f.gpu_gb > 0) {
             true => ", or name a model file of your own with model_file",
             false => "",
         };
@@ -343,7 +416,11 @@ fn get_ready(dir: &Path, model: Option<&File>, vad: bool, download: bool) -> Res
         )?;
         unpack(&archive, &runtime, dir)?;
     }
-    for f in vad.then_some(&SILERO_VAD).into_iter().chain(model) {
+    for f in vad
+        .then_some(&SILERO_VAD)
+        .into_iter()
+        .chain(files.iter().copied())
+    {
         if !present(dir, f) {
             fetch(&Fetch::of(f), dir)?;
         }
@@ -416,21 +493,37 @@ pub fn present(dir: &Path, f: &File) -> bool {
     std::fs::metadata(dir.join(f.name)).is_ok_and(|m| m.len() == f.bytes)
 }
 
-fn files(asked: &Asked, dir: &Path) -> Result<(PathBuf, PathBuf)> {
-    let wanted = asked.model_file.is_none().then(|| file_of(asked.model));
-    get_ready(dir, wanted, asked.vad_file.is_none(), asked.download)?;
-    let model = asked
-        .model_file
-        .clone()
-        .unwrap_or_else(|| dir.join(file_of(asked.model).name));
+pub(crate) fn vad_path(asked: &Asked, dir: &Path) -> Result<PathBuf> {
+    get_ready(
+        dir,
+        &wanted(asked),
+        asked.vad_file.is_none(),
+        asked.download,
+    )?;
     let vad = asked
         .vad_file
         .clone()
         .unwrap_or_else(|| dir.join(SILERO_VAD.name));
-    for path in [&model, &vad] {
-        if !path.is_file() {
-            return Err(Error::Missing(format!("{}: no such file", path.display())));
+    if !vad.is_file() {
+        return Err(Error::Missing(format!("{}: no such file", vad.display())));
+    }
+    Ok(vad)
+}
+
+fn files(asked: &Asked, dir: &Path) -> Result<(PathBuf, PathBuf)> {
+    let vad = vad_path(asked, dir)?;
+    let model = match (&asked.model_file, file_of(asked.model)) {
+        (Some(f), _) => f.clone(),
+        (None, Some(f)) => dir.join(f.name),
+        (None, None) => {
+            return Err(Error::Invalid(format!(
+                "{} runs on its company's servers",
+                asked.model.title()
+            )));
         }
+    };
+    if !model.is_file() {
+        return Err(Error::Missing(format!("{}: no such file", model.display())));
     }
     Ok((model, vad))
 }
@@ -634,20 +727,204 @@ fn listen(
     Ok(())
 }
 
-fn heard_plan(plan: &RenderPlan, path: &Path, started: Instant) -> Result<Vec<f32>> {
-    if plan.sample_rate != RATE || plan.channels != 1 {
+pub(crate) fn heard_plan(plan: &RenderPlan, path: &Path, started: Instant) -> Result<Vec<f32>> {
+    if plan.sample_rate != RATE {
         return Err(Error::Invalid(format!(
-            "speech is heard at {RATE} Hz in one channel, not {} Hz in {}",
-            plan.sample_rate, plan.channels
+            "speech is heard at {RATE} Hz, not {} Hz",
+            plan.sample_rate
         )));
     }
     let total = plan.samples().max(0);
-    let mut pcm = Vec::with_capacity(total as usize);
-    listen(&plan.audio, total, path, started, |s| {
-        pcm.extend_from_slice(s);
-        Ok(())
-    })?;
+    let channels = usize::from(plan.channels.max(1));
+    let mut pcm = Vec::with_capacity(total as usize * channels);
+    let mut mix = AudioMix::new(&plan.audio, RATE, plan.channels.max(1), DECLICK_MS);
+    let mut done = 0;
+    while done < total {
+        crate::cancel::stop()?;
+        let n = (total - done).min(i64::from(RATE) * 10);
+        pcm.extend_from_slice(&mix.read(n as usize)?);
+        done += n;
+        let ms = |s: i64| s * 1000 / i64::from(RATE);
+        report(path, Stage::Listening, ms(done), ms(total), started);
+    }
     Ok(pcm)
+}
+
+pub(crate) struct Found {
+    pub stretches: Vec<(i64, i64)>,
+    pub quiet: Vec<f32>,
+    pub frame: usize,
+    pub found: FindSpeech,
+    pub floor: f64,
+}
+
+pub(crate) fn find_speech(
+    vad: &Path,
+    pcm: &[f32],
+    asked: &Asked,
+    warnings: &mut Vec<String>,
+) -> Result<Found> {
+    let (voice, frame) = speech(vad, pcm)?;
+    let quiet: Vec<f32> = pcm
+        .chunks(frame)
+        .map(|c| (c.iter().map(|s| s * s).sum::<f32>() / c.len() as f32).sqrt())
+        .collect();
+    let found = asked.find.unwrap_or_default();
+    let floor = asked.sound_db.unwrap_or(transcript::SOUND_DB);
+    let sound = transcript::sounding(&quiet, frame, floor);
+    let stretches = match found {
+        FindSpeech::Voice => {
+            if let Some(hint) = missed_singing(&voice, &sound, pcm.len()) {
+                warnings.push(hint);
+            }
+            voice
+        }
+        FindSpeech::Sound => sound,
+    };
+    Ok(Found {
+        stretches,
+        quiet,
+        frame,
+        found,
+        floor,
+    })
+}
+
+pub(crate) fn speakers_of(
+    dir: &Path,
+    pcm: &[f32],
+    gpu: bool,
+    language: Option<&str>,
+    choice: SpeakerModel,
+    started: Instant,
+    warnings: &mut Vec<String>,
+) -> Result<(Vec<Turn>, &'static str)> {
+    let moss = speaker_file(language, choice) == &MOSS && present(dir, &MOSS);
+    if moss {
+        match moss_turns(dir, pcm, gpu, started, warnings) {
+            Ok(turns) => return Ok((turns, SpeakerModel::Moss.name())),
+            Err(e) if present(dir, &SORTFORMER) => {
+                warnings.push(format!(
+                    "{} couldn't take {} of sound at once ({e}), so Sortformer told the \
+                     speakers; MOSS fits about 30 minutes",
+                    MOSS.title,
+                    transcript_clock(secs(pcm.len() as i64))
+                ));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    let path = dir.join(SORTFORMER.name);
+    let total = pcm.len() as i64 * 1000 / i64::from(RATE);
+    report(&path, Stage::Speakers, 0, total, started);
+    let loaded = load(&path, gpu, warnings)?;
+    crate::cancel::stop()?;
+    let most = loaded.model.diarize_info().map_err(tc_error)?.max_speakers;
+    let mut session = loaded.model.diarize_session().map_err(tc_error)?;
+    let turns: Vec<Turn> = telling(&path, total, started, |token| {
+        session.set_cancel_token(token);
+        session.run(pcm, &tc::DiarizeOptions::default())
+    })?
+    .iter()
+    .filter(|t| t.speaker_id > 0 && t.t1_ms > t.t0_ms)
+    .map(|t| Turn {
+        start: t.t0_ms as f64 / 1000.0,
+        end: t.t1_ms as f64 / 1000.0,
+        speaker: t.speaker_id as u32,
+    })
+    .collect();
+    report(&path, Stage::Speakers, total, total, started);
+    let could = choice == SpeakerModel::Auto && speaker_file(language, SpeakerModel::Auto) == &MOSS;
+    if let Some(w) = full(&turns, most, could) {
+        warnings.push(w);
+    }
+    Ok((turns, SpeakerModel::Sortformer.name()))
+}
+
+fn moss_turns(
+    dir: &Path,
+    pcm: &[f32],
+    gpu: bool,
+    started: Instant,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<Turn>> {
+    let path = dir.join(MOSS.name);
+    let total = pcm.len() as i64 * 1000 / i64::from(RATE);
+    report(&path, Stage::Speakers, 0, total, started);
+    let loaded = load(&path, gpu, warnings)?;
+    crate::cancel::stop()?;
+    let mut session = loaded.model.session().map_err(tc_error)?;
+    let heard = telling(&path, total, started, |token| {
+        session.set_cancel_token(token);
+        session.run(
+            pcm,
+            &tc::RunOptions {
+                diarize: tc::Diarize::On,
+                ..Default::default()
+            },
+        )
+    })?;
+    report(&path, Stage::Speakers, total, total, started);
+    Ok(heard
+        .speaker_segments
+        .iter()
+        .filter(|t| t.speaker_id > 0 && t.t1_ms > t.t0_ms)
+        .map(|t| Turn {
+            start: t.t0_ms as f64 / 1000.0,
+            end: t.t1_ms as f64 / 1000.0,
+            speaker: t.speaker_id as u32,
+        })
+        .collect())
+}
+
+fn telling<T: Send>(
+    path: &Path,
+    total: i64,
+    started: Instant,
+    run: impl FnOnce(&tc::CancelToken) -> std::result::Result<T, tc::Error> + Send,
+) -> Result<T> {
+    let token = tc::CancelToken::new();
+    let waiting = std::thread::current();
+    std::thread::scope(|s| {
+        let work = std::thread::Builder::new()
+            .name("vidcut-speakers".into())
+            .spawn_scoped(s, || {
+                let told = run(&token);
+                waiting.unpark();
+                told
+            })?;
+        while !work.is_finished() {
+            if crate::cancel::cancelled() {
+                token.cancel();
+            }
+            report(path, Stage::Speakers, 0, total, started);
+            std::thread::park_timeout(TELLING_TICK);
+        }
+        work.join()
+            .map_err(|_| Error::Invalid("the speaker model's thread panicked".into()))?
+            .map_err(tc_error)
+    })
+}
+
+fn full(turns: &[Turn], most: i32, moss_could: bool) -> Option<String> {
+    let mut heard: Vec<u32> = turns.iter().map(|t| t.speaker).collect();
+    heard.sort_unstable();
+    heard.dedup();
+    let moss = match moss_could {
+        true => format!(
+            ". {} ({}) tells more apart in English and Chinese: transcribe with the language \
+             set to download it",
+            MOSS.title,
+            size(MOSS.bytes)
+        ),
+        false => String::new(),
+    };
+    (most > 0 && heard.len() >= most as usize).then(|| {
+        format!(
+            "{most} speakers, the most Sortformer tells apart: more people share their numbers; \
+             Same Person As, Separate and Assign To fix them{moss}"
+        )
+    })
 }
 
 fn vad_model(vad: &Path) -> Result<tc::Model> {
@@ -667,7 +944,7 @@ pub fn voice_activity(
     models: &Path,
     download: bool,
 ) -> Result<VoiceActivity> {
-    get_ready(models, None, true, download)?;
+    get_ready(models, &[], true, download)?;
     let started = Instant::now();
     let a = media
         .info
@@ -873,6 +1150,7 @@ fn said_of(r: &tc::Transcript, piece: (i64, i64), stretches: &[(i64, i64)]) -> V
         end: ms(w.t1_ms),
         text: w.text.trim().to_string(),
         joined: false,
+        speaker: None,
     };
     if !r.words.is_empty() {
         if r.segments.is_empty() {
@@ -928,34 +1206,49 @@ fn said_of(r: &tc::Transcript, piece: (i64, i64), stretches: &[(i64, i64)]) -> V
     }]
 }
 
+pub fn transcribe_files(
+    plans: &[&RenderPlan],
+    asked: &Asked,
+    options: &Options,
+) -> Result<Vec<Speech>> {
+    match asked.model.paid() && asked.model_file.is_none() {
+        true => crate::speech_api::transcribe(plans, asked, options),
+        false => plans
+            .iter()
+            .map(|p| transcribe(p, asked, options))
+            .collect(),
+    }
+}
+
 pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result<Speech> {
+    if asked.model.paid() && asked.model_file.is_none() {
+        return crate::speech_api::transcribe(&[plan], asked, options)?
+            .pop()
+            .ok_or_else(|| Error::Invalid("no transcript came back".into()));
+    }
     let started = Instant::now();
     let (model_path, vad_path) = files(asked, options.models)?;
     let pcm = heard_plan(plan, &model_path, started)?;
-    let (voice, frame) = speech(&vad_path, &pcm)?;
-    let quiet: Vec<f32> = pcm
-        .chunks(frame)
-        .map(|c| (c.iter().map(|s| s * s).sum::<f32>() / c.len() as f32).sqrt())
-        .collect();
+    if plan.channels != 1 {
+        return Err(Error::Invalid(format!(
+            "speech is heard in one channel, not {}",
+            plan.channels
+        )));
+    }
     let mut warnings = Vec::new();
-    let found = asked.find.unwrap_or_default();
-    let floor = asked.sound_db.unwrap_or(transcript::SOUND_DB);
-    let sound = transcript::sounding(&quiet, frame, floor);
-    let stretches = match found {
-        FindSpeech::Voice => {
-            if let Some(hint) = missed_singing(&voice, &sound, pcm.len()) {
-                warnings.push(hint);
-            }
-            voice
-        }
-        FindSpeech::Sound => sound,
-    };
+    let Found {
+        stretches,
+        quiet,
+        frame,
+        found,
+        floor,
+    } = find_speech(&vad_path, &pcm, asked, &mut warnings)?;
     report(&model_path, Stage::Loading, 0, 0, started);
     let loaded = load(&model_path, options.gpu, &mut warnings)?;
     crate::cancel::stop()?;
     if loaded.gpu
         && asked.model_file.is_none()
-        && let Some(warning) = short_of_memory(file_of(asked.model))
+        && let Some(warning) = file_of(asked.model).and_then(short_of_memory)
     {
         warnings.push(warning);
     }
@@ -1034,16 +1327,43 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
             started,
         );
     }
-    let said: Vec<Said> = heard
+    let mut said: Vec<Said> = heard
         .iter()
         .zip(&pieces)
         .filter_map(|(r, &piece)| Some(said_of(r.as_ref()?, piece, &stretches)))
         .flatten()
         .filter(|s| !s.text.is_empty() || !s.words.is_empty())
         .collect();
+    drop(session);
+    let device = loaded.device.clone();
+    drop(loaded);
+    let speakers = match asked.speakers {
+        true => {
+            let heard_language = language.clone().or_else(|| {
+                transcript::language_of(
+                    said.iter()
+                        .flat_map(|s| s.words.iter())
+                        .map(|w| w.text.as_str()),
+                )
+                .map(String::from)
+            });
+            let (turns, by) = speakers_of(
+                options.models,
+                &pcm,
+                options.gpu,
+                heard_language.as_deref(),
+                asked.speaker_model,
+                started,
+                &mut warnings,
+            )?;
+            transcript::give_speakers(&mut said, &turns);
+            Some((run_id(), by))
+        }
+        false => None,
+    };
     Ok(Speech {
         model: asked.model_name(),
-        device: loaded.device,
+        device,
         language,
         timing: timing_of(caps.max_timestamp_kind),
         pieces: pieces.len(),
@@ -1052,9 +1372,52 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
         warnings,
         found,
         sound_db: (found == FindSpeech::Sound).then_some(floor),
+        speakers_by: speakers.as_ref().map(|(_, by)| by.to_string()),
+        speakers: speakers.map(|(run, _)| run),
+        notes: Vec::new(),
     })
 }
 
 fn transcript_clock(secs: f64) -> String {
     vidcut_core::subtitles::clock(secs, '.')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::full;
+    use vidcut_core::transcript::Turn;
+
+    fn turn(speaker: u32) -> Turn {
+        Turn {
+            start: 0.0,
+            end: 1.0,
+            speaker,
+        }
+    }
+
+    #[test]
+    fn four_speakers_say_more_may_share_numbers() {
+        assert!(full(&[turn(1), turn(2), turn(3), turn(4)], 4, false).is_some());
+    }
+
+    #[test]
+    fn three_speakers_say_nothing() {
+        assert_eq!(full(&[turn(1), turn(2), turn(3), turn(1)], 4, false), None);
+    }
+
+    #[test]
+    fn english_and_chinese_take_moss_for_speakers() {
+        assert_eq!(
+            super::speaker_file(Some("en"), Default::default()).name,
+            super::MOSS.name
+        );
+    }
+
+    #[test]
+    fn finnish_takes_sortformer_for_speakers() {
+        assert_eq!(
+            super::speaker_file(Some("fi"), Default::default()).name,
+            super::SORTFORMER.name
+        );
+    }
 }
