@@ -208,10 +208,10 @@ fn service_rows(ui: &mut egui::Ui, s: &mut Settings, transcribing: bool) {
                     s.xai.filler_words = (!keep).then_some(false);
                 }
             });
-            dialog::row(ui, "Voice Threshold", |ui| {
+            dialog::row(ui, "Skip Non-Speech", |ui| {
                 let mut own = s.xai.vad_threshold.is_some();
                 ui.checkbox(&mut own, "")
-                    .on_hover_text("Off: xAI's 0.5, or 0 when found by sound level");
+                    .on_hover_text("Higher skips more; 0 keeps everything");
                 let mut v = s.xai.vad_threshold.unwrap_or(0.5);
                 ui.add_enabled(
                     own,
