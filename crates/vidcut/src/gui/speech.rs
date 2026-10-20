@@ -292,9 +292,17 @@ fn speakers_row(ui: &mut egui::Ui, s: &mut Settings) {
         SpeechModel::Google => "One numbering up to 30 minutes, past that per file",
         _ => "Up to 4 in each file, on this computer",
     };
+    let most = match s.model {
+        SpeechModel::Xai => "",
+        SpeechModel::Google => "up to 8",
+        _ => "up to 4 per file",
+    };
     dialog::row(ui, "Speakers", |ui| {
         ui.checkbox(&mut s.speakers, "Tell Who Speaks")
             .on_hover_text(tip);
+        if s.speakers && !most.is_empty() {
+            ui.label(dim(most));
+        }
     });
 }
 

@@ -769,12 +769,11 @@ pub(crate) fn speakers_of(
     report(&path, Stage::Speakers, 0, total, started);
     let loaded = load(&path, gpu, warnings)?;
     crate::cancel::stop()?;
+    let most = loaded.model.diarize_info().map_err(tc_error)?.max_speakers;
     let mut session = loaded.model.diarize_session().map_err(tc_error)?;
-    let turns = session
+    let turns: Vec<Turn> = session
         .run(pcm, &tc::DiarizeOptions::default())
-        .map_err(tc_error)?;
-    report(&path, Stage::Speakers, total, total, started);
-    Ok(turns
+        .map_err(tc_error)?
         .iter()
         .filter(|t| t.speaker_id > 0 && t.t1_ms > t.t0_ms)
         .map(|t| Turn {
@@ -782,7 +781,24 @@ pub(crate) fn speakers_of(
             end: t.t1_ms as f64 / 1000.0,
             speaker: t.speaker_id as u32,
         })
-        .collect())
+        .collect();
+    report(&path, Stage::Speakers, total, total, started);
+    if let Some(w) = full(&turns, most) {
+        warnings.push(w);
+    }
+    Ok(turns)
+}
+
+fn full(turns: &[Turn], most: i32) -> Option<String> {
+    let mut heard: Vec<u32> = turns.iter().map(|t| t.speaker).collect();
+    heard.sort_unstable();
+    heard.dedup();
+    (most > 0 && heard.len() >= most as usize).then(|| {
+        format!(
+            "{most} speakers, the most this computer's speaker model tells apart: more people \
+             share their numbers; Same Person As, Separate and Assign To fix them"
+        )
+    })
 }
 
 fn vad_model(vad: &Path) -> Result<tc::Model> {
@@ -1220,4 +1236,28 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
 
 fn transcript_clock(secs: f64) -> String {
     vidcut_core::subtitles::clock(secs, '.')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::full;
+    use vidcut_core::transcript::Turn;
+
+    fn turn(speaker: u32) -> Turn {
+        Turn {
+            start: 0.0,
+            end: 1.0,
+            speaker,
+        }
+    }
+
+    #[test]
+    fn four_speakers_say_more_may_share_numbers() {
+        assert!(full(&[turn(1), turn(2), turn(3), turn(4)], 4).is_some());
+    }
+
+    #[test]
+    fn three_speakers_say_nothing() {
+        assert_eq!(full(&[turn(1), turn(2), turn(3), turn(1)], 4), None);
+    }
 }
