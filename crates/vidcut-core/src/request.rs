@@ -1227,8 +1227,9 @@ pub enum Request {
         /// and kept (Transcribe Audio), placed through the clips. Where two
         /// tracks have the same word at once, the first track's is kept (V1,
         /// V2, …, then A1, A2, …). `mix`: the mix of the tracks heard over
-        /// `range`, which keeps nothing. Default: `media` with a model that
-        /// times words and no `model_file`, else `mix`.
+        /// `range`, which keeps nothing. Default: `media` over the whole
+        /// timeline with a model that times words and no `model_file`; else
+        /// `mix`, so a part of a long recording is all that is heard.
         #[serde(default)]
         hear: Option<HearFrom>,
         /// Download what this computer doesn't have yet: transcribe.cpp's

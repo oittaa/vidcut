@@ -364,31 +364,32 @@ fn track_choice(ui: &mut egui::Ui, s: &mut Settings, p: &Project) {
         });
 }
 
-fn words_from(ui: &mut egui::Ui, s: &mut Settings) {
-    let can = s.model.times_words();
-    let mut media = s.from_media && can;
+fn words_from(ui: &mut egui::Ui, s: &mut Settings, marks: bool) {
+    let can = s.model.times_words() && !(s.in_out && marks);
+    let media = s.each_file(marks);
     dialog::switch(ui, |ui| {
         ui.add_enabled_ui(can, |ui| {
             if ui
                 .selectable_label(media, "Each File")
                 .on_hover_text("Each clip's file, transcribed once and kept")
-                .on_disabled_hover_text("Needs a model that times each word")
+                .on_disabled_hover_text(match s.model.times_words() {
+                    true => "In–Out hears only the marked part",
+                    false => "Needs a model that times each word",
+                })
                 .clicked()
             {
-                media = true;
+                s.from_media = true;
             }
         });
         if ui
             .selectable_label(!media, "Timeline Mix")
             .on_hover_text("The tracks mixed over the range; nothing is kept")
             .clicked()
+            && can
         {
-            media = false;
+            s.from_media = false;
         }
     });
-    if can {
-        s.from_media = media;
-    }
 }
 
 fn ask_download(
@@ -480,6 +481,10 @@ fn ask_payment(ctx: &egui::Context, p: &Paying, again: &mut bool) -> Option<bool
 }
 
 impl Settings {
+    fn each_file(&self, marks: bool) -> bool {
+        self.from_media && self.model.times_words() && !(self.in_out && marks)
+    }
+
     fn plain(&self) -> bool {
         self.look.eq_ignore_ascii_case(PLAIN)
     }
@@ -867,7 +872,7 @@ impl Workspace {
             "chars": s.chars,
             "lines": s.lines,
             "gap": s.gap,
-            "hear": if s.from_media && s.model.times_words() { "media" } else { "mix" },
+            "hear": if s.each_file(marked(p).is_some()) { "media" } else { "mix" },
         });
         if let Some(l) = &s.language {
             params["language"] = json!(l);
@@ -1013,7 +1018,7 @@ impl Workspace {
                 dialog::advanced(ui, "speech-advanced", unusual, |ui| {
                     dialog::form(ui, "speech-advanced-form", |ui| {
                         if !transcribing {
-                            dialog::row(ui, "Words From", |ui| words_from(ui, s));
+                            dialog::row(ui, "Words From", |ui| words_from(ui, s, range.is_some()));
                             dialog::row(ui, "Gap", |ui| {
                                 ui.add(
                                     egui::DragValue::new(&mut s.gap)
@@ -1042,12 +1047,8 @@ impl Workspace {
                     }
                 } else if heard.is_empty() {
                     dialog::warn(ui, "Tick a track to hear");
-                } else if s.from_media && s.model.times_words() {
-                    let (a, b) = match range {
-                        Some(marks) if s.in_out => marks,
-                        _ => (0, p.end()),
-                    };
-                    let missing = heard_files(&p, &heard, (a, b), &self.snap.transcribed);
+                } else if s.each_file(range.is_some()) {
+                    let missing = heard_files(&p, &heard, (0, p.end()), &self.snap.transcribed);
                     if !missing.is_empty() {
                         let names: Vec<String> = missing
                             .iter()
@@ -1183,7 +1184,7 @@ impl Workspace {
             Some(marks) if s.in_out => marks,
             _ => (0, p.end()),
         };
-        match s.from_media && s.model.times_words() {
+        match s.each_file(marked(p).is_some()) {
             true => {
                 let media = heard_files(p, heard, (a, b), skip);
                 (duration(p, &media), files(media.len()))

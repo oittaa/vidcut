@@ -3336,7 +3336,8 @@ fn mutate(
                 xai: xai.clone(),
                 google: google.clone(),
             };
-            let from_media = hears_media(*hear, &asked)?;
+            let part = a > 0 || b < p.end();
+            let from_media = !(hear.is_none() && part) && hears_media(*hear, &asked)?;
             let (speech, media) = match from_media {
                 true => {
                     let (s, media) = clip_speech(p, env, (a, b), &heard, &asked, true)?;

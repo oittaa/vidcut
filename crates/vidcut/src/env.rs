@@ -56,6 +56,7 @@ fn heard_key(plan: &RenderPlan, asked: &Asked) -> String {
         "find": asked.find.unwrap_or_default(),
         "sound_db": asked.level(),
         "speakers": asked.speakers,
+        "speaker_model": asked.speaker_model,
         "xai": asked.xai,
         "google": asked.google,
     }))
