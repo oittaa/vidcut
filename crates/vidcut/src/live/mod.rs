@@ -13,6 +13,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+use notify::Watcher;
 use serde_json::{Value, json};
 use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue};
 use vidcut_core::model::{Clip, Format, Title};
@@ -232,6 +233,7 @@ pub(crate) enum Msg {
     },
     FileChanged,
     PreferencesChanged,
+    OmarchyChanged,
     HistoryPreview(Option<PreviewAt>),
     Previewed {
         at: PreviewAt,
@@ -503,6 +505,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
     let mut live = Live {
         _preferences: project::watch(&preferences, tx.clone(), || Msg::PreferencesChanged),
         _themes: project::watch_dir(&themes, tx.clone(), || Msg::PreferencesChanged),
+        omarchy: None,
+        omarchy_due: None,
         theme,
         theme_error: theme_error.clone(),
         tx: tx.clone(),
@@ -568,6 +572,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         flash: None,
         flash_seq: 0,
     };
+    live.watch_omarchy();
     let project = config.project;
     let create = config.create;
     let thread = crate::threads::spawn("vidcut-session", Work::Interactive, move || {
@@ -734,10 +739,14 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
     })
 }
 
-fn chosen_theme() -> (crate::themes::Theme, Option<String>) {
-    let name = crate::preferences::load()
+fn chosen_name() -> String {
+    crate::preferences::load()
         .map(|p| p.appearance.theme)
-        .unwrap_or_else(|_| crate::themes::DEFAULT.into());
+        .unwrap_or_else(|_| crate::themes::DEFAULT.into())
+}
+
+fn chosen_theme() -> (crate::themes::Theme, Option<String>) {
+    let name = chosen_name();
     match crate::themes::load(&name) {
         Ok(t) => (t, None),
         Err(e) => (
@@ -752,12 +761,15 @@ fn chosen_theme() -> (crate::themes::Theme, Option<String>) {
 }
 
 const RELOAD_EVERY: Duration = Duration::from_millis(100);
+const OMARCHY_SETTLES: Duration = Duration::from_millis(150);
 
 struct Live {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     _preferences: Option<notify::RecommendedWatcher>,
     _themes: Option<notify::RecommendedWatcher>,
+    omarchy: Option<(notify::RecommendedWatcher, Option<PathBuf>)>,
+    omarchy_due: Option<Instant>,
     theme: Arc<crate::themes::Theme>,
     theme_error: Option<String>,
     shared: Arc<Mutex<Arc<Snapshot>>>,
@@ -1007,6 +1019,10 @@ impl Live {
                     self.project_changed(None);
                 }
             }
+            Msg::OmarchyChanged => {
+                changed = false;
+                self.omarchy_due = Some(Instant::now() + OMARCHY_SETTLES);
+            }
             Msg::HistoryPreview(at) => changed = self.preview_step(at),
             Msg::Previewed { at, rev, result } => changed = self.previewed(at, rev, result),
             Msg::FileChanged => {
@@ -1121,6 +1137,14 @@ impl Live {
             if now >= due {
                 self.timeline_due = None;
                 self.refresh_timeline();
+            } else {
+                soonest(due);
+            }
+        }
+        if let Some(due) = self.omarchy_due {
+            if now >= due {
+                self.omarchy_due = None;
+                self.follow_theme();
             } else {
                 soonest(due);
             }
@@ -1293,6 +1317,31 @@ impl Live {
             if let Some(e) = error {
                 self.notice(e, true);
             }
+        }
+        self.watch_omarchy();
+    }
+
+    fn watch_omarchy(&mut self) {
+        let wanted = crate::themes::colors_from(&chosen_name());
+        if wanted != Some(crate::themes::ColorsFrom::Omarchy) {
+            self.omarchy = None;
+            return;
+        }
+        if self.omarchy.is_none() {
+            self.omarchy = project::watcher(crate::omarchy::relevant, self.tx.clone(), || {
+                Msg::OmarchyChanged
+            })
+            .map(|w| (w, None));
+        }
+        let Some((watcher, armed)) = &mut self.omarchy else {
+            return;
+        };
+        if let Some(dir) = armed.take() {
+            let _ = watcher.unwatch(&dir);
+        }
+        let (dir, mode) = crate::omarchy::watched();
+        if watcher.watch(&dir, mode).is_ok() {
+            *armed = Some(dir);
         }
     }
 

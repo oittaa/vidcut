@@ -43,7 +43,7 @@ Priority: **interactive** and **job** are the `Work` kinds; **inherited** sets n
 | `vidcut-cpu-N`, `vidcut-cpu-job-N` | the first `pool::run` or `pool::give` | the two CPU pools | inherited; lowest class |
 | `vidcut-give-back` | `buffers::give_back` | `malloc_trim` (Linux, glibc) | inherited |
 
-On Windows `look::watch` starts two `vidcut-look` threads; Linux and macOS start one.
+On Windows `look::watch` starts two `vidcut-look` threads; Linux and macOS start one. Omarchy's palette is watched by a `notify` watcher that `Live` holds, not by a thread of its own.
 
 Libraries start their own (FFmpeg, GPU drivers, CUDA, transcribe.cpp's ggml, cpal, PipeWire, `notify`, zbus, ctrlc).
 

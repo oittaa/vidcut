@@ -15,7 +15,7 @@ flowchart LR
   JOB["vidcut-j1, vidcut-j2, …<br>export, proxy or transcription jobs"]
   WORK["vidcut-worker-N<br>filmstrips, waveforms"]
   MISS["vidcut-missing-media"]
-  WATCH["notify callbacks, vidcut-look<br>project, preferences, themes, OS look"]
+  WATCH["notify callbacks, vidcut-look<br>project, preferences, themes, OS look, Omarchy"]
   TILES["vidcut-tiles-N<br>timeline tiles"]
 
   UI -->|"Msg::Request"| S
@@ -154,7 +154,7 @@ While a job runs, the engine says what it is doing: the job thread installs a `v
 
 ## Themes and keys
 
-A theme is a TOML file: the built-in ones are compiled in from `crates/vidcut/themes/`, and the user's live in the config dir's `themes` folder (`themes::dir`), where one named like a built-in replaces it. A theme's `light_mode` table applies while the system is in light mode (`look::current`, watched on `vidcut-look`). The core loads the theme `appearance.theme` names into the snapshot, and loads it again when the preferences, the themes folder or the system's look change (`Msg::PreferencesChanged`); one that doesn't load shows the default, with a notice. The UI applies a new theme at its next frame.
+A theme is a TOML file: the built-in ones are compiled in from `crates/vidcut/themes/`, and the user's live in the config dir's `themes` folder (`themes::dir`), where one named like a built-in replaces it. A theme's `light_mode` table applies while the system is in light mode (`look::current`, watched on `vidcut-look`). A theme with `colors_from = "omarchy"` then takes `light` and its colors from the palette Omarchy stages in `~/.local/state/omarchy/current/theme/colors.toml` (`omarchy::apply`). It decides light or dark as Omarchy does: `mode`, then `theme_type`, then a `light.mode` file, then the background's brightness. A palette that can't be read or has no background or foreground makes the theme fail to load. While the chosen theme says so, `Live` watches `~/.local/state/omarchy/current`, or its nearest parent until it exists (`omarchy::watched`). A change there is `Msg::OmarchyChanged`, and the theme reloads once the files have been quiet for a moment, so a theme switch is read only after it has finished. The core loads the theme `appearance.theme` names into the snapshot, and loads it again when the preferences, the themes folder or the system's look change; one that doesn't load shows the default, with a notice. The UI applies a new theme at its next frame.
 
 The keys are one table, `vidcut_core::shortcuts`: the Help window (`crates/vidcut/src/gui/help.rs`) and `keys.list` both read it.
 
