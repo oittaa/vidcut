@@ -814,8 +814,7 @@ impl Workspace {
                 transcribe::file_of(model(i)).is_none_or(|f| transcribe::present(&dir, f))
             }),
             key: std::array::from_fn(|i| {
-                crate::services::of(model(i))
-                    .is_none_or(|s| crate::services::source(s, &prefs.services).is_some())
+                crate::services::of(model(i)).is_none_or(|s| crate::services::source(s).is_some())
             }),
             ask: std::array::from_fn(|i| match model(i) {
                 SpeechModel::Xai => prefs.services.ask_xai,

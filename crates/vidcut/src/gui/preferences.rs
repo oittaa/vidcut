@@ -33,7 +33,6 @@ pub(super) struct PreferencesUi {
     reset_saved: bool,
     reset_keep: bool,
     keys: [String; 2],
-    commands: [String; 2],
     keyed: Option<(&'static str, Value)>,
     resetting: Option<Ask>,
     forgotten: Option<super::workspace::ViewState>,
@@ -236,9 +235,6 @@ impl Workspace {
                     ui_state.mbps = n(&p["proxies"]["above_mbps"]);
                     ui_state.size = n(&p["proxies"]["size"]);
                     ui_state.folder = proxy_folder(p).to_string();
-                    let command =
-                        |k: &str| p["services"][k].as_str().unwrap_or_default().to_string();
-                    ui_state.commands = [command("xai_key_command"), command("google_key_command")];
                     ui_state.state = Some(r.result);
                     ui_state.error = None;
                 }
@@ -937,7 +933,6 @@ fn services(
                     label(ui, "Key");
                     ui.label(match info["key"].as_str() {
                         Some("environment") => format!("From {variable}"),
-                        Some("command") => "From the key command".into(),
                         Some("keychain") => "In the keychain".into(),
                         _ => "Not set".into(),
                     });
@@ -970,21 +965,6 @@ fn services(
                         }
                     });
                     ui.end_row();
-                    let field = format!("{service}_key_command");
-                    label(ui, "Key Command");
-                    let r = ui
-                        .add_enabled(
-                            !busy,
-                            egui::TextEdit::singleline(&mut ui_state.commands[i])
-                                .hint_text(format!("Optional, like pass show {service}"))
-                                .desired_width(200.0),
-                        )
-                        .on_hover_text("Its output is the key, when no variable is set");
-                    let typed = ui_state.commands[i].trim().to_string();
-                    if r.lost_focus() && typed != saved[&field].as_str().unwrap_or_default() {
-                        *patch = Some(json!({ "services": { field: typed } }));
-                    }
-                    ui.end_row();
                     let ask = format!("ask_{service}");
                     let mut on = saved[&ask] != false;
                     label(ui, "Before Sending");
@@ -999,10 +979,7 @@ fn services(
                 });
             }
             if state["services"]["xai"]["keychain"] == false {
-                dialog::note(
-                    ui,
-                    "No keychain answers here: use the variables or a key command",
-                );
+                dialog::note(ui, "No keychain answers here: use the variables");
             }
         },
     );

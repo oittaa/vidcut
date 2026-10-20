@@ -23,16 +23,11 @@ pub struct Preferences {
 }
 
 /// The paid speech services, xAI and Google. A key comes from the
-/// environment (`XAI_API_KEY`, `GEMINI_API_KEY`), else the key command, else
-/// the system's keychain (`services.set_key`); it is never kept in this file.
+/// environment (`XAI_API_KEY`, `GEMINI_API_KEY`), else the system's keychain
+/// (`services.set_key`); it is never kept in this file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Services {
-    /// A command whose output is the xAI key, such as `pass show xai`, run
-    /// when a key is needed.
-    pub xai_key_command: String,
-    /// A command whose output is the Gemini key, run when a key is needed.
-    pub google_key_command: String,
     /// The GUI asks before audio is sent to xAI.
     pub ask_xai: bool,
     /// The GUI asks before audio is sent to Google.
@@ -42,8 +37,6 @@ pub struct Services {
 impl Default for Services {
     fn default() -> Self {
         Self {
-            xai_key_command: String::new(),
-            google_key_command: String::new(),
             ask_xai: true,
             ask_google: true,
         }
@@ -279,10 +272,6 @@ pub struct PreferencesPatch {
 #[serde(deny_unknown_fields)]
 pub struct ServicesPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub xai_key_command: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub google_key_command: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ask_xai: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ask_google: Option<bool>,
@@ -459,12 +448,6 @@ impl Preferences {
         }
         if let Some(x) = &patch.services {
             let s = &mut p.services;
-            if let Some(c) = &x.xai_key_command {
-                s.xai_key_command = c.trim().to_string();
-            }
-            if let Some(c) = &x.google_key_command {
-                s.google_key_command = c.trim().to_string();
-            }
             s.ask_xai = x.ask_xai.unwrap_or(s.ask_xai);
             s.ask_google = x.ask_google.unwrap_or(s.ask_google);
         }

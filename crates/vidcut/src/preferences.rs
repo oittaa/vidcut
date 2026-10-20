@@ -321,7 +321,7 @@ fn describe(p: &Preferences) -> Value {
             "mb": (bytes as f64 / f64::from(1 << 20) * 10.0).round() / 10.0,
         },
         "proxy_codecs": codecs,
-        "services": crate::services::describe(&p.services),
+        "services": crate::services::describe(),
         "cache": {
             "models": folder_usage(&crate::paths::models_dir()),
             "replies": folder_usage(&vidcut_av::speech_api::replies_folder()),

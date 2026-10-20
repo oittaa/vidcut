@@ -205,7 +205,7 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             .filter(|k| !k.trim().is_empty())
             .ok_or_else(|| {
                 Error::Missing(format!(
-                    "no {company} key: set {}, a key command in the preferences, or save one in \
+                    "no {company} key: set {}, or save one in \
                      the keychain (vidcut services set-key)",
                     key_variable(asked.model)
                 ))
