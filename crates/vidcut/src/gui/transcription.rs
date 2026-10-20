@@ -1012,19 +1012,12 @@ impl Workspace {
         let Some(e) = &mut t.editing else { return };
         let mut open = true;
         let mut change = None;
-        egui::Window::new("Filler Words")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_pos(near_center(ctx, 420.0, 220.0))
-            .show(ctx, |ui| {
-                ui.set_width(400.0);
-                change =
-                    super::fillers::editor(ui, e, Some(project), preferred, t.saving.is_some());
-                if let Some(error) = &t.edit_error {
-                    ui.label(RichText::new(error).color(theme::colors().error));
-                }
-            });
+        super::dialog::window(ctx, "Filler Words", &mut open, |ui| {
+            change = super::fillers::editor(ui, e, Some(project), preferred, t.saving.is_some());
+            if let Some(error) = &t.edit_error {
+                super::dialog::warn(ui, error.clone());
+            }
+        });
         if !open {
             t.editing = None;
             t.edit_error = None;

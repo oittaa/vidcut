@@ -831,34 +831,39 @@ impl Workspace {
         let mut open = true;
         let mut apply = false;
         let mut cancel = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-        egui::Window::new(if r.new { "New Bin" } else { "Rename Bin" })
-            .collapsible(false)
-            .resizable(false)
-            .default_pos(super::export::near_center(ctx, 260.0, 90.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                let output = egui::TextEdit::singleline(&mut r.name)
-                    .desired_width(240.0)
-                    .show(ui);
-                let edit = output.response;
-                if r.focus {
-                    edit.request_focus();
-                    let mut state = output.state;
-                    let all = egui::text::CCursorRange::two(
-                        egui::text::CCursor::new(0),
-                        egui::text::CCursor::new(r.name.chars().count()),
-                    );
-                    state.cursor.set_char_range(Some(all));
-                    state.store(ui.ctx(), edit.id);
-                    r.focus = false;
-                }
-                let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                ui.horizontal(|ui| {
-                    let label = if r.new { "Create" } else { "Rename" };
-                    apply = ui.button(label).clicked() || enter;
-                    cancel |= ui.button("Cancel").clicked();
+        let title = if r.new { "New Bin" } else { "Rename Bin" };
+        super::dialog::window(ctx, title, &mut open, |ui| {
+            let mut enter = false;
+            super::dialog::form(ui, "bin-form", |ui| {
+                super::dialog::row(ui, "Name", |ui| {
+                    let output = egui::TextEdit::singleline(&mut r.name)
+                        .desired_width(260.0)
+                        .show(ui);
+                    let edit = output.response;
+                    if r.focus {
+                        edit.request_focus();
+                        let mut state = output.state;
+                        let all = egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(r.name.chars().count()),
+                        );
+                        state.cursor.set_char_range(Some(all));
+                        state.store(ui.ctx(), edit.id);
+                        r.focus = false;
+                    }
+                    enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 });
             });
+            let named = !r.name.trim().is_empty();
+            super::dialog::footer(ui, |ui| {
+                let label = if r.new { "Create" } else { "Rename" };
+                apply = super::dialog::main_button(ui, label, named) || (enter && named);
+                cancel |= ui.button("Cancel").clicked();
+                if !named {
+                    super::dialog::why(ui, "Name it first");
+                }
+            });
+        });
         let name = r.name.trim();
         if apply && !name.is_empty() {
             let to = join(parent(&r.path), name);

@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 
 use super::export::{Ask, Picked};
 use super::folders::Kind;
+use super::import;
 use super::workspace::{Workspace, dim};
-use super::{import, theme};
 
 #[derive(Default)]
 pub(super) struct RelinkUi {
@@ -142,53 +142,47 @@ impl Workspace {
     fn report_window(&mut self, ctx: &egui::Context, mut report: Report) -> Option<State> {
         let (mut open, mut again, mut close) = (true, false, false);
         let mut anyway = None;
-        egui::Window::new("Relink Media")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.set_max_width(560.0);
-                ui.label(dim(format!(
-                    "Looked in {} and its subfolders.",
-                    report.folder.display()
-                )));
-                if let Some(e) = &report.error {
-                    ui.colored_label(theme::colors().error, e);
-                }
-                ui.label(format!("{} relinked", report.relinked));
-                if !report.not_found.is_empty() {
-                    ui.label(format!("{} not found:", report.not_found.len()));
-                    let shown = report.not_found.iter().take(8).cloned();
-                    ui.label(dim(shown.collect::<Vec<_>>().join(", ")));
-                    if report.not_found.len() > 8 {
-                        ui.label(dim(format!("and {} more", report.not_found.len() - 8)));
-                    }
-                }
-                if !report.different.is_empty() {
-                    ui.label(format!(
-                        "{} found by name, but not the same file:",
-                        report.different.len()
-                    ));
-                    for (i, (_, name, _, why)) in report.different.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.label(name);
-                            ui.label(dim(why));
-                            if ui.button("Relink Anyway").clicked() {
-                                anyway = Some(i);
-                            }
-                        });
-                    }
-                }
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if !self.snap.missing.is_empty()
-                        && ui.button("Choose Another Folder…").clicked()
-                    {
-                        again = true;
-                    }
-                    close = ui.button("Close").clicked();
+        super::dialog::window(ctx, "Relink Media", &mut open, |ui| {
+            if let Some(e) = &report.error {
+                super::dialog::warn(ui, e.clone());
+            }
+            super::dialog::form(ui, "relink-form", |ui| {
+                super::dialog::row(ui, "Looked In", |ui| {
+                    ui.add(egui::Label::new(report.folder.display().to_string()).wrap())
                 });
+                super::dialog::row(ui, "Relinked", |ui| ui.label(report.relinked.to_string()));
+                if !report.not_found.is_empty() {
+                    super::dialog::row(ui, "Not Found", |ui| {
+                        let mut names: Vec<String> =
+                            report.not_found.iter().take(8).cloned().collect();
+                        if report.not_found.len() > 8 {
+                            names.push(format!("and {} more", report.not_found.len() - 8));
+                        }
+                        ui.add(egui::Label::new(dim(names.join(", "))).wrap())
+                    });
+                }
             });
+            if !report.different.is_empty() {
+                super::dialog::note(ui, "Found by name, but not the same file:");
+                for (i, (_, name, path, why)) in report.different.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(name);
+                        ui.label(dim(why));
+                        if ui.button("Relink Anyway").clicked() {
+                            anyway = Some(i);
+                        }
+                    });
+                    ui.add(egui::Label::new(dim(path.display().to_string())).wrap());
+                }
+            }
+            super::dialog::footer(ui, |ui| {
+                close = super::dialog::main_button(ui, "Close", true);
+                if !self.snap.missing.is_empty() && ui.button("Choose Another Folder…").clicked()
+                {
+                    again = true;
+                }
+            });
+        });
         if let Some(i) = anyway {
             let (id, _, path, _) = report.different.remove(i);
             self.send("media.relink", json!({ "media": id, "path": path }));

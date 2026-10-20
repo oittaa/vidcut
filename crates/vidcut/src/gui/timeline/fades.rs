@@ -175,14 +175,11 @@ impl Workspace {
         let mut open = true;
         let mut apply = None;
         let mut done = false;
-        egui::Window::new("Change Transition Duration")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                egui::Grid::new("fade-duration").show(ui, |ui| {
-                    ui.label("Format");
-                    ui.horizontal(|ui| {
+        use super::super::dialog;
+        dialog::window(ctx, "Change Transition Duration", &mut open, |ui| {
+            dialog::form(ui, "fade-form", |ui| {
+                dialog::row(ui, "Format", |ui| {
+                    dialog::switch(ui, |ui| {
                         for (frames, label) in [(false, "Time"), (true, "Frames")] {
                             if ui.selectable_label(in_frames == frames, label).clicked()
                                 && in_frames != frames
@@ -194,49 +191,43 @@ impl Workspace {
                             }
                         }
                     });
-                    ui.end_row();
-                    ui.label("Duration");
+                });
+                dialog::row(ui, "Duration", |ui| {
                     let r = ui.add(egui::TextEdit::singleline(&mut d.text).desired_width(110.0));
                     if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                         apply = typed(&d.text, fps, in_frames);
                         done = apply.is_some();
                     }
-                    ui.end_row();
-                    ui.label("Preset");
-                    ui.horizontal(|ui| {
-                        for secs in [1, 5, 15] {
-                            let frames = fps.secs_to_frames(f64::from(secs));
-                            let label = if in_frames {
-                                frames.to_string()
-                            } else {
-                                format!("{secs}s")
-                            };
-                            if ui.button(label).clicked() {
-                                apply = Some(frames);
-                                done = true;
-                            }
-                        }
-                        ui.add_enabled(false, egui::Button::new("End"));
-                    });
-                    ui.end_row();
                 });
-                let frames = typed(&d.text, fps, in_frames);
-                ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
-                        done = true;
-                    }
-                    if frames.is_none() {
-                        super::super::dialog::why(ui, "not a duration");
-                    }
-                    if ui
-                        .add_enabled(frames.is_some(), egui::Button::new("Change"))
-                        .clicked()
-                    {
-                        apply = frames;
-                        done = true;
+                dialog::row(ui, "Or", |ui| {
+                    for secs in [1, 5, 15] {
+                        let frames = fps.secs_to_frames(f64::from(secs));
+                        let label = if in_frames {
+                            frames.to_string()
+                        } else {
+                            format!("{secs}s")
+                        };
+                        if ui.button(label).clicked() {
+                            apply = Some(frames);
+                            done = true;
+                        }
                     }
                 });
             });
+            let frames = typed(&d.text, fps, in_frames);
+            dialog::footer(ui, |ui| {
+                if dialog::main_button(ui, "Change", frames.is_some()) {
+                    apply = frames;
+                    done = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    done = true;
+                }
+                if frames.is_none() {
+                    dialog::why(ui, "not a duration");
+                }
+            });
+        });
         self.timeline.fade_in_frames = in_frames;
         if let Some(f) = apply {
             self.resize_transition(d.track, d.at, f);

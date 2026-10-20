@@ -538,24 +538,18 @@ impl Workspace {
         };
         let mut done = None;
         let mut open = true;
-        egui::Window::new("Mark This Version")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_pos(ctx.content_rect().center() - vec2(160.0, 60.0))
-            .show(ctx, |ui| {
-                ui.label(
-                    RichText::new(if naming.step == 0 {
-                        "A name for the project as it was before every step".to_string()
+        super::dialog::window(ctx, "Mark This Version", &mut open, |ui| {
+            super::dialog::form(ui, "mark-form", |ui| {
+                super::dialog::row(ui, "Version", |ui| {
+                    ui.label(if naming.step == 0 {
+                        "before every step".to_string()
                     } else {
-                        format!("A name for the project as it is after step {}", naming.step)
+                        format!("after step {}", naming.step)
                     })
-                    .color(theme::colors().text_dim),
-                );
-                ui.horizontal(|ui| {
-                    ui.label("Name");
+                });
+                super::dialog::row(ui, "Name", |ui| {
                     let r =
-                        ui.add(egui::TextEdit::singleline(&mut naming.name).desired_width(240.0));
+                        ui.add(egui::TextEdit::singleline(&mut naming.name).desired_width(260.0));
                     if naming.fresh {
                         r.request_focus();
                         naming.fresh = false;
@@ -564,22 +558,23 @@ impl Workspace {
                         done = Some(true);
                     }
                 });
-                ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
-                        done = Some(false);
-                    }
-                    let ok = !naming.name.trim().is_empty();
-                    if ui.add_enabled(ok, egui::Button::new("Mark")).clicked() {
-                        done = Some(true);
-                    }
-                    if !ok {
-                        super::dialog::why(ui, "Name it first");
-                    }
-                });
-                if ui.input(|i| i.key_pressed(Key::Escape)) {
+            });
+            let ok = !naming.name.trim().is_empty();
+            super::dialog::footer(ui, |ui| {
+                if super::dialog::main_button(ui, "Mark", ok) {
+                    done = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
                     done = Some(false);
                 }
+                if !ok {
+                    super::dialog::why(ui, "Name it first");
+                }
             });
+            if ui.input(|i| i.key_pressed(Key::Escape)) {
+                done = Some(false);
+            }
+        });
         if !open {
             done = Some(false);
         }

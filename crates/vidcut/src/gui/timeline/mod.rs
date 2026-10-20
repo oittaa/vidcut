@@ -2454,19 +2454,19 @@ impl Workspace {
         };
         let mut open = true;
         let mut done = false;
-        egui::Window::new("Marker")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                egui::Grid::new("marker-fields").show(ui, |ui| {
-                    ui.label("Name");
-                    ui.text_edit_singleline(&mut d.name);
-                    ui.end_row();
-                    ui.label("Notes");
-                    ui.text_edit_multiline(&mut d.note);
-                    ui.end_row();
-                    ui.label("Color");
+        super::dialog::window(ctx, "Marker", &mut open, |ui| {
+            super::dialog::form(ui, "marker-form", |ui| {
+                super::dialog::row(ui, "Name", |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(260.0));
+                });
+                super::dialog::row(ui, "Notes", |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut d.note)
+                            .desired_rows(3)
+                            .desired_width(260.0),
+                    );
+                });
+                super::dialog::row(ui, "Color", |ui| {
                     egui::ComboBox::from_id_salt("marker-color")
                         .selected_text(&d.color)
                         .show_ui(ui, |ui| {
@@ -2474,22 +2474,25 @@ impl Workspace {
                                 ui.selectable_value(&mut d.color, c.to_string(), *c);
                             }
                         });
-                    ui.end_row();
-                });
-                ui.horizontal(|ui| {
-                    if ui.button("Done").clicked() {
-                        self.send(
-                            "markers.set",
-                            json!({ "marker": d.id, "name": d.name, "note": d.note, "color": d.color }),
-                        );
-                        done = true;
-                    }
-                    if ui.button("Remove Marker").clicked() {
-                        self.send("markers.remove", json!({ "marker": d.id }));
-                        done = true;
-                    }
                 });
             });
+            super::dialog::footer(ui, |ui| {
+                if super::dialog::main_button(ui, "Done", true) {
+                    self.send(
+                        "markers.set",
+                        json!({ "marker": d.id, "name": d.name, "note": d.note, "color": d.color }),
+                    );
+                    done = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    done = true;
+                }
+                if ui.button("Remove Marker").clicked() {
+                    self.send("markers.remove", json!({ "marker": d.id }));
+                    done = true;
+                }
+            });
+        });
         if open && !done {
             self.timeline.marker_dialog = Some(d);
         }
@@ -2502,43 +2505,55 @@ impl Workspace {
         let clips = self.snap.selection.clips.clone();
         let mut open = !clips.is_empty();
         let mut done = false;
-        egui::Window::new("Change Clip Duration")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.label(format!("{} clip(s)", clips.len()));
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut text)
-                        .hint_text("frames (90f), seconds (3s) or a timecode")
-                        .desired_width(220.0),
+        super::dialog::window(ctx, "Change Clip Duration", &mut open, |ui| {
+            let set = |d: Value| {
+                self.send(
+                    "edit.change_duration",
+                    json!({ "clips": clips, "duration": d }),
                 );
-                r.request_focus();
-                let set = |d: Value| {
-                    self.send(
-                        "edit.change_duration",
-                        json!({ "clips": clips, "duration": d }),
+            };
+            let typed = crate::gui::viewer::timecode_input(&text, self.dropped());
+            let mut enter = false;
+            super::dialog::form(ui, "duration-form", |ui| {
+                super::dialog::row(ui, "Clips", |ui| ui.label(clips.len().to_string()));
+                super::dialog::row(ui, "Duration", |ui| {
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .hint_text("90f, 3s or a timecode")
+                            .desired_width(200.0),
                     );
-                };
-                ui.horizontal(|ui| {
+                    r.request_focus();
+                    enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                });
+                super::dialog::row(ui, "Or", |ui| {
                     for s in [1, 5, 15] {
                         if ui.button(format!("{s} s")).clicked() {
                             set(json!(format!("{s}s")));
                             done = true;
                         }
                     }
-                    if ui.button("End").clicked() {
+                    if ui.button("To the End").clicked() {
                         set(json!("end"));
                         done = true;
                     }
                 });
-                if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                    if let Some(spec) = crate::gui::viewer::timecode_input(&text, self.dropped()) {
-                        set(json!(spec));
-                    }
+            });
+            super::dialog::footer(ui, |ui| {
+                let change = super::dialog::main_button(ui, "Change", typed.is_some());
+                if (change || enter)
+                    && let Some(spec) = &typed
+                {
+                    set(json!(spec));
                     done = true;
                 }
+                if ui.button("Cancel").clicked() {
+                    done = true;
+                }
+                if typed.is_none() && !text.trim().is_empty() {
+                    super::dialog::why(ui, "not a duration");
+                }
             });
+        });
         if open && !done {
             self.timeline.duration_dialog = Some(text);
         }
@@ -2575,48 +2590,47 @@ impl Workspace {
         let clips = self.snap.selection.clips.clone();
         let mut open = !clips.is_empty();
         let mut done = false;
-        egui::Window::new("Change Clip Speed")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.label(format!("{} clip(s)", clips.len()));
-                ui.add_enabled_ui(!d.freeze, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Speed");
-                        ui.add(
-                            egui::DragValue::new(&mut d.percent)
-                                .range(1.0..=10000.0)
-                                .speed(1.0)
-                                .suffix(" %"),
-                        );
-                    });
-                    ui.checkbox(&mut d.reverse, "Reverse Speed");
-                });
-                ui.checkbox(&mut d.freeze, "Freeze Frame");
-                ui.checkbox(&mut d.ripple, "Ripple Timeline");
-                ui.horizontal(|ui| {
-                    let change =
-                        ui.button("Change").clicked() || ui.input(|i| i.key_pressed(Key::Enter));
-                    if change {
-                        let speed = if d.freeze {
-                            0.0
-                        } else if d.reverse {
-                            -d.percent / 100.0
-                        } else {
-                            d.percent / 100.0
-                        };
-                        self.send(
-                            "edit.change_speed",
-                            json!({ "clips": clips, "speed": speed, "ripple": d.ripple }),
-                        );
-                        done = true;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        done = true;
+        super::dialog::window(ctx, "Change Clip Speed", &mut open, |ui| {
+            super::dialog::form(ui, "speed-form", |ui| {
+                super::dialog::row(ui, "Clips", |ui| ui.label(clips.len().to_string()));
+                super::dialog::row(ui, "Speed", |ui| {
+                    ui.add_enabled(
+                        !d.freeze,
+                        egui::DragValue::new(&mut d.percent)
+                            .range(1.0..=10000.0)
+                            .speed(1.0)
+                            .suffix(" %"),
+                    );
+                    ui.add_enabled(!d.freeze, egui::Checkbox::new(&mut d.reverse, "Reverse"));
+                    if d.freeze {
+                        super::dialog::why(ui, "a freeze frame holds one picture");
                     }
                 });
+                super::dialog::row(ui, "Freeze Frame", |ui| ui.checkbox(&mut d.freeze, ""));
+                super::dialog::row(ui, "Ripple Timeline", |ui| ui.checkbox(&mut d.ripple, ""));
             });
+            super::dialog::footer(ui, |ui| {
+                let change = super::dialog::main_button(ui, "Change", true)
+                    || ui.input(|i| i.key_pressed(Key::Enter));
+                if change {
+                    let speed = if d.freeze {
+                        0.0
+                    } else if d.reverse {
+                        -d.percent / 100.0
+                    } else {
+                        d.percent / 100.0
+                    };
+                    self.send(
+                        "edit.change_speed",
+                        json!({ "clips": clips, "speed": speed, "ripple": d.ripple }),
+                    );
+                    done = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    done = true;
+                }
+            });
+        });
         if open && !done {
             self.timeline.speed_dialog = Some(d);
         }
