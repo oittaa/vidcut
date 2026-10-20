@@ -31,6 +31,10 @@ pub(super) struct PreferencesUi {
     choosing_folder: Option<Picked>,
     confirm_reset: bool,
     reset_saved: bool,
+    reset_keep: bool,
+    keys: [String; 2],
+    commands: [String; 2],
+    keyed: Option<(&'static str, Value)>,
     resetting: Option<Ask>,
     forgotten: Option<super::workspace::ViewState>,
     fillers: super::fillers::FillerEditor,
@@ -44,18 +48,20 @@ enum Page {
     Gpu,
     Memory,
     Sound,
-    Thumbnails,
+    Cache,
     Proxies,
+    Services,
     Fillers,
 }
 
-const PAGES: [(Page, &str, &str); 7] = [
+const PAGES: [(Page, &str, &str); 8] = [
     (Page::General, icon::GEAR_SIX, "General"),
     (Page::Gpu, icon::GRAPHICS_CARD, "GPU"),
     (Page::Memory, icon::MEMORY, "Memory"),
     (Page::Sound, icon::SPEAKER_HIGH, "Sound"),
-    (Page::Thumbnails, icon::IMAGES, "Thumbnails"),
+    (Page::Cache, icon::DATABASE, "Cache"),
     (Page::Proxies, icon::FILM_STRIP, "Proxies"),
+    (Page::Services, icon::CLOUD, "Services"),
     (Page::Fillers, icon::CHAT_TEXT, "Filler Words"),
 ];
 
@@ -230,6 +236,9 @@ impl Workspace {
                     ui_state.mbps = n(&p["proxies"]["above_mbps"]);
                     ui_state.size = n(&p["proxies"]["size"]);
                     ui_state.folder = proxy_folder(p).to_string();
+                    let command =
+                        |k: &str| p["services"][k].as_str().unwrap_or_default().to_string();
+                    ui_state.commands = [command("xai_key_command"), command("google_key_command")];
                     ui_state.state = Some(r.result);
                     ui_state.error = None;
                 }
@@ -325,8 +334,9 @@ impl Workspace {
                                     Page::Gpu => gpu(ui, &state, busy, display.as_deref(), &mut patch),
                                     Page::Memory => memory(ui, &state, busy, ui_state, &mut patch),
                                     Page::Sound => sound(ui, &state, busy, ui_state, &mut patch),
-                                    Page::Thumbnails => {
-                                        thumbnails(ui, &state, busy, ui_state, &mut patch)
+                                    Page::Cache => cache(ui, &state, busy, ui_state, &mut patch),
+                                    Page::Services => {
+                                        services(ui, &state, busy, ui_state, &mut patch)
                                     }
                                     Page::Proxies => {
                                         let folders = Folders {
@@ -356,6 +366,10 @@ impl Workspace {
         if let Some(p) = patch {
             ui_state.ask = Some(Ask::send(&self.live, ctx, "preferences.set", p));
         }
+        if let Some((method, params)) = ui_state.keyed.take() {
+            self.send(method, params);
+            self.preferences.ask = Some(Ask::send(&self.live, ctx, "preferences.get", json!({})));
+        }
     }
 
     fn reset_window(&mut self, ctx: &egui::Context) {
@@ -383,6 +397,10 @@ impl Workspace {
                 &mut ui_state.reset_saved,
                 "Also delete my presets, themes and looks",
             );
+            ui.checkbox(
+                &mut ui_state.reset_keep,
+                "Keep downloaded models and paid replies",
+            );
             dialog::footer(ui, |ui| {
                 if ui
                     .button(RichText::new("Reset").color(theme::colors().error))
@@ -401,10 +419,11 @@ impl Workspace {
         match choice {
             Some(true) => {
                 let saved = ui_state.reset_saved;
+                let keep = ui_state.reset_keep;
                 ui_state.confirm_reset = false;
                 let forgotten = self.forget_view_state();
                 self.preferences.forgotten = Some(forgotten);
-                let params = json!({ "saved": saved });
+                let params = json!({ "saved": saved, "keep_downloads": keep });
                 self.preferences.resetting = Some(Ask::send(&self.live, ctx, "reset", params));
             }
             Some(false) => ui_state.confirm_reset = false,
@@ -522,6 +541,7 @@ fn general(
             {
                 ui_state.confirm_reset = true;
                 ui_state.reset_saved = false;
+                ui_state.reset_keep = true;
             }
             ui.end_row();
         });
@@ -824,7 +844,21 @@ fn sound(
     });
 }
 
-fn thumbnails(
+fn folder_row(ui: &mut egui::Ui, name: &str, held: &Value, what: &str) {
+    label(ui, name);
+    ui.horizontal(|ui| {
+        ui.label(dim(format!(
+            "{} MB in {} {what}",
+            held["mb"], held["files"]
+        )));
+        if ui.button("Show in Folder").clicked() {
+            super::file_manager::show(Path::new(held["path"].as_str().unwrap_or_default()));
+        }
+    });
+    ui.end_row();
+}
+
+fn cache(
     ui: &mut egui::Ui,
     state: &Value,
     busy: bool,
@@ -835,12 +869,14 @@ fn thumbnails(
     let cache = &state["thumbnail_cache"];
     page(
         ui,
-        "Thumbnails",
-        "The Media Pool's thumbnails and the pictures in the timeline's clips",
+        "Cache",
+        "Kept here, so it isn't made, downloaded or paid for again",
         |ui| {
-            grid(ui, "preferences-thumbnails", |ui| {
+            grid(ui, "preferences-cache", |ui| {
+                folder_row(ui, "Speech Models", &state["cache"]["models"], "files");
+                folder_row(ui, "Paid Replies", &state["cache"]["replies"], "replies");
                 let mut disk = thumbs["disk_cache"] == true;
-                label(ui, "Disk Cache");
+                label(ui, "Thumbnails");
                 if ui
                     .add_enabled(!busy, egui::Checkbox::new(&mut disk, "Keep them on disk"))
                     .on_hover_text("Projects open with their pictures at once; off empties it")
@@ -872,6 +908,102 @@ fn thumbnails(
                 });
                 ui.end_row();
             });
+        },
+    );
+}
+
+fn services(
+    ui: &mut egui::Ui,
+    state: &Value,
+    busy: bool,
+    ui_state: &mut PreferencesUi,
+    patch: &mut Option<Value>,
+) {
+    let saved = &state["preferences"]["services"];
+    page(
+        ui,
+        "Services",
+        "Paid speech recognition: xAI and Google",
+        |ui| {
+            for (i, (service, name)) in [("xai", "xAI"), ("google", "Google")]
+                .into_iter()
+                .enumerate()
+            {
+                ui.add_space(4.0);
+                ui.label(RichText::new(name).strong());
+                let info = &state["services"][service];
+                let variable = info["variable"].as_str().unwrap_or_default();
+                grid(ui, &format!("preferences-{service}"), |ui| {
+                    label(ui, "Key");
+                    ui.label(match info["key"].as_str() {
+                        Some("environment") => format!("From {variable}"),
+                        Some("command") => "From the key command".into(),
+                        Some("keychain") => "In the keychain".into(),
+                        _ => "Not set".into(),
+                    });
+                    ui.end_row();
+                    label(ui, "New Key");
+                    ui.horizontal(|ui| {
+                        ui.add_enabled(
+                            !busy,
+                            egui::TextEdit::singleline(&mut ui_state.keys[i])
+                                .password(true)
+                                .desired_width(200.0),
+                        )
+                        .on_hover_text(format!("Kept in the keychain; {variable} goes first"));
+                        let typed = !ui_state.keys[i].trim().is_empty();
+                        if ui
+                            .add_enabled(!busy && typed, egui::Button::new("Save"))
+                            .clicked()
+                        {
+                            let key = std::mem::take(&mut ui_state.keys[i]);
+                            ui_state.keyed = Some((
+                                "services.set_key",
+                                json!({ "service": service, "key": key.trim() }),
+                            ));
+                        }
+                        if info["key"] == "keychain"
+                            && ui.add_enabled(!busy, egui::Button::new("Remove")).clicked()
+                        {
+                            ui_state.keyed =
+                                Some(("services.remove_key", json!({ "service": service })));
+                        }
+                    });
+                    ui.end_row();
+                    let field = format!("{service}_key_command");
+                    label(ui, "Key Command");
+                    let r = ui
+                        .add_enabled(
+                            !busy,
+                            egui::TextEdit::singleline(&mut ui_state.commands[i])
+                                .hint_text("pass show xai")
+                                .desired_width(200.0),
+                        )
+                        .on_hover_text("Its output is the key, when no variable is set");
+                    let typed = ui_state.commands[i].trim().to_string();
+                    if r.lost_focus() && typed != saved[&field].as_str().unwrap_or_default() {
+                        *patch = Some(json!({ "services": { field: typed } }));
+                    }
+                    ui.end_row();
+                    let ask = format!("ask_{service}");
+                    let mut on = saved[&ask] != false;
+                    label(ui, "Before Sending");
+                    if ui
+                        .add_enabled(!busy, egui::Checkbox::new(&mut on, "Ask"))
+                        .on_hover_text("Shows the length and the estimated cost first")
+                        .changed()
+                    {
+                        *patch = Some(json!({ "services": { ask: on } }));
+                    }
+                    ui.end_row();
+                });
+            }
+            if state["services"]["xai"]["keychain"] == false {
+                dialog::note(
+                    ui,
+                    "No keychain answers here: use the variables or a key command",
+                );
+            }
         },
     );
 }

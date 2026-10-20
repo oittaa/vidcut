@@ -35,6 +35,7 @@ Priority: **interactive** and **job** are the `Work` kinds; **inherited** sets n
 | `vidcut-viewer-close`, `vidcut-two-up-close`, `vidcut-frees-imports` | `threads::closing` | drop players, Vulkan imports | interactive |
 | `vidcut-cancel` | `ipc::client::call` | watches a CLI call's cancel | interactive |
 | `vidcut-proxies`, `vidcut-transcribe`, `vidcut-story-N` | `session::run_with`, `storyboard::render` | a headless proxy encode or transcription; storyboard pictures | starter's (`Work::current`) |
+| `vidcut-upload` | `speech_api::transcribe` | a paid speech service's upload and reply, while the job's thread reports and cancels | inherited |
 | `vidcut-play-video`, `vidcut-play-audio`, `vidcut-play-windows` | `Player::new`; windows once followed | an engine's decoding, mix, two-up windows | inherited |
 | `vidcut-audio-out` | `CpalOutput`, `PacedOutput` | the device's stream, or paced silence | inherited |
 | `vidcut-encode` | `Worker::spawn` | an output's encoders and muxer | starter's |

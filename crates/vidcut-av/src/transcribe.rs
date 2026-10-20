@@ -99,7 +99,7 @@ pub const SILERO_VAD: File = File {
 
 pub const SORTFORMER: File = File {
     name: "diar_streaming_sortformer_4spk-v2.1-Q8_0.gguf",
-    title: "Sortformer (speakers)",
+    title: "Sortformer speaker detection",
     repo: "handy-computer/diar_streaming_sortformer_4spk-v2.1-gguf",
     revision: "60ebab3ef7cae9869be0abcde13360347e96ba03",
     bytes: 139_310_336,

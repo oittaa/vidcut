@@ -1705,12 +1705,12 @@ fn upload_check(asked: &transcript::Asked, secs: f64, what: &str) -> Result<()> 
     Err(Error::new(
         crate::error::ErrorCode::Dependency,
         format!(
-            "{what} would be sent to {}: {} of audio, about {:.0} MB, about ${:.2} at ${:.2} an \
-             hour. Pass send (--send) to upload it",
+            "{what} would be sent to {}: {} of audio, about {:.0} MB, {} at ${:.2} an hour. \
+             Pass send (--send) to upload it",
             asked.model.company(),
             crate::subtitles::clock(secs, '.'),
             transcript::upload_mb(secs, 1).ceil(),
-            transcript::cost(asked.model, secs),
+            transcript::dollars(transcript::cost(asked.model, secs)),
             asked.model.dollars_per_hour()
         ),
     ))

@@ -144,6 +144,13 @@ pub fn cost(model: SpeechModel, secs: f64) -> f64 {
     model.dollars_per_hour() * secs / 3600.0
 }
 
+pub fn dollars(v: f64) -> String {
+    match v {
+        v if v < 0.005 => "less than $0.01".into(),
+        v => format!("about ${v:.2}"),
+    }
+}
+
 pub const SOUND_DB: f64 = -40.0;
 pub const SHORTEST_QUIET: f64 = 0.5;
 pub const SHORTEST_SOUND: f64 = 0.25;

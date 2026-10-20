@@ -407,9 +407,11 @@ fn ask_payment(ctx: &egui::Context, p: &Paying, again: &mut bool) -> Option<bool
             length(p.secs),
             vidcut_core::transcript::upload_mb(p.secs, 1).ceil()
         ));
+        let cost = vidcut_core::transcript::dollars(vidcut_core::transcript::cost(p.model, p.secs));
         ui.label(format!(
-            "About ${:.2}, at ${:.2} an hour",
-            vidcut_core::transcript::cost(p.model, p.secs),
+            "{}{}, at ${:.2} an hour",
+            cost[..1].to_uppercase(),
+            &cost[1..],
             p.model.dollars_per_hour()
         ));
         dialog::note(

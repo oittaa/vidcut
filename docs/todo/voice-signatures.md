@@ -2,7 +2,7 @@
 
 **When:** once transcribe.cpp gives speaker embeddings.
 
-Speakers found on this computer are numbered per file, and the user links them across files by hand ([paid-speech.md](paid-speech.md)). With a voice signature for each speaker, vidcut would link them by itself, as Resolve's Speaker Detection remembers voices across a project's clips (pp. 997–1001).
+Speakers found on this computer are numbered per file, and the user links them across files by hand ([deviation X61](../deviations.md#x61-speakers-are-numbered-per-file-or-per-run-and-joined-by-hand)). With a voice signature for each speaker, vidcut would link them by itself, as Resolve's Speaker Detection remembers voices across a project's clips (pp. 997–1001).
 
 - **The model.** transcribe.cpp already runs ECAPA-TDNN for language identification; SpeechBrain's speaker model (`speechbrain/spkrec-ecapa-voxceleb`) is the same network trained on voices, and gives 192 numbers for a stretch of speech. transcribe.cpp would need a role that returns them.
 - **Kept with the file.** Each speaker's signature, from its longest turns, goes into the kept transcript, so it serves every project that uses the file.
