@@ -1,7 +1,7 @@
 use std::sync::{Mutex, OnceLock};
 
 use cosmic_text::{
-    Align, Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, Style, SwashCache,
+    Align, Attrs, Buffer, Color, Family, FontSystem, Metrics, Renderer, Shaping, Style, SwashCache,
     UnderlineStyle, Weight, Wrap,
 };
 use vidcut_core::model::{
@@ -203,7 +203,7 @@ enum Markup<'a> {
 
 #[derive(Clone)]
 struct Laid {
-    sprite: Sprite,
+    sprite: Option<Sprite>,
     lines: f32,
     popped: Option<(f32, f32)>,
 }
@@ -347,9 +347,12 @@ struct Traced {
 
 struct Bars(Vec<Traced>);
 
-impl cosmic_text::Renderer for Bars {
-    fn rectangle(&mut self, x: i32, y: i32, w: u32, h: u32, _: Color) {
+impl Renderer for Bars {
+    fn rectangle(&mut self, x: i32, y: i32, w: u32, h: u32, color: Color) {
         use zeno::Command::{Close, LineTo, MoveTo};
+        if color.a() == 0 {
+            return;
+        }
         let (w, h) = (w as f32, h as f32);
         self.0.push(Traced {
             x,
@@ -551,11 +554,11 @@ fn lay_out(look: &Look) -> Option<Laid> {
     let (cw, ch) = (gx1 - gx0 + 2 * margin, lines.ceil() as i32 + 2 * pad);
     let (w, h) = (cw as usize, ch as usize);
     let mut canvas = vec![[0.0f32; 4]; w * h];
-    buffer.draw(
-        &mut f.system,
-        &mut f.cache,
-        Color::rgb(255, 255, 255),
-        |x, y, bw, bh, color| {
+    let white = Color::rgb(255, 255, 255);
+    let mut painter = cosmic_text::LegacyRenderer {
+        font_system: &mut f.system,
+        cache: &mut f.cache,
+        callback: |x: i32, y: i32, bw: u32, bh: u32, color: Color| {
             let a = f32::from(color.a()) / 255.0;
             if a <= 0.0 {
                 return;
@@ -575,7 +578,16 @@ fn lay_out(look: &Look) -> Option<Laid> {
                 }
             }
         },
-    );
+    };
+    for run in buffer.layout_runs() {
+        for g in run.glyphs.iter().filter(|g| g.metadata & HIDDEN == 0) {
+            painter.glyph(
+                g.physical((0., run.line_y), 1.0),
+                g.color_opt.unwrap_or(white),
+            );
+        }
+        cosmic_text::render_decoration(&mut painter, &run, white);
+    }
     let traced = stroke.and_then(|_| traces(&buffer, f));
     drop(held);
     let alpha: Vec<f32> = canvas.iter().map(|p| p[3]).collect();
@@ -638,20 +650,17 @@ fn lay_out(look: &Look) -> Option<Laid> {
             y1 = y1.max(y + 1);
         }
     }
-    if x1 <= x0 || y1 <= y0 {
-        return None;
-    }
-    let crop = (y0..y1)
-        .flat_map(|y| rgba[y * w + x0..y * w + x1].iter().copied())
-        .collect();
+    let sprite = (x1 > x0 && y1 > y0).then(|| Sprite {
+        x: x0 as i32 + left,
+        y: y0 as i32 - pad,
+        width: (x1 - x0) as u32,
+        height: (y1 - y0) as u32,
+        rgba: (y0..y1)
+            .flat_map(|y| rgba[y * w + x0..y * w + x1].iter().copied())
+            .collect(),
+    });
     Some(Laid {
-        sprite: Sprite {
-            x: x0 as i32 + left,
-            y: y0 as i32 - pad,
-            width: (x1 - x0) as u32,
-            height: (y1 - y0) as u32,
-            rgba: crop,
-        },
+        sprite,
         lines,
         popped,
     })
@@ -697,9 +706,9 @@ fn block(
     };
     let left = (width as f32 - look.wrap) / 2.0;
     let top = style.block_top(place, h, f64::from(laid.lines)) as f32;
-    let drawn = placed(laid.sprite, left, top);
+    let drawn = laid.sprite.map(|s| placed(s, left, top));
     let Some((cx, cy)) = laid.popped else {
-        return (Some(drawn), None);
+        return (drawn, None);
     };
     {
         let word: Vec<Piece> = pieces
@@ -718,14 +727,14 @@ fn block(
             markup: Markup::Pieces(&word, bold),
             ..look
         };
-        let popped = lay_out(&big).map(|l| {
-            placed(
-                l.sprite,
+        let popped = lay_out(&big).and_then(|l| {
+            Some(placed(
+                l.sprite?,
                 left + cx - big.wrap / 2.0,
                 top + cy - l.lines / 2.0,
-            )
+            ))
         });
-        (Some(drawn), popped)
+        (drawn, popped)
     }
 }
 
@@ -795,7 +804,12 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
         boxed: true,
         markup: Markup::Title(&t.text, (h * zoom) as f32),
     };
-    let Some(Laid { sprite, lines, .. }) = lay_out(&look) else {
+    let Some(Laid {
+        sprite: Some(sprite),
+        lines,
+        ..
+    }) = lay_out(&look)
+    else {
         return Vec::new();
     };
     let [x, y] = t.place();
@@ -1264,4 +1278,46 @@ pub(crate) fn overlay(
         );
     }
     Ok((color, alpha))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Drawing, draw};
+    use vidcut_core::model::{Place, SubtitleStyle};
+    use vidcut_core::subtitles::{Piece, Shown};
+
+    fn drawn(piece: Piece) -> Drawing {
+        let shown = Shown {
+            pieces: vec![piece],
+            spoken: Some(0),
+            step: Some(0),
+            pop: 1.15,
+        };
+        draw(
+            &[(&shown, Place::Bottom)],
+            1280,
+            720,
+            &SubtitleStyle::default(),
+        )
+    }
+
+    #[test]
+    fn a_hidden_word_leaves_no_ink() {
+        let d = drawn(Piece {
+            text: "Hello".into(),
+            hidden: true,
+            ..Piece::default()
+        });
+        assert_eq!(d, Drawing::default());
+    }
+
+    #[test]
+    fn a_lone_popping_word_is_drawn() {
+        let d = drawn(Piece {
+            text: "Hello".into(),
+            popped: true,
+            ..Piece::default()
+        });
+        assert_eq!((d.lines.len(), d.pops.len()), (0, 1));
+    }
 }
