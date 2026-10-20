@@ -1672,6 +1672,7 @@ fn clip_speech(
     (a, b): (i64, i64),
     heard: &[String],
     asked: &transcript::Asked,
+    transcribe: bool,
 ) -> Result<(Speech, Vec<Value>)> {
     let fps = p.settings.fps;
     let mut speech = Speech {
@@ -1715,6 +1716,7 @@ fn clip_speech(
                 None => {
                     let s = match env.transcript(m, sound.stream)?.filter(|s| asked.made(s)) {
                         Some(s) => s,
+                        None if !transcribe => continue,
                         None => {
                             let plan = media_sound_plan(p, m, sound.stream)?;
                             env.transcribe_media(m, sound.stream, &plan, asked)?
@@ -2944,6 +2946,7 @@ fn mutate(
             duration,
             track,
             place,
+            words,
         } => {
             let start = match at {
                 Some(t) => resolve(p, t, playhead)?,
@@ -2952,7 +2955,25 @@ fn mutate(
             let end = end.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
             let duration = duration.as_ref().map(|d| length(p, d)).transpose()?;
             let ti = ops::subtitles::target(p, track.as_deref())?;
-            let id = ops::subtitles::add_cue(p, ti, start, end, duration, text, *place)?;
+            if let Some(w) = words {
+                let text = crate::subtitles::normalize(text);
+                let frames = match (end, duration) {
+                    (Some(e), _) => e - start,
+                    (None, Some(d)) => d,
+                    (None, None) => i64::MAX,
+                };
+                ops::subtitles::checked_words(&text, frames, w)?;
+            }
+            let id = ops::subtitles::add_cue(
+                p,
+                ti,
+                start,
+                end,
+                duration,
+                text,
+                *place,
+                words.clone().unwrap_or_default(),
+            )?;
             json!({ "cue": id, "track": p.subtitles[ti].id })
         }
         Request::TitlesAdd {
@@ -3020,6 +3041,7 @@ fn mutate(
             start,
             end,
             place,
+            words,
         } => {
             let id = resolve_cue(p, cue, playhead)?;
             let start = start
@@ -3027,7 +3049,18 @@ fn mutate(
                 .map(|t| resolve(p, t, playhead))
                 .transpose()?;
             let end = end.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
-            ops::subtitles::set_cue(p, &id, text.as_deref(), start, end, *place)?;
+            let how = ops::subtitles::set_cue(
+                p,
+                &id,
+                text.as_deref(),
+                start,
+                end,
+                *place,
+                words.clone(),
+            )?;
+            if how == ops::subtitles::Words::Spread {
+                time_from_kept(p, env, &id)?;
+            }
             Value::Null
         }
         Request::SubtitlesMove {
@@ -3145,7 +3178,7 @@ fn mutate(
             let from_media = hears_media(*hear, &asked)?;
             let (speech, media) = match from_media {
                 true => {
-                    let (s, media) = clip_speech(p, env, (a, b), &heard, &asked)?;
+                    let (s, media) = clip_speech(p, env, (a, b), &heard, &asked, true)?;
                     (Arc::new(s), json!(media))
                 }
                 false => (
@@ -3187,6 +3220,7 @@ fn mutate(
                         None,
                         &m.text,
                         None,
+                        m.words.clone(),
                     )?);
                 }
                 on = Some(p.subtitles[ti].id.clone());
@@ -3205,6 +3239,80 @@ fn mutate(
                 "pieces": speech.pieces,
                 "longest_piece": speech.longest_piece,
                 "warnings": warnings,
+            })
+        }
+        Request::SubtitlesTimeWords {
+            track,
+            cues,
+            range,
+            tracks,
+            hear,
+            language,
+            download,
+        } => {
+            let ti = match track {
+                Some(id) => p
+                    .subtitle_index(id)
+                    .ok_or_else(|| Error::not_found(format!("no subtitle track {id}")))?,
+                None => ops::subtitles::shown(p)?,
+            };
+            ops::subtitles::unlocked(p, ti)?;
+            let (a, b) = transcribed_range(p, range.as_ref(), playhead)?;
+            let named = match cues {
+                Some(c) => Some(resolve_cues(p, &c.to_vec(), playhead)?),
+                None => None,
+            };
+            let which: Vec<usize> = p.subtitles[ti]
+                .cues
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.start < b && c.end() > a)
+                .filter(|(_, c)| named.as_ref().is_none_or(|n| n.contains(&c.id)))
+                .map(|(i, _)| i)
+                .collect();
+            if which.is_empty() {
+                return Err(Error::invalid(format!(
+                    "{} has no cues there to time",
+                    p.subtitles[ti].id
+                )));
+            }
+            let (a, b) = which.iter().fold((b, a), |(lo, hi), &i| {
+                let c = &p.subtitles[ti].cues[i];
+                (lo.min(c.start), hi.max(c.end()))
+            });
+            let heard = heard_tracks(p, tracks.as_deref())?;
+            let asked = transcript::Asked {
+                model: SpeechModel::ParakeetUltra,
+                model_file: None,
+                vad_file: None,
+                language: language.clone(),
+                download: *download,
+            };
+            let from_media = hears_media(*hear, &asked)?;
+            let (speech, media) = match from_media {
+                true => {
+                    let (s, media) = clip_speech(p, env, (a, b), &heard, &asked, true)?;
+                    (Arc::new(s), json!(media))
+                }
+                false => (
+                    env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?,
+                    Value::Null,
+                ),
+            };
+            let (words, matched, unmatched) = time_words(p, ti, &which, &speech.said, a);
+            json!({
+                "track": p.subtitles[ti].id,
+                "cues": which.len(),
+                "words": words,
+                "matched": matched,
+                "unmatched": unmatched,
+                "heard": sounding(p, &heard),
+                "hear": if from_media { "media" } else { "mix" },
+                "media": media,
+                "model": speech.model,
+                "device": device_json(&speech),
+                "language": speech.language,
+                "warnings": speech.warnings,
             })
         }
         Request::EditRippleDeleteWords {
@@ -5966,6 +6074,67 @@ fn unclear(track: &str, lined: &retime::Lined, matched: Option<usize>) -> Error 
     })
 }
 
+fn time_words(
+    p: &mut Project,
+    ti: usize,
+    which: &[usize],
+    said: &[transcript::Said],
+    a: i64,
+) -> (usize, usize, Vec<String>) {
+    let fps = p.settings.fps.as_f64();
+    let texts: Vec<Vec<String>> = which
+        .iter()
+        .map(|&ci| crate::subtitles::words(&p.subtitles[ti].cues[ci].text))
+        .collect();
+    let known = retime::word_starts(&texts, &retime::spoken(said));
+    let (mut total, mut matched, mut unmatched) = (0, 0, Vec::new());
+    for ((&ci, words), known) in which.iter().zip(&texts).zip(known) {
+        let c = &p.subtitles[ti].cues[ci];
+        let hits = known.iter().flatten().count();
+        total += words.len();
+        matched += hits;
+        if hits == 0 && !words.is_empty() {
+            unmatched.push(c.id.clone());
+        }
+        let span = ((c.start - a) as f64 / fps, (c.end() - a) as f64 / fps);
+        let weights: Vec<f64> = words
+            .iter()
+            .map(|w| w.chars().count() as f64 + 1.0)
+            .collect();
+        let starts = crate::subtitles::fill_times(&known, &weights, span.0, span.1)
+            .into_iter()
+            .map(|t| a + (t * fps).round() as i64 - c.start)
+            .collect();
+        ops::subtitles::set_words(p, ti, ci, starts);
+    }
+    (total, matched, unmatched)
+}
+
+fn time_from_kept(p: &mut Project, env: &dyn Env, id: &str) -> Result<()> {
+    let Some((ti, ci)) = p.find_cue(id) else {
+        return Ok(());
+    };
+    let (a, b) = {
+        let c = &p.subtitles[ti].cues[ci];
+        (c.start, c.end())
+    };
+    let heard = heard_tracks(p, None)?;
+    let asked = transcript::Asked {
+        model: SpeechModel::ParakeetUltra,
+        model_file: None,
+        vad_file: None,
+        language: None,
+        download: false,
+    };
+    let Ok((speech, _)) = clip_speech(p, env, (a, b), &heard, &asked, false) else {
+        return Ok(());
+    };
+    if !speech.said.is_empty() {
+        time_words(p, ti, &[ci], &speech.said, a);
+    }
+    Ok(())
+}
+
 fn rounded(x: f64) -> f64 {
     (x * 1000.0).round() / 1000.0
 }
@@ -6038,7 +6207,7 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
         };
         let (heard, media) = match hears_media(r.hear, &asked)? {
             true => {
-                let (s, media) = clip_speech(p, env, (0, p.end()), &heard, &asked)?;
+                let (s, media) = clip_speech(p, env, (0, p.end()), &heard, &asked, true)?;
                 (Arc::new(s), json!(media))
             }
             false => (
@@ -6107,13 +6276,13 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
             None => return Err(unclear(&id, &lined, None)),
         }
     };
-    let old: Vec<(String, i64, i64)> = p.subtitles[ti]
+    let old: Vec<(String, i64, i64, Vec<i64>)> = p.subtitles[ti]
         .cues
         .iter()
-        .map(|c| (c.id.clone(), c.start, c.end()))
+        .map(|c| (c.id.clone(), c.start, c.end(), c.words.clone()))
         .collect();
     let (mut moved, mut cut, mut removed) = (0, 0, Vec::new());
-    for (i, (cue, s0, e0)) in old.into_iter().enumerate() {
+    for (i, (cue, s0, e0, words)) in old.into_iter().enumerate() {
         let (s, e) = plan.map(i, cues[i]);
         let (s, e) = ((s * fps).round() as i64, (e * fps).round() as i64);
         if e <= 0 {
@@ -6126,7 +6295,8 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
         let s = s.max(0);
         let e = e.max(s + 1);
         if (s, e) != (s0, e0) {
-            ops::subtitles::set_cue(p, &cue, None, Some(s), Some(e), None)?;
+            let words = ops::subtitles::scaled_words(&words, e0 - s0, e - s);
+            ops::subtitles::set_cue(p, &cue, None, Some(s), Some(e), None, Some(words))?;
             moved += 1;
         }
     }

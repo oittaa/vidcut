@@ -1523,6 +1523,11 @@ pub struct Cue {
     /// Where it shows on the picture: the bottom unless set.
     #[serde(default, skip_serializing_if = "Place::is_bottom")]
     pub place: Place,
+    /// The frame each of its words starts on, counted from the cue's start:
+    /// one for each word of its text without the markup, words being parted
+    /// by spaces and line breaks. Empty when its words have no times.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<i64>,
 }
 
 /// Where a cue shows on the picture.

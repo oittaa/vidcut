@@ -102,6 +102,7 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
             | "analyze.words"
             | "media.transcribe"
             | "subtitles.retime"
+            | "subtitles.time_words"
     ) {
         let _ = ctrlc::set_handler(|| CANCEL.store(true, Ordering::Relaxed));
     }

@@ -268,6 +268,45 @@ fn default_length(p: &Project, ti: usize, start: i64) -> i64 {
     next.map_or(full, |n| full.min(n - start)).max(1)
 }
 
+pub fn checked_words(text: &str, duration: i64, words: &[i64]) -> Result<()> {
+    if words.is_empty() {
+        return Ok(());
+    }
+    let n = subtitles::words(text).len();
+    if words.len() != n {
+        return Err(Error::invalid(format!(
+            "the text has {n} word(s) and {} word time(s)",
+            words.len()
+        )));
+    }
+    if words.iter().any(|&w| w < 0 || w >= duration) || words.windows(2).any(|w| w[1] < w[0]) {
+        return Err(Error::invalid(
+            "word times are frames from the cue's start, in order and inside the cue",
+        ));
+    }
+    Ok(())
+}
+
+fn clamped(words: &[i64], shift: i64, duration: i64) -> Vec<i64> {
+    let mut last = 0;
+    words
+        .iter()
+        .map(|w| {
+            last = (w - shift).clamp(0, duration - 1).max(last);
+            last
+        })
+        .collect()
+}
+
+fn fitted(text: &str, duration: i64, words: Vec<i64>) -> Vec<i64> {
+    if words.is_empty() || words.len() == subtitles::words(text).len() {
+        clamped(&words, 0, duration)
+    } else {
+        subtitles::spread_words(text, duration)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn add_cue(
     p: &mut Project,
     ti: usize,
@@ -276,6 +315,7 @@ pub fn add_cue(
     duration: Option<i64>,
     text: &str,
     place: Option<Place>,
+    words: Vec<i64>,
 ) -> Result<String> {
     unlocked(p, ti)?;
     if start < 0 {
@@ -289,6 +329,8 @@ pub fn add_cue(
     if duration < 1 {
         return Err(Error::invalid("a cue lasts at least one frame"));
     }
+    let text = subtitles::normalize(text);
+    let words = fitted(&text, duration, words);
     let id = p.alloc_cue_id();
     place_cue(
         &mut p.subtitles[ti],
@@ -296,11 +338,31 @@ pub fn add_cue(
             id: id.clone(),
             start,
             duration,
-            text: subtitles::normalize(text),
+            text,
             place: place.unwrap_or_default(),
+            words,
         },
     );
     Ok(id)
+}
+
+pub fn scaled_words(words: &[i64], from: i64, to: i64) -> Vec<i64> {
+    let scaled: Vec<i64> = words
+        .iter()
+        .map(|&w| (w as f64 * to as f64 / from.max(1) as f64).round() as i64)
+        .collect();
+    clamped(&scaled, 0, to)
+}
+
+pub fn set_words(p: &mut Project, ti: usize, ci: usize, words: Vec<i64>) {
+    let c = &mut p.subtitles[ti].cues[ci];
+    c.words = fitted(&c.text, c.duration, words);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Words {
+    Kept,
+    Spread,
 }
 
 pub fn set_cue(
@@ -310,7 +372,8 @@ pub fn set_cue(
     start: Option<i64>,
     end: Option<i64>,
     place: Option<Place>,
-) -> Result<()> {
+    words: Option<Vec<i64>>,
+) -> Result<Words> {
     let (ti, ci) = find(p, id)?;
     unlocked(p, ti)?;
     let c = &mut p.subtitles[ti].cues[ci];
@@ -323,16 +386,31 @@ pub fn set_cue(
             "{id} would end at frame {e}, before it starts at {s}"
         )));
     }
-    c.start = s;
-    c.duration = e - s;
+    let mut how = Words::Kept;
+    let was = subtitles::words(&c.text).len();
     if let Some(t) = text {
         c.text = subtitles::normalize(t);
     }
+    match words {
+        Some(w) => {
+            checked_words(&c.text, e - s, &w)?;
+            c.words = w;
+        }
+        None => {
+            c.words = clamped(&c.words, s - c.start, e - s);
+            if !c.words.is_empty() && subtitles::words(&c.text).len() != was {
+                c.words = subtitles::spread_words(&c.text, e - s);
+                how = Words::Spread;
+            }
+        }
+    }
+    c.start = s;
+    c.duration = e - s;
     if let Some(pl) = place {
         c.place = pl;
     }
     p.subtitles[ti].sort();
-    Ok(())
+    Ok(how)
 }
 
 fn take(p: &mut Project, ids: &[String]) -> Result<Vec<(usize, Cue)>> {
@@ -420,12 +498,15 @@ pub fn split_cue(p: &mut Project, id: &str, at: i64) -> Result<String> {
         )));
     }
     let mut right = c.clone();
+    right.duration = right.end() - at;
+    right.words = clamped(&c.words, at - c.start, right.duration);
+    right.start = at;
     let new_id = p.alloc_cue_id();
     right.id = new_id.clone();
-    right.duration = right.end() - at;
-    right.start = at;
     let t = &mut p.subtitles[ti];
-    t.cues[ci].duration = at - t.cues[ci].start;
+    let left = &mut t.cues[ci];
+    left.duration = at - left.start;
+    left.words = clamped(&left.words, 0, left.duration);
     place_cue(t, right);
     Ok(new_id)
 }
@@ -459,9 +540,21 @@ pub fn join_cues(p: &mut Project, ids: &[String]) -> Result<String> {
         .filter(|t| !t.is_empty())
         .collect::<Vec<_>>()
         .join("\n");
+    let timed = cues
+        .iter()
+        .all(|c| !c.words.is_empty() || subtitles::words(&c.text).is_empty());
+    let first = cues[0].start;
+    let words: Vec<i64> = if timed {
+        cues.iter()
+            .flat_map(|c| c.words.iter().map(move |w| w + c.start - first))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut joined = cues[0].clone();
     joined.duration = end - joined.start;
     joined.text = subtitles::normalize(&text);
+    joined.words = fitted(&joined.text, joined.duration, words);
     let ids: Vec<String> = cues.iter().map(|c| c.id.clone()).collect();
     take(p, &ids)?;
     let id = joined.id.clone();
@@ -602,14 +695,22 @@ pub fn import(
             continue;
         }
         let s = s.max(0);
+        let duration = (e - s).max(1);
+        let text = subtitles::normalize(&c.text);
+        let words = c
+            .words
+            .iter()
+            .map(|&w| frames_of(p, w, base) - offset - s)
+            .collect();
         let id = p.alloc_cue_id();
         place_cue(
             &mut p.subtitles[ti],
             Cue {
                 id,
                 start: s,
-                duration: (e - s).max(1),
-                text: subtitles::normalize(&c.text),
+                duration,
+                words: fitted(&text, duration, words),
+                text,
                 place: c.place,
             },
         );
@@ -643,6 +744,7 @@ pub fn collect(p: &Project, ti: usize, range: (i64, i64), timecode: bool) -> Vec
             end: base + (c.end().min(b) - zero) as f64 / fps,
             text: c.text.clone(),
             place: c.place,
+            words: Vec::new(),
         })
         .collect()
 }
@@ -672,6 +774,14 @@ pub fn remap(p: &mut Project, map: impl Fn(i64) -> Option<i64>) {
                     _ => runs.push((f, f + 1)),
                 }
             }
+            let landed: Vec<Option<i64>> = c
+                .words
+                .iter()
+                .map(|w| {
+                    let from = (*w as usize).min(images.len() - 1);
+                    images[from..images.len() - 1].iter().find_map(|x| *x)
+                })
+                .collect();
             for (k, (s, e)) in runs.into_iter().enumerate() {
                 let mut piece = c.clone();
                 piece.start = s.max(0);
@@ -679,6 +789,11 @@ pub fn remap(p: &mut Project, map: impl Fn(i64) -> Option<i64>) {
                 if piece.duration < 1 {
                     continue;
                 }
+                let at: Vec<i64> = landed
+                    .iter()
+                    .map(|l| l.map_or(piece.duration - 1, |x| x - piece.start))
+                    .collect();
+                piece.words = clamped(&at, 0, piece.duration);
                 if k == 0 {
                     kept.push(piece);
                 } else {

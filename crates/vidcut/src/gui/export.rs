@@ -1732,6 +1732,7 @@ fn job_method(j: &JobInfo) -> Option<&'static str> {
         "words" => Some("analyze.words"),
         "transcript" => Some("media.transcribe"),
         "retime" => Some("subtitles.retime"),
+        "word_times" => Some("subtitles.time_words"),
         _ => None,
     }
 }

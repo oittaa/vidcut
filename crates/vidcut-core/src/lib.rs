@@ -57,3 +57,5 @@ mod tracks_tests;
 mod transcript_cut_tests;
 #[cfg(test)]
 mod versions_tests;
+#[cfg(test)]
+mod word_times_tests;

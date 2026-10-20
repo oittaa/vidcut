@@ -57,12 +57,16 @@ pub fn read(source: &str) -> Result<Read> {
             .split_once("-->")
             .map(|(_, b)| b.split_whitespace().skip(1).collect::<Vec<_>>().join(" "))
             .unwrap_or_default();
-        let (body, _) = text::markup(&block[at + 1..].join("\n"), Dialect::Vtt, &classes);
+        let raw = block[at + 1..].join("\n");
+        let (body, _) = text::markup(&raw, Dialect::Vtt, &classes);
+        let text = text::clean(&body);
+        let words = word_times(&raw, &classes, (start, end), &text);
         cues.push(Timed {
             start,
             end,
-            text: text::clean(&body),
+            text,
             place: place(&settings),
+            words,
         });
     }
     Ok(Read {
@@ -70,6 +74,48 @@ pub fn read(source: &str) -> Result<Read> {
         warnings,
         language: None,
     })
+}
+
+fn word_times(raw: &str, classes: &[(String, String)], span: (f64, f64), text: &str) -> Vec<f64> {
+    let words = super::words(text);
+    let mut known = vec![None; words.len()];
+    let mut from = 0;
+    while let Some(i) = raw[from..].find('<') {
+        let at = from + i;
+        from = at + 1;
+        let Some(close) = raw[at..].find('>') else {
+            break;
+        };
+        let Some(t) = srt::time(&raw[at + 1..at + close]).filter(|_| {
+            raw[at + 1..at + close]
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == ':' || c == '.')
+        }) else {
+            continue;
+        };
+        let (before, _) = text::markup(&raw[..at], Dialect::Vtt, classes);
+        let (after, _) = text::markup(&raw[at + close + 1..], Dialect::Vtt, classes);
+        let (before, after) = (text::plain(&before), text::plain(&after));
+        let inside = before.ends_with(|c: char| !c.is_whitespace())
+            && after.starts_with(|c: char| !c.is_whitespace());
+        if inside {
+            continue;
+        }
+        if let Some(k) = known
+            .get_mut(before.split_whitespace().count())
+            .filter(|k| k.is_none())
+        {
+            *k = Some(t.clamp(span.0, span.1));
+        }
+    }
+    if known.iter().all(Option::is_none) {
+        return Vec::new();
+    }
+    let weights: Vec<f64> = words
+        .iter()
+        .map(|w| w.chars().count() as f64 + 1.0)
+        .collect();
+    super::fill_times(&known, &weights, span.0, span.1)
 }
 
 fn style_colors(css: &str) -> Vec<(String, String)> {

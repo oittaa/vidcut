@@ -2596,11 +2596,13 @@ impl Live {
                 };
                 Step::Encode(Box::new(hear), Box::new(envelope), title.into(), kind)
             }
-            Request::SubtitlesRetime { .. } => {
+            Request::SubtitlesRetime { .. } | Request::SubtitlesTimeWords { .. } => {
                 let Some(open) = &self.project else {
                     return Step::Now(Err(no_project()));
                 };
                 let (project, path) = (open.project().clone(), open.store.path().to_path_buf());
+                let context = project.time_context(Some(self.player.position(TIMELINE)));
+                let envelope = bind_playhead(envelope, &context);
                 let copy = envelope.clone();
                 let hear = move || {
                     let env = AvEnv::for_project(&path);
@@ -2608,8 +2610,13 @@ impl Live {
                         .apply(copy, &env, None)
                         .map(drop)
                 };
-                let title = "Re-time Subtitles to Speech".to_string();
-                Step::Encode(Box::new(hear), Box::new(envelope), title, "retime")
+                let (title, kind) = match &envelope.request {
+                    Request::SubtitlesTimeWords { .. } => {
+                        ("Synchronize Word Timings", "word_times")
+                    }
+                    _ => ("Re-time Subtitles to Speech", "retime"),
+                };
+                Step::Encode(Box::new(hear), Box::new(envelope), title.into(), kind)
             }
             Request::TimelineImport {
                 path: Some(path),

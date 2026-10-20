@@ -412,6 +412,40 @@ pub fn anchors(cues: &[String], words: &[Spoken]) -> Vec<Anchor> {
     out
 }
 
+pub fn word_starts(cues: &[Vec<String>], words: &[Spoken]) -> Vec<Vec<Option<f64>>> {
+    let mut ids: HashMap<String, u32> = HashMap::new();
+    let mut id = |t: String| {
+        let n = ids.len() as u32;
+        *ids.entry(t).or_insert(n)
+    };
+    let (mut a, mut of) = (Vec::new(), Vec::new());
+    for (ci, cue) in cues.iter().enumerate() {
+        for (wi, word) in cue.iter().enumerate() {
+            for (k, t) in tokens(word).into_iter().enumerate() {
+                a.push(id(t));
+                of.push((ci, wi, k == 0));
+            }
+        }
+    }
+    let (mut b, mut times) = (Vec::new(), Vec::new());
+    for w in words {
+        for t in tokens(&w.text) {
+            b.push(id(t));
+            times.push(w.start);
+        }
+    }
+    let mut out: Vec<Vec<Option<f64>>> = cues.iter().map(|c| vec![None; c.len()]).collect();
+    for (i, j, k) in blocks(&a, &b) {
+        for m in 0..k {
+            let (ci, wi, first) = of[i + m];
+            if first {
+                out[ci][wi] = Some(times[j + m]);
+            }
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {

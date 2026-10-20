@@ -303,6 +303,7 @@ impl Walk<'_, '_> {
                 .region
                 .as_deref()
                 .map_or(Place::Bottom, |r| self.sheet.place(r)),
+            words: Vec::new(),
         });
     }
 }
