@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use vidcut_core::model::Title;
@@ -53,6 +54,7 @@ struct Entry {
 struct Kept {
     entries: Vec<Entry>,
     clock: u64,
+    last: HashMap<String, Title>,
 }
 
 impl Kept {
@@ -112,39 +114,47 @@ impl Titles {
                 ),
                 None => (steady(&shown.title), shown.title.clone(), shown.alpha()),
             };
-            match kept
+            let key = if kept.has(&key, size) {
+                key
+            } else {
+                all = false;
+                match kept.last.get(&shown.clip).filter(|k| kept.has(k, size)) {
+                    Some(k) => k.clone(),
+                    None => continue,
+                }
+            };
+            let Some(e) = kept
                 .entries
                 .iter_mut()
                 .find(|e| e.size == size && e.title == key)
-            {
-                Some(e) => {
-                    e.used = now;
-                    if let Some(p) = &e.picture {
-                        let [x0, y0] = key.pivot();
-                        let [x, y] = to.pivot();
-                        let dx = ((x - x0) * w).round() as i32;
-                        let dy = match shown.run {
-                            Some(r) => r.top(0, h, f64::from(p.height)).round() as i32 - p.top,
-                            None => ((y - y0) * h).round() as i32,
-                        };
-                        let turn = [
-                            (x * w) as f32,
-                            (y * h) as f32,
-                            (to.scale() / key.scale()) as f32,
-                            (to.turn() - key.turn()).to_radians() as f32,
-                        ];
-                        out.push(TitleOver {
-                            above,
-                            picture: p.clone(),
-                            dx,
-                            dy,
-                            turn,
-                            alpha: alpha as f32,
-                        });
-                    }
-                }
-                None => all = false,
+            else {
+                continue;
+            };
+            e.used = now;
+            if let Some(p) = e.picture.clone() {
+                let [x0, y0] = key.pivot();
+                let [x, y] = to.pivot();
+                let dx = ((x - x0) * w).round() as i32;
+                let dy = match shown.run {
+                    Some(r) => r.top(0, h, f64::from(p.height)).round() as i32 - p.top,
+                    None => ((y - y0) * h).round() as i32,
+                };
+                let turn = [
+                    (x * w) as f32,
+                    (y * h) as f32,
+                    (to.scale() / key.scale()) as f32,
+                    (to.turn() - key.turn()).to_radians() as f32,
+                ];
+                out.push(TitleOver {
+                    above,
+                    picture: p,
+                    dx,
+                    dy,
+                    turn,
+                    alpha: alpha as f32,
+                });
             }
+            kept.last.insert(shown.clip.clone(), key);
         }
         (out, all)
     }
