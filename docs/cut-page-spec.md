@@ -48,11 +48,12 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - **Stills and image sequences** (pp. 114, 366, 1194): an image file, or a GIF or WebP of one frame, comes in as a still (D38); numbered image files, as one clip (D39).
 - **Remove** (p. 654): Delete or Backspace, after a confirmation. Only the pool entry goes; files on disk stay.
 - **Views** (pp. 638, 664–665):
-  - **Thumbnail:** hovering scrubs the clip, and I/O mark its source In/Out. Clicking a thumbnail's lower-right corner shows its metadata.
+  - **Thumbnail:** hovering scrubs the clip, and I/O mark its source In/Out. Clicking a thumbnail's lower-right corner shows its metadata (deviation X60).
   - **Filmstrip:** each clip is a row of its pictures as wide as the pool, under its name; hovering and I/O work as on a thumbnail.
   - **List:** a column per field; clicking a header sorts by it.
   - **Metadata:** a card per clip, with a scrubbable thumbnail and basic metadata.
   - A sound file shows its waveform.
+  - **Metadata Display** (p. 665): a tag icon beside the search field shows the selected clip's camera name, scene, shot and take, frame rate and resolution at the top of the pool (deviation X60).
 - **Sort and search** (pp. 666–667): Sort Media By Clip Name, Date Imported, Date Modified or Timecode (D59), ascending or descending, which is also the Source Tape order. The search field filters live, through the open bin and the bins inside it.
 - **Bins** (pp. 655–656, 377): the Master bin is the top level. The pool shows the open bin's clips and its bins as folders; a path at the top (Master › Interviews › Day 1), the Bins menu and a double-click open any bin. New Bin is on the File menu (Shift+Ctrl+N), the Bins menu and the pool's right-click menu; a bin's own menu has Rename Bin and Remove Bin, which keeps its clips (deviation X6). Clips dragged onto a bin, or a level of the path, move into it, as do bins; a clip's menu has Move to Bin and Create Bin With Selected Clips (p. 656). Imports go into the open bin (p. 377). Source Tape strings together the open bin's clips and its bins' clips, in the sort order (pp. 680, 696).
 - **Clip Color** (pp. 667–668): right-click clips in the pool or the timeline and pick one of 16 colors, or Clear Color. A timeline clip is tinted with its own color, else its pool item's.

@@ -2,6 +2,7 @@
 mod acquire;
 mod app;
 mod cells;
+mod clip_info;
 pub mod export;
 mod file_manager;
 mod fillers;

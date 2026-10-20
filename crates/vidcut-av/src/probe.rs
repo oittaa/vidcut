@@ -119,6 +119,137 @@ pub fn pixel_depth(name: &str) -> u8 {
         .map_or(8, |d| unsafe { (*d.as_ptr()).comp[0].depth } as u8)
 }
 
+fn c_name(name: *const std::ffi::c_char) -> Option<String> {
+    // SAFETY: FFmpeg's static, NUL-terminated names, or null.
+    (!name.is_null()).then(|| {
+        unsafe { std::ffi::CStr::from_ptr(name) }
+            .to_string_lossy()
+            .into_owned()
+    })
+}
+
+fn tags(dict: ffmpeg::DictionaryRef<'_>) -> std::collections::BTreeMap<String, String> {
+    dict.iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+fn rate(bits: i64) -> Option<u64> {
+    u64::try_from(bits).ok().filter(|&b| b > 0)
+}
+
+fn chroma(d: &ffmpeg::ffi::AVPixFmtDescriptor) -> Option<String> {
+    if d.nb_components < 3 || d.flags & ffmpeg::ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0 {
+        return None;
+    }
+    Some(
+        match (d.log2_chroma_w, d.log2_chroma_h) {
+            (0, 0) => "4:4:4",
+            (1, 0) => "4:2:2",
+            (1, 1) => "4:2:0",
+            (2, 0) => "4:1:1",
+            (2, 2) => "4:1:0",
+            _ => return None,
+        }
+        .to_string(),
+    )
+}
+
+pub fn pixel_chroma(name: &str) -> Option<String> {
+    use std::str::FromStr;
+    let d = ffmpeg::format::Pixel::from_str(name).ok()?.descriptor()?;
+    // SAFETY: FFmpeg's static descriptor.
+    chroma(unsafe { &*d.as_ptr() })
+}
+
+pub fn details(path: &Path) -> Result<vidcut_core::model::MediaDetails> {
+    use ffmpeg::ffi;
+    let input = Input::File(path.to_path_buf()).open()?;
+    // SAFETY: an open input's context.
+    let bit_rate = unsafe { (*input.as_ptr()).bit_rate };
+    let mut streams = Vec::new();
+    for stream in input.streams() {
+        let params = stream.parameters();
+        // SAFETY: the stream's own parameters.
+        let raw = unsafe { &*params.as_ptr() };
+        let id = params.id();
+        // SAFETY: a lookup of the codec's static descriptor.
+        let descriptor = unsafe { ffi::avcodec_descriptor_get(id.into()) };
+        let tags = tags(stream.metadata());
+        let mut d = vidcut_core::model::StreamDetails {
+            index: stream.index() as u32,
+            kind: match params.medium() {
+                media::Type::Video => "video",
+                media::Type::Audio => "audio",
+                media::Type::Subtitle => "subtitle",
+                media::Type::Attachment => "attachment",
+                _ => "data",
+            }
+            .to_string(),
+            codec: id.name().to_string(),
+            // SAFETY: the descriptor is FFmpeg's static one, or null.
+            codec_name: (!descriptor.is_null())
+                .then(|| c_name(unsafe { (*descriptor).long_name }))
+                .flatten()
+                .unwrap_or_default(),
+            // SAFETY: a lookup of a static profile name.
+            profile: c_name(unsafe { ffi::avcodec_profile_name(id.into(), raw.profile) }),
+            bit_rate: rate(raw.bit_rate),
+            language: tags.get("language").filter(|l| *l != "und").cloned(),
+            tags,
+            ..Default::default()
+        };
+        match params.medium() {
+            media::Type::Video => {
+                let pixel = ffmpeg::codec::context::Context::from_parameters(params.clone())
+                    .and_then(|c| c.decoder().video())
+                    .ok()
+                    .and_then(|v| v.format().descriptor());
+                if let Some(pixel) = pixel {
+                    // SAFETY: FFmpeg's static descriptor.
+                    let pixel = unsafe { &*pixel.as_ptr() };
+                    d.pix_fmt = c_name(pixel.name);
+                    d.bits = Some(u32::from(pixel.comp[0].depth as u8));
+                    d.chroma = chroma(pixel);
+                }
+                // SAFETY: lookups of static color names.
+                unsafe {
+                    d.primaries = c_name(ffi::av_color_primaries_name(raw.color_primaries));
+                    d.transfer = c_name(ffi::av_color_transfer_name(raw.color_trc));
+                    d.matrix = c_name(ffi::av_color_space_name(raw.color_space));
+                    d.range = c_name(ffi::av_color_range_name(raw.color_range));
+                }
+            }
+            media::Type::Audio => {
+                d.sample_rate = u32::try_from(raw.sample_rate).ok().filter(|&r| r > 0);
+                d.channels = u16::try_from(raw.ch_layout.nb_channels)
+                    .ok()
+                    .filter(|&c| c > 0);
+                let mut buf = [0 as std::ffi::c_char; 64];
+                // SAFETY: describes the stream's layout into a buffer of its length.
+                let n = unsafe {
+                    ffi::av_channel_layout_describe(&raw.ch_layout, buf.as_mut_ptr(), buf.len())
+                };
+                if n > 0 {
+                    d.layout = c_name(buf.as_ptr());
+                }
+                d.sample_format = ffmpeg::codec::context::Context::from_parameters(params.clone())
+                    .and_then(|c| c.decoder().audio())
+                    .ok()
+                    .map(|a| a.format().name().to_string());
+            }
+            _ => {}
+        }
+        streams.push(d);
+    }
+    Ok(vidcut_core::model::MediaDetails {
+        format: input.format().description().to_string(),
+        bit_rate: rate(bit_rate),
+        tags: tags(input.metadata()),
+        streams,
+    })
+}
+
 pub fn probe(path: &Path, decoder: Option<&crate::hw::GpuDecoder>) -> Result<MediaInfo> {
     probe_input(&Input::File(path.to_path_buf()), decoder)
 }
@@ -433,5 +564,17 @@ mod tests {
         ] {
             assert_eq!(super::pixel_depth(name), depth, "{name}");
         }
+    }
+
+    #[test]
+    fn a_four_two_zero_formats_chroma_reads_as_such() {
+        crate::init();
+        assert_eq!(super::pixel_chroma("yuv420p10le").as_deref(), Some("4:2:0"));
+    }
+
+    #[test]
+    fn an_rgb_format_has_no_chroma_subsampling() {
+        crate::init();
+        assert_eq!(super::pixel_chroma("rgb24"), None);
     }
 }

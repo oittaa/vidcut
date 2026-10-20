@@ -637,6 +637,72 @@ pub enum Hdr {
     Hlg,
 }
 
+/// What a media file says about itself, read from it again: its container
+/// and every stream, with the tags they carry.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MediaDetails {
+    /// The container's long name, such as `QuickTime / MOV`.
+    pub format: String,
+    /// Bits per second of the whole file, as the container says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bit_rate: Option<u64>,
+    /// The container's tags, such as `creation_time`, `make`, `model` and
+    /// `encoder`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tags: BTreeMap<String, String>,
+    pub streams: Vec<StreamDetails>,
+}
+
+/// One stream of a media file.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StreamDetails {
+    /// Its index in the file, all kinds counted.
+    pub index: u32,
+    /// `video`, `audio`, `subtitle`, `data` or `attachment`.
+    pub kind: String,
+    pub codec: String,
+    /// The codec's long name, such as `H.264 / AVC / MPEG-4 AVC / MPEG-4
+    /// part 10`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub codec_name: String,
+    /// The codec's profile, such as `High` or `Main 10`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bit_rate: Option<u64>,
+    /// Pixel format, bits per component and chroma subsampling (`4:2:0`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pix_fmt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bits: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chroma: Option<String>,
+    /// Color tags as the stream states them: primaries, transfer, matrix
+    /// and range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primaries: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transfer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matrix: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample_rate: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channels: Option<u16>,
+    /// The channel layout, such as `stereo` or `5.1(side)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample_format: Option<String>,
+    /// Its language tag, such as `eng`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tags: BTreeMap<String, String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AudioInfo {
     /// Index among the file's audio streams (0 = first audio stream).

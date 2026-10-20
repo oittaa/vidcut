@@ -157,6 +157,11 @@ pub trait Env {
         Err(Error::usage("speech is detected by the vidcut program"))
     }
 
+    fn media_details(&self, media: &Media) -> Result<crate::model::MediaDetails> {
+        let _ = media;
+        Err(Error::usage("files are read by the vidcut program"))
+    }
+
     fn transcript(&self, media: &Media, stream: u32) -> Result<Option<Arc<Speech>>> {
         let _ = (media, stream);
         Ok(None)
@@ -5271,6 +5276,16 @@ pub fn query(
                     .map(|m| media_json(p, m, env, &env.proxy_dir()))
                     .collect::<Vec<_>>()
             )
+        }
+        Request::MediaDetails { media } => {
+            let m = p
+                .media(media)
+                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+            let mut v = serde_json::to_value(env.media_details(m)?).unwrap_or_default();
+            v["media"] = json!(m.id);
+            v["path"] = json!(m.path);
+            v["size"] = json!(m.size);
+            v
         }
         Request::MediaGet { media } => {
             let m = p

@@ -288,6 +288,11 @@ impl Env for AvEnv {
         Ok(speech)
     }
 
+    fn media_details(&self, media: &Media) -> Result<vidcut_core::model::MediaDetails> {
+        vidcut_av::probe::details(&media.path)
+            .map_err(|e| Error::media(format!("{}: {e}", media.path.display())))
+    }
+
     fn transcript(&self, media: &Media, stream: u32) -> Result<Option<Arc<Speech>>> {
         let lock = || TRANSCRIPTS.lock().unwrap_or_else(PoisonError::into_inner);
         let key = transcript_file(media, stream);

@@ -179,6 +179,25 @@ pub(super) fn shown_media<'a>(p: &'a Project, view: &PoolView, search: &str) -> 
         .collect()
 }
 
+fn chosen(clicked: Option<&str>, selected: &[String]) -> Option<String> {
+    clicked
+        .filter(|id| selected.iter().any(|s| s == id))
+        .map(String::from)
+        .or_else(|| selected.last().cloned())
+}
+
+fn strip_path() -> std::path::PathBuf {
+    crate::paths::config_dir().join("pool.json")
+}
+
+pub(super) fn strip_kept() -> bool {
+    std::fs::read_to_string(strip_path())
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v["metadata"].as_bool())
+        .unwrap_or(true)
+}
+
 fn header_sort(column: usize, sort: PoolSort, descending: bool) -> Option<(PoolSort, bool)> {
     let by = match column {
         0 => PoolSort::Name,
@@ -396,6 +415,17 @@ impl Workspace {
                     self.send("pool.set", json!({ "view": mode }));
                 }
             }
+            let tag = egui::Button::selectable(
+                self.metadata_strip,
+                RichText::new(egui_phosphor::regular::TAG).size(14.0),
+            );
+            if ui
+                .add(tag)
+                .on_hover_text("The selected clip's format at a glance, above the clips")
+                .clicked()
+            {
+                self.show_metadata_strip(!self.metadata_strip);
+            }
             if ui.available_width() >= 120.0 {
                 search(ui, &mut self.search);
             } else {
@@ -407,6 +437,9 @@ impl Workspace {
         }
         if let Some(p) = project {
             self.bin_bar(ui, p);
+            if self.metadata_strip {
+                self.metadata_strip(ui, p);
+            }
         }
         ui.separator();
         let view = &snap.pool;
@@ -494,6 +527,53 @@ impl Workspace {
             ui.ctx().request_repaint();
         }
         self.rename_bin_window(ui.ctx());
+    }
+
+    pub(super) fn show_metadata_strip(&mut self, on: bool) {
+        self.metadata_strip = on;
+        if let Some(dir) = strip_path().parent()
+            && std::fs::create_dir_all(dir).is_ok()
+        {
+            let _ = std::fs::write(strip_path(), json!({ "metadata": on }).to_string());
+        }
+    }
+
+    pub(super) fn chosen_media(&self) -> Option<String> {
+        chosen(self.pool_clicked.as_deref(), &self.snap.selection.media)
+    }
+
+    fn metadata_strip(&mut self, ui: &mut egui::Ui, p: &Project) {
+        let m = self.chosen_media().and_then(|id| p.media(&id).cloned());
+        egui::Frame::new()
+            .fill(theme::colors().panel_dark)
+            .inner_margin(egui::Margin::symmetric(6, 4))
+            .corner_radius(3)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let Some(m) = m else {
+                    ui.label(dim("Select a clip to see its format"));
+                    return;
+                };
+                ui.horizontal(|ui| {
+                    if ui
+                        .small_button(egui_phosphor::regular::INFO)
+                        .on_hover_text("Clip Info: all that is known of it")
+                        .clicked()
+                    {
+                        self.open_clip_info(Some(m.id.clone()));
+                    }
+                    ui.label(RichText::new(elide(&m.name, 48)).strong());
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    for (i, fact) in super::clip_info::glance(&m).iter().enumerate() {
+                        if i > 0 {
+                            ui.label(dim("·"));
+                        }
+                        ui.add(egui::Label::new(fact).extend());
+                    }
+                });
+            });
     }
 
     fn bin_bar(&mut self, ui: &mut egui::Ui, p: &Project) {
@@ -882,6 +962,19 @@ impl Workspace {
         );
         let resp = resp.on_hover_text(tip);
         self.media_interaction(&resp, m);
+        if resp.hovered() || ui.rect_contains_pointer(picture) {
+            let at = Rect::from_min_size(
+                picture.right_bottom() + vec2(-40.0, -22.0),
+                vec2(20.0, 18.0),
+            );
+            if ui
+                .put(at, egui::Button::new(egui_phosphor::regular::INFO).small())
+                .on_hover_text("Clip Info")
+                .clicked()
+            {
+                self.open_clip_info(Some(m.id.clone()));
+            }
+        }
     }
 
     fn filmstrip(&mut self, ui: &mut egui::Ui, rect: Rect, m: &Media) {
@@ -1400,6 +1493,7 @@ impl Workspace {
             return;
         }
         if resp.clicked() {
+            self.pool_clicked = Some(m.id.clone());
             let mods = resp.ctx.input(|i| i.modifiers);
             let mut selection = self.snap.selection.media.clone();
             if mods.command {
@@ -1547,6 +1641,10 @@ impl Workspace {
                 .map(|id| p.media(id).and_then(|m| m.color.as_deref()));
             theme::same_color(colors).map(str::to_string)
         });
+        if ui.button("Clip Info…").clicked() {
+            self.open_clip_info(Some(m.id.clone()));
+            ui.close();
+        }
         ui.menu_button("Clip Color", |ui| {
             if let Some(color) = theme::clip_color_menu(ui, current.as_deref()) {
                 self.send("media.set", json!({ "media": ids, "color": color }));
@@ -1851,6 +1949,12 @@ mod tests {
             bin: "Day 1".into(),
             ..PoolView::default()
         }
+    }
+
+    #[test]
+    fn the_strip_shows_the_clip_clicked_last_while_it_is_selected() {
+        let selected = ["m1".to_string(), "m2".into(), "m3".into()];
+        assert_eq!(super::chosen(Some("m1"), &selected).as_deref(), Some("m1"));
     }
 
     #[test]
