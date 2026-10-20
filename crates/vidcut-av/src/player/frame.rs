@@ -286,6 +286,7 @@ pub struct TitlePicture {
 pub struct TitleOver {
     pub above: usize,
     pub picture: Arc<TitlePicture>,
+    pub dx: i32,
     pub dy: i32,
     pub alpha: f32,
 }

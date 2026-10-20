@@ -523,6 +523,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         player,
         skipping: None,
         title_preview: None,
+        nudging: false,
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
@@ -776,6 +777,7 @@ struct Live {
     player: Player,
     skipping: Option<Vec<ClipSpans>>,
     title_preview: Option<TitlePreview>,
+    nudging: bool,
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
@@ -934,8 +936,25 @@ impl Live {
             Msg::PreviewTitle(title) => {
                 changed = false;
                 if self.title_preview != title {
+                    let nudge = match &title {
+                        Some(TitlePreview::Clip(id, to)) => self
+                            .project
+                            .as_ref()
+                            .and_then(|s| s.project().clip(id))
+                            .and_then(|c| c.title.clone())
+                            .filter(|from| vidcut_av::player::Nudge::moves_only(from, to))
+                            .map(|from| vidcut_av::player::Nudge {
+                                title: from,
+                                to: to.clone(),
+                            }),
+                        _ => None,
+                    };
                     self.title_preview = title;
-                    self.schedule_timeline();
+                    self.nudging = nudge.is_some();
+                    match nudge {
+                        Some(n) => self.player.nudge_title(Some(n)),
+                        None => self.schedule_timeline(),
+                    }
                 }
             }
             Msg::Picture => {
@@ -3073,7 +3092,11 @@ impl Live {
         }
         let plan = self.preview_plan(plan);
         self.timeline_loaded_at = Some(Instant::now());
-        self.player.load(TIMELINE, plan, lanes, at)
+        let loaded = self.player.load(TIMELINE, plan, lanes, at);
+        if !self.nudging {
+            self.player.nudge_title(None);
+        }
+        loaded
     }
 
     fn refresh_source(&mut self) -> Option<u64> {

@@ -131,9 +131,27 @@ impl Workspace {
                 Some(hd) if hd.clip == clip => hd.now.clone(),
                 _ => stored,
             };
-            let Some([x, y, bw, bh]) = self.timeline.title_grab.upright_box(&title, size) else {
+            let base = Title {
+                position: None,
+                zoom: None,
+                rotation: None,
+                opacity: None,
+                ..title.clone()
+            };
+            let Some([bx, by, bw, bh]) = self.timeline.title_grab.upright_box(&base, size) else {
                 continue;
             };
+            let z = title.scale() as f32;
+            let [qx, qy] = base.pivot().map(|v| v as f32);
+            let [rx, ry] = title.pivot().map(|v| v as f32);
+            let (fw, fh) = (w as f32, h as f32);
+            let x = rx * fw + (bx - qx * fw) * z;
+            let y = if title.moves() {
+                by
+            } else {
+                ry * fh + (by - qy * fh) * z
+            };
+            let (bw, bh) = (bw * z, bh * z);
             let dy = if title.moves() {
                 let run = Run {
                     at: at - start,
@@ -297,17 +315,19 @@ impl Workspace {
         if resp.drag_stopped()
             && let Some(held) = self.timeline.title_grab.held.take()
         {
+            let params = changed(&held);
+            if let Some(params) = &params {
+                self.send("titles.set", params.clone());
+            }
             self.live.preview_title(None);
-            if let Some(params) = changed(&held) {
-                self.send("titles.set", params);
-                if let Some(d) = self
+            if params.is_some()
+                && let Some(d) = self
                     .timeline
                     .title_dialog
                     .as_mut()
                     .filter(|d| d.clip() == held.clip)
-                {
-                    d.placed(&held.now);
-                }
+            {
+                d.placed(&held.now);
             }
         }
         if resp.clicked() {

@@ -21,6 +21,7 @@ pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,
 };
+pub use titles::Nudge;
 
 use crate::error::{Error, Result};
 use clock::{Heard, Markers};
@@ -1104,6 +1105,12 @@ impl Player {
             failed: *lock(&self.shared.failed),
             error: device.or(error),
             glide,
+        }
+    }
+
+    pub fn nudge_title(&self, nudge: Option<Nudge>) {
+        if self.shared.titles.nudge(nudge) {
+            self.shared.prepared();
         }
     }
 
