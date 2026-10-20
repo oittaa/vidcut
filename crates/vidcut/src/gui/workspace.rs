@@ -856,16 +856,6 @@ impl Workspace {
                         if ui.button("Create Subtitles from Audio…").clicked() {
                             self.open_speech();
                         }
-                        if ui
-                            .button("Create Animated Subtitles…")
-                            .on_hover_text(
-                                "Subtitles from the speech, a few words at a time, the spoken \
-                                 word yellow and popping",
-                            )
-                            .clicked()
-                        {
-                            self.open_animated_speech();
-                        }
                     });
                 });
             });

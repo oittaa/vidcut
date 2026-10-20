@@ -71,6 +71,65 @@ if [[ -n "$comments" ]]; then
   exit 1
 fi
 
+step "short GUI text"
+# A string in the GUI has 12 words at most (AGENTS.md, rule 12). The files
+# listed here still have longer ones (docs/todo/gui-text.md). Strings are
+# read across lines; a char literal '"' is dropped first, and a file's tests
+# are skipped.
+long_text_left=(
+  crates/vidcut/src/gui/export.rs
+  crates/vidcut/src/gui/fillers.rs
+  crates/vidcut/src/gui/history.rs
+  crates/vidcut/src/gui/picture.rs
+  crates/vidcut/src/gui/pool.rs
+  crates/vidcut/src/gui/preferences.rs
+  crates/vidcut/src/gui/project.rs
+  crates/vidcut/src/gui/subtitles.rs
+  crates/vidcut/src/gui/timeline/cues.rs
+  crates/vidcut/src/gui/timeline/mod.rs
+  crates/vidcut/src/gui/timeline/tools.rs
+  crates/vidcut/src/gui/title_browser.rs
+  crates/vidcut/src/gui/titles.rs
+  crates/vidcut/src/gui/transcription.rs
+  crates/vidcut/src/gui/video.rs
+  crates/vidcut/src/gui/viewer.rs
+  crates/vidcut/src/gui/vulkan.rs
+  crates/vidcut/src/gui/workspace.rs
+)
+long=$(
+  git ls-files -- 'crates/vidcut/src/gui/*.rs' \
+    | { grep -vxF -f <(printf '%s\n' "${long_text_left[@]}") || true; } \
+    | while IFS= read -r f; do
+      awk '
+        /^#\[cfg\(test\)\]/ { tests = 1 }
+        tests { next }
+        {
+          line = $0
+          gsub(/\047\\?"\047/, "", line)
+          sub(/\\$/, "", line)
+          text = text line "\n"
+        }
+        END {
+          rest = text; n = 1
+          while (match(rest, /"([^"\\]|\\.)*"/)) {
+            before = substr(rest, 1, RSTART - 1); n += gsub(/\n/, "", before)
+            s = substr(rest, RSTART + 1, RLENGTH - 2); rest = substr(rest, RSTART + RLENGTH)
+            gsub(/\\n/, " ", s)
+            k = 0; m = split(s, w, /[ \t\n]+/)
+            for (i = 1; i <= m; i++) if (w[i] != "") k++
+            flat = s; lines = gsub(/\n/, " ", flat); gsub(/  +/, " ", flat)
+            if (k > 12) printf "%s:%d: %d words: %s\n", FILENAME, n, k, flat
+            n += lines
+          }
+        }' "$f"
+    done
+)
+if [[ -n "$long" ]]; then
+  echo "GUI text over 12 words (AGENTS.md, rule 12):" >&2
+  printf '%s\n' "$long" | sed 's/^/  /' >&2
+  exit 1
+fi
+
 step "docs: names and links"
 scripts/check-docs.sh
 

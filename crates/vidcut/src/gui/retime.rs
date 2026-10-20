@@ -2,8 +2,9 @@ use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_av::transcribe;
 
-use super::export::{Ask, near_center};
-use super::speech::{Hear, listed};
+use super::dialog;
+use super::export::Ask;
+use super::speech::Hear;
 use super::theme;
 use super::workspace::{Workspace, dim};
 
@@ -85,50 +86,67 @@ impl Workspace {
         });
     }
 
-    fn correction_text(&self, c: &Value) -> String {
+    fn result(&self, ui: &mut egui::Ui, v: &Value) {
+        let c = &v["correction"];
         let sections = c["sections"].as_array().cloned().unwrap_or_default();
         let fps = self.fps().as_f64().max(1.0);
-        let mut text = match sections.as_slice() {
-            [one] => format!("Moves them by {}", secs(&one["offset"])),
-            many => format!(
-                "Moves them by section: {}",
-                many.iter()
-                    .map(|s| format!(
-                        "{} from {}",
-                        secs(&s["offset"]),
-                        self.tc((s["from"].as_f64().unwrap_or_default() * fps).round() as i64)
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        };
-        if let Some(s) = speed(c) {
-            text.push_str(&format!(", at {s}"));
-        }
-        if let Some(n) = c["snapped"].as_u64().filter(|&n| n > 0) {
-            text = format!("{n} matched subtitle(s) go to their words. The others: {text}");
-        }
-        text
+        let colors = theme::colors();
+        egui::Frame::new()
+            .fill(colors.faint)
+            .stroke(egui::Stroke::new(1.0, colors.line))
+            .corner_radius(6)
+            .inner_margin(egui::Margin::symmetric(12, 10))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing.y = 4.0;
+                let head = match sections.as_slice() {
+                    [one] => secs(&one["offset"]),
+                    many => format!("{} offsets", many.len()),
+                };
+                ui.label(RichText::new(head).size(20.0).strong());
+                if sections.len() > 1 {
+                    for s in &sections {
+                        let from = (s["from"].as_f64().unwrap_or_default() * fps).round() as i64;
+                        dialog::note(ui, format!("{} from {}", secs(&s["offset"]), self.tc(from)));
+                    }
+                }
+                if let Some(s) = speed(c) {
+                    dialog::note(ui, format!("At {s}"));
+                }
+                if let Some(n) = c["snapped"].as_u64().filter(|&n| n > 0) {
+                    dialog::note(ui, format!("{n} matched subtitle(s) go to their words"));
+                }
+                ui.label(format!("{} of {} subtitles move", v["moved"], v["cues"]));
+                for warning in v["warnings"].as_array().into_iter().flatten() {
+                    dialog::warn(ui, warning.as_str().unwrap_or_default());
+                }
+                egui::CollapsingHeader::new("Details")
+                    .id_salt("retime-details")
+                    .show(ui, |ui| self.details(ui, v));
+            });
     }
 
-    fn preview(&self, ui: &mut egui::Ui, v: &Value) {
+    fn details(&self, ui: &mut egui::Ui, v: &Value) {
         let s = &v["speech"];
         if s.is_object() {
-            let mut line = format!("Speech: best offset {}", secs(&s["offset"]));
+            let mut line = format!("Speech: {}", secs(&s["offset"]));
             if let Some(sp) = speed(s) {
                 line.push_str(&format!(" at {sp}"));
             }
+            ui.label(line);
             let clarity = s["clarity"]
                 .as_f64()
                 .map_or("far above".into(), |c| format!("{c:.2} times"));
-            ui.label(line);
-            ui.label(dim(format!(
-                "Its peak, {:.3}, is {clarity} the next best ({}, {:.3}); {} times is needed",
-                s["peak"].as_f64().unwrap_or_default(),
-                secs(&s["rival_offset"]),
-                s["rival"].as_f64().unwrap_or_default(),
-                s["needed"]
-            )));
+            dialog::note(
+                ui,
+                format!(
+                    "Peak {:.3}, {clarity} the next best: {:.3} at {}; needs {}",
+                    s["peak"].as_f64().unwrap_or_default(),
+                    s["rival"].as_f64().unwrap_or_default(),
+                    secs(&s["rival_offset"]),
+                    s["needed"]
+                ),
+            );
         }
         let w = &v["words"];
         if w.is_object() {
@@ -140,27 +158,19 @@ impl Workspace {
                 w["language"].as_str().unwrap_or("language not told")
             ));
             if w["speech_errors"].is_object() {
-                ui.label(dim(format!(
-                    "After the speech's offset: {}",
-                    errors(&w["speech_errors"])
-                )));
+                dialog::note(
+                    ui,
+                    format!("After the speech's offset: {}", errors(&w["speech_errors"])),
+                );
             }
         }
-        ui.label(RichText::new(self.correction_text(&v["correction"])).strong());
         if v["correction"]["errors"].is_object() {
-            ui.label(dim(format!(
-                "Matched subtitles after it: {}",
-                errors(&v["correction"]["errors"])
-            )));
-        }
-        ui.label(dim(format!(
-            "{} of {} subtitles move",
-            v["moved"], v["cues"]
-        )));
-        for warning in v["warnings"].as_array().into_iter().flatten() {
-            ui.label(
-                RichText::new(format!("⚠ {}", warning.as_str().unwrap_or_default()))
-                    .color(ui.visuals().warn_fg_color),
+            dialog::note(
+                ui,
+                format!(
+                    "After the correction: {}",
+                    errors(&v["correction"]["errors"])
+                ),
             );
         }
         let unmatched: Vec<&str> = w["unmatched"]
@@ -224,90 +234,64 @@ impl Workspace {
         let name = t.display_name();
         let mut open = true;
         let (mut find, mut apply, mut cancel) = (false, false, false);
-        egui::Window::new("Re-time Subtitles to Speech")
-            .collapsible(false)
-            .resizable(false)
-            .default_pos(near_center(ctx, 460.0, 360.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.set_max_width(460.0);
-                ui.label(dim(format!(
-                    "Lines up where speech is heard on the tracks it hears with where {name}'s \
-                     subtitles show, and moves them to fit: an offset, and a speed change where \
-                     one fits better. It needs no words, so any language works, translations too."
-                )));
-                ui.add_space(4.0);
-                ui.add_enabled_ui(d.asked.is_none(), |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Hear");
-                        d.heard = d.hear.ui(ui, &p);
+        dialog::window(ctx, "Re-time Subtitles to Speech", &mut open, |ui| {
+            ui.add_enabled_ui(d.asked.is_none(), |ui| {
+                dialog::form(ui, "retime-form", |ui| {
+                    dialog::row(ui, "Track", |ui| ui.label(&name));
+                    d.heard = dialog::row(ui, "Hear", |ui| d.hear.ui(ui, &p));
+                    dialog::row(ui, "Words", |ui| {
+                        ui.checkbox(&mut d.words, "Match Words Too")
+                            .on_hover_text(format!(
+                                "More exact: reads the words with {}",
+                                file.title
+                            ));
                     });
                 });
-                match d.heard.is_empty() {
-                    true => ui.label(
-                        RichText::new("Tick a track to hear").color(ui.visuals().warn_fg_color),
-                    ),
-                    false => ui.label(dim(format!(
-                        "Hears {} over the whole timeline",
-                        listed(&d.heard)
-                    ))),
-                };
-                ui.add_enabled_ui(d.asked.is_none(), |ui| {
-                    ui.checkbox(&mut d.words, format!("Also match words ({})", file.title));
-                });
-                ui.indent("retime-words-note", |ui| {
-                    ui.label(dim(
-                        "Reads the words too, those kept for each clip's file, transcribing and \
-                         keeping a file's that aren't: checks the result on the subtitles whose \
-                         words it finds, finds where the offset jumps, and can move each of them \
-                         to its words",
-                    ));
-                    if !transcribe::present(&dir, file) {
-                        ui.label(dim(format!(
-                            "{}, downloaded from Hugging Face when first used",
-                            transcribe::size(file.bytes)
-                        )));
-                    }
-                });
-                ui.separator();
-                match (&d.error, d.current(), d.asked.is_some()) {
-                    (_, _, true) => {
-                        ui.label(dim("Finding… Jobs shows the progress, and can cancel it"));
-                    }
-                    (Some((key, e)), _, false) if *key == d.key() => {
-                        ui.label(RichText::new(e).color(theme::colors().error));
-                    }
-                    (_, Some(v), false) => {
-                        let v = v.clone();
-                        self.preview(ui, &v);
-                    }
-                    _ => {
-                        ui.label(dim("Find shows what it would do before anything moves."));
-                    }
-                }
-                if !needs.is_empty() {
-                    ui.label(dim(format!(
-                        "Find first downloads {}, checked against SHA-256",
-                        transcribe::listed(&needs)
-                    )));
-                }
-                ui.horizontal(|ui| {
-                    let label = match needs.is_empty() {
-                        true => "Find".to_string(),
-                        false => "Download and Find".to_string(),
-                    };
-                    find = ui
-                        .add_enabled(
-                            d.asked.is_none() && !d.heard.is_empty(),
-                            egui::Button::new(label),
-                        )
-                        .clicked();
-                    let ready = d.asked.is_none()
-                        && d.current().is_some_and(|v| v["moved"].as_u64() > Some(0));
-                    apply = ui.add_enabled(ready, egui::Button::new("Apply")).clicked();
-                    cancel = ui.button("Cancel").clicked();
-                });
             });
+            if d.heard.is_empty() {
+                dialog::warn(ui, "Tick a track to hear");
+            }
+            if !needs.is_empty() {
+                dialog::note(
+                    ui,
+                    format!("Downloads {} first", transcribe::listed(&needs)),
+                );
+            }
+            match (&d.error, d.current(), d.asked.is_some()) {
+                (_, _, true) => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(dim("Finding… Jobs shows its progress"));
+                    });
+                }
+                (Some((key, e)), _, false) if *key == d.key() => {
+                    ui.add(egui::Label::new(RichText::new(e).color(theme::colors().error)).wrap());
+                }
+                (_, Some(v), false) => {
+                    let v = v.clone();
+                    self.result(ui, &v);
+                }
+                _ => {}
+            }
+            let idle = d.asked.is_none();
+            let ready = idle && d.current().is_some_and(|v| v["moved"].as_u64() > Some(0));
+            let can_find = idle && !d.heard.is_empty();
+            let find_label = match needs.is_empty() {
+                true => "Find",
+                false => "Download and Find",
+            };
+            dialog::footer(ui, |ui| {
+                if ready {
+                    apply = dialog::main_button(ui, "Apply", true);
+                    find = ui
+                        .add_enabled(can_find, egui::Button::new(find_label))
+                        .clicked();
+                } else {
+                    find = dialog::main_button(ui, find_label, can_find);
+                }
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
         if find {
             let mut dry = d.params(!needs.is_empty());
             dry["dry_run"] = json!(true);
