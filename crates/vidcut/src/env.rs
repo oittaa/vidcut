@@ -42,6 +42,7 @@ impl AvEnv {
 }
 
 static HEARD: LazyLock<Mutex<HashMap<String, Arc<Speech>>>> = LazyLock::new(Default::default);
+static PAID: LazyLock<Mutex<HashMap<String, Vec<Arc<Speech>>>>> = LazyLock::new(Default::default);
 const HEARD_KEPT: usize = 8;
 
 fn heard_key(plan: &RenderPlan, asked: &Asked) -> String {
@@ -268,7 +269,8 @@ impl Env for AvEnv {
     fn transcribe(&self, plan: &RenderPlan, asked: &Asked) -> Result<Arc<Speech>> {
         let lock = || HEARD.lock().unwrap_or_else(PoisonError::into_inner);
         let key = heard_key(plan, asked);
-        if let Some(s) = lock().get(&key) {
+        let reuse = self.heard_only || !asked.model.paid();
+        if let Some(s) = lock().get(&key).filter(|_| reuse) {
             return Ok(s.clone());
         }
         if self.heard_only {
@@ -333,14 +335,31 @@ impl Env for AvEnv {
                 .collect();
         }
         let plans: Vec<&RenderPlan> = files.iter().map(|f| f.2).collect();
+        let lock = || PAID.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = plans
+            .iter()
+            .map(|p| heard_key(p, asked))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if self.heard_only {
+            return lock().get(&key).cloned().ok_or_else(|| {
+                Error::conflict("the files changed while they were being transcribed; run it again")
+            });
+        }
         let speeches =
             vidcut_av::transcribe::transcribe_files(&plans, asked, &speech_options(asked)?)
                 .map_err(av_error)?;
-        files
+        let kept = files
             .iter()
             .zip(speeches)
             .map(|((m, s, _), speech)| keep_transcript(m, *s, Arc::new(speech)))
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        let mut memo = lock();
+        if memo.len() >= HEARD_KEPT {
+            memo.clear();
+        }
+        memo.insert(key, kept.clone());
+        Ok(kept)
     }
 
     fn fillers(&self, language: &str) -> Option<Vec<String>> {
