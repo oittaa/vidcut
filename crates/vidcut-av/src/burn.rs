@@ -291,6 +291,90 @@ fn shifted(alpha: &[f32], w: usize, h: usize, (dx, dy): (i32, i32)) -> Vec<f32> 
     out
 }
 
+struct Traced {
+    x: i32,
+    y: i32,
+    path: Vec<zeno::Command>,
+    offset: zeno::Vector,
+}
+
+struct Bars(Vec<Traced>);
+
+impl cosmic_text::Renderer for Bars {
+    fn rectangle(&mut self, x: i32, y: i32, w: u32, h: u32, _: Color) {
+        use zeno::Command::{Close, LineTo, MoveTo};
+        let (w, h) = (w as f32, h as f32);
+        self.0.push(Traced {
+            x,
+            y,
+            path: vec![
+                MoveTo([0.0, 0.0].into()),
+                LineTo([w, 0.0].into()),
+                LineTo([w, -h].into()),
+                LineTo([0.0, -h].into()),
+                Close,
+            ],
+            offset: zeno::Vector::ZERO,
+        });
+    }
+
+    fn glyph(&mut self, _: cosmic_text::PhysicalGlyph, _: Color) {}
+}
+
+fn traces(buffer: &Buffer, f: &mut Fonts) -> Option<Vec<Traced>> {
+    let mut bars = Bars(Vec::new());
+    for run in buffer.layout_runs() {
+        for g in run.glyphs {
+            let p = g.physical((0., run.line_y), 1.0);
+            let path = f.cache.get_outline_commands(&mut f.system, p.cache_key)?;
+            bars.0.push(Traced {
+                x: p.x,
+                y: p.y,
+                path: path.to_vec(),
+                offset: zeno::Vector::new(
+                    p.cache_key.x_bin.as_float(),
+                    p.cache_key.y_bin.as_float(),
+                ),
+            });
+        }
+        cosmic_text::render_decoration(&mut bars, &run, Color::rgb(255, 255, 255));
+    }
+    Some(bars.0)
+}
+
+fn stroked(traces: &[Traced], width: f32, into: &mut [f32], w: usize, (left, top): (i32, i32)) {
+    use zeno::{Cap, Format, Join, Mask, Origin, Stroke};
+    let h = into.len() / w;
+    for t in traces {
+        let (mask, at) = Mask::new(&t.path[..])
+            .format(Format::Alpha)
+            .origin(Origin::BottomLeft)
+            .style(Stroke::new(width).join(Join::Round).cap(Cap::Round))
+            .offset(t.offset)
+            .render_offset(t.offset)
+            .inspect(|_, _, _| ())
+            .render();
+        let (mw, mh) = (at.width as i32, at.height as i32);
+        for j in 0..mh {
+            let y = t.y - at.top + j - top;
+            if y < 0 || y >= h as i32 {
+                continue;
+            }
+            for i in 0..mw {
+                let x = t.x + at.left + i - left;
+                if x < 0 || x >= w as i32 {
+                    continue;
+                }
+                let a = f32::from(mask[(j * mw + i) as usize]) / 255.0;
+                let d = &mut into[y as usize * w + x as usize];
+                if a > *d {
+                    *d = a;
+                }
+            }
+        }
+    }
+}
+
 fn lay_out(text: &str, look: &Look) -> Option<(Sprite, f32)> {
     let size = look.size;
     let wrap = look.wrap;
@@ -435,11 +519,17 @@ fn lay_out(text: &str, look: &Look) -> Option<(Sprite, f32)> {
             }
         },
     );
+    let traced = stroke.and_then(|_| traces(&buffer, f));
     drop(held);
     let alpha: Vec<f32> = canvas.iter().map(|p| p[3]).collect();
-    let (ring, edge) = match stroke {
-        Some((rgb, _)) => (dilate(&alpha, w, h, outline), rgb),
-        None => (vec![0.0; alpha.len()], [0, 0, 0]),
+    let (ring, edge) = match (stroke, traced) {
+        (Some((rgb, _)), Some(list)) => {
+            let mut ring = alpha.clone();
+            stroked(&list, 2.0 * outline, &mut ring, w, (left, -pad));
+            (ring, rgb)
+        }
+        (Some((rgb, _)), None) => (dilate(&alpha, w, h, outline), rgb),
+        (None, _) => (vec![0.0; alpha.len()], [0, 0, 0]),
     };
     let shade: Vec<f32> = match look.shadow {
         Some(s) => {

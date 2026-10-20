@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use vidcut_core::model::Title;
+use vidcut_core::model::{Title, TitleKind};
 use vidcut_core::render::ShownTitle;
 
 use super::frame::{TitleOver, TitlePicture};
@@ -25,6 +25,7 @@ impl Nudge {
 fn steady(t: &Title) -> Title {
     Title {
         position: None,
+        rotation: t.rotation.filter(|_| t.kind == TitleKind::Scroll),
         opacity: None,
         ..t.clone()
     }
@@ -134,8 +135,8 @@ impl Titles {
                         let turn = [
                             (x * w) as f32,
                             (y * h) as f32,
-                            (c.to.scale() / c.from.scale()) as f32,
-                            (c.to.turn() - c.from.turn()).to_radians() as f32,
+                            (c.to.scale() / key.scale()) as f32,
+                            (c.to.turn() - key.turn()).to_radians() as f32,
                         ];
                         out.push(TitleOver {
                             above,
