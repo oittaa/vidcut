@@ -197,3 +197,34 @@ fn matching_a_speaker_leaves_other_peoples_cues() {
         Place::Bottom
     );
 }
+
+#[test]
+fn applying_to_all_makes_the_cues_color_its_speakers() {
+    let mut f = Fixture::new(&[]);
+    f.ok(req(
+        "subtitles.add",
+        json!({"text": "hi", "at": "0f", "duration": "25f", "speaker": "Nikki", "color": "#00ff88"}),
+    ));
+    f.ok(req("subtitles.match_speaker", json!({"cue": "q1"})));
+    let p = f.editor.project();
+    assert_eq!(
+        p.speakers.colors.get("Nikki").map(String::as_str),
+        Some("#00ff88")
+    );
+}
+
+#[test]
+fn applying_to_all_takes_away_the_speakers_own_cue_colors() {
+    let mut f = Fixture::new(&[]);
+    f.ok(req(
+        "subtitles.add",
+        json!({"text": "hi", "at": "0f", "duration": "25f", "speaker": "Nikki"}),
+    ));
+    f.ok(req(
+        "subtitles.add",
+        json!({"text": "hi", "at": "50f", "duration": "25f", "speaker": "Nikki", "color": "red"}),
+    ));
+    f.ok(req("subtitles.match_speaker", json!({"cue": "q1"})));
+    let (ti, ci) = f.editor.project().find_cue("q2").unwrap();
+    assert_eq!(f.editor.project().subtitles[ti].cues[ci].color, None);
+}

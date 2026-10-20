@@ -1119,8 +1119,9 @@ pub enum Request {
         #[serde(default)]
         color: Option<String>,
     },
-    /// Give every other cue of `cue`'s speaker on its track the place and
-    /// own color `cue` has. Returns the cues changed.
+    /// Apply to All: `cue`'s own color becomes its speaker's, and every cue
+    /// of that speaker on its track takes its place and drops a color of
+    /// its own. Returns the cues changed.
     #[serde(rename = "subtitles.match_speaker")]
     SubtitlesMatchSpeaker { cue: String },
     /// Move cues by `by` (`+12f`, `-1s`) or so the first starts at `to`; with

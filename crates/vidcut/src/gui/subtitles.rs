@@ -21,8 +21,6 @@ pub struct CueDialog {
     pub place: Place,
     speaker: Option<String>,
     color: String,
-    own: bool,
-    person_color: String,
     person_name: String,
     loaded: bool,
     focus: bool,
@@ -32,22 +30,14 @@ impl CueDialog {
     fn load(&mut self, speakers: &Speakers, c: &Cue) {
         self.text = c.text.clone();
         self.place = c.place;
-        self.speaker = c.speaker.clone();
-        self.own = c.color.is_some() || c.speaker.is_none();
         self.color = c.color.clone().unwrap_or_default();
         self.take_person(speakers, c.speaker.clone());
         self.loaded = true;
     }
 
     fn take_person(&mut self, speakers: &Speakers, person: Option<String>) {
-        self.person_color = person_color(speakers, person.as_deref());
         self.person_name = person_name(speakers, person.as_deref());
-        self.own = self.own || person.is_none();
         self.speaker = person;
-    }
-
-    fn own_color(&self) -> Option<String> {
-        self.own.then(|| field(&self.color)).flatten()
     }
 
     fn typing(&self) -> Typing {
@@ -56,8 +46,7 @@ impl CueDialog {
             text: self.text.clone(),
             place: self.place,
             speaker: self.speaker.clone(),
-            color: self.own_color(),
-            person_color: field(&self.person_color),
+            color: field(&self.color),
         }
     }
 }
@@ -69,13 +58,6 @@ pub(crate) struct Typing {
     place: Place,
     speaker: Option<String>,
     color: Option<String>,
-    person_color: Option<String>,
-}
-
-fn person_color(speakers: &Speakers, person: Option<&str>) -> String {
-    person
-        .and_then(|k| speakers.colors.get(k).cloned())
-        .unwrap_or_default()
 }
 
 fn person_name(speakers: &Speakers, person: Option<&str>) -> String {
@@ -314,7 +296,7 @@ impl Workspace {
         if d.speaker != cue.speaker {
             params["speaker"] = json!(d.speaker.clone().unwrap_or_default());
         }
-        let own = d.own_color();
+        let own = field(&d.color);
         if own != cue.color {
             params["color"] = json!(own.unwrap_or_default());
         }
@@ -331,20 +313,12 @@ impl Workspace {
         let Some(person) = d.speaker.clone() else {
             return;
         };
-        let Some(p) = self.project() else {
-            return;
-        };
-        let mut params = json!({ "person": person });
-        let color = field(&d.person_color);
-        if !d.own && field(&person_color(&p.speakers, Some(&person))) != color {
-            params["color"] = json!(color.unwrap_or_default());
-        }
+        let stored = self
+            .project()
+            .map(|p| person_name(&p.speakers, Some(&person)));
         let name = d.person_name.trim();
-        if name != person_name(&p.speakers, Some(&person)) {
-            params["name"] = json!(name);
-        }
-        if params.as_object().is_some_and(|o| o.len() > 1) {
-            self.send("speakers.set", params);
+        if stored.is_some_and(|s| s != name) {
+            self.send("speakers.set", json!({ "person": person, "name": name }));
         }
     }
 
@@ -364,8 +338,6 @@ impl Workspace {
             place: Place::default(),
             speaker: None,
             color: String::new(),
-            own: true,
-            person_color: String::new(),
             person_name: String::new(),
             loaded: false,
             focus: true,
@@ -449,17 +421,8 @@ impl Workspace {
                 c.speaker = ty.speaker.clone();
                 c.color = ty.color.clone();
             }
-            let mut speakers = p.speakers.clone();
-            if let Some(ty) = &typing
-                && let Some(k) = &ty.speaker
-            {
-                match &ty.person_color {
-                    Some(c) => speakers.colors.insert(k.clone(), c.clone()),
-                    None => speakers.colors.remove(k),
-                };
-            }
             for c in &mut cues {
-                c.color = speakers.color_of(c);
+                c.color = p.speakers.color_of(c);
             }
             vidcut_av::player::SubtitleView {
                 style: styling.unwrap_or_else(|| t.style.clone()),
@@ -571,7 +534,7 @@ impl Workspace {
                 }
                 dialog::row(ui, "Color", |ui| {
                     ui.add_enabled_ui(style.paints() != SpeakerPaint::None, |ui| {
-                        let usual = match (style.paints(), &style.words) {
+                        let track = match (style.paints(), &style.words) {
                             (SpeakerPaint::Spoken, Some(w)) => w
                                 .color
                                 .as_deref()
@@ -579,22 +542,20 @@ impl Workspace {
                                 .unwrap_or([255, 212, 0]),
                             _ => style.ink(),
                         };
-                        let edited = match d.own {
-                            true => &mut d.color,
-                            false => &mut d.person_color,
-                        };
-                        swatch(ui, edited, usual);
+                        let usual = d
+                            .speaker
+                            .as_ref()
+                            .and_then(|k| p.speakers.colors.get(k))
+                            .and_then(|c| vidcut_core::subtitles::rgb(c))
+                            .unwrap_or(track);
+                        swatch(ui, &mut d.color, usual);
                         if ui
-                            .add_enabled(!edited.is_empty(), egui::Button::new("Clear"))
+                            .add_enabled(!d.color.is_empty(), egui::Button::new("Clear"))
+                            .on_hover_text("Back to the speaker's color")
                             .clicked()
                         {
-                            edited.clear();
+                            d.color.clear();
                         }
-                        ui.add_enabled_ui(d.speaker.is_some(), |ui| {
-                            if ui.checkbox(&mut d.own, "This Subtitle Only").changed() && !d.own {
-                                d.color.clear();
-                            }
-                        });
                     })
                     .response
                     .on_disabled_hover_text("Off in the track's Speakers setting");
@@ -626,11 +587,12 @@ impl Workspace {
                     let label = format!("Apply to All of {}'s", p.speakers.name(&k));
                     if ui
                         .button(label)
-                        .on_hover_text("Their other subtitles take this position and color")
+                        .on_hover_text("All their subtitles take this position and color")
                         .clicked()
                     {
                         self.save_cue(&d);
                         self.send("subtitles.match_speaker", json!({ "cue": d.cue }));
+                        d.color.clear();
                     }
                 }
             });

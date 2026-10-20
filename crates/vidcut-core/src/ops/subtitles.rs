@@ -410,14 +410,16 @@ pub fn match_speaker(p: &mut Project, id: &str) -> Result<Vec<String>> {
     let Some(who) = like.speaker.clone() else {
         return Err(Error::invalid(format!("{id} has no speaker")));
     };
+    if let Some(color) = &like.color {
+        p.speakers.colors.insert(who.clone(), color.clone());
+    }
     let mut changed = Vec::new();
     for c in &mut p.subtitles[ti].cues {
-        if c.id != like.id
-            && c.speaker.as_deref() == Some(who.as_str())
-            && (c.place != like.place || c.color != like.color)
+        if c.speaker.as_deref() == Some(who.as_str())
+            && (c.place != like.place || c.color.is_some())
         {
             c.place = like.place;
-            c.color = like.color.clone();
+            c.color = None;
             changed.push(c.id.clone());
         }
     }
