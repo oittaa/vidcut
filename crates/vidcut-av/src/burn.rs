@@ -201,10 +201,45 @@ enum Markup<'a> {
     Title(&'a str, f32),
 }
 
+#[derive(Clone)]
 struct Laid {
     sprite: Sprite,
     lines: f32,
     popped: Option<(f32, f32)>,
+}
+
+#[derive(PartialEq)]
+struct Line {
+    pieces: Vec<Piece>,
+    place: Place,
+    size: (u32, u32),
+    style: SubtitleStyle,
+}
+
+const LINES: usize = 8;
+
+fn lines() -> &'static Mutex<Vec<(Line, Laid)>> {
+    static LINES_KEPT: OnceLock<Mutex<Vec<(Line, Laid)>>> = OnceLock::new();
+    LINES_KEPT.get_or_init(Mutex::default)
+}
+
+fn laid_line(line: Line, look: &Look) -> Option<Laid> {
+    {
+        let mut kept = lines().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(i) = kept.iter().position(|(l, _)| *l == line) {
+            let entry = kept.remove(i);
+            let laid = entry.1.clone();
+            kept.push(entry);
+            return Some(laid);
+        }
+    }
+    let laid = lay_out(look)?;
+    let mut kept = lines().lock().unwrap_or_else(|e| e.into_inner());
+    if kept.len() >= LINES {
+        kept.remove(0);
+    }
+    kept.push((line, laid.clone()));
+    Some(laid)
 }
 
 fn installed(f: &Fonts, name: &str) -> Option<String> {
@@ -651,7 +686,13 @@ fn block(
         boxed: false,
         markup: Markup::Pieces(pieces, bold),
     };
-    let Some(laid) = lay_out(&look) else {
+    let line = Line {
+        pieces: pieces.to_vec(),
+        place,
+        size: (width, height),
+        style: style.clone(),
+    };
+    let Some(laid) = laid_line(line, &look) else {
         return Vec::new();
     };
     let left = (width as f32 - look.wrap) / 2.0;
@@ -1136,14 +1177,33 @@ pub(crate) fn blend_at(f: &mut frame::Video, sprites: &[Sprite], shift: Placing)
     Ok(())
 }
 
+pub(crate) fn bounds(
+    sprites: &[Sprite],
+    ((dx, dy), _): Placing,
+    (w, h): (u32, u32),
+) -> Option<(i32, i32, u32, u32)> {
+    let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for s in sprites {
+        x0 = x0.min(s.x + dx);
+        y0 = y0.min(s.y + dy);
+        x1 = x1.max(s.x + dx + s.width as i32);
+        y1 = y1.max(s.y + dy + s.height as i32);
+    }
+    let (x0, y0) = (x0.max(0) & !1, y0.max(0) & !1);
+    let x1 = ((x1.saturating_add(1)) & !1).min(w as i32);
+    let y1 = ((y1.saturating_add(1)) & !1).min(h as i32);
+    (x1 > x0 && y1 > y0).then(|| (x0, y0, (x1 - x0) as u32, (y1 - y0) as u32))
+}
+
 pub(crate) fn overlay(
     pixel: format::Pixel,
     like: &frame::Video,
     sprites: &[Sprite],
-    shift: Placing,
+    ((dx, dy), level): Placing,
+    (ax, ay, w, h): (i32, i32, u32, u32),
 ) -> Result<(frame::Video, frame::Video)> {
     let layout = layout(pixel)?;
-    let (w, h) = (like.width(), like.height());
+    let shift = ((dx - ax, dy - ay), level);
     let mut color = frame::Video::new(pixel, w, h);
     let mut alpha = frame::Video::new(pixel, w, h);
     for f in [&mut color, &mut alpha] {
