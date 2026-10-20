@@ -658,7 +658,10 @@ impl Workspace {
                     _ if steps.done == n => steps_word(n),
                     _ => format!("At step {} of {n}", steps.done),
                 };
-                ui.label(RichText::new(text).color(theme::colors().text_dim));
+                ui.add(
+                    egui::Label::new(RichText::new(text).color(theme::colors().text_dim))
+                        .truncate(),
+                );
             });
         });
         ui.horizontal(|ui| {

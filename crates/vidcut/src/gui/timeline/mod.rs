@@ -991,37 +991,57 @@ impl Workspace {
     }
 
     fn timeline_toolbar(&mut self, ui: &mut egui::Ui, p: &Project) {
+        use Toolbar as T;
+        let row = crate::gui::row::Row {
+            left: &[T::Title],
+            fill: None,
+            right: &[T::Marks, T::ZoomOut, T::ZoomIn, T::Summary],
+            leaving: &[T::Marks, T::Summary, T::ZoomOut, T::ZoomIn],
+            group: |t| match t {
+                T::Title => 0,
+                T::Marks | T::ZoomOut | T::ZoomIn => 1,
+                T::Summary => 2,
+            },
+        };
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Timeline").strong());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(dim(format!(
+            self.fit_row(ui, row, |ws, ui, t| match t {
+                T::Title => ui.label(RichText::new("Timeline").strong()),
+                T::Summary => ui.label(dim(format!(
                     "{} clips, {}",
                     p.tracks.iter().map(|t| t.clips.len()).sum::<usize>(),
-                    self.tc(p.end())
-                )));
-                ui.separator();
-                let o = &mut self.timeline.options;
-                if ui
-                    .small_button("+")
-                    .on_hover_text(keys("Zoom in (Ctrl+wheel)"))
-                    .clicked()
-                {
-                    o.ppf = (o.ppf * 1.5).min(*ZOOM.end());
-                    o.save();
+                    ws.tc(p.end())
+                ))),
+                T::ZoomIn => {
+                    let r = ui
+                        .small_button("+")
+                        .on_hover_text(keys("Zoom in (Ctrl+wheel)"));
+                    if r.clicked() {
+                        let o = &mut ws.timeline.options;
+                        o.ppf = (o.ppf * 1.5).min(*ZOOM.end());
+                        o.save();
+                    }
+                    r
                 }
-                if ui.small_button("−").on_hover_text("Zoom out").clicked() {
-                    o.ppf = (o.ppf / 1.5).max(*ZOOM.start());
-                    o.save();
+                T::ZoomOut => {
+                    let r = ui.small_button("−").on_hover_text("Zoom out");
+                    if r.clicked() {
+                        let o = &mut ws.timeline.options;
+                        o.ppf = (o.ppf / 1.5).max(*ZOOM.start());
+                        o.save();
+                    }
+                    r
                 }
-                let marks = match (p.marks.mark_in, p.marks.mark_out) {
-                    (None, None) => "no In/Out".to_string(),
-                    (a, b) => format!(
-                        "In {}  Out {}",
-                        a.map_or("-".into(), |f| self.tc(f)),
-                        b.map_or("-".into(), |f| self.tc(f - 1)),
-                    ),
-                };
-                ui.label(dim(marks));
+                T::Marks => {
+                    let marks = match (p.marks.mark_in, p.marks.mark_out) {
+                        (None, None) => "no In/Out".to_string(),
+                        (a, b) => format!(
+                            "In {}  Out {}",
+                            a.map_or("-".into(), |f| ws.tc(f)),
+                            b.map_or("-".into(), |f| ws.tc(f - 1)),
+                        ),
+                    };
+                    ui.label(dim(marks))
+                }
             });
         });
     }
@@ -3007,6 +3027,15 @@ fn focus(m: &crate::gui::history::Marks) -> Option<(i64, i64)> {
     let from = m.spans.iter().map(|s| s.from).min()?;
     let to = m.spans.iter().map(|s| s.to).max()?;
     Some((from, to))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Toolbar {
+    Title,
+    Marks,
+    ZoomOut,
+    ZoomIn,
+    Summary,
 }
 
 #[cfg(test)]
