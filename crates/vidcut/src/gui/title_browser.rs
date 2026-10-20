@@ -96,14 +96,18 @@ pub fn templates(looks: &[Look]) -> Vec<Template> {
     kinds.chain(looks).collect()
 }
 
-fn picture(sprite: Option<&Sprite>, (w, h): (u32, u32), dy: i32) -> ColorImage {
+pub(super) fn picture<'a>(
+    sprites: impl IntoIterator<Item = &'a Sprite>,
+    (w, h): (u32, u32),
+    dy: i32,
+) -> ColorImage {
     let (w, h) = (w as usize, h as usize);
     let mut rgba = vec![0u8; w * h * 4];
     for px in rgba.as_chunks_mut::<4>().0 {
         px[..3].copy_from_slice(&BACKDROP);
         px[3] = 255;
     }
-    if let Some(s) = sprite {
+    for s in sprites {
         for sy in 0..s.height as i32 {
             let y = s.y + dy + sy;
             if y < 0 || y >= h as i32 {

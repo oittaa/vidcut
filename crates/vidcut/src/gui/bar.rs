@@ -162,9 +162,9 @@ impl Workspace {
             Item::Jobs => self.jobs_button(ui),
             Item::History => {
                 let mut open = self.history.open;
-                let r = ui.toggle_value(&mut open, "History").on_hover_text(
-                    "Every step, who made it and when; hover one to see the timeline as it was",
-                );
+                let r = ui
+                    .toggle_value(&mut open, "History")
+                    .on_hover_text("Every step, who made it and when");
                 if r.changed() {
                     if open {
                         self.history.show();
@@ -176,10 +176,7 @@ impl Workspace {
             }
             Item::Transcription => ui
                 .toggle_value(&mut self.transcription.open, "Transcription")
-                .on_hover_text(
-                    "The words said in the source clip or the timeline: go to them, mark them, \
-                     cut them",
-                ),
+                .on_hover_text("Go to, mark and cut the words said"),
             Item::Mixer => ui
                 .toggle_value(&mut self.show_mixer, "Mixer")
                 .on_hover_text("Track faders, mute, solo and meters"),

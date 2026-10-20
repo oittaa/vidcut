@@ -30,6 +30,10 @@ vidcut is a video cutting tool modeled on DaVinci Resolve's Cut page, in Rust. [
    - No progress notes, past attempts, "before, X did Y" or why a mistake happened. That goes in commit messages and PR descriptions.
    - A todo file says what is open, not what got done.
    - A PR that touches a doc also cuts the stale text in the parts it touches.
+12. **GUI text is short.** A window's title says what it does, so no window opens with a paragraph about itself.
+   - Labels and buttons are a few words, in Title Case. A tooltip only where the label isn't enough. A line under the controls only for what changes the result: a download, a warning, files to transcribe first.
+   - No string in `crates/vidcut/src/gui/` has more than 12 words; `scripts/check.sh` enforces it. The details go in the docs.
+   - Windows use `gui/dialog.rs`: labeled rows, two or three choices as a switch, rarely needed settings under Advanced, and Cancel with one main button at the bottom right.
 
 ## Quality gates
 
@@ -37,7 +41,7 @@ These are mandatory.
 
 | When | Command | Runs |
 |---|---|---|
-| Before **every commit** (enforced by `.githooks/pre-commit`) | `make check` (`scripts/check.sh`); for `.md` files alone, `scripts/check-docs.sh` | no binary files in git, no comments in `crates/` (rule 2), the docs' names and links and no conflict marks (`scripts/check-docs.sh`), `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
+| Before **every commit** (enforced by `.githooks/pre-commit`) | `make check` (`scripts/check.sh`); for `.md` files alone, `scripts/check-docs.sh` | no binary files in git, no comments in `crates/` (rule 2), GUI text of 12 words at most (rule 12), the docs' names and links and no conflict marks (`scripts/check-docs.sh`), `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, unit tests (`--lib --bins`) |
 | After a **bigger change** | `make check-full` (`scripts/check.sh full`) | the above plus the examples, benches and doc tests |
 
 **Enable the hook once per clone:** `make hooks` (`git config core.hooksPath .githooks`).
