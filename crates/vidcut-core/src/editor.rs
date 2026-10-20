@@ -1695,6 +1695,7 @@ fn clip_speech(
         said: Vec::new(),
         warnings: Vec::new(),
         found: asked.find.unwrap_or_default(),
+        sound_db: asked.level(),
     };
     let mut media = Vec::new();
     let mut devices: Vec<String> = Vec::new();

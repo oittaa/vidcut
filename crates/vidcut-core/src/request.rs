@@ -168,7 +168,8 @@ pub enum Request {
         /// voice-activity model (the default), or `sound`, everything louder
         /// than `sound_db`, for singing and speech over music, which voice
         /// detection misses. Words kept for a file are used again only when
-        /// they were found the same way; without `find`, either way does.
+        /// they were found the same way, at the same `sound_db`; without
+        /// `find`, either way does.
         #[serde(default)]
         find: Option<FindSpeech>,
         /// For `find: sound`: sound quieter than this, in dBFS, for half a
@@ -435,7 +436,8 @@ pub enum Request {
         /// voice-activity model (the default), or `sound`, everything louder
         /// than `sound_db`, for singing and speech over music, which voice
         /// detection misses. Words kept for a file are used again only when
-        /// they were found the same way; without `find`, either way does.
+        /// they were found the same way, at the same `sound_db`; without
+        /// `find`, either way does.
         #[serde(default)]
         find: Option<FindSpeech>,
         /// For `find: sound`: sound quieter than this, in dBFS, for half a
@@ -1156,7 +1158,8 @@ pub enum Request {
         /// voice-activity model (the default), or `sound`, everything louder
         /// than `sound_db`, for singing and speech over music, which voice
         /// detection misses. Words kept for a file are used again only when
-        /// they were found the same way; without `find`, either way does.
+        /// they were found the same way, at the same `sound_db`; without
+        /// `find`, either way does.
         #[serde(default)]
         find: Option<FindSpeech>,
         /// For `find: sound`: sound quieter than this, in dBFS, for half a
@@ -1214,7 +1217,8 @@ pub enum Request {
         /// voice-activity model (the default), or `sound`, everything louder
         /// than `sound_db`, for singing and speech over music, which voice
         /// detection misses. Words kept for a file are used again only when
-        /// they were found the same way; without `find`, either way does.
+        /// they were found the same way, at the same `sound_db`; without
+        /// `find`, either way does.
         #[serde(default)]
         find: Option<FindSpeech>,
         /// For `find: sound`: sound quieter than this, in dBFS, for half a
@@ -1265,7 +1269,8 @@ pub enum Request {
         /// voice-activity model (the default), or `sound`, everything louder
         /// than `sound_db`, for singing and speech over music, which voice
         /// detection misses. Words kept for a file are used again only when
-        /// they were found the same way; without `find`, either way does.
+        /// they were found the same way, at the same `sound_db`; without
+        /// `find`, either way does.
         #[serde(default)]
         find: Option<FindSpeech>,
         /// For `find: sound`: sound quieter than this, in dBFS, for half a

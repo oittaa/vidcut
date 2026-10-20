@@ -53,6 +53,8 @@ fn heard_key(plan: &RenderPlan, asked: &Asked) -> String {
         "model_file": asked.model_file,
         "vad_file": asked.vad_file,
         "language": asked.language,
+        "find": asked.find.unwrap_or_default(),
+        "sound_db": asked.level(),
     }))
     .unwrap_or_default();
     vidcut_core::fingerprint::digest(&bytes)

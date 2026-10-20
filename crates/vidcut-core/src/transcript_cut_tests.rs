@@ -1,8 +1,9 @@
 use serde_json::json;
 
+use crate::request::{FindSpeech, SpeechModel};
 use crate::test_support::{Fixture, row};
 use crate::time::Rational;
-use crate::transcript::{Said, Speech, Timing, Word, sounding, spoken, word_frames};
+use crate::transcript::{Asked, Said, Speech, Timing, Word, sounding, spoken, word_frames};
 
 fn speech(model: &str, timing: Timing, said: Vec<Said>) -> Speech {
     Speech {
@@ -15,6 +16,7 @@ fn speech(model: &str, timing: Timing, said: Vec<Said>) -> Speech {
         said,
         warnings: Vec::new(),
         found: Default::default(),
+        sound_db: None,
     }
 }
 
@@ -135,4 +137,21 @@ fn half_a_second_of_quiet_parts_the_sound() {
 fn a_shorter_quiet_stays_inside_the_sound() {
     let l = levels(&[(0.5, 20), (0.0, 10), (0.5, 20)]);
     assert_eq!(sounding(&l, 512, -40.0), vec![(0, 50 * 512)]);
+}
+
+#[test]
+fn words_found_at_another_sound_level_arent_used_again() {
+    let mut kept = speech("Parakeet Ultra", Timing::Words, Vec::new());
+    kept.found = FindSpeech::Sound;
+    kept.sound_db = Some(-40.0);
+    let asked = Asked {
+        model: SpeechModel::ParakeetUltra,
+        model_file: None,
+        vad_file: None,
+        language: None,
+        download: false,
+        find: Some(FindSpeech::Sound),
+        sound_db: Some(-50.0),
+    };
+    assert!(!asked.made(&kept));
 }

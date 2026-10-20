@@ -31,13 +31,19 @@ impl Asked {
         }
     }
 
+    pub fn level(&self) -> Option<f64> {
+        (self.find == Some(FindSpeech::Sound)).then(|| self.sound_db.unwrap_or(SOUND_DB))
+    }
+
     pub fn made(&self, speech: &Speech) -> bool {
         speech.model == self.model_name()
             && self
                 .language
                 .as_ref()
                 .is_none_or(|l| speech.language.as_ref() == Some(l))
-            && self.find.is_none_or(|f| speech.found == f)
+            && self.find.is_none_or(|f| {
+                speech.found == f && (f == FindSpeech::Voice || speech.sound_db == self.level())
+            })
     }
 }
 
@@ -61,6 +67,8 @@ pub struct Speech {
     pub warnings: Vec<String>,
     #[serde(default)]
     pub found: FindSpeech,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sound_db: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

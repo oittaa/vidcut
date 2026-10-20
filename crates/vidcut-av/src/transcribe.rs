@@ -1051,6 +1051,7 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
         said,
         warnings,
         found,
+        sound_db: (found == FindSpeech::Sound).then_some(floor),
     })
 }
 
