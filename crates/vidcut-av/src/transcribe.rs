@@ -794,7 +794,12 @@ pub(crate) fn speakers_of(
         match moss_turns(dir, pcm, gpu, started, warnings) {
             Ok(turns) => return Ok((turns, SpeakerModel::Moss.name())),
             Err(e) if present(dir, &SORTFORMER) => {
-                warnings.push(format!("{}: {e}; Sortformer told the speakers", MOSS.title));
+                warnings.push(format!(
+                    "{} couldn't take {} of sound at once ({e}), so Sortformer told the \
+                     speakers; MOSS fits about 30 minutes",
+                    MOSS.title,
+                    transcript_clock(secs(pcm.len() as i64))
+                ));
             }
             Err(e) => return Err(e),
         }
