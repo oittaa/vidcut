@@ -165,6 +165,9 @@ impl Workspace {
                 picker.error.clear();
             }
             let yours = shown.filter(|l| !l.built_in);
+            if shown.is_some_and(|l| l.built_in) {
+                super::dialog::why(ui, "built-in looks stay");
+            }
             if ui
                 .add_enabled(idle && yours.is_some(), egui::Button::new("Delete"))
                 .clicked()

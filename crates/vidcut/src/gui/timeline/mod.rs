@@ -1059,7 +1059,6 @@ impl Workspace {
                 let r = ui.selectable_label(on, RichText::new(&t.id).small());
                 let name = format!("Target {}", t.id);
                 r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, &name));
-                let r = r;
                 if r.clicked() {
                     self.target = (t.id != MAIN).then(|| t.id.clone());
                 }
@@ -1199,6 +1198,9 @@ impl Workspace {
             self.open_retime(&t.id);
             ui.close();
         }
+        if shown.is_none() {
+            super::dialog::why(ui, "the shown subtitle track has no subtitles");
+        }
         ui.separator();
         if ui.button("Clear Transition from All Edits").clicked() {
             self.send("edit.remove_transition", json!({ "all": true }));
@@ -1213,22 +1215,27 @@ impl Workspace {
         let with = |want: fn(&vidcut_core::model::Clip) -> bool| {
             selected.iter().any(|id| p.clip(id).is_some_and(want))
         };
+        let sound = with(|c| c.audio.is_some());
         if ui
-            .add_enabled(
-                with(|c| c.audio.is_some()),
-                egui::Button::new("Ripple Delete Silence…"),
-            )
+            .add_enabled(sound, egui::Button::new("Ripple Delete Silence…"))
             .clicked()
         {
             self.open_silence(selected.clone());
             ui.close();
         }
+        if !sound {
+            super::dialog::why(ui, "select clips with sound");
+        }
+        let video = with(|c| c.video);
         if ui
-            .add_enabled(with(|c| c.video), egui::Button::new("Detect Scene Cuts"))
+            .add_enabled(video, egui::Button::new("Detect Scene Cuts"))
             .clicked()
         {
             self.send("edit.detect_scene_cuts", json!({ "clips": selected }));
             ui.close();
+        }
+        if !video {
+            super::dialog::why(ui, "select clips with video");
         }
     }
 
@@ -1265,6 +1272,9 @@ impl Workspace {
         {
             self.open_speed_dialog();
             ui.close();
+        }
+        if self.snap.selection.clips.is_empty() {
+            super::dialog::why(ui, "select clips first");
         }
     }
 

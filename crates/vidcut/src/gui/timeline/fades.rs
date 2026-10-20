@@ -225,6 +225,9 @@ impl Workspace {
                     if ui.button("Cancel").clicked() {
                         done = true;
                     }
+                    if frames.is_none() {
+                        super::super::dialog::why(ui, "not a duration");
+                    }
                     if ui
                         .add_enabled(frames.is_some(), egui::Button::new("Change"))
                         .clicked()

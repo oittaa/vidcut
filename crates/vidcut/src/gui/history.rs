@@ -413,7 +413,6 @@ impl Workspace {
             if r.hovered() {
                 self.history.hovered = Some(i + 1);
             }
-            let r = r;
             if r.clicked() {
                 go = Some(i + 1);
             }
@@ -572,6 +571,9 @@ impl Workspace {
                     let ok = !naming.name.trim().is_empty();
                     if ui.add_enabled(ok, egui::Button::new("Mark")).clicked() {
                         done = Some(true);
+                    }
+                    if !ok {
+                        super::dialog::why(ui, "Name it first");
                     }
                 });
                 if ui.input(|i| i.key_pressed(Key::Escape)) {
@@ -953,7 +955,6 @@ impl Workspace {
                 if r.hovered() {
                     self.history.hovered = Some(i + 1);
                 }
-                let r = r;
                 r.context_menu(|ui| {
                     if ui.button("Go Here").clicked() {
                         acts.push(Act::Go(i + 1));
@@ -961,6 +962,9 @@ impl Workspace {
                     let revert = ui.add_enabled(done, egui::Button::new("Revert This Step"));
                     if revert.clicked() {
                         acts.push(Act::Revert(i + 1));
+                    }
+                    if !done {
+                        super::dialog::why(ui, "it's undone already");
                     }
                     names_menu(ui, steps, i + 1, &mut acts);
                     ui.separator();
@@ -1042,7 +1046,6 @@ impl Workspace {
                 if r.clicked() {
                     acts.push(Act::Go(i + 1));
                 }
-                let r = r;
                 r.context_menu(|ui| {
                     if ui.button("Go Here").clicked() {
                         acts.push(Act::Go(i + 1));

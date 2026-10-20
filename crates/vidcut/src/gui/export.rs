@@ -721,14 +721,19 @@ impl Workspace {
                     ui.label(RichText::new(e).color(theme::colors().error));
                 }
                 let busy = self.export.starting.is_some();
+                let picked = presets
+                    .iter()
+                    .find(|p| Some(&p.name) == q.selected.as_ref());
+                let usable = picked.is_some_and(|p| p.unavailable.is_none());
+                match picked {
+                    None => super::dialog::why(ui, "Pick a preset"),
+                    Some(p) if p.unavailable.is_some() => {
+                        super::dialog::why(ui, format!("{} isn't available here", p.title))
+                    }
+                    _ => {}
+                }
                 if ui
-                    .add_enabled(
-                        !busy
-                            && presets.iter().any(|p| {
-                                Some(&p.name) == q.selected.as_ref() && p.unavailable.is_none()
-                            }),
-                        egui::Button::new("Export…"),
-                    )
+                    .add_enabled(!busy && usable, egui::Button::new("Export…"))
                     .clicked()
                 {
                     export = true;
@@ -1026,6 +1031,11 @@ impl Workspace {
                     {
                         start = true;
                     }
+                    match &d.plan_result {
+                        _ if ready || self.export.starting.is_some() => {}
+                        Some(Err(_)) => super::dialog::why(ui, "the settings above can't export"),
+                        _ => super::dialog::why(ui, "checking the settings…"),
+                    }
                 });
             });
         if browse {
@@ -1146,6 +1156,9 @@ impl Workspace {
             }
             ui.horizontal(|ui| {
                 let ok = !s.name.trim().is_empty() && s.ask.is_none();
+                if s.name.trim().is_empty() {
+                    super::dialog::why(ui, "Name it first");
+                }
                 if ui
                     .add_enabled(ok, egui::Button::new("Save Preset"))
                     .clicked()
@@ -2173,6 +2186,10 @@ fn choice<T: PartialEq>(
     text: String,
     why: Option<String>,
 ) -> egui::Response {
+    let text = match &why {
+        Some(why) => format!("{text} · {why}"),
+        None => text,
+    };
     ui.add_enabled_ui(why.is_none(), |ui| {
         ui.selectable_value(current, value, text)
     })
@@ -2323,6 +2340,15 @@ fn settings_form(
                 }
                 let mut audio_only = d.settings.video.is_none();
                 let can_choose = !d.settings.container.audio_only();
+                if !can_choose {
+                    super::dialog::why(
+                        ui,
+                        format!(
+                            "{} holds only sound",
+                            d.settings.container.extension().to_uppercase()
+                        ),
+                    );
+                }
                 if ui
                     .add_enabled(
                         can_choose,
@@ -2403,6 +2429,12 @@ fn settings_form(
                 ui.horizontal(|ui| {
                     let mut by_quality = v.bitrate.is_none();
                     let bitrate_only = vidcut_av::export::encode::bitrate_only(v.codec, v.encoder);
+                    if bitrate_only {
+                        super::dialog::why(
+                            ui,
+                            format!("{} takes only a bitrate", v.encoder.title()),
+                        );
+                    }
                     let quality = ui
                         .add_enabled_ui(!bitrate_only, |ui| {
                             ui.radio_value(&mut by_quality, true, "Quality")

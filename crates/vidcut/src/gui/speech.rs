@@ -234,7 +234,9 @@ fn model_choice(ui: &mut egui::Ui, s: &mut Settings, d: &Ready, words_only: bool
         .width(190.0)
         .show_ui(ui, |ui| {
             for (i, (model, note)) in MODELS.iter().enumerate() {
+                let usable = !words_only || model.times_words();
                 let state = match transcribe::file_of(*model) {
+                    _ if !usable => "Transcribe Audio needs each word timed".into(),
                     Some(f) if d.have[i] => transcribe::size(f.bytes),
                     Some(f) => format!("{} download", transcribe::size(f.bytes)),
                     None if d.key[i] => format!("${:.2} an hour", model.dollars_per_hour()),
@@ -251,7 +253,7 @@ fn model_choice(ui: &mut egui::Ui, s: &mut Settings, d: &Ready, words_only: bool
                     0.0,
                     egui::TextFormat::simple(small.clone(), c.text_dim),
                 );
-                ui.add_enabled_ui(!words_only || model.times_words(), |ui| {
+                ui.add_enabled_ui(usable, |ui| {
                     ui.selectable_value(&mut s.model, *model, job);
                 });
             }
@@ -348,6 +350,11 @@ fn words_from(ui: &mut egui::Ui, s: &mut Settings, marks: bool) {
             s.from_media = false;
         }
     });
+    if !s.model.times_words() {
+        dialog::why(ui, "this model doesn't time each word");
+    } else if !can {
+        dialog::why(ui, "In–Out hears only its part");
+    }
 }
 
 fn ask_download(
@@ -979,6 +986,9 @@ impl Workspace {
                             _ => (0, p.end()),
                         };
                         ui.label(dim(self.src_tc(b - a)));
+                        if range.is_none() {
+                            dialog::why(ui, "no In and Out marked");
+                        }
                     });
                     heard = dialog::row(ui, "Hear", |ui| d.hear.ui(ui, &p));
                     dialog::row(ui, "Track", |ui| track_choice(ui, s, &p));

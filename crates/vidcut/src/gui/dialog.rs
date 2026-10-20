@@ -68,6 +68,10 @@ pub(super) fn warn(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response
     ui.add(egui::Label::new(RichText::new(format!("⚠ {}", text.into())).color(color)).wrap())
 }
 
+pub(super) fn why(ui: &mut egui::Ui, text: impl Into<String>) {
+    ui.label(RichText::new(text).small().color(theme::colors().text_dim));
+}
+
 pub(super) fn footer(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     ui.separator();
     let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);

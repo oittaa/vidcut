@@ -7,4 +7,3 @@ The files `scripts/check.sh` lists in `long_text_left` still have strings over 1
 Some controls need a better form now that they have no tooltips:
 - The timeline header's icon buttons, which have no room for words: Timeline Options, Timeline Actions and Edit Actions; Ripple On and Dynamic Trim; a track's Enlarge.
 - Skip Non-Speech, xAI's voice threshold: a slider from Keep All to Skip Most.
-- A disabled choice says nothing of why, such as In–Out with no marks set.

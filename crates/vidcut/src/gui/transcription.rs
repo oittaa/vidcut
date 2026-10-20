@@ -646,6 +646,9 @@ impl Workspace {
                     {
                         acts.push(Act::RemoveSilences);
                     }
+                    if !silences {
+                        super::dialog::why(ui, "no pause of a second or more");
+                    }
                 });
                 ui.horizontal_wrapped(|ui| {
                     let fillers = items.as_ref().map_or(0, |i| {
@@ -923,6 +926,9 @@ impl Workspace {
                     }
                     if button(ui, "Copy") {
                         acts.push(Act::Copy);
+                    }
+                    if !any {
+                        super::dialog::why(ui, "select words first");
                     }
                     let one_file =
                         selected

@@ -954,6 +954,13 @@ impl Workspace {
             (_, true) => "Trim the Out",
             _ => "Trim the In",
         };
+        if !enabled {
+            let why = match here {
+                false => "no clip on this side",
+                true => "trimming the other side",
+            };
+            super::dialog::why(ui, why);
+        }
         for (by, icon, way) in [(-1, "◀|", "a frame earlier"), (1, "|▶", "a frame later")] {
             let tip = format!("{what} {way}");
             let r = ui.add_enabled(enabled, egui::Button::new(RichText::new(icon).size(14.0)));

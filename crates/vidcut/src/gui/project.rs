@@ -167,6 +167,9 @@ impl Format {
                 });
                 ui.end_row();
                 let label = ui.label("Frame rate");
+                if !rate_enabled {
+                    super::dialog::why(ui, "only while the timeline is empty");
+                }
                 ui.add_enabled_ui(rate_enabled, |ui| {
                     ui.horizontal(|ui| {
                         let current = self.fps();

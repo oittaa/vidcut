@@ -572,6 +572,9 @@ impl Workspace {
                             d.color.clear();
                         }
                     });
+                    if style.paints() == SpeakerPaint::None {
+                        dialog::why(ui, "off in the track's Speakers setting");
+                    }
                 });
                 dialog::row(ui, "Position", |ui| {
                     dialog::switch(ui, |ui| {

@@ -488,9 +488,13 @@ fn general(
                         .show_ui(ui, |ui| {
                             for t in &themes {
                                 let name = t["name"].as_str().unwrap_or_default();
+                                let shown = match t["error"].as_str() {
+                                    Some(e) => format!("{} · {e}", title(name)),
+                                    None => title(name),
+                                };
                                 let r = ui.add_enabled(
                                     t["error"].is_null(),
-                                    egui::Button::selectable(pick == name, title(name)),
+                                    egui::Button::selectable(pick == name, shown),
                                 );
                                 if r.clicked() {
                                     pick = name.to_string();

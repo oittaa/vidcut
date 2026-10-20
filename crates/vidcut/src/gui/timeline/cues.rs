@@ -477,9 +477,10 @@ impl Workspace {
                 }
             });
             ui.separator();
+            let inside = c.start < at && at < c.end();
             if ui
                 .add_enabled(
-                    c.start < at && at < c.end(),
+                    inside,
                     egui::Button::new(keys("Split at Playhead  (Ctrl+B)")),
                 )
                 .clicked()
@@ -487,13 +488,17 @@ impl Workspace {
                 self.split_at_playhead();
                 ui.close();
             }
+            if !inside {
+                super::super::dialog::why(ui, "the playhead isn't inside it");
+            }
             let track = p.find_cue(id).map(|(t, _)| t);
             let joinable =
                 cues.len() > 1 && cues.iter().all(|q| p.find_cue(q).map(|(t, _)| t) == track);
-            if ui
-                .add_enabled(joinable, egui::Button::new("Join Subtitles"))
-                .clicked()
-            {
+            let join = ui.add_enabled(joinable, egui::Button::new("Join Subtitles"));
+            if !joinable {
+                super::super::dialog::why(ui, "select two or more on one track");
+            }
+            if join.clicked() {
                 self.send("subtitles.join", json!({ "cues": cues }));
                 ui.close();
             }

@@ -321,6 +321,9 @@ impl Workspace {
                     }
                     .align();
                 }
+                if d.kind == TitleKind::Text {
+                    super::dialog::why(ui, "a Text title is centered on its position");
+                }
                 ui.add_enabled_ui(d.kind != TitleKind::Text, |ui| {
                     ui.horizontal(|ui| {
                         ui.label("Align");

@@ -1,5 +1,4 @@
 use std::ops::Range;
-use std::path::Path;
 use std::sync::Arc;
 
 use eframe::egui::{
@@ -324,37 +323,27 @@ struct ProxyState {
     badge: &'static str,
     column: String,
     color: Color32,
-    tip: String,
 }
 
-fn proxy_state(m: &Media, lost: bool, folder: &Path) -> Option<ProxyState> {
+fn proxy_state(m: &Media, lost: bool) -> Option<ProxyState> {
     let p = m.proxy.as_ref()?;
     Some(if lost {
         ProxyState {
             badge: "LOST PROXY",
             column: "file gone".into(),
             color: theme::colors().error,
-            tip: format!(
-                "The proxy file is gone, so the original plays: {}. Generate Proxy makes it \
-                 again.",
-                p.path_in(folder).display()
-            ),
         }
     } else if m.fresh_proxy().is_some() {
         ProxyState {
             badge: "PROXY",
             column: format!("{}x{}", p.width, p.height),
             color: theme::colors().ok,
-            tip: format!("Proxy: {}x{} (plays when Proxies is on)", p.width, p.height),
         }
     } else {
         ProxyState {
             badge: "OLD PROXY",
             column: "out of date".into(),
             color: theme::colors().error,
-            tip: "The proxy is out of date: the file changed after it was made, so the \
-                  original plays. Generate Proxy makes a new one."
-                .into(),
         }
     })
 }
@@ -791,7 +780,6 @@ impl Workspace {
         }
         self.drop_highlight(ui, picture, path);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, leaf(path)));
-        let resp = resp;
         self.bin_interaction(&resp, path);
     }
 
@@ -964,7 +952,6 @@ impl Workspace {
             second,
             theme::colors().text_dim,
         );
-        let resp = resp;
         self.media_interaction(&resp, m);
         if resp.hovered() || ui.rect_contains_pointer(picture) {
             let at = Rect::from_min_size(
@@ -1125,7 +1112,7 @@ impl Workspace {
         );
     }
 
-    fn badges(&self, painter: &egui::Painter, rect: Rect, m: &Media) -> String {
+    fn badges(&self, painter: &egui::Painter, rect: Rect, m: &Media) {
         let badge = |text: &str, color: Color32, right: bool| {
             let galley =
                 painter.layout_no_wrap(text.to_string(), egui::FontId::proportional(10.0), color);
@@ -1146,7 +1133,7 @@ impl Workspace {
             badge("MISSING", theme::colors().error, false);
         }
         let lost = self.snap.lost_proxies.contains_key(&m.id);
-        let proxy = proxy_state(m, lost, &self.snap.proxy_dir);
+        let proxy = proxy_state(m, lost);
         if let Some(px) = &proxy {
             badge(px.badge, px.color, true);
         }
@@ -1164,47 +1151,6 @@ impl Workspace {
             painter.rect_filled(r, CornerRadius::same(2), theme::colors().panel_dark);
             painter.galley(r.min + vec2(3.0, 1.0), galley, theme::colors().text);
         }
-        let subtitles = m.subtitles.as_ref().map_or(String::new(), |s| {
-            let mut text = format!(
-                "Subtitles: {}, {}, {} cue(s){}\n",
-                crate::gui::subtitles::format_name(s.format),
-                s.encoding,
-                s.cues,
-                s.language
-                    .as_deref()
-                    .map_or(String::new(), |l| format!(", {l}"))
-            );
-            for w in &s.warnings {
-                text.push_str(&format!("{w}\n"));
-            }
-            text
-        });
-        let how = match m.subtitles {
-            Some(_) => {
-                "Drag it onto a subtitle track, or right-click > Insert Selected Subtitles to \
-                 Timeline Using Timecode"
-            }
-            None => "I/O while hovering marks the clip; double-click opens it",
-        };
-        format!(
-            "{}\n{}\n{subtitles}{}{}{}{}{how}",
-            m.name,
-            m.path.display(),
-            if transcribed {
-                "Transcribed: its words are kept with it\n"
-            } else {
-                ""
-            },
-            if missing {
-                "The file is missing: Relink Media finds it, or right-click > Relink…\n"
-            } else {
-                ""
-            },
-            proxy.map_or(String::new(), |px| format!("{}\n", px.tip)),
-            m.color.as_deref().map_or(String::new(), |c| {
-                format!("Clip Color: {}\n", theme::color_title(c))
-            }),
-        )
     }
 
     fn list(
@@ -1332,7 +1278,6 @@ impl Workspace {
                 };
                 let size = vec2(ui.available_width(), ui.spacing().interact_size.y);
                 let (rect, r) = ui.allocate_exact_size(size, Sense::click());
-                let r = r;
                 let builder = UiBuilder::new()
                     .max_rect(rect)
                     .layout(egui::Layout::left_to_right(egui::Align::Center));
@@ -1432,11 +1377,7 @@ impl Workspace {
                     (None, None) => "none".into(),
                 });
             }
-            7 => match proxy_state(
-                m,
-                self.snap.lost_proxies.contains_key(&m.id),
-                &self.snap.proxy_dir,
-            ) {
+            7 => match proxy_state(m, self.snap.lost_proxies.contains_key(&m.id)) {
                 Some(px) => {
                     ui.label(RichText::new(px.column).color(px.color));
                 }

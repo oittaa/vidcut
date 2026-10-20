@@ -677,6 +677,9 @@ impl Workspace {
                 });
                 ui.separator();
                 let open = self.project().is_some();
+                if !open {
+                    super::dialog::why(ui, "open a project for these");
+                }
                 if ui
                     .add_enabled(open, egui::Button::new("Project Settings…"))
                     .clicked()
@@ -741,6 +744,9 @@ impl Workspace {
                     .clicked()
                 {
                     self.export_subtitle(ui.ctx(), None);
+                }
+                if open && !subtitles {
+                    super::dialog::why(ui, "no subtitle track yet");
                 }
                 ui.separator();
                 if ui
@@ -925,7 +931,7 @@ impl Workspace {
         });
         ui.label(
             RichText::new(
-                "What you, scripts and agents did. Hover an entry for its request; click to copy it as a command.",
+                "What you, scripts and agents did. Click an entry to copy it as a command.",
             )
             .color(theme::colors().text_dim)
             .small(),
