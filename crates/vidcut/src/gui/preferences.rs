@@ -976,7 +976,7 @@ fn services(
                         .add_enabled(
                             !busy,
                             egui::TextEdit::singleline(&mut ui_state.commands[i])
-                                .hint_text("pass show xai")
+                                .hint_text(format!("Optional, like pass show {service}"))
                                 .desired_width(200.0),
                         )
                         .on_hover_text("Its output is the key, when no variable is set");
