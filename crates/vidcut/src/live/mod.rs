@@ -267,18 +267,16 @@ pub(crate) enum Msg {
     },
     Audition(Option<Audition>),
     Skip(Option<Vec<ClipSpans>>),
-    PreviewTitle(Option<TitlePreview>),
+    PreviewTitle(Option<(String, Title)>),
+    FreeTitle(Option<FreeTitle>),
     Shutdown,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TitlePreview {
-    Clip(String, Title),
-    Over {
-        title: Title,
-        at: i64,
-        fraction: f64,
-    },
+pub struct FreeTitle {
+    title: Title,
+    at: i64,
+    fraction: f64,
 }
 
 pub struct Audition {
@@ -328,16 +326,14 @@ impl Handle {
     }
 
     pub fn preview_title(&self, title: Option<(String, Title)>) {
-        let _ = self.tx.send(Msg::PreviewTitle(
-            title.map(|(id, t)| TitlePreview::Clip(id, t)),
-        ));
+        let _ = self.tx.send(Msg::PreviewTitle(title));
     }
 
     pub fn preview_free_title(&self, title: Option<(Title, i64, f64)>) {
         let _ = self
             .tx
-            .send(Msg::PreviewTitle(title.map(|(title, at, fraction)| {
-                TitlePreview::Over {
+            .send(Msg::FreeTitle(title.map(|(title, at, fraction)| {
+                FreeTitle {
                     title,
                     at,
                     fraction,
@@ -522,8 +518,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         tape_media: None,
         player,
         skipping: None,
-        title_preview: None,
-        nudged: None,
+        free_title: None,
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
@@ -776,8 +771,7 @@ struct Live {
     tape_media: Option<String>,
     player: Player,
     skipping: Option<Vec<ClipSpans>>,
-    title_preview: Option<TitlePreview>,
-    nudged: Option<vidcut_av::player::Nudge>,
+    free_title: Option<FreeTitle>,
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
@@ -935,46 +929,16 @@ impl Live {
             Msg::Skip(parts) => changed = self.set_skipping(parts),
             Msg::PreviewTitle(title) => {
                 changed = false;
-                let title = title.map(|t| match t {
-                    TitlePreview::Clip(id, t) => {
-                        let t = vidcut_core::ops::titles::checked(&t).unwrap_or(t);
-                        TitlePreview::Clip(id, t)
-                    }
-                    other => other,
-                });
-                if self.title_preview != title {
-                    let nudge = match &title {
-                        Some(TitlePreview::Clip(id, to)) => match &self.title_preview {
-                            Some(TitlePreview::Clip(was, from)) if was == id => Some(from.clone()),
-                            _ => self
-                                .project
-                                .as_ref()
-                                .and_then(|s| s.project().clip(id))
-                                .and_then(|c| c.title.clone()),
-                        }
-                        .filter(|from| vidcut_av::player::Nudge::fits(from, to))
-                        .map(|_| vidcut_av::player::Nudge {
-                            clip: id.clone(),
-                            to: to.clone(),
-                        }),
-                        _ => None,
-                    };
-                    let let_go = title.is_none();
-                    self.title_preview = title;
-                    match (nudge, self.nudged.take()) {
-                        (Some(n), _) => {
-                            self.player.nudge_title(Some(n.clone()));
-                            self.nudged = Some(n);
-                        }
-                        (None, Some(held)) if let_go => {
-                            self.nudged = Some(held);
-                            self.schedule_timeline();
-                        }
-                        (None, _) => {
-                            self.player.nudge_title(None);
-                            self.schedule_timeline();
-                        }
-                    }
+                if self.timeline_due.take().is_some() {
+                    self.refresh_timeline();
+                }
+                self.player.preview_title(title);
+            }
+            Msg::FreeTitle(title) => {
+                changed = false;
+                if self.free_title != title {
+                    self.free_title = title;
+                    self.schedule_timeline();
                 }
             }
             Msg::Picture => {
@@ -3076,36 +3040,22 @@ impl Live {
 
     fn refresh_timeline_at(&mut self, at: Option<i64>) -> Option<u64> {
         let mut p = self.project.as_ref()?.project().clone();
-        let mut scrolled: Option<(Title, (i64, i64), i64)> = None;
-        match &self.title_preview {
-            Some(TitlePreview::Clip(id, title)) => {
-                if let Some((t, c)) = p.find_clip(id)
-                    && p.tracks[t].clips[c].title.is_some()
-                {
-                    p.tracks[t].clips[c].title = Some(title.clone());
-                }
-            }
-            Some(TitlePreview::Over {
-                title,
-                at,
-                fraction,
-            }) => {
-                let len = vidcut_core::ops::titles::default_length(&p);
-                if let Ok((id, _)) = vidcut_core::ops::titles::add(&mut p, None, *at, len, title)
-                    && let Some(c) = p.clip(&id)
-                    && let Some(t) = c.title.as_ref().filter(|t| t.moves())
-                {
-                    let off = (fraction * len as f64).round() as i64 - (at - c.start);
-                    scrolled = Some((t.clone(), (c.start, c.end()), off));
-                }
-            }
-            None => {}
-        }
-        if let Some(n) = &self.nudged
-            && p.clip(&n.clip).and_then(|c| c.title.as_ref()) != Some(&n.to)
+        let mut scrolled: Option<(String, (i64, i64), i64)> = None;
+        if let Some(FreeTitle {
+            title,
+            at,
+            fraction,
+        }) = &self.free_title
         {
-            self.player.nudge_title(None);
-            self.nudged = None;
+            let len = vidcut_core::ops::titles::default_length(&p);
+            if let Ok((id, _)) = vidcut_core::ops::titles::add(&mut p, None, *at, len, title)
+                && let Some(c) = p
+                    .clip(&id)
+                    .filter(|c| c.title.as_ref().is_some_and(Title::moves))
+            {
+                let off = (fraction * len as f64).round() as i64 - (at - c.start);
+                scrolled = Some((id.clone(), (c.start, c.end()), off));
+            }
         }
         let end = p.end();
         if end == 0 {
@@ -3119,12 +3069,12 @@ impl Live {
                 return None;
             }
         };
-        if let Some((t, (a, b), off)) = &scrolled {
+        if let Some((id, (a, b), off)) = &scrolled {
             let mut from = 0;
             for piece in &mut plan.video {
                 let frames = piece.frames();
                 if from < *b && from + frames > *a {
-                    scroll_by(piece, t, *off);
+                    scroll_by(piece, id, *off);
                 }
                 from += frames;
             }
@@ -3649,22 +3599,18 @@ fn job_notes(tx: &Sender<Msg>, id: &str) -> vidcut_av::progress::Noting {
     }))
 }
 
-fn scroll_by(piece: &mut render::VideoPiece, t: &Title, off: i64) {
+fn scroll_by(piece: &mut render::VideoPiece, clip: &str, off: i64) {
     match piece {
         render::VideoPiece::Titled { under, titles } => {
-            for r in titles
-                .iter_mut()
-                .filter(|s| s.title == *t)
-                .filter_map(|s| s.run.as_mut())
-            {
-                r.at += off;
+            for s in titles.iter_mut().filter(|s| s.clip == clip) {
+                s.run.at += off;
             }
-            scroll_by(under, t, off);
+            scroll_by(under, clip, off);
         }
         render::VideoPiece::Mix { under, over } => {
-            scroll_by(under, t, off);
+            scroll_by(under, clip, off);
             for o in over {
-                scroll_by(&mut o.piece, t, off);
+                scroll_by(&mut o.piece, clip, off);
             }
         }
         _ => {}

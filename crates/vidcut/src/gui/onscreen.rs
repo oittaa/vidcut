@@ -33,7 +33,8 @@ struct Held {
 pub struct Grab {
     selected: Option<String>,
     held: Option<Held>,
-    landed: Option<(String, Title, std::time::Instant, Title)>,
+    landing: Option<(String, Title, std::time::Instant, Title)>,
+    sent: Option<(String, Title)>,
     boxes: Vec<(Title, (u32, u32), [f32; 4])>,
 }
 
@@ -118,6 +119,51 @@ impl Grab {
 }
 
 impl Workspace {
+    pub(super) fn stored_title(&self, clip: &str) -> Option<Title> {
+        self.project()?.clip(clip)?.title.clone()
+    }
+
+    fn title_wanted(&self) -> Option<(String, Title)> {
+        let g = &self.timeline.title_grab;
+        if let Some(h) = &g.held {
+            return Some((h.clip.clone(), h.now.clone()));
+        }
+        if let Some(p) = self
+            .timeline
+            .title_dialog
+            .as_ref()
+            .and_then(|d| d.previewing())
+        {
+            return Some(p);
+        }
+        let (clip, to, since, from) = g.landing.as_ref()?;
+        landing(to, since.elapsed(), from, &self.stored_title(clip)?)
+            .map(|t| (clip.clone(), t.clone()))
+    }
+
+    pub(super) fn title_landing(&mut self, clip: &str, to: &Title) {
+        self.timeline.title_grab.landing = self.stored_title(clip).map(|from| {
+            (
+                clip.to_string(),
+                to.clone(),
+                std::time::Instant::now(),
+                from,
+            )
+        });
+    }
+
+    pub(super) fn sync_title_preview(&mut self) {
+        let wanted = self.title_wanted();
+        let g = &mut self.timeline.title_grab;
+        if wanted.is_none() {
+            g.landing = None;
+        }
+        if wanted != g.sent {
+            self.live.preview_title(wanted.clone());
+            g.sent = wanted;
+        }
+    }
+
     fn title_shapes(&mut self, picture: Rect) -> Vec<Shown> {
         let Some(p) = self.project_shared() else {
             return Vec::new();
@@ -126,30 +172,12 @@ impl Workspace {
         let size = (p.settings.width, p.settings.height);
         let (w, h) = (f64::from(size.0), f64::from(size.1));
         let scale = vec2(picture.width() / w as f32, picture.height() / h as f32);
-        let held = self.timeline.title_grab.held.clone();
-        let landed = self.timeline.title_grab.landed.clone();
-        let previewed = self
-            .timeline
-            .title_dialog
-            .as_ref()
-            .and_then(|d| d.previewing());
-        let mut landing_yet = false;
+        let wanted = self.title_wanted();
         let mut out = Vec::new();
         for (clip, stored, start, length) in showing(&p, at) {
-            let stored = match &previewed {
+            let title = match &wanted {
                 Some((id, t)) if *id == clip => t.clone(),
                 _ => stored,
-            };
-            let title = match &held {
-                Some(hd) if hd.clip == clip => hd.now.clone(),
-                _ => match landed.as_ref().filter(|l| l.0 == clip) {
-                    Some((_, to, since, from)) => {
-                        let shown = landing(to, since.elapsed(), from, &stored).cloned();
-                        landing_yet |= shown.is_some();
-                        shown.unwrap_or(stored)
-                    }
-                    None => stored,
-                },
             };
             let base = Title {
                 position: None,
@@ -210,9 +238,6 @@ impl Workspace {
                 angle,
                 turn_at: top_middle + up,
             });
-        }
-        if !landing_yet {
-            self.timeline.title_grab.landed = None;
         }
         out
     }
@@ -328,41 +353,22 @@ impl Workspace {
         if let (Some(held), Some(to)) = (self.timeline.title_grab.held.clone(), pointer)
             && resp.dragged()
         {
-            let next = self.moved(&held, to, picture, shift, free);
-            if next.now != held.now {
-                self.live
-                    .preview_title(Some((next.clip.clone(), next.now.clone())));
-            }
-            self.timeline.title_grab.held = Some(next);
+            self.timeline.title_grab.held = Some(self.moved(&held, to, picture, shift, free));
         }
         if resp.drag_stopped()
             && let Some(held) = self.timeline.title_grab.held.take()
+            && let Some(params) = changed(&held)
         {
-            let params = changed(&held);
-            if let Some(params) = &params {
-                self.send("titles.set", params.clone());
-                self.timeline.title_grab.landed = Some((
-                    held.clip.clone(),
-                    held.now.clone(),
-                    std::time::Instant::now(),
-                    held.title.clone(),
-                ));
-            }
-            let kept = match self
+            self.send("titles.set", params);
+            self.title_landing(&held.clip, &held.now);
+            if let Some(d) = self
                 .timeline
                 .title_dialog
                 .as_mut()
                 .filter(|d| d.clip() == held.clip)
             {
-                Some(d) => {
-                    if params.is_some() {
-                        d.placed(&held.now);
-                    }
-                    d.previewing()
-                }
-                None => None,
-            };
-            self.live.preview_title(kept);
+                d.placed(&held.now);
+            }
         }
         if resp.clicked() {
             let hit = pointer.and_then(|p| shapes.iter().find(|s| s.inside(p)));
@@ -375,6 +381,7 @@ impl Workspace {
         {
             self.open_title(&id);
         }
+        self.sync_title_preview();
         self.paint_title_controls(ui, picture, &shapes, pointer);
     }
 

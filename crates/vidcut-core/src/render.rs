@@ -67,20 +67,18 @@ pub enum VideoPiece {
     },
 }
 
-/// A title of a [`VideoPiece::Titled`], with where its clip's frames are
-/// when it moves.
+/// A title of a [`VideoPiece::Titled`], with where the piece is in its clip.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ShownTitle {
     pub clip: String,
     pub title: Title,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run: Option<Run>,
+    pub run: Run,
     /// How a dissolve at its clip's edge fades it in or out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fade: Option<Ramp>,
 }
 
-/// Where a piece is in a moving title's clip.
+/// Where a piece is in a title's clip, which a moving title is placed by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Run {
     /// Frames of the clip before the piece's first.
@@ -108,7 +106,7 @@ impl ShownTitle {
         Self {
             clip: self.clip.clone(),
             title: self.title.clone(),
-            run: self.run.map(|r| r.after(k)),
+            run: self.run.after(k),
             fade: self.fade.map(|r| r.after(k)),
         }
     }
@@ -827,15 +825,13 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                 }
             }
             let shown = |c: &Clip, fade: Option<Ramp>| {
-                let title = c.title.clone()?;
-                let run = title.moves().then(|| Run {
-                    at: x - c.start,
-                    of: c.duration,
-                });
                 Some(ShownTitle {
                     clip: c.id.clone(),
-                    title,
-                    run,
+                    title: c.title.clone()?,
+                    run: Run {
+                        at: x - c.start,
+                        of: c.duration,
+                    },
                     fade,
                 })
             };

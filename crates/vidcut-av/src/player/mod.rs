@@ -14,6 +14,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use vidcut_core::model::Title;
 use vidcut_core::render::RenderPlan;
 
 pub use frame::{Layout, Over, Picture, Shown, TitleOver, TitlePicture};
@@ -21,7 +22,6 @@ pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,
 };
-pub use titles::Nudge;
 
 use crate::error::{Error, Result};
 use clock::{Heard, Markers};
@@ -1108,8 +1108,8 @@ impl Player {
         }
     }
 
-    pub fn nudge_title(&self, nudge: Option<Nudge>) {
-        if self.shared.titles.nudge(nudge) {
+    pub fn preview_title(&self, title: Option<(String, Title)>) {
+        if self.shared.titles.preview(title) {
             self.shared.prepared();
             self.shared.changed.notify_all();
         }
