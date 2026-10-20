@@ -69,11 +69,9 @@ impl Default for Settings {
 }
 
 fn found_by(s: &Settings, params: &mut serde_json::Value) {
-    if s.find == FindSpeech::Sound {
-        params["find"] = json!(s.find);
-        if s.sound_db != vidcut_core::transcript::SOUND_DB {
-            params["sound_db"] = json!(s.sound_db);
-        }
+    params["find"] = json!(s.find);
+    if s.find == FindSpeech::Sound && s.sound_db != vidcut_core::transcript::SOUND_DB {
+        params["sound_db"] = json!(s.sound_db);
     }
 }
 
