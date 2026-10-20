@@ -821,17 +821,13 @@ impl Workspace {
                 if ui.checkbox(&mut on, "Audio Scrubbing").clicked() {
                     self.send("player.audio_scrubbing", json!({ "on": on }));
                 }
-                ui.add_enabled_ui(self.snap.project.is_some(), |ui| {
-                    if ui.button("Add Title").clicked() {
-                        self.add_title(ui.ctx());
-                        ui.close();
+                match self.project_shared() {
+                    Some(p) => {
+                        ui.separator();
+                        self.timeline_actions_menu(ui, &p, true);
                     }
-                    ui.menu_button("AI Tools", |ui| {
-                        if ui.button("Create Subtitles from Audio…").clicked() {
-                            self.open_speech();
-                        }
-                    });
-                });
+                    None => super::dialog::why(ui, "open a project for the rest"),
+                }
             });
             ui.separator();
             self.bar_buttons(ui);
