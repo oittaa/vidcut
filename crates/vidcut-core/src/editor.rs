@@ -3151,12 +3151,17 @@ fn mutate(
             vad_file,
             language,
             track,
+            look,
             chars,
             lines,
             gap,
             hear,
             download,
         } => {
+            let looked = look.map(ops::subtitles::look);
+            let chars = &chars.or(looked.as_ref().map(|l| l.1)).unwrap_or(42);
+            let lines = &lines.or(looked.as_ref().map(|l| l.2)).unwrap_or(1);
+            let style = looked.map(|l| l.0);
             if !(1..=60).contains(chars) {
                 return Err(Error::usage("chars: 1 to 60 characters per line"));
             }
@@ -3204,9 +3209,16 @@ fn mutate(
             } else {
                 let ti = match track {
                     Some(t) => ops::subtitles::target(p, Some(t))?,
-                    None if p.subtitles.is_empty() => ops::subtitles::target(p, None)?,
+                    None if look.is_some() || p.subtitles.is_empty() => {
+                        ops::subtitles::add_track(p, None);
+                        p.subtitles.len() - 1
+                    }
                     None => p.subtitles.len() - 1,
                 };
+                if let Some(s) = style {
+                    ops::subtitles::unlocked(p, ti)?;
+                    p.subtitles[ti].style = s;
+                }
                 if p.subtitles[ti].language.is_none() {
                     p.subtitles[ti].language = speech.language.clone();
                 }

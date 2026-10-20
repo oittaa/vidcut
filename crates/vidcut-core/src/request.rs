@@ -834,7 +834,12 @@ pub enum Request {
         /// height, from 0 to 1/10 (`0` draws none). `background` is a color
         /// and an `opacity` from 0 to 1. `margin` is the inset from the
         /// left and right, and from the top or bottom, as a fraction of the
-        /// picture (from 0 up to but not including 1/2).
+        /// picture (from 0 up to but not including 1/2). `bold` takes the
+        /// font's bold face; `case` draws every letter `upper` or `lower`.
+        /// `shadow` is a title's drop shadow. `words` shows the words as
+        /// they are spoken, by the cues' word times: `show` (`highlight`,
+        /// `reveal` or `word`), the spoken word's `color`, and its `pop`,
+        /// how large it starts, from 1 to 2.
         #[serde(default)]
         style: Option<SubtitleStyle>,
     },
@@ -1075,16 +1080,23 @@ pub enum Request {
         /// model tells it from the longest stretch of speech.
         #[serde(default)]
         language: Option<String>,
-        /// The subtitle track for the cues. Default: the highest one, or a
-        /// new one when there is none.
+        /// The subtitle track for the cues. Default: a new one with `look`,
+        /// else the highest one, or a new one when there is none.
         #[serde(default)]
         track: Option<String>,
-        /// Characters per line, 1 to 60.
-        #[serde(default = "chars_per_line")]
-        chars: u32,
-        /// Lines per cue: 1 or 2.
-        #[serde(default = "one_line")]
-        lines: u32,
+        /// A look for the track, which sets its style and the usual
+        /// `chars` and `lines`: `pop`, the spoken word yellow and popping,
+        /// in bold capitals, 20 characters on one line; `highlight`, the
+        /// spoken word yellow; `reveal`, each word shown as it is spoken;
+        /// `word`, only the spoken word, large; `plain`, the usual style.
+        #[serde(default)]
+        look: Option<SubtitleLook>,
+        /// Characters per line, 1 to 60. Default: `look`'s, else 42.
+        #[serde(default)]
+        chars: Option<u32>,
+        /// Lines per cue: 1 or 2. Default: `look`'s, else 1.
+        #[serde(default)]
+        lines: Option<u32>,
         /// Frames left between a cue and the next, 0 to 10.
         #[serde(default)]
         gap: u32,
@@ -1856,6 +1868,17 @@ pub struct ExportParams {
     pub subtitle_format: Option<SubtitleFormat>,
 }
 
+/// A subtitle track's look from `subtitles.transcribe`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SubtitleLook {
+    Plain,
+    Pop,
+    Highlight,
+    Reveal,
+    Word,
+}
+
 /// How subtitle tracks go out with an export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -2186,14 +2209,6 @@ fn silence_margin() -> TimeSpec {
 
 fn silence_min() -> TimeSpec {
     TimeSpec::Seconds(0.5)
-}
-
-fn chars_per_line() -> u32 {
-    42
-}
-
-fn one_line() -> u32 {
-    1
 }
 
 fn scene_threshold() -> f64 {

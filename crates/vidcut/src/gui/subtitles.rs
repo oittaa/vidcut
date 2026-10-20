@@ -5,7 +5,8 @@ use eframe::egui::{
 };
 use serde_json::json;
 use vidcut_core::model::{
-    Cue, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle, SubtitleTrack,
+    Cue, LetterCase, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle,
+    SubtitleTrack, SubtitleWords, WordsShow,
 };
 use vidcut_core::subtitles::{Tag, Token};
 
@@ -37,10 +38,29 @@ pub struct TrackDialog {
     background: String,
     opacity: String,
     margin: String,
+    bold: bool,
+    case: Option<LetterCase>,
+    shadow: bool,
+    show: Option<WordsShow>,
+    spoken: String,
+    pop: String,
     error: String,
     families: Vec<String>,
     preview: Option<SubtitleStyle>,
 }
+
+const CASES: [(Option<LetterCase>, &str); 3] = [
+    (None, "As typed"),
+    (Some(LetterCase::Upper), "Capitals"),
+    (Some(LetterCase::Lower), "Small letters"),
+];
+
+const SHOWS: [(Option<WordsShow>, &str); 4] = [
+    (None, "All at once"),
+    (Some(WordsShow::Highlight), "Highlight the spoken word"),
+    (Some(WordsShow::Reveal), "Reveal words as spoken"),
+    (Some(WordsShow::Word), "Only the spoken word"),
+];
 
 pub(super) fn format_name(f: vidcut_core::request::SubtitleFormat) -> &'static str {
     match f {
@@ -178,6 +198,14 @@ fn style_of(d: &TrackDialog, stored: &SubtitleStyle) -> Result<SubtitleStyle, St
         stored.outline.as_ref().and_then(|o| o.size),
         "outline size",
     )?;
+    let words = match d.show {
+        Some(show) => Some(SubtitleWords {
+            show: Some(show),
+            color: field(&d.spoken),
+            pop: kept_number(&d.pop, stored.words.as_ref().and_then(|w| w.pop), "pop")?,
+        }),
+        None => None,
+    };
     let style = SubtitleStyle {
         font: field(&d.font),
         size: kept_number(&d.size, stored.size, "size")?,
@@ -188,6 +216,10 @@ fn style_of(d: &TrackDialog, stored: &SubtitleStyle) -> Result<SubtitleStyle, St
         }),
         background,
         margin: kept_number(&d.margin, stored.margin, "margin")?,
+        bold: d.bold.then_some(true),
+        case: d.case,
+        shadow: d.shadow.then(|| stored.shadow.clone().unwrap_or_default()),
+        words,
     };
     vidcut_core::ops::subtitles::checked_style(&style).map_err(|e| e.message)
 }
@@ -426,6 +458,16 @@ impl Workspace {
                 .unwrap_or_default(),
             opacity: percent(s.background.as_ref().and_then(|b| b.opacity)),
             margin: percent(s.margin),
+            bold: s.bold == Some(true),
+            case: s.case,
+            shadow: s.shadow.is_some(),
+            show: s.words.as_ref().map(|w| w.show.unwrap_or_default()),
+            spoken: s
+                .words
+                .as_ref()
+                .and_then(|w| w.color.clone())
+                .unwrap_or_default(),
+            pop: percent(s.words.as_ref().and_then(|w| w.pop)),
             error: String::new(),
             families: vidcut_av::burn::families(),
             preview: None,
@@ -603,6 +645,41 @@ impl Workspace {
                     ui.end_row();
                     changed |= row(ui, "Margin", &mut d.margin, "none: centered at 80% or 20%");
                     ui.end_row();
+                    ui.label("Letters");
+                    ui.horizontal(|ui| {
+                        changed |= ui.checkbox(&mut d.bold, "Bold").changed();
+                        changed |= ui.checkbox(&mut d.shadow, "Shadow").changed();
+                        for (case, label) in CASES {
+                            changed |= ui.radio_value(&mut d.case, case, label).changed();
+                        }
+                    });
+                    ui.end_row();
+                    ui.label("Words");
+                    egui::ComboBox::from_id_salt("subtitle-words")
+                        .selected_text(
+                            SHOWS
+                                .iter()
+                                .find(|(s, _)| *s == d.show)
+                                .map_or("", |(_, l)| *l),
+                        )
+                        .width(240.0)
+                        .show_ui(ui, |ui| {
+                            for (show, label) in SHOWS {
+                                changed |= ui.selectable_value(&mut d.show, show, label).changed();
+                            }
+                        });
+                    ui.end_row();
+                    if d.show.is_some() {
+                        let usual = match d.show {
+                            Some(WordsShow::Highlight) => "#ffd400",
+                            _ => "the text's color",
+                        };
+                        changed |= row(ui, "Spoken word", &mut d.spoken, usual);
+                        changed |= swatch(ui, &mut d.spoken, [255, 212, 0]);
+                        ui.end_row();
+                        changed |= row(ui, "Pop", &mut d.pop, "100%: none, up to 200%");
+                        ui.end_row();
+                    }
                 });
                 if changed {
                     d.preview = style_of(&d, &t.style).ok();

@@ -464,11 +464,15 @@ fn subtitle_track(p: &Project, ti: usize, (a, b): (i64, i64)) -> engine::subtitl
             .cues
             .iter()
             .filter(|c| c.start < b && c.end() > a && !c.text.trim().is_empty())
-            .map(|c| engine::subtitles::Cue {
-                start: c.start.max(a) - a,
-                end: c.end().min(b) - a,
-                text: c.text.clone(),
-                place: c.place,
+            .map(|c| {
+                let cut = c.start.max(a) - c.start;
+                engine::subtitles::Cue {
+                    start: c.start.max(a) - a,
+                    end: c.end().min(b) - a,
+                    text: c.text.clone(),
+                    place: c.place,
+                    words: c.words.iter().map(|w| (w - cut).max(0)).collect(),
+                }
             })
             .collect(),
     }

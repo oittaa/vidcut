@@ -17,6 +17,7 @@ fn style() -> SubtitleStyle {
             opacity: Some(0.5),
         }),
         margin: Some(0.08),
+        ..SubtitleStyle::default()
     }
 }
 
@@ -49,6 +50,7 @@ fn a_track_style_is_stored_in_canonical_form() {
                 opacity: Some(0.5),
             }),
             margin: Some(0.08),
+            ..SubtitleStyle::default()
         }
     );
 }

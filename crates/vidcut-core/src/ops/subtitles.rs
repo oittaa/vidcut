@@ -2,9 +2,10 @@ use std::collections::HashSet;
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Cue, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle, SubtitleTrack,
+    Cue, LetterCase, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle,
+    SubtitleTrack, SubtitleWords, TitleShadow, WordsShow,
 };
-use crate::request::SubtitleTimeBase;
+use crate::request::{SubtitleLook, SubtitleTimeBase};
 use crate::subtitles::{self, Read, Timed};
 
 pub const DEFAULT_SECS: f64 = 3.0;
@@ -177,6 +178,12 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
             ));
         }
     };
+    let shadow = style
+        .shadow
+        .as_ref()
+        .map(super::titles::checked_shadow)
+        .transpose()?;
+    let words = style.words.as_ref().map(checked_words_style).transpose()?;
     Ok(SubtitleStyle {
         font,
         size,
@@ -184,7 +191,58 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
         outline,
         background,
         margin,
+        bold: style.bold.filter(|&b| b),
+        case: style.case,
+        shadow,
+        words,
     })
+}
+
+fn checked_words_style(w: &SubtitleWords) -> Result<SubtitleWords> {
+    let pop = match w.pop {
+        None => None,
+        Some(p) if fraction(p, 1.0, 2.0, true) => (p > 1.0).then_some(p),
+        Some(_) => {
+            return Err(Error::invalid(
+                "a spoken word's pop is a multiple of the text's size, from 1 to 2",
+            ));
+        }
+    };
+    Ok(SubtitleWords {
+        show: w.show,
+        color: checked_color(w.color.as_deref(), "spoken word")?,
+        pop,
+    })
+}
+
+pub fn look(look: SubtitleLook) -> (SubtitleStyle, u32, u32) {
+    let bold = |size: f64, show: WordsShow, pop: Option<f64>| SubtitleStyle {
+        size: Some(size),
+        outline: Some(SubtitleOutline {
+            color: None,
+            size: Some(0.08),
+        }),
+        margin: Some(0.15),
+        bold: Some(true),
+        shadow: Some(TitleShadow::default()),
+        words: Some(SubtitleWords {
+            show: Some(show),
+            color: None,
+            pop,
+        }),
+        ..SubtitleStyle::default()
+    };
+    let upper = |s: SubtitleStyle| SubtitleStyle {
+        case: Some(LetterCase::Upper),
+        ..s
+    };
+    match look {
+        SubtitleLook::Plain => (SubtitleStyle::default(), 42, 1),
+        SubtitleLook::Pop => (upper(bold(0.075, WordsShow::Highlight, Some(1.25))), 20, 1),
+        SubtitleLook::Highlight => (bold(0.065, WordsShow::Highlight, None), 32, 1),
+        SubtitleLook::Reveal => (bold(0.065, WordsShow::Reveal, None), 32, 1),
+        SubtitleLook::Word => (upper(bold(0.1, WordsShow::Word, Some(1.15))), 20, 1),
+    }
 }
 
 pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {

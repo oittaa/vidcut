@@ -755,6 +755,9 @@ fn style_attrs(style: &SubtitleStyle) -> String {
         plain_number(style.text_fraction() * 10_000.0),
         plain_number(SubtitleStyle::LINE * 100.0),
     );
+    if style.bold == Some(true) {
+        attrs.push_str(" tts:fontWeight=\"bold\"");
+    }
     if let Some((rgb, size)) = style.stroke() {
         attrs.push_str(&format!(
             " tts:textOutline=\"{} {}%\"",
@@ -813,12 +816,10 @@ pub fn write(
     );
     let background = background(style);
     for c in cues {
+        let body = paragraph(&super::cased_markup(&c.text, style.case));
         let text = match &background {
-            Some(color) => format!(
-                "<span tts:backgroundColor=\"{color}\">{}</span>",
-                paragraph(&c.text)
-            ),
-            None => paragraph(&c.text),
+            Some(color) => format!("<span tts:backgroundColor=\"{color}\">{body}</span>"),
+            None => body,
         };
         out.push_str(&format!(
             "      <p begin=\"{}\" end=\"{}\" region=\"{}\">{text}</p>\n",

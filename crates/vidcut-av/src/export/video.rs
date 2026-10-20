@@ -412,8 +412,9 @@ pub struct VideoFrames {
 struct Burner {
     cues: Vec<super::subtitles::Cue>,
     style: SubtitleStyle,
+    fps: f64,
     frame: i64,
-    showing: Vec<usize>,
+    showing: Vec<(usize, Option<usize>, Option<i64>)>,
     size: (u32, u32),
     drawn: Drawn,
     gpu_failed: bool,
@@ -500,21 +501,32 @@ impl Burner {
     fn burn(&mut self, f: frame::Video, output: &Output) -> Result<frame::Video> {
         let j = self.frame;
         self.frame += 1;
-        let showing: Vec<usize> = self
+        let shown: Vec<(usize, vidcut_core::subtitles::Shown)> = self
             .cues
             .iter()
             .enumerate()
             .filter(|(_, c)| c.start <= j && j < c.end)
-            .map(|(i, _)| i)
+            .map(|(i, c)| {
+                let s = vidcut_core::subtitles::shown(
+                    &c.text,
+                    &c.words,
+                    &self.style,
+                    j - c.start,
+                    self.fps,
+                );
+                (i, s)
+            })
             .collect();
-        if showing.is_empty() {
+        if shown.is_empty() {
             return Ok(f);
         }
+        let showing: Vec<(usize, Option<usize>, Option<i64>)> =
+            shown.iter().map(|(i, s)| (*i, s.spoken, s.step)).collect();
         let size = (f.width(), f.height());
         if showing != self.showing || size != self.size {
-            let cues: Vec<(&str, vidcut_core::model::Place)> = showing
+            let cues: Vec<(&vidcut_core::subtitles::Shown, vidcut_core::model::Place)> = shown
                 .iter()
-                .map(|&i| (self.cues[i].text.as_str(), self.cues[i].place))
+                .map(|(i, s)| (s, self.cues[*i].place))
                 .collect();
             self.drawn = Drawn::of(crate::burn::draw(&cues, size.0, size.1, &self.style));
             self.showing = showing;
@@ -629,6 +641,7 @@ impl VideoFrames {
         self.burn = (!cues.is_empty()).then(|| Burner {
             cues,
             style,
+            fps: self.fps.as_f64(),
             frame: 0,
             showing: Vec::new(),
             size: (0, 0),

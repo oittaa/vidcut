@@ -1,4 +1,5 @@
 mod languages;
+mod spoken;
 mod srt;
 mod text;
 mod ttml;
@@ -11,6 +12,7 @@ use crate::model::{Place, Settings, SubtitleStyle};
 use crate::request::SubtitleFormat;
 
 pub use languages::three_letter;
+pub use spoken::{HIGHLIGHT, POP_SECS, Piece, Shown, cased, cased_markup, pieces, shown};
 pub use text::{Encoding, Tag, Token, color, plain, rgb, tokens};
 
 #[derive(Debug, Clone, PartialEq)]
