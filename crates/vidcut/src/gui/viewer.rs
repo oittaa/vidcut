@@ -9,6 +9,7 @@ use vidcut_core::model::{Media, Project, TrackKind};
 use vidcut_core::request::ViewerMode;
 
 use super::pool::elide;
+use super::row::Row;
 use super::theme;
 use super::workspace::{Drag, TimecodeEntry, Workspace, dim, fit};
 use crate::live::PlayerId;
@@ -134,32 +135,40 @@ impl Workspace {
     pub(super) fn viewer_panel(&mut self, ui: &mut egui::Ui) {
         let mode = self.snap.viewer;
         let id = PlayerId::of(mode);
+        let modes = [
+            Header::Mode(ViewerMode::SourceClip),
+            Header::Mode(ViewerMode::SourceTape),
+            Header::Mode(ViewerMode::Timeline),
+        ];
+        let row = Row {
+            left: &modes,
+            fill: Some((Header::Title, Align::Min)),
+            right: &[Header::Duration],
+            leaving: &[modes[1], modes[0], modes[2]],
+            group: |h| match h {
+                Header::Mode(_) => 0,
+                Header::Title => 1,
+                Header::Duration => 2,
+            },
+        };
         ui.horizontal(|ui| {
-            for (m, label, tip) in [
-                (
-                    ViewerMode::SourceClip,
-                    "Source Clip",
-                    "The clip opened from the pool",
-                ),
-                (
-                    ViewerMode::SourceTape,
-                    "Source Tape",
-                    "Every pool clip end to end",
-                ),
-                (ViewerMode::Timeline, "Timeline", "The program (Q toggles)"),
-            ] {
-                if ui
-                    .selectable_label(mode == m, label)
-                    .on_hover_text(tip)
-                    .clicked()
-                {
-                    self.send("viewer.set", json!({ "mode": m }));
+            self.fit_row(ui, row, |ws, ui, h| match h {
+                Header::Mode(m) => {
+                    let (label, tip) = match m {
+                        ViewerMode::SourceClip => ("Source Clip", "The clip opened from the pool"),
+                        ViewerMode::SourceTape => ("Source Tape", "Every pool clip end to end"),
+                        ViewerMode::Timeline => ("Timeline", "The program (Q toggles)"),
+                    };
+                    let r = ui.selectable_label(mode == m, label).on_hover_text(tip);
+                    if r.clicked() {
+                        ws.send("viewer.set", json!({ "mode": m }));
+                    }
+                    r
                 }
-            }
-            ui.separator();
-            ui.label(RichText::new(self.viewer_title()).strong());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                self.duration_field(ui);
+                Header::Title => {
+                    ui.add(egui::Label::new(RichText::new(ws.viewer_title()).strong()).truncate())
+                }
+                Header::Duration => ui.scope(|ui| ws.duration_field(ui)).response,
             });
         });
 
@@ -351,31 +360,50 @@ impl Workspace {
         let strips = Rect::from_min_max(pos2(area.left(), area.bottom() - band), area.max);
         self.trim_strips(ui, strips, &p, e);
         ui.add_space(4.0);
+        let side = match e.side {
+            Side::Out => "the Out",
+            Side::In => "the In",
+            _ => "a roll",
+        };
+        let text = if self.timeline.dynamic.is_some() {
+            format!(
+                "Dynamic Trim: {side} at {}. L/J trim, K stops, Space plays around it, W leaves",
+                self.tc(e.at)
+            )
+        } else {
+            format!("Trim Editor: {side} at {}", self.tc(e.at))
+        };
+        let row = Row {
+            left: &[],
+            fill: Some((TrimRow::Status, Align::Min)),
+            right: &[TrimRow::Close],
+            leaving: &[],
+            group: |_| 0,
+        };
         ui.allocate_ui(vec2(ui.available_width(), 28.0), |ui| {
             ui.horizontal_centered(|ui| {
-                let side = match e.side {
-                    Side::Out => "the Out",
-                    Side::In => "the In",
-                    _ => "a roll",
-                };
-                if let Some(why) = self.dynamic_stopped() {
-                    ui.label(
-                        RichText::new(format!("Stopped here: {why}."))
-                            .color(theme::colors().error),
-                    );
-                }
-                let text = if self.timeline.dynamic.is_some() {
-                    format!(
-                        "Dynamic Trim: {side} at {}. L/J trim, K stops, Space plays around it, W leaves",
-                        self.tc(e.at)
-                    )
-                } else {
-                    format!("Trim Editor: {side} at {}", self.tc(e.at))
-                };
-                ui.label(dim(text));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Close").on_hover_text("Esc").clicked() {
-                        self.timeline.edit = None;
+                self.fit_row(ui, row, |ws, ui, t| match t {
+                    TrimRow::Status => {
+                        ui.horizontal(|ui| {
+                            if let Some(why) = ws.dynamic_stopped() {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(format!("Stopped here: {why}."))
+                                            .color(theme::colors().error),
+                                    )
+                                    .truncate(),
+                                );
+                            }
+                            ui.add(egui::Label::new(dim(&text)).truncate());
+                        })
+                        .response
+                    }
+                    TrimRow::Close => {
+                        let r = ui.button("Close").on_hover_text("Esc");
+                        if r.clicked() {
+                            ws.timeline.edit = None;
+                        }
+                        r
                     }
                 });
             });
@@ -774,74 +802,134 @@ impl Workspace {
         id: PlayerId,
         trim: Option<crate::gui::timeline::EditSel>,
     ) {
+        use Transport as T;
         let player = self.snap.player(id).clone();
+        let shuttling = player.speed != 0.0 && player.speed != 1.0;
+        let left: Vec<Transport> = [
+            trim.map(|_| T::TrimOut),
+            Some(T::Previous),
+            Some(T::Stop),
+            Some(T::Play),
+            Some(T::Next),
+            Some(T::Loop),
+            trim.map(|_| T::TrimIn),
+            Some(T::MarkIn),
+            Some(T::MarkOut),
+            Some(T::Clear),
+            shuttling.then_some(T::Speed),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let row = Row {
+            left: &left,
+            fill: None,
+            right: &[T::Timecode],
+            leaving: &[
+                T::Speed,
+                T::Clear,
+                T::MarkOut,
+                T::MarkIn,
+                T::Loop,
+                T::TrimIn,
+                T::TrimOut,
+                T::Next,
+                T::Previous,
+                T::Stop,
+                T::Play,
+            ],
+            group: |t| match t {
+                T::TrimOut => 0,
+                T::Previous | T::Stop | T::Play | T::Next | T::Loop => 1,
+                T::TrimIn => 2,
+                T::MarkIn | T::MarkOut | T::Clear | T::Speed => 3,
+                T::Timecode => 4,
+            },
+        };
         ui.horizontal(|ui| {
-            let big = |s: &str| RichText::new(s).size(16.0);
-            if let Some(e) = trim {
-                self.trim_pair(ui, e, true);
-                ui.separator();
-            }
-            if ui
-                .button(big("⏮"))
-                .on_hover_text("Previous edit (Up)")
-                .clicked()
-            {
-                self.jump_edit(id, false);
-            }
-            if ui.button(big("⏹")).on_hover_text("Stop (K)").clicked() {
-                self.send("player.pause", json!({}));
-            }
-            let play = if player.playing { "⏸" } else { "▶" };
-            if ui
-                .button(big(play))
-                .on_hover_text("Play/stop (Space); J/K/L shuttle")
-                .clicked()
-            {
-                self.send("player.toggle", json!({}));
-            }
-            if ui
-                .button(big("⏭"))
-                .on_hover_text("Next edit (Down)")
-                .clicked()
-            {
-                self.jump_edit(id, true);
-            }
-            let looping = self.snap.looping;
-            if ui
-                .selectable_label(looping, big(egui_phosphor::regular::REPEAT))
-                .on_hover_text(super::keys(
-                    "Loop (Ctrl+/): from the end back to the start, or from Out back to In",
-                ))
-                .clicked()
-            {
-                self.send("player.loop", json!({ "on": !looping }));
-            }
-            if let Some(e) = trim {
-                ui.separator();
-                self.trim_pair(ui, e, false);
-            }
-            ui.separator();
-            if ui.button("Mark In").on_hover_text("I").clicked() {
-                self.mark(true);
-            }
-            if ui.button("Mark Out").on_hover_text("O").clicked() {
-                self.mark(false);
-            }
-            if ui
-                .button("Clear")
-                .on_hover_text(super::keys("Alt+X"))
-                .clicked()
-            {
-                self.clear_marks();
-            }
-            if player.speed != 0.0 && player.speed != 1.0 {
-                ui.label(
-                    RichText::new(format!("{:+}×", player.speed)).color(theme::colors().accent),
-                );
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(12.0);
-                self.timecode_field(ui, id);
+            self.fit_row(ui, row, |ws, ui, t| {
+                let big = |s: &str| RichText::new(s).size(16.0);
+                match t {
+                    T::TrimOut | T::TrimIn => {
+                        let e = trim.expect("trimming");
+                        ui.horizontal(|ui| ws.trim_pair(ui, e, t == T::TrimOut))
+                            .response
+                    }
+                    T::Previous => {
+                        let r = ui.button(big("⏮")).on_hover_text("Previous edit (Up)");
+                        if r.clicked() {
+                            ws.jump_edit(id, false);
+                        }
+                        r
+                    }
+                    T::Stop => {
+                        let r = ui.button(big("⏹")).on_hover_text("Stop (K)");
+                        if r.clicked() {
+                            ws.send("player.pause", json!({}));
+                        }
+                        r
+                    }
+                    T::Play => {
+                        let play = if player.playing { "⏸" } else { "▶" };
+                        let r = ui
+                            .button(big(play))
+                            .on_hover_text("Play/stop (Space); J/K/L shuttle");
+                        if r.clicked() {
+                            ws.send("player.toggle", json!({}));
+                        }
+                        r
+                    }
+                    T::Next => {
+                        let r = ui.button(big("⏭")).on_hover_text("Next edit (Down)");
+                        if r.clicked() {
+                            ws.jump_edit(id, true);
+                        }
+                        r
+                    }
+                    T::Loop => {
+                        let looping = ws.snap.looping;
+                        let r = ui
+                            .selectable_label(looping, big(egui_phosphor::regular::REPEAT))
+                            .on_hover_text(super::keys(
+                                "Loop (Ctrl+/): from the end back to the start, or from Out back to In",
+                            ));
+                        if r.clicked() {
+                            ws.send("player.loop", json!({ "on": !looping }));
+                        }
+                        r
+                    }
+                    T::MarkIn => {
+                        let r = ui.button("Mark In").on_hover_text("I");
+                        if r.clicked() {
+                            ws.mark(true);
+                        }
+                        r
+                    }
+                    T::MarkOut => {
+                        let r = ui.button("Mark Out").on_hover_text("O");
+                        if r.clicked() {
+                            ws.mark(false);
+                        }
+                        r
+                    }
+                    T::Clear => {
+                        let r = ui.button("Clear").on_hover_text(super::keys("Alt+X"));
+                        if r.clicked() {
+                            ws.clear_marks();
+                        }
+                        r
+                    }
+                    T::Speed => ui.label(
+                        RichText::new(format!("{:+}×", player.speed)).color(theme::colors().accent),
+                    ),
+                    T::Timecode => {
+                        ui.scope(|ui| {
+                            ui.add_space(12.0);
+                            ws.timecode_field(ui, id);
+                        })
+                        .response
+                    }
+                }
             });
         });
     }
@@ -923,7 +1011,7 @@ impl Workspace {
                 Some(_) => "−",
                 None => "=",
             });
-            if entry.focus {
+            if entry.focus && !ui.is_sizing_pass() {
                 r.request_focus();
                 entry.focus = false;
             }
@@ -985,7 +1073,7 @@ impl Workspace {
                         None => self.send("marks.set", json!({ "duration": text })),
                     }
                 }
-            } else if !r.has_focus() {
+            } else if !r.has_focus() && !ui.is_sizing_pass() {
                 r.request_focus();
             }
         } else {
@@ -1004,6 +1092,35 @@ impl Workspace {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Header {
+    Mode(ViewerMode),
+    Title,
+    Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrimRow {
+    Status,
+    Close,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Transport {
+    TrimOut,
+    Previous,
+    Stop,
+    Play,
+    Next,
+    Loop,
+    TrimIn,
+    MarkIn,
+    MarkOut,
+    Clear,
+    Speed,
+    Timecode,
 }
 
 fn stats_panel(painter: &egui::Painter, picture: Rect, stats: &crate::live::stats::PlayerStats) {

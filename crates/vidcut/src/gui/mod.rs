@@ -23,6 +23,7 @@ mod preferences;
 mod project;
 mod relink;
 mod retime;
+mod row;
 mod shared;
 mod shuttle;
 mod speech;
