@@ -164,6 +164,17 @@ pub enum Request {
         /// missing file is an error that says what would be downloaded.
         #[serde(default)]
         download: bool,
+        /// How the speech to hear is found: `voice`, the built-in
+        /// voice-activity model (the default), or `sound`, everything louder
+        /// than `sound_db`, for singing and speech over music, which voice
+        /// detection misses. Words kept for a file are used again only when
+        /// they were found the same way; without `find`, either way does.
+        #[serde(default)]
+        find: Option<FindSpeech>,
+        /// For `find: sound`: sound quieter than this, in dBFS, for half a
+        /// second or more is silence and isn't heard. Default: -40.
+        #[serde(default)]
+        sound_db: Option<f64>,
         /// Hear media that have a transcript again, replacing it.
         #[serde(default)]
         again: bool,
@@ -420,6 +431,17 @@ pub enum Request {
         /// missing file is an error that says what would be downloaded.
         #[serde(default)]
         download: bool,
+        /// How the speech to hear is found: `voice`, the built-in
+        /// voice-activity model (the default), or `sound`, everything louder
+        /// than `sound_db`, for singing and speech over music, which voice
+        /// detection misses. Words kept for a file are used again only when
+        /// they were found the same way; without `find`, either way does.
+        #[serde(default)]
+        find: Option<FindSpeech>,
+        /// For `find: sound`: sound quieter than this, in dBFS, for half a
+        /// second or more is silence and isn't heard. Default: -40.
+        #[serde(default)]
+        sound_db: Option<f64>,
     },
     /// Import an OpenTimelineIO timeline: an `.otio` file, an `.otioz` bundle
     /// (its media are unpacked first) or an `.otiod` bundle folder, as other
@@ -1130,6 +1152,17 @@ pub enum Request {
         /// would be downloaded.
         #[serde(default)]
         download: bool,
+        /// How the speech to hear is found: `voice`, the built-in
+        /// voice-activity model (the default), or `sound`, everything louder
+        /// than `sound_db`, for singing and speech over music, which voice
+        /// detection misses. Words kept for a file are used again only when
+        /// they were found the same way; without `find`, either way does.
+        #[serde(default)]
+        find: Option<FindSpeech>,
+        /// For `find: sound`: sound quieter than this, in dBFS, for half a
+        /// second or more is silence and isn't heard. Default: -40.
+        #[serde(default)]
+        sound_db: Option<f64>,
     },
     /// Re-time a subtitle track to the timeline's speech. Where the built-in
     /// voice-activity model hears speech is lined up with where the cues
@@ -1177,6 +1210,17 @@ pub enum Request {
         /// one is an error that says what would be downloaded.
         #[serde(default)]
         download: bool,
+        /// How the speech to hear is found: `voice`, the built-in
+        /// voice-activity model (the default), or `sound`, everything louder
+        /// than `sound_db`, for singing and speech over music, which voice
+        /// detection misses. Words kept for a file are used again only when
+        /// they were found the same way; without `find`, either way does.
+        #[serde(default)]
+        find: Option<FindSpeech>,
+        /// For `find: sound`: sound quieter than this, in dBFS, for half a
+        /// second or more is silence and isn't heard. Default: -40.
+        #[serde(default)]
+        sound_db: Option<f64>,
     },
     /// Synchronize Word Timings: time each word of a subtitle track's cues
     /// to the speech. The words heard, as `subtitles.transcribe` hears them
@@ -1217,6 +1261,17 @@ pub enum Request {
         /// error that says what would be downloaded.
         #[serde(default)]
         download: bool,
+        /// How the speech to hear is found: `voice`, the built-in
+        /// voice-activity model (the default), or `sound`, everything louder
+        /// than `sound_db`, for singing and speech over music, which voice
+        /// detection misses. Words kept for a file are used again only when
+        /// they were found the same way; without `find`, either way does.
+        #[serde(default)]
+        find: Option<FindSpeech>,
+        /// For `find: sound`: sound quieter than this, in dBFS, for half a
+        /// second or more is silence and isn't heard. Default: -40.
+        #[serde(default)]
+        sound_db: Option<f64>,
     },
 
     /// Title clips with their times in frames: every video track's, or
@@ -1923,6 +1978,17 @@ pub struct ExportParams {
     /// The subtitle files' format. Default: SRT.
     #[serde(default)]
     pub subtitle_format: Option<SubtitleFormat>,
+}
+
+/// How the speech to transcribe is found.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FindSpeech {
+    /// The built-in voice-activity model hears where people speak.
+    #[default]
+    Voice,
+    /// All sound louder than a level: singing and speech over music too.
+    Sound,
 }
 
 /// How subtitle tracks go out with an export.

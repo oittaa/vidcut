@@ -2,7 +2,7 @@ use serde_json::json;
 
 use crate::test_support::{Fixture, row};
 use crate::time::Rational;
-use crate::transcript::{Said, Speech, Timing, Word, spoken, word_frames};
+use crate::transcript::{Said, Speech, Timing, Word, sounding, spoken, word_frames};
 
 fn speech(model: &str, timing: Timing, said: Vec<Said>) -> Speech {
     Speech {
@@ -14,6 +14,7 @@ fn speech(model: &str, timing: Timing, said: Vec<Said>) -> Speech {
         longest_piece: 10.0,
         said,
         warnings: Vec::new(),
+        found: Default::default(),
     }
 }
 
@@ -112,4 +113,26 @@ fn cutting_words_closes_the_gap_with_ripple_off() {
         ]
     );
     assert!(!f.editor.project().settings.ripple_on);
+}
+
+fn levels(parts: &[(f32, usize)]) -> Vec<f32> {
+    parts
+        .iter()
+        .flat_map(|&(level, frames)| std::iter::repeat_n(level, frames))
+        .collect()
+}
+
+#[test]
+fn half_a_second_of_quiet_parts_the_sound() {
+    let l = levels(&[(0.5, 20), (0.0, 20), (0.5, 20)]);
+    assert_eq!(
+        sounding(&l, 512, -40.0),
+        vec![(0, 20 * 512), (40 * 512, 60 * 512)]
+    );
+}
+
+#[test]
+fn a_shorter_quiet_stays_inside_the_sound() {
+    let l = levels(&[(0.5, 20), (0.0, 10), (0.5, 20)]);
+    assert_eq!(sounding(&l, 512, -40.0), vec![(0, 50 * 512)]);
 }

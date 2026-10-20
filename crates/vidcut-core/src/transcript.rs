@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::request::SpeechModel;
+use crate::request::{FindSpeech, SpeechModel};
 use crate::time::Rational;
 
 pub const RATE: u32 = 16_000;
@@ -16,6 +16,8 @@ pub struct Asked {
     pub vad_file: Option<PathBuf>,
     pub language: Option<String>,
     pub download: bool,
+    pub find: Option<FindSpeech>,
+    pub sound_db: Option<f64>,
 }
 
 impl Asked {
@@ -35,6 +37,7 @@ impl Asked {
                 .language
                 .as_ref()
                 .is_none_or(|l| speech.language.as_ref() == Some(l))
+            && self.find.is_none_or(|f| speech.found == f)
     }
 }
 
@@ -56,6 +59,8 @@ pub struct Speech {
     pub longest_piece: f64,
     pub said: Vec<Said>,
     pub warnings: Vec<String>,
+    #[serde(default)]
+    pub found: FindSpeech,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -88,6 +93,32 @@ pub struct Made {
     pub end: i64,
     pub text: String,
     pub words: Vec<i64>,
+}
+
+pub const SOUND_DB: f64 = -40.0;
+pub const SHORTEST_QUIET: f64 = 0.5;
+pub const SHORTEST_SOUND: f64 = 0.25;
+
+pub fn sounding(levels: &[f32], frame: usize, floor_db: f64) -> Vec<(i64, i64)> {
+    let frame = frame.max(1);
+    let per_sec = f64::from(RATE) / frame as f64;
+    let quiet_frames = (SHORTEST_QUIET * per_sec).ceil() as usize;
+    let sound_frames = (SHORTEST_SOUND * per_sec).ceil() as usize;
+    let floor = 10f32.powf(floor_db as f32 / 20.0);
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for (i, &l) in levels.iter().enumerate() {
+        if l < floor {
+            continue;
+        }
+        match runs.last_mut() {
+            Some((_, end)) if i - *end < quiet_frames => *end = i + 1,
+            _ => runs.push((i, i + 1)),
+        }
+    }
+    runs.into_iter()
+        .filter(|(a, b)| b - a >= sound_frames)
+        .map(|(a, b)| ((a * frame) as i64, (b * frame) as i64))
+        .collect()
 }
 
 pub fn pieces(
