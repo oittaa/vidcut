@@ -368,6 +368,7 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
                     options.models,
                     &heard[i],
                     options.gpu,
+                    language.as_deref().or(asked.language.as_deref()),
                     started,
                     &mut warnings[i],
                 )?;

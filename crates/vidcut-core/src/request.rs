@@ -176,10 +176,11 @@ pub enum Request {
         /// second or more is silence and isn't heard. Default: -40.
         #[serde(default)]
         sound_db: Option<f64>,
-        /// Give each word its speaker. On this computer, up to 4 speakers
-        /// in each file (NVIDIA's Sortformer); with `xai`, one numbering
-        /// across every file heard; with `google`, the same up to 30 minutes
-        /// of speech, past that this computer's. The project names them
+        /// Give each word its speaker. On this computer, in English and
+        /// Chinese MOSS-Transcribe-Diarize tells them apart, else up to 4 in
+        /// each file (NVIDIA's Sortformer); with `xai`, one numbering across
+        /// every file heard; with `google`, the same up to 30 minutes of
+        /// speech, past that this computer's. The project names them
         /// (`speakers.name`).
         #[serde(default)]
         speakers: bool,
@@ -497,10 +498,11 @@ pub enum Request {
         /// second or more is silence and isn't heard. Default: -40.
         #[serde(default)]
         sound_db: Option<f64>,
-        /// Give each word its speaker. On this computer, up to 4 speakers
-        /// in each file (NVIDIA's Sortformer); with `xai`, one numbering
-        /// across every file heard; with `google`, the same up to 30 minutes
-        /// of speech, past that this computer's. The project names them
+        /// Give each word its speaker. On this computer, in English and
+        /// Chinese MOSS-Transcribe-Diarize tells them apart, else up to 4 in
+        /// each file (NVIDIA's Sortformer); with `xai`, one numbering across
+        /// every file heard; with `google`, the same up to 30 minutes of
+        /// speech, past that this computer's. The project names them
         /// (`speakers.name`).
         #[serde(default)]
         speakers: bool,
@@ -1237,10 +1239,11 @@ pub enum Request {
         /// second or more is silence and isn't heard. Default: -40.
         #[serde(default)]
         sound_db: Option<f64>,
-        /// Give each word its speaker. On this computer, up to 4 speakers
-        /// in each file (NVIDIA's Sortformer); with `xai`, one numbering
-        /// across every file heard; with `google`, the same up to 30 minutes
-        /// of speech, past that this computer's. The project names them
+        /// Give each word its speaker. On this computer, in English and
+        /// Chinese MOSS-Transcribe-Diarize tells them apart, else up to 4 in
+        /// each file (NVIDIA's Sortformer); with `xai`, one numbering across
+        /// every file heard; with `google`, the same up to 30 minutes of
+        /// speech, past that this computer's. The project names them
         /// (`speakers.name`).
         #[serde(default)]
         speakers: bool,

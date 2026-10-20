@@ -137,7 +137,10 @@ fn languages(model: SpeechModel) -> Vec<&'static str> {
 fn wanted(s: &Settings) -> Vec<&'static transcribe::File> {
     transcribe::file_of(s.model)
         .into_iter()
-        .chain((s.speakers && s.model != SpeechModel::Xai).then_some(&transcribe::SORTFORMER))
+        .chain(
+            (s.speakers && s.model != SpeechModel::Xai)
+                .then(|| transcribe::speaker_file(s.language.as_deref())),
+        )
         .collect()
 }
 
@@ -290,11 +293,16 @@ fn speakers_row(ui: &mut egui::Ui, s: &mut Settings) {
     let tip = match s.model {
         SpeechModel::Xai => "One numbering across every file heard",
         SpeechModel::Google => "One numbering up to 30 minutes, past that per file",
+        _ if transcribe::speaker_file(s.language.as_deref()) == &transcribe::MOSS => {
+            "MOSS, for English and Chinese, on this computer"
+        }
         _ => "Up to 4 in each file, on this computer",
     };
+    let moss = transcribe::speaker_file(s.language.as_deref()) == &transcribe::MOSS;
     let most = match s.model {
         SpeechModel::Xai => "",
         SpeechModel::Google => "up to 8",
+        _ if moss => "many per file, with MOSS",
         _ => "up to 4 per file",
     };
     dialog::row(ui, "Speakers", |ui| {
