@@ -1158,6 +1158,8 @@ impl Workspace {
         }
         if open && !cancel {
             self.speech.dialog = Some(d);
+        } else {
+            self.speech.last = Some(d.settings);
         }
     }
 
