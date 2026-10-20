@@ -1002,11 +1002,12 @@ impl Live {
                         (job, result)
                     }
                 };
+                let ended = encode.is_some();
                 if let Some(id) = encode {
                     self.job_ended(&id, &result);
                 }
                 self.finish(job, result);
-                self.refresh_transcribed();
+                self.refresh_transcribed(ended);
             }
             Msg::PreferencesChanged => {
                 changed = self
@@ -2977,7 +2978,7 @@ impl Live {
         self.dirty = true;
     }
 
-    fn refresh_transcribed(&mut self) {
+    fn refresh_transcribed(&mut self, job_ended: bool) {
         let Some(open) = &self.project else { return };
         let now: HashSet<String> = open
             .project()
@@ -2986,14 +2987,14 @@ impl Live {
             .filter(|m| crate::env::transcribed(m))
             .map(|m| m.id.clone())
             .collect();
-        if *self.transcribed != now {
+        if job_ended || *self.transcribed != now {
             self.transcribed = Arc::new(now);
             self.dirty = true;
         }
     }
 
     fn check_media(&mut self) {
-        self.refresh_transcribed();
+        self.refresh_transcribed(false);
         let Some(open) = &self.project else { return };
         let media: Vec<_> = open.project().media.clone();
         let channels = open.project().settings.channels;
