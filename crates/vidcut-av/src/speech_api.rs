@@ -898,7 +898,9 @@ fn google_words(text: &str) -> Result<Got> {
                 };
                 let speaker = a["speaker"]
                     .as_str()
-                    .and_then(|s| s.trim_start_matches("spk_").parse::<u32>().ok());
+                    .and_then(|s| s.rsplit(|c: char| !c.is_ascii_digit()).next())
+                    .and_then(|n| n.parse::<u32>().ok())
+                    .map(|n| n + 1);
                 words.push(Heard {
                     start,
                     end,
@@ -1038,7 +1040,7 @@ mod tests {
     fn google_words_come_from_the_word_annotations() {
         let got = google_words(
             r#"{"steps":[{"type":"model_output","content":[{"type":"text","text":"Hello",
-                "annotations":[{"type":"word_info","text":"Hello","speaker":"spk_2",
+                "annotations":[{"type":"word_info","text":"Hello","speaker":"spk:2",
                 "start_offset":"0.100s","end_offset":"0.450s"}]}]}]}"#,
         )
         .unwrap();
@@ -1048,7 +1050,7 @@ mod tests {
                 start: 0.1,
                 end: 0.45,
                 text: "Hello".into(),
-                speaker: Some(2)
+                speaker: Some(3)
             }]
         );
     }
