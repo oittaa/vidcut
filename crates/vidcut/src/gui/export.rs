@@ -662,69 +662,63 @@ impl Workspace {
         };
         let mut open = true;
         let mut export = false;
-        egui::Window::new("Quick Export")
-            .collapsible(false)
-            .resizable(false)
-            .default_pos(near_center(ctx, 340.0, 320.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                if presets.is_empty() {
-                    ui.label(dim("Loading presets…"));
-                    return;
-                }
-                ui.horizontal_wrapped(|ui| {
-                    for p in &presets {
-                        let selected = q.selected.as_deref() == Some(p.name.as_str());
-                        let size = p
-                            .settings
-                            .video
-                            .as_ref()
-                            .and_then(|v| v.height.map(|h| format!("{h}p")))
-                            .unwrap_or_else(|| "timeline size".into());
-                        let text = match p.unavailable {
-                            Some(_) => format!("{}\nNot available here", p.title),
-                            None => format!(
-                                "{}\n{} · {}",
-                                p.title,
-                                p.settings.container.extension().to_uppercase(),
-                                size
-                            ),
-                        };
-                        let r = ui
-                            .add_enabled_ui(p.unavailable.is_none(), |ui| {
-                                ui.add_sized(
-                                    [150.0, 56.0],
-                                    egui::Button::selectable(selected, text),
-                                )
-                            })
-                            .inner;
-                        if r.clicked() {
-                            q.selected = Some(p.name.clone());
-                            q.error = None;
-                        }
+        let mut cancel = false;
+        super::dialog::window(ctx, "Quick Export", &mut open, |ui| {
+            if presets.is_empty() {
+                super::dialog::note(ui, "Loading presets…");
+                return;
+            }
+            ui.horizontal_wrapped(|ui| {
+                for p in &presets {
+                    let selected = q.selected.as_deref() == Some(p.name.as_str());
+                    let size = p
+                        .settings
+                        .video
+                        .as_ref()
+                        .and_then(|v| v.height.map(|h| format!("{h}p")))
+                        .unwrap_or_else(|| "timeline size".into());
+                    let text = match p.unavailable {
+                        Some(_) => format!("{}\nNot available here", p.title),
+                        None => format!(
+                            "{}\n{} · {}",
+                            p.title,
+                            p.settings.container.extension().to_uppercase(),
+                            size
+                        ),
+                    };
+                    let r = ui
+                        .add_enabled_ui(p.unavailable.is_none(), |ui| {
+                            ui.add_sized([150.0, 56.0], egui::Button::selectable(selected, text))
+                        })
+                        .inner;
+                    if r.clicked() {
+                        q.selected = Some(p.name.clone());
+                        q.error = None;
                     }
-                });
-                ui.separator();
-                if let Some(p) = presets
-                    .iter()
-                    .find(|p| Some(&p.name) == q.selected.as_ref())
-                {
-                    ui.label(&p.description);
                 }
-                ui.label(dim(&range));
+            });
+            let picked = presets
+                .iter()
+                .find(|p| Some(&p.name) == q.selected.as_ref());
+            if let Some(p) = picked {
+                super::dialog::note(ui, p.description.clone());
+            }
+            super::dialog::form(ui, "quick-export-form", |ui| {
+                super::dialog::row(ui, "Range", |ui| ui.label(&range));
                 if let Some((_, name)) = &animated {
-                    ui.label(dim(format!(
-                        "Burns in {name}: its words show as they are spoken"
-                    )));
+                    super::dialog::row(ui, "Subtitles", |ui| {
+                        ui.label(format!("{name} burned in, words as spoken"))
+                    });
                 }
-                if let Some(e) = &q.error {
-                    ui.label(RichText::new(e).color(theme::colors().error));
-                }
-                let busy = self.export.starting.is_some();
-                let picked = presets
-                    .iter()
-                    .find(|p| Some(&p.name) == q.selected.as_ref());
-                let usable = picked.is_some_and(|p| p.unavailable.is_none());
+            });
+            if let Some(e) = &q.error {
+                super::dialog::warn(ui, e.clone());
+            }
+            let busy = self.export.starting.is_some();
+            let usable = picked.is_some_and(|p| p.unavailable.is_none());
+            super::dialog::footer(ui, |ui| {
+                export = super::dialog::main_button(ui, "Export…", !busy && usable);
+                cancel = ui.button("Cancel").clicked();
                 match picked {
                     None => super::dialog::why(ui, "Pick a preset"),
                     Some(p) if p.unavailable.is_some() => {
@@ -732,13 +726,11 @@ impl Workspace {
                     }
                     _ => {}
                 }
-                if ui
-                    .add_enabled(!busy && usable, egui::Button::new("Export…"))
-                    .clicked()
-                {
-                    export = true;
-                }
             });
+        });
+        if cancel {
+            open = false;
+        }
         if export && let Some(name) = q.selected.clone() {
             let ext = presets
                 .iter()
@@ -843,27 +835,21 @@ impl Workspace {
         let mut open = true;
         let mut start = false;
         let mut browse = false;
-        egui::Window::new("Export")
-            .collapsible(false)
-            .resizable(true)
-            .default_width(600.0)
-            .default_pos(near_center(ctx, 600.0, 640.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(ctx.content_rect().height() * 0.7)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let label = ui.label("Preset");
+        let mut cancel = false;
+        let mut save = false;
+        super::dialog::window_of(ctx, "Export", &mut open, 600.0, |ui| {
+            egui::ScrollArea::vertical()
+                .max_height(ctx.content_rect().height() * 0.7)
+                .show(ui, |ui| {
+                    super::dialog::form(ui, "export-form", |ui| {
+                        super::dialog::row(ui, "Preset", |ui| {
                             let title = presets
                                 .iter()
                                 .find(|p| p.name == d.preset)
                                 .map_or(d.preset.clone(), |p| p.title.clone());
-                            let edited = d.settings != d.base;
-                            let shown = if edited {
-                                format!("{title} (changed)")
-                            } else {
-                                title
+                            let shown = match d.settings != d.base {
+                                true => format!("{title} (changed)"),
+                                false => title,
                             };
                             egui::ComboBox::from_id_salt("export-preset")
                                 .selected_text(shown)
@@ -887,19 +873,7 @@ impl Workspace {
                                             d.use_preset(p);
                                         }
                                     }
-                                })
-                                .response
-                                .labelled_by(label.id);
-                            if ui.button("Save as Preset…").clicked() {
-                                d.save = Some(SavePreset {
-                                    name: String::new(),
-                                    title: String::new(),
-                                    quick_export: false,
-                                    overwrite: false,
-                                    ask: None,
-                                    error: None,
                                 });
-                            }
                             let user = presets.iter().any(|p| p.name == d.preset && p.user);
                             if user && ui.button("Delete Preset").clicked() {
                                 self.send("presets.delete", json!({ "name": d.preset }));
@@ -907,32 +881,27 @@ impl Workspace {
                                     Some(Ask::send(&self.live, ctx, "presets.list", json!({})));
                             }
                         });
-                        self.save_preset_form(ui, ctx, &mut d);
-                        ui.separator();
-                        let can = &self.export.encodable;
-                        settings_form(ui, &mut d, can, (width, height), (rate, channels));
-                        ui.separator();
-                        if !subtitle_tracks.is_empty() {
-                            subtitles_form(ui, &mut d, &subtitle_tracks);
-                            ui.separator();
-                        }
-                        ui.horizontal(|ui| {
-                            ui.label("Range");
-                            ui.radio_value(&mut d.range, RangeChoice::All, "Whole timeline");
-                            let label = match (in_out.mark_in, in_out.mark_out) {
-                                (Some(a), Some(b)) => {
-                                    format!("In–Out ({} – {})", self.tc(a), self.tc(b))
-                                }
-                                _ => "In–Out (not set)".into(),
-                            };
-                            ui.add_enabled_ui(marks, |ui| {
-                                ui.radio_value(&mut d.range, RangeChoice::InOut, label);
+                        super::dialog::row(ui, "Range", |ui| {
+                            super::dialog::switch(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut d.range,
+                                    RangeChoice::All,
+                                    "Whole Timeline",
+                                );
+                                ui.add_enabled_ui(marks, |ui| {
+                                    ui.selectable_value(&mut d.range, RangeChoice::InOut, "In–Out");
+                                });
+                                ui.selectable_value(&mut d.range, RangeChoice::Custom, "Custom");
                             });
-                            ui.radio_value(&mut d.range, RangeChoice::Custom, "Custom");
+                            match (in_out.mark_in, in_out.mark_out) {
+                                (Some(a), Some(b)) => {
+                                    ui.label(dim(format!("{} – {}", self.tc(a), self.tc(b))));
+                                }
+                                _ => super::dialog::why(ui, "no In and Out marked"),
+                            }
                         });
                         if d.range == RangeChoice::Custom {
-                            ui.horizontal(|ui| {
-                                ui.label(dim("from"));
+                            super::dialog::row(ui, "From", |ui| {
                                 ui.add(
                                     egui::TextEdit::singleline(&mut d.from)
                                         .hint_text("00:00:00:00")
@@ -944,15 +913,15 @@ impl Workspace {
                                         .hint_text("00:01:00:00")
                                         .desired_width(110.0),
                                 );
-                                ui.label(dim("(to is excluded; 15s, 450f also work)"));
+                                ui.label(dim("its frame left out"));
                             });
                         }
-                        ui.separator();
-                        ui.horizontal(|ui| {
-                            ui.label("Output");
+                        super::dialog::row(ui, "Output", |ui| {
                             let before = d.per_clip;
-                            ui.radio_value(&mut d.per_clip, false, "One file");
-                            ui.radio_value(&mut d.per_clip, true, "One file per clip");
+                            super::dialog::switch(ui, |ui| {
+                                ui.selectable_value(&mut d.per_clip, false, "One File");
+                                ui.selectable_value(&mut d.per_clip, true, "One File per Clip");
+                            });
                             if d.per_clip != before {
                                 let path = PathBuf::from(d.output.trim());
                                 d.output = if d.per_clip {
@@ -964,10 +933,9 @@ impl Workspace {
                                 };
                             }
                         });
-                        ui.horizontal(|ui| {
-                            ui.label(if d.per_clip { "Folder" } else { "File" });
+                        super::dialog::row(ui, if d.per_clip { "Folder" } else { "File" }, |ui| {
                             let r = ui.add(
-                                egui::TextEdit::singleline(&mut d.output).desired_width(380.0),
+                                egui::TextEdit::singleline(&mut d.output).desired_width(360.0),
                             );
                             if r.lost_focus()
                                 && !d.per_clip
@@ -988,8 +956,7 @@ impl Workspace {
                             }
                         });
                         if d.per_clip {
-                            ui.horizontal(|ui| {
-                                ui.label("Names");
+                            super::dialog::row(ui, "Names", |ui| {
                                 ui.add(
                                     egui::TextEdit::singleline(&mut d.template)
                                         .desired_width(200.0),
@@ -997,12 +964,20 @@ impl Workspace {
                                 ui.label(dim("{index}, {index:03}, {name}, {clip}, {media}"));
                             });
                         }
-                        ui.checkbox(&mut d.overwrite, "Replace existing files");
-                        ui.separator();
-                        if let Some(set) = plan_view(ui, &d) {
-                            keep_hdr(&mut d, &set);
-                        }
-                        ui.separator();
+                        super::dialog::row(ui, "Replace Files", |ui| {
+                            ui.checkbox(&mut d.overwrite, "");
+                        });
+                    });
+                    if !subtitle_tracks.is_empty() {
+                        subtitles_form(ui, &mut d, &subtitle_tracks);
+                    }
+                    self.save_preset_form(ui, ctx, &mut d);
+                    if let Some(set) = plan_view(ui, &d) {
+                        keep_hdr(&mut d, &set);
+                    }
+                    super::dialog::advanced(ui, "export-advanced", false, |ui| {
+                        let can = &self.export.encodable;
+                        settings_form(ui, &mut d, can, (width, height), (rate, channels));
                         let params = d.params();
                         if let Some(project) = &project {
                             let cmd = command(project, &params);
@@ -1017,27 +992,37 @@ impl Workspace {
                             );
                         }
                     });
-                ui.separator();
-                if let Some(e) = &d.error {
-                    ui.label(RichText::new(e).color(theme::colors().error));
-                }
-                ui.horizontal(|ui| {
-                    let ready = matches!(d.plan_result, Some(Ok(_)))
-                        && d.planned.as_ref() == Some(&d.params())
-                        && self.export.starting.is_none();
-                    if ui
-                        .add_enabled(ready, egui::Button::new("Start Export"))
-                        .clicked()
-                    {
-                        start = true;
-                    }
-                    match &d.plan_result {
-                        _ if ready || self.export.starting.is_some() => {}
-                        Some(Err(_)) => super::dialog::why(ui, "the settings above can't export"),
-                        _ => super::dialog::why(ui, "checking the settings…"),
-                    }
                 });
+            if let Some(e) = &d.error {
+                super::dialog::warn(ui, e.clone());
+            }
+            let ready = matches!(d.plan_result, Some(Ok(_)))
+                && d.planned.as_ref() == Some(&d.params())
+                && self.export.starting.is_none();
+            super::dialog::footer(ui, |ui| {
+                start = super::dialog::main_button(ui, "Start Export", ready);
+                cancel = ui.button("Cancel").clicked();
+                save = ui.button("Save as Preset…").clicked();
+                match &d.plan_result {
+                    _ if ready || self.export.starting.is_some() => {}
+                    Some(Err(_)) => super::dialog::why(ui, "the settings above can't export"),
+                    _ => super::dialog::why(ui, "checking the settings…"),
+                }
             });
+        });
+        if cancel {
+            open = false;
+        }
+        if save {
+            d.save = Some(SavePreset {
+                name: String::new(),
+                title: String::new(),
+                quick_export: false,
+                overwrite: false,
+                ask: None,
+                error: None,
+            });
+        }
         if browse {
             let (dialogs, folder) = (self.dialogs.clone(), self.export_folder());
             let per_clip = d.per_clip;
@@ -1335,16 +1320,17 @@ impl Workspace {
     fn otio_windows(&mut self, ctx: &egui::Context) {
         if let Some((name, warnings)) = self.export.warnings.clone() {
             let mut open = true;
-            egui::Window::new("Imported With Warnings")
-                .collapsible(false)
-                .open(&mut open)
-                .show(ctx, |ui| {
-                    ui.label(format!("{name} was imported, except:"));
-                    for w in &warnings {
-                        ui.label(format!("• {w}"));
-                    }
+            let mut close = false;
+            super::dialog::window(ctx, "Imported With Warnings", &mut open, |ui| {
+                ui.label(format!("{name} was imported, except:"));
+                for w in &warnings {
+                    super::dialog::warn(ui, w.clone());
+                }
+                super::dialog::footer(ui, |ui| {
+                    close = super::dialog::main_button(ui, "Close", true);
                 });
-            if !open {
+            });
+            if !open || close {
                 self.export.warnings = None;
             }
         }
