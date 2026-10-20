@@ -25,10 +25,14 @@ const PTX: &str = r#"
 	.param .u32 p_height,
 	.param .u32 p_bytes,
 	.param .u32 p_shift,
-	.param .u32 p_top
+	.param .u32 p_top,
+	.param .u32 p_x0,
+	.param .u32 p_y0,
+	.param .u32 p_x1,
+	.param .u32 p_y1
 )
 {
-	.reg .pred %p<4>;
+	.reg .pred %p<8>;
 	.reg .b32 %r<16>;
 	.reg .b64 %rd<16>;
 	.reg .f32 %f<8>;
@@ -60,6 +64,20 @@ const PTX: &str = r#"
 	add.s64 %rd5, %rd5, %rd1;
 	@%p3 ld.global.u8 %r10, [%rd5];
 	@!%p3 ld.global.u16 %r10, [%rd5];
+	mov.u32 %r14, %r10;
+
+	ld.param.u32 %r15, [p_x0];
+	setp.lt.u32 %p4, %r4, %r15;
+	ld.param.u32 %r15, [p_x1];
+	setp.ge.u32 %p5, %r4, %r15;
+	or.pred %p4, %p4, %p5;
+	ld.param.u32 %r15, [p_y0];
+	setp.lt.u32 %p5, %r5, %r15;
+	or.pred %p4, %p4, %p5;
+	ld.param.u32 %r15, [p_y1];
+	setp.ge.u32 %p5, %r5, %r15;
+	or.pred %p4, %p4, %p5;
+	@%p4 bra $L_store;
 
 	ld.param.u64 %rd6, [p_color];
 	ld.param.u64 %rd7, [p_color_pitch];
@@ -89,6 +107,7 @@ const PTX: &str = r#"
 	cvt.rni.u32.f32 %r14, %f6;
 	shl.b32 %r14, %r14, %r9;
 
+$L_store:
 	ld.param.u64 %rd12, [p_out];
 	ld.param.u64 %rd13, [p_out_pitch];
 	mad.lo.s64 %rd14, %rd2, %rd13, %rd12;
@@ -138,6 +157,29 @@ fn kernel(cuda: &Cuda, ctx: CuContext) -> Result<*mut c_void> {
 pub(crate) struct Overlay {
     color: frame::Video,
     alpha: frame::Video,
+    area: (u32, u32, u32, u32),
+}
+
+fn pool_frame(frames: &CudaFrames) -> Result<frame::Video> {
+    let mut f = frame::Video::empty();
+    // SAFETY: a frame of the pool, its planes in CUDA memory.
+    let ret = unsafe { ffi::av_hwframe_get_buffer(frames.as_ptr(), f.as_mut_ptr(), 0) };
+    if ret < 0 {
+        return Err(Error::Ffmpeg {
+            context: "getting a GPU frame".into(),
+            source: crate::ffmpeg::Error::from(ret),
+        });
+    }
+    Ok(f)
+}
+
+fn two_planes(sw: crate::ffmpeg::format::Pixel) -> Result<()> {
+    match sw {
+        crate::ffmpeg::format::Pixel::NV12 | crate::ffmpeg::format::Pixel::P010LE => Ok(()),
+        _ => Err(Error::Invalid(format!(
+            "the GPU draws subtitles into NV12 and P010 pictures, not {sw:?}"
+        ))),
+    }
 }
 
 impl Overlay {
@@ -147,12 +189,62 @@ impl Overlay {
         sprites: &[crate::burn::Sprite],
         shift: crate::burn::Placing,
     ) -> Result<Self> {
+        let cuda = Cuda::get()?;
         // SAFETY: the pool is a live CUDA frames context.
-        let sw = unsafe { (*((*frames.as_ptr()).data as *const ffi::AVHWFramesContext)).sw_format };
-        let (color, alpha) = crate::burn::overlay(sw.into(), like, sprites, shift)?;
+        let (sw, (ctx, stream)) = unsafe {
+            let fc = &*((*frames.as_ptr()).data as *const ffi::AVHWFramesContext);
+            (
+                crate::ffmpeg::format::Pixel::from(fc.sw_format),
+                cuda_context(fc.device_ref),
+            )
+        };
+        two_planes(sw)?;
+        let samples = Samples::of(sw)?;
+        let (color, alpha) = (pool_frame(frames)?, pool_frame(frames)?);
+        let size = (like.width(), like.height());
+        let Some(area) = crate::burn::bounds(sprites, shift, size) else {
+            return Ok(Self {
+                color,
+                alpha,
+                area: (0, 0, 0, 0),
+            });
+        };
+        let (x0, y0, w, h) = area;
+        let (up_color, up_alpha) = crate::burn::overlay(sw, like, sprites, shift, area)?;
+        let from = samples.row_bytes(x0 as u32);
+        let rows = samples.row_bytes(w);
+        in_context(cuda, ctx, || {
+            for (host, device) in [(&up_color, &color), (&up_alpha, &alpha)] {
+                for p in 0..2 {
+                    let (y, n) = match p {
+                        0 => (y0 as usize, h as usize),
+                        _ => (y0 as usize / 2, (h as usize).div_ceil(2)),
+                    };
+                    // SAFETY: a CUDA frame's planes are device pointers.
+                    let (to, to_pitch) = unsafe {
+                        let d = &*device.as_ptr();
+                        (d.data[p] as u64, d.linesize[p] as usize)
+                    };
+                    // SAFETY: both planes, of one format, hold the area's rows at their strides.
+                    check("copying subtitles to the GPU", unsafe {
+                        cuda.copy_up(
+                            (host.data(p).as_ptr(), host.stride(p)),
+                            (to, to_pitch),
+                            (from[p], y),
+                            (rows[p], n),
+                            stream,
+                        )
+                    })?;
+                }
+            }
+            Ok(())
+        })?;
+        crate::copies::up(&up_color);
+        crate::copies::up(&up_alpha);
         Ok(Self {
-            color: frames.upload(&color)?,
-            alpha: frames.upload(&alpha)?,
+            color,
+            alpha,
+            area: (x0 as u32, y0 as u32, w, h),
         })
     }
 }
@@ -170,24 +262,9 @@ pub(crate) fn burn(
         (fc, cuda_context(fc.device_ref))
     };
     let sw: crate::ffmpeg::format::Pixel = fc.sw_format.into();
-    if !matches!(
-        sw,
-        crate::ffmpeg::format::Pixel::NV12 | crate::ffmpeg::format::Pixel::P010LE
-    ) {
-        return Err(Error::Invalid(format!(
-            "the GPU draws subtitles into NV12 and P010 pictures, not {sw:?}"
-        )));
-    }
+    two_planes(sw)?;
     let samples = Samples::of(sw)?;
-    let mut out = frame::Video::empty();
-    // SAFETY: a frame of the pool, its planes in CUDA memory.
-    let ret = unsafe { ffi::av_hwframe_get_buffer(frames.as_ptr(), out.as_mut_ptr(), 0) };
-    if ret < 0 {
-        return Err(Error::Ffmpeg {
-            context: "getting a GPU frame".into(),
-            source: crate::ffmpeg::Error::from(ret),
-        });
-    }
+    let mut out = pool_frame(frames)?;
     let function = kernel(cuda, ctx)?;
     let (w, h) = match (u32::try_from(fc.width), u32::try_from(fc.height)) {
         (Ok(w), Ok(h)) => (w, h),
@@ -200,6 +277,8 @@ pub(crate) fn burn(
     };
     let deep = samples.bytes == 2;
     let rows = samples.row_bytes(w);
+    let (ax, ay, aw, ah) = over.area;
+    let (left, right) = (samples.row_bytes(ax), samples.row_bytes(ax + aw));
     in_context(cuda, ctx, || {
         for (p, rows_down) in [(0usize, h), (1, h.div_ceil(2))] {
             let plane = |f: &frame::Video| -> Result<(u64, u64)> {
@@ -219,7 +298,13 @@ pub(crate) fn burn(
             let mut bytes = samples.bytes as u32;
             let mut shift = samples.shift;
             let mut top: u32 = if deep { 1023 } else { 255 };
-            let mut params: [*mut c_void; 13] = [
+            let mut x0 = (left[p] / samples.bytes) as u32;
+            let mut x1 = (right[p] / samples.bytes) as u32;
+            let (mut y0, mut y1) = match p {
+                0 => (ay, ay + ah),
+                _ => (ay / 2, ay / 2 + ah.div_ceil(2)),
+            };
+            let mut params: [*mut c_void; 17] = [
                 (&raw mut o).cast(),
                 (&raw mut o_pitch).cast(),
                 (&raw mut u).cast(),
@@ -233,8 +318,12 @@ pub(crate) fn burn(
                 (&raw mut bytes).cast(),
                 (&raw mut shift).cast(),
                 (&raw mut top).cast(),
+                (&raw mut x0).cast(),
+                (&raw mut y0).cast(),
+                (&raw mut x1).cast(),
+                (&raw mut y1).cast(),
             ];
-            // SAFETY: the context is current; `params` holds the kernel's 13 parameters, in order.
+            // SAFETY: the context is current; `params` holds the kernel's 17 parameters, in order.
             check("drawing subtitles", unsafe {
                 (cuda.launch_kernel)(
                     function,

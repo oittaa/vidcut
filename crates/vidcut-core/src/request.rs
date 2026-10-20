@@ -834,7 +834,12 @@ pub enum Request {
         /// height, from 0 to 1/10 (`0` draws none). `background` is a color
         /// and an `opacity` from 0 to 1. `margin` is the inset from the
         /// left and right, and from the top or bottom, as a fraction of the
-        /// picture (from 0 up to but not including 1/2).
+        /// picture (from 0 up to but not including 1/2). `bold` takes the
+        /// font's bold face; `case` draws every letter `upper` or `lower`.
+        /// `shadow` is a title's drop shadow. `words` shows the words as
+        /// they are spoken, by the cues' word times: `show` (`highlight`,
+        /// `reveal` or `word`), the spoken word's `color`, and its `pop`,
+        /// how large it starts, from 1 to 2.
         #[serde(default)]
         style: Option<SubtitleStyle>,
     },
@@ -941,9 +946,19 @@ pub enum Request {
         track: Option<String>,
         #[serde(default)]
         place: Option<Place>,
+        /// The frame each word of `text` starts on, counted from the cue's
+        /// start, in order: one for each word, words being parted by spaces
+        /// and line breaks.
+        #[serde(default)]
+        words: Option<Vec<i64>>,
     },
     /// Change a cue (`q3`, or `S1@15s` for the cue on S1 at 15 s): its text,
-    /// its start or end (each moves that edge alone), or where it shows.
+    /// its start or end (each moves that edge alone), where it shows, or its
+    /// words' times. Moving an edge keeps each word on its frame. New text
+    /// with as many words keeps their times; with another number of words,
+    /// they are read again from the words kept for the clips' files under
+    /// it, as `subtitles.time_words` reads them, else spread over the cue by
+    /// their characters.
     #[serde(rename = "subtitles.set")]
     SubtitlesSet {
         cue: String,
@@ -955,6 +970,10 @@ pub enum Request {
         end: Option<TimeSpec>,
         #[serde(default)]
         place: Option<Place>,
+        /// The frame each word starts on, counted from the cue's start, in
+        /// order: one for each word of its text. `[]` clears them.
+        #[serde(default)]
+        words: Option<Vec<i64>>,
     },
     /// Move cues by `by` (`+12f`, `-1s`) or so the first starts at `to`; with
     /// `track`, onto that subtitle track.
@@ -1061,16 +1080,23 @@ pub enum Request {
         /// model tells it from the longest stretch of speech.
         #[serde(default)]
         language: Option<String>,
-        /// The subtitle track for the cues. Default: the highest one, or a
-        /// new one when there is none.
+        /// The subtitle track for the cues. Default: a new one with `look`,
+        /// else the highest one, or a new one when there is none.
         #[serde(default)]
         track: Option<String>,
-        /// Characters per line, 1 to 60.
-        #[serde(default = "chars_per_line")]
-        chars: u32,
-        /// Lines per cue: 1 or 2.
-        #[serde(default = "one_line")]
-        lines: u32,
+        /// A look for the track, which sets its style and the usual
+        /// `chars` and `lines`: `pop`, the spoken word yellow and popping,
+        /// in bold capitals, 20 characters on one line; `highlight`, the
+        /// spoken word yellow; `reveal`, each word shown as it is spoken;
+        /// `word`, only the spoken word, large; `plain`, the usual style.
+        #[serde(default)]
+        look: Option<SubtitleLook>,
+        /// Characters per line, 1 to 60. Default: `look`'s, else 42.
+        #[serde(default)]
+        chars: Option<u32>,
+        /// Lines per cue: 1 or 2. Default: `look`'s, else 1.
+        #[serde(default)]
+        lines: Option<u32>,
         /// Frames left between a cue and the next, 0 to 10.
         #[serde(default)]
         gap: u32,
@@ -1134,6 +1160,46 @@ pub enum Request {
         /// transcribe.cpp's library and Silero VAD, and Parakeet Ultra for
         /// `words`, each checked against its SHA-256. Without it, a missing
         /// one is an error that says what would be downloaded.
+        #[serde(default)]
+        download: bool,
+    },
+    /// Synchronize Word Timings: time each word of a subtitle track's cues
+    /// to the speech. The words heard, as `subtitles.transcribe` hears them
+    /// (`hear`) with Parakeet Ultra, are matched to the cues' words in
+    /// order across the cues timed, so cues off from the speech still find
+    /// their words. A word matched starts where it is heard, kept inside its
+    /// cue; the others are spread between their matched neighbors by their
+    /// characters. The answer counts the words matched and names the cues
+    /// with none.
+    #[serde(rename = "subtitles.time_words")]
+    SubtitlesTimeWords {
+        /// Default: the shown subtitle track.
+        #[serde(default)]
+        track: Option<String>,
+        /// These cues only (`q3`, or `S1@15s`). Default: the track's cues in
+        /// `range`.
+        #[serde(default)]
+        cues: Option<OneOrMany<String>>,
+        /// Default: In–Out when both are set, else everything.
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        /// The tracks heard, such as `["A1"]`, muted or not; the others
+        /// aren't. Default: the tracks playback hears, those not muted, or
+        /// the soloed ones.
+        #[serde(default)]
+        tracks: Option<Vec<String>>,
+        /// `media` (the default), each heard clip's file's words, or `mix`,
+        /// as `subtitles.transcribe` takes it.
+        #[serde(default)]
+        hear: Option<HearFrom>,
+        /// The language spoken, as a code such as `en`. Default: the model
+        /// tells it from the longest stretch of speech.
+        #[serde(default)]
+        language: Option<String>,
+        /// Download what hearing needs if this computer doesn't have it yet:
+        /// transcribe.cpp's library, Silero VAD and Parakeet Ultra, each
+        /// checked against its SHA-256. Without it, a missing one is an
+        /// error that says what would be downloaded.
         #[serde(default)]
         download: bool,
     },
@@ -1802,6 +1868,17 @@ pub struct ExportParams {
     pub subtitle_format: Option<SubtitleFormat>,
 }
 
+/// A subtitle track's look from `subtitles.transcribe`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SubtitleLook {
+    Plain,
+    Pop,
+    Highlight,
+    Reveal,
+    Word,
+}
+
 /// How subtitle tracks go out with an export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -2132,14 +2209,6 @@ fn silence_margin() -> TimeSpec {
 
 fn silence_min() -> TimeSpec {
     TimeSpec::Seconds(0.5)
-}
-
-fn chars_per_line() -> u32 {
-    42
-}
-
-fn one_line() -> u32 {
-    1
 }
 
 fn scene_threshold() -> f64 {

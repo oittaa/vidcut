@@ -1396,6 +1396,60 @@ pub struct SubtitleStyle {
     /// at 80%, 50% or 20% of the height.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub margin: Option<f64>,
+    /// The font's bold face. Usual: its regular one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bold: Option<bool>,
+    /// Every letter drawn as a capital (`upper`) or a small letter
+    /// (`lower`), whatever the text has. Usual: as the text has them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case: Option<LetterCase>,
+    /// A soft copy of the text behind it. Usual: none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<TitleShadow>,
+    /// The words shown as they are spoken, by the cues' word times. A cue
+    /// without word times shows all at once. Usual: all at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<SubtitleWords>,
+}
+
+/// Letters drawn all as capitals or all as small letters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LetterCase {
+    Upper,
+    Lower,
+}
+
+/// How a cue's words show as they are spoken. A word is spoken from its
+/// start until the next word starts, the last one until the cue ends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct SubtitleWords {
+    /// Usual: `highlight`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<WordsShow>,
+    /// The spoken word's color: `#rrggbb`, `#rgb` or a name such as
+    /// `yellow`. Usual: `#ffd400` for `highlight`, the text's color
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// How large the spoken word starts, as a multiple of the text's size,
+    /// from 1 to 2: it eases back to the text's size within 0.2 s, about
+    /// its own middle, over the words beside it. Usual: 1, no pop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pop: Option<f64>,
+}
+
+/// Which of a cue's words show while it is spoken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum WordsShow {
+    /// Every word, the spoken one in its color.
+    #[default]
+    Highlight,
+    /// Each word from when it is spoken, the others keeping their room.
+    Reveal,
+    /// Only the spoken word.
+    Word,
 }
 
 /// An outline around a subtitle track's or a title's text.
@@ -1431,6 +1485,10 @@ impl SubtitleStyle {
             && self.outline.is_none()
             && self.background.is_none()
             && self.margin.is_none()
+            && self.bold.is_none()
+            && self.case.is_none()
+            && self.shadow.is_none()
+            && self.words.is_none()
     }
 
     pub fn text_fraction(&self) -> f64 {
@@ -1523,6 +1581,11 @@ pub struct Cue {
     /// Where it shows on the picture: the bottom unless set.
     #[serde(default, skip_serializing_if = "Place::is_bottom")]
     pub place: Place,
+    /// The frame each of its words starts on, counted from the cue's start:
+    /// one for each word of its text without the markup, words being parted
+    /// by spaces and line breaks. Empty when its words have no times.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<i64>,
 }
 
 /// Where a cue shows on the picture.

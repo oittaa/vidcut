@@ -268,6 +268,7 @@ pub(crate) enum Msg {
     Audition(Option<Audition>),
     Skip(Option<Vec<ClipSpans>>),
     PreviewTitle(Option<(String, Title)>),
+    Subtitles(Option<vidcut_av::player::SubtitleView>),
     FreeTitle(Option<FreeTitle>),
     Shutdown,
 }
@@ -327,6 +328,10 @@ impl Handle {
 
     pub fn preview_title(&self, title: Option<(String, Title)>) {
         let _ = self.tx.send(Msg::PreviewTitle(title));
+    }
+
+    pub fn show_subtitles(&self, view: Option<vidcut_av::player::SubtitleView>) {
+        let _ = self.tx.send(Msg::Subtitles(view));
     }
 
     pub fn preview_free_title(&self, title: Option<(Title, i64, f64)>) {
@@ -933,6 +938,10 @@ impl Live {
                     self.refresh_timeline();
                 }
                 self.player.preview_title(title);
+            }
+            Msg::Subtitles(view) => {
+                changed = false;
+                self.player.set_subtitles(view);
             }
             Msg::FreeTitle(title) => {
                 changed = false;
@@ -2596,11 +2605,13 @@ impl Live {
                 };
                 Step::Encode(Box::new(hear), Box::new(envelope), title.into(), kind)
             }
-            Request::SubtitlesRetime { .. } => {
+            Request::SubtitlesRetime { .. } | Request::SubtitlesTimeWords { .. } => {
                 let Some(open) = &self.project else {
                     return Step::Now(Err(no_project()));
                 };
                 let (project, path) = (open.project().clone(), open.store.path().to_path_buf());
+                let context = project.time_context(Some(self.player.position(TIMELINE)));
+                let envelope = bind_playhead(envelope, &context);
                 let copy = envelope.clone();
                 let hear = move || {
                     let env = AvEnv::for_project(&path);
@@ -2608,8 +2619,13 @@ impl Live {
                         .apply(copy, &env, None)
                         .map(drop)
                 };
-                let title = "Re-time Subtitles to Speech".to_string();
-                Step::Encode(Box::new(hear), Box::new(envelope), title, "retime")
+                let (title, kind) = match &envelope.request {
+                    Request::SubtitlesTimeWords { .. } => {
+                        ("Synchronize Word Timings", "word_times")
+                    }
+                    _ => ("Re-time Subtitles to Speech", "retime"),
+                };
+                Step::Encode(Box::new(hear), Box::new(envelope), title.into(), kind)
             }
             Request::TimelineImport {
                 path: Some(path),

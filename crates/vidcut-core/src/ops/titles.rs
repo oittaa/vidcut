@@ -85,7 +85,7 @@ pub fn checked(t: &Title) -> Result<Title> {
     })
 }
 
-fn checked_shadow(s: &TitleShadow) -> Result<TitleShadow> {
+pub(crate) fn checked_shadow(s: &TitleShadow) -> Result<TitleShadow> {
     let opacity = match s.opacity {
         Some(o) if o.is_finite() && (0.0..=1.0).contains(&o) => Some(o),
         Some(_) => return Err(Error::invalid("a shadow's opacity is from 0 to 1")),

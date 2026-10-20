@@ -517,6 +517,17 @@ impl Workspace {
             self.open_retime(track);
             ui.close();
         }
+        if ui
+            .button("Synchronize Word Timings")
+            .on_hover_text(
+                "Time each word of this track's subtitles to the speech, for words shown as \
+                 they are spoken",
+            )
+            .clicked()
+        {
+            self.time_words(track);
+            ui.close();
+        }
     }
 
     fn send_all(&self, commands: Vec<Value>, label: &str) {

@@ -36,6 +36,8 @@ pub use store::Store;
 #[cfg(test)]
 mod analysis_tests;
 #[cfg(test)]
+mod animated_subtitles_tests;
+#[cfg(test)]
 mod folder_tests;
 #[cfg(test)]
 mod history_tests;
@@ -57,3 +59,5 @@ mod tracks_tests;
 mod transcript_cut_tests;
 #[cfg(test)]
 mod versions_tests;
+#[cfg(test)]
+mod word_times_tests;

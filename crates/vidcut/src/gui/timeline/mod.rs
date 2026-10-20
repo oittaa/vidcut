@@ -221,6 +221,7 @@ pub struct TimelineView {
     pub(crate) title_grab: crate::gui::onscreen::Grab,
     pub(super) files: Option<crate::gui::subtitles::Files>,
     pub(super) retime: Option<crate::gui::retime::Retime>,
+    pub(crate) subtitles_sent: Option<crate::gui::subtitles::SubtitlesKey>,
 }
 
 impl Default for TimelineView {
@@ -264,6 +265,7 @@ impl Default for TimelineView {
             title_grab: Default::default(),
             files: None,
             retime: None,
+            subtitles_sent: None,
         }
     }
 }
@@ -1210,6 +1212,17 @@ impl Workspace {
             .clicked()
         {
             self.open_speech();
+            ui.close();
+        }
+        if ui
+            .button("Create Animated Subtitles…")
+            .on_hover_text(
+                "Subtitles from the speech, a few words at a time, the spoken word yellow and \
+                 popping",
+            )
+            .clicked()
+        {
+            self.open_animated_speech();
             ui.close();
         }
         let shown = vidcut_core::ops::subtitles::shown(p)

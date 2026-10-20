@@ -1,4 +1,5 @@
 mod languages;
+mod spoken;
 mod srt;
 mod text;
 mod ttml;
@@ -11,6 +12,7 @@ use crate::model::{Place, Settings, SubtitleStyle};
 use crate::request::SubtitleFormat;
 
 pub use languages::three_letter;
+pub use spoken::{HIGHLIGHT, POP_SECS, Piece, Shown, cased, cased_markup, pieces, shown};
 pub use text::{Encoding, Tag, Token, color, plain, rgb, tokens};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +21,7 @@ pub struct Timed {
     pub end: f64,
     pub text: String,
     pub place: Place,
+    pub words: Vec<f64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -150,6 +153,61 @@ pub fn normalize(text: &str) -> String {
         .map(String::from)
         .collect();
     self::text::render(&self::text::tokens(&lines.join("\n")))
+}
+
+pub fn words(text: &str) -> Vec<String> {
+    plain(text).split_whitespace().map(String::from).collect()
+}
+
+pub fn spread_words(text: &str, duration: i64) -> Vec<i64> {
+    let words = words(text);
+    let total: usize = words.iter().map(|w| w.chars().count() + 1).sum();
+    let mut before = 0;
+    words
+        .iter()
+        .map(|w| {
+            let at = (before as f64 / total.max(1) as f64 * duration as f64).floor() as i64;
+            before += w.chars().count() + 1;
+            at.clamp(0, (duration - 1).max(0))
+        })
+        .collect()
+}
+
+pub fn fill_times(known: &[Option<f64>], weights: &[f64], start: f64, end: f64) -> Vec<f64> {
+    let n = known.len();
+    let mut at = vec![0.0; n + 1];
+    for i in 0..n {
+        at[i + 1] = at[i] + weights.get(i).copied().unwrap_or(1.0).max(0.0);
+    }
+    let mut out: Vec<f64> = Vec::with_capacity(n);
+    let mut i = 0;
+    while i < n {
+        if let Some(t) = known[i] {
+            out.push(t);
+            i += 1;
+            continue;
+        }
+        let j = (i..n).find(|&k| known[k].is_some()).unwrap_or(n);
+        let (t0, w0) = match i.checked_sub(1) {
+            Some(b) => (out[b], at[b]),
+            None => (start, 0.0),
+        };
+        let (t1, w1) = match known.get(j).copied().flatten() {
+            Some(t) => (t, at[j]),
+            None => (end, at[n]),
+        };
+        for &w in &at[i..j] {
+            let share = if w1 > w0 { (w - w0) / (w1 - w0) } else { 0.0 };
+            out.push(t0 + share * (t1 - t0));
+        }
+        i = j;
+    }
+    let mut last = f64::MIN;
+    for t in &mut out {
+        last = t.max(last);
+        *t = last;
+    }
+    out
 }
 
 pub fn origin(settings: &Settings) -> f64 {

@@ -87,6 +87,7 @@ pub struct Made {
     pub start: i64,
     pub end: i64,
     pub text: String,
+    pub words: Vec<i64>,
 }
 
 pub fn pieces(
@@ -467,10 +468,17 @@ pub fn cues(said: &[Said], fps: Rational, layout: Layout) -> Vec<Made> {
         .filter_map(|g| {
             let (first, last) = (g.first()?, g.last()?);
             let start = fps.secs_to_frames(first.start).max(0);
+            let words = g
+                .iter()
+                .enumerate()
+                .filter(|(i, w)| *i == 0 || !w.joined)
+                .map(|(_, w)| (fps.secs_to_frames(w.start) - start).max(0))
+                .collect();
             Some(Made {
                 start,
                 end: fps.secs_to_frames(last.end).max(start + shortest),
                 text: wrap(g, chars).join("\n"),
+                words,
             })
         })
         .collect();

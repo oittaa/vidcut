@@ -187,6 +187,9 @@ pub fn violations(p: &Project) -> Vec<String> {
             if c.start < 0 {
                 v.push(format!("{}: starts before 0 ({})", c.id, c.start));
             }
+            if let Err(e) = crate::ops::subtitles::checked_words(&c.text, c.duration, &c.words) {
+                v.push(format!("{}: {}", c.id, e.message));
+            }
             if prev.is_some_and(|s| c.start < s) {
                 v.push(format!("{}: out of order on {}", c.id, t.id));
             }

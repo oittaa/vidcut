@@ -17,6 +17,7 @@ fn style() -> SubtitleStyle {
             opacity: Some(0.5),
         }),
         margin: Some(0.08),
+        ..SubtitleStyle::default()
     }
 }
 
@@ -49,6 +50,7 @@ fn a_track_style_is_stored_in_canonical_form() {
                 opacity: Some(0.5),
             }),
             margin: Some(0.08),
+            ..SubtitleStyle::default()
         }
     );
 }
@@ -130,6 +132,7 @@ fn an_imsc1_file_writes_the_track_style() {
             end: 2.5,
             text: "Hi".into(),
             place: Place::Bottom,
+            words: Vec::new(),
         }],
         SubtitleFormat::Ttml,
         &crate::subtitles::Writing {
@@ -184,18 +187,21 @@ fn a_styled_file_keeps_each_cues_place() {
                 end: 2.0,
                 text: "Bottom".into(),
                 place: Place::Bottom,
+                words: Vec::new(),
             },
             Timed {
                 start: 3.0,
                 end: 4.0,
                 text: "Middle".into(),
                 place: Place::Middle,
+                words: Vec::new(),
             },
             Timed {
                 start: 5.0,
                 end: 6.0,
                 text: "Top".into(),
                 place: Place::Top,
+                words: Vec::new(),
             },
         ],
         SubtitleFormat::Ttml,

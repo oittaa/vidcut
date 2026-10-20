@@ -232,6 +232,10 @@ pub fn describe_at(
             format!("Re-time {} to the speech", d.text("track"))
         }
         "subtitles.retime" => "Re-time subtitles to the speech".into(),
+        "subtitles.time_words" if d.params["track"].is_string() => {
+            format!("Synchronize Word Timings on {}", d.text("track"))
+        }
+        "subtitles.time_words" => "Synchronize Word Timings".into(),
         "export.start" => format!("Export {}", d.file("output")),
         "export.plan" => format!("Plan an export to {}", d.file("output")),
         "frame.render" => format!("Render the frame at {}", d.time("at")),

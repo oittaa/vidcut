@@ -697,6 +697,24 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 v["longest_piece"].as_f64().unwrap_or_default()
             );
         }
+        "subtitles.time_words" => {
+            let v = &r.result;
+            for w in v["warnings"].as_array().into_iter().flatten() {
+                eprintln!("vidcut: warning: {}", w.as_str().unwrap_or_default());
+            }
+            println!(
+                "timed {} cue(s) on {}: {} of {} word(s) matched the speech (rev {})",
+                v["cues"],
+                v["track"].as_str().unwrap_or_default(),
+                v["matched"],
+                v["words"],
+                r.rev
+            );
+            if let Some(u) = v["unmatched"].as_array().filter(|u| !u.is_empty()) {
+                let ids: Vec<&str> = u.iter().filter_map(Value::as_str).collect();
+                println!("  no word heard, spread: {}", ids.join(", "));
+            }
+        }
         "subtitles.retime" => {
             let v = &r.result;
             for w in v["warnings"].as_array().into_iter().flatten() {

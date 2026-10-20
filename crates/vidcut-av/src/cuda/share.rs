@@ -58,6 +58,7 @@ const HANDLE_TYPE: u32 = 1;
 #[cfg(windows)]
 const HANDLE_TYPE: u32 = 2;
 const DEDICATED: u32 = 1;
+const MEMORY_TYPE_HOST: u32 = 1;
 const MEMORY_TYPE_DEVICE: u32 = 2;
 const STREAM_NON_BLOCKING: u32 = 1;
 
@@ -173,6 +174,38 @@ impl Cuda {
             src_pitch: from_pitch,
             dst_x_in_bytes: 0,
             dst_y: 0,
+            dst_memory_type: MEMORY_TYPE_DEVICE,
+            dst_host: std::ptr::null_mut(),
+            dst_device: to,
+            dst_array: std::ptr::null_mut(),
+            dst_pitch: to_pitch,
+            width_in_bytes: row_bytes,
+            height: rows,
+        };
+        // SAFETY: as the caller says.
+        unsafe { (self.copy_2d)(&copy, stream) }
+    }
+}
+
+impl Cuda {
+    pub(super) unsafe fn copy_up(
+        &self,
+        (from, from_pitch): (*const u8, usize),
+        (to, to_pitch): (CuDevicePtr, usize),
+        (x_bytes, y): (usize, usize),
+        (row_bytes, rows): (usize, usize),
+        stream: CuStream,
+    ) -> CuResult {
+        let copy = Memcpy2d {
+            src_x_in_bytes: 0,
+            src_y: 0,
+            src_memory_type: MEMORY_TYPE_HOST,
+            src_host: from.cast(),
+            src_device: 0,
+            src_array: std::ptr::null_mut(),
+            src_pitch: from_pitch,
+            dst_x_in_bytes: x_bytes,
+            dst_y: y,
             dst_memory_type: MEMORY_TYPE_DEVICE,
             dst_host: std::ptr::null_mut(),
             dst_device: to,

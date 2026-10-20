@@ -412,25 +412,57 @@ pub struct VideoFrames {
 struct Burner {
     cues: Vec<super::subtitles::Cue>,
     style: SubtitleStyle,
+    fps: f64,
     frame: i64,
-    showing: Vec<usize>,
+    showing: Vec<(usize, Option<usize>, Option<i64>)>,
     size: (u32, u32),
     drawn: Drawn,
     gpu_failed: bool,
 }
 
+type OnGpu = Option<(crate::cuda::burn::Overlay, crate::burn::Placing)>;
+
 #[derive(Default)]
 struct Drawn {
     sprites: Vec<crate::burn::Sprite>,
-    on_gpu: Option<(crate::cuda::burn::Overlay, crate::burn::Placing)>,
+    on_gpu: OnGpu,
+    pops: Vec<crate::burn::Sprite>,
+    pops_on_gpu: OnGpu,
+}
+
+fn overlaid(
+    kept: &mut OnGpu,
+    frames: &crate::cuda::CudaFrames,
+    f: &frame::Video,
+    sprites: &[crate::burn::Sprite],
+    shift: crate::burn::Placing,
+) -> Result<frame::Video> {
+    if kept.as_ref().is_none_or(|(_, at)| *at != shift) {
+        let overlay = crate::cuda::burn::Overlay::new(frames, f, sprites, shift)?;
+        *kept = Some((overlay, shift));
+    }
+    crate::cuda::burn::burn(frames, f, &kept.as_ref().expect("made").0)
 }
 
 impl Drawn {
     fn of(sprites: Vec<crate::burn::Sprite>) -> Self {
         Self {
             sprites,
-            on_gpu: None,
+            ..Self::default()
         }
+    }
+
+    fn drawing(d: crate::burn::Drawing) -> Self {
+        Self {
+            sprites: d.lines,
+            pops: d.pops,
+            ..Self::default()
+        }
+    }
+
+    fn pops(&mut self, pops: Vec<crate::burn::Sprite>) {
+        self.pops = pops;
+        self.pops_on_gpu = None;
     }
 
     fn over(
@@ -441,13 +473,14 @@ impl Drawn {
         what: &str,
         shift: crate::burn::Placing,
     ) -> Result<frame::Video> {
-        if self.sprites.is_empty() || shift.1 <= 0.0 {
+        if (self.sprites.is_empty() && self.pops.is_empty()) || shift.1 <= 0.0 {
             return Ok(f);
         }
         match (Place::of(&f), output) {
             (Place::Memory, _) => {
                 let mut f = f;
                 crate::burn::blend_at(&mut f, &self.sprites, shift)?;
+                crate::burn::blend_at(&mut f, &self.pops, shift)?;
                 Ok(f)
             }
             (Place::Cuda, Output::Cuda { frames, .. }) if !*gpu_failed => {
@@ -474,11 +507,11 @@ impl Drawn {
         f: &frame::Video,
         shift: crate::burn::Placing,
     ) -> Result<frame::Video> {
-        if self.on_gpu.as_ref().is_none_or(|(_, at)| *at != shift) {
-            let overlay = crate::cuda::burn::Overlay::new(frames, f, &self.sprites, shift)?;
-            self.on_gpu = Some((overlay, shift));
+        let lined = overlaid(&mut self.on_gpu, frames, f, &self.sprites, shift)?;
+        match self.pops.is_empty() {
+            true => Ok(lined),
+            false => overlaid(&mut self.pops_on_gpu, frames, &lined, &self.pops, shift),
         }
-        crate::cuda::burn::burn(frames, f, &self.on_gpu.as_ref().expect("made").0)
     }
 
     fn in_memory(
@@ -489,6 +522,7 @@ impl Drawn {
     ) -> Result<frame::Video> {
         let mut m = crate::hw::download(f)?;
         crate::burn::blend_at(&mut m, &self.sprites, shift)?;
+        crate::burn::blend_at(&mut m, &self.pops, shift)?;
         match up {
             Some(frames) => frames.upload(&m),
             None => Ok(m),
@@ -500,23 +534,43 @@ impl Burner {
     fn burn(&mut self, f: frame::Video, output: &Output) -> Result<frame::Video> {
         let j = self.frame;
         self.frame += 1;
-        let showing: Vec<usize> = self
+        let shown: Vec<(usize, vidcut_core::subtitles::Shown)> = self
             .cues
             .iter()
             .enumerate()
             .filter(|(_, c)| c.start <= j && j < c.end)
-            .map(|(i, _)| i)
+            .map(|(i, c)| {
+                let s = vidcut_core::subtitles::shown(
+                    &c.text,
+                    &c.words,
+                    &self.style,
+                    j - c.start,
+                    self.fps,
+                );
+                (i, s)
+            })
             .collect();
-        if showing.is_empty() {
+        if shown.is_empty() {
             return Ok(f);
         }
+        let showing: Vec<(usize, Option<usize>, Option<i64>)> =
+            shown.iter().map(|(i, s)| (*i, s.spoken, s.step)).collect();
         let size = (f.width(), f.height());
         if showing != self.showing || size != self.size {
-            let cues: Vec<(&str, vidcut_core::model::Place)> = showing
+            let cues: Vec<(&vidcut_core::subtitles::Shown, vidcut_core::model::Place)> = shown
                 .iter()
-                .map(|&i| (self.cues[i].text.as_str(), self.cues[i].place))
+                .map(|(i, s)| (s, self.cues[*i].place))
                 .collect();
-            self.drawn = Drawn::of(crate::burn::draw(&cues, size.0, size.1, &self.style));
+            let drawing = crate::burn::draw(&cues, size.0, size.1, &self.style);
+            let steady = |s: &[(usize, Option<usize>, Option<i64>)]| -> Vec<_> {
+                s.iter()
+                    .map(|&(i, w, step)| (i, w, step.is_some()))
+                    .collect()
+            };
+            match size == self.size && steady(&showing) == steady(&self.showing) {
+                true => self.drawn.pops(drawing.pops),
+                false => self.drawn = Drawn::drawing(drawing),
+            }
             self.showing = showing;
             self.size = size;
         }
@@ -629,6 +683,7 @@ impl VideoFrames {
         self.burn = (!cues.is_empty()).then(|| Burner {
             cues,
             style,
+            fps: self.fps.as_f64(),
             frame: 0,
             showing: Vec::new(),
             size: (0, 0),

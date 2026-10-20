@@ -7,7 +7,7 @@ use cosmic_text::{
 use vidcut_core::model::{
     Place, SubtitleStyle, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle,
 };
-use vidcut_core::subtitles::{Tag, Token, rgb, tokens};
+use vidcut_core::subtitles::{Piece, Shown, rgb};
 
 use crate::error::{Error, Result};
 use crate::ffmpeg::{ffi, format, frame};
@@ -102,42 +102,38 @@ fn unit([r, g, b]: [u8; 3], a: f32) -> [f32; 4] {
     ]
 }
 
-fn spans<'a>(text: &str, family: Family<'a>, ink: Color) -> Vec<(String, Attrs<'a>)> {
-    let base = Attrs::new().family(family).color(ink);
-    let (mut italic, mut bold, mut under) = (0u32, 0u32, 0u32);
-    let mut colors: Vec<Color> = Vec::new();
-    let mut out = Vec::new();
-    for t in tokens(text) {
-        match t {
-            Token::Text(s) => {
-                let mut a = base.clone();
-                if italic > 0 {
-                    a = a.style(Style::Italic);
-                }
-                if bold > 0 {
-                    a = a.weight(Weight::BOLD);
-                }
-                if under > 0 {
-                    a = a.underline(UnderlineStyle::Single);
-                }
-                if let Some(c) = colors.last() {
-                    a = a.color(*c);
-                }
-                out.push((s, a));
+const HIDDEN: usize = 1;
+const POPPED: usize = 2;
+
+fn spans<'a>(
+    pieces: &[Piece],
+    family: Family<'a>,
+    ink: Color,
+    bold: bool,
+) -> Vec<(String, Attrs<'a>)> {
+    pieces
+        .iter()
+        .map(|p| {
+            let mut a = Attrs::new()
+                .family(family)
+                .color(p.color.as_deref().and_then(rgb).map_or(ink, color));
+            if p.italic {
+                a = a.style(Style::Italic);
             }
-            Token::Open(Tag::I) => italic += 1,
-            Token::Open(Tag::B) => bold += 1,
-            Token::Open(Tag::U) => under += 1,
-            Token::Open(Tag::Color(hex)) => colors.push(rgb(&hex).map_or(ink, color)),
-            Token::Close(Tag::I) => italic = italic.saturating_sub(1),
-            Token::Close(Tag::B) => bold = bold.saturating_sub(1),
-            Token::Close(Tag::U) => under = under.saturating_sub(1),
-            Token::Close(Tag::Color(_)) => {
-                colors.pop();
+            if p.bold || bold {
+                a = a.weight(Weight::BOLD);
             }
-        }
-    }
-    out
+            if p.underline {
+                a = a.underline(UnderlineStyle::Single);
+            }
+            if p.hidden || p.popped {
+                a = a
+                    .color(Color::rgba(0, 0, 0, 0))
+                    .metadata(HIDDEN | if p.popped { POPPED } else { 0 });
+            }
+            (p.text.clone(), a)
+        })
+        .collect()
 }
 
 fn dilate(alpha: &[f32], w: usize, h: usize, radius: f32) -> Vec<f32> {
@@ -196,13 +192,54 @@ struct Look<'a> {
     backing: Option<([u8; 3], f64)>,
     shadow: Option<Shade>,
     boxed: bool,
-    markup: Markup,
+    markup: Markup<'a>,
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Markup {
-    Cues,
-    Title(f32),
+enum Markup<'a> {
+    Pieces(&'a [Piece], bool),
+    Title(&'a str, f32),
+}
+
+#[derive(Clone)]
+struct Laid {
+    sprite: Sprite,
+    lines: f32,
+    popped: Option<(f32, f32)>,
+}
+
+#[derive(PartialEq)]
+struct Line {
+    pieces: Vec<Piece>,
+    place: Place,
+    size: (u32, u32),
+    style: SubtitleStyle,
+}
+
+const LINES: usize = 8;
+
+fn lines() -> &'static Mutex<Vec<(Line, Laid)>> {
+    static LINES_KEPT: OnceLock<Mutex<Vec<(Line, Laid)>>> = OnceLock::new();
+    LINES_KEPT.get_or_init(Mutex::default)
+}
+
+fn laid_line(line: Line, look: &Look) -> Option<Laid> {
+    {
+        let mut kept = lines().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(i) = kept.iter().position(|(l, _)| *l == line) {
+            let entry = kept.remove(i);
+            let laid = entry.1.clone();
+            kept.push(entry);
+            return Some(laid);
+        }
+    }
+    let laid = lay_out(look)?;
+    let mut kept = lines().lock().unwrap_or_else(|e| e.into_inner());
+    if kept.len() >= LINES {
+        kept.remove(0);
+    }
+    kept.push((line, laid.clone()));
+    Some(laid)
 }
 
 fn installed(f: &Fonts, name: &str) -> Option<String> {
@@ -220,6 +257,16 @@ struct Shade {
     opacity: f32,
     shift: (i32, i32),
     sigma: f32,
+}
+
+fn shade(s: &TitleShadow, w: f64, h: f64) -> Shade {
+    let [dx, dy] = s.shift();
+    Shade {
+        ink: s.ink(),
+        opacity: s.alpha() as f32,
+        shift: ((dx * w).round() as i32, (dy * h).round() as i32),
+        sigma: (s.softness() * h / TitleShadow::BLUR_PER_PICTURE) as f32,
+    }
 }
 
 fn radii(sigma: f32) -> [usize; 3] {
@@ -324,7 +371,7 @@ impl cosmic_text::Renderer for Bars {
 fn traces(buffer: &Buffer, f: &mut Fonts) -> Option<Vec<Traced>> {
     let mut bars = Bars(Vec::new());
     for run in buffer.layout_runs() {
-        for g in run.glyphs {
+        for g in run.glyphs.iter().filter(|g| g.metadata & HIDDEN == 0) {
             let p = g.physical((0., run.line_y), 1.0);
             let path = f.cache.get_outline_commands(&mut f.system, p.cache_key)?;
             bars.0.push(Traced {
@@ -375,7 +422,7 @@ fn stroked(traces: &[Traced], width: f32, into: &mut [f32], w: usize, (left, top
     }
 }
 
-fn lay_out(text: &str, look: &Look) -> Option<(Sprite, f32)> {
+fn lay_out(look: &Look) -> Option<Laid> {
     let size = look.size;
     let wrap = look.wrap;
     let mut held = fonts().lock().unwrap_or_else(|e| e.into_inner());
@@ -392,16 +439,16 @@ fn lay_out(text: &str, look: &Look) -> Option<(Sprite, f32)> {
         None => Family::SansSerif,
     };
     let runs = match look.markup {
-        Markup::Title(_) => vidcut_core::rich::spans(text),
-        Markup::Cues => Vec::new(),
+        Markup::Title(text, _) => vidcut_core::rich::spans(text),
+        Markup::Pieces(..) => Vec::new(),
     };
     let faces: Vec<Option<String>> = runs
         .iter()
         .map(|r| r.look.face.as_deref().and_then(|n| installed(f, n)))
         .collect();
     let spans = match look.markup {
-        Markup::Cues => spans(text, family, color(look.ink)),
-        Markup::Title(per) => runs
+        Markup::Pieces(pieces, bold) => spans(pieces, family, color(look.ink), bold),
+        Markup::Title(_, per) => runs
             .iter()
             .zip(&faces)
             .map(|(r, face)| {
@@ -436,6 +483,16 @@ fn lay_out(text: &str, look: &Look) -> Option<(Sprite, f32)> {
     if lines <= 0.0 {
         return None;
     }
+    let popped = buffer.layout_runs().find_map(|run| {
+        let (x0, x1) = run
+            .glyphs
+            .iter()
+            .filter(|g| g.metadata & POPPED != 0)
+            .fold((f32::MAX, f32::MIN), |(a, b), g| {
+                (a.min(g.x), b.max(g.x + g.w))
+            });
+        (x1 > x0).then(|| ((x0 + x1) / 2.0, run.line_top + run.line_height / 2.0))
+    });
     let stroke = look.stroke;
     let backing = look.backing;
     let outline = stroke.map_or(0.0, |(_, s)| size * s as f32);
@@ -587,8 +644,8 @@ fn lay_out(text: &str, look: &Look) -> Option<(Sprite, f32)> {
     let crop = (y0..y1)
         .flat_map(|y| rgba[y * w + x0..y * w + x1].iter().copied())
         .collect();
-    Some((
-        Sprite {
+    Some(Laid {
+        sprite: Sprite {
             x: x0 as i32 + left,
             y: y0 as i32 - pad,
             width: (x1 - x0) as u32,
@@ -596,7 +653,8 @@ fn lay_out(text: &str, look: &Look) -> Option<(Sprite, f32)> {
             rgba: crop,
         },
         lines,
-    ))
+        popped,
+    })
 }
 
 fn placed(mut sprite: Sprite, left: f32, top: f32) -> Sprite {
@@ -606,45 +664,112 @@ fn placed(mut sprite: Sprite, left: f32, top: f32) -> Sprite {
 }
 
 fn block(
-    text: &str,
+    pieces: &[Piece],
+    pop: f64,
     place: Place,
     width: u32,
     height: u32,
     style: &SubtitleStyle,
-) -> Option<Sprite> {
+) -> (Option<Sprite>, Option<Sprite>) {
+    let (w, h) = (f64::from(width), f64::from(height));
     let size = (height as f32 * style.text_fraction() as f32).max(1.0);
+    let bold = style.bold == Some(true);
     let look = Look {
         font: style.font.as_deref(),
         size,
-        wrap: (style.wrap_width(f64::from(width), f64::from(height)) as f32).max(size),
+        wrap: (style.wrap_width(w, h) as f32).max(size),
         align: Align::Center,
         ink: style.ink(),
         stroke: style.stroke(),
         backing: style.backing(),
-        shadow: None,
+        shadow: style.shadow.as_ref().map(|s| shade(s, w, h)),
         boxed: false,
-        markup: Markup::Cues,
+        markup: Markup::Pieces(pieces, bold),
     };
-    let (sprite, lines) = lay_out(text, &look)?;
-    let text_top = style.block_top(place, f64::from(height), f64::from(lines)) as f32;
-    Some(placed(sprite, (width as f32 - look.wrap) / 2.0, text_top))
+    let line = Line {
+        pieces: pieces.to_vec(),
+        place,
+        size: (width, height),
+        style: style.clone(),
+    };
+    let Some(laid) = laid_line(line, &look) else {
+        return (None, None);
+    };
+    let left = (width as f32 - look.wrap) / 2.0;
+    let top = style.block_top(place, h, f64::from(laid.lines)) as f32;
+    let drawn = placed(laid.sprite, left, top);
+    let Some((cx, cy)) = laid.popped else {
+        return (Some(drawn), None);
+    };
+    {
+        let word: Vec<Piece> = pieces
+            .iter()
+            .filter(|p| p.popped)
+            .map(|p| Piece {
+                popped: false,
+                hidden: false,
+                ..p.clone()
+            })
+            .collect();
+        let big = Look {
+            size: size * pop as f32,
+            wrap: width as f32 * 4.0,
+            backing: None,
+            markup: Markup::Pieces(&word, bold),
+            ..look
+        };
+        let popped = lay_out(&big).map(|l| {
+            placed(
+                l.sprite,
+                left + cx - big.wrap / 2.0,
+                top + cy - l.lines / 2.0,
+            )
+        });
+        (Some(drawn), popped)
+    }
 }
 
-pub fn draw(cues: &[(&str, Place)], width: u32, height: u32, style: &SubtitleStyle) -> Vec<Sprite> {
-    [Place::Top, Place::Middle, Place::Bottom]
-        .into_iter()
-        .filter_map(|place| {
-            let text: Vec<&str> = cues
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Drawing {
+    pub lines: Vec<Sprite>,
+    pub pops: Vec<Sprite>,
+}
+
+impl Drawing {
+    pub fn all(self) -> Vec<Sprite> {
+        self.lines.into_iter().chain(self.pops).collect()
+    }
+}
+
+pub fn draw(cues: &[(&Shown, Place)], width: u32, height: u32, style: &SubtitleStyle) -> Drawing {
+    let mut drawing = Drawing::default();
+    for place in [Place::Top, Place::Middle, Place::Bottom] {
+        let (line, pop) = {
+            let here: Vec<&Shown> = cues
                 .iter()
-                .filter(|(_, p)| *p == place)
-                .map(|(t, _)| *t)
+                .filter(|(s, p)| *p == place && !s.pieces.is_empty())
+                .map(|(s, _)| *s)
                 .collect();
-            if text.is_empty() {
-                return None;
+            let mut pieces: Vec<Piece> = Vec::new();
+            for (i, s) in here.iter().enumerate() {
+                if i > 0 {
+                    pieces.push(Piece {
+                        text: "\n".into(),
+                        ..Piece::default()
+                    });
+                }
+                pieces.extend(s.pieces.iter().cloned());
             }
-            block(&text.join("\n"), place, width, height, style)
-        })
-        .collect()
+            let pop = here.iter().map(|s| s.pop).fold(1.0, f64::max);
+            match pieces.is_empty() {
+                true => (None, None),
+                false => block(&pieces, pop, place, width, height, style),
+            }
+        };
+        drawing.lines.extend(line);
+        drawing.pops.extend(pop);
+    }
+    drawing
 }
 
 pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
@@ -666,19 +791,11 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
         ink: t.ink(),
         stroke: t.stroke(),
         backing: t.backing(),
-        shadow: t.style.shadow.as_ref().map(|s| {
-            let [dx, dy] = s.shift();
-            Shade {
-                ink: s.ink(),
-                opacity: s.alpha() as f32,
-                shift: ((dx * w).round() as i32, (dy * h).round() as i32),
-                sigma: (s.softness() * h / TitleShadow::BLUR_PER_PICTURE) as f32,
-            }
-        }),
+        shadow: t.style.shadow.as_ref().map(|s| shade(s, w, h)),
         boxed: true,
-        markup: Markup::Title((h * zoom) as f32),
+        markup: Markup::Title(&t.text, (h * zoom) as f32),
     };
-    let Some((sprite, lines)) = lay_out(&t.text, &look) else {
+    let Some(Laid { sprite, lines, .. }) = lay_out(&look) else {
         return Vec::new();
     };
     let [x, y] = t.place();
@@ -1073,14 +1190,33 @@ pub(crate) fn blend_at(f: &mut frame::Video, sprites: &[Sprite], shift: Placing)
     Ok(())
 }
 
+pub(crate) fn bounds(
+    sprites: &[Sprite],
+    ((dx, dy), _): Placing,
+    (w, h): (u32, u32),
+) -> Option<(i32, i32, u32, u32)> {
+    let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for s in sprites {
+        x0 = x0.min(s.x + dx);
+        y0 = y0.min(s.y + dy);
+        x1 = x1.max(s.x + dx + s.width as i32);
+        y1 = y1.max(s.y + dy + s.height as i32);
+    }
+    let (x0, y0) = (x0.max(0) & !1, y0.max(0) & !1);
+    let x1 = ((x1.saturating_add(1)) & !1).min(w as i32);
+    let y1 = ((y1.saturating_add(1)) & !1).min(h as i32);
+    (x1 > x0 && y1 > y0).then(|| (x0, y0, (x1 - x0) as u32, (y1 - y0) as u32))
+}
+
 pub(crate) fn overlay(
     pixel: format::Pixel,
     like: &frame::Video,
     sprites: &[Sprite],
-    shift: Placing,
+    ((dx, dy), level): Placing,
+    (ax, ay, w, h): (i32, i32, u32, u32),
 ) -> Result<(frame::Video, frame::Video)> {
     let layout = layout(pixel)?;
-    let (w, h) = (like.width(), like.height());
+    let shift = ((dx - ax, dy - ay), level);
     let mut color = frame::Video::new(pixel, w, h);
     let mut alpha = frame::Video::new(pixel, w, h);
     for f in [&mut color, &mut alpha] {

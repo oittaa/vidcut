@@ -273,13 +273,8 @@ impl Workspace {
             offline_media(p, &self.snap.missing, mode, player.position, source)
                 .map(|m| m.name.clone())
         });
-        if mode == ViewerMode::Timeline
-            && offline.is_none()
-            && let Some(p) = self.project()
-        {
-            let typing = self.timeline.cue_dialog.as_ref();
-            let styling = self.timeline.track_dialog.as_ref();
-            super::subtitles::paint_cues(&painter, picture, p, player.position, typing, styling);
+        if mode == ViewerMode::Timeline {
+            self.sync_subtitles();
         }
         if mode == ViewerMode::Timeline && offline.is_none() && played.is_some() {
             self.title_controls(ui, &area_resp, picture);

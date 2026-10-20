@@ -557,6 +557,13 @@ impl Workspace {
             .map_or("export".into(), |s| s.to_string_lossy().into_owned())
     }
 
+    fn animated_track(&self) -> Option<(String, String)> {
+        let p = self.project()?;
+        let t = p.subtitles.iter().find(|t| t.shown)?;
+        let words = t.style.words.is_some() && t.cues.iter().any(|c| !c.words.is_empty());
+        words.then(|| (t.id.clone(), t.display_name()))
+    }
+
     fn marks_set(&self) -> bool {
         self.project()
             .is_some_and(|p| p.marks.mark_in.is_some() && p.marks.mark_out.is_some())
@@ -607,7 +614,12 @@ impl Workspace {
             } else {
                 RangeChoice::All
             };
-            self.export.dialog = Some(Box::new(Dialog::new(&preset, output, range)));
+            let mut dialog = Dialog::new(&preset, output, range);
+            if let Some((track, _)) = self.animated_track() {
+                dialog.subtitles = Some(SubtitlesAs::Burn);
+                dialog.subtitle_tracks = vec![track];
+            }
+            self.export.dialog = Some(Box::new(dialog));
         }
         self.quick_window(ctx);
         self.dialog_window(ctx);
@@ -621,6 +633,7 @@ impl Workspace {
         let Some(mut q) = self.export.quick.take() else {
             return;
         };
+        let animated = self.animated_track();
         let presets: Vec<PresetInfo> = self
             .export
             .presets
@@ -698,6 +711,11 @@ impl Workspace {
                     ui.label(&p.description);
                 }
                 ui.label(dim(&range));
+                if let Some((_, name)) = &animated {
+                    ui.label(dim(format!(
+                        "Burns in {name}: its words show as they are spoken"
+                    )));
+                }
                 if let Some(e) = &q.error {
                     ui.label(RichText::new(e).color(theme::colors().error));
                 }
@@ -726,8 +744,12 @@ impl Workspace {
                 dialogs.save_file("Quick Export", &folder, &file, &[ext])
             });
             q.error = None;
+            let mut params = json!({ "preset": name, "overwrite": true, "background": true });
+            if animated.is_some() {
+                params["subtitles_as"] = json!(SubtitlesAs::Burn);
+            }
             self.export.starting = Some(Starting {
-                params: json!({ "preset": name, "overwrite": true, "background": true }),
+                params,
                 from: From::Quick,
                 picking: Some(picking),
                 ask: None,
@@ -1732,6 +1754,7 @@ fn job_method(j: &JobInfo) -> Option<&'static str> {
         "words" => Some("analyze.words"),
         "transcript" => Some("media.transcribe"),
         "retime" => Some("subtitles.retime"),
+        "word_times" => Some("subtitles.time_words"),
         _ => None,
     }
 }

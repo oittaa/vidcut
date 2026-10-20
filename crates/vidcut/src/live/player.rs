@@ -56,6 +56,7 @@ pub struct Player {
     audio_device: Option<String>,
     plays_on: PlaysOn,
     pub audio_error: Option<String>,
+    subtitles: Option<engine::SubtitleView>,
 }
 
 impl Player {
@@ -93,6 +94,7 @@ impl Player {
             audio_device: crate::preferences::audio_device(),
             plays_on: PlaysOn::Default,
             audio_error: None,
+            subtitles: None,
         }
     }
 
@@ -103,6 +105,18 @@ impl Player {
     pub fn preview_title(&self, title: Option<(String, Title)>) {
         if let Some(e) = &self.engine {
             e.preview_title(title);
+        }
+    }
+
+    pub fn set_subtitles(&mut self, view: Option<engine::SubtitleView>) {
+        self.subtitles = view;
+        self.show_subtitles();
+    }
+
+    fn show_subtitles(&self) {
+        if let Some(e) = &self.engine {
+            let on = self.plays == Some(PlayerId::Timeline);
+            e.set_subtitles(self.subtitles.clone().filter(|_| on));
         }
     }
 
@@ -239,6 +253,7 @@ impl Player {
             self.plays = Some(id);
             self.renderer.attach(self.engine.clone());
         }
+        self.show_subtitles();
         if let Some(e) = &self.engine {
             for (&lane, &db) in &self.contents[id.index()].faders {
                 e.set_lane_gain(lane, db);
