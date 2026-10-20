@@ -2248,16 +2248,14 @@ impl Workspace {
     pub(crate) fn start_title_drag(
         &mut self,
         p: &Project,
-        kind: vidcut_core::model::TitleKind,
-        align: Option<vidcut_core::model::TitleAlign>,
+        template: crate::gui::title_browser::Template,
         press: Pos2,
     ) {
         self.timeline.snap_flipped = false;
         self.timeline.drag = Some(ActiveDrag {
             drag: Drag::new(
                 Gesture::Title {
-                    kind,
-                    align,
+                    template: Box::new(template),
                     len: vidcut_core::ops::titles::default_length(p),
                 },
                 press,
@@ -2299,14 +2297,7 @@ impl Workspace {
                     .map_or(media.clone(), |m| m.name.clone()),
                 (0, cues.iter().map(|c| c.1).max().unwrap_or(0)),
             ),
-            Gesture::Title { kind, align, len } => (
-                crate::gui::title_browser::KINDS
-                    .iter()
-                    .find(|(_, k, a)| k == kind && a == align)
-                    .map_or("Title", |(label, ..)| label)
-                    .to_string(),
-                (0, *len),
-            ),
+            Gesture::Title { template, len } => (template.label.clone(), (0, *len)),
             _ => return,
         };
         let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) else {

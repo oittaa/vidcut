@@ -75,6 +75,8 @@ The window presents with vsync (`PresentMode::AutoVsync`) and redraws on demand:
 
 A gesture is one request: `Workspace::send` calls `Handle::request`, a `Msg::Request` with `Origin::Gui` and no reply; a failure comes back as a notice. Where the UI needs the answer (presets, export plans, preferences), `Ask::send` calls `Handle::call` on a `vidcut-ask` thread and leaves the result in a slot.
 
+The Subtitle Track and Title windows share their style rows (`TextFields`) and one look picker (`Workspace::look_picker`, its state a `Picker`). The GUI reads the looks itself (`Looks`, `looks::all`), again two seconds after the last read and after a save or delete; picking one fills the window's fields, and the viewer shows them as any edit. Save as Look… and Delete send `looks.save` and `looks.delete` with `Ask::send`. Apply Look in a subtitle track header's menu, Create Subtitles from Audio's Look and the Titles tab's look cards send the look's name in `track.set`, `subtitles.transcribe` and `titles.add`.
+
 ## The core
 
 `live::start` runs `Live::run` on `vidcut-session`. Everything reaches it as a `Msg` on one channel; `Handle`, cheap to clone, holds the sender and the latest snapshot. Each pass:

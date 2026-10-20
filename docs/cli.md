@@ -92,7 +92,7 @@ When a GUI has the project open (`vidcut -p FILE` starts one), commands for it r
 
 - Without `-p`, a command goes to the only GUI with a project open; with several, pick one.
 - `vidcut instances` lists running GUIs: pid, project, socket.
-- Requests needing no project (`schema`, `doctor`, `reset`, `probe`, `project create`, presets, encoders, decoders, preferences, keys) run here.
+- Requests needing no project (`schema`, `doctor`, `reset`, `probe`, `project create`, presets, looks, encoders, decoders, preferences, keys) run here.
 - Live-only requests (`player`, `viewer`, `selection`, `pool`, `mixer preview`, `gui`, `jobs`, `project open`) and `export start --background` fail with `NO_INSTANCE` without a GUI.
 - The CLI makes paths absolute before sending, those in `apply` too.
 - Ctrl-C cancels a headless export, proxy encode or transcription, leaving no partial file but a model download's `.part`, which the next download goes on from; ending the CLI cancels its call to a GUI.
@@ -124,6 +124,8 @@ The schema describes parameters, not results. Commonly read:
 | `export start --background`, `jobs get` | `id`, `state` (`queued`, `running`, `done`, `failed`, `cancelled`), `progress` (0–1), `result`, `error`, and `details` as it runs: `video` (`encoder`, `device`, `pixel`, `bits`, `passes`, `gpu_frames_in`), `audio`, `color`, `metadata`, `tried`, `sources`, `downloading` (the file being downloaded), `gpu_frames`, `gpu_decoded`, `copied`, `fps` |
 | `proxy generate` | `proxies[]`: `media`, `path`, `made_with` (how it was decoded and encoded), `copies` |
 | `titles add` | `clip`, `track` (where it went) |
+| `looks list` | `looks[]`: `name`, `kind` (`subtitles` or `titles`), `built_in`, `description` (a built-in one's), and `subtitles` or `titles`, the look as `looks save` takes it; `refused[]`: `kind`, `name`, `path`, `why` (look files left out) |
+| `looks save`, `looks delete` | `look` and `path` (the file written); `deleted`, `kind` and `path` |
 | `titles list` | per title: `clip`, `track`, `start`, `end` (frames), `start_tc`, `end_tc`, `enabled`, `title` |
 | `subtitles export` | `path`, `track`, `format`, `cues` (how many), `warnings` (an IMSC1 file's cues with more lines than their region holds) |
 | `subtitles transcribe` | `track`, `cues` (their ids), `from`, `to`, `heard` (the tracks heard that have sound), `hear` (`media` or `mix`), `media[]` with `media`: `media`, `stream` and the `model`, `device`, `language` and `words` (how many) of the transcript its words came from, `model`, `device` (the GPU or `CPU`; with `media`, those that made the transcripts), `language`, `timing` (`words`, `phrases`, or `pauses` for a model without times), `pieces`, `longest_piece` (seconds), `warnings` |

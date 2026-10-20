@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use crate::looks::TitleLook;
 use crate::model::{
     Clip, Project, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle, Track, TrackKind,
 };
@@ -192,14 +193,14 @@ pub struct TitleChange {
     pub zoom: Option<f64>,
     pub rotation: Option<f64>,
     pub opacity: Option<f64>,
+    pub look: Option<TitleLook>,
 }
 
-pub fn set(p: &mut Project, id: &str, change: &TitleChange) -> Result<()> {
-    let (ti, ci) = locate(p, id)?;
-    let Some(old) = p.tracks[ti].clips[ci].title.as_ref() else {
-        return Err(Error::invalid(format!("{id} is not a title")));
+pub fn changed(old: &Title, change: &TitleChange) -> Title {
+    let mut t = match &change.look {
+        Some(l) => l.on(&old.text),
+        None => old.clone(),
     };
-    let mut t = old.clone();
     if let Some(k) = change.kind {
         if k == TitleKind::Text {
             t.align = None;
@@ -227,7 +228,15 @@ pub fn set(p: &mut Project, id: &str, change: &TitleChange) -> Result<()> {
     if let Some(o) = change.opacity {
         t.opacity = Some(o);
     }
-    let t = checked(&t)?;
+    t
+}
+
+pub fn set(p: &mut Project, id: &str, change: &TitleChange) -> Result<()> {
+    let (ti, ci) = locate(p, id)?;
+    let Some(old) = p.tracks[ti].clips[ci].title.as_ref() else {
+        return Err(Error::invalid(format!("{id} is not a title")));
+    };
+    let t = checked(&changed(old, change))?;
     p.tracks[ti].clips[ci].title = Some(t);
     Ok(())
 }

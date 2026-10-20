@@ -334,6 +334,10 @@ impl Env for AvEnv {
         crate::preferences::fillers(language)
     }
 
+    fn looks(&self, kind: vidcut_core::looks::LookKind) -> vidcut_core::looks::Listing {
+        vidcut_core::looks::read(&vidcut_core::looks::dir(), kind)
+    }
+
     fn proxy_rules(&self) -> vidcut_core::preferences::Proxies {
         crate::preferences::load()
             .map(|p| p.proxies)

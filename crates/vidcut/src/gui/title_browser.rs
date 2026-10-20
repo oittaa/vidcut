@@ -6,6 +6,7 @@ use eframe::egui::{
 };
 use serde_json::json;
 use vidcut_av::burn::Sprite;
+use vidcut_core::looks::{Look, LookKind, Styled};
 use vidcut_core::model::{Project, Title, TitleAlign, TitleKind};
 
 use super::export::Ask;
@@ -35,17 +36,64 @@ const BACKDROP: [u8; 3] = [30, 30, 32];
 const STEPS: f64 = 60.0;
 const KEPT: usize = 64;
 
-pub fn sample(kind: TitleKind, align: Option<TitleAlign>) -> Title {
-    let text = match kind {
+fn sample_text(kind: TitleKind) -> &'static str {
+    match kind {
         TitleKind::Text => "Title",
         TitleKind::LowerThird => "Name\nTitle",
         TitleKind::Scroll => "Directed by\nName\n\nMusic by\nName",
-    };
-    Title {
-        kind,
-        align,
-        ..Title::new(text)
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Template {
+    pub label: String,
+    pub title: Title,
+    pub look: Option<String>,
+    pub tip: String,
+}
+
+impl Template {
+    pub fn params(&self) -> serde_json::Value {
+        let mut params = json!({ "text": self.title.text });
+        match &self.look {
+            Some(l) => params["look"] = json!(l),
+            None => {
+                if self.title.kind != TitleKind::Text {
+                    params["kind"] = json!(self.title.kind);
+                }
+                if let Some(a) = self.title.align {
+                    params["align"] = json!(a);
+                }
+            }
+        }
+        params
+    }
+}
+
+pub fn templates(looks: &[Look]) -> Vec<Template> {
+    let kinds = KINDS.iter().map(|(label, kind, align)| Template {
+        label: (*label).to_string(),
+        title: Title {
+            kind: *kind,
+            align: *align,
+            ..Title::new(sample_text(*kind))
+        },
+        look: None,
+        tip: String::new(),
+    });
+    let looks = looks.iter().filter_map(|l| match &l.styled {
+        Styled::Titles(t) if !(l.built_in && t.on("") == Title::new("")) => Some(Template {
+            label: l.name.clone(),
+            title: t.on(sample_text(t.kind)),
+            look: Some(l.name.clone()),
+            tip: match l.description {
+                "" => "Your look".to_string(),
+                d => d.to_string(),
+            },
+        }),
+        _ => None,
+    });
+    kinds.chain(looks).collect()
 }
 
 fn picture(sprite: Option<&Sprite>, (w, h): (u32, u32), dy: i32) -> ColorImage {
@@ -100,8 +148,8 @@ struct Card {
 pub struct Browser {
     pub open: bool,
     pub hover_scrub: bool,
-    cards: Vec<Option<Card>>,
-    hovered: Option<(usize, i64)>,
+    cards: HashMap<String, Card>,
+    hovered: Option<(String, i64)>,
 }
 
 impl Default for Browser {
@@ -109,45 +157,57 @@ impl Default for Browser {
         Self {
             open: false,
             hover_scrub: true,
-            cards: (0..KINDS.len()).map(|_| None).collect(),
+            cards: HashMap::new(),
             hovered: None,
         }
     }
+}
+
+fn card_key(t: &Template) -> String {
+    format!(
+        "{} {}",
+        t.label,
+        serde_json::to_string(&t.title).unwrap_or_default()
+    )
 }
 
 impl Browser {
     fn card(
         &mut self,
         ctx: &egui::Context,
-        index: usize,
+        template: &Template,
         size: (u32, u32),
         fraction: f64,
     ) -> TextureId {
-        let (_, kind, align) = KINDS[index];
-        let stale = self.cards[index].as_ref().is_none_or(|c| c.size != size);
+        let key = card_key(template);
+        let moves = template.title.moves();
+        let stale = self.cards.get(&key).is_none_or(|c| c.size != size);
         if stale {
-            let sprite = vidcut_av::burn::title(&sample(kind, align), size.0, size.1)
+            let sprite = vidcut_av::burn::title(&template.title, size.0, size.1)
                 .into_iter()
                 .next();
-            let dy = if kind == TitleKind::Scroll {
+            let dy = if moves {
                 scrolled(sprite.as_ref(), size.1, fraction)
             } else {
                 0
             };
             let texture = ctx.load_texture(
-                format!("title-card-{index}"),
+                format!("title-card-{}", template.label),
                 picture(sprite.as_ref(), size, dy),
                 TextureOptions::LINEAR,
             );
-            self.cards[index] = Some(Card {
-                size,
-                sprite,
-                texture,
-                fraction,
-            });
+            self.cards.insert(
+                key.clone(),
+                Card {
+                    size,
+                    sprite,
+                    texture,
+                    fraction,
+                },
+            );
         }
-        let card = self.cards[index].as_mut().expect("made above");
-        if kind == TitleKind::Scroll && card.fraction != fraction {
+        let card = self.cards.get_mut(&key).expect("made above");
+        if moves && card.fraction != fraction {
             let dy = scrolled(card.sprite.as_ref(), size.1, fraction);
             card.texture.set(
                 picture(card.sprite.as_ref(), size, dy),
@@ -228,20 +288,9 @@ impl Workspace {
         });
     }
 
-    pub(crate) fn add_title_kind(
-        &mut self,
-        ctx: &egui::Context,
-        kind: TitleKind,
-        align: Option<TitleAlign>,
-    ) {
-        let t = sample(kind, align);
-        let mut params = json!({ "text": t.text, "at": self.snap.timeline.position });
-        if kind != TitleKind::Text {
-            params["kind"] = json!(kind);
-        }
-        if let Some(a) = align {
-            params["align"] = json!(a);
-        }
+    pub(crate) fn add_title_template(&mut self, ctx: &egui::Context, template: &Template) {
+        let mut params = template.params();
+        params["at"] = json!(self.snap.timeline.position);
         self.timeline.adding_title = Some(Ask::send(&self.live, ctx, "titles.add", params));
     }
 
@@ -274,8 +323,11 @@ impl Workspace {
         let mut hovered = None;
         let mut grabbed = None;
         let mut added = None;
+        let templates = templates(self.looks.of(LookKind::Titles));
+        let keys: Vec<String> = templates.iter().map(card_key).collect();
+        self.titles.cards.retain(|k, _| keys.contains(k));
         ui.horizontal_wrapped(|ui| {
-            for (i, (label, kind, align)) in KINDS.iter().enumerate() {
+            for t in &templates {
                 ui.vertical(|ui| {
                     let (rect, resp) =
                         ui.allocate_exact_size(vec2(CARD_WIDTH, card_h), Sense::click_and_drag());
@@ -283,9 +335,9 @@ impl Workspace {
                         f64::from(((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0))
                     });
                     let fraction = across
-                        .filter(|_| *kind == TitleKind::Scroll)
+                        .filter(|_| t.title.moves())
                         .map_or(0.5, |f| (f * STEPS).round() / STEPS);
-                    let tex = self.titles.card(ui.ctx(), i, size, fraction);
+                    let tex = self.titles.card(ui.ctx(), t, size, fraction);
                     ui.painter().image(
                         tex,
                         rect,
@@ -299,33 +351,37 @@ impl Workspace {
                             Stroke::new(1.5, theme::colors().accent),
                             StrokeKind::Inside,
                         );
-                        hovered = Some((i, (fraction * STEPS).round() as i64));
+                        hovered = Some((t, (fraction * STEPS).round() as i64));
                     }
-                    ui.label(*label);
+                    let r = ui.label(&t.label);
+                    if !t.tip.is_empty() {
+                        r.on_hover_text(&t.tip);
+                    }
                     if resp.drag_started()
                         && let Some(press) = ui.input(|i| i.pointer.press_origin())
                     {
-                        grabbed = Some((*kind, *align, press));
+                        grabbed = Some((t, press));
                     }
                     if resp.double_clicked() {
-                        added = Some((*kind, *align));
+                        added = Some(t);
                     }
                 });
             }
         });
-        if let Some((kind, align, press)) = grabbed {
-            self.start_title_drag(&p, kind, align, press);
+        if let Some((t, press)) = grabbed {
+            self.start_title_drag(&p, t.clone(), press);
         }
-        if let Some((kind, align)) = added {
-            self.add_title_kind(ui.ctx(), kind, align);
+        if let Some(t) = added {
+            self.add_title_template(ui.ctx(), t);
         }
-        let want = hovered.filter(|_| self.titles.hover_scrub && self.timeline.drag.is_none());
+        let want = hovered
+            .filter(|_| self.titles.hover_scrub && self.timeline.drag.is_none())
+            .map(|(t, step)| (t, (card_key(t), step)));
         match want {
-            Some(w) if Some(w) != self.titles.hovered => {
-                let (_, kind, align) = KINDS[w.0];
+            Some((t, w)) if Some(&w) != self.titles.hovered.as_ref() => {
                 let at = self.snap.timeline.position;
                 self.live
-                    .preview_free_title(Some((sample(kind, align), at, w.1 as f64 / STEPS)));
+                    .preview_free_title(Some((t.title.clone(), at, w.1 as f64 / STEPS)));
                 self.titles.hovered = Some(w);
             }
             Some(_) => {}

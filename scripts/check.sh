@@ -59,7 +59,7 @@ comments=$(
     {
       split($0, a, ":"); f = a[1]; n = a[2]; t = substr($0, length(f) + length(n) + 3)
       if (t ~ /^[ \t]*\/\/ SAFETY: [^ \t]/) next
-      if (f ~ /^crates\/vidcut-core\/src\/(analysis|error|export|model|ops|ops\/dissolve|preferences|render|request)[.]rs$/ && t ~ /^[ \t]*\/\/\/( |$)/) next
+      if (f ~ /^crates\/vidcut-core\/src\/(analysis|error|export|looks|model|ops|ops\/dissolve|preferences|render|request)[.]rs$/ && t ~ /^[ \t]*\/\/\/( |$)/) next
       if (t ~ /^[ \t]*\/\/\/ # Safety$/) { sf = f; sn = n; next }
       if (f == sf && n == sn + 1 && t ~ /^[ \t]*\/\/\/ /) next
       print
