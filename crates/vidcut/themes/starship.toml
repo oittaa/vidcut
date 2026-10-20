@@ -13,6 +13,8 @@ title = "Starship"
 light = false
 # A [light_mode] table at the end holds keys that replace the ones above
 # while the computer is in light mode, as in native.toml.
+# colors_from = "omarchy" replaces `light` and the colors with the desktop's
+# current Omarchy theme and follows it, as in omarchy.toml.
 
 [colors]
 # Behind the panels, the top bar and the status bar.

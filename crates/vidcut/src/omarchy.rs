@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use eframe::egui::Color32;
-use notify::Watcher;
+use vidcut_core::{Error, Result};
 
 use crate::themes::{Colors, Theme};
 
@@ -11,33 +11,38 @@ pub(crate) struct Palette {
     pub colors: Colors,
 }
 
-pub(crate) fn apply(theme: &mut Theme) {
-    let Some(dir) = theme_dir() else {
-        return;
-    };
-    let Ok(text) = std::fs::read_to_string(dir.join("colors.toml")) else {
-        return;
-    };
-    let Some(painted) = palette(&text, dir.join("light.mode").is_file()) else {
-        return;
-    };
+fn current() -> PathBuf {
+    vidcut_core::dirs::home().join(".local/state/omarchy/current")
+}
+
+pub(crate) fn apply(theme: &mut Theme) -> Result<()> {
+    let current = current();
+    let dir = current.join("theme");
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    let path = dir.join("colors.toml");
+    let painted = std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|text| palette(&text, dir.join("light.mode").is_file()))
+        .map_err(|e| Error::usage(format!("{}: {e}", path.display())))?;
     theme.light = painted.light;
     theme.colors = painted.colors;
-    let Some(root) = dir.parent() else {
-        return;
-    };
-    if let Some(name) = std::fs::read_to_string(root.join("theme.name"))
-        .ok()
-        .filter(|name| !name.trim().is_empty())
+    if let Ok(name) = std::fs::read_to_string(current.join("theme.name"))
+        && !name.trim().is_empty()
     {
         theme.title = title(name.trim());
     }
+    Ok(())
 }
 
-pub(crate) fn palette(text: &str, light_marker: bool) -> Option<Palette> {
-    let table: toml::Table = toml::from_str(text).ok()?;
-    let background = color(&table, &["background", "bg"])?;
-    let foreground = color(&table, &["foreground", "fg"])?;
+pub(crate) fn palette(text: &str, light_marker: bool) -> std::result::Result<Palette, String> {
+    let table: toml::Table = toml::from_str(text).map_err(|e| e.to_string())?;
+    let needed = |keys: &[&str]| {
+        color(&table, keys).ok_or_else(|| format!("{} is missing or isn't #RRGGBB", keys[0]))
+    };
+    let background = needed(&["background", "bg"])?;
+    let foreground = needed(&["foreground", "fg"])?;
     let accent = color(&table, &["accent", "blue", "color4", "color12"]).unwrap_or(ACCENT);
     let selection = color(&table, &["selection", "selection_background"])
         .unwrap_or_else(|| crate::look::mix(background, accent, 0.22));
@@ -58,15 +63,16 @@ pub(crate) fn palette(text: &str, light_marker: bool) -> Option<Palette> {
     let blue = color(&table, &["blue", "color4"]).unwrap_or(accent);
     let magenta = color(&table, &["magenta", "color5"]).unwrap_or(accent);
     let bright_red = color(&table, &["bright_red", "color9"]).unwrap_or(red);
-    let light = match text_value(&table, &["mode"]) {
-        Some("light") => true,
-        Some("dark") => false,
-        _ if light_marker => true,
-        _ => luminance(background) >= 0.6,
+    let mode = ["mode", "theme_type"]
+        .iter()
+        .find_map(|key| text_value(&table, &[key]).filter(|mode| !mode.is_empty()));
+    let light = match mode {
+        Some(mode) => mode == "light",
+        None => light_marker || bright(background),
     };
     let wash = |c| crate::look::mix(c, background, 0.30);
     let [r, g, b, _] = selection.to_srgba_unmultiplied();
-    Some(Palette {
+    Ok(Palette {
         light,
         colors: Colors {
             background: dark_background,
@@ -122,21 +128,17 @@ fn text_value<'a>(table: &'a toml::Table, keys: &[&str]) -> Option<&'a str> {
     })
 }
 
-fn luminance(c: Color32) -> f32 {
-    let [r, g, b, _] = c.to_srgba_unmultiplied();
-    (0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b)) / 255.0
+fn bright(c: Color32) -> bool {
+    u16::from(c.r()) + u16::from(c.g()) + u16::from(c.b()) > 382
 }
 
 fn title(name: &str) -> String {
     let words: Vec<String> = name
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .map(|word| {
+        .split(|c: char| !c.is_alphanumeric())
+        .filter_map(|word| {
             let mut chars = word.chars();
-            match chars.next() {
-                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
-                None => String::new(),
-            }
+            let first = chars.next()?;
+            Some(first.to_uppercase().chain(chars).collect())
         })
         .collect();
     if words.is_empty() {
@@ -146,127 +148,42 @@ fn title(name: &str) -> String {
     }
 }
 
-fn theme_dir() -> Option<PathBuf> {
-    roots()
-        .into_iter()
-        .map(|root| root.join("theme"))
-        .find(|dir| dir.join("colors.toml").is_file())
-}
-
-fn roots() -> [PathBuf; 2] {
-    [
-        xdg("XDG_STATE_HOME", ".local/state").join("omarchy/current"),
-        xdg("XDG_CONFIG_HOME", ".config").join("omarchy/current"),
-    ]
-}
-
-fn xdg(var: &str, fallback: &str) -> PathBuf {
-    match std::env::var_os(var).filter(|value| !value.is_empty()) {
-        Some(value) => PathBuf::from(value),
-        None => home().join(fallback),
+pub(crate) fn watched() -> (PathBuf, notify::RecursiveMode) {
+    let current = current();
+    if current.is_dir() {
+        return (current, notify::RecursiveMode::Recursive);
     }
+    let dir = current
+        .ancestors()
+        .skip(1)
+        .find(|dir| dir.is_dir())
+        .map_or_else(|| current.clone(), Path::to_path_buf);
+    (dir, notify::RecursiveMode::NonRecursive)
 }
 
-fn home() -> PathBuf {
-    std::env::home_dir().unwrap_or_else(|| PathBuf::from("."))
+pub(crate) fn relevant(path: &Path) -> bool {
+    let current = current();
+    let theme = current.join("theme");
+    current.starts_with(path)
+        || path == theme
+        || path == current.join("theme.name")
+        || (path.parent() == Some(theme.as_path())
+            && matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("colors.toml" | "light.mode")
+            ))
 }
-
-pub(crate) fn watch(changed: impl Fn() + Send + 'static) -> Option<notify::RecommendedWatcher> {
-    let dirs: Vec<PathBuf> = roots().into_iter().filter(|dir| dir.is_dir()).collect();
-    if dirs.is_empty() {
-        return None;
-    }
-    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        let Ok(event) = event else {
-            return;
-        };
-        if matches!(event.kind, notify::EventKind::Access(_)) {
-            return;
-        }
-        if event.paths.iter().any(|path| relevant(path)) {
-            changed();
-        }
-    })
-    .ok()?;
-    let mut watching = false;
-    for dir in &dirs {
-        watching |= watcher.watch(dir, notify::RecursiveMode::Recursive).is_ok();
-    }
-    watching.then_some(watcher)
-}
-
-fn relevant(path: &Path) -> bool {
-    matches!(
-        path.file_name().and_then(|name| name.to_str()),
-        Some("colors.toml" | "theme.name" | "light.mode" | "theme")
-    )
-}
-
-#[cfg(test)]
-pub(crate) const TOKYO_NIGHT: &str = r##"
-mode = "dark"
-
-accent = "#7aa2f7"
-selection = "#292e42"
-muted = "#414868"
-
-background = "#1a1b26"
-dark_background = "#13141c"
-darker_background = "#0e0e14"
-lighter_background = "#24283b"
-
-foreground = "#a9b1d6"
-dark_foreground = "#565f89"
-light_foreground = "#b4bee6"
-bright_foreground = "#c0caf5"
-
-red = "#f7768e"
-yellow = "#e0af68"
-orange = "#eb927b"
-green = "#9ece6a"
-cyan = "#449dab"
-blue = "#7aa2f7"
-magenta = "#ad8ee6"
-
-bright_red = "#ff7a93"
-bright_green = "#b9f27c"
-"##;
-
-#[cfg(test)]
-pub(crate) const CATPPUCCIN_LATTE: &str = r##"
-mode = "light"
-
-accent = "#1e66f5"
-selection = "#ccd0da"
-muted = "#acb0be"
-
-background = "#eff1f5"
-dark_background = "#e3e4e8"
-darker_background = "#d7d8dc"
-lighter_background = "#dce0e8"
-
-foreground = "#4c4f69"
-dark_foreground = "#9ca0b0"
-light_foreground = "#5c5f77"
-bright_foreground = "#4c4f69"
-
-red = "#d20f39"
-yellow = "#df8e1d"
-green = "#40a02b"
-blue = "#1e66f5"
-magenta = "#ea76cb"
-
-bright_red = "#d20f39"
-bright_green = "#40a02b"
-"##;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn a_palette_without_a_background_is_none() {
-        assert!(palette("foreground = \"#AABBCC\"\n", false).is_none());
+    fn a_palette_without_a_background_says_so() {
+        assert_eq!(
+            palette("foreground = \"#AABBCC\"\n", false),
+            Err("background is missing or isn't #RRGGBB".to_string())
+        );
     }
 
     #[test]
@@ -334,8 +251,33 @@ mod tests {
     }
 
     #[test]
+    fn theme_type_says_whether_the_palette_is_light_when_mode_is_absent() {
+        let painted = palette(
+            "theme_type = \"light\"\nbackground = \"#101010\"\nforeground = \"#EEEEEE\"\n",
+            false,
+        )
+        .unwrap();
+        assert!(painted.light);
+    }
+
+    #[test]
+    fn a_bright_background_is_light_when_nothing_says() {
+        let painted = palette(
+            "background = \"#808081\"\nforeground = \"#101010\"\n",
+            false,
+        )
+        .unwrap();
+        assert!(painted.light);
+    }
+
+    #[test]
     fn a_theme_name_is_its_title() {
         assert_eq!(title("tokyo-night"), "Omarchy: Tokyo Night");
+    }
+
+    #[test]
+    fn a_theme_name_keeps_its_accents() {
+        assert_eq!(title("rosé-pine"), "Omarchy: Rosé Pine");
     }
 
     #[test]

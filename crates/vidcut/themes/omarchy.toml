@@ -1,10 +1,11 @@
-# Omarchy. With a current Omarchy theme installed, its colors.toml
-# replaces the colors below and the window follows a theme change.
-# Otherwise this is Tokyo Night, and Catppuccin Latte in [light_mode]
-# while the computer is in light mode.
+# Omarchy: the desktop's current Omarchy theme. colors_from takes `light`
+# and the colors from its colors.toml and follows a theme change, so a copy
+# of this file keeps following it. Without Omarchy this is Tokyo Night, and
+# Catppuccin Latte in [light_mode] while the computer is in light mode.
 
 title = "Omarchy"
 light = false
+colors_from = "omarchy"
 
 [colors]
 background = "#13141C"

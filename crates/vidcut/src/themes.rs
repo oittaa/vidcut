@@ -28,10 +28,18 @@ const BUILT_IN: &[(&str, &str)] = &[
 pub struct Theme {
     pub title: String,
     pub light: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors_from: Option<ColorsFrom>,
     pub colors: Colors,
     pub shape: Shape,
     pub fonts: Fonts,
     pub decoration: Decoration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorsFrom {
+    Omarchy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -237,20 +245,26 @@ pub fn load(name: &str) -> Result<Theme> {
     load_with(name, &crate::look::current())
 }
 
+pub fn colors_from(name: &str) -> Option<ColorsFrom> {
+    written(name, &crate::look::current()).ok()?.colors_from
+}
+
 fn load_with(name: &str, look: &Look) -> Result<Theme> {
+    let mut theme = written(name, look)?;
+    if theme.colors_from == Some(ColorsFrom::Omarchy) {
+        crate::omarchy::apply(&mut theme)?;
+    }
+    Ok(theme)
+}
+
+fn written(name: &str, look: &Look) -> Result<Theme> {
     check_name(name)?;
     let path = user_path(name);
     match std::fs::read_to_string(&path) {
         Ok(text) => {
             parse(&text, name, look).map_err(|e| Error::usage(format!("{}: {e}", path.display())))
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let mut theme = builtin(name, look)?;
-            if name == "omarchy" {
-                crate::omarchy::apply(&mut theme);
-            }
-            Ok(theme)
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => builtin(name, look),
         Err(e) => Err(Error::usage(format!("{}: {e}", path.display()))),
     }
 }
@@ -454,17 +468,11 @@ mod tests {
     }
 
     #[test]
-    fn the_omarchy_theme_is_tokyo_night_in_the_dark() {
-        let theme = builtin("omarchy", &DARK).unwrap();
-        let painted = crate::omarchy::palette(crate::omarchy::TOKYO_NIGHT, false).unwrap();
-        assert_eq!((theme.light, theme.colors), (painted.light, painted.colors));
-    }
-
-    #[test]
-    fn the_omarchy_theme_is_catppuccin_latte_in_the_light() {
-        let theme = builtin("omarchy", &LIGHT).unwrap();
-        let painted = crate::omarchy::palette(crate::omarchy::CATPPUCCIN_LATTE, false).unwrap();
-        assert_eq!((theme.light, theme.colors), (painted.light, painted.colors));
+    fn the_omarchy_theme_takes_its_colors_from_omarchy() {
+        assert_eq!(
+            builtin("omarchy", &DARK).unwrap().colors_from,
+            Some(ColorsFrom::Omarchy)
+        );
     }
 
     #[test]

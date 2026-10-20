@@ -159,23 +159,32 @@ impl OpenProject {
     }
 }
 
+pub(super) fn watcher(
+    relevant: impl Fn(&Path) -> bool + Send + 'static,
+    inbox: Sender<Msg>,
+    changed: fn() -> Msg,
+) -> Option<notify::RecommendedWatcher> {
+    notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        if let Ok(event) = event
+            && !matches!(event.kind, notify::EventKind::Access(_))
+            && event.paths.iter().any(|p| relevant(p))
+        {
+            let _ = inbox.send(changed());
+        }
+    })
+    .ok()
+}
+
 pub(super) fn watch_dir(
     dir: &Path,
     inbox: Sender<Msg>,
     changed: fn() -> Msg,
 ) -> Option<notify::RecommendedWatcher> {
-    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        if let Ok(event) = event
-            && !matches!(event.kind, notify::EventKind::Access(_))
-            && event
-                .paths
-                .iter()
-                .any(|p| p.extension().is_some_and(|e| e == "toml"))
-        {
-            let _ = inbox.send(changed());
-        }
-    })
-    .ok()?;
+    let mut watcher = watcher(
+        |p| p.extension().is_some_and(|e| e == "toml"),
+        inbox,
+        changed,
+    )?;
     watcher
         .watch(dir, notify::RecursiveMode::NonRecursive)
         .ok()?;
@@ -189,18 +198,11 @@ pub(super) fn watch(
 ) -> Option<notify::RecommendedWatcher> {
     let dir = path.parent()?.to_path_buf();
     let name = path.file_name()?.to_os_string();
-    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        if let Ok(event) = event
-            && !matches!(event.kind, notify::EventKind::Access(_))
-            && event
-                .paths
-                .iter()
-                .any(|p| p.file_name() == Some(name.as_os_str()))
-        {
-            let _ = inbox.send(changed());
-        }
-    })
-    .ok()?;
+    let mut watcher = watcher(
+        move |p| p.file_name() == Some(name.as_os_str()),
+        inbox,
+        changed,
+    )?;
     watcher
         .watch(&dir, notify::RecursiveMode::NonRecursive)
         .ok()?;
