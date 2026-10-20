@@ -128,11 +128,10 @@ if [[ -n "$long" ]]; then
 fi
 
 step "no tooltips"
-# A control says what it does by its label and its form, never by a tooltip
-# (AGENTS.md, rule 12).
+# A control says what it does by its label and its form, never by a tooltip.
 tips=$(git grep -n -E 'on_(disabled_)?hover_(text|ui)' -- 'crates/vidcut/src/gui/' || true)
 if [[ -n "$tips" ]]; then
-  echo "tooltips in the GUI (AGENTS.md, rule 12): make the control say it instead" >&2
+  echo "tooltips in the GUI: make the control say it instead" >&2
   printf '%s\n' "$tips" | sed 's/^/  /' >&2
   exit 1
 fi
