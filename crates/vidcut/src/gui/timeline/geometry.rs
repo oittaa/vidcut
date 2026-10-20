@@ -106,6 +106,7 @@ impl Rows {
         min: f32,
         strip: f32,
         enlarged: Option<&str>,
+        lift: f32,
     ) -> Self {
         let [v1, video, audio, subtitle] = heights;
         let mut order: Vec<(&str, f32, f32)> = p
@@ -162,7 +163,7 @@ impl Rows {
             };
         }
         let used: f32 = heights.iter().sum();
-        let mut y = (area.bottom() + 1.0 - used).max(area.top() + strip);
+        let mut y = area.bottom() + 1.0 - used + lift.clamp(0.0, (used - room).max(0.0));
         let rows = order
             .iter()
             .zip(heights)
@@ -184,9 +185,23 @@ impl Rows {
     }
 
     pub fn at(&self, y: f32) -> Option<&Row> {
+        if y < self.area.top() || y > self.area.bottom() {
+            return None;
+        }
         self.rows
             .iter()
             .find(|r| r.rect.rect.top() <= y && y <= r.rect.rect.bottom())
+    }
+
+    pub fn used(&self) -> f32 {
+        match (self.rows.first(), self.rows.last()) {
+            (Some(a), Some(b)) => b.rect.rect.bottom() + 1.0 - a.rect.rect.top(),
+            _ => 0.0,
+        }
+    }
+
+    pub fn overflow(&self, strip: f32) -> f32 {
+        (self.used() - (self.area.height() - strip).max(1.0)).max(0.0)
     }
 
     pub fn span(&self) -> (f32, f32) {

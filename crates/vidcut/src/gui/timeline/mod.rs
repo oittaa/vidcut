@@ -187,6 +187,7 @@ pub struct TimelineView {
     pub epoch: Instant,
     pub snap_flipped: bool,
     pub scroll: f64,
+    pub rows_lift: f32,
     pub drag: Option<ActiveDrag>,
     pub edit: Option<EditSel>,
     pub transition: Option<(TrackRef, i64)>,
@@ -229,6 +230,7 @@ impl Default for TimelineView {
             epoch: Instant::now(),
             snap_flipped: false,
             scroll: 0.0,
+            rows_lift: 0.0,
             drag: None,
             edit: None,
             transition: None,
@@ -502,6 +504,7 @@ impl Workspace {
             4.0,
             0.0,
             None,
+            0.0,
         );
         let lower_ruler = Rect::from_min_size(content.min, vec2(content.width(), LOWER_RULER));
         let [v1_h, video_h, audio_h] = LOWER_ROWS;
@@ -520,7 +523,11 @@ impl Workspace {
             22.0,
             NEW_TRACK_STRIP,
             self.timeline.enlarged.as_deref(),
+            self.timeline.rows_lift,
         );
+        self.timeline.rows_lift = self.timeline.rows_lift.min(lower.overflow(NEW_TRACK_STRIP));
+        let rows_clip =
+            Rect::from_min_max(pos2(lower_rect.left(), lower.area.top()), lower_rect.max);
         let layout = Layout {
             upper_ruler,
             upper,
@@ -648,6 +655,9 @@ impl Workspace {
                 0.0,
                 theme::colors().panel_dark,
             );
+            let ruler_painter = painter;
+            let painter =
+                ruler_painter.with_clip_rect(rows_clip.intersect(ruler_painter.clip_rect()));
             for row in &layout.lower.rows {
                 let band = Rect::from_min_max(
                     pos2(lower_rect.left() + 1.0, row.rect.rect.top()),
@@ -664,7 +674,14 @@ impl Workspace {
                     painter.rect_filled(band, 2.0, theme::colors().panel);
                 }
             }
-            paint::ruler(&painter, lower_ruler, &lower_scale, drawn, smart, false);
+            paint::ruler(
+                &ruler_painter,
+                lower_ruler,
+                &lower_scale,
+                drawn,
+                smart,
+                false,
+            );
             for row in &layout.lower.rows {
                 if let Some(s) = drawn.subtitle_track(&row.track) {
                     cues::paint_track(
@@ -729,16 +746,19 @@ impl Workspace {
                 paint::marks(&painter, &layout.lower, &lower_scale, drawn, m);
             }
             paint::playhead(
-                &painter,
+                &ruler_painter,
                 lower_scale.x(glided),
                 lower_ruler,
-                layout.lower.span().1,
+                layout.lower.span().1.min(layout.lower.area.bottom()),
                 self.playhead_color(),
             );
         }
         self.thumbs = thumbs;
         self.tiles = tiles;
-        self.track_headers(ui, lower_rect, &layout.lower, &p);
+        let mut headers = ui.new_child(egui::UiBuilder::new().max_rect(lower_rect));
+        headers.set_clip_rect(rows_clip.intersect(ui.clip_rect()));
+        self.track_headers(&mut headers, lower_rect, &layout.lower, &p);
+        self.row_scrollbar(ui, &layout.lower);
         let upper_box =
             Rect::from_min_max(full.min, pos2(upper_rect.left() - 1.0, upper_rect.bottom()));
         let lower_box = Rect::from_min_max(
@@ -905,6 +925,7 @@ impl Workspace {
                 self.clicks(ui, resp, &p, is_upper, &layout);
             }
         }
+        self.scroll_rows(ui, rows_clip, &layout.lower);
         self.end_swipe(ui.ctx(), now);
         self.run_drag(ui, &p, &layout, now);
         self.stripe_drag(ui, &p, &layout.lower_scale);
@@ -914,7 +935,7 @@ impl Workspace {
             } else {
                 (&layout.lower, &layout.lower_scale)
             };
-            let painter = ui.painter_at(if d.upper { upper_rect } else { lower_rect });
+            let painter = ui.painter_at(if d.upper { upper_rect } else { rows_clip });
             paint::preview(&painter, rows, scale, &p, &d.preview);
             self.drag_tooltip(ui, &d.preview);
         }
@@ -1286,9 +1307,70 @@ impl Workspace {
         }
     }
 
+    fn scroll_rows(&mut self, ui: &egui::Ui, band: Rect, rows: &Rows) {
+        let over = rows.overflow(NEW_TRACK_STRIP);
+        if over <= 0.0 || self.timeline.drag.is_some() || !ui.rect_contains_pointer(band) {
+            return;
+        }
+        let dy = ui.input(|i| match i.modifiers.command {
+            true => 0.0,
+            false => i.smooth_scroll_delta.y,
+        });
+        if dy != 0.0 {
+            self.timeline.rows_lift = (self.timeline.rows_lift + dy).clamp(0.0, over);
+            ui.ctx().request_repaint();
+        }
+    }
+
+    fn row_scrollbar(&mut self, ui: &egui::Ui, rows: &Rows) {
+        let over = rows.overflow(NEW_TRACK_STRIP);
+        if over <= 0.0 {
+            return;
+        }
+        let area = rows.area;
+        let bar = Rect::from_min_max(
+            pos2(area.right() - 8.0, area.top() + NEW_TRACK_STRIP),
+            pos2(area.right() - 2.0, area.bottom()),
+        );
+        let used = rows.used().max(1.0);
+        let h = bar.height();
+        let thumb_h = (h * (used - over) / used).clamp(16.0_f32.min(h), h);
+        let travel = (h - thumb_h).max(1.0);
+        let resp = ui.interact(
+            bar,
+            ui.scope_id().with("row-scrollbar"),
+            Sense::click_and_drag(),
+        );
+        if resp.dragged() {
+            let dy = resp.drag_delta().y;
+            self.timeline.rows_lift =
+                (self.timeline.rows_lift - dy * over / travel).clamp(0.0, over);
+        } else if resp.clicked()
+            && let Some(pos) = resp.interact_pointer_pos()
+        {
+            let at = ((pos.y - bar.top() - thumb_h / 2.0) / travel).clamp(0.0, 1.0);
+            self.timeline.rows_lift = over * (1.0 - at);
+        }
+        let top = bar.top() + travel * (over - self.timeline.rows_lift) / over;
+        let thumb = Rect::from_min_size(pos2(bar.left(), top), vec2(bar.width(), thumb_h));
+        let c = theme::colors();
+        let painter = ui.painter_at(bar);
+        painter.rect_filled(bar, 3.0, c.panel_dark.gamma_multiply(0.8));
+        let shade = if resp.hovered() || resp.dragged() {
+            c.text_dim
+        } else {
+            c.line
+        };
+        painter.rect_filled(thumb, 3.0, shade);
+        resp.on_hover_text("Scroll the tracks; the mouse wheel over them does too");
+    }
+
     fn track_headers(&mut self, ui: &mut egui::Ui, lower_rect: Rect, rows: &Rows, p: &Project) {
         for row in &rows.rows {
             let r = row.rect.rect;
+            if !r.intersects(rows.area) {
+                continue;
+            }
             let rect = Rect::from_min_max(
                 pos2(lower_rect.left() + 2.0, r.top()),
                 pos2(lower_rect.left() + HEADER - 4.0, r.bottom()),

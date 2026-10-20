@@ -283,6 +283,7 @@ Shortcuts do nothing while a text field has focus or a modal question is up; Esc
 | W | Dynamic Trim on/off |
 | Shift+S | Audio scrubbing on/off |
 | Ctrl+wheel | Zoom the lower timeline (X21) |
+| Wheel over the lower timeline's tracks | Scroll them, when they don't fit (X57) |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Ctrl+I | Import media |
 | Shift+Ctrl+N | New bin |
