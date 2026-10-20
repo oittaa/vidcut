@@ -412,6 +412,9 @@ fn speaker_menu(
                 ui.close();
             }
         });
+        if w.speaker == 0 {
+            return;
+        }
         let others: Vec<_> = everyone.iter().filter(|(p, _)| *p != w.person).collect();
         if !others.is_empty() {
             ui.menu_button("Same Person As", |ui| {

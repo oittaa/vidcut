@@ -1851,10 +1851,7 @@ fn clip_speech(
             let middle = (start + end) / 2;
             if (a..b).contains(&middle) {
                 let w = &timed[i];
-                let person = w.speaker.zip(said.speakers.as_ref()).map(|(n, run)| {
-                    p.speakers
-                        .person(&m.id, stream, run, n, (w.start + w.end) / 2.0)
-                });
+                let person = p.speakers.word(&m.id, stream, said.speakers.as_deref(), w);
                 placed.push(Placed {
                     track,
                     clip: c.id.clone(),
@@ -5783,10 +5780,11 @@ pub fn query(
                             let w = &timed[i];
                             let mut v = word_json(w, a, b, &fillers);
                             v["file_time"] = json!([w.start, w.end]);
-                            if let (Some(n), Some(run)) = (w.speaker, &speech.speakers) {
-                                let at = (w.start + w.end) / 2.0;
-                                let person = p.speakers.person(&m.id, stream, run, n, at);
-                                v["speaker"] = json!(n);
+                            let run = speech.speakers.as_deref();
+                            if let Some(person) = p.speakers.word(&m.id, stream, run, w) {
+                                if let Some(n) = w.speaker {
+                                    v["speaker"] = json!(n);
+                                }
                                 v["name"] = json!(p.speakers.name(&person));
                                 v["person"] = json!(person);
                             }

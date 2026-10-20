@@ -38,6 +38,13 @@ fn a_word_takes_the_speaker_heard_over_most_of_it() {
 }
 
 #[test]
+fn a_word_between_turns_takes_the_nearest() {
+    let mut heard = vec![said(vec![word("the", 2.0, 2.2, None)])];
+    give_speakers(&mut heard, &[turn(0.0, 1.5, 1), turn(2.5, 4.0, 2)]);
+    assert_eq!(heard[0].words[0].speaker, Some(2));
+}
+
+#[test]
 fn a_word_outside_every_turn_has_no_speaker() {
     let mut heard = vec![said(vec![word("hello", 5.0, 6.0, Some(3))])];
     give_speakers(&mut heard, &[turn(0.0, 1.0, 1)]);
@@ -89,6 +96,20 @@ fn an_assigned_word_is_its_new_persons() {
 }
 
 #[test]
+fn an_assigned_word_without_a_speaker_is_its_new_persons() {
+    let mut s = Speakers::default();
+    s.assign(Assigned {
+        media: "m1".into(),
+        stream: 0,
+        start: 4.0,
+        end: 6.0,
+        person: "will".into(),
+    });
+    let w = word("road", 5.0, 5.4, None);
+    assert_eq!(s.word("m1", 0, Some("r7"), &w).as_deref(), Some("will"));
+}
+
+#[test]
 fn assigning_no_one_gives_the_words_back_to_their_speaker() {
     let mut s = Speakers::default();
     let a = |person: &str| Assigned {
@@ -101,6 +122,11 @@ fn assigning_no_one_gives_the_words_back_to_their_speaker() {
     s.assign(a("r7/1"));
     s.assign(a(""));
     assert!(s.assigned.is_empty());
+}
+
+#[test]
+fn a_person_made_up_by_name_is_called_that() {
+    assert_eq!(Speakers::default().name("Will"), "Will");
 }
 
 #[test]

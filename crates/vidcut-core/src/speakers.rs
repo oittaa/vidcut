@@ -1,4 +1,5 @@
 pub use crate::model::{Assigned, Speakers};
+use crate::transcript::Word;
 
 pub fn voice(media: &str, stream: u32, speaker: u32) -> String {
     format!("{media}/{stream}/{speaker}")
@@ -13,14 +14,25 @@ impl Speakers {
         self.names.is_empty() && self.links.is_empty() && self.assigned.is_empty()
     }
 
-    pub fn person(&self, media: &str, stream: u32, run: &str, speaker: u32, at: f64) -> String {
-        if let Some(a) = self
-            .assigned
+    pub fn assigned_to(&self, media: &str, stream: u32, at: f64) -> Option<String> {
+        self.assigned
             .iter()
             .rev()
             .find(|a| a.media == media && a.stream == stream && a.start <= at && at < a.end)
-        {
-            return a.person.clone();
+            .map(|a| a.person.clone())
+    }
+
+    pub fn word(&self, media: &str, stream: u32, run: Option<&str>, w: &Word) -> Option<String> {
+        let at = (w.start + w.end) / 2.0;
+        match (w.speaker, run) {
+            (Some(n), Some(run)) => Some(self.person(media, stream, run, n, at)),
+            _ => self.assigned_to(media, stream, at),
+        }
+    }
+
+    pub fn person(&self, media: &str, stream: u32, run: &str, speaker: u32, at: f64) -> String {
+        if let Some(a) = self.assigned_to(media, stream, at) {
+            return a;
         }
         self.links
             .get(&voice(media, stream, speaker))
@@ -29,9 +41,14 @@ impl Speakers {
     }
 
     pub fn name(&self, person: &str) -> String {
-        match self.names.get(person) {
-            Some(n) => n.clone(),
-            None => format!("Speaker {}", person.rsplit('/').next().unwrap_or(person)),
+        let number = person
+            .rsplit('/')
+            .next()
+            .filter(|n| n.parse::<u32>().is_ok());
+        match (self.names.get(person), number) {
+            (Some(n), _) => n.clone(),
+            (None, Some(n)) => format!("Speaker {n}"),
+            (None, None) => person.to_string(),
         }
     }
 
