@@ -870,70 +870,7 @@ impl Workspace {
                 });
             });
             ui.separator();
-            if self.snap.project.is_some() {
-                if ui
-                    .button("Import")
-                    .on_hover_text(super::keys("Ctrl+I"))
-                    .clicked()
-                {
-                    self.import_media();
-                }
-                if ui
-                    .button("Import Folder")
-                    .on_hover_text(FOLDER_HINT)
-                    .clicked()
-                {
-                    self.import_folder();
-                }
-                if ui
-                    .button("Quick Export")
-                    .on_hover_text("Export the In–Out range, or the whole timeline, with a preset")
-                    .clicked()
-                {
-                    self.open_quick_export(ui.ctx());
-                }
-                if ui
-                    .button("Export")
-                    .on_hover_text("All export settings")
-                    .clicked()
-                {
-                    self.open_export(ui.ctx());
-                }
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.toggle_value(&mut self.help.open, "Help")
-                    .on_hover_text("Keyboard shortcuts, with what the less obvious ones do (F1)");
-                ui.toggle_value(&mut self.show_log, "Command log");
-                if self.project().is_some() {
-                    ui.toggle_value(&mut self.show_mixer, "Mixer")
-                        .on_hover_text("Track faders, mute, solo and meters");
-                    ui.toggle_value(&mut self.transcription.open, "Transcription")
-                        .on_hover_text(
-                            "The words said in the source clip or the timeline: go to them, \
-                             mark them, cut them",
-                        );
-                    let mut open = self.history.open;
-                    if ui
-                        .toggle_value(&mut open, "History")
-                        .on_hover_text(
-                            "Every step, who made it and when; hover one to see the timeline as \
-                             it was",
-                        )
-                        .changed()
-                    {
-                        if open {
-                            self.history.show();
-                        } else {
-                            self.history.close();
-                        }
-                    }
-                }
-                self.jobs_button(ui);
-                if let Some(e) = &self.snap.preview_error {
-                    ui.label(RichText::new("no preview").color(theme::colors().error))
-                        .on_hover_text(e);
-                }
-            });
+            self.bar_buttons(ui);
         });
     }
 
@@ -1823,7 +1760,7 @@ impl Workspace {
 
 const NOTICE_FADE: f64 = 1.0;
 
-const FOLDER_HINT: &str = "A folder as a bin, with a bin for each folder in it";
+pub(super) const FOLDER_HINT: &str = "A folder as a bin, with a bin for each folder in it";
 
 fn recent_projects() -> Vec<PathBuf> {
     std::fs::read_to_string(crate::paths::state_dir().join("recent.json"))

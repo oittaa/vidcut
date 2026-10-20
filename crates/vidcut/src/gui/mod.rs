@@ -1,6 +1,7 @@
 #[cfg(any(target_os = "linux", windows))]
 mod acquire;
 mod app;
+mod bar;
 mod cells;
 mod clip_info;
 pub mod export;
