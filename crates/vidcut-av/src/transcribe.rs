@@ -10,7 +10,7 @@ use transcribe_cpp as tc;
 use vidcut_core::analysis::VoiceActivity;
 use vidcut_core::model::Media;
 use vidcut_core::render::{AudioPiece, RenderPlan};
-use vidcut_core::request::SpeechModel;
+use vidcut_core::request::{FindSpeech, SpeechModel};
 use vidcut_core::transcript::{self, Asked, RATE, Said, Speech, Timing, Word};
 
 use crate::error::{Error, Result};
@@ -709,6 +709,22 @@ pub fn voice_activity(
     })
 }
 
+fn missed_singing(voice: &[(i64, i64)], sound: &[(i64, i64)], total: usize) -> Option<String> {
+    let length = |spans: &[(i64, i64)]| spans.iter().map(|(a, b)| b - a).sum::<i64>();
+    let (heard, loud) = (length(voice), length(sound));
+    let mostly_loud = loud * 2 >= total as i64 && loud > 0;
+    (mostly_loud && heard * 4 < loud).then(|| {
+        format!(
+            "the voice detection found speech in {}% of the sound ({} of {}): singing or speech \
+             over music may have been left out; find the speech by sound level instead \
+             (find: sound)",
+            heard * 100 / loud,
+            transcript_clock(secs(heard)),
+            transcript_clock(secs(loud))
+        )
+    })
+}
+
 fn speech(vad: &Path, pcm: &[f32]) -> Result<(Vec<(i64, i64)>, usize)> {
     let model = vad_model(vad)?;
     let frame = model.vad_info().map_err(tc_error)?.frame_samples.max(1) as usize;
@@ -916,12 +932,24 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
     let started = Instant::now();
     let (model_path, vad_path) = files(asked, options.models)?;
     let pcm = heard_plan(plan, &model_path, started)?;
-    let (stretches, frame) = speech(&vad_path, &pcm)?;
+    let (voice, frame) = speech(&vad_path, &pcm)?;
     let quiet: Vec<f32> = pcm
         .chunks(frame)
         .map(|c| (c.iter().map(|s| s * s).sum::<f32>() / c.len() as f32).sqrt())
         .collect();
     let mut warnings = Vec::new();
+    let found = asked.find.unwrap_or_default();
+    let floor = asked.sound_db.unwrap_or(transcript::SOUND_DB);
+    let sound = transcript::sounding(&quiet, frame, floor);
+    let stretches = match found {
+        FindSpeech::Voice => {
+            if let Some(hint) = missed_singing(&voice, &sound, pcm.len()) {
+                warnings.push(hint);
+            }
+            voice
+        }
+        FindSpeech::Sound => sound,
+    };
     report(&model_path, Stage::Loading, 0, 0, started);
     let loaded = load(&model_path, options.gpu, &mut warnings)?;
     crate::cancel::stop()?;
@@ -1022,6 +1050,8 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
         longest_piece: pieces.iter().map(|(s, e)| secs(e - s)).fold(0.0, f64::max),
         said,
         warnings,
+        found,
+        sound_db: (found == FindSpeech::Sound).then_some(floor),
     })
 }
 

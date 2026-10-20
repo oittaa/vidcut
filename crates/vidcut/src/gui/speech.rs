@@ -5,7 +5,7 @@ use serde_json::json;
 use vidcut_av::transcribe;
 use vidcut_core::looks::{Look, LookKind, Styled};
 use vidcut_core::model::Project;
-use vidcut_core::request::SpeechModel;
+use vidcut_core::request::{FindSpeech, SpeechModel};
 
 use super::export::near_center;
 use super::workspace::{Workspace, dim, escape_cancels};
@@ -46,6 +46,8 @@ struct Settings {
     gap: u32,
     from_media: bool,
     look: String,
+    find: FindSpeech,
+    sound_db: f64,
 }
 
 impl Default for Settings {
@@ -60,8 +62,47 @@ impl Default for Settings {
             gap: 0,
             from_media: true,
             look: PLAIN.into(),
+            find: FindSpeech::Voice,
+            sound_db: vidcut_core::transcript::SOUND_DB,
         }
     }
+}
+
+fn found_by(s: &Settings, params: &mut serde_json::Value) {
+    params["find"] = json!(s.find);
+    if s.find == FindSpeech::Sound && s.sound_db != vidcut_core::transcript::SOUND_DB {
+        params["sound_db"] = json!(s.sound_db);
+    }
+}
+
+fn find_speech(ui: &mut egui::Ui, s: &mut Settings) {
+    egui::CollapsingHeader::new("Advanced")
+        .id_salt("speech-advanced")
+        .default_open(s.find != FindSpeech::Voice)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Find speech by");
+                ui.radio_value(&mut s.find, FindSpeech::Voice, "Voice")
+                    .on_hover_text("The voice detection hears where people speak: best for talk");
+                ui.radio_value(&mut s.find, FindSpeech::Sound, "Sound level")
+                    .on_hover_text(
+                        "Everything louder than the level is heard: singing and speech over \
+                         music too, which voice detection misses",
+                    );
+            });
+            if s.find == FindSpeech::Sound {
+                ui.horizontal(|ui| {
+                    ui.label("Quieter than");
+                    ui.add(
+                        egui::DragValue::new(&mut s.sound_db)
+                            .range(-80.0..=-10.0)
+                            .speed(0.5)
+                            .suffix(" dBFS"),
+                    );
+                    ui.label(dim("for half a second is silence"));
+                });
+            }
+        });
 }
 
 impl Settings {
@@ -429,6 +470,7 @@ impl Workspace {
         if again {
             params["again"] = json!(true);
         }
+        found_by(s, &mut params);
         if download {
             params["download"] = json!(true);
         }
@@ -465,6 +507,7 @@ impl Workspace {
             Onto::Track(id) => params["track"] = json!(id),
             Onto::New => params["track"] = json!(format!("S{}", p.subtitles.len() + 1)),
         }
+        found_by(s, &mut params);
         if download {
             params["download"] = json!(true);
         }
@@ -741,6 +784,7 @@ impl Workspace {
                             );
                             ui.end_row();
                         });
+                    find_speech(ui, s);
                     let (a, b) = match range {
                         Some(marks) if s.in_out => marks,
                         _ => (0, p.end()),

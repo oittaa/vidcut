@@ -21,8 +21,8 @@ use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
 use crate::render::RenderPlan;
 use crate::request::{
-    Changes, Client, ClientKind, ClipPart, ClipRef, Detect, Envelope, HearFrom, ImportMode,
-    NewTrack, OneOrMany, ProjectSet, Request, Response, SourceParams, SpeechModel,
+    Changes, Client, ClientKind, ClipPart, ClipRef, Detect, Envelope, FindSpeech, HearFrom,
+    ImportMode, NewTrack, OneOrMany, ProjectSet, Request, Response, SourceParams, SpeechModel,
 };
 use crate::retime;
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
@@ -1694,6 +1694,8 @@ fn clip_speech(
         longest_piece: 0.0,
         said: Vec::new(),
         warnings: Vec::new(),
+        found: asked.find.unwrap_or_default(),
+        sound_db: asked.level(),
     };
     let mut media = Vec::new();
     let mut devices: Vec<String> = Vec::new();
@@ -1950,6 +1952,7 @@ fn transcript_json(stream: u32, s: &Speech) -> Value {
         "model": s.model,
         "language": s.language,
         "timing": s.timing,
+        "find": s.found,
         "words": s.said.iter().map(|x| transcript::words(x).len()).sum::<usize>(),
     })
 }
@@ -3187,6 +3190,8 @@ fn mutate(
             gap,
             hear,
             download,
+            find,
+            sound_db,
         } => {
             let looked = look
                 .as_deref()
@@ -3214,6 +3219,8 @@ fn mutate(
                 vad_file: vad_file.clone(),
                 language: language.clone(),
                 download: *download,
+                find: *find,
+                sound_db: *sound_db,
             };
             let from_media = hears_media(*hear, &asked)?;
             let (speech, media) = match from_media {
@@ -3283,6 +3290,7 @@ fn mutate(
                 "device": device_json(&speech),
                 "language": speech.language,
                 "timing": speech.timing,
+                "find": speech.found,
                 "pieces": speech.pieces,
                 "longest_piece": speech.longest_piece,
                 "warnings": warnings,
@@ -3296,6 +3304,8 @@ fn mutate(
             hear,
             language,
             download,
+            find,
+            sound_db,
         } => {
             let ti = match track {
                 Some(id) => p
@@ -3334,6 +3344,8 @@ fn mutate(
                 vad_file: None,
                 language: language.clone(),
                 download: *download,
+                find: *find,
+                sound_db: *sound_db,
             };
             let from_media = hears_media(*hear, &asked)?;
             let (speech, media) = match from_media {
@@ -3401,6 +3413,8 @@ fn mutate(
             language,
             max_offset,
             download,
+            find,
+            sound_db,
         } => retime_subtitles(
             p,
             env,
@@ -3412,6 +3426,8 @@ fn mutate(
                 language: language.as_ref(),
                 max_offset: max_offset.as_ref(),
                 download: *download,
+                find: *find,
+                sound_db: *sound_db,
             },
         )?,
         Request::TimelineImport {
@@ -5443,6 +5459,8 @@ pub fn query(
             vad_file,
             language,
             download,
+            find,
+            sound_db,
             again,
         } => {
             let asked = transcript::Asked {
@@ -5451,6 +5469,8 @@ pub fn query(
                 vad_file: vad_file.clone(),
                 language: language.clone(),
                 download: *download,
+                find: *find,
+                sound_db: *sound_db,
             };
             if model_file.is_none() && !asked.model.times_words() {
                 return Err(Error::invalid(format!(
@@ -5507,6 +5527,8 @@ pub fn query(
             vad_file,
             language,
             download,
+            find,
+            sound_db,
         } => {
             if media.is_some() || clips.is_some() {
                 if range.is_some() || tracks.is_some() {
@@ -5568,6 +5590,8 @@ pub fn query(
                     vad_file: vad_file.clone(),
                     language: language.clone(),
                     download: *download,
+                    find: *find,
+                    sound_db: *sound_db,
                 },
             )?;
             let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
@@ -6089,6 +6113,8 @@ struct Retime<'a> {
     language: Option<&'a String>,
     max_offset: Option<&'a TimeSpec>,
     download: bool,
+    find: Option<FindSpeech>,
+    sound_db: Option<f64>,
 }
 
 fn signed(secs: f64) -> String {
@@ -6185,6 +6211,8 @@ fn time_from_kept(p: &mut Project, env: &dyn Env, id: &str) -> Result<()> {
         vad_file: None,
         language: None,
         download: false,
+        find: None,
+        sound_db: None,
     };
     let Ok((speech, _)) = clip_speech(p, env, (a, b), &heard, &asked, false) else {
         return Ok(());
@@ -6264,6 +6292,8 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
             vad_file: None,
             language: r.language.cloned(),
             download: r.download,
+            find: r.find,
+            sound_db: r.sound_db,
         };
         let (heard, media) = match hears_media(r.hear, &asked)? {
             true => {
