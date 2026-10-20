@@ -195,7 +195,7 @@ pub fn details(path: &Path) -> Result<vidcut_core::model::MediaDetails> {
             // SAFETY: a lookup of a static profile name.
             profile: c_name(unsafe { ffi::avcodec_profile_name(id.into(), raw.profile) }),
             bit_rate: rate(raw.bit_rate),
-            language: tags.get("language").cloned(),
+            language: tags.get("language").filter(|l| *l != "und").cloned(),
             tags,
             ..Default::default()
         };

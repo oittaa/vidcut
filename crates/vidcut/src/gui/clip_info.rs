@@ -1,7 +1,7 @@
 use eframe::egui::{self, RichText};
 use serde_json::json;
 use vidcut_core::model::{
-    ColorSpace, Hdr, Media, MediaDetails, Project, StartTimecode, StreamDetails, VideoInfo,
+    ColorSpace, Hdr, Media, MediaDetails, StartTimecode, StreamDetails, VideoInfo,
 };
 use vidcut_core::time::format_timecode;
 
@@ -33,20 +33,50 @@ fn bit_rate(bits: u64) -> String {
     }
 }
 
+fn clock(secs: f64) -> String {
+    let whole = secs.max(0.0) as i64;
+    format!(
+        "{:02}:{:02}:{:02}.{:03}",
+        whole / 3600,
+        whole / 60 % 60,
+        whole % 60,
+        ((secs - whole as f64) * 1000.0) as i64
+    )
+}
+
 pub(super) fn start_label(tc: &StartTimecode) -> String {
     if tc.rate.as_f64() > 1000.0 {
-        let secs = tc.count as f64 / tc.rate.as_f64();
-        let whole = secs as i64;
-        format!(
-            "{:02}:{:02}:{:02}.{:03}",
-            whole / 3600,
-            whole / 60 % 60,
-            whole % 60,
-            ((secs - whole as f64) * 1000.0) as i64
-        )
+        clock(tc.count as f64 / tc.rate.as_f64())
     } else {
         format_timecode(tc.count, tc.rate, 0, tc.drop_frame)
     }
+}
+
+fn length(m: &Media) -> Option<String> {
+    if m.subtitles.is_some() {
+        return None;
+    }
+    match &m.info.video {
+        Some(v) if v.still => None,
+        Some(v) => {
+            let frames = v.fps.secs_to_frames(v.duration);
+            Some(format_timecode(frames, v.fps, 0, false))
+        }
+        None => Some(clock(m.info.duration)),
+    }
+}
+
+fn told(key: &str, value: &str) -> bool {
+    let v = value.trim();
+    let nothing = v.is_empty()
+        || (key == "language" && v == "und")
+        || (key == "vendor_id" && v.chars().all(|c| matches!(c, '[' | ']' | '0')))
+        || (key == "handler_name"
+            && matches!(
+                v,
+                "VideoHandler" | "SoundHandler" | "SubtitleHandler" | "DataHandler"
+            ));
+    !nothing
 }
 
 fn depth(v: &VideoInfo) -> String {
@@ -85,7 +115,7 @@ fn audio_line(a: &vidcut_core::model::AudioInfo) -> String {
     )
 }
 
-pub(super) fn glance(app: &Workspace, p: &Project, m: &Media) -> Vec<String> {
+pub(super) fn glance(m: &Media) -> Vec<String> {
     if let Some(s) = &m.subtitles {
         return vec![
             format!("{} subtitles", super::subtitles::format_name(s.format)),
@@ -111,9 +141,7 @@ pub(super) fn glance(app: &Workspace, p: &Project, m: &Media) -> Vec<String> {
             out.push("interlaced".into());
         }
     }
-    if m.info.video.as_ref().is_none_or(|v| !v.still) {
-        out.push(app.src_tc(p.media_frames(m)));
-    }
+    out.extend(length(m));
     if let Some(tc) = &m.info.timecode {
         out.push(format!("TC {}", start_label(tc)));
     }
@@ -167,13 +195,13 @@ fn stream_rows(s: &StreamDetails) -> Vec<(String, String)> {
     if let Some(b) = s.bit_rate {
         rows.push(("Bit rate".into(), bit_rate(b)));
     }
-    for (k, v) in &s.tags {
+    for (k, v) in s.tags.iter().filter(|(k, v)| told(k, v)) {
         rows.push((k.clone(), v.clone()));
     }
     rows
 }
 
-fn sections(app: &Workspace, p: &Project, m: &Media, read: Option<&MediaDetails>) -> Vec<Section> {
+fn sections(app: &Workspace, m: &Media, read: Option<&MediaDetails>) -> Vec<Section> {
     let mut file = vec![
         ("Name".to_string(), m.name.clone()),
         ("Path".into(), m.path.display().to_string()),
@@ -200,15 +228,8 @@ fn sections(app: &Workspace, p: &Project, m: &Media, read: Option<&MediaDetails>
         "Container".to_string(),
         read.map_or_else(|| m.info.format.clone(), |d| d.format.clone()),
     )];
-    if m.info.video.as_ref().is_none_or(|v| !v.still) && m.subtitles.is_none() {
-        format.push((
-            "Duration".into(),
-            format!(
-                "{} ({:.3} s)",
-                app.src_tc(p.media_frames(m)),
-                m.info.duration
-            ),
-        ));
+    if let Some(l) = length(m) {
+        format.push(("Duration".into(), format!("{l} ({:.3} s)", m.info.duration)));
     }
     if let Some(tc) = &m.info.timecode {
         format.push(("Start timecode".into(), start_label(tc)));
@@ -216,7 +237,12 @@ fn sections(app: &Workspace, p: &Project, m: &Media, read: Option<&MediaDetails>
     if let Some(b) = read.and_then(|d| d.bit_rate) {
         format.push(("Bit rate".into(), bit_rate(b)));
     }
-    for (k, v) in read.map(|d| &d.tags).into_iter().flatten() {
+    for (k, v) in read
+        .map(|d| &d.tags)
+        .into_iter()
+        .flatten()
+        .filter(|(k, v)| told(k, v))
+    {
         format.push((k.clone(), v.clone()));
     }
     out.push(("Format".into(), format));
@@ -230,17 +256,23 @@ fn sections(app: &Workspace, p: &Project, m: &Media, read: Option<&MediaDetails>
             rows.push((
                 "Frame rate".into(),
                 format!(
-                    "{} fps ({}){}",
+                    "{} fps{}{}",
                     v.fps.decimal(),
-                    v.fps,
+                    if v.fps.is_whole() {
+                        String::new()
+                    } else {
+                        format!(" ({})", v.fps)
+                    },
                     if v.vfr { ", variable" } else { "" }
                 ),
             ));
         }
-        rows.push((
-            "Pixel format".into(),
-            format!("{}, {}", v.pix_fmt, depth(v)),
-        ));
+        if read.is_none() {
+            rows.push((
+                "Pixel format".into(),
+                format!("{}, {}", v.pix_fmt, depth(v)),
+            ));
+        }
         rows.push(("Dynamic range".into(), dynamic_range(v)));
         rows.push((
             "Scan".into(),
@@ -375,7 +407,7 @@ impl Workspace {
                     _ => None,
                 };
                 let details = read.and_then(|r| r.as_ref().ok());
-                let all = sections(self, &p, m, details);
+                let all = sections(self, m, details);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(&m.name).strong());
                     if ui
@@ -425,7 +457,12 @@ mod tests {
     use vidcut_core::model::StartTimecode;
     use vidcut_core::time::Rational;
 
-    use super::start_label;
+    use super::{start_label, told};
+
+    #[test]
+    fn an_undetermined_language_tag_is_left_out() {
+        assert!(!told("language", "und"));
+    }
 
     #[test]
     fn a_broadcast_wavs_time_reference_reads_as_a_time_of_day() {

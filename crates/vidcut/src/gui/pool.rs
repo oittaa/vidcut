@@ -561,7 +561,7 @@ impl Workspace {
                 });
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    for (i, fact) in super::clip_info::glance(self, p, &m).iter().enumerate() {
+                    for (i, fact) in super::clip_info::glance(&m).iter().enumerate() {
                         if i > 0 {
                             ui.label(dim("·"));
                         }
