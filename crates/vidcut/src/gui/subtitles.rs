@@ -737,9 +737,7 @@ impl Workspace {
                 if changed {
                     d.preview = style_of(&d).ok();
                 }
-                ui.label(dim(
-                    "Burned in, and written to an IMSC1 file. An empty field keeps the usual look",
-                ));
+                ui.label(dim("An empty field keeps the usual look."));
                 if !d.error.is_empty() {
                     ui.colored_label(ui.visuals().error_fg_color, &d.error);
                 }
@@ -801,9 +799,7 @@ impl Workspace {
             None => vidcut_core::ops::subtitles::shown(p).ok(),
         };
         let Some(t) = ti.map(|i| &p.subtitles[i]) else {
-            self.say(
-                "Show a subtitle track to export, or use Export Subtitle in its header's menu",
-            );
+            self.say("Show a subtitle track first, or export from its header's menu");
             return;
         };
         let stem = self
@@ -873,9 +869,7 @@ impl Workspace {
                     return;
                 };
                 self.say(format!(
-                    "Imported {name} into the Media Pool, {} subtitle(s): drag it onto a \
-                     subtitle track, or right-click it > Insert Selected Subtitles to Timeline \
-                     Using Timecode",
+                    "Imported {name}, {} subtitle(s). Drag it onto a subtitle track.",
                     s.cues
                 ));
                 if !s.warnings.is_empty() {

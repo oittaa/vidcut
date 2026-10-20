@@ -346,7 +346,7 @@ impl Workspace {
                 let mut choice = None;
                 let modal = egui::Modal::new(egui::Id::unique("otio-open-taken")).show(ctx, |ui| {
                     ui.label(format!(
-                        "{} is already there. Open it, or save the project from {} under another name.",
+                        "{} exists already. Open it, or save {} under another name.",
                         file_name(&f.target),
                         file_name(&f.otio)
                     ));
@@ -466,16 +466,14 @@ impl Workspace {
                     new.format.edit_start(ui);
                 }
                 ui.label(
-                    RichText::new(
-                        "The size can change later; the frame rate only while the timeline is empty.",
-                    )
-                    .small()
-                    .color(theme::colors().text_dim),
+                    RichText::new("The frame rate can change only while the timeline is empty.")
+                        .small()
+                        .color(theme::colors().text_dim),
                 );
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    let ok = (!new.choose || new.format.fps().is_some())
-                        && new.format.start().is_some();
+                    let ok =
+                        (!new.choose || new.format.fps().is_some()) && new.format.start().is_some();
                     let button = if new.from.is_some() {
                         "Create"
                     } else {

@@ -885,8 +885,7 @@ impl Workspace {
                     }
                     _ => {
                         ui.label(dim(
-                            "Click a word to go to it, drag over words for In and Out, X for a \
-                             sentence",
+                            "Click a word to go there; drag over words to mark them.",
                         ));
                     }
                 });

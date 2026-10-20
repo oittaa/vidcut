@@ -475,10 +475,7 @@ impl Workspace {
                         if searching {
                             ui.label(dim("Nothing matches"));
                         } else if !view.bin.is_empty() {
-                            ui.label(dim(
-                                "This bin is empty. Drag clips onto it, or right-click \
-                                 a clip and choose Move to Bin",
-                            ));
+                            ui.label(dim("Empty bin. Drag clips here, or use Move to Bin."));
                         } else {
                             ui.label(dim(super::keys(
                                 "No media yet. Import with Ctrl+I, or `vidcut media add FILE…`",

@@ -310,7 +310,7 @@ impl Workspace {
             ui.checkbox(&mut self.titles.hover_scrub, "Hover Scrub Preview");
         });
         ui.label(dim(
-            "Drag a title onto a timeline, or double-click it to add it at the playhead",
+            "Drag a title onto a timeline, or double-click to add it.",
         ));
         ui.add_space(6.0);
         let (w, h) = (p.settings.width.max(1), p.settings.height.max(1));

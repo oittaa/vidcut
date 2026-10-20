@@ -526,7 +526,7 @@ impl Workspace {
             })
             .collect();
         match sources.len() {
-            0 => self.say("Pick a source first: open a clip, or select media in the pool"),
+            0 => self.say("Open a clip or select pool media first"),
             1 => self.send(
                 method,
                 with_position(sources.into_iter().next().expect("one")),
@@ -930,11 +930,9 @@ impl Workspace {
             ui.checkbox(&mut self.log_edits_only, "edits only");
         });
         ui.label(
-            RichText::new(
-                "What you, scripts and agents did. Click an entry to copy it as a command.",
-            )
-            .color(theme::colors().text_dim)
-            .small(),
+            RichText::new("Click an entry to copy it as a command.")
+                .color(theme::colors().text_dim)
+                .small(),
         );
         ui.separator();
         let project = self.snap.project.as_ref().map(|p| p.path.clone());

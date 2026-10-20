@@ -367,7 +367,7 @@ impl Workspace {
         };
         let text = if self.timeline.dynamic.is_some() {
             format!(
-                "Dynamic Trim: {side} at {}. L/J trim, K stops, Space plays around it, W leaves",
+                "Dynamic Trim: {side} at {}. L/J trim, K stops, W leaves",
                 self.tc(e.at)
             )
         } else {

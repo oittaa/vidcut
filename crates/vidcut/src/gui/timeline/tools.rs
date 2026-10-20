@@ -782,8 +782,7 @@ impl Workspace {
                     ui.label(status);
                 } else {
                     ui.label(dim(format!(
-                        "Speech is heard with {}, not on this computer yet: downloaded once, \
-                         each checked against its SHA-256.",
+                        "Speech needs {}, downloaded once.",
                         vidcut_av::transcribe::listed(&needs)
                     )));
                     if ui.button("Download and Find").clicked() {
@@ -791,10 +790,7 @@ impl Workspace {
                     }
                 }
                 ui.label(dim(
-                    "Click a stripe to keep it, or drag its edges. [ and ] go to the previous \
-                     and next, X keeps or cuts the one at the playhead. Play and Space play \
-                     the timeline as Remove would leave it. Ctrl+Z and Ctrl+Shift+Z undo and \
-                     redo changes to the stripes and the settings.",
+                    "Click a stripe to keep it; X toggles the playhead's stripe",
                 ));
                 ui.label(dim("Cuts are de-clicked with 3 ms fades."));
                 let ready = d.current() && all > 0;

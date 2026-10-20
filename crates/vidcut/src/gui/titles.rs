@@ -425,23 +425,13 @@ impl Workspace {
                 });
                 ui.label(dim(match d.kind {
                     TitleKind::LowerThird => {
-                        "Across and Down place the lower third's corner, as percents of the \
-                         picture; it grows and turns about the point where its lines meet. \
-                         A shadow's Across and Down are percents of the picture too, and its \
-                         blur from 0 to 100. An empty field keeps the usual look"
+                        "Across and Down: the corner, in percents of the picture."
                     }
                     TitleKind::Scroll => {
-                        "Across places the lines' left edge, middle or right edge by Align, \
-                         as a percent of the picture; the lines rise from below the picture \
-                         to above it over the clip. A shadow's Across and Down are percents \
-                         of the picture, and its blur from 0 to 100. An empty field keeps the \
-                         usual look"
+                        "Across: the lines' edge by Align, in percents of the picture."
                     }
                     TitleKind::Text => {
-                        "Across and Down place the middle of the text, as percents of the \
-                         picture; it grows and turns about that point. A shadow's Across and \
-                         Down are percents of the picture too, and its blur from 0 to 100. An \
-                         empty field keeps the usual look"
+                        "Across and Down: the text's middle, in percents of the picture."
                     }
                 }));
                 if !d.error.is_empty() {

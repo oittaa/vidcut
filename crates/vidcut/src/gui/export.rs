@@ -1263,9 +1263,7 @@ impl Workspace {
             .open(&mut open)
             .show(ctx, |ui| {
                 if jobs.is_empty() {
-                    ui.label(dim(
-                        "No exports or proxy encodes yet. Those from vidcut CLI commands show here too.",
-                    ));
+                    ui.label(dim("No jobs yet. Jobs from the CLI show here too."));
                 }
                 egui::ScrollArea::vertical()
                     .max_height(520.0)

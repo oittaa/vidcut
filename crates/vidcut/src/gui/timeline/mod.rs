@@ -2865,7 +2865,7 @@ impl Workspace {
             (_, Side::Audio) => audio_edits(t)
                 .find(|&(cut, _)| cut == e.at)
                 .map(|(_, at)| at)
-                .ok_or("This cut has no audio edit: one of its clips has no sound")?,
+                .ok_or("No audio edit here: one clip has no sound")?,
             _ => e.at,
         };
         self.timeline.edit = Some(EditSel {

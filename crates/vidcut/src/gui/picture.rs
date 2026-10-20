@@ -1534,7 +1534,7 @@ fn d3d11_shared_for(
     pool.push(share_d3d11(gpu, frame, formats)?);
     vidcut_av::debug!(
         "viewer",
-        "imported a {}x{} {:?} Direct3D 11 texture to show pictures through ({} in all)",
+        "imported a {}x{} {:?} Direct3D 11 texture ({} in all)",
         frame.width(),
         frame.height(),
         formats.0,

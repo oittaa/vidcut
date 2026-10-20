@@ -729,8 +729,7 @@ impl Workspace {
     }
 
     fn history_footer(&mut self, steps: &Steps) -> String {
-        let hint = "Hover a step to see the timeline as it was. Click it, or use \u{2191} \
-                    \u{2193} and Enter, to go there; Esc comes back.";
+        let hint = "Hover previews a step; click or Enter goes there, Esc back.";
         let at = match (self.history.version, self.history.target) {
             (Some((id, k)), _) => PreviewAt::Version(id, k),
             (None, Some(t)) if t == steps.done => return "This is where the project is".into(),
