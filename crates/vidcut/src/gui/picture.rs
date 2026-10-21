@@ -60,7 +60,7 @@ impl Gpu {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("vidcut picture"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("picture.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(shader().into()),
         });
         let texture = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -1932,7 +1932,14 @@ fn write_plane(
     );
 }
 
-const LEVELS: usize = 4;
+const LEVELS: usize = vidcut_core::render::NESTED + 1;
+
+fn shader() -> String {
+    format!(
+        "const LEVELS: u32 = {LEVELS}u;\n{}",
+        include_str!("picture.wgsl")
+    )
+}
 
 const PARAMS: usize = (11 + 3 * LEVELS) * 16;
 
@@ -2075,7 +2082,7 @@ mod tests {
 
     #[test]
     fn the_shader_compiles() {
-        let module = naga::front::wgsl::parse_str(include_str!("picture.wgsl")).unwrap();
+        let module = naga::front::wgsl::parse_str(&super::shader()).unwrap();
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),

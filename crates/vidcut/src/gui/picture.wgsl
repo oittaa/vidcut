@@ -10,7 +10,7 @@ struct Params {
     flags: vec4<u32>,
     per: vec4<u32>,
     placed: vec4<f32>,
-    levels: array<vec4<f32>, 12>,
+    levels: array<vec4<f32>, 3u * LEVELS>,
 };
 
 @group(0) @binding(0) var<uniform> p: Params;

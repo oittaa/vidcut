@@ -672,6 +672,8 @@ pub(crate) fn plays_inside(c: &Clip) -> bool {
 
 type Within = Vec<Vec<Vec<Placed>>>;
 
+pub const NESTED: usize = 8;
+
 fn expanded(p: &Project) -> Option<(Project, Within)> {
     let holds = |p: &Project| p.tracks.iter().any(|t| t.clips.iter().any(plays_inside));
     if !holds(p) {
@@ -683,7 +685,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
         .iter()
         .map(|t| vec![Vec::new(); t.clips.len()])
         .collect();
-    for _ in 0..8 {
+    for _ in 0..NESTED {
         if !holds(&out) {
             break;
         }
