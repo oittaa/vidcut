@@ -192,6 +192,20 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             "the audio would be sent to {company}: pass send"
         )));
     }
+    if asked.model == SpeechModel::Google {
+        let o = asked.google.clone().unwrap_or_default();
+        let unlisted = o
+            .language_codes
+            .iter()
+            .chain(asked.language.iter())
+            .find(|code| !GOOGLE_LANGUAGES.contains(&code.as_str()));
+        if let Some(code) = unlisted {
+            return Err(Error::Invalid(format!(
+                "Gemini takes only the language codes Google lists, such as fi-FI or es-US: \
+                 {code} isn't one"
+            )));
+        }
+    }
     let started = Instant::now();
     let service = match asked.model {
         SpeechModel::Google => "google",
