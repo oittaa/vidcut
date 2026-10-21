@@ -158,6 +158,7 @@ const SYSTEM_MONO: &[&str] = if cfg!(windows) {
 fn font_definitions(f: &Fonts) -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();
     add_phosphor(&mut defs);
+    add_fallback(&mut defs);
     for (family, wanted, system, fallback) in [
         (FontFamily::Proportional, &f.ui, SYSTEM_UI, "Geist"),
         (FontFamily::Monospace, &f.mono, SYSTEM_MONO, "Geist Mono"),
@@ -199,6 +200,17 @@ fn add_phosphor(defs: &mut egui::FontDefinitions) {
     if let Some(font_keys) = defs.families.get_mut(&FontFamily::Proportional) {
         let at = font_keys.len().min(1);
         font_keys.insert(at, name.into());
+    }
+}
+
+fn add_fallback(defs: &mut egui::FontDefinitions) {
+    let Some(data) = font("Geist") else {
+        return;
+    };
+    let name = "fallback Geist";
+    defs.font_data.insert(name.into(), Arc::new(data));
+    if let Some(font_keys) = defs.families.get_mut(&FontFamily::Proportional) {
+        font_keys.push(name.into());
     }
 }
 
