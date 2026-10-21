@@ -2933,7 +2933,7 @@ fn mutate(
             let or_none =
                 |v: &Option<String>| v.as_ref().map(|v| (!v.is_empty()).then(|| v.clone()));
             let voice_isolation = voice_isolation.map(ops::checked_isolation).transpose()?;
-            if voice_isolation.is_some_and(|v| v > 0.0) {
+            if voice_isolation.is_some_and(|v| v > 0.0) && !dry_run {
                 env.voice_isolation(*download)?;
             }
             let props = ClipProps {
@@ -3091,7 +3091,7 @@ fn mutate(
             ..
         } => {
             let voice_isolation = voice_isolation.map(ops::checked_isolation).transpose()?;
-            if voice_isolation.is_some_and(|v| v > 0.0) {
+            if voice_isolation.is_some_and(|v| v > 0.0) && !dry_run {
                 env.voice_isolation(*download)?;
             }
             let props = ops::TrackProps {

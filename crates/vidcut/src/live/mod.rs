@@ -2652,7 +2652,10 @@ impl Live {
                 voice_isolation: Some(amount),
                 download: true,
                 ..
-            } if amount > 0.0 && !vidcut_av::isolate::needed(&paths::models_dir()).is_empty() => {
+            } if amount > 0.0
+                && !envelope.dry_run
+                && !vidcut_av::isolate::needed(&paths::models_dir()).is_empty() =>
+            {
                 let fetch = || {
                     vidcut_av::isolate::get_ready(&paths::models_dir(), true).map_err(|e| {
                         crate::export::av_error(&e, vidcut_core::ErrorCode::Media, String::new())
