@@ -76,6 +76,10 @@ impl<K: Hash + Eq + Clone, V, const N: usize> Lru<K, V, N> {
         self.at.contains_key(key)
     }
 
+    pub fn peek(&self, key: &K) -> Option<&V> {
+        self.at.get(key).map(|&i| &self.nodes[i].value)
+    }
+
     pub fn get(&mut self, key: &K) -> Option<&V> {
         self.get_mut(key).map(|v| &*v)
     }
