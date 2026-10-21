@@ -398,7 +398,17 @@ fn layer_size(out: (u32, u32), f: &frame::Video, rotation: u16, placed: &[Placed
         .min(native.max(1.0))
         .clamp(least, most.max(least));
     let even = |v: f64| ((v * scale / 2.0).round() as u32 * 2).max(2);
-    (even(ow), even(oh))
+    let mut size = (even(ow), even(oh));
+    for _ in 0..3 {
+        let (fw, fh) = upright_fit(f, rotation, size);
+        let (x, y) = ((size.0 - fw.min(size.0)) / 2, (size.1 - fh.min(size.1)) / 2);
+        if x % 4 == 0 && y % 4 == 0 {
+            break;
+        }
+        size.0 += if x % 4 == 0 { 0 } else { 2 };
+        size.1 += if y % 4 == 0 { 0 } else { 2 };
+    }
+    size
 }
 
 const LAYERS: usize = 16;
