@@ -127,6 +127,12 @@ pub struct Usage {
 
 pub const REBUILD_EVERY: Duration = Duration::from_secs(60 * 60);
 
+const UNFINISHED_FOR: Duration = Duration::from_secs(24 * 60 * 60);
+
+fn unfinished(name: &str) -> bool {
+    name.split('.').any(|piece| piece == "part")
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Entry {
     len: u64,
@@ -214,7 +220,8 @@ fn drop_all(victims: Vec<PathBuf>) {
 
 pub fn start(policy: Policy, disk: fn(&Path) -> Option<Disk>) {
     let _ = DISK.set(disk);
-    let index = Index::of(found(&policy));
+    let (found, left) = found(&policy);
+    let index = Index::of(found);
     let free = free_space();
     let mut victims = Vec::new();
     {
@@ -225,6 +232,7 @@ pub fn start(policy: Policy, disk: fn(&Path) -> Option<Disk>) {
         }
     }
     drop_all(victims);
+    drop_all(left);
 }
 
 pub fn set_policy(policy: Policy) {
@@ -247,7 +255,7 @@ pub fn rebuild() {
     let Some((policy, mark)) = live().as_ref().map(|l| (l.policy.clone(), l.index.writes)) else {
         return;
     };
-    let found = found(&policy);
+    let (found, left) = found(&policy);
     let free = free_space();
     let mut victims = Vec::new();
     {
@@ -274,6 +282,7 @@ pub fn rebuild() {
         }
     }
     drop_all(victims);
+    drop_all(left);
 }
 
 enum Reserved {
@@ -428,7 +437,7 @@ pub fn usage(policy: &Policy, disk: Option<Disk>) -> Usage {
     let (files, bytes) = match live().as_ref() {
         Some(l) => (l.index.files.len(), l.index.total),
         None => {
-            let found = found(policy);
+            let (found, _) = found(policy);
             (found.len(), found.iter().map(|(_, len, _)| len).sum())
         }
     };
@@ -441,33 +450,42 @@ pub fn usage(policy: &Policy, disk: Option<Disk>) -> Usage {
     }
 }
 
-fn found(policy: &Policy) -> Vec<(PathBuf, u64, SystemTime)> {
-    let mut found = Vec::new();
+type Found = Vec<(PathBuf, u64, SystemTime)>;
+
+fn found(policy: &Policy) -> (Found, Vec<PathBuf>) {
+    let (mut found, mut left) = (Vec::new(), Vec::new());
     for kind in Kind::ALL {
-        listed(&plain(&kind.dir()), &|name| !kind.keeps(name), &mut found);
+        let counts = |name: &str| !kind.keeps(name);
+        listed(&plain(&kind.dir()), &counts, &mut found, &mut left);
     }
     if let Some(dir) = policy.proxies_dir() {
-        listed(&dir, &|name| name.ends_with(".mkv"), &mut found);
+        listed(&dir, &|name| name.ends_with(".mkv"), &mut found, &mut left);
     }
     found.sort_by_key(|(_, _, used)| *used);
-    found
+    (found, left)
 }
 
-fn listed(dir: &Path, counts: &dyn Fn(&str) -> bool, found: &mut Vec<(PathBuf, u64, SystemTime)>) {
+fn listed(dir: &Path, counts: &dyn Fn(&str) -> bool, found: &mut Found, left: &mut Vec<PathBuf>) {
     let Ok(listing) = std::fs::read_dir(dir) else {
         return;
     };
     for e in listing.flatten() {
         let name = e.file_name();
         let name = name.to_string_lossy();
-        if !counts(&name) {
+        let part = unfinished(&name);
+        if !part && !counts(&name) {
             continue;
         }
         let Ok(meta) = e.metadata() else {
             continue;
         };
-        if let (true, Ok(used)) = (meta.is_file(), meta.modified()) {
+        let (true, Ok(used)) = (meta.is_file(), meta.modified()) else {
+            continue;
+        };
+        if !part {
             found.push((e.path(), meta.len(), used));
+        } else if used.elapsed().is_ok_and(|age| age > UNFINISHED_FOR) {
+            left.push(e.path());
         }
     }
 }
