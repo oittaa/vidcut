@@ -917,6 +917,10 @@ fn cache(
                         _ => now,
                     }));
                     ui.end_row();
+                } else {
+                    ui.label("");
+                    ui.label(dim("The disk's size can't be read, so nothing is removed"));
+                    ui.end_row();
                 }
                 let mut disk = state["preferences"]["thumbnails"]["disk_cache"] == true;
                 label(ui, "Thumbnails");

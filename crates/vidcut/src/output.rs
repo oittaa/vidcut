@@ -526,7 +526,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
             let c = &r.result["cache"];
             let limit = match c["limit_mb"].as_u64() {
                 Some(mb) => format!(", up to {mb} MB"),
-                None => String::new(),
+                None => ", no limit: the disk's size can't be read".into(),
             };
             println!(
                 "cache: {} MB in {} files{limit} ({})",
