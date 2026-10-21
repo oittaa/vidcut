@@ -348,51 +348,9 @@ pub fn fillers(language: &str) -> &'static [&'static str] {
     }
 }
 
-const COMMON: [(&str, [&str; 6]); 25] = [
-    ("en", ["the", "and", "of", "to", "is", "that"]),
-    ("de", ["der", "die", "und", "das", "ist", "nicht"]),
-    ("fr", ["le", "les", "et", "est", "des", "une"]),
-    ("es", ["el", "los", "que", "y", "una", "del"]),
-    ("it", ["il", "che", "di", "non", "gli", "una"]),
-    ("pt", ["o", "os", "não", "uma", "do", "com"]),
-    ("ru", ["и", "в", "не", "что", "на", "это"]),
-    ("uk", ["і", "в", "не", "що", "на", "це"]),
-    ("hr", ["je", "i", "da", "se", "u", "na"]),
-    ("sl", ["je", "in", "da", "se", "v", "ki"]),
-    ("lv", ["un", "ir", "ka", "ar", "uz", "no"]),
-    ("lt", ["ir", "kad", "tai", "su", "yra", "ne"]),
-    ("et", ["ja", "on", "et", "ei", "see", "ka"]),
-    ("fi", ["ja", "on", "että", "ei", "se", "oli"]),
-    ("sv", ["och", "att", "det", "är", "som", "inte"]),
-    ("da", ["og", "at", "det", "er", "som", "ikke"]),
-    ("nl", ["de", "het", "een", "en", "van", "niet"]),
-    ("pl", ["i", "w", "nie", "się", "na", "że"]),
-    ("cs", ["a", "je", "se", "na", "že", "to"]),
-    ("sk", ["a", "je", "sa", "na", "že", "to"]),
-    ("hu", ["a", "az", "és", "hogy", "nem", "egy"]),
-    ("ro", ["și", "de", "în", "nu", "că", "este"]),
-    ("bg", ["и", "на", "да", "се", "не", "е"]),
-    ("el", ["και", "το", "να", "η", "του", "είναι"]),
-    ("mt", ["il", "u", "li", "ta", "fil", "huwa"]),
-];
-
 fn bare(text: &str) -> String {
     text.trim_matches(|c: char| !c.is_alphanumeric())
         .to_lowercase()
-}
-
-pub fn language_of<'a>(texts: impl Iterator<Item = &'a str>) -> Option<&'static str> {
-    let mut score = [0usize; COMMON.len()];
-    for text in texts {
-        let word = bare(text);
-        for (k, (_, common)) in COMMON.iter().enumerate() {
-            if common.contains(&word.as_str()) {
-                score[k] += 1;
-            }
-        }
-    }
-    let (k, best) = score.iter().enumerate().max_by_key(|(_, s)| **s)?;
-    (*best > 0).then_some(COMMON[k].0)
 }
 
 pub fn built_in_fillers(language: &str) -> Vec<String> {
