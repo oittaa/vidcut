@@ -99,6 +99,7 @@ impl Workspace {
             };
             let r = ui.add(
                 egui::DragValue::new(&mut value)
+                    .update_while_editing(false)
                     .range(1.0..=100.0)
                     .speed(0.5)
                     .fixed_decimals(0)
