@@ -2231,8 +2231,10 @@ pub enum SpeechModel {
     Xai,
     /// Google's `gemini-3.5-transcribe`, on Google's servers: 85 languages
     /// and more, times per word, about $0.30 per hour of audio (October
-    /// 2026), 30 minutes of speech at most: more is refused before anything
-    /// is sent. It needs a Gemini key and `send`.
+    /// 2026), 30 minutes of speech at most with word times, which vidcut
+    /// always asks for: more is refused before anything is sent. It tells up
+    /// to 8 speakers apart, 3 or more experimentally. It needs a Gemini key
+    /// and `send`.
     #[serde(rename = "google")]
     Google,
 }
@@ -2257,6 +2259,13 @@ impl SpeechModel {
     pub fn longest_secs(self) -> Option<f64> {
         match self {
             Self::Google => Some(30.0 * 60.0),
+            _ => None,
+        }
+    }
+
+    pub fn max_speakers(self) -> Option<u32> {
+        match self {
+            Self::Google => Some(8),
             _ => None,
         }
     }
@@ -2294,6 +2303,13 @@ pub enum SpeakerModel {
 }
 
 impl SpeakerModel {
+    pub fn max_speakers(self) -> Option<u32> {
+        match self {
+            Self::Sortformer => Some(4),
+            _ => None,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::Auto => "auto",
