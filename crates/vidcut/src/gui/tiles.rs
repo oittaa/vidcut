@@ -37,7 +37,7 @@ pub struct Job {
     width: u32,
     fps: Rational,
     pieces: Vec<VideoPiece>,
-    disk: Option<(BlockFile, u64)>,
+    disk: Option<BlockFile>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -101,7 +101,7 @@ pub struct Tiles {
     clock: u64,
     bytes: usize,
     budget: usize,
-    disk: Option<u64>,
+    disk: bool,
     asked: RefCell<Vec<Job>>,
     shown: RefCell<Vec<TileKey>>,
     missing: HashSet<TileKey>,
@@ -123,7 +123,7 @@ impl Tiles {
             clock: 0,
             bytes: 0,
             budget: MEMORY,
-            disk: None,
+            disk: false,
             asked: RefCell::default(),
             shown: RefCell::default(),
             missing: HashSet::new(),
@@ -143,9 +143,7 @@ impl Tiles {
     }
 
     pub fn set_prefs(&mut self, prefs: &Thumbnails) {
-        self.disk = prefs
-            .disk_cache
-            .then(|| prefs.cache_limit_mb.saturating_mul(1 << 20));
+        self.disk = prefs.disk_cache;
     }
 
     pub fn begin_frame(&mut self, ctx: &egui::Context, p: Option<&Project>) {
@@ -276,14 +274,14 @@ impl Tiles {
             width,
             fps: p.settings.fps,
             pieces,
-            disk: self.disk.map(|limit| {
+            disk: self.disk.then(|| {
                 let block = key.frame.div_euclid(TILE_BLOCK);
                 let origin = match self.versions.get(&key.media) {
                     Some(seen) if seen.is(m) => seen.origin.clone(),
                     _ => paths::media_origin(m),
                 };
                 let path = thumbcache::tile_block(&origin, key.height, block, m.color_space);
-                (BlockFile { path, origin }, limit)
+                BlockFile { path, origin }
             }),
         })
     }
@@ -428,8 +426,6 @@ pub fn tile_height(px: f32) -> u32 {
     ((px / 16.0).ceil().max(1.0) as u32) * 16
 }
 
-const TRIM_EVERY: Duration = Duration::from_secs(30);
-
 const READER_IDLE: Duration = Duration::from_secs(10);
 
 fn reader_waits(idle: Duration) -> Option<Duration> {
@@ -441,7 +437,6 @@ type Block = Vec<(i64, Image)>;
 type Blocks = Lru<BlockFile, Block, 8>;
 
 fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egui::Context) {
-    static TRIMMED: Mutex<Option<Instant>> = Mutex::new(None);
     let _cancel = vidcut_av::cancel::Guard::set(queue.cancel.clone());
     let reader_for = |d: &GpuDecoding| match d.own_decoder() {
         Some(gpu) => FrameReader::decoding_on(gpu),
@@ -451,7 +446,7 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
     let mut reader: Option<FrameReader> = None;
     let mut used = Instant::now();
     let mut blocks = Blocks::new();
-    let mut unwritten: HashMap<BlockFile, (Block, u64)> = HashMap::new();
+    let mut unwritten: HashMap<BlockFile, Block> = HashMap::new();
     loop {
         let job = {
             let mut w = queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
@@ -466,7 +461,7 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
                 }
                 if !unwritten.is_empty() {
                     drop(w);
-                    write(&mut unwritten, &mut blocks, &TRIMMED);
+                    write(&mut unwritten, &mut blocks);
                     w = queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
                     continue;
                 }
@@ -504,11 +499,11 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
             drop(beside);
             used = Instant::now();
             let made = made?;
-            if let Some((file, limit)) = &job.disk {
-                let pending = unwritten
+            if let Some(file) = &job.disk {
+                unwritten
                     .entry(file.clone())
-                    .or_insert((Vec::new(), *limit));
-                pending.0.push((job.key.frame, made.clone()));
+                    .or_default()
+                    .push((job.key.frame, made.clone()));
             }
             Some(made)
         });
@@ -526,13 +521,8 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
                 w.failed.insert(job.key);
             }
         }
-        if unwritten
-            .values()
-            .map(|(tiles, _)| tiles.len())
-            .sum::<usize>()
-            >= 32
-        {
-            write(&mut unwritten, &mut blocks, &TRIMMED);
+        if unwritten.values().map(Vec::len).sum::<usize>() >= 32 {
+            write(&mut unwritten, &mut blocks);
         }
     }
 }
@@ -566,16 +556,16 @@ fn next(w: &mut Waiting, n: usize) -> Option<Job> {
 fn from_disk(
     job: &Job,
     blocks: &mut Blocks,
-    unwritten: &HashMap<BlockFile, (Block, u64)>,
+    unwritten: &HashMap<BlockFile, Block>,
 ) -> Option<Image> {
-    let (file, _) = job.disk.as_ref()?;
+    let file = job.disk.as_ref()?;
     let pick = |tiles: &Block| {
         tiles
             .iter()
             .find(|(f, i)| *f == job.key.frame && i.width == job.width)
             .map(|(_, i)| i.clone())
     };
-    if let Some(found) = unwritten.get(file).and_then(|(tiles, _)| pick(tiles)) {
+    if let Some(found) = unwritten.get(file).and_then(pick) {
         return Some(found);
     }
     if let Some(tiles) = blocks.get(file) {
@@ -587,23 +577,10 @@ fn from_disk(
     found
 }
 
-fn write(
-    unwritten: &mut HashMap<BlockFile, (Block, u64)>,
-    blocks: &mut Blocks,
-    trimmed: &Mutex<Option<Instant>>,
-) {
-    let mut limit = None;
-    for (file, (tiles, l)) in unwritten.drain() {
+fn write(unwritten: &mut HashMap<BlockFile, Block>, blocks: &mut Blocks) {
+    for (file, tiles) in unwritten.drain() {
         thumbcache::store_tiles(&file.path, &file.origin, &tiles);
         blocks.remove(&file);
-        limit = Some(l);
-    }
-    let Some(limit) = limit else { return };
-    let mut last = trimmed.lock().unwrap_or_else(|e| e.into_inner());
-    if last.is_none_or(|t| t.elapsed() >= TRIM_EVERY) {
-        *last = Some(Instant::now());
-        drop(last);
-        thumbcache::evict(&thumbcache::dir(), limit);
     }
 }
 

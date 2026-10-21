@@ -28,6 +28,7 @@ pub fn apply_proxies(
         };
         let file = proxy.path_in(proxies);
         if exists(&file) {
+            crate::disk_cache::used(&file);
             *path = file;
             *image = None;
             *color_space = ColorSpace::Tagged;
