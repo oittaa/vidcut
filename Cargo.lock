@@ -3864,12 +3864,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f4d68b8efe681274b8b349b211d17a6b8b40f480bbe48915d0478703aea5f5b"
 
 [[package]]
+name = "shadcn-egui-core"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "efe9286936820a3a9094c59accd26781c158356b05d9e6ab570f787db50f9e63"
+
+[[package]]
 name = "shadcn-egui-font-geist"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f3af1f3344acd8fd322a43cad886bf9c42653258056bf003795d01aec38f221"
 dependencies = [
- "shadcn-egui-core",
+ "shadcn-egui-core 0.4.0",
 ]
 
 [[package]]
@@ -3878,16 +3884,16 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "856c45ecca41f11d523e726c314b4439bf90a3e86f2d41608cb606df78cc936e"
 dependencies = [
- "shadcn-egui-core",
+ "shadcn-egui-core 0.4.0",
 ]
 
 [[package]]
 name = "shadcn-egui-font-space-grotesk"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "709d8d85ff72bbe42bbda6b9ecacbc5d8f56ad293bfbc5ebe48059fed1f967c5"
+checksum = "bc80211eeb294614ccf7363cc38dcc54fddd9ef4730a0ace16cffcb8c8a5c334"
 dependencies = [
- "shadcn-egui-core",
+ "shadcn-egui-core 0.5.0",
 ]
 
 [[package]]
