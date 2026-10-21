@@ -315,15 +315,6 @@ fn speakers_from_service(asked: &Asked) -> bool {
     asked.model_file.is_none() && asked.model.paid()
 }
 
-pub(crate) fn speaker_model_ready(
-    dir: &Path,
-    language: Option<&str>,
-    choice: SpeakerModel,
-    download: bool,
-) -> Result<()> {
-    get_ready(dir, &[speaker_file(language, choice)], false, download)
-}
-
 pub fn listed(needs: &[Need]) -> String {
     let names: Vec<String> = needs
         .iter()
