@@ -433,7 +433,6 @@ struct Paying {
     model: SpeechModel,
     what: String,
     secs: f64,
-    speakers: bool,
 }
 
 fn ask_payment(ctx: &egui::Context, p: &Paying, again: &mut bool) -> Option<bool> {
@@ -465,8 +464,13 @@ fn ask_payment(ctx: &egui::Context, p: &Paying, again: &mut bool) -> Option<bool
                 ui,
                 "A free-tier key lets Google use the audio for its models.",
             );
-            if p.speakers && p.secs > 30.0 * 60.0 {
-                dialog::note(ui, "Over 30 minutes, speakers come from this computer.");
+            if let Some(longest) = p.model.longest_secs()
+                && p.secs > longest
+            {
+                dialog::note(
+                    ui,
+                    format!("Over {:.0} minutes of speech is refused.", longest / 60.0),
+                );
             }
         }
         ui.checkbox(again, format!("Don't ask again for {company}"));
@@ -1126,7 +1130,6 @@ impl Workspace {
                 model: s.model,
                 what,
                 secs,
-                speakers: s.speakers,
             };
             match ask_payment(ctx, &paying, &mut d.again) {
                 Some(true) => {

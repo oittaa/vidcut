@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use vidcut_core::render::RenderPlan;
 use vidcut_core::request::{FindSpeech, SpeechModel};
-use vidcut_core::transcript::{self, Asked, RATE, Said, Speech, Timing, Word};
+use vidcut_core::transcript::{Asked, RATE, Said, Speech, Timing, Word};
 
 use crate::error::{Context, Error, Result};
 use crate::export::{CANCELLED, Progress, Stage};
@@ -20,7 +20,6 @@ const XAI_MODEL: &str = "grok-voice-transcribe-2.0";
 const XAI_LIMIT: u64 = 500_000_000;
 const GOOGLE: &str = "https://generativelanguage.googleapis.com";
 const GOOGLE_MODEL: &str = "gemini-3.5-transcribe";
-const GOOGLE_LONGEST: f64 = 30.0 * 60.0;
 const PAD: f64 = 0.2;
 const GAP: f64 = 0.5;
 const WAIT: Duration = Duration::from_secs(60 * 60);
@@ -192,8 +191,10 @@ fn where_in(pieces: &[Piece], t: f64) -> Option<(usize, f64)> {
     let at = (t * f64::from(RATE)) as i64;
     let i = pieces.partition_point(|p| p.at <= at).saturating_sub(1);
     let p = pieces.get(i)?;
-    let into = (at - p.at).clamp(0, p.to - p.from);
-    Some((p.file, secs(p.from + into)))
+    let into = at - p.at;
+    (0..=p.to - p.from)
+        .contains(&into)
+        .then(|| (p.file, secs(p.from + into)))
 }
 
 pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Result<Vec<Speech>> {
@@ -225,8 +226,17 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
         transcribe::Telling::new(asked, service, Some(format!("{company}'s servers")));
     let vad = transcribe::vad_path(asked, options.models)?;
     let channels = plans.first().map_or(1, |p| usize::from(p.channels.max(1)));
+    if let Some(other) = plans
+        .iter()
+        .map(|p| usize::from(p.channels.max(1)))
+        .find(|&c| c != channels)
+    {
+        return Err(Error::Invalid(format!(
+            "the files have {channels} and {other} channels, and one request to {company} \
+             takes one count: transcribe them separately"
+        )));
+    }
     let mut warnings: Vec<Vec<String>> = vec![Vec::new(); plans.len()];
-    let mut heard: Vec<Vec<f32>> = Vec::new();
     let mut joined: Vec<f32> = Vec::new();
     let mut pieces: Vec<Piece> = Vec::new();
     let mut found = (asked.find.unwrap_or_default(), None);
@@ -256,15 +266,21 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             });
             joined.extend_from_slice(&pcm[s as usize * channels..e as usize * channels]);
         }
-        heard.push(match channels {
-            1 => pcm,
-            _ => Vec::new(),
-        });
     }
     let length = (joined.len() / channels) as i64;
-    let requests: Vec<(i64, i64)> = match asked.model {
-        _ if length == 0 => Vec::new(),
-        SpeechModel::Google => split(&pieces, length, (GOOGLE_LONGEST * f64::from(RATE)) as i64),
+    if let Some(longest) = asked.model.longest_secs()
+        && secs(length) > longest
+    {
+        return Err(Error::Invalid(format!(
+            "{} of speech is over the {:.0} minutes {} takes: hear less, or a shorter In–Out \
+             range",
+            clock(secs(length)),
+            longest / 60.0,
+            asked.model.title()
+        )));
+    }
+    let requests: Vec<(i64, i64)> = match length {
+        0 => Vec::new(),
         _ => vec![(0, length)],
     };
     let run = transcribe::run_id();
@@ -324,10 +340,8 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             telling.heard(l, options.models, asked.speaker_model);
         }
     }
-    let service_speakers = asked.speakers
-        && (asked.model == SpeechModel::Xai || requests.len() <= 1)
-        && !asked.xai.as_ref().is_some_and(|x| x.multichannel);
     let channel_speakers = asked.speakers && asked.xai.as_ref().is_some_and(|x| x.multichannel);
+    let service_speakers = asked.speakers && !channel_speakers;
     let mut per_file: Vec<Vec<Word>> = vec![Vec::new(); plans.len()];
     for w in words {
         let Some((file, start)) = where_in(&pieces, w.start) else {
@@ -355,7 +369,7 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
     let mut out = Vec::new();
     for (i, mut said_words) in per_file.into_iter().enumerate() {
         said_words.sort_by(|x, y| x.start.total_cmp(&y.start));
-        let mut said: Vec<Said> = match (said_words.first(), said_words.last()) {
+        let said: Vec<Said> = match (said_words.first(), said_words.last()) {
             (Some(f), Some(l)) => vec![Said {
                 start: f.start,
                 end: l.end,
@@ -365,46 +379,7 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             }],
             _ => Vec::new(),
         };
-        let speakers = match asked.speakers {
-            false => None,
-            true if service_speakers || channel_speakers => Some((run.clone(), service)),
-            true if !heard[i].is_empty() => {
-                let spoken = language.as_deref().or(asked.language.as_deref());
-                match transcribe::speaker_model_ready(
-                    options.models,
-                    spoken,
-                    asked.speaker_model,
-                    asked.download,
-                ) {
-                    Err(e) => {
-                        warnings[i].push(format!(
-                            "{company} tells speakers in up to {} minutes of speech, and this \
-                             computer can't past that: {e}",
-                            GOOGLE_LONGEST / 60.0
-                        ));
-                        None
-                    }
-                    Ok(()) => {
-                        let at = transcribe::Hearing {
-                            dir: options.models,
-                            gpu: options.gpu,
-                            started,
-                        };
-                        let (turns, by) = transcribe::speakers_of(
-                            &at,
-                            &heard[i],
-                            spoken,
-                            asked.speaker_model,
-                            &mut telling,
-                            &mut warnings[i],
-                        )?;
-                        transcript::give_speakers(&mut said, &turns);
-                        Some((transcribe::run_id(), by))
-                    }
-                }
-            }
-            true => None,
-        };
+        let speakers = (service_speakers || channel_speakers).then(|| (run.clone(), service));
         out.push(Speech {
             model: asked.model_name(),
             device: format!("{company}'s servers"),
@@ -434,23 +409,6 @@ fn kept_note(company: &str, reused: usize, pieces: usize) -> Option<String> {
             "{n} of {pieces} pieces from {company}'s saved replies; the rest was sent"
         )),
     }
-}
-
-fn split(pieces: &[Piece], length: i64, max: i64) -> Vec<(i64, i64)> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    while length - start > max {
-        let cut = pieces
-            .iter()
-            .map(|p| p.at)
-            .filter(|&at| at > start && at - start <= max)
-            .max()
-            .unwrap_or(start + max);
-        out.push((start, cut));
-        start = cut;
-    }
-    out.push((start, length));
-    out
 }
 
 fn key_variable(model: SpeechModel) -> &'static str {
@@ -807,6 +765,7 @@ fn google_transcribe(
     asked: &Asked,
     started: Instant,
 ) -> Result<String> {
+    let mut ready = false;
     for _ in 0..300 {
         crate::cancel::stop()?;
         let a = answer(
@@ -820,7 +779,10 @@ fn google_transcribe(
         }
         let v: Value = serde_json::from_str(&a.text).unwrap_or(Value::Null);
         match v["state"].as_str() {
-            Some("ACTIVE") | None => break,
+            Some("ACTIVE") => {
+                ready = true;
+                break;
+            }
             Some("FAILED") => {
                 return Err(Error::Invalid(format!(
                     "Google couldn't read the audio: {}",
@@ -829,6 +791,12 @@ fn google_transcribe(
             }
             _ => std::thread::sleep(Duration::from_secs(2)),
         }
+    }
+    if !ready {
+        return Err(Error::Invalid(
+            "Google didn't say the audio was ready within 10 minutes; nothing was transcribed"
+                .into(),
+        ));
     }
     let body = google_request(asked, uri).to_string();
     let key = key.to_string();
@@ -970,8 +938,30 @@ fn keep_reply(key: &str, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Heard, google_code, google_words, kept_note, offset, reply_key, xai_words};
+    use super::{
+        Heard, Piece, RATE, google_code, google_words, kept_note, offset, reply_key, where_in,
+        xai_words,
+    };
     use serde_json::json;
+
+    #[test]
+    fn a_word_in_the_quiet_between_pieces_is_dropped() {
+        let pieces = [
+            Piece {
+                file: 0,
+                from: 0,
+                to: RATE as i64,
+                at: 0,
+            },
+            Piece {
+                file: 1,
+                from: 0,
+                to: RATE as i64,
+                at: 3 * RATE as i64 / 2,
+            },
+        ];
+        assert_eq!(where_in(&pieces, 1.25), None);
+    }
 
     #[test]
     fn a_run_kept_in_part_says_the_rest_was_sent() {

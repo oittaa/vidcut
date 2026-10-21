@@ -2231,8 +2231,8 @@ pub enum SpeechModel {
     Xai,
     /// Google's `gemini-3.5-transcribe`, on Google's servers: 85 languages
     /// and more, times per word, about $0.30 per hour of audio (October
-    /// 2026), 30 minutes of speech per request. It needs a Gemini key and
-    /// `send`.
+    /// 2026), 30 minutes of speech at most: more is refused before anything
+    /// is sent. It needs a Gemini key and `send`.
     #[serde(rename = "google")]
     Google,
 }
@@ -2251,6 +2251,13 @@ impl SpeechModel {
             Self::Xai => 0.10,
             Self::Google => 0.30,
             _ => 0.0,
+        }
+    }
+
+    pub fn longest_secs(self) -> Option<f64> {
+        match self {
+            Self::Google => Some(30.0 * 60.0),
+            _ => None,
         }
     }
 
