@@ -19,6 +19,8 @@ pub struct Gpu {
     pipeline: wgpu::RenderPipeline,
     blended: wgpu::RenderPipeline,
     placed: wgpu::RenderPipeline,
+    adding: wgpu::RenderPipeline,
+    adding_scaled: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     lettering: wgpu::RenderPipeline,
     lettering_layout: wgpu::BindGroupLayout,
@@ -39,6 +41,8 @@ pub struct Gpu {
 const MAX_SHARED: usize = 4;
 
 const TARGET: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+const MIXING: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
     let wanted = wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
@@ -97,7 +101,7 @@ impl Gpu {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipeline_with = |blend| {
+        let pipeline_in = |blend, format| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("vidcut picture"),
                 layout: Some(&pipeline_layout),
@@ -115,7 +119,7 @@ impl Gpu {
                     entry_point: Some("fs"),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: TARGET,
+                        format,
                         blend,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -124,6 +128,7 @@ impl Gpu {
                 cache: None,
             })
         };
+        let pipeline_with = |blend| pipeline_in(blend, TARGET);
         let pipeline = pipeline_with(None);
         let over = wgpu::BlendComponent {
             src_factor: wgpu::BlendFactor::Constant,
@@ -143,6 +148,25 @@ impl Gpu {
             color: premultiplied,
             alpha: premultiplied,
         }));
+        let add = |src_factor| wgpu::BlendComponent {
+            src_factor,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let adding = pipeline_in(
+            Some(wgpu::BlendState {
+                color: add(wgpu::BlendFactor::One),
+                alpha: add(wgpu::BlendFactor::One),
+            }),
+            MIXING,
+        );
+        let adding_scaled = pipeline_in(
+            Some(wgpu::BlendState {
+                color: add(wgpu::BlendFactor::Constant),
+                alpha: add(wgpu::BlendFactor::Constant),
+            }),
+            MIXING,
+        );
         let lettering_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut title"),
             entries: &[
@@ -215,6 +239,8 @@ impl Gpu {
             pipeline,
             blended,
             placed,
+            adding,
+            adding_scaled,
             layout,
             lettering,
             lettering_layout,
@@ -391,6 +417,8 @@ struct Target {
 #[derive(Default)]
 pub struct Screen {
     target: Option<Target>,
+    mixing: Option<Mixing>,
+    drawn_crosses: Vec<bool>,
     drawn: Option<Option<Arc<Picture>>>,
     drawn_titles: Vec<TitleOver>,
     drawn_placed: Vec<Vec<Placed>>,
@@ -403,6 +431,107 @@ struct Letters {
     picture: Arc<TitlePicture>,
     params: wgpu::Buffer,
     bind: wgpu::BindGroup,
+}
+
+struct Mixing {
+    size: (u32, u32),
+    view: wgpu::TextureView,
+    bind: wgpu::BindGroup,
+}
+
+impl Mixing {
+    fn new(gpu: &Gpu, size: (u32, u32)) -> Self {
+        let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("vidcut dissolve"),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: MIXING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vidcut dissolve"),
+            size: 48,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let (w, h) = (size.0 as f32, size.1 as f32);
+        let bytes: Vec<u8> = [0.0, 0.0, w, h, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+            .iter()
+            .flat_map(|v: &f32| v.to_le_bytes())
+            .collect();
+        gpu.queue.write_buffer(&params, 0, &bytes);
+        let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vidcut dissolve"),
+            layout: &gpu.lettering_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&gpu.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+            ],
+        });
+        Self { size, view, bind }
+    }
+}
+
+fn begin<'a>(
+    encoder: &'a mut wgpu::CommandEncoder,
+    view: &'a wgpu::TextureView,
+    clear: Option<wgpu::Color>,
+) -> wgpu::RenderPass<'a> {
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("vidcut picture"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: clear.map_or(wgpu::LoadOp::Load, wgpu::LoadOp::Clear),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    })
+}
+
+fn letter(
+    pass: &mut wgpu::RenderPass<'_>,
+    gpu: &Gpu,
+    letters: &[Letters],
+    titles: &[TitleOver],
+    after: usize,
+    layers: usize,
+) {
+    for t in titles
+        .iter()
+        .filter(|t| t.above == after || (after == layers && t.above > after))
+    {
+        let Some(l) = letters.iter().find(|l| Arc::ptr_eq(&l.picture, &t.picture)) else {
+            continue;
+        };
+        pass.set_pipeline(&gpu.lettering);
+        pass.set_bind_group(0, &l.bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
 }
 
 impl Letters {
@@ -574,7 +703,7 @@ impl Screen {
         gpu: &Gpu,
         picture: Option<&Arc<Picture>>,
         titles: &[TitleOver],
-        placed: &[Vec<Placed>],
+        (placed, crosses): (&[Vec<Placed>], &[bool]),
         width: u32,
         height: u32,
     ) -> Drawn {
@@ -590,7 +719,8 @@ impl Screen {
                 (Some(None), None) => true,
                 _ => false,
             } && same_titles(&self.drawn_titles, titles)
-                && self.drawn_placed == placed;
+                && self.drawn_placed == placed
+                && self.drawn_crosses == crosses;
             if same {
                 return Drawn::Same;
             }
@@ -656,57 +786,64 @@ impl Screen {
                 l.place(gpu, size, t);
             }
         }
+        let n = binds.len();
+        let pair_at = |i: usize| i + 1 < n && crosses.get(i + 1).copied().unwrap_or(false);
+        if (0..n).any(pair_at) && self.mixing.as_ref().is_none_or(|m| m.size != size) {
+            self.mixing = Some(Mixing::new(gpu, size));
+        }
         let target = self.target.as_ref().expect("made above");
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("vidcut picture"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target.view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            let drawn_layers = binds.len();
-            for (i, (bind, level, placed)) in binds.iter().enumerate() {
+        let mut clear = Some(wgpu::Color::BLACK);
+        if n == 0 {
+            drop(begin(&mut encoder, &target.view, clear.take()));
+        }
+        let level_of = |l: f64| wgpu::Color {
+            r: l,
+            g: l,
+            b: l,
+            a: l,
+        };
+        let mut i = 0;
+        while i < n {
+            if pair_at(i) {
+                let mixing = self.mixing.as_ref().expect("made for a dissolve");
+                {
+                    let mut pass =
+                        begin(&mut encoder, &mixing.view, Some(wgpu::Color::TRANSPARENT));
+                    for (bind, level, placed) in &binds[i..i + 2] {
+                        if *placed {
+                            pass.set_pipeline(&gpu.adding);
+                        } else {
+                            pass.set_pipeline(&gpu.adding_scaled);
+                            pass.set_blend_constant(level_of(level.unwrap_or(1.0)));
+                        }
+                        pass.set_bind_group(0, bind, &[]);
+                        pass.draw(0..3, 0..1);
+                    }
+                }
+                let mut pass = begin(&mut encoder, &target.view, clear.take());
+                pass.set_pipeline(&gpu.lettering);
+                pass.set_bind_group(0, &mixing.bind, &[]);
+                pass.draw(0..3, 0..1);
+                letter(&mut pass, gpu, &self.letters, titles, i + 1, n);
+                letter(&mut pass, gpu, &self.letters, titles, i + 2, n);
+                i += 2;
+                continue;
+            }
+            let mut pass = begin(&mut encoder, &target.view, clear.take());
+            while i < n && !pair_at(i) {
+                let (bind, level, placed) = &binds[i];
                 match level {
                     _ if *placed => pass.set_pipeline(&gpu.placed),
                     None => pass.set_pipeline(&gpu.pipeline),
                     Some(l) => {
                         pass.set_pipeline(&gpu.blended);
-                        pass.set_blend_constant(wgpu::Color {
-                            r: *l,
-                            g: *l,
-                            b: *l,
-                            a: *l,
-                        });
+                        pass.set_blend_constant(level_of(*l));
                     }
                 }
                 pass.set_bind_group(0, bind, &[]);
                 pass.draw(0..3, 0..1);
-                let after = i + 1;
-                for t in titles
-                    .iter()
-                    .filter(|t| t.above == after || (after == drawn_layers && t.above > after))
-                {
-                    let Some(l) = self
-                        .letters
-                        .iter()
-                        .find(|l| Arc::ptr_eq(&l.picture, &t.picture))
-                    else {
-                        continue;
-                    };
-                    pass.set_pipeline(&gpu.lettering);
-                    pass.set_bind_group(0, &l.bind, &[]);
-                    pass.draw(0..3, 0..1);
-                }
+                letter(&mut pass, gpu, &self.letters, titles, i + 1, n);
+                i += 1;
             }
         }
         let acquired: Vec<wgpu::CommandBuffer> = self.slots[..layers.len()]
@@ -732,6 +869,7 @@ impl Screen {
         self.drawn = Some(picture.cloned());
         self.drawn_titles = titles.to_vec();
         self.drawn_placed = placed.to_vec();
+        self.drawn_crosses = crosses.to_vec();
         drawn
     }
 }

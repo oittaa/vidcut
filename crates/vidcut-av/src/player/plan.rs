@@ -170,6 +170,15 @@ impl Plan {
             .collect()
     }
 
+    pub(crate) fn crosses_at(&self, t: i64) -> Vec<bool> {
+        let (i, _) = self.locate(t);
+        self.plan
+            .video
+            .get(i)
+            .map(VideoPiece::crosses)
+            .unwrap_or_default()
+    }
+
     pub(crate) fn size(&self) -> (u32, u32) {
         (self.plan.width, self.plan.height)
     }

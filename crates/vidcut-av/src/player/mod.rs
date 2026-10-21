@@ -945,6 +945,7 @@ impl Player {
             let shown = lock(&self.shared.placing);
             plan.placed_at(pos, shown.as_ref())
         };
+        let crosses = plan.crosses_at(pos);
         let (mut titles, titled) = self.shared.titles.shown(&plan, pos);
         let (cues, cued) = self.shared.subtitles.shown(&plan, pos);
         titles.extend(cues);
@@ -964,6 +965,7 @@ impl Player {
                     exact: drawn,
                     titles,
                     placed,
+                    crosses,
                 };
                 p.shown = Some(shown.clone());
                 p.shown_landing = landed.0;
@@ -983,6 +985,7 @@ impl Player {
                         exact: false,
                         titles: titles.clone(),
                         placed: placed.clone(),
+                        crosses: crosses.clone(),
                     });
                 }
                 p.shown.clone().map(|s| Shown {
@@ -990,6 +993,7 @@ impl Player {
                     exact: false,
                     titles,
                     placed,
+                    crosses,
                     ..s
                 })
             }

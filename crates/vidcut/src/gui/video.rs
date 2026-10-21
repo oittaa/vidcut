@@ -281,7 +281,10 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             gpu,
             shown.as_ref().map(|s| &s.picture),
             shown.as_ref().map_or(&[][..], |s| &s.titles),
-            shown.as_ref().map_or(&[][..], |s| &s.placed),
+            (
+                shown.as_ref().map_or(&[][..], |s| &s.placed),
+                shown.as_ref().map_or(&[][..], |s| &s.crosses),
+            ),
             w.max(2) as u32,
             h.max(2) as u32,
         );

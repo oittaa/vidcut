@@ -204,7 +204,8 @@ impl Screens {
         picture: &Arc<Picture>,
         size: [u32; 2],
     ) -> Option<egui::TextureId> {
-        let drawn = self.screens[i].draw(&self.gpu, Some(picture), &[], &[], size[0], size[1]);
+        let drawn =
+            self.screens[i].draw(&self.gpu, Some(picture), &[], (&[], &[]), size[0], size[1]);
         let view = self.screens[i].view()?;
         let filter = wgpu::FilterMode::Nearest;
         let mut renderer = self.render.renderer.write();

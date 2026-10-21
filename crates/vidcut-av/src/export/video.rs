@@ -350,6 +350,7 @@ pub(crate) struct Layer {
     pub(crate) decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
     made_on_gpu: bool,
     placing: Option<(Placing, [f64; 4])>,
+    crossing: bool,
 }
 
 impl Layer {
@@ -362,6 +363,7 @@ impl Layer {
             decoding: None,
             made_on_gpu: false,
             placing: None,
+            crossing: false,
         }
     }
 }
@@ -962,6 +964,7 @@ impl VideoFrames {
             self.k += 1;
             let piece = piece.clone();
             let layers = piece.layers();
+            let crosses = piece.crosses();
             let files = layers
                 .iter()
                 .any(|(l, _)| matches!(l, VideoPiece::Source { .. }));
@@ -998,6 +1001,7 @@ impl VideoFrames {
                             decoding: None,
                             made_on_gpu: false,
                             placing: None,
+                            crossing: crosses.get(i).copied().unwrap_or(false),
                         });
                     }
                     continue;
@@ -1047,6 +1051,7 @@ impl VideoFrames {
                     decoding: Some(decoding),
                     made_on_gpu: self.open[s].fitting.route == Some(Route::Gpu),
                     placing,
+                    crossing: crosses.get(i).copied().unwrap_or(false),
                 });
             }
             return Ok(Some(picture.then_some(made)));
@@ -1086,7 +1091,7 @@ impl VideoFrames {
             ));
         }
         let shown = heaviest(&layers);
-        let placed = layers.iter().any(|l| l.placing.is_some());
+        let placed = layers.iter().any(|l| l.placing.is_some() || l.crossing);
         let black = match self.maker.output() {
             Output::Cuda { .. } if placed && self.gpu_mixes() && layers[0].frame.is_none() => {
                 Some(self.black_frame()?)
@@ -1122,21 +1127,30 @@ impl VideoFrames {
                     }
                 };
                 let mut mixed = in_memory(layers[0].frame.as_ref())?;
+                let mut below: Option<frame::Video> = None;
                 for l in &layers[1..] {
                     let over = in_memory(l.frame.as_ref())?;
                     let weight = l.weight.unwrap_or(WHOLE);
-                    mixed = match &l.placing {
+                    let laid = |under: &frame::Video| match &l.placing {
                         Some((placing, fitted)) => super::place::over(
-                            &mixed,
+                            under,
                             &super::place::Layer {
                                 picture: &over,
                                 placing,
                                 fitted: *fitted,
                                 weight,
                             },
-                        )?,
-                        None => super::mix::mix(&mixed, &over, weight)?,
+                        ),
+                        None => super::mix::mix(under, &over, weight),
                     };
+                    if l.crossing
+                        && let Some(b) = &below
+                    {
+                        mixed = super::mix::crossed(&mixed, &laid(b)?, b)?;
+                    } else {
+                        let next = laid(&mixed)?;
+                        below = Some(std::mem::replace(&mut mixed, next));
+                    }
                 }
                 match self.maker.output() {
                     Output::Cuda { frames, .. } => frames.upload(&mixed)?,
@@ -1636,8 +1650,11 @@ fn cuda_mix(
     black: Option<&frame::Video>,
     size: (u32, u32),
 ) -> Result<frame::Video> {
-    let mut mixed: Option<frame::Video> = None;
-    for l in layers {
+    let solid = |f: Option<&frame::Video>| match (f, black) {
+        (Some(f), _) | (None, Some(f)) => frame_ref(f),
+        (None, None) => Err(Error::Invalid("nothing under a placed picture".into())),
+    };
+    let laid = |under: Option<&frame::Video>, l: &Layer| -> Result<Option<frame::Video>> {
         if let (Some((placing, fitted)), Some(f)) = (&l.placing, &l.frame) {
             let picture = match Place::of(f) {
                 Place::Memory => frame_ref(f)?,
@@ -1650,27 +1667,31 @@ fn cuda_mix(
                 weight: l.weight.unwrap_or(WHOLE),
             };
             let overlay = crate::cuda::burn::Overlay::of(frames, &layer, size)?;
-            let under = match (mixed.take(), black) {
-                (Some(m), _) => m,
-                (None, Some(b)) => frame_ref(b)?,
-                (None, None) => {
-                    return Err(Error::Invalid("nothing under a placed picture".into()));
-                }
-            };
-            mixed = Some(crate::cuda::burn::burn(frames, &under, &overlay)?);
-            continue;
+            let under = solid(under)?;
+            return Ok(Some(crate::cuda::burn::burn(frames, &under, &overlay)?));
         }
-        match (mixed.take(), l.weight) {
-            (None, None) => mixed = l.frame.as_ref().map(frame_ref).transpose()?,
-            (under, w) => {
-                let w = w.unwrap_or(WHOLE);
-                mixed = Some(crate::cuda::mix::mix(
-                    frames,
-                    under.as_ref(),
-                    l.frame.as_ref(),
-                    w,
-                )?);
-            }
+        match (under, l.weight) {
+            (None, None) => l.frame.as_ref().map(frame_ref).transpose(),
+            (under, w) => Ok(Some(crate::cuda::mix::mix(
+                frames,
+                under,
+                l.frame.as_ref(),
+                w.unwrap_or(WHOLE),
+            )?)),
+        }
+    };
+    let mut mixed: Option<frame::Video> = None;
+    let mut below: Option<Option<frame::Video>> = None;
+    for l in layers {
+        if l.crossing
+            && let Some(b) = &below
+        {
+            let then = solid(laid(b.as_ref(), l)?.as_ref())?;
+            let (now, b) = (solid(mixed.as_ref())?, solid(b.as_ref())?);
+            mixed = Some(crate::cuda::mix::sum(frames, &now, &then, &b)?);
+        } else {
+            let next = laid(mixed.as_ref(), l)?;
+            below = Some(std::mem::replace(&mut mixed, next));
         }
     }
     mixed.ok_or_else(|| Error::Invalid("a mix of black alone".into()))

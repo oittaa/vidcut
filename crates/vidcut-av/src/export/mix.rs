@@ -11,6 +11,7 @@ pub(crate) struct Samples {
     format: ffi::AVPixelFormat,
     pub(crate) bytes: usize,
     pub(crate) shift: u32,
+    pub(crate) top: u32,
     planes: usize,
 }
 
@@ -36,6 +37,7 @@ impl Samples {
             format: format.into(),
             bytes: if depth + shift > 8 { 2 } else { 1 },
             shift,
+            top: (1 << depth) - 1,
             planes: planes.max(0) as usize,
         })
     }
@@ -84,6 +86,65 @@ pub(crate) fn mix(under: &frame::Video, over: &frame::Video, weight: u32) -> Res
     }
     // SAFETY: `out` and `under` are valid frames.
     unsafe { ffi::av_frame_copy_props(out.as_mut_ptr(), under.as_ptr()) };
+    Ok(out)
+}
+
+pub(crate) fn crossed(
+    now: &frame::Video,
+    then: &frame::Video,
+    below: &frame::Video,
+) -> Result<frame::Video> {
+    let format = now.format();
+    let size = (now.width(), now.height());
+    if [then, below]
+        .iter()
+        .any(|f| f.format() != format || (f.width(), f.height()) != size)
+    {
+        return Err(Error::Invalid(
+            "pictures of different sizes or formats can't be mixed".into(),
+        ));
+    }
+    let samples = Samples::of(format)?;
+    let mut out = frame::Video::new(format, size.0, size.1);
+    let rows = samples.row_bytes(size.0);
+    let top = i64::from(samples.top);
+    for (p, &bytes) in rows.iter().enumerate().take(samples.planes) {
+        let height = now.plane_height(p) as usize;
+        let strides = [
+            now.stride(p),
+            then.stride(p),
+            below.stride(p),
+            out.stride(p),
+        ];
+        let (a, b, c) = (now.data(p), then.data(p), below.data(p));
+        let o = out.data_mut(p);
+        for y in 0..height {
+            let (ra, rb, rc) = (
+                &a[y * strides[0]..y * strides[0] + bytes],
+                &b[y * strides[1]..y * strides[1] + bytes],
+                &c[y * strides[2]..y * strides[2] + bytes],
+            );
+            let ro = &mut o[y * strides[3]..y * strides[3] + bytes];
+            let sum = |a: i64, b: i64, c: i64| (a + b - c).clamp(0, top);
+            if samples.bytes == 1 {
+                for (i, o) in ro.iter_mut().enumerate() {
+                    let v = sum(i64::from(ra[i]), i64::from(rb[i]), i64::from(rc[i]));
+                    *o = v as u8;
+                }
+            } else {
+                let s = samples.shift;
+                let get = |r: &[u8], i: usize| {
+                    i64::from(u16::from_le_bytes([r[2 * i], r[2 * i + 1]]) >> s)
+                };
+                for (i, o) in ro.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                    let v = sum(get(ra, i), get(rb, i), get(rc, i)) << s;
+                    *o = (v as u16).to_le_bytes();
+                }
+            }
+        }
+    }
+    // SAFETY: `out` and `now` are valid frames.
+    unsafe { ffi::av_frame_copy_props(out.as_mut_ptr(), now.as_ptr()) };
     Ok(out)
 }
 

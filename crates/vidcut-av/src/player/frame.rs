@@ -272,6 +272,7 @@ pub struct Shown {
     pub exact: bool,
     pub titles: Vec<TitleOver>,
     pub placed: Vec<Vec<vidcut_core::render::Placed>>,
+    pub crosses: Vec<bool>,
 }
 
 pub struct TitlePicture {

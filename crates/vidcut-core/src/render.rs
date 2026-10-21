@@ -128,6 +128,11 @@ pub struct Over {
     pub piece: VideoPiece,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ramp: Option<Ramp>,
+    /// With the picture before it, the two sides of one dissolve with a
+    /// placed picture: they mix into each other, then go over what is
+    /// below them together.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cross: bool,
 }
 
 /// A clip's picture as it goes over the frame.
@@ -310,6 +315,18 @@ impl VideoPiece {
         }
     }
 
+    pub fn crosses(&self) -> Vec<bool> {
+        match self {
+            Self::Mix { under, over } => under
+                .crosses()
+                .into_iter()
+                .chain(over.iter().map(|o| o.cross))
+                .collect(),
+            Self::Titled { under, .. } => under.crosses(),
+            _ => vec![false],
+        }
+    }
+
     pub fn titles(&self) -> Vec<(usize, &ShownTitle)> {
         match self {
             Self::Mix { under, .. } => under.titles(),
@@ -384,6 +401,7 @@ impl VideoPiece {
                     .map(|o| Over {
                         piece: o.piece.part(k, frames),
                         ramp: o.ramp.map(|r| r.after(k)),
+                        cross: o.cross,
                     })
                     .collect(),
             },
@@ -431,7 +449,9 @@ impl VideoPiece {
                 under.goes_on_as(u2)
                     && over.len() == o2.len()
                     && over.iter().zip(o2).all(|(a, b)| {
-                        a.ramp.map(|r| r.after(k)) == b.ramp && a.piece.goes_on_as(&b.piece)
+                        a.ramp.map(|r| r.after(k)) == b.ramp
+                            && a.cross == b.cross
+                            && a.piece.goes_on_as(&b.piece)
                     })
             }
             (
@@ -792,6 +812,7 @@ pub(crate) fn paced(
 enum Layer {
     Picture(VideoPiece, Option<Ramp>),
     Placed(VideoPiece, Option<Ramp>),
+    Crossing(VideoPiece, Option<Ramp>),
     Title(Box<ShownTitle>),
 }
 
@@ -897,9 +918,12 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                                 (Layer::Picture(f, _), g @ Layer::Picture(..)) => {
                                     stack = vec![Layer::Picture(f, None), g];
                                 }
-                                (Layer::Picture(f, _) | Layer::Placed(f, _), g) => {
+                                (
+                                    Layer::Picture(f, _) | Layer::Placed(f, _),
+                                    Layer::Picture(g, r) | Layer::Placed(g, r),
+                                ) => {
                                     stack.push(Layer::Placed(f, Some(ramp(true))));
-                                    stack.push(g);
+                                    stack.push(Layer::Crossing(g, r));
                                 }
                                 _ => {}
                             }
@@ -961,9 +985,16 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         for layer in stack {
             piece = match layer {
                 Layer::Picture(shown, None) => shown,
-                Layer::Picture(shown, ramp) | Layer::Placed(shown, ramp) => {
-                    piece.with_over(Over { piece: shown, ramp })
-                }
+                Layer::Picture(shown, ramp) | Layer::Placed(shown, ramp) => piece.with_over(Over {
+                    piece: shown,
+                    ramp,
+                    cross: false,
+                }),
+                Layer::Crossing(shown, ramp) => piece.with_over(Over {
+                    piece: shown,
+                    ramp,
+                    cross: true,
+                }),
                 Layer::Title(t) => piece.with_title(*t),
             };
         }

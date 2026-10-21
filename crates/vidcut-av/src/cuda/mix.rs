@@ -98,21 +98,123 @@ $L_done:
 }
 "#;
 
+const SUM: &str = r#"
+.version 7.0
+.target sm_52
+.address_size 64
+
+.visible .entry vidcut_sum(
+	.param .u64 p_out,
+	.param .u64 p_out_pitch,
+	.param .u64 p_a,
+	.param .u64 p_a_pitch,
+	.param .u64 p_b,
+	.param .u64 p_b_pitch,
+	.param .u64 p_c,
+	.param .u64 p_c_pitch,
+	.param .u32 p_width,
+	.param .u32 p_height,
+	.param .u32 p_bytes,
+	.param .u32 p_shift,
+	.param .u32 p_top
+)
+{
+	.reg .pred %p<8>;
+	.reg .b32 %r<20>;
+	.reg .b64 %rd<20>;
+
+	mov.u32 %r1, %ctaid.x;
+	mov.u32 %r2, %ntid.x;
+	mov.u32 %r3, %tid.x;
+	mad.lo.s32 %r4, %r1, %r2, %r3;
+	mov.u32 %r1, %ctaid.y;
+	mov.u32 %r2, %ntid.y;
+	mov.u32 %r3, %tid.y;
+	mad.lo.s32 %r5, %r1, %r2, %r3;
+	ld.param.u32 %r6, [p_width];
+	ld.param.u32 %r7, [p_height];
+	setp.ge.u32 %p1, %r4, %r6;
+	setp.ge.u32 %p2, %r5, %r7;
+	or.pred %p1, %p1, %p2;
+	@%p1 bra $L_done;
+
+	ld.param.u32 %r8, [p_bytes];
+	ld.param.u32 %r9, [p_shift];
+	setp.eq.u32 %p3, %r8, 1;
+	mul.wide.u32 %rd1, %r4, %r8;
+	cvt.u64.u32 %rd2, %r5;
+
+	ld.param.u64 %rd3, [p_a];
+	ld.param.u64 %rd4, [p_a_pitch];
+	mad.lo.s64 %rd5, %rd2, %rd4, %rd3;
+	add.s64 %rd5, %rd5, %rd1;
+	@%p3 ld.global.u8 %r10, [%rd5];
+	@!%p3 ld.global.u16 %r10, [%rd5];
+	shr.u32 %r10, %r10, %r9;
+
+	ld.param.u64 %rd6, [p_b];
+	ld.param.u64 %rd7, [p_b_pitch];
+	mad.lo.s64 %rd8, %rd2, %rd7, %rd6;
+	add.s64 %rd8, %rd8, %rd1;
+	@%p3 ld.global.u8 %r11, [%rd8];
+	@!%p3 ld.global.u16 %r11, [%rd8];
+	shr.u32 %r11, %r11, %r9;
+
+	ld.param.u64 %rd9, [p_c];
+	ld.param.u64 %rd10, [p_c_pitch];
+	mad.lo.s64 %rd11, %rd2, %rd10, %rd9;
+	add.s64 %rd11, %rd11, %rd1;
+	@%p3 ld.global.u8 %r12, [%rd11];
+	@!%p3 ld.global.u16 %r12, [%rd11];
+	shr.u32 %r12, %r12, %r9;
+
+	add.s32 %r13, %r10, %r11;
+	sub.s32 %r13, %r13, %r12;
+	max.s32 %r13, %r13, 0;
+	ld.param.u32 %r14, [p_top];
+	min.s32 %r13, %r13, %r14;
+	shl.b32 %r13, %r13, %r9;
+
+	ld.param.u64 %rd12, [p_out];
+	ld.param.u64 %rd13, [p_out_pitch];
+	mad.lo.s64 %rd14, %rd2, %rd13, %rd12;
+	add.s64 %rd14, %rd14, %rd1;
+	@%p3 st.global.u8 [%rd14], %r13;
+	@!%p3 st.global.u16 [%rd14], %r13;
+
+$L_done:
+	ret;
+}
+"#;
+
 const BLOCK: (u32, u32) = (32, 8);
 
 struct Kernel {
     ctx: usize,
+    name: &'static std::ffi::CStr,
     function: usize,
 }
 
 fn kernel(cuda: &Cuda, ctx: CuContext) -> Result<*mut c_void> {
+    kernel_of(cuda, ctx, PTX, c"vidcut_mix")
+}
+
+fn kernel_of(
+    cuda: &Cuda,
+    ctx: CuContext,
+    ptx: &str,
+    name: &'static std::ffi::CStr,
+) -> Result<*mut c_void> {
     static LOADED: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
     let mut loaded = LOADED.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(k) = loaded.iter().find(|k| k.ctx == ctx as usize) {
+    if let Some(k) = loaded
+        .iter()
+        .find(|k| k.ctx == ctx as usize && k.name == name)
+    {
         return Ok(k.function as *mut c_void);
     }
     let function = in_context(cuda, ctx, || {
-        let ptx = std::ffi::CString::new(PTX).expect("no NUL");
+        let ptx = std::ffi::CString::new(ptx).expect("no NUL");
         let mut module = std::ptr::null_mut();
         // SAFETY: the context is current; `ptx` is NUL-terminated.
         check("loading the mixing kernel", unsafe {
@@ -121,12 +223,13 @@ fn kernel(cuda: &Cuda, ctx: CuContext) -> Result<*mut c_void> {
         let mut function = std::ptr::null_mut();
         // SAFETY: the context is current; the module just loaded.
         check("finding the mixing kernel", unsafe {
-            (cuda.module_get_function)(&mut function, module, c"vidcut_mix".as_ptr())
+            (cuda.module_get_function)(&mut function, module, name.as_ptr())
         })?;
         Ok(function)
     })?;
     loaded.push(Kernel {
         ctx: ctx as usize,
+        name,
         function: function as usize,
     });
     Ok(function)
@@ -240,6 +343,98 @@ pub(crate) fn mix(
         }
         Ok(())
     })?;
+    Ok(out)
+}
+
+pub(crate) fn sum(
+    frames: &CudaFrames,
+    a: &frame::Video,
+    b: &frame::Video,
+    c: &frame::Video,
+) -> Result<frame::Video> {
+    let cuda = Cuda::get()?;
+    for f in [a, b, c] {
+        super::share::wait_for(f)?;
+    }
+    // SAFETY: the pool is a live CUDA frames context.
+    let (fc, (ctx, stream)) = unsafe {
+        let fc = &*((*frames.as_ptr()).data as *const ffi::AVHWFramesContext);
+        (fc, cuda_context(fc.device_ref))
+    };
+    let sw: crate::ffmpeg::format::Pixel = fc.sw_format.into();
+    if !matches!(
+        sw,
+        crate::ffmpeg::format::Pixel::NV12 | crate::ffmpeg::format::Pixel::P010LE
+    ) {
+        return Err(Error::Invalid(format!(
+            "the GPU mixes NV12 and P010 pictures, not {sw:?}"
+        )));
+    }
+    let samples = Samples::of(sw)?;
+    let mut out = frame::Video::empty();
+    // SAFETY: a frame of the pool, its planes in CUDA memory.
+    let ret = unsafe { ffi::av_hwframe_get_buffer(frames.as_ptr(), out.as_mut_ptr(), 0) };
+    if ret < 0 {
+        return Err(Error::Ffmpeg {
+            context: "getting a GPU frame".into(),
+            source: crate::ffmpeg::Error::from(ret),
+        });
+    }
+    let function = kernel_of(cuda, ctx, SUM, c"vidcut_sum")?;
+    let (w, h) = frame_u32(fc.width, fc.height)?;
+    let rows = samples.row_bytes(w);
+    in_context(cuda, ctx, || {
+        for (p, rows_down) in [(0usize, h), (1, h.div_ceil(2))] {
+            let plane = |f: &frame::Video| -> Result<(u64, u64)> {
+                // SAFETY: a CUDA frame's planes are device pointers.
+                let f = unsafe { &*f.as_ptr() };
+                Ok((f.data[p] as u64, stride_u64(f.linesize[p])?))
+            };
+            let (mut o, mut o_pitch) = plane(&out)?;
+            let (mut pa, mut pa_pitch) = plane(a)?;
+            let (mut pb, mut pb_pitch) = plane(b)?;
+            let (mut pc, mut pc_pitch) = plane(c)?;
+            let mut width = (rows[p] / samples.bytes) as u32;
+            let mut height = rows_down;
+            let mut bytes = samples.bytes as u32;
+            let mut shift = samples.shift;
+            let mut top = samples.top;
+            let mut params: [*mut c_void; 13] = [
+                (&raw mut o).cast(),
+                (&raw mut o_pitch).cast(),
+                (&raw mut pa).cast(),
+                (&raw mut pa_pitch).cast(),
+                (&raw mut pb).cast(),
+                (&raw mut pb_pitch).cast(),
+                (&raw mut pc).cast(),
+                (&raw mut pc_pitch).cast(),
+                (&raw mut width).cast(),
+                (&raw mut height).cast(),
+                (&raw mut bytes).cast(),
+                (&raw mut shift).cast(),
+                (&raw mut top).cast(),
+            ];
+            // SAFETY: the context is current; `params` holds the kernel's 13 parameters, in order.
+            check("mixing pictures", unsafe {
+                (cuda.launch_kernel)(
+                    function,
+                    width.div_ceil(BLOCK.0),
+                    height.div_ceil(BLOCK.1),
+                    1,
+                    BLOCK.0,
+                    BLOCK.1,
+                    1,
+                    0,
+                    stream,
+                    params.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                )
+            })?;
+        }
+        Ok(())
+    })?;
+    // SAFETY: both are valid frames.
+    unsafe { ffi::av_frame_copy_props(out.as_mut_ptr(), a.as_ptr()) };
     Ok(out)
 }
 
