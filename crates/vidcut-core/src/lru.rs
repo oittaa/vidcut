@@ -77,12 +77,21 @@ impl<K: Hash + Eq + Clone, V, const N: usize> Lru<K, V, N> {
     }
 
     pub fn get(&mut self, key: &K) -> Option<&V> {
+        self.get_mut(key).map(|v| &*v)
+    }
+
+    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
         let i = *self.at.get(key)?;
         if self.newest != Some(i) {
             self.unlink(i);
             self.link_newest(i);
         }
-        Some(&self.nodes[i].value)
+        Some(&mut self.nodes[i].value)
+    }
+
+    pub fn pop_oldest(&mut self) -> Option<(K, V)> {
+        let k = self.nodes[self.oldest?].key.clone();
+        self.remove(&k)
     }
 
     pub fn insert(&mut self, key: K, value: V) {
@@ -92,11 +101,8 @@ impl<K: Hash + Eq + Clone, V, const N: usize> Lru<K, V, N> {
             self.link_newest(i);
             return;
         }
-        if self.nodes.len() >= N
-            && let Some(o) = self.oldest
-        {
-            let k = self.nodes[o].key.clone();
-            self.remove(&k);
+        if self.nodes.len() >= N {
+            self.pop_oldest();
         }
         let i = self.nodes.len();
         self.at.insert(key.clone(), i);
