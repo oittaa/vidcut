@@ -1899,6 +1899,7 @@ fn speech_rows(n: &SpeechNote) -> Vec<(&'static str, String)> {
     let find = match n.find {
         FindSpeech::Voice => "Voice",
         FindSpeech::Sound => "Sound Level",
+        FindSpeech::None => "None",
     };
     rows.push(("Find Speech By", find.into()));
     rows

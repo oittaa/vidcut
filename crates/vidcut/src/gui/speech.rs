@@ -158,6 +158,7 @@ fn find_rows(ui: &mut egui::Ui, s: &mut Settings) {
         dialog::switch(ui, |ui| {
             ui.selectable_value(&mut s.find, FindSpeech::Sound, "Sound Level");
             ui.selectable_value(&mut s.find, FindSpeech::Voice, "Voice");
+            ui.selectable_value(&mut s.find, FindSpeech::None, "None");
         });
     });
     if s.find == FindSpeech::Sound {
