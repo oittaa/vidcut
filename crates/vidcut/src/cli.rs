@@ -213,7 +213,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     ("media.set", "vidcut media set m1 m2 --color teal"),
     (
         "clip.set",
-        "vidcut clip set c4 --color pink\n  vidcut clip set c4 --color \"\"",
+        "vidcut clip set c4 --color pink\n  vidcut clip set c4 --color \"\"\n  vidcut clip set c4 --voice-isolation 75 --download\n  vidcut clip set c4 --voice-isolation 0",
     ),
     (
         "proxy.generate",
@@ -255,7 +255,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "track.set",
-        "vidcut track set A1 --volume-db -6 --name Music\n  vidcut track set V2 --locked true\n  vidcut track set A2 --solo true",
+        "vidcut track set A1 --volume-db -6 --name Music\n  vidcut track set V2 --locked true\n  vidcut track set A2 --solo true\n  vidcut track set A1 --voice-isolation 75",
     ),
     (
         "titles.add",

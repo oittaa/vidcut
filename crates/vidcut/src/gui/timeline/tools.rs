@@ -746,7 +746,7 @@ impl Workspace {
                     ui,
                     format!(
                         "Speech needs {}, downloaded once.",
-                        vidcut_av::transcribe::listed(&needs)
+                        vidcut_av::models::listed(&needs)
                     ),
                 );
                 if ui.button("Download and Find").clicked() {

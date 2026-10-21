@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use eframe::egui;
 use serde_json::json;
-use vidcut_av::{speech_api, transcribe};
+use vidcut_av::{models, speech_api, transcribe};
 use vidcut_core::looks::{Look, LookKind, Styled};
 use vidcut_core::model::Project;
 use vidcut_core::request::{FindSpeech, GoogleOptions, SpeakerModel, SpeechModel, XaiOptions};
@@ -143,7 +143,7 @@ fn languages(model: SpeechModel) -> Vec<&'static str> {
     }
 }
 
-fn wanted(s: &Settings) -> Vec<&'static transcribe::File> {
+fn wanted(s: &Settings) -> Vec<&'static models::File> {
     transcribe::file_of(s.model)
         .into_iter()
         .chain(
@@ -173,11 +173,11 @@ fn find_rows(ui: &mut egui::Ui, s: &mut Settings) {
     }
 }
 
-fn speakers_of(s: &Settings) -> Option<&'static transcribe::File> {
+fn speakers_of(s: &Settings) -> Option<&'static models::File> {
     transcribe::speakers_by(s.language.as_deref(), s.speaker_model)
 }
 
-fn speaker_title(f: &transcribe::File) -> &'static str {
+fn speaker_title(f: &models::File) -> &'static str {
     match f == &transcribe::MOSS {
         true => "MOSS",
         false => "Sortformer",
@@ -272,8 +272,8 @@ fn model_choice(ui: &mut egui::Ui, s: &mut Settings, d: &Ready, words_only: bool
                 let usable = !words_only || model.times_words();
                 let state = match transcribe::file_of(*model) {
                     _ if !usable => "doesn't time each word".into(),
-                    Some(f) if d.have[i] => transcribe::size(f.bytes),
-                    Some(f) => format!("{} download", transcribe::size(f.bytes)),
+                    Some(f) if d.have[i] => models::size(f.bytes),
+                    Some(f) => format!("{} download", models::size(f.bytes)),
                     None if d.key[i] => format!("${:.2} an hour", model.dollars_per_hour()),
                     None => "no key".into(),
                 };
@@ -296,7 +296,7 @@ fn model_choice(ui: &mut egui::Ui, s: &mut Settings, d: &Ready, words_only: bool
     let i = index(s.model);
     match transcribe::file_of(s.model) {
         Some(f) if !d.have[i] => {
-            ui.label(dim(format!("{} download", transcribe::size(f.bytes))));
+            ui.label(dim(format!("{} download", models::size(f.bytes))));
         }
         None if !d.key[i] => {
             ui.label(dim("No key: Preferences > Services"));
@@ -398,10 +398,10 @@ fn words_from(ui: &mut egui::Ui, s: &mut Settings, marks: bool) {
     }
 }
 
-fn ask_download(
+pub(super) fn ask_download(
     ctx: &egui::Context,
     id: &str,
-    needs: &[transcribe::Need],
+    needs: &[models::Need],
     go: &str,
 ) -> Option<bool> {
     let total: u64 = needs.iter().map(|n| n.bytes).sum();
@@ -409,8 +409,8 @@ fn ask_download(
     let modal = egui::Modal::new(egui::Id::unique(id)).show(ctx, |ui| {
         ui.set_width(dialog::WIDTH);
         ui.spacing_mut().item_spacing.y = 8.0;
-        ui.heading(format!("Download {}?", transcribe::size(total)));
-        ui.add(egui::Label::new(transcribe::listed(needs)).wrap());
+        ui.heading(format!("Download {}?", models::size(total)));
+        ui.add(egui::Label::new(models::listed(needs)).wrap());
         dialog::note(
             ui,
             format!("Kept in {}", crate::paths::models_dir().display()),
@@ -909,7 +909,7 @@ impl Workspace {
         let model = |i: usize| MODELS[i].0;
         let ready = Ready {
             have: std::array::from_fn(|i| {
-                transcribe::file_of(model(i)).is_none_or(|f| transcribe::present(&dir, f))
+                transcribe::file_of(model(i)).is_none_or(|f| models::present(&dir, f))
             }),
             key: std::array::from_fn(|i| {
                 crate::services::of(model(i)).is_none_or(|s| crate::services::source(s).is_some())
@@ -1301,8 +1301,7 @@ impl Workspace {
         };
         if create {
             let i = index(s.model);
-            d.ready.have[i] =
-                transcribe::file_of(s.model).is_none_or(|f| transcribe::present(&dir, f));
+            d.ready.have[i] = transcribe::file_of(s.model).is_none_or(|f| models::present(&dir, f));
             if transcribe::needed(&dir, &files_wanted).is_empty() {
                 let go = Go {
                     download: false,

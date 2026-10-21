@@ -5,6 +5,7 @@ use vidcut_core::render::AudioPiece;
 use super::ahead::Ahead;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, codec, ffi, format, frame, media};
+use crate::isolate::Isolator;
 use crate::stretch::Stretch;
 
 pub(crate) struct Resampler {
@@ -66,20 +67,69 @@ impl Resampler {
         }
     }
 
+    pub(crate) fn between(from: u32, to: u32, channels: u16) -> Result<Self> {
+        unsafe {
+            let mut layout: ffi::AVChannelLayout = std::mem::zeroed();
+            ffi::av_channel_layout_default(&mut layout, i32::from(channels));
+            let flt = ffi::AVSampleFormat::AV_SAMPLE_FMT_FLT;
+            let mut swr = std::ptr::null_mut();
+            let ret = ffi::swr_alloc_set_opts2(
+                &mut swr,
+                &layout,
+                flt,
+                to as i32,
+                &layout,
+                flt,
+                from as i32,
+                0,
+                std::ptr::null_mut(),
+            );
+            ffi::av_channel_layout_uninit(&mut layout);
+            if ret < 0 || ffi::swr_init(swr) < 0 {
+                ffi::swr_free(&mut swr);
+                return Err(Error::Invalid(format!(
+                    "cannot convert audio from {from} Hz to {to} Hz"
+                )));
+            }
+            Ok(Self {
+                swr,
+                channels: usize::from(channels),
+                input: (flt as i32, from as i32, i32::from(channels)),
+            })
+        }
+    }
+
     pub(crate) fn matches(&self, src: &frame::Audio) -> bool {
         let f = unsafe { &*src.as_ptr() };
         self.input == (f.format, f.sample_rate, f.ch_layout.nb_channels)
     }
 
+    pub(crate) fn convert_samples(&mut self, input: &[f32], out: &mut Vec<f32>) -> Result<()> {
+        let planes = [input.as_ptr() as *const u8];
+        let count = (input.len() / self.channels.max(1)) as i32;
+        unsafe { self.run(planes.as_ptr(), count, out) }
+    }
+
     pub(crate) fn convert(&mut self, src: Option<&frame::Audio>, out: &mut Vec<f32>) -> Result<()> {
-        unsafe {
-            let (inp, in_count) = match src {
-                Some(f) => (
+        let (inp, in_count) = match src {
+            Some(f) => unsafe {
+                (
                     (*f.as_ptr()).extended_data as *const *const u8,
                     (*f.as_ptr()).nb_samples,
-                ),
-                None => (std::ptr::null(), 0),
-            };
+                )
+            },
+            None => (std::ptr::null(), 0),
+        };
+        unsafe { self.run(inp, in_count, out) }
+    }
+
+    unsafe fn run(
+        &mut self,
+        inp: *const *const u8,
+        in_count: i32,
+        out: &mut Vec<f32>,
+    ) -> Result<()> {
+        unsafe {
             let room = ffi::swr_get_out_samples(self.swr, in_count).max(0) as usize + 32;
             let start = out.len();
             out.resize(start + room * self.channels, 0.0);
@@ -178,6 +228,10 @@ impl SourceAudio {
         };
         s.seek(start)?;
         Ok(s)
+    }
+
+    fn channels_in(&self) -> Option<i32> {
+        self.resampler.as_ref().map(|r| r.input.2)
     }
 
     fn reposition(&mut self, start: f64) -> Result<()> {
@@ -492,6 +546,8 @@ struct Lane {
     declick: i64,
     scratch: Vec<f32>,
     trim: f32,
+    isolator: Option<Isolator>,
+    unheard: Option<String>,
 }
 
 impl Lane {
@@ -507,6 +563,8 @@ impl Lane {
             declick,
             scratch: Vec::new(),
             trim: 1.0,
+            isolator: None,
+            unheard: None,
         }
     }
 
@@ -598,10 +656,23 @@ impl Lane {
                 gain_db,
                 speed,
                 fade: cross,
+                isolation,
                 ..
             } = &piece
             {
-                if take > 0 && (self.pos == 0 || !self.started) {
+                let continues = self.started
+                    && self.isolator.is_some()
+                    && *speed > 0.0
+                    && self
+                        .piece
+                        .checked_sub(1)
+                        .map(|i| &self.pieces[i])
+                        .is_some_and(|b| plays_on(b, &piece) && isolation_of(b) == *isolation);
+                if take > 0 && self.pos == 0 && continues {
+                    if let Some(paced) = self.paced.as_mut() {
+                        paced.bound = *source_sample + (len as f64 * speed).round() as i64;
+                    }
+                } else if take > 0 && (self.pos == 0 || !self.started) {
                     self.paced = None;
                     let start = if *speed == 1.0 {
                         origin + (*source_sample + self.pos) as f64 / f64::from(rate)
@@ -617,13 +688,44 @@ impl Lane {
                         start
                     };
                     self.start_piece(path, *stream, start, rate, channels)?;
+                    self.isolator = match isolation {
+                        Some(amount) if *amount > 0.0 => match crate::isolate::model() {
+                            Ok(model) => {
+                                let mono = self
+                                    .source
+                                    .as_ref()
+                                    .and_then(SourceAudio::channels_in)
+                                    .is_some_and(|n| n == 1);
+                                let shared = mono && channels > 1;
+                                Some(Isolator::new(model, *amount, rate, channels, shared)?)
+                            }
+                            Err(e) => {
+                                self.unheard.get_or_insert_with(|| match e {
+                                    Error::Missing(_) => format!(
+                                        "Voice Isolation isn't heard: its {} model isn't on \
+                                         this computer. Download it from a clip's menu or the Mixer.",
+                                        crate::models::size(crate::isolate::DPDFNET.bytes)
+                                    ),
+                                    e => format!("Voice Isolation isn't heard: {e}"),
+                                });
+                                None
+                            }
+                        },
+                        _ => None,
+                    };
                     self.started = true;
                 }
                 self.scratch.clear();
                 let source = self.source.as_mut().expect("open");
-                match self.paced.as_mut() {
-                    Some(paced) => paced.read(source, take, &mut self.scratch)?,
-                    None => source.read(take, &mut self.scratch)?,
+                match (self.isolator.as_mut(), self.paced.as_mut()) {
+                    (Some(iso), Some(paced)) => {
+                        iso.read(take, &mut self.scratch, |n, out| paced.read(source, n, out))?
+                    }
+                    (Some(iso), None) => {
+                        iso.read(take, &mut self.scratch, |n, out| source.read(n, out))?
+                    }
+                    (None, Some(paced)) => paced.read(source, take, &mut self.scratch)?,
+                    (None, None) => source.read(take, &mut self.scratch)?,
                 }
                 let gain = 10f32.powf(*gain_db as f32 / 20.0) * self.trim;
                 let fade = self.declick.min(len / 2).max(1);
@@ -658,6 +760,13 @@ impl Lane {
             }
         }
         Ok(())
+    }
+}
+
+fn isolation_of(piece: &AudioPiece) -> Option<f64> {
+    match piece {
+        AudioPiece::Source { isolation, .. } => *isolation,
+        AudioPiece::Silence { .. } => None,
     }
 }
 
@@ -735,6 +844,10 @@ impl AudioMix {
         for lane in &mut self.lanes {
             lane.seek(sample);
         }
+    }
+
+    pub fn unheard(&mut self) -> Option<String> {
+        self.lanes.iter_mut().find_map(|l| l.unheard.take())
     }
 
     pub fn replan(&mut self, lanes: &[Vec<AudioPiece>], sample: i64) {

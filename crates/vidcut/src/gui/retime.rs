@@ -1,6 +1,6 @@
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
-use vidcut_av::transcribe;
+use vidcut_av::{models, transcribe};
 
 use super::dialog;
 use super::export::Ask;
@@ -251,10 +251,7 @@ impl Workspace {
                 dialog::warn(ui, "Tick a track to hear");
             }
             if !needs.is_empty() {
-                dialog::note(
-                    ui,
-                    format!("Downloads {} first", transcribe::listed(&needs)),
-                );
+                dialog::note(ui, format!("Downloads {} first", models::listed(&needs)));
             }
             match (&d.error, d.current(), d.asked.is_some()) {
                 (_, _, true) => {

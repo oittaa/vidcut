@@ -278,7 +278,10 @@ pub fn timeline(
         summary["files"] = json!(items.iter().map(|i| i.files.len()).sum::<usize>());
         summary["bytes"] = json!(items.iter().map(|i| i.bytes).sum::<u64>());
     }
-    let notes = subtitle_notes(&subtitles);
+    let mut notes = subtitle_notes(&subtitles);
+    if let Some(message) = otio::unheard_isolation(p, span) {
+        notes.push(json!({ "code": "voice_isolation_kept", "message": message }));
+    }
     let Some(writing) = write else {
         return Ok(json!({
             "preset": null, "format": format.name(), "outputs": [summary], "notes": notes,

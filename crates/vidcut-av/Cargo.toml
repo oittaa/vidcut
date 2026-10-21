@@ -24,6 +24,8 @@ transcribe-cpp-sys.workspace = true
 flate2.workspace = true
 tar.workspace = true
 ureq.workspace = true
+tract-onnx.workspace = true
+rustfft.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true

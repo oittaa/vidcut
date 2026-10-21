@@ -2096,6 +2096,15 @@ impl Workspace {
             ui.close();
         }
         if c.audio.is_some() {
+            let heard = self
+                .project()
+                .and_then(|p| super::isolation::heard(p, &c.id))
+                .flatten();
+            let on = super::isolation::Isolate::Clips(clips.clone());
+            let label = keys("Voice Isolation  (Alt+V)");
+            if self.isolation_controls(ui, on, heard, &label) {
+                ui.close();
+            }
             ui.menu_button("Audio Operations", |ui| {
                 if ui.button("Ripple Delete Silence…").clicked() {
                     self.open_silence(clips.clone());
@@ -3071,6 +3080,7 @@ mod tests {
                 gain_db: 0.0,
                 muted: false,
                 effects: None,
+                voice_isolation: None,
             }),
             enabled: true,
             name: None,
