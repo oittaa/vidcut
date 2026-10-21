@@ -287,7 +287,13 @@ pub(crate) struct Isolator {
 }
 
 impl Isolator {
-    pub(crate) fn new(model: Arc<Model>, amount: f64, rate: u32, channels: u16) -> Result<Self> {
+    pub(crate) fn new(
+        model: Arc<Model>,
+        amount: f64,
+        rate: u32,
+        channels: u16,
+        shared: bool,
+    ) -> Result<Self> {
         let (into, out_of) = match rate {
             RATE => (None, None),
             r => (
@@ -295,7 +301,9 @@ impl Isolator {
                 Some(Resampler::between(RATE, r, channels)?),
             ),
         };
-        let voices = (0..channels.max(1)).map(|_| Voice::new(&model)).collect();
+        let voices = (0..if shared { 1 } else { channels.max(1) })
+            .map(|_| Voice::new(&model))
+            .collect();
         let pull = (model.hop() as u64 * u64::from(rate) / u64::from(RATE)).max(1) as usize;
         Ok(Self {
             model,
@@ -336,11 +344,12 @@ impl Isolator {
             }
             let made = self.voices.iter().map(|v| v.wet.len()).min().unwrap_or(0);
             self.mixed.clear();
+            let copies = ch / self.voices.len();
             for i in 0..made {
                 for voice in &mut self.voices {
                     let dry = voice.dry.pop_front().unwrap_or(0.0);
-                    self.mixed
-                        .push(self.amount * voice.wet[i] + (1.0 - self.amount) * dry);
+                    let value = self.amount * voice.wet[i] + (1.0 - self.amount) * dry;
+                    self.mixed.extend(std::iter::repeat_n(value, copies));
                 }
             }
             for voice in &mut self.voices {

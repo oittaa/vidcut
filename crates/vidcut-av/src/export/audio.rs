@@ -230,6 +230,10 @@ impl SourceAudio {
         Ok(s)
     }
 
+    fn channels_in(&self) -> Option<i32> {
+        self.resampler.as_ref().map(|r| r.input.2)
+    }
+
     fn reposition(&mut self, start: f64) -> Result<()> {
         let want = ((start - self.t0) * f64::from(self.rate)).round() as i64;
         let ahead = want - self.at;
@@ -686,7 +690,15 @@ impl Lane {
                     self.start_piece(path, *stream, start, rate, channels)?;
                     self.isolator = match isolation {
                         Some(amount) if *amount > 0.0 => match crate::isolate::model() {
-                            Ok(model) => Some(Isolator::new(model, *amount, rate, channels)?),
+                            Ok(model) => {
+                                let mono = self
+                                    .source
+                                    .as_ref()
+                                    .and_then(SourceAudio::channels_in)
+                                    .is_some_and(|n| n == 1);
+                                let shared = mono && channels > 1;
+                                Some(Isolator::new(model, *amount, rate, channels, shared)?)
+                            }
                             Err(e) => {
                                 self.unheard.get_or_insert_with(|| match e {
                                     Error::Missing(_) => format!(
