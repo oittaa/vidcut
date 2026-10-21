@@ -417,11 +417,15 @@ fn slot(piece: usize, layer: usize) -> usize {
     piece * LAYERS + layer.min(LAYERS - 1)
 }
 
-fn heaviest(layers: &[Layer]) -> usize {
+fn heaviest(layers: &[Layer], (fw, fh): (u32, u32)) -> usize {
     let mut left = u64::from(WHOLE);
     let mut best = (0, 0);
     for (i, l) in layers.iter().enumerate().rev() {
-        let w = u64::from(l.weight.unwrap_or(WHOLE));
+        let share = l
+            .placing
+            .as_ref()
+            .map_or(1.0, |(p, _)| p.share((f64::from(fw), f64::from(fh))));
+        let w = (f64::from(l.weight.unwrap_or(WHOLE)) * share) as u64;
         let shown = left * w;
         if shown > best.1 {
             best = (i, shown);
@@ -922,7 +926,8 @@ impl VideoFrames {
             return Ok(None);
         };
         let layers = layers.expect("a picture was asked for");
-        let heaviest = heaviest(&layers);
+        let (w, h, _) = self.maker.out();
+        let heaviest = heaviest(&layers, (w, h));
         let shown = &layers[heaviest];
         let read = shown
             .decoding
@@ -1100,7 +1105,8 @@ impl VideoFrames {
                 "pictures as decoded come apart, not mixed".into(),
             ));
         }
-        let shown = heaviest(&layers);
+        let (w, h, _) = self.maker.out();
+        let shown = heaviest(&layers, (w, h));
         let placed = layers.iter().any(|l| l.placing.is_some() || l.crossing);
         let black = match self.maker.output() {
             Output::Cuda { .. } if placed && self.gpu_mixes() && layers[0].frame.is_none() => {

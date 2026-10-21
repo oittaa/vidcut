@@ -111,6 +111,19 @@ impl Placing {
         })
     }
 
+    pub fn share(&self, (w, h): (f64, f64)) -> f64 {
+        let Some(l) = self.levels.last() else {
+            return 0.0;
+        };
+        let [a, b, _, c, d, _] = l.back;
+        let [u0, v0, u1, v1] = l.shown;
+        let quad = (u1 - u0) * (v1 - v0) / (a * d - b * c).abs();
+        let boxed = self.bounds((w, h)).map_or(0.0, |[x0, y0, x1, y1]| {
+            f64::from(x1 - x0) * f64::from(y1 - y0)
+        });
+        (quad.min(boxed) / (w * h)).clamp(0.0, 1.0)
+    }
+
     pub fn bounds(&self, (w, h): (f64, f64)) -> Option<[u32; 4]> {
         let mut out = [0.0, 0.0, w, h];
         for l in &self.levels {
