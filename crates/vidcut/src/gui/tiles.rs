@@ -10,6 +10,7 @@ use eframe::egui;
 use vidcut_av::export::renderer::FrameReader;
 use vidcut_av::thumbs::Image;
 use vidcut_core::fingerprint::Origin;
+use vidcut_core::lru::Lru;
 use vidcut_core::model::{Media, Project};
 use vidcut_core::preferences::Thumbnails;
 use vidcut_core::render::VideoPiece;
@@ -437,6 +438,8 @@ fn reader_waits(idle: Duration) -> Option<Duration> {
 
 type Block = Vec<(i64, Image)>;
 
+type Blocks = Lru<BlockFile, Block, 8>;
+
 fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egui::Context) {
     static TRIMMED: Mutex<Option<Instant>> = Mutex::new(None);
     let _cancel = vidcut_av::cancel::Guard::set(queue.cancel.clone());
@@ -447,7 +450,7 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
     let mut decoding = crate::preferences::gpu_decoding();
     let mut reader: Option<FrameReader> = None;
     let mut used = Instant::now();
-    let mut blocks: Vec<(BlockFile, Block)> = Vec::new();
+    let mut blocks = Blocks::new();
     let mut unwritten: HashMap<BlockFile, (Block, u64)> = HashMap::new();
     loop {
         let job = {
@@ -562,7 +565,7 @@ fn next(w: &mut Waiting, n: usize) -> Option<Job> {
 
 fn from_disk(
     job: &Job,
-    blocks: &mut Vec<(BlockFile, Block)>,
+    blocks: &mut Blocks,
     unwritten: &HashMap<BlockFile, (Block, u64)>,
 ) -> Option<Image> {
     let (file, _) = job.disk.as_ref()?;
@@ -575,31 +578,24 @@ fn from_disk(
     if let Some(found) = unwritten.get(file).and_then(|(tiles, _)| pick(tiles)) {
         return Some(found);
     }
-    let i = match blocks.iter().position(|(f, _)| f == file) {
-        Some(i) => i,
-        None => {
-            blocks.push((
-                file.clone(),
-                thumbcache::load_tiles(&file.path, &file.origin).unwrap_or_default(),
-            ));
-            if blocks.len() > 8 {
-                blocks.remove(0);
-            }
-            blocks.len() - 1
-        }
-    };
-    pick(&blocks[i].1)
+    if let Some(tiles) = blocks.get(file) {
+        return pick(tiles);
+    }
+    let tiles = thumbcache::load_tiles(&file.path, &file.origin).unwrap_or_default();
+    let found = pick(&tiles);
+    blocks.insert(file.clone(), tiles);
+    found
 }
 
 fn write(
     unwritten: &mut HashMap<BlockFile, (Block, u64)>,
-    blocks: &mut Vec<(BlockFile, Block)>,
+    blocks: &mut Blocks,
     trimmed: &Mutex<Option<Instant>>,
 ) {
     let mut limit = None;
     for (file, (tiles, l)) in unwritten.drain() {
         thumbcache::store_tiles(&file.path, &file.origin, &tiles);
-        blocks.retain(|(f, _)| f != &file);
+        blocks.remove(&file);
         limit = Some(l);
     }
     let Some(limit) = limit else { return };

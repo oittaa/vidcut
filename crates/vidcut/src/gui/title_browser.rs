@@ -7,6 +7,7 @@ use eframe::egui::{
 use serde_json::json;
 use vidcut_av::burn::Sprite;
 use vidcut_core::looks::{Look, LookKind, Styled};
+use vidcut_core::lru::Lru;
 use vidcut_core::model::{Project, Title, TitleAlign, TitleKind};
 
 use super::export::Ask;
@@ -225,7 +226,7 @@ impl Browser {
 
 #[derive(Default)]
 pub struct Thumbs {
-    kept: Vec<(String, TextureHandle)>,
+    kept: Lru<String, TextureHandle, KEPT>,
     shown: HashMap<String, TextureId>,
 }
 
@@ -241,13 +242,8 @@ impl Thumbs {
                 continue;
             };
             let key = format!("{w}x{h} {}", serde_json::to_string(t).unwrap_or_default());
-            let id = match self.kept.iter().position(|(k, _)| *k == key) {
-                Some(i) => {
-                    let kept = self.kept.remove(i);
-                    let id = kept.1.id();
-                    self.kept.push(kept);
-                    id
-                }
+            let id = match self.kept.get(&key) {
+                Some(texture) => texture.id(),
                 None => {
                     let sprite = vidcut_av::burn::title(t, w, h).into_iter().next();
                     let dy = if t.moves() {
@@ -260,14 +256,11 @@ impl Thumbs {
                             TextureOptions::LINEAR
                         });
                     let id = texture.id();
-                    self.kept.push((key, texture));
+                    self.kept.insert(key, texture);
                     id
                 }
             };
             self.shown.insert(c.id.clone(), id);
-        }
-        while self.kept.len() > KEPT {
-            drop(self.kept.remove(0));
         }
         &self.shown
     }

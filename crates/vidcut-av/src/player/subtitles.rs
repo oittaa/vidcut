@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use vidcut_core::lru::Lru;
 use vidcut_core::model::{Cue, Place, SubtitleStyle};
 use vidcut_core::subtitles::Shown as Words;
 
@@ -22,27 +23,10 @@ struct Key {
     cues: Vec<(Words, Place)>,
 }
 
-struct Entry {
-    key: Key,
-    pictures: Vec<Arc<TitlePicture>>,
-    used: u64,
-}
-
 #[derive(Default)]
 struct Kept {
-    entries: Vec<Entry>,
-    clock: u64,
+    pictures: Lru<Key, Vec<Arc<TitlePicture>>, KEPT>,
     last: Option<Key>,
-}
-
-impl Kept {
-    fn find(&mut self, key: &Key) -> Option<Vec<Arc<TitlePicture>>> {
-        self.clock += 1;
-        let now = self.clock;
-        let e = self.entries.iter_mut().find(|e| e.key == *key)?;
-        e.used = now;
-        Some(e.pictures.clone())
-    }
 }
 
 #[derive(Default)]
@@ -106,11 +90,14 @@ impl Subtitles {
             return (Vec::new(), true);
         };
         let mut kept = lock(&self.kept);
-        if let Some(p) = kept.find(&key) {
+        if let Some(p) = kept.pictures.get(&key).cloned() {
             kept.last = Some(key);
             return (p.into_iter().map(over).collect(), true);
         }
-        let stand_in = kept.last.clone().and_then(|k| kept.find(&k));
+        let stand_in = kept
+            .last
+            .clone()
+            .and_then(|k| kept.pictures.get(&k).cloned());
         (stand_in.into_iter().flatten().map(over).collect(), false)
     }
 
@@ -121,7 +108,7 @@ impl Subtitles {
         let Some(key) = key_at(&view, plan, t) else {
             return false;
         };
-        if lock(&self.kept).entries.iter().any(|e| e.key == key) {
+        if lock(&self.kept).pictures.contains(&key) {
             return false;
         }
         let (w, h) = key.size;
@@ -140,20 +127,7 @@ impl Subtitles {
                 })
             })
             .collect();
-        let mut kept = lock(&self.kept);
-        kept.clock += 1;
-        let used = kept.clock;
-        kept.entries.push(Entry {
-            key,
-            pictures,
-            used,
-        });
-        while kept.entries.len() > KEPT {
-            let oldest = (0..kept.entries.len())
-                .min_by_key(|&i| kept.entries[i].used)
-                .expect("more than kept");
-            kept.entries.remove(oldest);
-        }
+        lock(&self.kept).pictures.insert(key, pictures);
         true
     }
 }

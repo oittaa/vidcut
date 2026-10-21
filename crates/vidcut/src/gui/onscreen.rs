@@ -1,5 +1,6 @@
 use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use serde_json::{Value, json};
+use vidcut_core::lru::Lru;
 use vidcut_core::model::{Project, Title, TitleKind, TrackKind};
 use vidcut_core::render::Run;
 
@@ -35,7 +36,7 @@ pub struct Grab {
     held: Option<Held>,
     landing: Option<(String, Title, std::time::Instant, Title)>,
     sent: Option<(String, Title)>,
-    boxes: Vec<(Title, (u32, u32), [f32; 4])>,
+    boxes: Lru<(Title, (u32, u32)), [f32; 4], KEPT>,
 }
 
 struct Shown {
@@ -120,7 +121,8 @@ fn angle_of(v: Vec2) -> f32 {
 
 impl Grab {
     fn upright_box(&mut self, t: &Title, size: (u32, u32)) -> Option<[f32; 4]> {
-        if let Some((_, _, b)) = self.boxes.iter().find(|(k, s, _)| k == t && *s == size) {
+        let key = (t.clone(), size);
+        if let Some(b) = self.boxes.get(&key) {
             return Some(*b);
         }
         let upright = Title {
@@ -135,10 +137,7 @@ impl Grab {
             .into_iter()
             .next()?;
         let b = [s.x as f32, s.y as f32, s.width as f32, s.height as f32];
-        self.boxes.push((t.clone(), size, b));
-        if self.boxes.len() > KEPT {
-            self.boxes.remove(0);
-        }
+        self.boxes.insert(key, b);
         Some(b)
     }
 }

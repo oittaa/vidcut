@@ -9,6 +9,7 @@ pub mod fingerprint;
 pub mod folder;
 mod history;
 pub mod looks;
+pub mod lru;
 pub mod model;
 pub mod ops;
 pub mod otio;

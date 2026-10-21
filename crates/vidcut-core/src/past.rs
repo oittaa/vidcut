@@ -1,8 +1,8 @@
-use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::editor::{Chain, Editor};
 use crate::error::Result;
+use crate::lru::Lru;
 use crate::model::Project;
 
 const KEPT: usize = 32;
@@ -10,7 +10,7 @@ const KEPT: usize = 32;
 #[derive(Debug, Default)]
 pub struct Past {
     key: Option<(u64, usize, usize)>,
-    states: VecDeque<(usize, Arc<Project>)>,
+    states: Lru<usize, Arc<Project>, KEPT>,
     chain: Option<(u64, Arc<Chain>)>,
     applied: usize,
 }
@@ -45,11 +45,8 @@ impl Past {
 
     pub fn project_at(&mut self, editor: &Editor, step: usize) -> Result<Arc<Project>> {
         let u = self.fresh(editor);
-        if let Some(i) = self.states.iter().position(|(s, _)| *s == step) {
-            let hit = self.states.remove(i).expect("found above");
-            let project = hit.1.clone();
-            self.states.push_back(hit);
-            return Ok(project);
+        if let Some(project) = self.states.get(&step) {
+            return Ok(project.clone());
         }
         let (from, start) = self
             .states
@@ -61,10 +58,7 @@ impl Past {
             .expect("the current project is always there");
         let project = Arc::new(editor.project_between(start, from, step)?);
         self.applied += from.abs_diff(step);
-        self.states.push_back((step, project.clone()));
-        if self.states.len() > KEPT {
-            self.states.pop_front();
-        }
+        self.states.insert(step, project.clone());
         Ok(project)
     }
 
