@@ -209,7 +209,7 @@ struct Laid {
     popped: Option<(f32, f32)>,
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 struct Line {
     pieces: Vec<Piece>,
     place: Place,
