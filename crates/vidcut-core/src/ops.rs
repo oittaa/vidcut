@@ -2072,6 +2072,9 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
         let on_video = p.tracks[ti].kind == TrackKind::Video;
         let sound_block = clip.compound.is_some() && !clip.video;
         clip.video = clip.video && has_video && on_video;
+        if !clip.video {
+            clip.picture = None;
+        }
         if (!clip.video && clip.audio.is_none() && !sound_block) || (sound_block && on_video) {
             return Err(Error::invalid(format!(
                 "pasted clip has nothing for track {}",
