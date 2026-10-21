@@ -89,7 +89,7 @@ flowchart TD
 
 ## Sound
 
-`AudioMix` mixes the lanes sample-exact: clip gains, cross fades, de-click fades at cuts, clips at other speeds stretched with their pitch kept. With `audio.loudness`, `analysis::mix_loudness` first measures the mix as it will be encoded, and `loudness_gain` gives one gain (`AudioMix::set_gain_db`) that reaches the target with the true peak under a ceiling.
+`AudioMix` mixes the lanes sample-exact: clip gains, cross fades, de-click fades at cuts, clips at other speeds stretched with their pitch kept. A piece with Voice Isolation (`AudioPiece`'s `isolation`) goes through an `Isolator` in its lane after the speed stage: DPDFNet on tract's CPU runtime, one model state per channel, at 48 kHz, with `Resampler::between` on either side when the mix runs at another rate. The model's output lags its input by two of its windows, as its own code trims, so the isolator reads that far ahead and drops as much: the voice stays in sync, and the Amount mixes it with the dry sound sample for sample. An export checks for the model first (`isolate::check`); in playback, a lane without it plays dry, and `AudioMix::unheard` says why. With `audio.loudness`, `analysis::mix_loudness` first measures the mix as it will be encoded, and `loudness_gain` gives one gain (`AudioMix::set_gain_db`) that reaches the target with the true peak under a ceiling.
 
 ## Errors and logs
 
@@ -138,6 +138,7 @@ Automatic tries DNxHR LB, ProRes Proxy, AV1, HEVC and H.264 in four rounds: made
 - `crates/vidcut-core/src/export/color.rs`
 - `crates/vidcut-core/src/export/metadata.rs`
 - `crates/vidcut-core/src/render.rs`
+- `crates/vidcut-av/src/isolate.rs`
 - `crates/vidcut-core/src/subtitles.rs`
 - `crates/vidcut-av/src/export/mod.rs`
 - `crates/vidcut-av/src/export/subtitles.rs`
