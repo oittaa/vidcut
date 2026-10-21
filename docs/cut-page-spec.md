@@ -18,12 +18,12 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - Quick Export, plus our Export dialog
 
 **Out of scope (out):**
-- effects, other transitions, other titles, generators, keyframes
+- effects, other transitions, other titles, generators, keyframes ([clip transform](todo/clip-transform.md))
 - color, Fusion, Smart Reframe, Close Up
 - Sync Bin, Multi Source, Source Overwrite, Live Overwrite
 - Replay, voiceover
-- AI tools other than Create Subtitles from Audio: voice/dialogue tools
-- Mixer FX, Paste Attributes, guides
+- AI tools other than Create Subtitles from Audio: voice/dialogue tools ([voice isolation](todo/voice-isolation.md))
+- Mixer FX, Paste Attributes, guides ([ducking](todo/ducking.md))
 - interchange formats: DRT, AAF, XML
 
 ## 2. Layout (pp. 636–637)
