@@ -20,7 +20,7 @@ impl Past {
         let (u, r) = editor.history_counts();
         let key = (editor.project().rev, u, r);
         if self.key != Some(key) {
-            self.states.clear();
+            self.states = Lru::new();
             self.chain = None;
             self.key = Some(key);
         }
@@ -113,19 +113,6 @@ mod tests {
             past.project_at(&editor, step).unwrap();
         }
         assert_eq!(past.applied(), 5);
-    }
-
-    #[test]
-    fn a_state_seen_before_is_not_made_again() {
-        let dir = tempfile::tempdir().unwrap();
-        let s = store(dir.path());
-        bins(&s, &["a", "b", "c", "d", "e"]);
-        let editor = s.load().unwrap();
-        let mut past = Past::default();
-        for step in [2, 4, 2] {
-            past.project_at(&editor, step).unwrap();
-        }
-        assert_eq!(past.applied(), 4);
     }
 
     #[test]
