@@ -15,7 +15,7 @@ use crate::folder::Folder;
 use crate::history::HistoryFile;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marks, Media,
-    MediaInfo, Project, Proxy, Title, Track, TrackKind, Transition, VideoInfo,
+    MediaInfo, Picture, Project, Proxy, Title, Track, TrackKind, Transition, VideoInfo,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -4403,6 +4403,22 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
     t.fps = to;
 }
 
+fn imported_picture(
+    c: &otio::ImportedClip,
+    shape: Option<otio::picture::Shape>,
+    warnings: &mut Vec<String>,
+) -> (Vec<Value>, Option<Picture>) {
+    match shape.filter(|_| c.has_picture()) {
+        None => (c.effects.clone(), c.picture.clone()),
+        Some(shape) => {
+            otio::picture::take(&c.effects, c.picture.as_ref(), &shape).unwrap_or_else(|names| {
+                otio::note_kept(warnings, &names);
+                (c.effects.clone(), None)
+            })
+        }
+    }
+}
+
 fn place_imported(
     p: &mut Project,
     t: &otio::Imported,
@@ -4438,6 +4454,7 @@ fn place_imported(
         .map(|(i, m)| (m.id.clone(), i))
         .collect();
     debug_assert_eq!(t.fps, p.settings.fps, "converted first (at_project_rate)");
+    let frame = (p.settings.width, p.settings.height);
     let track_of = |id: &str| tracks.get(id).cloned().unwrap_or_else(|| id.to_string());
     let carry = |list: &[Value], first: i64| {
         (!list.is_empty()).then(|| Effects {
@@ -4482,6 +4499,11 @@ fn place_imported(
                     t
                 })
                 .or_else(|| c.title.clone());
+            let shape = c
+                .compound
+                .as_ref()
+                .map(|_| otio::picture::Shape::whole(frame));
+            let (effects, picture) = imported_picture(c, shape, warnings);
             let id = clip_id(p, &c.id);
             clips.push(id.clone());
             made.insert(c.key, (id.clone(), track_of(&c.track)));
@@ -4496,12 +4518,12 @@ fn place_imported(
                 audio: None,
                 enabled: c.enabled,
                 name: (!c.name.is_empty()).then(|| c.name.clone()),
-                effects: carry(&c.effects, source_in),
+                effects: carry(&effects, source_in),
                 generator: c.generator.as_ref().map(|reference| Generator {
                     reference: reference.clone().into(),
                 }),
                 title,
-                picture: c.picture.clone(),
+                picture,
                 compound,
                 speed: c.speed.clone(),
                 color: color(c),
@@ -4515,7 +4537,6 @@ fn place_imported(
         let mut start = offset + c.start;
         let end = offset + c.end();
         let mut source_in = c.source_in;
-        let effects = carry(&c.effects, source_in);
         let sound_from = c.source_in + c.audio.map_or(0, |a| a.0);
         if c.video && m.info.video.is_none() {
             warnings.push(format!("{label}: {} has no video; left out", m.name));
@@ -4586,6 +4607,13 @@ fn place_imported(
         }
         let name = (!c.name.is_empty() && c.name != m.name && c.name != c.media.file_name)
             .then(|| c.name.clone());
+        let shape = m
+            .info
+            .video
+            .as_ref()
+            .map(|v| otio::picture::Shape::of(v, frame));
+        let (effects, picture) = imported_picture(c, shape, warnings);
+        let effects = carry(&effects, c.source_in);
         let id = clip_id(p, &c.id);
         clips.push(id.clone());
         made.insert(c.key, (id.clone(), track_of(&c.track)));
@@ -4603,7 +4631,7 @@ fn place_imported(
             effects,
             generator: None,
             title: None,
-            picture: c.picture.clone(),
+            picture,
             compound: None,
             speed: c.speed.clone(),
             color: color(c),

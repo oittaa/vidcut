@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 
+use super::effects::{effect, group, keyed, plain, ranged, rounded};
 use super::{EDITOR, VIDCUT};
 use crate::model::{
     SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleAlign, TitleKind, TitleShadow,
@@ -45,21 +46,16 @@ pub fn with_opacity(t: &Title, effects: Vec<Value>) -> Vec<Value> {
         .filter(|e| composite_opacity(e).is_none())
         .collect();
     if let Some(o) = t.opacity {
-        out.push(json!({
-            "OTIO_SCHEMA": "Effect.1",
-            "metadata": { EDITOR: group(
-                "Composite",
-                1,
-                1,
-                vec![ranged(
-                    keyed("opacity", json!(rounded(o * 100.0)), json!(100.0), "Double"),
-                    0.0,
-                    100.0,
-                )],
-            ) },
-            "name": "",
-            "effect_name": "Resolve Effect",
-        }));
+        out.push(effect(group(
+            "Composite",
+            1,
+            1,
+            vec![ranged(
+                keyed("opacity", json!(rounded(o * 100.0)), json!(100.0), "Double"),
+                0.0,
+                100.0,
+            )],
+        )));
     }
     out
 }
@@ -143,10 +139,6 @@ fn hex([r, g, b]: [u8; 3]) -> String {
     format!("#{r:02x}{g:02x}{b:02x}")
 }
 
-fn rounded(v: f64) -> f64 {
-    (v * 1e6).round() / 1e6
-}
-
 fn number(v: f64) -> String {
     let s = format!("{v:.2}");
     s.trim_end_matches('0').trim_end_matches('.').to_string()
@@ -220,38 +212,6 @@ fn plain_lines(lines: &[&[Span]]) -> String {
         .map(|l| l.iter().map(|s| s.text.as_str()).collect::<String>())
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn plain(id: &str, value: Value, usual: Value, variant: &str) -> Value {
-    json!({
-        "Default Parameter Value": usual,
-        "Parameter ID": id,
-        "Parameter Value": value,
-        "Variant Type": variant,
-    })
-}
-
-fn keyed(id: &str, value: Value, usual: Value, variant: &str) -> Value {
-    let mut p = plain(id, value, usual, variant);
-    p["Key Frames"] = json!({});
-    p
-}
-
-fn ranged(mut p: Value, low: f64, high: f64) -> Value {
-    p["minValue"] = json!(low);
-    p["maxValue"] = json!(high);
-    p
-}
-
-fn group(name: &str, kind: u32, shown: u32, parameters: Vec<Value>) -> Value {
-    json!({
-        "Display Type": shown,
-        "Effect Name": name,
-        "Enabled": true,
-        "Name": name,
-        "Parameters": parameters,
-        "Type": kind,
-    })
 }
 
 fn rich_text(

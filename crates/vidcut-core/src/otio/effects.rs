@@ -12,6 +12,51 @@ const FADES: [(&str, bool); 4] = [
     ("faderOut", false),
 ];
 
+pub(super) fn rounded(v: f64) -> f64 {
+    (v * 1e6).round() / 1e6
+}
+
+pub(super) fn plain(id: &str, value: Value, usual: Value, variant: &str) -> Value {
+    json!({
+        "Default Parameter Value": usual,
+        "Parameter ID": id,
+        "Parameter Value": value,
+        "Variant Type": variant,
+    })
+}
+
+pub(super) fn keyed(id: &str, value: Value, usual: Value, variant: &str) -> Value {
+    let mut p = plain(id, value, usual, variant);
+    p["Key Frames"] = json!({});
+    p
+}
+
+pub(super) fn ranged(mut p: Value, low: f64, high: f64) -> Value {
+    p["minValue"] = json!(low);
+    p["maxValue"] = json!(high);
+    p
+}
+
+pub(super) fn group(name: &str, kind: u32, shown: u32, parameters: Vec<Value>) -> Value {
+    json!({
+        "Display Type": shown,
+        "Effect Name": name,
+        "Enabled": true,
+        "Name": name,
+        "Parameters": parameters,
+        "Type": kind,
+    })
+}
+
+pub(super) fn effect(group: Value) -> Value {
+    json!({
+        "OTIO_SCHEMA": "Effect.1",
+        "metadata": { EDITOR: group },
+        "name": "",
+        "effect_name": "Resolve Effect",
+    })
+}
+
 pub(super) fn volume(db: f64) -> Value {
     json!({
         "OTIO_SCHEMA": "Effect.1",
