@@ -73,12 +73,13 @@ fi
 
 step "short GUI text"
 # A string in the GUI has 12 words at most (AGENTS.md, rule 12). Strings are
-# read across lines; a char literal '"' is dropped first, and a file's tests
-# are skipped.
+# read across lines, as bytes (in a UTF-8 locale gawk 5.0 misreads
+# gui/pool.rs); a char literal '"' is dropped first, and a file's tests are
+# skipped.
 long=$(
   git ls-files -- 'crates/vidcut/src/gui/*.rs' \
     | while IFS= read -r f; do
-      awk '
+      LC_ALL=C awk '
         /^#\[cfg\(test\)\]/ { tests = 1 }
         tests { next }
         {
