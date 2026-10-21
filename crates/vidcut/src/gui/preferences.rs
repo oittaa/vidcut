@@ -214,7 +214,10 @@ impl Workspace {
                 Ok(r) => {
                     let p = &r.result["preferences"];
                     let n = |v: &Value| v.as_u64().unwrap_or(0).to_string();
-                    ui_state.limit = n(&p["thumbnails"]["cache_limit_mb"]);
+                    ui_state.limit = match p["cache"]["limit"].as_str() {
+                        Some("gb") => n(&p["cache"]["gb"]),
+                        _ => n(&p["cache"]["percent"]),
+                    };
                     let size = |key: &str, auto: &str| match p["player"][key].as_u64().unwrap_or(0)
                     {
                         0 => gb(r.result[auto].as_u64().unwrap_or(1024)),
@@ -851,17 +854,71 @@ fn cache(
     ui_state: &mut PreferencesUi,
     patch: &mut Option<Value>,
 ) {
-    let thumbs = &state["preferences"]["thumbnails"];
-    let cache = &state["thumbnail_cache"];
+    let saved = &state["preferences"]["cache"];
+    let held = &state["cache"];
     page(
         ui,
         "Cache",
         "Kept here, so it isn't made, downloaded or paid for again",
         |ui| {
             grid(ui, "preferences-cache", |ui| {
-                folder_row(ui, "Speech Models", &state["cache"]["models"], "files");
-                folder_row(ui, "Paid Replies", &state["cache"]["replies"], "replies");
-                let mut disk = thumbs["disk_cache"] == true;
+                folder_row(ui, "Speech Models", &held["models"], "files");
+                folder_row(ui, "Paid Replies", &held["replies"], "replies");
+                folder_row(ui, "Other Files", held, "files");
+                let fixed = saved["limit"] == "gb";
+                let named = label(ui, "Size Limit");
+                ui.horizontal(|ui| {
+                    dialog::switch(ui, |ui| {
+                        if ui
+                            .add_enabled(!busy, egui::Button::selectable(!fixed, "Share of Disk"))
+                            .clicked()
+                            && fixed
+                        {
+                            *patch = Some(json!({ "cache": { "limit": "percent" } }));
+                        }
+                        if ui
+                            .add_enabled(!busy, egui::Button::selectable(fixed, "Fixed Size"))
+                            .clicked()
+                            && !fixed
+                        {
+                            let gb = saved["gb"].as_u64().unwrap_or_else(|| {
+                                (held["chosen_mb"].as_u64().unwrap_or(0) / 1024).max(1)
+                            });
+                            *patch = Some(json!({ "cache": { "limit": "gb", "gb": gb } }));
+                        }
+                    });
+                    let (key, range, unit, refusal) = if fixed {
+                        ("gb", 1..=u64::MAX, "GB", "The size limit is at least 1 GB")
+                    } else {
+                        ("percent", 1..=100, "%", "The share is 1 to 100%")
+                    };
+                    let field = NumberField {
+                        label: named.id,
+                        saved: saved[key].as_u64().unwrap_or(1),
+                        range,
+                        unit: Unit::Plain,
+                        enabled: !busy,
+                        refusal,
+                    };
+                    if let Some(n) = field.show(ui, &mut ui_state.limit, &mut ui_state.error) {
+                        *patch = Some(json!({ "cache": { key: n } }));
+                    }
+                    ui.label(unit);
+                });
+                ui.end_row();
+                if let Some(limit) = held["limit_mb"].as_u64() {
+                    let now = format!("{} GB now", about_gb(limit));
+                    ui.label("");
+                    ui.label(dim(match held["chosen_mb"].as_u64() {
+                        Some(chosen) if limit < chosen => format!(
+                            "{now}, keeping {}% of the disk free",
+                            held["keep_free_percent"]
+                        ),
+                        _ => now,
+                    }));
+                    ui.end_row();
+                }
+                let mut disk = state["preferences"]["thumbnails"]["disk_cache"] == true;
                 label(ui, "Thumbnails");
                 if ui
                     .add_enabled(!busy, egui::Checkbox::new(&mut disk, "Keep them on disk"))
@@ -869,26 +926,6 @@ fn cache(
                 {
                     *patch = Some(json!({ "thumbnails": { "disk_cache": disk } }));
                 }
-                ui.end_row();
-                let label = label(ui, "Size Limit");
-                ui.horizontal(|ui| {
-                    let field = NumberField {
-                        label: label.id,
-                        saved: thumbs["cache_limit_mb"].as_u64().unwrap_or(1),
-                        range: 1..=1_000_000,
-                        unit: Unit::Plain,
-                        enabled: !busy && disk,
-                        refusal: "The size limit is 1 to 1000000 MB",
-                    };
-                    if let Some(mb) = field.show(ui, &mut ui_state.limit, &mut ui_state.error) {
-                        *patch = Some(json!({ "thumbnails": { "cache_limit_mb": mb } }));
-                    }
-                    ui.label("MB");
-                    ui.label(dim(format!(
-                        "Holds {} MB in {} files",
-                        cache["mb"], cache["files"]
-                    )));
-                });
                 ui.end_row();
             });
         },
