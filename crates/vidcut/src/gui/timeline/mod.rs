@@ -19,7 +19,7 @@ use vidcut_core::request::ViewerMode;
 use crate::gui::workspace::{Workspace, dim};
 use crate::gui::{keys, theme};
 use crate::live::PlayerId;
-use geometry::{Hit, NEW_TRACK_STRIP, Rows, Scale, Snap, hit_rows};
+use geometry::{Hit, MARK_BAND, NEW_TRACK_STRIP, Rows, Scale, Snap, hit_rows};
 use gesture::{Ctx, Drag, Gesture, HELD_FRAME, Preview, swipe};
 use paint::{Assets, Look};
 
@@ -309,13 +309,13 @@ pub struct Layout {
     pub lower_scale: Scale,
 }
 
-const UPPER_RULER: f32 = 16.0;
-const UPPER_TRACK: f32 = 30.0;
+const UPPER_RULER: f32 = 24.0;
+const UPPER_TRACK: f32 = 40.0;
 const UPPER_OTHER: f32 = 9.0;
-const LOWER_ROWS: [f32; 3] = [100.0, 60.0, 46.0];
+const LOWER_ROWS: [f32; 3] = [130.0, 80.0, 60.0];
 const LOWER_SUBTITLE: f32 = 40.0;
 const LOWER_SUBTITLE_MINIMIZED: f32 = 22.0;
-const LOWER_RULER: f32 = 22.0;
+const LOWER_RULER: f32 = 30.0;
 const HEADER: f32 = 150.0;
 const BOX_CONTROL: f32 = 18.0;
 
@@ -413,6 +413,37 @@ impl Workspace {
             project: Arc::new(trimmed),
             since: std::time::Instant::now(),
         });
+    }
+
+    pub(crate) fn timeline_wanted(&mut self) -> Option<f32> {
+        let p = self.shown_project()?;
+        let others = (p.tracks.len().saturating_sub(1) + p.subtitles.len()).min(6) as f32;
+        let [v1, video, audio] = LOWER_ROWS;
+        let subtitle = if self.timeline.options.minimize_subtitles {
+            LOWER_SUBTITLE_MINIMIZED
+        } else {
+            LOWER_SUBTITLE
+        };
+        let rows: f32 = p
+            .tracks
+            .iter()
+            .map(|t| match t.kind {
+                vidcut_core::model::TrackKind::Audio => audio,
+                _ if t.id == MAIN => v1,
+                _ => video,
+            })
+            .sum::<f32>()
+            + subtitle * p.subtitles.len() as f32;
+        Some(
+            UPPER_RULER
+                + UPPER_TRACK
+                + UPPER_OTHER * others
+                + 6.0
+                + LOWER_RULER
+                + 2.0
+                + rows
+                + NEW_TRACK_STRIP,
+        )
     }
 
     pub(crate) fn timeline_panel(&mut self, ui: &mut egui::Ui) {
@@ -529,10 +560,18 @@ impl Workspace {
         };
         self.timeline.layout = Some(layout.clone());
 
+        let dragged = match (&trimmed, &before) {
+            (None, None) => self
+                .timeline
+                .drag
+                .as_ref()
+                .and_then(|d| d.preview.moved(&p)),
+            _ => None,
+        };
         let (drawn, edit_at) = match (&trimmed, &before) {
             (Some((q, at)), _) => (q, self.timeline.edit.is_some().then_some(*at)),
             (None, Some(q)) => (&**q, None),
-            (None, None) => (&*p, None),
+            (None, None) => (dragged.as_ref().unwrap_or(&*p), None),
         };
         let placed = match (&trimmed, &before) {
             (Some((q, _)), _) => Arc::new(paint::placed(q)),
@@ -783,6 +822,10 @@ impl Workspace {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                     None
                 }
+                Gesture::Mark { .. } | Gesture::Marker { .. } => {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    None
+                }
                 _ => None,
             };
             if let Some(kind) = pointer {
@@ -802,11 +845,15 @@ impl Workspace {
             && !on_stripe
             && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
         {
-            for (rows, scale, area) in [
-                (&layout.upper, &upper_scale, upper_rect),
-                (&layout.lower, &lower_scale, content),
+            for (rows, scale, area, ruler) in [
+                (&layout.upper, &upper_scale, upper_rect, upper_ruler),
+                (&layout.lower, &lower_scale, content, lower_ruler),
             ] {
                 if !area.contains(pos) {
+                    continue;
+                }
+                if mark_grab(&p, ruler, scale, pos).is_some() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                     continue;
                 }
                 if let Some(row) = rows.at(pos.y).filter(|r| geometry::is_subtitle(&r.track)) {
@@ -1495,28 +1542,10 @@ impl Workspace {
         let (track, what) = hit_rows(p, rows, &scale, press);
         let gesture = if ruler.expand2(vec2(0.0, 2.0)).contains(press) || track.is_none() && !upper
         {
-            let near = |f: i64| (scale.xf(f) - press.x).abs() <= 5.0;
-            if let Some(k) = p.markers.iter().find(|k| near(k.at)) {
-                Gesture::Marker {
-                    id: k.id.clone(),
-                    from: k.at,
-                }
-            } else if let Some(i) = p.marks.mark_in.filter(|&i| near(i)) {
-                Gesture::Mark {
-                    is_in: true,
-                    from: i,
-                }
-            } else if let Some(o) = p.marks.mark_out.filter(|&o| near(o)) {
-                Gesture::Mark {
-                    is_in: false,
-                    from: o,
-                }
-            } else {
-                Gesture::Scrub {
-                    drag_content: fixed,
-                    from: playhead as f64,
-                }
-            }
+            mark_grab(p, ruler, &scale, press).unwrap_or(Gesture::Scrub {
+                drag_content: fixed,
+                from: playhead as f64,
+            })
         } else if let Some(g) = self.cue_gesture(p, rows, &scale, press, upper, mods.command) {
             g
         } else if let Some((track, at, end, x, sound)) = rows.at(press.y).and_then(|r| {
@@ -2970,6 +2999,29 @@ impl From<Side> for vidcut_core::request::TrimSide {
             Side::Audio => Self::Audio,
         }
     }
+}
+
+fn mark_grab(p: &Project, ruler: Rect, scale: &Scale, pos: Pos2) -> Option<Gesture> {
+    let band = Rect::from_x_y_ranges(
+        ruler.x_range(),
+        ruler.bottom() - MARK_BAND..=ruler.bottom() + 2.0,
+    );
+    if !band.contains(pos) {
+        return None;
+    }
+    let near = |f: i64| (scale.xf(f) - pos.x).abs() <= 5.0;
+    if let Some(k) = p.markers.iter().find(|k| near(k.at)) {
+        return Some(Gesture::Marker {
+            id: k.id.clone(),
+            from: k.at,
+        });
+    }
+    let (is_in, from) = match (p.marks.mark_in, p.marks.mark_out) {
+        (Some(i), _) if near(i) => (true, i),
+        (_, Some(o)) if near(o) => (false, o),
+        _ => return None,
+    };
+    Some(Gesture::Mark { is_in, from })
 }
 
 fn focus(m: &crate::gui::history::Marks) -> Option<(i64, i64)> {

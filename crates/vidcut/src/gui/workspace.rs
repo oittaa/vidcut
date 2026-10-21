@@ -1631,11 +1631,17 @@ impl Workspace {
             egui::CentralPanel::default().show(ui, |ui| self.start_screen(ui));
             return;
         }
+        let frame = theme::card(panel);
+        let spacing = ctx.global_style().spacing.clone();
+        let wanted = self.timeline_wanted().unwrap_or(300.0)
+            + frame.total_margin().sum().y
+            + spacing.interact_size.y
+            + spacing.item_spacing.y;
         egui::Panel::bottom("timeline")
             .resizable(true)
-            .default_size(300.0)
+            .default_size(wanted.min(ctx.content_rect().height() * 0.6).max(140.0))
             .min_size(140.0)
-            .frame(theme::card(panel))
+            .frame(frame)
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Card, |ui| self.timeline_panel(ui))
             });

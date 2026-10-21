@@ -295,7 +295,7 @@ vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)) unless an ent
 - **Why:** transcribed once, a file's words serve subtitles, the Transcription window and cutting by words in every project that uses it, and they agree. A file heard on its own is clearer than the mix, and two microphones recording the same speech give it once.
 ## X57. The lower timeline keeps its height, and its tracks scroll
 - **Resolve:** the manual doesn't say. In Resolve Studio 21's Cut page, adding video tracks makes the timeline taller and the viewer smaller, V1 kept at the bottom.
-- **vidcut:** the lower timeline keeps the height it is given. Its tracks shrink to fit, to 22 px at the least, and when they still don't fit they scroll: the mouse wheel over them or their headers, or the scrollbar at its right edge. It opens on the bottom tracks, V1 and the audio. The rulers and the upper timeline stay put.
+- **vidcut:** the timeline opens as tall as the project's tracks need, up to 60% of the window, and the lower timeline then keeps the height it is given. Its tracks shrink to fit, to 22 px at the least, and when they still don't fit they scroll: the mouse wheel over them or their headers, or the scrollbar at its right edge. It opens on the bottom tracks, V1 and the audio. The rulers and the upper timeline stay put.
 - **Why:** the viewer stays big while there are many tracks, and the picture is what a cut is watched in.
 
 ## X58. Animated subtitles are a track style, made from the speech in one step
