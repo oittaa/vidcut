@@ -9,6 +9,8 @@ struct Params {
     gamut2: vec4<f32>,
     flags: vec4<u32>,
     per: vec4<u32>,
+    placed: vec4<f32>,
+    levels: array<vec4<f32>, 12>,
 };
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -67,24 +69,7 @@ fn to_linear(c_in: vec3<f32>) -> vec3<f32> {
     return c * p.matrix.w;
 }
 
-@fragment
-fn fs(in: Out) -> @location(0) vec4<f32> {
-    let px = in.position.xy;
-    let rel = (px - p.place.xy) / p.place.zw;
-    if any(rel < vec2<f32>(0.0)) || any(rel >= vec2<f32>(1.0)) {
-        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
-    }
-    let cover = p.upright.xy / p.place.zw;
-    let taps = vec2<u32>(clamp(ceil(cover), vec2<f32>(1.0), vec2<f32>(8.0)));
-    let step = vec2<f32>(1.0) / (p.place.zw * vec2<f32>(taps));
-    let first = (px - vec2<f32>(0.5) - p.place.xy) / p.place.zw + step * 0.5;
-    var sum = vec3<f32>(0.0);
-    for (var j = 0u; j < taps.y; j++) {
-        for (var i = 0u; i < taps.x; i++) {
-            sum += yuv(first + vec2<f32>(f32(i), f32(j)) * step);
-        }
-    }
-    let s = sum / f32(taps.x * taps.y);
+fn rgb(s: vec3<f32>) -> vec3<f32> {
     let y = (s.x - p.range.x) * p.range.y;
     let cb = (s.y - p.range.z) * p.range.w;
     let cr = (s.z - p.range.z) * p.range.w;
@@ -104,7 +89,68 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
         c = c * (mapped / sig);
         c = pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4));
     }
-    return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+fn placed(px: vec2<f32>) -> vec4<f32> {
+    let n = u32(p.placed.x);
+    var cover = 1.0;
+    var uv = vec2<f32>(0.0);
+    var across = vec2<f32>(0.0);
+    var down = vec2<f32>(0.0);
+    for (var i = 0u; i < n; i++) {
+        let a = p.levels[i * 3u];
+        let b = p.levels[i * 3u + 1u];
+        let s = p.levels[i * 3u + 2u];
+        uv = vec2<f32>(dot(a.xy, px) + a.z, dot(b.xy, px) + b.z);
+        let gu = length(a.xy);
+        let gv = length(b.xy);
+        let edges = vec4<f32>((uv.x - s.x) / gu, (s.z - uv.x) / gu, (uv.y - s.y) / gv, (s.w - uv.y) / gv);
+        let e = clamp(edges + 0.5, vec4<f32>(0.0), vec4<f32>(1.0));
+        cover *= e.x * e.y * e.z * e.w;
+        across = vec2<f32>(a.x, b.x);
+        down = vec2<f32>(a.y, b.y);
+    }
+    if cover <= 0.0 {
+        discard;
+    }
+    let size = p.upright.xy;
+    let spans = vec2<f32>(length(across * size), length(down * size));
+    let taps = vec2<u32>(clamp(ceil(spans), vec2<f32>(1.0), vec2<f32>(8.0)));
+    let half = vec2<f32>(0.5) / size;
+    var sum = vec3<f32>(0.0);
+    for (var j = 0u; j < taps.y; j++) {
+        for (var i = 0u; i < taps.x; i++) {
+            let o = (vec2<f32>(f32(i), f32(j)) + 0.5) / vec2<f32>(taps) - 0.5;
+            let q = clamp(uv + across * o.x + down * o.y, half, vec2<f32>(1.0) - half);
+            sum += yuv(q);
+        }
+    }
+    let a = cover * p.placed.y;
+    return vec4<f32>(rgb(sum / f32(taps.x * taps.y)) * a, a);
+}
+
+@fragment
+fn fs(in: Out) -> @location(0) vec4<f32> {
+    let px = in.position.xy;
+    if p.placed.x > 0.5 {
+        return placed(px);
+    }
+    let rel = (px - p.place.xy) / p.place.zw;
+    if any(rel < vec2<f32>(0.0)) || any(rel >= vec2<f32>(1.0)) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    let cover = p.upright.xy / p.place.zw;
+    let taps = vec2<u32>(clamp(ceil(cover), vec2<f32>(1.0), vec2<f32>(8.0)));
+    let step = vec2<f32>(1.0) / (p.place.zw * vec2<f32>(taps));
+    let first = (px - vec2<f32>(0.5) - p.place.xy) / p.place.zw + step * 0.5;
+    var sum = vec3<f32>(0.0);
+    for (var j = 0u; j < taps.y; j++) {
+        for (var i = 0u; i < taps.x; i++) {
+            sum += yuv(first + vec2<f32>(f32(i), f32(j)) * step);
+        }
+    }
+    return vec4<f32>(rgb(sum / f32(taps.x * taps.y)), 1.0);
 }
 
 struct Lettering {

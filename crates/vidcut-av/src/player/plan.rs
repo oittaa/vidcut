@@ -142,6 +142,34 @@ impl Plan {
             .unwrap_or_default()
     }
 
+    pub(crate) fn placed_at(
+        &self,
+        t: i64,
+        preview: Option<&(String, vidcut_core::model::Picture)>,
+    ) -> Vec<Vec<vidcut_core::render::Placed>> {
+        let (i, _) = self.locate(t);
+        let Some(piece) = self.plan.video.get(i) else {
+            return Vec::new();
+        };
+        piece
+            .layers()
+            .into_iter()
+            .map(|(l, _)| match l {
+                VideoPiece::Source { placed, .. } => placed
+                    .iter()
+                    .map(|p| match preview {
+                        Some((clip, picture)) if *clip == p.clip => vidcut_core::render::Placed {
+                            clip: p.clip.clone(),
+                            picture: picture.clone(),
+                        },
+                        _ => p.clone(),
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
     pub(crate) fn size(&self) -> (u32, u32) {
         (self.plan.width, self.plan.height)
     }

@@ -270,6 +270,7 @@ pub(crate) enum Msg {
     Audition(Option<Audition>),
     Skip(Option<Vec<ClipSpans>>),
     PreviewTitle(Option<(String, Title)>),
+    PreviewPicture(Option<(String, vidcut_core::model::Picture)>),
     Subtitles(Option<vidcut_av::player::SubtitleView>),
     FreeTitle(Option<FreeTitle>),
     Shutdown,
@@ -330,6 +331,10 @@ impl Handle {
 
     pub fn preview_title(&self, title: Option<(String, Title)>) {
         let _ = self.tx.send(Msg::PreviewTitle(title));
+    }
+
+    pub fn preview_picture(&self, picture: Option<(String, vidcut_core::model::Picture)>) {
+        let _ = self.tx.send(Msg::PreviewPicture(picture));
     }
 
     pub fn show_subtitles(&self, view: Option<vidcut_av::player::SubtitleView>) {
@@ -528,6 +533,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         player,
         skipping: None,
         free_title: None,
+        free_picture: None,
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
@@ -793,6 +799,7 @@ struct Live {
     player: Player,
     skipping: Option<Vec<ClipSpans>>,
     free_title: Option<FreeTitle>,
+    free_picture: Option<(String, vidcut_core::model::Picture)>,
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
@@ -955,6 +962,15 @@ impl Live {
                     self.refresh_timeline();
                 }
                 self.player.preview_title(title);
+            }
+            Msg::PreviewPicture(picture) => {
+                changed = false;
+                if self.free_picture != picture {
+                    self.player.preview_picture(picture.clone());
+                    self.free_picture = picture;
+                    self.schedule_timeline();
+                    (self.notify)();
+                }
             }
             Msg::Subtitles(view) => {
                 changed = false;
@@ -3140,6 +3156,11 @@ impl Live {
 
     fn refresh_timeline_at(&mut self, at: Option<i64>) -> Option<u64> {
         let mut p = self.project.as_ref()?.project().clone();
+        if let Some((id, picture)) = &self.free_picture
+            && let Some((t, c)) = p.find_clip(id)
+        {
+            p.tracks[t].clips[c].picture = (!picture.is_usual()).then(|| picture.clone());
+        }
         let mut scrolled: Option<(String, (i64, i64), i64)> = None;
         if let Some(FreeTitle {
             title,

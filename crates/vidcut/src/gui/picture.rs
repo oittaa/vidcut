@@ -8,6 +8,8 @@ use vidcut_av::hw::Kind;
 use vidcut_av::player::{Layout, Picture, TitleOver, TitlePicture};
 use vidcut_av::thumbs::Image;
 use vidcut_core::model::Hdr;
+use vidcut_core::place::Placing;
+use vidcut_core::render::Placed;
 
 pub struct Gpu {
     #[cfg(any(target_os = "linux", windows))]
@@ -16,6 +18,7 @@ pub struct Gpu {
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
     blended: wgpu::RenderPipeline,
+    placed: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     lettering: wgpu::RenderPipeline,
     lettering_layout: wgpu::BindGroupLayout,
@@ -131,6 +134,15 @@ impl Gpu {
             color: over,
             alpha: over,
         }));
+        let premultiplied = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let placed = pipeline_with(Some(wgpu::BlendState {
+            color: premultiplied,
+            alpha: premultiplied,
+        }));
         let lettering_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut title"),
             entries: &[
@@ -159,11 +171,6 @@ impl Gpu {
                 bind_group_layouts: &[Some(&lettering_layout)],
                 immediate_size: 0,
             });
-        let premultiplied = wgpu::BlendComponent {
-            src_factor: wgpu::BlendFactor::One,
-            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-            operation: wgpu::BlendOperation::Add,
-        };
         let lettering = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("vidcut title"),
             layout: Some(&lettering_pipeline_layout),
@@ -207,6 +214,7 @@ impl Gpu {
             queue: queue.clone(),
             pipeline,
             blended,
+            placed,
             layout,
             lettering,
             lettering_layout,
@@ -385,6 +393,7 @@ pub struct Screen {
     target: Option<Target>,
     drawn: Option<Option<Arc<Picture>>>,
     drawn_titles: Vec<TitleOver>,
+    drawn_placed: Vec<Vec<Placed>>,
     slots: Vec<Slot>,
     letters: Vec<Letters>,
     imports_before: u64,
@@ -565,6 +574,7 @@ impl Screen {
         gpu: &Gpu,
         picture: Option<&Arc<Picture>>,
         titles: &[TitleOver],
+        placed: &[Vec<Placed>],
         width: u32,
         height: u32,
     ) -> Drawn {
@@ -579,7 +589,8 @@ impl Screen {
                 (Some(Some(a)), Some(b)) => Arc::ptr_eq(a, b),
                 (Some(None), None) => true,
                 _ => false,
-            } && same_titles(&self.drawn_titles, titles);
+            } && same_titles(&self.drawn_titles, titles)
+                && self.drawn_placed == placed;
             if same {
                 return Drawn::Same;
             }
@@ -614,11 +625,19 @@ impl Screen {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("vidcut picture"),
             });
-        let binds: Vec<(wgpu::BindGroup, Option<f64>)> = layers
+        let frame = (f64::from(size.0), f64::from(size.1));
+        let binds: Vec<(wgpu::BindGroup, Option<f64>, bool)> = layers
             .iter()
             .zip(&mut self.slots)
-            .map(|(&(picture, level), slot)| {
-                (slot.prepare(gpu, picture, size, &mut encoder), level)
+            .enumerate()
+            .map(|(i, (&(picture, level), slot))| {
+                let placing = placed.get(i).filter(|p| !p.is_empty()).map(|p| {
+                    let (x, y, w, h) = picture.placement(size.0, size.1);
+                    let fitted = [x, y, w, h].map(f64::from);
+                    (Placing::new(p, frame, fitted), level.unwrap_or(1.0))
+                });
+                let bind = slot.prepare(gpu, picture, size, placing.as_ref(), &mut encoder);
+                (bind, level, placing.is_some())
             })
             .collect();
         self.letters
@@ -656,8 +675,9 @@ impl Screen {
                 multiview_mask: None,
             });
             let drawn_layers = binds.len();
-            for (i, (bind, level)) in binds.iter().enumerate() {
+            for (i, (bind, level, placed)) in binds.iter().enumerate() {
                 match level {
+                    _ if *placed => pass.set_pipeline(&gpu.placed),
                     None => pass.set_pipeline(&gpu.pipeline),
                     Some(l) => {
                         pass.set_pipeline(&gpu.blended);
@@ -711,6 +731,7 @@ impl Screen {
         self.slots.truncate(keep);
         self.drawn = Some(picture.cloned());
         self.drawn_titles = titles.to_vec();
+        self.drawn_placed = placed.to_vec();
         drawn
     }
 }
@@ -721,6 +742,7 @@ impl Slot {
         gpu: &Gpu,
         picture: &Arc<Picture>,
         size: (u32, u32),
+        placing: Option<&(Placing, f64)>,
         encoder: &mut wgpu::CommandEncoder,
     ) -> wgpu::BindGroup {
         self.filled = None;
@@ -739,8 +761,11 @@ impl Slot {
                 f64::from(picture.height()) / f64::from(h),
             )
         });
-        gpu.queue
-            .write_buffer(params, 0, &params_of(picture, size, gpu.wide, cover));
+        gpu.queue.write_buffer(
+            params,
+            0,
+            &params_of(picture, size, gpu.wide, cover, placing),
+        );
         let planes = self.planes.as_ref().expect("uploaded");
         let view = |t: &wgpu::Texture| t.create_view(&Default::default());
         let (y, u) = self
@@ -1769,7 +1794,9 @@ fn write_plane(
     );
 }
 
-const PARAMS: usize = 10 * 16;
+const LEVELS: usize = 4;
+
+const PARAMS: usize = (11 + 3 * LEVELS) * 16;
 
 fn sixteen(layout: Layout) -> bool {
     match layout {
@@ -1807,7 +1834,13 @@ fn chroma_size(layout: Layout, w: u32, h: u32) -> (u32, u32) {
     (w.div_ceil(across), h.div_ceil(down))
 }
 
-fn params_of(picture: &Picture, size: (u32, u32), wide: bool, cover: (f64, f64)) -> Vec<u8> {
+fn params_of(
+    picture: &Picture,
+    size: (u32, u32),
+    wide: bool,
+    cover: (f64, f64),
+    placing: Option<&(Placing, f64)>,
+) -> Vec<u8> {
     let colors = shader_colors(picture.colors());
     let (x, y, w, h) = picture.placement(size.0, size.1);
     let turns = u32::from(picture.rotation() / 90) % 4;
@@ -1854,6 +1887,24 @@ fn params_of(picture: &Picture, size: (u32, u32), wide: bool, cover: (f64, f64))
     let (across, down) = per_chroma(layout);
     for v in [hdr, turns, uv, 0, across, down, 0, 0] {
         out.extend_from_slice(&v.to_le_bytes());
+    }
+    let levels = placing.map_or(&[][..], |(p, _)| {
+        &p.levels[p.levels.len().saturating_sub(LEVELS)..]
+    });
+    let mut floats = vec![
+        levels.len() as f64,
+        placing.map_or(0.0, |(_, l)| *l),
+        0.0,
+        0.0,
+    ];
+    for l in levels {
+        let [a, b, e, c, d, f] = l.back;
+        floats.extend([a, b, e, 0.0, c, d, f, 0.0]);
+        floats.extend(l.shown);
+    }
+    floats.resize(4 + 12 * LEVELS, 0.0);
+    for v in floats {
+        out.extend_from_slice(&(v as f32).to_le_bytes());
     }
     out
 }

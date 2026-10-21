@@ -271,6 +271,7 @@ pub struct Shown {
     pub picture: Arc<Picture>,
     pub exact: bool,
     pub titles: Vec<TitleOver>,
+    pub placed: Vec<Vec<vidcut_core::render::Placed>>,
 }
 
 pub struct TitlePicture {
