@@ -1,6 +1,6 @@
 # Clip transform and crop
 
-**When:** next. First of the finishing work in [the roadmap](../roadmap.md#next). A placed, cropped, moving picture is what a simple video still leaves for another editor, and [speed ramps](speed-ramps.md) and [stabilization](stabilization.md) write the same curves.
+**When:** next. First of the finishing work in [the roadmap](../roadmap.md#what-comes-next). A placed, cropped, moving picture is what a simple video still leaves for another editor.
 
 A footage clip, a still, an image sequence, or a compound clip gets a place on the timeline frame: position, one zoom or a zoom per axis, rotation, an anchor, a crop on each side with one soft edge, opacity, and a flip on either axis. Any of those but the flips can change along the clip (a picture in picture, a punch-in, a move across a still). The viewer and the export draw the same picture, the way a title already does ([playback](../design/playback.md#the-viewer-thread), [export](../design/export.md#titles)). Every control is a request ([requests](../design/requests.md#one-vocabulary)).
 

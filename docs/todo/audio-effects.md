@@ -1,6 +1,6 @@
 # Clip and track audio
 
-**When:** next. Third in [the roadmap](../roadmap.md#next), beside [audio cleanup](audio-cleanup.md). Ducking, a voice EQ, a high-pass, a compressor, a limiter and a de-esser use the speech detection and the loudness export already have, so they can ship with no model.
+**When:** next. Third in [the roadmap](../roadmap.md#what-comes-next), beside [audio cleanup](audio-cleanup.md). Ducking, a voice EQ, a high-pass, a compressor, a limiter and a de-esser use the speech detection and the loudness export already have, so they can ship with no model.
 
 Resolve does this in Fairlight (EQ, dynamics, a de-esser, and ducking on the Fairlight page). The Cut page has track volume and a clip's gain, which vidcut already has. vidcut has no mixer window; these are a request and a small window, and they are on the timeline a script already edits.
 

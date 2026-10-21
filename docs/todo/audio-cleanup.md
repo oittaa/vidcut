@@ -1,6 +1,6 @@
 # Audio cleanup
 
-**When:** next. Second in [the roadmap](../roadmap.md#next), with [clip and track audio](audio-effects.md). A Meet recording (use case 2) is still noisy after the silences are cut. The denoiser runs on a laptop CPU.
+**When:** next. Second in [the roadmap](../roadmap.md#what-comes-next), with [clip and track audio](audio-effects.md). A Meet recording (use case 2) is still noisy after the silences are cut. The denoiser runs on a laptop CPU.
 
 Local models only. Nothing is uploaded. A model is fetched the way a speech model is: pinned by repository, revision, size and SHA-256, kept in the cache dir's `models` folder, refused with `DEPENDENCY` until `download` is set, and the GUI asks before the fetch ([analysis](../design/analysis.md#transcription)). Weights are MIT or Apache-2.0. There is no PyTorch runtime and no Python subprocess.
 

@@ -16,17 +16,8 @@ They decide what gets built and tested.
 
 Open work is in [docs/todo/](todo/), one file per item, each with a **When:** line. With the interchange in place (use case 1), the smaller items come next, then macOS.
 
-Finishing a simple video here is a separate list. The order is what a meeting cut needs first, then what a picture move needs, then what cannot ride along in an OTIO file or what is too heavy for the laptop preview.
+Finishing a simple video comes first, in this order:
 
-### Next
-
-1. [Clip transform and crop](todo/clip-transform.md). Position, zoom, rotation, crop and keyframes place a picture, and speed ramps and stabilization write the same curves.
-2. [Audio cleanup](todo/audio-cleanup.md). A Meet recording is still noisy after the silences are cut, and the denoiser runs on a laptop CPU.
-3. [Clip and track audio](todo/audio-effects.md). Ducking, a voice EQ, a high-pass, a compressor and a de-esser use the speech detection and the loudness export already have, and they ship with no model.
-4. [Freeze frame and holds](todo/freeze-frame.md). A whole clip already freezes; one chosen frame, and a hold at the head or the tail, is the rest, and it round-trips.
-
-### Later
-
-5. [Basic color](todo/color.md). Exposure, white balance and a LUT finish a picture here, and a grade does not survive an OTIO file into Resolve.
-6. [Speed ramps](todo/speed-ramps.md). A speed that changes reuses the transform's curves. Constant speed already exists, and interpolation past the nearest frame stays off a laptop preview.
-7. [Stabilization](todo/stabilization.md). The smoothed motion is a per-frame transform, so it waits on that, and the vid.stab releases in distribution are GPL, so they are not the default.
+1. [Clip transform](todo/clip-transform.md): a picture in a picture, a punch-in, a slow push on a still.
+2. [Audio cleanup](todo/audio-cleanup.md): a Meet recording is still noisy after its silences are cut.
+3. [Clip and track audio](todo/audio-effects.md): music that dips under speech.
