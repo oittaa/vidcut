@@ -2,7 +2,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vidcut_core::model::{ColorSpace, Hdr, SubtitleStyle, Title};
-use vidcut_core::render::{Image, ShownTitle, VideoPiece, WHOLE};
+use vidcut_core::place::Placing;
+use vidcut_core::render::{Image, Placed, ShownTitle, VideoPiece, WHOLE};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
@@ -348,6 +349,7 @@ pub(crate) struct Layer {
     pub(crate) decoder: Option<crate::hw::Kind>,
     pub(crate) decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
     made_on_gpu: bool,
+    placing: Option<(Placing, [f64; 4])>,
 }
 
 impl Layer {
@@ -359,8 +361,42 @@ impl Layer {
             decoder: None,
             decoding: None,
             made_on_gpu: false,
+            placing: None,
         }
     }
+}
+
+fn upright_fit(f: &frame::Video, rotation: u16, (w, h): (u32, u32)) -> (u32, u32) {
+    let sar = f.aspect_ratio();
+    let sar = (sar.numerator(), sar.denominator());
+    if rotation % 180 == 90 {
+        super::normalize::fit(f.height(), f.width(), (sar.1, sar.0), w, h)
+    } else {
+        super::normalize::fit(f.width(), f.height(), sar, w, h)
+    }
+}
+
+const PLACED_MOST: f64 = 16384.0;
+
+fn layer_size(out: (u32, u32), f: &frame::Video, rotation: u16, placed: &[Placed]) -> (u32, u32) {
+    let (fw, fh) = upright_fit(f, rotation, out);
+    let sar = f.aspect_ratio();
+    let across = if sar.numerator() > 0 && sar.denominator() > 0 {
+        f64::from(sar.numerator()) / f64::from(sar.denominator())
+    } else {
+        1.0
+    };
+    let (w, h) = (f64::from(f.width()) * across, f64::from(f.height()));
+    let (dw, dh) = if rotation % 180 == 90 { (h, w) } else { (w, h) };
+    let native = (dw / f64::from(fw.max(1))).max(dh / f64::from(fh.max(1)));
+    let (ow, oh) = (f64::from(out.0), f64::from(out.1));
+    let most = PLACED_MOST / ow.max(oh);
+    let least = 2.0 / ow.min(oh);
+    let scale = vidcut_core::place::detail(placed)
+        .min(native.max(1.0))
+        .clamp(least, most.max(least));
+    let even = |v: f64| ((v * scale / 2.0).round() as u32 * 2).max(2);
+    (even(ow), even(oh))
 }
 
 const LAYERS: usize = 16;
@@ -940,7 +976,13 @@ impl VideoFrames {
             let mut made = Vec::with_capacity(layers.len());
             for (i, (layer, ramp)) in layers.into_iter().enumerate() {
                 let weight = ramp.map(|r| r.weight(k));
-                let VideoPiece::Source { image, pace, .. } = layer else {
+                let VideoPiece::Source {
+                    image,
+                    pace,
+                    placed,
+                    ..
+                } = layer
+                else {
                     if picture {
                         let decoded = matches!(self.maker.output(), Output::Decoded { .. });
                         let frame = if mixed && !decoded {
@@ -955,6 +997,7 @@ impl VideoFrames {
                             decoder: None,
                             decoding: None,
                             made_on_gpu: false,
+                            placing: None,
                         });
                     }
                     continue;
@@ -982,6 +1025,20 @@ impl VideoFrames {
                 } else {
                     self.source_frame(i, s, layer, k)?
                 };
+                let decoded = matches!(self.maker.output(), Output::Decoded { .. });
+                let placing = match (&self.open[s].current, placed.is_empty() || decoded) {
+                    (Some((f, _)), false) => {
+                        let (w, h, _) = self.maker.out();
+                        let at_out =
+                            vidcut_core::place::fitted((w, h), upright_fit(f, rotation, (w, h)));
+                        let layer = (frame.width(), frame.height());
+                        let at_layer =
+                            vidcut_core::place::fitted(layer, upright_fit(f, rotation, layer));
+                        let frame_size = (f64::from(w), f64::from(h));
+                        Some((Placing::new(placed, frame_size, at_out), at_layer))
+                    }
+                    _ => None,
+                };
                 made.push(Layer {
                     frame: Some(frame),
                     weight,
@@ -989,6 +1046,7 @@ impl VideoFrames {
                     decoder,
                     decoding: Some(decoding),
                     made_on_gpu: self.open[s].fitting.route == Some(Route::Gpu),
+                    placing,
                 });
             }
             return Ok(Some(picture.then_some(made)));
@@ -1028,18 +1086,21 @@ impl VideoFrames {
             ));
         }
         let shown = heaviest(&layers);
+        let placed = layers.iter().any(|l| l.placing.is_some());
         let on_gpu = match self.maker.output() {
-            Output::Cuda { frames, .. } if self.gpu_mixes() => match cuda_mix(frames, &layers) {
-                Ok(mixed) => Some(mixed),
-                Err(e) => {
-                    crate::debug!(
-                        "decoding",
-                        "the GPU won't mix a dissolve's pictures, the CPU mixes them: {e}"
-                    );
-                    self.cuda_mix_failed = Some(e.to_string());
-                    None
+            Output::Cuda { frames, .. } if self.gpu_mixes() && !placed => {
+                match cuda_mix(frames, &layers) {
+                    Ok(mixed) => Some(mixed),
+                    Err(e) => {
+                        crate::debug!(
+                            "decoding",
+                            "the GPU won't mix a dissolve's pictures, the CPU mixes them: {e}"
+                        );
+                        self.cuda_mix_failed = Some(e.to_string());
+                        None
+                    }
                 }
-            },
+            }
             _ => None,
         };
         let mut out = match on_gpu {
@@ -1056,7 +1117,13 @@ impl VideoFrames {
                 let mut mixed = in_memory(layers[0].frame.as_ref())?;
                 for l in &layers[1..] {
                     let over = in_memory(l.frame.as_ref())?;
-                    mixed = super::mix::mix(&mixed, &over, l.weight.unwrap_or(WHOLE))?;
+                    let weight = l.weight.unwrap_or(WHOLE);
+                    mixed = match &l.placing {
+                        Some((placing, fitted)) => {
+                            super::place::over(&mixed, &over, placing, *fitted, weight)?
+                        }
+                        None => super::mix::mix(&mixed, &over, weight)?,
+                    };
                 }
                 match self.maker.output() {
                     Output::Cuda { frames, .. } => frames.upload(&mixed)?,
@@ -1406,7 +1473,7 @@ impl VideoFrames {
         k: i64,
     ) -> Result<frame::Video> {
         let first = self.open[s].source_frame;
-        self.frame_at(i, s, first + Self::step(layer, k))
+        self.frame_at(i, s, first + Self::step(layer, k), layer)
     }
 
     fn reversed_frame(
@@ -1435,7 +1502,7 @@ impl VideoFrames {
             let low = *shown.last().expect("frame k");
             for p in low..=pos {
                 if shown.contains(&p) {
-                    let frame = self.frame_at(i, s, p)?;
+                    let frame = self.frame_at(i, s, p, layer)?;
                     let dolby_vision = dolby_vision(&self.last_dolby_vision)?;
                     self.open[s].reversed.push(Reversed {
                         input: input.clone(),
@@ -1475,12 +1542,34 @@ impl VideoFrames {
         ((REVERSED_BYTES / bytes) as i64).clamp(1, most)
     }
 
-    fn frame_at(&mut self, i: usize, s: usize, pos: i64) -> Result<frame::Video> {
+    fn frame_at(
+        &mut self,
+        i: usize,
+        s: usize,
+        pos: i64,
+        layer: &VideoPiece,
+    ) -> Result<frame::Video> {
         let fps = self.fps;
-        let up = !self.maker.mixing() || self.gpu_mixes();
+        let placed = match layer {
+            VideoPiece::Source { placed, .. } => placed.as_slice(),
+            _ => &[],
+        };
+        let decoded = matches!(self.maker.output(), Output::Decoded { .. });
+        let up = (!self.maker.mixing() || self.gpu_mixes()) && placed.is_empty();
         let src = &mut self.open[s];
         let changed = src.advance(target(fps, src.origin, pos))?;
-        if changed || src.normalized.is_none() {
+        let (w, h, _) = self.maker.out();
+        let wanted = match (&src.current, placed.is_empty() || decoded) {
+            (Some((f, _)), false) => Some(layer_size((w, h), f, src.reader.rotation(), placed)),
+            _ => None,
+        };
+        self.maker.size_layer(i, wanted);
+        let stale = !decoded
+            && src
+                .normalized
+                .as_ref()
+                .is_some_and(|n| (n.width(), n.height()) != wanted.unwrap_or((w, h)));
+        if changed || stale || src.normalized.is_none() {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
             let reading = src.pictures.reading(self.maker.reading());

@@ -14,6 +14,7 @@ pub mod model;
 pub mod ops;
 pub mod otio;
 pub mod past;
+pub mod place;
 pub mod preferences;
 pub mod preview;
 pub mod render;

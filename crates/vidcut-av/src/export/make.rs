@@ -130,6 +130,8 @@ pub(crate) struct Maker {
 
 struct Stage {
     normalizer: Option<Normalizer>,
+    size: Option<(u32, u32)>,
+    made_at: Option<(u32, u32)>,
     shrinker: Option<crate::hw::Shrinker>,
     relayout: Relayout,
     keeper: Option<crate::hw::Keeper>,
@@ -142,6 +144,8 @@ impl Default for Stage {
     fn default() -> Self {
         Self {
             normalizer: None,
+            size: None,
+            made_at: None,
             shrinker: None,
             relayout: Relayout::new(),
             keeper: None,
@@ -180,6 +184,13 @@ impl Maker {
 
     pub(crate) fn clear_stages(&mut self) {
         self.stages.clear();
+    }
+
+    pub(crate) fn size_layer(&mut self, layer: usize, size: Option<(u32, u32)>) {
+        if self.stages.len() <= layer {
+            self.stages.resize_with(layer + 1, Stage::default);
+        }
+        self.stages[layer].size = size;
     }
 
     pub(crate) fn set_mixing(&mut self, mixing: bool) {
@@ -285,8 +296,12 @@ impl Maker {
             stage.normalizer = None;
             stage.relayout = Relayout::new();
         }
-        let (out_w, out_h, out_fmt) = self.out;
+        let (out_w, out_h) = stage.size.unwrap_or((self.out.0, self.out.1));
+        let out_fmt = self.out.2;
         let mut facts = self.facts(stage, fitting, frame, rotation);
+        if stage.size.is_some() {
+            facts.mixes = false;
+        }
         let dest = self.dest(frame);
         let mut route;
         let mut came_down_at = None;
@@ -360,11 +375,13 @@ impl Maker {
             if let Output::Decoded { .. } = self.output {
                 break crate::buffers::owned(&stage.relayout.run(frame, reading)?)?;
             }
-            let rebuild = stage
-                .normalizer
-                .as_ref()
-                .is_none_or(|n| !n.matches(frame, rotation));
+            let rebuild = stage.made_at != Some((out_w, out_h))
+                || stage
+                    .normalizer
+                    .as_ref()
+                    .is_none_or(|n| !n.matches(frame, rotation));
             if rebuild {
+                stage.made_at = Some((out_w, out_h));
                 stage.normalizer = Some(Normalizer::new(
                     frame,
                     rotation,

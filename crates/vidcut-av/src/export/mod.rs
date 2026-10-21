@@ -4,6 +4,7 @@ pub mod encode;
 pub(crate) mod make;
 pub(crate) mod mix;
 pub(crate) mod normalize;
+pub(crate) mod place;
 pub mod renderer;
 pub mod still;
 pub mod subtitles;
