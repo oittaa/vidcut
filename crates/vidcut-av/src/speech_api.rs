@@ -217,6 +217,12 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
         )));
     }
     let started = Instant::now();
+    let service = match asked.model {
+        SpeechModel::Google => "google",
+        _ => "xai",
+    };
+    let mut telling =
+        transcribe::Telling::new(asked, service, Some(format!("{company}'s servers")));
     let vad = transcribe::vad_path(asked, options.models)?;
     let channels = plans.first().map_or(1, |p| usize::from(p.channels.max(1)));
     let mut warnings: Vec<Vec<String>> = vec![Vec::new(); plans.len()];
@@ -314,6 +320,9 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             ..w
         }));
         language = language.or(got.language);
+        if let Some(l) = &language {
+            telling.heard(l, options.models, asked.speaker_model);
+        }
     }
     let service_speakers = asked.speakers
         && (asked.model == SpeechModel::Xai || requests.len() <= 1)
@@ -356,10 +365,6 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             }],
             _ => Vec::new(),
         };
-        let service = match asked.model {
-            SpeechModel::Google => "google",
-            _ => "xai",
-        };
         let speakers = match asked.speakers {
             false => None,
             true if service_speakers || channel_speakers => Some((run.clone(), service)),
@@ -380,13 +385,17 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
                         None
                     }
                     Ok(()) => {
+                        let at = transcribe::Hearing {
+                            dir: options.models,
+                            gpu: options.gpu,
+                            started,
+                        };
                         let (turns, by) = transcribe::speakers_of(
-                            options.models,
+                            &at,
                             &heard[i],
-                            options.gpu,
                             spoken,
                             asked.speaker_model,
-                            started,
+                            &mut telling,
                             &mut warnings[i],
                         )?;
                         transcript::give_speakers(&mut said, &turns);

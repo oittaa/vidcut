@@ -1821,10 +1821,16 @@ fn clip_speech(
     }
     let mut media = Vec::new();
     let mut devices: Vec<String> = Vec::new();
+    let mut tellers: Vec<String> = Vec::new();
     for ((m, stream), s) in files.iter().zip(&kept) {
         let Some(s) = s else { continue };
         if !s.device.is_empty() && !devices.contains(&s.device) {
             devices.push(s.device.clone());
+        }
+        if let Some(by) = &s.speakers_by
+            && !tellers.contains(by)
+        {
+            tellers.push(by.clone());
         }
         speech.pieces += s.pieces;
         speech.longest_piece = speech.longest_piece.max(s.longest_piece);
@@ -1836,14 +1842,18 @@ fn clip_speech(
                 speech.notes.push(n.clone());
             }
         }
-        media.push(json!({
+        let mut entry = json!({
             "media": m.id,
             "stream": stream,
             "model": s.model,
             "device": s.device,
             "language": s.language,
             "words": transcript::spoken(s).map_or(0, |w| w.len()),
-        }));
+        });
+        if let Some(by) = &s.speakers_by {
+            entry["speakers_by"] = json!(by);
+        }
+        media.push(entry);
     }
     let mut placed = Vec::new();
     for (track, c, m, stream, (from, to)) in clips {
@@ -1872,6 +1882,7 @@ fn clip_speech(
         }
     }
     speech.device = devices.join(", ");
+    speech.speakers_by = (!tellers.is_empty()).then(|| tellers.join(", "));
     let chosen = first_heard(placed);
     if speech.language.is_none() {
         let mut counts: HashMap<&str, usize> = HashMap::new();
@@ -2057,14 +2068,18 @@ fn word_json(w: &transcript::Word, start: i64, end: i64, fillers: &[String]) -> 
 }
 
 fn transcript_json(stream: u32, s: &Speech) -> Value {
-    json!({
+    let mut v = json!({
         "stream": stream,
         "model": s.model,
         "language": s.language,
         "timing": s.timing,
         "find": s.found,
         "words": s.said.iter().map(|x| transcript::words(x).len()).sum::<usize>(),
-    })
+    });
+    if let Some(by) = &s.speakers_by {
+        v["speakers_by"] = json!(by);
+    }
+    v
 }
 
 fn ctx(p: &Project, playhead: Option<i64>) -> TimeContext {
@@ -3420,7 +3435,7 @@ fn mutate(
                 }
                 on = Some(p.subtitles[ti].id.clone());
             }
-            json!({
+            let mut v = json!({
                 "track": on,
                 "cues": ids,
                 "from": a, "to": b,
@@ -3436,7 +3451,11 @@ fn mutate(
                 "longest_piece": speech.longest_piece,
                 "warnings": warnings,
                 "notes": speech.notes,
-            })
+            });
+            if let Some(by) = &speech.speakers_by {
+                v["speakers_by"] = json!(by);
+            }
+            v
         }
         Request::SubtitlesTimeWords {
             track,

@@ -718,18 +718,32 @@ impl Workspace {
                         ui.end_row();
                     }
                     ui.label("Speakers");
+                    let usual = SubtitleStyle {
+                        words: d.show.map(|show| SubtitleWords {
+                            show: Some(show),
+                            ..Default::default()
+                        }),
+                        speaker_color: None,
+                        ..Default::default()
+                    }
+                    .paints();
+                    let paint_label = |paint: Option<SpeakerPaint>| {
+                        let named = |p: Option<SpeakerPaint>| {
+                            PAINTS.iter().find(|(s, _)| *s == p).map_or("", |(_, l)| *l)
+                        };
+                        match paint {
+                            None => format!("{} ({})", named(None), named(Some(usual))),
+                            p => named(p).to_string(),
+                        }
+                    };
                     egui::ComboBox::from_id_salt("subtitle-speakers")
-                        .selected_text(
-                            PAINTS
-                                .iter()
-                                .find(|(s, _)| *s == d.paint)
-                                .map_or("", |(_, l)| *l),
-                        )
+                        .selected_text(paint_label(d.paint))
                         .width(240.0)
                         .show_ui(ui, |ui| {
-                            for (paint, label) in PAINTS {
-                                changed |=
-                                    ui.selectable_value(&mut d.paint, paint, label).changed();
+                            for (paint, _) in PAINTS {
+                                changed |= ui
+                                    .selectable_value(&mut d.paint, paint, paint_label(paint))
+                                    .changed();
                             }
                         });
                     ui.end_row();
