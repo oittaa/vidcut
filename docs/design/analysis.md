@@ -119,7 +119,23 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 | speech models | `models` (`paths::models_dir`) | file name, checked by size; SHA-256 when downloaded |
 | paid speech replies | `speech-replies` (`speech_api::replies_folder`) | the company, the request's settings, the audio |
 
-`reset` with `keep_downloads` keeps `models` and `speech-replies`. On disk only `thumbs` has a size limit (`thumbcache::evict`, least recently used first), set in the preferences. `Tiles::evict` also drops kept pictures past the tile cache's own budget. Levels, voice activity, picture stats and light are memoized in the process too, and the last few heard (`HEARD`, an `Lru`) only there.
+`reset` with `keep_downloads` keeps `models` and `speech-replies`. `Tiles::evict` drops kept pictures past the tile cache's own memory budget. Levels, voice activity, picture stats and light are memoized in the process too, and the last few heard (`HEARD`, an `Lru`) only there.
+
+### The disk cache limit
+
+`disk_cache` keeps what vidcut can make again under one limit: the folders of `disk_cache::Kind` (`thumbs`, `waveforms`, `analysis`, `shaders`, `decoder-tests`) and the proxies (`.mkv` files) in `proxies.folder` when it is in the cache dir (`Policy`). Transcripts (`words` files in `analysis`, `Kind::keeps`), `models`, `speech-replies`, `uploads`, `encoders.json` and `plays.json` stay and don't count.
+
+- **The limit** is the preferences' `cache` (`Policy::limit`): `cache.percent` of the disk the cache dir is on (10 by default; `system::disk` reads its size and free space) or `cache.gb`, and never more than keeps 20% of that disk free (`KEEP_FREE_PERCENT`): the files held plus the free space, less that fifth.
+- **Reads** go through `disk_cache::read`, which sets the file's modification time to now. `disk_cache::used` does that for a file something else reads: a project's proxies when it opens, a proxy `proxy.generate` finds made, a decoder test clip.
+- **Writes** go through `disk_cache::write`, a `.part` file renamed into place, or `disk_cache::added` for a file FFmpeg wrote (a proxy, a test clip). Both then run `disk_cache::evict`, which lists the files and, past the limit, removes the oldest first. A file being written (a name with a `part` piece) is neither counted nor removed, and one that can't be removed (in use on Windows) is skipped. `main` also runs one on a `vidcut-cache` thread at startup, and `preferences.set` one with the new limit.
+- **libplacebo** reads and writes `shaders` itself, so a shader's time is when it was compiled.
+- **Usage:** `preferences.get` answers `disk_cache::usage` in `cache`: files, MB, the limit as set (`chosen_mb`) and as it stands (`limit_mb`), the disk's size and free space; the Cache page of Preferences shows it.
+
+**Why** the time on the file, not a list in memory: a GUI and a CLI, each its own process, read and write the same folders, and each one's listing sees what the others used. In one process `evict` runs one pass at a time, and a write meanwhile asks the running one for another pass instead of listing in parallel.
+
+**Why** named folders, not the whole cache dir: a folder vidcut doesn't know (a download, a newer version's) is never removed.
+
+**A new kind** of entry: add a variant to `disk_cache::Kind` and name its folder in `Kind::folder`, name its files with `Kind::file`, and read and write them with `disk_cache::read` and `disk_cache::write`. Files of it that must stay go in `Kind::keeps`.
 
 ## Storyboards
 
@@ -131,6 +147,7 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 - `crates/vidcut-core/src/editor.rs`
 - `crates/vidcut-core/src/fingerprint.rs`
 - `crates/vidcut-core/src/dirs.rs`
+- `crates/vidcut-core/src/disk_cache.rs`
 - `crates/vidcut-av/src/analysis.rs`
 - `crates/vidcut-core/src/transcript.rs`
 - `crates/vidcut-core/src/speakers.rs`
@@ -143,6 +160,7 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 - `crates/vidcut-av/src/thumbs.rs`
 - `crates/vidcut/src/env.rs`
 - `crates/vidcut/src/paths.rs`
+- `crates/vidcut/src/preferences.rs`
 - `crates/vidcut/src/thumbcache.rs`
 - `crates/vidcut/src/live/mod.rs`
 - `crates/vidcut/src/storyboard.rs`
