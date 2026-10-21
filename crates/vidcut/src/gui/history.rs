@@ -134,7 +134,8 @@ impl HistoryUi {
         if let Some(dir) = kept_path().parent()
             && std::fs::create_dir_all(dir).is_ok()
         {
-            let _ = std::fs::write(kept_path(), json!(Kept { width: self.width }).to_string());
+            let text = json!(Kept { width: self.width }).to_string();
+            let _ = vidcut_core::temp::write(&kept_path(), text.as_bytes());
         }
     }
 

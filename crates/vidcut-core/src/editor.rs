@@ -112,16 +112,8 @@ pub trait Env {
     }
 
     fn write_file(&self, path: &Path, bytes: &[u8]) -> Result<()> {
-        let name = path
-            .file_name()
-            .map_or_else(|| "export".into(), |n| n.to_string_lossy().into_owned());
-        let part = path.with_file_name(format!(".{name}.part"));
-        std::fs::write(&part, bytes)
-            .and_then(|()| std::fs::rename(&part, path))
-            .map_err(|e| {
-                let _ = std::fs::remove_file(&part);
-                Error::new(ErrorCode::Export, format!("{}: {e}", path.display()))
-            })
+        crate::temp::write(path, bytes)
+            .map_err(|e| Error::new(ErrorCode::Export, format!("{}: {e}", path.display())))
     }
 
     fn exists(&self, path: &Path) -> bool {

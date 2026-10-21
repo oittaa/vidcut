@@ -348,14 +348,21 @@ pub fn write(
         std::fs::create_dir_all(parent)
             .map_err(|e| Error::Invalid(format!("creating {}: {e}", parent.display())))?;
     }
-    let tmp = dest.with_extension("part.mkv");
+    let (part, file) = vidcut_core::temp::file(dest)
+        .map_err(|e| Error::Invalid(format!("creating {}: {e}", dest.display())))?;
+    drop(file);
     let shown = Shown {
         dest,
         total: total.map_or(0, |t| t as i64),
         started: std::time::Instant::now(),
     };
-    let done = |frames, enc: &ProxyEncoder, went, decoder| -> Result<WrittenProxy> {
-        std::fs::rename(&tmp, dest)
+    let done = |part: vidcut_core::temp::Temp,
+                frames,
+                enc: &ProxyEncoder,
+                went,
+                decoder|
+     -> Result<WrittenProxy> {
+        part.keep(dest)
             .map_err(|e| Error::Invalid(format!("replacing {}: {e}", dest.display())))?;
         Ok(WrittenProxy {
             path: dest.to_path_buf(),
@@ -385,17 +392,13 @@ pub fn write(
             &mut reader,
             enc,
             (width, height),
-            (&tmp, origin),
+            (part.path(), origin),
             &shown,
             decoder,
         ) {
-            Ok((frames, went)) => return done(frames, enc, went, reader.gpu()),
-            Err(Failed::Encoding(e)) => {
-                let _ = std::fs::remove_file(&tmp);
-                return Err(e);
-            }
+            Ok((frames, went)) => return done(part, frames, enc, went, reader.gpu()),
+            Err(Failed::Encoding(e)) => return Err(e),
             Err(Failed::Opening(e)) => {
-                let _ = std::fs::remove_file(&tmp);
                 crate::progress::note(crate::export::Note::Tried(crate::export::Tried {
                     encoder: Some(enc.name.clone()),
                     error: e.to_string(),

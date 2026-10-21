@@ -440,57 +440,41 @@ pub fn run_decoding_on(
     if cancel.load(Ordering::Relaxed) {
         return Err(Error::Invalid(CANCELLED.into()));
     }
-    let part = partial_path(output);
-    let result = encode(
-        plan, settings, &part, output, available, decoder, subtitles, cancel, progress,
-    );
-    match result.map(|r| Report {
+    let (part, file) = vidcut_core::temp::file(output)?;
+    drop(file);
+    let report = encode(
+        plan,
+        settings,
+        part.path(),
+        output,
+        available,
+        decoder,
+        subtitles,
+        cancel,
+        progress,
+    )?;
+    part.keep(output)?;
+    Ok(Report {
         color: chosen,
         metadata: metadata_chosen,
         copies: copies.counted(),
-        ..r
-    }) {
-        Ok(report) => match std::fs::rename(&part, output) {
-            Ok(()) => Ok(report),
-            Err(e) => {
-                let _ = std::fs::remove_file(&part);
-                Err(Error::Io(e))
-            }
-        },
-        Err(e) => {
-            let _ = std::fs::remove_file(&part);
-            Err(e)
-        }
-    }
-}
-
-pub fn passes_path(output: &Path) -> PathBuf {
-    let name = output
-        .file_name()
-        .map_or_else(|| "export".into(), |n| n.to_string_lossy().into_owned());
-    output.with_file_name(format!(".{name}.passes"))
+        ..report
+    })
 }
 
 struct PassFiles {
-    dir: PathBuf,
+    dir: vidcut_core::temp::Temp,
 }
 
 impl PassFiles {
     fn new(output: &Path) -> Result<Self> {
-        let dir = passes_path(output);
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir)?;
-        Ok(Self { dir })
+        Ok(Self {
+            dir: vidcut_core::temp::dir(output)?,
+        })
     }
 
     fn stats(&self) -> PathBuf {
-        self.dir.join("stats")
-    }
-}
-
-impl Drop for PassFiles {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
+        self.dir.path().join("stats")
     }
 }
 
@@ -599,13 +583,6 @@ fn first_run(
         Ok(()) => passing.finish(),
         Err(e) => Err(passing.abandon(e)),
     }
-}
-
-pub fn partial_path(output: &Path) -> PathBuf {
-    let name = output
-        .file_name()
-        .map_or_else(|| "export".into(), |n| n.to_string_lossy().into_owned());
-    output.with_file_name(format!(".{name}.part"))
 }
 
 pub const DECLICK_MS: u32 = 3;

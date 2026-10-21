@@ -214,26 +214,21 @@ pub fn write(
             )));
         }
     }
-    let part = vidcut_av::export::partial_path(out);
-    let _ = std::fs::remove_dir_all(&part);
-    let _ = std::fs::remove_file(&part);
+    let part = match kind {
+        Kind::Otioz => vidcut_core::temp::file(out).map(|(part, _)| part),
+        Kind::Otiod => vidcut_core::temp::dir(out),
+    }
+    .map_err(io_error(out))?;
     let total = items.iter().map(|i| i.bytes).sum();
     let mut done = 0;
-    let written = match kind {
-        Kind::Otioz => write_zip(&part, text, items, &mut done, total, cancel, progress),
-        Kind::Otiod => write_folder(&part, text, items, &mut done, total, cancel, progress),
-    };
-    let moved = written.and_then(|()| {
-        if kind == Kind::Otiod && out.is_dir() {
-            std::fs::remove_dir_all(out).map_err(io_error(out))?;
-        }
-        std::fs::rename(&part, out).map_err(io_error(out))
-    });
-    if moved.is_err() {
-        let _ = std::fs::remove_dir_all(&part);
-        let _ = std::fs::remove_file(&part);
+    match kind {
+        Kind::Otioz => write_zip(part.path(), text, items, &mut done, total, cancel, progress),
+        Kind::Otiod => write_folder(part.path(), text, items, &mut done, total, cancel, progress),
+    }?;
+    if kind == Kind::Otiod && out.is_dir() {
+        std::fs::remove_dir_all(out).map_err(io_error(out))?;
     }
-    moved
+    part.keep(out).map_err(io_error(out))
 }
 
 fn write_zip(
@@ -419,22 +414,15 @@ pub fn open(path: &Path, unpack: Option<&Path>, write: bool) -> Result<TimelineF
                 if let Some(dir) = target.parent() {
                     std::fs::create_dir_all(dir).map_err(io_error(dir))?;
                 }
-                let mut part = target.clone().into_os_string();
-                part.push(".part");
-                let part = PathBuf::from(part);
-                let unpacked = (|| {
-                    let mut out = BufWriter::new(File::create(&part).map_err(io_error(&part))?);
-                    let mut entry = zip.by_index(*i).map_err(&err)?;
-                    std::io::copy(&mut entry, &mut out).map_err(|e| {
-                        Error::usage(format!("{}: {}: {e}", path.display(), rel.display()))
-                    })?;
-                    out.flush().map_err(io_error(&part))?;
-                    std::fs::rename(&part, &target).map_err(io_error(&target))
-                })();
-                if unpacked.is_err() {
-                    let _ = std::fs::remove_file(&part);
-                }
-                unpacked?;
+                let (part, file) = vidcut_core::temp::file(&target).map_err(io_error(&target))?;
+                let mut out = BufWriter::new(file);
+                let mut entry = zip.by_index(*i).map_err(&err)?;
+                std::io::copy(&mut entry, &mut out).map_err(|e| {
+                    Error::usage(format!("{}: {}: {e}", path.display(), rel.display()))
+                })?;
+                out.flush().map_err(io_error(part.path()))?;
+                drop(out);
+                part.keep(&target).map_err(io_error(&target))?;
                 remember(&target, *crc);
             }
         }

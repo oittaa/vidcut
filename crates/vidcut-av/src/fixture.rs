@@ -515,23 +515,12 @@ pub fn ensure_in(dir: &Path, spec: &FixtureSpec) -> Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let path = dir.join(spec.file_name());
     if !path.exists() {
-        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp = dir.join(format!(
-            ".{}.{}.{n}.part",
-            spec.file_name(),
-            std::process::id()
-        ));
-        let result = generate(spec, &tmp);
-        if result.is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
-        result?;
-        match std::fs::rename(&tmp, &path) {
+        let (tmp, file) = vidcut_core::temp::file(&path)?;
+        drop(file);
+        generate(spec, tmp.path())?;
+        match tmp.keep(&path) {
             Ok(()) => {}
-            Err(_) if path.exists() => {
-                let _ = std::fs::remove_file(&tmp);
-            }
+            Err(_) if path.exists() => {}
             Err(e) => return Err(e.into()),
         }
     }
@@ -598,17 +587,13 @@ pub fn ensure_images(spec: &ImageSpec) -> Result<Vec<PathBuf>> {
     if dir.exists() {
         return Ok(files(&dir));
     }
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = dir.with_file_name(format!(
-        ".{}.{}.{n}.part",
-        spec.folder_name(),
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&tmp)?;
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = vidcut_core::temp::dir(&dir)?;
     let (w, h) = (spec.width as usize, spec.height as usize);
     let mut luma = vec![0u8; w * h];
-    for (k, path) in files(&tmp).iter().enumerate() {
+    for (k, path) in files(tmp.path()).iter().enumerate() {
         crate::barcode::paint(spec.barcode + k as u32, &mut luma, w, h, w);
         let bytes = match spec.ext {
             "jpg" => jpeg_gray(spec.width, spec.height, &luma)?,
@@ -619,11 +604,9 @@ pub fn ensure_images(spec: &ImageSpec) -> Result<Vec<PathBuf>> {
         };
         std::fs::write(path, bytes)?;
     }
-    match std::fs::rename(&tmp, &dir) {
+    match tmp.keep(&dir) {
         Ok(()) => {}
-        Err(_) if dir.exists() => {
-            let _ = std::fs::remove_dir_all(&tmp);
-        }
+        Err(_) if dir.exists() => {}
         Err(e) => return Err(e.into()),
     }
     Ok(files(&dir))

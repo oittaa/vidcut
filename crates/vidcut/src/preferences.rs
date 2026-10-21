@@ -231,10 +231,8 @@ fn write(p: &Preferences) -> Result<()> {
         "# vidcut preferences: `vidcut preferences set --help`, or File > Preferences.\n\n{}",
         toml::to_string(&p).map_err(|e| Error::internal(e.to_string()))?
     );
-    let part = path.with_extension("part");
     std::fs::create_dir_all(dir)
-        .and_then(|()| std::fs::write(&part, text))
-        .and_then(|()| std::fs::rename(&part, &path))
+        .and_then(|()| vidcut_core::temp::write(&path, text.as_bytes()))
         .map_err(|e| Error::internal(format!("{}: {e}", path.display())))?;
     vidcut_av::gpus::choose(&p.gpu.device);
     if !p.thumbnails.disk_cache {

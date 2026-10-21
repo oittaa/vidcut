@@ -28,6 +28,7 @@ pub mod speakers;
 pub mod steps;
 pub mod store;
 pub mod subtitles;
+pub mod temp;
 pub mod time;
 pub mod transcript;
 pub mod validate;

@@ -94,6 +94,6 @@ pub fn write_png(
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<()> {
     let bytes = png(piece, fps, width, height, decoder)?;
-    std::fs::write(path, bytes)?;
+    vidcut_core::temp::write(path, &bytes)?;
     Ok(())
 }

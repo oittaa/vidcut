@@ -553,10 +553,7 @@ pub fn save(
     if let Some(old) = old.filter(|o| *o != path) {
         std::fs::rename(&old, &path).map_err(failed)?;
     }
-    let part = folder.join(format!(".{}.part", look.name));
-    std::fs::write(&part, text)
-        .and_then(|()| std::fs::rename(&part, &path))
-        .map_err(failed)?;
+    crate::temp::write(&path, text.as_bytes()).map_err(failed)?;
     Ok((look, path))
 }
 

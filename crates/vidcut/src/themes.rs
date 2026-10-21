@@ -386,7 +386,7 @@ pub fn import(path: &Path, dry_run: bool) -> Result<String> {
     let to = user_path(&name);
     if !dry_run && std::fs::canonicalize(path).ok() != std::fs::canonicalize(&to).ok() {
         std::fs::create_dir_all(dir())
-            .and_then(|()| std::fs::write(&to, text))
+            .and_then(|()| vidcut_core::temp::write(&to, text.as_bytes()))
             .map_err(|e| Error::internal(format!("{}: {e}", to.display())))?;
     }
     Ok(name)
