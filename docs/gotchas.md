@@ -23,6 +23,7 @@ FFmpeg, driver, OS and library behavior vidcut works around: the quirk, what it 
 
 ## FFmpeg: filters and colors
 
+- **FFmpeg's `buffer` source takes the frame it is given** (`av_buffersrc_add_frame`, which ffmpeg-next's `Source::add` calls): it moves the frame's buffers out and leaves it empty. `Fitting::scale` gives the CUDA scaler a reference of its own, so the decoded frame stays for a placed picture fitted again at its own size.
 - **Tell FFmpeg's `buffer` source a picture's matrix and range** (`colorspace`, `range`). A conversion FFmpeg adds for a filter that doesn't take the layout (`transpose` and 4:2:2) reads the frame's tags and writes the source's; told nothing, the source asks for BT.601. The `Normalizer` sets both from `color::Source::yuv_tags`.
 - **An untagged picture's matrix follows from its size** (decision D35, `color::untagged_matrix`), so a copy scaled on the GPU carries the matrix of the picture it came from (`color::keep_matrix`): untagged 1280×720 shrunk to 640×360 would read as BT.601.
 - **FFmpeg 9's `scale_cuda` truncates in each pass of a shrink with filters** (`use_filters`, on by default for a shrink; `from_floatN` in vector_helpers.cuh): 4K shrunk to 192×108 comes out 8 to 9 levels low in red and blue. `cuda::scaling` asks for the fixed kernels (`use_filters=0`), within 1.2 levels of the CPU.

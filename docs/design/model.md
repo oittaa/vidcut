@@ -80,6 +80,10 @@ classDiagram
     text, style
     position
   }
+  class Picture {
+    position, zoom, rotation
+    flips, crop
+  }
   Project *-- Settings : settings
   Project *-- "*" Media : media
   Project *-- "*" Track : tracks
@@ -93,6 +97,7 @@ classDiagram
   Track *-- "*" Transition : transitions
   Clip *-- "0..1" ClipAudio : audio
   Clip *-- "0..1" Title : title
+  Clip *-- "0..1" Picture : picture
   Clip ..> Media : media id
   Clip *-- Kept : effects, generator, compound, speed
   Transition *-- Kept : otio
@@ -148,6 +153,10 @@ A file is missing when `Env::present` says so; a path absolute only on the other
 
 A clip with a `title` is a title ([spec §8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)): no media, no audio, any length, on a video track. `Clip::is_generator` and `Clip::is_block` count it, so edits treat it as a carried generator, and it has no speed. Its `Title` holds a `TitleKind` (`text`, `lower_third` or `scroll`), a lower third's or a scroll's `TitleAlign`, its lines, with markup that `rich::spans` reads into `Span`s, a `TitleStyle` and an optional `position`, the point its anchor goes to (`Title::place`, `Title::anchor`; [spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `ops::titles` holds the edits; `ops::titles::checked` is the check `titles.add`, `titles.set` and `validate::violations` share, and it takes the style's font, size, colors, outline and background through the subtitle style's (`checked_font`, `checked_size`, `checked_color`, `checked_outline`, `checked_background`).
 
+## Pictures
+
+A clip of footage, a still, an image sequence or a compound clip may carry a `Picture` ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)): where the middle of the whole picture goes (`position`), its `zoom` across and down, its `rotation`, its flips and a `Crop` of each side, each left out at its usual value, so `Picture::is_usual` is a picture that fills the frame. `ops::picture` holds the edits: `ops::picture::checked`, the check `picture.set`, `validate::violations` and an OTIO file's metadata share, leaves usual values out; `ops::picture::has_picture` says which clips take one (not titles, generators or sound); `ops::picture::clear` puts back the transform, the crop (`PictureTool`) or both. `place::Placing` turns a clip's picture, with those of the compound clips it plays inside, into maps from a pixel of the frame back to each picture (`place::Level`: the map and the part shown), which an export and the viewer both draw by ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
+
 ## Looks
 
 Looks are named styles ([spec D71](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), not in the project. `looks::Styled` is a `SubtitleLook` (a `SubtitleStyle` with `chars` and `lines`) or a `TitleLook` (a `Title` without its text: `TitleLook::of`, `TitleLook::on`), and `looks::checked` runs each through its kind's check (`checked_style`, `ops::titles::checked`). `looks::built_in` holds the built-in ones in code. Yours are TOML files under `looks::dir`, one folder per `LookKind`: `looks::read` lists a folder's, putting a file that fails to parse or check in `Listing::refused` with why, and `looks::save` and `looks::delete` write and remove them, refusing built-in names. The editor reads them through `Env::looks`, which only `AvEnv` fills, so tests give their own folder; `looks::find` looks a name up, built-ins first, whatever its case. `looks.list`, `looks.save` and `looks.delete` are projectless; `track.set`, `titles.add`, `titles.set` and `subtitles.transcribe` take a `look` by name.
@@ -181,7 +190,7 @@ flowchart LR
 
 | Metadata | Holds |
 |---|---|
-| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `source_in` and `skip` for stills and speeds, which the source range rounds; a title's `Title` |
+| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `source_in` and `skip` for stills and speeds, which the source range rounds; a title's `Title`; a placed clip's `Picture`, a compound clip's too, which an export's notes name (`otio::placed`), as other editors don't read it |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO`, which other editors read | `Link Group ID`, `Channels`, a clip volume effect, and `Media In` on reversed clips; on compound clips a `Sequence ID`, kept or made from the compound's content, and a `Link Group ID` joining the picture and sound of one compound at the same place (`compound_links`); `Locked`, `SoloOn` and `Audio Type` on tracks; `Note` on markers |
 
