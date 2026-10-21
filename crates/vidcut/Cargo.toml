@@ -20,6 +20,7 @@ eframe.workspace = true
 egui.workspace = true
 egui-phosphor.workspace = true
 fontdb.workspace = true
+shadcn-egui-core.workspace = true
 shadcn-egui-font-geist.workspace = true
 shadcn-egui-font-geist-mono.workspace = true
 shadcn-egui-font-space-grotesk.workspace = true

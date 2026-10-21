@@ -234,7 +234,7 @@ fn font(name: &str) -> Option<egui::FontData> {
 }
 
 fn built_in_font(name: &str) -> Option<&'static [u8]> {
-    let files = match name {
+    let files: &shadcn_egui_core::FontFiles = match name {
         "Geist" => &shadcn_egui_font_geist::FONT,
         "Geist Mono" => &shadcn_egui_font_geist_mono::FONT,
         "Space Grotesk" => &shadcn_egui_font_space_grotesk::FONT,

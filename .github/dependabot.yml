@@ -6,6 +6,12 @@ updates:
     schedule:
       interval: weekly
     groups:
+      # Listed first so these crates leave the group below. They share one
+      # shadcn-egui-core, so one pull request takes every update of them,
+      # breaking ones too.
+      shadcn-egui:
+        patterns:
+          - "shadcn-egui*"
       cargo-minor-and-patch:
         patterns:
           - "*"
