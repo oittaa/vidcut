@@ -783,6 +783,7 @@ pub fn voice_activity(
         gain_db: 0.0,
         speed: 1.0,
         fade: None,
+        isolation: None,
     }];
     let model = vad_model(&models.join(SILERO_VAD.name))?;
     let frame = model.vad_info().map_err(tc_error)?.frame_samples.max(1);

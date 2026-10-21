@@ -779,6 +779,10 @@ pub struct Track {
     /// The mixer fader, in dB (decision D12's range, -60..24).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub volume_db: f64,
+    /// Voice Isolation on the track's clips that have none of their own,
+    /// as a clip's `voice_isolation`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_isolation: Option<f64>,
     /// Video of this track is shown (video tracks only).
     pub video_enabled: bool,
     /// A name shown in the track header and the mixer.
@@ -1296,6 +1300,11 @@ pub struct ClipAudio {
     /// is `gain_db`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Effects>,
+    /// Voice Isolation's Amount, from 1 to 100: that much of the voice the
+    /// model hears in the sound, mixed with the rest of the sound. Left out,
+    /// it is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_isolation: Option<f64>,
 }
 
 impl Clip {
@@ -1986,6 +1995,7 @@ impl Track {
             muted: false,
             solo: false,
             volume_db: 0.0,
+            voice_isolation: None,
             video_enabled: true,
             name: None,
             transitions: Vec::new(),

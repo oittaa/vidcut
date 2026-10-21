@@ -332,6 +332,9 @@ impl Producer {
                 run.taken.elapsed().as_secs_f64() * 1000.0
             );
         }
+        if let Some(unheard) = self.mix.unheard() {
+            self.shared.fail(unheard);
+        }
         match failed {
             Some(e) => Err(e),
             None => Ok(true),

@@ -157,6 +157,11 @@ pub trait Env {
         Err(Error::usage("speech is detected by the vidcut program"))
     }
 
+    fn voice_isolation(&self, download: bool) -> Result<()> {
+        let _ = download;
+        Err(Error::usage("voice isolation runs in the vidcut program"))
+    }
+
     fn media_details(&self, media: &Media) -> Result<crate::model::MediaDetails> {
         let _ = media;
         Err(Error::usage("files are read by the vidcut program"))
@@ -2921,16 +2926,23 @@ fn mutate(
             gain_db,
             name,
             color,
+            voice_isolation,
+            download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let or_none =
                 |v: &Option<String>| v.as_ref().map(|v| (!v.is_empty()).then(|| v.clone()));
+            let voice_isolation = voice_isolation.map(ops::checked_isolation).transpose()?;
+            if let Some(Some(_)) = voice_isolation {
+                env.voice_isolation(*download)?;
+            }
             let props = ClipProps {
                 enabled: *enabled,
                 muted: *muted,
                 gain_db: *gain_db,
                 name: or_none(name),
                 color: or_none(color),
+                voice_isolation,
             };
             ops::set_clips(p, &ids, &props)?;
             Value::Null
@@ -3028,7 +3040,9 @@ fn mutate(
             muted: None,
             solo: None,
             volume_db: None,
+            voice_isolation: None,
             video_enabled: None,
+            ..
         } if track.starts_with('S') => {
             let style = match (style, look) {
                 (Some(_), Some(_)) => return Err(Error::usage("give style or look, not both")),
@@ -3070,15 +3084,22 @@ fn mutate(
             muted,
             solo,
             volume_db,
+            voice_isolation,
+            download,
             video_enabled,
             name,
             ..
         } => {
+            let voice_isolation = voice_isolation.map(ops::checked_isolation).transpose()?;
+            if let Some(Some(_)) = voice_isolation {
+                env.voice_isolation(*download)?;
+            }
             let props = ops::TrackProps {
                 locked: *locked,
                 muted: *muted,
                 solo: *solo,
                 volume_db: *volume_db,
+                voice_isolation,
                 video_enabled: *video_enabled,
                 name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
             };
@@ -4509,6 +4530,7 @@ fn place_imported(
                     gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
                     muted: c.muted,
                     effects: carry(&c.audio_effects, sound_from),
+                    voice_isolation: None,
                 })
             });
         if audio.is_some() && !GAIN.contains(&c.gain_db) {

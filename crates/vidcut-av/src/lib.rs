@@ -18,6 +18,7 @@ pub mod fixture;
 pub mod gpus;
 pub mod hdr;
 pub mod hw;
+pub mod isolate;
 pub mod light;
 pub mod models;
 pub mod parts;

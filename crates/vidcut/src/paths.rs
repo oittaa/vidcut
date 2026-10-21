@@ -12,7 +12,7 @@ pub fn cache_dir() -> PathBuf {
 }
 
 pub fn models_dir() -> PathBuf {
-    cache_dir().join("models")
+    vidcut_core::dirs::models()
 }
 
 pub fn media_origin(media: &Media) -> Origin {

@@ -151,11 +151,11 @@ impl Fetch {
 }
 
 pub(crate) fn fetch(f: &Fetch, dir: &Path) -> Result<PathBuf> {
-    std::fs::create_dir_all(dir)?;
+    let target = dir.join(&f.name);
+    std::fs::create_dir_all(target.parent().unwrap_or(dir))?;
     crate::progress::note(crate::export::Note::Downloading {
         name: format!("{} ({})", f.title, size(f.bytes)),
     });
-    let target = dir.join(&f.name);
     let part = dir.join(format!("{}.part", f.name));
     let stop = crate::cancel::current().unwrap_or_default();
     let started = Instant::now();
