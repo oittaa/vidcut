@@ -1263,10 +1263,11 @@ pub enum Request {
         /// tracks have the same word at once, the first track's is kept (V1,
         /// V2, …, then A1, A2, …). `mix`: the mix of the tracks heard over
         /// `range`, which keeps nothing. `transcript`: the words each file
-        /// has already, whichever model made them; only a file without any
-        /// is transcribed with `model`, and kept. Default: `media` over the
-        /// whole timeline with a model that times words and no `model_file`;
-        /// else `mix`, so a part of a long recording is all that is heard.
+        /// has already, whichever model made them, in their language; only
+        /// a file without any is transcribed with `model` and `language`,
+        /// and kept. Default: `media` over the whole timeline with a model
+        /// that times words and no `model_file`; else `mix`, so a part of a
+        /// long recording is all that is heard.
         #[serde(default)]
         hear: Option<HearFrom>,
         /// Download what this computer doesn't have yet: transcribe.cpp's

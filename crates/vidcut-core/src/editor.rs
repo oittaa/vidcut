@@ -1761,7 +1761,7 @@ fn clip_speech(
     let mut speech = Speech {
         model: asked.model_name(),
         device: String::new(),
-        language: asked.language.clone(),
+        language: asked.language.clone().filter(|_| use_kept != Reuse::Any),
         timing: transcript::Timing::Words,
         pieces: 0,
         longest_piece: 0.0,

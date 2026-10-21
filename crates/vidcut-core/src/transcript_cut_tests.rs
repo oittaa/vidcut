@@ -205,6 +205,17 @@ fn subtitles_from_the_transcript_name_the_model_that_made_it() {
 }
 
 #[test]
+fn subtitles_from_the_transcript_take_its_language_not_the_one_asked() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 250);
+    kept_hello(&mut f);
+    let r = f.ok(json!({"method": "subtitles.transcribe", "params": {
+        "hear": "transcript", "language": "fi"
+    }}));
+    assert_eq!(r.result["language"], "en");
+}
+
+#[test]
 fn only_the_file_without_a_transcript_would_be_sent() {
     let mut f = Fixture::new(&[(10.0, true), (20.0, true)]);
     f.append("m1", 0, 250);
