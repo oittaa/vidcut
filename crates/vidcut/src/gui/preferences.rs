@@ -270,8 +270,6 @@ impl Workspace {
             .collapsible(false)
             .resizable(false)
             .default_pos(near_center(ctx, SIDEBAR + PAGE + 40.0, height))
-            .min_width(SIDEBAR + PAGE + 16.0)
-            .max_width(SIDEBAR + PAGE + 16.0)
             .open(&mut open)
             .show(ctx, |ui| {
                 let Some(state) = ui_state.state.clone() else {
@@ -315,7 +313,8 @@ impl Workspace {
                     });
                     ui.separator();
                     ui.vertical(|ui| {
-                        ui.set_min_size(egui::vec2(PAGE, height));
+                        ui.set_width(PAGE);
+                        ui.set_min_height(height);
                         egui::ScrollArea::vertical()
                             .max_height(height)
                             .auto_shrink([false, false])
