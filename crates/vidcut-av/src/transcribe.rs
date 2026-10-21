@@ -423,14 +423,12 @@ fn get_ready(dir: &Path, files: &[&File], vad: bool, download: bool) -> Result<(
 
 fn unpack(archive: &Path, runtime: &Runtime, dir: &Path) -> Result<()> {
     let home = runtime.home(dir);
-    let part = dir.join(format!("transcribe-{TRANSCRIBE}.part"));
-    let _ = std::fs::remove_dir_all(&part);
-    std::fs::create_dir_all(&part)?;
+    let part = vidcut_core::temp::dir(&home)?;
     let gz = flate2::read::GzDecoder::new(std::fs::File::open(archive)?);
-    tar::Archive::new(gz).unpack(&part)?;
-    let inner = std::iter::once(part.clone())
+    tar::Archive::new(gz).unpack(part.path())?;
+    let inner = std::iter::once(part.path().to_path_buf())
         .chain(
-            std::fs::read_dir(&part)?
+            std::fs::read_dir(part.path())?
                 .filter_map(|e| e.ok())
                 .map(|e| e.path()),
         )
@@ -443,8 +441,11 @@ fn unpack(archive: &Path, runtime: &Runtime, dir: &Path) -> Result<()> {
             ))
         })?;
     let _ = std::fs::remove_dir_all(&home);
-    std::fs::rename(&inner, &home)?;
-    let _ = std::fs::remove_dir_all(&part);
+    if inner == part.path() {
+        part.keep(&home)?;
+    } else {
+        std::fs::rename(&inner, &home)?;
+    }
     let _ = std::fs::remove_file(archive);
     Ok(())
 }

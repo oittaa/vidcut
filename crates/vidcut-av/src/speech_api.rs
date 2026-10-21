@@ -920,10 +920,8 @@ fn kept_reply(key: &str) -> Option<String> {
 
 fn keep_reply(key: &str, text: &str) {
     let dir = replies_folder();
-    let part = dir.join(format!("{key}.part"));
     let _ = std::fs::create_dir_all(&dir)
-        .and_then(|()| std::fs::write(&part, text))
-        .and_then(|()| std::fs::rename(&part, dir.join(format!("{key}.json"))));
+        .and_then(|()| vidcut_core::temp::write(&dir.join(format!("{key}.json")), text.as_bytes()));
 }
 
 #[cfg(test)]

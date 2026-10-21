@@ -34,13 +34,11 @@ fn read() -> Option<Kept> {
 
 fn write(kept: &Kept) {
     let file = path();
-    let part = file.with_extension("part");
     let written = serde_json::to_string_pretty(kept)
         .map_err(std::io::Error::other)
         .and_then(|text| {
             std::fs::create_dir_all(file.parent().expect("in the state dir"))?;
-            std::fs::write(&part, text)?;
-            std::fs::rename(&part, &file)
+            vidcut_core::temp::write(&file, text.as_bytes())
         });
     if let Err(e) = written {
         eprintln!("vidcut: {}: {e}", file.display());

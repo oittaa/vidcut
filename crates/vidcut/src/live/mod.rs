@@ -915,14 +915,7 @@ impl Live {
                 Err(_) => break,
             }
         }
-        for job in self.jobs.iter() {
-            if self.job_cancels.contains_key(&job.id) {
-                for o in &job.outputs {
-                    let part = vidcut_av::export::partial_path(&o.path);
-                    let _ = std::fs::remove_file(&part).or_else(|_| std::fs::remove_dir_all(&part));
-                }
-            }
-        }
+        vidcut_core::temp::remove_left();
         for w in std::mem::take(&mut self.waits) {
             reply(
                 w.job.reply,

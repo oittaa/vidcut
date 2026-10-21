@@ -130,9 +130,7 @@ pub fn save_preset(s: &PresetSave<'_>) -> Result<Value> {
     let text = toml::to_string(&preset).map_err(|e| Error::internal(e.to_string()))?;
     let dir = path.parent().expect("has a parent");
     std::fs::create_dir_all(dir).map_err(|e| Error::usage(format!("{}: {e}", dir.display())))?;
-    let part = path.with_extension("toml.part");
-    std::fs::write(&part, text)
-        .and_then(|()| std::fs::rename(&part, &path))
+    vidcut_core::temp::write(&path, text.as_bytes())
         .map_err(|e| Error::usage(format!("{}: {e}", path.display())))?;
     Ok(json!({ "preset": preset, "path": path }))
 }
@@ -308,9 +306,7 @@ pub fn timeline(
         serde_json::to_string_pretty(&doc).map_err(|e| Error::internal(e.to_string()))? + "\n";
     match format {
         TimelineFormat::Otio => {
-            let part = vidcut_av::export::partial_path(&params.output);
-            std::fs::write(&part, text)
-                .and_then(|()| std::fs::rename(&part, &params.output))
+            vidcut_core::temp::write(&params.output, text.as_bytes())
                 .map_err(|e| Error::usage(format!("{}: {e}", params.output.display())))?;
         }
         TimelineFormat::Bundle(kind) => bundle::write(
@@ -369,9 +365,7 @@ pub fn subtitle_notes(files: &[vidcut_core::subtitles::Beside]) -> Vec<Value> {
 
 pub fn write_subtitles(files: &[vidcut_core::subtitles::Beside]) -> Result<()> {
     for f in files {
-        let part = vidcut_av::export::partial_path(&f.path);
-        std::fs::write(&part, &f.text)
-            .and_then(|()| std::fs::rename(&part, &f.path))
+        vidcut_core::temp::write(&f.path, f.text.as_bytes())
             .map_err(|e| Error::usage(format!("{}: {e}", f.path.display())))?;
     }
     Ok(())

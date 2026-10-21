@@ -1,5 +1,4 @@
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime};
 
@@ -332,17 +331,11 @@ pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         Reserved::Room(victims) => drop_all(victims),
         Reserved::Free => {}
     }
-    static WRITTEN: AtomicU64 = AtomicU64::new(0);
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let n = WRITTEN.fetch_add(1, Ordering::Relaxed);
-    let part = path.with_file_name(format!(".{name}.{}.{n}.part", std::process::id()));
     let written = path
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(&part, bytes))
-        .and_then(|()| std::fs::rename(&part, path));
+        .and_then(|()| crate::temp::write(path, bytes));
     if written.is_err() {
-        let _ = std::fs::remove_file(&part);
         forget(path);
     }
     written

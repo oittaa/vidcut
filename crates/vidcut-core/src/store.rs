@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -386,21 +385,7 @@ fn parse(path: &Path, dir: &Path, text: &str) -> Result<Project> {
 }
 
 pub(crate) fn write_atomic(path: &Path, data: &str) -> std::io::Result<()> {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let tmp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-    let result = (|| {
-        let mut f = File::create(&tmp)?;
-        f.write_all(data.as_bytes())?;
-        f.sync_all()?;
-        std::fs::rename(&tmp, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
+    crate::temp::write(path, data.as_bytes())
 }
 
 pub fn from_another_system(path: &Path) -> bool {

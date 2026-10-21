@@ -35,10 +35,8 @@ pub fn register(instance: &Instance) -> std::io::Result<()> {
     let dir = dir();
     super::private_dir(&dir)?;
     let path = entry_path(instance.pid);
-    let tmp = path.with_extension("json.tmp");
     let json = serde_json::to_string_pretty(instance).map_err(std::io::Error::other)?;
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &path)
+    vidcut_core::temp::write(&path, json.as_bytes())
 }
 
 pub fn unregister(pid: u32) {
