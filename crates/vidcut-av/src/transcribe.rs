@@ -128,27 +128,9 @@ pub fn speaker_file(language: Option<&str>, choice: SpeakerModel) -> &'static Fi
     }
 }
 
-pub fn speaker_pick(dir: &Path, language: Option<&str>, choice: SpeakerModel) -> &'static File {
-    match speaker_file(language, choice) {
-        f if f == &MOSS && !present(dir, &MOSS) => &SORTFORMER,
-        f => f,
-    }
-}
-
-pub fn speakers_by(
-    dir: &Path,
-    language: Option<&str>,
-    choice: SpeakerModel,
-) -> Option<&'static File> {
+pub fn speakers_by(language: Option<&str>, choice: SpeakerModel) -> Option<&'static File> {
     let unheard = language.is_none() && choice == SpeakerModel::Auto;
-    let could = MOSS
-        .languages
-        .iter()
-        .any(|l| speaker_pick(dir, Some(l), choice) != speaker_pick(dir, None, choice));
-    match unheard && could {
-        true => None,
-        false => Some(speaker_file(language, choice)),
-    }
+    (!unheard).then(|| speaker_file(language, choice))
 }
 
 pub fn speaker_name(f: &File) -> &'static str {
@@ -173,8 +155,8 @@ impl Telling {
         Self(told)
     }
 
-    fn here(asked: &Asked, dir: &Path) -> Self {
-        let by = speakers_by(dir, asked.language.as_deref(), asked.speaker_model)
+    fn here(asked: &Asked) -> Self {
+        let by = speakers_by(asked.language.as_deref(), asked.speaker_model)
             .map_or(SpeakerModel::Auto.name(), speaker_name);
         Self::new(asked, by, None)
     }
@@ -187,14 +169,13 @@ impl Telling {
         }
     }
 
-    pub(crate) fn heard(&mut self, language: &str, dir: &Path, choice: SpeakerModel) {
+    pub(crate) fn heard(&mut self, language: &str, choice: SpeakerModel) {
         self.tell(|n| {
             if n.language.is_none() {
                 n.language = Some(language.to_string());
             }
             if n.speakers_by.as_deref() == Some(SpeakerModel::Auto.name()) {
-                n.speakers_by =
-                    Some(speaker_name(speaker_pick(dir, Some(language), choice)).into());
+                n.speakers_by = Some(speaker_name(speaker_file(Some(language), choice)).into());
             }
         });
     }
@@ -856,6 +837,7 @@ pub(crate) fn find_speech(
 pub(crate) struct Hearing<'a> {
     pub(crate) dir: &'a Path,
     pub(crate) gpu: bool,
+    pub(crate) download: bool,
     pub(crate) started: Instant,
 }
 
@@ -868,22 +850,25 @@ pub(crate) fn speakers_of(
     warnings: &mut Vec<String>,
 ) -> Result<(Vec<Turn>, &'static str)> {
     let (dir, gpu, started) = (at.dir, at.gpu, at.started);
-    let picked = speaker_pick(dir, language, choice);
+    let picked = speaker_file(language, choice);
     told.tell(|n| n.speakers_by = Some(speaker_name(picked).into()));
+    get_ready(dir, &[picked], false, at.download).map_err(|e| match e {
+        Error::Missing(m) if picked == &MOSS => Error::Missing(format!(
+            "{m}; or pick Sortformer under Speakers By (speaker_model: sortformer)"
+        )),
+        e => e,
+    })?;
     if picked == &MOSS {
-        match moss_turns(dir, pcm, gpu, started, warnings) {
-            Ok(turns) => return Ok((turns, SpeakerModel::Moss.name())),
-            Err(e) if present(dir, &SORTFORMER) => {
-                warnings.push(format!(
-                    "{} couldn't take {} of sound at once ({e}), so Sortformer told the \
-                     speakers; MOSS fits about 30 minutes",
-                    MOSS.title,
-                    transcript_clock(secs(pcm.len() as i64))
-                ));
-                told.tell(|n| n.speakers_by = Some(SpeakerModel::Sortformer.name().into()));
-            }
-            Err(e) => return Err(e),
-        }
+        return moss_turns(dir, pcm, gpu, started, warnings)
+            .map(|turns| (turns, SpeakerModel::Moss.name()))
+            .map_err(|e| match e {
+                Error::Invalid(m) if m == CANCELLED => Error::Invalid(m),
+                e => Error::Invalid(format!(
+                    "{} couldn't tell the speakers apart: {e}. Sortformer is a smaller model to \
+                     try: pick it under Speakers By (speaker_model: sortformer)",
+                    MOSS.title
+                )),
+            });
     }
     let path = dir.join(SORTFORMER.name);
     let total = pcm.len() as i64 * 1000 / i64::from(RATE);
@@ -1313,7 +1298,7 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
             .ok_or_else(|| Error::Invalid("no transcript came back".into()));
     }
     let started = Instant::now();
-    let mut telling = Telling::here(asked, options.models);
+    let mut telling = Telling::here(asked);
     let (model_path, vad_path) = files(asked, options.models)?;
     let pcm = heard_plan(plan, &model_path, started)?;
     if plan.channels != 1 {
@@ -1405,7 +1390,7 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
         if language.is_none() {
             language = r.language.clone();
             if let Some(l) = &language {
-                telling.heard(l, options.models, asked.speaker_model);
+                telling.heard(l, asked.speaker_model);
             }
         }
         heard[i] = Some(r);
@@ -1434,6 +1419,7 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
             let at = Hearing {
                 dir: options.models,
                 gpu: options.gpu,
+                download: asked.download,
                 started,
             };
             let (turns, by) = speakers_of(
@@ -1510,29 +1496,18 @@ mod tests {
     }
 
     #[test]
-    fn without_moss_an_unheard_language_takes_sortformer() {
-        let dir = std::path::Path::new("/no/models/here");
+    fn an_unheard_language_names_no_speaker_model_yet() {
         assert_eq!(
-            super::speakers_by(dir, None, Default::default()).map(|f| f.name),
-            Some(super::SORTFORMER.name)
+            super::speakers_by(None, Default::default()).map(|f| f.name),
+            None
         );
     }
 
     #[test]
     fn english_asked_takes_moss_before_it_is_downloaded() {
-        let dir = std::path::Path::new("/no/models/here");
         assert_eq!(
-            super::speakers_by(dir, Some("en"), Default::default()).map(|f| f.name),
+            super::speakers_by(Some("en"), Default::default()).map(|f| f.name),
             Some(super::MOSS.name)
-        );
-    }
-
-    #[test]
-    fn heard_english_without_moss_takes_sortformer() {
-        let dir = std::path::Path::new("/no/models/here");
-        assert_eq!(
-            super::speaker_pick(dir, Some("en"), Default::default()).name,
-            super::SORTFORMER.name
         );
     }
 }

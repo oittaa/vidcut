@@ -24,7 +24,7 @@ const PAD: f64 = 0.2;
 const GAP: f64 = 0.5;
 const WAIT: Duration = Duration::from_secs(60 * 60);
 
-const GOOGLE_LANGUAGES: [&str; 83] = [
+pub const GOOGLE_LANGUAGES: [&str; 83] = [
     "en-US",
     "es-US",
     "pt-BR",
@@ -116,35 +116,11 @@ pub const XAI_LANGUAGES: [&str; 38] = [
     "es", "sv", "th", "tr", "uk", "ur", "vi",
 ];
 
-pub fn google_languages() -> Vec<&'static str> {
-    let mut out: Vec<&str> = Vec::new();
-    for code in GOOGLE_LANGUAGES {
-        let short = primary(code);
-        if !out.contains(&short) {
-            out.push(short);
-        }
-    }
-    out
-}
-
 fn primary(code: &str) -> &str {
     match code.split('-').next().unwrap_or(code) {
         "cmn" => "zh",
         p => p,
     }
-}
-
-pub fn google_code(language: &str) -> String {
-    let l = language.to_ascii_lowercase();
-    let l = match l.as_str() {
-        "no" | "nn" => "nb",
-        "tl" => "fil",
-        other => other,
-    };
-    GOOGLE_LANGUAGES
-        .iter()
-        .find(|c| primary(c) == l)
-        .map_or_else(|| language.to_string(), |c| c.to_string())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -216,6 +192,20 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
         return Err(Error::Invalid(format!(
             "the audio would be sent to {company}: pass send"
         )));
+    }
+    if asked.model == SpeechModel::Google {
+        let o = asked.google.clone().unwrap_or_default();
+        let unlisted = o
+            .language_codes
+            .iter()
+            .chain(asked.language.iter())
+            .find(|code| !GOOGLE_LANGUAGES.contains(&code.as_str()));
+        if let Some(code) = unlisted {
+            return Err(Error::Invalid(format!(
+                "Gemini takes only the language codes Google lists, such as fi-FI or es-US: \
+                 {code} isn't one"
+            )));
+        }
     }
     let started = Instant::now();
     let service = match asked.model {
@@ -337,7 +327,7 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
         }));
         language = language.or(got.language);
         if let Some(l) = &language {
-            telling.heard(l, options.models, asked.speaker_model);
+            telling.heard(l, asked.speaker_model);
         }
     }
     let channel_speakers = asked.speakers && asked.xai.as_ref().is_some_and(|x| x.multichannel);
@@ -826,7 +816,7 @@ fn google_transcribe(
 fn google_request(asked: &Asked, uri: &str) -> Value {
     let o = asked.google.clone().unwrap_or_default();
     let codes: Vec<String> = match (&o.language_codes[..], &asked.language) {
-        ([], Some(l)) => vec![google_code(l)],
+        ([], Some(l)) => vec![l.clone()],
         (codes, _) => codes.to_vec(),
     };
     let mut mode = json!({ "type": "verbatim", "timestamp_granularities": ["word"] });
@@ -938,7 +928,7 @@ fn keep_reply(key: &str, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Heard, google_code, google_words, kept_note, offset, reply_key, xai_words};
+    use super::{Heard, kept_note, offset, reply_key, xai_words};
     use serde_json::json;
 
     #[test]
@@ -961,16 +951,6 @@ mod tests {
         let a = reply_key("xAI", &json!({}), 1, &[0.5]);
         let b = reply_key("xAI", &json!({}), 1, &[0.25]);
         assert_ne!(a, b);
-    }
-
-    #[test]
-    fn a_two_letter_language_takes_googles_regional_code() {
-        assert_eq!(google_code("fi"), "fi-FI");
-    }
-
-    #[test]
-    fn chinese_is_googles_mandarin() {
-        assert_eq!(google_code("zh"), "cmn-Hans-CN");
     }
 
     #[test]
@@ -1004,24 +984,5 @@ mod tests {
         )
         .unwrap();
         assert_eq!(got.words[0].speaker, Some(2));
-    }
-
-    #[test]
-    fn google_words_come_from_the_word_annotations() {
-        let got = google_words(
-            r#"{"steps":[{"type":"model_output","content":[{"type":"text","text":"Hello",
-                "annotations":[{"type":"word_info","text":"Hello","speaker":"spk:2",
-                "start_offset":"0.100s","end_offset":"0.450s"}]}]}]}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            got.words,
-            [Heard {
-                start: 0.1,
-                end: 0.45,
-                text: "Hello".into(),
-                speaker: Some(3)
-            }]
-        );
     }
 }

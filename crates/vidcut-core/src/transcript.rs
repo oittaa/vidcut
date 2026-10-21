@@ -117,14 +117,12 @@ pub struct Turn {
     pub speaker: u32,
 }
 
-pub const NEAREST_TURN: f64 = 1.0;
-
 pub fn give_speakers(said: &mut [Said], turns: &[Turn]) {
     for w in said.iter_mut().flat_map(|s| s.words.iter_mut()) {
         let overlap = |t: &Turn| w.end.min(t.end) - w.start.max(t.start);
         w.speaker = turns
             .iter()
-            .filter(|t| overlap(t) > -NEAREST_TURN)
+            .filter(|t| overlap(t) > 0.0)
             .max_by(|a, b| overlap(a).total_cmp(&overlap(b)))
             .map(|t| t.speaker);
     }

@@ -2038,7 +2038,7 @@ fn filler_language(asked: &Option<String>, speech: &Speech) -> Option<String> {
 }
 
 fn filler_words(p: &Project, env: &dyn Env, language: Option<&str>) -> (Vec<String>, &'static str) {
-    let Some(language) = language else {
+    let Some(language) = language.and_then(|l| l.split('-').next()) else {
         return (Vec::new(), "built_in");
     };
     if let Some(words) = p.settings.fillers.get(language) {
