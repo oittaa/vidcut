@@ -696,33 +696,36 @@ impl Workspace {
                         go = Some(if back { Jump::Previous } else { Jump::Next });
                         r.request_focus();
                     }
-                    if needle.is_empty() {
-                        return;
-                    }
-                    let any = !hits.is_empty();
-                    for (label, to) in [
-                        ("First", Jump::First),
-                        ("Previous", Jump::Previous),
-                        ("Next", Jump::Next),
-                        ("Last", Jump::Last),
-                    ] {
-                        if ui.add_enabled(any, egui::Button::new(label)).clicked() {
-                            go = Some(to);
-                        }
-                    }
-                    match t.found.and_then(|f| hits.iter().position(|&h| h == f)) {
-                        Some(k) => {
-                            ui.label(format!("{} of {}", k + 1, hits.len()));
-                        }
-                        None if hits.len() == 1 => {
-                            ui.label("1 match");
-                        }
-                        None if any => {
-                            ui.label(format!("{} matches", hits.len()));
-                        }
-                        None => super::dialog::why(ui, "no matches"),
-                    }
                 });
+                if !needle.is_empty() {
+                    ui.label("");
+                    ui.horizontal_wrapped(|ui| {
+                        let any = !hits.is_empty();
+                        for (label, to) in [
+                            ("First", Jump::First),
+                            ("Previous", Jump::Previous),
+                            ("Next", Jump::Next),
+                            ("Last", Jump::Last),
+                        ] {
+                            if ui.add_enabled(any, egui::Button::new(label)).clicked() {
+                                go = Some(to);
+                            }
+                        }
+                        match t.found.and_then(|f| hits.iter().position(|&h| h == f)) {
+                            Some(k) => {
+                                ui.label(format!("{} of {}", k + 1, hits.len()));
+                            }
+                            None if hits.len() == 1 => {
+                                ui.label("1 match");
+                            }
+                            None if any => {
+                                ui.label(format!("{} matches", hits.len()));
+                            }
+                            None => super::dialog::why(ui, "no matches"),
+                        }
+                    });
+                    ui.end_row();
+                }
                 super::dialog::row(ui, "Playhead", |ui| {
                     let mut follow = !t.hold;
                     if ui.checkbox(&mut follow, "Follow").changed() {
