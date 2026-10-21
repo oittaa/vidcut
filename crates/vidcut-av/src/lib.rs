@@ -19,6 +19,7 @@ pub mod gpus;
 pub mod hdr;
 pub mod hw;
 pub mod light;
+pub mod models;
 pub mod parts;
 pub mod player;
 pub mod pool;
