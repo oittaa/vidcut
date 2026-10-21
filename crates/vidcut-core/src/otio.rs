@@ -497,6 +497,9 @@ pub fn export_drawn(
                     meta["stream"] = json!(au.stream);
                     meta["gain_db"] = json!(au.gain_db);
                     meta["muted"] = json!(au.muted);
+                    if let Some(v) = au.voice_isolation {
+                        meta["voice_isolation"] = json!(v);
+                    }
                 }
                 if m.is_some_and(Media::is_still) {
                     meta["source_in"] = json!(c.source_at(s));
@@ -555,6 +558,9 @@ pub fn export_drawn(
                     "clip": c.id, "media": c.media, "color": c.color, "stream": au.stream,
                     "gain_db": au.gain_db,
                 });
+                if let Some(v) = au.voice_isolation {
+                    meta["voice_isolation"] = json!(v);
+                }
                 own_pace(&mut meta, c, s);
                 let n = m
                     .and_then(|m| m.info.audio.get(au.stream as usize))
@@ -616,10 +622,13 @@ pub fn export_drawn(
         }
         transitions::close(&mut video, rate);
         transitions::close(&mut audio, rate);
-        let meta = json!({
+        let mut meta = json!({
             "track": t.id, "locked": t.locked, "muted": t.muted, "solo": t.solo,
             "volume_db": t.volume_db, "video_enabled": t.video_enabled, "name": t.name,
         });
+        if let Some(v) = t.voice_isolation {
+            meta["voice_isolation"] = json!(v);
+        }
         let mut sound = json!({ "Locked": t.locked, "SoloOn": t.solo });
         if let Some(&n) = channels.first()
             && channels.iter().all(|&x| x == n)
@@ -903,6 +912,7 @@ pub struct ImportedClip {
     pub stream: u32,
     pub gain_db: f64,
     pub muted: bool,
+    pub voice_isolation: Option<f64>,
     pub link: Option<i64>,
     pub effects: Vec<Value>,
     pub audio_effects: Vec<Value>,
@@ -958,6 +968,7 @@ impl ImportedClip {
             stream: 0,
             gain_db: 0.0,
             muted: false,
+            voice_isolation: None,
             link: None,
             effects: Vec::new(),
             audio_effects: Vec::new(),
@@ -994,6 +1005,7 @@ pub struct ImportedTrack {
     pub muted: bool,
     pub solo: bool,
     pub volume_db: f64,
+    pub voice_isolation: Option<f64>,
     pub video_enabled: bool,
     pub name: Option<String>,
 }
@@ -1015,6 +1027,7 @@ impl ImportedTrack {
                 .or(editor["SoloOn"].as_bool().filter(|_| audio))
                 .unwrap_or(false),
             volume_db: meta["volume_db"].as_f64().unwrap_or(0.0),
+            voice_isolation: meta["voice_isolation"].as_f64(),
             video_enabled: meta["video_enabled"].as_bool().unwrap_or(audio || enabled),
             name: match meta.get("name") {
                 Some(name) => name.as_str().map(String::from),
@@ -1655,6 +1668,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         stream: meta["stream"].as_u64().unwrap_or(0) as u32,
                         gain_db: meta["gain_db"].as_f64().unwrap_or(0.0),
                         muted: meta["muted"].as_bool().unwrap_or(false),
+                        voice_isolation: meta["voice_isolation"].as_f64(),
                         link: link_group(item),
                         effects,
                         audio_effects: Vec::new(),
@@ -1739,6 +1753,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let muted = item["enabled"].as_bool() == Some(false);
             let link = link_group(item);
             let gain = meta["gain_db"].as_f64().or_else(|| effects::gain(item));
+            let voice_isolation = meta["voice_isolation"].as_f64();
             let stream = meta["stream"]
                 .as_u64()
                 .map(|s| s as u32)
@@ -1783,6 +1798,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if let Some(s) = stream {
                     c.stream = s;
                 }
+                if voice_isolation.is_some() {
+                    c.voice_isolation = voice_isolation;
+                }
                 c.audio_effects = effects;
                 if c.speed.is_none() {
                     c.speed = speed;
@@ -1817,6 +1835,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 stream: stream.unwrap_or(0),
                 gain_db: gain.unwrap_or(0.0),
                 muted,
+                voice_isolation,
                 link,
                 effects: Vec::new(),
                 audio_effects: effects,
@@ -2024,5 +2043,38 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         has_audio_tracks: !audio_tracks.is_empty(),
         project,
         warnings,
+    })
+}
+
+pub fn unheard_isolation(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    let (a, b) = span.unwrap_or((0, p.end()));
+    let mut named: Vec<String> = Vec::new();
+    for t in &p.tracks {
+        let clips: Vec<&Clip> = t
+            .clips
+            .iter()
+            .filter(|c| {
+                c.audio
+                    .as_ref()
+                    .is_some_and(|au| au.voice_isolation.is_some())
+            })
+            .filter(|c| exported(c, a, b))
+            .collect();
+        match t.voice_isolation {
+            Some(_)
+                if t.clips
+                    .iter()
+                    .any(|c| c.audio.is_some() && exported(c, a, b)) =>
+            {
+                named.push(t.id.clone())
+            }
+            _ => named.extend(clips.iter().map(|c| c.id.clone())),
+        }
+    }
+    (!named.is_empty()).then(|| {
+        format!(
+            "Voice Isolation stays in vidcut's own metadata, so other editors won't hear it: {}",
+            named.join(", ")
+        )
     })
 }

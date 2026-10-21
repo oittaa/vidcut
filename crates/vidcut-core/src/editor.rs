@@ -4530,7 +4530,9 @@ fn place_imported(
                     gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
                     muted: c.muted,
                     effects: carry(&c.audio_effects, sound_from),
-                    voice_isolation: None,
+                    voice_isolation: c
+                        .voice_isolation
+                        .and_then(|v| ops::checked_isolation(v).ok().flatten()),
                 })
             });
         if audio.is_some() && !GAIN.contains(&c.gain_db) {
@@ -5229,6 +5231,9 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                 track.muted = s.muted;
                 track.solo = s.solo;
                 track.volume_db = s.volume_db.clamp(-60.0, 24.0);
+                track.voice_isolation = s
+                    .voice_isolation
+                    .and_then(|v| ops::checked_isolation(v).ok().flatten());
                 track.video_enabled = s.video_enabled;
                 track.name = s.name.clone();
             }
