@@ -2,7 +2,7 @@
 
 **When:** next, first in [the roadmap](../roadmap.md#what-comes-next). A slow push on a still is what a simple video most often still needs another editor for.
 
-Transform and Crop are in ([spec §8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), [D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions), [X64](../deviations.md#x64-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Two parts are open.
+Transform and Crop are in ([spec §8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), [D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions), [X65](../deviations.md#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Two parts are open.
 
 ## Dynamic Zoom
 
