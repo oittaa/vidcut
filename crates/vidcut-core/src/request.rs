@@ -1639,11 +1639,12 @@ pub enum Request {
     DecodersList {},
     /// Application preferences (`~/.config/vidcut/preferences.toml`, on
     /// Windows in `%APPDATA%\vidcut`, on macOS in `~/Library/Application
-    /// Support/vidcut`) and what the thumbnail cache holds.
+    /// Support/vidcut`) and what the disk cache holds, with its limit.
     #[serde(rename = "preferences.get")]
     PreferencesGet {},
     /// Change application preferences; what is left out stays. Turning the
-    /// thumbnail cache off empties it, and a lower limit evicts at once.
+    /// thumbnails' disk cache off empties it, and a lower `cache` limit
+    /// evicts at once.
     #[serde(rename = "preferences.set")]
     PreferencesSet(crate::preferences::PreferencesPatch),
     /// Put the preferences back to the defaults. The file is written anew,
