@@ -322,12 +322,13 @@ impl Workspace {
         match held.hold {
             Hold::Move => {
                 let mut d = to - held.from;
-                if shift {
-                    if d.x.abs() >= d.y.abs() {
-                        d.y = 0.0;
-                    } else {
-                        d.x = 0.0;
-                    }
+                let across = d.x.abs() >= d.y.abs();
+                let (x_free, y_free) = (!shift || across, !shift || !across);
+                if !x_free {
+                    d.x = 0.0;
+                }
+                if !y_free {
+                    d.y = 0.0;
                 }
                 let [x0, y0] = p0.place();
                 let mut x = x0 + f64::from(d.x / picture.width());
@@ -339,11 +340,11 @@ impl Workspace {
                             .into_iter()
                             .find(|l| ((v - l).abs() as f32) * span <= SNAP)
                     };
-                    if let Some(l) = near(x, picture.width()) {
+                    if let Some(l) = near(x, picture.width()).filter(|_| x_free) {
                         x = l;
                         guides.0 = Some(l);
                     }
-                    if let Some(l) = near(y, picture.height()) {
+                    if let Some(l) = near(y, picture.height()).filter(|_| y_free) {
                         y = l;
                         guides.1 = Some(l);
                     }
