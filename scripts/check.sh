@@ -46,6 +46,22 @@ if [[ -n "$binary" ]]; then
   exit 1
 fi
 
+step "one shadcn-egui-core"
+# Each font crate exports FontFiles from shadcn-egui-core of its own version.
+# Two versions in the lockfile are two types, and the theme match in
+# gui/theme.rs stops compiling. Cargo.lock lists every resolved copy.
+cores=$(
+  awk '
+    $0 == "name = \"shadcn-egui-core\"" { grab = 1; next }
+    grab && $1 == "version" { print $3; grab = 0 }
+  ' Cargo.lock | sort -u
+)
+if [[ "$(printf '%s\n' "$cores" | grep -c .)" != 1 ]]; then
+  echo "shadcn-egui-core must resolve to one version; the font crates share its FontFiles:" >&2
+  printf '%s\n' "$cores" | sed 's/^/  /' >&2
+  exit 1
+fi
+
 step "no comments in crates/"
 # Only the schema's doc comments, one-line `// SAFETY:` comments, and on a
 # public unsafe fn the `# Safety` section clippy wants, one line under its
