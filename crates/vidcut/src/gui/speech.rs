@@ -469,7 +469,11 @@ fn ask_payment(ctx: &egui::Context, p: &Paying, again: &mut bool) -> Option<bool
             {
                 dialog::note(
                     ui,
-                    format!("Over {:.0} minutes of speech is refused.", longest / 60.0),
+                    format!(
+                        "{} takes {:.0} minutes of speech at most; more is refused.",
+                        p.model.company(),
+                        longest / 60.0
+                    ),
                 );
             }
         }
