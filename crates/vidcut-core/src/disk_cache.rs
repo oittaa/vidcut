@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock, TryLockError};
+use std::sync::{Mutex, OnceLock, PoisonError, TryLockError};
 use std::time::SystemTime;
 
 use crate::fingerprint::Origin;
@@ -96,6 +96,8 @@ pub struct Usage {
 }
 
 static POLICY: OnceLock<fn() -> Policy> = OnceLock::new();
+static AGAIN: AtomicBool = AtomicBool::new(false);
+static EVICTING: Mutex<()> = Mutex::new(());
 
 pub fn governed_by(policy: fn() -> Policy) {
     let _ = POLICY.set(policy);
@@ -125,13 +127,17 @@ pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
         .and_then(|()| std::fs::write(&part, bytes))
-        .and_then(|()| std::fs::rename(&part, path));
+        .and_then(|()| match stays(path, bytes.len() as u64) {
+            true => std::fs::rename(&part, path),
+            false => Err(std::io::Error::new(
+                std::io::ErrorKind::StorageFull,
+                "the disk cache has no room for it",
+            )),
+        });
     if written.is_err() {
         let _ = std::fs::remove_file(&part);
     }
-    written?;
-    evict();
-    Ok(())
+    written
 }
 
 pub fn added(path: &Path) {
@@ -140,8 +146,6 @@ pub fn added(path: &Path) {
 }
 
 pub fn evict() {
-    static AGAIN: AtomicBool = AtomicBool::new(false);
-    static EVICTING: Mutex<()> = Mutex::new(());
     let Some(policy) = POLICY.get() else {
         return;
     };
@@ -153,17 +157,59 @@ pub fn evict() {
             Err(TryLockError::WouldBlock) => return,
         };
         while AGAIN.swap(false, Ordering::AcqRel) {
-            let policy = policy();
-            let found = entries(&policy);
-            if let Some(limit) = policy.limit(found.iter().map(|e| e.len).sum()) {
-                shrink(found, limit);
-            }
+            pass(&policy(), None);
         }
         drop(one);
         if !AGAIN.load(Ordering::Acquire) {
             return;
         }
     }
+}
+
+fn stays(path: &Path, len: u64) -> bool {
+    let Some(policy) = POLICY.get().map(|p| p()) else {
+        return true;
+    };
+    if !counted(&policy, path) {
+        evict();
+        return true;
+    }
+    let one = EVICTING.lock().unwrap_or_else(PoisonError::into_inner);
+    AGAIN.store(false, Ordering::Release);
+    let fits = pass(&policy, Some((path, len)));
+    drop(one);
+    if AGAIN.load(Ordering::Acquire) {
+        evict();
+    }
+    fits
+}
+
+fn pass(policy: &Policy, new: Option<(&Path, u64)>) -> bool {
+    let (path, len) = new.unwrap_or((Path::new(""), 0));
+    let mut found = entries(policy);
+    found.retain(|e| e.path != path);
+    let held = found.iter().map(|e| e.len).sum::<u64>() + len;
+    let Some(limit) = policy.limit(held) else {
+        return true;
+    };
+    let fits = len <= limit;
+    shrink(found, if fits { limit - len } else { limit });
+    fits
+}
+
+fn counted(policy: &Policy, path: &Path) -> bool {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return false;
+    };
+    let name = name.to_string_lossy();
+    Kind::ALL.iter().any(|k| dir == k.dir() && !k.keeps(&name))
+        || (proxies(policy) == Some(dir) && name.ends_with(".mkv"))
+}
+
+fn proxies(policy: &Policy) -> Option<&Path> {
+    let dir = &policy.proxies;
+    (dir.starts_with(crate::dirs::cache()) && !Kind::ALL.iter().any(|k| *dir == k.dir()))
+        .then_some(dir.as_path())
 }
 
 pub fn usage(policy: &Policy) -> Usage {
@@ -188,9 +234,8 @@ fn entries(policy: &Policy) -> Vec<Entry> {
     for kind in Kind::ALL {
         listed(&kind.dir(), &|name| !kind.keeps(name), &mut found);
     }
-    let proxies = &policy.proxies;
-    if proxies.starts_with(crate::dirs::cache()) && !Kind::ALL.iter().any(|k| *proxies == k.dir()) {
-        listed(proxies, &|name| name.ends_with(".mkv"), &mut found);
+    if let Some(dir) = proxies(policy) {
+        listed(dir, &|name| name.ends_with(".mkv"), &mut found);
     }
     found
 }
