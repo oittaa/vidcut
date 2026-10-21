@@ -4917,6 +4917,11 @@ fn decompose(
             e.names().join(", ")
         ));
     }
+    if block.picture.is_some() {
+        warnings.push(format!(
+            "{id}'s place, zoom and crop were dropped: its clips fill the frame"
+        ));
+    }
     Ok(made)
 }
 
