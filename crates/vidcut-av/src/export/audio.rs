@@ -656,7 +656,19 @@ impl Lane {
                 ..
             } = &piece
             {
-                if take > 0 && (self.pos == 0 || !self.started) {
+                let continues = self.started
+                    && self.isolator.is_some()
+                    && *speed > 0.0
+                    && self
+                        .piece
+                        .checked_sub(1)
+                        .map(|i| &self.pieces[i])
+                        .is_some_and(|b| plays_on(b, &piece) && isolation_of(b) == *isolation);
+                if take > 0 && self.pos == 0 && continues {
+                    if let Some(paced) = self.paced.as_mut() {
+                        paced.bound = *source_sample + (len as f64 * speed).round() as i64;
+                    }
+                } else if take > 0 && (self.pos == 0 || !self.started) {
                     self.paced = None;
                     let start = if *speed == 1.0 {
                         origin + (*source_sample + self.pos) as f64 / f64::from(rate)
@@ -731,6 +743,13 @@ impl Lane {
             }
         }
         Ok(())
+    }
+}
+
+fn isolation_of(piece: &AudioPiece) -> Option<f64> {
+    match piece {
+        AudioPiece::Source { isolation, .. } => *isolation,
+        AudioPiece::Silence { .. } => None,
     }
 }
 
