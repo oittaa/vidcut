@@ -170,11 +170,33 @@ fn find_rows(ui: &mut egui::Ui, s: &mut Settings) {
     }
 }
 
+fn speakers_of(s: &Settings) -> Option<&'static transcribe::File> {
+    transcribe::speakers_by(
+        &crate::paths::models_dir(),
+        s.language.as_deref(),
+        s.speaker_model,
+    )
+}
+
+fn speaker_title(f: &transcribe::File) -> &'static str {
+    match f == &transcribe::MOSS {
+        true => "MOSS",
+        false => "Sortformer",
+    }
+}
+
 fn service_rows(ui: &mut egui::Ui, s: &mut Settings, transcribing: bool) {
     if s.speakers && !s.model.paid() {
+        let automatic = match speakers_of(&Settings {
+            speaker_model: SpeakerModel::Auto,
+            ..s.clone()
+        }) {
+            Some(f) => format!("Automatic ({})", speaker_title(f)),
+            None => "Automatic".into(),
+        };
         dialog::row(ui, "Speakers By", |ui| {
             dialog::switch(ui, |ui| {
-                ui.selectable_value(&mut s.speaker_model, SpeakerModel::Auto, "Automatic");
+                ui.selectable_value(&mut s.speaker_model, SpeakerModel::Auto, automatic);
                 ui.selectable_value(&mut s.speaker_model, SpeakerModel::Moss, "MOSS");
                 ui.selectable_value(&mut s.speaker_model, SpeakerModel::Sortformer, "Sortformer");
             });
@@ -308,18 +330,19 @@ fn language_choice(ui: &mut egui::Ui, s: &mut Settings) {
 }
 
 fn speakers_row(ui: &mut egui::Ui, s: &mut Settings) {
-    let moss =
-        transcribe::speaker_file(s.language.as_deref(), s.speaker_model) == &transcribe::MOSS;
-    let most = match s.model {
-        SpeechModel::Xai => "",
-        SpeechModel::Google => "up to 8",
-        _ if moss => "many per file, with MOSS",
-        _ => "up to 4 per file",
+    let by = match s.model {
+        SpeechModel::Xai => "by xAI",
+        SpeechModel::Google => "by Google · up to 8",
+        _ => match speakers_of(s) {
+            Some(f) if f == &transcribe::MOSS => "by MOSS · many per file",
+            Some(_) => "by Sortformer · up to 4 per file",
+            None => "",
+        },
     };
     dialog::row(ui, "Speakers", |ui| {
         ui.checkbox(&mut s.speakers, "Tell Who Speaks");
-        if s.speakers && !most.is_empty() {
-            ui.label(dim(most));
+        if s.speakers && !by.is_empty() {
+            ui.label(dim(by));
         }
     });
 }
@@ -496,6 +519,7 @@ struct Dialog {
     ready: Ready,
     short: [Option<String>; 5],
     gpu: bool,
+    device: Option<String>,
     asking: bool,
     paying: Option<(f64, String)>,
     paid: bool,
@@ -853,6 +877,7 @@ impl Workspace {
                 gpu.then(|| transcribe::short_of_memory(f)).flatten()
             }),
             gpu,
+            device: gpu.then(|| transcribe::gpu_label(&dir)).flatten(),
             asking: false,
             paying: None,
             paid: false,
@@ -1022,8 +1047,15 @@ impl Workspace {
                 if let Some(w) = &d.short[index(s.model)] {
                     dialog::warn(ui, format!("{w}; it runs anyway"));
                 }
-                if !d.gpu && !s.model.paid() {
-                    dialog::note(ui, "Runs on the CPU: GPU acceleration is off");
+                match &d.device {
+                    _ if s.model.paid() => {}
+                    _ if !d.gpu => {
+                        dialog::note(ui, "Runs on the CPU: GPU acceleration is off");
+                    }
+                    Some(device) => {
+                        dialog::note(ui, format!("Runs on {device}"));
+                    }
+                    None => {}
                 }
                 let unusual = s.find != FindSpeech::default()
                     || (!transcribing && (s.gap != 0 || !s.from_media))

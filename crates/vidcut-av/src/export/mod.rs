@@ -75,6 +75,19 @@ pub enum Note {
     Downloading {
         name: String,
     },
+    Speech(SpeechNote),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SpeechNote {
+    pub model: String,
+    pub find: vidcut_core::request::FindSpeech,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speakers_by: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

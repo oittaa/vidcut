@@ -47,7 +47,7 @@ Both doors end in `session::export_media`. Headless, `session::run_with` loads t
 | NVENC, VAAPI, AMF, QSV, VideoToolbox | that one; an error says why it can't |
 | `cpu` | the codec's first CPU encoder this FFmpeg has (`parts`) |
 
-The export takes the first that opens; a detected one can still fail (NVENC allows few sessions). `auto` with Dolby Vision is the CPU's alone. Quality or bitrate, profile and depth become each encoder's own options; 10 bits for `bit_depth` 10, `main10` or HDR. A `speed` goes to the first candidate only, since encoders name speeds differently.
+The export takes the first that opens; a detected one can still fail (NVENC allows few sessions). `auto` with Dolby Vision is the CPU's alone. Quality or bitrate, profile and depth become each encoder's own options; 10 bits for `bit_depth` 10, `main10` or HDR. A `speed` goes to the first candidate only, since encoders name speeds differently. The encoder records the speed and profile it took (`Chosen`), and `export.plan` returns them with the encoder, so the Export dialog's auto and default choices name what the plan picked.
 
 **Two passes** (spec D45) come with a bitrate, or `passes` set to 2. x264, x265 and libvpx-vp9 encode the range twice (`Passes::TwoRuns`): a first run drops its packets and keeps statistics (in a hidden `.passes` folder, `passes_path`, or in memory for libvpx), then the encoder opens again for the real run. NVENC passes twice inside one encode (`Passes::TwoInside`). Every other encoder, VAAPI, AMF, QSV, VideoToolbox and libsvtav1 among them, makes one pass: given a bitrate alone it encodes in one, and with `passes` set to 2 `encode::passes` refuses it, so `auto` goes on to the next candidate.
 

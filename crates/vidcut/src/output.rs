@@ -655,12 +655,13 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     eprintln!("vidcut: warning: {}", w.as_str().unwrap_or_default());
                 }
                 println!(
-                    "{}: {} word(s), {} on {}, language {}",
+                    "{}: {} word(s), {} on {}, language {}{}",
                     m["media"].as_str().unwrap_or_default(),
                     m["words"],
                     m["model"].as_str().unwrap_or_default(),
                     m["device"].as_str().unwrap_or_default(),
-                    m["language"].as_str().unwrap_or("not told")
+                    m["language"].as_str().unwrap_or("not told"),
+                    speakers_by(m)
                 );
             }
         }
@@ -693,10 +694,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 _ => "the pauses",
             };
             println!(
-                "  {} on {}, language {}, timed by {timing}, {} piece(s) of up to {:.0} s",
+                "  {} on {}, language {}{}, timed by {timing}, {} piece(s) of up to {:.0} s",
                 v["model"].as_str().unwrap_or_default(),
                 v["device"].as_str().unwrap_or_default(),
                 v["language"].as_str().unwrap_or("not told"),
+                speakers_by(v),
                 v["pieces"],
                 v["longest_piece"].as_f64().unwrap_or_default()
             );
@@ -1002,6 +1004,13 @@ fn edit_point(e: &Value) -> String {
     )
 }
 
+fn speakers_by(v: &Value) -> String {
+    v["speakers_by"]
+        .as_str()
+        .map(|by| format!(", speakers by {by}"))
+        .unwrap_or_default()
+}
+
 fn clock(secs: f64) -> String {
     let s = secs.max(0.0).round() as u64;
     format!("{}:{:02}", s / 60, s % 60)
@@ -1060,8 +1069,21 @@ fn job_line(j: &Value) -> String {
         .as_str()
         .map(|e| format!("  ({e})"))
         .unwrap_or_default();
+    let speech = &j["details"]["speech"];
+    let uses = match speech["model"].as_str() {
+        Some(model) => format!(
+            "  ({model}{}, language {}{})",
+            speech["device"]
+                .as_str()
+                .map(|d| format!(" on {d}"))
+                .unwrap_or_default(),
+            speech["language"].as_str().unwrap_or("auto"),
+            speakers_by(speech)
+        ),
+        None => String::new(),
+    };
     format!(
-        "{:<4} {:<9} {:>3}%  {:<10} {}{error}",
+        "{:<4} {:<9} {:>3}%  {:<10} {}{uses}{error}",
         j["id"].as_str().unwrap_or_default(),
         state,
         (j["progress"].as_f64().unwrap_or(0.0) * 100.0).floor(),

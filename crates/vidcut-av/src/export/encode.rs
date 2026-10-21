@@ -18,6 +18,29 @@ pub struct VideoEncoder {
     pub passes: Passes,
     pub metadata: crate::hdr::Static,
     pub dynamic: crate::hdr::Dynamic,
+    pub chosen: Chosen,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Chosen {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+}
+
+impl Chosen {
+    fn speed(&mut self, key: &str, value: impl ToString) -> (String, String) {
+        let o = opt(key, value);
+        self.speed = Some(o.1.clone());
+        o
+    }
+
+    fn profile(&mut self, key: &str, value: impl ToString) -> (String, String) {
+        let o = opt(key, value);
+        self.profile = Some(o.1.clone());
+        o
+    }
 }
 
 pub fn hdr_metadata(v: &VideoSettings) -> (crate::hdr::Static, crate::hdr::Dynamic) {
@@ -390,11 +413,13 @@ fn video_encoder(
         })
         .min(v.codec.worst_quality());
     let passes = passes(v, name)?;
+    let mut chosen = Chosen::default();
+    let c = &mut chosen;
     let options = match kind {
-        EncoderChoice::Nvenc => nvenc_options(v, q, ten, passes),
-        EncoderChoice::Amf => amf_options(v, q, ten),
-        EncoderChoice::Qsv => qsv_options(v, q, ten),
-        EncoderChoice::VideoToolbox => videotoolbox_options(v, q, ten),
+        EncoderChoice::Nvenc => nvenc_options(v, q, ten, passes, c),
+        EncoderChoice::Amf => amf_options(v, q, ten, c),
+        EncoderChoice::Qsv => qsv_options(v, q, ten, c),
+        EncoderChoice::VideoToolbox => videotoolbox_options(v, q, ten, c),
         _ => vaapi_options(v, q),
     };
     let (metadata, dynamic) = hdr_metadata(v);
@@ -408,12 +433,19 @@ fn video_encoder(
         passes,
         metadata,
         dynamic,
+        chosen,
     }))
 }
 
-fn nvenc_options(v: &VideoSettings, q: u32, ten: bool, passes: Passes) -> Vec<(String, String)> {
+fn nvenc_options(
+    v: &VideoSettings,
+    q: u32,
+    ten: bool,
+    passes: Passes,
+    c: &mut Chosen,
+) -> Vec<(String, String)> {
     let mut options = vec![
-        opt("preset", v.speed.as_deref().unwrap_or("p5")),
+        c.speed("preset", v.speed.as_deref().unwrap_or("p5")),
         opt("tune", "hq"),
         opt("rc", "vbr"),
     ];
@@ -442,8 +474,10 @@ fn nvenc_options(v: &VideoSettings, q: u32, ten: bool, passes: Passes) -> Vec<(S
         }
     }
     match v.codec {
-        VideoCodec::Hevc => options.push(opt("profile", if ten { "main10" } else { "main" })),
-        VideoCodec::H264 => options.push(opt("profile", v.profile.as_deref().unwrap_or("high"))),
+        VideoCodec::Hevc => options.push(c.profile("profile", if ten { "main10" } else { "main" })),
+        VideoCodec::H264 => {
+            options.push(c.profile("profile", v.profile.as_deref().unwrap_or("high")))
+        }
         _ => {}
     }
     options
@@ -459,8 +493,8 @@ fn vaapi_options(v: &VideoSettings, q: u32) -> Vec<(String, String)> {
     }
 }
 
-fn amf_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
-    let mut options = vec![opt("quality", v.speed.as_deref().unwrap_or("quality"))];
+fn amf_options(v: &VideoSettings, q: u32, ten: bool, c: &mut Chosen) -> Vec<(String, String)> {
+    let mut options = vec![c.speed("quality", v.speed.as_deref().unwrap_or("quality"))];
     match v.bitrate {
         Some(b) => {
             options.push(opt("rc", "vbr_peak"));
@@ -481,21 +515,26 @@ fn amf_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
         }
     }
     match v.codec {
-        VideoCodec::Hevc => options.push(opt("profile", if ten { "main10" } else { "main" })),
+        VideoCodec::Hevc => options.push(c.profile("profile", if ten { "main10" } else { "main" })),
         VideoCodec::H264 => {
             let profile = match v.profile.as_deref() {
                 Some("baseline") => "constrained_baseline",
                 Some(p) => p,
                 None => "high",
             };
-            options.push(opt("profile", profile));
+            options.push(c.profile("profile", profile));
         }
         _ => {}
     }
     options
 }
 
-fn videotoolbox_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
+fn videotoolbox_options(
+    v: &VideoSettings,
+    q: u32,
+    ten: bool,
+    c: &mut Chosen,
+) -> Vec<(String, String)> {
     let mut options = Vec::new();
     match v.bitrate {
         Some(b) => options.push(opt("b", b)),
@@ -506,15 +545,17 @@ fn videotoolbox_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, St
         }
     }
     match v.codec {
-        VideoCodec::Hevc => options.push(opt("profile", if ten { "main10" } else { "main" })),
-        VideoCodec::H264 => options.push(opt("profile", v.profile.as_deref().unwrap_or("high"))),
+        VideoCodec::Hevc => options.push(c.profile("profile", if ten { "main10" } else { "main" })),
+        VideoCodec::H264 => {
+            options.push(c.profile("profile", v.profile.as_deref().unwrap_or("high")))
+        }
         _ => {}
     }
     options
 }
 
-fn qsv_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
-    let mut options = vec![opt("preset", v.speed.as_deref().unwrap_or("medium"))];
+fn qsv_options(v: &VideoSettings, q: u32, ten: bool, c: &mut Chosen) -> Vec<(String, String)> {
+    let mut options = vec![c.speed("preset", v.speed.as_deref().unwrap_or("medium"))];
     match v.bitrate {
         Some(b) => {
             options.push(opt("b", b));
@@ -523,8 +564,10 @@ fn qsv_options(v: &VideoSettings, q: u32, ten: bool) -> Vec<(String, String)> {
         None => options.push(opt("global_quality", icq(v.codec, q))),
     }
     match v.codec {
-        VideoCodec::Hevc => options.push(opt("profile", if ten { "main10" } else { "main" })),
-        VideoCodec::H264 => options.push(opt("profile", v.profile.as_deref().unwrap_or("high"))),
+        VideoCodec::Hevc => options.push(c.profile("profile", if ten { "main10" } else { "main" })),
+        VideoCodec::H264 => {
+            options.push(c.profile("profile", v.profile.as_deref().unwrap_or("high")))
+        }
         _ => {}
     }
     options
@@ -547,7 +590,8 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
         }
         params
     };
-    let speed = |default: &str| opt("preset", v.speed.as_deref().unwrap_or(default));
+    let mut c = Chosen::default();
+    let speed = |default: &str| v.speed.as_deref().unwrap_or(default).to_string();
     let quality = |key: &str, default: u32| match v.bitrate {
         Some(b) => opt("b", b),
         None => opt(
@@ -585,11 +629,15 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             };
             (
                 deep,
-                vec![speed("medium"), quality("crf", 18), opt("profile", profile)],
+                vec![
+                    c.speed("preset", speed("medium")),
+                    quality("crf", 18),
+                    c.profile("profile", profile),
+                ],
             )
         }
         "libopenh264" => {
-            let mut o = vec![opt("profile", "high")];
+            let mut o = vec![c.profile("profile", "high")];
             match v.bitrate {
                 Some(b) => o.push(opt("b", b)),
                 None => o.extend([
@@ -602,7 +650,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
         }
         "libx265" => (deep, {
             let mut o = vec![
-                speed("medium"),
+                c.speed("preset", speed("medium")),
                 quality("crf", 20),
                 opt("x265-params", x265),
             ];
@@ -612,7 +660,8 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             o
         }),
         "libkvazaar" => {
-            let preset = v.speed.as_deref().unwrap_or("medium");
+            let preset = speed("medium");
+            c.speed = Some(preset.clone());
             let params = match v.bitrate {
                 Some(_) => format!("preset={preset}"),
                 None => format!("preset={preset},qp={}", q(20)),
@@ -624,14 +673,14 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             (deep, o)
         }
         "libsvtav1" => (deep, {
-            let mut o = vec![speed("8"), quality("crf", 30)];
+            let mut o = vec![c.speed("preset", speed("8")), quality("crf", 30)];
             if dynamic.dolby_vision {
                 o.push(opt("dolbyvision", 1));
             }
             o
         }),
         "libaom-av1" => {
-            let mut o = vec![opt("cpu-used", numbered(8, "6")), opt("row-mt", 1)];
+            let mut o = vec![c.speed("cpu-used", numbered(8, "6")), opt("row-mt", 1)];
             match v.bitrate {
                 Some(b) => o.push(opt("b", b)),
                 None => o.extend([opt("crf", q(30)), opt("b", 0)]),
@@ -639,7 +688,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             (deep, o)
         }
         "librav1e" => {
-            let mut o = vec![opt("speed", numbered(10, "6"))];
+            let mut o = vec![c.speed("speed", numbered(10, "6"))];
             match v.bitrate {
                 Some(b) => o.push(opt("b", b)),
                 None => o.push(opt("qp", av1_qindex(q(30)))),
@@ -650,7 +699,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             let mut o = vec![
                 quality("crf", 32),
                 opt("row-mt", 1),
-                opt("cpu-used", v.speed.as_deref().unwrap_or("4")),
+                c.speed("cpu-used", speed("4")),
             ];
             if v.bitrate.is_none() {
                 o.push(opt("b", 0));
@@ -658,7 +707,9 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             o
         }),
         "prores_ks" | "prores_aw" => {
-            let (profile, pixel) = match v.profile.as_deref().unwrap_or("hq") {
+            let named = v.profile.as_deref().unwrap_or("hq");
+            c.profile = Some(named.to_string());
+            let (profile, pixel) = match named {
                 "proxy" => (0, Pixel::YUV422P10LE),
                 "lt" => (1, Pixel::YUV422P10LE),
                 "standard" => (2, Pixel::YUV422P10LE),
@@ -669,6 +720,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
         }
         "dnxhd" => {
             let p = v.profile.as_deref().unwrap_or("hq");
+            c.profile = Some(p.to_string());
             let pixel = match p {
                 "hqx" => Pixel::YUV422P10LE,
                 "444" => Pixel::YUV444P10LE,
@@ -688,6 +740,7 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
         passes: passes(v, name)?,
         metadata,
         dynamic,
+        chosen: c,
     })
 }
 
@@ -1185,6 +1238,7 @@ fn try_gpu(
         passes: Passes::One,
         metadata: Default::default(),
         dynamic: Default::default(),
+        chosen: Chosen::default(),
     })
 }
 
@@ -1367,6 +1421,7 @@ mod tests {
             passes: Passes::One,
             metadata: Default::default(),
             dynamic: Default::default(),
+            chosen: Default::default(),
         }
     }
 

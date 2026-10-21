@@ -971,7 +971,16 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
         .video
         .as_ref();
     let video_encoder = video.map(|v| match vidcut_av::export::encode::resolve_video(v, available) {
-        Ok(e) => json!({ "name": e.name, "kind": e.kind, "pixel": vidcut_av::export::encode::pixel_name(e.pixel), "device": e.device, "options": e.options, "passes": e.passes }),
+        Ok(e) => {
+            let mut out = json!({ "name": e.name, "kind": e.kind, "pixel": vidcut_av::export::encode::pixel_name(e.pixel), "device": e.device, "options": e.options, "passes": e.passes });
+            if let Some(speed) = &e.chosen.speed {
+                out["speed"] = json!(speed);
+            }
+            if let Some(profile) = &e.chosen.profile {
+                out["profile"] = json!(profile);
+            }
+            out
+        }
         Err(err) => json!({ "error": err.to_string() }),
     });
     json!({

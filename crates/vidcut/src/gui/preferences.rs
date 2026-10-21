@@ -634,6 +634,9 @@ fn gpu_choice(
     let shown = match &found {
         _ if chosen.is_empty() => automatic.clone(),
         Some(_) => name(&state["gpu_chosen"]),
+        None if state["gpu_automatic"].is_object() => {
+            format!("{chosen} (not here: {})", name(&state["gpu_automatic"]))
+        }
         None => format!("{chosen} (not here: automatic)"),
     };
     let current = found.unwrap_or_else(|| chosen.clone());
@@ -793,14 +796,13 @@ fn sound(
                     ui.label(RichText::new(e).color(theme::colors().error));
                 }
                 Some(Ok(devices)) => {
-                    let default = devices
-                        .iter()
-                        .find(|d| d.default)
-                        .map_or(String::new(), |d| format!(" ({})", d.name));
+                    let usual = devices.iter().find(|d| d.default);
+                    let default = usual.map_or(String::new(), |d| format!(" ({})", d.name));
+                    let plays = usual.map_or("the default", |d| d.name.as_str());
                     let shown = match devices.iter().find(|d| d.id == chosen) {
                         _ if chosen.is_empty() => format!("System default{default}"),
                         Some(d) => d.name.clone(),
-                        None => format!("{chosen} (not connected: the default plays)"),
+                        None => format!("{chosen} (not connected: {plays} plays)"),
                     };
                     let mut pick = chosen.clone();
                     ui.add_enabled_ui(!busy, |ui| {
