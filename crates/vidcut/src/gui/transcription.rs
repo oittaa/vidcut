@@ -690,42 +690,46 @@ impl Workspace {
             ui.add(egui::Label::new(RichText::new(&title).strong()).truncate());
             super::dialog::form(ui, "transcription-form", |ui| {
                 super::dialog::row(ui, "Search", |ui| {
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut t.search)
-                            .hint_text("a word")
-                            .desired_width(150.0),
-                    );
-                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        let back = ui.input(|i| i.modifiers.shift);
-                        go = Some(if back { Jump::Previous } else { Jump::Next });
-                        r.request_focus();
-                    }
-                    if needle.is_empty() {
-                        return;
-                    }
-                    let any = !hits.is_empty();
-                    for (label, to) in [
-                        ("First", Jump::First),
-                        ("Previous", Jump::Previous),
-                        ("Next", Jump::Next),
-                        ("Last", Jump::Last),
-                    ] {
-                        if ui.add_enabled(any, egui::Button::new(label)).clicked() {
-                            go = Some(to);
+                    ui.vertical(|ui| {
+                        let r = ui.add(
+                            egui::TextEdit::singleline(&mut t.search)
+                                .hint_text("a word")
+                                .desired_width(150.0),
+                        );
+                        if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                            let back = ui.input(|i| i.modifiers.shift);
+                            go = Some(if back { Jump::Previous } else { Jump::Next });
+                            r.request_focus();
                         }
-                    }
-                    match t.found.and_then(|f| hits.iter().position(|&h| h == f)) {
-                        Some(k) => {
-                            ui.label(format!("{} of {}", k + 1, hits.len()));
+                        if needle.is_empty() {
+                            return;
                         }
-                        None if hits.len() == 1 => {
-                            ui.label("1 match");
-                        }
-                        None if any => {
-                            ui.label(format!("{} matches", hits.len()));
-                        }
-                        None => super::dialog::why(ui, "no matches"),
-                    }
+                        ui.horizontal_wrapped(|ui| {
+                            let any = !hits.is_empty();
+                            for (label, to) in [
+                                ("First", Jump::First),
+                                ("Previous", Jump::Previous),
+                                ("Next", Jump::Next),
+                                ("Last", Jump::Last),
+                            ] {
+                                if ui.add_enabled(any, egui::Button::new(label)).clicked() {
+                                    go = Some(to);
+                                }
+                            }
+                            match t.found.and_then(|f| hits.iter().position(|&h| h == f)) {
+                                Some(k) => {
+                                    ui.label(format!("{} of {}", k + 1, hits.len()));
+                                }
+                                None if hits.len() == 1 => {
+                                    ui.label("1 match");
+                                }
+                                None if any => {
+                                    ui.label(format!("{} matches", hits.len()));
+                                }
+                                None => super::dialog::why(ui, "no matches"),
+                            }
+                        });
+                    });
                 });
                 super::dialog::row(ui, "Playhead", |ui| {
                     let mut follow = !t.hold;
