@@ -1012,8 +1012,9 @@ pub enum Request {
         color: Option<String>,
         /// Voice Isolation's Amount, from 1 to 100: that much of the voice
         /// the model hears in the sound, mixed with the rest of it; 0 turns
-        /// it off. The model runs on this computer and is downloaded once,
-        /// when `download` allows it.
+        /// it off for the clip, also when its track has it on. A clip never
+        /// given one follows its track's. The model runs on this computer
+        /// and is downloaded once, when `download` allows it.
         #[serde(default)]
         voice_isolation: Option<f64>,
         /// Download Voice Isolation's model if this computer doesn't have it

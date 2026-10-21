@@ -1344,11 +1344,9 @@ impl Workspace {
         }
         if pressed(Key::V) && m.alt && !m.shift && !m.command {
             let clips = self.snap.selection.clips.clone();
-            let current = self.project().and_then(|p| {
-                clips
-                    .iter()
-                    .find_map(|id| p.clip(id)?.audio.as_ref().map(|a| a.voice_isolation))
-            });
+            let current = self
+                .project()
+                .and_then(|p| clips.iter().find_map(|id| super::isolation::heard(p, id)));
             if let Some(current) = current {
                 let amount = match current {
                     Some(_) => 0.0,

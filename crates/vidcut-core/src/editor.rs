@@ -2933,7 +2933,7 @@ fn mutate(
             let or_none =
                 |v: &Option<String>| v.as_ref().map(|v| (!v.is_empty()).then(|| v.clone()));
             let voice_isolation = voice_isolation.map(ops::checked_isolation).transpose()?;
-            if let Some(Some(_)) = voice_isolation {
+            if voice_isolation.is_some_and(|v| v > 0.0) {
                 env.voice_isolation(*download)?;
             }
             let props = ClipProps {
@@ -3091,7 +3091,7 @@ fn mutate(
             ..
         } => {
             let voice_isolation = voice_isolation.map(ops::checked_isolation).transpose()?;
-            if let Some(Some(_)) = voice_isolation {
+            if voice_isolation.is_some_and(|v| v > 0.0) {
                 env.voice_isolation(*download)?;
             }
             let props = ops::TrackProps {
@@ -3099,7 +3099,7 @@ fn mutate(
                 muted: *muted,
                 solo: *solo,
                 volume_db: *volume_db,
-                voice_isolation,
+                voice_isolation: voice_isolation.map(|v| (v > 0.0).then_some(v)),
                 video_enabled: *video_enabled,
                 name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
             };
@@ -4532,7 +4532,7 @@ fn place_imported(
                     effects: carry(&c.audio_effects, sound_from),
                     voice_isolation: c
                         .voice_isolation
-                        .and_then(|v| ops::checked_isolation(v).ok().flatten()),
+                        .and_then(|v| ops::checked_isolation(v).ok()),
                 })
             });
         if audio.is_some() && !GAIN.contains(&c.gain_db) {
@@ -5233,7 +5233,8 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                 track.volume_db = s.volume_db.clamp(-60.0, 24.0);
                 track.voice_isolation = s
                     .voice_isolation
-                    .and_then(|v| ops::checked_isolation(v).ok().flatten());
+                    .and_then(|v| ops::checked_isolation(v).ok())
+                    .filter(|v| *v > 0.0);
                 track.video_enabled = s.video_enabled;
                 track.name = s.name.clone();
             }

@@ -2095,10 +2095,14 @@ impl Workspace {
             self.open_speed_dialog();
             ui.close();
         }
-        if let Some(a) = &c.audio {
+        if c.audio.is_some() {
+            let heard = self
+                .project()
+                .and_then(|p| super::isolation::heard(p, &c.id))
+                .flatten();
             let on = super::isolation::Isolate::Clips(clips.clone());
             let label = keys("Voice Isolation  (Alt+V)");
-            if self.isolation_controls(ui, on, a.voice_isolation, &label) {
+            if self.isolation_controls(ui, on, heard, &label) {
                 ui.close();
             }
             ui.menu_button("Audio Operations", |ui| {

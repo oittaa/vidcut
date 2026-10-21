@@ -673,7 +673,7 @@ impl Lane {
                     };
                     self.start_piece(path, *stream, start, rate, channels)?;
                     self.isolator = match isolation {
-                        Some(amount) => match crate::isolate::model() {
+                        Some(amount) if *amount > 0.0 => match crate::isolate::model() {
                             Ok(model) => Some(Isolator::new(model, *amount, rate, channels)?),
                             Err(e) => {
                                 self.unheard.get_or_insert_with(|| {
@@ -682,7 +682,7 @@ impl Lane {
                                 None
                             }
                         },
-                        None => None,
+                        _ => None,
                     };
                     self.started = true;
                 }

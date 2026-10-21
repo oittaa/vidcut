@@ -1520,16 +1520,16 @@ pub struct ClipProps {
     pub gain_db: Option<f64>,
     pub name: Option<Option<String>>,
     pub color: Option<Option<String>>,
-    pub voice_isolation: Option<Option<f64>>,
+    pub voice_isolation: Option<f64>,
 }
 
-pub fn checked_isolation(amount: f64) -> Result<Option<f64>> {
-    match amount {
-        0.0 => Ok(None),
-        a if a > 0.0 && a <= 100.0 => Ok(Some(a)),
-        a => Err(Error::invalid(format!(
-            "voice isolation {a} outside 0..100 (0 turns it off)"
-        ))),
+pub fn checked_isolation(amount: f64) -> Result<f64> {
+    if amount == 0.0 || (1.0..=100.0).contains(&amount) {
+        Ok(amount)
+    } else {
+        Err(Error::invalid(format!(
+            "voice isolation {amount} is neither 0 (off) nor 1..100"
+        )))
     }
 }
 
@@ -1566,7 +1566,7 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
                 a.gain_db = g;
             }
             if let Some(v) = props.voice_isolation {
-                a.voice_isolation = v;
+                a.voice_isolation = Some(v);
             }
         }
     }

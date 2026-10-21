@@ -2056,7 +2056,7 @@ pub fn unheard_isolation(p: &Project, span: Option<(i64, i64)>) -> Option<String
             .filter(|c| {
                 c.audio
                     .as_ref()
-                    .is_some_and(|au| au.voice_isolation.is_some())
+                    .is_some_and(|au| au.voice_isolation.is_some_and(|v| v > 0.0))
             })
             .filter(|c| exported(c, a, b))
             .collect();

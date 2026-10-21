@@ -207,7 +207,7 @@ pub enum AudioPiece {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fade: Option<Fade>,
         /// Voice Isolation's Amount over it, from 1 to 100: the clip's own,
-        /// else its track's.
+        /// else its track's; left out when the clip's own is 0.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         isolation: Option<f64>,
     },
@@ -954,7 +954,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                     {
                         *gain_db += track.volume_db;
                         *f2 = fade(f, x, falling);
-                        *isolation = isolation.or(track.voice_isolation);
+                        *isolation = isolation.or(track.voice_isolation).filter(|a| *a > 0.0);
                     }
                     push_audio(lane, piece);
                 }

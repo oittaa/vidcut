@@ -1,5 +1,6 @@
 use eframe::egui;
 use serde_json::json;
+use vidcut_core::Project;
 
 use super::workspace::Workspace;
 
@@ -9,6 +10,20 @@ pub(super) const FIRST_AMOUNT: f64 = 75.0;
 pub(super) enum Isolate {
     Clips(Vec<String>),
     Track(String),
+}
+
+pub(super) fn heard(p: &Project, clip: &str) -> Option<Option<f64>> {
+    let t = p
+        .tracks
+        .iter()
+        .find(|t| t.clips.iter().any(|c| c.id == clip))?;
+    let audio = t.clips.iter().find(|c| c.id == clip)?.audio.as_ref()?;
+    Some(
+        audio
+            .voice_isolation
+            .or(t.voice_isolation)
+            .filter(|a| *a > 0.0),
+    )
 }
 
 #[derive(Default)]
