@@ -1090,12 +1090,16 @@ impl Workspace {
                                     s.transcript = false;
                                 }
                             });
-                            match untold.len() {
-                                0 => {}
-                                1 => dialog::why(ui, "a file heard has no transcript"),
-                                n => dialog::why(ui, format!("{n} files heard have no transcript")),
-                            }
                         });
+                        match untold.len() {
+                            0 => {}
+                            1 => dialog::row(ui, "", |ui| {
+                                dialog::why(ui, "a file heard has no transcript")
+                            }),
+                            n => dialog::row(ui, "", |ui| {
+                                dialog::why(ui, format!("{n} files heard have no transcript"))
+                            }),
+                        }
                     }
                     if from_transcript {
                         dialog::row(ui, "Transcript", |ui| {
