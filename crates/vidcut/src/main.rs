@@ -132,6 +132,8 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
 struct ProgressBar {
     show: bool,
     last: Instant,
+    beat: usize,
+    open: bool,
 }
 
 impl ProgressBar {
@@ -139,6 +141,15 @@ impl ProgressBar {
         Self {
             show,
             last: Instant::now() - Duration::from_secs(1),
+            beat: 0,
+            open: false,
+        }
+    }
+
+    fn wrote(&mut self, finished: bool) {
+        self.open = !finished;
+        if finished {
+            eprintln!();
         }
     }
 
@@ -157,6 +168,10 @@ impl ProgressBar {
         }
         self.last = Instant::now();
         if v["queued"].as_bool() == Some(true) {
+            if self.open {
+                eprintln!();
+                self.open = false;
+            }
             let title = v["title"].as_str().unwrap_or_default();
             eprintln!("{title}: waiting for the jobs before it");
             return;
@@ -169,20 +184,22 @@ impl ProgressBar {
             let pct = frames * 100 / total.max(1);
             let eta = (total - frames) as f64 / (frames as f64 / elapsed.max(1e-3)).max(1e-3);
             let eta = format!("ETA {}:{:02}", eta as u64 / 60, eta as u64 % 60);
+            let mark = ['|', '/', '-', '\\'][self.beat % 4];
+            self.beat = self.beat.wrapping_add(1);
             match stage {
                 "downloading" => eprint!(
                     "\r{file}: downloading {pct:3}% ({:.0}/{:.0} MB, {eta})   ",
                     frames as f64 / 1e6,
                     total as f64 / 1e6
                 ),
-                "loading" => eprint!("\r{file}: loading the model   "),
-                "speakers" => eprint!("\r{file}: finding the speakers   "),
+                "loading" => eprint!("\r{file}: loading the model {mark}   "),
+                "speakers" => eprint!("\r{file}: finding the speakers {mark}   "),
                 "uploading" => eprint!(
                     "\r{file}: uploading {pct:3}% ({:.0}/{:.0} MB, {eta})   ",
                     frames as f64 / 1e6,
                     total as f64 / 1e6
                 ),
-                "waiting" => eprint!("\r{file}: waiting for the reply   "),
+                "waiting" => eprint!("\r{file}: waiting for the reply {mark}   "),
                 "listening" => eprint!(
                     "\r{file}: listening {pct:3}% ({}/{} s of sound)   ",
                     frames / 1000,
@@ -194,9 +211,7 @@ impl ProgressBar {
                     total / 1000
                 ),
             }
-            if frames == total {
-                eprintln!();
-            }
+            self.wrote(frames == total && stage != "waiting");
             return;
         }
         if v["measuring"].as_bool() == Some(true) {
@@ -204,9 +219,7 @@ impl ProgressBar {
                 "\r{file}: measuring light for the HDR metadata, {:3}%   ",
                 frames * 100 / total.max(1)
             );
-            if frames == total {
-                eprintln!();
-            }
+            self.wrote(frames == total);
             return;
         }
         let passes = i64::from(passes.max(1));
@@ -229,7 +242,13 @@ impl ProgressBar {
             eta as u64 / 60,
             eta as u64 % 60
         );
-        if frames == total {
+        self.wrote(frames == total);
+    }
+}
+
+impl Drop for ProgressBar {
+    fn drop(&mut self) {
+        if self.open {
             eprintln!();
         }
     }
