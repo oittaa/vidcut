@@ -818,6 +818,18 @@ enum Layer {
     Title(Box<ShownTitle>),
 }
 
+impl Layer {
+    fn inside(&self, outer: &[Placed]) -> bool {
+        match self {
+            Layer::Placed(VideoPiece::Source { placed, .. }, _)
+            | Layer::Crossing(VideoPiece::Source { placed, .. }, _) => {
+                placed.len() > outer.len() && placed.ends_with(outer)
+            }
+            _ => false,
+        }
+    }
+}
+
 pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
     flatten_lanes(p, a, b).map(|(plan, _)| plan)
 }
@@ -938,7 +950,15 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                 None => {
                     if let Some(c) = t.clip_covering(x).map(|ci| &t.clips[ci]).filter(shows) {
                         match shown(c, None)? {
-                            l @ Layer::Placed(..) => stack.push(l),
+                            Layer::Placed(piece, ramp) => {
+                                if let VideoPiece::Source { placed, .. } = &piece
+                                    && crate::place::fills(placed)
+                                {
+                                    let outer = &placed[1..];
+                                    stack.retain(|l| !l.inside(outer));
+                                }
+                                stack.push(Layer::Placed(piece, ramp));
+                            }
                             l => stack = vec![l],
                         }
                     }

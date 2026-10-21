@@ -2036,10 +2036,11 @@ fn params_of(
     let levels = placing.map_or(&[][..], |(p, _)| {
         &p.levels[p.levels.len().saturating_sub(LEVELS)..]
     });
+    let bars = placing.is_some_and(|(p, _)| p.bars);
     let mut floats = vec![
         levels.len() as f64,
         placing.map_or(0.0, |(_, l)| *l),
-        0.0,
+        f64::from(u8::from(bars)),
         0.0,
     ];
     for l in levels {

@@ -10,6 +10,11 @@ pub struct Level {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Placing {
     pub levels: Vec<Level>,
+    pub bars: bool,
+}
+
+pub fn fills(placed: &[Placed]) -> bool {
+    placed.len() > 1 && placed[0].picture.is_usual()
 }
 
 fn level(p: &Picture, (w, h): (f64, f64), [fx, fy, fw, fh]: [f64; 4]) -> Level {
@@ -61,6 +66,7 @@ impl Level {
 impl Placing {
     pub fn new(placed: &[Placed], frame: (f64, f64), fitted: [f64; 4]) -> Self {
         let whole = [0.0, 0.0, frame.0, frame.1];
+        let bars = fills(placed);
         let mut levels: Vec<Level> = Vec::with_capacity(placed.len());
         for (i, p) in placed.iter().enumerate().rev() {
             let own = level(&p.picture, frame, if i == 0 { fitted } else { whole });
@@ -68,12 +74,15 @@ impl Placing {
                 Some(outer) => then(&outer.back, &own.back, frame),
                 None => own.back,
             };
-            levels.push(Level {
-                back,
-                shown: own.shown,
-            });
+            let [fx, fy, fw, fh] = fitted;
+            let shown = if i == 0 && bars {
+                [-fx / fw, -fy / fh, (frame.0 - fx) / fw, (frame.1 - fy) / fh]
+            } else {
+                own.shown
+            };
+            levels.push(Level { back, shown });
         }
-        Self { levels }
+        Self { levels, bars }
     }
 
     pub fn at(&self, x: f64, y: f64) -> Option<([f64; 2], f64)> {

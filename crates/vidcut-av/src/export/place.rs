@@ -282,11 +282,17 @@ impl<'a> Shading<'a> {
                 taps(dux * fw, dvx * fh * across / down),
                 taps(duy * fw * down / across, dvy * fh),
             ),
-            lo: (fx / across, fy / down),
-            hi: (
-                ((fx + fw) / across - 1.0).min(grid.0 as f64 - 1.0),
-                ((fy + fh) / down - 1.0).min(grid.1 as f64 - 1.0),
-            ),
+            lo: match layer.placing.bars {
+                true => (0.0, 0.0),
+                false => (fx / across, fy / down),
+            },
+            hi: match layer.placing.bars {
+                true => (grid.0 as f64 - 1.0, grid.1 as f64 - 1.0),
+                false => (
+                    ((fx + fw) / across - 1.0).min(grid.0 as f64 - 1.0),
+                    ((fy + fh) / down - 1.0).min(grid.1 as f64 - 1.0),
+                ),
+            },
         }
     }
 
