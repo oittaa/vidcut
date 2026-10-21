@@ -30,7 +30,7 @@ Priority: **interactive** and **job** are the `Work` kinds; **inherited** sets n
 | `vidcut-preview` | `Live::preview_step` | the project as it was at a step of the history (`Store::project_at`, from the nearest state its `Past` keeps), the newest asked only | interactive |
 | `vidcut-worker-N`, `vidcut-tiles-N` | `Workers::new`, `Tiles::begin_frame` | filmstrips and waveforms; timeline tiles | job |
 | `vidcut-missing-media`, `vidcut-look` | `MissingWatch::start`, `look::watch` | media and proxy files; the OS's look | interactive |
-| `vidcut-ask`, `vidcut-file-dialog`, `vidcut-import-dialog`, `vidcut-project-dialog`, `vidcut-audio-devices`, `vidcut-show-in-folder`, `vidcut-open-file` | `Ask::send`, `Picked::ask`, `Workspace::import_media`, `Workspace::pick_project`, `Workspace::open_preferences`, `file_manager::show`, `file_manager::open` | UI helpers | interactive |
+| `vidcut-ask`, `vidcut-file-dialog`, `vidcut-import-dialog`, `vidcut-project-dialog`, `vidcut-audio-devices`, `vidcut-gpu-label`, `vidcut-show-in-folder`, `vidcut-open-file` | `Ask::send`, `Picked::ask`, `Workspace::import_media`, `Workspace::pick_project`, `Workspace::open_preferences`, `Workspace::open_hearing`, `file_manager::show`, `file_manager::open` | UI helpers | interactive |
 | `vidcut-quit`, `vidcut-exit-watch` | `Port::quit`, `threads::end_within` | quit fallback, exit watchdog | interactive |
 | `vidcut-viewer-close`, `vidcut-two-up-close`, `vidcut-frees-imports` | `threads::closing` | drop players, Vulkan imports | interactive |
 | `vidcut-cancel` | `ipc::client::call` | watches a CLI call's cancel | interactive |
