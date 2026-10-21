@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Compound, Marks, Media, Project, Speed, Title, TrackKind};
+use crate::model::{Clip, Compound, Marks, Media, Picture, Project, Speed, Title, TrackKind};
 use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
 use crate::time::Rational;
 
@@ -215,6 +215,16 @@ pub fn played_by(k: &Compound) -> Vec<String> {
 pub fn exported(c: &Clip, a: i64, b: i64) -> bool {
     let within = c.start.max(a) < c.end().min(b);
     (within && (c.video || c.compound.is_some())) || audio_part(c, a, b).is_some()
+}
+
+pub fn placed(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
+    let (a, b) = span.unwrap_or((0, p.end()));
+    p.tracks
+        .iter()
+        .flat_map(|t| &t.clips)
+        .filter(|c| c.picture.is_some() && c.video && exported(c, a, b))
+        .map(|c| c.id.clone())
+        .collect()
 }
 
 pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
@@ -492,6 +502,9 @@ pub fn export_drawn(
                 let mut meta = json!({ "clip": c.id, "media": c.media, "color": c.color });
                 if let Some(t) = &c.title {
                     meta["title"] = json!(t);
+                }
+                if let Some(x) = &c.picture {
+                    meta["picture"] = json!(x);
                 }
                 if let Some(au) = &c.audio {
                     meta["stream"] = json!(au.stream);
@@ -785,6 +798,9 @@ fn compound_item(
     v["markers"] = json!([]);
     v["enabled"] = json!(c.enabled);
     v["metadata"][VIDCUT] = json!({ "clip": c.id, "color": c.color });
+    if let Some(x) = &c.picture {
+        v["metadata"][VIDCUT]["picture"] = json!(x);
+    }
     v
 }
 
@@ -909,6 +925,7 @@ pub struct ImportedClip {
     pub generator: Option<Value>,
     pub title: Option<Title>,
     pub title_from: Option<Value>,
+    pub picture: Option<Picture>,
     pub compound: Option<Compound>,
     pub speed: Option<Speed>,
     pub color: Option<String>,
@@ -964,6 +981,7 @@ impl ImportedClip {
             generator: None,
             title: None,
             title_from: None,
+            picture: None,
             compound: None,
             speed: None,
             color: clip_color(item),
@@ -1525,6 +1543,11 @@ fn our_str(item: &Value, key: &str) -> Option<String> {
     item["metadata"][VIDCUT][key].as_str().map(String::from)
 }
 
+fn our_picture(item: &Value) -> Option<Picture> {
+    let p = serde_json::from_value(item["metadata"][VIDCUT].get("picture")?.clone()).ok()?;
+    crate::ops::picture::checked(&p).ok().flatten()
+}
+
 fn marker(k: &Value, at: i64, fps: Rational) -> ImportedMarker {
     let color = match k["metadata"][VIDCUT]["color"].as_str() {
         Some(c) if crate::ops::MARKER_COLORS.contains(&c) => c.to_string(),
@@ -1608,6 +1631,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 c.speed = speed;
                 if stack {
                     c.compound = Some(compound_of(item, fps));
+                    c.picture = our_picture(item);
                 } else if let Some(mut t) = titles::read(item, reference, titles::UNKNOWN_HEIGHT) {
                     let opacity = titles::take_opacity(&mut c.effects);
                     if item["metadata"][VIDCUT].get("title").is_none() {
@@ -1661,6 +1685,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         generator: None,
                         title: None,
                         title_from: None,
+                        picture: our_picture(item),
                         compound: None,
                         speed,
                         color: clip_color(item),
@@ -1823,6 +1848,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 generator: None,
                 title: None,
                 title_from: None,
+                picture: None,
                 compound: None,
                 speed,
                 color: clip_color(item),

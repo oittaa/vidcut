@@ -3223,6 +3223,41 @@ fn mutate(
             ops::titles::set(p, &id, &change)?;
             Value::Null
         }
+        Request::PictureSet {
+            clips,
+            position,
+            zoom,
+            rotation,
+            flip_horizontal,
+            flip_vertical,
+            crop_left,
+            crop_right,
+            crop_top,
+            crop_bottom,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let change = ops::picture::PictureChange {
+                position: position
+                    .as_deref()
+                    .map(ops::picture::position)
+                    .transpose()?,
+                zoom: zoom
+                    .as_ref()
+                    .map(|z| ops::picture::zoom(&z.to_vec()))
+                    .transpose()?,
+                rotation: *rotation,
+                flip_horizontal: *flip_horizontal,
+                flip_vertical: *flip_vertical,
+                crop: [*crop_left, *crop_right, *crop_top, *crop_bottom],
+            };
+            ops::picture::set(p, &ids, &change)?;
+            Value::Null
+        }
+        Request::PictureClear { clips, tool } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            ops::picture::clear(p, &ids, *tool)?;
+            Value::Null
+        }
         Request::SubtitlesSet {
             cue,
             text,
@@ -4445,6 +4480,7 @@ fn place_imported(
                     reference: reference.clone().into(),
                 }),
                 title,
+                picture: c.picture.clone(),
                 compound,
                 speed: c.speed.clone(),
                 color: color(c),
@@ -4543,6 +4579,7 @@ fn place_imported(
             effects,
             generator: None,
             title: None,
+            picture: c.picture.clone(),
             compound: None,
             speed: c.speed.clone(),
             color: color(c),
@@ -5693,6 +5730,10 @@ pub fn query(
                 .collect::<Vec<_>>()
         ),
         Request::BinsList {} => json!(p.bins),
+        Request::PictureGet { clip } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::picture::get(p, &id)?
+        }
         Request::TitlesList { track, range } => {
             let (a, b) = match range {
                 Some(r) => ctx(p, playhead).range(r)?,

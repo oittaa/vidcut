@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
-use crate::model::{Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle, TrackClip};
+use crate::model::{
+    PictureTool, Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle, TrackClip,
+};
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
 
@@ -1525,6 +1527,63 @@ pub enum Request {
         look: Option<String>,
     },
 
+    /// Where a clip's picture goes over the frame (`c3`, or `V2@15s`): the
+    /// `position` of its middle, its `zoom` across and down, its `rotation`,
+    /// its flips and its `crop`, every value given, usual ones too.
+    #[serde(rename = "picture.get")]
+    PictureGet { clip: ClipRef },
+    /// Move, zoom, turn, flip or crop clips' pictures: footage, stills,
+    /// image sequences and compound clips; a title has its own place
+    /// (`titles.set`). Each field given replaces its own. A picture at its
+    /// usual values fills the frame, bars and all; any other shows the
+    /// tracks below around it and where it is cropped.
+    #[serde(rename = "picture.set")]
+    PictureSet {
+        clips: OneOrMany<ClipRef>,
+        /// Where the middle of the whole picture goes, `[x, y]` as
+        /// fractions of the frame from its top left, each from -100 to 100,
+        /// or `[]` for the middle.
+        #[serde(default)]
+        position: Option<Vec<f64>>,
+        /// How much larger it is drawn, from 1/100 to 100: one number for
+        /// both ways, or `[x, y]` across and down. 1 for its usual size.
+        #[serde(default)]
+        zoom: Option<OneOrMany<f64>>,
+        /// Degrees turned counterclockwise about its middle, from -3600 to
+        /// 3600; 0 for none.
+        #[serde(default)]
+        rotation: Option<f64>,
+        /// Mirrored left to right.
+        #[serde(default)]
+        flip_horizontal: Option<bool>,
+        /// Mirrored top to bottom.
+        #[serde(default)]
+        flip_vertical: Option<bool>,
+        /// What is cut off its left side, as a fraction of its width, from
+        /// 0 up to what leaves some of it with `crop_right`.
+        #[serde(default)]
+        crop_left: Option<f64>,
+        /// What is cut off its right side, as a fraction of its width.
+        #[serde(default)]
+        crop_right: Option<f64>,
+        /// What is cut off its top, as a fraction of its height, from 0 up
+        /// to what leaves some of it with `crop_bottom`.
+        #[serde(default)]
+        crop_top: Option<f64>,
+        /// What is cut off its bottom, as a fraction of its height.
+        #[serde(default)]
+        crop_bottom: Option<f64>,
+    },
+    /// Put clips' pictures back at their usual values: the `transform`
+    /// (position, zoom, rotation and flips), the `crop`, or both when no
+    /// `tool` is given.
+    #[serde(rename = "picture.clear")]
+    PictureClear {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default)]
+        tool: Option<PictureTool>,
+    },
+
     /// Plan an export without encoding: settings, encoder, outputs, segments.
     #[serde(rename = "export.plan")]
     ExportPlan(ExportParams),
@@ -2886,6 +2945,7 @@ impl Request {
                     | Self::MarkersList {}
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }
+                    | Self::PictureGet { .. }
                     | Self::SubtitlesExport { .. }
                     | Self::AnalyzeWords { .. }
                     | Self::MediaTranscribe { .. }

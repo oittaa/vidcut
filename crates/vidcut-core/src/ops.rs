@@ -1,6 +1,7 @@
 mod dissolve;
 pub mod filmstrip;
 mod follow;
+pub mod picture;
 pub mod subtitles;
 pub mod titles;
 mod tracks;
@@ -249,6 +250,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         effects: None,
         generator: None,
         title: None,
+        picture: None,
         compound: None,
         speed: None,
         color: None,

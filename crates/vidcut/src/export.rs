@@ -278,7 +278,18 @@ pub fn timeline(
         summary["files"] = json!(items.iter().map(|i| i.files.len()).sum::<usize>());
         summary["bytes"] = json!(items.iter().map(|i| i.bytes).sum::<u64>());
     }
-    let notes = subtitle_notes(&subtitles);
+    let mut notes = subtitle_notes(&subtitles);
+    let placed = otio::placed(p, span);
+    if !placed.is_empty() {
+        notes.push(json!({
+            "code": "pictures_kept",
+            "message": format!(
+                "{}: their pictures' places and crops are in vidcut's own metadata, which \
+                 other editors don't read; there they fill the frame",
+                placed.join(", ")
+            ),
+        }));
+    }
     let Some(writing) = write else {
         return Ok(json!({
             "preset": null, "format": format.name(), "outputs": [summary], "notes": notes,

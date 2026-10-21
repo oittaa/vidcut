@@ -55,6 +55,9 @@ pub fn violations(p: &Project) -> Vec<String> {
                 v.push(format!("{} overlaps the previous clip on {}", c.id, t.id));
             }
             prev_end = Some(c.end());
+            if let Some(e) = crate::ops::picture::violation(p, i, c) {
+                v.push(e);
+            }
             if c.is_block() {
                 let video = c.is_generator() || t.kind == TrackKind::Video;
                 if !c.media.is_empty()

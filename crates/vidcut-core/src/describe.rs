@@ -196,6 +196,31 @@ pub fn describe_at(
         "subtitles.match_speaker" => format!("Match the speaker's cues to {}", d.cues("cue")),
         "titles.add" => format!("Title {} at {}", quoted(&d.text("text")), d.time("at")),
         "titles.set" => format!("Change title {}", d.clips("clip")),
+        "picture.set" => {
+            let crops = ["crop_left", "crop_right", "crop_top", "crop_bottom"]
+                .iter()
+                .any(|k| !d.params[*k].is_null());
+            let moves = [
+                "position",
+                "zoom",
+                "rotation",
+                "flip_horizontal",
+                "flip_vertical",
+            ]
+            .iter()
+            .any(|k| !d.params[*k].is_null());
+            let what = match (moves, crops) {
+                (true, true) => "Transform and crop",
+                (false, true) => "Crop",
+                _ => "Transform",
+            };
+            format!("{what} {}", d.clips("clips"))
+        }
+        "picture.clear" => match d.params["tool"].as_str() {
+            Some("crop") => format!("Reset the crop of {}", d.clips("clips")),
+            Some(_) => format!("Reset the transform of {}", d.clips("clips")),
+            None => format!("Reset the picture of {}", d.clips("clips")),
+        },
         "subtitles.import" if d.params["media"].is_string() => {
             format!("Insert subtitles {}", d.media("media"))
         }
