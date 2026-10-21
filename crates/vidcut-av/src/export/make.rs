@@ -106,7 +106,7 @@ impl Fitting {
 
     pub(crate) fn scale(&mut self, frame: &frame::Video) -> Result<Option<frame::Video>> {
         let scaler = self.scaler.as_mut().expect("a scaler");
-        scaler.push(Some(frame))?;
+        scaler.push(Some(&super::video::frame_ref(frame)?))?;
         scaler.pull()
     }
 

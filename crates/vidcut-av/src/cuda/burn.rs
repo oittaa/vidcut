@@ -189,17 +189,12 @@ impl Overlay {
         sprites: &[crate::burn::Sprite],
         shift: crate::burn::Placing,
     ) -> Result<Self> {
-        let cuda = Cuda::get()?;
         // SAFETY: the pool is a live CUDA frames context.
-        let (sw, (ctx, stream)) = unsafe {
+        let sw = unsafe {
             let fc = &*((*frames.as_ptr()).data as *const ffi::AVHWFramesContext);
-            (
-                crate::ffmpeg::format::Pixel::from(fc.sw_format),
-                cuda_context(fc.device_ref),
-            )
+            crate::ffmpeg::format::Pixel::from(fc.sw_format)
         };
         two_planes(sw)?;
-        let samples = Samples::of(sw)?;
         let (color, alpha) = (pool_frame(frames)?, pool_frame(frames)?);
         let size = (like.width(), like.height());
         let Some(area) = crate::burn::bounds(sprites, shift, size) else {
@@ -211,10 +206,76 @@ impl Overlay {
         };
         let (x0, y0, w, h) = area;
         let (up_color, up_alpha) = crate::burn::overlay(sw, like, sprites, shift, area)?;
+        Self::up(
+            frames,
+            (color, alpha),
+            (&up_color, &up_alpha),
+            (x0, y0, w, h),
+        )
+    }
+
+    pub(crate) fn of(
+        frames: &CudaFrames,
+        layer: &crate::export::place::Layer,
+        size: (u32, u32),
+    ) -> Result<Self> {
+        // SAFETY: the pool is a live CUDA frames context.
+        let sw = unsafe {
+            let fc = &*((*frames.as_ptr()).data as *const ffi::AVHWFramesContext);
+            crate::ffmpeg::format::Pixel::from(fc.sw_format)
+        };
+        two_planes(sw)?;
+        let (color, alpha) = (pool_frame(frames)?, pool_frame(frames)?);
+        let fits = |v: u32, most: u32| (v & !1).min(most);
+        let area = layer
+            .placing
+            .bounds((f64::from(size.0), f64::from(size.1)))
+            .map(|[x0, y0, x1, y1]| {
+                [
+                    fits(x0, size.0),
+                    fits(y0, size.1),
+                    fits(x1 + 1, size.0),
+                    fits(y1 + 1, size.1),
+                ]
+            })
+            .filter(|[x0, y0, x1, y1]| x1 > x0 && y1 > y0);
+        let Some(area) = area else {
+            return Ok(Self {
+                color,
+                alpha,
+                area: (0, 0, 0, 0),
+            });
+        };
+        let (up_color, up_alpha) = crate::export::place::overlay(sw, layer, size, area)?;
+        let [x0, y0, x1, y1] = area;
+        Self::up(
+            frames,
+            (color, alpha),
+            (&up_color, &up_alpha),
+            (x0 as i32, y0 as i32, x1 - x0, y1 - y0),
+        )
+    }
+
+    fn up(
+        frames: &CudaFrames,
+        (color, alpha): (frame::Video, frame::Video),
+        (up_color, up_alpha): (&frame::Video, &frame::Video),
+        (x0, y0, w, h): (i32, i32, u32, u32),
+    ) -> Result<Self> {
+        let cuda = Cuda::get()?;
+        // SAFETY: the pool is a live CUDA frames context.
+        let (sw, (ctx, stream)) = unsafe {
+            let fc = &*((*frames.as_ptr()).data as *const ffi::AVHWFramesContext);
+            (
+                crate::ffmpeg::format::Pixel::from(fc.sw_format),
+                cuda_context(fc.device_ref),
+            )
+        };
+        let samples = Samples::of(sw)?;
         let from = samples.row_bytes(x0 as u32);
         let rows = samples.row_bytes(w);
         in_context(cuda, ctx, || {
-            for (host, device) in [(&up_color, &color), (&up_alpha, &alpha)] {
+            for (host, device) in [(up_color, &color), (up_alpha, &alpha)] {
                 for p in 0..2 {
                     let (y, n) = match p {
                         0 => (y0 as usize, h as usize),
@@ -239,8 +300,8 @@ impl Overlay {
             }
             Ok(())
         })?;
-        crate::copies::up(&up_color);
-        crate::copies::up(&up_alpha);
+        crate::copies::up(up_color);
+        crate::copies::up(up_alpha);
         Ok(Self {
             color,
             alpha,

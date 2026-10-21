@@ -1087,9 +1087,16 @@ impl VideoFrames {
         }
         let shown = heaviest(&layers);
         let placed = layers.iter().any(|l| l.placing.is_some());
+        let black = match self.maker.output() {
+            Output::Cuda { .. } if placed && self.gpu_mixes() && layers[0].frame.is_none() => {
+                Some(self.black_frame()?)
+            }
+            _ => None,
+        };
+        let (w, h, _) = self.maker.out();
         let on_gpu = match self.maker.output() {
-            Output::Cuda { frames, .. } if self.gpu_mixes() && !placed => {
-                match cuda_mix(frames, &layers) {
+            Output::Cuda { frames, .. } if self.gpu_mixes() => {
+                match cuda_mix(frames, &layers, black.as_ref(), (w, h)) {
                     Ok(mixed) => Some(mixed),
                     Err(e) => {
                         crate::debug!(
@@ -1119,9 +1126,15 @@ impl VideoFrames {
                     let over = in_memory(l.frame.as_ref())?;
                     let weight = l.weight.unwrap_or(WHOLE);
                     mixed = match &l.placing {
-                        Some((placing, fitted)) => {
-                            super::place::over(&mixed, &over, placing, *fitted, weight)?
-                        }
+                        Some((placing, fitted)) => super::place::over(
+                            &mixed,
+                            &super::place::Layer {
+                                picture: &over,
+                                placing,
+                                fitted: *fitted,
+                                weight,
+                            },
+                        )?,
                         None => super::mix::mix(&mixed, &over, weight)?,
                     };
                 }
@@ -1617,9 +1630,36 @@ impl VideoFrames {
     }
 }
 
-fn cuda_mix(frames: &crate::cuda::CudaFrames, layers: &[Layer]) -> Result<frame::Video> {
+fn cuda_mix(
+    frames: &crate::cuda::CudaFrames,
+    layers: &[Layer],
+    black: Option<&frame::Video>,
+    size: (u32, u32),
+) -> Result<frame::Video> {
     let mut mixed: Option<frame::Video> = None;
     for l in layers {
+        if let (Some((placing, fitted)), Some(f)) = (&l.placing, &l.frame) {
+            let picture = match Place::of(f) {
+                Place::Memory => frame_ref(f)?,
+                _ => crate::hw::download(f)?,
+            };
+            let layer = super::place::Layer {
+                picture: &picture,
+                placing,
+                fitted: *fitted,
+                weight: l.weight.unwrap_or(WHOLE),
+            };
+            let overlay = crate::cuda::burn::Overlay::of(frames, &layer, size)?;
+            let under = match (mixed.take(), black) {
+                (Some(m), _) => m,
+                (None, Some(b)) => frame_ref(b)?,
+                (None, None) => {
+                    return Err(Error::Invalid("nothing under a placed picture".into()));
+                }
+            };
+            mixed = Some(crate::cuda::burn::burn(frames, &under, &overlay)?);
+            continue;
+        }
         match (mixed.take(), l.weight) {
             (None, None) => mixed = l.frame.as_ref().map(frame_ref).transpose()?,
             (under, w) => {
