@@ -1569,6 +1569,109 @@ impl Workspace {
     }
 }
 
+const SWEEP_LEG: f64 = 1.0;
+
+fn sweep(time: f64) -> (f32, bool) {
+    let phase = (time / SWEEP_LEG).rem_euclid(2.0);
+    let forward = phase < 1.0;
+    let t = if forward { phase } else { 2.0 - phase };
+    let t = t * t * (3.0 - 2.0 * t);
+    (t as f32, forward)
+}
+
+fn job_meter(j: &JobInfo) -> (Option<f32>, String) {
+    if j.measuring {
+        return (
+            Some(j.progress.clamp(0.0, 1.0) as f32),
+            format!(
+                "measuring light for the HDR metadata · {:.0}%",
+                j.progress * 100.0
+            ),
+        );
+    }
+    match j.fraction() {
+        None => (
+            None,
+            format!("{} elapsed", clock(j.clock.elapsed().as_secs_f64())),
+        ),
+        Some(share) => {
+            let text = match j.eta {
+                Some(eta) => format!(
+                    "{:.0}% · {} elapsed · about {} left",
+                    share * 100.0,
+                    clock(j.elapsed),
+                    clock(eta)
+                ),
+                None => "starting…".into(),
+            };
+            (Some(share as f32), text)
+        }
+    }
+}
+
+fn fade(color: egui::Color32, alpha: f32) -> egui::Color32 {
+    let [r, g, b, a] = color.to_array();
+    egui::Color32::from_rgba_unmultiplied(r, g, b, (f32::from(a) * alpha) as u8)
+}
+
+fn paint_sweep(painter: &egui::Painter, bar: egui::Rect, color: egui::Color32, time: f64) {
+    let span = (bar.width() * 0.36).clamp(bar.height() * 2.0, bar.width());
+    let (t, forward) = sweep(time);
+    let x = bar.left() + (bar.width() - span) * t;
+    let body = egui::Rect::from_min_size(egui::pos2(x, bar.top()), egui::vec2(span, bar.height()));
+    let radius = bar.height() * 0.5;
+    let steps = 24;
+    for i in 0..steps {
+        let toward_head = i as f32 / (steps - 1) as f32;
+        let cover = 1.0 - toward_head;
+        let w = bar.height() + (span - bar.height()) * cover;
+        let left = if forward {
+            body.right() - w
+        } else {
+            body.left()
+        };
+        let rect =
+            egui::Rect::from_min_size(egui::pos2(left, body.top()), egui::vec2(w, body.height()));
+        painter.rect_filled(rect, radius, fade(color, 0.22 + 0.78 * toward_head));
+    }
+}
+
+fn job_bar(ui: &mut egui::Ui, share: Option<f32>, text: &str) {
+    if let Some(share) = share {
+        ui.add(
+            egui::ProgressBar::new(share)
+                .text(text)
+                .desired_width(360.0),
+        );
+        return;
+    }
+    let height = ui.spacing().interact_size.y;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(360.0, height), egui::Sense::hover());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::ProgressIndicator, ui.is_enabled(), text)
+    });
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(33));
+    let track = ui.visuals().extreme_bg_color;
+    let fill = ui.visuals().selection.bg_fill;
+    let text_color = ui.visuals().text_color();
+    let painter = ui.painter();
+    painter.rect_filled(rect, height * 0.5, track);
+    paint_sweep(painter, rect, fill, ui.input(|i| i.time));
+    let galley = egui::WidgetText::from(text).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let pos = rect.left_center() - egui::vec2(0.0, galley.size().y * 0.5)
+        + egui::vec2(ui.spacing().item_spacing.x, 0.0);
+    painter.with_clip_rect(rect).galley(pos, galley, text_color);
+}
+
 fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
     match j.state {
         JobState::Queued => {
@@ -1578,27 +1681,8 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
             }
         }
         JobState::Running => {
-            let telling = j.stage == Some(vidcut_av::export::Stage::Speakers) && j.frames < j.total;
-            let text = match j.eta {
-                _ if j.measuring => format!(
-                    "measuring light for the HDR metadata · {:.0}%",
-                    j.progress * 100.0
-                ),
-                _ if telling => format!("{} elapsed", clock(j.elapsed)),
-                Some(eta) => format!(
-                    "{:.0}% · {} elapsed · about {} left",
-                    j.progress * 100.0,
-                    clock(j.elapsed),
-                    clock(eta)
-                ),
-                None => "starting…".into(),
-            };
-            ui.add(
-                egui::ProgressBar::new(j.progress as f32)
-                    .text(text)
-                    .animate(telling)
-                    .desired_width(360.0),
-            );
+            let (share, text) = job_meter(j);
+            job_bar(ui, share, &text);
             use vidcut_av::export::Stage;
             let (done, total) = (j.frames, j.total);
             ui.label(dim(match j.stage {
@@ -1613,7 +1697,7 @@ fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
                 }
                 Some(Stage::Loading) => "loading the model".into(),
                 Some(Stage::Speakers) => {
-                    format!("finding the speakers · {} s of sound", total / 1000)
+                    format!("finding the speakers in {} s of sound", total / 1000)
                 }
                 Some(Stage::Uploading) => format!(
                     "uploading · {:.0} / {:.0} MB",

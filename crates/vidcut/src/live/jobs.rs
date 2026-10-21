@@ -223,8 +223,24 @@ impl JobInfo {
         } else {
             0.0
         };
-        self.eta = (self.frames > 0)
-            .then(|| self.elapsed * (self.total - self.frames) as f64 / self.frames as f64);
+        self.eta = match self.fraction() {
+            Some(_) if self.frames > 0 => {
+                Some(self.elapsed * (self.total - self.frames) as f64 / self.frames as f64)
+            }
+            _ => None,
+        };
+    }
+
+    pub(crate) fn fraction(&self) -> Option<f64> {
+        if self.measuring {
+            return Some(self.progress.clamp(0.0, 1.0));
+        }
+        match self.stage {
+            Some(Stage::Waiting | Stage::Loading) => None,
+            Some(Stage::Speakers) if self.frames <= 0 => None,
+            _ if self.total <= 0 => None,
+            _ => Some(self.progress.clamp(0.0, 1.0)),
+        }
     }
 
     pub(crate) fn ended(&mut self, result: &vidcut_core::Result<vidcut_core::Response>) {
@@ -370,6 +386,46 @@ mod tests {
         t.ask("j2", false);
         t.ask("j3", true);
         assert_eq!(t.ended("j1").as_deref(), Some("j3"));
+    }
+
+    #[test]
+    fn a_download_fills_its_share() {
+        let mut j = JobInfo::new("j".into(), "gui", json!({}));
+        j.progressed(
+            0,
+            Progress::stage(
+                Stage::Downloading,
+                25,
+                100,
+                std::time::Duration::from_secs(1),
+            ),
+        );
+        assert_eq!(j.fraction(), Some(0.25));
+    }
+
+    #[test]
+    fn a_speaker_pass_with_no_count_has_no_share() {
+        let mut j = JobInfo::new("j".into(), "gui", json!({}));
+        j.progressed(
+            0,
+            Progress::stage(
+                Stage::Speakers,
+                0,
+                12_000,
+                std::time::Duration::from_secs(4),
+            ),
+        );
+        assert_eq!(j.fraction(), None);
+    }
+
+    #[test]
+    fn waiting_for_a_reply_has_no_share() {
+        let mut j = JobInfo::new("j".into(), "gui", json!({}));
+        j.progressed(
+            0,
+            Progress::stage(Stage::Waiting, 80, 80, std::time::Duration::from_secs(5)),
+        );
+        assert_eq!(j.fraction(), None);
     }
 
     #[test]
