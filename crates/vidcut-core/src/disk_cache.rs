@@ -67,6 +67,8 @@ pub const KEEP_FREE_PERCENT: u64 = 20;
 
 pub const RESCAN_EVERY: Duration = Duration::from_secs(30);
 
+pub const MARK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+
 impl Policy {
     pub fn chosen(&self, disk: Option<Disk>) -> Option<u64> {
         match self.cache.limit {
@@ -235,12 +237,21 @@ fn held<'a>(s: &'a mut State, sources: &Sources) -> Held<'a> {
 }
 
 pub fn read(path: &Path) -> Option<Vec<u8>> {
-    let bytes = std::fs::read(path).ok()?;
-    used(path);
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut f, &mut bytes).ok()?;
+    mark(path, f.metadata().and_then(|m| m.modified()).ok());
     Some(bytes)
 }
 
 pub fn used(path: &Path) {
+    mark(
+        path,
+        std::fs::metadata(path).and_then(|m| m.modified()).ok(),
+    );
+}
+
+fn mark(path: &Path, modified: Option<SystemTime>) {
     if !path.starts_with(crate::dirs::cache()) {
         return;
     }
@@ -248,7 +259,10 @@ pub fn used(path: &Path) {
     if let Some(e) = state().index.as_mut().and_then(|i| i.files.get_mut(path)) {
         e.used = now;
     }
-    if let Ok(f) = std::fs::File::options().write(true).open(path) {
+    let stale = modified.and_then(|t| now.duration_since(t).ok());
+    if stale.is_some_and(|age| age >= MARK_EVERY)
+        && let Ok(f) = std::fs::File::options().write(true).open(path)
+    {
         let _ = f.set_modified(now);
     }
 }
