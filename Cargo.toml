@@ -32,7 +32,7 @@ zeno = "0.3"
 # Geist Mono, Space Grotesk. OFL-1.1, the crates' code MIT. Exact versions:
 # the crates are new.
 shadcn-egui-font-geist = "=0.4.0"
-shadcn-egui-font-geist-mono = "=0.4.0"
+shadcn-egui-font-geist-mono = "=0.5.0"
 shadcn-egui-font-space-grotesk = "=0.4.0"
 # A font's metrics, to center its capitals in a line (the version epaint
 # lays text out with).
