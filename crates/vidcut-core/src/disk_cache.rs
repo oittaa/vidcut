@@ -140,9 +140,23 @@ pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     written
 }
 
-pub fn added(path: &Path) {
+pub fn added(path: &Path) -> bool {
     used(path);
-    evict();
+    let len = std::fs::metadata(path).map_or(0, |m| m.len());
+    let kept = stays(path, len);
+    if !kept {
+        let _ = std::fs::remove_file(path);
+    }
+    kept
+}
+
+pub fn room(path: &Path) -> Option<u64> {
+    let policy = POLICY.get()?();
+    if !counted(&policy, path) {
+        return None;
+    }
+    let found = entries(&policy);
+    policy.limit(found.iter().filter(|e| e.path != path).map(|e| e.len).sum())
 }
 
 pub fn evict() {

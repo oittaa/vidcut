@@ -405,6 +405,9 @@ impl Env for AvEnv {
             (made_with, copies) = made().remove(&path).unzip();
             disk_cache::used(&path);
         } else if !dry_run {
+            if disk_cache::room(&path) == Some(0) {
+                return Err(no_room(dir));
+            }
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
             let total = Some((v.duration * v.fps.as_f64()).round().max(0.0) as u64);
@@ -439,7 +442,9 @@ impl Env for AvEnv {
                     .map_err(|e| Error::media(format!("{}: {e}", actual.display())))?;
                 path = actual;
             }
-            disk_cache::added(&path);
+            if !disk_cache::added(&path) {
+                return Err(no_room(dir));
+            }
             made().insert(path.clone(), (how.clone(), written.copies));
             made_with = Some(how);
             copies = Some(written.copies);
@@ -654,6 +659,15 @@ fn speech_options(asked: &Asked) -> Result<vidcut_av::transcribe::Options<'stati
         gpu: crate::preferences::gpu_acceleration(),
         key,
     })
+}
+
+fn no_room(dir: &Path) -> Error {
+    Error::media(format!(
+        "{}: the disk cache has no room for this proxy: it stays under cache.limit and keeps \
+         {}% of the disk free; free some space, or set proxies.folder outside the cache dir",
+        dir.display(),
+        disk_cache::KEEP_FREE_PERCENT
+    ))
 }
 
 fn keep_transcript(media: &Media, stream: u32, speech: Arc<Speech>) -> Result<Arc<Speech>> {
