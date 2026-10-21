@@ -586,11 +586,7 @@ pub fn decoders(dir: &std::path::Path) -> Vec<DecoderStatus> {
     ]
     .map(|(codec, video, container, id)| {
         let spec = FixtureSpec::new(video, container, 640, 360, (30, 1), 8).no_audio();
-        let clip = crate::fixture::ensure_in(dir, &spec);
-        if let Ok(path) = &clip {
-            vidcut_core::disk_cache::added(path);
-        }
-        (codec, id, clip)
+        (codec, id, crate::fixture::ensure_in(dir, &spec))
     });
     let mut out = Vec::new();
     for gpu in GpuDecoder::all() {
@@ -613,6 +609,11 @@ pub fn decoders(dir: &std::path::Path) -> Vec<DecoderStatus> {
                 ok: result.is_ok(),
                 error: result.err(),
             });
+        }
+    }
+    for (_, _, clip) in &clips {
+        if let Ok(path) = clip {
+            vidcut_core::disk_cache::added(path);
         }
     }
     out
@@ -651,8 +652,9 @@ pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<(&'static str, Kind
         .filter(|&(_, video, container, id)| {
             let spec = FixtureSpec::new(video, container, 640, 360, (30, 1), 8).no_audio();
             crate::fixture::ensure_in(dir, &spec).is_ok_and(|clip| {
+                let plays = gpu.why_not(id, || false).is_none() && decodes_all(gpu, &clip).is_ok();
                 vidcut_core::disk_cache::added(&clip);
-                gpu.why_not(id, || false).is_none() && decodes_all(gpu, &clip).is_ok()
+                plays
             })
         })
         .map(|(codec, .., id)| (codec, gpu.kind_for(id).unwrap_or(gpu.kind())))
