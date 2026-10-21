@@ -86,6 +86,8 @@ impl Default for Settings {
     }
 }
 
+const XAI_VOICE_GATE: f64 = 0.5;
+
 fn split_list(text: &str) -> Vec<String> {
     text.split([',', '\n'])
         .map(str::trim)
@@ -197,11 +199,7 @@ fn service_rows(ui: &mut egui::Ui, s: &mut Settings, transcribing: bool) {
                 }
             });
             dialog::row(ui, "Skip Non-Speech", |ui| {
-                let usual = match s.find {
-                    FindSpeech::Sound => 0.0,
-                    FindSpeech::Voice => 0.5,
-                };
-                let mut v = s.xai.vad_threshold.unwrap_or(usual);
+                let mut v = s.xai.vad_threshold.unwrap_or(XAI_VOICE_GATE);
                 ui.label(dim("Keep All"));
                 if ui
                     .add(egui::Slider::new(&mut v, 0.0..=1.0).show_value(false))
