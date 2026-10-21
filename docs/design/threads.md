@@ -27,6 +27,7 @@ Priority: **interactive** and **job** are the `Work` kinds; **inherited** sets n
 | `vidcut-task`, `vidcut-make`, `vidcut-measure` | the core, per `Step` | their step | task: its `Work`; make: interactive; measure: job |
 | vidcut-j1, vidcut-j2, … | `Live::start_export`, `Live::start_encode` | an export, proxy or transcription job | job |
 | `vidcut-history` | `OpenProject::apply` | `Store::compact` | job |
+| `vidcut-cache` | `main`, for the GUI | `disk_cache::start`: the index from one listing at startup, then `disk_cache::rebuild` every hour | job |
 | `vidcut-preview` | `Live::preview_step` | the project as it was at a step of the history (`Store::project_at`, from the nearest state its `Past` keeps), the newest asked only | interactive |
 | `vidcut-worker-N`, `vidcut-tiles-N` | `Workers::new`, `Tiles::begin_frame` | filmstrips and waveforms; timeline tiles | job |
 | `vidcut-missing-media`, `vidcut-look` | `MissingWatch::start`, `look::watch` | media and proxy files; the OS's look | interactive |
