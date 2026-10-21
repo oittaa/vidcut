@@ -120,7 +120,28 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 | speech models | `models` (`paths::models_dir`) | file name, checked by size; SHA-256 when downloaded |
 | paid speech replies | `speech-replies` (`speech_api::replies_folder`) | the company, the request's settings, the audio |
 
-`reset` with `keep_downloads` keeps `models` and `speech-replies`. On disk only `thumbs` has a size limit (`thumbcache::evict`, least recently used first), set in the preferences. `Tiles::evict` also drops kept pictures past the tile cache's own budget. Levels, voice activity, picture stats and light are memoized in the process too, and the last few heard (`HEARD`, an `Lru`) only there.
+`reset` with `keep_downloads` keeps `models` and `speech-replies`. `Tiles::evict` drops kept pictures past the tile cache's own memory budget. Levels, voice activity, picture stats and light are memoized in the process too, and the last few heard (`HEARD`, an `Lru`) only there.
+
+### The disk cache limit
+
+`disk_cache` keeps what vidcut can make again under one limit: the folders of `disk_cache::Kind` (`thumbs`, `waveforms`, `analysis`, `shaders`, `decoder-tests`) and the proxies (`.mkv` files) in `proxies.folder` when it is in the cache dir (`Policy`, compared with . and .. resolved). Transcripts (`words` files in `analysis`, `Kind::keeps`), `models`, `speech-replies`, `uploads`, `encoders.json` and `plays.json` stay and don't count. A file with a `part` piece in its name is still being written and doesn't count; one a killed job left, a day old, goes at the next listing.
+
+- **The limit** is the preferences' `cache` (`Policy::limit`): `cache.percent` of the disk the cache dir is on (10 by default; `system::disk` reads its size and free space) or `cache.gb`, and never more than keeps 20% of that disk free (`KEEP_FREE_PERCENT`): the files held plus the free space, less that fifth. Without the disk's size a share of it sets no limit, and Preferences says so.
+- **The index** (`Index`) is an `Lru` of the counted files, a hashmap and a linked list from least to most recently used, with each file's size, and their total. Only the GUI keeps one: its `vidcut-cache` thread builds it at startup from one listing of the folders, the files' modification times giving the order, and pops what is past the limit (`disk_cache::start`); every hour it lists them again to see what other processes wrote or removed (`disk_cache::rebuild`, `REBUILD_EVERY`), without the lock, and keeps what the index gained meanwhile. A CLI process has none: its reads and writes go straight to the files, with no listing and no eviction.
+- **Reads** go through `disk_cache::read`, and `disk_cache::used` marks a file something else reads (a project's proxies when it opens and when the preview plays them, a proxy `proxy.generate` finds made, a decoder test clip): the entry moves to the head. A file's modification time is written the first time it is used in a run, so the next start's order follows use. A file that isn't there is a miss and leaves the index; one the index doesn't have yet joins it.
+- **Writes** go through `disk_cache::write`. A file larger than the limit is refused with `StorageFull`, nothing written, and the caller goes on with what it has in memory; otherwise the oldest entries are popped until it fits and it goes in at the head, then the popped files are removed and it is written (a `.part`, then renamed). `disk_cache::added` decides the same for a file FFmpeg wrote (a proxy, a test clip), removing one that can't stay and saying so: `proxy.generate` into the cache dir then fails with why, and fails before it encodes while `disk_cache::room` is 0. A decoder test clip goes through it only after its test, so a full disk costs the clip, not the result.
+- **The lock** covers only the index's map and list: listing folders, reading, writing and removing files and writing times all happen outside it.
+- **A preference change** (`disk_cache::set_policy`, from `preferences.set` and `Msg::PreferencesChanged`) pops what the new limit leaves out. Turning thumbnails off clears `thumbs`, and their entries go as misses.
+- **libplacebo** reads and writes `shaders` itself, so a shader's time is when it was compiled.
+- **Usage:** the preferences requests answer `disk_cache::usage` in `cache`, from the index in the GUI and from one listing of the folders in a CLI process: files, MB, the limit as set (`chosen_mb`) and as it stands (`limit_mb`), the disk's size and free space; the Cache page of Preferences shows it.
+
+How often the bookkeeping touches the disk: one listing of the folders when the GUI starts and one an hour; a write touches its own file and the files it pops; a read writes a file's time once per run at most; a CLI command lists nothing but a preferences request, once, for its usage.
+
+**Why** an index built from the files: an LRU makes every operation constant time, and building it from the folders makes it right after anything else touched them (a CLI run, a person clearing the cache). Other processes' writes and removals show at the next rebuild; until then a removed file is a miss.
+
+**Why** named folders, not the whole cache dir: a folder vidcut doesn't know (a download, a newer version's) is never removed.
+
+**A new kind** of entry: add a variant to `disk_cache::Kind`, name its folder in `Kind::folder` and list it in `Kind::ALL` (a variant left out of `ALL` is never counted or evicted), name its files with `Kind::file`, and read and write them with `disk_cache::read` and `disk_cache::write`. A file FFmpeg writes goes to a name with a `part` piece and, once renamed into place, through `disk_cache::added`; mark one FFmpeg reads with `disk_cache::used`. Files of it that must stay go in `Kind::keeps`.
 
 ## Storyboards
 
@@ -132,6 +153,7 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 - `crates/vidcut-core/src/editor.rs`
 - `crates/vidcut-core/src/fingerprint.rs`
 - `crates/vidcut-core/src/dirs.rs`
+- `crates/vidcut-core/src/disk_cache.rs`
 - `crates/vidcut-av/src/analysis.rs`
 - `crates/vidcut-core/src/transcript.rs`
 - `crates/vidcut-core/src/speakers.rs`
@@ -145,6 +167,7 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 - `crates/vidcut-av/src/thumbs.rs`
 - `crates/vidcut/src/env.rs`
 - `crates/vidcut/src/paths.rs`
+- `crates/vidcut/src/preferences.rs`
 - `crates/vidcut/src/thumbcache.rs`
 - `crates/vidcut/src/live/mod.rs`
 - `crates/vidcut/src/storyboard.rs`

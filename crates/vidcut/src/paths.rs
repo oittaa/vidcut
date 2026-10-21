@@ -48,10 +48,6 @@ fn content_origin(content: &str, size: u64, mtime_ns: i64) -> Origin {
     }
 }
 
-pub fn media_cache(dir: &str, origin: &Origin, ext: &str) -> PathBuf {
-    cache_dir().join(dir).join(format!("{}.{ext}", origin.name))
-}
-
 pub fn state_dir() -> PathBuf {
     vidcut_core::store::state_dir()
 }

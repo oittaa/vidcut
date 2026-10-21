@@ -523,9 +523,13 @@ pub fn print(method: &str, r: &Response, json: bool) {
             if !chosen.is_empty() && found.is_none() {
                 println!("gpu.device={chosen} isn't here: the automatic GPU is in use");
             }
-            let c = &r.result["thumbnail_cache"];
+            let c = &r.result["cache"];
+            let limit = match c["limit_mb"].as_u64() {
+                Some(mb) => format!(", up to {mb} MB"),
+                None => ", no limit: the disk's size can't be read".into(),
+            };
             println!(
-                "thumbnail cache: {} MB in {} files ({})",
+                "cache: {} MB in {} files{limit} ({})",
                 c["mb"],
                 c["files"],
                 c["path"].as_str().unwrap_or_default()

@@ -2,6 +2,7 @@ pub mod analysis;
 pub mod change;
 pub mod describe;
 pub mod dirs;
+pub mod disk_cache;
 pub mod editor;
 pub mod error;
 pub mod export;
