@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
@@ -89,19 +89,35 @@ impl Policy {
     }
 
     fn counts(&self, path: &Path) -> bool {
+        let path = plain(path);
         let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
             return false;
         };
         let name = name.to_string_lossy();
-        Kind::ALL.iter().any(|k| dir == k.dir() && !k.keeps(&name))
-            || (self.proxies_dir() == Some(dir) && name.ends_with(".mkv"))
+        Kind::ALL
+            .iter()
+            .any(|k| dir == plain(&k.dir()) && !k.keeps(&name))
+            || (self.proxies_dir().as_deref() == Some(dir) && name.ends_with(".mkv"))
     }
 
-    fn proxies_dir(&self) -> Option<&Path> {
-        let dir = &self.proxies;
-        (dir.starts_with(crate::dirs::cache()) && !Kind::ALL.iter().any(|k| *dir == k.dir()))
-            .then_some(dir.as_path())
+    fn proxies_dir(&self) -> Option<PathBuf> {
+        let dir = plain(&self.proxies);
+        (dir.starts_with(plain(&crate::dirs::cache()))
+            && !Kind::ALL.iter().any(|k| dir == plain(&k.dir())))
+        .then_some(dir)
     }
+}
+
+fn plain(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir if out.pop() => {}
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,7 +268,8 @@ pub fn used(path: &Path) {
 }
 
 fn mark(path: &Path, modified: Option<SystemTime>) {
-    if !path.starts_with(crate::dirs::cache()) {
+    let path = &plain(path);
+    if !path.starts_with(plain(&crate::dirs::cache())) {
         return;
     }
     let now = SystemTime::now();
@@ -301,6 +318,7 @@ pub fn added(path: &Path) -> bool {
 }
 
 pub fn room(path: &Path) -> Option<u64> {
+    let path = &plain(path);
     let sources = SOURCES.get()?;
     let mut s = state();
     let h = held(&mut s, sources);
@@ -311,13 +329,14 @@ pub fn room(path: &Path) -> Option<u64> {
 }
 
 fn take_room(path: &Path, len: u64, part: Option<&Path>) -> bool {
+    let path = &plain(path);
     let Some(sources) = SOURCES.get() else {
         return true;
     };
     let mut s = state();
     let h = held(&mut s, sources);
     if let Some(part) = part {
-        h.index.forget(part);
+        h.index.forget(&plain(part));
     }
     if !h.policy.counts(path) {
         return true;
@@ -427,10 +446,10 @@ pub fn usage(policy: &Policy) -> Usage {
 fn scan(policy: &Policy) -> HashMap<PathBuf, Entry> {
     let mut found = HashMap::new();
     for kind in Kind::ALL {
-        listed(&kind.dir(), &|name| !kind.keeps(name), &mut found);
+        listed(&plain(&kind.dir()), &|name| !kind.keeps(name), &mut found);
     }
     if let Some(dir) = policy.proxies_dir() {
-        listed(dir, &|name| name.ends_with(".mkv"), &mut found);
+        listed(&dir, &|name| name.ends_with(".mkv"), &mut found);
     }
     found
 }
