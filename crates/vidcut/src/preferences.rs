@@ -99,11 +99,9 @@ pub fn cache_policy() -> Policy {
 }
 
 fn policy_of(p: &Preferences) -> Policy {
-    let root = paths::cache_dir();
     Policy {
         cache: p.cache.clone(),
-        disk: crate::system::disk(&root),
-        proxies: p.proxies.folder_in(&root),
+        proxies: p.proxies.folder_in(&paths::cache_dir()),
     }
 }
 
@@ -241,7 +239,8 @@ fn write(p: &Preferences) -> Result<()> {
         thumbcache::clear()
             .map_err(|e| Error::internal(format!("{}: {e}", thumbcache::dir().display())))?;
     }
-    disk_cache::evict();
+    disk_cache::reread();
+    disk_cache::settle();
     Ok(())
 }
 
@@ -276,8 +275,7 @@ fn mb(bytes: u64) -> f64 {
 }
 
 fn cache_usage(p: &Preferences) -> Value {
-    let policy = policy_of(p);
-    let usage = disk_cache::usage(&policy);
+    let usage = disk_cache::usage(&policy_of(p));
     let mut v = json!({
         "path": paths::cache_dir(),
         "files": usage.files,
@@ -289,8 +287,8 @@ fn cache_usage(p: &Preferences) -> Value {
     for (key, bytes) in [
         ("chosen_mb", usage.chosen),
         ("limit_mb", usage.limit),
-        ("disk_mb", policy.disk.map(|d| d.size)),
-        ("free_mb", policy.disk.map(|d| d.free)),
+        ("disk_mb", usage.disk.map(|d| d.size)),
+        ("free_mb", usage.disk.map(|d| d.free)),
     ] {
         if let Some(bytes) = bytes {
             v[key] = json!(bytes >> 20);

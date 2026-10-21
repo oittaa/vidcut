@@ -25,9 +25,10 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     vidcut_av::cuda::keep_shaders_in(Kind::Shaders.dir());
     vidcut_av::light::cache_in(Kind::Analysis.dir());
-    disk_cache::governed_by(vidcut::preferences::cache_policy);
-    let _ = vidcut::threads::spawn("vidcut-cache", Work::Job, disk_cache::evict);
+    disk_cache::governed_by(vidcut::preferences::cache_policy, vidcut::system::disk);
+    let _ = vidcut::threads::spawn("vidcut-cache", Work::Job, disk_cache::run);
     let ran = run(&cli);
+    disk_cache::finish();
     vidcut_av::ending::join();
     match ran {
         Ok(()) => ExitCode::SUCCESS,

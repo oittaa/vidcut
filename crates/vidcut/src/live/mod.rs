@@ -1005,6 +1005,7 @@ impl Live {
                 self.refresh_transcribed(ended);
             }
             Msg::PreferencesChanged => {
+                disk_cache::reread();
                 changed = self
                     .player
                     .follow_decoding(crate::preferences::gpu_decoding());
