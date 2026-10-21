@@ -122,6 +122,7 @@ The schema describes parameters, not results. Commonly read:
 |---|---|
 | `apply` | `results`, in order |
 | `export start` | `outputs[]`: `frames`, `video_encoder`, `gpu_frames` (made on the GPU), `gpu_decoded`, `copies` (GPU frames copied `down` and `up`), `color` and `metadata` (what was chosen, and `why`), `tried` (video encoders that didn't open, and why), `sources` (each file and how it was decoded). `notes[]`: `code`, `message` |
+| `export plan` | `settings`, `video_encoder`, `notes`, `outputs[]` with `color` and `metadata`, and `auto`: what each automatic setting picks with only it on auto, a list for each of `encoder`, `passes`, `bit_depth`, `hdr`, `metadata`, one entry per different pick across the outputs |
 | `export start --background`, `jobs get` | `id`, `state` (`queued`, `running`, `done`, `failed`, `cancelled`), `progress` (0–1), `result`, `error`, and `details` as it runs: `video` (`encoder`, `device`, `pixel`, `bits`, `passes`, `gpu_frames_in`), `audio`, `color`, `metadata`, `tried`, `sources`, `downloading` (the file being downloaded), `speech` (a transcription's `model`, `find`, and as each is known `device`, `language`, `speakers_by`), `gpu_frames`, `gpu_decoded`, `copied`, `fps` (only while encoding) |
 | `proxy generate` | `proxies[]`: `media`, `path`, `made_with` (how it was decoded and encoded), `copies` |
 | `titles add` | `clip`, `track` (where it went) |
