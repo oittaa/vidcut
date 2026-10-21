@@ -167,11 +167,8 @@ impl Format {
                 });
                 ui.end_row();
                 let label = ui.label("Frame rate");
-                if !rate_enabled {
-                    super::dialog::why(ui, "only while the timeline is empty");
-                }
-                ui.add_enabled_ui(rate_enabled, |ui| {
-                    ui.horizontal(|ui| {
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(rate_enabled, |ui| {
                         let current = self.fps();
                         egui::ComboBox::from_id_salt("frame rate")
                             .selected_text(match current {
@@ -206,6 +203,9 @@ impl Format {
                             );
                         }
                     });
+                    if !rate_enabled {
+                        super::dialog::why(ui, "only while the timeline is empty");
+                    }
                 });
                 ui.end_row();
                 if self.fps().is_some_and(Rational::has_drop_frame) {

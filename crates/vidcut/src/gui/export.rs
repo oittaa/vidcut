@@ -2324,6 +2324,10 @@ fn settings_form(
                 }
                 let mut audio_only = d.settings.video.is_none();
                 let can_choose = !d.settings.container.audio_only();
+                let audio_box = ui.add_enabled(
+                    can_choose,
+                    egui::Checkbox::new(&mut audio_only, "Audio only"),
+                );
                 if !can_choose {
                     super::dialog::why(
                         ui,
@@ -2333,13 +2337,7 @@ fn settings_form(
                         ),
                     );
                 }
-                if ui
-                    .add_enabled(
-                        can_choose,
-                        egui::Checkbox::new(&mut audio_only, "Audio only"),
-                    )
-                    .changed()
-                {
+                if audio_box.changed() {
                     if audio_only {
                         d.stashed_video = d.settings.video.take();
                     } else {

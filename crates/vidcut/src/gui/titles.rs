@@ -321,16 +321,16 @@ impl Workspace {
                     }
                     .align();
                 }
-                if d.kind == TitleKind::Text {
-                    super::dialog::why(ui, "a Text title is centered on its position");
-                }
-                ui.add_enabled_ui(d.kind != TitleKind::Text, |ui| {
-                    ui.horizontal(|ui| {
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(d.kind != TitleKind::Text, |ui| {
                         ui.label("Align");
                         for (align, label) in ALIGNS {
                             changed |= ui.radio_value(&mut d.align, align, label).changed();
                         }
                     });
+                    if d.kind == TitleKind::Text {
+                        super::dialog::why(ui, "a Text title is centered on its position");
+                    }
                 });
                 let out = egui::TextEdit::multiline(&mut d.text)
                     .desired_rows(3)
