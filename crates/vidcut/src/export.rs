@@ -1137,11 +1137,12 @@ pub fn detected(refresh: bool) -> Availability {
         .is_some_and(|pid| !crate::ipc::registry::alive(pid));
     let dir = std::fs::create_dir_all(cache_dir()).is_ok();
     if dir {
-        let _ = std::fs::write(&testing, std::process::id().to_string());
+        let _ = vidcut_core::temp::write(&testing, std::process::id().to_string().as_bytes());
     }
     let a = vidcut_av::export::encode::detect(!crashed);
     if dir {
-        let _ = std::fs::write(&path, json!({ "key": key, "availability": a }).to_string());
+        let text = json!({ "key": key, "availability": a }).to_string();
+        let _ = vidcut_core::temp::write(&path, text.as_bytes());
         let _ = std::fs::remove_file(&testing);
     }
     a
@@ -1180,7 +1181,7 @@ pub fn plays(decoding: bool) -> Option<Vec<(String, String)>> {
     cached.retain(|k, _| k.starts_with(&tested));
     cached.insert(key, json!({ "found": found, "codecs": codecs }));
     if std::fs::create_dir_all(cache_dir()).is_ok() {
-        let _ = std::fs::write(&path, Value::Object(cached).to_string());
+        let _ = vidcut_core::temp::write(&path, Value::Object(cached).to_string().as_bytes());
     }
     found
 }

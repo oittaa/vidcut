@@ -123,9 +123,7 @@ pub fn render(
     }
     let png = vidcut_av::export::still::png_rgba(cw as u32, ch as u32, &canvas)
         .map_err(|e| crate::export::av_error(&e, ErrorCode::Export, String::new()))?;
-    let part = out.with_extension("part.png");
-    std::fs::write(&part, png)
-        .and_then(|()| std::fs::rename(&part, out))
+    vidcut_core::temp::write(out, &png)
         .map_err(|e| Error::new(ErrorCode::Export, format!("{}: {e}", out.display())))?;
     Ok(json!({
         "path": out, "width": cw, "height": ch, "columns": columns,

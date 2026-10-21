@@ -2944,7 +2944,7 @@ impl Live {
         recent.insert(0, canonical);
         recent.truncate(10);
         if std::fs::create_dir_all(paths::state_dir()).is_ok() {
-            let _ = std::fs::write(&file, json!(recent).to_string());
+            let _ = vidcut_core::temp::write(&file, json!(recent).to_string().as_bytes());
         }
     }
 
@@ -3524,7 +3524,7 @@ impl Live {
                 let png =
                     vidcut_av::export::still::png_rgba(image.width, image.height, &image.rgba)
                         .map_err(|e| Error::internal(e.to_string()))?;
-                std::fs::write(&out, png)
+                vidcut_core::temp::write(&out, &png)
                     .map_err(|e| Error::usage(format!("{}: {e}", out.display())))?;
                 let mut r = state;
                 r.result = json!({

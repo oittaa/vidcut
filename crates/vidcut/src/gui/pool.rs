@@ -513,7 +513,8 @@ impl Workspace {
         if let Some(dir) = strip_path().parent()
             && std::fs::create_dir_all(dir).is_ok()
         {
-            let _ = std::fs::write(strip_path(), json!({ "metadata": on }).to_string());
+            let text = json!({ "metadata": on }).to_string();
+            let _ = vidcut_core::temp::write(&strip_path(), text.as_bytes());
         }
     }
 

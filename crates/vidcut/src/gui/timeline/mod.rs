@@ -367,7 +367,7 @@ impl Options {
         if let Some(dir) = options_path().parent()
             && std::fs::create_dir_all(dir).is_ok()
         {
-            let _ = std::fs::write(options_path(), json!(self).to_string());
+            let _ = vidcut_core::temp::write(&options_path(), json!(self).to_string().as_bytes());
         }
     }
 }
