@@ -861,10 +861,23 @@ pub(crate) fn speakers_of(
     let (dir, gpu, started) = (at.dir, at.gpu, at.started);
     let picked = speaker_file(language, choice);
     told.tell(|n| n.speakers_by = Some(speaker_name(picked).into()));
-    get_ready(dir, &[picked], false, at.download)?;
+    get_ready(dir, &[picked], false, at.download).map_err(|e| match e {
+        Error::Missing(m) if picked == &MOSS => Error::Missing(format!(
+            "{m}; or pick Sortformer under Speakers By (speaker_model: sortformer)"
+        )),
+        e => e,
+    })?;
     if picked == &MOSS {
         return moss_turns(dir, pcm, gpu, started, warnings)
-            .map(|turns| (turns, SpeakerModel::Moss.name()));
+            .map(|turns| (turns, SpeakerModel::Moss.name()))
+            .map_err(|e| match e {
+                Error::Invalid(m) if m == CANCELLED => Error::Invalid(m),
+                e => Error::Invalid(format!(
+                    "{} couldn't tell the speakers apart: {e}. Sortformer is a smaller model to \
+                     try: pick it under Speakers By (speaker_model: sortformer)",
+                    MOSS.title
+                )),
+            });
     }
     let path = dir.join(SORTFORMER.name);
     let total = pcm.len() as i64 * 1000 / i64::from(RATE);
