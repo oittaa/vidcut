@@ -8,14 +8,16 @@ Voice Isolation (Studio only, p. 774) takes loud sounds that aren't voice out of
 
 ## What vidcut does
 
-- **Free and local.** The model is DeepFilterNet3, dual-licensed MIT or Apache-2.0 (`libDF/Cargo.toml` in [Rikorose/DeepFilterNet](https://github.com/Rikorose/DeepFilterNet)). Its paper reports a real-time factor of 0.19 on one thread of a notebook CPU ([arXiv:2305.08227](https://arxiv.org/abs/2305.08227)). It runs in Rust on `tract`, on the CPU: nothing is uploaded, and there is no Python.
-- **The crate.** The `deep_filter` on crates.io is 0.2.5, from 2022, and the repository's `libDF` is 0.5.7-pre, so vidcut pins a git revision. The repository's last commit is from 2024-10-17.
-- **Amount** from 0 to 100, as on the Cut page, on a clip (`clip.set`) or a track (`track.set`), and stored only when set. Preview and export hear the same samples (`AudioMix`). There is one model, with no lighter one swapped in behind the user's back.
+- **Free and local.** The model is DPDFNet's `dpdfnet2_48khz_hr` ([ceva-ip/DPDFNet](https://github.com/ceva-ip/DPDFNet)): DeepFilterNet2 with dual-path recurrent blocks, its code and weights under Apache-2.0. On the paper's multilingual low-SNR set its 16 kHz DPDFNet-2 scores a PESQ of 3.14 where DeepFilterNet3 scores 2.76, for 1.35 G MACs against 0.35 ([arXiv:2512.16420](https://arxiv.org/abs/2512.16420), Table 1). Nothing is uploaded, and there is no Python.
+- **On `tract`.** `tract` 0.23.9 runs the published ONNX file as it is: 120 s of speech took 11.7 s on one thread of a Ryzen 7 9800X3D, a real-time factor of 0.098. A laptop's is unmeasured. `tract` has no GPU; a GPU would need ONNX Runtime's CUDA build, for NVIDIA alone.
+- **Around the model.** The file holds the network and its feature normalization. vidcut adds a Vorbis window, a 960-point FFT every 480 samples at 48 kHz, the model's state (its start is in the file's metadata), the inverse FFT and overlap-add. The model is mono, so each channel has its own state.
+- **What it does to speech.** On `nasa-speech-1979` at full strength, the hiss in the pauses goes to silence, and some faint speech under loud background noise goes with it.
+- **Amount** from 0 to 100, as on the Cut page: that much of the isolated voice, mixed with the rest of the source. On a clip (`clip.set`) or a track (`track.set`), stored only when set. Preview and export hear the same samples (`AudioMix`).
 - **Controls.** Voice Isolation is in the clip's right-click menu and on a track's strip in the Mixer, with its Amount beside it. Proposed key, free now: Alt + V on the selected clips.
 - **OpenTimelineIO.** How Resolve writes Voice Isolation into an OTIO file isn't known, so the Amount goes in vidcut's own metadata, and an OTIO export warns that Resolve won't hear it.
 
 ## Open questions
 
-- Whether the weights are built in with the crate's `default-model` feature or fetched after asking, as the speech models are ([analysis](../design/analysis.md#transcription)), pinned by SHA-256. `DeepFilterNet3_onnx.tar.gz` is 7,983,136 bytes, and the low-latency `DeepFilterNet3_ll_onnx.tar.gz` 36,359,660.
-- Which of the two, by the real-time factor measured on a laptop.
-- What playback does on a computer too slow to run it live.
+- Whether the weights are built in or fetched after asking, as the speech models are ([analysis](../design/analysis.md#transcription)). The file is 10,493,337 bytes, SHA-256 `7f0575a5cec0ba4ffd8f8bd657e06d007e4ccdd955d76faab922b9d3291dc14b`, at revision `dd6818d00f50c836fed43a6243ebe49116de5964` of Ceva-IP/DPDFNet on Hugging Face.
+- Which Amount keeps faint speech under loud noise, heard on short back-to-back pairs.
+- The real-time factor on a laptop CPU.
