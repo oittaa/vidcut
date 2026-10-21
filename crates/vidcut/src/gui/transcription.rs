@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -7,6 +6,7 @@ use eframe::egui::{
     text::{LayoutJob, TextFormat},
 };
 use serde_json::{Value, json};
+use vidcut_core::lru::Lru;
 use vidcut_core::model::{Project, uncovered};
 use vidcut_core::request::ViewerMode;
 
@@ -127,23 +127,20 @@ const SEARCHES: usize = 16;
 #[derive(Debug, Default)]
 struct Searches {
     version: u64,
-    recent: VecDeque<(String, Arc<[usize]>)>,
+    recent: Lru<String, Arc<[usize]>, SEARCHES>,
 }
 
 impl Searches {
     fn hits(&mut self, version: u64, needle: &str, items: &[Item]) -> Arc<[usize]> {
         if self.version != version {
-            self.recent.clear();
+            self.recent = Lru::new();
             self.version = version;
         }
-        if let Some(k) = self.recent.iter().position(|(n, _)| n == needle)
-            && let Some(seen) = self.recent.remove(k)
-        {
-            let hits = seen.1.clone();
-            self.recent.push_front(seen);
-            return hits;
+        let needle = needle.to_string();
+        if let Some(hits) = self.recent.get(&needle) {
+            return hits.clone();
         }
-        let keep = |i: &usize| items[*i].lower.contains(needle);
+        let keep = |i: &usize| items[*i].lower.contains(needle.as_str());
         let wider = self
             .recent
             .iter()
@@ -153,8 +150,7 @@ impl Searches {
             Some((_, wider)) => wider.iter().copied().filter(keep).collect(),
             None => (0..items.len()).filter(keep).collect(),
         };
-        self.recent.push_front((needle.to_string(), hits.clone()));
-        self.recent.truncate(SEARCHES);
+        self.recent.insert(needle, hits.clone());
         hits
     }
 }
@@ -1332,32 +1328,12 @@ mod tests {
     }
 
     #[test]
-    fn the_least_recently_used_search_is_dropped_first() {
-        let items = words(&["a"]);
-        let mut searches = Searches::default();
-        for n in 0..=SEARCHES {
-            searches.hits(1, &n.to_string(), &items);
-        }
-        assert_eq!(searches.recent.back().map(|(n, _)| n.as_str()), Some("1"));
-    }
-
-    #[test]
-    fn a_search_made_again_becomes_the_most_recent() {
-        let items = words(&["a"]);
-        let mut searches = Searches::default();
-        searches.hits(1, "a", &items);
-        searches.hits(1, "b", &items);
-        searches.hits(1, "a", &items);
-        assert_eq!(searches.recent.front().map(|(n, _)| n.as_str()), Some("a"));
-    }
-
-    #[test]
     fn a_new_transcript_forgets_the_searches() {
         let items = words(&["a"]);
         let mut searches = Searches::default();
         searches.hits(1, "a", &items);
         searches.hits(2, "b", &items);
-        assert_eq!(searches.recent.len(), 1);
+        assert_eq!(searches.recent.iter().count(), 1);
     }
 
     #[test]

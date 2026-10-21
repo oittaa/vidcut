@@ -1,9 +1,10 @@
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use cosmic_text::{
     Align, Attrs, Buffer, Color, Family, FontSystem, Metrics, Renderer, Shaping, Style, SwashCache,
     UnderlineStyle, Weight, Wrap,
 };
+use vidcut_core::lru::Lru;
 use vidcut_core::model::{
     Place, SubtitleStyle, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle,
 };
@@ -218,27 +219,17 @@ struct Line {
 
 const LINES: usize = 8;
 
-fn lines() -> &'static Mutex<Vec<(Line, Laid)>> {
-    static LINES_KEPT: OnceLock<Mutex<Vec<(Line, Laid)>>> = OnceLock::new();
-    LINES_KEPT.get_or_init(Mutex::default)
+fn lines() -> MutexGuard<'static, Lru<Line, Laid, LINES>> {
+    static LINES_KEPT: Mutex<Lru<Line, Laid, LINES>> = Mutex::new(Lru::new());
+    LINES_KEPT.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn laid_line(line: Line, look: &Look) -> Option<Laid> {
-    {
-        let mut kept = lines().lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(i) = kept.iter().position(|(l, _)| *l == line) {
-            let entry = kept.remove(i);
-            let laid = entry.1.clone();
-            kept.push(entry);
-            return Some(laid);
-        }
+    if let Some(laid) = lines().get(&line) {
+        return Some(laid.clone());
     }
     let laid = lay_out(look)?;
-    let mut kept = lines().lock().unwrap_or_else(|e| e.into_inner());
-    if kept.len() >= LINES {
-        kept.remove(0);
-    }
-    kept.push((line, laid.clone()));
+    lines().insert(line, laid.clone());
     Some(laid)
 }
 

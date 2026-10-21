@@ -118,7 +118,7 @@ An `Origin` is a file's path, size and modification time (`fingerprint::origin`)
 | speech models | `models` (`paths::models_dir`) | file name, checked by size; SHA-256 when downloaded |
 | paid speech replies | `speech-replies` (`speech_api::replies_folder`) | the company, the request's settings, the audio |
 
-`reset` with `keep_downloads` keeps `models` and `speech-replies`. On disk only `thumbs` has a size limit (`thumbcache::evict`, least recently used first), set in the preferences. `Tiles::evict` also drops kept pictures past the tile cache's own budget. Levels, voice activity, picture stats and light are memoized in the process too, and what was heard (`HEARD`) only there.
+`reset` with `keep_downloads` keeps `models` and `speech-replies`. On disk only `thumbs` has a size limit (`thumbcache::evict`, least recently used first), set in the preferences. `Tiles::evict` also drops kept pictures past the tile cache's own budget. Levels, voice activity, picture stats and light are memoized in the process too, and the last few heard (`HEARD`, an `Lru`) only there.
 
 ## Storyboards
 

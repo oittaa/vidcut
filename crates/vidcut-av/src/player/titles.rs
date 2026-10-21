@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use vidcut_core::lru::Lru;
 use vidcut_core::model::Title;
 use vidcut_core::render::ShownTitle;
 
@@ -11,6 +12,8 @@ use super::plan::Plan;
 const KEPT: usize = 16;
 
 type Preview = Option<(String, Title)>;
+
+type Key = (Title, (u32, u32));
 
 fn steady(t: &Title) -> Title {
     Title {
@@ -28,26 +31,10 @@ fn wanted<'a>(preview: &'a Preview, s: &'a ShownTitle) -> &'a Title {
     }
 }
 
-struct Entry {
-    title: Title,
-    size: (u32, u32),
-    picture: Option<Arc<TitlePicture>>,
-    used: u64,
-}
-
 #[derive(Default)]
 struct Kept {
-    entries: Vec<Entry>,
-    clock: u64,
+    pictures: Lru<Key, Option<Arc<TitlePicture>>, KEPT>,
     last: HashMap<String, Title>,
-}
-
-impl Kept {
-    fn has(&self, key: &Title, size: (u32, u32)) -> bool {
-        self.entries
-            .iter()
-            .any(|e| e.size == size && e.title == *key)
-    }
 }
 
 #[derive(Default)]
@@ -69,30 +56,23 @@ impl Titles {
         let size = plan.size();
         let (w, h) = (f64::from(size.0), f64::from(size.1));
         let mut kept = lock(&self.kept);
-        kept.clock += 1;
-        let now = kept.clock;
         let mut out = Vec::new();
         let mut all = true;
         for (above, shown) in plan.titles_at(t) {
             let to = wanted(&preview, &shown);
-            let exact = steady(to);
-            let key = if kept.has(&exact, size) {
+            let exact = (steady(to), size);
+            let key = if kept.pictures.contains(&exact) {
                 exact
             } else {
                 all = false;
-                match kept.last.get(&shown.clip).filter(|k| kept.has(k, size)) {
-                    Some(k) => k.clone(),
+                let last = kept.last.get(&shown.clip).map(|k| (k.clone(), size));
+                match last.filter(|k| kept.pictures.contains(k)) {
+                    Some(k) => k,
                     None => continue,
                 }
             };
-            let picture = kept
-                .entries
-                .iter_mut()
-                .find(|e| e.size == size && e.title == key)
-                .and_then(|e| {
-                    e.used = now;
-                    e.picture.clone()
-                });
+            let picture = kept.pictures.get(&key).cloned().flatten();
+            let (key, _) = key;
             if let Some(p) = picture {
                 let [x0, y0] = key.pivot();
                 let [x, y] = to.pivot();
@@ -123,12 +103,12 @@ impl Titles {
     pub(crate) fn draw(&self, plan: &Plan, t: i64) -> bool {
         let size = plan.size();
         let preview = lock(&self.preview).clone();
-        let missing: Vec<(String, Title)> = {
+        let missing: Vec<(String, Key)> = {
             let kept = lock(&self.kept);
-            let mut keys: Vec<(String, Title)> = Vec::new();
+            let mut keys: Vec<(String, Key)> = Vec::new();
             for (_, shown) in plan.titles_at(t) {
-                let key = steady(wanted(&preview, &shown));
-                if !kept.has(&key, size) && !keys.iter().any(|(_, k)| *k == key) {
+                let key = (steady(wanted(&preview, &shown)), size);
+                if !kept.pictures.contains(&key) && !keys.iter().any(|(_, k)| *k == key) {
                     keys.push((shown.clip.clone(), key));
                 }
             }
@@ -137,24 +117,11 @@ impl Titles {
         if missing.is_empty() {
             return false;
         }
-        for (clip, title) in missing {
-            let picture = drawn(&title, size);
+        for (clip, key) in missing {
+            let picture = drawn(&key.0, size);
             let mut kept = lock(&self.kept);
-            kept.clock += 1;
-            let used = kept.clock;
-            kept.last.insert(clip, title.clone());
-            kept.entries.push(Entry {
-                title,
-                size,
-                picture,
-                used,
-            });
-            while kept.entries.len() > KEPT {
-                let oldest = (0..kept.entries.len())
-                    .min_by_key(|&i| kept.entries[i].used)
-                    .expect("more than kept");
-                kept.entries.remove(oldest);
-            }
+            kept.last.insert(clip, key.0.clone());
+            kept.pictures.insert(key, picture);
         }
         true
     }

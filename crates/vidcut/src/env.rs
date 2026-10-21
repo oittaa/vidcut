@@ -5,6 +5,7 @@ use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats, VoiceActivity};
 use vidcut_core::editor::GeneratedProxy;
 use vidcut_core::fingerprint::Origin;
+use vidcut_core::lru::Lru;
 use vidcut_core::model::{
     AudioInfo, FieldOrder, Hdr, Media, MediaInfo, StartTimecode, VideoInfo, proxy_size,
 };
@@ -41,9 +42,9 @@ impl AvEnv {
     }
 }
 
-static HEARD: LazyLock<Mutex<HashMap<String, Arc<Speech>>>> = LazyLock::new(Default::default);
-static PAID: LazyLock<Mutex<HashMap<String, Vec<Arc<Speech>>>>> = LazyLock::new(Default::default);
 const HEARD_KEPT: usize = 8;
+static HEARD: Mutex<Lru<String, Arc<Speech>, HEARD_KEPT>> = Mutex::new(Lru::new());
+static PAID: Mutex<Lru<String, Vec<Arc<Speech>>, HEARD_KEPT>> = Mutex::new(Lru::new());
 
 fn heard_key(plan: &RenderPlan, asked: &Asked) -> String {
     let bytes = serde_json::to_vec(&serde_json::json!({
@@ -270,7 +271,7 @@ impl Env for AvEnv {
         let lock = || HEARD.lock().unwrap_or_else(PoisonError::into_inner);
         let key = heard_key(plan, asked);
         let reuse = self.heard_only || !asked.model.paid();
-        if let Some(s) = lock().get(&key).filter(|_| reuse) {
+        if reuse && let Some(s) = lock().get(&key) {
             return Ok(s.clone());
         }
         if self.heard_only {
@@ -281,11 +282,7 @@ impl Env for AvEnv {
         let speech = vidcut_av::transcribe::transcribe(plan, asked, &speech_options(asked)?)
             .map_err(av_error)?;
         let speech = Arc::new(speech);
-        let mut memo = lock();
-        if memo.len() >= HEARD_KEPT {
-            memo.clear();
-        }
-        memo.insert(key, speech.clone());
+        lock().insert(key, speech.clone());
         Ok(speech)
     }
 
@@ -354,11 +351,7 @@ impl Env for AvEnv {
             .zip(speeches)
             .map(|((m, s, _), speech)| keep_transcript(m, *s, Arc::new(speech)))
             .collect::<Result<Vec<_>>>()?;
-        let mut memo = lock();
-        if memo.len() >= HEARD_KEPT {
-            memo.clear();
-        }
-        memo.insert(key, kept.clone());
+        lock().insert(key, kept.clone());
         Ok(kept)
     }
 
