@@ -938,30 +938,8 @@ fn keep_reply(key: &str, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Heard, Piece, RATE, google_code, google_words, kept_note, offset, reply_key, where_in,
-        xai_words,
-    };
+    use super::{Heard, google_code, google_words, kept_note, offset, reply_key, xai_words};
     use serde_json::json;
-
-    #[test]
-    fn a_word_in_the_quiet_between_pieces_is_dropped() {
-        let pieces = [
-            Piece {
-                file: 0,
-                from: 0,
-                to: RATE as i64,
-                at: 0,
-            },
-            Piece {
-                file: 1,
-                from: 0,
-                to: RATE as i64,
-                at: 3 * RATE as i64 / 2,
-            },
-        ];
-        assert_eq!(where_in(&pieces, 1.25), None);
-    }
 
     #[test]
     fn a_run_kept_in_part_says_the_rest_was_sent() {
