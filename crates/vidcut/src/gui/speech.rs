@@ -330,13 +330,18 @@ fn language_choice(ui: &mut egui::Ui, s: &mut Settings) {
 }
 
 fn speakers_row(ui: &mut egui::Ui, s: &mut Settings) {
+    let up_to = |most: Option<u32>, each: &str| {
+        most.map_or(String::new(), |n| format!(" · up to {n}{each}"))
+    };
     let by = match s.model {
-        SpeechModel::Xai => "by xAI",
-        SpeechModel::Google => "by Google · up to 8",
+        m if m.paid() => format!("by {}{}", m.company(), up_to(m.max_speakers(), "")),
         _ => match speakers_of(s) {
-            Some(f) if f == &transcribe::MOSS => "by MOSS · many per file",
-            Some(_) => "by Sortformer · up to 4 per file",
-            None => "",
+            Some(f) if f == &transcribe::MOSS => "by MOSS · many per file".to_string(),
+            Some(_) => format!(
+                "by Sortformer{}",
+                up_to(SpeakerModel::Sortformer.max_speakers(), " per file")
+            ),
+            None => String::new(),
         },
     };
     dialog::row(ui, "Speakers", |ui| {
@@ -433,7 +438,6 @@ struct Paying {
     model: SpeechModel,
     what: String,
     secs: f64,
-    speakers: bool,
 }
 
 fn ask_payment(ctx: &egui::Context, p: &Paying, again: &mut bool) -> Option<bool> {
@@ -465,8 +469,17 @@ fn ask_payment(ctx: &egui::Context, p: &Paying, again: &mut bool) -> Option<bool
                 ui,
                 "A free-tier key lets Google use the audio for its models.",
             );
-            if p.speakers && p.secs > 30.0 * 60.0 {
-                dialog::note(ui, "Over 30 minutes, speakers come from this computer.");
+            if let Some(longest) = p.model.longest_secs()
+                && p.secs > longest
+            {
+                dialog::note(
+                    ui,
+                    format!(
+                        "{} takes {:.0} minutes of speech at most; more is refused.",
+                        p.model.company(),
+                        longest / 60.0
+                    ),
+                );
             }
         }
         ui.checkbox(again, format!("Don't ask again for {company}"));
@@ -1126,7 +1139,6 @@ impl Workspace {
                 model: s.model,
                 what,
                 secs,
-                speakers: s.speakers,
             };
             match ask_payment(ctx, &paying, &mut d.again) {
                 Some(true) => {
