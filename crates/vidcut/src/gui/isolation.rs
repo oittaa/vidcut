@@ -86,6 +86,13 @@ impl Workspace {
             self.isolate(on.clone(), if checked { FIRST_AMOUNT } else { 0.0 });
         }
         if let Some(stored) = amount {
+            if !vidcut_av::isolate::needed(&crate::paths::models_dir()).is_empty() {
+                let size = vidcut_av::models::size(vidcut_av::isolate::DPDFNET.bytes);
+                if ui.button(format!("Download Model ({size})")).clicked() {
+                    self.isolate(on, stored);
+                }
+                return toggled;
+            }
             let mut value = match &self.isolation.dragging {
                 Some((o, v)) if *o == on => *v,
                 _ => stored,

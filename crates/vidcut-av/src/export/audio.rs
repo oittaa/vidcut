@@ -688,8 +688,13 @@ impl Lane {
                         Some(amount) if *amount > 0.0 => match crate::isolate::model() {
                             Ok(model) => Some(Isolator::new(model, *amount, rate, channels)?),
                             Err(e) => {
-                                self.unheard.get_or_insert_with(|| {
-                                    format!("Voice Isolation is not heard: {e}")
+                                self.unheard.get_or_insert_with(|| match e {
+                                    Error::Missing(_) => format!(
+                                        "Voice Isolation isn't heard: its {} model isn't on \
+                                         this computer. Download it from a clip's menu or the Mixer.",
+                                        crate::models::size(crate::isolate::DPDFNET.bytes)
+                                    ),
+                                    e => format!("Voice Isolation isn't heard: {e}"),
                                 });
                                 None
                             }

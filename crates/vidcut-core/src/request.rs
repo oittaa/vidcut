@@ -2170,6 +2170,11 @@ pub struct ExportParams {
     /// The subtitle files' format. Default: SRT.
     #[serde(default)]
     pub subtitle_format: Option<SubtitleFormat>,
+    /// Download Voice Isolation's model if the export needs it and this
+    /// computer doesn't have it yet, checked against its SHA-256. Without
+    /// it, a missing model is an error that says what would be downloaded.
+    #[serde(default)]
+    pub download: bool,
 }
 
 /// How the speech to transcribe is found.
