@@ -33,6 +33,7 @@ pub struct Assets<'a> {
     pub waveforms: &'a HashMap<String, Arc<Waveform>>,
     pub tiles: Option<&'a Tiles>,
     pub missing: &'a HashSet<String>,
+    pub transcribed: &'a HashSet<String>,
     pub pool: &'a HashMap<&'a str, &'a Media>,
     pub titles: &'a HashMap<String, egui::TextureId>,
 }
@@ -406,8 +407,12 @@ fn clip(
             .or_else(|| c.compound.as_ref().map(vidcut_core::otio::compound_kind))
             .unwrap_or_default();
         let left = x0.max(painter.clip_rect().left());
-        let room = x1 - left;
-        let label = elide(&name, ((room - 8.0) / 6.5).max(3.0) as usize);
+        let told = c.audio.is_some() && assets.transcribed.contains(&c.media);
+        let room = x1 - left - if told { 16.0 } else { 0.0 };
+        let mut label = elide(&name, ((room - 8.0) / 6.5).max(3.0) as usize);
+        if told {
+            label = format!("{} {label}", egui_phosphor::regular::CHAT_TEXT);
+        }
         let pos = pos2(left + 4.0, video.top().min(tr.audio_top) + 2.0);
         let galley = painter.layout_no_wrap(label, FontId::proportional(11.0), Color32::WHITE);
         painter.rect_filled(
