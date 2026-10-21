@@ -7,13 +7,11 @@ updates:
       interval: weekly
     groups:
       # Listed first so these crates leave the group below. They share one
-      # shadcn-egui-core; a pull request updates every one that has a release.
+      # shadcn-egui-core, so one pull request takes every update of them,
+      # breaking ones too.
       shadcn-egui:
         patterns:
           - "shadcn-egui*"
-        update-types:
-          - minor
-          - patch
       cargo-minor-and-patch:
         patterns:
           - "*"
