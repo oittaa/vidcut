@@ -187,11 +187,10 @@ fn speaker_title(f: &transcribe::File) -> &'static str {
 
 fn service_rows(ui: &mut egui::Ui, s: &mut Settings, transcribing: bool) {
     if s.speakers && !s.model.paid() {
-        let picked = speakers_of(&Settings {
+        let automatic = match speakers_of(&Settings {
             speaker_model: SpeakerModel::Auto,
             ..s.clone()
-        });
-        let automatic = match picked {
+        }) {
             Some(f) => format!("Automatic ({})", speaker_title(f)),
             None => "Automatic".into(),
         };
@@ -202,20 +201,6 @@ fn service_rows(ui: &mut egui::Ui, s: &mut Settings, transcribing: bool) {
                 ui.selectable_value(&mut s.speaker_model, SpeakerModel::Sortformer, "Sortformer");
             });
         });
-        if picked.is_none() && s.speaker_model == SpeakerModel::Auto {
-            let languages: Vec<&str> = transcribe::MOSS
-                .languages
-                .iter()
-                .map(|code| language_name(code))
-                .collect();
-            dialog::note(
-                ui,
-                format!(
-                    "MOSS if it hears {}, else Sortformer",
-                    languages.join(" or ")
-                ),
-            );
-        }
     }
     match s.model {
         SpeechModel::Xai => {
