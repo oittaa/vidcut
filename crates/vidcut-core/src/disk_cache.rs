@@ -176,11 +176,14 @@ impl Index {
         self.files.get(path).map_or(0, |e| e.len)
     }
 
-    fn rescan(&mut self, policy: &Policy) {
-        let mut files = scan(policy);
-        for (path, e) in &mut files {
-            if let Some(known) = self.files.get(path) {
-                e.used = e.used.max(known.used);
+    fn merge(&mut self, mut files: HashMap<PathBuf, Entry>, since: SystemTime) {
+        for (path, known) in std::mem::take(&mut self.files) {
+            match files.get_mut(&path) {
+                Some(e) => e.used = e.used.max(known.used),
+                None if known.used >= since => {
+                    files.insert(path, known);
+                }
+                None => {}
             }
         }
         *self = Index::of(files);
@@ -231,6 +234,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     wanted: false,
 });
 static WAKE: Condvar = Condvar::new();
+static BUILDING: Mutex<()> = Mutex::new(());
 
 fn state() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)
@@ -242,14 +246,25 @@ struct Held<'a> {
     disk: Option<Disk>,
 }
 
-fn held<'a>(s: &'a mut State, sources: &Sources) -> Held<'a> {
-    let policy = s.policy.get_or_insert_with(sources.policy);
-    let index = s.index.get_or_insert_with(|| Index::of(scan(policy)));
-    Held {
-        policy,
-        index,
+fn held<'a>(s: &'a mut State, sources: &Sources) -> Option<Held<'a>> {
+    Some(Held {
+        policy: s.policy.as_ref()?,
+        index: s.index.as_mut()?,
         disk: (sources.disk)(&crate::dirs::cache()),
+    })
+}
+
+fn ensure_index(sources: &Sources) {
+    if state().index.is_some() {
+        return;
     }
+    let _one = BUILDING.lock().unwrap_or_else(PoisonError::into_inner);
+    if state().index.is_some() {
+        return;
+    }
+    let policy = state().policy.get_or_insert_with(sources.policy).clone();
+    let index = Index::of(scan(&policy));
+    state().index.get_or_insert(index);
 }
 
 pub fn read(path: &Path) -> Option<Vec<u8>> {
@@ -320,8 +335,9 @@ pub fn added(path: &Path) -> bool {
 pub fn room(path: &Path) -> Option<u64> {
     let path = &plain(path);
     let sources = SOURCES.get()?;
+    ensure_index(sources);
     let mut s = state();
-    let h = held(&mut s, sources);
+    let h = held(&mut s, sources)?;
     if !h.policy.counts(path) {
         return None;
     }
@@ -333,8 +349,11 @@ fn take_room(path: &Path, len: u64, part: Option<&Path>) -> bool {
     let Some(sources) = SOURCES.get() else {
         return true;
     };
+    ensure_index(sources);
     let mut s = state();
-    let h = held(&mut s, sources);
+    let Some(h) = held(&mut s, sources) else {
+        return true;
+    };
     if let Some(part) = part {
         h.index.forget(&plain(part));
     }
@@ -371,16 +390,13 @@ pub fn settle() {
     let Some(sources) = SOURCES.get() else {
         return;
     };
-    shrink(&mut state(), sources);
+    ensure_index(sources);
+    shrink(sources);
 }
 
 pub fn finish() {
-    let Some(sources) = SOURCES.get() else {
-        return;
-    };
-    let mut s = state();
-    if s.index.is_some() {
-        shrink(&mut s, sources);
+    if let Some(sources) = SOURCES.get() {
+        shrink(sources);
     }
 }
 
@@ -401,24 +417,36 @@ pub fn reread() {
     WAKE.notify_one();
 }
 
-fn shrink(s: &mut State, sources: &Sources) {
-    let h = held(s, sources);
+fn shrink(sources: &Sources) {
     let over = |h: &Held| {
         h.policy
             .limit(h.disk, h.index.held)
             .filter(|&l| h.index.held > l)
     };
-    let Some(mut limit) = over(&h) else {
-        return;
+    let due = {
+        let mut s = state();
+        let Some(h) = held(&mut s, sources) else {
+            return;
+        };
+        if over(&h).is_none() {
+            return;
+        }
+        h.index.scanned.elapsed() >= RESCAN_EVERY
     };
-    if h.index.scanned.elapsed() >= RESCAN_EVERY {
-        h.index.rescan(h.policy);
-        match over(&h) {
-            Some(l) => limit = l,
-            None => return,
+    let policy = state().policy.clone();
+    if due && let Some(policy) = policy {
+        let since = SystemTime::now();
+        let files = scan(&policy);
+        if let Some(index) = state().index.as_mut() {
+            index.merge(files, since);
         }
     }
-    h.index.shrink(limit, SystemTime::now());
+    let mut s = state();
+    if let Some(h) = held(&mut s, sources)
+        && let Some(limit) = over(&h)
+    {
+        h.index.shrink(limit, SystemTime::now());
+    }
 }
 
 pub fn usage(policy: &Policy) -> Usage {
@@ -432,8 +460,17 @@ pub fn usage(policy: &Policy) -> Usage {
             disk: None,
         };
     };
+    ensure_index(sources);
     let mut s = state();
-    let h = held(&mut s, sources);
+    let Some(h) = held(&mut s, sources) else {
+        return Usage {
+            files: 0,
+            bytes: 0,
+            chosen: None,
+            limit: None,
+            disk: None,
+        };
+    };
     Usage {
         files: h.index.files.len(),
         bytes: h.index.held,
