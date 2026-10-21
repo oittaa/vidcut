@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use eframe::egui::{
-    self, Color32, ColorImage, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, TextureHandle,
-    TextureId, TextureOptions, vec2,
+    self, Align, Color32, ColorImage, Layout, Pos2, Rect, RichText, Sense, Stroke, StrokeKind,
+    TextStyle, TextureHandle, TextureId, TextureOptions, vec2,
 };
 use serde_json::json;
 use vidcut_av::burn::Sprite;
@@ -312,51 +312,61 @@ impl Workspace {
             ((f64::from(RENDER_WIDTH) * f64::from(h) / f64::from(w)).round() as u32).max(1),
         );
         let card_h = CARD_WIDTH * size.1 as f32 / size.0 as f32;
+        let cell = vec2(
+            CARD_WIDTH,
+            card_h + ui.spacing().item_spacing.y + ui.text_style_height(&TextStyle::Body),
+        );
         let mut hovered = None;
         let mut grabbed = None;
         let mut added = None;
         let templates = templates(self.looks.of(LookKind::Titles));
         let keys: Vec<String> = templates.iter().map(card_key).collect();
         self.titles.cards.retain(|k, _| keys.contains(k));
-        ui.horizontal_wrapped(|ui| {
-            for t in &templates {
-                ui.vertical(|ui| {
-                    let (rect, resp) =
-                        ui.allocate_exact_size(vec2(CARD_WIDTH, card_h), Sense::click_and_drag());
-                    let across = resp.hover_pos().map(|pos| {
-                        f64::from(((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0))
-                    });
-                    let fraction = across
-                        .filter(|_| t.title.moves())
-                        .map_or(0.5, |f| (f * STEPS).round() / STEPS);
-                    let tex = self.titles.card(ui.ctx(), t, size, fraction);
-                    ui.painter().image(
-                        tex,
-                        rect,
-                        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
-                    if resp.hovered() {
-                        ui.painter().rect_stroke(
-                            rect,
-                            2.0,
-                            Stroke::new(1.5, theme::colors().accent),
-                            StrokeKind::Inside,
-                        );
-                        hovered = Some((t, (fraction * STEPS).round() as i64));
-                    }
-                    ui.label(&t.label);
-                    if resp.drag_started()
-                        && let Some(press) = ui.input(|i| i.pointer.press_origin())
-                    {
-                        grabbed = Some((t, press));
-                    }
-                    if resp.double_clicked() {
-                        added = Some(t);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for t in &templates {
+                        ui.allocate_ui_with_layout(cell, Layout::top_down(Align::Min), |ui| {
+                            let (rect, resp) = ui.allocate_exact_size(
+                                vec2(CARD_WIDTH, card_h),
+                                Sense::click_and_drag(),
+                            );
+                            let across = resp.hover_pos().map(|pos| {
+                                f64::from(((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0))
+                            });
+                            let fraction = across
+                                .filter(|_| t.title.moves())
+                                .map_or(0.5, |f| (f * STEPS).round() / STEPS);
+                            let tex = self.titles.card(ui.ctx(), t, size, fraction);
+                            ui.painter().image(
+                                tex,
+                                rect,
+                                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                                Color32::WHITE,
+                            );
+                            if resp.hovered() {
+                                ui.painter().rect_stroke(
+                                    rect,
+                                    2.0,
+                                    Stroke::new(1.5, theme::colors().accent),
+                                    StrokeKind::Inside,
+                                );
+                                hovered = Some((t, (fraction * STEPS).round() as i64));
+                            }
+                            ui.label(&t.label);
+                            if resp.drag_started()
+                                && let Some(press) = ui.input(|i| i.pointer.press_origin())
+                            {
+                                grabbed = Some((t, press));
+                            }
+                            if resp.double_clicked() {
+                                added = Some(t);
+                            }
+                        });
                     }
                 });
-            }
-        });
+            });
         if let Some((t, press)) = grabbed {
             self.start_title_drag(&p, t.clone(), press);
         }
