@@ -1439,14 +1439,7 @@ pub fn transcribe(plan: &RenderPlan, asked: &Asked, options: &Options) -> Result
     drop(loaded);
     let speakers = match asked.speakers {
         true => {
-            let heard_language = language.clone().or_else(|| {
-                transcript::language_of(
-                    said.iter()
-                        .flat_map(|s| s.words.iter())
-                        .map(|w| w.text.as_str()),
-                )
-                .map(String::from)
-            });
+            let heard_language = language.clone();
             let at = Hearing {
                 dir: options.models,
                 gpu: options.gpu,

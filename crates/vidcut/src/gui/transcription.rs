@@ -756,6 +756,9 @@ impl Workspace {
                     {
                         acts.push(Act::Fillers);
                     }
+                    if t.fillers_in.is_none() && t.detected.is_none() {
+                        super::dialog::why(ui, "no language known: pick one");
+                    }
                     let auto = match &t.detected {
                         Some(code) => format!("Auto: {}", super::speech::language_label(code)),
                         None => "Auto".to_string(),

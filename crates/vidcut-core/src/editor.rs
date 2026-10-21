@@ -2033,17 +2033,8 @@ fn quiet_edges(p: &Project, env: &dyn Env, spans: &[(i64, i64)]) -> Result<Vec<(
         .collect())
 }
 
-fn filler_language(
-    asked: &Option<String>,
-    speech: &Speech,
-    words: &[transcript::Word],
-) -> Option<String> {
-    asked
-        .clone()
-        .or_else(|| speech.language.clone())
-        .or_else(|| {
-            transcript::language_of(words.iter().map(|w| w.text.as_str())).map(String::from)
-        })
+fn filler_language(asked: &Option<String>, speech: &Speech) -> Option<String> {
+    asked.clone().or_else(|| speech.language.clone())
 }
 
 fn filler_words(p: &Project, env: &dyn Env, language: Option<&str>) -> (Vec<String>, &'static str) {
@@ -5891,7 +5882,7 @@ pub fn query(
                         ))
                     })?;
                     let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
-                    let tongue = filler_language(language, &speech, &timed);
+                    let tongue = filler_language(language, &speech);
                     let (fillers, fillers_from) = filler_words(p, env, tongue.as_deref());
                     let words: Vec<Value> = analysis::words_in(&target.span(p)?, &timed)
                         .into_iter()
@@ -5945,7 +5936,7 @@ pub fn query(
             upload_check(&asked, (b - a) as f64 / p.settings.fps.as_f64(), "The mix")?;
             let speech = env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?;
             let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
-            let tongue = filler_language(&None, &speech, &timed);
+            let tongue = filler_language(&None, &speech);
             let (fillers, fillers_from) = filler_words(p, env, tongue.as_deref());
             let words: Vec<Value> = timed
                 .iter()
