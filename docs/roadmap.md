@@ -16,7 +16,7 @@ They decide what gets built and tested.
 
 Open work is in [docs/todo/](todo/), one file per item, each with a **When:** line. With the interchange in place (use case 1), the smaller items come next, then macOS.
 
-Finishing a simple video comes first, in this order:
+Finishing a simple video is its own list, in this order:
 
 1. [Clip transform](todo/clip-transform.md): a picture in a picture, a punch-in, a slow push on a still.
 2. [Voice isolation](todo/voice-isolation.md): a Meet recording is still noisy after its silences are cut.
