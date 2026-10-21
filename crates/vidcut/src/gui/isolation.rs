@@ -104,7 +104,7 @@ impl Workspace {
                 && let Some((o, v)) = self.isolation.dragging.take()
                 && v != stored
             {
-                self.send_isolation(&o, v, false);
+                self.isolate(o, v);
             }
         }
         toggled
