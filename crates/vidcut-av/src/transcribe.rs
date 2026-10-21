@@ -1135,10 +1135,15 @@ fn device_label(device: &tc::Device) -> String {
     format!("{} ({})", device.description, kind_name(&device.kind))
 }
 
-pub fn gpu_label(dir: &Path) -> Option<String> {
-    let runtime = RUNTIME.filter(|r| r.present(dir))?;
-    start(dir, &runtime).ok()?;
-    gpu_device().map(|(d, _)| device_label(&d))
+pub fn gpu_label() -> Option<String> {
+    RUNTIME?;
+    let gpu = crate::gpus::in_use()?;
+    let kind = if cfg!(target_os = "macos") {
+        "metal"
+    } else {
+        "vulkan"
+    };
+    Some(format!("{} ({})", gpu.name, kind_name(kind)))
 }
 
 fn kind_name(kind: &str) -> String {

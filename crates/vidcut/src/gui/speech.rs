@@ -520,7 +520,6 @@ struct Dialog {
     short: [Option<String>; 5],
     gpu: bool,
     device: Option<String>,
-    finding: Option<std::sync::mpsc::Receiver<Option<String>>>,
     asking: bool,
     paying: Option<(f64, String)>,
     paid: bool,
@@ -878,19 +877,7 @@ impl Workspace {
                 gpu.then(|| transcribe::short_of_memory(f)).flatten()
             }),
             gpu,
-            device: None,
-            finding: gpu.then(|| {
-                let (tx, rx) = std::sync::mpsc::channel();
-                let dir = dir.clone();
-                let _ = crate::threads::spawn(
-                    "vidcut-gpu-label",
-                    crate::threads::Work::Interactive,
-                    move || {
-                        let _ = tx.send(transcribe::gpu_label(&dir));
-                    },
-                );
-                rx
-            }),
+            device: gpu.then(transcribe::gpu_label).flatten(),
             asking: false,
             paying: None,
             paid: false,
@@ -959,18 +946,6 @@ impl Workspace {
         let Some(mut d) = self.speech.dialog.take() else {
             return;
         };
-        if let Some(r) = &d.finding {
-            match r.try_recv() {
-                Ok(device) => {
-                    d.device = device;
-                    d.finding = None;
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    ctx.request_repaint_after(std::time::Duration::from_millis(50));
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => d.finding = None,
-            }
-        }
         let Some(p) = self.project_shared() else {
             return;
         };
