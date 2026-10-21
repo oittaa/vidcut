@@ -1091,7 +1091,7 @@ impl Workspace {
                 self.options_menu(ui, p)
             });
             ui.menu_button(RichText::new("Actions").small(), |ui| {
-                self.timeline_actions_menu(ui, p, false)
+                self.timeline_actions_menu(ui, p)
             });
             ui.menu_button(RichText::new("Edit").small(), |ui| {
                 self.edit_actions_menu(ui)
@@ -1180,7 +1180,7 @@ impl Workspace {
         }
     }
 
-    pub(super) fn timeline_actions_menu(&mut self, ui: &mut egui::Ui, p: &Project, in_bar: bool) {
+    pub(super) fn timeline_actions_menu(&mut self, ui: &mut egui::Ui, p: &Project) {
         if ui.button("Add Video Track").clicked() {
             self.send("track.add", json!({ "kind": "video" }));
             ui.close();
@@ -1218,12 +1218,7 @@ impl Workspace {
             self.add_subtitle(ui.ctx(), None);
             ui.close();
         }
-        let create = |ui: &mut egui::Ui| ui.button("Create Subtitles from Audio…").clicked();
-        let asked = match in_bar {
-            true => ui.menu_button("AI Tools", create).inner.unwrap_or(false),
-            false => create(ui),
-        };
-        if asked {
+        if ui.button("Create Subtitles from Audio…").clicked() {
             self.open_speech();
             ui.close();
         }

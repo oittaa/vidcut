@@ -76,6 +76,7 @@ pub struct FakeEnv {
     pub lost_proxies: HashSet<PathBuf>,
     pub others: Vec<PathBuf>,
     pub looks: Option<PathBuf>,
+    pub transcripts: HashMap<PathBuf, Arc<crate::transcript::Speech>>,
 }
 
 pub fn levels(secs: f64, loud: &[(f64, f64)]) -> AudioLevels {
@@ -157,6 +158,14 @@ fn tree(dir: &Path, paths: &[PathBuf]) -> Folder {
 }
 
 impl Env for FakeEnv {
+    fn transcript(
+        &self,
+        media: &Media,
+        _stream: u32,
+    ) -> Result<Option<Arc<crate::transcript::Speech>>> {
+        Ok(self.transcripts.get(&media.path).cloned())
+    }
+
     fn probe(&self, path: &Path) -> Result<ProbedMedia> {
         let info = self
             .files

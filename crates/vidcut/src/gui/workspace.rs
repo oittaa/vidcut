@@ -824,7 +824,7 @@ impl Workspace {
                 match self.project_shared() {
                     Some(p) => {
                         ui.separator();
-                        self.timeline_actions_menu(ui, &p, true);
+                        self.timeline_actions_menu(ui, &p);
                     }
                     None => super::dialog::why(ui, "open a project for the rest"),
                 }

@@ -164,3 +164,54 @@ fn words_found_at_another_sound_level_arent_used_again() {
     };
     assert!(!asked.made(&kept));
 }
+
+fn kept_hello(f: &mut Fixture) {
+    let said = Said {
+        start: 1.0,
+        end: 2.0,
+        text: "Hello there".into(),
+        words: vec![word("Hello", 1.0, 1.4), word("there", 1.5, 2.0)],
+        ..Default::default()
+    };
+    let kept = speech("xAI Grok Transcribe", Timing::Words, vec![said]);
+    f.env
+        .transcripts
+        .insert("/media/1.mp4".into(), std::sync::Arc::new(kept));
+}
+
+#[test]
+fn subtitles_from_the_transcript_take_its_words_without_hearing() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 250);
+    kept_hello(&mut f);
+    f.ok(
+        json!({"method": "subtitles.transcribe", "params": {"hear": "transcript", "model": "xai"}}),
+    );
+    let texts: Vec<&str> = f.editor.project().subtitles[0]
+        .cues
+        .iter()
+        .map(|c| c.text.as_str())
+        .collect();
+    assert_eq!(texts, vec!["Hello there"]);
+}
+
+#[test]
+fn subtitles_from_the_transcript_name_the_model_that_made_it() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 250);
+    kept_hello(&mut f);
+    let r = f.ok(json!({"method": "subtitles.transcribe", "params": {"hear": "transcript"}}));
+    assert_eq!(r.result["model"], "xAI Grok Transcribe");
+}
+
+#[test]
+fn a_clip_whose_file_has_no_transcript_is_refused() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.append("m1", 0, 250);
+    let e = f.err(json!({"method": "subtitles.transcribe", "params": {"hear": "transcript"}}));
+    assert_eq!(
+        e.message,
+        "1.mp4 has no transcript yet: transcribe it first (media.transcribe), or hear it \
+         (hear: media or mix)"
+    );
+}

@@ -1262,9 +1262,12 @@ pub enum Request {
         /// and kept (Transcribe Audio), placed through the clips. Where two
         /// tracks have the same word at once, the first track's is kept (V1,
         /// V2, …, then A1, A2, …). `mix`: the mix of the tracks heard over
-        /// `range`, which keeps nothing. Default: `media` over the whole
-        /// timeline with a model that times words and no `model_file`; else
-        /// `mix`, so a part of a long recording is all that is heard.
+        /// `range`, which keeps nothing. `transcript`: the words each file
+        /// has already, whichever model made them, so nothing is heard or
+        /// sent and `model` and its options don't count; a clip whose file
+        /// has none is refused. Default: `media` over the whole timeline
+        /// with a model that times words and no `model_file`; else `mix`, so
+        /// a part of a long recording is all that is heard.
         #[serde(default)]
         hear: Option<HearFrom>,
         /// Download what this computer doesn't have yet: transcribe.cpp's
@@ -1340,7 +1343,7 @@ pub enum Request {
         #[serde(default)]
         words: bool,
         /// For `words`: `media` (the default), each heard clip's file's words,
-        /// or `mix`, as `subtitles.transcribe` takes it.
+        /// `mix` or `transcript`, as `subtitles.transcribe` takes it.
         #[serde(default)]
         hear: Option<HearFrom>,
         /// The language spoken, as a code such as `en`, for `words`.
@@ -1394,8 +1397,8 @@ pub enum Request {
         /// the soloed ones.
         #[serde(default)]
         tracks: Option<Vec<String>>,
-        /// `media` (the default), each heard clip's file's words, or `mix`,
-        /// as `subtitles.transcribe` takes it.
+        /// `media` (the default), each heard clip's file's words, `mix` or
+        /// `transcript`, as `subtitles.transcribe` takes it.
         #[serde(default)]
         hear: Option<HearFrom>,
         /// The language spoken, as a code such as `en`. Default: the model
@@ -2386,6 +2389,9 @@ pub enum HearFrom {
     Media,
     /// The mix of the tracks heard.
     Mix,
+    /// The words already kept for each heard clip's file, whichever model
+    /// made them, placed through the clips: nothing is heard or sent.
+    Transcript,
 }
 
 /// A subtitle file format.

@@ -1658,15 +1658,23 @@ fn sound_plan(p: &Project, a: i64, b: i64, heard: &[String]) -> Result<RenderPla
     crate::render::flatten(&q, a, b)
 }
 
-fn hears_media(hear: Option<HearFrom>, asked: &transcript::Asked) -> Result<bool> {
+fn hearing(hear: Option<HearFrom>, asked: &transcript::Asked) -> Result<HearFrom> {
     let can = asked.model_file.is_none() && asked.model.times_words();
     match hear {
         Some(HearFrom::Media) if !can => Err(Error::invalid(
             "hear: media keeps each file's words with their times, which only parakeet-ultra \
              gives: use it without a model_file, or hear the mix (hear: mix)",
         )),
-        Some(h) => Ok(h == HearFrom::Media),
-        None => Ok(can),
+        Some(h) => Ok(h),
+        None if can => Ok(HearFrom::Media),
+        None => Ok(HearFrom::Mix),
+    }
+}
+
+fn reuse(from: HearFrom) -> Reuse {
+    match from {
+        HearFrom::Transcript => Reuse::Any,
+        _ => Reuse::MadeOrHeard,
     }
 }
 
@@ -1723,6 +1731,13 @@ fn device_json(s: &Speech) -> Value {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Reuse {
+    Any,
+    Made,
+    MadeOrHeard,
+}
+
 #[derive(Clone)]
 struct Placed {
     track: usize,
@@ -1740,7 +1755,7 @@ fn clip_speech(
     (a, b): (i64, i64),
     heard: &[String],
     asked: &transcript::Asked,
-    transcribe: bool,
+    use_kept: Reuse,
 ) -> Result<(Speech, Vec<Value>, Vec<String>)> {
     let fps = p.settings.fps;
     let mut speech = Speech {
@@ -1791,9 +1806,22 @@ fn clip_speech(
     }
     let mut kept: Vec<Option<Arc<Speech>>> = files
         .iter()
-        .map(|(m, s)| Ok(env.transcript(m, *s)?.filter(|t| asked.made(t))))
+        .map(|(m, s)| {
+            Ok(env
+                .transcript(m, *s)?
+                .filter(|t| use_kept == Reuse::Any || asked.made(t)))
+        })
         .collect::<Result<_>>()?;
-    if transcribe && kept.iter().any(Option::is_none) {
+    if use_kept == Reuse::Any
+        && let Some(i) = kept.iter().position(Option::is_none)
+    {
+        return Err(Error::invalid(format!(
+            "{} has no transcript yet: transcribe it first (media.transcribe), or hear it \
+             (hear: media or mix)",
+            files[i].0.name
+        )));
+    }
+    if use_kept == Reuse::MadeOrHeard && kept.iter().any(Option::is_none) {
         if asked.model.paid() && asked.speakers {
             kept.iter_mut().for_each(|k| *k = None);
         }
@@ -1821,11 +1849,15 @@ fn clip_speech(
     }
     let mut media = Vec::new();
     let mut devices: Vec<String> = Vec::new();
+    let mut models: Vec<String> = Vec::new();
     let mut tellers: Vec<String> = Vec::new();
     for ((m, stream), s) in files.iter().zip(&kept) {
         let Some(s) = s else { continue };
         if !s.device.is_empty() && !devices.contains(&s.device) {
             devices.push(s.device.clone());
+        }
+        if !models.contains(&s.model) {
+            models.push(s.model.clone());
         }
         if let Some(by) = &s.speakers_by
             && !tellers.contains(by)
@@ -1882,6 +1914,9 @@ fn clip_speech(
         }
     }
     speech.device = devices.join(", ");
+    if use_kept == Reuse::Any {
+        speech.model = models.join(", ");
+    }
     speech.speakers_by = (!tellers.is_empty()).then(|| tellers.join(", "));
     let chosen = first_heard(placed);
     if speech.language.is_none() {
@@ -3359,13 +3394,17 @@ fn mutate(
                 google: google.clone(),
             };
             let part = a > 0 || b < p.end();
-            let from_media = !(hear.is_none() && part) && hears_media(*hear, &asked)?;
-            let (speech, media, people) = match from_media {
-                true => {
-                    let (s, media, people) = clip_speech(p, env, (a, b), &heard, &asked, true)?;
+            let from = match hear {
+                None if part => HearFrom::Mix,
+                _ => hearing(*hear, &asked)?,
+            };
+            let (speech, media, people) = match from {
+                HearFrom::Media | HearFrom::Transcript => {
+                    let (s, media, people) =
+                        clip_speech(p, env, (a, b), &heard, &asked, reuse(from))?;
                     (Arc::new(s), json!(media), people)
                 }
-                false => {
+                HearFrom::Mix => {
                     upload_check(&asked, (b - a) as f64 / p.settings.fps.as_f64(), "The mix")?;
                     let s = env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?;
                     let people = match &s.speakers {
@@ -3431,7 +3470,7 @@ fn mutate(
                 "cues": ids,
                 "from": a, "to": b,
                 "heard": sounding(p, &heard),
-                "hear": if from_media { "media" } else { "mix" },
+                "hear": from,
                 "media": media,
                 "model": speech.model,
                 "device": device_json(&speech),
@@ -3504,13 +3543,13 @@ fn mutate(
                 xai: None,
                 google: None,
             };
-            let from_media = hears_media(*hear, &asked)?;
-            let (speech, media) = match from_media {
-                true => {
-                    let (s, media, _) = clip_speech(p, env, (a, b), &heard, &asked, true)?;
+            let from = hearing(*hear, &asked)?;
+            let (speech, media) = match from {
+                HearFrom::Media | HearFrom::Transcript => {
+                    let (s, media, _) = clip_speech(p, env, (a, b), &heard, &asked, reuse(from))?;
                     (Arc::new(s), json!(media))
                 }
-                false => (
+                HearFrom::Mix => (
                     env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?,
                     Value::Null,
                 ),
@@ -3523,7 +3562,7 @@ fn mutate(
                 "matched": matched,
                 "unmatched": unmatched,
                 "heard": sounding(p, &heard),
-                "hear": if from_media { "media" } else { "mix" },
+                "hear": from,
                 "media": media,
                 "model": speech.model,
                 "device": device_json(&speech),
@@ -6618,7 +6657,7 @@ fn time_from_kept(p: &mut Project, env: &dyn Env, id: &str) -> Result<()> {
         xai: None,
         google: None,
     };
-    let Ok((speech, _, _)) = clip_speech(p, env, (a, b), &heard, &asked, false) else {
+    let Ok((speech, _, _)) = clip_speech(p, env, (a, b), &heard, &asked, Reuse::Made) else {
         return Ok(());
     };
     if !speech.said.is_empty() {
@@ -6704,12 +6743,13 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
             xai: None,
             google: None,
         };
-        let (heard, media) = match hears_media(r.hear, &asked)? {
-            true => {
-                let (s, media, _) = clip_speech(p, env, (0, p.end()), &heard, &asked, true)?;
+        let from = hearing(r.hear, &asked)?;
+        let (heard, media) = match from {
+            HearFrom::Media | HearFrom::Transcript => {
+                let (s, media, _) = clip_speech(p, env, (0, p.end()), &heard, &asked, reuse(from))?;
                 (Arc::new(s), json!(media))
             }
-            false => (
+            HearFrom::Mix => (
                 env.transcribe(&sound_plan(p, 0, p.end(), &heard)?, &asked)?,
                 Value::Null,
             ),
