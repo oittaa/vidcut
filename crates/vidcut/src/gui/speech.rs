@@ -465,18 +465,6 @@ fn ask_payment(ctx: &egui::Context, p: &Paying, again: &mut bool) -> Option<bool
                 ui,
                 "A free-tier key lets Google use the audio for its models.",
             );
-            if let Some(longest) = p.model.longest_secs()
-                && p.secs > longest
-            {
-                dialog::note(
-                    ui,
-                    format!(
-                        "{} takes {:.0} minutes of speech at most; more is refused.",
-                        p.model.company(),
-                        longest / 60.0
-                    ),
-                );
-            }
         }
         ui.checkbox(again, format!("Don't ask again for {company}"));
         dialog::footer(ui, |ui| {
