@@ -857,6 +857,13 @@ fn offset(v: &Value) -> Option<f64> {
     v.as_str()?.trim_end_matches('s').parse().ok()
 }
 
+fn speaker_number(label: &str) -> Option<u32> {
+    let number = label
+        .strip_prefix("spk:")
+        .or_else(|| label.strip_prefix("spk_"))?;
+    number.parse().ok()
+}
+
 fn google_words(text: &str) -> Result<Got> {
     let v: Value = serde_json::from_str(text)
         .map_err(|e| Error::Invalid(format!("Google's answer isn't JSON: {e}")))?;
@@ -877,10 +884,7 @@ fn google_words(text: &str) -> Result<Got> {
                 ) else {
                     continue;
                 };
-                let speaker = a["speaker"]
-                    .as_str()
-                    .and_then(|s| s.rsplit(|c: char| !c.is_ascii_digit()).next())
-                    .and_then(|n| n.parse::<u32>().ok());
+                let speaker = a["speaker"].as_str().and_then(speaker_number);
                 words.push(Heard {
                     start,
                     end,
