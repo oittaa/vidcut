@@ -15,6 +15,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use notify::Watcher;
 use serde_json::{Value, json};
+use vidcut_core::disk_cache;
 use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue};
 use vidcut_core::model::{Clip, Format, Title};
 use vidcut_core::ops::ClipSpans;
@@ -1010,6 +1011,7 @@ impl Live {
                 self.refresh_transcribed(ended);
             }
             Msg::PreferencesChanged => {
+                disk_cache::set_policy(crate::preferences::cache_policy());
                 changed = self
                     .player
                     .follow_decoding(crate::preferences::gpu_decoding());

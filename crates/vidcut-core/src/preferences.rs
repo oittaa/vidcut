@@ -17,6 +17,7 @@ pub struct Preferences {
     pub gpu: Gpu,
     pub player: Player,
     pub thumbnails: Thumbnails,
+    pub cache: Cache,
     pub proxies: Proxies,
     pub transcripts: Transcripts,
     pub services: Services,
@@ -151,6 +152,46 @@ impl Default for Thumbnails {
     }
 }
 
+/// What vidcut keeps in its cache dir and can make again: thumbnails,
+/// waveforms, the measurements of media, compiled shaders, decoder test
+/// clips, and proxies kept there. Past the limit, the least recently used
+/// files go first. Speech models, paid replies and transcripts stay and
+/// don't count.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Cache {
+    /// What sets the limit: `percent` (the default) or `gb`. Either way the
+    /// cache shrinks to keep 20% of its disk free.
+    pub limit: CacheLimit,
+    /// The limit as a share of the disk the cache dir is on: 1 to 100
+    /// percent.
+    pub percent: u32,
+    /// The limit in GB, at least 1; needed when `limit` is `gb`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gb: Option<u64>,
+}
+
+impl Default for Cache {
+    fn default() -> Self {
+        Self {
+            limit: CacheLimit::Percent,
+            percent: 10,
+            gb: None,
+        }
+    }
+}
+
+/// What sets the cache's limit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum CacheLimit {
+    /// `percent` of the disk.
+    #[default]
+    Percent,
+    /// `gb`.
+    Gb,
+}
+
 /// Playback proxies (decision D41): which media the running app makes them
 /// for by itself, and their size.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -261,6 +302,8 @@ pub struct PreferencesPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thumbnails: Option<ThumbnailsPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache: Option<CachePatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxies: Option<ProxiesPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcripts: Option<TranscriptsPatch>,
@@ -353,6 +396,19 @@ pub struct ThumbnailsPatch {
     pub cache_limit_mb: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CachePatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<CacheLimit>,
+    /// 1 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub percent: Option<u32>,
+    /// At least 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gb: Option<u64>,
+}
+
 pub fn set_fillers(
     lists: &mut BTreeMap<String, Vec<String>>,
     changes: &BTreeMap<String, Option<Vec<String>>>,
@@ -431,6 +487,12 @@ impl Preferences {
                 p.thumbnails.cache_limit_mb = v;
             }
         }
+        if let Some(x) = &patch.cache {
+            let c = &mut p.cache;
+            c.limit = x.limit.unwrap_or(c.limit);
+            c.percent = x.percent.unwrap_or(c.percent);
+            c.gb = x.gb.or(c.gb);
+        }
         if let Some(x) = &patch.proxies {
             let p = &mut p.proxies;
             p.auto = x.auto.unwrap_or(p.auto);
@@ -468,6 +530,16 @@ impl Preferences {
         }
         if self.thumbnails.cache_limit_mb == 0 {
             return Err(Error::usage("thumbnails.cache_limit_mb must be at least 1"));
+        }
+        let c = &self.cache;
+        if !(1..=100).contains(&c.percent) {
+            return Err(Error::usage("cache.percent must be from 1 to 100"));
+        }
+        if c.gb == Some(0) {
+            return Err(Error::usage("cache.gb must be at least 1"));
+        }
+        if c.limit == CacheLimit::Gb && c.gb.is_none() {
+            return Err(Error::usage("cache.limit is gb: set cache.gb too"));
         }
         let x = &self.proxies;
         if x.larger_than.contains(&0) {

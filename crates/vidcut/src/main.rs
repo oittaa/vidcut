@@ -9,6 +9,8 @@ use serde_json::{Value, json};
 use vidcut::cli::{Action, Cli};
 use vidcut::ipc::{self, Route, RouteOptions};
 use vidcut::output;
+use vidcut::threads::Work;
+use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::{Envelope, Error, Response, Result};
 
 fn main() -> ExitCode {
@@ -21,8 +23,8 @@ fn main() -> ExitCode {
         unsafe { std::env::set_var("LIBVA_MESSAGING_LEVEL", "1") };
     }
     let cli = Cli::parse();
-    vidcut_av::cuda::keep_shaders_in(vidcut::paths::cache_dir().join("shaders"));
-    vidcut_av::light::cache_in(vidcut::paths::cache_dir().join("analysis"));
+    vidcut_av::cuda::keep_shaders_in(Kind::Shaders.dir());
+    vidcut_av::light::cache_in(Kind::Analysis.dir());
     let ran = run(&cli);
     vidcut_av::ending::join();
     match ran {
@@ -48,6 +50,13 @@ fn run(cli: &Cli) -> Result<()> {
     match action {
         Action::Gui { project } => {
             leave_own_console();
+            let _ = vidcut::threads::spawn("vidcut-cache", Work::Job, || {
+                disk_cache::start(vidcut::preferences::cache_policy(), vidcut::system::disk);
+                loop {
+                    std::thread::sleep(disk_cache::REBUILD_EVERY);
+                    disk_cache::rebuild();
+                }
+            });
             vidcut::gui::run(project)
         }
         Action::Mcp => vidcut::mcp::serve(

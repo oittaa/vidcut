@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
+use vidcut_core::disk_cache::{self, Policy};
 use vidcut_core::preferences::{Preferences, PreferencesPatch};
 use vidcut_core::{Error, Result};
 
@@ -65,7 +66,9 @@ fn read_noting() -> Result<(Preferences, Vec<String>)> {
 }
 
 fn known() -> toml::Table {
-    match toml::Value::try_from(Preferences::default()) {
+    let mut every = Preferences::default();
+    every.cache.gb = Some(1);
+    match toml::Value::try_from(every) {
         Ok(toml::Value::Table(t)) => t,
         _ => toml::Table::new(),
     }
@@ -91,6 +94,17 @@ fn prune(table: &mut toml::Table, known: &toml::Table, at: &str) -> Vec<String> 
         }
     });
     ignored
+}
+
+pub fn cache_policy() -> Policy {
+    policy_of(&read().unwrap_or_default())
+}
+
+fn policy_of(p: &Preferences) -> Policy {
+    Policy {
+        cache: p.cache.clone(),
+        proxies: p.proxies.folder_in(&paths::cache_dir()),
+    }
 }
 
 pub fn gpu_acceleration() -> bool {
@@ -232,6 +246,7 @@ fn write(p: &Preferences) -> Result<()> {
         thumbcache::clear()
             .map_err(|e| Error::internal(format!("{}: {e}", thumbcache::dir().display())))?;
     }
+    disk_cache::set_policy(policy_of(p));
     Ok(())
 }
 

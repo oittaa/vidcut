@@ -52,6 +52,42 @@ pub fn gpus() -> Vec<Value> {
     }
 }
 
+pub fn disk(path: &std::path::Path) -> Option<vidcut_core::disk_cache::Disk> {
+    let path = path.ancestors().find(|p| p.exists())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let name = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+        // SAFETY: an all-zero `statvfs` is valid, and statvfs writes only the one given.
+        let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
+        // SAFETY: `name` is a NUL-terminated path and `s` a live `statvfs`.
+        if unsafe { libc::statvfs(name.as_ptr(), &mut s) } != 0 {
+            return None;
+        }
+        let unit = s.f_frsize as u64;
+        Some(vidcut_core::disk_cache::Disk {
+            size: (s.f_blocks as u64).saturating_mul(unit),
+            free: (s.f_bavail as u64).saturating_mul(unit),
+        })
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let name: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+        let (mut free, mut size) = (0u64, 0u64);
+        // SAFETY: `name` is a NUL-terminated path; the counts are live u64s, the third may be null.
+        let ok = unsafe {
+            windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+                name.as_ptr(),
+                &mut free,
+                &mut size,
+                std::ptr::null_mut(),
+            )
+        };
+        (ok != 0).then_some(vidcut_core::disk_cache::Disk { size, free })
+    }
+}
+
 #[cfg(windows)]
 mod windows {
     use windows_sys::Win32::System::Registry::{
