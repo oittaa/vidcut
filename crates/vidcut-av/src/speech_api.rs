@@ -861,7 +861,6 @@ fn google_words(text: &str) -> Result<Got> {
     let v: Value = serde_json::from_str(text)
         .map_err(|e| Error::Invalid(format!("Google's answer isn't JSON: {e}")))?;
     let mut words = Vec::new();
-    let mut labels: Vec<String> = Vec::new();
     for step in v["steps"].as_array().into_iter().flatten() {
         if step["type"].as_str().is_some_and(|t| t != "model_output") {
             continue;
@@ -878,13 +877,10 @@ fn google_words(text: &str) -> Result<Got> {
                 ) else {
                     continue;
                 };
-                let speaker = a["speaker"].as_str().map(|label| {
-                    let at = labels.iter().position(|l| l == label).unwrap_or_else(|| {
-                        labels.push(label.to_string());
-                        labels.len() - 1
-                    });
-                    at as u32 + 1
-                });
+                let speaker = a["speaker"]
+                    .as_str()
+                    .and_then(|label| label.strip_prefix("spk_"))
+                    .and_then(|n| n.parse::<u32>().ok());
                 words.push(Heard {
                     start,
                     end,
@@ -1012,7 +1008,7 @@ mod tests {
     fn google_words_come_from_the_word_annotations() {
         let got = google_words(
             r#"{"steps":[{"type":"model_output","content":[{"type":"text","text":"Hello",
-                "annotations":[{"type":"word_info","text":"Hello","speaker":"spk:2",
+                "annotations":[{"type":"word_info","text":"Hello","speaker":"spk_2",
                 "start_offset":"0.100s","end_offset":"0.450s"}]}]}]}"#,
         )
         .unwrap();
@@ -1022,7 +1018,7 @@ mod tests {
                 start: 0.1,
                 end: 0.45,
                 text: "Hello".into(),
-                speaker: Some(1)
+                speaker: Some(2)
             }]
         );
     }
