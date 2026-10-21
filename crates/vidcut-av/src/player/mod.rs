@@ -1180,6 +1180,7 @@ impl Player {
 fn replace_plan(ctl: &mut Control, plan: RenderPlan) {
     ctl.plan = Arc::new(Plan::new(plan));
     ctl.plan_gen += 1;
+    ctl.error = None;
     ctl.trims.clear();
     ctl.trims_gen += 1;
 }

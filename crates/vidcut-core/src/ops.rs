@@ -244,6 +244,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             gain_db: 0.0,
             muted: false,
             effects: None,
+            voice_isolation: None,
         }),
         enabled: true,
         name: None,
@@ -1521,6 +1522,17 @@ pub struct ClipProps {
     pub gain_db: Option<f64>,
     pub name: Option<Option<String>>,
     pub color: Option<Option<String>>,
+    pub voice_isolation: Option<f64>,
+}
+
+pub fn checked_isolation(amount: f64) -> Result<f64> {
+    if amount == 0.0 || (1.0..=100.0).contains(&amount) {
+        Ok(amount)
+    } else {
+        Err(Error::invalid(format!(
+            "voice isolation {amount} is neither 0 (off) nor 1..100"
+        )))
+    }
 }
 
 pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<()> {
@@ -1544,7 +1556,7 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
         if let Some(color) = &props.color {
             c.color = color.clone();
         }
-        if props.muted.is_some() || props.gain_db.is_some() {
+        if props.muted.is_some() || props.gain_db.is_some() || props.voice_isolation.is_some() {
             let a = c
                 .audio
                 .as_mut()
@@ -1554,6 +1566,9 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
             }
             if let Some(g) = props.gain_db {
                 a.gain_db = g;
+            }
+            if let Some(v) = props.voice_isolation {
+                a.voice_isolation = Some(v);
             }
         }
     }

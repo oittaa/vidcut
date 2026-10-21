@@ -116,6 +116,7 @@ pub struct Workspace {
     pub(super) tiles: Option<super::tiles::Tiles>,
     pub(super) shuttle: super::shuttle::Shuttle,
     pub(super) speech: super::speech::SpeechUi,
+    pub(super) isolation: super::isolation::IsolationUi,
     pub(super) transcription: super::transcription::TranscriptionUi,
     pub(super) clip_info: super::clip_info::ClipInfo,
     pub(super) metadata_strip: bool,
@@ -200,6 +201,7 @@ impl Workspace {
             )),
             shuttle: Default::default(),
             speech: Default::default(),
+            isolation: Default::default(),
             transcription: Default::default(),
             clip_info: Default::default(),
             metadata_strip: super::pool::strip_kept(),
@@ -1362,6 +1364,19 @@ impl Workspace {
                 json!({ "clips": self.snap.selection.clips, "enabled": !enabled }),
             );
         }
+        if pressed(Key::V) && m.alt && !m.shift && !m.command {
+            let clips = self.snap.selection.clips.clone();
+            let current = self
+                .project()
+                .and_then(|p| clips.iter().find_map(|id| super::isolation::heard(p, id)));
+            if let Some(current) = current {
+                let amount = match current {
+                    Some(_) => 0.0,
+                    None => super::isolation::FIRST_AMOUNT,
+                };
+                self.isolate(super::isolation::Isolate::Clips(clips), amount);
+            }
+        }
         if pressed(Key::A) && m.command && self.pool_focus {
             let media: Vec<String> = match self.project() {
                 Some(p) if !m.shift => super::pool::shown_media(p, &self.snap.pool, &self.search)
@@ -1629,6 +1644,7 @@ impl Workspace {
         self.relink_window(&ctx);
         self.remove_media_window(&ctx);
         self.speech_window(&ctx);
+        self.isolation_prompt(&ctx);
         self.transcription_window(&ctx);
         self.clip_info_window(&ctx);
         let panel = theme::colors().panel;

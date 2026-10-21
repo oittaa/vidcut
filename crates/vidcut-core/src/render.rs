@@ -224,6 +224,10 @@ pub enum AudioPiece {
         /// `gain_db`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fade: Option<Fade>,
+        /// Voice Isolation's Amount over it, from 1 to 100: the clip's own,
+        /// else its track's; left out when the clip's own is 0.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        isolation: Option<f64>,
     },
     Silence {
         samples: i64,
@@ -600,6 +604,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 gain_db,
                 speed,
                 fade,
+                isolation,
                 ..
             }),
             AudioPiece::Source {
@@ -610,11 +615,13 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 gain_db: g2,
                 speed: sp2,
                 fade: f2,
+                isolation: i2,
                 ..
             },
         ) if media == m2
             && stream == st2
             && gain_db == g2
+            && isolation == i2
             && *speed == 1.0
             && *sp2 == 1.0
             && fade.is_none()
@@ -1088,11 +1095,15 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                     let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
                     let mut piece = source_audio(p, c, m, x, sample(y) - sample(x));
                     if let AudioPiece::Source {
-                        gain_db, fade: f2, ..
+                        gain_db,
+                        fade: f2,
+                        isolation,
+                        ..
                     } = &mut piece
                     {
                         *gain_db += track.volume_db;
                         *f2 = fade(f, x, falling);
+                        *isolation = isolation.or(track.voice_isolation).filter(|a| *a > 0.0);
                     }
                     push_audio(lane, piece);
                 }
@@ -1159,6 +1170,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         gain_db: audio.gain_db,
         speed,
         fade: None,
+        isolation: audio.voice_isolation,
     }
 }
 
@@ -1279,6 +1291,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     samples,
                     gain_db: 0.0,
                     fade: None,
+                    isolation: None,
                 },
             );
         }

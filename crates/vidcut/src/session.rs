@@ -451,6 +451,15 @@ pub fn export_media(
     let mut prepared = export::prepare(p, params, None)?;
     let subtitles = export::subtitles_beside(p, &prepared, params)?;
     export::refuse_existing(&subtitles, params.overwrite)?;
+    if prepared.settings.audio.is_some()
+        && prepared
+            .outputs
+            .iter()
+            .any(|o| vidcut_av::isolate::wanted(&o.plan.audio))
+    {
+        vidcut_av::isolate::get_ready(&crate::paths::models_dir(), params.download)
+            .map_err(|e| export::av_error(&e, ErrorCode::Export, String::new()))?;
+    }
     export::as_preferred(&mut prepared, crate::preferences::gpu_acceleration());
     let available = if export::needs_gpu_info(&prepared.settings) {
         export::availability(false)

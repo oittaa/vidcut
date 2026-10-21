@@ -461,6 +461,8 @@ impl Workspace {
                     self.send("track.set", json!({ "track": t.id, "solo": !t.solo }));
                 }
             });
+            let on = super::isolation::Isolate::Track(t.id.clone());
+            self.isolation_controls(ui, on, t.voice_isolation, "Voice Isolation");
         });
     }
 

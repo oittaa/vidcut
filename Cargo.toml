@@ -182,6 +182,10 @@ crc32fast = "1.5"
 # relinking, and the names and checks of vidcut's own files. Pure Rust, MIT
 # or Apache-2.0.
 sha2 = "0.11"
+# Voice isolation: DPDFNet's ONNX model run on the CPU, and the FFT around
+# it (which tract itself uses). MIT or Apache-2.0.
+tract-onnx = "0.23"
+rustfft = "6.4"
 # The player's audio output (ALSA on Linux, which PipeWire and PulseAudio
 # serve). Apache-2.0; needs libasound2-dev to build.
 cpal = "0.18"

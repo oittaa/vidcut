@@ -19,5 +19,4 @@ Open work is in [docs/todo/](todo/), one file per item, each with a **When:** li
 Finishing a simple video is its own list, in this order:
 
 1. [Clip transform](todo/clip-transform.md): Dynamic Zoom, a slow push on a still, and the placement in Resolve's OTIO files.
-2. [Voice isolation](todo/voice-isolation.md): a Meet recording is still noisy after its silences are cut.
-3. [Ducking](todo/ducking.md): music that dips under speech.
+2. [Ducking](todo/ducking.md): music that dips under speech.

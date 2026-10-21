@@ -932,7 +932,7 @@ pub enum Request {
         force: bool,
     },
     /// Track header toggles (lock, mute, video on or off) and the mixer (solo,
-    /// volume in dB). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
+    /// volume in dB, Voice Isolation). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
     /// `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
     TrackSet {
@@ -945,6 +945,18 @@ pub enum Request {
         solo: Option<bool>,
         #[serde(default)]
         volume_db: Option<f64>,
+        /// Voice Isolation's Amount, from 1 to 100: that much of the voice
+        /// the model hears in the sound of the track's clips
+        /// that have none of their own, mixed with the rest of it; 0 turns
+        /// it off. The model runs on this computer and is downloaded once,
+        /// when `download` allows it.
+        #[serde(default)]
+        voice_isolation: Option<f64>,
+        /// Download Voice Isolation's model if this computer doesn't have it
+        /// yet, checked against its SHA-256. Without it, a missing model is
+        /// an error that says what would be downloaded.
+        #[serde(default)]
+        download: bool,
         #[serde(default)]
         video_enabled: Option<bool>,
         /// Empty string clears the name.
@@ -980,8 +992,8 @@ pub enum Request {
         #[serde(default)]
         look: Option<String>,
     },
-    /// Enable/disable video (D), mute, gain (dB, -60..24), name and Clip
-    /// Color.
+    /// Enable/disable video (D), mute, gain (dB, -60..24), name, Clip Color
+    /// and Voice Isolation.
     #[serde(rename = "clip.set")]
     ClipSet {
         clips: OneOrMany<ClipRef>,
@@ -1000,6 +1012,18 @@ pub enum Request {
         /// media's color.
         #[serde(default)]
         color: Option<String>,
+        /// Voice Isolation's Amount, from 1 to 100: that much of the voice
+        /// the model hears in the sound, mixed with the rest of it; 0 turns
+        /// it off for the clip, also when its track has it on. A clip never
+        /// given one follows its track's. The model runs on this computer
+        /// and is downloaded once, when `download` allows it.
+        #[serde(default)]
+        voice_isolation: Option<f64>,
+        /// Download Voice Isolation's model if this computer doesn't have it
+        /// yet, checked against its SHA-256. Without it, a missing model is
+        /// an error that says what would be downloaded.
+        #[serde(default)]
+        download: bool,
     },
     /// The timeline's In and Out marks.
     #[serde(rename = "marks.get")]
@@ -2207,6 +2231,11 @@ pub struct ExportParams {
     /// The subtitle files' format. Default: SRT.
     #[serde(default)]
     pub subtitle_format: Option<SubtitleFormat>,
+    /// Download Voice Isolation's model if the export needs it and this
+    /// computer doesn't have it yet, checked against its SHA-256. Without
+    /// it, a missing model is an error that says what would be downloaded.
+    #[serde(default)]
+    pub download: bool,
 }
 
 /// How the speech to transcribe is found.

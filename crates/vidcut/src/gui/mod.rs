@@ -13,6 +13,7 @@ mod gate;
 mod help;
 mod history;
 mod import;
+mod isolation;
 mod look_tiles;
 mod looks;
 mod mixer;

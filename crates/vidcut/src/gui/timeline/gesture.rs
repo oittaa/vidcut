@@ -1061,6 +1061,7 @@ mod tests {
                 gain_db: 0.0,
                 muted: false,
                 effects: None,
+                voice_isolation: None,
             }),
             enabled: true,
             name: None,

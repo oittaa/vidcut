@@ -16,7 +16,7 @@ pub struct SubtitleView {
     pub cues: Vec<Cue>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Key {
     style: SubtitleStyle,
     size: (u32, u32),

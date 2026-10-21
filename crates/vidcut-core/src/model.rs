@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -779,6 +780,10 @@ pub struct Track {
     /// The mixer fader, in dB (decision D12's range, -60..24).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub volume_db: f64,
+    /// Voice Isolation on the track's clips that have none of their own,
+    /// as a clip's `voice_isolation`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_isolation: Option<f64>,
     /// Video of this track is shown (video tracks only).
     pub video_enabled: bool,
     /// A name shown in the track header and the mixer.
@@ -1393,6 +1398,12 @@ pub struct ClipAudio {
     /// is `gain_db`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Effects>,
+    /// Voice Isolation's Amount, from 1 to 100: that much of the voice the
+    /// model hears in the sound, mixed with the rest of the sound. 0 keeps
+    /// it off, also when the clip's track has it on. Left out, the clip
+    /// follows its track's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_isolation: Option<f64>,
 }
 
 impl Clip {
@@ -1620,7 +1631,7 @@ pub struct SubtitleStyle {
 }
 
 /// What a cue's own or its speaker's color paints.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum SpeakerPaint {
     Text,
@@ -1629,7 +1640,7 @@ pub enum SpeakerPaint {
 }
 
 /// Letters drawn all as capitals or all as small letters.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum LetterCase {
     Upper,
@@ -1656,7 +1667,7 @@ pub struct SubtitleWords {
 }
 
 /// Which of a cue's words show while it is spoken.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum WordsShow {
     /// Every word, the spoken one in its color.
@@ -2083,6 +2094,7 @@ impl Track {
             muted: false,
             solo: false,
             volume_db: 0.0,
+            voice_isolation: None,
             video_enabled: true,
             name: None,
             transitions: Vec::new(),
@@ -2119,6 +2131,136 @@ impl Track {
         self.clips.sort_by_key(|c| c.start);
     }
 }
+
+pub(crate) fn float_bits(v: f64) -> u64 {
+    (v + 0.0).to_bits()
+}
+
+fn floats_bits(v: Option<f64>) -> Option<u64> {
+    v.map(float_bits)
+}
+
+fn pair_bits(v: Option<[f64; 2]>) -> Option<[u64; 2]> {
+    v.map(|[a, b]| [float_bits(a), float_bits(b)])
+}
+
+impl Hash for Title {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        let Title {
+            kind,
+            align,
+            text,
+            style,
+            position,
+            zoom,
+            rotation,
+            opacity,
+        } = self;
+        (kind, align, text, style).hash(h);
+        pair_bits(*position).hash(h);
+        (
+            floats_bits(*zoom),
+            floats_bits(*rotation),
+            floats_bits(*opacity),
+        )
+            .hash(h);
+    }
+}
+
+impl Eq for Title {}
+
+impl Hash for TitleStyle {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        let TitleStyle {
+            font,
+            size,
+            color,
+            outline,
+            background,
+            shadow,
+        } = self;
+        (font, floats_bits(*size), color, outline, background, shadow).hash(h);
+    }
+}
+
+impl Eq for TitleStyle {}
+
+impl Hash for TitleShadow {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        let TitleShadow {
+            color,
+            opacity,
+            offset,
+            blur,
+        } = self;
+        (
+            color,
+            floats_bits(*opacity),
+            pair_bits(*offset),
+            floats_bits(*blur),
+        )
+            .hash(h);
+    }
+}
+
+impl Eq for TitleShadow {}
+
+impl Hash for SubtitleStyle {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        let SubtitleStyle {
+            font,
+            size,
+            color,
+            outline,
+            background,
+            margin,
+            bold,
+            case,
+            shadow,
+            words,
+            speaker_color,
+        } = self;
+        (font, floats_bits(*size), color, outline, background).hash(h);
+        (
+            floats_bits(*margin),
+            bold,
+            case,
+            shadow,
+            words,
+            speaker_color,
+        )
+            .hash(h);
+    }
+}
+
+impl Eq for SubtitleStyle {}
+
+impl Hash for SubtitleOutline {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        let SubtitleOutline { color, size } = self;
+        (color, floats_bits(*size)).hash(h);
+    }
+}
+
+impl Eq for SubtitleOutline {}
+
+impl Hash for SubtitleBackground {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        let SubtitleBackground { color, opacity } = self;
+        (color, floats_bits(*opacity)).hash(h);
+    }
+}
+
+impl Eq for SubtitleBackground {}
+
+impl Hash for SubtitleWords {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        let SubtitleWords { show, color, pop } = self;
+        (show, color, floats_bits(*pop)).hash(h);
+    }
+}
+
+impl Eq for SubtitleWords {}
 
 #[cfg(test)]
 mod tests {

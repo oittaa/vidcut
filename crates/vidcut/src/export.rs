@@ -290,6 +290,9 @@ pub fn timeline(
             ),
         }));
     }
+    if let Some(message) = otio::unheard_isolation(p, span) {
+        notes.push(json!({ "code": "voice_isolation_kept", "message": message }));
+    }
     let Some(writing) = write else {
         return Ok(json!({
             "preset": null, "format": format.name(), "outputs": [summary], "notes": notes,

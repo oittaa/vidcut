@@ -94,6 +94,7 @@ pub struct TrackProps {
     pub muted: Option<bool>,
     pub solo: Option<bool>,
     pub volume_db: Option<f64>,
+    pub voice_isolation: Option<Option<f64>>,
     pub video_enabled: Option<bool>,
     pub name: Option<Option<String>>,
 }
@@ -121,6 +122,9 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     }
     if let Some(v) = props.volume_db {
         t.volume_db = v;
+    }
+    if let Some(v) = props.voice_isolation {
+        t.voice_isolation = v;
     }
     if let Some(v) = props.video_enabled {
         t.video_enabled = v;

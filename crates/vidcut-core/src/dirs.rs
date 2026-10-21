@@ -33,6 +33,10 @@ pub fn config() -> PathBuf {
     dir
 }
 
+pub fn models() -> PathBuf {
+    cache().join("models")
+}
+
 pub fn cache() -> PathBuf {
     if let Some(dir) = xdg("XDG_CACHE_HOME") {
         return dir.join("vidcut");
