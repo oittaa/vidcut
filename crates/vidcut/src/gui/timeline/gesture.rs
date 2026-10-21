@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{Pos2, Rect};
 use serde_json::{Value, json};
-use vidcut_core::model::{Clip, Project, Track, TrackKind};
+use vidcut_core::model::{Clip, Marks, Project, Track, TrackKind};
 use vidcut_core::ops::{Edge, MAIN};
 
 use super::geometry::{Hit, Rows, SNAP_PX, Scale, Snap, clips_in, edit_near, hit_rows};
@@ -118,6 +118,26 @@ pub struct Preview {
     pub blocked: bool,
     pub row: Option<String>,
     pub cues: Vec<(i64, i64)>,
+    pub marks: Option<Marks>,
+    pub marker: Option<(String, i64)>,
+}
+
+impl Preview {
+    pub fn moved(&self, p: &Project) -> Option<Project> {
+        if self.marks.is_none() && self.marker.is_none() {
+            return None;
+        }
+        let mut moved = p.clone();
+        if let Some(m) = &self.marks {
+            moved.marks = m.clone();
+        }
+        if let Some((id, to)) = &self.marker
+            && let Some(k) = moved.markers.iter_mut().find(|k| &k.id == id)
+        {
+            k.at = *to;
+        }
+        Some(moved)
+    }
 }
 
 pub struct Ctx<'a> {
@@ -315,6 +335,7 @@ impl Drag {
                         .flatten(),
                     snapped,
                     delta: Some((to - from, None)),
+                    marker: Some((id.clone(), to)),
                     ..Preview::default()
                 }
             }
@@ -327,11 +348,18 @@ impl Drag {
                     marks.mark_in.map_or(f.max(1), |i| f.max(i + 1))
                 };
                 let key = if *is_in { "in" } else { "out" };
+                let mut moved = marks.clone();
+                if *is_in {
+                    moved.mark_in = Some(f);
+                } else {
+                    moved.mark_out = Some(f);
+                }
                 Preview {
                     request: (f != *from)
                         .then(|| request("marks.set", json!({ key: f })))
                         .flatten(),
                     snapped,
+                    marks: Some(moved),
                     ..Preview::default()
                 }
             }

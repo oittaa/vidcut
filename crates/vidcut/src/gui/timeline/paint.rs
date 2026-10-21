@@ -160,13 +160,10 @@ pub fn ruler(
             (p.marks.mark_out.map(|_| x1), false),
         ] {
             if let Some(x) = x {
-                let w = if left { 6.0 } else { -6.0 };
+                let w = if left { 7.0 } else { -7.0 };
+                let top = rect.bottom() - super::geometry::MARK_BAND;
                 painter.add(egui::Shape::convex_polygon(
-                    vec![
-                        pos2(x, rect.top() + 2.0),
-                        pos2(x + w, rect.top() + 2.0),
-                        pos2(x, rect.bottom()),
-                    ],
+                    vec![pos2(x, top), pos2(x + w, top), pos2(x, rect.bottom())],
                     Color32::WHITE,
                     Stroke::NONE,
                 ));

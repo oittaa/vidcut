@@ -91,6 +91,8 @@ pub struct Rows {
 
 pub const NEW_TRACK_STRIP: f32 = 14.0;
 
+pub const MARK_BAND: f32 = 12.0;
+
 pub fn is_subtitle(track: &str) -> bool {
     track.starts_with('S')
 }
