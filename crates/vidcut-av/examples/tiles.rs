@@ -57,6 +57,7 @@ fn main() {
                 frames: 1,
                 image: None,
                 color_space: Default::default(),
+                placed: Vec::new(),
             };
             let t = Instant::now();
             reader.rgba(&piece, fps, width, height).expect("tile");

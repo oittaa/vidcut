@@ -28,6 +28,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 | "project"
                 | "track"
                 | "bins"
+                | "picture"
         )
     ) && !matches!(
         method,
@@ -43,6 +44,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
             | "bins.list"
             | "marks.get"
             | "markers.list"
+            | "picture.get"
     );
     if mutation {
         if r.dry_run {
@@ -810,6 +812,40 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     c["source_frame"]
                 );
             }
+        }
+        "picture.get" => {
+            let v = &r.result;
+            let pair = |k: &str| {
+                let n = |i: usize| v[k][i].as_f64().unwrap_or_default();
+                format!("{}, {}", n(0), n(1))
+            };
+            let crop = &v["crop"];
+            let side = |k: &str| crop[k].as_f64().unwrap_or_default();
+            println!(
+                "{}  position {}  zoom {}  rotation {}°",
+                v["clip"].as_str().unwrap_or_default(),
+                pair("position"),
+                pair("zoom"),
+                v["rotation"].as_f64().unwrap_or_default()
+            );
+            let flips: Vec<&str> = [
+                ("flip_horizontal", "horizontal"),
+                ("flip_vertical", "vertical"),
+            ]
+            .into_iter()
+            .filter(|(k, _)| v[*k] == true)
+            .map(|(_, name)| name)
+            .collect();
+            if !flips.is_empty() {
+                println!("  flipped {}", flips.join(" and "));
+            }
+            println!(
+                "  crop left {}  right {}  top {}  bottom {}",
+                side("left"),
+                side("right"),
+                side("top"),
+                side("bottom")
+            );
         }
         "timeline.edit_points" => {
             for p in r.result.as_array().into_iter().flatten() {

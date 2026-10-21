@@ -491,6 +491,7 @@ mod tests {
             frames,
             image: None,
             color_space: Default::default(),
+            placed: Vec::new(),
         }
     }
 

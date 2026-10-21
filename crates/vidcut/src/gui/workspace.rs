@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
-use vidcut_core::model::Project;
+use vidcut_core::model::{PictureTool, Project};
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{Rational, format_timecode};
 
@@ -239,6 +239,8 @@ impl Workspace {
             GuiPanel::Titles => self.titles.open = true,
             GuiPanel::Metadata => self.show_metadata_strip(true),
             GuiPanel::ClipInfo => self.open_clip_info(None),
+            GuiPanel::Transform => self.show_picture_tool(PictureTool::Transform),
+            GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
         }
     }
 
@@ -286,12 +288,23 @@ impl Workspace {
             GuiPanel::Titles => self.titles.open = false,
             GuiPanel::Metadata => self.show_metadata_strip(false),
             GuiPanel::ClipInfo => self.clip_info.open = false,
+            GuiPanel::Transform | GuiPanel::Crop => {
+                let tool = match panel {
+                    GuiPanel::Crop => PictureTool::Crop,
+                    _ => PictureTool::Transform,
+                };
+                let g = &mut self.timeline.picture_grab;
+                if g.tool == Some(tool) {
+                    g.tool = None;
+                }
+            }
         }
     }
 
     pub fn gui_state(&self) -> live::GuiState {
         use vidcut_core::request::GuiPanel;
         let (quick, dialog) = self.export.windows();
+        let tool = self.timeline.picture_grab.tool;
         let open = [
             (GuiPanel::QuickExport, quick),
             (GuiPanel::Export, dialog),
@@ -305,6 +318,8 @@ impl Workspace {
             (GuiPanel::Titles, self.titles.open),
             (GuiPanel::Metadata, self.metadata_strip),
             (GuiPanel::ClipInfo, self.clip_info.open),
+            (GuiPanel::Transform, tool == Some(PictureTool::Transform)),
+            (GuiPanel::Crop, tool == Some(PictureTool::Crop)),
         ];
         live::GuiState {
             edit: self.edit_point(),
@@ -1278,6 +1293,13 @@ impl Workspace {
                 }),
             };
             self.send("edit.dissolve", params);
+        }
+        if pressed(Key::T) && !m.command && !m.alt {
+            self.picture_tool(if m.shift {
+                PictureTool::Crop
+            } else {
+                PictureTool::Transform
+            });
         }
         if (pressed(Key::Backslash) || pressed(Key::B)) && m.command {
             self.split_at_playhead();

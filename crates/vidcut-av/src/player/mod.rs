@@ -329,6 +329,7 @@ pub(crate) struct Shared {
     levels: Mutex<std::collections::VecDeque<Level>>,
     pub(crate) titles: titles::Titles,
     pub(crate) subtitles: subtitles::Subtitles,
+    placing: Mutex<Option<(String, vidcut_core::model::Picture)>>,
 }
 
 pub(crate) struct Level {
@@ -694,6 +695,7 @@ impl Player {
             levels: Mutex::new(std::collections::VecDeque::new()),
             titles: titles::Titles::default(),
             subtitles: subtitles::Subtitles::default(),
+            placing: Mutex::new(None),
         });
         shared.apply_video_budget();
         output.start(source)?;
@@ -939,6 +941,11 @@ impl Player {
                 ctl.plan.clone(),
             )
         };
+        let placed = {
+            let shown = lock(&self.shared.placing);
+            plan.placed_at(pos, shown.as_ref())
+        };
+        let crosses = plan.crosses_at(pos);
         let (mut titles, titled) = self.shared.titles.shown(&plan, pos);
         let (cues, cued) = self.shared.subtitles.shown(&plan, pos);
         titles.extend(cues);
@@ -957,6 +964,8 @@ impl Player {
                     picture,
                     exact: drawn,
                     titles,
+                    placed,
+                    crosses,
                 };
                 p.shown = Some(shown.clone());
                 p.shown_landing = landed.0;
@@ -975,12 +984,16 @@ impl Player {
                         picture,
                         exact: false,
                         titles: titles.clone(),
+                        placed: placed.clone(),
+                        crosses: crosses.clone(),
                     });
                 }
                 p.shown.clone().map(|s| Shown {
                     frame: pos,
                     exact: false,
                     titles,
+                    placed,
+                    crosses,
                     ..s
                 })
             }
@@ -1113,6 +1126,10 @@ impl Player {
             error: device.or(error),
             glide,
         }
+    }
+
+    pub fn preview_picture(&self, picture: Option<(String, vidcut_core::model::Picture)>) {
+        *lock(&self.shared.placing) = picture;
     }
 
     pub fn preview_title(&self, title: Option<(String, Title)>) {

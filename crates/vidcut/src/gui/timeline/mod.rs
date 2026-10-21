@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sense, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use vidcut_core::model::{Project, Track};
+use vidcut_core::model::{PictureTool, Project, Track};
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::request::ViewerMode;
 
@@ -219,6 +219,7 @@ pub struct TimelineView {
     pub(super) adding_title: Option<crate::gui::export::Ask>,
     pub title_dialog: Option<crate::gui::titles::TitleDialog>,
     pub(crate) title_grab: crate::gui::onscreen::Grab,
+    pub(crate) picture_grab: crate::gui::placing::Grab,
     pub(super) files: Option<crate::gui::subtitles::Files>,
     pub(super) retime: Option<crate::gui::retime::Retime>,
     pub(crate) subtitles_sent: Option<crate::gui::subtitles::SubtitlesKey>,
@@ -263,6 +264,7 @@ impl Default for TimelineView {
             adding_title: None,
             title_dialog: None,
             title_grab: Default::default(),
+            picture_grab: Default::default(),
             files: None,
             retime: None,
             subtitles_sent: None,
@@ -2086,6 +2088,29 @@ impl Workspace {
                 json!({ "clips": [c.id] }),
             );
         }
+        if vidcut_core::ops::picture::has_picture(c) {
+            ui.separator();
+            let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+            for (label, tool) in [
+                ("Transform  (T)", PictureTool::Transform),
+                ("Crop  (Shift+T)", PictureTool::Crop),
+            ] {
+                if ui.button(keys(label)).clicked() {
+                    self.send("selection.set", json!({ "clips": [c.id] }));
+                    if !(c.start..c.end()).contains(&at) {
+                        self.send("player.seek", json!({ "at": c.start }));
+                    }
+                    self.timeline.picture_grab.tool = Some(tool);
+                    ui.close();
+                }
+            }
+            for (label, tool) in [("Reset Transform", "transform"), ("Reset Crop", "crop")] {
+                if ui.button(label).clicked() {
+                    self.send("picture.clear", json!({ "clips": clips, "tool": tool }));
+                    ui.close();
+                }
+            }
+        }
         ui.separator();
         if ui.button(keys("Change Duration…  (Ctrl+D)")).clicked() {
             self.timeline.duration_dialog = Some(String::new());
@@ -3087,6 +3112,7 @@ mod tests {
             effects: None,
             generator: None,
             title: None,
+            picture: None,
             compound: None,
             speed: None,
             color: None,

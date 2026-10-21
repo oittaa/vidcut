@@ -1,6 +1,7 @@
 mod dissolve;
 pub mod filmstrip;
 mod follow;
+pub mod picture;
 pub mod subtitles;
 pub mod titles;
 mod tracks;
@@ -250,6 +251,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         effects: None,
         generator: None,
         title: None,
+        picture: None,
         compound: None,
         speed: None,
         color: None,
@@ -2085,6 +2087,9 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
         let on_video = p.tracks[ti].kind == TrackKind::Video;
         let sound_block = clip.compound.is_some() && !clip.video;
         clip.video = clip.video && has_video && on_video;
+        if !clip.video {
+            clip.picture = None;
+        }
         if (!clip.video && clip.audio.is_none() && !sound_block) || (sound_block && on_video) {
             return Err(Error::invalid(format!(
                 "pasted clip has nothing for track {}",

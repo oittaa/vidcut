@@ -1068,6 +1068,7 @@ mod tests {
             effects: None,
             generator: None,
             title: None,
+            picture: None,
             compound: None,
             speed: None,
             color: None,

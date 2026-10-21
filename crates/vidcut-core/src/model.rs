@@ -858,6 +858,10 @@ pub struct Clip {
     /// empty) and no audio, and any length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<Title>,
+    /// Where its picture goes over the frame: moved, zoomed, turned,
+    /// flipped and cropped. Left out, it fills the frame as it always has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<Picture>,
     /// A compound clip or nested timeline another editor made, carried
     /// (deviation X9): a block that plays as a gap, with no media and no
     /// audio. On an audio track it stands for the nested timeline's sound
@@ -1242,6 +1246,100 @@ impl Title {
         let text = crate::rich::plain(&self.text);
         let line = text.lines().find(|l| !l.trim().is_empty());
         line.map_or_else(|| "Title".to_string(), |l| l.trim().to_string())
+    }
+}
+
+/// Where a clip's picture goes over the frame: footage, a still, an image
+/// sequence or a compound clip. A field left out is at its usual value; at
+/// all of them the picture is fitted into the frame. The tracks below show
+/// wherever it doesn't cover the frame: in the bars around a picture of
+/// another shape, around it and where it is cropped.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Picture {
+    /// Where the middle of the whole picture goes, `[x, y]` as fractions of
+    /// the frame from its top left, each from -100 to 100. Usual: `[0.5,
+    /// 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f64; 2]>,
+    /// How much larger it is drawn across and down, `[x, y]`, each from
+    /// 1/100 to 100. Usual: `[1, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<[f64; 2]>,
+    /// Degrees it is turned counterclockwise about its middle, from -3600 to
+    /// 3600. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<f64>,
+    /// Mirrored left to right.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip_horizontal: bool,
+    /// Mirrored top to bottom.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip_vertical: bool,
+    /// What is cut off each side, as fractions of the source picture; the
+    /// rest stays where it was.
+    #[serde(default, skip_serializing_if = "Crop::is_none")]
+    pub crop: Crop,
+}
+
+/// What is cut off each side of a picture, as fractions of its width
+/// (`left`, `right`) and height (`top`, `bottom`), each from 0 up to what
+/// leaves some of it. Usual: 0.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Crop {
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub left: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub right: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub top: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub bottom: f64,
+}
+
+impl Crop {
+    pub fn is_none(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn sides(&self) -> [f64; 4] {
+        [self.left, self.right, self.top, self.bottom]
+    }
+}
+
+/// Which of a picture's tools: `transform` (its position, zoom, rotation
+/// and flips) or `crop`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum PictureTool {
+    Transform,
+    Crop,
+}
+
+impl Picture {
+    pub const MIDDLE: [f64; 2] = [0.5, 0.5];
+
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn place(&self) -> [f64; 2] {
+        self.position.unwrap_or(Self::MIDDLE)
+    }
+
+    pub fn scale(&self) -> [f64; 2] {
+        self.zoom.unwrap_or([1.0, 1.0])
+    }
+
+    pub fn turn(&self) -> f64 {
+        self.rotation.unwrap_or(0.0)
+    }
+
+    pub fn moved(&self) -> bool {
+        self.position.is_some()
+            || self.zoom.is_some()
+            || self.rotation.is_some()
+            || self.flip_horizontal
+            || self.flip_vertical
     }
 }
 

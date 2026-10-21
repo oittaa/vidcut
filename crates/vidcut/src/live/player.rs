@@ -102,6 +102,12 @@ impl Player {
         self.contents[id.index()].plan.is_some()
     }
 
+    pub fn preview_picture(&self, picture: Option<(String, vidcut_core::model::Picture)>) {
+        if let Some(e) = &self.engine {
+            e.preview_picture(picture);
+        }
+    }
+
     pub fn preview_title(&self, title: Option<(String, Title)>) {
         if let Some(e) = &self.engine {
             e.preview_title(title);

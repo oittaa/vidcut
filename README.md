@@ -11,10 +11,11 @@ A simple, fully scriptable video cutting tool for Linux, Windows and macOS. It b
 - **Automatic tools:** Ripple Delete Silence, Detect Scene Cuts, the Boring Detector.
 - **Sound:** Voice Isolation on a clip or a track, on this computer, free; the Mixer with volume, mute and solo.
 - **Titles:** Text titles and lower thirds on the video tracks, edited in their own window, drawn alike in the viewer and the export.
+- **Transform and Crop:** a clip's picture moved, zoomed, turned, flipped and cropped over the tracks below with the viewer's handles (T, Shift+T): a picture in a picture, a punch-in that keeps the source's detail.
 - **Subtitles:** subtitle tracks; Create Subtitles from Audio, on this computer's GPU or, asked first, with xAI or Google, who speaks too; a track re-timed to the speech, in any language; SRT, WebVTT and TTML in and out; in an export as files beside it, streams in it or burned into the picture.
 - **Interchange:** OpenTimelineIO (`.otio`, `.otioz`, `.otiod`), which also open as projects, with subtitles as SRT beside them.
 - **Scriptable:** every action is a CLI command, a JSON-RPC call on the running app and an MCP tool.
-- **Not included:** effects, other titles, color grading, transitions other than dissolves. Those in another editor's OTIO file are kept and written back.
+- **Not included:** other effects, other titles, color grading, transitions other than dissolves. Those in another editor's OTIO file are kept and written back.
 
 Where vidcut differs from the Cut page: [docs/deviations.md](docs/deviations.md).
 

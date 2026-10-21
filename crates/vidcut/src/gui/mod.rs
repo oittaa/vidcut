@@ -19,6 +19,7 @@ mod looks;
 mod mixer;
 mod onscreen;
 pub mod picture;
+mod placing;
 mod pool;
 mod preferences;
 mod project;

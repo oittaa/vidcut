@@ -53,6 +53,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("titles.list", &["track"]),
     ("titles.add", &["text"]),
     ("titles.set", &["clip"]),
+    ("picture.get", &["clip"]),
+    ("picture.set", &["clips"]),
+    ("picture.clear", &["clips"]),
     ("edit.append", &["media"]),
     ("edit.smart_insert", &["media"]),
     ("edit.insert", &["media"]),
@@ -138,6 +141,10 @@ const GROUPS: &[(&str, &str)] = &[
     ("media", "The Media Pool"),
     ("media.marks", "A media item's source In and Out marks"),
     ("mixer", "The Mixer"),
+    (
+        "picture",
+        "A clip's picture over the frame: moved, zoomed, turned, flipped, cropped",
+    ),
     ("player", "The viewer's playback (running GUI)"),
     ("pool", "The GUI's Media Pool view"),
     (
@@ -268,6 +275,16 @@ const EXAMPLES: &[(&str, &str)] = &[
         "vidcut titles set c4 --text \"Opening night\"\n  \
          vidcut titles set V2@10s --kind lower_third --align middle\n  \
          vidcut titles set c4 --position 0.5,0.2",
+    ),
+    (
+        "picture.set",
+        "vidcut picture set c3 --zoom 0.33 --position 0.8,0.2\n  \
+         vidcut picture set c3 --zoom 1.5,1 --rotation 10 --flip-horizontal true\n  \
+         vidcut picture set V2@10s --crop-left 0.25 --crop-right 0.25",
+    ),
+    (
+        "picture.clear",
+        "vidcut picture clear c3\n  vidcut picture clear c3 --tool crop",
     ),
     (
         "export.start",

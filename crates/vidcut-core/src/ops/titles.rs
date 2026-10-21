@@ -174,6 +174,7 @@ pub fn add(
             effects: None,
             generator: None,
             title: Some(title),
+            picture: None,
             compound: None,
             speed: None,
             color: None,
