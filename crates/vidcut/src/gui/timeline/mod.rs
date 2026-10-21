@@ -584,12 +584,14 @@ impl Workspace {
         let thumbs = std::mem::take(&mut self.thumbs);
         let tiles = self.tiles.take();
         let (waveforms, missing) = (self.snap.waveforms.clone(), self.snap.missing.clone());
+        let transcribed = self.snap.transcribed.clone();
         let title_thumbs = self.title_thumbs.prepare(ui.ctx(), drawn).clone();
         let assets = Assets {
             thumbs: &thumbs,
             waveforms: &waveforms,
             tiles: tiles.as_ref(),
             missing: &missing,
+            transcribed: &transcribed,
             pool: &pool,
             titles: &title_thumbs,
         };

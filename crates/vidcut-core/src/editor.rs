@@ -1814,15 +1814,16 @@ fn clip_speech(
         .collect::<Result<_>>()?;
     if use_kept == Reuse::Any
         && let Some(i) = kept.iter().position(Option::is_none)
+        && !(asked.model_file.is_none() && asked.model.times_words())
     {
         return Err(Error::invalid(format!(
-            "{} has no transcript yet: transcribe it first (media.transcribe), or hear it \
-             (hear: media or mix)",
+            "{} has no transcript yet, and hear: transcript transcribes it with a model that \
+             times each word: parakeet-ultra, xai or google, without a model_file",
             files[i].0.name
         )));
     }
-    if use_kept == Reuse::MadeOrHeard && kept.iter().any(Option::is_none) {
-        if asked.model.paid() && asked.speakers {
+    if use_kept != Reuse::Made && kept.iter().any(Option::is_none) {
+        if use_kept == Reuse::MadeOrHeard && asked.model.paid() && asked.speakers {
             kept.iter_mut().for_each(|k| *k = None);
         }
         let missing: Vec<usize> = (0..files.len()).filter(|&i| kept[i].is_none()).collect();

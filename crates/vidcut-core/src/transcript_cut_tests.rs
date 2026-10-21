@@ -205,13 +205,17 @@ fn subtitles_from_the_transcript_name_the_model_that_made_it() {
 }
 
 #[test]
-fn a_clip_whose_file_has_no_transcript_is_refused() {
-    let mut f = Fixture::new(&[(10.0, true)]);
+fn only_the_file_without_a_transcript_would_be_sent() {
+    let mut f = Fixture::new(&[(10.0, true), (20.0, true)]);
     f.append("m1", 0, 250);
-    let e = f.err(json!({"method": "subtitles.transcribe", "params": {"hear": "transcript"}}));
+    f.append("m2", 0, 500);
+    kept_hello(&mut f);
+    let e = f.err(
+        json!({"method": "subtitles.transcribe", "params": {"hear": "transcript", "model": "xai"}}),
+    );
     assert_eq!(
         e.message,
-        "1.mp4 has no transcript yet: transcribe it first (media.transcribe), or hear it \
-         (hear: media or mix)"
+        "1 file would be sent to xAI: 00:00:20.000 of audio, about 1 MB, less than $0.01 at \
+         $0.10 an hour. Pass send (--send) to upload it"
     );
 }

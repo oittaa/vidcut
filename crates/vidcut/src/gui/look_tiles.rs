@@ -101,7 +101,11 @@ impl Tiles {
                             true => c.text,
                             false => c.text_dim,
                         });
-                        let label = ui.add(egui::Label::new(name).truncate().sense(Sense::click()));
+                        let label = ui
+                            .vertical_centered(|ui| {
+                                ui.add(egui::Label::new(name).truncate().sense(Sense::click()))
+                            })
+                            .inner;
                         tile.union(label)
                     })
                     .inner;

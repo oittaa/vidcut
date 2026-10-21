@@ -156,8 +156,8 @@ fn wanted(s: &Settings) -> Vec<&'static transcribe::File> {
 fn find_rows(ui: &mut egui::Ui, s: &mut Settings) {
     dialog::row(ui, "Find Speech By", |ui| {
         dialog::switch(ui, |ui| {
-            ui.selectable_value(&mut s.find, FindSpeech::Voice, "Voice");
             ui.selectable_value(&mut s.find, FindSpeech::Sound, "Sound Level");
+            ui.selectable_value(&mut s.find, FindSpeech::Voice, "Voice");
         });
     });
     if s.find == FindSpeech::Sound {
@@ -236,10 +236,7 @@ fn service_rows(ui: &mut egui::Ui, s: &mut Settings, transcribing: bool) {
                 if slid || typed {
                     s.xai.vad_threshold = Some(v);
                 }
-                if ui
-                    .add_enabled(s.xai.vad_threshold.is_some(), egui::Button::new("Usual"))
-                    .clicked()
-                {
+                if s.xai.vad_threshold.is_some() && ui.button("Reset").clicked() {
                     s.xai.vad_threshold = None;
                 }
             });
@@ -273,7 +270,7 @@ fn model_choice(ui: &mut egui::Ui, s: &mut Settings, d: &Ready, words_only: bool
             for (i, (model, note)) in MODELS.iter().enumerate() {
                 let usable = !words_only || model.times_words();
                 let state = match transcribe::file_of(*model) {
-                    _ if !usable => "Transcribe Audio needs each word timed".into(),
+                    _ if !usable => "doesn't time each word".into(),
                     Some(f) if d.have[i] => transcribe::size(f.bytes),
                     Some(f) => format!("{} download", transcribe::size(f.bytes)),
                     None if d.key[i] => format!("${:.2} an hour", model.dollars_per_hour()),
@@ -664,6 +661,17 @@ fn kept_for(p: &Project, s: &Settings, media: &[String]) -> Vec<String> {
         .collect()
 }
 
+fn to_transcribe(p: &Project, s: &Settings, heard: &[String], span: (i64, i64)) -> Vec<String> {
+    let mut media = heard_files(p, heard, span, &HashSet::new());
+    let kept = kept_for(p, s, &media);
+    match kept.len() == media.len() {
+        true => media.clear(),
+        false if !(s.speakers && s.model.paid()) => media.retain(|m| !kept.contains(m)),
+        false => {}
+    }
+    media
+}
+
 fn described(p: &Project, media: &[String]) -> String {
     use vidcut_core::Env;
     let env = crate::env::AvEnv::new();
@@ -962,20 +970,16 @@ impl Workspace {
             "lines": s.lines,
             "gap": s.gap,
         });
-        match from_transcript {
-            true => params["hear"] = json!("transcript"),
-            false => {
-                params["model"] = json!(s.model);
-                params["hear"] = json!(match s.each_file(marked(p).is_some()) {
-                    true => "media",
-                    false => "mix",
-                });
-                if let Some(l) = &s.language {
-                    params["language"] = json!(l);
-                }
-                hearing(s, &mut params, go.send);
-            }
+        params["model"] = json!(s.model);
+        params["hear"] = json!(match (from_transcript, s.each_file(marked(p).is_some())) {
+            (true, _) => "transcript",
+            (false, true) => "media",
+            (false, false) => "mix",
+        });
+        if let Some(l) = &s.language {
+            params["language"] = json!(l);
         }
+        hearing(s, &mut params, go.send);
         if !s.plain() {
             params["look"] = json!(s.look);
         }
@@ -1011,8 +1015,9 @@ impl Workspace {
         let heard_media = heard_files(&p, &hearing_now, span, &HashSet::new());
         let untold = heard_files(&p, &hearing_now, span, &self.snap.transcribed);
         let told = d.media.is_empty() && untold.len() < heard_media.len();
-        let from_transcript = told && untold.is_empty() && d.settings.transcript;
-        if from_transcript && d.described.as_ref().is_none_or(|(m, _)| *m != heard_media) {
+        let from_transcript = told && d.settings.transcript;
+        let instant = from_transcript && untold.is_empty();
+        if instant && d.described.as_ref().is_none_or(|(m, _)| *m != heard_media) {
             d.described = Some((heard_media.clone(), described(&p, &heard_media)));
         }
         let about = d
@@ -1029,7 +1034,7 @@ impl Workspace {
         let mut open = true;
         let (mut create, mut cancel) = (false, false);
         let transcribing = !d.media.is_empty();
-        if transcribing && !s.model.times_words() {
+        if (transcribing || (from_transcript && !instant)) && !s.model.times_words() {
             s.model = SpeechModel::default();
         }
         if s.language
@@ -1075,38 +1080,29 @@ impl Workspace {
                     if told {
                         dialog::row(ui, "Words", |ui| {
                             dialog::switch(ui, |ui| {
-                                ui.add_enabled_ui(untold.is_empty(), |ui| {
-                                    if ui
-                                        .selectable_label(from_transcript, "From Transcript")
-                                        .clicked()
-                                    {
-                                        s.transcript = true;
-                                    }
-                                });
                                 if ui
-                                    .selectable_label(!from_transcript, "Transcribe Again")
+                                    .selectable_label(from_transcript, "From Transcript")
+                                    .clicked()
+                                {
+                                    s.transcript = true;
+                                }
+                                if ui
+                                    .selectable_label(!from_transcript, "Choose Model")
                                     .clicked()
                                 {
                                     s.transcript = false;
                                 }
                             });
                         });
-                        match untold.len() {
-                            0 => {}
-                            1 => dialog::row(ui, "", |ui| {
-                                dialog::why(ui, "a file heard has no transcript")
-                            }),
-                            n => dialog::row(ui, "", |ui| {
-                                dialog::why(ui, format!("{n} files heard have no transcript"))
-                            }),
-                        }
                     }
-                    if from_transcript {
+                    if instant {
                         dialog::row(ui, "Transcript", |ui| {
                             ui.label(dim(about.as_str()));
                         });
                     } else {
-                        dialog::row(ui, "Model", |ui| model_choice(ui, s, &ready, transcribing));
+                        dialog::row(ui, "Model", |ui| {
+                            model_choice(ui, s, &ready, transcribing || from_transcript)
+                        });
                         dialog::row(ui, "Language", |ui| language_choice(ui, s));
                         speakers_row(ui, s);
                     }
@@ -1147,12 +1143,12 @@ impl Workspace {
                     });
                 });
                 if let Some(w) = &d.short[index(s.model)]
-                    && !from_transcript
+                    && !instant
                 {
                     dialog::warn(ui, format!("{w}; it runs anyway"));
                 }
                 match &d.device {
-                    _ if s.model.paid() || from_transcript => {}
+                    _ if s.model.paid() || instant => {}
                     _ if !d.gpu => {
                         dialog::note(ui, "Runs on the CPU: GPU acceleration is off");
                     }
@@ -1161,7 +1157,7 @@ impl Workspace {
                     }
                     None => {}
                 }
-                let unusual = match from_transcript {
+                let unusual = match instant {
                     true => s.gap != 0,
                     false => {
                         s.find != FindSpeech::default()
@@ -1186,7 +1182,7 @@ impl Workspace {
                                 );
                             });
                         }
-                        if !from_transcript {
+                        if !instant {
                             find_rows(ui, s);
                             service_rows(ui, s, transcribing);
                         }
@@ -1207,17 +1203,42 @@ impl Workspace {
                     }
                 } else if heard.is_empty() {
                     dialog::warn(ui, "Tick a track to hear");
-                } else if !from_transcript && s.each_file(range.is_some()) {
-                    let missing = heard_files(&p, &heard, (0, p.end()), &self.snap.transcribed);
-                    if !missing.is_empty() {
+                } else if from_transcript {
+                    if !untold.is_empty() {
+                        let what = match untold.as_slice() {
+                            [one] => p.media(one).map_or_else(|| one.clone(), |m| m.name.clone()),
+                            many => files(many.len()),
+                        };
                         dialog::note(
                             ui,
                             format!(
-                                "Transcribes {} first ({})",
-                                files(missing.len()),
-                                length(duration(&p, &missing))
+                                "Transcribes {what} first ({})",
+                                length(duration(&p, &untold))
                             ),
                         );
+                    }
+                } else if s.each_file(range.is_some()) {
+                    let missing = to_transcribe(&p, s, &heard, (0, p.end()));
+                    if !missing.is_empty() {
+                        let total = heard_files(&p, &heard, (0, p.end()), &HashSet::new()).len();
+                        let what = match missing.len() {
+                            n if n < total => format!("{n} of {total} files"),
+                            n => files(n),
+                        };
+                        let mut text = format!(
+                            "Transcribes {what} first ({})",
+                            length(duration(&p, &missing))
+                        );
+                        match missing
+                            .iter()
+                            .filter(|m| self.snap.transcribed.contains(*m))
+                            .count()
+                        {
+                            0 => {}
+                            1 => text.push_str(", replacing a transcript"),
+                            n => text.push_str(&format!(", replacing {n} transcripts")),
+                        }
+                        dialog::note(ui, text);
                     }
                 }
                 dialog::footer(ui, |ui| {
@@ -1227,7 +1248,7 @@ impl Workspace {
                         (false, _) => "Create",
                     };
                     let can = (transcribing || !heard.is_empty())
-                        && (from_transcript || ready.key[index(s.model)]);
+                        && (instant || ready.key[index(s.model)]);
                     create = dialog::main_button(ui, label, can);
                     cancel = ui.button("Cancel").clicked();
                 });
@@ -1258,8 +1279,11 @@ impl Workspace {
                 None => {}
             }
         }
-        if create && s.model.paid() && !d.paid && !from_transcript {
-            let (secs, what) = self.upload_size(&p, &s, &d, &heard);
+        if create && s.model.paid() && !d.paid && !instant {
+            let (secs, what) = match from_transcript {
+                true => (duration(&p, &untold), files(untold.len())),
+                false => self.upload_size(&p, &s, &d, &heard),
+            };
             match (secs > 0.0, d.ready.ask[index(s.model)]) {
                 (false, _) => {}
                 (true, true) => {
@@ -1270,7 +1294,7 @@ impl Workspace {
             }
         }
         let dir = crate::paths::models_dir();
-        let files_wanted = match from_transcript {
+        let files_wanted = match instant {
             true => Vec::new(),
             false => wanted(&s),
         };
@@ -1330,16 +1354,8 @@ impl Workspace {
         d: &Dialog,
         heard: &[String],
     ) -> (f64, String) {
-        let skip = HashSet::new();
-        let skip = &skip;
         if !d.media.is_empty() {
-            let media: Vec<String> = d
-                .media
-                .iter()
-                .filter(|m| !skip.contains(*m))
-                .cloned()
-                .collect();
-            return (duration(p, &media), files(media.len()));
+            return (duration(p, &d.media), files(d.media.len()));
         }
         let (a, b) = match marked(p) {
             Some(marks) if s.in_out => marks,
@@ -1347,13 +1363,7 @@ impl Workspace {
         };
         match s.each_file(marked(p).is_some()) {
             true => {
-                let mut media = heard_files(p, heard, (a, b), skip);
-                let kept = kept_for(p, s, &media);
-                match kept.len() == media.len() {
-                    true => media.clear(),
-                    false if !s.speakers => media.retain(|m| !kept.contains(m)),
-                    false => {}
-                }
+                let media = to_transcribe(p, s, heard, (a, b));
                 (duration(p, &media), files(media.len()))
             }
             false => ((b - a) as f64 / p.settings.fps.as_f64(), "The mix".into()),
