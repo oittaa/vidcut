@@ -72,7 +72,7 @@ flowchart LR
 | snapshot | what the GUI draws, published by the live core | `Snapshot` |
 | origin | a cache stamp of a file's path, size and time | `Origin` |
 | kept | data of another editor that vidcut carries without modeling it | `Kept` |
-| lru | a cache of a set number of entries that lets the least recently used go | `Lru` |
+| lru | a cache of a set number of entries, a hashmap and a linked list, that lets the least recently used go | `Lru` |
 
 ## Pages
 

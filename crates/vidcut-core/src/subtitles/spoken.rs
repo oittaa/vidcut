@@ -4,7 +4,7 @@ use crate::model::{LetterCase, SpeakerPaint, SubtitleStyle, WordsShow};
 pub const POP_SECS: f64 = 0.2;
 pub const HIGHLIGHT: &str = "#ffd400";
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Piece {
     pub text: String,
     pub italic: bool,
@@ -179,3 +179,17 @@ pub fn shown(
         pop,
     }
 }
+
+impl std::hash::Hash for Shown {
+    fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
+        let Shown {
+            pieces,
+            spoken,
+            step,
+            pop,
+        } = self;
+        (pieces, spoken, step, crate::model::float_bits(*pop)).hash(h);
+    }
+}
+
+impl Eq for Shown {}
