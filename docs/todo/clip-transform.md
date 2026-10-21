@@ -2,7 +2,10 @@
 
 **When:** next, first in [the roadmap](../roadmap.md#what-comes-next). A slow push on a still is what a simple video most often still needs another editor for.
 
-Transform and Crop are in ([spec §8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), [D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions), [X65](../deviations.md#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Two parts are open.
+Transform and Crop are in ([spec §8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), [D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions), [X65](../deviations.md#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Two parts are open, and two smaller ones:
+
+- **Titles in a placed compound clip** stay where they are. Placing them needs a title drawn through the compound's maps (`place::Placing`) in the viewer's `fs_title` and the export's title drawing, which move, zoom and turn a title but don't crop or stretch it.
+- **`edit.decompose`** drops a placed compound's picture with a warning. Its clips could take it where that is exact: a clip with no picture of its own that fills the frame.
 
 ## Dynamic Zoom
 
