@@ -2163,13 +2163,8 @@ fn keep_hdr(d: &mut Dialog, set: &[String]) {
     }
 }
 
-fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value) {
+fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value, auto: String) {
     use vidcut_core::export::{FirstPass, Multipass};
-    let auto = match planned["passes"]["kind"].as_str() {
-        Some("one") => "auto (1)".to_string(),
-        Some(_) => "auto (2)".to_string(),
-        None => "auto".to_string(),
-    };
     let label = |p: Option<u8>| match p {
         None => auto.clone(),
         Some(n) => n.to_string(),
@@ -2227,9 +2222,14 @@ fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value) {
     }
 }
 
-fn auto_of(outputs: &[Value], pick: impl Fn(&Value) -> Option<String>) -> String {
+fn auto_label(picked: &Value, setting: &str, show: impl Fn(&Value) -> Option<String>) -> String {
     let mut picks: Vec<String> = Vec::new();
-    for p in outputs.iter().filter_map(pick) {
+    for p in picked[setting]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(show)
+    {
         if !picks.contains(&p) {
             picks.push(p);
         }
@@ -2379,9 +2379,7 @@ fn settings_form(
 ) {
     let plan = d.plan_result.as_ref().and_then(|r| r.as_ref().ok());
     let planned = plan.map(|p| p["video_encoder"].clone()).unwrap_or_default();
-    let outputs = plan
-        .and_then(|p| p["outputs"].as_array().cloned())
-        .unwrap_or_default();
+    let picked = plan.map(|p| p["auto"].clone()).unwrap_or_default();
     egui::Grid::new("export-settings")
         .num_columns(2)
         .spacing([12.0, 6.0])
@@ -2471,8 +2469,9 @@ fn settings_form(
                             }
                         });
                     ui.label(dim("encoder"));
-                    let encoder = |e: &EncoderChoice| match (e, planned["name"].as_str()) {
-                        (EncoderChoice::Auto, Some(n)) => format!("auto ({n})"),
+                    let auto = auto_label(&picked, "encoder", |e| e.as_str().map(String::from));
+                    let encoder = |e: &EncoderChoice| match e {
+                        EncoderChoice::Auto => auto.clone(),
                         _ => name(e),
                     };
                     egui::ComboBox::from_id_salt("export-encoder")
@@ -2549,7 +2548,13 @@ fn settings_form(
                 if v.bitrate.is_some() && !matches!(v.codec, VideoCodec::Prores | VideoCodec::Dnxhr)
                 {
                     ui.label("");
-                    ui.horizontal(|ui| passes_row(ui, v, &planned));
+                    let auto = auto_label(&picked, "passes", |p| {
+                        p["kind"].as_str().map(|k| match k {
+                            "one" => "1".to_string(),
+                            _ => "2".to_string(),
+                        })
+                    });
+                    ui.horizontal(|ui| passes_row(ui, v, &planned, auto));
                     ui.end_row();
                 }
 
@@ -2601,9 +2606,8 @@ fn settings_form(
                     }
                     if !matches!(v.codec, VideoCodec::Prores | VideoCodec::Dnxhr) {
                         ui.label(dim("bit depth"));
-                        let auto = auto_of(&outputs, |o| {
-                            o["color"]["bit_depth"].as_u64().map(|b| b.to_string())
-                        });
+                        let auto =
+                            auto_label(&picked, "bit_depth", |b| b.as_u64().map(|b| b.to_string()));
                         egui::ComboBox::from_id_salt("export-depth")
                             .selected_text(v.bit_depth.map_or(auto.clone(), |b| b.to_string()))
                             .show_ui(ui, |ui| {
@@ -2623,8 +2627,8 @@ fn settings_form(
                             "hlg" => "HDR (HLG)",
                             _ => "SDR",
                         };
-                        let auto = auto_of(&outputs, |o| {
-                            o["color"]["hdr"].as_str().map(|h| range(h).to_string())
+                        let auto = auto_label(&picked, "hdr", |h| {
+                            h.as_str().map(|h| range(h).to_string())
                         });
                         let label = |h: HdrMode| match h {
                             HdrMode::Auto => auto.clone(),
@@ -2653,8 +2657,8 @@ fn settings_form(
                                 M::All => "HDR10 + HDR10+ + DV",
                                 M::None => "none",
                             };
-                            let auto = auto_of(&outputs, |o| {
-                                serde_json::from_value::<M>(o["metadata"]["mode"].clone())
+                            let auto = auto_label(&picked, "metadata", |m| {
+                                serde_json::from_value::<M>(m.clone())
                                     .ok()
                                     .map(|m| kind(m).to_string())
                             });
@@ -2796,7 +2800,7 @@ fn settings_form(
 mod tests {
     use serde_json::json;
 
-    use super::{auto_of, command_params, decoded_on, detail_rows, details_text, metadata_line};
+    use super::{auto_label, command_params, decoded_on, detail_rows, details_text, metadata_line};
     use crate::live::JobInfo;
 
     fn job() -> JobInfo {
@@ -2838,9 +2842,9 @@ mod tests {
 
     #[test]
     fn an_automatic_setting_names_what_the_plan_picked() {
-        let outputs = [json!({ "color": { "bit_depth": 10 } })];
-        let depth = |o: &serde_json::Value| o["color"]["bit_depth"].as_u64().map(|b| b.to_string());
-        assert_eq!(auto_of(&outputs, depth), "auto (10)");
+        let picked = json!({ "bit_depth": [10] });
+        let depth = |b: &serde_json::Value| b.as_u64().map(|b| b.to_string());
+        assert_eq!(auto_label(&picked, "bit_depth", depth), "auto (10)");
     }
 
     #[test]

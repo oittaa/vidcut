@@ -339,15 +339,16 @@ pub fn render(
         }
         Request::ExportPlan(params) => {
             let mut prepared = export::prepare(project, params, None)?;
-            export::as_preferred(&mut prepared, crate::preferences::gpu_acceleration());
-            let available = if export::needs_gpu_info(&prepared.settings) {
-                export::availability(false)
-            } else {
-                Default::default()
+            let gpu = crate::preferences::gpu_acceleration();
+            export::as_preferred(&mut prepared, gpu);
+            let available = match gpu && prepared.settings.video.is_some() {
+                true => export::availability(false),
+                false => Default::default(),
             };
             export::choose_colors(&mut prepared, project, &available, None)?;
             let subtitles = export::subtitles_beside(project, &prepared, params)?;
             let mut plan = export::describe(&prepared, &available);
+            plan["auto"] = export::auto_picks(&prepared, project, &available, gpu);
             if !subtitles.is_empty() {
                 plan["subtitles"] = export::subtitle_files(&subtitles);
             }

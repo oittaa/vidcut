@@ -9,7 +9,8 @@ use vidcut_av::light::Span;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind, PictureShare};
 use vidcut_core::export::metadata::{Measured, PieceMeta};
 use vidcut_core::export::{
-    Container, EncoderChoice, ExportSettings, Preset, apply_overrides, builtin_presets, validate,
+    Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Preset, VideoSettings,
+    apply_overrides, builtin_presets, validate,
 };
 use vidcut_core::otio::{self, Locations};
 use vidcut_core::render::{self, RenderPlan};
@@ -781,12 +782,7 @@ pub fn choose_colors(
     Ok(())
 }
 
-fn choose_once(
-    prepared: &mut Prepared,
-    p: &Project,
-    available: &Availability,
-    measured: bool,
-) -> Vec<Span> {
+fn filled_project(prepared: &Prepared, p: &Project) -> Project {
     let ids: Vec<String> = prepared
         .outputs
         .iter()
@@ -798,34 +794,123 @@ fn choose_once(
         .collect();
     let mut filled = p.clone();
     fill_hdr_metadata(&mut filled, &ids);
-    let mut todo: Vec<Span> = Vec::new();
-    for o in &mut prepared.outputs {
-        o.settings = prepared.settings.clone();
-        o.color = vidcut_av::export::choose_color(&o.plan, &o.settings, available, |piece| {
-            picture_kind(p, piece)
-        });
-        if let (Some(c), Some(v)) = (&o.color, o.settings.video.as_mut()) {
-            c.apply(v);
-        }
-        let fps = o.plan.fps;
-        let colored = o.settings.video.clone();
-        o.metadata = vidcut_av::export::choose_metadata(&o.plan, &o.settings, |piece| {
-            let mut m = piece_meta(&filled, piece);
-            if let Some(v) = &colored {
-                m.measured = engine::measured_light(piece, fps, v, &m, false, None, None);
-                if m.measured == Measured::Pending {
-                    if measured {
-                        m.measured = Measured::Failed;
-                    } else {
-                        todo.extend(Span::of(piece, fps));
-                    }
+    filled
+}
+
+struct Chosen {
+    settings: ExportSettings,
+    color: Option<ColorChoice>,
+    metadata: Option<vidcut_core::export::metadata::MetadataChoice>,
+}
+
+fn choose_output(
+    plan: &RenderPlan,
+    asked: &ExportSettings,
+    (p, filled): (&Project, &Project),
+    available: &Availability,
+    measured: bool,
+    todo: &mut Vec<Span>,
+) -> Chosen {
+    let mut settings = asked.clone();
+    let color =
+        vidcut_av::export::choose_color(plan, &settings, available, |piece| picture_kind(p, piece));
+    if let (Some(c), Some(v)) = (&color, settings.video.as_mut()) {
+        c.apply(v);
+    }
+    let fps = plan.fps;
+    let colored = settings.video.clone();
+    let metadata = vidcut_av::export::choose_metadata(plan, &settings, |piece| {
+        let mut m = piece_meta(filled, piece);
+        if let Some(v) = &colored {
+            m.measured = engine::measured_light(piece, fps, v, &m, false, None, None);
+            if m.measured == Measured::Pending {
+                if measured {
+                    m.measured = Measured::Failed;
+                } else {
+                    todo.extend(Span::of(piece, fps));
                 }
             }
-            m
-        });
-        if let (Some(c), Some(v)) = (&o.metadata, o.settings.video.as_mut()) {
-            c.apply(v);
         }
+        m
+    });
+    if let (Some(c), Some(v)) = (&metadata, settings.video.as_mut()) {
+        c.apply(v);
+    }
+    Chosen {
+        settings,
+        color,
+        metadata,
+    }
+}
+
+pub fn auto_picks(prepared: &Prepared, p: &Project, available: &Availability, gpu: bool) -> Value {
+    if prepared.settings.video.is_none() {
+        return Value::Null;
+    }
+    let filled = filled_project(prepared, p);
+    let picks = |reset: &dyn Fn(&mut VideoSettings), read: &dyn Fn(&Chosen) -> Option<Value>| {
+        let mut asked = prepared.settings.clone();
+        if let Some(v) = asked.video.as_mut() {
+            reset(v);
+            preferred(v, gpu);
+        }
+        let mut out: Vec<Value> = Vec::new();
+        for o in &prepared.outputs {
+            let chosen = choose_output(
+                &o.plan,
+                &asked,
+                (p, &filled),
+                available,
+                false,
+                &mut Vec::new(),
+            );
+            if let Some(x) = read(&chosen)
+                && !out.contains(&x)
+            {
+                out.push(x);
+            }
+        }
+        json!(out)
+    };
+    let encoder = |c: &Chosen| {
+        c.settings
+            .video
+            .as_ref()
+            .and_then(|v| vidcut_av::export::encode::resolve_video(v, available).ok())
+    };
+    json!({
+        "encoder": picks(&|v| v.encoder = EncoderChoice::Auto, &|c| encoder(c).map(|e| json!(e.name))),
+        "passes": picks(&|v| v.passes = None, &|c| encoder(c).map(|e| json!(e.passes))),
+        "bit_depth": picks(&|v| v.bit_depth = None, &|c| c.color.as_ref().map(|c| json!(c.bit_depth))),
+        "hdr": picks(&|v| v.hdr = HdrMode::Auto, &|c| c.color.as_ref().map(|c| json!(c.hdr))),
+        "metadata": picks(
+            &|v| v.hdr_metadata = HdrMetadata::Auto,
+            &|c| c.metadata.as_ref().map(|m| json!(m.mode)),
+        ),
+    })
+}
+
+fn choose_once(
+    prepared: &mut Prepared,
+    p: &Project,
+    available: &Availability,
+    measured: bool,
+) -> Vec<Span> {
+    let filled = filled_project(prepared, p);
+    let mut todo: Vec<Span> = Vec::new();
+    for o in &mut prepared.outputs {
+        let chosen = choose_output(
+            &o.plan,
+            &prepared.settings,
+            (p, &filled),
+            available,
+            measured,
+            &mut todo,
+        );
+        o.settings = chosen.settings;
+        o.color = chosen.color;
+        o.metadata = chosen.metadata;
+        let fps = o.plan.fps;
         let Some(v) = o.settings.video.as_ref() else {
             continue;
         };
@@ -1093,21 +1178,26 @@ pub fn plays(decoding: bool) -> Option<Vec<(String, String)>> {
 }
 
 pub fn as_preferred(prepared: &mut Prepared, gpu: bool) {
-    let Some(v) = prepared.settings.video.as_mut() else {
-        return;
-    };
+    if let Some(v) = prepared.settings.video.as_mut()
+        && let Some(why) = preferred(v, gpu)
+    {
+        prepared.encoder_changed = Some(why);
+    }
+}
+
+fn preferred(v: &mut VideoSettings, gpu: bool) -> Option<String> {
     if !gpu {
         v.encoder = EncoderChoice::Cpu;
-    } else if let Some(g) = vidcut_av::gpus::in_use()
-        && !g.encodes_with(v.encoder)
-    {
-        prepared.encoder_changed = Some(format!(
-            "{} isn't on the GPU in use ({}): it encodes with its own, or the CPU does",
-            v.encoder.title(),
-            g.name
-        ));
-        v.encoder = EncoderChoice::Auto;
+        return None;
     }
+    let g = vidcut_av::gpus::in_use().filter(|g| !g.encodes_with(v.encoder))?;
+    let why = format!(
+        "{} isn't on the GPU in use ({}): it encodes with its own, or the CPU does",
+        v.encoder.title(),
+        g.name
+    );
+    v.encoder = EncoderChoice::Auto;
+    Some(why)
 }
 
 pub fn unavailable(
