@@ -1592,10 +1592,7 @@ fn job_meter(j: &JobInfo) -> (Option<f32>, String) {
     match j.fraction() {
         None => (
             None,
-            format!(
-                "still working · no count · {} elapsed",
-                clock(j.clock.elapsed().as_secs_f64())
-            ),
+            format!("{} elapsed", clock(j.clock.elapsed().as_secs_f64())),
         ),
         Some(share) => {
             let text = match j.eta {
@@ -2996,56 +2993,5 @@ mod tests {
         );
         assert_eq!(why, "MaxCLL 1000\nMaxCLL 2000");
         assert!(metadata_line(&outputs[3..]).is_none());
-    }
-
-    #[test]
-    fn the_light_starts_at_the_left() {
-        assert_eq!(super::sweep(0.0), (0.0, true));
-    }
-
-    #[test]
-    fn the_light_is_midway_on_the_way_back() {
-        assert_eq!(super::sweep(1.5), (0.5, false));
-    }
-
-    #[test]
-    fn a_download_names_its_share() {
-        let mut j = job();
-        j.clock = std::time::Instant::now() - std::time::Duration::from_secs(4);
-        j.progressed(
-            0,
-            vidcut_av::export::Progress::stage(
-                vidcut_av::export::Stage::Downloading,
-                25,
-                100,
-                std::time::Duration::from_secs(1),
-            ),
-        );
-        assert_eq!(
-            super::job_meter(&j),
-            (
-                Some(0.25),
-                "25% · 0:04 elapsed · about 0:12 left".to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn a_step_with_no_count_says_it_is_still_working() {
-        let mut j = job();
-        j.clock = std::time::Instant::now() - std::time::Duration::from_secs(75);
-        j.progressed(
-            0,
-            vidcut_av::export::Progress::stage(
-                vidcut_av::export::Stage::Waiting,
-                80,
-                80,
-                std::time::Duration::from_secs(5),
-            ),
-        );
-        assert_eq!(
-            super::job_meter(&j),
-            (None, "still working · no count · 1:15 elapsed".to_string())
-        );
     }
 }

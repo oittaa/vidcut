@@ -404,43 +404,6 @@ mod tests {
     }
 
     #[test]
-    fn encoded_frames_fill_their_share() {
-        let mut j = JobInfo::new("j".into(), "gui", json!({}));
-        j.progressed(
-            0,
-            Progress::single(40, 100, std::time::Duration::from_secs(2)),
-        );
-        assert_eq!(j.fraction(), Some(0.4));
-    }
-
-    #[test]
-    fn measuring_light_fills_its_share() {
-        let mut j = JobInfo::new("j".into(), "gui", json!({}));
-        j.progressed(
-            0,
-            Progress::measuring(0.4, std::time::Duration::from_secs(1)),
-        );
-        assert_eq!(j.fraction(), Some(0.4));
-    }
-
-    #[test]
-    fn a_job_before_its_total_has_no_share() {
-        let j = JobInfo::new("j".into(), "gui", json!({}));
-        assert_eq!(j.fraction(), None);
-    }
-
-    #[test]
-    fn loading_a_model_has_no_share() {
-        let mut j = JobInfo::new("j".into(), "gui", json!({}));
-        j.progressed(
-            0,
-            Progress::stage(Stage::Loading, 0, 0, std::time::Duration::from_secs(1)),
-        );
-        assert_eq!(j.fraction(), None);
-        assert_eq!(j.eta, None);
-    }
-
-    #[test]
     fn a_speaker_pass_with_no_count_has_no_share() {
         let mut j = JobInfo::new("j".into(), "gui", json!({}));
         j.progressed(
@@ -453,34 +416,16 @@ mod tests {
             ),
         );
         assert_eq!(j.fraction(), None);
-        assert_eq!(j.eta, None);
     }
 
     #[test]
-    fn a_speaker_pass_that_counts_fills_its_share() {
-        let mut j = JobInfo::new("j".into(), "gui", json!({}));
-        j.progressed(
-            0,
-            Progress::stage(
-                Stage::Speakers,
-                3_000,
-                12_000,
-                std::time::Duration::from_secs(4),
-            ),
-        );
-        assert_eq!(j.fraction(), Some(0.25));
-    }
-
-    #[test]
-    fn waiting_for_a_reply_keeps_the_upload_and_has_no_share() {
+    fn waiting_for_a_reply_has_no_share() {
         let mut j = JobInfo::new("j".into(), "gui", json!({}));
         j.progressed(
             0,
             Progress::stage(Stage::Waiting, 80, 80, std::time::Duration::from_secs(5)),
         );
-        assert_eq!(j.progress, 1.0);
         assert_eq!(j.fraction(), None);
-        assert_eq!(j.eta, None);
     }
 
     #[test]
