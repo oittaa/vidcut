@@ -22,7 +22,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - color, Fusion, Smart Reframe, Close Up
 - Sync Bin, Multi Source, Source Overwrite, Live Overwrite
 - Replay, voiceover
-- AI tools other than Create Subtitles from Audio: voice/dialogue tools ([audio cleanup](todo/audio-cleanup.md))
+- AI tools other than Create Subtitles from Audio: voice/dialogue tools ([voice isolation](todo/voice-isolation.md))
 - Mixer FX, Paste Attributes, guides ([clip and track audio](todo/audio-effects.md))
 - interchange formats: DRT, AAF, XML
 

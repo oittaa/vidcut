@@ -19,5 +19,5 @@ Open work is in [docs/todo/](todo/), one file per item, each with a **When:** li
 Finishing a simple video comes first, in this order:
 
 1. [Clip transform](todo/clip-transform.md): a picture in a picture, a punch-in, a slow push on a still.
-2. [Audio cleanup](todo/audio-cleanup.md): a Meet recording is still noisy after its silences are cut.
+2. [Voice isolation](todo/voice-isolation.md): a Meet recording is still noisy after its silences are cut.
 3. [Clip and track audio](todo/audio-effects.md): music that dips under speech.
