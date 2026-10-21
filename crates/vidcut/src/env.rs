@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats, VoiceActivity};
+use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::editor::GeneratedProxy;
 use vidcut_core::fingerprint::Origin;
 use vidcut_core::lru::Lru;
@@ -90,19 +91,12 @@ fn measured<T>(
         return Ok(v.clone());
     }
     let (file, origin) = &key;
-    let read = std::fs::read(file).ok();
+    let read = disk_cache::read(file);
     let value = match read.as_deref().and_then(|b| from_bytes(origin.check(b)?)) {
         Some(v) => v,
         None => {
             let v = measure().map_err(av_error)?;
-            if let Some(dir) = file.parent()
-                && std::fs::create_dir_all(dir).is_ok()
-            {
-                let part = file.with_extension("part");
-                if std::fs::write(&part, origin.stamp(&to_bytes(&v))).is_ok() {
-                    let _ = std::fs::rename(&part, file);
-                }
-            }
+            let _ = disk_cache::write(file, &origin.stamp(&to_bytes(&v)));
             v
         }
     };
@@ -121,7 +115,7 @@ pub fn transcribed(media: &Media) -> bool {
 
 fn analysis_file(media: &Media, what: &str) -> (PathBuf, Origin) {
     let origin = paths::media_origin(media);
-    (paths::media_cache("analysis", &origin, what), origin)
+    (Kind::Analysis.file(&origin, what), origin)
 }
 
 pub fn input_of(m: &Media) -> vidcut_av::decode::Input {
@@ -298,8 +292,7 @@ impl Env for AvEnv {
             return Ok(Some(s.clone()));
         }
         let (file, origin) = &key;
-        let Some(speech) = std::fs::read(file)
-            .ok()
+        let Some(speech) = disk_cache::read(file)
             .and_then(|b| serde_json::from_slice::<Speech>(origin.check(&b)?).ok())
         else {
             return Ok(None);
@@ -410,6 +403,7 @@ impl Env for AvEnv {
             && vidcut_av::proxy::origin(&path).as_deref() == Some(&*origin.text)
         {
             (made_with, copies) = made().remove(&path).unzip();
+            disk_cache::used(&path);
         } else if !dry_run {
             std::fs::create_dir_all(dir)
                 .map_err(|e| Error::media(format!("{}: {e}", dir.display())))?;
@@ -445,6 +439,7 @@ impl Env for AvEnv {
                     .map_err(|e| Error::media(format!("{}: {e}", actual.display())))?;
                 path = actual;
             }
+            disk_cache::added(&path);
             made().insert(path.clone(), (how.clone(), written.copies));
             made_with = Some(how);
             copies = Some(written.copies);
@@ -665,11 +660,7 @@ fn keep_transcript(media: &Media, stream: u32, speech: Arc<Speech>) -> Result<Ar
     vidcut_core::transcript::spoken(&speech).map_err(Error::invalid)?;
     let (file, origin) = transcript_file(media, stream);
     let bytes = serde_json::to_vec(&*speech).map_err(|e| Error::internal(e.to_string()))?;
-    let part = file.with_extension("part");
-    file.parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(&part, origin.stamp(&bytes)))
-        .and_then(|()| std::fs::rename(&part, &file))
+    disk_cache::write(&file, &origin.stamp(&bytes))
         .map_err(|e| Error::media(format!("{}: {e}", file.display())))?;
     TRANSCRIPTS
         .lock()

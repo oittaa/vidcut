@@ -214,7 +214,7 @@ pub fn run_with(
             answer(answer_json)
         }
         Request::DecodersList {} => {
-            let clips = vidcut_core::dirs::cache().join("decoder-tests");
+            let clips = vidcut_core::disk_cache::Kind::DecoderTests.dir();
             answer(json!({ "decoders": vidcut_av::hw::decoders(&clips) }))
         }
         Request::PreferencesGet {} => answer(crate::preferences::get()?),

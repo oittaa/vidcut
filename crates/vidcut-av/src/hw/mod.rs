@@ -586,7 +586,11 @@ pub fn decoders(dir: &std::path::Path) -> Vec<DecoderStatus> {
     ]
     .map(|(codec, video, container, id)| {
         let spec = FixtureSpec::new(video, container, 640, 360, (30, 1), 8).no_audio();
-        (codec, id, crate::fixture::ensure_in(dir, &spec))
+        let clip = crate::fixture::ensure_in(dir, &spec);
+        if let Ok(path) = &clip {
+            vidcut_core::disk_cache::added(path);
+        }
+        (codec, id, clip)
     });
     let mut out = Vec::new();
     for gpu in GpuDecoder::all() {
@@ -647,6 +651,7 @@ pub fn plays(gpu: &GpuDecoder, dir: &std::path::Path) -> Vec<(&'static str, Kind
         .filter(|&(_, video, container, id)| {
             let spec = FixtureSpec::new(video, container, 640, 360, (30, 1), 8).no_audio();
             crate::fixture::ensure_in(dir, &spec).is_ok_and(|clip| {
+                vidcut_core::disk_cache::added(&clip);
                 gpu.why_not(id, || false).is_none() && decodes_all(gpu, &clip).is_ok()
             })
         })

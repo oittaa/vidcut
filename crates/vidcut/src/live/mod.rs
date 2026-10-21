@@ -15,6 +15,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use notify::Watcher;
 use serde_json::{Value, json};
+use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue};
 use vidcut_core::model::{Clip, Format, Title};
 use vidcut_core::ops::ClipSpans;
@@ -721,13 +722,7 @@ fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip
             }
             .map_err(|e| e.to_string())?;
             if prefs.disk_cache && !strip.0.is_empty() {
-                crate::thumbcache::store(
-                    media,
-                    THUMBS,
-                    THUMB_SIZE,
-                    (&strip.0, &strip.1),
-                    prefs.cache_limit_mb,
-                );
+                crate::thumbcache::store(media, THUMBS, THUMB_SIZE, (&strip.0, &strip.1));
             }
             strip
         }
@@ -2884,6 +2879,12 @@ impl Live {
 
     fn open_project(&mut self, path: &Path, create: Option<project::New>) -> Result<()> {
         let open = OpenProject::open(path, create, self.tx.clone())?;
+        let proxies = AvEnv::for_project(open.store.path()).proxy_dir();
+        for m in &open.project().media {
+            if let Some(proxy) = &m.proxy {
+                disk_cache::used(&proxy.path_in(&proxies));
+            }
+        }
         self.project = Some(open);
         self.selection = Selection::default();
         self.source_media = None;
@@ -3029,22 +3030,16 @@ impl Live {
                 let (tx, id, path) = (self.tx.clone(), m.id.clone(), m.path.clone());
                 let wanted = sound;
                 let origin = paths::media_origin(&m);
-                let cache =
-                    paths::media_cache("waveforms", &origin, &format!("peaks-{channels}ch"));
+                let cache = Kind::Waveforms.file(&origin, &format!("peaks-{channels}ch"));
                 self.workers.run(move || {
-                    let cached = std::fs::read(&cache)
-                        .ok()
+                    let cached = disk_cache::read(&cache)
                         .and_then(|b| vidcut_av::waveform::Waveform::from_bytes(origin.check(&b)?));
                     let result = match cached {
                         Some(w) => Ok(w),
                         None => vidcut_av::waveform::waveform(&path, 0, WAVEFORM_RATE, channels)
                             .map_err(|e| e.to_string())
                             .inspect(|w| {
-                                if let Some(dir) = cache.parent()
-                                    && std::fs::create_dir_all(dir).is_ok()
-                                {
-                                    let _ = std::fs::write(&cache, origin.stamp(&w.to_bytes()));
-                                }
+                                let _ = disk_cache::write(&cache, &origin.stamp(&w.to_bytes()));
                             }),
                     };
                     let _ = tx.send(Msg::Waveform {

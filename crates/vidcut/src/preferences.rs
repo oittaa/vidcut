@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
+use vidcut_core::disk_cache::{self, Policy};
 use vidcut_core::preferences::{Preferences, PreferencesPatch};
 use vidcut_core::{Error, Result};
 
@@ -91,6 +92,19 @@ fn prune(table: &mut toml::Table, known: &toml::Table, at: &str) -> Vec<String> 
         }
     });
     ignored
+}
+
+pub fn cache_policy() -> Policy {
+    policy_of(&read().unwrap_or_default())
+}
+
+fn policy_of(p: &Preferences) -> Policy {
+    let root = paths::cache_dir();
+    Policy {
+        cache: p.cache.clone(),
+        disk: crate::system::disk(&root),
+        proxies: p.proxies.folder_in(&root),
+    }
 }
 
 pub fn gpu_acceleration() -> bool {
@@ -223,15 +237,11 @@ fn write(p: &Preferences) -> Result<()> {
         .and_then(|()| std::fs::rename(&part, &path))
         .map_err(|e| Error::internal(format!("{}: {e}", path.display())))?;
     vidcut_av::gpus::choose(&p.gpu.device);
-    if p.thumbnails.disk_cache {
-        thumbcache::evict(
-            &thumbcache::dir(),
-            p.thumbnails.cache_limit_mb.saturating_mul(1 << 20),
-        );
-    } else {
+    if !p.thumbnails.disk_cache {
         thumbcache::clear()
             .map_err(|e| Error::internal(format!("{}: {e}", thumbcache::dir().display())))?;
     }
+    disk_cache::evict();
     Ok(())
 }
 
@@ -261,6 +271,34 @@ fn video_memory_auto_mb(p: &Preferences) -> u64 {
     (vidcut_av::player::Budget::gpu_video(gpu) >> 20) as u64
 }
 
+fn mb(bytes: u64) -> f64 {
+    (bytes as f64 / f64::from(1 << 20) * 10.0).round() / 10.0
+}
+
+fn cache_usage(p: &Preferences) -> Value {
+    let policy = policy_of(p);
+    let usage = disk_cache::usage(&policy);
+    let mut v = json!({
+        "path": paths::cache_dir(),
+        "files": usage.files,
+        "mb": mb(usage.bytes),
+        "keep_free_percent": disk_cache::KEEP_FREE_PERCENT,
+        "models": folder_usage(&paths::models_dir()),
+        "replies": folder_usage(&vidcut_av::speech_api::replies_folder()),
+    });
+    for (key, bytes) in [
+        ("chosen_mb", usage.chosen),
+        ("limit_mb", usage.limit),
+        ("disk_mb", policy.disk.map(|d| d.size)),
+        ("free_mb", policy.disk.map(|d| d.free)),
+    ] {
+        if let Some(bytes) = bytes {
+            v[key] = json!(bytes >> 20);
+        }
+    }
+    v
+}
+
 fn folder_usage(dir: &std::path::Path) -> Value {
     let mut files = 0u64;
     let mut bytes = 0u64;
@@ -280,13 +318,12 @@ fn folder_usage(dir: &std::path::Path) -> Value {
     json!({
         "path": dir,
         "files": files,
-        "mb": (bytes as f64 / f64::from(1 << 20) * 10.0).round() / 10.0,
+        "mb": mb(bytes),
     })
 }
 
 fn describe(p: &Preferences) -> Value {
     use vidcut_core::preferences::ProxyCodec;
-    let (files, bytes) = thumbcache::usage();
     let decoding = p.gpu.acceleration && p.gpu.decoding;
     let played = crate::export::plays(decoding);
     let codecs: Vec<Value> = std::iter::once(ProxyCodec::Auto)
@@ -315,17 +352,9 @@ fn describe(p: &Preferences) -> Value {
         "themes": themes::list(),
         "themes_folder": themes::dir(),
         "system_look": system_look(),
-        "thumbnail_cache": {
-            "path": thumbcache::dir(),
-            "files": files,
-            "mb": (bytes as f64 / f64::from(1 << 20) * 10.0).round() / 10.0,
-        },
         "proxy_codecs": codecs,
         "services": crate::services::describe(),
-        "cache": {
-            "models": folder_usage(&crate::paths::models_dir()),
-            "replies": folder_usage(&vidcut_av::speech_api::replies_folder()),
-        },
+        "cache": cache_usage(p),
         "gpus": vidcut_av::gpus::list(),
         "gpu_chosen": vidcut_av::gpus::find(vidcut_av::gpus::list(), &p.gpu.device),
         "gpu_automatic": vidcut_av::gpus::automatic(),

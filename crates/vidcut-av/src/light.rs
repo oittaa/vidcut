@@ -725,7 +725,7 @@ pub fn analysis(
         if !m.contains_key(&origin)
             && let Some(a) = file
                 .as_ref()
-                .and_then(|f| std::fs::read(f).ok())
+                .and_then(|f| vidcut_core::disk_cache::read(f))
                 .and_then(|b| from_bytes(origin.check(&b)?))
         {
             m.insert(origin.clone(), Arc::new(a));
@@ -749,13 +749,7 @@ pub fn analysis(
         a
     };
     if let Some(f) = &file {
-        if let Some(dir) = f.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let part = f.with_extension(format!("part{}", std::process::id()));
-        if std::fs::write(&part, origin.stamp(&to_bytes(&a))).is_ok() {
-            let _ = std::fs::rename(&part, f);
-        }
+        let _ = vidcut_core::disk_cache::write(f, &origin.stamp(&to_bytes(&a)));
     }
     Ok(Some(a))
 }

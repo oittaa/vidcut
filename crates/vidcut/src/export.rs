@@ -1163,7 +1163,7 @@ pub fn plays(decoding: bool) -> Option<Vec<(String, String)>> {
         return found;
     }
     let found = vidcut_av::hw::GpuDecoder::best().map(|d| {
-        let clips = vidcut_core::dirs::cache().join("decoder-tests");
+        let clips = vidcut_core::disk_cache::Kind::DecoderTests.dir();
         vidcut_av::hw::plays(&d, &clips)
             .into_iter()
             .map(|(codec, kind)| (codec.to_string(), kind.label().to_string()))
