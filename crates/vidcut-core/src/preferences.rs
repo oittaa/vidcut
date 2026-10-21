@@ -136,19 +136,14 @@ impl Default for Gpu {
 #[serde(default, deny_unknown_fields)]
 pub struct Thumbnails {
     /// Keep thumbnails on disk (`~/.cache/vidcut/thumbs`), so a project
-    /// opens with them shown instead of decoding every clip again.
+    /// opens with them shown instead of decoding every clip again. They
+    /// count toward `cache`'s limit.
     pub disk_cache: bool,
-    /// The size limit of that cache in MB: the least recently used
-    /// thumbnails go first.
-    pub cache_limit_mb: u64,
 }
 
 impl Default for Thumbnails {
     fn default() -> Self {
-        Self {
-            disk_cache: true,
-            cache_limit_mb: 512,
-        }
+        Self { disk_cache: true }
     }
 }
 
@@ -391,9 +386,6 @@ pub struct ProxiesPatch {
 pub struct ThumbnailsPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_cache: Option<bool>,
-    /// At least 1.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_limit_mb: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -479,13 +471,8 @@ impl Preferences {
                 p.player.audio_device = d.clone();
             }
         }
-        if let Some(t) = &patch.thumbnails {
-            if let Some(v) = t.disk_cache {
-                p.thumbnails.disk_cache = v;
-            }
-            if let Some(v) = t.cache_limit_mb {
-                p.thumbnails.cache_limit_mb = v;
-            }
+        if let Some(v) = patch.thumbnails.as_ref().and_then(|t| t.disk_cache) {
+            p.thumbnails.disk_cache = v;
         }
         if let Some(x) = &patch.cache {
             let c = &mut p.cache;
@@ -527,9 +514,6 @@ impl Preferences {
                     "{key} must be 0 (automatic) or at least 64"
                 )));
             }
-        }
-        if self.thumbnails.cache_limit_mb == 0 {
-            return Err(Error::usage("thumbnails.cache_limit_mb must be at least 1"));
         }
         let c = &self.cache;
         if !(1..=100).contains(&c.percent) {
@@ -576,24 +560,20 @@ mod tests {
         let pairs = |p: &[&str]| {
             PreferencesPatch::from_pairs(&p.iter().map(|s| s.to_string()).collect::<Vec<_>>())
         };
-        let p = pairs(&[
-            "thumbnails.cache_limit_mb=256",
-            "thumbnails.disk_cache=false",
-        ])
-        .unwrap();
+        let p = pairs(&["cache.percent=5", "thumbnails.disk_cache=false"]).unwrap();
         assert_eq!(
             p.thumbnails,
             Some(ThumbnailsPatch {
                 disk_cache: Some(false),
-                cache_limit_mb: Some(256),
             })
         );
+        assert_eq!(p.cache.and_then(|c| c.percent), Some(5));
         assert_eq!(pairs(&[]).unwrap(), PreferencesPatch::default());
         for bad in [
             &["thumbnails.disk_cache"][..],
             &["thumbnails.size=3"],
             &["thumbnails=3"],
-            &["thumbnails.cache_limit_mb=-1"],
+            &["cache.percent=-1"],
             &["thumbnails.disk_cache=1", "thumbnails.disk_cache.x=2"],
         ] {
             let e = pairs(bad).unwrap_err();
