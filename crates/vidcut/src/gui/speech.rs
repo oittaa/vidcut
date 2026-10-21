@@ -201,13 +201,21 @@ fn service_rows(ui: &mut egui::Ui, s: &mut Settings, transcribing: bool) {
             dialog::row(ui, "Skip Non-Speech", |ui| {
                 let mut v = s.xai.vad_threshold.unwrap_or(XAI_VOICE_GATE);
                 ui.label(dim("Keep All"));
-                if ui
+                let slid = ui
                     .add(egui::Slider::new(&mut v, 0.0..=1.0).show_value(false))
-                    .changed()
-                {
+                    .changed();
+                ui.label(dim("Skip Most"));
+                let typed = ui
+                    .add(
+                        egui::DragValue::new(&mut v)
+                            .range(0.0..=1.0)
+                            .speed(0.01)
+                            .fixed_decimals(2),
+                    )
+                    .changed();
+                if slid || typed {
                     s.xai.vad_threshold = Some(v);
                 }
-                ui.label(dim("Skip Most"));
                 if ui
                     .add_enabled(s.xai.vad_threshold.is_some(), egui::Button::new("Usual"))
                     .clicked()
