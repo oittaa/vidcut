@@ -73,11 +73,15 @@ FFmpeg, driver, OS and library behavior vidcut works around: the quirk, what it 
 
 ## Resolve's OTIO files
 
-Measured in Resolve Studio 21.1.1 through its scripting API, by importing titles from OTIO files and exporting stills.
+Measured in Resolve Studio 21.1.1 through its scripting API: values set on clips, OTIO files exported and imported, and stills and a Deliver render read back.
 
 - **Resolve draws a title read from a file at a pixel a point**, at any picture size, while its own titles have 1/1080 of the picture's height a point. At 3840×2160 its own 96-point title is twice as tall as the same title read back from its own export. `otio::titles` reads and writes a point as a pixel of the picture, as Resolve's import does, so a title vidcut writes looks the same in Resolve and comes back the same; a title made in Resolve on a picture other than 1080 lines tall comes in at another size, in vidcut as in Resolve.
 - **Resolve draws no stroke on a title read from a file.** It keeps `strokeSize` and `strokeColor` and writes them back, but draws nothing at 4, 8 or 16, and it drops `-qt-stroke` styles from the rich text. In two of seven imports it also set the first title's `strokeSize` to 1 and its `strokeColor` to black, whatever the file said; one of those files, imported again, kept its values, and the cause wasn't found. A title's outline doesn't show in Resolve.
-- **Resolve drops metadata it doesn't know**, the clip's `vidcut` key among it, so a title comes back from Resolve by its parameters alone.
+- **Resolve drops metadata it doesn't know**, the clip's `vidcut` key among it, so a title comes back from Resolve by its parameters alone, and a placed clip by its Transform, Cropping and Retime and Scaling.
+- **Resolve's file holds no frame size:** its timeline's metadata is only `Resolve OTIO Meta Version`, and a clip's Transform (a `Resolve Effect` of type 2), Cropping (3) and Retime and Scaling (22) hold fractions, listing only the parameters off their defaults. `otio::picture` converts them with the shapes of the frame and the source alone (`Shape`). Resolve reads them in the form `otio::picture` writes: each parameter with its default and empty `Key Frames`.
+- **Pan, Tilt and the crop are fractions of Resolve's picture,** not of the frame: the source sized by Retime and Scaling's `scale`, by the scripting API's numbers 0 the project's (fit in a new project), 1 crop (a source pixel to a frame pixel, measured with square pixels only), 2 fit, 3 fill and 4 stretch; only 3 was checked in a file. Pan is in picture widths to the right, Tilt in picture heights up, and the zoom is across and down the picture. vidcut writes `scale` 2, so Resolve fits a clip whatever its project says, and reads crop, fill and stretch as a zoom; a compound clip's picture is the frame.
+- **Resolve zooms and turns about the anchor point,** `transformationAnchorPoint`, from the picture's middle in fractions of it, y up, and flips about the middle. vidcut has no anchor: reading folds it into `position`, the middle landing at A − R·S·A plus Pan and Tilt's move (A the anchor, S the zoom, R the turn), and writing leaves it at the middle.
+- **Resolve's Pan and Tilt go from −4 to 4.** vidcut writes a picture moved further at 4 and names its clip in the export's notes.
 
 ## transcribe.cpp and its models
 

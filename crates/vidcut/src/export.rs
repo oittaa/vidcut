@@ -277,14 +277,14 @@ pub fn timeline(
         summary["bytes"] = json!(items.iter().map(|i| i.bytes).sum::<u64>());
     }
     let mut notes = subtitle_notes(&subtitles);
-    let placed = otio::placed(p, span);
-    if !placed.is_empty() {
+    let far = otio::out_of_reach(p, span);
+    if !far.is_empty() {
         notes.push(json!({
-            "code": "pictures_kept",
+            "code": "pictures_out_of_reach",
             "message": format!(
-                "{}: their pictures' places and crops are in vidcut's own metadata, which \
-                 other editors don't read; there they fill the frame",
-                placed.join(", ")
+                "{}: moved more than 4 picture widths or heights, further than other \
+                 editors' Transform goes; there they stop at 4",
+                far.join(", ")
             ),
         }));
     }

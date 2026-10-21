@@ -9,6 +9,7 @@ use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
 use crate::time::Rational;
 
 pub mod effects;
+pub mod picture;
 #[cfg(test)]
 mod tests;
 pub mod titles;
@@ -18,6 +19,31 @@ const VIDCUT: &str = "vidcut";
 const EDITOR: &str = "Resolve_OTIO";
 pub const COMPOUNDS_KEPT: &str =
     "compound clips and nested timelines kept as blocks, playing their clips";
+const EFFECTS_KEPT: &str = "clip effects kept on their clips but not shown or played";
+
+pub fn note_kept(warnings: &mut Vec<String>, names: &[String]) {
+    let head = format!("{EFFECTS_KEPT}: ");
+    let at = warnings.iter().position(|w| w.starts_with(&head));
+    let mut all: Vec<String> = at.map_or_else(Vec::new, |i| {
+        warnings[i][head.len()..]
+            .split(", ")
+            .map(String::from)
+            .collect()
+    });
+    for n in names {
+        if !all.contains(n) {
+            all.push(n.clone());
+        }
+    }
+    if all.is_empty() {
+        return;
+    }
+    let note = format!("{head}{}", all.join(", "));
+    match at {
+        Some(i) => warnings[i] = note,
+        None => warnings.push(note),
+    }
+}
 
 fn with(mut small: Value, big: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
     for (key, value) in big {
@@ -217,12 +243,36 @@ pub fn exported(c: &Clip, a: i64, b: i64) -> bool {
     (within && (c.video || c.compound.is_some())) || audio_part(c, a, b).is_some()
 }
 
-pub fn placed(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
+fn shape_of(p: &Project, c: &Clip, m: Option<&Media>) -> picture::Shape {
+    let frame = (p.settings.width, p.settings.height);
+    match m.and_then(|m| m.info.video.as_ref()) {
+        Some(v) if c.compound.is_none() => picture::Shape::of(v, frame),
+        _ => picture::Shape::whole(frame),
+    }
+}
+
+fn with_picture(c: &Clip, shape: &picture::Shape, effects: Vec<Value>) -> Vec<Value> {
+    let Some(x) = &c.picture else {
+        return effects;
+    };
+    effects
+        .into_iter()
+        .filter(|e| !picture::is_placing(e))
+        .chain(picture::effects(x, shape))
+        .collect()
+}
+
+pub fn out_of_reach(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     let (a, b) = span.unwrap_or((0, p.end()));
     p.tracks
         .iter()
         .flat_map(|t| &t.clips)
-        .filter(|c| c.picture.is_some() && c.video && exported(c, a, b))
+        .filter(|c| c.video && exported(c, a, b))
+        .filter(|c| {
+            c.picture
+                .as_ref()
+                .is_some_and(|x| !picture::reaches(x, &shape_of(p, c, p.media(&c.media))))
+        })
         .map(|c| c.id.clone())
         .collect()
 }
@@ -533,7 +583,7 @@ pub fn export_drawn(
                 );
                 let effects = match &c.title {
                     Some(t) => titles::with_opacity(t, effects),
-                    None => effects,
+                    None => with_picture(c, &shape_of(p, c, m), effects),
                 };
                 let mut it = match &c.compound {
                     Some(k) => block(c, k, &label, c.source_at(s), e - s, effects),
@@ -958,6 +1008,10 @@ impl ImportedClip {
 
     pub fn is_block(&self) -> bool {
         self.generator.is_some() || self.title.is_some() || self.compound.is_some()
+    }
+
+    pub fn has_picture(&self) -> bool {
+        self.video && self.title.is_none() && self.generator.is_none()
     }
 
     fn block(
@@ -1936,21 +1990,20 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     }
     settings.retain(|t| t.id.starts_with('V') || clips.iter().any(|c| c.track == t.id));
     let mut kept: Vec<String> = Vec::new();
-    for e in clips
-        .iter()
-        .flat_map(|c| c.effects.iter().chain(&c.audio_effects))
-    {
-        let name = effects::name(e);
-        if !kept.contains(&name) {
-            kept.push(name);
+    for c in &clips {
+        let placed = c.has_picture() && picture::taken(&c.effects, c.picture.is_some());
+        let shown = c
+            .effects
+            .iter()
+            .filter(|e| !(placed && picture::is_placing(e)));
+        for e in shown.chain(&c.audio_effects) {
+            let name = effects::name(e);
+            if !kept.contains(&name) {
+                kept.push(name);
+            }
         }
     }
-    if !kept.is_empty() {
-        warnings.push(format!(
-            "clip effects kept on their clips but not shown or played: {}",
-            kept.join(", ")
-        ));
-    }
+    note_kept(&mut warnings, &kept);
     let mut made: Vec<&str> = Vec::new();
     for c in clips.iter().filter(|c| c.generator.is_some()) {
         if !made.contains(&c.name.as_str()) {
