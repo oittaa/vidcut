@@ -287,6 +287,21 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     key(
         Clips,
+        &["T"],
+        "Transform",
+        Some(
+            "Shows the selected clip's handles in the viewer: drag inside to move it, a corner \
+             to zoom, a side to stretch, the handle above to turn it. T again hides them.",
+        ),
+    ),
+    key(
+        Clips,
+        &["Shift", "T"],
+        "Crop",
+        Some("Shows a handle on each side of the selected clip in the viewer to crop it."),
+    ),
+    key(
+        Clips,
         &["Ctrl", "D"],
         "Change duration",
         Some("Of the selected clips, or of the selected dissolve, as a timecode or in frames."),

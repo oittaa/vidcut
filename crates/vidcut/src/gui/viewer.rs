@@ -285,7 +285,11 @@ impl Workspace {
         if mode == ViewerMode::Timeline {
             self.sync_subtitles();
         }
-        if mode == ViewerMode::Timeline && offline.is_none() && played.is_some() {
+        if mode == ViewerMode::Timeline
+            && offline.is_none()
+            && played.is_some()
+            && !self.picture_controls(ui, &area_resp, picture)
+        {
             self.title_controls(ui, &area_resp, picture);
         }
         if let Some(name) = offline {

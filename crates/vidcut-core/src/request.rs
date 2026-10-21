@@ -2038,8 +2038,10 @@ pub enum Request {
     /// `jobs`, `log`, `mixer`, `preferences`, `history` (the undo history),
     /// `help` (the keyboard shortcuts), `transcription` (the words of the
     /// source clip or the timeline), `metadata` (the strip at the top of the
-    /// Media Pool) or `clip_info` (the media selected in the pool). Answers
-    /// what `gui.state` does.
+    /// Media Pool), `clip_info` (the media selected in the pool), or the
+    /// viewer's `transform` or `crop` handles on the selected clip (the
+    /// topmost clip at the playhead when none is selected). Answers what
+    /// `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
@@ -2622,6 +2624,11 @@ pub enum GuiPanel {
     /// The Titles tab, in the Media Pool's place: the kinds of title to
     /// drag onto the timeline.
     Titles,
+    /// The viewer's Transform handles on the selected clip: move, zoom,
+    /// stretch and turn its picture.
+    Transform,
+    /// The viewer's Crop handles on the selected clip, one on each side.
+    Crop,
 }
 
 /// Media Pool sort orders.

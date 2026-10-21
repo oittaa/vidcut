@@ -52,6 +52,12 @@ fn ahead(m: &[f64; 6], [u, v]: [f64; 2]) -> [f64; 2] {
     [(d * u - b * v) / det, (a * v - c * u) / det]
 }
 
+impl Level {
+    pub fn forward(&self, uv: [f64; 2]) -> [f64; 2] {
+        ahead(&self.back, uv)
+    }
+}
+
 impl Placing {
     pub fn new(placed: &[Placed], frame: (f64, f64), fitted: [f64; 4]) -> Self {
         let whole = [0.0, 0.0, frame.0, frame.1];
