@@ -94,10 +94,8 @@ impl Subtitles {
             kept.last = Some(key);
             return (p.into_iter().map(over).collect(), true);
         }
-        let stand_in = kept
-            .last
-            .clone()
-            .and_then(|k| kept.pictures.get(&k).cloned());
+        let last = kept.last.clone();
+        let stand_in = last.and_then(|k| kept.pictures.get(&k).cloned());
         (stand_in.into_iter().flatten().map(over).collect(), false)
     }
 
