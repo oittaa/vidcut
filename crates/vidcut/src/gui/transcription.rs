@@ -99,6 +99,8 @@ enum Act {
     Assign(Who, f64, String),
 }
 
+const FOOTER: f32 = 64.0;
+
 #[derive(Debug, Default)]
 pub(super) struct TranscriptionUi {
     pub(super) open: bool,
@@ -112,6 +114,7 @@ pub(super) struct TranscriptionUi {
     anchor: Option<usize>,
     dragging: bool,
     moved: bool,
+    footer: f32,
     search: String,
     found: Option<usize>,
     scroll_to: Option<(usize, bool)>,
@@ -718,8 +721,7 @@ impl Workspace {
                 super::dialog::warn(ui, e.clone());
             }
             ui.separator();
-            let footer = 64.0;
-            let height = (ui.available_height() - footer).max(80.0);
+            let height = (ui.available_height() - t.footer.max(FOOTER)).max(80.0);
             let mut placed: Vec<(usize, Rect)> = Vec::new();
             let mut visible = Rect::NOTHING;
             match &items {
@@ -864,6 +866,7 @@ impl Workspace {
                     }
                 }
             }
+            let footer_top = ui.cursor().top();
             ui.separator();
             let selected = items.as_ref().and_then(|i| t.selected(i));
             ui.horizontal_wrapped(|ui| match (&items, selected) {
@@ -944,6 +947,7 @@ impl Workspace {
                     });
                 }
             });
+            t.footer = (ui.cursor().top() - footer_top).ceil();
             over = ui.ui_contains_pointer();
         });
         if search_go && let Some(items) = &items {
