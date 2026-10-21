@@ -211,6 +211,7 @@ fn add_fallback(defs: &mut egui::FontDefinitions) {
     defs.font_data.insert(name.into(), Arc::new(data));
     if let Some(font_keys) = defs.families.get_mut(&FontFamily::Proportional) {
         font_keys.push(name.into());
+        font_keys.push("Hack".into());
     }
 }
 
@@ -683,6 +684,31 @@ pub fn clip_color_menu(ui: &mut egui::Ui, current: Option<&str>) -> Option<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_text_falls_back_to_geist_then_hack() {
+        let fonts = crate::themes::Fonts {
+            ui: vec!["Space Grotesk".into()],
+            mono: Vec::new(),
+            size: 13.0,
+            small: 11.0,
+            heading: 16.0,
+            mono_size: 12.0,
+        };
+        assert_eq!(
+            font_definitions(&fonts).families[&FontFamily::Proportional],
+            [
+                "theme Space Grotesk",
+                "Ubuntu-Light",
+                "phosphor",
+                "egui-icons",
+                "NotoEmoji-Regular",
+                "emoji-icon-font",
+                "fallback Geist",
+                "Hack",
+            ]
+        );
+    }
 
     #[test]
     fn clips_of_one_color_show_it_in_the_menu() {
