@@ -165,9 +165,9 @@ pub enum Request {
         #[serde(default)]
         download: bool,
         /// How the speech to hear is found: `sound` (the default), everything
-        /// louder than `sound_db`, or `voice`, the built-in voice-activity
+        /// louder than `sound_db`; `voice`, the built-in voice-activity
         /// model, which misses singing, speech over music and shouts such as
-        /// a countdown. Words kept for a file are used again only when they
+        /// a countdown; or `none`, all of the audio. Words kept for a file are used again only when they
         /// were found the same way, at the same `sound_db`; without `find`,
         /// either way does.
         #[serde(default)]
@@ -507,9 +507,9 @@ pub enum Request {
         #[serde(default)]
         download: bool,
         /// How the speech to hear is found: `sound` (the default), everything
-        /// louder than `sound_db`, or `voice`, the built-in voice-activity
+        /// louder than `sound_db`; `voice`, the built-in voice-activity
         /// model, which misses singing, speech over music and shouts such as
-        /// a countdown. Words kept for a file are used again only when they
+        /// a countdown; or `none`, all of the audio. Words kept for a file are used again only when they
         /// were found the same way, at the same `sound_db`; without `find`,
         /// either way does.
         #[serde(default)]
@@ -1277,9 +1277,9 @@ pub enum Request {
         #[serde(default)]
         download: bool,
         /// How the speech to hear is found: `sound` (the default), everything
-        /// louder than `sound_db`, or `voice`, the built-in voice-activity
+        /// louder than `sound_db`; `voice`, the built-in voice-activity
         /// model, which misses singing, speech over music and shouts such as
-        /// a countdown. Words kept for a file are used again only when they
+        /// a countdown; or `none`, all of the audio. Words kept for a file are used again only when they
         /// were found the same way, at the same `sound_db`; without `find`,
         /// either way does.
         #[serde(default)]
@@ -1360,9 +1360,9 @@ pub enum Request {
         #[serde(default)]
         download: bool,
         /// How the speech to hear is found: `sound` (the default), everything
-        /// louder than `sound_db`, or `voice`, the built-in voice-activity
+        /// louder than `sound_db`; `voice`, the built-in voice-activity
         /// model, which misses singing, speech over music and shouts such as
-        /// a countdown. Words kept for a file are used again only when they
+        /// a countdown; or `none`, all of the audio. Words kept for a file are used again only when they
         /// were found the same way, at the same `sound_db`; without `find`,
         /// either way does.
         #[serde(default)]
@@ -1412,9 +1412,9 @@ pub enum Request {
         #[serde(default)]
         download: bool,
         /// How the speech to hear is found: `sound` (the default), everything
-        /// louder than `sound_db`, or `voice`, the built-in voice-activity
+        /// louder than `sound_db`; `voice`, the built-in voice-activity
         /// model, which misses singing, speech over music and shouts such as
-        /// a countdown. Words kept for a file are used again only when they
+        /// a countdown; or `none`, all of the audio. Words kept for a file are used again only when they
         /// were found the same way, at the same `sound_db`; without `find`,
         /// either way does.
         #[serde(default)]
@@ -2157,6 +2157,8 @@ pub enum FindSpeech {
     /// All sound louder than a level: singing and speech over music too.
     #[default]
     Sound,
+    /// All of the audio, the silences too.
+    None,
 }
 
 /// How subtitle tracks go out with an export.

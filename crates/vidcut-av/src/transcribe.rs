@@ -824,6 +824,7 @@ pub(crate) fn find_speech(
             voice
         }
         FindSpeech::Sound => sound,
+        FindSpeech::None => vec![(0, pcm.len() as i64)],
     };
     Ok(Found {
         stretches,
