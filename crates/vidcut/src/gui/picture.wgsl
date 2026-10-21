@@ -118,18 +118,12 @@ fn placed(px: vec2<f32>) -> vec4<f32> {
     let spans = vec2<f32>(length(across * size), length(down * size));
     let taps = vec2<u32>(clamp(ceil(spans), vec2<f32>(1.0), vec2<f32>(8.0)));
     let half = vec2<f32>(0.5) / size;
-    let black = vec3<f32>(p.range.x, p.range.z, p.range.z);
     var sum = vec3<f32>(0.0);
     for (var j = 0u; j < taps.y; j++) {
         for (var i = 0u; i < taps.x; i++) {
             let o = (vec2<f32>(f32(i), f32(j)) + 0.5) / vec2<f32>(taps) - 0.5;
             let q = uv + across * o.x + down * o.y;
-            let out = any(q < vec2<f32>(0.0)) || any(q > vec2<f32>(1.0));
-            if p.placed.z > 0.5 && out {
-                sum += black;
-            } else {
-                sum += yuv(clamp(q, half, vec2<f32>(1.0) - half));
-            }
+            sum += yuv(clamp(q, half, vec2<f32>(1.0) - half));
         }
     }
     let a = cover * p.placed.y;

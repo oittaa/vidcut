@@ -368,14 +368,10 @@ impl Layer {
     }
 }
 
-fn upright_fit(f: &frame::Video, rotation: u16, (w, h): (u32, u32)) -> (u32, u32) {
+fn upright_fit(f: &frame::Video, rotation: u16, out: (u32, u32)) -> (u32, u32) {
     let sar = f.aspect_ratio();
     let sar = (sar.numerator(), sar.denominator());
-    if rotation % 180 == 90 {
-        super::normalize::fit(f.height(), f.width(), (sar.1, sar.0), w, h)
-    } else {
-        super::normalize::fit(f.width(), f.height(), sar, w, h)
-    }
+    vidcut_core::place::upright_fit((f.width(), f.height()), sar, rotation, out)
 }
 
 const PLACED_MOST: f64 = 16384.0;

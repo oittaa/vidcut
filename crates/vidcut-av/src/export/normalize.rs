@@ -1,4 +1,5 @@
 use vidcut_core::model::Hdr;
+pub(crate) use vidcut_core::place::fit;
 
 use super::video::frame_ref;
 use crate::decode::Reading;
@@ -31,21 +32,6 @@ fn upright(rotation: u16) -> &'static str {
         180 => "hflip,vflip,",
         270 => "transpose=cclock,",
         _ => "",
-    }
-}
-
-pub(crate) fn fit(w: u32, h: u32, sar: (i32, i32), out_w: u32, out_h: u32) -> (u32, u32) {
-    let sar = if sar.0 > 0 && sar.1 > 0 {
-        f64::from(sar.0) / f64::from(sar.1)
-    } else {
-        1.0
-    };
-    let dar = f64::from(w) * sar / f64::from(h);
-    let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
-    if dar > f64::from(out_w) / f64::from(out_h) {
-        (out_w, even(f64::from(out_w) / dar).min(out_h))
-    } else {
-        (even(f64::from(out_h) * dar).min(out_w), out_h)
     }
 }
 

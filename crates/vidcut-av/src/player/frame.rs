@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::color::{Colors, colors_of};
 use crate::decode::Decoding;
 use crate::error::Result;
-use crate::export::normalize::{Normalizer, fit};
+use crate::export::normalize::Normalizer;
 use crate::ffmpeg::{self, format, frame};
 use crate::thumbs::Image;
 
@@ -128,11 +128,8 @@ impl Picture {
     pub fn placement(&self, width: u32, height: u32) -> (u32, u32, u32, u32) {
         let sar = self.frame.aspect_ratio();
         let sar = (sar.numerator(), sar.denominator());
-        let (w, h) = if self.rotation % 180 == 90 {
-            fit(self.height(), self.width(), (sar.1, sar.0), width, height)
-        } else {
-            fit(self.width(), self.height(), sar, width, height)
-        };
+        let size = (self.width(), self.height());
+        let (w, h) = vidcut_core::place::upright_fit(size, sar, self.rotation, (width, height));
         ((width - w) / 2, (height - h) / 2, w, h)
     }
 

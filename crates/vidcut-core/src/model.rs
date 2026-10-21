@@ -1250,9 +1250,10 @@ impl Title {
 }
 
 /// Where a clip's picture goes over the frame: footage, a still, an image
-/// sequence or a compound clip. A field left out is at its usual value. A
-/// picture at all of them fills the frame as it always has, bars and all;
-/// any other shows the tracks below around it and where it is cropped.
+/// sequence or a compound clip. A field left out is at its usual value; at
+/// all of them the picture is fitted into the frame. The tracks below show
+/// wherever it doesn't cover the frame: in the bars around a picture of
+/// another shape, around it and where it is cropped.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Picture {
     /// Where the middle of the whole picture goes, `[x, y]` as fractions of

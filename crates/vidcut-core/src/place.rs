@@ -1,4 +1,4 @@
-use crate::model::Picture;
+use crate::model::{Picture, VideoInfo};
 use crate::render::Placed;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -10,11 +10,6 @@ pub struct Level {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Placing {
     pub levels: Vec<Level>,
-    pub bars: bool,
-}
-
-pub fn fills(placed: &[Placed]) -> bool {
-    placed.len() > 1 && placed[0].picture.is_usual()
 }
 
 fn level(p: &Picture, (w, h): (f64, f64), [fx, fy, fw, fh]: [f64; 4]) -> Level {
@@ -66,7 +61,6 @@ impl Level {
 impl Placing {
     pub fn new(placed: &[Placed], frame: (f64, f64), fitted: [f64; 4]) -> Self {
         let whole = [0.0, 0.0, frame.0, frame.1];
-        let bars = fills(placed);
         let mut levels: Vec<Level> = Vec::with_capacity(placed.len());
         for (i, p) in placed.iter().enumerate().rev() {
             let own = level(&p.picture, frame, if i == 0 { fitted } else { whole });
@@ -74,15 +68,12 @@ impl Placing {
                 Some(outer) => then(&outer.back, &own.back, frame),
                 None => own.back,
             };
-            let [fx, fy, fw, fh] = fitted;
-            let shown = if i == 0 && bars {
-                [-fx / fw, -fy / fh, (frame.0 - fx) / fw, (frame.1 - fy) / fh]
-            } else {
-                own.shown
-            };
-            levels.push(Level { back, shown });
+            levels.push(Level {
+                back,
+                shown: own.shown,
+            });
         }
-        Self { levels, bars }
+        Self { levels }
     }
 
     pub fn at(&self, x: f64, y: f64) -> Option<([f64; 2], f64)> {
@@ -145,6 +136,39 @@ impl Placing {
         let (x1, y1) = (x1.ceil().min(w) as u32, y1.ceil().min(h) as u32);
         (x1 > x0 && y1 > y0).then_some([x0, y0, x1, y1])
     }
+}
+
+pub fn fit(w: u32, h: u32, sar: (i32, i32), out_w: u32, out_h: u32) -> (u32, u32) {
+    let sar = if sar.0 > 0 && sar.1 > 0 {
+        f64::from(sar.0) / f64::from(sar.1)
+    } else {
+        1.0
+    };
+    let dar = f64::from(w) * sar / f64::from(h);
+    let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
+    if dar > f64::from(out_w) / f64::from(out_h) {
+        (out_w, even(f64::from(out_w) / dar).min(out_h))
+    } else {
+        (even(f64::from(out_h) * dar).min(out_w), out_h)
+    }
+}
+
+pub fn upright_fit(
+    (w, h): (u32, u32),
+    sar: (i32, i32),
+    rotation: u16,
+    (out_w, out_h): (u32, u32),
+) -> (u32, u32) {
+    if rotation % 180 == 90 {
+        fit(h, w, (sar.1, sar.0), out_w, out_h)
+    } else {
+        fit(w, h, sar, out_w, out_h)
+    }
+}
+
+pub fn fills(v: &VideoInfo, frame: (u32, u32)) -> bool {
+    let sar = (v.sar[0], v.sar[1]);
+    upright_fit((v.width, v.height), sar, v.rotation, frame) == frame
 }
 
 pub fn fitted((w, h): (u32, u32), (fw, fh): (u32, u32)) -> [f64; 4] {

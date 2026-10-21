@@ -48,7 +48,7 @@ pub enum VideoPiece {
         color_space: ColorSpace,
         /// Where its picture goes over the frame: its clip's picture, then
         /// that of each compound clip it plays inside, outward. Empty, it
-        /// fills the frame.
+        /// covers the whole frame, its bars black.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         placed: Vec<Placed>,
     },
@@ -713,6 +713,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 let chain: Vec<Placed> = c
                     .picture
                     .iter()
+                    .filter(|x| !x.is_usual())
                     .map(|x| Placed {
                         clip: c.id.clone(),
                         picture: x.clone(),
@@ -753,13 +754,14 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
     Some((out, within))
 }
 
-fn placed_of(c: &Clip, within: &[Placed]) -> Vec<Placed> {
-    if c.picture.is_none() && within.is_empty() {
+fn placed_of(c: &Clip, within: &[Placed], over: bool) -> Vec<Placed> {
+    let own = c.picture.clone().filter(|x| !x.is_usual());
+    if own.is_none() && within.is_empty() && !over {
         return Vec::new();
     }
     let own = Placed {
         clip: c.id.clone(),
-        picture: c.picture.clone().unwrap_or_default(),
+        picture: own.unwrap_or_default(),
     };
     std::iter::once(own).chain(within.iter().cloned()).collect()
 }
@@ -892,7 +894,14 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
     }
     cuts.sort_unstable();
     cuts.dedup();
-    let picture = |c: &Clip, outer: &[Placed], x: i64, y: i64| -> Result<VideoPiece> {
+    let fills = |c: &Clip| {
+        c.picture.as_ref().is_none_or(Picture::is_usual)
+            && pool
+                .get(c.media.as_str())
+                .and_then(|m| m.info.video.as_ref())
+                .is_some_and(|v| crate::place::fills(v, (s.width, s.height)))
+    };
+    let picture = |c: &Clip, outer: &[Placed], over: bool, x: i64, y: i64| -> Result<VideoPiece> {
         let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
         let (path, origin) = origin_of(m);
         Ok(VideoPiece::Source {
@@ -904,7 +913,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
             image: image_of(m),
             pace: c.pace().after(x - c.start),
             color_space: m.color_space,
-            placed: placed_of(c, outer),
+            placed: placed_of(c, outer, over),
         })
     };
     let mut video = Vec::new();
@@ -913,11 +922,11 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         let mut stack: Vec<Layer> = Vec::new();
         for ((t, played), within) in tracks.iter().zip(&dissolves).zip(&inside) {
             let shows = |c: &&Clip| visible(t, c);
-            let shown = |c: &Clip, ramp: Option<Ramp>| -> Result<Layer> {
+            let shown = |c: &Clip, ramp: Option<Ramp>, below: bool| -> Result<Layer> {
                 let outer = within
                     .and_then(|w| w.get(t.clips.iter().position(|x| std::ptr::eq(x, c))?))
                     .map_or(&[][..], Vec::as_slice);
-                let piece = picture(c, outer, x, y)?;
+                let piece = picture(c, outer, below && !fills(c), x, y)?;
                 Ok(match &piece {
                     VideoPiece::Source { placed, .. } if !placed.is_empty() => {
                         Layer::Placed(piece, ramp)
@@ -932,9 +941,11 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                         of: d.frames.1 - d.frames.0,
                         falling,
                     };
+                    let below = !stack.is_empty();
                     match (d.before.filter(shows), d.after.filter(shows)) {
                         (Some(f), Some(g)) => {
-                            let (f, g) = (shown(f, None)?, shown(g, Some(ramp(false)))?);
+                            let (f, g) =
+                                (shown(f, None, below)?, shown(g, Some(ramp(false)), below)?);
                             match (f, g) {
                                 (Layer::Picture(f, _), g @ Layer::Picture(..)) => {
                                     stack = vec![Layer::Picture(f, None), g];
@@ -949,17 +960,17 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                                 _ => {}
                             }
                         }
-                        (Some(f), None) => stack.push(shown(f, Some(ramp(true)))?),
-                        (None, Some(g)) => stack.push(shown(g, Some(ramp(false)))?),
+                        (Some(f), None) => stack.push(shown(f, Some(ramp(true)), below)?),
+                        (None, Some(g)) => stack.push(shown(g, Some(ramp(false)), below)?),
                         (None, None) => {}
                     }
                 }
                 None => {
                     if let Some(c) = t.clip_covering(x).map(|ci| &t.clips[ci]).filter(shows) {
-                        match shown(c, None)? {
+                        match shown(c, None, !stack.is_empty())? {
                             Layer::Placed(piece, ramp) => {
                                 if let VideoPiece::Source { placed, .. } = &piece
-                                    && crate::place::fills(placed)
+                                    && fills(c)
                                 {
                                     let outer = &placed[1..];
                                     stack.retain(|l| !l.inside(outer));

@@ -1558,9 +1558,10 @@ pub enum Request {
     PictureGet { clip: ClipRef },
     /// Move, zoom, turn, flip or crop clips' pictures: footage, stills,
     /// image sequences and compound clips; a title has its own place
-    /// (`titles.set`). Each field given replaces its own. A picture at its
-    /// usual values fills the frame, bars and all; any other shows the
-    /// tracks below around it and where it is cropped.
+    /// (`titles.set`). Each field given replaces its own. At its usual
+    /// values a picture is fitted into the frame; the tracks below show
+    /// wherever it doesn't cover the frame: in its bars, around it and
+    /// where it is cropped.
     #[serde(rename = "picture.set")]
     PictureSet {
         clips: OneOrMany<ClipRef>,
