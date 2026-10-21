@@ -2095,7 +2095,12 @@ impl Workspace {
             self.open_speed_dialog();
             ui.close();
         }
-        if c.audio.is_some() {
+        if let Some(a) = &c.audio {
+            let on = super::isolation::Isolate::Clips(clips.clone());
+            let label = keys("Voice Isolation  (Alt+V)");
+            if self.isolation_controls(ui, on, a.voice_isolation, &label) {
+                ui.close();
+            }
             ui.menu_button("Audio Operations", |ui| {
                 if ui.button("Ripple Delete Silence…").clicked() {
                     self.open_silence(clips.clone());

@@ -398,7 +398,12 @@ fn words_from(ui: &mut egui::Ui, s: &mut Settings, marks: bool) {
     }
 }
 
-fn ask_download(ctx: &egui::Context, id: &str, needs: &[models::Need], go: &str) -> Option<bool> {
+pub(super) fn ask_download(
+    ctx: &egui::Context,
+    id: &str,
+    needs: &[models::Need],
+    go: &str,
+) -> Option<bool> {
     let total: u64 = needs.iter().map(|n| n.bytes).sum();
     let mut answer = None;
     let modal = egui::Modal::new(egui::Id::unique(id)).show(ctx, |ui| {

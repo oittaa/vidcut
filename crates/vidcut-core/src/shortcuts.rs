@@ -287,6 +287,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     key(
         Clips,
+        &["Alt", "V"],
+        "Voice Isolation on or off",
+        Some("Takes background noise out of the selected clips' voices."),
+    ),
+    key(
+        Clips,
         &["Ctrl", "D"],
         "Change duration",
         Some("Of the selected clips, or of the selected dissolve, as a timecode or in frames."),
