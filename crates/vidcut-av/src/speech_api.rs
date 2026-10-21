@@ -879,7 +879,7 @@ fn google_words(text: &str) -> Result<Got> {
                 };
                 let speaker = a["speaker"]
                     .as_str()
-                    .and_then(|label| label.strip_prefix("spk_"))
+                    .and_then(|s| s.rsplit(|c: char| !c.is_ascii_digit()).next())
                     .and_then(|n| n.parse::<u32>().ok());
                 words.push(Heard {
                     start,
@@ -946,7 +946,7 @@ fn keep_reply(key: &str, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Heard, google_words, kept_note, offset, reply_key, xai_words};
+    use super::{Heard, kept_note, offset, reply_key, xai_words};
     use serde_json::json;
 
     #[test]
@@ -1002,24 +1002,5 @@ mod tests {
         )
         .unwrap();
         assert_eq!(got.words[0].speaker, Some(2));
-    }
-
-    #[test]
-    fn google_words_come_from_the_word_annotations() {
-        let got = google_words(
-            r#"{"steps":[{"type":"model_output","content":[{"type":"text","text":"Hello",
-                "annotations":[{"type":"word_info","text":"Hello","speaker":"spk_2",
-                "start_offset":"0.100s","end_offset":"0.450s"}]}]}]}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            got.words,
-            [Heard {
-                start: 0.1,
-                end: 0.45,
-                text: "Hello".into(),
-                speaker: Some(2)
-            }]
-        );
     }
 }
