@@ -858,10 +858,12 @@ fn offset(v: &Value) -> Option<f64> {
 }
 
 fn speaker_number(label: &str) -> Option<u32> {
-    let number = label
+    let number: u32 = label
         .strip_prefix("spk:")
-        .or_else(|| label.strip_prefix("spk_"))?;
-    number.parse().ok()
+        .or_else(|| label.strip_prefix("spk_"))?
+        .parse()
+        .ok()?;
+    Some(number + 1)
 }
 
 fn google_words(text: &str) -> Result<Got> {
