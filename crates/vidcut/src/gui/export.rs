@@ -1728,14 +1728,29 @@ fn job_chips(ui: &mut egui::Ui, j: &JobInfo) {
         return;
     }
     ui.horizontal_wrapped(|ui| {
+        let row = ui.max_rect().width();
         for c in chips {
-            egui::Frame::new()
-                .fill(ui.visuals().faint_bg_color)
-                .corner_radius(egui::CornerRadius::same(4))
-                .inner_margin(egui::Margin::symmetric(6, 1))
-                .show(ui, |ui| ui.label(RichText::new(c).small()));
+            chip(ui, c, row);
         }
     });
+}
+
+fn chip(ui: &mut egui::Ui, text: String, row: f32) {
+    let margin = egui::vec2(6.0, 1.0);
+    let galley = egui::WidgetText::from(RichText::new(text).small()).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        row - 2.0 * margin.x,
+        egui::TextStyle::Small,
+    );
+    let (rect, _) = ui.allocate_exact_size(galley.size() + 2.0 * margin, egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(
+        rect,
+        egui::CornerRadius::same(4),
+        ui.visuals().faint_bg_color,
+    );
+    painter.galley(rect.min + margin, galley, ui.visuals().text_color());
 }
 
 fn job_details(ui: &mut egui::Ui, j: &JobInfo, rate: Option<f64>, project: Option<&Path>) {
