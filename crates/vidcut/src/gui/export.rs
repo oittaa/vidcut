@@ -1885,7 +1885,7 @@ fn speech_rows(n: &SpeechNote) -> Vec<(&'static str, String)> {
         FindSpeech::Voice => "Voice",
         FindSpeech::Sound => "Sound Level",
     };
-    rows.push(("Find speech by", find.into()));
+    rows.push(("Find Speech By", find.into()));
     rows
 }
 
@@ -1941,7 +1941,7 @@ fn detail_rows(j: &JobInfo, rate: Option<f64>) -> Vec<(&'static str, String)> {
         rows.extend(c.why.iter().map(|why| ("", why.clone())));
     }
     if let Some(m) = &d.metadata {
-        rows.push(("HDR metadata", metadata_name(m.mode).into()));
+        rows.push(("HDR Metadata", metadata_name(m.mode).into()));
         rows.extend(m.why.iter().map(|why| ("", why.clone())));
     }
     if let Some(decode) = decoded_on(&d.sources) {
@@ -2824,7 +2824,7 @@ mod tests {
                 ("Device", "CPU".to_string()),
                 ("Language", "English (en)".to_string()),
                 ("Speakers", "by MOSS".to_string()),
-                ("Find speech by", "Sound Level".to_string()),
+                ("Find Speech By", "Sound Level".to_string()),
             ]
         );
     }

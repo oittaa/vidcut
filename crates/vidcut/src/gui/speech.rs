@@ -877,7 +877,7 @@ impl Workspace {
                 gpu.then(|| transcribe::short_of_memory(f)).flatten()
             }),
             gpu,
-            device: gpu.then(|| transcribe::gpu_label(&dir)).flatten(),
+            device: gpu.then(transcribe::gpu_label).flatten(),
             asking: false,
             paying: None,
             paid: false,
