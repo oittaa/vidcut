@@ -1170,6 +1170,9 @@ pub fn clip_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
     for t in &mut alone.tracks {
         t.clips.retain(|x| x.id == clip);
         t.transitions.clear();
+        for x in &mut t.clips {
+            x.picture = None;
+        }
     }
     flatten(&alone, at, at + 1)?
         .video
