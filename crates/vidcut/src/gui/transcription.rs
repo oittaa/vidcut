@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -49,6 +50,7 @@ struct Item {
     start: i64,
     end: i64,
     text: String,
+    lower: String,
     joined: bool,
     silence: bool,
     filler: bool,
@@ -62,7 +64,7 @@ struct Look {
     version: u64,
     selection: Option<(usize, usize)>,
     left_out: Vec<(i64, i64)>,
-    search: String,
+    hits: Arc<[usize]>,
     width: i32,
 }
 
@@ -83,6 +85,25 @@ pub(super) enum Pressed {
     Clear,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Jump {
+    First,
+    Previous,
+    Next,
+    Last,
+}
+
+fn jump(hits: &[usize], found: Option<usize>, to: Jump) -> usize {
+    let n = hits.len();
+    let k = match to {
+        Jump::First => 0,
+        Jump::Last => n - 1,
+        Jump::Next => found.map_or(0, |f| hits.partition_point(|&h| h <= f) % n),
+        Jump::Previous => found.map_or(n - 1, |f| (hits.partition_point(|&h| h < f) + n - 1) % n),
+    };
+    hits[k]
+}
+
 enum Act {
     Seek(i64),
     Marks(i64, i64),
@@ -101,6 +122,43 @@ enum Act {
 
 const FOOTER: f32 = 64.0;
 
+const SEARCHES: usize = 16;
+
+#[derive(Debug, Default)]
+struct Searches {
+    version: u64,
+    recent: VecDeque<(String, Arc<[usize]>)>,
+}
+
+impl Searches {
+    fn hits(&mut self, version: u64, needle: &str, items: &[Item]) -> Arc<[usize]> {
+        if self.version != version {
+            self.recent.clear();
+            self.version = version;
+        }
+        if let Some(k) = self.recent.iter().position(|(n, _)| n == needle)
+            && let Some(seen) = self.recent.remove(k)
+        {
+            let hits = seen.1.clone();
+            self.recent.push_front(seen);
+            return hits;
+        }
+        let keep = |i: &usize| items[*i].lower.contains(needle);
+        let wider = self
+            .recent
+            .iter()
+            .filter(|(n, _)| needle.contains(n.as_str()))
+            .max_by_key(|(n, _)| n.len());
+        let hits: Arc<[usize]> = match wider {
+            Some((_, wider)) => wider.iter().copied().filter(keep).collect(),
+            None => (0..items.len()).filter(keep).collect(),
+        };
+        self.recent.push_front((needle.to_string(), hits.clone()));
+        self.recent.truncate(SEARCHES);
+        hits
+    }
+}
+
 #[derive(Debug, Default)]
 pub(super) struct TranscriptionUi {
     pub(super) open: bool,
@@ -116,6 +174,7 @@ pub(super) struct TranscriptionUi {
     moved: bool,
     footer: f32,
     search: String,
+    searches: Searches,
     found: Option<usize>,
     scroll_to: Option<(usize, bool)>,
     hold: bool,
@@ -213,10 +272,12 @@ fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Vec<Item> {
                     w["file_time"][1].as_f64().unwrap_or(0.0),
                 ),
             });
+            let text = w["text"].as_str()?;
             Some(Item {
                 start: w["start"].as_i64()?,
                 end: w["end"].as_i64()?,
-                text: w["text"].as_str()?.to_string(),
+                text: text.to_string(),
+                lower: text.to_lowercase(),
                 joined: w["joined"].as_bool().unwrap_or(false),
                 silence: false,
                 filler: w["filler"].as_bool().unwrap_or(false),
@@ -229,6 +290,7 @@ fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Vec<Item> {
         start,
         end,
         text: "(...)".into(),
+        lower: String::new(),
         joined: false,
         silence: true,
         filler: false,
@@ -335,7 +397,6 @@ fn layout(
     let mut chars = Vec::new();
     let mut count = 0;
     let picked = |i: usize| look.selection.is_some_and(|(a, b)| a <= i && i <= b);
-    let needle = look.search.to_lowercase();
     for i in range.clone() {
         let item = &items[i];
         let font = FontId::proportional(15.0);
@@ -354,7 +415,7 @@ fn layout(
             f.color = c.marked;
             f.strikethrough = Stroke::new(1.5, c.marked);
         }
-        if !needle.is_empty() && !item.silence && item.text.to_lowercase().contains(&needle) {
+        if look.hits.binary_search(&i).is_ok() {
             f.background = FOUND;
         }
         if picked(i) {
@@ -619,7 +680,12 @@ impl Workspace {
         };
         let mut open = t.open;
         let mut over = false;
-        let mut search_go = false;
+        let mut go = None;
+        let needle = t.search.trim().to_lowercase();
+        let hits = match &items {
+            Some(items) if !needle.is_empty() => t.searches.hits(t.version, &needle, items),
+            _ => Arc::default(),
+        };
         super::dialog::tool_window(ctx, "Transcription", &mut open, [560.0, 620.0], |ui| {
             ui.add(egui::Label::new(RichText::new(&title).strong()).truncate());
             super::dialog::form(ui, "transcription-form", |ui| {
@@ -630,11 +696,40 @@ impl Workspace {
                             .desired_width(150.0),
                     );
                     if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        search_go = true;
+                        let back = ui.input(|i| i.modifiers.shift);
+                        go = Some(if back { Jump::Previous } else { Jump::Next });
                         r.request_focus();
                     }
+                    if needle.is_empty() {
+                        return;
+                    }
+                    let any = !hits.is_empty();
+                    for (label, to) in [
+                        ("First", Jump::First),
+                        ("Previous", Jump::Previous),
+                        ("Next", Jump::Next),
+                        ("Last", Jump::Last),
+                    ] {
+                        if ui.add_enabled(any, egui::Button::new(label)).clicked() {
+                            go = Some(to);
+                        }
+                    }
+                    match t.found.and_then(|f| hits.iter().position(|&h| h == f)) {
+                        Some(k) => {
+                            ui.label(format!("{} of {}", k + 1, hits.len()));
+                        }
+                        None if hits.len() == 1 => {
+                            ui.label("1 match");
+                        }
+                        None if any => {
+                            ui.label(format!("{} matches", hits.len()));
+                        }
+                        None => super::dialog::why(ui, "no matches"),
+                    }
+                });
+                super::dialog::row(ui, "Playhead", |ui| {
                     let mut follow = !t.hold;
-                    if ui.checkbox(&mut follow, "Follow the Playhead").changed() {
+                    if ui.checkbox(&mut follow, "Follow").changed() {
                         t.hold = !follow;
                     }
                 });
@@ -743,7 +838,7 @@ impl Workspace {
                         version: t.version,
                         selection: t.selection,
                         left_out: left_out.clone(),
-                        search: t.search.trim().to_string(),
+                        hits: hits.clone(),
                         width: width as i32,
                     };
                     let now = playhead.and_then(|f| at_frame(items, f));
@@ -950,21 +1045,15 @@ impl Workspace {
             t.footer = (ui.cursor().top() - footer_top).ceil();
             over = ui.ui_contains_pointer();
         });
-        if search_go && let Some(items) = &items {
-            let needle = t.search.trim().to_lowercase();
-            if !needle.is_empty() {
-                let from = t.found.map_or(0, |i| i + 1);
-                let found = (from..items.len())
-                    .chain(0..from)
-                    .find(|&i| !items[i].silence && items[i].text.to_lowercase().contains(&needle));
-                if let Some(i) = found {
-                    t.found = Some(i);
-                    t.selection = Some((i, i));
-                    t.anchor = Some(i);
-                    t.scroll_to = Some((i, true));
-                    acts.push(Act::Seek(items[i].start));
-                }
-            }
+        if let (Some(to), Some(items)) = (go, &items)
+            && !hits.is_empty()
+        {
+            let i = jump(&hits, t.found, to);
+            t.found = Some(i);
+            t.selection = Some((i, i));
+            t.anchor = Some(i);
+            t.scroll_to = Some((i, true));
+            acts.push(Act::Seek(items[i].start));
         }
         t.open = open;
         t.over = over;
@@ -1204,5 +1293,95 @@ impl Workspace {
             .collect();
         let label = format!("{} part(s) of the transcript", commands.len());
         self.send("apply", json!({ "commands": commands, "label": label }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn words(texts: &[&str]) -> Vec<Item> {
+        texts
+            .iter()
+            .map(|t| Item {
+                start: 0,
+                end: 0,
+                text: t.to_string(),
+                lower: t.to_lowercase(),
+                joined: false,
+                silence: false,
+                filler: false,
+                who: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_search_finds_words_whatever_their_case() {
+        let mut searches = Searches::default();
+        let hits = searches.hits(1, "the", &words(&["The", "cat", "other"]));
+        assert_eq!(&*hits, &[0, 2]);
+    }
+
+    #[test]
+    fn a_longer_search_keeps_the_shorter_ones_matches_that_still_match() {
+        let items = words(&["then", "thin", "other"]);
+        let mut searches = Searches::default();
+        searches.hits(1, "th", &items);
+        assert_eq!(&*searches.hits(1, "the", &items), &[0, 2]);
+    }
+
+    #[test]
+    fn the_least_recently_used_search_is_dropped_first() {
+        let items = words(&["a"]);
+        let mut searches = Searches::default();
+        for n in 0..=SEARCHES {
+            searches.hits(1, &n.to_string(), &items);
+        }
+        assert_eq!(searches.recent.back().map(|(n, _)| n.as_str()), Some("1"));
+    }
+
+    #[test]
+    fn a_search_made_again_becomes_the_most_recent() {
+        let items = words(&["a"]);
+        let mut searches = Searches::default();
+        searches.hits(1, "a", &items);
+        searches.hits(1, "b", &items);
+        searches.hits(1, "a", &items);
+        assert_eq!(searches.recent.front().map(|(n, _)| n.as_str()), Some("a"));
+    }
+
+    #[test]
+    fn a_new_transcript_forgets_the_searches() {
+        let items = words(&["a"]);
+        let mut searches = Searches::default();
+        searches.hits(1, "a", &items);
+        searches.hits(2, "b", &items);
+        assert_eq!(searches.recent.len(), 1);
+    }
+
+    #[test]
+    fn next_goes_to_the_first_match_after_the_found_word() {
+        assert_eq!(jump(&[2, 5, 9], Some(5), Jump::Next), 9);
+    }
+
+    #[test]
+    fn next_from_the_last_match_wraps_to_the_first() {
+        assert_eq!(jump(&[2, 5, 9], Some(9), Jump::Next), 2);
+    }
+
+    #[test]
+    fn previous_from_the_first_match_wraps_to_the_last() {
+        assert_eq!(jump(&[2, 5, 9], Some(2), Jump::Previous), 9);
+    }
+
+    #[test]
+    fn previous_from_a_word_between_matches_goes_to_the_one_before_it() {
+        assert_eq!(jump(&[2, 5, 9], Some(7), Jump::Previous), 5);
+    }
+
+    #[test]
+    fn previous_with_nothing_found_goes_to_the_last_match() {
+        assert_eq!(jump(&[2, 5, 9], None, Jump::Previous), 9);
     }
 }

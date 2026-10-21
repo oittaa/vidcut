@@ -192,6 +192,7 @@ impl ProxyEncoder {
             passes: Passes::One,
             metadata,
             dynamic: Default::default(),
+            chosen: Default::default(),
         }
     }
 }

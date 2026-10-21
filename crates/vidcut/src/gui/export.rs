@@ -3,11 +3,12 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
+use vidcut_av::export::SpeechNote;
 use vidcut_core::export::{
     AudioCodec, AudioSettings, Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode,
     VideoCodec, VideoSettings, apply_overrides, validate,
 };
-use vidcut_core::request::{ImportMode, SubtitleFormat, SubtitlesAs};
+use vidcut_core::request::{FindSpeech, ImportMode, SubtitleFormat, SubtitlesAs};
 use vidcut_core::{Envelope, Error, Response};
 
 use super::folders::Kind;
@@ -1258,11 +1259,11 @@ impl Workspace {
                                 ui.set_min_width(ui.available_width());
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(&j.title).strong());
-                                    let from = match j.origin {
-                                        "session" => "automatic".to_string(),
-                                        o => format!("from {o}"),
+                                    match j.origin {
+                                        "ipc" => ui.label(dim("script")),
+                                        "session" => ui.label(dim("automatic")),
+                                        _ => ui.label(""),
                                     };
-                                    ui.label(dim(format!("{} · {from}", j.id)));
                                 });
                                 job_chips(ui, j);
                                 for w in job_warnings(j) {
@@ -1711,6 +1712,18 @@ fn job_chips(ui: &mut egui::Ui, j: &JobInfo) {
             n => format!("{n} encoders failed"),
         });
     }
+    if let Some(n) = speech_of(j) {
+        chips.push(n.model.clone());
+        if let Some(l) = &n.language {
+            chips.push(super::speech::language_label(l));
+        }
+        if let Some(by) = n.speakers_by.as_deref().filter(|b| *b != "auto") {
+            chips.push(format!("speakers by {}", speakers_name(by)));
+        }
+        if let Some(device) = &n.device {
+            chips.push(format!("on {device}"));
+        }
+    }
     if chips.is_empty() {
         return;
     }
@@ -1742,7 +1755,9 @@ fn job_details(ui: &mut egui::Ui, j: &JobInfo, rate: Option<f64>, project: Optio
     });
     let rows = detail_rows(j, rate);
     if rows.is_empty() {
-        ui.label(dim("Known once the job starts"));
+        if j.state == JobState::Queued {
+            ui.label(dim("Known once the job starts"));
+        }
         return;
     }
     egui::Grid::new(("job-details-grid", &j.id))
@@ -1823,11 +1838,65 @@ fn details_text(j: &JobInfo, rate: Option<f64>) -> String {
     lines.join("\n")
 }
 
+fn speech_of(j: &JobInfo) -> Option<SpeechNote> {
+    if let Some(n) = &j.details.speech {
+        return Some(n.clone());
+    }
+    let r = j.result.as_ref()?;
+    let r = match r["model"].is_string() {
+        true => r,
+        false => r["media"].get(0)?,
+    };
+    Some(SpeechNote {
+        model: r["model"].as_str()?.to_string(),
+        find: serde_json::from_value(r["find"].clone()).unwrap_or_default(),
+        device: r["device"].as_str().map(String::from),
+        language: r["language"].as_str().map(String::from),
+        speakers_by: r["speakers_by"].as_str().map(String::from),
+    })
+}
+
+fn speakers_name(by: &str) -> &str {
+    match by {
+        "moss" => "MOSS",
+        "sortformer" => "Sortformer",
+        "xai" => "xAI",
+        "google" => "Google",
+        by => by,
+    }
+}
+
+fn speech_rows(n: &SpeechNote) -> Vec<(&'static str, String)> {
+    let mut rows = vec![("Model", n.model.clone())];
+    if let Some(device) = &n.device {
+        rows.push(("Device", device.clone()));
+    }
+    let language = n
+        .language
+        .as_deref()
+        .map_or("Auto".into(), super::speech::language_label);
+    rows.push(("Language", language));
+    match n.speakers_by.as_deref() {
+        Some("auto") => rows.push(("Speakers", "Automatic".into())),
+        Some(by) => rows.push(("Speakers", format!("by {}", speakers_name(by)))),
+        None => {}
+    }
+    let find = match n.find {
+        FindSpeech::Voice => "Voice",
+        FindSpeech::Sound => "Sound Level",
+    };
+    rows.push(("Find speech by", find.into()));
+    rows
+}
+
 fn detail_rows(j: &JobInfo, rate: Option<f64>) -> Vec<(&'static str, String)> {
     let d = &j.details;
     let mut rows = Vec::new();
     for o in &j.outputs {
         rows.push(("Writes", o.path.display().to_string()));
+    }
+    if let Some(n) = speech_of(j) {
+        rows.extend(speech_rows(&n));
     }
     if let Some(v) = &d.video {
         let mut text = format!("{} · {}", v.encoder, v.pixel);
@@ -2096,8 +2165,13 @@ fn keep_hdr(d: &mut Dialog, set: &[String]) {
 
 fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value) {
     use vidcut_core::export::{FirstPass, Multipass};
-    let label = |p: Option<u8>| match p {
+    let auto = match planned["passes"]["kind"].as_str() {
+        Some("one") => "auto (1)".to_string(),
+        Some(_) => "auto (2)".to_string(),
         None => "auto".to_string(),
+    };
+    let label = |p: Option<u8>| match p {
+        None => auto.clone(),
         Some(n) => n.to_string(),
     };
     ui.label(dim("passes"));
@@ -2150,6 +2224,19 @@ fn passes_row(ui: &mut egui::Ui, v: &mut VideoSettings, planned: &Value) {
         {
             v.lookahead = (n != vidcut_core::export::DEFAULT_LOOKAHEAD).then_some(n);
         }
+    }
+}
+
+fn auto_of(outputs: &[Value], pick: impl Fn(&Value) -> Option<String>) -> String {
+    let mut picks: Vec<String> = Vec::new();
+    for p in outputs.iter().filter_map(pick) {
+        if !picks.contains(&p) {
+            picks.push(p);
+        }
+    }
+    match picks.is_empty() {
+        true => "auto".to_string(),
+        false => format!("auto ({})", picks.join(" / ")),
     }
 }
 
@@ -2290,11 +2377,10 @@ fn settings_form(
     size: (u32, u32),
     audio: (u32, u16),
 ) {
-    let planned = d
-        .plan_result
-        .as_ref()
-        .and_then(|r| r.as_ref().ok())
-        .map(|p| p["video_encoder"].clone())
+    let plan = d.plan_result.as_ref().and_then(|r| r.as_ref().ok());
+    let planned = plan.map(|p| p["video_encoder"].clone()).unwrap_or_default();
+    let outputs = plan
+        .and_then(|p| p["outputs"].as_array().cloned())
         .unwrap_or_default();
     egui::Grid::new("export-settings")
         .num_columns(2)
@@ -2385,8 +2471,12 @@ fn settings_form(
                             }
                         });
                     ui.label(dim("encoder"));
+                    let encoder = |e: &EncoderChoice| match (e, planned["name"].as_str()) {
+                        (EncoderChoice::Auto, Some(n)) => format!("auto ({n})"),
+                        _ => name(e),
+                    };
                     egui::ComboBox::from_id_salt("export-encoder")
-                        .selected_text(name(&v.encoder))
+                        .selected_text(encoder(&v.encoder))
                         .show_ui(ui, |ui| {
                             let gpus: &[EncoderChoice] = if cfg!(windows) {
                                 &[EncoderChoice::Nvenc, EncoderChoice::Amf, EncoderChoice::Qsv]
@@ -2401,7 +2491,7 @@ fn settings_form(
                             };
                             for &e in [EncoderChoice::Auto, EncoderChoice::Cpu].iter().chain(gpus) {
                                 let why = why_video(can, v.codec, e);
-                                choice(ui, &mut v.encoder, e, name(&e), why);
+                                choice(ui, &mut v.encoder, e, encoder(&e), why);
                             }
                         });
                 });
@@ -2496,10 +2586,14 @@ fn settings_form(
                     let options = profiles(v.codec);
                     if !options.is_empty() {
                         ui.label(dim("profile"));
+                        let usual = match planned["profile"].as_str() {
+                            Some(p) => format!("default ({p})"),
+                            None => "default".to_string(),
+                        };
                         egui::ComboBox::from_id_salt("export-profile")
-                            .selected_text(v.profile.as_deref().unwrap_or("default"))
+                            .selected_text(v.profile.clone().unwrap_or(usual.clone()))
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut v.profile, None, "default");
+                                ui.selectable_value(&mut v.profile, None, usual);
                                 for p in options {
                                     ui.selectable_value(&mut v.profile, Some(p.to_string()), *p);
                                 }
@@ -2507,20 +2601,36 @@ fn settings_form(
                     }
                     if !matches!(v.codec, VideoCodec::Prores | VideoCodec::Dnxhr) {
                         ui.label(dim("bit depth"));
+                        let auto = auto_of(&outputs, |o| {
+                            o["color"]["bit_depth"].as_u64().map(|b| b.to_string())
+                        });
                         egui::ComboBox::from_id_salt("export-depth")
-                            .selected_text(v.bit_depth.map_or("auto".into(), |b| b.to_string()))
+                            .selected_text(v.bit_depth.map_or(auto.clone(), |b| b.to_string()))
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut v.bit_depth, None, "auto");
+                                ui.selectable_value(&mut v.bit_depth, None, auto);
                                 ui.selectable_value(&mut v.bit_depth, Some(8), "8");
                                 ui.selectable_value(&mut v.bit_depth, Some(10), "10");
                             });
                     }
+                });
+                ui.end_row();
+
+                ui.label("");
+                ui.horizontal(|ui| {
                     if vidcut_core::export::color::carries_hdr(v.codec) {
+                        let range = |h: &str| match h {
+                            "pq" => "HDR (PQ)",
+                            "hlg" => "HDR (HLG)",
+                            _ => "SDR",
+                        };
+                        let auto = auto_of(&outputs, |o| {
+                            o["color"]["hdr"].as_str().map(|h| range(h).to_string())
+                        });
                         let label = |h: HdrMode| match h {
-                            HdrMode::Auto => "auto",
-                            HdrMode::Sdr => "SDR",
-                            HdrMode::Pq => "HDR (PQ)",
-                            HdrMode::Hlg => "HDR (HLG)",
+                            HdrMode::Auto => auto.clone(),
+                            HdrMode::Sdr => "SDR".to_string(),
+                            HdrMode::Pq => "HDR (PQ)".to_string(),
+                            HdrMode::Hlg => "HDR (HLG)".to_string(),
                         };
                         ui.label(dim("range"));
                         egui::ComboBox::from_id_salt("export-hdr")
@@ -2535,13 +2645,22 @@ fn settings_form(
                         }
                         if v.hdr != HdrMode::Sdr {
                             use vidcut_core::export::HdrMetadata as M;
-                            let label = |m: M| match m {
+                            let kind = |m: M| match m {
                                 M::Auto => "auto",
                                 M::Static => "HDR10 only",
                                 M::Hdr10plus => "HDR10 + HDR10+",
                                 M::DolbyVision => "HDR10 + Dolby Vision",
                                 M::All => "HDR10 + HDR10+ + DV",
                                 M::None => "none",
+                            };
+                            let auto = auto_of(&outputs, |o| {
+                                serde_json::from_value::<M>(o["metadata"]["mode"].clone())
+                                    .ok()
+                                    .map(|m| kind(m).to_string())
+                            });
+                            let label = |m: M| match m {
+                                M::Auto => auto.clone(),
+                                m => kind(m).to_string(),
                             };
                             ui.label(dim("metadata"));
                             egui::ComboBox::from_id_salt("export-hdr-metadata")
@@ -2567,7 +2686,7 @@ fn settings_form(
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut speed)
-                                .hint_text("default")
+                                .hint_text(planned["speed"].as_str().unwrap_or("default"))
                                 .desired_width(70.0),
                         )
                         .changed()
@@ -2677,11 +2796,51 @@ fn settings_form(
 mod tests {
     use serde_json::json;
 
-    use super::{command_params, decoded_on, detail_rows, details_text, metadata_line};
+    use super::{auto_of, command_params, decoded_on, detail_rows, details_text, metadata_line};
     use crate::live::JobInfo;
 
     fn job() -> JobInfo {
         JobInfo::new("j1".into(), "gui", json!({ "output": "out.mp4" }))
+    }
+
+    fn speech(language: Option<&str>, speakers_by: Option<&str>) -> vidcut_av::export::SpeechNote {
+        vidcut_av::export::SpeechNote {
+            model: "Parakeet Ultra".into(),
+            find: Default::default(),
+            device: Some("CPU".into()),
+            language: language.map(String::from),
+            speakers_by: speakers_by.map(String::from),
+        }
+    }
+
+    #[test]
+    fn a_transcription_says_what_it_uses() {
+        let mut j = job();
+        j.details.speech = Some(speech(Some("en"), Some("moss")));
+        assert_eq!(
+            detail_rows(&j, None),
+            [
+                ("Model", "Parakeet Ultra".to_string()),
+                ("Device", "CPU".to_string()),
+                ("Language", "English (en)".to_string()),
+                ("Speakers", "by MOSS".to_string()),
+                ("Find speech by", "Sound Level".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_language_not_yet_known_reads_auto() {
+        let mut j = job();
+        j.details.speech = Some(speech(None, None));
+        assert!(detail_rows(&j, None).contains(&("Language", "Auto".to_string())));
+    }
+
+    #[test]
+    fn an_automatic_setting_names_what_the_plan_picked() {
+        let outputs = [json!({ "color": { "bit_depth": 10 } })];
+        let depth = |o: &serde_json::Value| o["color"]["bit_depth"].as_u64().map(|b| b.to_string());
+        assert_eq!(auto_of(&outputs, depth), "auto (10)");
     }
 
     #[test]

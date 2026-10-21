@@ -3,7 +3,9 @@ use std::time::{Instant, SystemTime};
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use vidcut_av::export::{AudioNote, Note, Progress, SourceNote, Stage, Tried, VideoNote};
+use vidcut_av::export::{
+    AudioNote, Note, Progress, SourceNote, SpeechNote, Stage, Tried, VideoNote,
+};
 use vidcut_core::Error;
 use vidcut_core::editor::Copied;
 use vidcut_core::export::color::ColorChoice;
@@ -70,6 +72,8 @@ pub struct JobDetails {
     pub sources: Vec<SourceNote>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub downloading: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speech: Option<SpeechNote>,
     pub gpu_frames: i64,
     pub gpu_decoded: i64,
     pub copied: Copied,
@@ -95,6 +99,7 @@ impl JobDetails {
                 None => self.sources.push(s),
             },
             Note::Downloading { name } => self.downloading = Some(name),
+            Note::Speech(s) => self.speech = Some(s),
         }
     }
 
@@ -112,7 +117,9 @@ impl JobDetails {
             up_bytes: a.up_bytes + e.2.up_bytes,
         });
         let secs = p.elapsed.as_secs_f64();
-        self.fps = (secs > 0.0 && p.frames > 0).then(|| p.frames as f64 / secs);
+        let encodes = self.video.is_some() || self.audio.is_some();
+        self.fps = (encodes && p.stage.is_none() && secs > 0.0 && p.frames > 0)
+            .then(|| p.frames as f64 / secs);
     }
 }
 
@@ -337,6 +344,16 @@ mod tests {
         d.counted(1, &made(5));
         d.counted(0, &made(12));
         assert_eq!(d.gpu_frames, 17);
+    }
+
+    #[test]
+    fn a_job_that_encodes_nothing_has_no_frame_rate() {
+        let mut d = JobDetails::default();
+        d.counted(
+            0,
+            &Progress::single(500, 1000, std::time::Duration::from_secs(1)),
+        );
+        assert_eq!(d.fps, None);
     }
 
     #[test]
