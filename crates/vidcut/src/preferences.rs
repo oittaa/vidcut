@@ -66,7 +66,9 @@ fn read_noting() -> Result<(Preferences, Vec<String>)> {
 }
 
 fn known() -> toml::Table {
-    match toml::Value::try_from(Preferences::default()) {
+    let mut every = Preferences::default();
+    every.cache.gb = Some(1);
+    match toml::Value::try_from(every) {
         Ok(toml::Value::Table(t)) => t,
         _ => toml::Table::new(),
     }
