@@ -276,13 +276,15 @@ pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
         .and_then(|()| std::fs::write(&part, bytes))
-        .and_then(|()| match take_room(path, bytes.len() as u64) {
-            true => std::fs::rename(&part, path),
-            false => Err(std::io::Error::new(
-                std::io::ErrorKind::StorageFull,
-                "the disk cache has no room for it",
-            )),
-        });
+        .and_then(
+            |()| match take_room(path, bytes.len() as u64, Some(&part)) {
+                true => std::fs::rename(&part, path),
+                false => Err(std::io::Error::new(
+                    std::io::ErrorKind::StorageFull,
+                    "the disk cache has no room for it",
+                )),
+            },
+        );
     if written.is_err() {
         let _ = std::fs::remove_file(&part);
     }
@@ -291,7 +293,7 @@ pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 pub fn added(path: &Path) -> bool {
     let len = std::fs::metadata(path).map_or(0, |m| m.len());
-    let kept = take_room(path, len);
+    let kept = take_room(path, len, None);
     if !kept {
         let _ = std::fs::remove_file(path);
     }
@@ -308,12 +310,15 @@ pub fn room(path: &Path) -> Option<u64> {
     h.policy.limit(h.disk, h.index.held - h.index.len_of(path))
 }
 
-fn take_room(path: &Path, len: u64) -> bool {
+fn take_room(path: &Path, len: u64, part: Option<&Path>) -> bool {
     let Some(sources) = SOURCES.get() else {
         return true;
     };
     let mut s = state();
     let h = held(&mut s, sources);
+    if let Some(part) = part {
+        h.index.forget(part);
+    }
     if !h.policy.counts(path) {
         return true;
     }
@@ -437,7 +442,7 @@ fn listed(dir: &Path, counts: &dyn Fn(&str) -> bool, found: &mut HashMap<PathBuf
     for e in listing.flatten() {
         let name = e.file_name();
         let name = name.to_string_lossy();
-        if name.split('.').any(|s| s == "part") || !counts(&name) {
+        if !counts(&name) {
             continue;
         }
         let Ok(meta) = e.metadata() else {
