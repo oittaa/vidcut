@@ -396,7 +396,7 @@ impl Workspace {
         ui.vertical(|ui| {
             ui.set_width(meter_column_width(n) + FADER_SCALE_W + 40.0);
             let name = t.name.clone().unwrap_or_else(|| t.id.clone());
-            ui.label(RichText::new(name).strong()).on_hover_text(&t.id);
+            ui.label(RichText::new(name).strong());
             let held = self.hold_channels(&t.id, level);
             let bars = height - STRIP_ROOM;
             let value = ui.horizontal_top(|ui| {
@@ -409,14 +409,12 @@ impl Workspace {
                     .unwrap_or(t.volume_db);
                 ui.spacing_mut().slider_width = bars;
                 let under = ui.painter().add(egui::Shape::Noop);
-                let r = ui
-                    .add(
-                        egui::Slider::new(&mut value, FADER_DB)
-                            .vertical()
-                            .show_value(false)
-                            .step_by(0.5),
-                    )
-                    .on_hover_text("Track volume; double-click for 0 dB");
+                let r = ui.add(
+                    egui::Slider::new(&mut value, FADER_DB)
+                        .vertical()
+                        .show_value(false)
+                        .step_by(0.5),
+                );
                 let handle = ui.style().visuals.handle_shape;
                 let marks = fitting_marks(
                     &FADER_MARKS,
@@ -456,18 +454,10 @@ impl Workspace {
             );
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                if ui
-                    .selectable_label(t.muted, "M")
-                    .on_hover_text("Mute (export too)")
-                    .clicked()
-                {
+                if ui.selectable_label(t.muted, "M").clicked() {
                     self.send("track.set", json!({ "track": t.id, "muted": !t.muted }));
                 }
-                if ui
-                    .selectable_label(t.solo, "S")
-                    .on_hover_text("Solo: only soloed tracks are heard")
-                    .clicked()
-                {
+                if ui.selectable_label(t.solo, "S").clicked() {
                     self.send("track.set", json!({ "track": t.id, "solo": !t.solo }));
                 }
             });
@@ -527,9 +517,7 @@ impl Workspace {
             button,
             egui::Button::selectable(muted, if muted { "🔇" } else { "🔊" }).small(),
         );
-        if r.on_hover_text("Mute what the viewer plays (not the export)")
-            .clicked()
-        {
+        if r.clicked() {
             self.send("player.mute", json!({ "mute": !muted }));
         }
         let playing = self.snap.active().playing;

@@ -132,8 +132,7 @@ impl Workspace {
             let at = Rect::from_center_size(pos2(cut, rect.center().y), vec2(width, rect.height()));
             let r = ui
                 .interact(at, ui.scope_id().with(("trim-strip", label)), Sense::drag())
-                .on_hover_cursor(CursorIcon::ResizeHorizontal)
-                .on_hover_text(label);
+                .on_hover_cursor(CursorIcon::ResizeHorizontal);
             r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, true, label));
             r
         };
@@ -278,8 +277,7 @@ impl Workspace {
                     ui.scope_id().with(("trim-fade", end)),
                     Sense::drag(),
                 )
-                .on_hover_cursor(CursorIcon::ResizeHorizontal)
-                .on_hover_text(label);
+                .on_hover_cursor(CursorIcon::ResizeHorizontal);
             r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, true, label));
             (end, r)
         });

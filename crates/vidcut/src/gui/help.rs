@@ -178,7 +178,7 @@ fn row(
     let shown = ui.vertical(|ui| {
         ui.horizontal(|ui| {
             if s.explanation.is_some() {
-                let r = mark(ui, open).on_hover_text("What it does");
+                let r = mark(ui, open);
                 let name = format!("What {} does", s.action);
                 r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, open, &name));
                 toggle |= r.clicked();

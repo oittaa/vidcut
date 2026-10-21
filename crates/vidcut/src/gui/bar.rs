@@ -2,7 +2,7 @@ use eframe::egui::{self, RichText};
 
 use super::row::Row;
 use super::theme;
-use super::workspace::{FOLDER_HINT, Workspace};
+use super::workspace::Workspace;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Item {
@@ -76,46 +76,38 @@ impl Workspace {
     fn bar_item(&mut self, ui: &mut egui::Ui, item: Item) -> egui::Response {
         match item {
             Item::Import => {
-                let r = ui.button("Import").on_hover_text(super::keys("Ctrl+I"));
+                let r = ui.button("Import");
                 if r.clicked() {
                     self.import_media();
                 }
                 r
             }
             Item::ImportFolder => {
-                let r = ui.button("Import Folder").on_hover_text(FOLDER_HINT);
+                let r = ui.button("Import Folder");
                 if r.clicked() {
                     self.import_folder();
                 }
                 r
             }
             Item::QuickExport => {
-                let r = ui
-                    .button("Quick Export")
-                    .on_hover_text("Export the In–Out range, or the whole timeline, with a preset");
+                let r = ui.button("Quick Export");
                 if r.clicked() {
                     self.open_quick_export(ui.ctx());
                 }
                 r
             }
             Item::Export => {
-                let r = ui.button("Export").on_hover_text("All export settings");
+                let r = ui.button("Export");
                 if r.clicked() {
                     self.open_export(ui.ctx());
                 }
                 r
             }
-            Item::NoPreview => {
-                let why = self.snap.preview_error.clone().unwrap_or_default();
-                ui.label(RichText::new("no preview").color(theme::colors().error))
-                    .on_hover_text(why)
-            }
+            Item::NoPreview => ui.label(RichText::new("no preview").color(theme::colors().error)),
             Item::Jobs => self.jobs_button(ui),
             Item::History => {
                 let mut open = self.history.open;
-                let r = ui
-                    .toggle_value(&mut open, "History")
-                    .on_hover_text("Every step, who made it and when");
+                let r = ui.toggle_value(&mut open, "History");
                 if r.changed() {
                     if open {
                         self.history.show();
@@ -125,16 +117,10 @@ impl Workspace {
                 }
                 r
             }
-            Item::Transcription => ui
-                .toggle_value(&mut self.transcription.open, "Transcription")
-                .on_hover_text("Go to, mark and cut the words said"),
-            Item::Mixer => ui
-                .toggle_value(&mut self.show_mixer, "Mixer")
-                .on_hover_text("Track faders, mute, solo and meters"),
+            Item::Transcription => ui.toggle_value(&mut self.transcription.open, "Transcription"),
+            Item::Mixer => ui.toggle_value(&mut self.show_mixer, "Mixer"),
             Item::Log => ui.toggle_value(&mut self.show_log, "Command log"),
-            Item::Help => ui
-                .toggle_value(&mut self.help.open, "Help")
-                .on_hover_text("Keyboard shortcuts, with what the less obvious ones do (F1)"),
+            Item::Help => ui.toggle_value(&mut self.help.open, "Help"),
         }
     }
 }

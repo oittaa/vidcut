@@ -1,4 +1,4 @@
-use eframe::egui::{self, Key};
+use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
 use vidcut_core::model::{Title, TitleAlign, TitleKind};
@@ -321,13 +321,16 @@ impl Workspace {
                     }
                     .align();
                 }
-                ui.add_enabled_ui(d.kind != TitleKind::Text, |ui| {
-                    ui.horizontal(|ui| {
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(d.kind != TitleKind::Text, |ui| {
                         ui.label("Align");
                         for (align, label) in ALIGNS {
                             changed |= ui.radio_value(&mut d.align, align, label).changed();
                         }
                     });
+                    if d.kind == TitleKind::Text {
+                        super::dialog::why(ui, "a Text title is centered on its position");
+                    }
                 });
                 let out = egui::TextEdit::multiline(&mut d.text)
                     .desired_rows(3)
@@ -346,13 +349,13 @@ impl Workspace {
                         d.selection = (0, 0);
                         true
                     };
-                    if ui.button("B").on_hover_text("Bold").clicked() {
+                    if ui.button(RichText::new("B").strong()).clicked() {
                         changed |= wrap(&mut d, "<b>".into(), "</b>");
                     }
-                    if ui.button("I").on_hover_text("Italic").clicked() {
+                    if ui.button(RichText::new("I").italics()).clicked() {
                         changed |= wrap(&mut d, "<i>".into(), "</i>");
                     }
-                    if ui.button("U").on_hover_text("Underline").clicked() {
+                    if ui.button(RichText::new("U").underline()).clicked() {
                         changed |= wrap(&mut d, "<u>".into(), "</u>");
                     }
                     swatch(ui, &mut d.word_color, [255, 215, 0]);
@@ -378,11 +381,7 @@ impl Workspace {
                         let f = vidcut_core::rich::escape(d.word_font.trim()).replace('"', "");
                         changed |= wrap(&mut d, format!("<font face=\"{f}\">"), "</font>");
                     }
-                    if ui
-                        .button("Plain")
-                        .on_hover_text("Takes the styles off the words")
-                        .clicked()
-                    {
+                    if ui.button("Plain").clicked() {
                         d.text = unstyled(&d.text, d.selection);
                         d.selection = (0, 0);
                         changed = true;
@@ -426,23 +425,13 @@ impl Workspace {
                 });
                 ui.label(dim(match d.kind {
                     TitleKind::LowerThird => {
-                        "Across and Down place the lower third's corner, as percents of the \
-                         picture; it grows and turns about the point where its lines meet. \
-                         A shadow's Across and Down are percents of the picture too, and its \
-                         blur from 0 to 100. An empty field keeps the usual look"
+                        "Across and Down: the corner, in percents of the picture."
                     }
                     TitleKind::Scroll => {
-                        "Across places the lines' left edge, middle or right edge by Align, \
-                         as a percent of the picture; the lines rise from below the picture \
-                         to above it over the clip. A shadow's Across and Down are percents \
-                         of the picture, and its blur from 0 to 100. An empty field keeps the \
-                         usual look"
+                        "Across: the lines' edge by Align, in percents of the picture."
                     }
                     TitleKind::Text => {
-                        "Across and Down place the middle of the text, as percents of the \
-                         picture; it grows and turns about that point. A shadow's Across and \
-                         Down are percents of the picture too, and its blur from 0 to 100. An \
-                         empty field keeps the usual look"
+                        "Across and Down: the text's middle, in percents of the picture."
                     }
                 }));
                 if !d.error.is_empty() {

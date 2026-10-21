@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 
-use eframe::egui::{self, Color32, CornerRadius, Painter, Pos2, Rect, RichText, Stroke, pos2};
+use eframe::egui::{self, Color32, CornerRadius, Painter, Pos2, Rect, Stroke, pos2};
 use serde_json::{Value, json};
 use vidcut_core::model::Project;
 use vidcut_core::ops::{self, Edge};
 use vidcut_core::request::Detect;
 
 use super::{EditSel, Side, TrackRef, audio_edit_outgoing};
-use crate::gui::export::{Ask, near_center};
+use crate::gui::export::Ask;
 use crate::gui::shuttle::{Jkl, first_press};
-use crate::gui::theme;
 use crate::gui::timeline::geometry::{Rows, Scale};
 use crate::gui::workspace::{Workspace, dim};
 use crate::live::{Audition, MAX_SPEED, PlayerId};
@@ -661,144 +660,124 @@ impl Workspace {
         let edited = d.edited();
         let settled = d.current();
         let before = d.shot();
-        egui::Window::new("Ripple Delete Silence")
-            .collapsible(false)
-            .resizable(false)
-            .default_pos(near_center(ctx, 360.0, 220.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.label(dim(format!(
-                    "Cuts {cut} out of {what} and closes the gaps."
-                )));
-                ui.label(match edited {
-                    true => RichText::new(
-                        "Changing a setting finds the stripes again; Ctrl+Z brings your edits \
-                         back.",
-                    )
-                    .color(theme::colors().accent),
-                    false => dim("Changing a setting finds the stripes again."),
-                });
-                egui::Grid::new("silence-settings")
-                    .num_columns(3)
-                    .show(ui, |ui| {
-                        ui.label("Detect");
-                        ui.horizontal(|ui| {
-                            ui.radio_value(&mut d.detect, Detect::Level, "Sound level");
-                            ui.radio_value(&mut d.detect, Detect::Speech, "Speech");
-                        });
-                        ui.label(dim("what counts as silence"));
-                        ui.end_row();
-                        ui.label("Threshold");
-                        if speech {
-                            ui.add(
-                                egui::DragValue::new(&mut d.speech_threshold)
-                                    .update_while_editing(false)
-                                    .range(0.0..=1.0)
-                                    .speed(0.01)
-                                    .fixed_decimals(2),
-                            );
-                            ui.label(dim("speech probability from which it is speech"));
-                        } else {
-                            ui.add(
-                                egui::DragValue::new(&mut d.threshold_db)
-                                    .update_while_editing(false)
-                                    .range(-90.0..=0.0)
-                                    .speed(0.5)
-                                    .suffix(" dB"),
-                            );
-                            ui.label(dim("sound below this is silence"));
-                        }
-                        ui.end_row();
-                        if speech {
-                            ui.label("Shortest Speech");
-                            ui.add(
-                                egui::DragValue::new(&mut d.min_speech)
-                                    .update_while_editing(false)
-                                    .range(0.0..=5.0)
-                                    .speed(0.01)
-                                    .suffix(" s"),
-                            );
-                            ui.label(dim("shorter speech doesn't count"));
-                            ui.end_row();
-                        }
-                        ui.label("Pre Head");
-                        ui.add(
-                            egui::DragValue::new(&mut d.pre_head)
-                                .update_while_editing(false)
-                                .range(0.0..=5.0)
-                                .speed(0.01)
-                                .suffix(" s"),
-                        );
-                        ui.label(dim(format!("kept before each {kept} part")));
-                        ui.end_row();
-                        ui.label("Post Tail");
-                        ui.add(
-                            egui::DragValue::new(&mut d.post_tail)
-                                .update_while_editing(false)
-                                .range(0.0..=5.0)
-                                .speed(0.01)
-                                .suffix(" s"),
-                        );
-                        ui.label(dim(format!("kept after each {kept} part")));
-                        ui.end_row();
-                        ui.label("Minimum to Trip");
-                        ui.add(
-                            egui::DragValue::new(&mut d.min)
-                                .update_while_editing(false)
-                                .range(1.0 / fps..=60.0)
-                                .speed(0.01)
-                                .suffix(" s"),
-                        );
-                        ui.label(dim(if speech {
-                            "shorter non-speech stays"
-                        } else {
-                            "shorter silences stay"
-                        }));
-                        ui.end_row();
+        use super::super::dialog;
+        dialog::window(ctx, "Ripple Delete Silence", &mut open, |ui| {
+            dialog::form(ui, "silence-form", |ui| {
+                dialog::row(ui, "Cuts", |ui| ui.label(format!("{cut} of {what}")));
+                dialog::row(ui, "Detect", |ui| {
+                    dialog::switch(ui, |ui| {
+                        ui.selectable_value(&mut d.detect, Detect::Level, "Sound Level");
+                        ui.selectable_value(&mut d.detect, Detect::Speech, "Speech");
                     });
-                ui.separator();
-                let all = d.stripes.len();
-                let n = d.cut().count();
-                let frames: i64 = d.cut().map(|s| s.end - s.start).sum();
-                let status = match (&d.error, d.current(), d.asked.is_some()) {
-                    (Some(e), _, _) => RichText::new(e).color(theme::colors().error),
-                    (None, _, true) | (None, false, _) => dim(finding),
-                    (None, true, false) if all == 0 => dim("Nothing to remove."),
-                    (None, true, false) if n == 0 => {
-                        dim(format!("Keeps all {all} parts: nothing to remove."))
+                });
+                dialog::row(ui, "Threshold", |ui| {
+                    if speech {
+                        ui.add(
+                            egui::DragValue::new(&mut d.speech_threshold)
+                                .update_while_editing(false)
+                                .range(0.0..=1.0)
+                                .speed(0.01)
+                                .fixed_decimals(2),
+                        );
+                        ui.label(dim("speech from this probability"));
+                    } else {
+                        ui.add(
+                            egui::DragValue::new(&mut d.threshold_db)
+                                .update_while_editing(false)
+                                .range(-90.0..=0.0)
+                                .speed(0.5)
+                                .suffix(" dB"),
+                        );
+                        ui.label(dim("quieter is silence"));
+                    }
+                });
+                if speech {
+                    dialog::row(ui, "Shortest Speech", |ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut d.min_speech)
+                                .update_while_editing(false)
+                                .range(0.0..=5.0)
+                                .speed(0.01)
+                                .suffix(" s"),
+                        );
+                    });
+                }
+                dialog::row(ui, "Pre Head", |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut d.pre_head)
+                            .update_while_editing(false)
+                            .range(0.0..=5.0)
+                            .speed(0.01)
+                            .suffix(" s"),
+                    );
+                    ui.label(dim(format!("kept before each {kept} part")));
+                });
+                dialog::row(ui, "Post Tail", |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut d.post_tail)
+                            .update_while_editing(false)
+                            .range(0.0..=5.0)
+                            .speed(0.01)
+                            .suffix(" s"),
+                    );
+                    ui.label(dim(format!("kept after each {kept} part")));
+                });
+                dialog::row(ui, "Shortest Cut", |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut d.min)
+                            .update_while_editing(false)
+                            .range(1.0 / fps..=60.0)
+                            .speed(0.01)
+                            .suffix(" s"),
+                    );
+                });
+            });
+            if edited {
+                dialog::warn(
+                    ui,
+                    "A changed setting finds stripes again; Ctrl+Z brings edits back",
+                );
+            }
+            let all = d.stripes.len();
+            let n = d.cut().count();
+            let frames: i64 = d.cut().map(|s| s.end - s.start).sum();
+            if !needs.is_empty() {
+                dialog::note(
+                    ui,
+                    format!(
+                        "Speech needs {}, downloaded once.",
+                        vidcut_av::transcribe::listed(&needs)
+                    ),
+                );
+                if ui.button("Download and Find").clicked() {
+                    d.download = true;
+                }
+            } else {
+                match (&d.error, d.current(), d.asked.is_some()) {
+                    (Some(e), _, _) => {
+                        dialog::warn(ui, e.clone());
+                    }
+                    (None, _, true) | (None, false, _) => {
+                        dialog::note(ui, finding);
+                    }
+                    (None, true, false) if all == 0 => {
+                        dialog::note(ui, "Nothing to remove.");
                     }
                     (None, true, false) => {
                         let of = match n == all {
                             true => String::new(),
                             false => format!(" of {all}"),
                         };
-                        RichText::new(format!(
-                            "Removes {n}{of} parts, {} ({frames} frames): the red stripes.",
+                        ui.label(format!(
+                            "Removes {n}{of} parts, {}: the red stripes.",
                             self.src_tc(frames),
-                        ))
-                    }
-                };
-                if needs.is_empty() {
-                    ui.label(status);
-                } else {
-                    ui.label(dim(format!(
-                        "Speech is heard with {}, not on this computer yet: downloaded once, \
-                         each checked against its SHA-256.",
-                        vidcut_av::transcribe::listed(&needs)
-                    )));
-                    if ui.button("Download and Find").clicked() {
-                        d.download = true;
+                        ));
                     }
                 }
-                ui.label(dim(
-                    "Click a stripe to keep it, or drag its edges. [ and ] go to the previous \
-                     and next, X keeps or cuts the one at the playhead. Play and Space play \
-                     the timeline as Remove would leave it. Ctrl+Z and Ctrl+Shift+Z undo and \
-                     redo changes to the stripes and the settings.",
-                ));
-                ui.label(dim("Cuts are de-clicked with 3 ms fades."));
-                let ready = d.current() && all > 0;
-                ui.horizontal(|ui| {
+            }
+            let ready = d.current() && all > 0;
+            dialog::form(ui, "silence-stripes", |ui| {
+                dialog::row(ui, "Stripes", |ui| {
                     if ui
                         .add_enabled(ready, egui::Button::new("Keep All"))
                         .clicked()
@@ -813,14 +792,17 @@ impl Workspace {
                         d.mark();
                         d.stripes.iter_mut().for_each(|s| s.keep = false);
                     }
-                });
-                ui.horizontal(|ui| {
-                    remove = ui
-                        .add_enabled(ready && n > 0, egui::Button::new("Remove"))
-                        .clicked();
-                    cancel = ui.button("Cancel").clicked();
+                    ui.label(dim("click one to keep it; X at the playhead"));
                 });
             });
+            dialog::footer(ui, |ui| {
+                remove = dialog::main_button(ui, "Remove", ready && n > 0);
+                cancel = ui.button("Cancel").clicked();
+                if ready && n == 0 {
+                    dialog::why(ui, "every part is kept");
+                }
+            });
+        });
         if settled && d.params() != params {
             d.keep(before);
         }
@@ -1033,35 +1015,27 @@ impl Workspace {
         };
         let mut open = true;
         let (mut analyze, mut cancel) = (false, false);
-        egui::Window::new("Analyze Timeline Edits")
-            .collapsible(false)
-            .resizable(false)
-            .default_pos(near_center(ctx, 320.0, 140.0))
-            .open(&mut open)
-            .show(ctx, |ui| {
-                egui::Grid::new("boring-settings")
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        ui.label("Boring Clips");
-                        ui.add(
-                            egui::Slider::new(&mut secs, super::BORING_SECS)
-                                .logarithmic(true)
-                                .suffix(" s"),
-                        )
-                        .on_hover_text("Longer clips show light gray");
-                        ui.end_row();
-                        ui.label("Jump Cuts");
-                        ui.add(
-                            egui::Slider::new(&mut frames, super::JUMP_FRAMES).suffix(" frames"),
-                        )
-                        .on_hover_text("Shorter clips show red; 2 finds flash frames");
-                        ui.end_row();
-                    });
-                ui.horizontal(|ui| {
-                    analyze = ui.button("Analyze").clicked();
-                    cancel = ui.button("Cancel").clicked();
+        use super::super::dialog;
+        dialog::window(ctx, "Analyze Timeline Edits", &mut open, |ui| {
+            dialog::form(ui, "boring-form", |ui| {
+                dialog::row(ui, "Boring Clips", |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut secs, super::BORING_SECS)
+                            .logarithmic(true)
+                            .suffix(" s"),
+                    );
+                    ui.label(dim("longer shows gray"));
+                });
+                dialog::row(ui, "Jump Cuts", |ui| {
+                    ui.add(egui::Slider::new(&mut frames, super::JUMP_FRAMES).suffix(" frames"));
+                    ui.label(dim("shorter shows red"));
                 });
             });
+            dialog::footer(ui, |ui| {
+                analyze = dialog::main_button(ui, "Analyze", true);
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
         if analyze {
             let o = &mut self.timeline.options;
             o.boring = true;

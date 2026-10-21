@@ -165,8 +165,7 @@ pub(super) unsafe fn import(
     let allowed = 1u32.checked_shl(plane.memory_type).unwrap_or(0);
     if needs.size > plane.size || needs.memory_type_bits & allowed == 0 {
         return Err(fail(format!(
-            "the display's image of a plane isn't FFmpeg's: it takes {} bytes in memory types \
-             {:#b}, FFmpeg's has {} bytes in type {}",
+            "plane image mismatch: display {}B types {:#b}; FFmpeg {}B type {}",
             needs.size, needs.memory_type_bits, plane.size, plane.memory_type
         )));
     }

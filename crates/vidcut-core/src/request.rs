@@ -2333,8 +2333,7 @@ pub struct XaiOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filler_words: Option<bool>,
     /// xAI's own voice gate, 0 to 1: quieter speech is skipped, and 0
-    /// hears everything sent. Default: 0 with `find: sound`, so singing
-    /// isn't dropped again, else xAI's 0.5.
+    /// hears everything sent. Default: xAI's, 0.5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vad_threshold: Option<f64>,
     /// Each channel of the sound on its own, up to 8, the words merged by

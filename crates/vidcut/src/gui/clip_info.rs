@@ -387,61 +387,51 @@ impl Workspace {
             self.clip_info.asked = None;
         }
         let mut open = true;
-        egui::Window::new("Clip Info")
-            .collapsible(false)
-            .resizable(true)
-            .default_pos(super::export::near_center(ctx, 520.0, 620.0))
-            .default_size([520.0, 620.0])
-            .open(&mut open)
-            .show(ctx, |ui| {
-                let Some(m) = &m else {
-                    ui.label(dim("Select a clip in the Media Pool"));
-                    return;
-                };
-                let read = match &self.clip_info.read {
-                    Some((id, r)) if *id == m.id => Some(r),
-                    _ => None,
-                };
-                let details = read.and_then(|r| r.as_ref().ok());
-                let all = sections(self, m, details);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&m.name).strong());
-                    if ui
-                        .button("Copy")
-                        .on_hover_text("Copy all of it as text")
-                        .clicked()
-                    {
-                        ui.ctx().copy_text(as_text(&all));
-                    }
-                });
-                match read {
-                    None if m.subtitles.is_none() => {
-                        ui.label(dim("Reading the file…"));
-                    }
-                    Some(Err(e)) => {
-                        ui.label(dim(format!("The file couldn't be read again: {e}")));
-                    }
-                    _ => {}
+        super::dialog::tool_window(ctx, "Clip Info", &mut open, [520.0, 620.0], |ui| {
+            let Some(m) = &m else {
+                super::dialog::note(ui, "Select a clip in the Media Pool");
+                return;
+            };
+            let read = match &self.clip_info.read {
+                Some((id, r)) if *id == m.id => Some(r),
+                _ => None,
+            };
+            let details = read.and_then(|r| r.as_ref().ok());
+            let all = sections(self, m, details);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(&m.name).strong());
+                if ui.button("Copy").clicked() {
+                    ui.ctx().copy_text(as_text(&all));
                 }
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        egui::Grid::new("clip-info")
-                            .num_columns(2)
-                            .spacing([12.0, 3.0])
-                            .show(ui, |ui| {
-                                for (title, rows) in &all {
-                                    ui.label(RichText::new(title).strong());
-                                    ui.end_row();
-                                    for (k, v) in rows {
-                                        ui.label(dim(k));
-                                        ui.add(egui::Label::new(v).wrap());
-                                        ui.end_row();
-                                    }
-                                }
-                            });
-                    });
             });
+            match read {
+                None if m.subtitles.is_none() => {
+                    ui.label(dim("Reading the file…"));
+                }
+                Some(Err(e)) => {
+                    ui.label(dim(format!("The file couldn't be read again: {e}")));
+                }
+                _ => {}
+            }
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    egui::Grid::new("clip-info")
+                        .num_columns(2)
+                        .spacing([12.0, 3.0])
+                        .show(ui, |ui| {
+                            for (title, rows) in &all {
+                                ui.label(RichText::new(title).strong());
+                                ui.end_row();
+                                for (k, v) in rows {
+                                    ui.label(dim(k));
+                                    ui.add(egui::Label::new(v).wrap());
+                                    ui.end_row();
+                                }
+                            }
+                        });
+                });
+        });
         if !open {
             self.clip_info.open = false;
         }

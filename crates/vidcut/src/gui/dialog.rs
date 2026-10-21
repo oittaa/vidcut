@@ -12,13 +12,43 @@ pub(super) fn window<R>(
     open: &mut bool,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> Option<R> {
+    window_of(ctx, title, open, WIDTH, add)
+}
+
+pub(super) fn window_of<R>(
+    ctx: &egui::Context,
+    title: &str,
+    open: &mut bool,
+    width: f32,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> Option<R> {
     egui::Window::new(title)
         .collapsible(false)
         .resizable(false)
-        .default_pos(near_center(ctx, WIDTH, 400.0))
+        .default_pos(near_center(ctx, width, 400.0))
         .open(open)
         .show(ctx, |ui| {
-            ui.set_width(WIDTH);
+            ui.set_width(width);
+            ui.spacing_mut().item_spacing.y = 8.0;
+            add(ui)
+        })
+        .and_then(|r| r.inner)
+}
+
+pub(super) fn tool_window<R>(
+    ctx: &egui::Context,
+    title: &str,
+    open: &mut bool,
+    size: [f32; 2],
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> Option<R> {
+    egui::Window::new(title)
+        .collapsible(false)
+        .resizable(true)
+        .default_pos(near_center(ctx, size[0], size[1]))
+        .default_size(size)
+        .open(open)
+        .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             add(ui)
         })
@@ -66,6 +96,10 @@ pub(super) fn note(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response
 pub(super) fn warn(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
     let color = ui.visuals().warn_fg_color;
     ui.add(egui::Label::new(RichText::new(format!("⚠ {}", text.into())).color(color)).wrap())
+}
+
+pub(super) fn why(ui: &mut egui::Ui, text: impl Into<String>) {
+    ui.label(RichText::new(text).small().color(theme::colors().text_dim));
 }
 
 pub(super) fn footer(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {

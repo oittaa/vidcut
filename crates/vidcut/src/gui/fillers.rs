@@ -126,13 +126,8 @@ pub(super) fn editor(
     let typed = filler_list(&typed).unwrap_or_default();
     let mut change = None;
     ui.horizontal(|ui| {
-        let save_tip = match e.scope {
-            Scope::Project => "Mark these words in this project",
-            Scope::All => "Mark these words in every project without its own list",
-        };
         if ui
             .add_enabled(!busy && typed != words, egui::Button::new("Save"))
-            .on_hover_text(save_tip)
             .clicked()
         {
             change = Some(Change {
@@ -141,21 +136,15 @@ pub(super) fn editor(
                 words: Some(typed.clone()),
             });
         }
-        let (label, tip, own) = match e.scope {
+        let (label, own) = match e.scope {
             Scope::Project => (
                 "Use the List for All Projects",
-                "Drop this project's own list",
                 project.is_some_and(|p| p.contains_key(&e.language)),
             ),
-            Scope::All => (
-                "Use the Built-in List",
-                "Drop your list for all projects",
-                preferred.contains_key(&e.language),
-            ),
+            Scope::All => ("Use the Built-in List", preferred.contains_key(&e.language)),
         };
         if ui
             .add_enabled(!busy && own, egui::Button::new(label))
-            .on_hover_text(tip)
             .clicked()
         {
             change = Some(Change {

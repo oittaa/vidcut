@@ -86,6 +86,8 @@ impl Default for Settings {
     }
 }
 
+const XAI_VOICE_GATE: f64 = 0.5;
+
 fn split_list(text: &str) -> Vec<String> {
     text.split([',', '\n'])
         .map(str::trim)
@@ -152,10 +154,8 @@ fn wanted(s: &Settings) -> Vec<&'static transcribe::File> {
 fn find_rows(ui: &mut egui::Ui, s: &mut Settings) {
     dialog::row(ui, "Find Speech By", |ui| {
         dialog::switch(ui, |ui| {
-            ui.selectable_value(&mut s.find, FindSpeech::Voice, "Voice")
-                .on_hover_text("Where people speak; misses singing");
-            ui.selectable_value(&mut s.find, FindSpeech::Sound, "Sound Level")
-                .on_hover_text("All sound above a level: singing and speech over music");
+            ui.selectable_value(&mut s.find, FindSpeech::Voice, "Voice");
+            ui.selectable_value(&mut s.find, FindSpeech::Sound, "Sound Level");
         });
     });
     if s.find == FindSpeech::Sound {
@@ -165,8 +165,7 @@ fn find_rows(ui: &mut egui::Ui, s: &mut Settings) {
                     .range(-80.0..=-10.0)
                     .speed(0.5)
                     .suffix(" dBFS"),
-            )
-            .on_hover_text("Quieter than this for half a second is silence");
+            );
         });
     }
 }
@@ -175,12 +174,9 @@ fn service_rows(ui: &mut egui::Ui, s: &mut Settings, transcribing: bool) {
     if s.speakers && !s.model.paid() {
         dialog::row(ui, "Speakers By", |ui| {
             dialog::switch(ui, |ui| {
-                ui.selectable_value(&mut s.speaker_model, SpeakerModel::Auto, "Automatic")
-                    .on_hover_text("MOSS in English and Chinese, else Sortformer");
-                ui.selectable_value(&mut s.speaker_model, SpeakerModel::Moss, "MOSS")
-                    .on_hover_text("987 MB: English and Chinese, many speakers");
-                ui.selectable_value(&mut s.speaker_model, SpeakerModel::Sortformer, "Sortformer")
-                    .on_hover_text("139 MB: any language, up to 4 speakers");
+                ui.selectable_value(&mut s.speaker_model, SpeakerModel::Auto, "Automatic");
+                ui.selectable_value(&mut s.speaker_model, SpeakerModel::Moss, "MOSS");
+                ui.selectable_value(&mut s.speaker_model, SpeakerModel::Sortformer, "Sortformer");
             });
         });
     }
@@ -191,38 +187,45 @@ fn service_rows(ui: &mut egui::Ui, s: &mut Settings, transcribing: bool) {
                     egui::TextEdit::singleline(&mut s.keyterms)
                         .hint_text("names, jargon")
                         .desired_width(220.0),
-                )
-                .on_hover_text("Commas between them: 100 at most, 50 characters each");
+                );
             });
             dialog::row(ui, "Numbers", |ui| {
-                ui.checkbox(&mut s.xai.format, "As Digits")
-                    .on_hover_text("“$100” for “one hundred dollars”: needs a language");
+                ui.checkbox(&mut s.xai.format, "As Digits");
             });
             dialog::row(ui, "Filler Words", |ui| {
                 let mut keep = s.xai.filler_words.unwrap_or(true);
-                if ui
-                    .checkbox(&mut keep, "Keep Them")
-                    .on_hover_text("Off, Delete Filler Words has nothing to find")
-                    .changed()
-                {
+                if ui.checkbox(&mut keep, "Keep Them").changed() {
                     s.xai.filler_words = (!keep).then_some(false);
                 }
             });
             dialog::row(ui, "Skip Non-Speech", |ui| {
-                let mut own = s.xai.vad_threshold.is_some();
-                ui.checkbox(&mut own, "")
-                    .on_hover_text("Higher skips more; 0 keeps everything");
-                let mut v = s.xai.vad_threshold.unwrap_or(0.5);
-                ui.add_enabled(
-                    own,
-                    egui::DragValue::new(&mut v).range(0.0..=1.0).speed(0.01),
-                );
-                s.xai.vad_threshold = own.then_some(v);
+                let mut v = s.xai.vad_threshold.unwrap_or(XAI_VOICE_GATE);
+                ui.label(dim("Keep All"));
+                let slid = ui
+                    .add(egui::Slider::new(&mut v, 0.0..=1.0).show_value(false))
+                    .changed();
+                ui.label(dim("Skip Most"));
+                let typed = ui
+                    .add(
+                        egui::DragValue::new(&mut v)
+                            .range(0.0..=1.0)
+                            .speed(0.01)
+                            .fixed_decimals(2),
+                    )
+                    .changed();
+                if slid || typed {
+                    s.xai.vad_threshold = Some(v);
+                }
+                if ui
+                    .add_enabled(s.xai.vad_threshold.is_some(), egui::Button::new("Usual"))
+                    .clicked()
+                {
+                    s.xai.vad_threshold = None;
+                }
             });
             if transcribing {
                 dialog::row(ui, "Channels", |ui| {
-                    ui.checkbox(&mut s.xai.multichannel, "Each Separately")
-                        .on_hover_text("Each channel on its own; with Speakers, one speaker each");
+                    ui.checkbox(&mut s.xai.multichannel, "Each Separately");
                 });
             }
         }
@@ -232,8 +235,7 @@ fn service_rows(ui: &mut egui::Ui, s: &mut Settings, transcribing: bool) {
                     egui::TextEdit::singleline(&mut s.codes)
                         .hint_text("fi-FI, sv-SE")
                         .desired_width(220.0),
-                )
-                .on_hover_text("For speech that switches between languages");
+                );
             });
         }
         _ => {}
@@ -249,7 +251,9 @@ fn model_choice(ui: &mut egui::Ui, s: &mut Settings, d: &Ready, words_only: bool
         .width(190.0)
         .show_ui(ui, |ui| {
             for (i, (model, note)) in MODELS.iter().enumerate() {
+                let usable = !words_only || model.times_words();
                 let state = match transcribe::file_of(*model) {
+                    _ if !usable => "Transcribe Audio needs each word timed".into(),
                     Some(f) if d.have[i] => transcribe::size(f.bytes),
                     Some(f) => format!("{} download", transcribe::size(f.bytes)),
                     None if d.key[i] => format!("${:.2} an hour", model.dollars_per_hour()),
@@ -266,11 +270,8 @@ fn model_choice(ui: &mut egui::Ui, s: &mut Settings, d: &Ready, words_only: bool
                     0.0,
                     egui::TextFormat::simple(small.clone(), c.text_dim),
                 );
-                ui.add_enabled_ui(!words_only || model.times_words(), |ui| {
-                    ui.selectable_value(&mut s.model, *model, job)
-                        .on_disabled_hover_text(
-                            "Doesn't time each word, which cutting by words needs",
-                        );
+                ui.add_enabled_ui(usable, |ui| {
+                    ui.selectable_value(&mut s.model, *model, job);
                 });
             }
         });
@@ -307,16 +308,6 @@ fn language_choice(ui: &mut egui::Ui, s: &mut Settings) {
 }
 
 fn speakers_row(ui: &mut egui::Ui, s: &mut Settings) {
-    let tip = match s.model {
-        SpeechModel::Xai => "One numbering across every file heard",
-        SpeechModel::Google => "One numbering up to 30 minutes, past that per file",
-        _ if transcribe::speaker_file(s.language.as_deref(), s.speaker_model)
-            == &transcribe::MOSS =>
-        {
-            "MOSS, for English and Chinese, on this computer"
-        }
-        _ => "Up to 4 in each file, on this computer",
-    };
     let moss =
         transcribe::speaker_file(s.language.as_deref(), s.speaker_model) == &transcribe::MOSS;
     let most = match s.model {
@@ -326,8 +317,7 @@ fn speakers_row(ui: &mut egui::Ui, s: &mut Settings) {
         _ => "up to 4 per file",
     };
     dialog::row(ui, "Speakers", |ui| {
-        ui.checkbox(&mut s.speakers, "Tell Who Speaks")
-            .on_hover_text(tip);
+        ui.checkbox(&mut s.speakers, "Tell Who Speaks");
         if s.speakers && !most.is_empty() {
             ui.label(dim(most));
         }
@@ -369,27 +359,19 @@ fn words_from(ui: &mut egui::Ui, s: &mut Settings, marks: bool) {
     let media = s.each_file(marks);
     dialog::switch(ui, |ui| {
         ui.add_enabled_ui(can, |ui| {
-            if ui
-                .selectable_label(media, "Each File")
-                .on_hover_text("Each clip's file, transcribed once and kept")
-                .on_disabled_hover_text(match s.model.times_words() {
-                    true => "In–Out hears only the marked part",
-                    false => "Needs a model that times each word",
-                })
-                .clicked()
-            {
+            if ui.selectable_label(media, "Each File").clicked() {
                 s.from_media = true;
             }
         });
-        if ui
-            .selectable_label(!media, "Timeline Mix")
-            .on_hover_text("The tracks mixed over the range; nothing is kept")
-            .clicked()
-            && can
-        {
+        if ui.selectable_label(!media, "Timeline Mix").clicked() && can {
             s.from_media = false;
         }
     });
+    if !s.model.times_words() {
+        dialog::why(ui, "this model doesn't time each word");
+    } else if !can {
+        dialog::why(ui, "In–Out hears only its part");
+    }
 }
 
 fn ask_download(
@@ -546,7 +528,7 @@ impl Hear {
                 };
                 let r = ui.checkbox(&mut on, label);
                 let r = match t.muted {
-                    true => r.on_hover_text("Muted on the timeline"),
+                    true => r,
                     false => r,
                 };
                 if r.changed() {
@@ -993,8 +975,7 @@ impl Workspace {
                             length(duration(&p, &d.media))
                         )))
                         .truncate(),
-                    )
-                    .on_hover_text(names.join("\n"));
+                    );
                 } else if let Some(l) = tiles.show(ui, &looks, &s.look) {
                     s.take_look(l);
                 }
@@ -1012,11 +993,7 @@ impl Workspace {
                                 s.in_out = false;
                             }
                             ui.add_enabled_ui(range.is_some(), |ui| {
-                                if ui
-                                    .selectable_label(in_out, "In–Out")
-                                    .on_disabled_hover_text("Mark an In and an Out first")
-                                    .clicked()
-                                {
+                                if ui.selectable_label(in_out, "In–Out").clicked() {
                                     s.in_out = true;
                                 }
                             });
@@ -1025,11 +1002,10 @@ impl Workspace {
                             Some(marks) if in_out => marks,
                             _ => (0, p.end()),
                         };
-                        ui.label(dim(self.src_tc(b - a))).on_hover_text(format!(
-                            "{} – {}",
-                            self.tc(a),
-                            self.tc(b - 1)
-                        ));
+                        ui.label(dim(self.src_tc(b - a)));
+                        if range.is_none() {
+                            dialog::why(ui, "no In and Out marked");
+                        }
                     });
                     heard = dialog::row(ui, "Hear", |ui| d.hear.ui(ui, &p));
                     dialog::row(ui, "Track", |ui| track_choice(ui, s, &p));
@@ -1064,8 +1040,7 @@ impl Workspace {
                                     egui::DragValue::new(&mut s.gap)
                                         .range(0..=10)
                                         .suffix(" frames"),
-                                )
-                                .on_hover_text("Between one subtitle and the next");
+                                );
                             });
                         }
                         find_rows(ui, s);
@@ -1090,10 +1065,6 @@ impl Workspace {
                 } else if s.each_file(range.is_some()) {
                     let missing = heard_files(&p, &heard, (0, p.end()), &self.snap.transcribed);
                     if !missing.is_empty() {
-                        let names: Vec<String> = missing
-                            .iter()
-                            .map(|id| p.media(id).map_or_else(|| id.clone(), |m| m.name.clone()))
-                            .collect();
                         dialog::note(
                             ui,
                             format!(
@@ -1101,8 +1072,7 @@ impl Workspace {
                                 files(missing.len()),
                                 length(duration(&p, &missing))
                             ),
-                        )
-                        .on_hover_text(names.join("\n"));
+                        );
                     }
                 }
                 dialog::footer(ui, |ui| {

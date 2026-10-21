@@ -282,11 +282,7 @@ impl Workspace {
             {
                 self.titles.open = false;
             }
-            if ui
-                .selectable_label(self.titles.open, "Titles")
-                .on_hover_text("Text, lower thirds and scrolls to drag onto the timeline")
-                .clicked()
-            {
+            if ui.selectable_label(self.titles.open, "Titles").clicked() {
                 self.titles.open = true;
             }
         });
@@ -311,11 +307,10 @@ impl Workspace {
         };
         ui.horizontal(|ui| {
             ui.label(RichText::new("Titles").strong());
-            ui.checkbox(&mut self.titles.hover_scrub, "Hover Scrub Preview")
-                .on_hover_text("Show a title in the viewer while the pointer is over it");
+            ui.checkbox(&mut self.titles.hover_scrub, "Hover Scrub Preview");
         });
         ui.label(dim(
-            "Drag a title onto a timeline, or double-click it to add it at the playhead",
+            "Drag a title onto a timeline, or double-click to add it.",
         ));
         ui.add_space(6.0);
         let (w, h) = (p.settings.width.max(1), p.settings.height.max(1));
@@ -357,10 +352,7 @@ impl Workspace {
                         );
                         hovered = Some((t, (fraction * STEPS).round() as i64));
                     }
-                    let r = ui.label(&t.label);
-                    if !t.tip.is_empty() {
-                        r.on_hover_text(&t.tip);
-                    }
+                    ui.label(&t.label);
                     if resp.drag_started()
                         && let Some(press) = ui.input(|i| i.pointer.press_origin())
                     {

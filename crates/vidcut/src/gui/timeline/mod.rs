@@ -316,48 +316,37 @@ const LOWER_ROWS: [f32; 3] = [100.0, 60.0, 46.0];
 const LOWER_SUBTITLE: f32 = 40.0;
 const LOWER_SUBTITLE_MINIMIZED: f32 = 22.0;
 const LOWER_RULER: f32 = 22.0;
-const HEADER: f32 = 120.0;
+const HEADER: f32 = 150.0;
 const BOX_CONTROL: f32 = 18.0;
 
 mod icon {
     pub use egui_phosphor::regular::{
-        ARROWS_IN_LINE_HORIZONTAL as RIPPLE, ARROWS_IN_LINE_VERTICAL as SHRINK,
-        ARROWS_OUT_LINE_HORIZONTAL as DYNAMIC_TRIM, ARROWS_OUT_LINE_VERTICAL as ENLARGE,
-        BOOKMARK_SIMPLE as MARKER, EYE as VIDEO_ON, EYE_SLASH as VIDEO_OFF,
-        LIGHTNING as TIMELINE_ACTIONS, LOCK_SIMPLE as LOCKED, LOCK_SIMPLE_OPEN as UNLOCKED,
-        MAGNET as SNAP, PENCIL_SIMPLE as EDIT_ACTIONS, SCISSORS as SPLIT,
-        SLIDERS_HORIZONTAL as OPTIONS, SPEAKER_HIGH as AUDIO_ON, SPEAKER_SLASH as AUDIO_OFF,
+        ARROWS_IN_LINE_VERTICAL as SHRINK, ARROWS_OUT_LINE_VERTICAL as ENLARGE,
+        BOOKMARK_SIMPLE as MARKER, EYE as VIDEO_ON, EYE_SLASH as VIDEO_OFF, LOCK_SIMPLE as LOCKED,
+        LOCK_SIMPLE_OPEN as UNLOCKED, MAGNET as SNAP, SCISSORS as SPLIT, SPEAKER_HIGH as AUDIO_ON,
+        SPEAKER_SLASH as AUDIO_OFF,
     };
 }
 
-fn icon_toggle(ui: &mut egui::Ui, icon: &str, name: &str, on: bool, tip: &str) -> egui::Response {
+fn icon_toggle(ui: &mut egui::Ui, icon: &str, name: &str, on: bool) -> egui::Response {
     let r = ui.add(egui::Button::selectable(on, RichText::new(icon).size(15.0)));
     r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, name));
-    r.on_hover_text(tip)
+    r
 }
 
-fn header_button(
-    ui: &mut egui::Ui,
-    at: Rect,
-    icon: &str,
-    name: &str,
-    lit: bool,
-    tip: &str,
-) -> egui::Response {
+fn header_button(ui: &mut egui::Ui, at: Rect, icon: &str, name: &str, lit: bool) -> egui::Response {
     let r = ui.put(
         at,
         egui::Button::selectable(lit, RichText::new(icon).size(13.0)),
     );
     r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, lit, name));
-    r.on_hover_text(tip)
+    r
 }
 
-fn icon_menu(ui: &mut egui::Ui, icon: &str, name: &str, menu: impl FnOnce(&mut egui::Ui)) {
-    let r = ui
-        .menu_button(RichText::new(icon).size(15.0), menu)
-        .response;
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
-    r.on_hover_text(name);
+fn word_toggle(ui: &mut egui::Ui, word: &str, name: &str, on: bool) -> egui::Response {
+    let r = ui.add(egui::Button::selectable(on, RichText::new(word).small()));
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, name));
+    r
 }
 
 fn options_path() -> std::path::PathBuf {
@@ -1012,9 +1001,7 @@ impl Workspace {
                     ws.tc(p.end())
                 ))),
                 T::ZoomIn => {
-                    let r = ui
-                        .small_button("+")
-                        .on_hover_text(keys("Zoom in (Ctrl+wheel)"));
+                    let r = ui.small_button("+");
                     if r.clicked() {
                         let o = &mut ws.timeline.options;
                         o.ppf = (o.ppf * 1.5).min(*ZOOM.end());
@@ -1023,7 +1010,7 @@ impl Workspace {
                     r
                 }
                 T::ZoomOut => {
-                    let r = ui.small_button("−").on_hover_text("Zoom out");
+                    let r = ui.small_button("−");
                     if r.clicked() {
                         let o = &mut ws.timeline.options;
                         o.ppf = (o.ppf / 1.5).max(*ZOOM.start());
@@ -1050,16 +1037,16 @@ impl Workspace {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(upper.shrink(3.0)));
         child.set_clip_rect(upper.intersect(child.clip_rect()));
         child.spacing_mut().item_spacing = vec2(2.0, 2.0);
-        child.spacing_mut().button_padding = vec2(4.0, 1.0);
+        child.spacing_mut().button_padding = vec2(3.0, 1.0);
         child.spacing_mut().interact_size.y = BOX_CONTROL;
         child.horizontal(|ui| {
-            icon_menu(ui, icon::OPTIONS, "Timeline Options", |ui| {
+            ui.menu_button(RichText::new("Options").small(), |ui| {
                 self.options_menu(ui, p)
             });
-            icon_menu(ui, icon::TIMELINE_ACTIONS, "Timeline Actions", |ui| {
-                self.timeline_actions_menu(ui, p)
+            ui.menu_button(RichText::new("Actions").small(), |ui| {
+                self.timeline_actions_menu(ui, p, false)
             });
-            icon_menu(ui, icon::EDIT_ACTIONS, "Edit Actions", |ui| {
+            ui.menu_button(RichText::new("Edit").small(), |ui| {
                 self.edit_actions_menu(ui)
             });
         });
@@ -1069,7 +1056,6 @@ impl Workspace {
                 let r = ui.selectable_label(on, RichText::new(&t.id).small());
                 let name = format!("Target {}", t.id);
                 r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, &name));
-                let r = r.on_hover_text(format!("Edit functions put clips on {}", t.id));
                 if r.clicked() {
                     self.target = (t.id != MAIN).then(|| t.id.clone());
                 }
@@ -1086,24 +1072,10 @@ impl Workspace {
 
     fn timeline_tools(&mut self, ui: &mut egui::Ui, p: &Project) {
         let ripple = p.settings.ripple_on;
-        if icon_toggle(
-            ui,
-            icon::RIPPLE,
-            "Ripple On",
-            ripple,
-            "Ripple On: Track 1 closes gaps on insert, delete, move and trim; hold Alt to trim without",
-        )
-        .clicked()
-        {
+        if word_toggle(ui, "Ripple", "Ripple On", ripple).clicked() {
             self.send("project.set", json!({ "ripple_on": !ripple }));
         }
-        let r = icon_toggle(
-            ui,
-            icon::DYNAMIC_TRIM,
-            "Dynamic Trim",
-            self.timeline.dynamic.is_some(),
-            "Dynamic Trim (W): J/K/L trim the selected edit, or slip or slide the selected clips. Right-click for Slip or Slide",
-        );
+        let r = word_toggle(ui, "Trim", "Dynamic Trim", self.timeline.dynamic.is_some());
         if r.clicked() {
             self.toggle_dynamic();
         }
@@ -1117,21 +1089,13 @@ impl Workspace {
                 ui.close();
             }
         });
-        if icon_toggle(ui, icon::SPLIT, "Split", false, &keys("Split (Ctrl+B)")).clicked() {
+        if icon_toggle(ui, icon::SPLIT, "Split", false).clicked() {
             self.split_at_playhead();
         }
-        if icon_toggle(ui, icon::MARKER, "Marker", false, "Add Marker (M)").clicked() {
+        if icon_toggle(ui, icon::MARKER, "Marker", false).clicked() {
             self.send("markers.add", json!({ "at": self.snap.timeline.position }));
         }
-        if icon_toggle(
-            ui,
-            icon::SNAP,
-            "Snap",
-            self.snapping(),
-            "Snap (N); during a drag only for that drag",
-        )
-        .clicked()
-        {
+        if icon_toggle(ui, icon::SNAP, "Snap", self.snapping()).clicked() {
             self.timeline.options.snapping = !self.timeline.options.snapping;
             self.timeline.options.save();
         }
@@ -1153,11 +1117,9 @@ impl Workspace {
         ui.checkbox(&mut o.status, "Display Clip Status");
         ui.checkbox(&mut o.filmstrips, "Filmstrips");
         ui.checkbox(&mut o.waveforms, "Waveforms");
-        ui.checkbox(&mut o.minimize_subtitles, "Minimize Subtitle Track")
-            .on_hover_text("Draws the subtitle tracks shorter, for more room");
+        ui.checkbox(&mut o.minimize_subtitles, "Minimize Subtitle Track");
         ui.separator();
-        ui.checkbox(&mut o.boring, "Boring Detector")
-            .on_hover_text("Highlights clips that are too long (gray) or too short (red)");
+        ui.checkbox(&mut o.boring, "Boring Detector");
         let open_boring = ui.button("Analyze Timeline Edits…").clicked();
         if *o != before {
             o.save();
@@ -1171,7 +1133,7 @@ impl Workspace {
         }
     }
 
-    fn timeline_actions_menu(&mut self, ui: &mut egui::Ui, p: &Project) {
+    pub(super) fn timeline_actions_menu(&mut self, ui: &mut egui::Ui, p: &Project, in_bar: bool) {
         if ui.button("Add Video Track").clicked() {
             self.send("track.add", json!({ "kind": "video" }));
             ui.close();
@@ -1180,11 +1142,7 @@ impl Workspace {
             self.send("track.add", json!({ "kind": "audio" }));
             ui.close();
         }
-        if ui
-            .button("Add Subtitle Track")
-            .on_hover_text("A subtitle track above the video tracks, shown in the viewer")
-            .clicked()
-        {
+        if ui.button("Add Subtitle Track").clicked() {
             self.send("track.add", json!({ "kind": "subtitle" }));
             ui.close();
         }
@@ -1194,11 +1152,7 @@ impl Workspace {
             self.split_at_playhead();
             ui.close();
         }
-        if ui
-            .button("Join Match Edit Clips")
-            .on_hover_text("Join the parts of a split clip back into one")
-            .clicked()
-        {
+        if ui.button("Join Match Edit Clips").clicked() {
             self.send(
                 "edit.join",
                 json!({ "at": at, "clips": self.snap.selection.clips }),
@@ -1209,26 +1163,20 @@ impl Workspace {
             self.send("markers.add", json!({ "at": at }));
             ui.close();
         }
-        if ui
-            .button("Add Title")
-            .on_hover_text("A 5-second title at the playhead, over the tracks below it")
-            .clicked()
-        {
+        if ui.button("Add Title").clicked() {
             self.add_title(ui.ctx());
             ui.close();
         }
-        if ui
-            .button("Add Subtitle")
-            .on_hover_text(
-                "A subtitle at the playhead on the shown subtitle track (one is made if there is \
-                 none)",
-            )
-            .clicked()
-        {
+        if ui.button("Add Subtitle").clicked() {
             self.add_subtitle(ui.ctx(), None);
             ui.close();
         }
-        if ui.button("Create Subtitles from Audio…").clicked() {
+        let create = |ui: &mut egui::Ui| ui.button("Create Subtitles from Audio…").clicked();
+        let asked = match in_bar {
+            true => ui.menu_button("AI Tools", create).inner.unwrap_or(false),
+            false => create(ui),
+        };
+        if asked {
             self.open_speech();
             ui.close();
         }
@@ -1241,27 +1189,21 @@ impl Workspace {
                 shown.is_some(),
                 egui::Button::new("Re-time Subtitles to Speech…"),
             )
-            .on_hover_text("Move the shown subtitle track's subtitles to where the speech is")
             .clicked()
             && let Some(t) = shown
         {
             self.open_retime(&t.id);
             ui.close();
         }
+        if shown.is_none() {
+            super::dialog::why(ui, "the shown subtitle track has no subtitles");
+        }
         ui.separator();
-        if ui
-            .button("Clear Transition from All Edits")
-            .on_hover_text("Make every edit of V1 a cut again")
-            .clicked()
-        {
+        if ui.button("Clear Transition from All Edits").clicked() {
             self.send("edit.remove_transition", json!({ "all": true }));
             ui.close();
         }
-        if ui
-            .button("Add Dissolve to All Edits")
-            .on_hover_text("A one-second dissolve on every edit between two clips of V1")
-            .clicked()
-        {
+        if ui.button("Add Dissolve to All Edits").clicked() {
             self.send("edit.dissolve", json!({ "all": true }));
             ui.close();
         }
@@ -1270,24 +1212,27 @@ impl Workspace {
         let with = |want: fn(&vidcut_core::model::Clip) -> bool| {
             selected.iter().any(|id| p.clip(id).is_some_and(want))
         };
+        let sound = with(|c| c.audio.is_some());
         if ui
-            .add_enabled(
-                with(|c| c.audio.is_some()),
-                egui::Button::new("Ripple Delete Silence…"),
-            )
-            .on_hover_text("Cut the silent parts out of the selected clips")
+            .add_enabled(sound, egui::Button::new("Ripple Delete Silence…"))
             .clicked()
         {
             self.open_silence(selected.clone());
             ui.close();
         }
+        if !sound {
+            super::dialog::why(ui, "select clips with sound");
+        }
+        let video = with(|c| c.video);
         if ui
-            .add_enabled(with(|c| c.video), egui::Button::new("Detect Scene Cuts"))
-            .on_hover_text("Split the selected clips where their shots change")
+            .add_enabled(video, egui::Button::new("Detect Scene Cuts"))
             .clicked()
         {
             self.send("edit.detect_scene_cuts", json!({ "clips": selected }));
             ui.close();
+        }
+        if !video {
+            super::dialog::why(ui, "select clips with video");
         }
     }
 
@@ -1324,6 +1269,9 @@ impl Workspace {
         {
             self.open_speed_dialog();
             ui.close();
+        }
+        if self.snap.selection.clips.is_empty() {
+            super::dialog::why(ui, "select clips first");
         }
     }
 
@@ -1382,7 +1330,6 @@ impl Workspace {
             c.line
         };
         painter.rect_filled(thumb, 3.0, shade);
-        resp.on_hover_text("Scroll the tracks; the mouse wheel over them does too");
     }
 
     fn track_headers(&mut self, ui: &mut egui::Ui, lower_rect: Rect, rows: &Rows, p: &Project) {
@@ -1413,19 +1360,17 @@ impl Workspace {
                     .max_rect(parts.name)
                     .layout(egui::Layout::left_to_right(egui::Align::Center)),
             );
-            let r = name
-                .add(
-                    egui::Button::selectable(
-                        is_target,
-                        if is_target {
-                            RichText::new(&label).small()
-                        } else {
-                            RichText::new(&label).strong().small()
-                        },
-                    )
-                    .truncate(),
+            let r = name.add(
+                egui::Button::selectable(
+                    is_target,
+                    if is_target {
+                        RichText::new(&label).small()
+                    } else {
+                        RichText::new(&label).strong().small()
+                    },
                 )
-                .on_hover_text("The target track for edit functions");
+                .truncate(),
+            );
             if r.clicked() {
                 self.target = (t.id != MAIN).then(|| t.id.clone());
             }
@@ -1459,27 +1404,24 @@ impl Workspace {
                 }
             });
             let enlarged = self.timeline.enlarged.as_deref() == Some(t.id.as_str());
-            let (glyph, tip) = if enlarged {
-                (icon::SHRINK, "Back to its usual height")
+            let glyph = if enlarged {
+                icon::SHRINK
             } else {
-                (
-                    icon::ENLARGE,
-                    "Enlarge the track, to see its pictures and sound",
-                )
+                icon::ENLARGE
             };
             let name = format!("Enlarge {}", t.id);
-            if header_button(&mut child, parts.enlarge, glyph, &name, enlarged, tip).clicked() {
+            if header_button(&mut child, parts.enlarge, glyph, &name, enlarged).clicked() {
                 self.timeline.enlarged = (!enlarged).then(|| t.id.clone());
             }
             let lock = if t.locked {
-                (icon::LOCKED, "Unlock the track")
+                icon::LOCKED
             } else {
-                (icon::UNLOCKED, "Lock the track")
+                icon::UNLOCKED
             };
             let sound = if t.muted {
-                (icon::AUDIO_OFF, "Turn its audio back on")
+                icon::AUDIO_OFF
             } else {
-                (icon::AUDIO_ON, "Mute its audio")
+                icon::AUDIO_ON
             };
             let mut buttons = vec![
                 (
@@ -1497,16 +1439,16 @@ impl Workspace {
             ];
             if t.kind == vidcut_core::model::TrackKind::Video {
                 let picture = if t.video_enabled {
-                    (icon::VIDEO_ON, "Turn its video off")
+                    icon::VIDEO_ON
                 } else {
-                    (icon::VIDEO_OFF, "Turn its video back on")
+                    icon::VIDEO_OFF
                 };
                 let change = json!({ "track": t.id, "video_enabled": !t.video_enabled });
                 buttons.push(("Video", !t.video_enabled, picture, change));
             }
-            for ((what, lit, (glyph, tip), change), at) in buttons.into_iter().zip(parts.toggles) {
+            for ((what, lit, glyph, change), at) in buttons.into_iter().zip(parts.toggles) {
                 let name = format!("{what} {}", t.id);
-                if header_button(&mut child, at, glyph, &name, lit, tip).clicked() {
+                if header_button(&mut child, at, glyph, &name, lit).clicked() {
                     self.send("track.set", change);
                 }
             }
@@ -2504,19 +2446,19 @@ impl Workspace {
         };
         let mut open = true;
         let mut done = false;
-        egui::Window::new("Marker")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                egui::Grid::new("marker-fields").show(ui, |ui| {
-                    ui.label("Name");
-                    ui.text_edit_singleline(&mut d.name);
-                    ui.end_row();
-                    ui.label("Notes");
-                    ui.text_edit_multiline(&mut d.note);
-                    ui.end_row();
-                    ui.label("Color");
+        super::dialog::window(ctx, "Marker", &mut open, |ui| {
+            super::dialog::form(ui, "marker-form", |ui| {
+                super::dialog::row(ui, "Name", |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(260.0));
+                });
+                super::dialog::row(ui, "Notes", |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut d.note)
+                            .desired_rows(3)
+                            .desired_width(260.0),
+                    );
+                });
+                super::dialog::row(ui, "Color", |ui| {
                     egui::ComboBox::from_id_salt("marker-color")
                         .selected_text(&d.color)
                         .show_ui(ui, |ui| {
@@ -2524,22 +2466,25 @@ impl Workspace {
                                 ui.selectable_value(&mut d.color, c.to_string(), *c);
                             }
                         });
-                    ui.end_row();
-                });
-                ui.horizontal(|ui| {
-                    if ui.button("Done").clicked() {
-                        self.send(
-                            "markers.set",
-                            json!({ "marker": d.id, "name": d.name, "note": d.note, "color": d.color }),
-                        );
-                        done = true;
-                    }
-                    if ui.button("Remove Marker").clicked() {
-                        self.send("markers.remove", json!({ "marker": d.id }));
-                        done = true;
-                    }
                 });
             });
+            super::dialog::footer(ui, |ui| {
+                if super::dialog::main_button(ui, "Done", true) {
+                    self.send(
+                        "markers.set",
+                        json!({ "marker": d.id, "name": d.name, "note": d.note, "color": d.color }),
+                    );
+                    done = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    done = true;
+                }
+                if ui.button("Remove Marker").clicked() {
+                    self.send("markers.remove", json!({ "marker": d.id }));
+                    done = true;
+                }
+            });
+        });
         if open && !done {
             self.timeline.marker_dialog = Some(d);
         }
@@ -2552,47 +2497,55 @@ impl Workspace {
         let clips = self.snap.selection.clips.clone();
         let mut open = !clips.is_empty();
         let mut done = false;
-        egui::Window::new("Change Clip Duration")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.label(format!("{} clip(s)", clips.len()));
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut text)
-                        .hint_text("frames (90f), seconds (3s) or a timecode")
-                        .desired_width(220.0),
+        super::dialog::window(ctx, "Change Clip Duration", &mut open, |ui| {
+            let set = |d: Value| {
+                self.send(
+                    "edit.change_duration",
+                    json!({ "clips": clips, "duration": d }),
                 );
-                r.request_focus();
-                let set = |d: Value| {
-                    self.send(
-                        "edit.change_duration",
-                        json!({ "clips": clips, "duration": d }),
+            };
+            let typed = crate::gui::viewer::timecode_input(&text, self.dropped());
+            let mut enter = false;
+            super::dialog::form(ui, "duration-form", |ui| {
+                super::dialog::row(ui, "Clips", |ui| ui.label(clips.len().to_string()));
+                super::dialog::row(ui, "Duration", |ui| {
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .hint_text("90f, 3s or a timecode")
+                            .desired_width(200.0),
                     );
-                };
-                ui.horizontal(|ui| {
+                    r.request_focus();
+                    enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                });
+                super::dialog::row(ui, "Or", |ui| {
                     for s in [1, 5, 15] {
                         if ui.button(format!("{s} s")).clicked() {
                             set(json!(format!("{s}s")));
                             done = true;
                         }
                     }
-                    if ui
-                        .button("End")
-                        .on_hover_text("To the end of the media")
-                        .clicked()
-                    {
+                    if ui.button("To the End").clicked() {
                         set(json!("end"));
                         done = true;
                     }
                 });
-                if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                    if let Some(spec) = crate::gui::viewer::timecode_input(&text, self.dropped()) {
-                        set(json!(spec));
-                    }
+            });
+            super::dialog::footer(ui, |ui| {
+                let change = super::dialog::main_button(ui, "Change", typed.is_some());
+                if (change || enter)
+                    && let Some(spec) = &typed
+                {
+                    set(json!(spec));
                     done = true;
                 }
+                if ui.button("Cancel").clicked() {
+                    done = true;
+                }
+                if typed.is_none() && !text.trim().is_empty() {
+                    super::dialog::why(ui, "not a duration");
+                }
             });
+        });
         if open && !done {
             self.timeline.duration_dialog = Some(text);
         }
@@ -2629,51 +2582,47 @@ impl Workspace {
         let clips = self.snap.selection.clips.clone();
         let mut open = !clips.is_empty();
         let mut done = false;
-        egui::Window::new("Change Clip Speed")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.label(format!("{} clip(s)", clips.len()));
-                ui.add_enabled_ui(!d.freeze, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Speed");
-                        ui.add(
-                            egui::DragValue::new(&mut d.percent)
-                                .range(1.0..=10000.0)
-                                .speed(1.0)
-                                .suffix(" %"),
-                        );
-                    });
-                    ui.checkbox(&mut d.reverse, "Reverse Speed");
-                });
-                ui.checkbox(&mut d.freeze, "Freeze Frame")
-                    .on_hover_text("Holds the frame under the playhead");
-                ui.checkbox(&mut d.ripple, "Ripple Timeline").on_hover_text(
-                    "Keeps the clip's source and changes its length; off, keeps its length",
-                );
-                ui.horizontal(|ui| {
-                    let change =
-                        ui.button("Change").clicked() || ui.input(|i| i.key_pressed(Key::Enter));
-                    if change {
-                        let speed = if d.freeze {
-                            0.0
-                        } else if d.reverse {
-                            -d.percent / 100.0
-                        } else {
-                            d.percent / 100.0
-                        };
-                        self.send(
-                            "edit.change_speed",
-                            json!({ "clips": clips, "speed": speed, "ripple": d.ripple }),
-                        );
-                        done = true;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        done = true;
+        super::dialog::window(ctx, "Change Clip Speed", &mut open, |ui| {
+            super::dialog::form(ui, "speed-form", |ui| {
+                super::dialog::row(ui, "Clips", |ui| ui.label(clips.len().to_string()));
+                super::dialog::row(ui, "Speed", |ui| {
+                    ui.add_enabled(
+                        !d.freeze,
+                        egui::DragValue::new(&mut d.percent)
+                            .range(1.0..=10000.0)
+                            .speed(1.0)
+                            .suffix(" %"),
+                    );
+                    ui.add_enabled(!d.freeze, egui::Checkbox::new(&mut d.reverse, "Reverse"));
+                    if d.freeze {
+                        super::dialog::why(ui, "a freeze frame holds one picture");
                     }
                 });
+                super::dialog::row(ui, "Freeze Frame", |ui| ui.checkbox(&mut d.freeze, ""));
+                super::dialog::row(ui, "Ripple Timeline", |ui| ui.checkbox(&mut d.ripple, ""));
             });
+            super::dialog::footer(ui, |ui| {
+                let change = super::dialog::main_button(ui, "Change", true)
+                    || ui.input(|i| i.key_pressed(Key::Enter));
+                if change {
+                    let speed = if d.freeze {
+                        0.0
+                    } else if d.reverse {
+                        -d.percent / 100.0
+                    } else {
+                        d.percent / 100.0
+                    };
+                    self.send(
+                        "edit.change_speed",
+                        json!({ "clips": clips, "speed": speed, "ripple": d.ripple }),
+                    );
+                    done = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    done = true;
+                }
+            });
+        });
         if open && !done {
             self.timeline.speed_dialog = Some(d);
         }
@@ -2927,7 +2876,7 @@ impl Workspace {
             (_, Side::Audio) => audio_edits(t)
                 .find(|&(cut, _)| cut == e.at)
                 .map(|(_, at)| at)
-                .ok_or("This cut has no audio edit: one of its clips has no sound")?,
+                .ok_or("No audio edit here: one clip has no sound")?,
             _ => e.at,
         };
         self.timeline.edit = Some(EditSel {

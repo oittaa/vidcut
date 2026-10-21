@@ -277,9 +277,7 @@ pub(super) fn font_list(
                     changed = true;
                 }
             }
-        })
-        .response
-        .on_hover_text("Installed fonts");
+        });
     changed
 }
 
@@ -547,8 +545,7 @@ impl Workspace {
                             egui::TextEdit::singleline(&mut d.person_name)
                                 .hint_text(vidcut_core::speakers::Speakers::default().name(k))
                                 .desired_width(200.0),
-                        )
-                        .on_hover_text("Renames them on every subtitle");
+                        );
                     });
                 }
                 dialog::row(ui, "Color", |ui| {
@@ -570,14 +567,14 @@ impl Workspace {
                         swatch(ui, &mut d.color, usual);
                         if ui
                             .add_enabled(!d.color.is_empty(), egui::Button::new("Clear"))
-                            .on_hover_text("Back to the speaker's color")
                             .clicked()
                         {
                             d.color.clear();
                         }
-                    })
-                    .response
-                    .on_disabled_hover_text("Off in the track's Speakers setting");
+                    });
+                    if style.paints() == SpeakerPaint::None {
+                        dialog::why(ui, "off in the track's Speakers setting");
+                    }
                 });
                 dialog::row(ui, "Position", |ui| {
                     dialog::switch(ui, |ui| {
@@ -604,11 +601,7 @@ impl Workspace {
                 }
                 if let Some(k) = d.speaker.clone().filter(|_| found.is_some()) {
                     let label = format!("Apply to All of {}'s", p.speakers.name(&k));
-                    if ui
-                        .button(label)
-                        .on_hover_text("All their subtitles take this position and color")
-                        .clicked()
-                    {
+                    if ui.button(label).clicked() {
                         self.save_cue(&d);
                         self.send("subtitles.match_speaker", json!({ "cue": d.cue }));
                         d.color.clear();
@@ -738,17 +731,13 @@ impl Workspace {
                                 changed |=
                                     ui.selectable_value(&mut d.paint, paint, label).changed();
                             }
-                        })
-                        .response
-                        .on_hover_text("Usual: the spoken word with Words, else the text");
+                        });
                     ui.end_row();
                 });
                 if changed {
                     d.preview = style_of(&d).ok();
                 }
-                ui.label(dim(
-                    "Burned in, and written to an IMSC1 file. An empty field keeps the usual look",
-                ));
+                ui.label(dim("An empty field keeps the usual look."));
                 if !d.error.is_empty() {
                     ui.colored_label(ui.visuals().error_fg_color, &d.error);
                 }
@@ -810,9 +799,7 @@ impl Workspace {
             None => vidcut_core::ops::subtitles::shown(p).ok(),
         };
         let Some(t) = ti.map(|i| &p.subtitles[i]) else {
-            self.say(
-                "Show a subtitle track to export, or use Export Subtitle in its header's menu",
-            );
+            self.say("Show a subtitle track first, or export from its header's menu");
             return;
         };
         let stem = self
@@ -882,9 +869,7 @@ impl Workspace {
                     return;
                 };
                 self.say(format!(
-                    "Imported {name} into the Media Pool, {} subtitle(s): drag it onto a \
-                     subtitle track, or right-click it > Insert Selected Subtitles to Timeline \
-                     Using Timecode",
+                    "Imported {name}, {} subtitle(s). Drag it onto a subtitle track.",
                     s.cues
                 ));
                 if !s.warnings.is_empty() {

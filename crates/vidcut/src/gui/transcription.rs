@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use vidcut_core::model::{Project, uncovered};
 use vidcut_core::request::ViewerMode;
 
-use super::export::{Ask, near_center};
+use super::export::Ask;
 use super::fillers::{FillerEditor, Lists, Scope};
 use super::theme;
 use super::workspace::{Workspace, dim};
@@ -426,11 +426,7 @@ fn speaker_menu(
                 }
             });
         }
-        if ui
-            .button("Separate")
-            .on_hover_text("This file's speaker on its own")
-            .clicked()
-        {
+        if ui.button("Separate").clicked() {
             let voice = vidcut_core::speakers::voice(&w.media, w.stream, w.speaker);
             acts.push(Act::Link(w.clone(), voice));
             ui.close();
@@ -483,10 +479,9 @@ impl Workspace {
 
     fn transcription_frame(&mut self, ctx: &egui::Context, t: &mut TranscriptionUi) {
         let Some(p) = self.project_shared() else {
-            egui::Window::new("Transcription")
-                .open(&mut t.open)
-                .default_pos(near_center(ctx, 520.0, 300.0))
-                .show(ctx, |ui| ui.label(dim("Open a project first")));
+            super::dialog::tool_window(ctx, "Transcription", &mut t.open, [520.0, 300.0], |ui| {
+                super::dialog::note(ui, "Open a project first")
+            });
             return;
         };
         let (shown, clips, missing) = self.shown_source(&p);
@@ -622,17 +617,13 @@ impl Workspace {
         let mut open = t.open;
         let mut over = false;
         let mut search_go = false;
-        egui::Window::new("Transcription")
-            .open(&mut open)
-            .default_pos(near_center(ctx, 560.0, 620.0))
-            .default_size([560.0, 620.0])
-            .resizable(true)
-            .show(ctx, |ui| {
-                ui.add(egui::Label::new(RichText::new(&title).strong()).truncate());
-                ui.horizontal_wrapped(|ui| {
+        super::dialog::tool_window(ctx, "Transcription", &mut open, [560.0, 620.0], |ui| {
+            ui.add(egui::Label::new(RichText::new(&title).strong()).truncate());
+            super::dialog::form(ui, "transcription-form", |ui| {
+                super::dialog::row(ui, "Search", |ui| {
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut t.search)
-                            .hint_text("Search")
+                            .hint_text("a word")
                             .desired_width(150.0),
                     );
                     if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
@@ -640,45 +631,30 @@ impl Workspace {
                         r.request_focus();
                     }
                     let mut follow = !t.hold;
-                    if ui
-                        .checkbox(&mut follow, "Follow")
-                        .on_hover_text("While playing, keep the word under the playhead in view")
-                        .changed()
-                    {
+                    if ui.checkbox(&mut follow, "Follow the Playhead").changed() {
                         t.hold = !follow;
                     }
+                });
+                super::dialog::row(ui, "Silences", |ui| {
                     let silences = items.as_ref().is_some_and(|i| i.iter().any(|x| x.silence));
                     if ui
                         .add_enabled(silences, egui::Button::new("Remove Silent Portions"))
-                        .on_hover_text(match shown {
-                            Some(Shown::Timeline) => {
-                                "Ripple delete every pause of a second or more between words"
-                            }
-                            _ => "Leave every pause of a second or more out of the edits",
-                        })
                         .clicked()
                     {
                         acts.push(Act::RemoveSilences);
                     }
+                    if !silences {
+                        super::dialog::why(ui, "no pause of a second or more");
+                    }
                 });
-                ui.horizontal_wrapped(|ui| {
+                super::dialog::row(ui, "Filler Words", |ui| {
                     let fillers = items.as_ref().map_or(0, |i| {
                         i.iter()
                             .filter(|x| x.filler && !is_left_out(x, &left_out))
                             .count()
                     });
                     if ui
-                        .add_enabled(
-                            fillers > 0,
-                            egui::Button::new(format!("Delete Filler Words ({fillers})")),
-                        )
-                        .on_hover_text(match shown {
-                            Some(Shown::Timeline) => {
-                                "Ripple delete every filler word (dimmed in the text), at the \
-                                 quiet points around it"
-                            }
-                            _ => "Leave every filler word (dimmed in the text) out of the edits",
-                        })
+                        .add_enabled(fillers > 0, egui::Button::new(format!("Delete {fillers}")))
                         .clicked()
                     {
                         acts.push(Act::Fillers);
@@ -703,17 +679,8 @@ impl Workspace {
                                     super::speech::language_label(code),
                                 );
                             }
-                        })
-                        .response
-                        .on_hover_text(
-                            "Whose filler words are marked. Auto: the transcript's language, or \
-                             the one its commonest words belong to",
-                        );
-                    if ui
-                        .button("Edit…")
-                        .on_hover_text("Change the filler words, for this project or for all")
-                        .clicked()
-                    {
+                        });
+                    if ui.button("Edit…").clicked() {
                         let language = t
                             .fillers_in
                             .clone()
@@ -723,278 +690,262 @@ impl Workspace {
                         t.edit_error = None;
                     }
                 });
-                if !missing.is_empty() {
-                    ui.horizontal_wrapped(|ui| {
-                        let (text, button) = match shown {
-                            Some(Shown::Timeline) => (
-                                format!(
-                                    "The media of {} isn't transcribed",
-                                    super::speech::listed(
-                                        &missing
-                                            .iter()
-                                            .map(|m| p
-                                                .media(m)
-                                                .map_or(m.clone(), |x| x.name.clone()))
-                                            .collect::<Vec<_>>()
-                                    )
-                                ),
-                                "Transcribe Missing Clips",
+            });
+            if !missing.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    let (text, button) = match shown {
+                        Some(Shown::Timeline) => (
+                            format!(
+                                "The media of {} isn't transcribed",
+                                super::speech::listed(
+                                    &missing
+                                        .iter()
+                                        .map(|m| p.media(m).map_or(m.clone(), |x| x.name.clone()))
+                                        .collect::<Vec<_>>()
+                                )
                             ),
-                            _ => ("Not transcribed yet".to_string(), "Transcribe Audio…"),
-                        };
-                        ui.label(RichText::new(text).color(ui.visuals().warn_fg_color));
-                        if ui.button(button).clicked() {
-                            acts.push(Act::Transcribe(missing.clone()));
-                        }
-                    });
-                }
-                if let Some(e) = &error {
-                    ui.label(RichText::new(e).color(theme::colors().error));
-                }
-                ui.separator();
-                let footer = 64.0;
-                let height = (ui.available_height() - footer).max(80.0);
-                let mut placed: Vec<(usize, Rect)> = Vec::new();
-                let mut visible = Rect::NOTHING;
-                match &items {
-                    None if shown.is_none() => {
-                        ui.label(dim(
-                            "Open a clip in the Source viewer, or show the timeline",
-                        ));
+                            "Transcribe Missing Clips",
+                        ),
+                        _ => ("Not transcribed yet".to_string(), "Transcribe Audio…"),
+                    };
+                    super::dialog::warn(ui, text);
+                    if ui.button(button).clicked() {
+                        acts.push(Act::Transcribe(missing.clone()));
                     }
-                    None if have_words => {
-                        ui.label(dim("Reading the words…"));
+                });
+            }
+            if let Some(e) = &error {
+                super::dialog::warn(ui, e.clone());
+            }
+            ui.separator();
+            let footer = 64.0;
+            let height = (ui.available_height() - footer).max(80.0);
+            let mut placed: Vec<(usize, Rect)> = Vec::new();
+            let mut visible = Rect::NOTHING;
+            match &items {
+                None if shown.is_none() => {
+                    ui.label(dim(
+                        "Open a clip in the Source viewer, or show the timeline",
+                    ));
+                }
+                None if have_words => {
+                    ui.label(dim("Reading the words…"));
+                }
+                None => {}
+                Some(items) if items.is_empty() => {
+                    ui.label(dim("No words were heard"));
+                }
+                Some(items) => {
+                    let width = ui.available_width() - 16.0;
+                    let look = Look {
+                        version: t.version,
+                        selection: t.selection,
+                        left_out: left_out.clone(),
+                        search: t.search.trim().to_string(),
+                        width: width as i32,
+                    };
+                    let now = playhead.and_then(|f| at_frame(items, f));
+                    if !t.hold && playing && now.is_some() && now != t.followed {
+                        t.scroll_to = now.map(|i| (i, false));
+                    }
+                    t.followed = now;
+                    match &mut t.look {
+                        Some((l, paras)) if *l == look => {
+                            for para in paras.iter_mut() {
+                                let here = now.filter(|i| para.items.contains(i));
+                                if para.playhead != here {
+                                    *para = layout(ui, items, para.items.clone(), &look, now);
+                                }
+                            }
+                        }
+                        _ => {
+                            let laid = paragraphs(items)
+                                .into_iter()
+                                .map(|r| layout(ui, items, r, &look, now))
+                                .collect();
+                            t.look = Some((look, laid));
+                        }
+                    }
+                    let paras = &t.look.as_ref().expect("laid out").1;
+                    let everyone = people(items);
+                    egui::ScrollArea::vertical()
+                        .id_salt("transcription-text")
+                        .auto_shrink([false, false])
+                        .max_height(height)
+                        .show(ui, |ui| {
+                            visible = ui.clip_rect();
+                            let mut speaking: Option<&str> = None;
+                            for (k, para) in paras.iter().enumerate() {
+                                let first = &items[para.items.start];
+                                if !first.silence {
+                                    let new = first
+                                        .who
+                                        .as_ref()
+                                        .filter(|w| speaking != Some(w.person.as_str()));
+                                    ui.horizontal(|ui| {
+                                        if let Some(w) = new {
+                                            speaker_menu(
+                                                ui,
+                                                w,
+                                                &everyone,
+                                                &mut t.naming,
+                                                &mut acts,
+                                            );
+                                        }
+                                        ui.label(
+                                            RichText::new(tc(self, first.start))
+                                                .small()
+                                                .color(theme::colors().text_dim),
+                                        );
+                                    });
+                                    if let Some(p) = person(first) {
+                                        speaking = Some(p);
+                                    }
+                                }
+                                let (rect, _) = ui.allocate_exact_size(
+                                    para.galley.size(),
+                                    Sense::click_and_drag(),
+                                );
+                                ui.painter().galley(
+                                    rect.min,
+                                    para.galley.clone(),
+                                    theme::colors().text,
+                                );
+                                if let Some((i, center)) = t.scroll_to
+                                    && para.items.contains(&i)
+                                {
+                                    let align = center.then_some(egui::Align::Center);
+                                    ui.scroll_to_rect(rect, align);
+                                    t.scroll_to = None;
+                                }
+                                placed.push((k, rect));
+                                ui.add_space(if first.silence { 2.0 } else { 6.0 });
+                            }
+                        });
+                }
+            }
+            if let Some(items) = &items
+                && let Some((_, paras)) = &t.look
+            {
+                let pointer = ui.input(|i| i.pointer.interact_pos());
+                let hovered = pointer
+                    .filter(|pos| visible.contains(*pos) && ui.rect_contains_pointer(visible))
+                    .and_then(|pos| {
+                        let (k, rect) = placed.iter().find(|(_, r)| r.contains(pos))?;
+                        Some(hit(&paras[*k], pos - rect.min))
+                    });
+                let (pressed, down, released) = ui.input(|i| {
+                    (
+                        i.pointer.primary_pressed(),
+                        i.pointer.primary_down(),
+                        i.pointer.primary_released(),
+                    )
+                });
+                if pressed && let Some(h) = hovered {
+                    t.anchor = Some(h);
+                    t.selection = Some((h, h));
+                    t.dragging = true;
+                    t.moved = false;
+                }
+                if t.dragging
+                    && down
+                    && let (Some(a), Some(h)) = (t.anchor, hovered)
+                {
+                    t.moved |= h != a;
+                    t.selection = Some((a.min(h), a.max(h)));
+                }
+                if t.dragging && released {
+                    t.dragging = false;
+                    if let Some((a, _, start, end)) = t.selected(items) {
+                        match t.moved {
+                            false => acts.push(Act::Seek(items[a].end)),
+                            true => acts.push(Act::Marks(start, end)),
+                        }
+                    }
+                }
+            }
+            ui.separator();
+            let selected = items.as_ref().and_then(|i| t.selected(i));
+            ui.horizontal_wrapped(|ui| match (&items, selected) {
+                (Some(items), Some((a, b, start, end))) => {
+                    let words = items[a..=b].iter().filter(|i| !i.silence).count();
+                    ui.label(format!(
+                        "{words} word(s), {} – {} ({})",
+                        tc(self, start),
+                        tc(self, end - 1),
+                        self.src_tc(end - start)
+                    ));
+                }
+                _ => {
+                    ui.label(dim(
+                        "Click a word to go there; drag over words to mark them.",
+                    ));
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                let any = selected.is_some();
+                let button = |ui: &mut egui::Ui, label: &str| {
+                    ui.add_enabled(any, egui::Button::new(label)).clicked()
+                };
+                match shown {
+                    Some(Shown::Timeline) => {
+                        if button(ui, "Delete") {
+                            acts.push(Act::Delete);
+                        }
+                        if button(ui, "Add Marker") {
+                            acts.push(Act::Marker);
+                        }
+                    }
+                    Some(Shown::Media(_)) => {
+                        if button(ui, "Delete") {
+                            acts.push(Act::Delete);
+                        }
+                        if button(ui, "Undelete") {
+                            acts.push(Act::Undelete);
+                        }
+                        ui.separator();
+                        for (label, method) in [
+                            ("Place on Top", "edit.place_on_top"),
+                            ("Insert", "edit.insert"),
+                            ("Append", "edit.append"),
+                        ] {
+                            if button(ui, label) {
+                                acts.push(Act::Edit(method));
+                            }
+                        }
                     }
                     None => {}
-                    Some(items) if items.is_empty() => {
-                        ui.label(dim("No words were heard"));
-                    }
-                    Some(items) => {
-                        let width = ui.available_width() - 16.0;
-                        let look = Look {
-                            version: t.version,
-                            selection: t.selection,
-                            left_out: left_out.clone(),
-                            search: t.search.trim().to_string(),
-                            width: width as i32,
-                        };
-                        let now = playhead.and_then(|f| at_frame(items, f));
-                        if !t.hold && playing && now.is_some() && now != t.followed {
-                            t.scroll_to = now.map(|i| (i, false));
-                        }
-                        t.followed = now;
-                        match &mut t.look {
-                            Some((l, paras)) if *l == look => {
-                                for para in paras.iter_mut() {
-                                    let here = now.filter(|i| para.items.contains(i));
-                                    if para.playhead != here {
-                                        *para = layout(ui, items, para.items.clone(), &look, now);
-                                    }
-                                }
-                            }
-                            _ => {
-                                let laid = paragraphs(items)
-                                    .into_iter()
-                                    .map(|r| layout(ui, items, r, &look, now))
-                                    .collect();
-                                t.look = Some((look, laid));
-                            }
-                        }
-                        let paras = &t.look.as_ref().expect("laid out").1;
-                        let everyone = people(items);
-                        egui::ScrollArea::vertical()
-                            .id_salt("transcription-text")
-                            .auto_shrink([false, false])
-                            .max_height(height)
-                            .show(ui, |ui| {
-                                visible = ui.clip_rect();
-                                let mut speaking: Option<&str> = None;
-                                for (k, para) in paras.iter().enumerate() {
-                                    let first = &items[para.items.start];
-                                    if !first.silence {
-                                        let new = first
-                                            .who
-                                            .as_ref()
-                                            .filter(|w| speaking != Some(w.person.as_str()));
-                                        ui.horizontal(|ui| {
-                                            if let Some(w) = new {
-                                                speaker_menu(
-                                                    ui,
-                                                    w,
-                                                    &everyone,
-                                                    &mut t.naming,
-                                                    &mut acts,
-                                                );
-                                            }
-                                            ui.label(
-                                                RichText::new(tc(self, first.start))
-                                                    .small()
-                                                    .color(theme::colors().text_dim),
-                                            );
-                                        });
-                                        if let Some(p) = person(first) {
-                                            speaking = Some(p);
-                                        }
-                                    }
-                                    let (rect, _) = ui.allocate_exact_size(
-                                        para.galley.size(),
-                                        Sense::click_and_drag(),
-                                    );
-                                    ui.painter().galley(
-                                        rect.min,
-                                        para.galley.clone(),
-                                        theme::colors().text,
-                                    );
-                                    if let Some((i, center)) = t.scroll_to
-                                        && para.items.contains(&i)
-                                    {
-                                        let align = center.then_some(egui::Align::Center);
-                                        ui.scroll_to_rect(rect, align);
-                                        t.scroll_to = None;
-                                    }
-                                    placed.push((k, rect));
-                                    ui.add_space(if first.silence { 2.0 } else { 6.0 });
-                                }
-                            });
-                    }
                 }
-                if let Some(items) = &items
-                    && let Some((_, paras)) = &t.look
-                {
-                    let pointer = ui.input(|i| i.pointer.interact_pos());
-                    let hovered = pointer
-                        .filter(|pos| visible.contains(*pos) && ui.rect_contains_pointer(visible))
-                        .and_then(|pos| {
-                            let (k, rect) = placed.iter().find(|(_, r)| r.contains(pos))?;
-                            Some(hit(&paras[*k], pos - rect.min))
-                        });
-                    let (pressed, down, released) = ui.input(|i| {
-                        (
-                            i.pointer.primary_pressed(),
-                            i.pointer.primary_down(),
-                            i.pointer.primary_released(),
-                        )
+                if button(ui, "Copy") {
+                    acts.push(Act::Copy);
+                }
+                if !any {
+                    super::dialog::why(ui, "select words first");
+                }
+                let one_file = selected
+                    .zip(items.as_ref())
+                    .and_then(|((a, b, _, _), items)| {
+                        let mut whos = items[a..=b].iter().filter_map(|i| i.who.as_ref());
+                        let first = whos.next()?.clone();
+                        let last = items[a..=b].iter().rev().find_map(|i| i.who.as_ref())?;
+                        let same = items[a..=b]
+                            .iter()
+                            .filter_map(|i| i.who.as_ref())
+                            .all(|w| w.media == first.media && w.stream == first.stream);
+                        same.then_some((first, last.file.1))
                     });
-                    if pressed && let Some(h) = hovered {
-                        t.anchor = Some(h);
-                        t.selection = Some((h, h));
-                        t.dragging = true;
-                        t.moved = false;
-                    }
-                    if t.dragging
-                        && down
-                        && let (Some(a), Some(h)) = (t.anchor, hovered)
-                    {
-                        t.moved |= h != a;
-                        t.selection = Some((a.min(h), a.max(h)));
-                    }
-                    if t.dragging && released {
-                        t.dragging = false;
-                        if let Some((a, _, start, end)) = t.selected(items) {
-                            match t.moved {
-                                false => acts.push(Act::Seek(items[a].end)),
-                                true => acts.push(Act::Marks(start, end)),
+                if let (Some((first, end)), Some(items)) = (one_file, &items) {
+                    ui.menu_button("Assign To", |ui| {
+                        for (person, name) in people(items) {
+                            if ui.button(name).clicked() {
+                                acts.push(Act::Assign(first.clone(), end, person));
                             }
                         }
-                    }
+                    });
                 }
-                ui.separator();
-                let selected = items.as_ref().and_then(|i| t.selected(i));
-                ui.horizontal_wrapped(|ui| match (&items, selected) {
-                    (Some(items), Some((a, b, start, end))) => {
-                        let words = items[a..=b].iter().filter(|i| !i.silence).count();
-                        ui.label(format!(
-                            "{words} word(s), {} – {} ({})",
-                            tc(self, start),
-                            tc(self, end - 1),
-                            self.src_tc(end - start)
-                        ));
-                    }
-                    _ => {
-                        ui.label(dim(
-                            "Click a word to go to it, drag over words for In and Out, X for a \
-                             sentence",
-                        ));
-                    }
-                });
-                ui.horizontal_wrapped(|ui| {
-                    let any = selected.is_some();
-                    let button = |ui: &mut egui::Ui, label: &str, tip: &str| {
-                        ui.add_enabled(any, egui::Button::new(label))
-                            .on_hover_text(tip)
-                            .clicked()
-                    };
-                    match shown {
-                        Some(Shown::Timeline) => {
-                            if button(ui, "Delete", "Ripple delete these words (Delete)") {
-                                acts.push(Act::Delete);
-                            }
-                            if button(
-                                ui,
-                                "Add Marker",
-                                "A marker over these words, named after them",
-                            ) {
-                                acts.push(Act::Marker);
-                            }
-                        }
-                        Some(Shown::Media(_)) => {
-                            if button(ui, "Delete", "Leave these words out of the edits (Delete)") {
-                                acts.push(Act::Delete);
-                            }
-                            if button(ui, "Undelete", "Bring these words back") {
-                                acts.push(Act::Undelete);
-                            }
-                            ui.separator();
-                            for (label, method, tip) in [
-                                (
-                                    "Place on Top",
-                                    "edit.place_on_top",
-                                    "On a track above, at the playhead",
-                                ),
-                                (
-                                    "Insert",
-                                    "edit.insert",
-                                    "At the timeline In, else the playhead",
-                                ),
-                                ("Append", "edit.append", "After the last clip"),
-                            ] {
-                                if button(ui, label, &format!("{tip}, without the words left out"))
-                                {
-                                    acts.push(Act::Edit(method));
-                                }
-                            }
-                        }
-                        None => {}
-                    }
-                    if button(ui, "Copy", "Copy these words as text (Ctrl+C)") {
-                        acts.push(Act::Copy);
-                    }
-                    let one_file =
-                        selected
-                            .zip(items.as_ref())
-                            .and_then(|((a, b, _, _), items)| {
-                                let mut whos = items[a..=b].iter().filter_map(|i| i.who.as_ref());
-                                let first = whos.next()?.clone();
-                                let last =
-                                    items[a..=b].iter().rev().find_map(|i| i.who.as_ref())?;
-                                let same = items[a..=b]
-                                    .iter()
-                                    .filter_map(|i| i.who.as_ref())
-                                    .all(|w| w.media == first.media && w.stream == first.stream);
-                                same.then_some((first, last.file.1))
-                            });
-                    if let (Some((first, end)), Some(items)) = (one_file, &items) {
-                        ui.menu_button("Assign To", |ui| {
-                            for (person, name) in people(items) {
-                                if ui.button(name).clicked() {
-                                    acts.push(Act::Assign(first.clone(), end, person));
-                                }
-                            }
-                        });
-                    }
-                });
-                over = ui.ui_contains_pointer();
             });
+            over = ui.ui_contains_pointer();
+        });
         if search_go && let Some(items) = &items {
             let needle = t.search.trim().to_lowercase();
             if !needle.is_empty() {
@@ -1052,19 +1003,12 @@ impl Workspace {
         let Some(e) = &mut t.editing else { return };
         let mut open = true;
         let mut change = None;
-        egui::Window::new("Filler Words")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_pos(near_center(ctx, 420.0, 220.0))
-            .show(ctx, |ui| {
-                ui.set_width(400.0);
-                change =
-                    super::fillers::editor(ui, e, Some(project), preferred, t.saving.is_some());
-                if let Some(error) = &t.edit_error {
-                    ui.label(RichText::new(error).color(theme::colors().error));
-                }
-            });
+        super::dialog::window(ctx, "Filler Words", &mut open, |ui| {
+            change = super::fillers::editor(ui, e, Some(project), preferred, t.saving.is_some());
+            if let Some(error) = &t.edit_error {
+                super::dialog::warn(ui, error.clone());
+            }
+        });
         if !open {
             t.editing = None;
             t.edit_error = None;

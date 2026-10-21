@@ -105,9 +105,8 @@ impl Format {
                         })
                         .response
                         .labelled_by(label.id);
-                    let r = ui
-                        .add(egui::TextEdit::singleline(&mut self.start).desired_width(100.0))
-                        .on_hover_text("Any timecode, like 00:59:30:00 (drop-frame 01:00:00;00)");
+                    let r =
+                        ui.add(egui::TextEdit::singleline(&mut self.start).desired_width(100.0));
                     r.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::Role::TextInput,
@@ -151,14 +150,12 @@ impl Format {
                         .response
                         .labelled_by(label.id);
                     for (side, name) in [(&mut self.width, "Width"), (&mut self.height, "Height")] {
-                        let r = ui
-                            .add(
-                                egui::DragValue::new(side)
-                                    .range(16..=MAX_SIDE)
-                                    .speed(2.0)
-                                    .suffix(" px"),
-                            )
-                            .on_hover_text(name);
+                        let r = ui.add(
+                            egui::DragValue::new(side)
+                                .range(16..=MAX_SIDE)
+                                .speed(2.0)
+                                .suffix(" px"),
+                        );
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::Role::SpinButton, true, name)
                         });
@@ -170,8 +167,8 @@ impl Format {
                 });
                 ui.end_row();
                 let label = ui.label("Frame rate");
-                ui.add_enabled_ui(rate_enabled, |ui| {
-                    ui.horizontal(|ui| {
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(rate_enabled, |ui| {
                         let current = self.fps();
                         egui::ComboBox::from_id_salt("frame rate")
                             .selected_text(match current {
@@ -190,11 +187,8 @@ impl Format {
                             })
                             .response
                             .labelled_by(label.id);
-                        let r = ui
-                            .add(egui::TextEdit::singleline(&mut self.rate).desired_width(90.0))
-                            .on_hover_text(
-                                "Any rate: 24, 29.97, 30000/1001 or 12.5 frames a second",
-                            );
+                        let r =
+                            ui.add(egui::TextEdit::singleline(&mut self.rate).desired_width(90.0));
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::Role::TextInput,
@@ -209,12 +203,14 @@ impl Format {
                             );
                         }
                     });
+                    if !rate_enabled {
+                        super::dialog::why(ui, "only while the timeline is empty");
+                    }
                 });
                 ui.end_row();
                 if self.fps().is_some_and(Rational::has_drop_frame) {
                     ui.label("Timecode");
-                    ui.checkbox(&mut self.drop_frame, "Drop-frame")
-                        .on_hover_text("01:00:00;00 is an hour of the clock: two frame numbers a minute are skipped (four at 59.94), but every tenth");
+                    ui.checkbox(&mut self.drop_frame, "Drop-frame");
                     ui.end_row();
                 }
             });
@@ -350,7 +346,7 @@ impl Workspace {
                 let mut choice = None;
                 let modal = egui::Modal::new(egui::Id::unique("otio-open-taken")).show(ctx, |ui| {
                     ui.label(format!(
-                        "{} is already there. Open it, or save the project from {} under another name.",
+                        "{} exists already. Open it, or save {} under another name.",
                         file_name(&f.target),
                         file_name(&f.otio)
                     ));
@@ -470,16 +466,14 @@ impl Workspace {
                     new.format.edit_start(ui);
                 }
                 ui.label(
-                    RichText::new(
-                        "The size can change later; the frame rate only while the timeline is empty.",
-                    )
-                    .small()
-                    .color(theme::colors().text_dim),
+                    RichText::new("The frame rate can change only while the timeline is empty.")
+                        .small()
+                        .color(theme::colors().text_dim),
                 );
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    let ok = (!new.choose || new.format.fps().is_some())
-                        && new.format.start().is_some();
+                    let ok =
+                        (!new.choose || new.format.fps().is_some()) && new.format.start().is_some();
                     let button = if new.from.is_some() {
                         "Create"
                     } else {

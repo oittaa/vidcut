@@ -367,8 +367,7 @@ fn drew(shown: Option<&vidcut_av::player::Shown>, screen: &Screen) -> String {
         " (still the picture before it)"
     };
     format!(
-        "frame {}{late}: {}x{} {:?}, {:?} {range} range{hdr}{turned}, in {} memory, \
-         decoded by {}, {how}",
+        "frame {}{late}: {}x{} {:?}/{:?}/{range}{hdr}{turned}, {} memory, by {}, {how}",
         s.frame,
         p.width(),
         p.height(),

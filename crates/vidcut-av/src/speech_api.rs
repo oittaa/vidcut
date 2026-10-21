@@ -660,10 +660,7 @@ fn xai_fields(asked: &Asked) -> Vec<(&'static str, String)> {
     }
     let fillers = o.filler_words.unwrap_or(true);
     fields.push(("filler_words", fillers.to_string()));
-    let gate = o
-        .vad_threshold
-        .or((asked.find.unwrap_or_default() == FindSpeech::Sound).then_some(0.0));
-    if let Some(v) = gate {
+    if let Some(v) = o.vad_threshold {
         fields.push(("vad_threshold", v.to_string()));
     }
     fields
