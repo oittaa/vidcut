@@ -25,7 +25,7 @@ const PAD: f64 = 0.2;
 const GAP: f64 = 0.5;
 const WAIT: Duration = Duration::from_secs(60 * 60);
 
-const GOOGLE_LANGUAGES: [&str; 83] = [
+pub const GOOGLE_LANGUAGES: [&str; 83] = [
     "en-US",
     "es-US",
     "pt-BR",
@@ -117,35 +117,11 @@ pub const XAI_LANGUAGES: [&str; 38] = [
     "es", "sv", "th", "tr", "uk", "ur", "vi",
 ];
 
-pub fn google_languages() -> Vec<&'static str> {
-    let mut out: Vec<&str> = Vec::new();
-    for code in GOOGLE_LANGUAGES {
-        let short = primary(code);
-        if !out.contains(&short) {
-            out.push(short);
-        }
-    }
-    out
-}
-
 fn primary(code: &str) -> &str {
     match code.split('-').next().unwrap_or(code) {
         "cmn" => "zh",
         p => p,
     }
-}
-
-pub fn google_code(language: &str) -> String {
-    let l = language.to_ascii_lowercase();
-    let l = match l.as_str() {
-        "no" | "nn" => "nb",
-        "tl" => "fil",
-        other => other,
-    };
-    GOOGLE_LANGUAGES
-        .iter()
-        .find(|c| primary(c) == l)
-        .map_or_else(|| language.to_string(), |c| c.to_string())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -321,7 +297,7 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
         }));
         language = language.or(got.language);
         if let Some(l) = &language {
-            telling.heard(l, options.models, asked.speaker_model);
+            telling.heard(l, asked.speaker_model);
         }
     }
     let service_speakers = asked.speakers
@@ -388,6 +364,7 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
                         let at = transcribe::Hearing {
                             dir: options.models,
                             gpu: options.gpu,
+                            download: asked.download,
                             started,
                         };
                         let (turns, by) = transcribe::speakers_of(
@@ -858,7 +835,7 @@ fn google_transcribe(
 fn google_request(asked: &Asked, uri: &str) -> Value {
     let o = asked.google.clone().unwrap_or_default();
     let codes: Vec<String> = match (&o.language_codes[..], &asked.language) {
-        ([], Some(l)) => vec![google_code(l)],
+        ([], Some(l)) => vec![l.clone()],
         (codes, _) => codes.to_vec(),
     };
     let mut mode = json!({ "type": "verbatim", "timestamp_granularities": ["word"] });
@@ -884,6 +861,7 @@ fn google_words(text: &str) -> Result<Got> {
     let v: Value = serde_json::from_str(text)
         .map_err(|e| Error::Invalid(format!("Google's answer isn't JSON: {e}")))?;
     let mut words = Vec::new();
+    let mut labels: Vec<String> = Vec::new();
     for step in v["steps"].as_array().into_iter().flatten() {
         if step["type"].as_str().is_some_and(|t| t != "model_output") {
             continue;
@@ -900,11 +878,13 @@ fn google_words(text: &str) -> Result<Got> {
                 ) else {
                     continue;
                 };
-                let speaker = a["speaker"]
-                    .as_str()
-                    .and_then(|s| s.rsplit(|c: char| !c.is_ascii_digit()).next())
-                    .and_then(|n| n.parse::<u32>().ok())
-                    .map(|n| n + 1);
+                let speaker = a["speaker"].as_str().map(|label| {
+                    let at = labels.iter().position(|l| l == label).unwrap_or_else(|| {
+                        labels.push(label.to_string());
+                        labels.len() - 1
+                    });
+                    at as u32 + 1
+                });
                 words.push(Heard {
                     start,
                     end,
@@ -970,7 +950,7 @@ fn keep_reply(key: &str, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Heard, google_code, google_words, kept_note, offset, reply_key, xai_words};
+    use super::{Heard, google_words, kept_note, offset, reply_key, xai_words};
     use serde_json::json;
 
     #[test]
@@ -993,16 +973,6 @@ mod tests {
         let a = reply_key("xAI", &json!({}), 1, &[0.5]);
         let b = reply_key("xAI", &json!({}), 1, &[0.25]);
         assert_ne!(a, b);
-    }
-
-    #[test]
-    fn a_two_letter_language_takes_googles_regional_code() {
-        assert_eq!(google_code("fi"), "fi-FI");
-    }
-
-    #[test]
-    fn chinese_is_googles_mandarin() {
-        assert_eq!(google_code("zh"), "cmn-Hans-CN");
     }
 
     #[test]
@@ -1052,7 +1022,7 @@ mod tests {
                 start: 0.1,
                 end: 0.45,
                 text: "Hello".into(),
-                speaker: Some(3)
+                speaker: Some(1)
             }]
         );
     }

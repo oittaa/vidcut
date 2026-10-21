@@ -136,7 +136,7 @@ fn hearing(s: &Settings, params: &mut serde_json::Value, send: bool) {
 fn languages(model: SpeechModel) -> Vec<&'static str> {
     match model {
         SpeechModel::Xai => speech_api::XAI_LANGUAGES.to_vec(),
-        SpeechModel::Google => speech_api::google_languages(),
+        SpeechModel::Google => speech_api::GOOGLE_LANGUAGES.to_vec(),
         m => transcribe::file_of(m).map_or(Vec::new(), |f| f.languages.to_vec()),
     }
 }
@@ -171,11 +171,7 @@ fn find_rows(ui: &mut egui::Ui, s: &mut Settings) {
 }
 
 fn speakers_of(s: &Settings) -> Option<&'static transcribe::File> {
-    transcribe::speakers_by(
-        &crate::paths::models_dir(),
-        s.language.as_deref(),
-        s.speaker_model,
-    )
+    transcribe::speakers_by(s.language.as_deref(), s.speaker_model)
 }
 
 fn speaker_title(f: &transcribe::File) -> &'static str {
@@ -795,7 +791,7 @@ fn language_name(code: &str) -> &'static str {
 }
 
 pub(super) fn language_label(code: &str) -> String {
-    match language_name(code) {
+    match language_name(code.split('-').next().unwrap_or(code)) {
         "" => code.to_string(),
         name => format!("{name} ({code})"),
     }

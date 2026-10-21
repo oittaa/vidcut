@@ -38,10 +38,10 @@ fn a_word_takes_the_speaker_heard_over_most_of_it() {
 }
 
 #[test]
-fn a_word_between_turns_takes_the_nearest() {
+fn a_word_between_turns_has_no_speaker() {
     let mut heard = vec![said(vec![word("the", 2.0, 2.2, None)])];
     give_speakers(&mut heard, &[turn(0.0, 1.5, 1), turn(2.5, 4.0, 2)]);
-    assert_eq!(heard[0].words[0].speaker, Some(2));
+    assert_eq!(heard[0].words[0].speaker, None);
 }
 
 #[test]
