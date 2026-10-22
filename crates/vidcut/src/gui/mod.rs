@@ -14,6 +14,7 @@ mod gate;
 mod help;
 mod history;
 mod import;
+mod inspector;
 mod isolation;
 mod look_tiles;
 mod looks;

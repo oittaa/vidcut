@@ -15,6 +15,7 @@ pub use super::viewer::{TwoUp, TwoUpCell, TwoUpMode};
 use super::shuttle::Jkl;
 use super::theme::{self, Deco};
 use super::timeline::TimelineView;
+use super::title_browser::LeftTab;
 use crate::live::{self, Filmstrip, PlayerId, Snapshot};
 use crate::when::{LocalTime, local_time};
 
@@ -80,7 +81,9 @@ pub struct Workspace {
     pub(super) log_edits_only: bool,
     pub(super) hover: Option<(String, i64)>,
     pub(super) pool_clicked: Option<String>,
+    pub(super) left: LeftTab,
     pub(super) titles: super::title_browser::Browser,
+    pub(super) inspector: super::inspector::Inspector,
     pub(super) title_thumbs: super::title_browser::Thumbs,
     pub(super) looks: super::looks::Looks,
     pub(super) scrub: Option<(PlayerId, i64)>,
@@ -161,7 +164,9 @@ impl Workspace {
             log_edits_only: true,
             hover: None,
             pool_clicked: None,
+            left: Default::default(),
             titles: Default::default(),
+            inspector: Default::default(),
             title_thumbs: Default::default(),
             looks: Default::default(),
             scrub: None,
@@ -238,7 +243,8 @@ impl Workspace {
             GuiPanel::Help => self.help.open = true,
             GuiPanel::History => self.history.show(),
             GuiPanel::Transcription => self.transcription.open = true,
-            GuiPanel::Titles => self.titles.open = true,
+            GuiPanel::Titles => self.left = LeftTab::Titles,
+            GuiPanel::Inspector => self.left = LeftTab::Inspector,
             GuiPanel::Metadata => self.show_metadata_strip(true),
             GuiPanel::ClipInfo => self.open_clip_info(None),
             GuiPanel::Transform => self.show_picture_tool(PictureTool::Transform),
@@ -289,7 +295,15 @@ impl Workspace {
             GuiPanel::Help => self.help.open = false,
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
-            GuiPanel::Titles => self.titles.open = false,
+            GuiPanel::Titles | GuiPanel::Inspector => {
+                let tab = match panel {
+                    GuiPanel::Titles => LeftTab::Titles,
+                    _ => LeftTab::Inspector,
+                };
+                if self.left == tab {
+                    self.left = LeftTab::Pool;
+                }
+            }
             GuiPanel::Metadata => self.show_metadata_strip(false),
             GuiPanel::ClipInfo => self.clip_info.open = false,
             GuiPanel::Transform | GuiPanel::Crop | GuiPanel::DynamicZoom => {
@@ -321,7 +335,8 @@ impl Workspace {
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
-            (GuiPanel::Titles, self.titles.open),
+            (GuiPanel::Titles, self.left == LeftTab::Titles),
+            (GuiPanel::Inspector, self.left == LeftTab::Inspector),
             (GuiPanel::Metadata, self.metadata_strip),
             (GuiPanel::ClipInfo, self.clip_info.open),
             (GuiPanel::Transform, tool == Some(PictureTool::Transform)),
@@ -1723,11 +1738,22 @@ impl Workspace {
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Card, |ui| {
                     self.left_tabs(ui);
-                    if self.titles.open {
-                        self.titles_panel(ui);
-                    } else {
+                    if self.left != LeftTab::Titles {
                         self.end_title_hover();
-                        self.pool_panel(ui);
+                    }
+                    if self.left != LeftTab::Inspector {
+                        self.leave_inspector();
+                    }
+                    match self.left {
+                        LeftTab::Pool => self.pool_panel(ui),
+                        LeftTab::Titles => {
+                            self.pool_focus = false;
+                            self.titles_panel(ui);
+                        }
+                        LeftTab::Inspector => {
+                            self.pool_focus = false;
+                            self.inspector_panel(ui);
+                        }
                     }
                 })
             })

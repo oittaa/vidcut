@@ -116,8 +116,8 @@ Motions:
 - `Player::present` hands the `Placed` pictures of each layer with the frame, in `Shown` (`Plan::placed_at`). Thus a move or zoom of a placed picture keeps the frames decoded.
 - For a Dynamic Zoom, `Plan::placed_at` moves the `Run` of each `Placed` picture to the frame. Thus the box of that frame places the picture.
 - `Shown::crosses` marks the side of a dissolve that mixes with the side before it (`Over::cross`).
-- While a picture is dragged, `Player::preview_picture` at once puts the dragged picture in place of the picture of its clip.
-- The live core then plans the timeline again with the dragged picture (`Msg::PreviewPicture`), `RELOAD_EVERY` apart at most.
+- While pictures are dragged, `Player::preview_pictures` at once puts each dragged picture in place of the picture of its clip.
+- The live core then plans the timeline again with the dragged pictures (`Msg::PreviewPictures`), `RELOAD_EVERY` apart at most.
 - This is necessary because a picture that stops filling the frame needs the tracks below it decoded.
 
 **Titles**
@@ -136,7 +136,7 @@ Motions:
   - how many layers go under it
   - how it is moved, scaled and turned from how it was drawn: its place, zoom and rotation, or the `Run::top` of a scroll. The viewer's shader does the transform.
   - the level at which a fade or its opacity draws it (in the shader's `Lettering`)
-  - the pictures of the compound clips that it plays inside (`ShownTitle::placed`). A picture that `Player::preview_picture` drags takes the place of its own.
+  - the pictures of the compound clips that it plays inside (`ShownTitle::placed`). A picture that `Player::preview_pictures` drags takes the place of its own.
 - Until a title is drawn, the newest drawing of its clip shows, moved to its place. Thus a drag, a new color or new text does not blink.
 - The frame is not exact until the title is drawn.
 

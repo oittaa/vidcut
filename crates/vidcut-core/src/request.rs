@@ -2089,11 +2089,12 @@ pub enum Request {
     /// `jobs`, `log`, `mixer`, `preferences`, `history` (the undo history),
     /// `help` (the keyboard shortcuts), `transcription` (the words of the
     /// source clip or the timeline), `metadata` (the strip at the top of the
-    /// Media Pool), `clip_info` (the media selected in the pool), or the
-    /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the
-    /// selected clip (the topmost clip at the playhead when none is
-    /// selected), or `tools`, the viewer's row of Transform, Crop, Dynamic
-    /// Zoom and their buttons. Answers what `gui.state` does.
+    /// Media Pool), `clip_info` (the media selected in the pool), `titles`
+    /// or `inspector` (tabs in the Media Pool's place), or the viewer's
+    /// `transform`, `crop` or `dynamic_zoom` handles on the selected clip
+    /// (the topmost clip at the playhead when none is selected), or
+    /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom and their
+    /// buttons. Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
@@ -2681,6 +2682,9 @@ pub enum GuiPanel {
     /// The Titles tab, in the Media Pool's place: the kinds of title to
     /// drag onto the timeline.
     Titles,
+    /// The Inspector tab, in the Media Pool's place: the transform, crop
+    /// and Dynamic Zoom of the selected clips, as numbers to type or drag.
+    Inspector,
     /// The viewer's Transform handles on the selected clip: move, zoom,
     /// stretch and turn its picture.
     Transform,
