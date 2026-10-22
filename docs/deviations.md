@@ -1396,6 +1396,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
   - With nothing of these selected, it shows one line.
   - It has no Done and no Cancel. As in Resolve, a change goes in without a button, and Ctrl+Z undoes it.
+  - A section shows the project while the user does not edit it, also after Ctrl+Z or a change from a script.
   - Audio clips, titles and subtitles have no picture.
   - With several clips selected, it shows the first one that can have a picture. Its header gives the number of these clips.
   - Its picture sections are Transform, Crop and Dynamic Zoom. Each picture section has a Reset of the whole section.

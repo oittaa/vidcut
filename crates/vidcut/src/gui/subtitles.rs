@@ -25,7 +25,7 @@ pub struct CueDialog {
     person_name: String,
     loaded: bool,
     focus: bool,
-    sent: Option<(Option<Value>, String)>,
+    from: Option<(Typing, String)>,
 }
 
 impl CueDialog {
@@ -40,6 +40,10 @@ impl CueDialog {
     fn take_person(&mut self, speakers: &Speakers, person: Option<String>) {
         self.person_name = person_name(speakers, person.as_deref());
         self.speaker = person;
+    }
+
+    fn state(&self) -> (Typing, String) {
+        (self.typing(), self.person_name.clone())
     }
 
     fn typing(&self) -> Typing {
@@ -102,6 +106,7 @@ pub struct TrackDialog {
     paint: Option<SpeakerPaint>,
     base: SubtitleStyle,
     dirty: bool,
+    from: Option<(Option<String>, Option<String>, SubtitleStyle)>,
     error: String,
     families: Vec<String>,
     preview: Option<SubtitleStyle>,
@@ -329,7 +334,9 @@ impl Workspace {
     }
 
     pub(super) fn close_cue_form(&mut self) {
-        if let Some(d) = self.timeline.cue_dialog.take() {
+        if let Some(d) = self.timeline.cue_dialog.take()
+            && d.from.as_ref() != Some(&d.state())
+        {
             self.save_cue(&d);
         }
     }
@@ -382,7 +389,7 @@ impl Workspace {
             person_name: String::new(),
             loaded: false,
             focus,
-            sent: None,
+            from: None,
         };
         if let Some(p) = self.project()
             && let Some(c) = p.cue(id)
@@ -421,6 +428,7 @@ impl Workspace {
             paint: None,
             base: SubtitleStyle::default(),
             dirty: false,
+            from: None,
             error: String::new(),
             families: vidcut_av::burn::families(),
             preview: None,
@@ -507,7 +515,10 @@ impl Workspace {
             .find_cue(&d.cue)
             .map(|(t, c)| (&p.subtitles[t], &p.subtitles[t].cues[c]));
         match found {
-            Some((_, cue)) if !d.loaded => d.load(&p.speakers, cue),
+            Some((_, cue)) if !d.loaded || d.from.as_ref() == Some(&d.state()) => {
+                d.load(&p.speakers, cue);
+                d.from = Some(d.state());
+            }
             None if d.loaded => return false,
             _ => {}
         }
@@ -645,12 +656,9 @@ impl Workspace {
                 }
             }
         });
-        if !done && self.inspector_commits() {
-            let key = (self.typed(&d), d.person_name.clone());
-            if d.sent.as_ref() != Some(&key) {
-                self.save_cue(&d);
-                d.sent = Some(key);
-            }
+        if !done && self.inspector_commits() && d.from.as_ref() != Some(&d.state()) {
+            self.save_cue(&d);
+            d.from = Some(d.state());
         }
         ui.separator();
         if !done {
@@ -663,12 +671,20 @@ impl Workspace {
         let Some(mut d) = self.timeline.track_dialog.take() else {
             return false;
         };
-        if self
+        let Some(t) = self
             .project()
             .and_then(|p| p.subtitle_track(&d.track))
-            .is_none()
-        {
+            .cloned()
+        else {
             return false;
+        };
+        let now = (t.name.clone(), t.language.clone(), t.style);
+        if !d.dirty && d.from.as_ref() != Some(&now) {
+            d.name = now.0.clone().unwrap_or_default();
+            d.language = now.1.clone().unwrap_or_default();
+            d.load(&now.2);
+            d.preview = None;
+            d.from = Some(now);
         }
         ui.label(RichText::new("Subtitle Track").strong());
         let mut enter = false;

@@ -27,6 +27,7 @@ pub struct TitleDialog {
     loaded: bool,
     focus: bool,
     dirty: bool,
+    from: Option<Title>,
     selection: (usize, usize),
     word_color: String,
     word_size: String,
@@ -64,6 +65,7 @@ impl TitleDialog {
             loaded: false,
             focus: true,
             dirty: false,
+            from: None,
             base: None,
             picker: None,
         };
@@ -278,7 +280,11 @@ impl Workspace {
             Some((&p.tracks[t], clip, clip.title.as_ref()?))
         });
         match found {
-            Some((_, _, t)) if !d.loaded => d.load(t),
+            Some((_, _, t)) if !d.loaded || (!d.dirty && d.from.as_ref() != Some(t)) => {
+                d.load(t);
+                d.from = Some(t.clone());
+                d.shown = None;
+            }
             None if d.loaded => return false,
             _ => {}
         }
