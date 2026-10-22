@@ -1769,6 +1769,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The strip of each track has Ducking, its sources (Under …) and its Amount.
     - Advanced opens the Ducking window: Detect, Threshold, Lookahead, Rise Time, Hold and Recovery Time.
   - **OpenTimelineIO:**
-    - How Resolve writes a Track FX in an OTIO file is not known ([to-do](todo/ducking.md)).
+    - Resolve Studio 21.1.1 leaves the Ducker out of its OTIO export. Its tracks hold only the audio type, the lock and the solo.
+    - This was checked with two active Duckers. A render showed their dips of 10 dB, and the exported file had no trace of them.
     - The ducking goes in the `vidcut` metadata of the track.
     - The notes of an OTIO export say that other editors will not hear it.
