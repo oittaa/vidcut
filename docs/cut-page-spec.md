@@ -1645,6 +1645,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The crop moves with the picture, and the outline of the picture grows with the zoom.
     - **The timing.** On frame k of the clip's n frames, t is k/n, and e is the ease of t.
     - The box is e of the way from `start` to `end`, on a straight line. Thus the end box comes one frame after the last frame.
+    - In a compound clip, t follows the frame of the inner clip that shows. A reversed compound plays the zoom backward, and a frozen one holds it.
     - **Turned on**, it is a pull out from 125%, with Linear. The start box has the size 0.8 and the end box the size 1, both in the middle.
     - **How it plays:** a clip with a Dynamic Zoom is placed over the tracks below it. The viewer and the export draw the same frame.
     - **In the viewer**, Alt+T shows the boxes on the clip that T uses (X65).

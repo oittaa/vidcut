@@ -320,6 +320,7 @@ fn shape_of(
     let run = Run {
         at: at - c.start,
         of: c.duration,
+        held: false,
     };
     let placed = [Placed::of(c, drawn, run)];
     let middle = placed[0]

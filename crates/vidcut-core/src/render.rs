@@ -89,14 +89,17 @@ pub struct ShownTitle {
 pub struct Run {
     /// Frames of the clip before the piece's first.
     pub at: i64,
-    /// The clip's length in frames.
+    /// The clip's length in frames, negative where it plays backward.
     pub of: i64,
+    /// The clip stays on its frame `at`, as in a frozen compound clip.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub held: bool,
 }
 
 impl Run {
     pub fn after(&self, k: i64) -> Self {
         Self {
-            at: self.at + k,
+            at: if self.held { self.at } else { self.at + k },
             ..*self
         }
     }
@@ -107,7 +110,11 @@ impl Run {
     }
 
     pub fn share(&self) -> f64 {
-        self.at as f64 / self.of.max(1) as f64
+        if self.of == 0 {
+            0.0
+        } else {
+            self.at as f64 / self.of as f64
+        }
     }
 }
 
@@ -719,6 +726,7 @@ fn run_of(c: &Clip, run: Option<Run>) -> Run {
     run.unwrap_or(Run {
         at: -c.start,
         of: c.duration,
+        held: false,
     })
 }
 
@@ -828,15 +836,18 @@ fn inside(x: &Clip, c: &Clip) -> Option<(Clip, Run)> {
             a.head = 0;
             a.tail = 0;
         }
-        let run = if speed > 0.0 {
+        let run = if speed == 0.0 {
             Run {
-                at: (walked as f64 / speed).round() as i64 - y.start,
-                of: ((x.duration as f64 / speed).round() as i64).max(1),
+                at: walked,
+                of: x.duration,
+                held: true,
             }
         } else {
+            let of = (x.duration as f64 / speed).round() as i64;
             Run {
-                at: walked - y.start,
-                of: x.duration,
+                at: (walked as f64 / speed).round() as i64 - y.start,
+                of: if of == 0 { speed.signum() as i64 } else { of },
+                held: false,
             }
         };
         return Some((y, run));
@@ -859,6 +870,7 @@ fn inside(x: &Clip, c: &Clip) -> Option<(Clip, Run)> {
     let run = Run {
         at: s - x.start - y.start,
         of: x.duration,
+        held: false,
     };
     Some((y, run))
 }
@@ -1055,6 +1067,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                     run: Run {
                         at: x - c.start,
                         of: c.duration,
+                        held: false,
                     },
                     fade,
                 })
