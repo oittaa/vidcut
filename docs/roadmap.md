@@ -2,20 +2,27 @@
 
 ## Use cases
 
-They decide what gets built and tested.
+The use cases decide what is built and tested.
 
-1. **Cut by script or AI, finish in Resolve.** Many clips cut largely automatically by a script or an AI agent: silences out, shots found, long stretches flagged. DaVinci Resolve's free version has no scripting and no MCP server, so the cutting happens in vidcut and the timeline goes to Resolve for color correction and effects.
-2. **A quick edit on a modest laptop.** An intro and an outro around a Google Meet recording, its silent parts cut out. Even with Resolve Studio, on a low-powered laptop an app that starts fast and needs no GPU does it sooner.
+1. **Cut by script or AI, finish in Resolve.**
+   - A script or an AI agent cuts many clips, largely automatically: it removes silences, finds shots and flags long stretches.
+   - DaVinci Resolve's free version has no scripting and no MCP server.
+   - Thus the cutting happens in vidcut, and the timeline goes to Resolve for color correction and effects.
+2. **A quick edit on a modest laptop.**
+   - An example: an intro and an outro around a Google Meet recording, with its silent parts cut out.
+   - Even with Resolve Studio, an app that starts fast and needs no GPU does this sooner on a low-powered laptop.
 
 **What they need:**
-- Interchange with Resolve as easy as possible: moving an edit either way, or between computers, takes no fixing by hand.
+
+- Interchange with Resolve that is as easy as possible: moving an edit either way, or between computers, needs no fixing by hand.
 - Running well without a GPU on a modest CPU, tested with real meeting recordings (variable-frame-rate H.264).
-- Automatic cuts that are quick to tune: silence removal for speech, scene cuts for footage.
+- Automatic cuts that are quick to tune: silence removal for speech, and scene cuts for footage.
 
 ## What comes next
 
-Open work is in [docs/todo/](todo/), one file per item, each with a **When:** line. With the interchange in place (use case 1), the smaller items come next, then macOS.
+- Open work is in [docs/todo/](todo/), one file for each item. Each file has a **When:** line.
+- The interchange (use case 1) is in place. The smaller items come next, then macOS.
 
-Finishing a simple video is its own list, in this order:
+Finishing a simple video has its own list, in this order:
 
 1. [Ducking](todo/ducking.md): music that dips under speech.

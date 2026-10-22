@@ -1,103 +1,366 @@
 # Gotchas
 
-FFmpeg, driver, OS and library behavior vidcut works around: the quirk, what it breaks, and the code that handles it. How vidcut is built is in [design/](design/README.md).
+This file lists the FFmpeg, driver, OS and library behavior that vidcut works around. Each item gives the quirk, what it breaks, and the code that handles it. [design/](design/README.md) tells how vidcut is built.
 
 ## wgpu and egui
 
-- **wgpu's default error handler panics.** A texture larger than `device.limits()` allows, or a binding of the wrong format, takes the GUI down. `Screen::draw` draws black for a picture past the limit, and the shader's bindings change together with `Gpu::new`'s layout.
-- **wgpu 30's `Surface::configure` fails when another thread submits while it waits for the device to go idle**, and the default handler panics. eframe configures on every resize, so the viewer thread submits through `Gate::pass` ([playback](design/playback.md#the-viewer-thread), [todo](todo/wgpu-configure-gate.md)).
-- **egui-wgpu shows an `Rgba8Unorm` native texture's values as they are**, with no sRGB conversion. The viewer's target (`TARGET` in `gui/picture.rs`) holds gamma-encoded BT.709 RGB.
+- **wgpu's default error handler panics.**
+  - A texture larger than `device.limits()` allows, or a binding of the wrong format, stops the GUI.
+  - `Screen::draw` draws black for a picture past the limit.
+  - The bindings of the shader change together with the layout in `Gpu::new`.
+- **wgpu 30's `Surface::configure` fails when another thread submits while it waits for the device to go idle**.
+  - Then the default handler panics.
+  - eframe configures on each resize. Thus the viewer thread submits through `Gate::pass` ([playback](design/playback.md#the-viewer-thread), [todo](todo/wgpu-configure-gate.md)).
+- **egui-wgpu shows an `Rgba8Unorm` native texture's values as they are**, with no sRGB conversion.
+  - The target of the viewer (`TARGET` in `gui/picture.rs`) holds gamma-encoded BT.709 RGB.
 
 ## FFmpeg: reading and decoding
 
-- **FFmpeg on Windows opens files without delete sharing** (8.0, 9.0: `_wsopen` with `SH_DENYNO` in file_open.c). While it reads a file, nothing can rename, move or delete it, or its folder, so a media file or proxy vidcut plays can't go and come back as it can elsewhere ([missing media](design/live.md#missing-media)). `decode::open_file` opens the file with std's `File`, which shares delete, and hands it to FFmpeg as a `StreamIo`.
-- **MP4 seeks by decode times, and FFmpeg 8.0 makes a GPU's H.264 decoder anew at every flush.** With B-frames a keyframe decodes before its own time, so a seek to just before it lands on that keyframe, after the target. FFmpeg 8.0's H.264 decoder forgets its hardware context on a flush, and the next keyframe builds another (190–260 ms for 1080p on NVDEC); FFmpeg 9, and HEVC and AV1 in both, keep it. `VideoReader::seek` checks the first packet and seeks again before it flushes, so a seek flushes once.
-- **Matroska exports content light levels only when MaxCLL and MaxFALL are both non-zero**, and decoders put the container's HDR values on every frame whose bitstream has none. `hdr::of_frame` reads a file's values from its first decoded frame.
-- **FFmpeg's HEVC decoder puts the last HDR10+ it read on every frame after it** (8.0, 9.0), in decode order: a frame without its own looks like one with it. libdav1d's AV1 frames carry only their own. A test reading HDR10+ back from HEVC sees a missing one as the one before ([todo](todo/hdr-metadata-more.md)).
-- **FFmpeg's decoders lend a frame what an earlier frame left in their context** (8.0, `fill_frame_props` in decode.c): colors and pixel aspect (PNG's cHRM, gAMA, sRGB and pHYs, MJPEG's JFIF aspect), and the time guess (`guess_correct_pts`). A pool thread's decoder serves many streams in no order ([threads](design/threads.md#the-cpu-pools)), so `decode/standalone.rs` gives it the stream's colors and aspect before each packet (`Kind::restore`) and guesses times itself, in stream order.
-- **MJPEG and raw video frames may lean on earlier packets**, though FFmpeg marks both intra-only (8.0): MJPEG's Huffman tables, raw video's palette sent once, SMV JPEG's several frames in a packet. FFmpeg decodes neither on frame threads, and `standalone::stands_alone` sends an intra-only codec to the pool only where FFmpeg does. Image sequences go there whatever their codec.
-- **FFmpeg's PNG decoder holds its last picture** (8.0, for APNG) until its next frame or its close; a flush doesn't free it. Kept on each pool thread, it would hold a frame there (50 MB at 4K 16-bit). A pool decoder that still holds the frame it gave closes after it (`decode/standalone.rs`).
-- **FFmpeg's frame pools never shrink, and live until their last frame.** Every decoder's frames come from a pool (nvdec.c, get_buffer.c, the GPU frames contexts) that grows to the frames held at once and is freed after the decoder and its last frame. So one kept picture holds its decoder's whole pool, and a closed decoder's peak stays beside the next one's. `hw::Keeper` copies NVDEC's, Direct3D 11's and (with `vaCopy`) VA-API's kept pictures into memory of their own, and CPU decoders decode into vidcut's buffers (`buffers.rs`, its `get_buffer2`). Mesa VA-API's and Vulkan's kept pictures stay pool surfaces, and `Store::evict` lets a pool's pictures go together ([playback](design/playback.md#the-engine)).
-- **`AVHWDeviceContext.user_opaque` is FFmpeg's** on the devices `av_hwdevice_ctx_create` makes: VA-API keeps its DRM file there and frees it through that pointer. vidcut uses it only on the CUDA devices it allocates itself (`CudaDevice::with_own_stream`).
-- **ffmpeg-next's `frame::Video::data()` and `stride()` look the pixel format up on every call**, and `f64::round` is a library call on baseline x86-64. Loops over pixels take the planes once and round by adding a half and truncating (`light::Samples`).
+- **FFmpeg on Windows opens files without delete sharing** (8.0, 9.0: `_wsopen` with `SH_DENYNO` in file_open.c).
+  - While FFmpeg reads a file, nothing can rename, move or delete the file or its folder.
+  - Thus a media file or a proxy that vidcut plays cannot go away and come back, as it can on other systems ([missing media](design/live.md#missing-media)).
+  - `decode::open_file` opens the file with std's `File`, which shares delete. It gives the file to FFmpeg as a `StreamIo`.
+- **MP4 seeks by decode times, and FFmpeg 8.0 makes a GPU's H.264 decoder anew at every flush.**
+  - With B-frames, a keyframe decodes before its own time. Thus a seek to just before the keyframe lands on that keyframe, after the target.
+  - FFmpeg 8.0's H.264 decoder forgets its hardware context on a flush. The next keyframe builds another context (190–260 ms for 1080p on NVDEC).
+  - FFmpeg 9 keeps the context. HEVC and AV1 keep it in both versions.
+  - `VideoReader::seek` checks the first packet, and seeks again before it flushes. Thus a seek flushes once.
+- **Matroska exports content light levels only when MaxCLL and MaxFALL are both non-zero**.
+  - Decoders put the HDR values of the container on each frame whose bitstream has none.
+  - `hdr::of_frame` reads the values of a file from its first decoded frame.
+- **FFmpeg's HEVC decoder puts the last HDR10+ it read on every frame after it** (8.0, 9.0), in decode order.
+  - A frame without its own HDR10+ looks like a frame with it.
+  - libdav1d's AV1 frames carry only their own HDR10+.
+  - A test that reads HDR10+ back from HEVC sees a missing one as the one before ([todo](todo/hdr-metadata-more.md)).
+- **FFmpeg's decoders lend a frame what an earlier frame left in their context** (8.0, `fill_frame_props` in decode.c).
+  - This includes colors and pixel aspect: PNG's cHRM, gAMA, sRGB and pHYs, and MJPEG's JFIF aspect.
+  - It also includes the time guess (`guess_correct_pts`).
+  - The decoder of a pool thread serves many streams in no order ([threads](design/threads.md#the-cpu-pools)).
+  - Thus `decode/standalone.rs` gives the decoder the colors and the aspect of the stream before each packet (`Kind::restore`).
+  - It also guesses the times itself, in stream order.
+- **MJPEG and raw video frames may lean on earlier packets**, though FFmpeg marks both intra-only (8.0).
+  - Examples: MJPEG's Huffman tables, a palette of raw video that is sent once, and the several frames in a packet of SMV JPEG.
+  - FFmpeg decodes neither on frame threads.
+  - `standalone::stands_alone` sends an intra-only codec to the pool only where FFmpeg decodes it on frame threads.
+  - Image sequences go to the pool, whatever their codec.
+- **FFmpeg's PNG decoder holds its last picture** (8.0, for APNG) until its next frame or its close.
+  - A flush does not free the picture.
+  - Kept on each pool thread, the decoder would hold a frame there (50 MB at 4K 16-bit).
+  - A pool decoder that still holds the frame that it gave closes after it gives that frame (`decode/standalone.rs`).
+- **FFmpeg's frame pools never shrink, and live until their last frame.**
+  - The frames of each decoder come from a pool (nvdec.c, get_buffer.c, the GPU frames contexts).
+  - The pool grows to the number of frames held at once. FFmpeg frees it after the decoder and its last frame.
+  - Thus one kept picture holds the whole pool of its decoder.
+  - Also, the peak of a closed decoder stays beside the peak of the next decoder.
+  - `hw::Keeper` copies the kept pictures of NVDEC, Direct3D 11 and VA-API (with `vaCopy`) into memory of their own.
+  - CPU decoders decode into vidcut's buffers (`buffers.rs`, its `get_buffer2`).
+  - The kept pictures of Mesa VA-API and Vulkan stay pool surfaces. `Store::evict` lets the pictures of a pool go together ([playback](design/playback.md#the-engine)).
+- **`AVHWDeviceContext.user_opaque` is FFmpeg's** on the devices that `av_hwdevice_ctx_create` makes.
+  - VA-API keeps its DRM file there, and frees the file through that pointer.
+  - vidcut uses the field only on the CUDA devices that it allocates itself (`CudaDevice::with_own_stream`).
+- **ffmpeg-next's `frame::Video::data()` and `stride()` look the pixel format up on every call**.
+  - Also, `f64::round` is a library call on baseline x86-64.
+  - Loops over pixels take the planes once, and round by adding a half and truncating (`light::Samples`).
 
 ## FFmpeg: filters and colors
 
-- **FFmpeg's `buffer` source takes the frame it is given** (`av_buffersrc_add_frame`, which ffmpeg-next's `Source::add` calls): it moves the frame's buffers out and leaves it empty. `Fitting::scale` gives the CUDA scaler a reference of its own, so the decoded frame stays for a placed picture fitted again at its own size.
-- **Tell FFmpeg's `buffer` source a picture's matrix and range** (`colorspace`, `range`). A conversion FFmpeg adds for a filter that doesn't take the layout (`transpose` and 4:2:2) reads the frame's tags and writes the source's; told nothing, the source asks for BT.601. The `Normalizer` sets both from `color::Source::yuv_tags`.
-- **An untagged picture's matrix follows from its size** (decision D35, `color::untagged_matrix`), so a copy scaled on the GPU carries the matrix of the picture it came from (`color::keep_matrix`): untagged 1280×720 shrunk to 640×360 would read as BT.601.
-- **FFmpeg 9's `scale_cuda` truncates in each pass of a shrink with filters** (`use_filters`, on by default for a shrink; `from_floatN` in vector_helpers.cuh): 4K shrunk to 192×108 comes out 8 to 9 levels low in red and blue. `cuda::scaling` asks for the fixed kernels (`use_filters=0`), within 1.2 levels of the CPU.
-- **`scale_d3d11` fails on AMD's driver.** Its output textures are bound for the video encoder too (`D3D11_BIND_VIDEO_ENCODER`), which the driver refuses for NV12 and P010 (`E_INVALIDARG`). It also needs `format=`, and scales the decoder's padding into the picture (1080p decodes into 1088 lines). `hw::d3d11::Scaler` drives the video processor itself.
-- **FFmpeg's GPU deinterlacers aren't `bwdif`** (9.0.1). `bwdif_vulkan` reads black past the top and bottom edges and doesn't clip to the frame's bits, so 10-bit edge rows come out at half level or overshoot. `bwdif_cuda` differs by up to 115 levels at moving edges and in the top row: it has no filter for the edge rows and adds the row 4 above twice (`next2_mrefs4`). `hw::deinterlace` checks each against `bwdif` once per process; both fail, so their interlaced frames come down for `bwdif`. Reported upstream with patches: code.ffmpeg.org issues 25105 and 25106 ([todo](todo/gpu-deinterlacers-check.md)).
-- **FFmpeg's Vulkan filters and encoders keep the frames they last read, but not those frames' frames context** (9.0.1, vulkan.c `ff_vk_exec_add_dep_frame`). Freed after the context's last owner, such a frame is freed through freed memory (`vulkan_frame_free`): a crash now and then. FFmpeg frees a graph's filters sources first, so `hw::GpuGraph` frees them downstream first, and a Vulkan encoder closes before the graph whose frames it takes.
+- **FFmpeg's `buffer` source takes the frame it is given** (`av_buffersrc_add_frame`, which ffmpeg-next's `Source::add` calls).
+  - It moves the buffers out of the frame, and leaves the frame empty.
+  - `Fitting::scale` gives the CUDA scaler a reference of its own.
+  - Thus the decoded frame stays, for a placed picture that is fitted again at its own size.
+- **Tell FFmpeg's `buffer` source a picture's matrix and range** (`colorspace`, `range`).
+  - FFmpeg adds a conversion for a filter that does not take the layout (`transpose` and 4:2:2).
+  - That conversion reads the tags of the frame, and writes the tags of the source.
+  - If you tell the source nothing, it asks for BT.601.
+  - The `Normalizer` sets both values from `color::Source::yuv_tags`.
+- **An untagged picture's matrix follows from its size** (decision D35, `color::untagged_matrix`).
+  - Thus a copy that is scaled on the GPU carries the matrix of the picture that it came from (`color::keep_matrix`).
+  - Without this, untagged 1280×720 shrunk to 640×360 would read as BT.601.
+- **FFmpeg 9's `scale_cuda` truncates in each pass of a shrink with filters** (`use_filters`, on by default for a shrink; `from_floatN` in vector_helpers.cuh).
+  - 4K shrunk to 192×108 comes out 8 to 9 levels low in red and blue.
+  - `cuda::scaling` asks for the fixed kernels (`use_filters=0`). These are within 1.2 levels of the CPU.
+- **`scale_d3d11` fails on AMD's driver.**
+  - Its output textures are bound for the video encoder too (`D3D11_BIND_VIDEO_ENCODER`). The driver refuses this for NV12 and P010 (`E_INVALIDARG`).
+  - It also needs `format=`.
+  - It scales the padding of the decoder into the picture (1080p decodes into 1088 lines).
+  - `hw::d3d11::Scaler` drives the video processor itself.
+- **FFmpeg's GPU deinterlacers aren't `bwdif`** (9.0.1).
+  - `bwdif_vulkan` reads black past the top and bottom edges, and does not clip to the bits of the frame.
+  - Thus its 10-bit edge rows come out at half level, or overshoot.
+  - `bwdif_cuda` differs by up to 115 levels at moving edges and in the top row.
+  - `bwdif_cuda` has no filter for the edge rows, and adds the row 4 above twice (`next2_mrefs4`).
+  - `hw::deinterlace` checks each deinterlacer against `bwdif` once in each process.
+  - Both fail. Thus their interlaced frames come down to memory for `bwdif`.
+  - The upstream reports, with patches, are code.ffmpeg.org issues 25105 and 25106 ([todo](todo/gpu-deinterlacers-check.md)).
+- **FFmpeg's Vulkan filters and encoders keep the frames they last read, but not those frames' frames context** (9.0.1, vulkan.c `ff_vk_exec_add_dep_frame`).
+  - If such a frame is freed after the last owner of its context, it is freed through freed memory (`vulkan_frame_free`).
+  - This causes a crash now and then.
+  - FFmpeg frees the filters of a graph sources first. Thus `hw::GpuGraph` frees them downstream first.
+  - A Vulkan encoder closes before the graph whose frames it takes.
 
 ## FFmpeg: encoding and muxing
 
-- **FFmpeg's Vulkan ProRes encoder works on one frame at a time:** `prores_ks_vulkan` (9.0.2) makes its pool of GPU work with one slot, so `async_depth` changes nothing; vidcut doesn't set it.
-- **Set packet durations when muxing from an encoder with delay** (x264 with B-frames), or MP4's edit list drops the last frame (`VideoOut::drain`).
-- **Clear a decoded frame's picture type before encoding it** (`set_kind(picture::Type::None)`). Encoders take it as an order: the output copies the source's keyframes, and x264 warns of every B-frame it can't make.
-- **FFmpeg drops an option an encoder doesn't have without a word:** `avcodec_open2` leaves it in the dictionary and opens anyway. `av1_vaapi` and `vp9_vaapi` have no `qp`; `encode::vaapi_options` gives them `global_quality`.
-- **An encoder's own options come before the context's of the same name.** `bf` sets `h264_amf`'s own B-frame option, not `max_b_frames`, which FFmpeg 9.0.1's `h264_amf` never reads. Proxies give every encoder `bf=0` (`ProxyEncoder::video_encoder`).
-- **FFmpeg's encoders get one thread unless told otherwise** (`thread_count` is 1 for a program using the libraries; the `ffmpeg` command sets automatic). `encode::open_options` gives every CPU encoder `threads=auto`. `dnxhd` then takes frame threads, each with its own rate-control table (266 MB at 2160p), so it gets `thread_type=slice`, which shares one. `prores_ks` keeps frame threads: its slice threads only search quantizers and take 1.5 times as long.
-- **SVT-AV1 leaves stale blocks in low delay at its fast presets** (`pred-struct=1`): where a few flat blocks change, it codes some as they were in the frame before, at any CRF. 2.3.0 (Ubuntu's, with FFmpeg 8.0) does it from preset 9 up, 4.2.0 from 10 up (11 with `rtc=1`). Proxies use preset 8 (`ProxyEncoder::options`).
+- **FFmpeg's Vulkan ProRes encoder works on one frame at a time:**
+  - `prores_ks_vulkan` (9.0.2) makes its pool of GPU work with one slot. Thus `async_depth` changes nothing.
+  - vidcut does not set `async_depth`.
+- **Set packet durations when muxing from an encoder with delay** (x264 with B-frames).
+  - If you do not, the edit list of MP4 drops the last frame (`VideoOut::drain`).
+- **Clear a decoded frame's picture type before encoding it** (`set_kind(picture::Type::None)`).
+  - Encoders take the picture type as an order.
+  - Then the output copies the keyframes of the source, and x264 warns of each B-frame that it cannot make.
+- **FFmpeg drops an option an encoder doesn't have without a word:**
+  - `avcodec_open2` leaves the option in the dictionary, and opens the encoder anyway.
+  - `av1_vaapi` and `vp9_vaapi` have no `qp`. `encode::vaapi_options` gives them `global_quality`.
+- **An encoder's own options come before the context's of the same name.**
+  - `bf` sets `h264_amf`'s own B-frame option, not `max_b_frames`.
+  - FFmpeg 9.0.1's `h264_amf` never reads `max_b_frames`.
+  - Proxies give each encoder `bf=0` (`ProxyEncoder::video_encoder`).
+- **FFmpeg's encoders get one thread unless told otherwise**.
+  - `thread_count` is 1 for a program that uses the libraries. The `ffmpeg` command sets it to automatic.
+  - `encode::open_options` gives each CPU encoder `threads=auto`.
+  - `dnxhd` then takes frame threads, each with its own rate-control table (266 MB at 2160p).
+  - Thus `dnxhd` gets `thread_type=slice`, which shares one table.
+  - `prores_ks` keeps frame threads. Its slice threads only search quantizers, and take 1.5 times as long.
+- **SVT-AV1 leaves stale blocks in low delay at its fast presets** (`pred-struct=1`).
+  - Where a few flat blocks change, it codes some of them as they were in the frame before, at any CRF.
+  - 2.3.0 (Ubuntu's, with FFmpeg 8.0) does this from preset 9 up.
+  - 4.2.0 does this from preset 10 up (11 with `rtc=1`).
+  - Proxies use preset 8 (`ProxyEncoder::options`).
 
 ## GPU drivers
 
-- **Never give libplacebo the same Vulkan frame twice at once.** It takes a frame at the semaphore value FFmpeg's frame says and gives it back at the next, so a frame held twice ends a step ahead of anything the GPU signals: FFmpeg waits for that value forever when it frees the frame, and a copy from CUDA can take its picture before it is there. `cuda::Blacks` gives a black frame again only once libplacebo has let go of it.
-- **libplacebo marks an input frame done before it has read it** (fixed in commit 2ba21c07, in no release yet). If that comes before the CUDA copy into the frame finishes, the export shows the previous frame or hangs: the late copy sets the frame's semaphore back by one, and freeing the frame waits forever. `cuda::wait_done` waits for each copy before the frame goes to libplacebo, and for libplacebo's output before the next ([todo](todo/libplacebo-handback-workaround.md)).
-- **NVIDIA's exit handlers break a close during the exit** (Linux, driver 580). libnvcuvid's, reached by `_dl_fini` while a decoder lives, joins a thread of the library's that a decoder closing on another thread joins too: both wait forever. Another shuts CUDA down, after which a thread still freeing pictures gets `CUDA_ERROR_DEINITIALIZED` and dies in the driver. A decoder closed before the exit, or open through it, is fine. So the threads players and readers leave are joined first (`ending::join`, at the end of the CLI's `main` and in `threads::join_closing`), and the GUI then ends with `threads::exit_now`, which on Unix calls `_exit` ([threads](design/threads.md#how-the-process-ends)). The driver's threads carry the name of the thread that started them, such as `vidcut-play-video`.
-- **`cuMemAlloc` rounds each allocation up to 2 MiB** (driver 580): a 960×540 P010 frame of FFmpeg's CUDA pool (1.66 MB) takes 2 MiB. CUDA's stream-ordered allocator (`cuMemAllocAsync`) packs pictures within 1.1% and, with its release threshold at 0, gives memory back once a stream is synchronized. `cuda::keep` keeps NVDEC's pictures in memory from it.
-- **NVIDIA's driver, opening NVENC, copies the calling thread's nice value onto the process's main thread**, which nothing unprivileged raises again: a job at nice 19 would leave the GUI there. `first::lowest_priority` puts job threads in Linux's idle class (`SCHED_IDLE`) instead, where the nice value stays the process's.
-- **NVIDIA's Windows driver has one NT handle per memory object:** every `vkGetMemoryWin32HandleKHR` of the same memory gives the same handle. Closed, it is gone for later exports (an import fails with `VK_ERROR_OUT_OF_DEVICE_MEMORY`); open, it keeps the memory after `vkFreeMemory`. `hw::vulkan` exports each of FFmpeg's memory objects once and closes the handle when FFmpeg frees the frames context. FFmpeg's own copy of a frame to CUDA exports the same handle and closes it with the frame.
-- **FFmpeg's Vulkan ProRes decoder crashes on AMD's Windows driver** (9.0.2, Radeon iGPU, on one thread too). vidcut decodes on Vulkan on NVIDIA's GPUs only (`GpuDecoder::why_not`). A crash can't be caught, so another vendor needs its own check first.
-- **AMD's Direct3D 11 decoder and VideoToolbox lose their way in H.264 sought into an open GOP.** From a keyframe that isn't IDR, AMD's decodes a few frames, then repeats one picture; VideoToolbox (FFmpeg 9.0.2) shows other frames after some seeks (`examples/seek_check.rs`). From the start or an IDR keyframe both are right. `GpuDecoder::why_not` leaves such H.264 to the CPU there, and `decode::h264_open_gop` looks for a keyframe that isn't IDR. x264 makes open GOPs with B-frames unless told not to.
-- **AMD's video processor clips levels outside video range when told studio range** (to 16–235, chroma 16–240). Told full range in and out, it keeps them, so `hw::d3d11::Scaler` says full range where DXGI has such a space (PQ has studio range only), and its check has bands outside video range. Where one pass fails the check, as the Radeon iGPU's does shrinking to under half each way, the scaler shrinks in halving passes, each checked; a turned pass is checked turned.
-- **AMD's Windows driver counts a Direct3D 11 texture imported into Vulkan again against the process for good** (32.0.21042.62, Radeon iGPU): each `vkAllocateMemory` from a shared NT handle of a texture imported before adds twice the texture's size to the process's dedicated GPU memory (the `GPU Process Memory` counter Task Manager shows), and freeing the memory or the texture takes none of it back, though the adapter's usage and DXGI's `QueryVideoMemoryInfo` stay put. Imported each time a kept picture was shown, it passed 70 GB in 18 plays across a cut from a 4K clip to a 1080p one. A texture imported once and freed, the Vulkan memory or the texture first, leaves nothing. The viewer copies each picture into a few textures of its own (`hw::d3d11::Shared`) and imports each once, keeping them while the window lives. The driver's shareable NV12 and P010 textures also take less memory than plain ones (1.4 GB of GPU memory and 1.5 GB private for 1 GB of kept pictures, against 1.9 GB and 3.1 GB), so `hw::d3d11::Keeper` keeps pictures in shareable textures.
-- **Mesa's VA-API has no exact surface copy** (26.0, radeonsi): `vaCopy` is unimplemented, and its video processor shifts levels even P010 to P010 at the same size (by up to 9). On Mesa, kept pictures stay the decoder's surfaces, in a pool its decoders share (`hw::vaapi::share_frames`). Intel's iHD has an exact `vaCopy`, and frees surfaces let go only at its next allocation, so a process's GPU memory (DRM fdinfo) drops late.
-- **FFmpeg's copy-down of Intel's VA-API frames is slow**: it reads a copy the driver makes (`vaGetImage`), twice the time of the mapped surface (`vaDeriveImage`) on an N150. `hw::vaapi::intel_download` maps Intel's surfaces. Gen7–Gen9's mapped memory is uncached and an Arc card's is across the bus, so each display times both ways on its first frames and keeps the quicker (`hw::vaapi::Ways`).
-- **Intel's QSV runtime opens VA-API displays of its own**, and libva prints four info lines on stderr for each. `main` sets `LIBVA_MESSAGING_LEVEL=1` (errors only) on Linux unless it is set.
+- **Never give libplacebo the same Vulkan frame twice at once.**
+  - libplacebo takes a frame at the semaphore value that FFmpeg's frame gives, and gives it back at the next value.
+  - Thus a frame held twice ends one step ahead of all that the GPU signals.
+  - Then FFmpeg waits for that value forever when it frees the frame.
+  - Also, a copy from CUDA can take its picture before the picture is there.
+  - `cuda::Blacks` gives a black frame again only after libplacebo has let go of it.
+- **libplacebo marks an input frame done before it has read it** (fixed in commit 2ba21c07, in no release yet).
+  - This can come before the CUDA copy into the frame finishes. Then the export shows the previous frame, or hangs.
+  - The late copy sets the semaphore of the frame back by one, and freeing the frame waits forever.
+  - `cuda::wait_done` waits for each copy before the frame goes to libplacebo.
+  - It also waits for the output of libplacebo before the next step ([todo](todo/libplacebo-handback-workaround.md)).
+- **NVIDIA's exit handlers break a close during the exit** (Linux, driver 580).
+  - The handler of libnvcuvid runs from `_dl_fini`. If a decoder still lives, the handler joins a thread of the library.
+  - A decoder that closes on another thread also joins that thread. Both wait forever.
+  - Another handler shuts CUDA down. After that, a thread that still frees pictures gets `CUDA_ERROR_DEINITIALIZED`, and dies in the driver.
+  - A decoder that is closed before the exit, or that stays open through it, is fine.
+  - Thus vidcut first joins the threads that players and readers leave (`ending::join`, at the end of the CLI's `main` and in `threads::join_closing`).
+  - The GUI then ends with `threads::exit_now`, which calls `_exit` on Unix ([threads](design/threads.md#how-the-process-ends)).
+  - The threads of the driver carry the name of the thread that started them, for example `vidcut-play-video`.
+- **`cuMemAlloc` rounds each allocation up to 2 MiB** (driver 580).
+  - A 960×540 P010 frame of FFmpeg's CUDA pool (1.66 MB) takes 2 MiB.
+  - CUDA's stream-ordered allocator (`cuMemAllocAsync`) packs pictures within 1.1%.
+  - With its release threshold at 0, that allocator gives memory back when a stream is synchronized.
+  - `cuda::keep` keeps NVDEC's pictures in memory from that allocator.
+- **NVIDIA's driver, opening NVENC, copies the calling thread's nice value onto the process's main thread**.
+  - A process without privileges cannot raise that value again.
+  - Thus a job at nice 19 would leave the GUI at nice 19.
+  - `first::lowest_priority` puts job threads in Linux's idle class (`SCHED_IDLE`) instead. There, the nice value stays the value of the process.
+- **NVIDIA's Windows driver has one NT handle per memory object:**
+  - Each `vkGetMemoryWin32HandleKHR` of the same memory gives the same handle.
+  - If the handle is closed, later exports get a handle that is gone: an import fails with `VK_ERROR_OUT_OF_DEVICE_MEMORY`.
+  - If the handle stays open, it keeps the memory after `vkFreeMemory`.
+  - `hw::vulkan` exports each memory object of FFmpeg once. It closes the handle when FFmpeg frees the frames context.
+  - FFmpeg's own copy of a frame to CUDA exports the same handle, and closes it with the frame.
+- **FFmpeg's Vulkan ProRes decoder crashes on AMD's Windows driver** (9.0.2, Radeon iGPU, on one thread too).
+  - vidcut decodes on Vulkan only on NVIDIA's GPUs (`GpuDecoder::why_not`).
+  - A crash cannot be caught. Thus each other vendor needs its own check first.
+- **AMD's Direct3D 11 decoder and VideoToolbox lose their way in H.264 sought into an open GOP.**
+  - From a keyframe that is not IDR, AMD's decoder decodes a few frames, then repeats one picture.
+  - VideoToolbox (FFmpeg 9.0.2) shows other frames after some seeks (`examples/seek_check.rs`).
+  - From the start, or from an IDR keyframe, both decoders are correct.
+  - `GpuDecoder::why_not` gives such H.264 to the CPU on these decoders.
+  - `decode::h264_open_gop` looks for a keyframe that is not IDR.
+  - x264 makes open GOPs with B-frames, unless told not to.
+- **AMD's video processor clips levels outside video range when told studio range** (to 16–235, chroma 16–240).
+  - When told full range in and out, it keeps these levels.
+  - Thus `hw::d3d11::Scaler` says full range where DXGI has such a color space. PQ has studio range only.
+  - The check of the scaler has bands outside video range.
+  - Where one pass fails the check, the scaler shrinks in halving passes, and checks each pass.
+  - On the Radeon iGPU, a single pass fails the check when it shrinks to under half each way.
+  - The check of a turned pass is turned too.
+- **AMD's Windows driver counts a Direct3D 11 texture imported into Vulkan again against the process for good** (32.0.21042.62, Radeon iGPU).
+  - Each `vkAllocateMemory` from a shared NT handle of a texture that was imported before adds twice the texture's size.
+  - It adds this to the dedicated GPU memory of the process: the `GPU Process Memory` counter that Task Manager shows.
+  - Freeing the memory or the texture takes none of it back.
+  - The usage of the adapter and DXGI's `QueryVideoMemoryInfo` do not change.
+  - With an import each time a kept picture is shown, the counter passes 70 GB in 18 plays. Each play crosses a cut from a 4K clip to a 1080p clip.
+  - A texture imported once and freed leaves nothing, whether the Vulkan memory or the texture is freed first.
+  - The viewer copies each picture into a few textures of its own (`hw::d3d11::Shared`).
+  - The viewer imports each of these textures once, and keeps them while the window lives.
+  - The shareable NV12 and P010 textures of the driver also take less memory than plain ones.
+  - For 1 GB of kept pictures, they take 1.4 GB of GPU memory and 1.5 GB private, against 1.9 GB and 3.1 GB.
+  - Thus `hw::d3d11::Keeper` keeps pictures in shareable textures.
+- **Mesa's VA-API has no exact surface copy** (26.0, radeonsi).
+  - `vaCopy` is not implemented.
+  - Its video processor shifts levels, even from P010 to P010 at the same size (by up to 9).
+  - On Mesa, kept pictures stay the surfaces of the decoder, in a pool that its decoders share (`hw::vaapi::share_frames`).
+  - Intel's iHD has an exact `vaCopy`.
+  - iHD frees the surfaces that are let go only at its next allocation. Thus the GPU memory of a process (DRM fdinfo) drops late.
+- **FFmpeg's copy-down of Intel's VA-API frames is slow**.
+  - It reads a copy that the driver makes (`vaGetImage`).
+  - On an N150, this takes twice the time of a read of the mapped surface (`vaDeriveImage`).
+  - `hw::vaapi::intel_download` maps Intel's surfaces.
+  - The mapped memory of Gen7–Gen9 is uncached, and the mapped memory of an Arc card is across the bus.
+  - Thus each display times both ways on its first frames, and keeps the quicker way (`hw::vaapi::Ways`).
+- **Intel's QSV runtime opens VA-API displays of its own**.
+  - libva prints four info lines on stderr for each display.
+  - `main` sets `LIBVA_MESSAGING_LEVEL=1` (errors only) on Linux, unless it is already set.
 
 ## Operating systems and libraries
 
-- **glibc keeps freed frames' memory** (2.43). Its threshold for mapping a block of its own (128 KiB) rises to the largest block freed, up to 32 MiB, so later frames come from heaps that give little back. `buffers.rs` maps planes of its own and keeps the last 64 MB let go for the next frames (mapping each anew took a fifth more CPU). A closed decoder's own memory (libdav1d's pool) stays in the heaps, so `buffers::give_back` runs `malloc_trim`, at most once a second, when the player closes a decoder.
-- **Only Linux's idle class is inherited.** A thread started by one at Windows's idle priority or in macOS's utility QoS class runs at the default, FFmpeg's threads for a job too. The job pool's threads set their own (`first::lowest_priority`).
-- **`canonicalize` on Windows gives verbatim paths** (`\\?\C:\…`), which don't compare equal to the same path as people write it. `vidcut_core::dirs::canonical` keeps the usual form where it names the same file.
-- **Windows separates paths with `/` and `\` both.** Project files keep relative paths with `/` (`portable` in `store.rs`) and read them with the system's separator. Paths are compared as `Path`s, not strings.
-- **A read on a Unix socket on Windows isn't woken by a shutdown** from another thread, so a cancelled client would wait forever. Live control uses named pipes there, read with overlapped calls (`ipc::transport`).
-- **On Windows a started process inherits every inheritable handle.** The C runtime's `fopen` opens files inheritable, x264's two-pass statistics files among them, and while another process holds them x264 can't rename them (`failed to rename`, then `can't open stats file`). std's `Command` always starts a process so. Show in Folder asks the shell instead (`gui/file_manager.rs`), and a test that starts a process can break another test's two-pass export in the same binary.
-- **macOS's `poll` reports a hang-up only for what it is asked for**, where Linux reports `POLLHUP` and `POLLERR` always. Asked for `POLLIN`, a Unix socket hangs up once the peer stops writing; asked for `POLLOUT`, once the peer has closed, which `ipc::transport::Stream::peer_gone` asks for.
-- **WASAPI doesn't move a stream to a new default output** (cpal 0.18). macOS and PipeWire move a stream on the default to the new default device by themselves. On Windows, cpal hears the change but keeps the stream on the old device and reports `StreamInvalidated`, or `DeviceNotAvailable` once the old device is gone. `player::output::follow` opens the stream again on the new default.
-- **zeno's mask is placed one mask too low** (0.3) when it renders with the origin at the bottom left before it has measured itself: the top it reports is the mask's bottom edge. swash measures first; `stroked` in `burn.rs` calls `inspect` before `render` to do the same.
-- **cosmic-text draws a glyph's coverage, not its color's alpha** (0.19): `Buffer::draw` paints a glyph with alpha 0 at full strength in its color's RGB, so text colored transparent still shows. `lay_out` in `burn.rs` draws only the glyphs not marked hidden, and underlines in their own colors, which keep their alpha.
-- **cpal's `device_by_id` misses ALSA's devices** (0.18): it adds a device number to the id it looks for (`sysdefault:CARD=PCH,DEV=0`), which the listed ids lack, so a device chosen from the list would play on the default without a word. `output_by_id` finds the device among those listed, by its listed id.
+- **glibc keeps freed frames' memory** (2.43).
+  - Its threshold for mapping a block of its own (128 KiB) rises to the largest block freed, up to 32 MiB.
+  - Thus later frames come from heaps that give little back.
+  - `buffers.rs` maps planes of its own, and keeps the last 64 MB let go for the next frames.
+  - Mapping each plane anew takes a fifth more CPU.
+  - A closed decoder's own memory (libdav1d's pool) stays in the heaps.
+  - Thus `buffers::give_back` runs `malloc_trim` when the player closes a decoder, at most once a second.
+- **Only Linux's idle class is inherited.**
+  - On Windows, a thread at the idle priority starts threads at the default priority.
+  - On macOS, a thread in the utility QoS class also starts threads at the default.
+  - This includes FFmpeg's threads for a job.
+  - The threads of the job pool set their own priority (`first::lowest_priority`).
+- **`canonicalize` on Windows gives verbatim paths** (`\\?\C:\…`).
+  - A verbatim path is not equal to the same path as people write it.
+  - `vidcut_core::dirs::canonical` keeps the usual form where it names the same file.
+- **Windows separates paths with `/` and `\` both.**
+  - Project files keep relative paths with `/` (`portable` in `store.rs`), and read them with the separator of the system.
+  - vidcut compares paths as `Path`s, not as strings.
+- **A read on a Unix socket on Windows isn't woken by a shutdown** from another thread.
+  - Thus a cancelled client would wait forever.
+  - On Windows, live control uses named pipes, read with overlapped calls (`ipc::transport`).
+- **On Windows a started process inherits every inheritable handle.**
+  - The `fopen` of the C runtime opens files as inheritable. x264's two-pass statistics files are among them.
+  - While another process holds these files, x264 cannot rename them (`failed to rename`, then `can't open stats file`).
+  - std's `Command` always starts a process in this way.
+  - Thus Show in Folder asks the shell instead (`gui/file_manager.rs`).
+  - Also, a test that starts a process can break the two-pass export of another test in the same binary.
+- **macOS's `poll` reports a hang-up only for what it is asked for**.
+  - Linux always reports `POLLHUP` and `POLLERR`.
+  - Asked for `POLLIN`, a Unix socket hangs up when the peer stops writing.
+  - Asked for `POLLOUT`, it hangs up when the peer has closed. `ipc::transport::Stream::peer_gone` asks for `POLLOUT`.
+- **WASAPI doesn't move a stream to a new default output** (cpal 0.18).
+  - macOS and PipeWire move a stream on the default to the new default device by themselves.
+  - On Windows, cpal hears the change, but keeps the stream on the old device.
+  - cpal then reports `StreamInvalidated`, or `DeviceNotAvailable` when the old device is gone.
+  - `player::output::follow` opens the stream again on the new default.
+- **zeno's mask is placed one mask too low** (0.3) when it renders with the origin at the bottom left before it has measured itself.
+  - The top that it reports is the bottom edge of the mask.
+  - swash measures first. `stroked` in `burn.rs` calls `inspect` before `render` to do the same.
+- **cosmic-text draws a glyph's coverage, not its color's alpha** (0.19).
+  - `Buffer::draw` paints a glyph with alpha 0 at full strength in the RGB of its color.
+  - Thus text colored transparent still shows.
+  - `lay_out` in `burn.rs` draws only the glyphs that are not marked hidden.
+  - It draws underlines in their own colors, which keep their alpha.
+- **cpal's `device_by_id` misses ALSA's devices** (0.18).
+  - It adds a device number to the id that it looks for (`sysdefault:CARD=PCH,DEV=0`). The listed ids do not have this number.
+  - Thus a device chosen from the list would play on the default, with no message.
+  - `output_by_id` finds the device among the listed devices, by its listed id.
 
 ## Resolve's OTIO files
 
-Measured in Resolve Studio 21.1.1 through its scripting API: values set on clips, OTIO files exported and imported, and stills and a Deliver render read back.
+These facts come from measurements in Resolve Studio 21.1.1, through its scripting API. The measurements set values on clips, export and import OTIO files, and read back stills and a Deliver render.
 
-- **Resolve draws a title read from a file at a pixel a point**, at any picture size, while its own titles have 1/1080 of the picture's height a point. At 3840×2160 its own 96-point title is twice as tall as the same title read back from its own export. `otio::titles` reads and writes a point as a pixel of the picture, as Resolve's import does, so a title vidcut writes looks the same in Resolve and comes back the same; a title made in Resolve on a picture other than 1080 lines tall comes in at another size, in vidcut as in Resolve.
-- **Resolve draws no stroke on a title read from a file.** It keeps `strokeSize` and `strokeColor` and writes them back, but draws nothing at 4, 8 or 16, and it drops `-qt-stroke` styles from the rich text. In two of seven imports it also set the first title's `strokeSize` to 1 and its `strokeColor` to black, whatever the file said; one of those files, imported again, kept its values, and the cause wasn't found. A title's outline doesn't show in Resolve.
-- **Resolve drops metadata it doesn't know**, the clip's `vidcut` key among it, so a title comes back from Resolve by its parameters alone, and a placed clip by its Transform, Cropping and Retime and Scaling.
-- **Resolve's file holds no frame size:** its timeline's metadata is only `Resolve OTIO Meta Version`, and a clip's Transform (a `Resolve Effect` of type 2), Cropping (3) and Retime and Scaling (22) hold fractions, listing only the parameters off their defaults. `otio::picture` converts them with the shapes of the frame and the source alone (`Shape`). Resolve reads them in the form `otio::picture` writes: each parameter with its default and empty `Key Frames`.
-- **Pan, Tilt and the crop are fractions of Resolve's picture,** not of the frame: the source sized by Retime and Scaling's `scale`, by the scripting API's numbers 0 the project's (fit in a new project), 1 crop (a source pixel to a frame pixel, measured with square pixels only), 2 fit, 3 fill and 4 stretch; only 3 was checked in a file. Pan is in picture widths to the right, Tilt in picture heights up, and the zoom is across and down the picture. vidcut writes `scale` 2, so Resolve fits a clip whatever its project says, and reads crop, fill and stretch as a zoom; a compound clip's picture is the frame.
-- **Resolve zooms and turns about the anchor point,** `transformationAnchorPoint`, from the picture's middle in fractions of it, y up, and flips about the middle. vidcut has no anchor: reading folds it into `position`, the middle landing at A − R·S·A plus Pan and Tilt's move (A the anchor, S the zoom, R the turn), and writing leaves it at the middle.
-- **Resolve's Pan and Tilt go from −4 to 4.** vidcut writes a picture moved further at 4 and names its clip in the export's notes.
+- **Resolve draws a title read from a file at a pixel a point**, at any picture size.
+  - Resolve's own titles have 1/1080 of the height of the picture for a point.
+  - At 3840×2160, its own 96-point title is twice as tall as the same title read back from its own export.
+  - `otio::titles` reads and writes a point as a pixel of the picture, as the import of Resolve does.
+  - Thus a title that vidcut writes looks the same in Resolve, and comes back the same.
+  - A title made in Resolve on a picture that is not 1080 lines tall comes in at another size, in vidcut as in Resolve.
+- **Resolve draws no stroke on a title read from a file.**
+  - It keeps `strokeSize` and `strokeColor`, and writes them back. But it draws nothing at 4, 8 or 16.
+  - It drops `-qt-stroke` styles from the rich text.
+  - In two of seven imports, it also sets the `strokeSize` of the first title to 1 and its `strokeColor` to black, whatever the file says.
+  - One of those files, imported again, keeps its values. The cause is not known.
+  - The outline of a title does not show in Resolve.
+- **Resolve drops metadata it doesn't know**, which includes the `vidcut` key of the clip.
+  - Thus a title comes back from Resolve by its parameters alone.
+  - A placed clip comes back by its Transform, Cropping and Retime and Scaling alone.
+- **Resolve's file holds no frame size:**
+  - The metadata of its timeline is only `Resolve OTIO Meta Version`.
+  - The Transform of a clip (a `Resolve Effect` of type 2), Cropping (3) and Retime and Scaling (22) hold fractions.
+  - They list only the parameters that are not at their defaults.
+  - `otio::picture` converts them with the shapes of the frame and the source alone (`Shape`).
+  - Resolve reads them in the form that `otio::picture` writes: each parameter with its default and empty `Key Frames`.
+- **Pan, Tilt and the crop are fractions of Resolve's picture,** not of the frame.
+  - Resolve's picture is the source, sized by the `scale` of Retime and Scaling.
+  - The scripting API gives `scale` these numbers:
+    - 0: the project's setting (fit in a new project).
+    - 1: crop.
+    - 2: fit.
+    - 3: fill.
+    - 4: stretch.
+  - Crop maps a source pixel to a frame pixel. Only square pixels were measured.
+  - Only 3 (fill) was checked in a file.
+  - Pan is in picture widths to the right, and Tilt in picture heights up.
+  - The zoom is across and down the picture.
+  - vidcut writes `scale` 2. Thus Resolve fits a clip, whatever its project says.
+  - vidcut reads crop, fill and stretch as a zoom.
+  - The picture of a compound clip is the frame.
+- **Resolve zooms and turns about the anchor point,** `transformationAnchorPoint`.
+  - The anchor point is from the middle of the picture, in fractions of the picture, y up.
+  - Resolve flips about the middle.
+  - vidcut has no anchor. When it reads a file, it folds the anchor into `position`.
+  - The middle lands at A − R·S·A, plus the move of Pan and Tilt. A is the anchor, S the zoom and R the turn.
+  - When vidcut writes a file, it leaves the anchor at the middle.
+- **Resolve's Pan and Tilt go from −4 to 4.**
+  - vidcut writes a picture moved further at 4, and names its clip in the notes of the export.
 - **Resolve's Dynamic Zoom is a `Resolve Effect` of type 59.**
-  - `dynamicZoomCenter` (POINTF) is the middle of a box, from the middle of the picture in fractions of the picture, y up. `dynamicZoomScale` (Double) is the size of the box as a fraction of the picture.
-  - Each has two keys, at −g and 1000 − g, with g the timeline's `global_start_time` in frames. Resolve reads the earlier key as the start and the later key as the end, whatever their times.
-  - The box is in fractions of Resolve's picture, as Pan and Tilt are. vidcut reads a crop, fill or stretch as a zoom after the box, and that zoom scales the box with the picture. Thus `otio::picture` reads the box as it is, and writes it in this form.
-- **Resolve plays each ease of Dynamic Zoom as a straight line.** It keeps `dynamicZoomEase` (UInt: 0 Linear, 1 Ease In, 2 Ease Out, 3 Ease In and Out) and writes it.
-  - All four play the same straight line, in stills and in a Deliver render. This is so when the ease is set through scripting and when it is read from a file. Its Inspector menu wasn't tried.
-  - vidcut's eases are curves ([X67](deviations.md#x67-the-eases-of-dynamic-zoom-are-curves)), so a clip with an ease other than Linear plays differently in Resolve.
+  - `dynamicZoomCenter` (POINTF) is the middle of a box. It is from the middle of the picture, in fractions of the picture, y up.
+  - `dynamicZoomScale` (Double) is the size of the box as a fraction of the picture.
+  - Each has two keys, at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
+  - Resolve reads the earlier key as the start and the later key as the end, whatever their times.
+  - The box is in fractions of Resolve's picture, as Pan and Tilt are.
+  - vidcut reads a crop, fill or stretch as a zoom after the box, and that zoom scales the box with the picture. Thus `otio::picture` reads and writes the box as it is.
+- **Resolve plays each ease of Dynamic Zoom as a straight line.**
+  - It keeps `dynamicZoomEase` (UInt: 0 Linear, 1 Ease In, 2 Ease Out, 3 Ease In and Out) and writes it.
+  - All four play the same straight line, in stills and in a Deliver render.
+  - This is so when the ease is set through scripting and when it is read from a file. Its Inspector menu was not tried.
+  - vidcut's eases are curves ([X67](deviations.md#x67-the-eases-of-dynamic-zoom-are-curves)). Thus a clip with an ease other than Linear plays differently in Resolve.
 
 ## transcribe.cpp and its models
 
-- **Qwen3-ASR gives no times** (transcribe.cpp 0.4.0): one segment spans each run. Spread over the speech of a long run, its text drifts from the words: against Parakeet Ultra's word times on `nasa-speech-1979`, 90% of the cue starts were within 2.9 s with pieces of up to 3 min, 2.2 s at 30 s, and 0.7 s at 10 s, as close as Whisper large-v3's own phrase times. `transcribe::longest_piece` gives a model without times pieces of 10 s at the most.
-- **Qwen3-ASR's GPU memory grows with the length of a run.** On an RTX 4080 SUPER (Vulkan) it took 3.6 GB at 30 s, 4.9 GB at 2 min, 8.5 GB at 4 min and 11 GB at 6 min, and 10 min ran the 16 GB out. Whisper large-v3 and Parakeet Ultra cut long audio into windows themselves and held 2.2 and 1.3 GB at any length. `transcribe::longest_piece` sizes Qwen3-ASR's pieces from half the GPU's memory (`Gpu::memory_mb`).
-- **On a short piece, Qwen3-ASR may guess another language** and write "呃。" for an English "uh". `transcribe::transcribe` runs the longest piece first and gives its language to the rest, unless one was asked for.
-- **Silero VAD doesn't hear singing:** on a 38 min rap album it called 11% of the sound speech at its usual threshold of 0.5, and 13% at 0.1, nearly all of it in two of twelve songs, so a lower threshold doesn't help. Parakeet Ultra transcribes the singing when it hears it, so `find: sound` hears all sound above a level instead (`transcript::sounding`), and the voice detection's answer warns when it keeps under a quarter of a mostly loud range.
-- **Silero VAD is less exact on a GPU:** ggml-metal's F32 products work in half precision, about 2e-3 off the reference against 1e-6 on the CPU (transcribe.cpp's `silero_vad/model.cpp`). vidcut runs it on the CPU (`Backend::Cpu`), where it took 1.2 s for 29 min of sound.
-- **ggml's Vulkan backend builds its pipelines the first time a vidcut build runs a model on a GPU:** 10 min of speech took 3 min with Parakeet Ultra the first time and 4 s after, once the driver kept them.
-- **Whisper large-v3 loops in a long run:** in one 4-minute piece of Tears of Steel it wrote "You'll love her." 16 times over 16 s of lines it gets right in a piece of 20 s. Its memory doesn't grow with the length, and `transcribe::longest_piece` gives it pieces of 30 s.
-- **ggml's Vulkan backend on a Windows without the Vulkan loader:** where `vulkan-1.dll` is missing, `transcribe::start` starts the CPU backend alone (`init_backends_with`).
-- **transcribe.cpp and ggml log to stderr** until a program says otherwise; `transcribe::init` turns that off unless `VIDCUT_DEBUG` is set.
+- **Qwen3-ASR gives no times** (transcribe.cpp 0.4.0).
+  - One segment spans each run.
+  - Spread over the speech of a long run, its text drifts from the words.
+  - Against Parakeet Ultra's word times on `nasa-speech-1979`, 90% of the cue starts are within:
+    - 2.9 s, with pieces of up to 3 min.
+    - 2.2 s, with pieces of 30 s.
+    - 0.7 s, with pieces of 10 s. This is as close as Whisper large-v3's own phrase times.
+  - `transcribe::longest_piece` gives a model without times pieces of 10 s at the most.
+- **Qwen3-ASR's GPU memory grows with the length of a run.**
+  - On an RTX 4080 SUPER (Vulkan), it takes:
+    - 3.6 GB at 30 s.
+    - 4.9 GB at 2 min.
+    - 8.5 GB at 4 min.
+    - 11 GB at 6 min.
+    - More than the 16 GB of the card at 10 min.
+  - Whisper large-v3 and Parakeet Ultra cut long audio into windows themselves. They hold 2.2 GB and 1.3 GB at any length.
+  - `transcribe::longest_piece` sizes the pieces of Qwen3-ASR from half the memory of the GPU (`Gpu::memory_mb`).
+- **On a short piece, Qwen3-ASR may guess another language**, and write "呃。" for an English "uh".
+  - `transcribe::transcribe` runs the longest piece first, and gives its language to the other pieces.
+  - It does not do this when a language was asked for.
+- **Silero VAD doesn't hear singing:**
+  - On a 38 min rap album, it calls 11% of the sound speech at its usual threshold of 0.5, and 13% at 0.1.
+  - Nearly all of that is in two of twelve songs. Thus a lower threshold does not help.
+  - Parakeet Ultra transcribes the singing when it hears it.
+  - Thus `find: sound` hears all sound above a level instead (`transcript::sounding`).
+  - The answer of the voice detection warns when it keeps under a quarter of a range that is mostly loud.
+- **Silero VAD is less exact on a GPU:**
+  - The F32 products of ggml-metal work in half precision (transcribe.cpp's `silero_vad/model.cpp`).
+  - They are about 2e-3 off the reference, against 1e-6 on the CPU.
+  - vidcut runs Silero VAD on the CPU (`Backend::Cpu`). There it takes 1.2 s for 29 min of sound.
+- **ggml's Vulkan backend builds its pipelines the first time a vidcut build runs a model on a GPU:**
+  - With Parakeet Ultra, 10 min of speech takes 3 min the first time.
+  - After that, it takes 4 s, because the driver keeps the pipelines.
+- **Whisper large-v3 loops in a long run:**
+  - In one 4-minute piece of Tears of Steel, it writes "You'll love her." 16 times, over 16 s of lines.
+  - It gets these lines right in a piece of 20 s.
+  - Its memory does not grow with the length.
+  - `transcribe::longest_piece` gives it pieces of 30 s.
+- **ggml's Vulkan backend on a Windows without the Vulkan loader:**
+  - Where `vulkan-1.dll` is missing, `transcribe::start` starts the CPU backend alone (`init_backends_with`).
+- **transcribe.cpp and ggml log to stderr** until a program says otherwise.
+  - `transcribe::init` turns that off, unless `VIDCUT_DEBUG` is set.
