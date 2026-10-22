@@ -713,6 +713,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - The user types the text of a selected subtitle in the Captions panel of the Inspector.
   - The text shows on the clip while the user types (p. 1233).
+  - A list at the bottom of the Captions panel shows the subtitles of the track. Its Prev and Next buttons move through them (pp. 1231, 1233).
+  - The manual does not tell where the playhead goes.
 - **vidcut:**
   - The Subtitle section of the Inspector tab has the text and the position of the cue.
   - These open it and show the Inspector tab:
@@ -724,8 +726,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The text shows on the cue and in the viewer while the user types.
   - The position shows in the viewer when the user selects it.
   - The text goes in as one change when the user leaves the text box. The other rows go in at once. Ctrl+Z undoes a change.
+  - vidcut has no Captions list. Thus Previous and Next are at the top of the Subtitle section.
+  - Previous opens the cue before this cue on its track, by start time. Next opens the cue after it.
+  - The changes of the section go in first, as when the user leaves the section.
+  - The button also selects the cue and moves the playhead to its start. The playhead move is a decision of vidcut.
+  - A button is off when there is no cue before or after, and while the section shows "Adding…".
 - **Why:**
   - One change for each edit of the text keeps typing out of the undo history.
+  - With the playhead at the start of the cue, the viewer shows the cue.
 
 ## X44. Add Subtitle uses the shown subtitle track
 

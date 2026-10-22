@@ -473,9 +473,10 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - One subtitle track shows at a time. When one shows, the others are hidden (p. 1228).
   - Minimize Subtitle Track (Timeline Options, p. 645) makes them shorter.
   - Details: D56; deviation X44.
-- **Cues** (pp. 1232–1233, 1237):
+- **Cues** (pp. 1231–1233, 1237):
   - Add Subtitle, in the right-click menu of a subtitle track, puts a cue at the playhead.
   - You type its text in the Inspector. The text shows on the cue as you type it.
+  - Prev and Next in the Inspector move to the cue before or after on the track (pp. 1231, 1233).
   - Cues move, trim, split and delete like clips.
   - Details: D56, D57; deviations X43, X44.
 - **Import** (pp. 1230–1231):
