@@ -3012,10 +3012,11 @@ impl Request {
             serde_json::json!({ "method": method, "params": params.clone() }),
         )
         .map_err(|e| {
-            if e.to_string().contains("unknown variant") {
+            let text = e.to_string();
+            if text.contains(&format!("unknown variant `{method}`")) {
                 format!("unknown method {method:?}; see `vidcut schema`")
             } else {
-                format!("invalid params for {method}: {e}")
+                format!("invalid params for {method}: {text}")
             }
         })?;
         if let (Some(given), Ok(serde_json::Value::Object(parsed))) =
@@ -3385,6 +3386,22 @@ pub struct Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unknown_method_names_the_method() {
+        let e = Request::from_parts("no.such", None).unwrap_err();
+        assert_eq!(e, "unknown method \"no.such\"; see `vidcut schema`");
+    }
+
+    #[test]
+    fn a_bad_panel_is_invalid_params() {
+        let e = Request::from_parts("gui.show", Some(serde_json::json!({ "panel": "log" })))
+            .unwrap_err();
+        assert!(
+            e.starts_with("invalid params for gui.show: unknown variant `log`, expected "),
+            "{e}"
+        );
+    }
 
     #[test]
     fn every_parameter_given_is_known() {
