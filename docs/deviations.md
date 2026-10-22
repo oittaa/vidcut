@@ -1404,8 +1404,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - A value typed while Dynamic Zoom is off turns it on.
     - A Start value that the user types or drags shows the start of the zoom in the viewer. An End value shows the end. On and Swap show the start.
     - The viewer shows it until the playhead moves or the clip plays. Then the viewer shows the zoom of the current frame.
-    - A change to the Dynamic Zoom in the Inspector hides the boxes. Thus the viewer shows the result.
-    - Show Boxes shows the start box and the end box of the selected clip in the viewer.
+    - Show Boxes shows the start box and the end box of the selected clip in the viewer. On also shows them.
+    - No other change in the Inspector shows or hides the boxes.
+    - While the boxes show, the viewer darkens the part of the picture that the output does not show.
     - Show Boxes, On, Swap and the Start and End values can move the playhead. Off, the Ease and Reset do not move it.
     - They move it when it is not on a selected clip. It goes to the first frame of the first selected clip.
     - Alt+T shows the same boxes. It selects the clip under the playhead instead.
@@ -1438,4 +1439,5 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Resolve's Inspector has only Ease and Swap for Dynamic Zoom. Numbers show each box exactly, and bring back a box that is out of the viewer.
   - The viewer shows the start or the end that a value changes. Thus each change shows in the picture at once.
   - The boxes show the start and the end of a Dynamic Zoom. Without them, the viewer shows only the zoom of the current frame.
+  - The dark part shows what the output leaves out. Thus the boxes and the result show together.
   - The Inspector shows a clip that the user selected. Thus the playhead goes to that clip, and the selection does not change.

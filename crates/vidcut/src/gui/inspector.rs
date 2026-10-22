@@ -700,9 +700,14 @@ impl Workspace {
 
     fn unpeek(&mut self) {
         self.inspector.peek = None;
-        if self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom) {
-            self.timeline.picture_grab.tool = None;
-        }
+    }
+
+    pub(super) fn inspector_peek_of(&self, clip: &str) -> Option<bool> {
+        self.inspector
+            .peek
+            .as_ref()
+            .filter(|k| k.clips.iter().any(|c| c == clip))
+            .map(|k| k.start)
     }
 
     fn peek(&mut self, start: bool, chosen: &[Chosen]) {
@@ -888,6 +893,7 @@ impl Workspace {
                 });
                 if on {
                     self.peek(true, chosen);
+                    self.timeline.picture_grab.tool = Some(PictureTool::DynamicZoom);
                 } else {
                     self.unpeek();
                 }

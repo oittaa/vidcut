@@ -119,6 +119,7 @@ struct Shown {
     middle: [f64; 2],
     origin: Pos2,
     scale: Vec2,
+    framed: Option<ZoomBox>,
 }
 
 impl Shown {
@@ -342,6 +343,7 @@ fn shape_of(
         middle,
         origin: picture.min,
         scale: vec2(picture.width() / w as f32, picture.height() / h as f32),
+        framed: None,
     })
 }
 
@@ -703,7 +705,21 @@ impl Workspace {
             Some((_, x)) => x,
             None => c.picture.clone().unwrap_or_default(),
         };
-        shape_of(&p, c, shown, picture, (at, tool))
+        let mut s = shape_of(&p, c, shown, picture, (at, tool))?;
+        let peek = self.inspector_peek_of(&c.id);
+        let run = Run {
+            at: at - c.start,
+            of: c.duration,
+            held: false,
+        };
+        s.framed = s.picture.dynamic_zoom.map(|z| match peek {
+            Some(true) => z.start,
+            Some(false) => z.end,
+            None => Placed::of(c, s.picture.clone(), run)
+                .zoomed()
+                .unwrap_or(z.start),
+        });
+        Some(s)
     }
 
     fn picture_moved(
@@ -1007,9 +1023,38 @@ impl Workspace {
     }
 }
 
+fn paint_framing(painter: &egui::Painter, s: &Shown, b: ZoomBox) {
+    let [u0, v0, u1, v1] = s.level.shown;
+    let r = b.size / 2.0;
+    let a = flipped(&s.picture, [b.center[0] - r, b.center[1] - r]);
+    let c = flipped(&s.picture, [b.center[0] + r, b.center[1] + r]);
+    let (x0, x1) = (a[0].min(c[0]).clamp(u0, u1), a[0].max(c[0]).clamp(u0, u1));
+    let (y0, y1) = (a[1].min(c[1]).clamp(v0, v1), a[1].max(c[1]).clamp(v0, v1));
+    let dim = Color32::from_black_alpha(150);
+    for [p0, q0, p1, q1] in [
+        [u0, v0, u1, y0],
+        [u0, y1, u1, v1],
+        [u0, y0, x0, y1],
+        [x1, y0, u1, y1],
+    ] {
+        if p1 <= p0 || q1 <= q0 {
+            continue;
+        }
+        let quad = [[p0, q0], [p1, q0], [p1, q1], [p0, q1]].map(|uv| s.screen(uv));
+        painter.add(egui::Shape::convex_polygon(
+            quad.to_vec(),
+            dim,
+            Stroke::NONE,
+        ));
+    }
+}
+
 fn paint_boxes(painter: &egui::Painter, s: &Shown) {
     let z = s.zoom();
     let on = s.picture.dynamic_zoom.is_some();
+    if let Some(b) = s.framed.filter(|_| on) {
+        paint_framing(painter, s, b);
+    }
     let path = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 160));
     painter.line_segment(
         [s.box_point(z.start.center), s.box_point(z.end.center)],
