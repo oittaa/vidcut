@@ -16,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 use notify::Watcher;
 use serde_json::{Value, json};
 use vidcut_core::disk_cache::{self, Kind};
+use vidcut_core::duck::Unmeasured;
 use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue};
 use vidcut_core::model::{Clip, Format, Title};
 use vidcut_core::ops::ClipSpans;
@@ -231,6 +232,10 @@ pub(crate) enum Msg {
         envelope: Envelope,
         result: Result<()>,
         encode: Option<String>,
+    },
+    DuckHeard {
+        measured: Vec<Unmeasured>,
+        failed: Option<String>,
     },
     FileChanged,
     PreferencesChanged,
@@ -579,6 +584,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         past: Default::default(),
         flash: None,
         flash_seq: 0,
+        duck_measuring: HashSet::new(),
+        duck_failed: HashSet::new(),
     };
     live.watch_omarchy();
     let project = config.project;
@@ -839,6 +846,8 @@ struct Live {
     past: vidcut_core::past::Past,
     flash: Option<Arc<Flash>>,
     flash_seq: u64,
+    duck_measuring: HashSet<Unmeasured>,
+    duck_failed: HashSet<Unmeasured>,
 }
 
 const SOURCE: PlayerId = PlayerId::Source;
@@ -1012,6 +1021,16 @@ impl Live {
                 }
                 self.finish(job, result);
                 self.refresh_transcribed(ended);
+            }
+            Msg::DuckHeard { measured, failed } => {
+                for m in &measured {
+                    self.duck_measuring.remove(m);
+                }
+                if let Some(e) = failed {
+                    self.duck_failed.extend(measured);
+                    self.notice(format!("Ducking isn't heard: {e}"), true);
+                }
+                self.refresh_timeline();
             }
             Msg::PreferencesChanged => {
                 disk_cache::set_policy(crate::preferences::cache_policy());
@@ -1489,6 +1508,54 @@ impl Live {
                 self.start_encode(job, encode, *then, title, kind)
             }
         }
+    }
+
+    fn duck_measure(&self, envelope: &Envelope) -> Option<Measure> {
+        use vidcut_core::model::DuckDetect;
+        let p = self.project.as_ref()?.project();
+        let Request::TrackSet {
+            track,
+            duck: Some(Some(set)),
+            download,
+            voice_isolation,
+            ..
+        } = &envelope.request
+        else {
+            return None;
+        };
+        let d = vidcut_core::duck::patched(p, track, set).ok()?;
+        let isolate = voice_isolation.is_some_and(|v| v > 0.0)
+            && *download
+            && !vidcut_av::isolate::needed(&paths::models_dir()).is_empty();
+        let detect = d.detect();
+        let needed: Vec<(vidcut_core::model::Media, u32)> = match d.on {
+            true => vidcut_core::duck::sounds(p, track, &d)
+                .into_iter()
+                .filter(|(m, _)| !self.missing.contains(&m.id))
+                .filter(|(m, s)| crate::env::kept_measure(m, *s, detect).is_none())
+                .map(|(m, s)| (m.clone(), s))
+                .collect(),
+            false => Vec::new(),
+        };
+        if needed.is_empty() && !isolate {
+            return None;
+        }
+        let download = *download;
+        Some(Box::new(move || {
+            if isolate {
+                vidcut_av::isolate::get_ready(&paths::models_dir(), true).map_err(|e| {
+                    crate::export::av_error(&e, vidcut_core::ErrorCode::Media, String::new())
+                })?;
+            }
+            let env = AvEnv::new();
+            for (m, stream) in &needed {
+                match detect {
+                    DuckDetect::Speech => env.voice_activity(m, *stream, download).map(drop)?,
+                    DuckDetect::Level => env.audio_levels(m, *stream).map(drop)?,
+                }
+            }
+            Ok(())
+        }))
     }
 
     fn measuring(&self, envelope: &Envelope) -> Option<Measure> {
@@ -2648,6 +2715,16 @@ impl Live {
             | Request::AnalyzeLoudness { .. }
             | Request::AnalyzeWords { media: Some(_), .. }
             | Request::AnalyzeWords { clips: Some(_), .. } => self.project_task(envelope, job),
+            Request::TrackSet {
+                duck: Some(Some(_)),
+                ..
+            } if !envelope.dry_run => {
+                self.duck_failed.clear();
+                match self.duck_measure(&envelope) {
+                    Some(measure) => Step::Measure(measure, Box::new(envelope)),
+                    None => Step::Now(self.edit(envelope, job.origin)),
+                }
+            }
             Request::ClipSet {
                 voice_isolation: Some(amount),
                 download: true,
@@ -3126,9 +3203,10 @@ impl Live {
             return self.player.end_audition().is_some();
         };
         let q = &a.timeline;
-        let Ok((plan, _)) = render::flatten_lanes(q, 0, q.end()) else {
+        let Ok((mut plan, _)) = render::flatten_lanes(q, 0, q.end()) else {
             return false;
         };
+        self.hear_ducking(&mut plan, q);
         let mut plan = self.preview_plan(plan);
         if a.skips.is_none() {
             plan.video = vec![render::VideoPiece::Black {
@@ -3136,6 +3214,54 @@ impl Live {
             }];
         }
         self.player.audition(plan, a.at, a.speed, a.skips).is_some()
+    }
+
+    fn hear_ducking(&mut self, plan: &mut RenderPlan, p: &Project) {
+        if plan.ducking.is_empty() {
+            return;
+        }
+        let mut kept = |m: &vidcut_core::model::Media,
+                        stream: u32,
+                        detect: vidcut_core::model::DuckDetect|
+         -> Result<Option<vidcut_core::duck::Measured>> {
+            Ok(crate::env::kept_measure(m, stream, detect))
+        };
+        let Ok(missing) = vidcut_core::duck::hear(plan, p, &mut kept) else {
+            return;
+        };
+        let missing: Vec<Unmeasured> = missing
+            .into_iter()
+            .filter(|m| !self.duck_measuring.contains(m) && !self.duck_failed.contains(m))
+            .filter(|m| !self.missing.contains(&m.media))
+            .collect();
+        let wanted: Vec<_> = missing
+            .iter()
+            .filter_map(|u| Some((p.media(&u.media)?.clone(), u.stream, u.detect)))
+            .collect();
+        if wanted.is_empty() {
+            return;
+        }
+        self.duck_measuring.extend(missing.iter().cloned());
+        let tx = self.tx.clone();
+        let _ = crate::threads::spawn("vidcut-measure", Work::Job, move || {
+            let mut failed = None;
+            for (m, stream, detect) in &wanted {
+                let env = AvEnv::new();
+                let result = match detect {
+                    vidcut_core::model::DuckDetect::Speech => {
+                        env.voice_activity(m, *stream, false).map(drop)
+                    }
+                    vidcut_core::model::DuckDetect::Level => env.audio_levels(m, *stream).map(drop),
+                };
+                if let Err(e) = result {
+                    failed.get_or_insert(e.message);
+                }
+            }
+            let _ = tx.send(Msg::DuckHeard {
+                measured: missing,
+                failed,
+            });
+        });
     }
 
     fn preview_plan(&self, mut plan: RenderPlan) -> RenderPlan {
@@ -3209,6 +3335,7 @@ impl Live {
                 from += frames;
             }
         }
+        self.hear_ducking(&mut plan, &p);
         let plan = self.preview_plan(plan);
         self.timeline_loaded_at = Some(Instant::now());
         self.player.load(TIMELINE, plan, lanes, at)

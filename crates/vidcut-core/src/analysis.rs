@@ -427,6 +427,81 @@ pub fn non_speech_parts(
     })
 }
 
+pub fn speech_frames(span: &Span, frames: (i64, i64), va: &VoiceActivity) -> Vec<(f64, f64)> {
+    sounding_frames(span, frames, |from, to| {
+        let mut out = Vec::new();
+        let mut at = from;
+        let quiet = non_speech(
+            va,
+            from,
+            to,
+            crate::retime::SPEECH,
+            crate::retime::SHORTEST_SPEECH,
+            crate::retime::SHORTEST_PAUSE,
+        );
+        for (a, b) in quiet.into_iter().chain([(to, to)]) {
+            if a > at {
+                out.push((at, a));
+            }
+            at = at.max(b);
+        }
+        out
+    })
+}
+
+pub fn loud_frames(
+    span: &Span,
+    frames: (i64, i64),
+    levels: &AudioLevels,
+    threshold_db: f64,
+    gain_db: f64,
+) -> Vec<(f64, f64)> {
+    sounding_frames(span, frames, |from, to| {
+        let rate = f64::from(levels.per_second.max(1));
+        let limit = linear(threshold_db - gain_db) as f32;
+        let bucket = |x: f64| ((x - levels.start) * rate).floor() as i64;
+        let time = |i: i64| levels.start + i as f64 / rate;
+        let (first, last) = (bucket(from), bucket(to - 1e-9));
+        let mut out = Vec::new();
+        let mut run: Option<i64> = None;
+        for i in first..=last + 1 {
+            let loud = i <= last
+                && usize::try_from(i)
+                    .ok()
+                    .and_then(|i| levels.peaks.get(i))
+                    .is_some_and(|&p| p >= limit);
+            match (loud, run) {
+                (true, None) => run = Some(i),
+                (false, Some(s)) => {
+                    out.push((time(s).max(from), time(i).min(to)));
+                    run = None;
+                }
+                _ => {}
+            }
+        }
+        out
+    })
+}
+
+fn sounding_frames(
+    span: &Span,
+    (from, to): (i64, i64),
+    runs: impl FnOnce(f64, f64) -> Vec<(f64, f64)>,
+) -> Vec<(f64, f64)> {
+    if span.pace.speed == 0.0 || to <= from {
+        return Vec::new();
+    }
+    let (x, y) = (span.time(from as f64), span.time(to as f64));
+    runs(x.min(y), x.max(y))
+        .into_iter()
+        .map(|(a, b)| {
+            let (fa, fb) = (span.frame(a), span.frame(b));
+            (fa.min(fb).max(from as f64), fa.max(fb).min(to as f64))
+        })
+        .filter(|(a, b)| b > a)
+        .collect()
+}
+
 fn parts_of(
     span: &Span,
     s: &SilenceSettings,

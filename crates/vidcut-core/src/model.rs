@@ -784,6 +784,10 @@ pub struct Track {
     /// as a clip's `voice_isolation`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_isolation: Option<f64>,
+    /// Ducking: the track dips where its sources are active (decision
+    /// D76).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duck: Option<Duck>,
     /// Video of this track is shown (video tracks only).
     pub video_enabled: bool,
     /// A name shown in the track header and the mixer.
@@ -796,6 +800,69 @@ pub struct Track {
 
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
+}
+
+/// A track's ducking (decision D76): its sound dips by the Duck Amount
+/// where any of its sources is active, with the same gain on every
+/// channel. A value left out has its usual value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Duck {
+    /// It dips the track. Off keeps the settings.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub on: bool,
+    /// The tracks whose sound dips it (`V1`, `A2`), never its own. A source
+    /// counts only where it is heard: not muted, and soloed while any
+    /// track is.
+    #[serde(default)]
+    pub sources: Vec<String>,
+    /// The Duck Amount: how far it dips, in dB, from 0 to 60. 2.7 unless
+    /// set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount_db: Option<f64>,
+    /// How long before a source starts the full dip is reached, in ms,
+    /// from 0 to 1000. 15 unless set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lookahead_ms: Option<f64>,
+    /// The Rise Time: how long the gain takes to fall to the full dip, in
+    /// ms, from 1 to 1000. 10 unless set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rise_ms: Option<f64>,
+    /// How long the full dip stays after a source stops, in ms, from 0 to
+    /// 5000. A pause shorter than this keeps the dip. 150 unless set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_ms: Option<f64>,
+    /// The Recovery Time: how long the gain takes to come back after the
+    /// hold, in ms, from 1 to 1000. 750 unless set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_ms: Option<f64>,
+    /// What makes a source active. `speech` unless set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detect: Option<DuckDetect>,
+    /// With `detect` `level`: a source is active where its peak, after its
+    /// clip gain and fader, is at or above this many dBFS, from -96 to 0.
+    /// -42 unless set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold_db: Option<f64>,
+}
+
+fn on() -> bool {
+    true
+}
+
+fn is_on(v: &bool) -> bool {
+    *v
+}
+
+/// What makes a ducking source active (deviation X69).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DuckDetect {
+    /// Speech that the speech detector (Silero VAD, on the CPU) hears in
+    /// it. Room noise, breaths and bumps don't dip the track.
+    #[default]
+    Speech,
+    /// Sound at or above `threshold_db`.
+    Level,
 }
 
 /// A transition another editor put on an edit point, which vidcut keeps
@@ -2204,10 +2271,15 @@ impl Track {
             solo: false,
             volume_db: 0.0,
             voice_isolation: None,
+            duck: None,
             video_enabled: true,
             name: None,
             transitions: Vec::new(),
         }
+    }
+
+    pub fn has_sound(&self) -> bool {
+        self.kind == TrackKind::Audio || self.clips.iter().any(|c| c.audio.is_some())
     }
 
     pub fn audible(&self, any_solo: bool) -> bool {

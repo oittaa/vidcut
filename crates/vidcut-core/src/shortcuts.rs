@@ -331,6 +331,15 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     key(
         Clips,
+        &["Alt", "D"],
+        "Ducking on or off",
+        Some(
+            "The selected clip's track dips under the speech of the other tracks with sound, \
+             at the usual settings. The Mixer changes them.",
+        ),
+    ),
+    key(
+        Clips,
         &["Ctrl", "D"],
         "Change duration",
         Some("Of the selected clips, or of the selected dissolve, as a timecode or in frames."),

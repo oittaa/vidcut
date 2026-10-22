@@ -75,7 +75,8 @@ pub(crate) fn run(shared: Arc<Shared>) {
     };
     let plan = &first.plan.plan;
     let mut p = Producer {
-        mix: AudioMix::new(&plan.audio, plan.sample_rate, plan.channels, DECLICK_MS),
+        mix: AudioMix::new(&plan.audio, plan.sample_rate, plan.channels, DECLICK_MS)
+            .ducked(&plan.ducking),
         plan: first.plan.clone(),
         plan_gen: first.plan_gen,
         run: None,
@@ -114,7 +115,8 @@ impl Producer {
             };
             self.plan = snap.plan.clone();
             self.plan_gen = snap.plan_gen;
-            self.mix.replan(&self.plan.plan.audio, at);
+            self.mix
+                .replan(&self.plan.plan.audio, &self.plan.plan.ducking, at);
             self.trims_gen = None;
             if self.run.is_some() {
                 self.restart(at);

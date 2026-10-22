@@ -1052,10 +1052,12 @@ fn encode(
             };
             let declick = if settings.declick { DECLICK_MS } else { 0 };
             crate::isolate::check(&plan.audio)?;
-            let mut mix = AudioMix::new(&plan.audio, plan.sample_rate, spec.channels, declick);
+            let mut mix = AudioMix::new(&plan.audio, plan.sample_rate, spec.channels, declick)
+                .ducked(&plan.ducking);
             if let Some(target) = a.loudness {
                 let measured = crate::analysis::mix_loudness(
                     &plan.audio,
+                    &plan.ducking,
                     plan.sample_rate,
                     spec.channels,
                     declick,

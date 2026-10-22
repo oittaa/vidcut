@@ -21,6 +21,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - dissolves: cross dissolves, fades to and from black, audio cross fades (§8.11)
 - clip/track audio levels and waveforms
 - Voice Isolation, free (X64)
+- ducking, the Ducker Track FX (§9)
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop and Dynamic Zoom (§8.15)
@@ -32,7 +33,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Sync Bin, Multi Source, Source Overwrite, Live Overwrite
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
-- Mixer FX, Paste Attributes, guides ([ducking](todo/ducking.md))
+- Mixer FX other than the Ducker, Paste Attributes, guides
 - interchange formats: DRT, AAF, XML
 
 ## 2. Layout (pp. 636–637)
@@ -633,7 +634,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **How they play:** a clip covers the tracks below it only where its picture covers the frame. Details: D75.
 - **Out:** Pitch and Yaw (p. 767), crop Softness (p. 768), the modes and opacity of Composite (p. 769), keyframes.
 
-## 9. Audio (pp. 642, 649–650, 743, 771, 773)
+## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
 - **Mixer** (pp. 649–650):
@@ -641,7 +642,22 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - It has a meter for the mix.
   - Solo silences the tracks that are not soloed.
   - Mute and solo apply to the export too (p. 650).
-  - Track pan and FX: out.
+  - Track pan, and FX other than the Ducker: out.
+- **Ducking** (pp. 744, 778–779):
+  - The Ducker Track FX lowers a target track, such as music, where one or more source tracks, such as dialogue, are active.
+  - It changes the level only. It compresses nothing.
+  - Its controls and their defaults:
+    - Duck Amount: 2.7 dB. The Inspector calls it Duck Level. The manual says that 2 to 5 dB works best most of the time.
+    - Lookahead: 15 ms.
+    - Rise Time: 10 ms.
+    - Hold: 150 ms.
+    - Recovery Time: 750 ms.
+  - A graph shows the level of the source against the ducking.
+  - vidcut: `track.set` with `duck`, and the strip of the track in the Mixer. Alt+D turns it on or off (X69).
+  - vidcut gives every track the timing of a mono track (X68).
+  - vidcut adds Detect: Speech, the default, or Sound level (X69).
+  - The curve, the timing and the limits are in D76.
+  - vidcut has no graph yet ([gaps](todo/cut-page-gaps.md)).
 - **Viewer meter** (p. 642):
   - It shows what the viewer plays.
   - Its speaker button mutes only the playback, not the export.
@@ -711,6 +727,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 | V / U | Select nearest edit / cycle edit side |
 | , / . (Shift: 1 s)† | Trim the selected edit a frame |
 | D | Disable / enable clip video |
+| Alt+D | Ducking of the selected clip's track on or off (X69) |
 | Ctrl+D | Change clip or dissolve duration |
 | R† | Change clip speed (D48) |
 | T / Shift+T | Transform / Crop handles on the selected clip, on or off (X65) |
@@ -1663,3 +1680,76 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - **In an OTIO file**, the Dynamic Zoom is in the `vidcut` metadata of the clip and in Resolve's Dynamic Zoom effect.
     - An import reads Resolve's effect when its center and its scale each have exactly two keys.
     - Otherwise the effect stays on the clip unplayed (X9), with Transform, Cropping and Retime and Scaling.
+- **D76. Ducking** (§9; pp. 744, 778–779; deviations X68, X69).
+  - The manual gives the controls and their defaults. It does not give the gain curve, the threshold or the limits.
+  - **Resolve's gain.** These facts come from renders of Resolve Studio 21.1.1 on Windows, at 48 kHz:
+    - The source track had 3 kHz tone bursts of 50 ms to 2 s, at −6 to −60 dBFS peak.
+    - The target track had a steady 220 Hz tone at −12 dBFS.
+    - The gain is the rendered target divided by the input target, after the source is subtracted.
+    - The dip is the Duck Amount exactly: 2.700 dB at 2.7, and 10.000 dB at 10.
+    - The level of the source does not change the dip. Bursts at −6, −12, −24 and −36 dBFS give the same curve.
+    - Bursts at −48 and −60 dBFS give no dip. Thus the threshold is fixed, between −48 and −36 dBFS peak.
+    - A burst of 50 ms gives the full dip, and the same recovery as a burst of 2 s.
+    - A gap of 100 ms between two bursts keeps the full dip, with a Hold of 150 ms.
+    - The render has no delay. The source and the target stay aligned with the timeline.
+    - The recovery, and the fall with a Rise Time of 200 ms, are half cosines in dB.
+    - The half cosine fits the recovery to 0.011 dB rms or better. A line in dB fits it to 0.17 dB rms at best.
+    - The Recovery Time is 1000 ms at most. A typed 2000 becomes 1000.
+    - A Rise Time of 200 ms, a Hold of 500 ms and a Lookahead of 100 ms stay as typed. The other limits are not measured.
+    - On a timeline with two audio tracks, Source 1 of a new Ducker is the other track. With three tracks, Source 1 is empty.
+  - **A mono target track in Resolve**, with a Duck Amount of 10 dB:
+    - The times are in ms. A fall time is from the start of the source. A recovery time is from the end of the source.
+    - "Full dip" is within 0.01 dB of the Duck Amount. "Recovery ends" is within 0.001 dB of 0 dB.
+
+    | Lookahead | Rise Time | Hold | Recovery Time | Fall starts | Full dip | Recovery starts | Recovery ends |
+    |---|---|---|---|---|---|---|---|
+    | 15 | 10 | 150 | 750 | −40 | −6 | +151 | +898 |
+    | 15 | 200 | 150 | 750 | −230 | −30 | +171 | +918 |
+    | 100 | 10 | 500 | 1000 | −120 | −86 | +512 | +1506 |
+
+    - The fall starts Lookahead + Rise Time + 10 to 15 ms before the source.
+    - The recovery starts Hold + 1 to 21 ms after the source ends.
+    - The recovery lasts the Recovery Time.
+    - A stereo target track has other times (X68). The fall with a Rise Time of 10 ms has another shape (X69).
+  - **vidcut's gain**, for a Duck Amount of A dB:
+    - A source is active from s to e.
+    - The fall starts at s − Lookahead − Rise Time, and ends at s − Lookahead.
+    - Fall: gain = −A × (1 − cos(π t / R)) / 2 dB. R is the Rise Time, and t is the time from the start of the fall.
+    - The gain stays at −A dB until e + Hold.
+    - Recovery: gain = −A × (1 + cos(π t / T)) / 2 dB. T is the Recovery Time, and t is the time from e + Hold.
+    - Where the curves of two active parts meet, the lower gain applies. Thus a gap of up to Hold + Lookahead keeps the full dip.
+    - With several sources, a part is active where any source is active.
+    - Thus a fall starts 10 to 15 ms later than in Resolve, and a recovery 1 to 21 ms sooner.
+    - The gain is computed for each sample. Every channel of the track gets the same gain (X68).
+    - The preview and the export hear the same samples. The loudness gain of an export comes after the ducking.
+  - **What is active** (X69):
+    - Speech: a source is active where Silero VAD hears speech in its own sound, as for Ripple Delete Silence (X47).
+    - The rule has the defaults of Silero: a probability of 0.5, speech longer than 0.25 s, and pauses of 0.1 s or more.
+    - Sound level: a source is active where a 10 ms peak, after its clip gain and fader, is at or above the Threshold.
+    - The default Threshold is −42 dBFS, the middle of the range measured in Resolve.
+    - A source counts only where it is heard. A muted clip, a muted track and a track that solo silences dip nothing.
+  - **A source not yet measured is measured first:**
+    - `track.set` measures the sources of the ducking that it turns on or changes. A missing speech detector needs `download`.
+    - The preview plays a new source clip without its ducking until its measurement is done. The measurement runs as a job.
+    - An export and `analyze.loudness` measure what is missing.
+  - **Values:**
+    - Duck Amount: 0 to 60 dB.
+    - Lookahead: 0 to 1000 ms.
+    - Rise Time: 1 to 1000 ms.
+    - Hold: 0 to 5000 ms.
+    - Recovery Time: 1 to 1000 ms. 1000 is Resolve's maximum.
+    - Threshold: −96 to 0 dBFS.
+    - `track.set` refuses a value outside its range, and changes no value (X69).
+    - The project file keeps only the values that are not the usual ones.
+  - **Sources:**
+    - A new ducking has every other track with sound as its sources (X69).
+    - A source is a video or audio track. Only its sound counts. A track cannot duck under itself.
+    - When a track is removed, it leaves the sources. The other sources follow their new numbers.
+  - Each change is one undo step.
+  - **Mixer:**
+    - The strip of each track has Ducking, its sources (Under …) and its Amount.
+    - Advanced opens the Ducking window: Detect, Threshold, Lookahead, Rise Time, Hold and Recovery Time.
+  - **OpenTimelineIO:**
+    - How Resolve writes a Track FX in an OTIO file is not known ([to-do](todo/ducking.md)).
+    - The ducking goes in the `vidcut` metadata of the track.
+    - The notes of an OTIO export say that other editors will not hear it.

@@ -3,6 +3,7 @@ pub mod change;
 pub mod describe;
 pub mod dirs;
 pub mod disk_cache;
+pub mod duck;
 pub mod editor;
 pub mod error;
 pub mod export;

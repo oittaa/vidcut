@@ -196,8 +196,21 @@ Pictures:
 ## Sound
 
 - `AudioMix` mixes the lanes sample-exact: clip gains, cross fades, de-click fades at cuts, and clips at other speeds, stretched with their pitch kept.
-- With `audio.loudness`, `analysis::mix_loudness` first measures the mix as it will be encoded.
-- `loudness_gain` gives one gain (`AudioMix::set_gain_db`) that reaches the target, with the true peak under a ceiling.
+- With `audio.loudness`, `analysis::mix_loudness` first measures the mix as it will be encoded, ducking included.
+- `loudness_gain` gives one gain (`AudioMix::set_gain_db`) that reaches the target, with the true peak under a ceiling. Thus it comes after the ducking.
+
+Ducking ([spec D76](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+
+- `render::flatten_lanes` adds a `Ducking` to the plan for each ducked track that has lanes (`duck::planned`).
+- A `Ducking` names the lanes of its track, its `Dip` and the `DuckSource` of each source clip that can reach the range.
+- The range of the sources reaches Hold + Recovery Time before the plan, and Lookahead + Rise Time after it. Thus a range dips as the whole timeline does.
+- `duck::hear` finds where the sources are active, from the measurements of their files:
+  - by speech: `analysis::speech_frames`, from the `VoiceActivity` of the file
+  - by level: `analysis::loud_frames`, from its `AudioLevels`
+  - It puts these parts, in samples of the plan, into `Dip::active`.
+- `session::export_media` calls `duck::hear_with`, which measures what is missing. A missing speech detector needs `download`.
+- `AudioMix::ducked` gives each lane its `Dip`. A lane multiplies each sample by `Dip::gain`, on every channel.
+- `Dip::gain_db` is the lowest gain of the active parts near the sample: their fall, full dip and recovery.
 
 Voice Isolation:
 
@@ -428,6 +441,7 @@ Automatic:
 - `crates/vidcut-core/src/export/color.rs`
 - `crates/vidcut-core/src/export/metadata.rs`
 - `crates/vidcut-core/src/render.rs`
+- `crates/vidcut-core/src/duck.rs`
 - `crates/vidcut-av/src/isolate.rs`
 - `crates/vidcut-core/src/subtitles.rs`
 - `crates/vidcut-av/src/export/mod.rs`

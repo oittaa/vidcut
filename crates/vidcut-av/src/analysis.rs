@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats};
-use vidcut_core::render::{AudioPiece, RenderPlan};
+use vidcut_core::render::{AudioPiece, Ducking, RenderPlan};
 
 use crate::decode::decode_stream;
 use crate::error::{Context, Error, Result};
@@ -350,6 +350,7 @@ fn decode_pictures(
 pub fn loudness(plan: &RenderPlan) -> Result<Loudness> {
     mix_loudness(
         &plan.audio,
+        &plan.ducking,
         plan.sample_rate,
         plan.channels,
         crate::export::DECLICK_MS,
@@ -364,6 +365,7 @@ fn stopped(cancel: Option<&AtomicBool>) -> bool {
 
 pub fn mix_loudness(
     lanes: &[Vec<AudioPiece>],
+    ducking: &[Ducking],
     rate: u32,
     channels: u16,
     declick_ms: u32,
@@ -375,7 +377,7 @@ pub fn mix_loudness(
     }
     crate::init();
     let channels = channels.max(1);
-    let mut mix = AudioMix::new(lanes, rate, channels, declick_ms);
+    let mut mix = AudioMix::new(lanes, rate, channels, declick_ms).ducked(ducking);
     let mut graph = crate::pool::graph(crate::decode::Reading::Stream);
     let layout = match channels {
         1 => "mono",

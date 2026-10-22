@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use vidcut_core::render::AudioPiece;
+use vidcut_core::render::{AudioPiece, Dip, Ducking};
 
 use super::ahead::Ahead;
 use crate::error::{Error, Result};
@@ -548,6 +549,8 @@ struct Lane {
     trim: f32,
     isolator: Option<Isolator>,
     unheard: Option<String>,
+    dip: Option<Arc<Dip>>,
+    at: i64,
 }
 
 impl Lane {
@@ -565,6 +568,8 @@ impl Lane {
             trim: 1.0,
             isolator: None,
             unheard: None,
+            dip: None,
+            at: 0,
         }
     }
 
@@ -623,6 +628,7 @@ impl Lane {
 
     fn seek(&mut self, sample: i64) {
         let mut left = sample.max(0);
+        self.at = left;
         self.ahead.forget();
         self.started = false;
         for (i, piece) in self.pieces.iter().enumerate() {
@@ -642,6 +648,8 @@ impl Lane {
         let ch = usize::from(channels);
         let mut done = 0usize;
         let n = out.len() / ch;
+        let base = self.at;
+        self.at += n as i64;
         while done < n {
             let Some(piece) = self.pieces.get(self.piece).cloned() else {
                 return Ok(());
@@ -747,6 +755,9 @@ impl Lane {
                     if fade_out && p >= len - fade {
                         g *= (len - p) as f32 / fade as f32;
                     }
+                    if let Some(dip) = &self.dip {
+                        g *= dip.gain(base + (done + i) as i64);
+                    }
                     for c in 0..ch {
                         out[(done + i) * ch + c] += self.scratch[i * ch + c] * g;
                     }
@@ -820,6 +831,25 @@ impl AudioMix {
         }
     }
 
+    pub fn ducked(mut self, ducking: &[Ducking]) -> Self {
+        self.duck(ducking);
+        self
+    }
+
+    fn duck(&mut self, ducking: &[Ducking]) {
+        for lane in &mut self.lanes {
+            lane.dip = None;
+        }
+        for d in ducking.iter().filter(|d| !d.dip.active.is_empty()) {
+            let dip = Arc::new(d.dip.clone());
+            for &i in &d.lanes {
+                if let Some(lane) = self.lanes.get_mut(i) {
+                    lane.dip = Some(dip.clone());
+                }
+            }
+        }
+    }
+
     pub fn channels(&self) -> u16 {
         self.channels
     }
@@ -850,7 +880,7 @@ impl AudioMix {
         self.lanes.iter_mut().find_map(|l| l.unheard.take())
     }
 
-    pub fn replan(&mut self, lanes: &[Vec<AudioPiece>], sample: i64) {
+    pub fn replan(&mut self, lanes: &[Vec<AudioPiece>], ducking: &[Ducking], sample: i64) {
         let declick = self.lanes.first().map_or(0, |l| l.declick);
         let mut old: Vec<Option<SourceAudio>> =
             self.lanes.iter_mut().map(|l| l.source.take()).collect();
@@ -863,6 +893,7 @@ impl AudioMix {
                 lane
             })
             .collect();
+        self.duck(ducking);
         self.seek(sample);
     }
 

@@ -36,6 +36,7 @@ classDiagram
     id
     kind: Video or Audio
     locked, muted, solo, volume_db
+    duck
   }
   class Clip {
     id
@@ -341,6 +342,18 @@ Writing:
   - Each map goes from a pixel of the frame back to a picture (`place::Level`: the map and the part shown).
   - An export and the viewer both draw by these maps ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
 
+## Ducking
+
+- A track can carry a `Duck` ([spec D76](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+  - `on`, written only when off
+  - its `sources`, by track id
+  - the Duck Amount, the four times, `detect` (`DuckDetect`) and `threshold_db`, each left out at its usual value
+- `track.set` takes a `DuckSet`. Its fields replace their own (`duck::patched`). A new one takes `duck::default_sources`.
+- `duck::checked` is the check that `track.set`, `validate::violations` and the import of an OTIO file share.
+- `ops::remove_track` renumbers the tracks. Then `duck::renamed` moves the sources to the new ids, and drops the removed track.
+- An OTIO file carries the `Duck` in the `vidcut` metadata of its track. An import drops the sources that its tracks do not have (`duck::tidy`).
+- How the ducking plays: [export](export.md#sound).
+
 ## Looks
 
 - Looks are named styles ([spec D71](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). They are not in the project.
@@ -517,7 +530,7 @@ Reset:
 - known media and bins
 - gains in range
 - titles on video tracks
-- titles and subtitle styles that their requests would refuse
+- titles, subtitle styles and duckings that their requests would refuse
 
 It runs at these times:
 
@@ -533,6 +546,7 @@ It runs at these times:
 - `crates/vidcut-core/src/fingerprint.rs`
 - `crates/vidcut-core/src/validate.rs`
 - `crates/vidcut-core/src/ops/tracks.rs`
+- `crates/vidcut-core/src/duck.rs`
 - `crates/vidcut-core/src/otio.rs`
 - `crates/vidcut-core/src/otio/`
 - `crates/vidcut-core/src/editor.rs`

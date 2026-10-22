@@ -22,7 +22,3 @@ The use cases decide what is built and tested.
 
 - Open work is in [docs/todo/](todo/), one file for each item. Each file has a **When:** line.
 - The interchange (use case 1) is in place. The smaller items come next, then macOS.
-
-Finishing a simple video has its own list, in this order:
-
-1. [Ducking](todo/ducking.md): music that dips under speech.
