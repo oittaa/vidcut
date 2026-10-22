@@ -3387,6 +3387,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_unknown_method_names_the_method() {
+        let e = Request::from_parts("no.such", None).unwrap_err();
+        assert_eq!(e, "unknown method \"no.such\"; see `vidcut schema`");
+    }
+
+    #[test]
+    fn a_bad_panel_is_invalid_params() {
+        let e = Request::from_parts("gui.show", Some(serde_json::json!({ "panel": "log" }))).unwrap_err();
+        assert!(
+            e.starts_with("invalid params for gui.show: unknown variant `log`, expected "),
+            "{e}"
+        );
+    }
+
+    #[test]
     fn every_parameter_given_is_known() {
         use serde_json::json;
         for params in [
