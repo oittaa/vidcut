@@ -83,7 +83,7 @@ xargs awk -v paths="$tmp/paths" -v anchors="$tmp/anchors" '
 # Plain style (AGENTS.md, rule 11): a sentence has 25 words at most and a
 # line 300 characters, outside code blocks and without link targets. The
 # files below are still to rewrite; each rewrite takes its file off.
-not_yet=" $(tr '\n' ' ' < scripts/docs-to-rewrite.txt) "
+not_yet=" $(tr -d '\r' < scripts/docs-to-rewrite.txt | tr '\n' ' ') "
 while IFS= read -r f; do
   [[ "$not_yet" == *" $f "* ]] && continue
   awk '
