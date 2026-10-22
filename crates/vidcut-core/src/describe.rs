@@ -3,6 +3,8 @@ use serde_json::Value;
 use crate::model::Project;
 use crate::time::{DurationSpec, Keyword, RangeSpec, TimeSpec};
 
+mod set;
+
 pub fn describe(method: &str, params: &Value, project: Option<&Project>) -> String {
     describe_at(method, params, project, None)
 }
@@ -19,7 +21,7 @@ pub fn describe_at(
         playhead,
     };
     match method {
-        "project.set" => format!("Project: {}", d.settings()),
+        "project.set" => d.project_set(),
         "project.open" => format!("Open {}", d.file("path")),
         "project.create" => format!("Create {}", d.file("path")),
         "media.add" => format!("Import {}", d.files("paths")),
@@ -34,21 +36,12 @@ pub fn describe_at(
             d.files("search")
         ),
         "media.rename" => format!("Rename {} to {}", d.media("media"), d.text("name")),
-        "media.set" if d.text("color").is_empty() => {
-            format!("Clear the color of {}", d.media("media"))
-        }
-        "media.set" if d.params["color"].is_null() => {
-            let space = match d.text("color_space").as_str() {
-                "bt709" => "BT.709",
-                "bt601" => "BT.601",
-                "pq" => "BT.2100 PQ",
-                "hlg" => "BT.2100 HLG",
-                _ => "its tags say",
-            };
-            format!("Read the colors of {} as {space}", d.media("media"))
-        }
-        "media.set" => format!("Color {} {}", d.media("media"), d.text("color")),
-        "media.marks.set" => format!("Source marks of {}: {}", d.media("media"), d.in_out()),
+        "media.set" => d.media_set(),
+        "media.marks.set" => d.marks_set(
+            format!("Source marks of {}", d.media("media")),
+            set::source_marks(project, &d.list("media")),
+        ),
+        "speakers.set" => d.speaker_set(),
         "media.marks.clear" => format!("Clear the source marks of {}", d.media("media")),
         "tape.marks.set" => format!("Source Tape marks: {}", d.in_out()),
         "tape.marks.clear" => "Clear the Source Tape marks".into(),
@@ -176,16 +169,16 @@ pub fn describe_at(
             }
         }
         "track.remove" => format!("Remove track {}", d.text("track")),
-        "track.set" => format!("{}: {}", d.text("track"), d.track_settings()),
-        "clip.set" => format!("{}: {}", d.clips("clips"), d.clip_settings()),
-        "marks.set" => format!("Timeline marks: {}", d.in_out()),
+        "track.set" => d.track_set(),
+        "clip.set" => d.clip_set(),
+        "marks.set" => d.marks_set("Timeline marks".into(), project.map(|p| &p.marks)),
         "marks.clear" => "Clear the timeline marks".into(),
         "markers.add" => format!("Marker at {}{}", d.time("at"), d.named()),
         "markers.move" => format!("Move marker {} to {}", d.text("marker"), d.time("to")),
-        "markers.set" => format!("Change marker {}{}", d.text("marker"), d.named()),
+        "markers.set" => d.marker_set(),
         "markers.remove" => format!("Remove marker {}", d.text("marker")),
         "subtitles.add" => format!("Subtitle {} at {}", quoted(&d.text("text")), d.time("at")),
-        "subtitles.set" => format!("Change subtitle {}", d.cues("cue")),
+        "subtitles.set" => d.cue_set(),
         "subtitles.move" if d.params["track"].is_string() => {
             format!("Move {} to {}", d.cues("cues"), d.text("track"))
         }
@@ -195,29 +188,8 @@ pub fn describe_at(
         "subtitles.join" => format!("Join {}", d.cues("cues")),
         "subtitles.match_speaker" => format!("Match the speaker's cues to {}", d.cues("cue")),
         "titles.add" => format!("Title {} at {}", quoted(&d.text("text")), d.time("at")),
-        "titles.set" => format!("Change title {}", d.clips("clip")),
-        "picture.set" => {
-            let crops = ["crop_left", "crop_right", "crop_top", "crop_bottom"]
-                .iter()
-                .any(|k| !d.params[*k].is_null());
-            let moves = [
-                "position",
-                "zoom",
-                "rotation",
-                "flip_horizontal",
-                "flip_vertical",
-            ]
-            .iter()
-            .any(|k| !d.params[*k].is_null());
-            let clips = d.clips("clips");
-            match (moves, crops, d.params.get("dynamic_zoom")) {
-                (false, false, Some(Value::Null)) => format!("Reset the Dynamic Zoom of {clips}"),
-                (false, false, Some(_)) => format!("Change the Dynamic Zoom of {clips}"),
-                (true, true, _) => format!("Transform and crop {clips}"),
-                (false, true, _) => format!("Crop {clips}"),
-                _ => format!("Transform {clips}"),
-            }
-        }
+        "titles.set" => d.title_set(),
+        "picture.set" => d.picture_set(),
         "picture.clear" => match d.params["tool"].as_str() {
             Some("crop") => format!("Reset the crop of {}", d.clips("clips")),
             Some("dynamic_zoom") => format!("Reset the Dynamic Zoom of {}", d.clips("clips")),
@@ -814,142 +786,6 @@ impl Words<'_> {
             Some("source_tape") => "Source Tape".into(),
             Some(m) => m.to_string(),
             None => "?".into(),
-        }
-    }
-
-    fn settings(&self) -> String {
-        let p = self.params;
-        let mut parts = Vec::new();
-        if let Some(on) = p["use_proxies"].as_bool() {
-            parts.push(if on { "proxies on" } else { "proxies off" }.to_string());
-        }
-        if let Some(on) = p["ripple_on"].as_bool() {
-            parts.push(if on { "Ripple On" } else { "Ripple Off" }.to_string());
-        }
-        for key in [
-            "fps",
-            "width",
-            "height",
-            "sample_rate",
-            "channels",
-            "start_tc",
-            "still_duration",
-        ] {
-            if !p[key].is_null() {
-                parts.push(format!("{} {}", key.replace('_', " "), self.text(key)));
-            }
-        }
-        for (language, words) in p["fillers"].as_object().into_iter().flatten() {
-            let language = language.trim().to_lowercase();
-            parts.push(match words.is_null() {
-                true => format!("{language} filler words reset"),
-                false => format!("{language} filler words"),
-            });
-        }
-        if parts.is_empty() {
-            "unchanged".into()
-        } else {
-            parts.join(", ")
-        }
-    }
-
-    fn track_settings(&self) -> String {
-        let p = self.params;
-        let mut parts = Vec::new();
-        let on_off = |key: &str, on: &str, off: &str| {
-            p[key]
-                .as_bool()
-                .map(|b| if b { on } else { off }.to_string())
-        };
-        parts.extend(on_off("locked", "locked", "unlocked"));
-        parts.extend(on_off("muted", "audio off", "audio on"));
-        parts.extend(on_off("solo", "solo on", "solo off"));
-        parts.extend(on_off("video_enabled", "video on", "video off"));
-        parts.extend(on_off("shown", "shown", "hidden"));
-        match p["language"].as_str() {
-            Some("") => parts.push("no language".to_string()),
-            Some(l) => parts.push(format!("language {l}")),
-            None => {}
-        }
-        if !p["volume_db"].is_null() {
-            parts.push(format!("volume {}", db(&p["volume_db"])));
-        }
-        match p.get("duck") {
-            Some(Value::Null) => parts.push("no ducking".to_string()),
-            Some(Value::Object(d)) => {
-                let before = parts.len();
-                match d.get("on").and_then(Value::as_bool) {
-                    Some(false) => parts.push("ducking off".to_string()),
-                    Some(true) => parts.push("ducking on".to_string()),
-                    None => {}
-                }
-                if let Some(s) = d.get("sources").and_then(Value::as_array) {
-                    let names: Vec<&str> = s.iter().filter_map(Value::as_str).collect();
-                    parts.push(match names.as_slice() {
-                        [] => "ducked under nothing".to_string(),
-                        _ => format!("ducked under {}", names.join(", ")),
-                    });
-                }
-                if let Some(v) = d.get("amount_db").and_then(Value::as_f64) {
-                    parts.push(format!("ducking by {v:.1} dB"));
-                }
-                let more = [
-                    "lookahead_ms",
-                    "rise_ms",
-                    "hold_ms",
-                    "recovery_ms",
-                    "detect",
-                    "threshold_db",
-                ];
-                if more.iter().any(|k| d.contains_key(*k)) {
-                    parts.push("ducking settings".to_string());
-                }
-                if parts.len() == before {
-                    parts.push("ducking on".to_string());
-                }
-            }
-            _ => {}
-        }
-        if let Some(n) = p["name"].as_str() {
-            parts.push(format!("named \u{201c}{n}\u{201d}"));
-        }
-        if p["style"].is_object() {
-            parts.push("style".to_string());
-        }
-        if let Some(l) = p["look"].as_str() {
-            parts.push(format!("look {l}"));
-        }
-        match p["color"].as_str() {
-            Some("") => parts.push("no color".to_string()),
-            Some(c) => parts.push(c.to_string()),
-            None => {}
-        }
-        if parts.is_empty() {
-            "unchanged".into()
-        } else {
-            parts.join(", ")
-        }
-    }
-
-    fn clip_settings(&self) -> String {
-        let p = self.params;
-        let mut parts = Vec::new();
-        if let Some(b) = p["enabled"].as_bool() {
-            parts.push(if b { "enabled" } else { "disabled" }.to_string());
-        }
-        if let Some(b) = p["muted"].as_bool() {
-            parts.push(if b { "muted" } else { "unmuted" }.to_string());
-        }
-        if !p["gain_db"].is_null() {
-            parts.push(format!("gain {}", db(&p["gain_db"])));
-        }
-        if let Some(n) = p["name"].as_str() {
-            parts.push(format!("named \u{201c}{n}\u{201d}"));
-        }
-        if parts.is_empty() {
-            "unchanged".into()
-        } else {
-            parts.join(", ")
         }
     }
 }

@@ -35,6 +35,26 @@ pub struct Step {
     pub spans: Vec<Span>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<Call>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Call {
+    pub method: String,
+    pub params: Value,
+}
+
+impl Call {
+    pub fn of(request: &crate::request::Request) -> Option<Self> {
+        let Ok(Value::Object(mut m)) = serde_json::to_value(request) else {
+            return None;
+        };
+        Some(Self {
+            method: m.remove("method")?.as_str()?.to_string(),
+            params: m.remove("params").unwrap_or(Value::Null),
+        })
+    }
 }
 
 impl Step {

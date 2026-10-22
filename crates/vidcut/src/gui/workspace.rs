@@ -77,8 +77,6 @@ pub struct Workspace {
     pub(super) bins: super::pool::BinsUi,
     pub(super) timecode: Option<TimecodeEntry>,
     pub(super) duration_text: Option<String>,
-    pub(super) show_log: bool,
-    pub(super) log_edits_only: bool,
     pub(super) hover: Option<(String, i64)>,
     pub(super) pool_clicked: Option<String>,
     pub(super) left: LeftTab,
@@ -160,8 +158,6 @@ impl Workspace {
             bins: Default::default(),
             timecode: None,
             duration_text: None,
-            show_log: false,
-            log_edits_only: true,
             hover: None,
             pool_clicked: None,
             left: Default::default(),
@@ -237,7 +233,6 @@ impl Workspace {
             GuiPanel::QuickExport => self.open_quick_export(ctx),
             GuiPanel::Export => self.open_export(ctx),
             GuiPanel::Jobs => self.export.show_jobs = true,
-            GuiPanel::Log => self.show_log = true,
             GuiPanel::Mixer => self.show_mixer = true,
             GuiPanel::Preferences => self.open_preferences(ctx),
             GuiPanel::Help => self.help.open = true,
@@ -289,7 +284,6 @@ impl Workspace {
             GuiPanel::QuickExport => self.export.close_quick(),
             GuiPanel::Export => self.export.close_dialog(),
             GuiPanel::Jobs => self.export.show_jobs = false,
-            GuiPanel::Log => self.show_log = false,
             GuiPanel::Mixer => self.show_mixer = false,
             GuiPanel::Preferences => self.preferences.open = false,
             GuiPanel::Help => self.help.open = false,
@@ -329,7 +323,6 @@ impl Workspace {
             (GuiPanel::QuickExport, quick),
             (GuiPanel::Export, dialog),
             (GuiPanel::Jobs, self.export.show_jobs),
-            (GuiPanel::Log, self.show_log),
             (GuiPanel::Mixer, self.show_mixer),
             (GuiPanel::Preferences, self.preferences.open),
             (GuiPanel::Help, self.help.open),
@@ -961,64 +954,6 @@ impl Workspace {
                 }
             }
         });
-    }
-
-    fn log_panel(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.heading("Command log");
-            ui.checkbox(&mut self.log_edits_only, "edits only");
-        });
-        ui.label(
-            RichText::new("Click an entry to copy it as a command.")
-                .color(theme::colors().text_dim)
-                .small(),
-        );
-        ui.separator();
-        let project = self.snap.project.as_ref().map(|p| p.path.clone());
-        egui::ScrollArea::vertical()
-            .stick_to_bottom(true)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for e in self.snap.log.iter() {
-                    if self.log_edits_only && !e.changed && e.ok {
-                        continue;
-                    }
-                    let color = if e.ok {
-                        theme::colors().text
-                    } else {
-                        theme::colors().error
-                    };
-                    let who = match e.origin.as_str() {
-                        "ipc" => "script",
-                        "session" => "automatic",
-                        _ => "",
-                    };
-                    let r = ui
-                        .horizontal_wrapped(|ui| {
-                            if !who.is_empty() {
-                                ui.label(
-                                    RichText::new(who).small().color(theme::colors().text_dim),
-                                );
-                            }
-                            let r = ui.add(
-                                egui::Label::new(RichText::new(&e.summary).small().color(color))
-                                    .sense(egui::Sense::click()),
-                            );
-                            if let Some(err) = &e.error {
-                                ui.label(RichText::new(err).small().color(color));
-                            }
-                            r
-                        })
-                        .inner;
-                    if r.clicked() {
-                        ui.ctx().copy_text(vidcut_command(
-                            project.as_deref(),
-                            &e.method,
-                            &e.params,
-                        ));
-                    }
-                }
-            });
     }
 
     pub(super) fn pick_project(&self, ctx: &egui::Context, new: Option<Value>) {
@@ -1694,13 +1629,14 @@ impl Workspace {
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Status, |ui| self.status_bar(ui))
             });
-        if self.show_log {
-            egui::Panel::right("log")
+        if self.history.open && self.snap.project.is_some() {
+            egui::Panel::right("history")
                 .resizable(true)
-                .default_size(380.0)
+                .default_size(self.history.width)
+                .min_size(super::history::MIN_WIDTH)
                 .frame(theme::card(panel))
                 .show(ui, |ui| {
-                    theme::decorated(ui, Deco::Card, |ui| self.log_panel(ui))
+                    theme::decorated(ui, Deco::Card, |ui| self.history_panel(ui))
                 });
         }
         if self.snap.project.is_none() {
@@ -1759,16 +1695,6 @@ impl Workspace {
             })
             .response
             .rect;
-        if self.history.open {
-            egui::Panel::left("history")
-                .resizable(true)
-                .default_size(self.history.width)
-                .min_size(super::history::MIN_WIDTH)
-                .frame(theme::card(panel))
-                .show(ui, |ui| {
-                    theme::decorated(ui, Deco::Card, |ui| self.history_panel(ui))
-                });
-        }
         egui::CentralPanel::default()
             .frame(theme::card(theme::colors().panel_dark))
             .show(ui, |ui| {

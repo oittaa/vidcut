@@ -43,6 +43,8 @@ pub(super) struct HistoryUi {
     twigs: HashSet<u64>,
     flash: Option<(u64, f64)>,
     follow: bool,
+    offset: f32,
+    height: f32,
     seen: Option<(usize, usize)>,
     find: String,
     kind: Option<&'static str>,
@@ -189,6 +191,12 @@ fn kind_color(kind: ClientKind) -> Color32 {
         ClientKind::Ipc => Color32::from_rgb(80, 135, 215),
         ClientKind::File => Color32::from_rgb(210, 135, 55),
         ClientKind::Other => Color32::from_rgb(120, 120, 130),
+    }
+}
+
+fn full_on_hover(r: &egui::Response, shown: &egui::Galley, full: &str) {
+    if shown.elided {
+        r.clone().on_hover_text(full.to_owned());
     }
 }
 
@@ -465,6 +473,7 @@ impl Workspace {
         };
         if self.history.seen != Some((steps.done, steps.line.len())) {
             self.history.seen = Some((steps.done, steps.line.len()));
+            self.history.cursor = None;
             self.history.follow = true;
         }
         ui.horizontal(|ui| {
@@ -679,16 +688,27 @@ impl Workspace {
             && let Some(at) = mark_row
         {
             self.history.follow = false;
-            let y = at as f32 * (ROW + spacing) - view / 2.0 + ROW;
-            area = area.vertical_scroll_offset(y.max(0.0));
+            let top = at as f32 * (ROW + spacing);
+            let offset = self.history.offset;
+            let seen = match self.history.height {
+                h if h > 0.0 => h,
+                _ => view.min(ui.available_height()),
+            };
+            if top < offset {
+                area = area.vertical_scroll_offset(top);
+            } else if top + ROW > offset + seen {
+                area = area.vertical_scroll_offset((top + ROW - seen).max(0.0));
+            }
         }
         let now = when::now_ms();
         let mut acts = Vec::new();
-        area.show_rows(ui, ROW, rows.len(), |ui, range| {
+        let out = area.show_rows(ui, ROW, rows.len(), |ui, range| {
             for k in range {
                 acts.extend(self.history_row(ui, rows[k], steps, &all, &paths, now));
             }
         });
+        self.history.offset = out.state.clamped_offset().y;
+        self.history.height = out.inner_rect.height();
         let footer = self.history_footer(steps);
         ui.add_space(6.0);
         ui.add(egui::Label::new(RichText::new(footer).color(theme::colors().text_dim)).wrap());
@@ -890,6 +910,7 @@ impl Workspace {
                     time_text(ui, steps.line[g.to - 1].time, now, right, mid)
                 };
                 let text = one_line(ui, &label, right - x - time_w - 8.0, font, color);
+                full_on_hover(&r, &text, &label);
                 ui.painter()
                     .galley(pos2(x, mid - text.size().y / 2.0), text, color);
                 let over_undo = show_undo
@@ -924,6 +945,7 @@ impl Workspace {
             }
             Row::Step(i, inner) => {
                 let s = &steps.line[i];
+                let project = self.snap.project.as_ref().map(|p| p.path.as_path());
                 let done = i < steps.done;
                 let caret_rect = (!s.parts.is_empty())
                     .then(|| caret(ui, pos2(x - 8.0, mid), self.history.parts.contains(&i)));
@@ -939,6 +961,7 @@ impl Workspace {
                 let time_w = time_text(ui, s.time, now, right, mid);
                 let color = if done { c.text } else { c.text_dim };
                 let text = one_line(ui, &s.label, right - x - time_w - 8.0, font, color);
+                full_on_hover(&r, &text, &s.label);
                 ui.painter()
                     .galley(pos2(x, mid - text.size().y / 2.0), text, color);
                 if r.clicked() {
@@ -966,6 +989,7 @@ impl Workspace {
                     if ui.button("Copy Label").clicked() {
                         ui.ctx().copy_text(s.label.clone());
                     }
+                    copy_command(ui, project, s);
                 });
             }
             Row::Branch(bi, open) => {
@@ -993,6 +1017,7 @@ impl Workspace {
                 let label = branch_label(b, now);
                 let w = if show { 132.0 } else { 0.0 };
                 let text = one_line(ui, &label, right - x - w - 4.0, small.clone(), c.text_dim);
+                full_on_hover(&r, &text, &label);
                 ui.painter()
                     .galley(pos2(x, mid - text.size().y / 2.0), text, c.text_dim);
                 if show {
@@ -1023,16 +1048,23 @@ impl Workspace {
                     FontId::new(12.5, egui::FontFamily::Proportional),
                     c.text_dim.gamma_multiply(0.8),
                 );
+                full_on_hover(&r, &text, &s.label);
                 ui.painter()
                     .galley(pos2(x, mid - text.size().y / 2.0), text, c.text_dim);
+                if s.request.is_some() {
+                    let project = self.snap.project.as_ref().map(|p| p.path.as_path());
+                    r.context_menu(|ui| copy_command(ui, project, s));
+                }
             }
             Row::Flag(i) => {
                 let s = &steps.line[i];
+                let project = self.snap.project.as_ref().map(|p| p.path.as_path());
                 if let Some(name) = s.id.and_then(|id| steps.named(id)) {
                     x += flag(ui, pos2(x, mid), name);
                 }
                 let color = if i < steps.done { c.text } else { c.text_dim };
                 let text = one_line(ui, &s.label, right - x - 8.0, small, color);
+                full_on_hover(&r, &text, &s.label);
                 ui.painter()
                     .galley(pos2(x, mid - text.size().y / 2.0), text, color);
                 if r.hovered() {
@@ -1046,6 +1078,10 @@ impl Workspace {
                         acts.push(Act::Go(i + 1));
                     }
                     names_menu(ui, steps, i + 1, &mut acts);
+                    if s.request.is_some() {
+                        ui.separator();
+                    }
+                    copy_command(ui, project, s);
                 });
             }
         }
@@ -1276,6 +1312,15 @@ fn version_rows(
         if k < b.steps.len() {
             rows.push(Row::Twig(bi, k));
         }
+    }
+}
+
+fn copy_command(ui: &mut egui::Ui, project: Option<&std::path::Path>, s: &Step) {
+    if let Some(c) = &s.request
+        && ui.button("Copy as Command").clicked()
+    {
+        let command = super::workspace::vidcut_command(project, &c.method, &c.params);
+        ui.ctx().copy_text(command);
     }
 }
 

@@ -197,6 +197,7 @@ pub(crate) struct Job {
     reply: Option<Reply>,
     rev: Option<u64>,
     dry_run: bool,
+    said: Option<String>,
 }
 
 pub(crate) enum Msg {
@@ -375,6 +376,7 @@ impl Handle {
                         reply: None,
                         rev: None,
                         dry_run: false,
+                        said: None,
                     },
                     result: Err(Error::internal(e)),
                 });
@@ -483,7 +485,6 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: 0,
-        log: Arc::new(VecDeque::new()),
         notices: Arc::new(VecDeque::new()),
         thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
@@ -543,7 +544,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
-        log: Arc::new(VecDeque::new()),
+        log: VecDeque::new(),
         log_seq: 0,
         notices: Arc::new(VecDeque::new()),
         notice_seq: 0,
@@ -805,7 +806,7 @@ struct Live {
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
-    log: Arc<VecDeque<LogEntry>>,
+    log: VecDeque<LogEntry>,
     log_seq: u64,
     notices: Arc<VecDeque<Notice>>,
     notice_seq: u64,
@@ -1313,7 +1314,6 @@ impl Live {
             selection: self.selection.clone(),
             pool: self.pool.clone(),
             clipboard: self.clipboard.len(),
-            log: self.log.clone(),
             notices: self.notices.clone(),
             thumbs: self.thumbs.clone(),
             missing: self.missing.clone(),
@@ -1423,13 +1423,19 @@ impl Live {
             ),
             _ => (envelope.request.method(), Value::Null),
         };
+        let before = self.project.as_ref().map(|o| o.project());
+        let said = envelope
+            .request
+            .is_mutation()
+            .then(|| vidcut_core::describe::describe(&method, &params, before));
         let job = Job {
             method,
             params,
             origin,
             reply,
-            rev: self.project.as_ref().map(|p| p.project().rev),
+            rev: before.map(|p| p.rev),
             dry_run: envelope.dry_run,
+            said,
         };
         if let Some(expected) = expected {
             let open = self.project.as_ref().map(|p| p.store.path());
@@ -1980,10 +1986,9 @@ impl Live {
                             && job.method != "project.open"
                             && job.rev.is_some_and(|before| before != rev))),
             };
-            let log = Arc::make_mut(&mut self.log);
-            log.push_back(entry);
-            while log.len() > LOG_CAP {
-                log.pop_front();
+            self.log.push_back(entry);
+            while self.log.len() > LOG_CAP {
+                self.log.pop_front();
             }
         }
         if let (Err(e), Origin::Gui { .. }, None) = (&result, job.origin, &job.reply)
@@ -2001,8 +2006,10 @@ impl Live {
     }
 
     fn summary(&self, job: &Job, result: &Result<Response>) -> String {
-        let project = self.project.as_ref().map(|o| o.project());
-        let said = vidcut_core::describe::describe(&job.method, &job.params, project);
+        let said = job.said.clone().unwrap_or_else(|| {
+            let project = self.project.as_ref().map(|o| o.project());
+            vidcut_core::describe::describe(&job.method, &job.params, project)
+        });
         let steps = |key: &str| {
             result
                 .as_ref()

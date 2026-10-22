@@ -171,7 +171,6 @@ pub struct Snapshot {
     pub selection: Selection,
     pub pool: PoolView,
     pub clipboard: usize,
-    pub log: Arc<VecDeque<LogEntry>>,
     pub notices: Arc<VecDeque<Notice>>,
     pub thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     pub missing: Arc<HashSet<String>>,

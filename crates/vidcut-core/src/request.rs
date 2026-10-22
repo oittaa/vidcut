@@ -1831,7 +1831,8 @@ pub enum Request {
     /// the client gave), when (`time`, milliseconds since 1970 UTC), the
     /// clips and frames it changed (`clips`, `spans`), the commands of an
     /// `apply` (`parts`), when the GUI that made it opened the project
-    /// (`opened`), its `id` and `kind` (the request that made it), and
+    /// (`opened`), its `id`, the `request` that made it (its `method` and
+    /// `params`; none for a `file` step) and its `kind` (that method), and
     /// whether it is `done` (redo steps are not). `at` is the step the
     /// project is at. `groups` are runs of steps one client made in a row
     /// (an agent's edits). `branches` are steps a new change replaced after
@@ -2086,7 +2087,7 @@ pub enum Request {
     #[serde(rename = "gui.quit")]
     GuiQuit {},
     /// Open a window for the person at the GUI: `quick_export`, `export`,
-    /// `jobs`, `log`, `mixer`, `preferences`, `history` (the undo history),
+    /// `jobs`, `mixer`, `preferences`, `history` (the undo history),
     /// `help` (the keyboard shortcuts), `transcription` (the words of the
     /// source clip or the timeline), `metadata` (the strip at the top of the
     /// Media Pool), `clip_info` (the media selected in the pool), `titles`
@@ -2660,8 +2661,6 @@ pub enum GuiPanel {
     Export,
     /// Export jobs with their progress.
     Jobs,
-    /// The command log.
-    Log,
     /// The Mixer: track faders, mute, solo and meters.
     Mixer,
     /// Application preferences.

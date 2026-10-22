@@ -47,10 +47,15 @@ vidcut is a video cutting tool in Rust. Its model is the Cut page of DaVinci Res
     - `scripts/check-docs.sh` refuses a sentence of more than 25 words and a line of more than 300 characters.
 12. **GUI text is short.** The title of a window tells what the window does. Thus no window opens with a paragraph about itself.
     - Labels and buttons have a few words, in Title Case.
-    - Use a tooltip only where the label is not sufficient.
+    - Use a tooltip only where the label is not sufficient, for example the full text of a label that is cut off. A tooltip never repeats the label.
     - Put a line under the controls only for things that change the result: a download, a warning, files to transcribe first.
     - No string in `crates/vidcut/src/gui/` has more than 12 words. `scripts/check.sh` enforces this. The details go in the docs.
     - Windows use `gui/dialog.rs`: labeled rows, a switch for two or three choices, and rarely used settings under Advanced. Cancel and one main button are at the bottom right.
+13. **vidcut is not released yet. It is not backwards compatible.**
+    - The code never tries to be backwards compatible. It reads and writes only the current form of files, settings, histories and requests.
+    - Do not add migrations, fallbacks or serde defaults for a form that an older version of vidcut wrote.
+    - A field is optional only when the current code leaves it out. The docs say when that occurs.
+    - The docs never mention old versions of vidcut, earlier builds or older files.
 
 ## Quality gates
 

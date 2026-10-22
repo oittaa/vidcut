@@ -109,15 +109,6 @@ if [[ -n "$long" ]]; then
   exit 1
 fi
 
-step "no tooltips"
-# A control says what it does by its label and its form, never by a tooltip.
-tips=$(git grep -n -E 'on_(disabled_)?hover_(text|ui)' -- 'crates/vidcut/src/gui/' || true)
-if [[ -n "$tips" ]]; then
-  echo "tooltips in the GUI: make the control say it instead" >&2
-  printf '%s\n' "$tips" | sed 's/^/  /' >&2
-  exit 1
-fi
-
 step "docs: names and links"
 scripts/check-docs.sh
 

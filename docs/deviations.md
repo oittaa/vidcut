@@ -72,7 +72,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Cut page has none.
 - **vidcut:**
   - `edit insert --at` and `edit overwrite --at` place at an exact frame. Smart Insert inserts only at an edit point (p. 697).
-  - The command log shows each action as its request, from the GUI or from an agent. The user can copy each one as a `vidcut rpc` command.
+  - `gui log` gives scripts the recent requests of every client, from the GUI or from an agent.
   - Commands for a project that is open in a GUI run inside that GUI. Live-only commands drive the GUI ([cli.md](cli.md), [design/live.md](design/live.md)).
   - `edit copy` returns clips as JSON for `edit paste --clips` into any project. In the GUI, Ctrl+C also puts this JSON on the system clipboard.
   - Overwrites with `--use-marks false` place by position, as a drag does.
@@ -87,7 +87,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - Scripts and agents need frame-exact edits without a playhead.
   - They also need measurements to make a plan.
-  - The command log teaches the API.
 
 ## X6. Removing a bin keeps its clips
 
@@ -510,11 +509,25 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It names the clip by its name, else by the name of its media.
   - It gives the place as a timecode and a track.
   - An example: "Trim the end of Interview.mp4 by -12 frames at 00:01:02:10 on V1".
+  - A request that sets values names each field that changed, with its old and new value.
+  - These requests do this: `titles.set`, `subtitles.set`, `picture.set`, `track.set`, `clip.set`, `media.set`, `speakers.set`, `markers.set`, `project.set`, `marks.set` and `media.marks.set`.
+  - An example: "Title “Intro”: Size 10% → 14%, Color usual → #ffd700".
+  - "usual" is the value of a field that has no value of its own. "none" is a mark that is not set.
+  - A `style` replaces the whole style. Thus the step also names a style field that the request leaves out, which goes back to "usual".
+  - Word Times show only their name. A list of filler words shows its number of words.
+  - With three changed fields or more, the step names only the fields. A field that shows only its name does not count.
+  - When the old values of the clips or media are not all the same, the field shows only its new value.
+  - The boxes of a Dynamic Zoom show their old values only when the clip had a Dynamic Zoom. Else the step says "Dynamic Zoom off → on".
+  - A `look` shows only its name.
+  - `tape.marks.set` shows only the new marks. `preferences.set` changes no project, and its label lists the new values.
+  - In an `apply` batch, each command is named against the project after the commands before it.
   - An `apply` batch lists its commands under it.
   - Edit > Undo and Redo name the step.
   - Ctrl+Z and Ctrl+Shift+Z tell what they undid or redid. For a short time, they also outline where it was in the timeline ([D55](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - Ten lines of "Split Clips" do not tell the user which step to go back to.
+  - A step that only says "Change title" does not tell what an undo puts back.
+  - A step never shows an old value that the project did not have.
   - An undo can change something off screen, or something that an agent did. Then it looks as if nothing occurred.
 
 ## X34. The undo history says who made each step, and when
@@ -544,7 +557,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - When the pointer is on a row, the row becomes bold. A click goes to that step at once.
   - Up and Down do not move in the list (21.1.1).
 - **vidcut:**
-  - The history docks beside the Media Pool (Edit > History > Open History Window, or History in the top bar).
+  - The history docks at the right side of the window (Edit > History > Open History Window, or History in the top bar).
   - Thus it covers neither the viewer nor the timeline.
   - It keeps the width that the user gave it from one run to the next.
   - When the pointer is on a step, the timeline shows the state after that step. This works in the panel and in Edit > History.
@@ -555,6 +568,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - In the panel, Up and Down step through the history in the same way.
   - Enter goes to the step. Esc comes back to the current state of the project.
   - A click goes to the step, as in Resolve.
+  - The list scrolls only when the current step is out of view, and only as far as it must.
+  - Copy as Command in the right-click menu of a step copies its request as a `vidcut rpc` command.
+  - A step that another program made by writing the project file has no request, and no Copy as Command.
+  - A label that does not fit ends in "…". The pointer on it shows the full label.
   - Edit > History lists the newest twenty steps, as in Resolve.
   - When the current step is older than those, Edit > History lists the twenty steps around the current step.
 - **Why:**
@@ -563,6 +580,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A look costs nothing, because the project changes only on a click or Enter.
   - A menu that has scrolled past the current step cannot show the current state of the project.
   - Such a menu also cannot move the project one step in either direction.
+  - A list that moves at each edit loses the place where the user looks.
+  - A step copied as a command can run again in a script.
 
 ## X36. Nothing is lost: undone steps a new change replaces stay as a version
 
