@@ -276,7 +276,7 @@ pub(crate) enum Msg {
     Audition(Option<Audition>),
     Skip(Option<Vec<ClipSpans>>),
     PreviewTitle(Option<(String, Title)>),
-    PreviewPicture(Option<(String, vidcut_core::model::Picture)>),
+    PreviewPictures(Vec<(String, vidcut_core::model::Picture)>),
     Subtitles(Option<vidcut_av::player::SubtitleView>),
     FreeTitle(Option<FreeTitle>),
     Shutdown,
@@ -339,8 +339,8 @@ impl Handle {
         let _ = self.tx.send(Msg::PreviewTitle(title));
     }
 
-    pub fn preview_picture(&self, picture: Option<(String, vidcut_core::model::Picture)>) {
-        let _ = self.tx.send(Msg::PreviewPicture(picture));
+    pub fn preview_pictures(&self, pictures: Vec<(String, vidcut_core::model::Picture)>) {
+        let _ = self.tx.send(Msg::PreviewPictures(pictures));
     }
 
     pub fn show_subtitles(&self, view: Option<vidcut_av::player::SubtitleView>) {
@@ -539,7 +539,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         player,
         skipping: None,
         free_title: None,
-        free_picture: None,
+        free_pictures: Vec::new(),
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
@@ -801,7 +801,7 @@ struct Live {
     player: Player,
     skipping: Option<Vec<ClipSpans>>,
     free_title: Option<FreeTitle>,
-    free_picture: Option<(String, vidcut_core::model::Picture)>,
+    free_pictures: Vec<(String, vidcut_core::model::Picture)>,
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
@@ -960,11 +960,11 @@ impl Live {
                 }
                 self.player.preview_title(title);
             }
-            Msg::PreviewPicture(picture) => {
+            Msg::PreviewPictures(pictures) => {
                 changed = false;
-                if self.free_picture != picture {
-                    self.player.preview_picture(picture.clone());
-                    self.free_picture = picture;
+                if self.free_pictures != pictures {
+                    self.player.preview_pictures(pictures.clone());
+                    self.free_pictures = pictures;
                     self.schedule_timeline();
                     (self.notify)();
                 }
@@ -3291,10 +3291,10 @@ impl Live {
 
     fn refresh_timeline_at(&mut self, at: Option<i64>) -> Option<u64> {
         let mut p = self.project.as_ref()?.project().clone();
-        if let Some((id, picture)) = &self.free_picture
-            && let Some((t, c)) = p.find_clip(id)
-        {
-            p.tracks[t].clips[c].picture = (!picture.is_usual()).then(|| picture.clone());
+        for (id, picture) in &self.free_pictures {
+            if let Some((t, c)) = p.find_clip(id) {
+                p.tracks[t].clips[c].picture = (!picture.is_usual()).then(|| picture.clone());
+            }
         }
         let mut scrolled: Option<(String, (i64, i64), i64)> = None;
         if let Some(FreeTitle {

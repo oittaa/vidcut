@@ -55,7 +55,7 @@ impl Titles {
         &self,
         plan: &Plan,
         t: i64,
-        placing: Option<&(String, Picture)>,
+        placing: &[(String, Picture)],
     ) -> (Vec<TitleOver>, bool) {
         let preview = lock(&self.preview).clone();
         let size = plan.size();

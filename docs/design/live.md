@@ -315,7 +315,7 @@ The bar and the Jobs button:
   - The selected cues are part of the session's `Selection`, as clips are.
 - **Titles.**
   - The Title window (`TitleDialog`) works out the title that its fields give (`title_of`). While the fields are not valid, there is no title.
-  - Done sends the changes as one `titles.set` ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab-or-add-title-and-are-edited-in-a-title-window-without-an-inspector)).
+  - Done sends the changes as one `titles.set` ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab-or-add-title-and-are-edited-in-a-title-window)).
   - Add Title asks `titles.add`, and opens the window on the clip of the answer.
   - The onscreen controls of the viewer (`onscreen::Grab`, `Workspace::title_controls`) find the titles at the playhead.
   - They box each title from one upright drawing by `burn::title`, moved and scaled to its place and zoom. The drawings used last are kept in an `Lru`.
@@ -342,9 +342,26 @@ The bar and the Jobs button:
   - While the handles are under the pointer, the title controls wait.
   - A drag works on the picture that it started from, and ends in one `picture.set`.
   - A run of wheel notches over the picture (`Wheeled`) also ends in one `picture.set`. `Workspace::settle_picture_wheel` sends it when the wheel is still.
-  - The picture that is dragged or wheeled goes to the core with `Handle::preview_picture`.
+  - The picture that is dragged or wheeled goes to the core with `Handle::preview_pictures`.
   - After the drag or the wheel, the picture that was sent goes to the core until the project has it (`tools::landing`).
-  - While the Dynamic Zoom boxes show, the picture goes to the core without its Dynamic Zoom (`Workspace::previewed`). Thus both boxes show on the whole picture.
+  - The viewer draws a clip with its Dynamic Zoom, also while its boxes show.
+  - The boxes are the picture placed with the start box and with the end box (`Shown::ends`). Thus they stay in place while the clip plays.
+- **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`)
+  - It is a tab of the left panel, as the Titles tab is (`LeftTab`). `gui.show` and `gui.close` take `inspector`.
+  - It shows the selected clips that can have a picture. It reads their pictures from the snapshot in each frame.
+  - A picture that the handles, the wheel or the Inspector preview goes first (`Workspace::picture_wanted`). Thus the fields follow a drag in the viewer.
+  - Each field changes between the picture and its own unit (`Field::read`, `Field::put`). The fitted size comes from `place::upright_fit`, as in an export.
+  - The `Shape` of each clip holds the size of the frame and the fitted size of its picture.
+  - While the user drags or types in a field, the field shows its own value (`Held`).
+  - A drag previews the pictures of all the clips with `Handle::preview_pictures`. The request follows on release.
+  - Each change sends one request:
+    - one `picture.set`, when all the clips get the same parameters
+    - else an `apply` with one `picture.set` for each clip
+    - `picture.clear` for the Reset of a section
+  - Thus each change is one undo step.
+  - An `apply` is necessary because a `position` holds X and Y. Thus Position X goes with the Y of each clip.
+  - Also, a crop in pixels is a different fraction of each picture.
+  - After the request, the sent pictures go to the core until the project has them (`tools::landing`).
 - **Silence stripes.**
   - `SilenceDialog` keeps the dry run of Ripple Delete Silence as `Stripe`s, and the person's edits to them:
     - A click keeps or cuts a stripe (`stripe_press`).
@@ -496,6 +513,7 @@ sequenceDiagram
 - `crates/vidcut/src/gui/speech.rs`, `crates/vidcut/src/gui/retime.rs`
 - `crates/vidcut/src/gui/mixer.rs`, `crates/vidcut/src/gui/ducking.rs`
 - `crates/vidcut/src/gui/dialog.rs`, `crates/vidcut/src/gui/look_tiles.rs`
+- `crates/vidcut/src/gui/placing.rs`, `crates/vidcut/src/gui/inspector.rs`
 - `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/snapshot.rs`, `crates/vidcut/src/live/project.rs`, `crates/vidcut/src/live/jobs.rs`
 - `crates/vidcut/src/live/missing.rs`, `crates/vidcut/src/live/workers.rs`, `crates/vidcut/src/live/player.rs`
 - `crates/vidcut/src/ipc/server.rs`, `crates/vidcut/src/ipc/registry.rs`

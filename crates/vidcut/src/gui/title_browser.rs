@@ -150,8 +150,15 @@ struct Card {
     fraction: f64,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LeftTab {
+    #[default]
+    Pool,
+    Titles,
+    Inspector,
+}
+
 pub struct Browser {
-    pub open: bool,
     pub hover_scrub: bool,
     cards: HashMap<String, Card>,
     hovered: Option<(String, i64)>,
@@ -160,7 +167,6 @@ pub struct Browser {
 impl Default for Browser {
     fn default() -> Self {
         Self {
-            open: false,
             hover_scrub: true,
             cards: HashMap::new(),
             hovered: None,
@@ -269,14 +275,14 @@ impl Thumbs {
 impl Workspace {
     pub(super) fn left_tabs(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui
-                .selectable_label(!self.titles.open, "Media Pool")
-                .clicked()
-            {
-                self.titles.open = false;
-            }
-            if ui.selectable_label(self.titles.open, "Titles").clicked() {
-                self.titles.open = true;
+            for (tab, label) in [
+                (LeftTab::Pool, "Media Pool"),
+                (LeftTab::Titles, "Titles"),
+                (LeftTab::Inspector, "Inspector"),
+            ] {
+                if ui.selectable_label(self.left == tab, label).clicked() {
+                    self.left = tab;
+                }
             }
         });
     }
