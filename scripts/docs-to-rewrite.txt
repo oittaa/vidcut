@@ -1,5 +1,3 @@
-README.md
-docs/cli.md
 docs/cut-page-spec.md
 docs/design/analysis.md
 docs/design/export.md
@@ -10,8 +8,6 @@ docs/design/playback.md
 docs/design/requests.md
 docs/design/threads.md
 docs/deviations.md
-docs/gotchas.md
-docs/roadmap.md
 docs/todo/alsa-audio-devices.md
 docs/todo/animated-webp-ffmpeg-8.md
 docs/todo/burn-in-ahead.md
@@ -34,4 +30,3 @@ docs/todo/vaapi-amd-dcc.md
 docs/todo/voice-signatures.md
 docs/todo/vulkan-video.md
 docs/todo/wgpu-configure-gate.md
-docs/tools.md

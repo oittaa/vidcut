@@ -1,52 +1,124 @@
 # Developer tools
 
-**Fixtures:** generate one (cached, prints its path):
+**Fixtures:** this command makes a fixture, caches it and prints its path:
 
 ```bash
 cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 60 600
 ```
 
-`g=GOP` and `b=BFRAMES` set the keyframe spacing and B-frames (H.264 with B-frames has open GOPs). `busy` adds noise around the barcode, new in every frame: at 4K60, 260 to 400 Mbit/s, as heavy to decode as camera footage.
+- `g=GOP` sets the keyframe spacing. `b=BFRAMES` sets the B-frames.
+- H.264 with B-frames has open GOPs.
+- `busy` adds noise around the barcode, new in each frame. At 4K60 this gives 260 to 400 Mbit/s, as heavy to decode as camera footage.
 
-**Project speed:** `scripts/history-speed.sh [EDITS]` (release builds) makes a project of 300 media and 2000 clips in a temporary folder, with `FILL` undo steps (100). It then times EDITS edits, each followed by a command that only reads, and prints the history's size after each.
+**Project speed:** `scripts/history-speed.sh [EDITS]` (release builds).
 
-**Step-back speed:** `scripts/step-back-speed.py [STEPS] [MB…]` (release builds) opens a window on a 4K 10-bit HEVC clip with keyframes 2 s apart. It times STEPS steps back (100), one request each, with `player.video_memory_mb` at each MB given (1024 8192). `CLIP=FILE` times another clip.
+- It makes a project of 300 media and 2000 clips in a temporary folder, with `FILL` undo steps (100).
+- It then times EDITS edits. A command that only reads follows each edit.
+- It prints the size of the history after each edit.
 
-**Slow and dropped frames:** `scripts/playback-check.py [--log DIR] [CODEC…]` (`make playback`, release builds) opens a window on 4K60 `busy` AV1, 10-bit HEVC and VP9 clips with keyframes 2 s apart. It plays forward and backward, jumps and plays, steps both ways and runs and steps Dynamic Trim, each once. It prints, for each move, the frames the viewer showed late or skipped, the two-up's frames passed over, and each step's time. It fails when any frame was late, skipped or passed over. `--log` keeps each window's debug log (`VIDCUT_DEBUG`) as `DIR/CODEC.log`.
+**Step-back speed:** `scripts/step-back-speed.py [STEPS] [MB…]` (release builds).
 
-**transcribe.cpp's bindings:** `python3 scripts/transcribe-sys.py BINDINGS` writes crates/transcribe-cpp-sys/src/transcribe_sys.rs from the bindings the transcribe-cpp-sys crate ships (its bindings/rust/sys/src/transcribe_sys.rs), each function calling the library vidcut loads at run time. With a new transcribe.cpp, run it on that version's bindings, and put its prebuilt libraries' sizes and SHA-256 in `transcribe::RUNTIME`.
+- It opens a window on a 4K 10-bit HEVC clip with keyframes 2 s apart.
+- It times STEPS steps back (100), one request for each step.
+- It does this with `player.video_memory_mb` at each MB given (1024 8192).
+- `CLIP=FILE` times another clip.
 
-**Speech recognition speed:** `python3 scripts/stt-speed.py [--audio FILE] [--seconds S] [--devices KINDS] [MODEL[@PIECE]...]` times speech recognition models on each device of the computer through transcribe.cpp: the load, two runs over the first S seconds (600) of FILE (`nasa-speech-1979`, fetched from the media manifest), and the device memory the model holds. MODEL is a GGUF file or REPO/FILE of a handy-computer repository on Hugging Face (Parakeet Ultra, Whisper large-v3 and Qwen3-ASR 1.7B at Q8_0), downloaded into `$VIDCUT_TEST_DATA/models`; MODEL@30 feeds it 30 s pieces. The first run puts transcribe.cpp's prebuilt library for the system and the Python packages it needs into `$VIDCUT_TEST_DATA/stt-speed`; the clip, the library and the models are checked against their SHA-256.
+**Slow and dropped frames:** `scripts/playback-check.py [--log DIR] [CODEC…]` (`make playback`, release builds).
 
-**Threads:** `scripts/threads.sh [PID] [SECONDS]` (Linux) prints once a second the process's threads by name, with their total and the resident memory: `vidcut-play-vid=32` is the player's decode thread and the 31 FFmpeg started from it, which carry its name (Linux keeps 15 characters of a name). PID is the newest `vidcut` by default. `VIDCUT_DEBUG`'s `[decoding]` lines say each reader's thread count as it opens, and how many readers are open as one opens or closes.
+- It opens a window on 4K60 `busy` AV1, 10-bit HEVC and VP9 clips with keyframes 2 s apart.
+- It does each of these moves once: play forward, play backward, jump and play, step both ways, and run and step Dynamic Trim.
+- For each move, it prints:
+  - the frames that the viewer showed late or skipped,
+  - the frames of the two-up that it passed over,
+  - the time of each step.
+- It fails when a frame was late, skipped or passed over.
+- `--log` keeps the debug log (`VIDCUT_DEBUG`) of each window as `DIR/CODEC.log`.
 
-**GPU encoders:** `cargo run -p vidcut-av --example encoders` test-encodes every GPU encoder (NVENC, VAAPI, AMF, QSV) on every GPU, uncached.
+**transcribe.cpp's bindings:** `python3 scripts/transcribe-sys.py BINDINGS`.
 
-**Other FFmpeg versions:** `scripts/ffmpeg-check.sh [TARGET…]` (Docker) runs `scripts/check.sh full` against the checkout in a container per target, and prints a summary.
-- Targets: `lts` (Ubuntu 26.04's FFmpeg 8.0), `release` (the newest release) and `master` (FFmpeg's git master, allowed to fail). Default: `lts release`.
-- `--fast` runs `scripts/check.sh`; `-- CMD` runs any command, `-- bash` a shell.
-- The containers have no GPU, display or audio device. `scripts/ffmpeg-host.sh [release|master] [-- CMD]` runs a command on this computer, with its GPU, against the target's FFmpeg: copied out of the image to `target/ffmpeg/TARGET/prefix` (once for each image), with `FFMPEG_DIR`, `LD_LIBRARY_PATH` and a cargo target directory of its own (`target/ffmpeg/TARGET/cargo`) set, and a linker wrapper that searches FFmpeg's directory first (alsa-sys puts the system's ahead of it). Its FFmpeg runs with this computer's libraries, Ubuntu 26.04's as in the image.
-- FFmpeg's build (`scripts/ffmpeg/build-ffmpeg.sh`) is a cached image layer. `VIDCUT_FFMPEG_MASTER=COMMIT` pins master.
-- Each target's build takes about 5.5 GB, the images about 3 GB. To free them: `docker volume rm $(docker volume ls -q -f name=vidcut-ffmpeg)` and `docker image rm vidcut-ffmpeg:lts vidcut-ffmpeg:release vidcut-ffmpeg:master`.
-- A newer release: put its version and tarball sha256 in `scripts/ffmpeg/release.env` (the steps are there).
-- Where those builds are already installed, `scripts/with-ffmpeg.sh 8.1 -- cargo test -p vidcut-av --lib` (also `9.0.2` and `lts`) selects one. `lts` is Ubuntu 26.04's FFmpeg 8.0, the default `pkg-config` finds. `8.1` is FFmpeg 8.1.3 at `/opt/ffmpeg/8.1`. `9.0.2` and `release` select the release in `scripts/ffmpeg/release.env`, at `/opt/ffmpeg/9.0.2`. `8.1` and that release get the linker wrapper and a cargo target directory of their own, as `ffmpeg-host.sh` does.
+- It writes crates/transcribe-cpp-sys/src/transcribe_sys.rs from the bindings that the transcribe-cpp-sys crate ships (its bindings/rust/sys/src/transcribe_sys.rs).
+- In the file that it writes, each function calls the library that vidcut loads at run time.
+- For a new transcribe.cpp, run it on the bindings of that version. Then put the sizes and SHA-256 of its prebuilt libraries in `transcribe::RUNTIME`.
 
-**The macOS build, checked from Windows:** `cargo clippy --target aarch64-apple-darwin --workspace --all-targets -- -D warnings`, after `rustup target add aarch64-apple-darwin`. Nothing is linked or run. With `FFMPEG_DIR` set as usual, it needs macOS's C headers from Zig (`winget install zig.zig`): set `BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin="-isystem ZIG/lib/include -isystem ZIG/lib/libc/include/any-macos-any"`, ZIG being the folder with `zig.exe`.
+**Speech recognition speed:** `python3 scripts/stt-speed.py [--audio FILE] [--seconds S] [--devices KINDS] [MODEL[@PIECE]...]`.
 
-**A smaller FFmpeg:** `VIDCUT_FFMPEG_WITHOUT=zscale,libx264` treats those parts as missing.
+- It times speech recognition models through transcribe.cpp, on each device of the computer.
+- It times the load and two runs over the first S seconds (600) of FILE. It also gives the device memory that the model holds.
+- The default FILE is `nasa-speech-1979`, which it gets from the media manifest.
+- MODEL is a GGUF file, or REPO/FILE of a handy-computer repository on Hugging Face (Parakeet Ultra, Whisper large-v3 and Qwen3-ASR 1.7B at Q8_0).
+  - It downloads the models into `$VIDCUT_TEST_DATA/models`.
+  - MODEL@30 gives the model 30 s pieces.
+- The first run puts two things into `$VIDCUT_TEST_DATA/stt-speed`: the prebuilt transcribe.cpp library for the system, and the Python packages that it needs.
+- It checks the clip, the library and the models against their SHA-256.
+
+**Threads:** `scripts/threads.sh [PID] [SECONDS]` (Linux).
+
+- Once a second, it prints the threads of the process by name, with their total and the resident memory.
+- Example: `vidcut-play-vid=32` is the decode thread of the player and the 31 threads that FFmpeg started from it.
+  - The FFmpeg threads carry the name of the thread that started them.
+  - Linux keeps 15 characters of a thread name.
+- By default, PID is the newest `vidcut`.
+- The `[decoding]` lines of `VIDCUT_DEBUG` give the thread count of each reader when it opens. They also give how many readers are open when one opens or closes.
+
+**GPU encoders:** `cargo run -p vidcut-av --example encoders` makes a test encode with each GPU encoder (NVENC, VAAPI, AMF, QSV) on each GPU. It does not use the cache.
+
+**Other FFmpeg versions:** `scripts/ffmpeg-check.sh [TARGET…]` (Docker) runs `scripts/check.sh full` against the checkout, in a container for each target. Then it prints a summary.
+
+- Targets:
+  - `lts`: Ubuntu 26.04's FFmpeg 8.0.
+  - `release`: the newest release.
+  - `master`: FFmpeg's git master. It is allowed to fail.
+  - The default is `lts release`.
+- `--fast` runs `scripts/check.sh`. `-- CMD` runs any command, and `-- bash` runs a shell.
+- The containers have no GPU, display or audio device.
+- `scripts/ffmpeg-host.sh [release|master] [-- CMD]` runs a command on this computer, with its GPU, against the FFmpeg of the target.
+  - It copies FFmpeg out of the image to `target/ffmpeg/TARGET/prefix`, once for each image.
+  - It sets `FFMPEG_DIR`, `LD_LIBRARY_PATH` and a cargo target directory of its own (`target/ffmpeg/TARGET/cargo`).
+  - It sets a linker wrapper that searches the FFmpeg directory first. This is necessary because alsa-sys puts the directory of the system ahead of it.
+  - Its FFmpeg runs with the libraries of this computer: Ubuntu 26.04's, as in the image.
+- The FFmpeg build (`scripts/ffmpeg/build-ffmpeg.sh`) is a cached image layer. `VIDCUT_FFMPEG_MASTER=COMMIT` pins master.
+- The build of each target takes about 5.5 GB, and the images take about 3 GB.
+  - To free the space: `docker volume rm $(docker volume ls -q -f name=vidcut-ffmpeg)` and `docker image rm vidcut-ffmpeg:lts vidcut-ffmpeg:release vidcut-ffmpeg:master`.
+- For a newer release, put its version and tarball sha256 in `scripts/ffmpeg/release.env`. The steps are in that file.
+- Where those builds are already installed, `scripts/with-ffmpeg.sh 8.1 -- cargo test -p vidcut-av --lib` selects one. The other names are `9.0.2` and `lts`.
+  - `lts` is Ubuntu 26.04's FFmpeg 8.0, the default that `pkg-config` finds.
+  - `8.1` is FFmpeg 8.1.3 at `/opt/ffmpeg/8.1`.
+  - `9.0.2` and `release` select the release in `scripts/ffmpeg/release.env`, at `/opt/ffmpeg/9.0.2`.
+  - `8.1` and that release get the linker wrapper and a cargo target directory of their own, as with `ffmpeg-host.sh`.
+
+**The macOS build, checked from Windows:** `cargo clippy --target aarch64-apple-darwin --workspace --all-targets -- -D warnings`, after `rustup target add aarch64-apple-darwin`.
+
+- It does not link or run anything.
+- With `FFMPEG_DIR` set as usual, it needs the C headers of macOS from Zig (`winget install zig.zig`).
+- Set `BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin="-isystem ZIG/lib/include -isystem ZIG/lib/libc/include/any-macos-any"`. ZIG is the folder with `zig.exe`.
+
+**A smaller FFmpeg:** `VIDCUT_FFMPEG_WITHOUT=zscale,libx264` makes vidcut operate as if those parts are missing.
 
 **Media inspection** (`crates/vidcut-av/examples/`):
+
 - `read_barcode FILE...`: the barcode index in images or video.
 - `packets FILE [FROM TO]`: video packets in decode order, with pts, dts and keyframe flags.
 - `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
-- `tiles FILE [HEIGHT] [gpu]`: timeline tiles, timed at spacings from 0.25 to 30 s; `gpu` decodes on the GPU in use.
-- `seek_check FILE...`: seeks to every frame of barcode fixtures on the CPU and on each GPU decoder, and lists the seeks that show other frames.
-- `player_load PROJECT [SECONDS] [gpu]` (release build): plays the timeline with the real player and a paced device, presenting 60 times a second; alone, beside four filmstrip workers and a job that yield to players at the lowest priority (one worker at a time decodes beside the player, as timeline tiles do), and the load alone. It prints the presents that showed the picture before, the tiles and job frames a second, the threads at most and the peak memory.
-- `decode_speed FILE [FRAMES]`: decoding speed, cores and seek times on the CPU and on each GPU decoder.
-- `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build): exports a stretch at a bitrate (`qN`: constant quality) with `video.*` settings (`passes=2`), and prints the bitrate reached, the time and the luma PSNR.
+- `tiles FILE [HEIGHT] [gpu]`: timeline tiles, timed at spacings from 0.25 to 30 s. `gpu` decodes on the GPU in use.
+- `seek_check FILE...`: seeks to each frame of barcode fixtures, on the CPU and on each GPU decoder. It lists the seeks that show other frames.
+- `player_load PROJECT [SECONDS] [gpu]` (release build):
+  - It plays the timeline with the real player and a paced device, which presents 60 times a second.
+  - It measures three runs: the player alone, the player beside four filmstrip workers and a job, and that load alone.
+  - The workers and the job yield to players, at the lowest priority.
+  - One worker at a time decodes beside the player, as timeline tiles do.
+  - It prints the presents that showed the previous picture, the tiles and job frames each second, the maximum thread count and the peak memory.
+- `decode_speed FILE [FRAMES]`: the decoding speed, the cores and the seek times, on the CPU and on each GPU decoder.
+- `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build):
+  - It exports a stretch at a bitrate (`qN`: constant quality), with `video.*` settings (`passes=2`).
+  - It prints the bitrate that it reached, the time and the luma PSNR.
 
 **Debugging:**
-- `VIDCUT_DEBUG=1` prints to stderr what vidcut decodes and draws, and why. A GUI still ending 10 s after its window closed says the stage and every thread's wait state, then aborts under `VIDCUT_DEBUG` (exits with 1 otherwise): `VIDCUT_DEBUG=1 gdb -q -batch -ex run -ex "thread apply all bt 15" --args target/debug/vidcut -p PROJECT` shows every thread's stack at the hang.
-- `VIDCUT_AV_LOG=error` (or `warning`, `verbose`, `debug`) shows FFmpeg's own messages.
-- `VIDCUT_HWDEC` picks the player's GPU decoder: `nvdec[:CUDA index]`, `vaapi[:render node]`, `d3d11va[:adapter index]`, `videotoolbox` or `none`.
-- `WGPU_BACKEND` (`vulkan`, `metal`, `dx12`) and `WGPU_POWER_PREF` (`low`, `high`) pick wgpu's backend and adapter. `WGPU_VALIDATION=0` turns off the validation layers in debug builds.
+
+- `VIDCUT_DEBUG=1` prints to stderr what vidcut decodes and draws, and why.
+- A GUI that has not ended 10 s after its window closed tells the stage and the wait state of each thread.
+  - Then it aborts under `VIDCUT_DEBUG`. Without `VIDCUT_DEBUG`, it exits with 1.
+  - `VIDCUT_DEBUG=1 gdb -q -batch -ex run -ex "thread apply all bt 15" --args target/debug/vidcut -p PROJECT` shows the stack of each thread at the hang.
+- `VIDCUT_AV_LOG=error` (or `warning`, `verbose`, `debug`) shows the messages of FFmpeg itself.
+- `VIDCUT_HWDEC` selects the GPU decoder of the player: `nvdec[:CUDA index]`, `vaapi[:render node]`, `d3d11va[:adapter index]`, `videotoolbox` or `none`.
+- `WGPU_BACKEND` (`vulkan`, `metal`, `dx12`) and `WGPU_POWER_PREF` (`low`, `high`) select the backend and the adapter of wgpu.
+- `WGPU_VALIDATION=0` turns off the validation layers in debug builds.
