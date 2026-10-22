@@ -12,7 +12,14 @@ pub struct Placing {
     pub levels: Vec<Level>,
 }
 
-fn level(p: &Picture, (w, h): (f64, f64), [fx, fy, fw, fh]: [f64; 4]) -> Level {
+pub fn flipped(p: &Picture, [x, y]: [f64; 2]) -> [f64; 2] {
+    let sx = if p.flip_horizontal { -1.0 } else { 1.0 };
+    let sy = if p.flip_vertical { -1.0 } else { 1.0 };
+    [0.5 + sx * (x - 0.5), 0.5 + sy * (y - 0.5)]
+}
+
+fn level(placed: &Placed, (w, h): (f64, f64), [fx, fy, fw, fh]: [f64; 4]) -> Level {
+    let p = &placed.picture;
     let [px, py] = p.place();
     let [zx, zy] = p.scale();
     let (sin, cos) = p.turn().to_radians().sin_cos();
@@ -22,11 +29,14 @@ fn level(p: &Picture, (w, h): (f64, f64), [fx, fy, fw, fh]: [f64; 4]) -> Level {
         fx + fw / 2.0 + (px - 0.5) * w,
         fy + fh / 2.0 + (py - 0.5) * h,
     );
-    let (a, b) = (sx * cos / (zx * fw), -sx * sin / (zx * fw));
-    let (c, d) = (sy * sin / (zy * fh), sy * cos / (zy * fh));
+    let (k, [u0, v0]) = placed
+        .zoomed()
+        .map_or((1.0, Picture::MIDDLE), |b| (b.size, flipped(p, b.center)));
+    let (a, b) = (k * sx * cos / (zx * fw), -k * sx * sin / (zx * fw));
+    let (c, d) = (k * sy * sin / (zy * fh), k * sy * cos / (zy * fh));
     let c0 = p.crop;
     Level {
-        back: [a, b, 0.5 - a * ox - b * oy, c, d, 0.5 - c * ox - d * oy],
+        back: [a, b, u0 - a * ox - b * oy, c, d, v0 - c * ox - d * oy],
         shown: [c0.left, c0.top, 1.0 - c0.right, 1.0 - c0.bottom],
     }
 }
@@ -63,7 +73,7 @@ impl Placing {
         let whole = [0.0, 0.0, frame.0, frame.1];
         let mut levels: Vec<Level> = Vec::with_capacity(placed.len());
         for (i, p) in placed.iter().enumerate().rev() {
-            let own = level(&p.picture, frame, if i == 0 { fitted } else { whole });
+            let own = level(p, frame, if i == 0 { fitted } else { whole });
             let back = match levels.last() {
                 Some(outer) => then(&outer.back, &own.back, frame),
                 None => own.back,
@@ -185,7 +195,8 @@ pub fn detail(placed: &[Placed]) -> f64 {
         .iter()
         .map(|p| {
             let [x, y] = p.picture.scale();
-            x.max(y)
+            let near = p.picture.dynamic_zoom.map_or(1.0, |z| z.closest());
+            x.max(y) / near
         })
         .product()
 }

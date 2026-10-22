@@ -83,7 +83,8 @@ pub struct ShownTitle {
     pub fade: Option<Ramp>,
 }
 
-/// Where a piece is in a title's clip, which a moving title is placed by.
+/// Where a piece is in its clip, which a moving title and a Dynamic Zoom
+/// are placed by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Run {
     /// Frames of the clip before the piece's first.
@@ -103,6 +104,10 @@ impl Run {
     pub fn top(&self, k: i64, picture: f64, tall: f64) -> f64 {
         let t = ((self.at + k) as f64 + 0.5) / self.of.max(1) as f64;
         picture - t * (picture + tall)
+    }
+
+    pub fn share(&self) -> f64 {
+        self.at as f64 / self.of.max(1) as f64
     }
 }
 
@@ -140,6 +145,32 @@ pub struct Over {
 pub struct Placed {
     pub clip: String,
     pub picture: Picture,
+    /// Where the piece's first frame is in the clip, for a picture with a
+    /// Dynamic Zoom.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<Run>,
+}
+
+impl Placed {
+    pub fn of(clip: &Clip, picture: Picture, run: Run) -> Self {
+        Self {
+            clip: clip.id.clone(),
+            run: picture.dynamic_zoom.map(|_| run),
+            picture,
+        }
+    }
+
+    pub fn after(&self, k: i64) -> Self {
+        Self {
+            run: self.run.map(|r| r.after(k)),
+            ..self.clone()
+        }
+    }
+
+    pub fn zoomed(&self) -> Option<crate::model::ZoomBox> {
+        let z = self.picture.dynamic_zoom?;
+        Some(z.at(self.run.map_or(0.0, |r| r.share())))
+    }
 }
 
 /// How a dissolve's level goes over its frames (decision D50): straight
@@ -394,7 +425,7 @@ impl VideoPiece {
                     image: image.clone(),
                     pace: if still { *pace } else { pace.after(k) },
                     color_space: *color_space,
-                    placed: placed.clone(),
+                    placed: placed.iter().map(|p| p.after(k)).collect(),
                 }
             }
             Self::Black { .. } => Self::Black { frames },
@@ -440,7 +471,8 @@ impl VideoPiece {
                     && pace.is_normal()
                     && p2.is_normal()
                     && *source_frame + *frames == *s2
-                    && placed == l2
+                    && placed.len() == l2.len()
+                    && placed.iter().zip(l2).all(|(a, b)| a.after(*frames) == *b)
             }
             (
                 Self::Mix { under, over },
@@ -677,7 +709,20 @@ pub(crate) fn plays_inside(c: &Clip) -> bool {
     c.compound.as_ref().is_some_and(|k| !k.tracks.is_empty())
 }
 
-type Within = Vec<Vec<Vec<Placed>>>;
+#[derive(Debug, Clone, Default)]
+struct Nest {
+    outer: Vec<Placed>,
+    run: Option<Run>,
+}
+
+fn run_of(c: &Clip, run: Option<Run>) -> Run {
+    run.unwrap_or(Run {
+        at: -c.start,
+        of: c.duration,
+    })
+}
+
+type Within = Vec<Vec<Nest>>;
 
 pub const NESTED: usize = 8;
 
@@ -690,7 +735,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
     let mut within: Within = out
         .tracks
         .iter()
-        .map(|t| vec![Vec::new(); t.clips.len()])
+        .map(|t| vec![Nest::default(); t.clips.len()])
         .collect();
     for _ in 0..NESTED {
         if !holds(&out) {
@@ -701,10 +746,10 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
             let (mut host, mut host_within) = (t.clone(), Vec::new());
             host.clips.clear();
             let mut inner = Vec::new();
-            for (c, outer) in t.clips.iter().zip(w) {
+            for (c, nest) in t.clips.iter().zip(w) {
                 if !plays_inside(c) {
                     host.clips.push(c.clone());
-                    host_within.push(outer.clone());
+                    host_within.push(nest.clone());
                     continue;
                 }
                 if !c.enabled {
@@ -714,11 +759,8 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     .picture
                     .iter()
                     .filter(|x| !x.is_usual())
-                    .map(|x| Placed {
-                        clip: c.id.clone(),
-                        picture: x.clone(),
-                    })
-                    .chain(outer.iter().cloned())
+                    .map(|x| Placed::of(c, x.clone(), run_of(c, nest.run)))
+                    .chain(nest.outer.iter().cloned())
                     .collect();
                 let k = c.compound.as_ref().expect("plays inside");
                 for n in k.tracks.iter().filter(|n| n.kind == t.kind) {
@@ -729,11 +771,17 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     v.volume_db = t.volume_db;
                     v.video_enabled &= t.video_enabled;
                     v.transitions.clear();
-                    let mut clips: Vec<(Clip, Vec<Placed>)> = n
+                    let mut clips: Vec<(Clip, Nest)> = n
                         .clips
                         .iter()
                         .filter_map(|x| inside(x, c))
-                        .map(|y| (y, chain.clone()))
+                        .map(|(y, run)| {
+                            let nest = Nest {
+                                outer: chain.clone(),
+                                run: Some(run),
+                            };
+                            (y, nest)
+                        })
                         .collect();
                     clips.sort_by_key(|(y, _)| y.start);
                     let (clips, chains) = clips.into_iter().unzip();
@@ -754,30 +802,44 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
     Some((out, within))
 }
 
-fn placed_of(c: &Clip, within: &[Placed], over: bool) -> Vec<Placed> {
+fn placed_of(c: &Clip, nest: Option<&Nest>, over: bool, x: i64) -> Vec<Placed> {
+    let outer = nest.map_or(&[][..], |n| n.outer.as_slice());
     let own = c.picture.clone().filter(|x| !x.is_usual());
-    if own.is_none() && within.is_empty() && !over {
+    if own.is_none() && outer.is_empty() && !over {
         return Vec::new();
     }
-    let own = Placed {
-        clip: c.id.clone(),
-        picture: own.unwrap_or_default(),
-    };
-    std::iter::once(own).chain(within.iter().cloned()).collect()
+    let run = run_of(c, nest.and_then(|n| n.run)).after(x);
+    let own = Placed::of(c, own.unwrap_or_default(), run);
+    std::iter::once(own)
+        .chain(outer.iter().map(|p| p.after(x)))
+        .collect()
 }
 
-fn inside(x: &Clip, c: &Clip) -> Option<Clip> {
-    if c.speed() != 1.0 {
+fn inside(x: &Clip, c: &Clip) -> Option<(Clip, Run)> {
+    let speed = c.speed();
+    if speed != 1.0 {
         let (k0, k1) = shown_between(c, x.start, x.end())?;
         let mut y = x.clone();
-        y.walk(c.source_at(c.start + k0) - x.start);
+        let walked = c.source_at(c.start + k0) - x.start;
+        y.walk(walked);
         (y.start, y.duration) = (c.start + k0, k1 - k0);
         y.speed = paced(c, x.speed.as_ref(), k0);
         if let Some(a) = y.audio.as_mut() {
             a.head = 0;
             a.tail = 0;
         }
-        return Some(y);
+        let run = if speed > 0.0 {
+            Run {
+                at: (walked as f64 / speed).round() as i64 - y.start,
+                of: ((x.duration as f64 / speed).round() as i64).max(1),
+            }
+        } else {
+            Run {
+                at: walked - y.start,
+                of: x.duration,
+            }
+        };
+        return Some((y, run));
     }
     let (first, last) = (c.source_in, c.source_in + c.duration);
     let (s, e) = (x.start.max(first), x.end().min(last));
@@ -794,7 +856,11 @@ fn inside(x: &Clip, c: &Clip) -> Option<Clip> {
         a.head = 0;
         a.tail = 0;
     }
-    Some(y)
+    let run = Run {
+        at: s - x.start - y.start,
+        of: x.duration,
+    };
+    Some((y, run))
 }
 
 pub(crate) fn shown_between(c: &Clip, a: i64, b: i64) -> Option<(i64, i64)> {
@@ -901,21 +967,22 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                 .and_then(|m| m.info.video.as_ref())
                 .is_some_and(|v| crate::place::fills(v, (s.width, s.height)))
     };
-    let picture = |c: &Clip, outer: &[Placed], over: bool, x: i64, y: i64| -> Result<VideoPiece> {
-        let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
-        let (path, origin) = origin_of(m);
-        Ok(VideoPiece::Source {
-            media: c.media.clone(),
-            path,
-            origin,
-            source_frame: c.source_at(x),
-            frames: y - x,
-            image: image_of(m),
-            pace: c.pace().after(x - c.start),
-            color_space: m.color_space,
-            placed: placed_of(c, outer, over),
-        })
-    };
+    let picture =
+        |c: &Clip, nest: Option<&Nest>, over: bool, x: i64, y: i64| -> Result<VideoPiece> {
+            let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
+            let (path, origin) = origin_of(m);
+            Ok(VideoPiece::Source {
+                media: c.media.clone(),
+                path,
+                origin,
+                source_frame: c.source_at(x),
+                frames: y - x,
+                image: image_of(m),
+                pace: c.pace().after(x - c.start),
+                color_space: m.color_space,
+                placed: placed_of(c, nest, over, x),
+            })
+        };
     let mut video = Vec::new();
     for w in cuts.windows(2) {
         let (x, y) = (w[0], w[1]);
@@ -923,10 +990,9 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         for ((t, played), within) in tracks.iter().zip(&dissolves).zip(&inside) {
             let shows = |c: &&Clip| visible(t, c);
             let shown = |c: &Clip, ramp: Option<Ramp>, below: bool| -> Result<Layer> {
-                let outer = within
-                    .and_then(|w| w.get(t.clips.iter().position(|x| std::ptr::eq(x, c))?))
-                    .map_or(&[][..], Vec::as_slice);
-                let piece = picture(c, outer, below && !fills(c), x, y)?;
+                let nest =
+                    within.and_then(|w| w.get(t.clips.iter().position(|x| std::ptr::eq(x, c))?));
+                let piece = picture(c, nest, below && !fills(c), x, y)?;
                 Ok(match &piece {
                     VideoPiece::Source { placed, .. } if !placed.is_empty() => {
                         Layer::Placed(piece, ramp)

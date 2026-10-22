@@ -2,10 +2,12 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use serde_json::{Value, json};
-use vidcut_core::model::{Clip, Picture, PictureTool, Project, TrackKind};
-use vidcut_core::ops::picture::has_picture;
-use vidcut_core::place::{Level, Placing};
-use vidcut_core::render::Placed;
+use vidcut_core::model::{
+    Clip, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind, ZoomBox,
+};
+use vidcut_core::ops::picture::{has_picture, zoom_shown};
+use vidcut_core::place::{Level, Placing, flipped};
+use vidcut_core::render::{Placed, Run};
 
 use super::timeline::tools::landing;
 use super::workspace::Workspace;
@@ -15,6 +17,9 @@ const SNAP: f32 = 8.0;
 const LIFT: f32 = 26.0;
 const LINES: [f64; 3] = [1.0 / 3.0, 0.5, 2.0 / 3.0];
 const ZOOM: (f64, f64) = (0.01, 100.0);
+const REACH: f64 = 100.0;
+const START: Color32 = Color32::from_rgb(70, 200, 90);
+const END: Color32 = Color32::from_rgb(230, 70, 60);
 const LEFT_SHOWING: f32 = 4.0;
 const TURN_BAND: f32 = 12.0;
 const STEP: f64 = 15.0;
@@ -38,12 +43,36 @@ impl Side {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Boxed {
+    Start,
+    End,
+}
+
+impl Boxed {
+    fn of(self, z: &DynamicZoom) -> ZoomBox {
+        match self {
+            Boxed::Start => z.start,
+            Boxed::End => z.end,
+        }
+    }
+
+    fn set(self, z: &mut DynamicZoom, b: ZoomBox) {
+        match self {
+            Boxed::Start => z.start = b,
+            Boxed::End => z.end = b,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hold {
     Move,
     Corner,
     Stretch(Side),
     Turn,
     Crop(Side),
+    ZoomMove(Boxed),
+    ZoomSize(Boxed),
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +110,7 @@ struct Shown {
     clip: String,
     picture: Picture,
     level: Level,
+    middle: [f64; 2],
     origin: Pos2,
     scale: Vec2,
 }
@@ -115,7 +145,46 @@ impl Shown {
     }
 
     fn pivot(&self) -> Pos2 {
-        self.screen([0.5, 0.5])
+        self.screen(self.middle)
+    }
+
+    fn zoom(&self) -> DynamicZoom {
+        self.picture.dynamic_zoom.unwrap_or_default()
+    }
+
+    fn box_point(&self, at: [f64; 2]) -> Pos2 {
+        self.screen(flipped(&self.picture, at))
+    }
+
+    fn box_corners(&self, b: ZoomBox) -> [Pos2; 4] {
+        let ([x, y], r) = (b.center, b.size / 2.0);
+        [
+            [x - r, y - r],
+            [x + r, y - r],
+            [x + r, y + r],
+            [x - r, y + r],
+        ]
+        .map(|q| self.box_point(q))
+    }
+
+    fn box_holds(&self, b: ZoomBox, p: Pos2) -> bool {
+        let [x, y] = flipped(&self.picture, self.uv(p));
+        let r = b.size / 2.0;
+        (x - b.center[0]).abs() <= r && (y - b.center[1]).abs() <= r
+    }
+
+    fn flips(&self) -> [f64; 2] {
+        let sign = |on: bool| if on { -1.0 } else { 1.0 };
+        [
+            sign(self.picture.flip_horizontal),
+            sign(self.picture.flip_vertical),
+        ]
+    }
+
+    fn span(&self) -> [f64; 2] {
+        let across = self.screen([1.0, 0.5]) - self.screen([0.0, 0.5]);
+        let down = self.screen([0.5, 1.0]) - self.screen([0.5, 0.0]);
+        [f64::from(across.length()), f64::from(down.length())]
     }
 
     fn turn_at(&self) -> Pos2 {
@@ -170,6 +239,20 @@ impl Shown {
                 .into_iter()
                 .find(|s| near(self.side(*s)))
                 .map(Hold::Crop),
+            PictureTool::DynamicZoom => {
+                let z = self.zoom();
+                let ends = [Boxed::Start, Boxed::End];
+                if let Some(e) = ends
+                    .into_iter()
+                    .find(|e| self.box_corners(e.of(&z)).into_iter().any(near))
+                {
+                    return Some(Hold::ZoomSize(e));
+                }
+                ends.into_iter()
+                    .filter(|e| self.box_holds(e.of(&z), p))
+                    .min_by(|a, b| a.of(&z).size.total_cmp(&b.of(&z).size))
+                    .map(Hold::ZoomMove)
+            }
         }
     }
 
@@ -182,17 +265,18 @@ impl Shown {
                 CursorIcon::ResizeVertical
             }
         };
-        match hold {
-            Hold::Move => CursorIcon::Move,
-            Hold::Turn => CursorIcon::PointingHand,
-            Hold::Corner => {
-                let d = p - self.pivot();
-                if d.x * d.y > 0.0 {
-                    CursorIcon::ResizeNwSe
-                } else {
-                    CursorIcon::ResizeNeSw
-                }
+        let diagonal = |d: Vec2| {
+            if d.x * d.y > 0.0 {
+                CursorIcon::ResizeNwSe
+            } else {
+                CursorIcon::ResizeNeSw
             }
+        };
+        match hold {
+            Hold::Move | Hold::ZoomMove(_) => CursorIcon::Move,
+            Hold::Turn => CursorIcon::PointingHand,
+            Hold::Corner => diagonal(p - self.pivot()),
+            Hold::ZoomSize(e) => diagonal(p - self.box_point(e.of(&self.zoom()).center)),
             Hold::Stretch(s) | Hold::Crop(s) => along(s),
         }
     }
@@ -218,12 +302,29 @@ fn content(p: &Project, c: &Clip, (w, h): (f64, f64)) -> [f64; 4] {
     }
 }
 
-fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect) -> Option<Shown> {
+fn shape_of(
+    p: &Project,
+    c: &Clip,
+    shown: Picture,
+    picture: Rect,
+    (at, tool): (i64, PictureTool),
+) -> Option<Shown> {
     let (w, h) = (f64::from(p.settings.width), f64::from(p.settings.height));
-    let placed = [Placed {
-        clip: c.id.clone(),
-        picture: shown.clone(),
-    }];
+    let drawn = match tool {
+        PictureTool::DynamicZoom => Picture {
+            dynamic_zoom: None,
+            ..shown.clone()
+        },
+        _ => shown.clone(),
+    };
+    let run = Run {
+        at: at - c.start,
+        of: c.duration,
+    };
+    let placed = [Placed::of(c, drawn, run)];
+    let middle = placed[0]
+        .zoomed()
+        .map_or(Picture::MIDDLE, |b| flipped(&shown, b.center));
     let level = Placing::new(&placed, (w, h), content(p, c, (w, h)))
         .levels
         .pop()?;
@@ -231,9 +332,19 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect) -> Option<Show
         clip: c.id.clone(),
         picture: shown,
         level,
+        middle,
         origin: picture.min,
         scale: vec2(picture.width() / w as f32, picture.height() / h as f32),
     })
+}
+
+fn ease_label(e: Ease) -> &'static str {
+    match e {
+        Ease::Linear => "Linear",
+        Ease::EaseIn => "Ease In",
+        Ease::EaseOut => "Ease Out",
+        Ease::EaseInOut => "Ease In and Out",
+    }
 }
 
 fn rounded(v: f64, places: i32) -> f64 {
@@ -324,15 +435,38 @@ impl Workspace {
         landing(to, since.elapsed(), from, &stored).map(|t| (clip.clone(), t.clone()))
     }
 
+    fn previewed(&self, wanted: Option<(String, Picture)>) -> Option<(String, Picture)> {
+        if self.timeline.picture_grab.tool != Some(PictureTool::DynamicZoom) {
+            return wanted;
+        }
+        let (clip, picture) = match wanted {
+            Some(w) => w,
+            None => {
+                let p = self.project_shared()?;
+                let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+                let c = target(&p, &self.snap.selection.clips, at)?;
+                (c.id.clone(), c.picture.clone()?)
+            }
+        };
+        picture.dynamic_zoom.is_some().then(|| {
+            let whole = Picture {
+                dynamic_zoom: None,
+                ..picture
+            };
+            (clip, whole)
+        })
+    }
+
     fn sync_picture_preview(&mut self) {
         let wanted = self.picture_wanted();
-        let g = &mut self.timeline.picture_grab;
         if wanted.is_none() {
-            g.landing = None;
+            self.timeline.picture_grab.landing = None;
         }
-        if wanted != g.sent {
-            self.live.preview_picture(wanted.clone());
-            g.sent = wanted;
+        let shown = self.previewed(wanted);
+        let g = &mut self.timeline.picture_grab;
+        if shown != g.sent {
+            self.live.preview_picture(shown.clone());
+            g.sent = shown;
         }
     }
 
@@ -453,6 +587,7 @@ impl Workspace {
         for (label, t) in [
             ("Transform", PictureTool::Transform),
             ("Crop", PictureTool::Crop),
+            ("Dynamic Zoom", PictureTool::DynamicZoom),
         ] {
             let lit = tool == Some(t);
             let b = egui::Button::selectable(lit, label);
@@ -492,6 +627,9 @@ impl Workspace {
                 }
             }
         }
+        if tool == PictureTool::DynamicZoom {
+            self.zoom_tools(ui, clip.as_ref().map(|(id, _)| id.as_str()), &pic);
+        }
         if ui.add_enabled(found, egui::Button::new("Reset")).clicked()
             && let Some((id, _)) = &clip
         {
@@ -501,15 +639,48 @@ impl Workspace {
         }
     }
 
+    fn zoom_tools(&mut self, ui: &mut egui::Ui, clip: Option<&str>, pic: &Picture) {
+        let z = pic.dynamic_zoom.unwrap_or_default();
+        let mut wanted = None;
+        if ui
+            .add_enabled(clip.is_some(), egui::Button::new("Swap"))
+            .clicked()
+        {
+            wanted = Some(z.swapped());
+        }
+        ui.add_enabled_ui(clip.is_some(), |ui| {
+            egui::ComboBox::from_id_salt("dynamic-zoom-ease")
+                .selected_text(ease_label(z.ease))
+                .show_ui(ui, |ui| {
+                    for e in Ease::ALL {
+                        if ui.selectable_label(e == z.ease, ease_label(e)).clicked() {
+                            wanted = Some(DynamicZoom { ease: e, ..z });
+                        }
+                    }
+                });
+        });
+        if let (Some(id), Some(z)) = (clip, wanted)
+            && pic.dynamic_zoom != Some(z)
+        {
+            self.end_picture_wheel();
+            self.timeline.picture_grab.landing = None;
+            self.send(
+                "picture.set",
+                json!({ "clips": id, "dynamic_zoom": zoom_shown(&z) }),
+            );
+        }
+    }
+
     fn picture_shape(&self, picture: Rect) -> Option<Shown> {
         let p = self.project_shared()?;
         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
         let c = target(&p, &self.snap.selection.clips, at)?;
+        let tool = self.timeline.picture_grab.tool?;
         let shown = match self.picture_wanted() {
             Some((id, x)) if id == c.id => x,
             _ => c.picture.clone().unwrap_or_default(),
         };
-        shape_of(&p, c, shown, picture)
+        shape_of(&p, c, shown, picture, (at, tool))
     }
 
     fn picture_moved(
@@ -604,6 +775,42 @@ impl Workspace {
                     Side::Bottom => k.bottom = side_of(1.0 - v, k.top, lv),
                 }
             }
+            Hold::ZoomMove(e) => {
+                let mut z = p0.dynamic_zoom.unwrap_or_default();
+                let b = e.of(&z);
+                let ([u0, v0], [u1, v1]) = (s.uv(held.from), s.uv(to));
+                let [sx, sy] = s.flips();
+                let (mut dx, mut dy) = (sx * (u1 - u0), sy * (v1 - v0));
+                if shift {
+                    let [across, down] = s.span();
+                    if (dx * across).abs() >= (dy * down).abs() {
+                        dy = 0.0;
+                    } else {
+                        dx = 0.0;
+                    }
+                }
+                let at = |v: f64| rounded(v.clamp(-REACH, REACH), 4);
+                let center = [at(b.center[0] + dx), at(b.center[1] + dy)];
+                e.set(&mut z, ZoomBox { center, ..b });
+                next.now.dynamic_zoom = Some(z);
+            }
+            Hold::ZoomSize(e) => {
+                let mut z = p0.dynamic_zoom.unwrap_or_default();
+                let b = e.of(&z);
+                let middle = s.box_point(b.center);
+                let (d0, d1) = (held.from.distance(middle), to.distance(middle));
+                if d0 > 1.0 {
+                    let size = (b.size * f64::from(d1 / d0)).clamp(ZOOM.0, ZOOM.1);
+                    e.set(
+                        &mut z,
+                        ZoomBox {
+                            size: rounded(size, 4),
+                            ..b
+                        },
+                    );
+                    next.now.dynamic_zoom = Some(z);
+                }
+            }
         }
         next
     }
@@ -661,6 +868,7 @@ impl Workspace {
                 guides: (None, None),
             });
         }
+        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
         if let (Some(held), Some(to), Some(p)) = (
             self.timeline.picture_grab.held.clone(),
             pointer,
@@ -668,7 +876,7 @@ impl Workspace {
         ) && resp.dragged()
             && let Some(s0) = p
                 .clip(&held.clip)
-                .and_then(|c| shape_of(&p, c, held.start.clone(), picture))
+                .and_then(|c| shape_of(&p, c, held.start.clone(), picture, (at, tool)))
         {
             self.timeline.picture_grab.held =
                 Some(self.picture_moved(&held, &s0, to, picture, mods));
@@ -760,6 +968,7 @@ impl Workspace {
                     painter.line_segment([at - half, at + half], Stroke::new(GRAB, accent));
                 }
             }
+            PictureTool::DynamicZoom => paint_boxes(&painter, s),
         }
         if let Some(h) = &self.timeline.picture_grab.held {
             let guide = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 140));
@@ -775,8 +984,42 @@ impl Workspace {
     }
 }
 
+fn paint_boxes(painter: &egui::Painter, s: &Shown) {
+    let z = s.zoom();
+    let on = s.picture.dynamic_zoom.is_some();
+    let path = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 160));
+    painter.line_segment(
+        [s.box_point(z.start.center), s.box_point(z.end.center)],
+        path,
+    );
+    for (e, color) in [(Boxed::End, END), (Boxed::Start, START)] {
+        let b = e.of(&z);
+        let corners = s.box_corners(b);
+        let line = Stroke::new(1.5, color);
+        for i in 0..4 {
+            let edge = [corners[i], corners[(i + 1) % 4]];
+            if on {
+                painter.line_segment(edge, line);
+            } else {
+                painter.extend(egui::Shape::dashed_line(&edge, line, 6.0, 4.0));
+            }
+        }
+        for c in corners {
+            painter.rect_filled(
+                Rect::from_center_size(c, Vec2::splat(GRAB * 1.4)),
+                1.0,
+                color,
+            );
+        }
+        painter.circle_filled(s.box_point(b.center), GRAB * 0.5, color);
+    }
+}
+
 fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
     let mut params = json!({ "clips": clip });
+    if a.dynamic_zoom != b.dynamic_zoom {
+        params["dynamic_zoom"] = b.dynamic_zoom.as_ref().map_or(Value::Null, zoom_shown);
+    }
     if a.place() != b.place() {
         params["position"] = json!(b.place());
     }

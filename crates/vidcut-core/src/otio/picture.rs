@@ -1,13 +1,14 @@
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use super::EDITOR;
-use super::effects::{effect, group, keyed, ranged, rounded};
-use crate::model::{Crop, Picture, VideoInfo};
+use super::effects::{effect, group, keyed, plain, ranged, rounded};
+use crate::model::{Crop, DynamicZoom, Ease, Picture, VideoInfo, ZoomBox};
 
 const TRANSFORM: &str = "Transform";
 const CROPPING: &str = "Cropping";
 const SCALING: &str = "Retime and Scaling";
-const NAMES: [&str; 3] = [TRANSFORM, CROPPING, SCALING];
+const ZOOMING: &str = "Dynamic Zoom";
+const NAMES: [&str; 4] = [TRANSFORM, CROPPING, SCALING, ZOOMING];
 
 const ZOOM_X: &str = "transformationZoomX";
 const ZOOM_Y: &str = "transformationZoomY";
@@ -20,10 +21,15 @@ const FLIP_X: &str = "transformationFlipX";
 const FLIP_Y: &str = "transformationFlipY";
 const CROPS: [&str; 4] = ["cropLeft", "cropRight", "cropTop", "cropBottom"];
 const SCALE: &str = "scale";
+const EASE: &str = "dynamicZoomEase";
+const CENTER: &str = "dynamicZoomCenter";
+const SIZE: &str = "dynamicZoomScale";
 
 const FIT: u8 = 2;
 const REACH: f64 = 4.0;
 const TURNS: f64 = 3600.0;
+const LATER: i64 = 1000;
+const SIZES: (f64, f64) = (0.01, 100.0);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shape {
@@ -82,8 +88,13 @@ fn known(name: &str) -> &'static [&'static str] {
             ZOOM_X, ZOOM_Y, ZOOM_LINK, PAN, TILT, ROTATION, ANCHOR, FLIP_X, FLIP_Y,
         ],
         CROPPING => &CROPS,
+        ZOOMING => &[EASE, CENTER, SIZE],
         _ => &[SCALE],
     }
+}
+
+fn animated(name: &str, id: &str) -> bool {
+    name == ZOOMING && (id == CENTER || id == SIZE)
 }
 
 fn keyframed(p: &Value) -> bool {
@@ -95,9 +106,10 @@ fn keyframed(p: &Value) -> bool {
     }
 }
 
-fn parameters(effects: &[Value]) -> Option<Vec<(&str, &Value)>> {
-    let mut found = false;
-    let mut values = Vec::new();
+type Parameters<'a> = (Vec<&'static str>, Vec<(&'a str, &'a Value)>);
+
+fn parameters(effects: &[Value]) -> Option<Parameters<'_>> {
+    let (mut found, mut values) = (Vec::new(), Vec::new());
     for name in NAMES {
         let mut of = effects
             .iter()
@@ -109,20 +121,73 @@ fn parameters(effects: &[Value]) -> Option<Vec<(&str, &Value)>> {
         let Some(e) = first else {
             continue;
         };
-        found = true;
+        found.push(name);
         for p in e["metadata"][EDITOR]["Parameters"]
             .as_array()
             .into_iter()
             .flatten()
         {
             let id = p["Parameter ID"].as_str()?;
-            if !known(name).contains(&id) || keyframed(p) {
+            if !known(name).contains(&id) || keyframed(p) != animated(name, id) {
                 return None;
             }
-            values.push((id, &p["Parameter Value"]));
+            values.push((id, p));
         }
     }
-    found.then_some(values)
+    (!found.is_empty()).then_some((found, values))
+}
+
+fn ease_code(e: Ease) -> u8 {
+    match e {
+        Ease::Linear => 0,
+        Ease::EaseIn => 1,
+        Ease::EaseOut => 2,
+        Ease::EaseInOut => 3,
+    }
+}
+
+fn ease_of(v: &Value) -> Option<Ease> {
+    let code = v.as_f64().filter(|c| c.fract() == 0.0)?;
+    Ease::ALL
+        .into_iter()
+        .find(|e| f64::from(ease_code(*e)) == code)
+}
+
+fn ends(p: &Value) -> Option<[&Value; 2]> {
+    let keys = p["Key Frames"].as_object().filter(|k| k.len() == 2)?;
+    let mut at: Vec<(f64, &Value)> = keys
+        .iter()
+        .map(|(t, k)| {
+            Some((
+                t.parse::<f64>().ok().filter(|t| t.is_finite())?,
+                &k["Value"],
+            ))
+        })
+        .collect::<Option<_>>()?;
+    at.sort_by(|a, b| a.0.total_cmp(&b.0));
+    (at[0].0 < at[1].0).then(|| [at[0].1, at[1].1])
+}
+
+fn zoom_of(ease: Option<&Value>, center: &Value, size: &Value) -> Option<DynamicZoom> {
+    let ease = match ease {
+        None => Ease::Linear,
+        Some(p) => ease_of(&p["Parameter Value"])?,
+    };
+    let [c0, c1] = ends(center)?;
+    let [s0, s1] = ends(size)?;
+    let at = |c: &Value, s: &Value| -> Option<ZoomBox> {
+        let a = c.as_array().filter(|a| a.len() == 2)?;
+        let x = |i: usize| a[i].as_f64().filter(|v| v.is_finite());
+        Some(ZoomBox {
+            center: [rounded(0.5 + x(0)?), rounded(0.5 - x(1)?)],
+            size: rounded(s.as_f64().filter(|v| v.is_finite())?),
+        })
+    };
+    Some(DynamicZoom {
+        start: at(c0, s0)?,
+        end: at(c1, s1)?,
+        ease,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -134,11 +199,13 @@ struct Placement {
     flips: [bool; 2],
     crop: [f64; 4],
     scale: u8,
+    dynamic: Option<DynamicZoom>,
 }
 
 fn placement(effects: &[Value]) -> Option<Placement> {
-    let values = parameters(effects)?;
-    let given = |id: &str| values.iter().find(|(k, _)| *k == id).map(|(_, v)| *v);
+    let (found, values) = parameters(effects)?;
+    let param = |id: &str| values.iter().find(|(k, _)| *k == id).map(|(_, p)| *p);
+    let given = |id: &str| param(id).map(|p| &p["Parameter Value"]);
     let number = |id: &str, usual: f64| match given(id) {
         None => Some(usual),
         Some(v) => v.as_f64().filter(|v| v.is_finite()),
@@ -170,6 +237,10 @@ fn placement(effects: &[Value]) -> Option<Placement> {
         number(CROPS[2], 0.0)?,
         number(CROPS[3], 0.0)?,
     ];
+    let dynamic = match found.contains(&ZOOMING) {
+        true => Some(zoom_of(param(EASE), param(CENTER)?, param(SIZE)?)?),
+        false => None,
+    };
     Some(Placement {
         zoom: [number(ZOOM_X, 1.0)?, number(ZOOM_Y, 1.0)?],
         moved: [number(PAN, 0.0)?, number(TILT, 0.0)?],
@@ -178,6 +249,7 @@ fn placement(effects: &[Value]) -> Option<Placement> {
         flips: [switch(FLIP_X)?, switch(FLIP_Y)?],
         crop,
         scale,
+        dynamic,
     })
 }
 
@@ -210,6 +282,7 @@ impl Placement {
                 top,
                 bottom,
             },
+            dynamic_zoom: self.dynamic,
         }
     }
 }
@@ -266,7 +339,31 @@ fn boolean(id: &str, value: bool, usual: bool) -> Option<Value> {
     (value != usual).then(|| keyed(id, json!(value), json!(usual), "Bool"))
 }
 
-pub fn effects(p: &Picture, shape: &Shape) -> Vec<Value> {
+fn zooming(z: &DynamicZoom, g: i64) -> Vec<Value> {
+    let keys = |a: Value, b: Value, variant: &str| {
+        let mut m = Map::new();
+        for (at, v) in [(-g, a), (LATER - g, b)] {
+            m.insert(
+                at.to_string(),
+                json!({ "Value": v, "Variant Type": variant }),
+            );
+        }
+        Value::Object(m)
+    };
+    let middle = |b: &ZoomBox| json!([rounded(b.center[0] - 0.5), rounded(0.5 - b.center[1])]);
+    let mut center = plain(CENTER, json!([0.0, 0.0]), json!([0.0, 0.0]), "POINTF");
+    center["Key Frames"] = keys(middle(&z.start), middle(&z.end), "POINTF");
+    let mut size = ranged(
+        plain(SIZE, json!(1.0), json!(1.0), "Double"),
+        SIZES.0,
+        SIZES.1,
+    );
+    size["Key Frames"] = keys(json!(z.start.size), json!(z.end.size), "Double");
+    let ease = keyed(EASE, json!(ease_code(z.ease)), json!(0), "UInt");
+    vec![ease, center, size]
+}
+
+pub fn effects(p: &Picture, shape: &Shape, g: i64) -> Vec<Value> {
     let [zx, zy] = p.scale();
     let [pan, tilt] = moved(p, shape).map(|v| v.clamp(-REACH, REACH));
     let (zoom, reach) = ((0.0, 100.0), (-REACH, REACH));
@@ -289,10 +386,12 @@ pub fn effects(p: &Picture, shape: &Shape) -> Vec<Value> {
         .filter_map(|(id, v)| double(id, v, 0.0, (0.0, 1.0)))
         .collect();
     let scaling = vec![keyed(SCALE, json!(FIT), json!(0), "UInt")];
+    let dynamic = p.dynamic_zoom.map_or_else(Vec::new, |z| zooming(&z, g));
     [
         (TRANSFORM, 2, transform),
         (CROPPING, 3, cropping),
         (SCALING, 22, scaling),
+        (ZOOMING, 59, dynamic),
     ]
     .into_iter()
     .filter(|(_, _, list)| !list.is_empty())

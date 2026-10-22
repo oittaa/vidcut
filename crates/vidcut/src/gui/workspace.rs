@@ -241,6 +241,7 @@ impl Workspace {
             GuiPanel::ClipInfo => self.open_clip_info(None),
             GuiPanel::Transform => self.show_picture_tool(PictureTool::Transform),
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
+            GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
         }
     }
@@ -289,9 +290,10 @@ impl Workspace {
             GuiPanel::Titles => self.titles.open = false,
             GuiPanel::Metadata => self.show_metadata_strip(false),
             GuiPanel::ClipInfo => self.clip_info.open = false,
-            GuiPanel::Transform | GuiPanel::Crop => {
+            GuiPanel::Transform | GuiPanel::Crop | GuiPanel::DynamicZoom => {
                 let tool = match panel {
                     GuiPanel::Crop => PictureTool::Crop,
+                    GuiPanel::DynamicZoom => PictureTool::DynamicZoom,
                     _ => PictureTool::Transform,
                 };
                 let g = &mut self.timeline.picture_grab;
@@ -322,6 +324,10 @@ impl Workspace {
             (GuiPanel::ClipInfo, self.clip_info.open),
             (GuiPanel::Transform, tool == Some(PictureTool::Transform)),
             (GuiPanel::Crop, tool == Some(PictureTool::Crop)),
+            (
+                GuiPanel::DynamicZoom,
+                tool == Some(PictureTool::DynamicZoom),
+            ),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
         ];
         live::GuiState {
@@ -1297,11 +1303,11 @@ impl Workspace {
             };
             self.send("edit.dissolve", params);
         }
-        if pressed(Key::T) && !m.command && !m.alt {
-            self.picture_tool(if m.shift {
-                PictureTool::Crop
-            } else {
-                PictureTool::Transform
+        if pressed(Key::T) && !m.command && !(m.alt && m.shift) {
+            self.picture_tool(match (m.alt, m.shift) {
+                (true, _) => PictureTool::DynamicZoom,
+                (_, true) => PictureTool::Crop,
+                _ => PictureTool::Transform,
             });
         }
         if (pressed(Key::Backslash) || pressed(Key::B)) && m.command {

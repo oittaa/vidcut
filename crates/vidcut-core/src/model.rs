@@ -1279,6 +1279,112 @@ pub struct Picture {
     /// rest stays where it was.
     #[serde(default, skip_serializing_if = "Crop::is_none")]
     pub crop: Crop,
+    /// A slow push or pull and pan across the clip, from a start box to an
+    /// end box. Usual: none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamic_zoom: Option<DynamicZoom>,
+}
+
+/// Dynamic Zoom: the part of the picture that fills its place goes from
+/// the `start` box on the clip's first frame to the `end` box a frame
+/// after its last, along the `ease`. The picture is drawn larger about the
+/// box's middle, which goes to the picture's middle, after the flips and
+/// before the zoom, rotation and position. Turned on, it is a pull out: a
+/// start box 0.8 of the picture and an end box all of it, both in the
+/// middle, `linear`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DynamicZoom {
+    pub start: ZoomBox,
+    pub end: ZoomBox,
+    /// How it speeds up and slows down. Usual: `linear`.
+    #[serde(default, skip_serializing_if = "Ease::is_linear")]
+    pub ease: Ease,
+}
+
+/// A box of a Dynamic Zoom, the picture's shape.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZoomBox {
+    /// Its middle, `[x, y]` as fractions of the picture from its top left,
+    /// as it shows after the flips, each from -100 to 100: `[0.5, 0.5]` is
+    /// the picture's middle.
+    pub center: [f64; 2],
+    /// Its width and height as a fraction of the picture's, from 1/100 to
+    /// 100.
+    pub size: f64,
+}
+
+/// How a Dynamic Zoom goes from its start box to its end box, with `t` the
+/// share of the clip played, from 0 to 1.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Ease {
+    /// At one speed: `t`.
+    #[default]
+    Linear,
+    /// Slow at first: `t²`.
+    EaseIn,
+    /// Slow at the end: `1 − (1 − t)²`.
+    EaseOut,
+    /// Slow at both ends: `3t² − 2t³`.
+    EaseInOut,
+}
+
+impl Ease {
+    pub const ALL: [Ease; 4] = [Ease::Linear, Ease::EaseIn, Ease::EaseOut, Ease::EaseInOut];
+
+    pub fn is_linear(&self) -> bool {
+        *self == Self::Linear
+    }
+
+    pub fn of(self, t: f64) -> f64 {
+        let t = t.clamp(0.0, 1.0);
+        match self {
+            Self::Linear => t,
+            Self::EaseIn => t * t,
+            Self::EaseOut => 1.0 - (1.0 - t) * (1.0 - t),
+            Self::EaseInOut => t * t * (3.0 - 2.0 * t),
+        }
+    }
+}
+
+impl Default for DynamicZoom {
+    fn default() -> Self {
+        Self {
+            start: ZoomBox {
+                center: Picture::MIDDLE,
+                size: 0.8,
+            },
+            end: ZoomBox {
+                center: Picture::MIDDLE,
+                size: 1.0,
+            },
+            ease: Ease::Linear,
+        }
+    }
+}
+
+impl DynamicZoom {
+    pub fn at(&self, t: f64) -> ZoomBox {
+        let e = self.ease.of(t);
+        let (a, b) = (self.start, self.end);
+        let mix = |x: f64, y: f64| x + (y - x) * e;
+        ZoomBox {
+            center: [mix(a.center[0], b.center[0]), mix(a.center[1], b.center[1])],
+            size: mix(a.size, b.size),
+        }
+    }
+
+    pub fn swapped(&self) -> Self {
+        Self {
+            start: self.end,
+            end: self.start,
+            ease: self.ease,
+        }
+    }
+
+    pub fn closest(&self) -> f64 {
+        self.start.size.min(self.end.size)
+    }
 }
 
 /// What is cut off each side of a picture, as fractions of its width
@@ -1307,12 +1413,14 @@ impl Crop {
 }
 
 /// Which of a picture's tools: `transform` (its position, zoom, rotation
-/// and flips) or `crop`.
+/// and flips), `crop` or `dynamic_zoom`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PictureTool {
     Transform,
     Crop,
+    #[serde(rename = "dynamic_zoom")]
+    DynamicZoom,
 }
 
 impl Picture {

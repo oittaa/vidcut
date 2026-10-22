@@ -3247,9 +3247,11 @@ fn mutate(
             crop_right,
             crop_top,
             crop_bottom,
+            dynamic_zoom,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let change = ops::picture::PictureChange {
+                dynamic_zoom: *dynamic_zoom,
                 position: position
                     .as_deref()
                     .map(ops::picture::position)

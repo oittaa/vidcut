@@ -209,15 +209,18 @@ pub fn describe_at(
             ]
             .iter()
             .any(|k| !d.params[*k].is_null());
-            let what = match (moves, crops) {
-                (true, true) => "Transform and crop",
-                (false, true) => "Crop",
-                _ => "Transform",
-            };
-            format!("{what} {}", d.clips("clips"))
+            let clips = d.clips("clips");
+            match (moves, crops, d.params.get("dynamic_zoom")) {
+                (false, false, Some(Value::Null)) => format!("Reset the Dynamic Zoom of {clips}"),
+                (false, false, Some(_)) => format!("Change the Dynamic Zoom of {clips}"),
+                (true, true, _) => format!("Transform and crop {clips}"),
+                (false, true, _) => format!("Crop {clips}"),
+                _ => format!("Transform {clips}"),
+            }
         }
         "picture.clear" => match d.params["tool"].as_str() {
             Some("crop") => format!("Reset the crop of {}", d.clips("clips")),
+            Some("dynamic_zoom") => format!("Reset the Dynamic Zoom of {}", d.clips("clips")),
             Some(_) => format!("Reset the transform of {}", d.clips("clips")),
             None => format!("Reset the picture of {}", d.clips("clips")),
         },

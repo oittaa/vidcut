@@ -147,7 +147,7 @@ impl Plan {
         t: i64,
         preview: Option<&(String, vidcut_core::model::Picture)>,
     ) -> Vec<Vec<vidcut_core::render::Placed>> {
-        let (i, _) = self.locate(t);
+        let (i, k) = self.locate(t);
         let Some(piece) = self.plan.video.get(i) else {
             return Vec::new();
         };
@@ -159,10 +159,10 @@ impl Plan {
                     .iter()
                     .map(|p| match preview {
                         Some((clip, picture)) if *clip == p.clip => vidcut_core::render::Placed {
-                            clip: p.clip.clone(),
                             picture: picture.clone(),
+                            ..p.after(k)
                         },
-                        _ => p.clone(),
+                        _ => p.after(k),
                     })
                     .collect(),
                 _ => Vec::new(),
