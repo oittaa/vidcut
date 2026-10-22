@@ -1,14 +1,6 @@
 README.md
 docs/cli.md
 docs/cut-page-spec.md
-docs/design/analysis.md
-docs/design/export.md
-docs/design/gpu.md
-docs/design/live.md
-docs/design/model.md
-docs/design/playback.md
-docs/design/requests.md
-docs/design/threads.md
 docs/deviations.md
 docs/gotchas.md
 docs/roadmap.md
