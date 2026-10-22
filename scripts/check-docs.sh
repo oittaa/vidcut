@@ -4,8 +4,7 @@
 #   - every backticked name in docs/design/ exists in crates/
 #   - every relative link in a Markdown file points at a file that exists,
 #     and its #anchor at a heading of that file
-#   - every Markdown file is in plain style (AGENTS.md, rule 11), except
-#     those listed in scripts/docs-to-rewrite.txt
+#   - every Markdown file is in plain style (AGENTS.md, rule 11)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export LC_ALL=C
@@ -81,11 +80,8 @@ xargs awk -v paths="$tmp/paths" -v anchors="$tmp/anchors" '
 ' < "$tmp/docs" || status=1
 
 # Plain style (AGENTS.md, rule 11): a sentence has 25 words at most and a
-# line 300 characters, outside code blocks and without link targets. The
-# files below are still to rewrite; each rewrite takes its file off.
-not_yet=" $(tr -d '\r' < scripts/docs-to-rewrite.txt | tr '\n' ' ') "
+# line 300 characters, outside code blocks and without link targets.
 while IFS= read -r f; do
-  [[ "$not_yet" == *" $f "* ]] && continue
   awk '
     FNR == 1 { fence = 0 }
     /^ *(```|~~~)/ { fence = !fence; next }
