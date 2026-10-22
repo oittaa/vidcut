@@ -839,6 +839,10 @@ impl Workspace {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                     None
                 }
+                Gesture::Volume { .. } => {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                    None
+                }
                 _ => None,
             };
             if let Some(kind) = pointer {
@@ -874,6 +878,10 @@ impl Workspace {
                     continue;
                 }
                 let (track, what) = hit_rows(&p, rows, scale, pos);
+                let on_volume = rows
+                    .at(pos.y)
+                    .and_then(|r| geometry::volume_at(p.track(&r.track)?, scale, &r.rect, pos))
+                    .is_some();
                 if let Hit::AudioEdit { outgoing, .. } = &what
                     && let Some(row) = track.as_deref().and_then(|t| rows.get(t))
                     && let Some(c) = p.clip(outgoing)
@@ -892,7 +900,7 @@ impl Workspace {
                     && let Some(handle) =
                         geometry::slip_handle(&row.rect, scale.xf(c.start), scale.xf(c.end()))
                 {
-                    let grabbed = matches!(what, Hit::Slip(_));
+                    let grabbed = matches!(what, Hit::Slip(_)) && !on_volume;
                     let (fill, ink) = if grabbed {
                         (Color32::from_rgb(255, 210, 60), Color32::BLACK)
                     } else {
@@ -949,7 +957,9 @@ impl Workspace {
                     Hit::Roll { .. } | Hit::AudioEdit { .. } => Some(paint::TrimPointer::Roll),
                     _ => None,
                 };
-                if let Some(kind) = pointer {
+                if on_volume {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                } else if let Some(kind) = pointer {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::None);
                     let painter = ui.ctx().layer_painter(egui::LayerId::new(
                         egui::Order::Tooltip,
@@ -1577,6 +1587,11 @@ impl Workspace {
                 after: x.after,
                 sound,
             }
+        } else if let Some((clip, band)) = rows
+            .at(press.y)
+            .and_then(|r| geometry::volume_at(p.track(&r.track)?, &scale, &r.rect, press))
+        {
+            self.volume_gesture(p, clip, band, press)
         } else {
             let track = track.unwrap_or_else(|| MAIN.to_string());
             let ripples = |clip: &str| {
@@ -1656,6 +1671,36 @@ impl Workspace {
         });
     }
 
+    fn volume_gesture(&self, p: &Project, clip: String, band: Rect, press: Pos2) -> Gesture {
+        let sounding = |id: &String| {
+            p.find_clip(id).is_some_and(|(ti, ci)| {
+                !p.tracks[ti].locked && p.tracks[ti].clips[ci].audio.is_some()
+            })
+        };
+        let clips = if self.snap.selection.clips.contains(&clip) {
+            self.snap
+                .selection
+                .clips
+                .iter()
+                .filter(|id| sounding(id))
+                .cloned()
+                .collect()
+        } else {
+            vec![clip.clone()]
+        };
+        let gain = p
+            .clip(&clip)
+            .and_then(|c| c.audio.as_ref())
+            .map_or(0.0, |a| a.gain_db);
+        Gesture::Volume {
+            clips,
+            clip,
+            level: geometry::volume_level(gain),
+            last: press.y,
+            span: geometry::volume_span(band),
+        }
+    }
+
     fn run_drag(&mut self, ui: &egui::Ui, p: &Project, layout: &Layout, now: Instant) {
         let Some(mut d) = self.timeline.drag.take() else {
             return;
@@ -1732,6 +1777,7 @@ impl Workspace {
             .chain(&self.snap.selection.cues)
             .cloned()
             .collect();
+        d.drag.fine = ui.input(|i| i.modifiers.shift);
         let (preview, request) = {
             let ctx = self.ctx_for(p, d.upper, layout, Some(&snap), &picked);
             let preview = d.drag.update(pos, now, &ctx);
@@ -1753,6 +1799,11 @@ impl Workspace {
             if let Some(r) = request {
                 let method = r["method"].as_str().unwrap_or_default().to_string();
                 self.send_drag(&method, r["params"].clone());
+                if d.preview.gains.is_some()
+                    && let Some(q) = d.preview.moved(p)
+                {
+                    self.trim_sent(q);
+                }
             }
             if scrubbing && let Some(f) = self.timeline.scrub_sent.take() {
                 self.seek(PlayerId::Timeline, f, false);
@@ -2158,15 +2209,22 @@ impl Workspace {
     }
 
     fn drag_tooltip(&self, ui: &egui::Ui, pv: &Preview) {
-        let Some((delta, duration)) = pv.delta else {
-            return;
-        };
         let Some(pos) = ui.input(|i| i.pointer.latest_pos()) else {
             return;
         };
-        let text = match duration {
-            Some(d) => format!("{delta:+}  ({})", self.src_tc(d)),
-            None => format!("{delta:+}"),
+        let (text, pos) = if let Some(g) = &pv.gains {
+            (
+                format!("{:+.1} dB", g.shown),
+                pos2(pos.x, g.y.unwrap_or(pos.y)),
+            )
+        } else if let Some((delta, duration)) = pv.delta {
+            let text = match duration {
+                Some(d) => format!("{delta:+}  ({})", self.src_tc(d)),
+                None => format!("{delta:+}"),
+            };
+            (text, pos)
+        } else {
+            return;
         };
         let text = if pv.blocked {
             format!("{text}  ⏱ keep dragging to overwrite")

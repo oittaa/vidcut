@@ -298,6 +298,9 @@ The bar and the Jobs button:
   - When they still overflow, `TimelineView::rows_lift` lifts them by up to `Rows::overflow`.
   - The wheel over the rows (`scroll_rows`) and the scrollbar (`row_scrollbar`) set the lift.
   - Rows, their headers and drag previews are clipped to the area of the rows. `Rows::at` finds no row outside it ([deviation X57](../deviations.md#x57-the-lower-timeline-keeps-its-height-and-its-tracks-scroll)).
+- **Clip volume.**
+  - `paint::track` draws the volume line of each clip with sound at `geometry::volume_y`. `geometry::volume_at` finds the line under the pointer.
+  - A drag on it is a `Gesture::Volume`. The timeline draws the dragged gains (`Preview::gains`). On release, `Workspace::trim_sent` shows them until the project has them ([deviation X71](../deviations.md#x71-clip-volume-is-a-line-on-the-clip-without-keyframes)).
 - **Subtitles.**
   - `Rows::layout` puts the rows of the subtitle tracks above the video tracks.
   - `cues::paint_track` draws their cues, with a stripe in the color of the cue.

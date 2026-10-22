@@ -681,7 +681,16 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Viewer meter** (p. 642):
   - It shows what the viewer plays.
   - Its speaker button mutes only the playback, not the export.
-- **Clip volume:** one gain for each clip, and clip mute.
+- **Clip volume** (pp. 743, 1109–1110, 1112):
+  - Each clip has one gain, and a mute.
+  - The Inspector has the Volume of the clip. This is the value of the volume overlay of the clip (p. 743).
+  - On the Edit page, each clip with sound has a volume overlay. A drag up or down on it sets the level of the clip (p. 1109).
+  - Shift gives finer steps (p. 1109). The overlay is flat at first (p. 1112).
+  - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112).
+  - The volume commands of the Edit page change several selected clips together. The clips keep the differences between their levels (p. 1110).
+  - vidcut: a line on each clip with sound that is tall enough. A drag on it sets `gain_db` with `clip.set` (X71).
+  - The scale of the line and the step of Shift are in D77.
+  - vidcut has no keyframes (X71).
 - **Ripple Delete Silence** (p. 773):
   - Clip > Audio Operations > Ripple Delete Silence works on the selected clips.
   - vidcut: it is also in the right-click menu of the clip and in Timeline Actions.
@@ -811,6 +820,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D12. Clip gain range.**
   - The range is −60 dB to +24 dB, plus mute.
   - The manual gives no range.
+  - The volume line of a clip shows this range on its own scale (D77).
 - **D13. Keys.**
   - Keys that the Cut chapters do not give come from the Edit page.
   - §11 marks them with †.
@@ -1779,3 +1789,24 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - This was checked with two active Duckers. A render showed their dips of 10 dB, and the exported file had no trace of them.
     - The ducking goes in the `vidcut` metadata of the track.
     - The notes of an OTIO export say that other editors will not hear it.
+- **D77. The volume line** (§9; pp. 1109, 1112; deviation X71).
+  - The manual does not give the scale of the volume overlay. It does not tell how much finer Shift makes a drag.
+  - The line is in the sound part of the clip, 2 px in from its top and its bottom.
+  - It shows only where the sound part is 20 px high or more.
+  - **Scale:**
+    - −60 dB is at the bottom, and +24 dB is at the top.
+    - 0 dB is at 5/7 of the height, as on the fader of the Mixer.
+    - A gain g is a part x of its side of 0 dB, from 0 to 1. Above 0 dB, x = g / 24. Below 0 dB, x = −g / 60.
+    - The line goes the part x × (2 − x) of the way from 0 dB to the end of its side.
+    - Thus near 0 dB, a change of 1 dB moves the line twice as far as on the fader of the Mixer.
+    - Near −60 dB and +24 dB, a change of 1 dB moves the line almost not at all.
+    - The two sides have the same slope at 0 dB. Thus a drag across 0 dB keeps its speed.
+  - **Drag:**
+    - Within 4 px of the line, the pointer becomes an up-down arrow.
+    - The trim handles at the ends of a clip, and at the sound edit of a J or L cut, come before the line.
+    - The line comes before the slip handle of the clip.
+    - A drag moves the line as far as the pointer moves. With Shift, it moves the line a tenth as far.
+    - Shift can go on or off during the drag. The line does not jump.
+    - The gain of the dragged clip goes in steps of 0.1 dB. During the drag, a label beside the line shows it with one decimal.
+    - A drag that ends at the gain of the clip, to one decimal, changes nothing.
+  - Reason: the usual gains are near 0 dB, as on a fader. `clip.set` sets an exact value anywhere in the range.

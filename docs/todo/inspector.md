@@ -13,7 +13,7 @@ The Inspector tab shows and sets the transform, the crop and the Dynamic Zoom of
   - Now: the Change Clip Speed window sets it (R, spec D48).
   - Why: Resolve's Video panel has Speed Change. The Inspector would show the speed of a clip without a window.
 - **Volume.**
-  - Now: the GUI has no control for the gain of a clip. Only `clip.set` with `gain_db` sets it.
+  - Now: a drag on the volume line of a clip in the timeline sets its gain ([X71](../deviations.md#x71-clip-volume-is-a-line-on-the-clip-without-keyframes)). `clip.set` with `gain_db` also sets it.
   - Why: Resolve's Audio panel has the Volume of a clip.
 - **Anchor Point.**
   - Now: vidcut has no anchor. It folds the anchor of a Resolve file into the position ([gotchas](../gotchas.md#resolves-otio-files)).
