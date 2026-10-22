@@ -25,6 +25,7 @@ pub struct CueDialog {
     person_name: String,
     loaded: bool,
     focus: bool,
+    dirty: bool,
     from: Option<(Typing, String)>,
 }
 
@@ -70,6 +71,28 @@ fn person_name(speakers: &Speakers, person: Option<&str>) -> String {
     person
         .and_then(|k| speakers.names.get(k).cloned())
         .unwrap_or_default()
+}
+
+fn settled(id: &str, speakers: &Speakers, c: &Cue) -> (Typing, String) {
+    let color = c.color.clone().unwrap_or_default();
+    (
+        Typing {
+            cue: id.to_string(),
+            text: c.text.clone(),
+            place: c.place,
+            speaker: c.speaker.clone(),
+            color: field(&color),
+        },
+        person_name(speakers, c.speaker.as_deref()),
+    )
+}
+
+fn cue_copies(dirty: bool, loaded: bool, adopted_is_project: bool) -> bool {
+    !loaded || (!dirty && !adopted_is_project)
+}
+
+fn cue_saves(dirty: bool, commit: bool) -> bool {
+    dirty && commit
 }
 
 fn people(p: &Project) -> Vec<(String, String)> {
@@ -335,7 +358,7 @@ impl Workspace {
 
     pub(super) fn close_cue_form(&mut self) {
         if let Some(d) = self.timeline.cue_dialog.take()
-            && d.from.as_ref() != Some(&d.state())
+            && d.dirty
         {
             self.save_cue(&d);
         }
@@ -389,6 +412,7 @@ impl Workspace {
             person_name: String::new(),
             loaded: false,
             focus,
+            dirty: false,
             from: None,
         };
         if let Some(p) = self.project()
@@ -514,10 +538,13 @@ impl Workspace {
         let found = p
             .find_cue(&d.cue)
             .map(|(t, c)| (&p.subtitles[t], &p.subtitles[t].cues[c]));
+        let adopted_is_project = found
+            .is_some_and(|(_, cue)| d.from.as_ref() == Some(&settled(&d.cue, &p.speakers, cue)));
         match found {
-            Some((_, cue)) if !d.loaded || d.from.as_ref() == Some(&d.state()) => {
+            Some((_, cue)) if cue_copies(d.dirty, d.loaded, adopted_is_project) => {
                 d.load(&p.speakers, cue);
                 d.from = Some(d.state());
+                d.dirty = false;
             }
             None if d.loaded => return false,
             _ => {}
@@ -535,6 +562,7 @@ impl Workspace {
             ))),
             None => ui.label(dim("Adding…")),
         };
+        let before = d.state();
         let r = ui.add(
             egui::TextEdit::multiline(&mut d.text)
                 .desired_rows(3)
@@ -656,9 +684,12 @@ impl Workspace {
                 }
             }
         });
-        if !done && self.inspector_commits() && d.from.as_ref() != Some(&d.state()) {
+        if d.state() != before {
+            d.dirty = true;
+        }
+        if !done && cue_saves(d.dirty, self.inspector_commits()) {
             self.save_cue(&d);
-            d.from = Some(d.state());
+            d.dirty = false;
         }
         ui.separator();
         if !done {
@@ -968,5 +999,33 @@ impl Workspace {
                 }
             },
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cue_copies;
+    use super::cue_saves;
+
+    #[test]
+    fn a_saved_subtitle_stays_while_the_project_is_still_the_old_text() {
+        assert!(!cue_copies(false, true, true));
+    }
+
+    #[test]
+    fn a_clean_subtitle_copies_the_project_when_it_changes() {
+        assert!(cue_copies(false, true, false));
+    }
+
+    #[test]
+    fn an_edit_in_progress_is_not_replaced_by_the_project() {
+        assert!(!cue_copies(true, true, false));
+    }
+
+    #[test]
+    fn an_edit_is_saved_only_when_the_form_commits() {
+        assert!(cue_saves(true, true));
+        assert!(!cue_saves(true, false));
+        assert!(!cue_saves(false, true));
     }
 }
