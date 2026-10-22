@@ -2996,46 +2996,64 @@ impl<T: Clone> OneOrMany<T> {
     }
 }
 
-fn method_params() -> &'static HashMap<String, HashSet<String>> {
-    static PARAMS: OnceLock<HashMap<String, HashSet<String>>> = OnceLock::new();
-    PARAMS.get_or_init(|| {
-        let root = serde_json::to_value(schemars::schema_for!(Request)).expect("protocol schema");
-        let defs = root
-            .get("$defs")
-            .and_then(serde_json::Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        let mut out = HashMap::new();
-        for variant in root
-            .get("oneOf")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let Some(name) = method_name(variant) else {
-                continue;
-            };
-            let mut names = HashSet::new();
-            if let Some(params) = variant.pointer("/properties/params") {
-                parameter_names(params, &defs, &mut names, 0);
-            }
-            out.insert(name, names);
-        }
-        out
+pub fn protocol_schema() -> &'static serde_json::Value {
+    static SCHEMA: OnceLock<serde_json::Value> = OnceLock::new();
+    SCHEMA.get_or_init(|| {
+        serde_json::to_value(schemars::schema_for!(Request)).expect("protocol schema")
     })
 }
 
-fn method_name(variant: &serde_json::Value) -> Option<String> {
-    let method = variant.pointer("/properties/method")?;
-    method
-        .get("const")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            method
-                .pointer("/enum/0")
-                .and_then(serde_json::Value::as_str)
-        })
-        .map(str::to_string)
+pub fn method_names(variant: &serde_json::Value) -> Vec<&str> {
+    let method = &variant["properties"]["method"];
+    match method.get("const").and_then(serde_json::Value::as_str) {
+        Some(name) => vec![name],
+        None => method
+            .get("enum")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .collect(),
+    }
+}
+
+pub fn resolve_ref<'a>(
+    schema: &'a serde_json::Value,
+    defs: &'a serde_json::Map<String, serde_json::Value>,
+) -> &'a serde_json::Value {
+    static NULL: serde_json::Value = serde_json::Value::Null;
+    let mut schema = schema;
+    for _ in 0..8 {
+        match schema
+            .get("$ref")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|r| r.strip_prefix("#/$defs/"))
+        {
+            Some(name) => schema = defs.get(name).unwrap_or(&NULL),
+            None => break,
+        }
+    }
+    schema
+}
+
+fn method_params() -> &'static HashMap<String, HashSet<String>> {
+    static PARAMS: OnceLock<HashMap<String, HashSet<String>>> = OnceLock::new();
+    PARAMS.get_or_init(|| {
+        let root = protocol_schema();
+        let empty = serde_json::Map::new();
+        let defs = root["$defs"].as_object().unwrap_or(&empty);
+        let mut out = HashMap::new();
+        for variant in root["oneOf"].as_array().into_iter().flatten() {
+            let mut names = HashSet::new();
+            if let Some(params) = variant.pointer("/properties/params") {
+                parameter_names(params, defs, &mut names, 0);
+            }
+            for method in method_names(variant) {
+                out.insert(method.to_string(), names.clone());
+            }
+        }
+        out
+    })
 }
 
 fn parameter_names(
@@ -3047,7 +3065,7 @@ fn parameter_names(
     if depth == 8 {
         return;
     }
-    let schema = resolve_schema(schema, defs);
+    let schema = resolve_ref(schema, defs);
     if let Some(props) = schema
         .get("properties")
         .and_then(serde_json::Value::as_object)
@@ -3064,56 +3082,29 @@ fn parameter_names(
     }
 }
 
-fn resolve_schema<'a>(
-    schema: &'a serde_json::Value,
-    defs: &'a serde_json::Map<String, serde_json::Value>,
-) -> &'a serde_json::Value {
-    let mut schema = schema;
-    for _ in 0..8 {
-        let Some(name) = schema
-            .get("$ref")
-            .and_then(serde_json::Value::as_str)
-            .and_then(|r| r.strip_prefix("#/$defs/"))
-        else {
-            break;
-        };
-        let Some(next) = defs.get(name) else {
-            break;
-        };
-        schema = next;
-    }
-    schema
+#[derive(Deserialize)]
+struct Batch {
+    commands: Vec<serde_json::Value>,
+    label: Option<String>,
 }
 
-fn apply_commands(params: &mut serde_json::Value) -> Result<(), String> {
-    let Some(commands) = params
-        .get_mut("commands")
-        .and_then(serde_json::Value::as_array_mut)
-    else {
-        return Ok(());
-    };
-    for (i, command) in commands.iter_mut().enumerate() {
-        let (method, child) =
-            command_parts(command).map_err(|e| format!("entry {}: {e}", i + 1))?;
-        Request::from_parts(method, child).map_err(|e| format!("entry {}: {e}", i + 1))?;
-        if let Some(obj) = command.as_object_mut()
-            && obj.get("params").is_none_or(serde_json::Value::is_null)
-        {
-            obj.insert("params".to_string(), serde_json::json!({}));
-        }
-    }
-    Ok(())
+fn batch(params: serde_json::Value) -> Result<Request, String> {
+    let Batch { commands, label } =
+        serde_json::from_value(params).map_err(|e| format!("invalid params for apply: {e}"))?;
+    let commands = commands
+        .into_iter()
+        .enumerate()
+        .map(|(i, command)| batched(command).map_err(|e| format!("entry {}: {e}", i + 1)))
+        .collect::<Result<_, _>>()?;
+    Ok(Request::Apply { commands, label })
 }
 
-fn command_parts(command: &serde_json::Value) -> Result<(&str, Option<serde_json::Value>), String> {
-    let Some(obj) = command.as_object() else {
-        return Err("a request must be a JSON object with \"method\"".into());
-    };
-    let method = obj
-        .get("method")
-        .and_then(serde_json::Value::as_str)
-        .ok_or("missing \"method\"")?;
-    Ok((method, obj.get("params").cloned()))
+fn batched(command: serde_json::Value) -> Result<Request, String> {
+    let envelope = Envelope::from_json(command)?;
+    if envelope.if_rev.is_some() || envelope.dry_run {
+        return Err("put dry_run and if_rev on apply, not on its commands".into());
+    }
+    Ok(envelope.request)
 }
 
 impl Request {
@@ -3132,17 +3123,10 @@ impl Request {
         let Some(known) = method_params().get(method) else {
             return Err(format!("unknown method {method:?}; see `vidcut schema`"));
         };
-        let mut params = match params {
+        let params = match params {
             None | Some(serde_json::Value::Null) => serde_json::json!({}),
             Some(params) => params,
         };
-        if method == "apply" {
-            apply_commands(&mut params)?;
-        }
-        let request: Self = serde_json::from_value(
-            serde_json::json!({ "method": method, "params": params.clone() }),
-        )
-        .map_err(|e| format!("invalid params for {method}: {e}"))?;
         if let Some(given) = params.as_object() {
             let unknown: Vec<&str> = given
                 .iter()
@@ -3156,7 +3140,11 @@ impl Request {
                 ));
             }
         }
-        Ok(request)
+        if method == "apply" {
+            return batch(params);
+        }
+        serde_json::from_value(serde_json::json!({ "method": method, "params": params }))
+            .map_err(|e| format!("invalid params for {method}: {e}"))
     }
 
     pub fn is_live(&self) -> bool {
@@ -3594,7 +3582,6 @@ mod tests {
             e,
             "entry 2: unknown method \"no.such\"; see `vidcut schema`"
         );
-        assert!(!e.contains("unknown method \"apply\""));
     }
 
     #[test]

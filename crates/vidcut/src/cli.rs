@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use serde_json::{Map, Value, json};
-use vidcut_core::request::{Client, ClientKind};
+use vidcut_core::request::{Client, ClientKind, method_names, protocol_schema, resolve_ref};
 use vidcut_core::{Envelope, Error, Request, Result};
 
 pub const POSITIONAL: &[(&str, &[&str])] = &[
@@ -370,23 +370,21 @@ const CUSTOM: &[&str] = &["apply", "preferences.set"];
 fn methods() -> &'static [Method] {
     static METHODS: OnceLock<Vec<Method>> = OnceLock::new();
     METHODS.get_or_init(|| {
-        let root = crate::session::schema(None).expect("the protocol schema");
-        let defs = root["$defs"].as_object().cloned().unwrap_or_default();
+        let root = protocol_schema();
+        let empty = Map::new();
+        let defs = root["$defs"].as_object().unwrap_or(&empty);
         let mut out = Vec::new();
         for variant in root["oneOf"].as_array().into_iter().flatten() {
-            let Some(name) = variant["properties"]["method"]["const"]
-                .as_str()
-                .or_else(|| variant["properties"]["method"]["enum"][0].as_str())
-            else {
+            let Some(&name) = method_names(variant).first() else {
                 continue;
             };
             let positional = POSITIONAL
                 .iter()
                 .find(|(m, _)| *m == name)
                 .map_or(&[][..], |(_, p)| *p);
-            let params_schema = resolve(
+            let params_schema = resolve_ref(
                 variant["properties"].get("params").unwrap_or(&Value::Null),
-                &defs,
+                defs,
             );
             let required: Vec<&str> = params_schema["required"]
                 .as_array()
@@ -400,7 +398,7 @@ fn methods() -> &'static [Method] {
                 .flatten()
                 .map(|(p, schema)| Param {
                     name: p.clone(),
-                    kind: kind(schema, &defs),
+                    kind: kind(schema, defs),
                     required: required.contains(&p.as_str()),
                     help: help(schema),
                     position: positional.iter().position(|x| x == p),
@@ -422,17 +420,6 @@ fn methods() -> &'static [Method] {
 
 fn method(name: &str) -> Option<&'static Method> {
     methods().iter().find(|m| m.name == name)
-}
-
-fn resolve(schema: &Value, defs: &Map<String, Value>) -> Value {
-    let mut s = schema.clone();
-    for _ in 0..8 {
-        match s["$ref"].as_str().and_then(|r| r.strip_prefix("#/$defs/")) {
-            Some(name) => s = defs.get(name).cloned().unwrap_or(Value::Null),
-            None => break,
-        }
-    }
-    s
 }
 
 fn not_null(schema: &Value) -> Value {
@@ -464,7 +451,8 @@ fn nullable(schema: &Value) -> bool {
 
 fn kind(schema: &Value, defs: &Map<String, Value>) -> Kind {
     let may_be_unset = nullable(schema) || schema.get("default") == Some(&Value::Null);
-    let s = resolve(&not_null(schema), defs);
+    let base = not_null(schema);
+    let s = resolve_ref(&base, defs);
     match s["type"].as_str() {
         Some("boolean") => {
             if !may_be_unset && s["default"] != true && schema["default"] != true {
@@ -475,7 +463,7 @@ fn kind(schema: &Value, defs: &Map<String, Value>) -> Kind {
         }
         Some("integer") => Kind::Int,
         Some("number") => Kind::Float,
-        Some("string") => match choices(&s) {
+        Some("string") => match choices(s) {
             Some(c) => Kind::Choice(c),
             None => Kind::Text,
         },
@@ -485,15 +473,15 @@ fn kind(schema: &Value, defs: &Map<String, Value>) -> Kind {
         },
         Some(_) => Kind::Json,
         None => {
-            if let Some(c) = choices(&s) {
+            if let Some(c) = choices(s) {
                 return Kind::Choice(c);
             }
-            let alts: Vec<Value> = s["anyOf"]
+            let alts: Vec<&Value> = s["anyOf"]
                 .as_array()
                 .or_else(|| s["oneOf"].as_array())
                 .into_iter()
                 .flatten()
-                .map(|a| resolve(a, defs))
+                .map(|a| resolve_ref(a, defs))
                 .collect();
             if let Some(list) = alts.iter().find(|a| a["type"] == "array") {
                 return match kind(list, defs) {
