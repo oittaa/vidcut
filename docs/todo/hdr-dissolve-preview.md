@@ -2,4 +2,8 @@
 
 **When:** not decided.
 
-The viewer and picture renders mix a dissolve's pictures after converting each to RGB (tone-mapped for HDR), while an HDR export mixes them in its PQ or HLG code values, so mid-dissolve they differ (spec D50). Where every picture of a mix has the same colors (the usual HDR project), mixing their code values before the conversion would make them match.
+- The viewer and picture renders convert each picture of a dissolve to RGB, and then mix the pictures. For HDR, the conversion tone-maps.
+- An HDR export mixes the pictures in their PQ or HLG code values.
+- Thus, in the middle of a dissolve, the viewer and the export are different (spec D50).
+
+**To do:** where all pictures of a mix have the same colors, mix their code values before the conversion. Then the viewer and the export agree. The usual HDR project has the same colors in all pictures.

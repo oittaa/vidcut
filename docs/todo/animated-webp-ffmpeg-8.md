@@ -2,4 +2,12 @@
 
 **When:** not decided.
 
-FFmpeg's animated WebP demuxer and decoder are new in 9.0. FFmpeg 8 reads an animated WebP, even one of one frame, with `webp_pipe` as one image it can't decode, so vidcut takes it as a still 2×2 pixels whose picture never renders (a render says it "ends before" the frame; checked with Ubuntu 26.04's FFmpeg 8.0.1). Refusing it on import, saying it takes FFmpeg 9.0, would be better than a still that shows nothing: the VP8X chunk's animation flag tells an animated WebP.
+- FFmpeg has a demuxer and a decoder for animated WebP from 9.0.
+- FFmpeg 8 reads an animated WebP with `webp_pipe`, as one image that it cannot decode. An animated WebP of one frame gives the same result.
+- Thus vidcut takes the file as a still of 2×2 pixels, and its picture never renders. A render says that the still "ends before" the frame.
+- Ubuntu 26.04's FFmpeg 8.0.1 shows this behavior.
+
+**To do:**
+
+- With FFmpeg 8, refuse an animated WebP on import, and tell the user that it needs FFmpeg 9.0. This is better than a still that shows nothing.
+- The animation flag in the VP8X chunk identifies an animated WebP.
