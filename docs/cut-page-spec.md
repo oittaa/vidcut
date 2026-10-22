@@ -1148,7 +1148,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Resolve Studio 21.1.1 does this (checked through its scripting API):
     - It reads `01:00:00,000` on a 23.976 timeline as 00:59:56:10.
     - Its renders write a cue at 01:00:00:00 as `01:00:03.599`, at 23.976 and at 29.97 non-drop.
-    - File > Export Subtitle is not checked.
+    - Not checked: the files that File > Export Subtitle writes. The measurement used the scripting API only.
   - vidcut reads a file in real time, as Resolve writes and reads it. There are two exceptions:
     - `time_base` on `subtitles.import` says labels: timecode read as a clock, 01:00:00:00 as `01:00:00,000`.
     - The times of the file with fractions of a second fall on timecode frames, and clearly not on the frames of real time.
@@ -1189,7 +1189,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Resolve's look, from a burn-in render of Resolve Studio 21.1.1 over black (made through its scripting API, 3840×2160):
     - The tallest letters of a line are 4.2% of the picture height. Those of two lines are 11.3%.
     - Both are centered at 80.1% of the height.
-    - Its outline or shadow over a bright picture is not checked.
+    - Not checked: the outline or shadow of the text over a bright picture.
   - vidcut's look:
     - White text, 5.5% of the picture height.
     - Lines 1.31 times that height apart.
