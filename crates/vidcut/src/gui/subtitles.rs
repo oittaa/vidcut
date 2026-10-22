@@ -14,7 +14,7 @@ use super::folders::Kind;
 use super::looks::{Parts, Picker, TextFields};
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
-use crate::live::Answer;
+use crate::live::{Answer, PlayerId};
 
 #[derive(Debug)]
 pub struct CueDialog {
@@ -145,6 +145,12 @@ fn people(p: &Project) -> Vec<(String, String)> {
         .collect();
     out.sort_by(|a, b| a.1.cmp(&b.1));
     out
+}
+
+fn beside(p: &Project, cue: &str, by: isize) -> Option<(String, i64)> {
+    let (t, c) = p.find_cue(cue)?;
+    let near = p.subtitles[t].cues.get(c.checked_add_signed(by)?)?;
+    Some((near.id.clone(), near.start))
 }
 
 #[derive(Debug)]
@@ -616,7 +622,21 @@ impl Workspace {
         }
         let everyone = people(&p);
         let mut done = false;
-        ui.label(RichText::new("Subtitle").strong());
+        let mut step = None;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Subtitle").strong());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                for (label, by) in [("Next", 1), ("Previous", -1)] {
+                    let to = beside(&p, &d.cue, by);
+                    if ui
+                        .add_enabled(to.is_some(), egui::Button::new(label))
+                        .clicked()
+                    {
+                        step = to;
+                    }
+                }
+            });
+        });
         match found {
             Some((track, cue)) => ui.label(dim(format!(
                 "{}   {} – {}   ({})",
@@ -765,7 +785,16 @@ impl Workspace {
         if !done {
             self.timeline.cue_dialog = Some(d);
         }
+        if let Some((id, start)) = step {
+            self.step_cue(&id, start);
+        }
         true
+    }
+
+    fn step_cue(&mut self, id: &str, start: i64) {
+        self.inspect_cue(id, false);
+        self.send("selection.set", json!({ "cues": [id], "clips": [] }));
+        self.seek(PlayerId::Timeline, start, false);
     }
 
     pub(super) fn track_form(&mut self, ui: &mut egui::Ui) -> bool {
