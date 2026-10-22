@@ -42,7 +42,6 @@ pub struct Step {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Call {
     pub method: String,
-    #[serde(default)]
     pub params: Value,
 }
 
