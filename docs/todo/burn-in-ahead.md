@@ -2,6 +2,18 @@
 
 **When:** not decided.
 
-An export draws each subtitle picture on its frame thread when the picture changes (`Burner` in `export/video.rs`), so decoding and encoding wait for it. An animated track changes at every word and pop step: on 30 s of 1080×608 speech in the Pop look, the NVENC export takes 1.8 s against 1.3 s without subtitles, most of the difference drawing the text and building NVENC's overlay in YUV on one core.
+**Why:**
 
-The cues and their word times are known before the export starts, so the pictures, and for NVENC the overlays, can be drawn on worker threads a few changes ahead and handed to the frame thread as it reaches them, as the player draws titles and subtitles ahead on its decoding thread ([design/playback.md](../design/playback.md)). The pictures must stay the ones drawn now: check them against an export without the workers, frame for frame.
+- An export draws each subtitle picture on its frame thread when the picture changes (`Burner` in `export/video.rs`).
+- Decoding and encoding wait for the drawing.
+- An animated track changes at each word and at each pop step.
+- An example: 30 s of 1080×608 speech in the Pop look. The NVENC export takes 1.8 s, against 1.3 s without subtitles.
+- Most of the difference is on one core: vidcut draws the text and builds NVENC's overlay in YUV.
+
+**How:**
+
+- vidcut knows the cues and their word times before the export starts.
+- Thus worker threads can draw the pictures a few changes ahead. For NVENC, they also build the overlays.
+- The workers give each picture to the frame thread when the frame thread gets to it.
+- The player does the same: it draws titles and subtitles ahead on its decoding thread ([design/playback.md](../design/playback.md)).
+- The pictures must not change. Compare them, frame for frame, with an export without the workers.

@@ -2,6 +2,13 @@
 
 **When:** not decided.
 
-vidcut has Text, lower-third and Scroll titles with words styled apart, shadows, zoom, rotation, opacity and fades ([spec §8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)), read from and written to OTIO in Resolve's shape ([D67](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). Open:
+- vidcut has Text, lower-third and Scroll titles ([spec §8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
+- The titles have words styled apart, shadows, zoom, rotation, opacity and fades.
+- vidcut reads and writes them in OTIO in Resolve's shape ([D67](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
-- **A stroke's step in Resolve:** Resolve draws no stroke on a title it reads from a file ([gotchas](../gotchas.md#resolves-otio-files)), so `STROKE_PER_TEXT` needs a stroke set on one of Resolve's own titles in its Inspector, measured against the picture.
+Open:
+
+- **A stroke's step in Resolve:**
+  - Resolve draws no stroke on a title that it reads from a file ([gotchas](../gotchas.md#resolves-otio-files)).
+  - Thus, to find `STROKE_PER_TEXT`, set a stroke on one of Resolve's own titles in its Inspector.
+  - Measure the stroke against the picture.

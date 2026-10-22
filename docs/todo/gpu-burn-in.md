@@ -2,7 +2,14 @@
 
 **When:** not decided.
 
-Burning subtitles in, and drawing titles and placed pictures, mixes them into CUDA frames on the GPU (`cuda/burn.rs`); other GPUs' frames come down to memory while a cue, a title or a placed picture shows and go back up to the encoder ([design/export.md](../design/export.md#subtitles), [titles](../design/export.md#titles), [placed pictures](../design/export.md#placed-pictures)). Placing the picture itself on the GPU is [gpu-placement.md](gpu-placement.md). Each needs a mix of a picture with coverage over its frames, checked against `burn::blend`'s pictures, as [gpu-dissolves.md](gpu-dissolves.md) needs a mix at one weight:
+- On CUDA, vidcut mixes burned-in subtitles, titles and placed pictures into the frames on the GPU (`cuda/burn.rs`).
+- On other GPUs, the frames come down to memory while a cue, a title or a placed picture shows. Then they go back up to the encoder.
+- The export design tells how: [subtitles](../design/export.md#subtitles), [titles](../design/export.md#titles), [placed pictures](../design/export.md#placed-pictures).
+- [gpu-placement.md](gpu-placement.md) is the item for placing the picture itself on the GPU.
+- Each GPU below needs a mix of a picture with coverage over its frames. In the same way, [gpu-dissolves.md](gpu-dissolves.md) needs a mix at one weight.
+- Compare each mix with the pictures of `burn::blend`.
+
+The GPUs:
 
 - **VA-API:** FFmpeg's `overlay_vaapi` takes a second surface with alpha.
 - **Direct3D 11:** the video processor blends a second stream with alpha.
