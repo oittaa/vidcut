@@ -1393,7 +1393,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - `gui.show inspector` shows it.
   - It shows what the user selects: the Title section of a title, the Subtitle section of a subtitle, or the picture sections of other clips.
   - A double-click on the name of a subtitle track shows its Subtitle Track section (X51).
-  - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first.
+  - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
   - With nothing of these selected, it shows one line.
   - It has no Done and no Cancel. As in Resolve, a change goes in without a button, and Ctrl+Z undoes it.
   - Audio clips, titles and subtitles have no picture.

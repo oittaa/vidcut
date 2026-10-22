@@ -645,7 +645,7 @@ impl Workspace {
                 }
             }
         });
-        if !done && ui.ctx().memory(|m| m.focused().is_none()) {
+        if !done && self.inspector_commits() {
             let key = (self.typed(&d), d.person_name.clone());
             if d.sent.as_ref() != Some(&key) {
                 self.save_cue(&d);
@@ -796,7 +796,7 @@ impl Workspace {
             ui.colored_label(ui.visuals().error_fg_color, &d.error);
         }
         d.dirty |= changed;
-        if d.dirty && (enter || ui.ctx().memory(|m| m.focused().is_none())) {
+        if d.dirty && (enter || self.inspector_commits()) {
             match self.track_params(&d) {
                 Ok(params) => {
                     if let Some(params) = params {

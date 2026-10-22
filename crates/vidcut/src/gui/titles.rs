@@ -442,7 +442,7 @@ impl Workspace {
         }
         d.dirty |= changed;
         if d.dirty
-            && ui.ctx().memory(|m| m.focused().is_none())
+            && self.inspector_commits()
             && let Some(s) = stored.as_ref()
         {
             match title_of(&d, s) {
