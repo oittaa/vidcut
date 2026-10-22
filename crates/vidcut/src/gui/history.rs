@@ -43,6 +43,7 @@ pub(super) struct HistoryUi {
     twigs: HashSet<u64>,
     flash: Option<(u64, f64)>,
     follow: bool,
+    offset: f32,
     seen: Option<(usize, usize)>,
     find: String,
     kind: Option<&'static str>,
@@ -679,16 +680,22 @@ impl Workspace {
             && let Some(at) = mark_row
         {
             self.history.follow = false;
-            let y = at as f32 * (ROW + spacing) - view / 2.0 + ROW;
-            area = area.vertical_scroll_offset(y.max(0.0));
+            let top = at as f32 * (ROW + spacing);
+            let offset = self.history.offset;
+            if top < offset {
+                area = area.vertical_scroll_offset(top);
+            } else if top + ROW > offset + view {
+                area = area.vertical_scroll_offset((top + ROW - view).max(0.0));
+            }
         }
         let now = when::now_ms();
         let mut acts = Vec::new();
-        area.show_rows(ui, ROW, rows.len(), |ui, range| {
+        let out = area.show_rows(ui, ROW, rows.len(), |ui, range| {
             for k in range {
                 acts.extend(self.history_row(ui, rows[k], steps, &all, &paths, now));
             }
         });
+        self.history.offset = out.state.clamped_offset().y;
         let footer = self.history_footer(steps);
         ui.add_space(6.0);
         ui.add(egui::Label::new(RichText::new(footer).color(theme::colors().text_dim)).wrap());
@@ -924,6 +931,7 @@ impl Workspace {
             }
             Row::Step(i, inner) => {
                 let s = &steps.line[i];
+                let project = self.snap.project.as_ref().map(|p| p.path.as_path());
                 let done = i < steps.done;
                 let caret_rect = (!s.parts.is_empty())
                     .then(|| caret(ui, pos2(x - 8.0, mid), self.history.parts.contains(&i)));
@@ -966,6 +974,7 @@ impl Workspace {
                     if ui.button("Copy Label").clicked() {
                         ui.ctx().copy_text(s.label.clone());
                     }
+                    copy_command(ui, project, s);
                 });
             }
             Row::Branch(bi, open) => {
@@ -1028,6 +1037,7 @@ impl Workspace {
             }
             Row::Flag(i) => {
                 let s = &steps.line[i];
+                let project = self.snap.project.as_ref().map(|p| p.path.as_path());
                 if let Some(name) = s.id.and_then(|id| steps.named(id)) {
                     x += flag(ui, pos2(x, mid), name);
                 }
@@ -1046,6 +1056,10 @@ impl Workspace {
                         acts.push(Act::Go(i + 1));
                     }
                     names_menu(ui, steps, i + 1, &mut acts);
+                    if s.request.is_some() {
+                        ui.separator();
+                    }
+                    copy_command(ui, project, s);
                 });
             }
         }
@@ -1276,6 +1290,15 @@ fn version_rows(
         if k < b.steps.len() {
             rows.push(Row::Twig(bi, k));
         }
+    }
+}
+
+fn copy_command(ui: &mut egui::Ui, project: Option<&std::path::Path>, s: &Step) {
+    if let Some(c) = &s.request
+        && ui.button("Copy as Command").clicked()
+    {
+        let command = super::workspace::vidcut_command(project, &c.method, &c.params);
+        ui.ctx().copy_text(command);
     }
 }
 

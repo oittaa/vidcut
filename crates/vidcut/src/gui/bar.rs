@@ -15,7 +15,6 @@ enum Item {
     History,
     Transcription,
     Mixer,
-    Log,
     Help,
 }
 
@@ -26,19 +25,17 @@ const LEFT: [Item; 4] = [
     Item::Export,
 ];
 
-const RIGHT: [Item; 7] = [
+const RIGHT: [Item; 6] = [
     Item::NoPreview,
     Item::Jobs,
     Item::History,
     Item::Transcription,
     Item::Mixer,
-    Item::Log,
     Item::Help,
 ];
 
-const LEAVING: [Item; 11] = [
+const LEAVING: [Item; 10] = [
     Item::Help,
-    Item::Log,
     Item::Mixer,
     Item::Transcription,
     Item::History,
@@ -68,7 +65,7 @@ impl Workspace {
     fn bar_has(&self, item: Item) -> bool {
         match item {
             Item::NoPreview => self.snap.preview_error.is_some(),
-            Item::Jobs | Item::Log | Item::Help => true,
+            Item::Jobs | Item::Help => true,
             _ => self.project().is_some(),
         }
     }
@@ -119,7 +116,6 @@ impl Workspace {
             }
             Item::Transcription => ui.toggle_value(&mut self.transcription.open, "Transcription"),
             Item::Mixer => ui.toggle_value(&mut self.show_mixer, "Mixer"),
-            Item::Log => ui.toggle_value(&mut self.show_log, "Command log"),
             Item::Help => ui.toggle_value(&mut self.help.open, "Help"),
         }
     }

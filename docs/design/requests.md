@@ -146,6 +146,7 @@ sequenceDiagram
 - An edit that changes nothing makes no revision and no undo step.
 - Else the clone becomes the project, and `rev` goes up by one.
 - The history then gets an `Entry`: a label (`describe`) and the `Change`.
+- The label of a request that sets fields of one thing names each field that changed. `describe` takes the old value from the project before the edit, and the new value from the params.
 
 `apply`:
 
@@ -184,6 +185,7 @@ Steps:
   - when its GUI opened the project (`Editor::opened_at`)
   - the clips and frames it changed (`steps::places`, from the project before and after)
   - the commands of an `apply`
+  - the request that made it (`Call`: its method and params)
 - A history line without these fields loads with them empty.
 - The CLI and `mcp` put the `Client` on the `Envelope` (the `client` key of a JSON-RPC request).
 - A GUI gives its own `Client`, and the `Client` of its IPC callers, in `Live::request`.
@@ -237,7 +239,9 @@ Revert:
 
 The History panel:
 
-- The History panel (`HistoryUi`) docks beside the Media Pool. The config folder keeps its width.
+- The History panel (`HistoryUi`) docks at the right side of the window. The config folder keeps its width.
+- When the current step changes, the panel scrolls only if that row is out of view. It scrolls only as far as the row needs.
+- Copy as Command copies the `Call` of a step as a `vidcut rpc` command, as the export jobs do (`vidcut_command`).
 - It previews a step without a change to the project.
 - `Handle::history_preview` asks the live core. `Live::preview_step` hands the step to the `vidcut-preview` thread.
 - That thread makes the project as it was (`Store::project_at`), only for the newest step asked. Thus a long history never holds up the live core.

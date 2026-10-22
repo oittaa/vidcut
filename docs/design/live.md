@@ -139,7 +139,7 @@ Each pass:
 
 The snapshot:
 
-- The `Snapshot` carries the project, players, selection, log, notices, filmstrips, waveforms, missing media and jobs.
+- The `Snapshot` carries the project, players, selection, notices, filmstrips, waveforms, missing media and jobs.
 - `Port` passes `Renderer::attach`, `Renderer::present` and `Renderer::capture_viewer` to the viewer thread. It passes the rest to the UI.
 
 ## Steps and waits
@@ -258,7 +258,7 @@ The bar and the Jobs button:
   - success or error
   - the revision
   - whether the project changed
-- The log is capped. It shows in the GUI and in `gui.log`.
+- The log is capped. `gui.log` gives it to scripts.
 
 ## What the GUI computes itself
 

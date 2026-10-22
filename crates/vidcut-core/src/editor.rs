@@ -764,6 +764,7 @@ impl Editor {
             label: label_of(&request, &self.project, playhead),
             kind: Some(request.method()),
             by: client,
+            request: crate::steps::Call::of(&request),
             parts: match &request {
                 Request::Apply { commands, .. } => commands
                     .iter()
@@ -1062,6 +1063,7 @@ impl Editor {
                 label,
                 kind: Some("history.revert".into()),
                 by: client,
+                request: crate::steps::Call::of(&Request::HistoryRevert { step }),
                 ..Step::default()
             },
             result,

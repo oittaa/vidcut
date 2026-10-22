@@ -45,7 +45,7 @@ struct Placed {
 enum Brief {
     Of(serde::de::IgnoredAny),
     Base(serde::de::IgnoredAny),
-    Step(BriefStep),
+    Step(Box<BriefStep>),
     Undo(usize),
     Redo(usize),
     Mark(Mark),
@@ -75,6 +75,8 @@ struct BriefStep {
     spans: Vec<crate::steps::Span>,
     #[serde(default)]
     parts: Vec<String>,
+    #[serde(default)]
+    request: Option<crate::steps::Call>,
 }
 
 const MARK: u64 = 256;
@@ -366,6 +368,7 @@ impl HistoryFile {
                             clips: b.clips,
                             spans: b.spans,
                             parts: b.parts,
+                            request: b.request,
                         },
                     );
                 }

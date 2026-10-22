@@ -48,7 +48,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
   - The Inspector button is at the top right of the UI toolbar (§8.15). vidcut has an Inspector tab beside the Titles tab instead (deviation X70).
   - Out: the Sync Bin, Keyframe Editor, Transitions and Effects tabs.
-  - vidcut's bar also has Import, Export and Jobs (deviation X3), Help (X23) and the command log (X5).
+  - vidcut's bar also has Import, Export and Jobs (deviation X3), and Help (X23).
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
 - **Below the Media Pool:** the edit-function buttons (§7), and Cut and Dissolve (§8.11).
 - **Viewer:**
@@ -1564,7 +1564,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The ⋯ menu takes the place of the first item to go. It lists the items in the order of the bar.
   - The items come back when there is room.
   - The top bar keeps File, Edit and Timeline.
-  - It gives up Help, Command log, Mixer, Transcription, History, Export, Quick Export, Import Folder, Import, Jobs, and last the no preview warning.
+  - It gives up Help, Mixer, Transcription, History, Export, Quick Export, Import Folder, Import, Jobs, and last the no preview warning.
   - The transport keeps the timecode.
   - It gives up the shuttle speed, Clear, Mark Out, Mark In, Loop, the trim buttons, Next Edit, Previous Edit, Stop and Play.
   - The header of the viewer keeps Duration. It gives up Source Tape, Source Clip and Timeline.

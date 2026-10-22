@@ -483,7 +483,6 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: 0,
-        log: Arc::new(VecDeque::new()),
         notices: Arc::new(VecDeque::new()),
         thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
@@ -543,7 +542,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
-        log: Arc::new(VecDeque::new()),
+        log: VecDeque::new(),
         log_seq: 0,
         notices: Arc::new(VecDeque::new()),
         notice_seq: 0,
@@ -805,7 +804,7 @@ struct Live {
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
-    log: Arc<VecDeque<LogEntry>>,
+    log: VecDeque<LogEntry>,
     log_seq: u64,
     notices: Arc<VecDeque<Notice>>,
     notice_seq: u64,
@@ -1313,7 +1312,6 @@ impl Live {
             selection: self.selection.clone(),
             pool: self.pool.clone(),
             clipboard: self.clipboard.len(),
-            log: self.log.clone(),
             notices: self.notices.clone(),
             thumbs: self.thumbs.clone(),
             missing: self.missing.clone(),
@@ -1980,10 +1978,9 @@ impl Live {
                             && job.method != "project.open"
                             && job.rev.is_some_and(|before| before != rev))),
             };
-            let log = Arc::make_mut(&mut self.log);
-            log.push_back(entry);
-            while log.len() > LOG_CAP {
-                log.pop_front();
+            self.log.push_back(entry);
+            while self.log.len() > LOG_CAP {
+                self.log.pop_front();
             }
         }
         if let (Err(e), Origin::Gui { .. }, None) = (&result, job.origin, &job.reply)
