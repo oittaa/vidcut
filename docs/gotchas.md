@@ -82,6 +82,13 @@ Measured in Resolve Studio 21.1.1 through its scripting API: values set on clips
 - **Pan, Tilt and the crop are fractions of Resolve's picture,** not of the frame: the source sized by Retime and Scaling's `scale`, by the scripting API's numbers 0 the project's (fit in a new project), 1 crop (a source pixel to a frame pixel, measured with square pixels only), 2 fit, 3 fill and 4 stretch; only 3 was checked in a file. Pan is in picture widths to the right, Tilt in picture heights up, and the zoom is across and down the picture. vidcut writes `scale` 2, so Resolve fits a clip whatever its project says, and reads crop, fill and stretch as a zoom; a compound clip's picture is the frame.
 - **Resolve zooms and turns about the anchor point,** `transformationAnchorPoint`, from the picture's middle in fractions of it, y up, and flips about the middle. vidcut has no anchor: reading folds it into `position`, the middle landing at A − R·S·A plus Pan and Tilt's move (A the anchor, S the zoom, R the turn), and writing leaves it at the middle.
 - **Resolve's Pan and Tilt go from −4 to 4.** vidcut writes a picture moved further at 4 and names its clip in the export's notes.
+- **Resolve's Dynamic Zoom is a `Resolve Effect` of type 59.**
+  - `dynamicZoomCenter` (POINTF) is the middle of a box, from the middle of the picture in fractions of the picture, y up. `dynamicZoomScale` (Double) is the size of the box as a fraction of the picture.
+  - Each has two keys, at −g and 1000 − g, with g the timeline's `global_start_time` in frames. Resolve reads the earlier key as the start and the later key as the end, whatever their times.
+  - The box is in fractions of Resolve's picture, as Pan and Tilt are. vidcut reads a crop, fill or stretch as a zoom after the box, and that zoom scales the box with the picture. Thus `otio::picture` reads the box as it is, and writes it in this form.
+- **Resolve plays each ease of Dynamic Zoom as a straight line.** It keeps `dynamicZoomEase` (UInt: 0 Linear, 1 Ease In, 2 Ease Out, 3 Ease In and Out) and writes it.
+  - All four play the same straight line, in stills and in a Deliver render. This is so when the ease is set through scripting and when it is read from a file. Its Inspector menu wasn't tried.
+  - vidcut's eases are curves ([X67](deviations.md#x67-the-eases-of-dynamic-zoom-are-curves)), so a clip with an ease other than Linear plays differently in Resolve.
 
 ## transcribe.cpp and its models
 

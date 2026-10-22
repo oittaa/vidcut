@@ -15,7 +15,6 @@ docs/roadmap.md
 docs/todo/alsa-audio-devices.md
 docs/todo/animated-webp-ffmpeg-8.md
 docs/todo/burn-in-ahead.md
-docs/todo/clip-transform.md
 docs/todo/ducking.md
 docs/todo/effects-library.md
 docs/todo/ffmpeg-master-cuda-bindings.md

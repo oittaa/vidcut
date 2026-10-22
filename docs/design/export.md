@@ -123,6 +123,14 @@ A title is in the plan as `VideoPiece::Titled`: a picture (a source, black or a 
 
 A placed clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) is a source piece with `placed` pictures: its clip's, then those of the compound clips it plays inside (`render::Placed`). `render::flatten_lanes` lays it over the tracks below as an `Over` of a `VideoPiece::Mix` without a ramp; in a dissolve with a placed side the incoming side is marked `cross`. A clip at its usual values is laid over the same way where its fitted picture leaves bars and something is below it; where its fitted picture fills the frame (`place::fills`, by the `place::fit` the export and the viewer fit with), it takes the place of the layers below, inside a placed compound clip those of the compound, and with nothing below it is drawn with black bars, which costs less. `VideoFrames` fits a placed layer at the size it shows, up to its source's own (`layer_size`, `Maker::size_layer`), so a punch-in keeps the source's detail, and makes its frames in memory: on a GPU they come down shrunk. `place::Placing` maps each pixel of the frame back to the picture, and `export::place::over` lays the picture over the frame below in its own code values, each component tapped over the pixel's footprint and its edges covered in part, as the viewer's shader does. For NVENC the frame below stays on the GPU: `cuda::burn::Overlay::of` makes the placed picture's colors and coverage in memory, and `cuda::burn` mixes them in, as for a title. A crossing pair lays each side over what was below the first and adds them, taking that away once: `mix::crossed` in memory, `cuda::mix::sum` on the GPU.
 
+A picture with a Dynamic Zoom is placed on each frame by its own box:
+
+- Its `render::Placed` has a `Run`: where the piece starts in its clip. `VideoPiece::part` and `Placed::after` move the `Run` with the piece.
+- `VideoFrames` gives `place::Placing` the frame's `Run`, so `Placed::zoomed` gives the box of that frame.
+- A clip inside a compound clip keeps the `Run` of its own frames, which `render::inside` gives.
+- `layer_size` fits the layer for the smaller of the two boxes (`DynamicZoom::closest`).
+- The NVENC path is the same, as `cuda::burn::Overlay::of` takes the frame's `Placing`.
+
 ## Proxies
 
 `proxy.generate` uses the same machinery (spec D41). `Env::generate_proxy` in `AvEnv` picks encoders (`proxy::encoders`: the codec preference, the detected GPU encoders, for automatic the codecs the GPU plays, `export::plays`) and calls `proxy::write`: one source decoded on a GPU decoder of its own, pictures made by `Maker`, encoded on `vidcut-encode`, renamed into place. The Matroska file keeps each source frame's timestamp, and its `VIDCUT_ORIGIN` tag lets an unchanged source reuse it. Vulkan's ProRes encoder serves proxies only.
