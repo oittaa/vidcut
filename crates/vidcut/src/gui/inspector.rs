@@ -6,7 +6,9 @@ use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK,
 };
 use serde_json::{Value, json};
-use vidcut_core::model::{Clip, Crop, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind};
+use vidcut_core::model::{
+    Clip, Crop, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind, ZoomBox,
+};
 use vidcut_core::ops::picture::has_picture;
 use vidcut_core::place::upright_fit;
 
@@ -19,6 +21,7 @@ use crate::live::PlayerId;
 
 const REACH: f64 = 100.0;
 const ZOOM: (f64, f64) = (0.01, 100.0);
+const BOX: (f64, f64) = (0.01, 100.0);
 const TURNS: f64 = 3600.0;
 const LEFT_SHOWING: f64 = 1.0;
 const SAME: f64 = 1e-9;
@@ -36,6 +39,12 @@ enum Field {
     Right,
     Top,
     Bottom,
+    StartZoom,
+    StartX,
+    StartY,
+    EndZoom,
+    EndX,
+    EndY,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -57,12 +66,34 @@ impl Field {
             Field::Right => "Right",
             Field::Top => "Top",
             Field::Bottom => "Bottom",
+            Field::StartZoom => "Start Zoom",
+            Field::StartX => "Start X",
+            Field::StartY => "Start Y",
+            Field::EndZoom => "End Zoom",
+            Field::EndX => "End X",
+            Field::EndY => "End Y",
+        }
+    }
+
+    fn starts(self) -> Option<bool> {
+        match self {
+            Field::StartZoom | Field::StartX | Field::StartY => Some(true),
+            Field::EndZoom | Field::EndX | Field::EndY => Some(false),
+            _ => None,
+        }
+    }
+
+    fn zoom_box(self, z: &DynamicZoom) -> ZoomBox {
+        if self.starts() == Some(false) {
+            z.end
+        } else {
+            z.start
         }
     }
 
     fn suffix(self) -> &'static str {
         match self {
-            Field::Zoom | Field::ZoomX | Field::ZoomY => "%",
+            Field::Zoom | Field::ZoomX | Field::ZoomY | Field::StartZoom | Field::EndZoom => "%",
             Field::Rotation => "°",
             _ => "",
         }
@@ -70,14 +101,20 @@ impl Field {
 
     fn speed(self) -> f64 {
         match self {
-            Field::Zoom | Field::ZoomX | Field::ZoomY | Field::Rotation => 0.5,
+            Field::Zoom
+            | Field::ZoomX
+            | Field::ZoomY
+            | Field::Rotation
+            | Field::StartZoom
+            | Field::EndZoom => 0.5,
             _ => 1.0,
         }
     }
 
     fn usual(self) -> f64 {
         match self {
-            Field::Zoom | Field::ZoomX | Field::ZoomY => 100.0,
+            Field::Zoom | Field::ZoomX | Field::ZoomY | Field::EndZoom => 100.0,
+            Field::StartZoom => 100.0 / DynamicZoom::default().start.size,
             _ => 0.0,
         }
     }
@@ -85,6 +122,7 @@ impl Field {
     fn read(self, p: &Picture, s: &Shape) -> f64 {
         let ([x, y], [zx, zy], c) = (p.place(), p.scale(), p.crop);
         let ([w, h], [fw, fh]) = (s.frame, s.fitted);
+        let b = self.zoom_box(&p.dynamic_zoom.unwrap_or_default());
         match self {
             Field::Zoom | Field::ZoomX => zx * 100.0,
             Field::ZoomY => zy * 100.0,
@@ -95,11 +133,16 @@ impl Field {
             Field::Right => c.right * fw,
             Field::Top => c.top * fh,
             Field::Bottom => c.bottom * fh,
+            Field::StartZoom | Field::EndZoom => 100.0 / b.size,
+            Field::StartX | Field::EndX => (b.center[0] - 0.5) * fw,
+            Field::StartY | Field::EndY => (0.5 - b.center[1]) * fh,
         }
     }
 
     fn is_usual(self, p: &Picture) -> bool {
         let ([x, y], [zx, zy], c) = (p.place(), p.scale(), p.crop);
+        let usual = self.zoom_box(&DynamicZoom::default());
+        let b = p.dynamic_zoom.map_or(usual, |z| self.zoom_box(&z));
         match self {
             Field::Zoom => zx == 1.0 && zy == 1.0,
             Field::ZoomX => zx == 1.0,
@@ -111,6 +154,9 @@ impl Field {
             Field::Right => c.right == 0.0,
             Field::Top => c.top == 0.0,
             Field::Bottom => c.bottom == 0.0,
+            Field::StartZoom | Field::EndZoom => b.size == usual.size,
+            Field::StartX | Field::EndX => b.center[0] == usual.center[0],
+            Field::StartY | Field::EndY => b.center[1] == usual.center[1],
         }
     }
 
@@ -126,6 +172,9 @@ impl Field {
             Field::Right => side(c.left, fw),
             Field::Top => side(c.bottom, fh),
             Field::Bottom => side(c.top, fh),
+            Field::StartZoom | Field::EndZoom => 100.0 / BOX.1..=100.0 / BOX.0,
+            Field::StartX | Field::EndX => (-REACH - 0.5) * fw..=(REACH - 0.5) * fw,
+            Field::StartY | Field::EndY => (0.5 - REACH) * fh..=(0.5 + REACH) * fh,
         }
     }
 
@@ -151,6 +200,25 @@ impl Field {
             Field::Right => out.crop.right = v / fw,
             Field::Top => out.crop.top = v / fh,
             Field::Bottom => out.crop.bottom = v / fh,
+            Field::StartZoom
+            | Field::StartX
+            | Field::StartY
+            | Field::EndZoom
+            | Field::EndX
+            | Field::EndY => {
+                let mut z = p.dynamic_zoom.unwrap_or_default();
+                let b = if self.starts() == Some(true) {
+                    &mut z.start
+                } else {
+                    &mut z.end
+                };
+                match self {
+                    Field::StartZoom | Field::EndZoom => b.size = (100.0 / v).clamp(BOX.0, BOX.1),
+                    Field::StartX | Field::EndX => b.center[0] = at(0.5 + v / fw),
+                    _ => b.center[1] = at(0.5 - v / fh),
+                }
+                out.dynamic_zoom = Some(z);
+            }
         }
         out
     }
@@ -261,6 +329,15 @@ pub struct Inspector {
     unlinked: bool,
     held: Option<Held>,
     landing: Option<Landing>,
+    peek: Option<Peek>,
+}
+
+#[derive(Debug, Clone)]
+struct Peek {
+    start: bool,
+    at: i64,
+    seen: bool,
+    clips: Vec<String>,
 }
 
 enum Act {
@@ -439,7 +516,13 @@ fn crop(ui: &mut egui::Ui, i: &Inspector, chosen: &[Chosen], acts: &mut Vec<Act>
     });
 }
 
-fn dynamic_zoom(ui: &mut egui::Ui, chosen: &[Chosen], boxes: bool, acts: &mut Vec<Act>) {
+fn dynamic_zoom(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    chosen: &[Chosen],
+    boxes: bool,
+    acts: &mut Vec<Act>,
+) {
     let zooms: Vec<DynamicZoom> = chosen.iter().filter_map(|c| c.shown.dynamic_zoom).collect();
     let on = !zooms.is_empty();
     let first = chosen[0].shown.dynamic_zoom;
@@ -466,6 +549,16 @@ fn dynamic_zoom(ui: &mut egui::Ui, chosen: &[Chosen], boxes: bool, acts: &mut Ve
             acts.push(Act::Zooming(false));
         }
         ui.end_row();
+        for f in [
+            Field::StartZoom,
+            Field::StartX,
+            Field::StartY,
+            Field::EndZoom,
+            Field::EndX,
+            Field::EndY,
+        ] {
+            number(ui, (f, None), i, chosen, acts);
+        }
         let eased = zooms.iter().any(|z| z.ease != Ease::Linear);
         label(ui, "Ease", eased);
         ui.add_enabled_ui(first.is_some(), |ui| {
@@ -556,10 +649,76 @@ impl Workspace {
         if self.inspector.landing.is_some() && self.inspector_landed().is_empty() {
             self.inspector.landing = None;
         }
+        let player = self.snap.player(PlayerId::Timeline);
+        let (now, playing) = (player.position, player.playing);
+        let selected = &self.snap.selection.clips;
+        if let Some(k) = self.inspector.peek.as_mut() {
+            k.seen |= now == k.at;
+            let moved = k.seen && now != k.at;
+            if playing || moved || !k.clips.iter().all(|c| selected.contains(c)) {
+                self.inspector.peek = None;
+            }
+        }
     }
 
     pub(super) fn leave_inspector(&mut self) {
         self.inspector.held = None;
+        self.inspector.peek = None;
+    }
+
+    pub(super) fn inspector_peeked(
+        &self,
+        mut wanted: Vec<(String, Picture)>,
+    ) -> Vec<(String, Picture)> {
+        let (Some(k), Some(p)) = (&self.inspector.peek, self.project_shared()) else {
+            return wanted;
+        };
+        for id in &k.clips {
+            let base = match wanted.iter().find(|(w, _)| w == id) {
+                Some((_, x)) => Some(x.clone()),
+                None => p.clip(id).and_then(|c| c.picture.clone()),
+            };
+            let Some((b, z)) = base.and_then(|b| b.dynamic_zoom.map(|z| (b, z))) else {
+                continue;
+            };
+            let one = if k.start { z.start } else { z.end };
+            let framed = Picture {
+                dynamic_zoom: Some(DynamicZoom {
+                    start: one,
+                    end: one,
+                    ..z
+                }),
+                ..b
+            };
+            match wanted.iter_mut().find(|(w, _)| w == id) {
+                Some((_, x)) => *x = framed,
+                None => wanted.push((id.clone(), framed)),
+            }
+        }
+        wanted
+    }
+
+    fn peek(&mut self, start: bool, chosen: &[Chosen]) {
+        if self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom) {
+            self.timeline.picture_grab.tool = None;
+        }
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let ids: Vec<String> = chosen.iter().map(|c| c.id.clone()).collect();
+        let mut at = self.snap.player(PlayerId::Timeline).position;
+        if target(&p, &ids, at).is_none()
+            && let Some(c) = chosen.first().and_then(|c| p.clip(&c.id))
+        {
+            at = c.start;
+            self.seek(PlayerId::Timeline, at, false);
+        }
+        self.inspector.peek = Some(Peek {
+            start,
+            at,
+            seen: false,
+            clips: ids,
+        });
     }
 
     fn send_pictures(&mut self, chosen: &[Chosen], to: impl Fn(&Chosen) -> Option<Picture>) {
@@ -637,6 +796,9 @@ impl Workspace {
                     start: chosen.to_vec(),
                     dragging: true,
                 });
+                if let Some(start) = field.starts() {
+                    self.peek(start, chosen);
+                }
             }
             Act::Drag(field, value) => {
                 if let Some(h) = self.inspector.held.as_mut().filter(|h| h.field == field) {
@@ -660,6 +822,9 @@ impl Workspace {
                     self.inspector.held = None;
                 }
                 self.send_pictures(chosen, |c| Some(field.put(&c.shown, &c.shape, value)));
+                if let Some(start) = field.starts() {
+                    self.peek(start, chosen);
+                }
             }
             Act::Edit(field, value) => {
                 if !held_on(&self.inspector, field) {
@@ -670,6 +835,9 @@ impl Workspace {
                         start: Vec::new(),
                         dragging: false,
                     });
+                    if let Some(start) = field.starts() {
+                        self.peek(start, chosen);
+                    }
                 }
             }
             Act::Release(field) => {
@@ -714,31 +882,48 @@ impl Workspace {
                     })
                 });
                 if on {
-                    self.show_boxes(chosen);
+                    self.peek(true, chosen);
+                } else {
+                    self.inspector.peek = None;
                 }
             }
             Act::Boxes => {
+                self.inspector.peek = None;
                 if self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom) {
                     self.timeline.picture_grab.tool = None;
                 } else {
                     self.show_boxes(chosen);
                 }
             }
-            Act::Ease(ease) => self.send_pictures(chosen, |c| {
-                let z = c.shown.dynamic_zoom?;
-                Some(Picture {
-                    dynamic_zoom: Some(DynamicZoom { ease, ..z }),
-                    ..c.shown.clone()
-                })
-            }),
-            Act::Swap => self.send_pictures(chosen, |c| {
-                let z = c.shown.dynamic_zoom?;
-                Some(Picture {
-                    dynamic_zoom: Some(z.swapped()),
-                    ..c.shown.clone()
-                })
-            }),
-            Act::Clear(tool) => self.clear_pictures(chosen, tool),
+            Act::Ease(ease) => {
+                self.inspector.peek = None;
+                if self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom) {
+                    self.timeline.picture_grab.tool = None;
+                }
+                self.send_pictures(chosen, |c| {
+                    let z = c.shown.dynamic_zoom?;
+                    Some(Picture {
+                        dynamic_zoom: Some(DynamicZoom { ease, ..z }),
+                        ..c.shown.clone()
+                    })
+                });
+            }
+            Act::Swap => {
+                self.send_pictures(chosen, |c| {
+                    let z = c.shown.dynamic_zoom?;
+                    Some(Picture {
+                        dynamic_zoom: Some(z.swapped()),
+                        ..c.shown.clone()
+                    })
+                });
+                self.peek(true, chosen);
+            }
+            Act::Clear(tool) => {
+                if tool == PictureTool::DynamicZoom {
+                    self.inspector.peek = None;
+                }
+                self.clear_pictures(chosen, tool);
+            }
         }
     }
 
@@ -767,7 +952,7 @@ impl Workspace {
             .show(ui, |ui| {
                 transform(ui, i, &chosen, &mut acts);
                 crop(ui, i, &chosen, &mut acts);
-                dynamic_zoom(ui, &chosen, boxes, &mut acts);
+                dynamic_zoom(ui, i, &chosen, boxes, &mut acts);
             });
         for act in acts {
             self.inspect(act, &chosen);

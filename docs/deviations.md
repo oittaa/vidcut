@@ -1400,9 +1400,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The link button beside Zoom shows Zoom X and Zoom Y. A picture with two different zooms shows them both.
     - The link button turns the link on again, and makes Zoom Y equal to Zoom X.
   - **Crop:** Left, Right, Top and Bottom.
-  - **Dynamic Zoom:** Off or On, the Ease, Show Boxes and Swap.
-    - Show Boxes shows the start box and the end box of the selected clip in the viewer. On also shows them.
-    - If the playhead is not on a selected clip, Show Boxes and On move it to the first frame of the first selected clip.
+  - **Dynamic Zoom:** Off or On, Start Zoom, Start X, Start Y, End Zoom, End X, End Y, the Ease, Show Boxes and Swap.
+    - A value typed while Dynamic Zoom is off turns it on.
+    - A Start value that the user types or drags shows the start of the zoom in the viewer. An End value shows the end. On and Swap show the start.
+    - The viewer shows it until the playhead moves or the clip plays. Then the viewer shows the zoom of the current frame.
+    - A change to the Dynamic Zoom in the Inspector hides the boxes. Thus the viewer shows the result.
+    - Show Boxes shows the start box and the end box of the selected clip in the viewer.
+    - If the playhead is not on a selected clip, these controls move it to the first frame of the first selected clip.
     - Alt+T shows the same boxes. It selects the clip under the playhead instead.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - **Units:**
@@ -1411,6 +1415,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Zoom is in percent, as the viewer shows it while the user zooms.
     - Rotation is in degrees, counterclockwise.
     - Crop is in pixels of the picture as it is fitted into the frame, before the zoom, as in Resolve.
+    - The zoom of a Dynamic Zoom box is in percent. A box of half the picture is 200%.
+    - The X and Y of a box are pixels of the fitted picture from its middle, with Y up.
   - A drag on a field changes its value. A click on a field lets the user type a value.
   - The picture follows a drag in the viewer. One change follows on release.
   - A typed value is one change. Each change is one undo step.
@@ -1428,5 +1434,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A Reset for each value puts back one value and keeps the others of its group.
   - The same value on several clips is a usual need, for example the same Position for the clips of a picture in picture.
   - The requests keep their fractions ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Thus only the GUI shows pixels.
+  - Resolve's Inspector has only Ease and Swap for Dynamic Zoom. Numbers show each box exactly, and bring back a box that is out of the viewer.
+  - The viewer shows the start or the end that a value changes. Thus each change shows in the picture at once.
   - The boxes show the start and the end of a Dynamic Zoom. Without them, the viewer shows only the zoom of the current frame.
   - The Inspector shows a clip that the user selected. Thus the playhead goes to that clip, and the selection does not change.

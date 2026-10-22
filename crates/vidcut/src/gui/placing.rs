@@ -449,7 +449,8 @@ impl Workspace {
         }
     }
 
-    fn previewed(&self, mut wanted: Vec<(String, Picture)>) -> Vec<(String, Picture)> {
+    fn previewed(&self, wanted: Vec<(String, Picture)>) -> Vec<(String, Picture)> {
+        let mut wanted = self.inspector_peeked(wanted);
         if self.timeline.picture_grab.tool != Some(PictureTool::DynamicZoom) {
             return wanted;
         }
