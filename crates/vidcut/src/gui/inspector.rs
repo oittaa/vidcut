@@ -336,6 +336,7 @@ pub struct Inspector {
     landing: Option<Landing>,
     seen: Option<(Vec<String>, Vec<String>)>,
     focus: Option<egui::Id>,
+    moved: bool,
     commit: bool,
 }
 
@@ -875,8 +876,11 @@ impl Workspace {
 
     pub(super) fn inspector_panel(&mut self, ui: &mut egui::Ui) {
         let focus = ui.ctx().memory(|m| m.focused());
-        self.inspector.commit = focus.is_none() || focus != self.inspector.focus;
-        self.inspector.focus = focus;
+        let i = &mut self.inspector;
+        i.moved |= focus != i.focus;
+        i.focus = focus;
+        i.commit = (focus.is_none() || i.moved) && !ui.input(|i| i.pointer.any_down());
+        i.moved &= !i.commit;
         self.follow_selection();
         let chosen = self.chosen();
         let mut acts = Vec::new();
