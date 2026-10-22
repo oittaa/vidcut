@@ -643,7 +643,10 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Transform has Zoom X and Y, linked or not, Position X and Y, Rotation Angle, Anchor Point, Pitch, Yaw and Flip.
   - Cropping has Left, Right, Top and Bottom in pixels, Softness, and Retain Image Position.
   - Dynamic Zoom has Ease and Swap.
+  - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
+  - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
+  - vidcut: its Audio section has Volume, Mute and Voice Isolation for the selected clips with sound (X70).
 - **The units of the Inspector,** measured in Resolve Studio 21.1.1:
   - The timeline was 1920×1080. A 1280×720 chart and a 960×720 chart were fitted into it.
   - OTIO exports on 1080 and 2160 timelines gave the values in the file.
@@ -683,11 +686,12 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Its speaker button mutes only the playback, not the export.
 - **Clip volume** (pp. 743, 1109–1110, 1112):
   - Each clip has one gain, and a mute.
-  - The Inspector has the Volume of the clip. This is the value of the volume overlay of the clip (p. 743).
+  - The Inspector has the Volume of the clip, in its Audio panel. This is the value of the volume overlay of the clip (p. 743).
   - On the Edit page, each clip with sound has a volume overlay. A drag up or down on it sets the level of the clip (p. 1109).
   - Shift gives finer steps (p. 1109). The overlay is flat at first (p. 1112).
   - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112).
   - The volume commands of the Edit page change several selected clips together. The clips keep the differences between their levels (p. 1110).
+  - vidcut: Volume and Mute in the Audio section of the Inspector (X70). `clip.set` sets `gain_db` and `muted`. D12 gives the range.
   - vidcut: a line on each clip with sound that is tall enough. A drag on it sets `gain_db` with `clip.set` (X71).
   - The scale of the line and the step of Shift are in D77.
   - vidcut has no keyframes (X71).

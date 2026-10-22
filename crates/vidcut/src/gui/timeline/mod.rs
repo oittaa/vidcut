@@ -2074,6 +2074,16 @@ impl Workspace {
         } else {
             vec![c.id.clone()]
         };
+        let sounding: Vec<String> = self
+            .project()
+            .map(|p| {
+                clips
+                    .iter()
+                    .filter(|id| p.clip(id).is_some_and(|x| x.audio.is_some()))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
         if c.title.is_some() && ui.button("Edit Title…").clicked() {
             self.open_title(&c.id);
             ui.close();
@@ -2099,7 +2109,7 @@ impl Workspace {
                 ui,
                 if a.muted { "Unmute" } else { "Mute" },
                 "clip.set",
-                json!({ "clips": clips, "muted": !a.muted }),
+                json!({ "clips": sounding, "muted": !a.muted }),
             );
         }
         let current = self.project().and_then(|p| {
@@ -2190,7 +2200,7 @@ impl Workspace {
                 .project()
                 .and_then(|p| super::isolation::heard(p, &c.id))
                 .flatten();
-            let on = super::isolation::Isolate::Clips(clips.clone());
+            let on = super::isolation::Isolate::Clips(sounding.clone());
             let label = keys("Voice Isolation  (Alt+V)");
             if self.isolation_controls(ui, on, heard, &label) {
                 ui.close();
