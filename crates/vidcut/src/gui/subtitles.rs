@@ -57,6 +57,7 @@ impl Pending {
 #[derive(Debug)]
 pub(crate) struct Landing {
     typing: Typing,
+    person_name: String,
     pending: Pending,
 }
 
@@ -73,6 +74,15 @@ impl CueDialog {
         self.color = c.color.clone().unwrap_or_default();
         self.take_person(speakers, c.speaker.clone());
         self.loaded = true;
+    }
+
+    fn resume(&mut self, l: Landing) {
+        self.text = l.typing.text;
+        self.place = l.typing.place;
+        self.speaker = l.typing.speaker;
+        self.color = l.typing.color.unwrap_or_default();
+        self.person_name = l.person_name;
+        self.pending = l.pending;
     }
 
     fn take_person(&mut self, speakers: &Speakers, person: Option<String>) {
@@ -459,6 +469,7 @@ impl Workspace {
         if d.pending.waiting(rev) {
             self.timeline.cue_landings.push(Landing {
                 typing: d.typing(),
+                person_name: d.person_name,
                 pending: d.pending,
             });
         }
@@ -503,7 +514,12 @@ impl Workspace {
             return;
         }
         self.close_cue_form();
-        self.timeline.cue_landings.retain(|l| l.typing.cue != id);
+        let landing = self
+            .timeline
+            .cue_landings
+            .iter()
+            .position(|l| l.typing.cue == id)
+            .map(|i| self.timeline.cue_landings.remove(i));
         let mut d = CueDialog {
             cue: id.to_string(),
             text: String::new(),
@@ -520,6 +536,9 @@ impl Workspace {
             && let Some(c) = p.cue(id)
         {
             d.load(&p.speakers, c);
+        }
+        if let Some(l) = landing {
+            d.resume(l);
         }
         self.timeline.cue_dialog = Some(d);
     }
