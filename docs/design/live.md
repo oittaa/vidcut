@@ -314,7 +314,7 @@ The bar and the Jobs button:
   - The viewer draws this style in place of the track's style until the user leaves the field. Then `track.set` sends it ([deviation X51](../deviations.md#x51-a-subtitle-tracks-style-goes-in-when-the-user-leaves-a-field)).
   - Its color fields have the color picker of egui beside them.
   - Its font field has a list of the installed fonts, read once when the section opens (`burn::families`).
-  - The Subtitle section (`CueDialog`) keeps the text being typed. The timeline and the viewer draw it in place of the cue's text until the user leaves the text box.
+  - The Subtitle section (`CueDialog`) keeps the text being typed. While the section is open, the timeline and the viewer draw its text in place of the cue's text. The viewer also draws its position, person and color.
   - The Subtitle section sends its changes with `Handle::request_answered`. It keeps what it sent until each `Answer` comes and the project has that revision.
   - Then, while the user does not edit it, it shows the cue of the project. Thus a change that the project refuses goes away. The field does not jump back while a change is on its way.
   - The selected cues are part of the session's `Selection`, as clips are.
