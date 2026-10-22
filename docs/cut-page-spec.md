@@ -46,7 +46,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - On the left: the Media Pool and Mixer tabs (p. 649).
   - On the right: Quick Export and the Full Screen viewer.
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
-  - Out: the Sync Bin, Keyframe Editor, Transitions and Effects tabs, and the Inspector.
+  - The Inspector button is at the top right of the UI toolbar (§8.15). vidcut has an Inspector tab beside the Titles tab instead (deviation X70).
+  - Out: the Sync Bin, Keyframe Editor, Transitions and Effects tabs.
   - vidcut's bar also has Import, Export and Jobs (deviation X3), Help (X23) and the command log (X5).
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
 - **Below the Media Pool:** the edit-function buttons (§7), and Cut and Dissolve (§8.11).
@@ -618,6 +619,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Its values are Zoom (width and height, linked or not), Position X and Y, and Rotation Angle about the anchor point.
   - Its other values are Pitch, Yaw, and Flip Horizontal and Vertical.
   - vidcut: the shape and snapping of the title handles (X52), and the values of a picture in fractions of the frame (X65).
+  - vidcut: the Inspector tab shows these values in pixels, percent and degrees (X70).
   - Details: D75.
 - **Crop** (p. 768):
   - A handle on each side crops that side.
@@ -632,6 +634,23 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - vidcut: Alt+T shows the boxes, and the Tools row has Dynamic Zoom (X65). The eases are curves of their own (X67).
   - Details: D75.
 - **How they play:** a clip covers the tracks below it only where its picture covers the frame. Details: D75.
+- **Inspector** (pp. 734–744):
+  - The Inspector button at the top right of the UI toolbar opens it.
+  - Its panels are Video, Audio, Effects, Transition, Image and File. A panel that does not apply is gray.
+  - Each group has an on/off toggle and a Reset.
+  - The groups of the Video panel are Transform, Cropping, Dynamic Zoom, Composite, Speed Change, and Retime and Scaling.
+  - Transform has Zoom X and Y, linked or not, Position X and Y, Rotation Angle, Anchor Point, Pitch, Yaw and Flip.
+  - Cropping has Left, Right, Top and Bottom in pixels, Softness, and Retain Image Position.
+  - Dynamic Zoom has Ease and Swap.
+  - vidcut: an Inspector tab in the place of the Media Pool (X70).
+- **The units of the Inspector,** measured in Resolve Studio 21.1.1:
+  - The timeline was 1920×1080. A 1280×720 chart and a 960×720 chart were fitted into it.
+  - OTIO exports on 1080 and 2160 timelines gave the values in the file.
+  - Position X and Y are timeline pixels from the middle, with Y up.
+  - The OTIO `Pan` is Position X divided by the timeline width. `Tilt` is Position Y divided by the timeline height.
+  - Thus a picture narrower than the frame moves less than its number. On the 4:3 chart in the 16:9 timeline, Position X 200 moves it 150 pixels.
+  - Crop is in pixels of the picture as it is fitted in the timeline. Crop Left 100 on the 4:3 chart is a `cropLeft` of 100/1440 in the OTIO file.
+  - Zoom is a factor (1.000). Rotation is in degrees.
 - **Out:** Pitch and Yaw (p. 767), crop Softness (p. 768), the modes and opacity of Composite (p. 769), keyframes.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
@@ -1671,6 +1690,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - **How it plays:** a clip with a Dynamic Zoom is placed over the tracks below it. The viewer and the export draw the same frame.
     - **In the viewer**, Alt+T shows the boxes on the clip that T uses (X65).
     - The viewer then draws that clip without its Dynamic Zoom, so that both boxes show.
+    - The boxes stay in place on the picture, also while the clip plays. They mark where the zoom starts and where it ends.
     - The green box is the start, the red box is the end, and a line joins their centers.
     - A drag inside a box moves it, and Shift keeps the move on one axis.
     - A drag at a corner resizes the box about its center. One `picture.set` follows on release.

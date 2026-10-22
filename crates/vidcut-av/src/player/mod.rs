@@ -329,7 +329,7 @@ pub(crate) struct Shared {
     levels: Mutex<std::collections::VecDeque<Level>>,
     pub(crate) titles: titles::Titles,
     pub(crate) subtitles: subtitles::Subtitles,
-    placing: Mutex<Option<(String, vidcut_core::model::Picture)>>,
+    placing: Mutex<Vec<(String, vidcut_core::model::Picture)>>,
 }
 
 pub(crate) struct Level {
@@ -695,7 +695,7 @@ impl Player {
             levels: Mutex::new(std::collections::VecDeque::new()),
             titles: titles::Titles::default(),
             subtitles: subtitles::Subtitles::default(),
-            placing: Mutex::new(None),
+            placing: Mutex::new(Vec::new()),
         });
         shared.apply_video_budget();
         output.start(source)?;
@@ -942,9 +942,9 @@ impl Player {
             )
         };
         let placing = lock(&self.shared.placing).clone();
-        let placed = plan.placed_at(pos, placing.as_ref());
+        let placed = plan.placed_at(pos, &placing);
         let crosses = plan.crosses_at(pos);
-        let (mut titles, titled) = self.shared.titles.shown(&plan, pos, placing.as_ref());
+        let (mut titles, titled) = self.shared.titles.shown(&plan, pos, &placing);
         let (cues, cued) = self.shared.subtitles.shown(&plan, pos);
         titles.extend(cues);
         let drawn = titled && cued;
@@ -1126,8 +1126,8 @@ impl Player {
         }
     }
 
-    pub fn preview_picture(&self, picture: Option<(String, vidcut_core::model::Picture)>) {
-        *lock(&self.shared.placing) = picture;
+    pub fn preview_pictures(&self, pictures: Vec<(String, vidcut_core::model::Picture)>) {
+        *lock(&self.shared.placing) = pictures;
     }
 
     pub fn preview_title(&self, title: Option<(String, Title)>) {

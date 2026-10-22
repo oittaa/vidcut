@@ -230,7 +230,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - One method keeps the preview and the export frame-exact.
   - `bwdif` is the better of the CPU deinterlacers of FFmpeg.
-  - There is no Inspector for a choice for each clip.
+  - Thus the Inspector needs no Deinterlace Quality for each clip ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
 
 ## X14. Color is set per export, not managed
 
@@ -706,7 +706,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Both go in as one change on Done (Ctrl+Enter), or when the user opens another subtitle in the window.
   - Cancel leaves the cue as it was.
 - **Why:**
-  - vidcut has no Inspector.
+  - The Inspector of vidcut has the picture of a clip only. It has no Captions panel ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
   - One change for each subtitle keeps typing out of the undo history.
 
 ## X44. Add Subtitle uses the shown subtitle track
@@ -922,11 +922,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The style goes in as one `track.set` on Done. Cancel leaves the track as it was.
   - The margin is the inset from the edges of the picture. Only vidcut has this control. Resolve has Position X and Y instead.
 - **Why:**
-  - vidcut has no Inspector ([X43](#x43-a-subtitles-text-is-typed-in-its-own-window)).
+  - The Inspector of vidcut has no Track panel ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
   - One change for each track keeps typing out of the undo history.
   - Subtitle guidelines and IMSC1 regions speak of a margin.
 
-## X52. Titles come from a Titles tab or Add Title and are edited in a Title window, without an Inspector
+## X52. Titles come from a Titles tab or Add Title and are edited in a Title window
 
 - **Resolve:**
   - The user drags titles from the Titles browser onto the timeline.
@@ -967,7 +967,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A double-click on the title in the viewer opens the window.
   - `titles.add`, `titles.set` and `titles.list` do the same from a script.
 - **Why:**
-  - vidcut has no Inspector or effects browser ([X43](#x43-a-subtitles-text-is-typed-in-its-own-window), [X51](#x51-a-subtitle-tracks-style-is-set-in-its-own-window)).
+  - The Inspector of vidcut has no settings for titles, and vidcut has no effects browser ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
   - One change for each title keeps typing out of the undo history.
   - The Titles tab is the same as in Resolve. Its cards show the kinds of title that vidcut has.
   - Handles that show on hover, and a cursor that changes over them, show that the user can drag them.
@@ -1258,6 +1258,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - vidcut adds controls that the Cut page does not have. While the Transform handles show, the wheel or a pinch over the picture zooms it.
   - Alt+wheel turns it, and a drag just outside a corner turns it.
   - The place, zoom and crop of a picture are fractions of the frame and of the source ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The Inspector tab shows them in pixels, percent and degrees ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
   - The requests are `picture.get`, `picture.set` and `picture.clear`.
   - `gui.show transform` or `crop` shows the handles. `gui.show tools` shows the row.
   - Dynamic Zoom: Alt+T shows the start box and the end box of the clip in the viewer. Alt+T again hides them.
@@ -1378,3 +1379,56 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A start on a grid of 10 ms is of no use to the user.
   - The usual mix ducks music under every other track. With speech as the default, tracks without speech dip nothing.
   - A value that changes without a word is a different setting than the one asked for.
+
+## X70. The Inspector is a tab beside the Media Pool, in frame pixels
+
+- **Resolve:**
+  - The Inspector button at the top right of the UI toolbar opens the Inspector (pp. 734–744; [spec §8.15](cut-page-spec.md#815-transform-and-crop-pp-766768)).
+  - Its Video panel has Transform, Cropping and Dynamic Zoom. Each group has an on/off toggle and a Reset of all its values.
+  - There is no Reset for one value.
+  - Position X and Y are timeline pixels from the middle, with Y up.
+  - A picture narrower than the frame moves less than its number. On a 4:3 picture in a 16:9 timeline, Position X 200 moves it 150 pixels.
+  - Crop is in pixels of the fitted picture. Zoom is a factor, and Rotation is in degrees.
+- **vidcut:**
+  - An Inspector tab is beside the Media Pool and Titles tabs. It opens in the same place.
+  - `gui.show inspector` shows it.
+  - It shows the selected clip. With no selected clip that can have a picture, it shows one line.
+  - Audio clips, titles and subtitles have no picture.
+  - With several clips selected, it shows the first one that can have a picture. Its header gives the number of these clips.
+  - Its sections are Transform, Crop and Dynamic Zoom. Each section has a Reset of the whole section.
+  - **Transform:** Zoom, Position X and Y, Rotation, Flip Horizontal and Flip Vertical.
+    - The link button beside Zoom shows Zoom X and Zoom Y. A picture with two different zooms shows them both.
+    - The link button turns the link on again, and makes Zoom Y equal to Zoom X.
+  - **Crop:** Left, Right, Top and Bottom.
+  - **Dynamic Zoom:** Off or On, Start Zoom, Start X, Start Y, End Zoom, End X, End Y, the Ease, Show Boxes and Swap.
+    - A value typed while Dynamic Zoom is off turns it on.
+    - Show Boxes shows the start box and the end box in the viewer, as Alt+T does. On also shows them.
+    - While the boxes show, the viewer draws the whole picture. The boxes stay in place on it, also while the clip plays (D75).
+    - If the playhead is not on a selected clip, Show Boxes and On move it to the first frame of the first selected clip.
+  - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
+  - **Units:**
+    - Position X and Y are frame pixels from the middle of the frame, with Y up.
+    - Thus Position X 200 moves every picture 200 frame pixels, whatever its shape.
+    - Zoom is in percent, as the viewer shows it while the user zooms.
+    - Rotation is in degrees, counterclockwise.
+    - Crop is in pixels of the picture as it is fitted into the frame, before the zoom, as in Resolve.
+    - The zoom of a Dynamic Zoom box is in percent. A box of half the picture is 200%. Below 100%, the box is larger than the picture.
+    - The X and Y of a box are pixels of the fitted picture from its middle, with Y up.
+  - A drag on a field changes its value. A click on a field lets the user type a value.
+  - The picture follows a drag in the viewer. One change follows on release.
+  - A typed value is one change. Each change is one undo step.
+  - The fields show a change from a script, an agent, the viewer handles or the wheel at once.
+  - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
+  - With several clips, the accent color and the Reset show when one of the clips has such a value.
+  - A value goes to all the selected clips that can have a picture. It changes only that value on each clip.
+  - A Reset also acts on all of these clips.
+  - Not in the Inspector: the settings of titles and subtitles, Speed, Volume, Anchor Point, Pitch, Yaw, Softness and Composite ([todo](todo/inspector.md)).
+- **Why:**
+  - The Titles tab of the Cut page is in the place of the Media Pool. The Inspector goes beside it. Thus the viewer and the timeline keep their size.
+  - A number in frame pixels does the same thing to every picture. In Resolve, one Position moves pictures of two shapes by different distances.
+  - The viewer shows the zoom in percent. Thus one value does not show in two forms in vidcut.
+  - Crop in fitted pixels tells how much of the picture goes, whatever the size of its source.
+  - A Reset for each value puts back one value and keeps the others of its group.
+  - The same value on several clips is a usual need, for example the same Position for the clips of a picture in picture.
+  - The requests keep their fractions ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Thus only the GUI shows pixels.
+  - Resolve's Inspector has only Ease and Swap for Dynamic Zoom. Numbers show each box exactly, and bring back a box that is out of the viewer.

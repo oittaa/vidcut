@@ -103,7 +103,13 @@ pub struct Grab {
     held: Option<Held>,
     wheel: Option<Wheeled>,
     landing: Option<(String, Picture, Instant, Picture)>,
-    sent: Option<(String, Picture)>,
+    sent: Vec<(String, Picture)>,
+}
+
+impl Grab {
+    pub(super) fn cancel_landing(&mut self) {
+        self.landing = None;
+    }
 }
 
 struct Shown {
@@ -339,7 +345,7 @@ fn shape_of(
     })
 }
 
-fn ease_label(e: Ease) -> &'static str {
+pub(super) fn ease_label(e: Ease) -> &'static str {
     match e {
         Ease::Linear => "Linear",
         Ease::EaseIn => "Ease In",
@@ -418,7 +424,7 @@ pub(super) fn topmost(p: &Project, at: i64) -> Option<String> {
 }
 
 impl Workspace {
-    fn picture_wanted(&self) -> Option<(String, Picture)> {
+    fn grab_wanted(&self) -> Option<(String, Picture)> {
         let g = &self.timeline.picture_grab;
         if let Some(h) = &g.held {
             return Some((h.clip.clone(), h.now.clone()));
@@ -436,37 +442,48 @@ impl Workspace {
         landing(to, since.elapsed(), from, &stored).map(|t| (clip.clone(), t.clone()))
     }
 
-    fn previewed(&self, wanted: Option<(String, Picture)>) -> Option<(String, Picture)> {
+    pub(super) fn picture_wanted(&self) -> Vec<(String, Picture)> {
+        match self.grab_wanted() {
+            Some(w) => vec![w],
+            None => self.inspector_wanted(),
+        }
+    }
+
+    fn previewed(&self, mut wanted: Vec<(String, Picture)>) -> Vec<(String, Picture)> {
         if self.timeline.picture_grab.tool != Some(PictureTool::DynamicZoom) {
             return wanted;
         }
-        let (clip, picture) = match wanted {
-            Some(w) => w,
-            None => {
-                let p = self.project_shared()?;
-                let at = self.snap.player(crate::live::PlayerId::Timeline).position;
-                let c = target(&p, &self.snap.selection.clips, at)?;
-                (c.id.clone(), c.picture.clone()?)
-            }
+        let Some(p) = self.project_shared() else {
+            return wanted;
         };
-        picture.dynamic_zoom.is_some().then(|| {
-            let whole = Picture {
-                dynamic_zoom: None,
-                ..picture
-            };
-            (clip, whole)
-        })
+        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+        let Some(c) = target(&p, &self.snap.selection.clips, at) else {
+            return wanted;
+        };
+        match wanted.iter_mut().find(|(id, _)| *id == c.id) {
+            Some((_, picture)) => picture.dynamic_zoom = None,
+            None => {
+                if let Some(picture) = c.picture.as_ref().filter(|x| x.dynamic_zoom.is_some()) {
+                    let whole = Picture {
+                        dynamic_zoom: None,
+                        ..picture.clone()
+                    };
+                    wanted.push((c.id.clone(), whole));
+                }
+            }
+        }
+        wanted
     }
 
-    fn sync_picture_preview(&mut self) {
-        let wanted = self.picture_wanted();
-        if wanted.is_none() {
+    pub(super) fn sync_picture_preview(&mut self) {
+        if self.grab_wanted().is_none() {
             self.timeline.picture_grab.landing = None;
         }
-        let shown = self.previewed(wanted);
+        self.settle_inspector();
+        let shown = self.previewed(self.picture_wanted());
         let g = &mut self.timeline.picture_grab;
         if shown != g.sent {
-            self.live.preview_picture(shown.clone());
+            self.live.preview_pictures(shown.clone());
             g.sent = shown;
         }
     }
@@ -479,7 +496,7 @@ impl Workspace {
         }
     }
 
-    fn end_picture_wheel(&mut self) {
+    pub(super) fn end_picture_wheel(&mut self) {
         if let Some(w) = self.timeline.picture_grab.wheel.take() {
             self.land_picture(&w.clip, &w.start, &w.now);
         }
@@ -677,9 +694,13 @@ impl Workspace {
         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
         let c = target(&p, &self.snap.selection.clips, at)?;
         let tool = self.timeline.picture_grab.tool?;
-        let shown = match self.picture_wanted() {
-            Some((id, x)) if id == c.id => x,
-            _ => c.picture.clone().unwrap_or_default(),
+        let shown = match self
+            .picture_wanted()
+            .into_iter()
+            .find(|(id, _)| *id == c.id)
+        {
+            Some((_, x)) => x,
+            None => c.picture.clone().unwrap_or_default(),
         };
         shape_of(&p, c, shown, picture, (at, tool))
     }
@@ -1016,7 +1037,7 @@ fn paint_boxes(painter: &egui::Painter, s: &Shown) {
     }
 }
 
-fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
+pub(super) fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
     let mut params = json!({ "clips": clip });
     if a.dynamic_zoom != b.dynamic_zoom {
         params["dynamic_zoom"] = b.dynamic_zoom.as_ref().map_or(Value::Null, zoom_shown);
@@ -1029,6 +1050,12 @@ fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
     }
     if a.turn() != b.turn() {
         params["rotation"] = json!(b.turn());
+    }
+    if a.flip_horizontal != b.flip_horizontal {
+        params["flip_horizontal"] = json!(b.flip_horizontal);
+    }
+    if a.flip_vertical != b.flip_vertical {
+        params["flip_vertical"] = json!(b.flip_vertical);
     }
     for (key, x, y) in [
         ("crop_left", a.crop.left, b.crop.left),

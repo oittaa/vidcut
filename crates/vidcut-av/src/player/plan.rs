@@ -145,7 +145,7 @@ impl Plan {
     pub(crate) fn placed_at(
         &self,
         t: i64,
-        preview: Option<&(String, vidcut_core::model::Picture)>,
+        preview: &[(String, vidcut_core::model::Picture)],
     ) -> Vec<Vec<vidcut_core::render::Placed>> {
         let (i, k) = self.locate(t);
         let Some(piece) = self.plan.video.get(i) else {
@@ -203,16 +203,16 @@ impl Plan {
 
 pub(crate) fn previewed(
     placed: &[Placed],
-    preview: Option<&(String, vidcut_core::model::Picture)>,
+    preview: &[(String, vidcut_core::model::Picture)],
 ) -> Vec<Placed> {
     placed
         .iter()
-        .map(|p| match preview {
-            Some((clip, picture)) if *clip == p.clip => Placed {
+        .map(|p| match preview.iter().find(|(clip, _)| *clip == p.clip) {
+            Some((_, picture)) => Placed {
                 picture: picture.clone(),
                 ..p.clone()
             },
-            _ => p.clone(),
+            None => p.clone(),
         })
         .collect()
 }

@@ -102,9 +102,9 @@ impl Player {
         self.contents[id.index()].plan.is_some()
     }
 
-    pub fn preview_picture(&self, picture: Option<(String, vidcut_core::model::Picture)>) {
+    pub fn preview_pictures(&self, pictures: Vec<(String, vidcut_core::model::Picture)>) {
         if let Some(e) = &self.engine {
-            e.preview_picture(picture);
+            e.preview_pictures(pictures);
         }
     }
 
