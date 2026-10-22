@@ -1723,6 +1723,7 @@ impl Workspace {
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Viewer, |ui| self.viewer_panel(ui))
             });
+        self.settle_picture_wheel(&ctx);
         if let Some(tiles) = &mut self.tiles {
             tiles.end_frame();
         }
