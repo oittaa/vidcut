@@ -1401,8 +1401,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The link button turns the link on again, and makes Zoom Y equal to Zoom X.
   - **Crop:** Left, Right, Top and Bottom.
   - **Dynamic Zoom:** Off or On, the Ease, Show Boxes and Swap.
-    - Show Boxes shows the start box and the end box in the viewer, as Alt+T does.
-    - On also shows them. If the playhead is not on the clip, it goes to the first frame of the clip.
+    - Show Boxes shows the start box and the end box of the selected clip in the viewer. On also shows them.
+    - If the playhead is not on a selected clip, Show Boxes and On move it to the first frame of the first selected clip.
+    - Alt+T shows the same boxes. It selects the clip under the playhead instead.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - **Units:**
     - Position X and Y are frame pixels from the middle of the frame, with Y up.
@@ -1427,4 +1428,5 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A Reset for each value puts back one value and keeps the others of its group.
   - The same value on several clips is a usual need, for example the same Position for the clips of a picture in picture.
   - The requests keep their fractions ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Thus only the GUI shows pixels.
-  - The boxes show the start and the end of a Dynamic Zoom. Without them, a Dynamic Zoom set in the Inspector shows only while the clip plays.
+  - The boxes show the start and the end of a Dynamic Zoom. Without them, the viewer shows only the zoom of the current frame.
+  - The Inspector shows a clip that the user selected. Thus the playhead goes to that clip, and the selection does not change.
