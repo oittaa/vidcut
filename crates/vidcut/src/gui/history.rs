@@ -194,6 +194,12 @@ fn kind_color(kind: ClientKind) -> Color32 {
     }
 }
 
+fn full_on_hover(r: &egui::Response, shown: &egui::Galley, full: &str) {
+    if shown.elided {
+        r.clone().on_hover_text(full.to_owned());
+    }
+}
+
 fn one_line(
     ui: &egui::Ui,
     text: &str,
@@ -904,6 +910,7 @@ impl Workspace {
                     time_text(ui, steps.line[g.to - 1].time, now, right, mid)
                 };
                 let text = one_line(ui, &label, right - x - time_w - 8.0, font, color);
+                full_on_hover(&r, &text, &label);
                 ui.painter()
                     .galley(pos2(x, mid - text.size().y / 2.0), text, color);
                 let over_undo = show_undo
@@ -954,6 +961,7 @@ impl Workspace {
                 let time_w = time_text(ui, s.time, now, right, mid);
                 let color = if done { c.text } else { c.text_dim };
                 let text = one_line(ui, &s.label, right - x - time_w - 8.0, font, color);
+                full_on_hover(&r, &text, &s.label);
                 ui.painter()
                     .galley(pos2(x, mid - text.size().y / 2.0), text, color);
                 if r.clicked() {
@@ -1009,6 +1017,7 @@ impl Workspace {
                 let label = branch_label(b, now);
                 let w = if show { 132.0 } else { 0.0 };
                 let text = one_line(ui, &label, right - x - w - 4.0, small.clone(), c.text_dim);
+                full_on_hover(&r, &text, &label);
                 ui.painter()
                     .galley(pos2(x, mid - text.size().y / 2.0), text, c.text_dim);
                 if show {
@@ -1039,6 +1048,7 @@ impl Workspace {
                     FontId::new(12.5, egui::FontFamily::Proportional),
                     c.text_dim.gamma_multiply(0.8),
                 );
+                full_on_hover(&r, &text, &s.label);
                 ui.painter()
                     .galley(pos2(x, mid - text.size().y / 2.0), text, c.text_dim);
                 if s.request.is_some() {
@@ -1054,6 +1064,7 @@ impl Workspace {
                 }
                 let color = if i < steps.done { c.text } else { c.text_dim };
                 let text = one_line(ui, &s.label, right - x - 8.0, small, color);
+                full_on_hover(&r, &text, &s.label);
                 ui.painter()
                     .galley(pos2(x, mid - text.size().y / 2.0), text, color);
                 if r.hovered() {
