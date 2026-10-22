@@ -245,6 +245,25 @@ fn angle_of(v: Vec2) -> f32 {
     (-v.y).atan2(v.x)
 }
 
+fn zoom_text(p: &Picture) -> String {
+    let [zx, zy] = p.scale();
+    if zx == zy {
+        format!("{:.0}%", zx * 100.0)
+    } else {
+        format!("{:.0}% × {:.0}%", zx * 100.0, zy * 100.0)
+    }
+}
+
+fn turn_text(p: &Picture) -> String {
+    let r = p.turn();
+    if (r - r.round()).abs() < 0.05 {
+        let whole = r.round() + 0.0;
+        format!("{whole:.0}°")
+    } else {
+        format!("{r:.1}°")
+    }
+}
+
 fn wrapped(r: f64) -> f64 {
     (r + 180.0).rem_euclid(360.0) - 180.0
 }
@@ -669,18 +688,17 @@ impl Workspace {
             self.land_picture(&held.clip, &held.start, &held.now);
         }
         let g = &self.timeline.picture_grab;
-        let zooming = match (&g.held, &g.wheel) {
-            (Some(h), _) => matches!(h.hold, Hold::Corner | Hold::Stretch(_)).then_some(&h.now),
-            (None, Some(w)) => (w.now.scale() != w.start.scale()).then_some(&w.now),
-            (None, None) => None,
+        let readout = match (&g.held, &g.wheel) {
+            (Some(h), _) => match h.hold {
+                Hold::Corner | Hold::Stretch(_) => Some(zoom_text(&h.now)),
+                Hold::Turn => Some(turn_text(&h.now)),
+                _ => None,
+            },
+            (None, Some(w)) if w.now.turn() != w.start.turn() => Some(turn_text(&w.now)),
+            (None, Some(w)) if w.now.scale() != w.start.scale() => Some(zoom_text(&w.now)),
+            (None, _) => None,
         };
-        if let Some(now) = zooming {
-            let [zx, zy] = now.scale();
-            let zoom = if zx == zy {
-                format!("{:.0}%", zx * 100.0)
-            } else {
-                format!("{:.0}% × {:.0}%", zx * 100.0, zy * 100.0)
-            };
+        if let Some(text) = readout {
             egui::Tooltip::always_open(
                 ui.ctx().clone(),
                 ui.layer_id(),
@@ -688,7 +706,7 @@ impl Workspace {
                 egui::PopupAnchor::Pointer,
             )
             .gap(12.0)
-            .show(|ui| ui.add(egui::Label::new(zoom).extend()));
+            .show(|ui| ui.add(egui::Label::new(text).extend()));
         }
         self.sync_picture_preview();
         let shown = self.picture_shape(picture).unwrap_or(s);
