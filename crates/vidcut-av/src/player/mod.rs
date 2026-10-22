@@ -941,12 +941,10 @@ impl Player {
                 ctl.plan.clone(),
             )
         };
-        let placed = {
-            let shown = lock(&self.shared.placing);
-            plan.placed_at(pos, shown.as_ref())
-        };
+        let placing = lock(&self.shared.placing).clone();
+        let placed = plan.placed_at(pos, placing.as_ref());
         let crosses = plan.crosses_at(pos);
-        let (mut titles, titled) = self.shared.titles.shown(&plan, pos);
+        let (mut titles, titled) = self.shared.titles.shown(&plan, pos, placing.as_ref());
         let (cues, cued) = self.shared.subtitles.shown(&plan, pos);
         titles.extend(cues);
         let drawn = titled && cued;

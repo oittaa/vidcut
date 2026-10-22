@@ -1598,11 +1598,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The crop cuts each side by a fraction of the source picture, and leaves some of it.
     - Values at their usual place are left out of the project file.
   - **Compound clips:**
-    - A compound clip is placed as one picture. The pictures inside it go with it, cut at its frame.
+    - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
+    - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
     - Its tracks play over each other as the tracks of the timeline do.
     - The tracks below it show wherever its tracks leave its frame uncovered.
-    - The titles inside it stay where they are ([todo](todo/clip-transform.md)).
-    - `edit.decompose` drops its picture, and says so.
+    - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.
+    - `edit.decompose` gives the picture of the compound clip to each of its clips that has no picture of its own and fills the frame.
+    - With a Dynamic Zoom, a clip takes the picture only when it spans all of the compound clip.
+    - Thus each of these clips stays where it was in the compound clip, with the same size, crop and zoom.
+    - The other clips do not take the picture. A warning names them.
   - An export fits a placed picture at the size it shows, up to the size of the source. Thus a punch-in keeps the detail of the source.
   - The viewer draws it from the decoded picture with the same sums.
   - Titles keep their own place (X54).

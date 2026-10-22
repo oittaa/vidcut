@@ -69,6 +69,7 @@ fn over(picture: Arc<TitlePicture>) -> TitleOver {
         dy: 0,
         turn: [0.0, 0.0, 1.0, 0.0],
         alpha: 1.0,
+        placed: Vec::new(),
     }
 }
 

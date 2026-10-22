@@ -10,6 +10,8 @@ An NVENC export places a moved, zoomed or cropped picture on the CPU ([design/ex
 
 Thus a full-frame punch-in on 4K brings every frame down whole.
 
+A title in a placed compound clip is also mapped on the CPU (`export::place::title`). Then `cuda::burn` mixes it into the frame below.
+
 Open:
 
 - **Fit it on the GPU** at the size it shows.
@@ -19,5 +21,6 @@ Open:
   - Map each pixel back through its `place::Placing` levels.
   - Cover and tap it as `export::place` does.
   - Mix it into the frame below.
+  - Map a title in a placed compound clip with the same kernel.
   - Compare the frames with the CPU's frames.
 - **Vulkan,** possibly: the same placement as a compute pass on Vulkan frames.

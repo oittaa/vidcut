@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use vidcut_core::lru::Lru;
-use vidcut_core::model::Title;
+use vidcut_core::model::{Picture, Title};
 use vidcut_core::render::ShownTitle;
 
 use super::frame::{TitleOver, TitlePicture};
@@ -51,7 +51,12 @@ impl Titles {
         changed
     }
 
-    pub(crate) fn shown(&self, plan: &Plan, t: i64) -> (Vec<TitleOver>, bool) {
+    pub(crate) fn shown(
+        &self,
+        plan: &Plan,
+        t: i64,
+        placing: Option<&(String, Picture)>,
+    ) -> (Vec<TitleOver>, bool) {
         let preview = lock(&self.preview).clone();
         let size = plan.size();
         let (w, h) = (f64::from(size.0), f64::from(size.1));
@@ -93,6 +98,7 @@ impl Titles {
                         (to.turn() - key.turn()).to_radians() as f32,
                     ],
                     alpha: (to.opaque() * shown.fade.map_or(1.0, |r| r.level(0))) as f32,
+                    placed: super::plan::previewed(&shown.placed, placing),
                 });
             }
             kept.last.insert(shown.clip.clone(), key);

@@ -342,6 +342,20 @@ Drawing:
 - The frames of other GPUs come down while a title shows ([todo](../todo/gpu-burn-in.md)).
 - Titles draw in every export and in `frame.render`, whatever the subtitle settings are.
 
+Titles in a placed compound clip:
+
+- `render::flatten_lanes` gives a title the pictures of the compound clips that it plays inside (`ShownTitle::placed`).
+- A clip above it in the same compound clip takes its place where the clip fills the frame, as for the pictures below that clip.
+- `VideoFrames` draws such a title without its rotation.
+- `export::place::title` maps each pixel of the frame back to that drawing with one affine map:
+  - first through the pictures of the compound clips (`Placing::inner`)
+  - then through the scroll, the turn and the zoom of the title about its pivot (`place::lettered`)
+- It taps the drawing over the footprint of the pixel. Outside the drawing, a tap is clear.
+- It covers the edges of each compound clip in part (`Placing::at`). Thus the frame and the crop of each compound clip cut the title.
+- The result is a new drawing in the frame. It goes onto the frame as the other titles do (`Drawn`).
+- `VideoFrames` makes it again only when the pictures or the scroll change, for example on each frame of a Dynamic Zoom.
+- The CPU does this map, as for placed pictures ([todo](../todo/gpu-placement.md)). For NVENC, the mix into the frame stays on the GPU.
+
 ## Placed pictures
 
 The plan:
@@ -359,6 +373,7 @@ The pictures:
 - `VideoFrames` fits a placed layer at the size that it shows, up to the size of its source (`layer_size`, `Maker::size_layer`). Thus a punch-in keeps the detail of the source.
 - `VideoFrames` makes the frames of a placed layer in memory. On a GPU, they come down shrunk.
 - `place::Placing` maps each pixel of the frame back to the picture.
+- `place::Placing` leaves out the level of a clip in a compound clip when the clip fills the frame at its usual values. Thus the edges of the compound clip are covered once.
 - `export::place::over` lays the picture over the frame below, in its own code values. It taps each component over the footprint of the pixel, and covers the edges in part, as the viewer's shader does.
 - For NVENC, the frame below stays on the GPU.
   - `cuda::burn::Overlay::of` makes the colors and coverage of the placed picture in memory.
