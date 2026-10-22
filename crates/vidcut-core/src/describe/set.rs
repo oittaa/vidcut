@@ -652,7 +652,7 @@ impl Words<'_> {
         };
         s.put("enabled", "Enabled", &raw, |c| json!(c.enabled));
         s.put("muted", "Mute", &raw, |c| audio(c, |a| json!(a.muted)));
-        s.put("gain_db", "Gain", &decibels, |c| {
+        s.put("gain_db", "Volume", &decibels, |c| {
             audio(c, |a| json!(a.gain_db))
         });
         if s.put("name", "Name", &text, |c| json!(c.name)) && named {
