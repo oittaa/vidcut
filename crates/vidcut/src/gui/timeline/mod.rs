@@ -990,7 +990,7 @@ impl Workspace {
         self.silence_window(ui.ctx());
         self.boring_window(ui.ctx());
         self.subtitle_windows(ui.ctx());
-        self.title_windows(ui.ctx());
+        self.title_tick();
         self.dynamic_tick(ui.ctx());
     }
 

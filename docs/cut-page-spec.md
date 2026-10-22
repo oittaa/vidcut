@@ -580,7 +580,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A click on the text in the viewer gives onscreen controls for its Position, Zoom and Rotation.
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
-  - vidcut: the Title window and the controls of the viewer (X52). A double-click on a title in the viewer opens the Title window.
+  - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer opens the Title section.
 - **Kinds** (p. 1178):
   - L, M and R Lower 3rd put two lines at the bottom left, middle or right of title safe.
   - Title safe is 90% of the picture by default (p. 1178).
@@ -1172,7 +1172,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Split leaves its text in both parts.
   - Join keeps the first cue, to the end of the last cue, with their texts as lines.
   - The viewer draws the cues of the shown track as a burn-in draws them (D61), in the style of the track, its font too.
-  - While the Subtitle Track window is open for the shown track, the viewer draws the style of its fields, where they are valid.
+  - While the Subtitle Track section is open for the shown track, the viewer draws the style of its fields, where they are valid.
 - **D57. Cues follow Track 1** (§6, §8.12; p. 1242).
   - The manual says only that subtitles linked to clips move with them.
   - A cue keeps the frames of Track 1 under it:
@@ -1245,7 +1245,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - For scripts that the font does not have, the system's fonts are used.
   - Cues that show together at one place are one block, in the order they start.
   - HDR white is 203 cd/m², the graphics white of ITU-R BT.2408.
-  - A track's style (`track.set`, the Subtitle Track window) replaces that look where it is set:
+  - A track's style (`track.set`, the Subtitle Track section of the Inspector) replaces that look where it is set:
     - `font` is a family name. If it is not installed, the text is drawn in the usual font.
     - `size` is the text height as a fraction of the picture height, above 0 and at most half.
     - `color` is `#rrggbb`, `#rgb` or a name such as yellow. A color with an opacity is refused.
@@ -1553,7 +1553,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `track.set` with `look` sets the style of a track (Apply Look on a subtitle track header).
     - `titles.add` and `titles.set` with `look` set all of a title except its text. The fields given go on top.
     - `subtitles.transcribe` takes any subtitle look.
-  - In the Subtitle Track and Title windows:
+  - In the Subtitle Track and Title sections of the Inspector:
     - The Look list fills the fields. It shows the look that they match, or Custom.
     - Save as Look… saves them. A subtitle look also saves its characters and lines.
     - Delete deletes the look shown, when it is yours.

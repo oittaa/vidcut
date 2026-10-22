@@ -334,6 +334,10 @@ pub struct Inspector {
     unlinked: bool,
     held: Option<Held>,
     landing: Option<Landing>,
+    seen: Option<(Vec<String>, Vec<String>)>,
+    focus: Option<egui::Id>,
+    moved: bool,
+    commit: bool,
 }
 
 enum Act {
@@ -649,6 +653,14 @@ impl Workspace {
 
     pub(super) fn leave_inspector(&mut self) {
         self.inspector.held = None;
+        self.inspector.seen = None;
+        self.close_forms();
+    }
+
+    pub(super) fn close_forms(&mut self) {
+        self.close_title_form();
+        self.close_cue_form();
+        self.close_track_form();
     }
 
     fn send_pictures(&mut self, chosen: &[Chosen], to: impl Fn(&Chosen) -> Option<Picture>) {
@@ -831,29 +843,69 @@ impl Workspace {
         }
     }
 
-    pub(super) fn inspector_panel(&mut self, ui: &mut egui::Ui) {
-        let chosen = self.chosen();
-        let Some(p) = self.project_shared() else {
+    pub(super) fn inspector_saw_selection(&mut self) {
+        let s = &self.snap.selection;
+        self.inspector.seen = Some((s.clips.clone(), s.cues.clone()));
+    }
+
+    fn follow_selection(&mut self) {
+        let s = &self.snap.selection;
+        let now = (s.clips.clone(), s.cues.clone());
+        if self.inspector.seen.as_ref() == Some(&now) {
             return;
-        };
-        let Some(first) = chosen.first().and_then(|c| p.clip(&c.id)) else {
-            self.inspector.held = None;
-            ui.label(dim("Select a clip with a picture"));
-            self.sync_picture_preview();
-            return;
-        };
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(name(&p, first)).strong());
-            if chosen.len() > 1 {
-                ui.label(dim(format!("{} clips selected", chosen.len())));
-            }
+        }
+        let title = self.project_shared().and_then(|p| {
+            now.0
+                .iter()
+                .find(|id| p.clip(id).is_some_and(|c| c.title.is_some()))
+                .cloned()
         });
+        if let Some(id) = title {
+            self.inspect_title(&id, false);
+        } else if let Some(id) = now.1.first().cloned() {
+            self.inspect_cue(&id, false);
+        } else {
+            self.close_forms();
+        }
+        self.inspector.seen = Some(now);
+    }
+
+    pub(super) fn inspector_commits(&self) -> bool {
+        self.inspector.commit
+    }
+
+    pub(super) fn inspector_panel(&mut self, ui: &mut egui::Ui) {
+        let focus = ui.ctx().memory(|m| m.focused());
+        let i = &mut self.inspector;
+        i.moved |= focus != i.focus;
+        i.focus = focus;
+        i.commit = (focus.is_none() || i.moved) && !ui.input(|i| i.pointer.any_down());
+        i.moved &= !i.commit;
+        self.follow_selection();
+        let chosen = self.chosen();
         let mut acts = Vec::new();
-        let boxes = self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom);
-        let i = &self.inspector;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                let forms = self.title_form(ui) | self.cue_form(ui) | self.track_form(ui);
+                let Some(p) = self.project_shared() else {
+                    return;
+                };
+                let Some(first) = chosen.first().and_then(|c| p.clip(&c.id)) else {
+                    self.inspector.held = None;
+                    if !forms {
+                        ui.label(dim("Select a clip with a picture"));
+                    }
+                    return;
+                };
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(name(&p, first)).strong());
+                    if chosen.len() > 1 {
+                        ui.label(dim(format!("{} clips selected", chosen.len())));
+                    }
+                });
+                let boxes = self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom);
+                let i = &self.inspector;
                 transform(ui, i, &chosen, &mut acts);
                 crop(ui, i, &chosen, &mut acts);
                 dynamic_zoom(ui, i, &chosen, boxes, &mut acts);

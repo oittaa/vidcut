@@ -1,14 +1,14 @@
 # Inspector
 
-**When:** the Title and Subtitle settings next, before the Effects tab. The other parts are not decided.
+**When:** not decided.
 
-The Inspector tab shows and sets the transform, the crop and the Dynamic Zoom of the selected clips ([deviation X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)). These parts are still to do.
+The Inspector tab shows and sets the transform, the crop and the Dynamic Zoom of the selected clips ([deviation X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)). It also shows the open title, subtitle and subtitle track. These parts are still to do.
 
-- **Title and Subtitle settings.**
-  - Now: the Title window, the Subtitle window and the Subtitle Track window set them (X43, X51, X52).
-  - Why: Resolve sets them in the Inspector (pp. 764, 1233, 1237). In the Inspector, they show beside the clip without a window.
-  - To do: a Title section and a Subtitle section, with the rows and the Resets of the other sections. The three windows go.
-  - Why the windows go: one form of each setting is less code, and the settings of titles and pictures work the same way.
+- **Subtitle list.**
+  - Now: the Subtitle section shows one subtitle, the subtitle that the user opened (X43).
+  - Why: Resolve's Captions panel lists every subtitle of the track at its bottom. Prev and Next move through them (p. 1233).
+  - To do: a list of the subtitles of the track in the Subtitle section, with Prev and Next.
+  - Why: the user can read and correct the subtitles one after the other, without the timeline.
 - **Speed.**
   - Now: the Change Clip Speed window sets it (R, spec D48).
   - Why: Resolve's Video panel has Speed Change. The Inspector would show the speed of a clip without a window.

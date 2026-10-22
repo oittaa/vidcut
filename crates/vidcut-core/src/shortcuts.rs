@@ -354,7 +354,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Clips,
         &["Enter"],
         "Edit the selected subtitle",
-        Some("Opens its text and position in the Subtitle window; Ctrl+Enter there is Done."),
+        Some("Shows its text and position in the Inspector."),
     ),
     key(
         Clips,

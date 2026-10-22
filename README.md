@@ -19,7 +19,7 @@ It behaves like a Cut page ([spec](docs/cut-page-spec.md)). A script or an AI ag
 - **Sound:**
   - Voice Isolation on a clip or a track. It runs on this computer and is free.
   - The Mixer, with volume, mute and solo.
-- **Titles:** text titles and lower thirds on the video tracks. You edit them in their own window. The viewer and the export draw them the same.
+- **Titles:** text titles and lower thirds on the video tracks. You edit them in the Inspector. The viewer and the export draw them the same.
 - **Transform and Crop:** move, zoom, turn, flip and crop a clip's picture over the tracks below, with the viewer's handles (T, Shift+T). Use it for a picture in a picture, or for a punch-in that keeps the source's detail.
 - **Subtitles:**
   - Subtitle tracks.

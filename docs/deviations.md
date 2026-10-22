@@ -689,25 +689,24 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - Subtitles made in vidcut must go to the editor that finishes the program.
 
-## X43. A subtitle's text is typed in its own window
+## X43. A subtitle's text goes in as one change when the user leaves it
 
 - **Resolve:**
   - The user types the text of a selected subtitle in the Captions panel of the Inspector.
   - The text shows on the clip while the user types (p. 1233).
 - **vidcut:**
-  - A Subtitle window opens with the text and the position of the cue.
-  - These open it:
+  - The Subtitle section of the Inspector tab has the text and the position of the cue.
+  - These open it and show the Inspector tab:
     - a double-click on a cue
     - Enter with one cue selected
     - Edit Subtitle… in the right-click menu of a cue
     - Add Subtitle
+  - While the Inspector tab shows, a click on a cue also shows its section.
   - The text shows on the cue and in the viewer while the user types.
   - The position shows in the viewer when the user selects it.
-  - Both go in as one change on Done (Ctrl+Enter), or when the user opens another subtitle in the window.
-  - Cancel leaves the cue as it was.
+  - The text goes in as one change when the user leaves the text box. The other rows go in at once. Ctrl+Z undoes a change.
 - **Why:**
-  - The Inspector of vidcut has the picture of a clip only. It has no Captions panel ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
-  - One change for each subtitle keeps typing out of the undo history.
+  - One change for each edit of the text keeps typing out of the undo history.
 
 ## X44. Add Subtitle uses the shown subtitle track
 
@@ -902,14 +901,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The buttons of the window cover assembly from a transcript.
   - Estimates from a model that did not time the words would cut the wrong frames.
 
-## X51. A subtitle track's style is set in its own window
+## X51. A subtitle track's style goes in when the user leaves a field
 
 - **Resolve:**
   - The user sets the style of a track in the Track panel of the Inspector (p. 1237).
   - The style includes the font, color, size and position, and also a drop shadow, a stroke and a background.
 - **vidcut:**
-  - A double-click on the name of a subtitle track, or Name and Style… in its right-click menu, opens the Subtitle Track window.
-  - The window has the name, the language and the style of the track:
+  - A double-click on the name of a subtitle track, or Name and Style… in its right-click menu, opens the Subtitle Track section in the Inspector.
+  - The section has the name, the language and the style of the track:
     - a Look list ([X59](#x59-looks-for-titles-too-some-built-in))
     - the font, typed or selected from the installed fonts
     - the size
@@ -919,14 +918,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - bold, capitals or small letters
     - how the words show as they are spoken
   - The viewer shows the style while the user edits it.
-  - The style goes in as one `track.set` on Done. Cancel leaves the track as it was.
+  - A change goes in as one `track.set` when the user leaves a field or presses Enter. Ctrl+Z undoes it.
   - The margin is the inset from the edges of the picture. Only vidcut has this control. Resolve has Position X and Y instead.
 - **Why:**
-  - The Inspector of vidcut has no Track panel ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
-  - One change for each track keeps typing out of the undo history.
+  - One change for each field keeps typing out of the undo history.
   - Subtitle guidelines and IMSC1 regions speak of a margin.
 
-## X52. Titles come from a Titles tab or Add Title and are edited in a Title window
+## X52. Titles come from a Titles tab or Add Title and are edited in the Inspector
 
 - **Resolve:**
   - The user drags titles from the Titles browser onto the timeline.
@@ -937,13 +935,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A Titles tab is beside the tab of the Media Pool, and it opens in the same place.
   - The tab shows a card for Text, for each lower third and for Scroll. Each card is drawn as an export draws it.
   - The user drags a card onto either timeline.
-  - A double-click on a card adds its title at the playhead and opens the Title window.
+  - A double-click on a card adds its title at the playhead and opens the Title section of the Inspector tab.
   - With Hover Scrub Preview on, the pointer over a card shows that title over the frame of the viewer.
   - The card and the preview of a scroll move as the pointer crosses the card.
   - A title clip on the timeline shows its title at its head.
-  - Add Title, in Timeline Actions and the Timeline menu, puts a 5 s Text title at the playhead (D66). It opens the Title window.
-  - A double-click on a title clip, or Edit Title… in its right-click menu, also opens the window.
-  - The window has these controls:
+  - Add Title, in Timeline Actions and the Timeline menu, puts a 5 s Text title at the playhead (D66). It opens the Title section.
+  - A double-click on a title clip, or Edit Title… in its right-click menu, also opens the section.
+  - While the Inspector tab shows, a click on a title clip also shows its section.
+  - The section has these controls:
     - a Look list ([X59](#x59-looks-for-titles-too-some-built-in))
     - the kind of the title
     - the alignment of a lower third or a scroll
@@ -953,7 +952,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - the place, as percents across and down (X54)
     - the zoom and the rotation
   - The viewer shows the title while the user edits it, drawn as an export draws it.
-  - Done sends it as one `titles.set`. Cancel leaves the title as it was.
+  - A change goes in as one `titles.set` when the user leaves the field. A button puts it in at once. Ctrl+Z undoes it.
   - In the viewer, a click on a title selects it, as in Resolve.
   - When the pointer is near a title, the viewer shows its outline, its corners and the handle above it. They work without a click.
   - Over them, the pointer becomes a move, resize or hand cursor.
@@ -964,10 +963,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The zoom and the turn are about the pivot of the title.
   - A scroll moves only across.
   - The title shows during the drag. One `titles.set` follows on release.
-  - A double-click on the title in the viewer opens the window.
+  - A double-click on the title in the viewer opens the section.
   - `titles.add`, `titles.set` and `titles.list` do the same from a script.
 - **Why:**
-  - The Inspector of vidcut has no settings for titles, and vidcut has no effects browser ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
+  - vidcut has no effects browser.
   - One change for each title keeps typing out of the undo history.
   - The Titles tab is the same as in Resolve. Its cards show the kinds of title that vidcut has.
   - Handles that show on hover, and a cursor that changes over them, show that the user can drag them.
@@ -985,7 +984,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - `lower_third`: aligned left, middle or right, with two lines at most
     - `scroll` (X55)
   - Markup in its text styles words: `<b>`, `<i>`, `<u>` and `<font color face size>`.
-  - The B, I, U, Color, Size, Font and Plain buttons of the Title window put this markup around the selected words.
+  - The B, I, U, Color, Size, Font and Plain buttons of the Title section put this markup around the selected words.
   - A line of a lower third takes its own size in this way.
   - The lines of a title share one zoom and one rotation.
   - vidcut does not have Text+ and Fusion titles, or keyframes.
@@ -1000,7 +999,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The place, zoom, rotation and opacity of a title do what Transform and the opacity of Composite would do.
   - A title has no speed. The speed of a scroll comes from the length of its clip.
   - Markup in the text is what a script writes and reads.
-  - The buttons give the window what the rich-text controls of an Inspector give.
+  - The buttons give the Title section what the rich-text controls of an Inspector give.
 
 ## X54. A title's place is a point in fractions of the picture
 
@@ -1010,7 +1009,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A lower third is at a corner or at the middle of the bottom of title safe (p. 1178).
 - **vidcut:**
   - The `position` of a title is `[x, y]`, in fractions of the width and the height of the picture, from its top left.
-  - The Title window shows it as percents.
+  - The Title section of the Inspector shows it as percents.
   - It is where the middle of a Text title goes, or the bottom corner or middle of a lower third (D65).
   - Without a position, the title takes the usual place of its kind.
 - **Why:**
@@ -1096,7 +1095,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - After a correction, Update Word Timings times the words of a cue again. Synchronize Word Timings does this for a track (p. 1241).
 - **vidcut:**
   - The animation is the `words` of a track style, with `bold`, `case` and `shadow`.
-  - The user sets them in the Subtitle Track window or with `track.set` (D69).
+  - The user sets them in the Subtitle Track section of the Inspector or with `track.set` (D69).
   - The looks of Create Subtitles from Audio ([X46](#x46-create-subtitles-from-audio-with-open-models-on-this-computer)) put the speech on a new track that is already animated.
   - Word times follow edits and new text automatically (D70).
   - Synchronize Word Timings, in the menu of a subtitle track header, times captions that were not made from the speech.
@@ -1114,7 +1113,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Titles have no presets. The manual names no built-in presets.
 - **vidcut:**
   - Looks are for subtitle tracks and titles ([D71](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - The user selects, saves and deletes looks in the Subtitle Track and Title windows.
+  - The user selects, saves and deletes looks in the Subtitle Track and Title sections of the Inspector.
   - Apply Look in the header of a subtitle track applies one.
   - The user drags title looks from the Titles tab as cards.
   - Built-in looks come first, and the user cannot change them.
@@ -1202,7 +1201,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A cue can have its own color (`color`), which overrides the color of the person.
   - The Speakers setting of the subtitle track (`speaker_color`) tells what the color paints.
   - It paints the spoken word on a track that shows words as spoken, else all of the text. Or it paints nothing.
-  - In the Subtitle window, every row except the Name of the person changes only that cue.
+  - In the Subtitle section, every row except the Name of the person changes only that cue.
   - These rows are its Speaker, its Color and its Position.
   - The Speaker list also has All of the person's. This makes the person into another person everywhere (`speakers.join`).
   - This changes their cues, the speakers of the files, and the words that were theirs.
@@ -1392,10 +1391,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - An Inspector tab is beside the Media Pool and Titles tabs. It opens in the same place.
   - `gui.show inspector` shows it.
-  - It shows the selected clip. With no selected clip that can have a picture, it shows one line.
+  - It shows what the user selects: the Title section of a title, the Subtitle section of a subtitle, or the picture sections of other clips.
+  - A double-click on the name of a subtitle track shows its Subtitle Track section (X51).
+  - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
+  - With nothing of these selected, it shows one line.
+  - It has no Done and no Cancel. As in Resolve, a change goes in without a button, and Ctrl+Z undoes it.
+  - A section shows the project while the user does not edit it, also after Ctrl+Z or a change from a script.
   - Audio clips, titles and subtitles have no picture.
   - With several clips selected, it shows the first one that can have a picture. Its header gives the number of these clips.
-  - Its sections are Transform, Crop and Dynamic Zoom. Each section has a Reset of the whole section.
+  - Its picture sections are Transform, Crop and Dynamic Zoom. Each picture section has a Reset of the whole section.
   - **Transform:** Zoom, Position X and Y, Rotation, Flip Horizontal and Flip Vertical.
     - The link button beside Zoom shows Zoom X and Zoom Y. A picture with two different zooms shows them both.
     - The link button turns the link on again, and makes Zoom Y equal to Zoom X.
@@ -1425,9 +1429,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - With several clips, the accent color and the Reset show when one of the clips has such a value.
   - A value goes to all the selected clips that can have a picture. It changes only that value on each clip.
   - A Reset also acts on all of these clips.
-  - Not in the Inspector: the settings of titles and subtitles, Speed, Volume, Anchor Point, Pitch, Yaw, Softness and Composite ([todo](todo/inspector.md)).
+  - Not in the Inspector: Speed, Volume, Anchor Point, Pitch, Yaw, Softness and Composite ([todo](todo/inspector.md)).
 - **Why:**
   - The Titles tab of the Cut page is in the place of the Media Pool. The Inspector goes beside it. Thus the viewer and the timeline keep their size.
+  - Resolve also sets titles, subtitles and subtitle tracks in the Inspector (pp. 764, 1233, 1237).
   - A number in frame pixels does the same thing to every picture. In Resolve, one Position moves pictures of two shapes by different distances.
   - The viewer shows the zoom in percent. Thus one value does not show in two forms in vidcut.
   - Crop in fitted pixels tells how much of the picture goes, whatever the size of its source.
