@@ -241,6 +241,7 @@ impl Workspace {
             GuiPanel::ClipInfo => self.open_clip_info(None),
             GuiPanel::Transform => self.show_picture_tool(PictureTool::Transform),
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
+            GuiPanel::Tools => self.timeline.picture_grab.row = true,
         }
     }
 
@@ -298,6 +299,7 @@ impl Workspace {
                     g.tool = None;
                 }
             }
+            GuiPanel::Tools => self.timeline.picture_grab.row = false,
         }
     }
 
@@ -320,6 +322,7 @@ impl Workspace {
             (GuiPanel::ClipInfo, self.clip_info.open),
             (GuiPanel::Transform, tool == Some(PictureTool::Transform)),
             (GuiPanel::Crop, tool == Some(PictureTool::Crop)),
+            (GuiPanel::Tools, self.timeline.picture_grab.row),
         ];
         live::GuiState {
             edit: self.edit_point(),
@@ -1725,6 +1728,7 @@ impl Workspace {
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Viewer, |ui| self.viewer_panel(ui))
             });
+        self.settle_picture_wheel(&ctx);
         if let Some(tiles) = &mut self.tiles {
             tiles.end_frame();
         }

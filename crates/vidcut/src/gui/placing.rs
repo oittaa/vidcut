@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use serde_json::{Value, json};
 use vidcut_core::model::{Clip, Picture, PictureTool, Project, TrackKind};
@@ -14,6 +16,10 @@ const LIFT: f32 = 26.0;
 const LINES: [f64; 3] = [1.0 / 3.0, 0.5, 2.0 / 3.0];
 const ZOOM: (f64, f64) = (0.01, 100.0);
 const LEFT_SHOWING: f32 = 4.0;
+const TURN_BAND: f32 = 12.0;
+const STEP: f64 = 15.0;
+const NOTCH_ZOOM: f64 = 1.1;
+const STILL: Duration = Duration::from_millis(400);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Side {
@@ -50,11 +56,24 @@ struct Held {
     guides: (Option<f64>, Option<f64>),
 }
 
+#[derive(Debug, Clone)]
+struct Wheeled {
+    clip: String,
+    start: Picture,
+    now: Picture,
+    zoom: f64,
+    turn: f64,
+    steps: f64,
+    last: Instant,
+}
+
 #[derive(Debug, Default)]
 pub struct Grab {
     pub(crate) tool: Option<PictureTool>,
+    pub(crate) row: bool,
     held: Option<Held>,
-    landing: Option<(String, Picture, std::time::Instant, Picture)>,
+    wheel: Option<Wheeled>,
+    landing: Option<(String, Picture, Instant, Picture)>,
     sent: Option<(String, Picture)>,
 }
 
@@ -137,8 +156,14 @@ impl Shown {
                     Some(Hold::Corner)
                 } else if let Some(s) = Side::ALL.into_iter().find(|s| near(self.side(*s))) {
                     Some(Hold::Stretch(s))
+                } else if self.inside(p, GRAB) {
+                    Some(Hold::Move)
                 } else {
-                    self.inside(p, GRAB).then_some(Hold::Move)
+                    let reach = GRAB * 1.6 + TURN_BAND;
+                    self.corners()
+                        .into_iter()
+                        .any(|q| q.distance(p) <= reach)
+                        .then_some(Hold::Turn)
                 }
             }
             PictureTool::Crop => Side::ALL
@@ -220,6 +245,39 @@ fn angle_of(v: Vec2) -> f32 {
     (-v.y).atan2(v.x)
 }
 
+fn zoom_text(p: &Picture) -> String {
+    let [zx, zy] = p.scale();
+    if zx == zy {
+        format!("{:.0}%", zx * 100.0)
+    } else {
+        format!("{:.0}% × {:.0}%", zx * 100.0, zy * 100.0)
+    }
+}
+
+fn turn_text(p: &Picture) -> String {
+    let r = p.turn();
+    if (r - r.round()).abs() < 0.05 {
+        let whole = r.round() + 0.0;
+        format!("{whole:.0}°")
+    } else {
+        format!("{r:.1}°")
+    }
+}
+
+fn wrapped(r: f64) -> f64 {
+    (r + 180.0).rem_euclid(360.0) - 180.0
+}
+
+fn stepped(r: f64, up: bool) -> f64 {
+    let n = r / STEP;
+    let n = if up {
+        (n + 1e-6).floor() + 1.0
+    } else {
+        (n - 1e-6).ceil() - 1.0
+    };
+    wrapped(n * STEP)
+}
+
 pub(super) fn target<'a>(p: &'a Project, selected: &[String], at: i64) -> Option<&'a Clip> {
     let shows = |ti: usize, c: &Clip| {
         let t = &p.tracks[ti];
@@ -253,6 +311,9 @@ impl Workspace {
         if let Some(h) = &g.held {
             return Some((h.clip.clone(), h.now.clone()));
         }
+        if let Some(w) = &g.wheel {
+            return Some((w.clip.clone(), w.now.clone()));
+        }
         let (clip, to, since, from) = g.landing.as_ref()?;
         let stored = self
             .project()?
@@ -275,6 +336,85 @@ impl Workspace {
         }
     }
 
+    fn land_picture(&mut self, clip: &str, from: &Picture, to: &Picture) {
+        if let Some(params) = changed(clip, from, to) {
+            self.send("picture.set", params);
+            self.timeline.picture_grab.landing =
+                Some((clip.to_string(), to.clone(), Instant::now(), from.clone()));
+        }
+    }
+
+    fn end_picture_wheel(&mut self) {
+        if let Some(w) = self.timeline.picture_grab.wheel.take() {
+            self.land_picture(&w.clip, &w.start, &w.now);
+        }
+    }
+
+    pub(super) fn settle_picture_wheel(&mut self, ctx: &egui::Context) {
+        let Some(last) = self.timeline.picture_grab.wheel.as_ref().map(|w| w.last) else {
+            return;
+        };
+        let quiet = last.elapsed();
+        if quiet < STILL {
+            ctx.request_repaint_after(STILL - quiet);
+        } else {
+            self.end_picture_wheel();
+            self.sync_picture_preview();
+        }
+    }
+
+    fn picture_wheel(&mut self, ui: &egui::Ui, s: &Shown, mods: (bool, bool)) {
+        let (shift, alt) = mods;
+        let (zoom, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
+        let notch = ui
+            .ctx()
+            .options(|o| o.input_options.line_scroll_speed)
+            .max(1.0);
+        let notches = f64::from(if shift { scroll.x + scroll.y } else { scroll.y } / notch);
+        ui.ctx().input_mut(|i| i.smooth_scroll_delta = Vec2::ZERO);
+        let k = f64::from(zoom) * if alt { 1.0 } else { NOTCH_ZOOM.powf(notches) };
+        let turn = if alt { notches } else { 0.0 };
+        if k == 1.0 && turn == 0.0 {
+            return;
+        }
+        let w = self
+            .timeline
+            .picture_grab
+            .wheel
+            .get_or_insert_with(|| Wheeled {
+                clip: s.clip.clone(),
+                start: s.picture.clone(),
+                now: s.picture.clone(),
+                zoom: 1.0,
+                turn: s.picture.turn(),
+                steps: 0.0,
+                last: Instant::now(),
+            });
+        w.last = Instant::now();
+        if k != 1.0 {
+            let [zx, zy] = w.start.scale();
+            w.zoom = (w.zoom * k).clamp(ZOOM.0 / zx.min(zy), ZOOM.1 / zx.max(zy));
+            w.now.zoom = Some([rounded(zx * w.zoom, 4), rounded(zy * w.zoom, 4)]);
+        }
+        if turn != 0.0 {
+            if shift {
+                w.steps += turn;
+                while w.steps >= 0.5 {
+                    w.turn = stepped(w.turn, true);
+                    w.steps -= 1.0;
+                }
+                while w.steps <= -0.5 {
+                    w.turn = stepped(w.turn, false);
+                    w.steps += 1.0;
+                }
+            } else {
+                w.steps = 0.0;
+                w.turn = wrapped(w.turn + turn);
+            }
+            w.now.rotation = Some(rounded(w.turn, 2));
+        }
+    }
+
     pub(super) fn picture_tool(&mut self, tool: PictureTool) {
         if self.timeline.picture_grab.tool == Some(tool) {
             self.timeline.picture_grab.tool = None;
@@ -293,6 +433,71 @@ impl Workspace {
             && let Some(id) = topmost(&p, at)
         {
             self.send("selection.set", json!({ "clips": [id] }));
+        }
+    }
+
+    fn tools_clip(&self) -> Option<(String, Picture)> {
+        let p = self.project_shared()?;
+        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+        let c = match target(&p, &self.snap.selection.clips, at) {
+            Some(c) => c,
+            None => p.clip(&topmost(&p, at)?)?,
+        };
+        Some((c.id.clone(), c.picture.clone().unwrap_or_default()))
+    }
+
+    pub(super) fn picture_tools_row(&mut self, ui: &mut egui::Ui) {
+        let tool = self.timeline.picture_grab.tool;
+        let clip = self.tools_clip();
+        let found = clip.is_some();
+        for (label, t) in [
+            ("Transform", PictureTool::Transform),
+            ("Crop", PictureTool::Crop),
+        ] {
+            let lit = tool == Some(t);
+            let b = egui::Button::selectable(lit, label);
+            if ui.add_enabled(found || lit, b).clicked() {
+                self.picture_tool(t);
+            }
+        }
+        let Some(tool) = tool else {
+            return;
+        };
+        ui.separator();
+        let pic = clip.as_ref().map(|(_, p)| p.clone()).unwrap_or_default();
+        if tool == PictureTool::Transform {
+            use egui_phosphor::regular::{FLIP_HORIZONTAL, FLIP_VERTICAL};
+            for (icon, label, key, on) in [
+                (
+                    FLIP_HORIZONTAL,
+                    "Flip Horizontal",
+                    "flip_horizontal",
+                    pic.flip_horizontal,
+                ),
+                (
+                    FLIP_VERTICAL,
+                    "Flip Vertical",
+                    "flip_vertical",
+                    pic.flip_vertical,
+                ),
+            ] {
+                let b = egui::Button::selectable(on, format!("{icon} {label}"));
+                if ui.add_enabled(found, b).clicked()
+                    && let Some((id, _)) = &clip
+                {
+                    let mut params = json!({ "clips": id });
+                    params[key] = json!(!on);
+                    self.end_picture_wheel();
+                    self.send("picture.set", params);
+                }
+            }
+        }
+        if ui.add_enabled(found, egui::Button::new("Reset")).clicked()
+            && let Some((id, _)) = &clip
+        {
+            self.end_picture_wheel();
+            self.timeline.picture_grab.landing = None;
+            self.send("picture.clear", json!({ "clips": [id], "tool": tool }));
         }
     }
 
@@ -379,10 +584,9 @@ impl Workspace {
                     f64::from(angle_of(to - pivot) - angle_of(held.from - pivot)).to_degrees();
                 let mut r = p0.turn() + turned;
                 if shift {
-                    r = (r / 15.0).round() * 15.0;
+                    r = (r / STEP).round() * STEP;
                 }
-                let r = (r + 180.0).rem_euclid(360.0) - 180.0;
-                next.now.rotation = Some(rounded(r, 2));
+                next.now.rotation = Some(rounded(wrapped(r), 2));
             }
             Hold::Crop(side) => {
                 let [u, v] = s.uv(to);
@@ -414,9 +618,22 @@ impl Workspace {
         let shape = tool.and_then(|_| self.picture_shape(picture));
         let (Some(tool), Some(s)) = (tool, shape) else {
             self.timeline.picture_grab.held = None;
+            self.end_picture_wheel();
             self.sync_picture_preview();
             return false;
         };
+        let elsewhere = |w: &Wheeled| w.clip != s.clip;
+        if tool != PictureTool::Transform
+            || resp.drag_started()
+            || self
+                .timeline
+                .picture_grab
+                .wheel
+                .as_ref()
+                .is_some_and(elsewhere)
+        {
+            self.end_picture_wheel();
+        }
         let pointer = ui.input(|i| i.pointer.hover_pos());
         let mods = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
         let held = self.timeline.picture_grab.held.clone();
@@ -456,31 +673,32 @@ impl Workspace {
             self.timeline.picture_grab.held =
                 Some(self.picture_moved(&held, &s0, to, picture, mods));
         }
+        if tool == PictureTool::Transform
+            && self.timeline.picture_grab.held.is_none()
+            && resp.hovered()
+            && pointer.is_some_and(|p| picture.contains(p))
+        {
+            self.picture_wheel(ui, &s, mods);
+        }
         let mut busy = held.is_some() || hover.is_some();
         if resp.drag_stopped()
             && let Some(held) = self.timeline.picture_grab.held.take()
         {
             busy = true;
-            if let Some(params) = changed(&held) {
-                self.send("picture.set", params);
-                let from = held.start.clone();
-                self.timeline.picture_grab.landing = Some((
-                    held.clip.clone(),
-                    held.now.clone(),
-                    std::time::Instant::now(),
-                    from,
-                ));
-            }
+            self.land_picture(&held.clip, &held.start, &held.now);
         }
-        if let Some(h) = &self.timeline.picture_grab.held
-            && matches!(h.hold, Hold::Corner | Hold::Stretch(_))
-        {
-            let [zx, zy] = h.now.scale();
-            let zoom = if zx == zy {
-                format!("{:.0}%", zx * 100.0)
-            } else {
-                format!("{:.0}% × {:.0}%", zx * 100.0, zy * 100.0)
-            };
+        let g = &self.timeline.picture_grab;
+        let readout = match (&g.held, &g.wheel) {
+            (Some(h), _) => match h.hold {
+                Hold::Corner | Hold::Stretch(_) => Some(zoom_text(&h.now)),
+                Hold::Turn => Some(turn_text(&h.now)),
+                _ => None,
+            },
+            (None, Some(w)) if w.now.turn() != w.start.turn() => Some(turn_text(&w.now)),
+            (None, Some(w)) if w.now.scale() != w.start.scale() => Some(zoom_text(&w.now)),
+            (None, _) => None,
+        };
+        if let Some(text) = readout {
             egui::Tooltip::always_open(
                 ui.ctx().clone(),
                 ui.layer_id(),
@@ -488,7 +706,7 @@ impl Workspace {
                 egui::PopupAnchor::Pointer,
             )
             .gap(12.0)
-            .show(|ui| ui.add(egui::Label::new(zoom).extend()));
+            .show(|ui| ui.add(egui::Label::new(text).extend()));
         }
         self.sync_picture_preview();
         let shown = self.picture_shape(picture).unwrap_or(s);
@@ -557,16 +775,15 @@ impl Workspace {
     }
 }
 
-fn changed(held: &Held) -> Option<Value> {
-    let (a, b) = (&held.start, &held.now);
-    let mut params = json!({ "clips": held.clip });
-    if a.position != b.position {
+fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
+    let mut params = json!({ "clips": clip });
+    if a.place() != b.place() {
         params["position"] = json!(b.place());
     }
-    if a.zoom != b.zoom {
+    if a.scale() != b.scale() {
         params["zoom"] = json!(b.scale());
     }
-    if a.rotation != b.rotation {
+    if a.turn() != b.turn() {
         params["rotation"] = json!(b.turn());
     }
     for (key, x, y) in [

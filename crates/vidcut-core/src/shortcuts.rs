@@ -291,7 +291,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Transform",
         Some(
             "Shows the selected clip's handles in the viewer: drag inside to move it, a corner \
-             to zoom, a side to stretch, the handle above to turn it. T again hides them.",
+             to zoom, a side to stretch, the handle above or just outside a corner to turn it. \
+             T again hides them.",
         ),
     ),
     key(
@@ -299,6 +300,18 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Shift", "T"],
         "Crop",
         Some("Shows a handle on each side of the selected clip in the viewer to crop it."),
+    ),
+    key(
+        Clips,
+        &["Wheel"],
+        "Zoom the clip's picture",
+        Some("While T's handles show, over the viewer's picture. A trackpad pinch zooms it too."),
+    ),
+    key(
+        Clips,
+        &["Alt", "Wheel"],
+        "Turn the clip's picture",
+        Some("While T's handles show, 1° a notch; with Shift too, 15°."),
     ),
     key(
         Clips,

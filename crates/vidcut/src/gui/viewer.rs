@@ -172,7 +172,18 @@ impl Workspace {
             });
         });
 
-        let below = 34.0 + 36.0;
+        let dynamic = self
+            .timeline
+            .dynamic
+            .as_ref()
+            .is_some_and(crate::gui::timeline::tools::Dynamic::running)
+            && self.dynamic_target().is_some();
+        let trim = self.trim_editor_edit();
+        let tools = mode == ViewerMode::Timeline
+            && self.timeline.picture_grab.row
+            && !dynamic
+            && trim.is_none();
+        let below = 34.0 + 36.0 + if tools { TOOLS_ROW + 4.0 } else { 0.0 };
         let avail = ui.available_rect_before_wrap();
         let meter_w = self.viewer_meter_width();
         let area = Rect::from_min_max(
@@ -203,13 +214,6 @@ impl Workspace {
         if self.timeline.edit.is_none() {
             self.trim_anchor = None;
         }
-        let dynamic = self
-            .timeline
-            .dynamic
-            .as_ref()
-            .is_some_and(crate::gui::timeline::tools::Dynamic::running)
-            && self.dynamic_target().is_some();
-        let trim = self.trim_editor_edit();
         if dynamic || trim.is_none() {
             self.timeline.strip_drag = None;
         }
@@ -324,6 +328,11 @@ impl Workspace {
         }
 
         ui.add_space(4.0);
+        if tools {
+            ui.allocate_ui(vec2(ui.available_width(), TOOLS_ROW), |ui| {
+                ui.horizontal_centered(|ui| self.picture_tools_row(ui));
+            });
+        }
         if mode.is_source() {
             self.scroll_bar(ui);
         } else {
@@ -809,7 +818,9 @@ impl Workspace {
         use Transport as T;
         let player = self.snap.player(id).clone();
         let shuttling = player.speed != 0.0 && player.speed != 1.0;
+        let tools = id == PlayerId::Timeline && trim.is_none();
         let left: Vec<Transport> = [
+            tools.then_some(T::Tools),
             trim.map(|_| T::TrimOut),
             Some(T::Previous),
             Some(T::Stop),
@@ -834,6 +845,7 @@ impl Workspace {
                 T::Clear,
                 T::MarkOut,
                 T::MarkIn,
+                T::Tools,
                 T::Loop,
                 T::TrimIn,
                 T::TrimOut,
@@ -843,6 +855,7 @@ impl Workspace {
                 T::Play,
             ],
             group: |t| match t {
+                T::Tools => 5,
                 T::TrimOut => 0,
                 T::Previous | T::Stop | T::Play | T::Next | T::Loop => 1,
                 T::TrimIn => 2,
@@ -854,6 +867,14 @@ impl Workspace {
             self.fit_row(ui, row, |ws, ui, t| {
                 let big = |s: &str| RichText::new(s).size(16.0);
                 match t {
+                    T::Tools => {
+                        let shown = ws.timeline.picture_grab.row;
+                        let r = ui.selectable_label(shown, "Tools");
+                        if r.clicked() {
+                            ws.timeline.picture_grab.row = !shown;
+                        }
+                        r
+                    }
                     T::TrimOut | T::TrimIn => {
                         let e = trim.expect("trimming");
                         ui.horizontal(|ui| ws.trim_pair(ui, e, t == T::TrimOut))
@@ -1101,8 +1122,11 @@ enum TrimRow {
     Close,
 }
 
+const TOOLS_ROW: f32 = 28.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Transport {
+    Tools,
     TrimOut,
     Previous,
     Stop,
