@@ -4,6 +4,8 @@
 #   - every backticked name in docs/design/ exists in crates/
 #   - every relative link in a Markdown file points at a file that exists,
 #     and its #anchor at a heading of that file
+#   - every Markdown file is in plain style (AGENTS.md, rule 11), except
+#     those listed in scripts/docs-to-rewrite.txt
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export LC_ALL=C
@@ -77,6 +79,39 @@ xargs awk -v paths="$tmp/paths" -v anchors="$tmp/anchors" '
   }
   END { exit bad }
 ' < "$tmp/docs" || status=1
+
+# Plain style (AGENTS.md, rule 11): a sentence has 25 words at most and a
+# line 300 characters, outside code blocks and without link targets. The
+# files below are still to rewrite; each rewrite takes its file off.
+not_yet=" $(tr '\n' ' ' < scripts/docs-to-rewrite.txt) "
+while IFS= read -r f; do
+  [[ "$not_yet" == *" $f "* ]] && continue
+  awk '
+    FNR == 1 { fence = 0 }
+    /^ *(```|~~~)/ { fence = !fence; next }
+    fence { next }
+    {
+      line = $0
+      gsub(/\]\([^)]*\)/, "]", line)
+      if (length(line) > 300) {
+        printf "%s:%d: a line of %d characters (300 at most)\n", FILENAME, FNR, length(line); bad = 1
+      }
+      gsub(/`[^`]*`/, "x", line)
+      gsub(/[|]/, ".", line)
+      n = split(line, sentences, /[.!?;][*_)"]*( |$)/)
+      for (i = 1; i <= n; i++) {
+        w = split(sentences[i], words, /[ \t]+/)
+        k = 0
+        for (j = 1; j <= w; j++) if (words[j] ~ /[A-Za-z0-9]/) k++
+        if (k > 25) {
+          printf "%s:%d: a sentence of %d words (25 at most)\n", FILENAME, FNR, k; bad = 1
+          break
+        }
+      }
+    }
+    END { exit bad }
+  ' "$f" || status=1
+done < "$tmp/docs"
 
 if compgen -G 'docs/design/*.md' > /dev/null; then
   awk -v tokens="$tmp/tokens" -v paths="$tmp/paths" '
