@@ -2066,7 +2066,8 @@ pub enum Request {
     /// source clip or the timeline), `metadata` (the strip at the top of the
     /// Media Pool), `clip_info` (the media selected in the pool), or the
     /// viewer's `transform` or `crop` handles on the selected clip (the
-    /// topmost clip at the playhead when none is selected). Answers what
+    /// topmost clip at the playhead when none is selected), or `tools`, the
+    /// viewer's row of Transform, Crop, the flips and Reset. Answers what
     /// `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
@@ -2660,6 +2661,8 @@ pub enum GuiPanel {
     Transform,
     /// The viewer's Crop handles on the selected clip, one on each side.
     Crop,
+    /// The viewer's Tools row: Transform and Crop, the flips and Reset.
+    Tools,
 }
 
 /// Media Pool sort orders.

@@ -70,6 +70,7 @@ struct Wheeled {
 #[derive(Debug, Default)]
 pub struct Grab {
     pub(crate) tool: Option<PictureTool>,
+    pub(crate) row: bool,
     held: Option<Held>,
     wheel: Option<Wheeled>,
     landing: Option<(String, Picture, Instant, Picture)>,
@@ -413,6 +414,71 @@ impl Workspace {
             && let Some(id) = topmost(&p, at)
         {
             self.send("selection.set", json!({ "clips": [id] }));
+        }
+    }
+
+    fn tools_clip(&self) -> Option<(String, Picture)> {
+        let p = self.project_shared()?;
+        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+        let c = match target(&p, &self.snap.selection.clips, at) {
+            Some(c) => c,
+            None => p.clip(&topmost(&p, at)?)?,
+        };
+        Some((c.id.clone(), c.picture.clone().unwrap_or_default()))
+    }
+
+    pub(super) fn picture_tools_row(&mut self, ui: &mut egui::Ui) {
+        let tool = self.timeline.picture_grab.tool;
+        let clip = self.tools_clip();
+        let found = clip.is_some();
+        for (label, t) in [
+            ("Transform", PictureTool::Transform),
+            ("Crop", PictureTool::Crop),
+        ] {
+            let lit = tool == Some(t);
+            let b = egui::Button::selectable(lit, label);
+            if ui.add_enabled(found || lit, b).clicked() {
+                self.picture_tool(t);
+            }
+        }
+        let Some(tool) = tool else {
+            return;
+        };
+        ui.separator();
+        let pic = clip.as_ref().map(|(_, p)| p.clone()).unwrap_or_default();
+        if tool == PictureTool::Transform {
+            use egui_phosphor::regular::{FLIP_HORIZONTAL, FLIP_VERTICAL};
+            for (icon, label, key, on) in [
+                (
+                    FLIP_HORIZONTAL,
+                    "Flip Horizontal",
+                    "flip_horizontal",
+                    pic.flip_horizontal,
+                ),
+                (
+                    FLIP_VERTICAL,
+                    "Flip Vertical",
+                    "flip_vertical",
+                    pic.flip_vertical,
+                ),
+            ] {
+                let b = egui::Button::selectable(on, format!("{icon} {label}"));
+                if ui.add_enabled(found, b).clicked()
+                    && let Some((id, _)) = &clip
+                {
+                    let mut params = json!({ "clips": id });
+                    params[key] = json!(!on);
+                    self.end_picture_wheel();
+                    self.send("picture.set", params);
+                }
+            }
+        }
+        if ui.add_enabled(found, egui::Button::new("Reset")).clicked()
+            && let Some((id, _)) = &clip
+        {
+            self.end_picture_wheel();
+            self.timeline.picture_grab.landing = None;
+            self.send("picture.clear", json!({ "clips": [id], "tool": tool }));
         }
     }
 
