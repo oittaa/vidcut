@@ -1,6 +1,8 @@
 # Requests
 
-Every action, from a key press in the GUI to an agent's tool call, is one `Request`. This page follows a request from its front door to `Editor::apply` and back. The vocabulary and the editor are in vidcut-core; the GUI's side is in [live](live.md).
+- Every action is one `Request`, from a key press in the GUI to the tool call of an agent.
+- This page follows a request from its front door to `Editor::apply` and back.
+- The vocabulary and the editor are in vidcut-core. The GUI's side is in [live](live.md).
 
 ```mermaid
 flowchart TD
@@ -24,9 +26,18 @@ flowchart TD
 
 ## One vocabulary
 
-`Request` has one variant per method, serialized as `method` and `params`. Its JSON schema (`session::schema`) generates the CLI commands (`cli::command`) and the MCP tools (`mcp::tools`), so every door names things alike.
-
-An `Envelope` adds the two options every request takes: `if_rev` (fail with `ErrorCode::Conflict` unless the project is at that revision) and `dry_run`. `Envelope::from_json` takes them off the request object first, and out of `params` only when they are not there. Every answer is a `Response`: the revision after it, the ids created, modified and deleted (`Changes`), the result, `dry_run`, `warnings`, and where it ran (`via`).
+- `Request` has one variant per method. It is serialized as `method` and `params`.
+- Its JSON schema (`session::schema`) generates the CLI commands (`cli::command`) and the MCP tools (`mcp::tools`). Thus every door uses the same names.
+- An `Envelope` adds the two options that every request takes:
+  - `if_rev`: fail with `ErrorCode::Conflict` unless the project is at that revision.
+  - `dry_run`.
+- `Envelope::from_json` takes these options from the request object first. It takes them from `params` only when they are not on the request object.
+- Every answer is a `Response`. It holds:
+  - the revision after the request
+  - the ids created, modified and deleted (`Changes`)
+  - the result
+  - `dry_run` and `warnings`
+  - where the request ran (`via`)
 
 Three questions drive the routing:
 
@@ -45,26 +56,47 @@ Three questions drive the routing:
 | IPC | `ipc::server::start` in the GUI: `vidcut-ipc` accepts, one `vidcut-ipc-conn` thread per connection | `Handle::call` |
 | GUI | `Workspace::send` | `Handle::request`; no reply, errors become notices |
 
-The CLI and MCP make paths absolute first (`Request::paths_mut`), since the GUI runs in its own directory.
+The CLI and MCP first make paths absolute (`Request::paths_mut`), because the GUI runs in its own directory.
 
 ## Routing
 
 `ipc::run` asks `ipc::route` where the request runs:
 
 1. Projectless requests, and the `headless` option, run here.
-2. The `instance` option (a pid or a socket, also `VIDCUT_SOCKET`) picks a GUI.
-3. With a project, the GUI that has it open, else here; a live request then fails with NO_INSTANCE (`ErrorCode::NoInstance`).
-4. Without one, the only GUI with a project open (any GUI, for a live request). None: here, or NO_INSTANCE for a live request. Several: a usage error.
+2. The `instance` option picks a GUI. It is a pid or a socket. `VIDCUT_SOCKET` also sets it.
+3. With a project: the GUI that has it open, else here. If it runs here, a live request fails with NO_INSTANCE (`ErrorCode::NoInstance`).
+4. Without a project: the only GUI that has a project open. For a live request, any GUI.
+   - If there is no such GUI: here, or NO_INSTANCE for a live request.
+   - If there are several: a usage error.
 
-The registry (`ipc::registry`) is a folder in the user's runtime dir: each GUI writes an `Instance` entry (pid, socket, open project) and listens on that socket; `registry::list` removes dead ones. `ipc::client::call` sends one JSON-RPC line and reads progress notifications until the answer; closing the connection cancels the call.
+The registry and the client:
+
+- The registry (`ipc::registry`) is a folder in the user's runtime dir.
+- Each GUI writes an `Instance` entry (pid, socket, open project) and listens on that socket.
+- `registry::list` removes the entries of dead GUIs.
+- `ipc::client::call` sends one JSON-RPC line. It reads progress notifications until the answer.
+- When the connection closes, the call is cancelled.
 
 ## Headless
 
-`session::run_with` refuses live requests, answers projectless ones itself, and otherwise opens the project's `Store`. A mutation runs in `Store::transact`: take the lock (`Store::lock`), load the project and its history, `Editor::apply`, save if the revision moved. A query needs no lock. `proxy.generate` encodes on a copy first, outside the lock (spec D41), and `subtitles.transcribe` transcribes on one (`work_first`); inside the lock their edit finds the work done.
+- `session::run_with` refuses live requests. It answers projectless requests itself. For other requests, it opens the project's `Store`.
+- A mutation runs in `Store::transact`:
+  1. Take the lock (`Store::lock`).
+  2. Load the project and its history.
+  3. `Editor::apply`.
+  4. Save if the revision moved.
+- A query needs no lock.
+- `proxy.generate` first encodes on a copy, outside the lock (spec D41).
+- `subtitles.transcribe` first transcribes on a copy.
+- Both do this through `work_first`. Inside the lock, the edit of these two requests finds the work done.
 
 ## Live
 
-`Handle::call` and `Handle::request` put a `Msg::Request` on the `vidcut-session` thread's channel. `Live::request` checks the expected project and `if_rev`; `Live::dispatch` answers now or schedules the work. Edits go through `Live::edit` to `OpenProject::apply`, which takes the headless runs' lock, re-reads the file if it changed, applies and saves before answering. The new `Snapshot` is published before the replies go: once a client hears back, the GUI's state shows the change.
+- `Handle::call` and `Handle::request` put a `Msg::Request` on the channel of the `vidcut-session` thread.
+- `Live::request` checks the expected project and `if_rev`.
+- `Live::dispatch` answers at once, or schedules the work.
+- Edits go through `Live::edit` to `OpenProject::apply`. It takes the same lock as the headless runs, and reads the file again if it changed. Then it applies the edit and saves before it answers.
+- The live core publishes the new `Snapshot` before the replies go. Thus, when a client hears back, the GUI's state shows the change.
 
 ```mermaid
 sequenceDiagram
@@ -92,7 +124,13 @@ sequenceDiagram
 
 ## Requests that only read
 
-`export.start`, `export.plan`, `frame.render`, `storyboard.render` and the `analyze` methods leave the editor path. Headless, `session::run_with` loads the project, checks `if_rev` and calls `session::render`; a GUI calls it from `Live::project_task` on a worker thread, with a copy of the project. `session::render` hands exports to `session::export_media` ([export](export.md)) and runs the `analyze` methods as queries on a throwaway `Editor` ([analysis](analysis.md)). A GUI's media export is a job (`Live::start_export`). None takes the lock.
+- `export.start`, `export.plan`, `frame.render`, `storyboard.render` and the `analyze` methods do not go through the editor.
+- Headless, `session::run_with` loads the project, checks `if_rev` and calls `session::render`.
+- A GUI calls `session::render` from `Live::project_task` on a worker thread, with a copy of the project.
+- `session::render` hands exports to `session::export_media` ([export](export.md)).
+- `session::render` runs the `analyze` methods as queries on a throwaway `Editor` ([analysis](analysis.md)).
+- The media export of a GUI is a job (`Live::start_export`).
+- None of these requests takes the lock.
 
 ## The editor
 
@@ -100,28 +138,125 @@ sequenceDiagram
 
 - A query goes to `query`.
 - `history.undo` and `history.redo` call `step_history`.
-- A mutation runs `mutate` on a clone of the project: it resolves times and clip references and calls the edit operations in `ops` (`ops::split` for `edit.split`). Carried transitions that no longer fit go (`otio::transitions::prune`); `validate::violations` checks the result, and a violation fails the edit as a vidcut bug.
+- A mutation runs `mutate` on a clone of the project.
+  - It resolves times and clip references, and calls the edit operations in `ops` (`ops::split` for `edit.split`).
+  - Carried transitions that do not fit after the edit go (`otio::transitions::prune`).
+  - `validate::violations` checks the result. A violation fails the edit as a vidcut bug.
 - A dry run stops here and reports the `Changes`.
 - An edit that changes nothing makes no revision and no undo step.
-- Otherwise the clone becomes the project, `rev` goes up by one, and the history gets an `Entry`: a label (`describe`) and the `Change`.
+- Else the clone becomes the project, and `rev` goes up by one.
+- The history then gets an `Entry`: a label (`describe`) and the `Change`.
 
-`apply` runs a list of requests in order on one clone: one revision, one undo step, and any error fails them all. Undo, redo and `apply` can't be in the list.
+`apply`:
+
+- `apply` runs a list of requests in order on one clone. It makes one revision and one undo step.
+- Any error fails all the requests in the list.
+- Undo, redo and `apply` cannot be in the list.
 
 ## Undo history
 
-A `Change` is a tree of what differs: replaced values (`Set`), object fields (`Fields`) and lists of things with ids (`Items`), so a step costs what it changed. Undo applies it backward and still makes a new revision: revisions only grow.
+Changes:
 
-The history is a `.jsonl` file in the state dir's `history` folder, named by a digest of the project's path (`HistoryFile`). Each save appends lines ending with a hash of the project text it wrote. On load (`Store::load_text`), a project file that doesn't match that hash was changed by something else: `Editor::record_external` makes the difference from the last saved state one undoable step by `file`. A history file that is there but can't be read (`HistoryFile::read_tail` fails after a few tries, or its last saved project can't be rebuilt) is never written over: the editor keeps the session's steps in memory, says why (`Editor::history_trouble`: a GUI notice, `history.get`'s warnings), and appends them once the file reads again where it left off (`Store::save`, `Store::recover`). A GUI notices such writes through its file watcher (`Msg::FileChanged`, `OpenProject::reload`). Behavior: [spec §8.10](../cut-page-spec.md#810-undo-pp-651652), [deviation X4](../deviations.md#x4-undo-history-persists-across-sessions-and-cli-runs).
+- A `Change` is a tree of what differs: replaced values (`Set`), object fields (`Fields`) and lists of things with ids (`Items`).
+- Thus a step costs what it changed.
+- Undo applies a change backward, and still makes a new revision. Revisions only grow.
 
-Each `Entry` keeps a `Step` beside its `Change`: the label (`describe`), who made it (the request's `Client`), when, when its GUI opened the project (`Editor::opened_at`), the clips and frames it changed (`steps::places`, from the project before and after) and an `apply`'s commands. Lines written before steps had these load with them empty. The CLI and `mcp` put the `Client` on the `Envelope` (the `client` key of a JSON-RPC request); a GUI gives its own and its IPC callers' in `Live::request`.
+The history file:
 
-`Editor::history_steps` reads the steps without their changes (`HistoryFile::steps_now`, through one handle). A `StepsCache` keeps what it read, so a GUI reads only what a save appended, and the whole file again after a compaction. `history.get` lists them with the runs one client made in a row (`steps::listing`, `steps::groups`); `history.go` undoes or redoes to a step as one revision.
+- The history is a `.jsonl` file in the `history` folder of the state dir. A digest of the project's path names it (`HistoryFile`).
+- Each save appends lines. They end with a hash of the project text that the save wrote.
+- On load (`Store::load_text`), a project file that does not match that hash was changed by something else.
+- Then `Editor::record_external` makes the difference from the last saved state one undoable step, by `file`.
+- vidcut never writes over a history file that is there but cannot be read. Examples:
+  - `HistoryFile::read_tail` fails after a few tries.
+  - The last saved project of the file cannot be rebuilt.
+- Then the editor keeps the steps of the session in memory and says why (`Editor::history_trouble`: a GUI notice, the warnings of `history.get`).
+- The editor appends these steps when the file reads again where it left off (`Store::save`, `Store::recover`).
+- A GUI notices such writes through its file watcher (`Msg::FileChanged`, `OpenProject::reload`).
+- Behavior: [spec §8.10](../cut-page-spec.md#810-undo-pp-651652), [deviation X4](../deviations.md#x4-undo-history-persists-across-sessions-and-cli-runs).
 
-The history is a tree. Each saved step gets an id (`Tail` keeps the next; a save that finds none, written by an older vidcut, takes the next after the largest id in the file), and a step placed where steps could still be redone moves them into a `Branch` hanging after its place (`Tree::place_at`), so the reader of the file rebuilds the versions it already holds. `history.restore` undoes or redoes to where a version branched and writes its steps again under their own ids, stamped with the time of the restore: the reader sees a version's first id come back and takes the version out, and the steps it replaces become a version replaced then. A version inside another comes back with the ones holding it, outermost first, in the same revision (`Editor::chain`, `editor::climb`), and hovering a version's step draws the project as it was then (`PreviewAt`, `Past::version_at`). A compaction (`HistoryFile::compact`) leaves the steps and versions together at 90% of the limit, so the next steps don't compact again: the versions get up to a tenth of it, named ones first, then the newest, and those that hang before the oldest step kept go. It gives no step an id and carries the next one over, and it drops the names of the steps it drops, and the name of the start once the start moves. A name is a `Mark` line on a step's id (`history.mark`), saved without a new revision (`Editor::unsaved`); the GUI watches the history file, so a name given elsewhere shows at once. `history.revert` applies one step's change backward as a new step; `Change::touched` and `change::overlap` find a later step that changed the same thing, which refuses it. A run of items moved together touches its whole list, and a reorder moves only the items it listed, so items added since keep their places. When the change no longer fits, the revert names the later step after which it stops fitting. `steps::since` compares two projects for "since this step": clips, dissolves, cross fades, markers, media, tracks, bins, In and Out marks and settings; for a step still to redo it counts what redoing to it brings (`steps::since_step`), and for a version's step what going there brings (`steps::since_version`, `history.get` with `branch`), in the panel and in `history.get` alike. The kind and who filters offer what any step has, the versions' too (`steps::every_step`).
+Steps:
 
-The History panel (`HistoryUi`, docked beside the Media Pool, its width kept in the config folder) previews a step without changing the project. `Handle::history_preview` asks the live core; `Live::preview_step` hands the step to the `vidcut-preview` thread, which makes the project as it was (`Store::project_at`) for the newest step asked only, so a long history never holds up the live core. A `Past` keeps the states it made for the current revision, the few dozen used last (an `Lru`), and makes each new one from the nearest it holds (`Editor::project_between`, reading only the steps between), so moving one row costs one step however long the history is. The result is published in the snapshot (`HistoryPreview`), which the timeline draws in place of the project, its tracks and length too, outlining what the step changed; the panel's rows are laid out once per history and kept (`HistoryUi`). The keyboard cursor's preview lasts while the panel has the keys, and a press on the timeline while a past state is drawn only ends it (`Workspace::history_swallows`), up to its release. An undo, redo or `history.go` from the GUI publishes a `Flash` of what it moved through. Behavior: [deviations X33–X38](../deviations.md#x33-each-undo-step-says-what-where-and-how-much).
+- Each `Entry` keeps a `Step` beside its `Change`. The `Step` holds:
+  - the label (`describe`)
+  - who made it (the `Client` of the request)
+  - when
+  - when its GUI opened the project (`Editor::opened_at`)
+  - the clips and frames it changed (`steps::places`, from the project before and after)
+  - the commands of an `apply`
+- A history line without these fields loads with them empty.
+- The CLI and `mcp` put the `Client` on the `Envelope` (the `client` key of a JSON-RPC request).
+- A GUI gives its own `Client`, and the `Client` of its IPC callers, in `Live::request`.
+- `Editor::history_steps` reads the steps without their changes (`HistoryFile::steps_now`, through one handle).
+- A `StepsCache` keeps what it read. Thus a GUI reads only what a save appended. After a compaction, it reads the whole file again.
+- `history.get` lists the steps, with the runs that one client made in a row (`steps::listing`, `steps::groups`).
+- `history.go` undoes or redoes to a step, as one revision.
 
-**Why** the lock, the revision and the reload: the CLI, agents and the GUI edit one file at once ([deviation X1](../deviations.md#x1-projects-are-always-saved-standalone-json-files)). The lock orders the writers, the file always holds the latest project, and `if_rev` refuses an edit to a project that changed since the client read it.
+The tree of versions:
+
+- The history is a tree.
+- Each saved step gets an id. `Tail` keeps the next id.
+- A file that an older vidcut wrote has no next id. A save that finds none takes the next id after the largest id in the file.
+- A step can go where steps can still be redone. Then it moves those steps into a `Branch` that hangs after its place (`Tree::place_at`).
+- Thus the reader of the file rebuilds the versions that it already holds.
+- `history.restore` undoes or redoes to the place where a version branched. Then it writes the steps of the version again under their own ids, stamped with the time of the restore.
+- When the reader sees the first id of a version come back, it takes that version out.
+- The steps that the restore replaces become a version, replaced at that time.
+- A version inside another version comes back with the versions that hold it, outermost first, in the same revision (`Editor::chain`, `editor::climb`).
+- When the user hovers over the step of a version, the timeline draws the project as it was then (`PreviewAt`, `Past::version_at`).
+
+Compaction:
+
+- A compaction (`HistoryFile::compact`) leaves the steps and versions together at 90% of the limit. Thus the next steps do not compact again.
+- The versions get up to a tenth of the limit: named versions first, then the newest.
+- The versions that hang before the oldest kept step go.
+- A compaction gives no step an id. It carries the next id over.
+- It drops the names of the steps that it drops. When the start moves, it also drops the name of the start.
+
+Names:
+
+- A name is a `Mark` line on the id of a step (`history.mark`).
+- A name is saved without a new revision (`Editor::unsaved`).
+- The GUI watches the history file. Thus a name given elsewhere shows at once.
+
+Revert:
+
+- `history.revert` applies the change of one step backward, as a new step.
+- `Change::touched` and `change::overlap` find a later step that changed the same thing. Such a step refuses the revert.
+- A run of items moved together touches its whole list.
+- A reorder moves only the items that it listed. Thus items added after it keep their places.
+- When the change does not fit, the revert names the later step after which it stops fitting.
+
+"Since this step":
+
+- `steps::since` compares two projects for "since this step". It compares clips, dissolves, cross fades, markers, media, tracks, bins, In and Out marks, and settings.
+- For a step still to redo, it counts what a redo to that step brings (`steps::since_step`).
+- For the step of a version, it counts what a move to that step brings (`steps::since_version`, `history.get` with `branch`).
+- The panel and `history.get` show the same counts.
+- The kind filter and the who filter offer the values that any step has, the steps of versions too (`steps::every_step`).
+
+The History panel:
+
+- The History panel (`HistoryUi`) docks beside the Media Pool. The config folder keeps its width.
+- It previews a step without a change to the project.
+- `Handle::history_preview` asks the live core. `Live::preview_step` hands the step to the `vidcut-preview` thread.
+- That thread makes the project as it was (`Store::project_at`), only for the newest step asked. Thus a long history never holds up the live core.
+- A `Past` keeps the states that it made for the current revision: the few dozen used last (an `Lru`).
+- It makes each new state from the nearest state it holds (`Editor::project_between`, which reads only the steps between).
+- Thus a move of one row costs one step, however long the history is.
+- The snapshot publishes the result (`HistoryPreview`).
+- The timeline draws the result in place of the project, its tracks and length too. It outlines what the step changed.
+- The panel lays out its rows once per history and keeps them (`HistoryUi`).
+- The preview of the keyboard cursor lasts while the panel has the keys.
+- While a past state is drawn, a press on the timeline only ends the preview, up to its release (`Workspace::history_swallows`).
+- An undo, redo or `history.go` from the GUI publishes a `Flash` of what it moved through.
+- Behavior: [deviations X33–X38](../deviations.md#x33-each-undo-step-says-what-where-and-how-much).
+
+**Why** the lock, the revision and the reload: the CLI, agents and the GUI edit one file at the same time ([deviation X1](../deviations.md#x1-projects-are-always-saved-standalone-json-files)).
+
+- The lock orders the writers.
+- The file always holds the latest project.
+- `if_rev` refuses an edit to a project that changed after the client read it.
 
 ## Code
 

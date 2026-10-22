@@ -1,6 +1,10 @@
 # GPU
 
-vidcut decodes, scales, mixes, shows and encodes on the GPU wherever the GPU gives the CPU's results. One GPU does it all. A decoded frame stays in GPU memory as far as the next step can take it, and comes down to memory where it can't. [playback](playback.md) and [export](export.md) cover the pipelines around this; driver quirks and workarounds are in [gotchas](../gotchas.md).
+- vidcut decodes, scales, mixes, shows and encodes on the GPU wherever the GPU gives the same results as the CPU.
+- One GPU does all of this work.
+- A decoded frame stays in GPU memory as far as the next step can take it. Where the next step cannot take it, the frame comes down to memory.
+- [playback](playback.md) and [export](export.md) cover the pipelines around this.
+- [gotchas](../gotchas.md) has the driver quirks and their workarounds.
 
 ```mermaid
 flowchart LR
@@ -19,21 +23,54 @@ flowchart LR
 
 ## Choosing the GPU and the decoder
 
-`gpus::list` lists the computer's GPUs once, each by its PCI ids and slot (`Gpu::id`), with its CUDA device, Direct3D 11 adapter or render node. Its memory (`Gpu::memory_mb`) comes from one source per system, for every vendor: the dedicated video memory DXGI reports on Windows, and on Linux the largest device-local heap of the Vulkan device on the same PCI bus (`vulkan_memory`, which leaves Vulkan's loader loaded for the viewer). Integrated GPUs on Linux get none, since their Vulkan heap is system memory. A GPU that source can't size has none either. `gpus::in_use` is the one `gpu.device` names (`gpus::choose`), else `gpus::automatic`: NVIDIA's first CUDA device, else the first other. A Mac lists none.
+The GPU:
 
-Speech is transcribed on that GPU too: transcribe.cpp's Vulkan device with its PCI slot or name (Metal on a Mac), with pieces sized by its memory, and the voice-activity model on the CPU ([analysis](analysis.md#transcription)).
+- `gpus::list` lists the GPUs of the computer once. It names each GPU by its PCI ids and slot (`Gpu::id`), with its CUDA device, Direct3D 11 adapter or render node.
+- The memory of a GPU (`Gpu::memory_mb`) comes from one source per system, for every vendor:
+  - On Windows, the source is the dedicated video memory that DXGI reports.
+  - On Linux, the source is the largest device-local heap of the Vulkan device on the same PCI bus (`vulkan_memory`). This leaves the Vulkan loader loaded for the viewer.
+- On Linux, integrated GPUs get no memory value, because their Vulkan heap is system memory.
+- A GPU that this source cannot size also gets no memory value.
+- `gpus::in_use` is the GPU that `gpu.device` names (`gpus::choose`). Else it is `gpus::automatic`: the first CUDA device of NVIDIA, else the first other GPU.
+- A Mac lists no GPUs.
 
-`GpuDecoder::best` opens the decoder on the GPU in use, once per GPU: NVDEC on NVIDIA's (Vulkan beside it for ProRes), Direct3D 11 on Windows' others, VA-API on Linux's, VideoToolbox on a Mac. `VIDCUT_HWDEC` overrides it for tests. The player decodes on it. Exports, proxies, renders and the timeline's tiles use `GpuDecoder::own`: NVDEC on a CUDA stream of its own, the others on a device of their own on the same GPU.
+Speech is transcribed on that GPU too ([analysis](analysis.md#transcription)).
 
-**Why:** on the player's decoder their work would wait in line with playback's.
+The decoder:
 
-`gpu.acceleration` (on by default) lets the GPU decode, scale and encode; off, the CPU does everything, even for a preset naming a GPU encoder. `gpu.decoding` (on) lets it decode; off, the CPU decodes and scales and the GPU still encodes. The app reads both through `preferences::gpu_decoding`.
+- `GpuDecoder::best` opens the decoder on the GPU in use, once per GPU:
+  - NVDEC on an NVIDIA GPU, with Vulkan beside it for ProRes.
+  - Direct3D 11 on the other GPUs on Windows.
+  - VA-API on the other GPUs on Linux.
+  - VideoToolbox on a Mac.
+- `VIDCUT_HWDEC` overrides this choice for tests.
+- The player decodes on this decoder.
+- Exports, proxies, renders and the timeline's tiles use `GpuDecoder::own`. NVDEC gets a CUDA stream of its own. The other kinds get a device of their own on the same GPU.
 
-`GpuDecoder::kind_for` picks a stream's decoder kind, and `decode::gpu_decoder` FFmpeg's decoder with a hardware configuration for that device, never a wrapper of a GPU's own. `GpuDecoder::why_not` names what is left to the CPU. A stream the GPU's decoder refuses decodes on the CPU (`VideoReader::open_gpu_or_cpu`), as stills and image sequences do.
+**Why:** on the player's decoder, their work would wait in line with the work of playback.
+
+The settings:
+
+- `gpu.acceleration` (on by default) lets the GPU decode, scale and encode. When it is off, the CPU does everything, even for a preset that names a GPU encoder.
+- `gpu.decoding` (on by default) lets the GPU decode. When it is off, the CPU decodes and scales, and the GPU still encodes.
+- The app reads both settings through `preferences::gpu_decoding`.
+
+The decoder of a stream:
+
+- `GpuDecoder::kind_for` picks the decoder kind of a stream.
+- `decode::gpu_decoder` picks the FFmpeg decoder, with a hardware configuration for that device. It never picks a wrapper of the GPU's own decoder.
+- `GpuDecoder::why_not` names what is left to the CPU.
+- A stream that the GPU's decoder refuses decodes on the CPU (`VideoReader::open_gpu_or_cpu`). Stills and image sequences also decode on the CPU.
 
 ## Where a frame lives
 
-`route::Place` is where a picture is: `Memory` or one of the five GPU places of `hw::Kind`, by its pixel format. `route::Facts` holds what the planner knows of a frame bound for a `route::Dest` (memory, an encoder, the viewer): whether its GPU fits it for that encoder (`hw::can_fit`), hands pictures to the encoder's place (`hw::reaches`: CUDA and Vulkan to each other), mixes dissolves (`hw::can_mix`: CUDA only), and what failed before. `route::plan`, a pure function, gives the `Route`:
+- `route::Place` is where a picture is: `Memory`, or one of the five GPU places of `hw::Kind`. The pixel format of the picture tells which.
+- `route::Facts` holds what the planner knows of a frame that goes to a `route::Dest` (memory, an encoder, the viewer):
+  - whether its GPU fits it for that encoder (`hw::can_fit`)
+  - whether its GPU hands pictures to the place of the encoder (`hw::reaches`: CUDA and Vulkan to each other)
+  - whether its GPU mixes dissolves (`hw::can_mix`: CUDA only)
+  - what failed before
+- `route::plan` is a pure function. It gives the `Route`:
 
 | `Route` | The picture is |
 |---|---|
@@ -43,7 +80,8 @@ Speech is transcribed on that GPU too: transcribe.cpp's Vulkan device with its P
 | `Route::Whole` | copied down whole |
 | `Route::Cpu` | already in memory |
 
-A GPU route wins. One that fails becomes a fact, and the frame and its file's later frames are planned again without it.
+- A GPU route wins.
+- A GPU route that fails becomes a fact. Then the planner plans the frame and the later frames of its file again, without that route.
 
 ## Each decoder's frames
 
@@ -57,7 +95,14 @@ In playback:
 | Direct3D 11 | Windows, not NVIDIA | FFmpeg's D3D11VA decoders; on AMD not open-GOP H.264 | `d3d11::Keeper`: copied into shareable textures | copied on its GPU into a few shared textures (`d3d11::Shared`), each imported once |
 | VideoToolbox | macOS | FFmpeg's VideoToolbox decoders; not open-GOP H.264 | as decoded | IOSurface planes as Metal textures |
 
-What vidcut learns of a VA-API device (`NO_COPY`: its driver can't copy surfaces; `WAYS`: which way its frames come down; `SIZES`: its surfaces' size, all in `crates/vidcut-av/src/hw/vaapi.rs`) it keeps by the address of its VA display or device, with no reference to either, so a device opened where a freed one was, on another GPU too, inherits what they say.
+The facts of a VA-API device:
+
+- vidcut learns these facts of a VA-API device, all in `crates/vidcut-av/src/hw/vaapi.rs`:
+  - `NO_COPY`: its driver cannot copy surfaces.
+  - `WAYS`: which way its frames come down.
+  - `SIZES`: the size of its surfaces.
+- vidcut keeps these facts by the address of the VA display or device, with no reference to either.
+- Thus a device that opens where a freed device was gets the facts of the freed device. This is also true for a device on another GPU.
 
 In exports:
 
@@ -69,7 +114,26 @@ In exports:
 | Direct3D 11 | AMF on its adapter | the video processor; colors unchanged, not 8-bit into 10-bit | in memory | other encoders, QSV too; color changes; dissolves |
 | VideoToolbox | its own encoders | `transpose_vt`, `scale_vt`, where colors and layout stay | in memory | padding, layout or color changes; dissolves |
 
-Where the driver won't take `cuda::mix`'s kernel, the export mixes its dissolves on the CPU from then on, and its result says why. Burned-in subtitles, titles and placed pictures go the same ways: on the GPU into CUDA frames (`cuda::burn`), in memory for the others, whose frames come down and go back up only while a cue, a title or a placed picture shows; a placed picture's own frames come down shrunk to the size it shows ([export](export.md#placed-pictures)). Where a frame comes down and the output shows it smaller, the decoder's GPU shrinks it first (`scale_cuda`, `scale_vulkan`, `scale_vaapi`, the video processor, `scale_vt`). The viewer blends a dissolve's layers wherever each is. Any decoder's frames come down for CPU encoders, renders and tiles, and in the player where the viewer can't show that kind (`Gpu::gpu_pictures`), an import fails, pictures are shown shrunk, or their pool leaves the video-memory budget. Pictures made in memory go up into a GPU encoder's frames (`Upload`, `CudaFrames::upload`).
+Dissolves and overlays:
+
+- Where the driver does not take the kernel of `cuda::mix`, the export mixes its dissolves on the CPU for the rest of the export. Its result says why.
+- Burned-in subtitles, titles and placed pictures go the same ways:
+  - On the GPU, they go into CUDA frames (`cuda::burn`).
+  - For the other decoders, they go in memory. These frames come down and go back up only while a cue, a title or a placed picture shows.
+  - The frames of a placed picture come down shrunk to the size that it shows ([export](export.md#placed-pictures)).
+- The viewer blends the layers of a dissolve wherever each layer is.
+
+Frames that come down:
+
+- Where a frame comes down and the output shows it smaller, the decoder's GPU shrinks it first.
+  - It uses `scale_cuda`, `scale_vulkan`, `scale_vaapi`, the video processor or `scale_vt`.
+- The frames of any decoder come down for CPU encoders, renders and tiles.
+- In the player, frames come down in these cases:
+  - The viewer cannot show that kind (`Gpu::gpu_pictures`).
+  - An import fails.
+  - The pictures are shown shrunk.
+  - Their pool leaves the video-memory budget.
+- Pictures made in memory go up into the frames of a GPU encoder (`Upload`, `CudaFrames::upload`).
 
 ## Encoders
 
@@ -82,17 +146,35 @@ Where the driver won't take `cuda::mix`'s kernel, the export mixes its dissolves
 | VideoToolbox | macOS | H.264, HEVC; ProRes for proxies |
 | Vulkan | any listed GPU | ProRes (`prores_ks_vulkan`), proxies only |
 
-`encode::detect` test-encodes with each encoder, pixel format and GPU. `export::detected` keeps the result in `encoders.json`, keyed by the FFmpeg versions, the system and the GPUs and drivers; `encoders.list` with `refresh` tests again. `encoders.testing` names the process testing: one left by a process that died makes the next test skip Vulkan's encoders. Jobs take the GPU in use's encoders (`Availability::in_use`).
+- `encode::detect` test-encodes with each encoder, pixel format and GPU.
+- `export::detected` keeps the result in `encoders.json`. The key is the FFmpeg versions, the system, and the GPUs and drivers.
+- `encoders.list` with `refresh` tests again.
+- `encoders.testing` names the process that tests. When a process dies during a test, it leaves this file. Then the next test skips the encoders of Vulkan.
+- Jobs take the encoders of the GPU in use (`Availability::in_use`).
 
 ## Deinterlacing and HDR
 
-The reader deinterlaces as the CPU's `bwdif` does: CUDA frames with `bwdif_cuda`, Vulkan's with `bwdif_vulkan`, where `hw::deinterlace` finds, once per process, that the filter gives `bwdif`'s frames of their layout. Other interlaced frames come down for `bwdif` and reach an encoder from memory.
+Deinterlacing:
 
-libplacebo (`CudaPictures`) converts HDR to SDR, or into PQ or HLG, with the CPU's math in a shader (`color::gpu_color`), for NVENC and Vulkan's ProRes encoder. The other GPUs fit pictures only where their colors stay (`color::kept`), so a conversion comes down to `Normalizer`. The viewer's shader converts and tone-maps each picture with the export's math (`color::shader_colors`).
+- The reader deinterlaces as the CPU's `bwdif` does. CUDA frames use `bwdif_cuda`, and Vulkan frames use `bwdif_vulkan`.
+- This applies only where `hw::deinterlace` finds that the filter gives the same frames as `bwdif` for their layout. It checks once per process.
+- Other interlaced frames come down for `bwdif`, and go to an encoder from memory.
+
+HDR:
+
+- libplacebo (`CudaPictures`) converts HDR to SDR, or into PQ or HLG, for NVENC and the ProRes encoder of Vulkan.
+- It uses the math of the CPU in a shader (`color::gpu_color`).
+- The other GPUs fit pictures only where their colors stay (`color::kept`). Thus a conversion comes down to `Normalizer`.
+- The viewer's shader converts and tone-maps each picture with the math of the export (`color::shader_colors`).
 
 ## Why
 
-The rule is the GPU first wherever it works right (AGENTS.md rule 9), never the CPU because it is faster. The only exceptions are GPUs that give wrong results, named in `GpuDecoder::why_not`: AMD's Direct3D 11 and VideoToolbox go wrong after a seek into H.264 with open GOPs, and Vulkan is trusted on NVIDIA's GPUs only. GPU deinterlacers and some scalers (Vulkan's, Direct3D 11's video processor) are checked against test pictures first, and a GPU step that fails leaves its file to the CPU.
+- The rule is the GPU first wherever it works right (AGENTS.md rule 9). vidcut never moves work to the CPU because the CPU is faster.
+- The only exceptions are GPUs that give wrong results. `GpuDecoder::why_not` names them:
+  - AMD's Direct3D 11 and VideoToolbox go wrong after a seek into H.264 with open GOPs.
+  - vidcut trusts Vulkan on NVIDIA's GPUs only.
+- vidcut first checks GPU deinterlacers and some scalers against test pictures. These scalers are Vulkan's and the video processor of Direct3D 11.
+- A GPU step that fails leaves its file to the CPU.
 
 ## Code
 
