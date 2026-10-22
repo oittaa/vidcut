@@ -224,6 +224,21 @@ impl Field {
     }
 }
 
+pub(super) fn framed(p: &Picture, start: bool) -> Picture {
+    let Some(z) = p.dynamic_zoom else {
+        return p.clone();
+    };
+    let one = if start { z.start } else { z.end };
+    Picture {
+        dynamic_zoom: Some(DynamicZoom {
+            start: one,
+            end: one,
+            ..z
+        }),
+        ..p.clone()
+    }
+}
+
 fn typed(text: &str) -> Option<f64> {
     let t: String = text
         .chars()
@@ -678,21 +693,13 @@ impl Workspace {
                 Some((_, x)) => Some(x.clone()),
                 None => p.clip(id).and_then(|c| c.picture.clone()),
             };
-            let Some((b, z)) = base.and_then(|b| b.dynamic_zoom.map(|z| (b, z))) else {
+            let Some(b) = base.filter(|b| b.dynamic_zoom.is_some()) else {
                 continue;
             };
-            let one = if k.start { z.start } else { z.end };
-            let framed = Picture {
-                dynamic_zoom: Some(DynamicZoom {
-                    start: one,
-                    end: one,
-                    ..z
-                }),
-                ..b
-            };
+            let one = framed(&b, k.start);
             match wanted.iter_mut().find(|(w, _)| w == id) {
-                Some((_, x)) => *x = framed,
-                None => wanted.push((id.clone(), framed)),
+                Some((_, x)) => *x = one,
+                None => wanted.push((id.clone(), one)),
             }
         }
         wanted

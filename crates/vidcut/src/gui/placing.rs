@@ -9,6 +9,7 @@ use vidcut_core::ops::picture::{has_picture, zoom_shown};
 use vidcut_core::place::{Level, Placing, flipped};
 use vidcut_core::render::{Placed, Run};
 
+use super::inspector::framed;
 use super::timeline::tools::landing;
 use super::workspace::Workspace;
 
@@ -119,7 +120,6 @@ struct Shown {
     middle: [f64; 2],
     origin: Pos2,
     scale: Vec2,
-    framed: Option<ZoomBox>,
 }
 
 impl Shown {
@@ -309,27 +309,14 @@ fn content(p: &Project, c: &Clip, (w, h): (f64, f64)) -> [f64; 4] {
     }
 }
 
-fn shape_of(
-    p: &Project,
-    c: &Clip,
-    shown: Picture,
-    picture: Rect,
-    (at, tool): (i64, PictureTool),
-) -> Option<Shown> {
+fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Option<Shown> {
     let (w, h) = (f64::from(p.settings.width), f64::from(p.settings.height));
-    let drawn = match tool {
-        PictureTool::DynamicZoom => Picture {
-            dynamic_zoom: None,
-            ..shown.clone()
-        },
-        _ => shown.clone(),
-    };
     let run = Run {
         at: at - c.start,
         of: c.duration,
         held: false,
     };
-    let placed = [Placed::of(c, drawn, run)];
+    let placed = [Placed::of(c, shown.clone(), run)];
     let middle = placed[0]
         .zoomed()
         .map_or(Picture::MIDDLE, |b| flipped(&shown, b.center));
@@ -343,7 +330,6 @@ fn shape_of(
         middle,
         origin: picture.min,
         scale: vec2(picture.width() / w as f32, picture.height() / h as f32),
-        framed: None,
     })
 }
 
@@ -451,39 +437,12 @@ impl Workspace {
         }
     }
 
-    fn previewed(&self, wanted: Vec<(String, Picture)>) -> Vec<(String, Picture)> {
-        let mut wanted = self.inspector_peeked(wanted);
-        if self.timeline.picture_grab.tool != Some(PictureTool::DynamicZoom) {
-            return wanted;
-        }
-        let Some(p) = self.project_shared() else {
-            return wanted;
-        };
-        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
-        let Some(c) = target(&p, &self.snap.selection.clips, at) else {
-            return wanted;
-        };
-        match wanted.iter_mut().find(|(id, _)| *id == c.id) {
-            Some((_, picture)) => picture.dynamic_zoom = None,
-            None => {
-                if let Some(picture) = c.picture.as_ref().filter(|x| x.dynamic_zoom.is_some()) {
-                    let whole = Picture {
-                        dynamic_zoom: None,
-                        ..picture.clone()
-                    };
-                    wanted.push((c.id.clone(), whole));
-                }
-            }
-        }
-        wanted
-    }
-
     pub(super) fn sync_picture_preview(&mut self) {
         if self.grab_wanted().is_none() {
             self.timeline.picture_grab.landing = None;
         }
         self.settle_inspector();
-        let shown = self.previewed(self.picture_wanted());
+        let shown = self.inspector_peeked(self.picture_wanted());
         let g = &mut self.timeline.picture_grab;
         if shown != g.sent {
             self.live.preview_pictures(shown.clone());
@@ -696,7 +655,7 @@ impl Workspace {
         let p = self.project_shared()?;
         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
         let c = target(&p, &self.snap.selection.clips, at)?;
-        let tool = self.timeline.picture_grab.tool?;
+        self.timeline.picture_grab.tool?;
         let shown = match self
             .picture_wanted()
             .into_iter()
@@ -705,20 +664,12 @@ impl Workspace {
             Some((_, x)) => x,
             None => c.picture.clone().unwrap_or_default(),
         };
-        let mut s = shape_of(&p, c, shown, picture, (at, tool))?;
-        let peek = self.inspector_peek_of(&c.id);
-        let run = Run {
-            at: at - c.start,
-            of: c.duration,
-            held: false,
+        let drawn = match self.inspector_peek_of(&c.id) {
+            Some(start) => framed(&shown, start),
+            None => shown.clone(),
         };
-        s.framed = s.picture.dynamic_zoom.map(|z| match peek {
-            Some(true) => z.start,
-            Some(false) => z.end,
-            None => Placed::of(c, s.picture.clone(), run)
-                .zoomed()
-                .unwrap_or(z.start),
-        });
+        let mut s = shape_of(&p, c, drawn, picture, at)?;
+        s.picture = shown;
         Some(s)
     }
 
@@ -915,7 +866,7 @@ impl Workspace {
         ) && resp.dragged()
             && let Some(s0) = p
                 .clip(&held.clip)
-                .and_then(|c| shape_of(&p, c, held.start.clone(), picture, (at, tool)))
+                .and_then(|c| shape_of(&p, c, held.start.clone(), picture, at))
         {
             self.timeline.picture_grab.held =
                 Some(self.picture_moved(&held, &s0, to, picture, mods));
@@ -1023,38 +974,9 @@ impl Workspace {
     }
 }
 
-fn paint_framing(painter: &egui::Painter, s: &Shown, b: ZoomBox) {
-    let [u0, v0, u1, v1] = s.level.shown;
-    let r = b.size / 2.0;
-    let a = flipped(&s.picture, [b.center[0] - r, b.center[1] - r]);
-    let c = flipped(&s.picture, [b.center[0] + r, b.center[1] + r]);
-    let (x0, x1) = (a[0].min(c[0]).clamp(u0, u1), a[0].max(c[0]).clamp(u0, u1));
-    let (y0, y1) = (a[1].min(c[1]).clamp(v0, v1), a[1].max(c[1]).clamp(v0, v1));
-    let dim = Color32::from_black_alpha(150);
-    for [p0, q0, p1, q1] in [
-        [u0, v0, u1, y0],
-        [u0, y1, u1, v1],
-        [u0, y0, x0, y1],
-        [x1, y0, u1, y1],
-    ] {
-        if p1 <= p0 || q1 <= q0 {
-            continue;
-        }
-        let quad = [[p0, q0], [p1, q0], [p1, q1], [p0, q1]].map(|uv| s.screen(uv));
-        painter.add(egui::Shape::convex_polygon(
-            quad.to_vec(),
-            dim,
-            Stroke::NONE,
-        ));
-    }
-}
-
 fn paint_boxes(painter: &egui::Painter, s: &Shown) {
     let z = s.zoom();
     let on = s.picture.dynamic_zoom.is_some();
-    if let Some(b) = s.framed.filter(|_| on) {
-        paint_framing(painter, s, b);
-    }
     let path = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 160));
     painter.line_segment(
         [s.box_point(z.start.center), s.box_point(z.end.center)],
