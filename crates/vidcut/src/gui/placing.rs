@@ -9,7 +9,6 @@ use vidcut_core::ops::picture::{has_picture, zoom_shown};
 use vidcut_core::place::{Level, Placing, flipped};
 use vidcut_core::render::{Placed, Run};
 
-use super::inspector::framed;
 use super::timeline::tools::landing;
 use super::workspace::Workspace;
 
@@ -442,7 +441,7 @@ impl Workspace {
             self.timeline.picture_grab.landing = None;
         }
         self.settle_inspector();
-        let shown = self.inspector_peeked(self.picture_wanted());
+        let shown = self.picture_wanted();
         let g = &mut self.timeline.picture_grab;
         if shown != g.sent {
             self.live.preview_pictures(shown.clone());
@@ -664,13 +663,7 @@ impl Workspace {
             Some((_, x)) => x,
             None => c.picture.clone().unwrap_or_default(),
         };
-        let drawn = match self.inspector_peek_of(&c.id) {
-            Some(start) => framed(&shown, start),
-            None => shown.clone(),
-        };
-        let mut s = shape_of(&p, c, drawn, picture, at)?;
-        s.picture = shown;
-        Some(s)
+        shape_of(&p, c, shown, picture, at)
     }
 
     fn picture_moved(

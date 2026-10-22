@@ -1402,8 +1402,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - **Crop:** Left, Right, Top and Bottom.
   - **Dynamic Zoom:** Off or On, Start Zoom, Start X, Start Y, End Zoom, End X, End Y, the Ease, Show Boxes and Swap.
     - A value typed while Dynamic Zoom is off turns it on.
-    - A Start value that the user types or drags shows the start of the zoom in the viewer. An End value shows the end. On and Swap show the start.
-    - The viewer shows it until the playhead moves or the clip plays. Then the viewer shows the zoom of the current frame.
     - Show Boxes shows the start box and the end box of the selected clip in the viewer. On also shows them.
     - No other change in the Inspector shows or hides the boxes.
     - The viewer shows the output, with its Dynamic Zoom, also while the boxes show.
@@ -1437,7 +1435,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The same value on several clips is a usual need, for example the same Position for the clips of a picture in picture.
   - The requests keep their fractions ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Thus only the GUI shows pixels.
   - Resolve's Inspector has only Ease and Swap for Dynamic Zoom. Numbers show each box exactly, and bring back a box that is out of the viewer.
-  - The viewer shows the start or the end that a value changes. Thus each change shows in the picture at once.
   - The boxes show the start and the end of a Dynamic Zoom. Without them, the viewer shows only the zoom of the current frame.
-  - The viewer always shows the output. Thus each change to a Dynamic Zoom shows in the picture, also while the boxes show.
+  - The viewer always shows the output, and the boxes show both ends on it. Thus the viewer never shows a picture that the export does not make.
   - The Inspector shows a clip that the user selected. Thus the playhead goes to that clip, and the selection does not change.

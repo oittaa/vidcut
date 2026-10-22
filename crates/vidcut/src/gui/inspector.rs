@@ -224,21 +224,6 @@ impl Field {
     }
 }
 
-pub(super) fn framed(p: &Picture, start: bool) -> Picture {
-    let Some(z) = p.dynamic_zoom else {
-        return p.clone();
-    };
-    let one = if start { z.start } else { z.end };
-    Picture {
-        dynamic_zoom: Some(DynamicZoom {
-            start: one,
-            end: one,
-            ..z
-        }),
-        ..p.clone()
-    }
-}
-
 fn typed(text: &str) -> Option<f64> {
     let t: String = text
         .chars()
@@ -344,15 +329,6 @@ pub struct Inspector {
     unlinked: bool,
     held: Option<Held>,
     landing: Option<Landing>,
-    peek: Option<Peek>,
-}
-
-#[derive(Debug, Clone)]
-struct Peek {
-    start: bool,
-    at: i64,
-    seen: bool,
-    clips: Vec<String>,
 }
 
 enum Act {
@@ -664,78 +640,10 @@ impl Workspace {
         if self.inspector.landing.is_some() && self.inspector_landed().is_empty() {
             self.inspector.landing = None;
         }
-        let player = self.snap.player(PlayerId::Timeline);
-        let (now, playing) = (player.position, player.playing);
-        let selected = &self.snap.selection.clips;
-        if let Some(k) = self.inspector.peek.as_mut() {
-            k.seen |= now == k.at;
-            let moved = k.seen && now != k.at;
-            if playing || moved || !k.clips.iter().all(|c| selected.contains(c)) {
-                self.inspector.peek = None;
-            }
-        }
     }
 
     pub(super) fn leave_inspector(&mut self) {
         self.inspector.held = None;
-        self.inspector.peek = None;
-    }
-
-    pub(super) fn inspector_peeked(
-        &self,
-        mut wanted: Vec<(String, Picture)>,
-    ) -> Vec<(String, Picture)> {
-        let (Some(k), Some(p)) = (&self.inspector.peek, self.project_shared()) else {
-            return wanted;
-        };
-        for id in &k.clips {
-            let base = match wanted.iter().find(|(w, _)| w == id) {
-                Some((_, x)) => Some(x.clone()),
-                None => p.clip(id).and_then(|c| c.picture.clone()),
-            };
-            let Some(b) = base.filter(|b| b.dynamic_zoom.is_some()) else {
-                continue;
-            };
-            let one = framed(&b, k.start);
-            match wanted.iter_mut().find(|(w, _)| w == id) {
-                Some((_, x)) => *x = one,
-                None => wanted.push((id.clone(), one)),
-            }
-        }
-        wanted
-    }
-
-    fn unpeek(&mut self) {
-        self.inspector.peek = None;
-    }
-
-    pub(super) fn inspector_peek_of(&self, clip: &str) -> Option<bool> {
-        self.inspector
-            .peek
-            .as_ref()
-            .filter(|k| k.clips.iter().any(|c| c == clip))
-            .map(|k| k.start)
-    }
-
-    fn peek(&mut self, start: bool, chosen: &[Chosen]) {
-        self.unpeek();
-        let Some(p) = self.project_shared() else {
-            return;
-        };
-        let ids: Vec<String> = chosen.iter().map(|c| c.id.clone()).collect();
-        let mut at = self.snap.player(PlayerId::Timeline).position;
-        if target(&p, &ids, at).is_none()
-            && let Some(c) = chosen.first().and_then(|c| p.clip(&c.id))
-        {
-            at = c.start;
-            self.seek(PlayerId::Timeline, at, false);
-        }
-        self.inspector.peek = Some(Peek {
-            start,
-            at,
-            seen: false,
-            clips: ids,
-        });
     }
 
     fn send_pictures(&mut self, chosen: &[Chosen], to: impl Fn(&Chosen) -> Option<Picture>) {
@@ -790,6 +698,10 @@ impl Workspace {
 
     fn show_boxes(&mut self, chosen: &[Chosen]) {
         self.timeline.picture_grab.tool = Some(PictureTool::DynamicZoom);
+        self.bring_into_view(chosen);
+    }
+
+    fn bring_into_view(&mut self, chosen: &[Chosen]) {
         let Some(p) = self.project_shared() else {
             return;
         };
@@ -813,8 +725,8 @@ impl Workspace {
                     start: chosen.to_vec(),
                     dragging: true,
                 });
-                if let Some(start) = field.starts() {
-                    self.peek(start, chosen);
+                if field.starts().is_some() {
+                    self.bring_into_view(chosen);
                 }
             }
             Act::Drag(field, value) => {
@@ -839,8 +751,8 @@ impl Workspace {
                     self.inspector.held = None;
                 }
                 self.send_pictures(chosen, |c| Some(field.put(&c.shown, &c.shape, value)));
-                if let Some(start) = field.starts() {
-                    self.peek(start, chosen);
+                if field.starts().is_some() {
+                    self.bring_into_view(chosen);
                 }
             }
             Act::Edit(field, value) => {
@@ -852,8 +764,8 @@ impl Workspace {
                         start: Vec::new(),
                         dragging: false,
                     });
-                    if let Some(start) = field.starts() {
-                        self.peek(start, chosen);
+                    if field.starts().is_some() {
+                        self.bring_into_view(chosen);
                     }
                 }
             }
@@ -899,14 +811,10 @@ impl Workspace {
                     })
                 });
                 if on {
-                    self.peek(true, chosen);
-                    self.timeline.picture_grab.tool = Some(PictureTool::DynamicZoom);
-                } else {
-                    self.unpeek();
+                    self.show_boxes(chosen);
                 }
             }
             Act::Boxes => {
-                self.inspector.peek = None;
                 if self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom) {
                     self.timeline.picture_grab.tool = None;
                 } else {
@@ -914,7 +822,6 @@ impl Workspace {
                 }
             }
             Act::Ease(ease) => {
-                self.unpeek();
                 self.send_pictures(chosen, |c| {
                     let z = c.shown.dynamic_zoom?;
                     Some(Picture {
@@ -931,14 +838,9 @@ impl Workspace {
                         ..c.shown.clone()
                     })
                 });
-                self.peek(true, chosen);
+                self.bring_into_view(chosen);
             }
-            Act::Clear(tool) => {
-                if tool == PictureTool::DynamicZoom {
-                    self.unpeek();
-                }
-                self.clear_pictures(chosen, tool);
-            }
+            Act::Clear(tool) => self.clear_pictures(chosen, tool),
         }
     }
 

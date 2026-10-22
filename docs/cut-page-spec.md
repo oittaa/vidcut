@@ -1690,7 +1690,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - **How it plays:** a clip with a Dynamic Zoom is placed over the tracks below it. The viewer and the export draw the same frame.
     - **In the viewer**, Alt+T shows the boxes on the clip that T uses (X65).
     - The viewer still draws that clip with its Dynamic Zoom, as the output shows it. The boxes show on that picture, where they are in the current frame.
-    - Thus at the first frame the green box is the edge of the picture, and at the last frame the red box is.
+    - Thus at the first frame the green box is the edge of the picture. Near the end of the clip, the red box comes to the edge.
     - A box larger than the current view reaches past the edge of the picture. The Inspector sets it as numbers (X70).
     - The green box is the start, the red box is the end, and a line joins their centers.
     - A drag inside a box moves it, and Shift keeps the move on one axis.

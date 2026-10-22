@@ -345,7 +345,6 @@ The bar and the Jobs button:
   - The picture that is dragged or wheeled goes to the core with `Handle::preview_pictures`.
   - After the drag or the wheel, the picture that was sent goes to the core until the project has it (`tools::landing`).
   - The boxes of a Dynamic Zoom are placed through the same `place::Placing` as the picture, with the Dynamic Zoom of the current frame. Thus they show on the output.
-  - While the Inspector previews a start or an end, the picture goes to the core with that box at both ends (`Workspace::inspector_peeked`). The boxes are placed through the same picture.
 - **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`)
   - It is a tab of the left panel, as the Titles tab is (`LeftTab`). `gui.show` and `gui.close` take `inspector`.
   - It shows the selected clips that can have a picture. It reads their pictures from the snapshot in each frame.
