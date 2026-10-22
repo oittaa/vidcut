@@ -772,7 +772,10 @@ pub enum Request {
     /// it shows. A picture block brings its pictures: its first track in
     /// the block's place, each other on the next video track above that is
     /// free there. A sound block brings its sound the same way on audio
-    /// tracks.
+    /// tracks. The picture of a placed compound clip goes to each clip
+    /// that has no picture of its own and fills the frame; with a Dynamic
+    /// Zoom, only to a clip that spans all of the compound clip. A warning
+    /// names the clips that don't take it.
     #[serde(rename = "edit.decompose")]
     EditDecompose { clips: OneOrMany<ClipRef> },
     /// Slide a clip (Dynamic Trim's Slide mode): it keeps its media and moves,

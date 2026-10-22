@@ -4977,12 +4977,42 @@ fn decompose(
             e.names().join(", ")
         ));
     }
-    if block.picture.is_some() {
-        warnings.push(format!(
-            "{id}'s place, zoom and crop were dropped: its clips fill the frame"
-        ));
+    if let Some(picture) = block.picture.as_ref().filter(|x| !x.is_usual()) {
+        let dropped = give_picture(p, &block, picture, &made);
+        if !dropped.is_empty() {
+            warnings.push(format!(
+                "{id}'s place, zoom and crop were dropped from {}: they would not show as they did",
+                dropped.join(", ")
+            ));
+        }
     }
     Ok(made)
+}
+
+fn give_picture(p: &mut Project, block: &Clip, picture: &Picture, made: &[String]) -> Vec<String> {
+    let frame = (p.settings.width, p.settings.height);
+    let mut dropped = Vec::new();
+    for id in made {
+        let Some((ti, ci)) = p.find_clip(id) else {
+            continue;
+        };
+        let c = &p.tracks[ti].clips[ci];
+        if !c.video || c.generator.is_some() || p.tracks[ti].kind != TrackKind::Video {
+            continue;
+        }
+        let fills = c.compound.is_some()
+            || p.media(&c.media)
+                .and_then(|m| m.info.video.as_ref())
+                .is_some_and(|v| crate::place::fills(v, frame));
+        let whole = picture.dynamic_zoom.is_none()
+            || (c.start == block.start && c.duration == block.duration);
+        if c.title.is_none() && c.picture.is_none() && fills && whole {
+            p.tracks[ti].clips[ci].picture = Some(picture.clone());
+        } else {
+            dropped.push(id.clone());
+        }
+    }
+    dropped
 }
 
 fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Value> {

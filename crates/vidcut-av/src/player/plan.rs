@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use vidcut_core::render::{Image, RenderPlan, ShownTitle, VideoPiece};
+use vidcut_core::render::{Image, Placed, RenderPlan, ShownTitle, VideoPiece};
 use vidcut_core::time::Rational;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -155,16 +155,10 @@ impl Plan {
             .layers()
             .into_iter()
             .map(|(l, _)| match l {
-                VideoPiece::Source { placed, .. } => placed
-                    .iter()
-                    .map(|p| match preview {
-                        Some((clip, picture)) if *clip == p.clip => vidcut_core::render::Placed {
-                            picture: picture.clone(),
-                            ..p.after(k)
-                        },
-                        _ => p.after(k),
-                    })
-                    .collect(),
+                VideoPiece::Source { placed, .. } => {
+                    let placed: Vec<Placed> = placed.iter().map(|p| p.after(k)).collect();
+                    previewed(&placed, preview)
+                }
                 _ => Vec::new(),
             })
             .collect()
@@ -205,6 +199,22 @@ impl Plan {
     pub(crate) fn frame_at_sample(&self, s: i64) -> i64 {
         self.clamp(self.first() + frame_of(self.fps(), s, self.rate()))
     }
+}
+
+pub(crate) fn previewed(
+    placed: &[Placed],
+    preview: Option<&(String, vidcut_core::model::Picture)>,
+) -> Vec<Placed> {
+    placed
+        .iter()
+        .map(|p| match preview {
+            Some((clip, picture)) if *clip == p.clip => Placed {
+                picture: picture.clone(),
+                ..p.clone()
+            },
+            _ => p.clone(),
+        })
+        .collect()
 }
 
 fn cut(piece: &VideoPiece, k: i64) -> VideoPiece {

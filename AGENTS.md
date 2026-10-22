@@ -44,7 +44,7 @@ vidcut is a video cutting tool in Rust. Its model is the Cut page of DaVinci Res
     - A doc tells what the code does now and why. A todo file tells what is still to do and why.
     - Do not write progress notes, earlier attempts, "before, X did Y" or why a mistake occurred. Put them in commit messages and PR descriptions.
     - A PR that changes a doc also removes the stale text in the parts that it changes.
-    - `scripts/check-docs.sh` refuses a sentence of more than 25 words and a line of more than 300 characters. The files in `scripts/docs-to-rewrite.txt` are not checked yet. Remove a file from that list when you rewrite it.
+    - `scripts/check-docs.sh` refuses a sentence of more than 25 words and a line of more than 300 characters.
 12. **GUI text is short.** The title of a window tells what the window does. Thus no window opens with a paragraph about itself.
     - Labels and buttons have a few words, in Title Case.
     - Use a tooltip only where the label is not sufficient.
