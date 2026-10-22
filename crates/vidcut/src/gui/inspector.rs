@@ -698,10 +698,15 @@ impl Workspace {
         wanted
     }
 
-    fn peek(&mut self, start: bool, chosen: &[Chosen]) {
+    fn unpeek(&mut self) {
+        self.inspector.peek = None;
         if self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom) {
             self.timeline.picture_grab.tool = None;
         }
+    }
+
+    fn peek(&mut self, start: bool, chosen: &[Chosen]) {
+        self.unpeek();
         let Some(p) = self.project_shared() else {
             return;
         };
@@ -884,7 +889,7 @@ impl Workspace {
                 if on {
                     self.peek(true, chosen);
                 } else {
-                    self.inspector.peek = None;
+                    self.unpeek();
                 }
             }
             Act::Boxes => {
@@ -896,10 +901,7 @@ impl Workspace {
                 }
             }
             Act::Ease(ease) => {
-                self.inspector.peek = None;
-                if self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom) {
-                    self.timeline.picture_grab.tool = None;
-                }
+                self.unpeek();
                 self.send_pictures(chosen, |c| {
                     let z = c.shown.dynamic_zoom?;
                     Some(Picture {
@@ -920,7 +922,7 @@ impl Workspace {
             }
             Act::Clear(tool) => {
                 if tool == PictureTool::DynamicZoom {
-                    self.inspector.peek = None;
+                    self.unpeek();
                 }
                 self.clear_pictures(chosen, tool);
             }

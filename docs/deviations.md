@@ -1406,7 +1406,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The viewer shows it until the playhead moves or the clip plays. Then the viewer shows the zoom of the current frame.
     - A change to the Dynamic Zoom in the Inspector hides the boxes. Thus the viewer shows the result.
     - Show Boxes shows the start box and the end box of the selected clip in the viewer.
-    - If the playhead is not on a selected clip, these controls move it to the first frame of the first selected clip.
+    - Show Boxes, On, Swap and the Start and End values can move the playhead. Off, the Ease and Reset do not move it.
+    - They move it when it is not on a selected clip. It goes to the first frame of the first selected clip.
     - Alt+T shows the same boxes. It selects the clip under the playhead instead.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - **Units:**
