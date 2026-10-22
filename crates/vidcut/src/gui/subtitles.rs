@@ -27,8 +27,40 @@ pub struct CueDialog {
     loaded: bool,
     focus: bool,
     dirty: bool,
+    pending: Pending,
+}
+
+#[derive(Debug, Default)]
+struct Pending {
     sent: Vec<Answer>,
     landed: u64,
+}
+
+impl Pending {
+    fn waiting(&mut self, rev: u64) -> bool {
+        let landed = &mut self.landed;
+        self.sent.retain(|a| match a.take() {
+            Some(Ok(r)) => {
+                *landed = (*landed).max(r.rev);
+                false
+            }
+            Some(Err(_)) => false,
+            None => true,
+        });
+        !self.sent.is_empty() || rev < self.landed
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Landing {
+    typing: Typing,
+    pending: Pending,
+}
+
+impl Landing {
+    pub(crate) fn cue_text(&self) -> (&str, &str) {
+        (&self.typing.cue, &self.typing.text)
+    }
 }
 
 impl CueDialog {
@@ -176,7 +208,7 @@ const PAINTS: [(Option<SpeakerPaint>, &str); 4] = [
     (Some(SpeakerPaint::None), "No colors"),
 ];
 
-pub(crate) type SubtitlesKey = (u64, Option<String>, Option<Typing>, Option<SubtitleStyle>);
+pub(crate) type SubtitlesKey = (u64, Option<String>, Vec<Typing>, Option<SubtitleStyle>);
 
 pub(super) fn format_name(f: vidcut_core::request::SubtitleFormat) -> &'static str {
     match f {
@@ -364,10 +396,19 @@ impl Workspace {
     }
 
     pub(super) fn close_cue_form(&mut self) {
-        if let Some(d) = self.timeline.cue_dialog.take()
-            && d.dirty
-        {
-            self.save_cue(&d);
+        let Some(mut d) = self.timeline.cue_dialog.take() else {
+            return;
+        };
+        if d.dirty {
+            let sent = self.save_cue(&d);
+            d.pending.sent.extend(sent);
+        }
+        let rev = self.project().map_or(0, |p| p.rev);
+        if d.pending.waiting(rev) {
+            self.timeline.cue_landings.push(Landing {
+                typing: d.typing(),
+                pending: d.pending,
+            });
         }
     }
 
@@ -410,6 +451,7 @@ impl Workspace {
             return;
         }
         self.close_cue_form();
+        self.timeline.cue_landings.retain(|l| l.typing.cue != id);
         let mut d = CueDialog {
             cue: id.to_string(),
             text: String::new(),
@@ -420,8 +462,7 @@ impl Workspace {
             loaded: false,
             focus,
             dirty: false,
-            sent: Vec::new(),
-            landed: 0,
+            pending: Pending::default(),
         };
         if let Some(p) = self.project()
             && let Some(c) = p.cue(id)
@@ -475,7 +516,13 @@ impl Workspace {
             return;
         };
         let track = p.subtitles.iter().find(|t| t.shown);
-        let typing = self.timeline.cue_dialog.as_ref().map(CueDialog::typing);
+        let typing: Vec<Typing> = self
+            .timeline
+            .cue_landings
+            .iter()
+            .map(|l| l.typing.clone())
+            .chain(self.timeline.cue_dialog.as_ref().map(CueDialog::typing))
+            .collect();
         let styling = self
             .timeline
             .track_dialog
@@ -493,9 +540,10 @@ impl Workspace {
         }
         let view = track.map(|t| {
             let mut cues = t.cues.clone();
-            if let Some(ty) = &typing
-                && let Some(c) = cues.iter_mut().find(|c| c.id == ty.cue)
-            {
+            for ty in &typing {
+                let Some(c) = cues.iter_mut().find(|c| c.id == ty.cue) else {
+                    continue;
+                };
                 let text = vidcut_core::subtitles::normalize(&ty.text);
                 if !c.words.is_empty()
                     && vidcut_core::subtitles::words(&text).len() != c.words.len()
@@ -520,6 +568,13 @@ impl Workspace {
     }
 
     pub(super) fn subtitle_windows(&mut self, ctx: &egui::Context) {
+        let rev = self.project().map_or(0, |p| p.rev);
+        self.timeline
+            .cue_landings
+            .retain_mut(|l| l.pending.waiting(rev));
+        if !self.timeline.cue_landings.is_empty() {
+            ctx.request_repaint();
+        }
         if let Some(result) = self.timeline.adding.as_ref().and_then(Ask::take) {
             self.timeline.adding = None;
             match result {
@@ -543,15 +598,7 @@ impl Workspace {
         let Some(p) = self.project_shared() else {
             return false;
         };
-        d.sent.retain(|a| match a.take() {
-            Some(Ok(r)) => {
-                d.landed = d.landed.max(r.rev);
-                false
-            }
-            Some(Err(_)) => false,
-            None => true,
-        });
-        let waiting = !d.sent.is_empty() || p.rev < d.landed;
+        let waiting = d.pending.waiting(p.rev);
         if waiting {
             ui.ctx().request_repaint();
         }
@@ -697,8 +744,8 @@ impl Workspace {
                 let label = format!("Apply to All of {}'s", p.speakers.name(&k));
                 if ui.button(label).clicked() {
                     let sent = self.save_cue(&d);
-                    d.sent.extend(sent);
-                    d.sent.push(
+                    d.pending.sent.extend(sent);
+                    d.pending.sent.push(
                         self.live
                             .request_answered("subtitles.match_speaker", json!({ "cue": d.cue })),
                     );
@@ -711,7 +758,7 @@ impl Workspace {
         }
         if !done && cue_saves(d.dirty, self.inspector_commits()) {
             let sent = self.save_cue(&d);
-            d.sent.extend(sent);
+            d.pending.sent.extend(sent);
             d.dirty = false;
         }
         ui.separator();

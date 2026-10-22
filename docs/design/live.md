@@ -317,6 +317,7 @@ The bar and the Jobs button:
   - The Subtitle section (`CueDialog`) keeps the text being typed. While the section is open, the timeline and the viewer draw its text in place of the cue's text. The viewer also draws its position, person and color.
   - The Subtitle section sends its changes with `Handle::request_answered`. It keeps what it sent until each `Answer` comes and the project has that revision.
   - Then, while the user does not edit it, it shows the cue of the project. Thus a change that the project refuses goes away. The field does not jump back while a change is on its way.
+  - When the section closes while it waits, its text stays as a `Landing`. The timeline and the viewer draw it until the same answers and revision come.
   - The selected cues are part of the session's `Selection`, as clips are.
 - **Titles.**
   - The Title section (`TitleDialog`) works out the title that its fields give (`title_of`). While the fields are not valid, there is no title.

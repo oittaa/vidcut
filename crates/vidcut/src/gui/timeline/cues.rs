@@ -172,7 +172,7 @@ pub fn paint_track(
     speakers: &vidcut_core::speakers::Speakers,
     selected: &HashSet<&str>,
     compact: bool,
-    typing: Option<(&str, &str)>,
+    typing: &[(&str, &str)],
 ) {
     let rect = tr.rect;
     painter.rect_filled(rect, CornerRadius::ZERO, theme::colors().track);
@@ -214,10 +214,10 @@ pub fn paint_track(
         if compact || r.width() < 24.0 || r.height() < 10.0 {
             continue;
         }
-        let text = match typing {
-            Some((id, text)) if id == c.id => text,
-            _ => c.text.as_str(),
-        };
+        let text = typing
+            .iter()
+            .find(|(id, _)| *id == c.id)
+            .map_or(c.text.as_str(), |(_, text)| *text);
         let left = r.left().max(painter.clip_rect().left());
         let room = r.right() - left - 6.0;
         let label = elide(&one_line(text), (room / 6.0).max(1.0) as usize);
