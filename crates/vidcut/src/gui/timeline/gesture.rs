@@ -5,10 +5,16 @@ use eframe::egui::{Pos2, Rect};
 use serde_json::{Value, json};
 use vidcut_core::model::{Clip, Marks, Project, Track, TrackKind};
 use vidcut_core::ops::{Edge, MAIN};
+use vidcut_core::validate::GAIN;
 
-use super::geometry::{Hit, Rows, SNAP_PX, Scale, Snap, clips_in, edit_near, hit_rows};
+use super::geometry::{
+    Hit, Rows, SNAP_PX, Scale, Snap, clips_in, edit_near, hit_rows, sound_band, volume_gain,
+    volume_y,
+};
 
 pub const HOVER: Duration = Duration::from_millis(800);
+
+const VOLUME_FINE: f64 = 0.1;
 
 pub const SAFE_EDIT_HOLD: Duration = Duration::from_millis(600);
 
@@ -94,6 +100,13 @@ pub enum Gesture {
         edge: Edge,
         from: i64,
     },
+    Volume {
+        clips: Vec<String>,
+        clip: String,
+        level: f64,
+        last: f32,
+        span: f32,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -120,11 +133,19 @@ pub struct Preview {
     pub cues: Vec<(i64, i64)>,
     pub marks: Option<Marks>,
     pub marker: Option<(String, i64)>,
+    pub gains: Option<Gains>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Gains {
+    pub clips: Vec<(String, f64)>,
+    pub shown: f64,
+    pub y: Option<f32>,
 }
 
 impl Preview {
     pub fn moved(&self, p: &Project) -> Option<Project> {
-        if self.marks.is_none() && self.marker.is_none() {
+        if self.marks.is_none() && self.marker.is_none() && self.gains.is_none() {
             return None;
         }
         let mut moved = p.clone();
@@ -135,6 +156,13 @@ impl Preview {
             && let Some(k) = moved.markers.iter_mut().find(|k| &k.id == id)
         {
             k.at = *to;
+        }
+        for (id, gain) in self.gains.iter().flat_map(|g| &g.clips) {
+            if let Some((ti, ci)) = moved.find_clip(id)
+                && let Some(a) = moved.tracks[ti].clips[ci].audio.as_mut()
+            {
+                a.gain_db = *gain;
+            }
         }
         Some(moved)
     }
@@ -196,6 +224,7 @@ pub fn swipe(from: f64, dx: f32, ppf: f64, drag_content: bool, end: i64) -> f64 
 pub struct Drag {
     pub gesture: Gesture,
     pub press: Pos2,
+    pub fine: bool,
     hover: Option<(String, Instant)>,
     blocked_since: Option<Instant>,
 }
@@ -205,12 +234,27 @@ impl Drag {
         Self {
             gesture,
             press,
+            fine: false,
             hover: None,
             blocked_since: None,
         }
     }
 
     pub fn update(&mut self, pos: Pos2, now: Instant, ctx: &Ctx) -> Preview {
+        if let Gesture::Volume {
+            clips,
+            clip,
+            level,
+            last,
+            span,
+        } = &mut self.gesture
+        {
+            let step = if self.fine { VOLUME_FINE } else { 1.0 };
+            let moved = f64::from(*last - pos.y) / f64::from(span.max(1.0)) * step;
+            *level = (*level + moved).clamp(0.0, 1.0);
+            *last = pos.y;
+            return volume_preview(ctx, clips, clip, *level);
+        }
         let under = match hit_rows(ctx.project, ctx.rows, &ctx.scale, pos).1 {
             Hit::Clip(id) | Hit::Slip(id) | Hit::Edge(id, _) => Some(id),
             _ => None,
@@ -262,7 +306,7 @@ impl Drag {
                 &under,
                 &hovered,
             ),
-            Gesture::Bin { .. } => Preview::default(),
+            Gesture::Bin { .. } | Gesture::Volume { .. } => Preview::default(),
             Gesture::Subtitles { media, cues } => subtitles_preview(ctx, pos, media, cues),
             Gesture::Title { template, len } => title_preview(ctx, pos, template, *len),
             Gesture::Trim {
@@ -784,6 +828,74 @@ fn media_preview(
         target: Target::Overwrite(at, at + len),
         ghost: Some((at, at + len)),
         row,
+        ..Preview::default()
+    }
+}
+
+fn tenth(gain_db: f64) -> f64 {
+    let g = (gain_db * 10.0).round() / 10.0;
+    if g == 0.0 { 0.0 } else { g }
+}
+
+fn kept(gain_db: f64) -> f64 {
+    let g = (gain_db * 1e6).round() / 1e6;
+    if g == 0.0 { 0.0 } else { g }
+}
+
+fn volume_preview(ctx: &Ctx, clips: &[String], clip: &str, level: f64) -> Preview {
+    let gain = |id: &str| {
+        ctx.clip(id)
+            .and_then(|c| c.audio.as_ref())
+            .map(|a| a.gain_db)
+    };
+    let Some(base) = gain(clip) else {
+        return Preview::default();
+    };
+    let to = Some(tenth(volume_gain(level)))
+        .filter(|&g| g != tenth(base))
+        .unwrap_or(base);
+    let by = to - base;
+    let set: Vec<(String, f64)> = clips
+        .iter()
+        .filter_map(|id| {
+            let g = match gain(id)? {
+                _ if id == clip => to,
+                g if by == 0.0 => g,
+                g => kept((g + by).clamp(*GAIN.start(), *GAIN.end())),
+            };
+            Some((id.clone(), g))
+        })
+        .collect();
+    let changed: Vec<Value> = set
+        .iter()
+        .filter(|(id, g)| gain(id) != Some(*g))
+        .map(|(id, g)| json!({ "clips": [id], "gain_db": g }))
+        .collect();
+    let request = match changed.as_slice() {
+        [] => None,
+        [only] => request("clip.set", only.clone()),
+        many => request(
+            "apply",
+            json!({
+                "commands": many
+                    .iter()
+                    .map(|params| json!({ "method": "clip.set", "params": params }))
+                    .collect::<Vec<_>>(),
+            }),
+        ),
+    };
+    let y = ctx
+        .track_of(clip)
+        .and_then(|t| ctx.rows.get(&t.id))
+        .zip(ctx.clip(clip))
+        .and_then(|(r, c)| volume_y(sound_band(&r.rect, &ctx.scale, c)?, to));
+    Preview {
+        request,
+        gains: Some(Gains {
+            clips: set,
+            shown: to,
+            y,
+        }),
         ..Preview::default()
     }
 }
