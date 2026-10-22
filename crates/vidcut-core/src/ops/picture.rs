@@ -1,7 +1,8 @@
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Crop, Picture, PictureTool, Project, TrackKind};
+use crate::model::{Clip, Crop, DynamicZoom, Picture, PictureTool, Project, TrackKind, ZoomBox};
+use crate::request::DynamicZoomSet;
 
 use super::locate;
 
@@ -43,6 +44,9 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
             "a picture's crop is a fraction of it on each side, from 0, leaving some of it",
         ));
     }
+    if let Some(z) = &p.dynamic_zoom {
+        zoom_checked(z)?;
+    }
     let out = Picture {
         position: p.position.filter(|at| *at != Picture::MIDDLE),
         zoom: p.zoom.filter(|z| *z != [1.0, 1.0]),
@@ -50,6 +54,22 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
         ..p.clone()
     };
     Ok((!out.is_usual()).then_some(out))
+}
+
+fn zoom_checked(z: &DynamicZoom) -> Result<()> {
+    for b in [z.start, z.end] {
+        if !b.center.iter().all(|v| v.is_finite() && v.abs() <= REACH) {
+            return Err(Error::invalid(
+                "a Dynamic Zoom box's middle is two fractions of the picture, each from -100 to 100",
+            ));
+        }
+        if !(b.size.is_finite() && (ZOOM.0..=ZOOM.1).contains(&b.size)) {
+            return Err(Error::invalid(
+                "a Dynamic Zoom box's size is a fraction of the picture, from 1/100 to 100",
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub fn has_picture(c: &Clip) -> bool {
@@ -83,6 +103,7 @@ pub struct PictureChange {
     pub flip_horizontal: Option<bool>,
     pub flip_vertical: Option<bool>,
     pub crop: [Option<f64>; 4],
+    pub dynamic_zoom: Option<Option<DynamicZoomSet>>,
 }
 
 impl PictureChange {
@@ -120,13 +141,16 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
             *side = v;
         }
     }
+    if let Some(z) = change.dynamic_zoom {
+        p.dynamic_zoom = z.map(|z| z.on(p.dynamic_zoom.unwrap_or_default()));
+    }
     p
 }
 
 pub fn set(p: &mut Project, ids: &[String], change: &PictureChange) -> Result<()> {
     if change.is_empty() {
         return Err(Error::usage(
-            "picture.set needs a position, zoom, rotation, flip or crop",
+            "picture.set needs a position, zoom, rotation, flip, crop or Dynamic Zoom",
         ));
     }
     for id in ids {
@@ -151,10 +175,15 @@ pub fn clear(p: &mut Project, ids: &[String], tool: Option<PictureTool>) -> Resu
             None => Picture::default(),
             Some(PictureTool::Transform) => Picture {
                 crop: old.crop,
+                dynamic_zoom: old.dynamic_zoom,
                 ..Picture::default()
             },
             Some(PictureTool::Crop) => Picture {
                 crop: Crop::default(),
+                ..old
+            },
+            Some(PictureTool::DynamicZoom) => Picture {
+                dynamic_zoom: None,
                 ..old
             },
         };
@@ -176,7 +205,13 @@ pub fn shown(c: &Clip) -> Value {
         "crop": {
             "left": crop.left, "right": crop.right, "top": crop.top, "bottom": crop.bottom,
         },
+        "dynamic_zoom": p.dynamic_zoom.as_ref().map(zoom_shown),
     })
+}
+
+pub fn zoom_shown(z: &DynamicZoom) -> Value {
+    let shown = |b: &ZoomBox| json!({ "center": b.center, "size": b.size });
+    json!({ "start": shown(&z.start), "end": shown(&z.end), "ease": z.ease })
 }
 
 pub fn get(p: &Project, id: &str) -> Result<Value> {

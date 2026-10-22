@@ -1,6 +1,6 @@
 # Ducking
 
-**When:** next, third in [the roadmap](../roadmap.md#what-comes-next). Music under a voice-over or a talk is the most common mix, and vidcut already knows where the speech is.
+**When:** next, first in [the roadmap](../roadmap.md#what-comes-next). Music under a voice-over or a talk is the most common mix, and vidcut already knows where the speech is.
 
 ## What the Cut page does
 

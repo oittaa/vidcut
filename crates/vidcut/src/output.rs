@@ -846,6 +846,25 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 side("top"),
                 side("bottom")
             );
+            let z = &v["dynamic_zoom"];
+            if z.is_object() {
+                let end = |k: &str| {
+                    let b = &z[k];
+                    let n = |i: usize| b["center"][i].as_f64().unwrap_or_default();
+                    format!(
+                        "{} at {}, {}",
+                        b["size"].as_f64().unwrap_or_default(),
+                        n(0),
+                        n(1)
+                    )
+                };
+                println!(
+                    "  dynamic zoom from {} to {}  {}",
+                    end("start"),
+                    end("end"),
+                    z["ease"].as_str().unwrap_or_default()
+                );
+            }
         }
         "timeline.edit_points" => {
             for p in r.result.as_array().into_iter().flatten() {

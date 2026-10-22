@@ -25,5 +25,4 @@ The use cases decide what is built and tested.
 
 Finishing a simple video has its own list, in this order:
 
-1. [Clip transform](todo/clip-transform.md): Dynamic Zoom, a slow push on a still.
-2. [Ducking](todo/ducking.md): music that dips under speech.
+1. [Ducking](todo/ducking.md): music that dips under speech.

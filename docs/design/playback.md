@@ -114,6 +114,7 @@ Motions:
 - Placed pictures ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) are layers of a `VideoPiece::Mix`, as the layers of a dissolve are.
 - Their placement is not in the kept pictures.
 - `Player::present` hands the `Placed` pictures of each layer with the frame, in `Shown` (`Plan::placed_at`). Thus a move or zoom of a placed picture keeps the frames decoded.
+- For a Dynamic Zoom, `Plan::placed_at` moves the `Run` of each `Placed` picture to the frame. Thus the box of that frame places the picture.
 - `Shown::crosses` marks the side of a dissolve that mixes with the side before it (`Over::cross`).
 - While a picture is dragged, `Player::preview_picture` at once puts the dragged picture in place of the picture of its clip.
 - The live core then plans the timeline again with the dragged picture (`Msg::PreviewPicture`), `RELOAD_EVERY` apart at most.

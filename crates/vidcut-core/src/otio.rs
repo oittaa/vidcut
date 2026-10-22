@@ -251,14 +251,14 @@ fn shape_of(p: &Project, c: &Clip, m: Option<&Media>) -> picture::Shape {
     }
 }
 
-fn with_picture(c: &Clip, shape: &picture::Shape, effects: Vec<Value>) -> Vec<Value> {
+fn with_picture(c: &Clip, shape: &picture::Shape, effects: Vec<Value>, g: i64) -> Vec<Value> {
     let Some(x) = &c.picture else {
         return effects;
     };
     effects
         .into_iter()
         .filter(|e| !picture::is_placing(e))
-        .chain(picture::effects(x, shape))
+        .chain(picture::effects(x, shape, g))
         .collect()
 }
 
@@ -423,6 +423,7 @@ pub fn export_drawn(
     if b <= a {
         return Err(Error::invalid("nothing to export: the range is empty"));
     }
+    let g = p.settings.start_tc + a;
     let item = |label: &str,
                 c: &Clip,
                 m: Option<&Media>,
@@ -583,7 +584,7 @@ pub fn export_drawn(
                 );
                 let effects = match &c.title {
                     Some(t) => titles::with_opacity(t, effects),
-                    None => with_picture(c, &shape_of(p, c, m), effects),
+                    None => with_picture(c, &shape_of(p, c, m), effects, g),
                 };
                 let mut it = match &c.compound {
                     Some(k) => block(c, k, &label, c.source_at(s), e - s, effects),
@@ -791,7 +792,7 @@ pub fn export_drawn(
         json!({
             "OTIO_SCHEMA": "Timeline.1",
             "name": name,
-            "global_start_time": rt((p.settings.start_tc + a) as f64, rate),
+            "global_start_time": rt(g as f64, rate),
         }),
         [
             ("tracks", tracks),

@@ -366,6 +366,15 @@ The pictures:
 - A crossing pair lays each side over what was below the first side, and adds the two. Then it takes that lower part away once.
   - In memory, `mix::crossed` does this. On the GPU, `cuda::mix::sum` does this.
 
+A picture with a Dynamic Zoom is placed on each frame by its own box:
+
+- Its `render::Placed` has a `Run`: where the piece starts in its clip. `VideoPiece::part` and `Placed::after` move the `Run` with the piece.
+- `VideoFrames` gives `place::Placing` the frame's `Run`, so `Placed::zoomed` gives the box of that frame.
+- A clip inside a compound clip keeps the `Run` of its own frames, which `render::inside` gives.
+- In a reversed compound, that `Run` has a negative length and goes backward. In a frozen compound, it holds its frame (`Run::held`).
+- `layer_size` fits the layer for the smaller of the two boxes (`DynamicZoom::closest`).
+- The NVENC path is the same, as `cuda::burn::Overlay::of` takes the frame's `Placing`.
+
 ## Proxies
 
 - `proxy.generate` uses the same machinery (spec D41).

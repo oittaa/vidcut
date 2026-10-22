@@ -303,6 +303,16 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     key(
         Clips,
+        &["Alt", "T"],
+        "Dynamic Zoom",
+        Some(
+            "Shows the selected clip's whole picture in the viewer with a green start box and \
+             a red end box. Drag inside a box to move it and a corner to resize it; Shift \
+             keeps a move to one axis. The clip zooms and pans from the start box to the end box.",
+        ),
+    ),
+    key(
+        Clips,
         &["Wheel"],
         "Zoom the clip's picture",
         Some("While T's handles show, over the viewer's picture. A trackpad pinch zooms it too."),

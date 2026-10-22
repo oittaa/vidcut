@@ -330,11 +330,13 @@ Writing:
   - its `rotation`
   - its flips
   - a `Crop` of each side
+  - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
 - Each value is left out at its usual value. Thus a picture that `Picture::is_usual` accepts is only fitted into the frame.
 - `ops::picture` holds the edits:
   - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share. It leaves usual values out.
   - `ops::picture::has_picture` says which clips take a picture: not titles, generators or sound.
-  - `ops::picture::clear` puts back the transform, the crop (`PictureTool`) or both.
+  - `ops::picture::clear` puts back the transform, the crop or the Dynamic Zoom (`PictureTool`), or all of them.
+  - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
 - `place::Placing` turns the picture of a clip, with the pictures of the compound clips that it plays inside, into maps.
   - Each map goes from a pixel of the frame back to a picture (`place::Level`: the map and the part shown).
   - An export and the viewer both draw by these maps ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
@@ -399,14 +401,15 @@ The metadata:
 | `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `source_in` and `skip` for stills and speeds, which the source range rounds; a title's `Title`; a placed clip's `Picture`, a compound clip's too, read back before Resolve's effects |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`, a clip volume effect, and `Media In` on reversed clips |
-| `Resolve_OTIO` on placed clips | Transform, Cropping, and Retime and Scaling (`otio::picture`), fitted, in place of carried ones |
+| `Resolve_OTIO` on placed clips | Transform, Cropping, Retime and Scaling, and Dynamic Zoom (`otio::picture`), fitted, in place of carried ones |
 | `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content; a `Link Group ID` that joins the picture and sound of one compound at the same place (`compound_links`) |
 | `Resolve_OTIO` on tracks | `Locked`, `SoloOn` and `Audio Type` |
 | `Resolve_OTIO` on markers | `Note` |
 
 - Other editors read the `Resolve_OTIO` metadata.
-- The Transform, Cropping, and Retime and Scaling of a placed clip are read back as its `Picture` (`picture::take`, with the shape of the probed source).
-- This occurs when the clip has no `vidcut` one, and none of them is keyed or has other parameters.
+- An import reads the Transform, Cropping, Retime and Scaling, and Dynamic Zoom of a placed clip back as its `Picture` (`picture::take`).
+- `picture::take` uses the shape of the probed source.
+- This occurs when the clip has no `vidcut` one, and none of them has keys or other parameters. The two keys of Dynamic Zoom are the exception.
 - The notes of an export name a clip that moved past the reach of these parameters (`otio::out_of_reach`).
 
 Import:

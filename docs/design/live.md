@@ -326,16 +326,17 @@ The bar and the Jobs button:
   - `title_browser::Thumbs` keeps the pictures that title clips show on the timeline: the pictures used last (an `Lru`).
 - **Pictures.**
   - These set the viewer's tool (`placing::Grab`):
-    - T and Shift+T
+    - T, Shift+T and Alt+T
     - the right-click menu of the clip
     - the Tools row (`Workspace::picture_tools_row`, shown by `Grab::row`)
-    - `gui.show transform` or `crop`
+    - `gui.show transform`, `crop` or `dynamic_zoom`
   - `Workspace::picture_controls` draws the handles of the tool on the selected clip at the playhead. It boxes them through the same `place::Placing` as the picture ([deviation X65](../deviations.md#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)).
   - While the handles are under the pointer, the title controls wait.
   - A drag works on the picture that it started from, and ends in one `picture.set`.
   - A run of wheel notches over the picture (`Wheeled`) also ends in one `picture.set`. `Workspace::settle_picture_wheel` sends it when the wheel is still.
   - The picture that is dragged or wheeled goes to the core with `Handle::preview_picture`.
   - After the drag or the wheel, the picture that was sent goes to the core until the project has it (`tools::landing`).
+  - While the Dynamic Zoom boxes show, the picture goes to the core without its Dynamic Zoom (`Workspace::previewed`). Thus both boxes show on the whole picture.
 - **Silence stripes.**
   - `SilenceDialog` keeps the dry run of Ripple Delete Silence as `Stripe`s, and the person's edits to them:
     - A click keeps or cuts a stripe (`stripe_press`).

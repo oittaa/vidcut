@@ -23,11 +23,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Voice Isolation, free (X64)
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
-- a clip's Transform and Crop (§8.15)
+- a clip's Transform, Crop and Dynamic Zoom (§8.15)
 - Quick Export, plus our Export dialog
 
 **Out of scope (out):**
-- other effects (Dynamic Zoom: [clip transform](todo/clip-transform.md)), other transitions, other titles, generators, keyframes
+- other effects, other transitions, other titles, generators, keyframes
 - color, Fusion, Smart Reframe, Close Up
 - Sync Bin, Multi Source, Source Overwrite, Live Overwrite
 - Replay, voiceover
@@ -623,8 +623,15 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Crop Left, Right, Top and Bottom are in pixels.
   - The cropped area is transparent, so what is under it shows through.
   - Details: D75.
+- **Dynamic Zoom** (p. 768): a slow push or pull and pan from a start box to an end box.
+  - The green box is the start and the red box is the end.
+  - Each box is moved and resized in the viewer, and a path shows the motion.
+  - Swap reverses the boxes. The ease is Linear, Ease In, Ease Out or Ease In and Out.
+  - Shift keeps a drag on one axis.
+  - vidcut: Alt+T shows the boxes, and the Tools row has Dynamic Zoom (X65). The eases are curves of their own (X67).
+  - Details: D75.
 - **How they play:** a clip covers the tracks below it only where its picture covers the frame. Details: D75.
-- **Out:** Pitch and Yaw (p. 767), crop Softness (p. 768), Dynamic Zoom (p. 768; [todo](todo/clip-transform.md)), the modes and opacity of Composite (p. 769), keyframes.
+- **Out:** Pitch and Yaw (p. 767), crop Softness (p. 768), the modes and opacity of Composite (p. 769), keyframes.
 
 ## 9. Audio (pp. 642, 649–650, 743, 771, 773)
 
@@ -1628,3 +1635,27 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - When one of these effects has keyframes or other parameters, such as Pitch and Yaw, all three stay on the clip, unplayed (X9).
     - This is also true when they make a picture that vidcut refuses, such as a crop that leaves nothing.
     - The export names the clips moved further than Resolve's Pan and Tilt go, 4 pictures, and writes them at 4.
+  - **Dynamic Zoom.** The manual gives the boxes and the eases, not the units or the timing.
+    - The units, the order and the timing match Resolve Studio 21.1.1 ([gotchas](gotchas.md#resolves-otio-files)). The eases are vidcut's own (X67).
+    - **The boxes.** `dynamic_zoom` has a `start` box, an `end` box and an `ease`. A box has the shape of the picture.
+    - The `center` of a box is `[x, y]` in fractions of the picture from its top left, each from −100 to 100.
+    - The `size` of a box is its width and height as a fraction of those of the picture, from 1/100 to 100.
+    - **The order.** The picture is drawn at 1/size about the center of the box, and that center goes to the middle of the picture.
+    - This step comes after the flips and before the zoom: fit, crop, flip, Dynamic Zoom, zoom, turn and move.
+    - The crop moves with the picture, and the outline of the picture grows with the zoom.
+    - **The timing.** On frame k of the clip's n frames, t is k/n, and e is the ease of t.
+    - The box is e of the way from `start` to `end`, on a straight line. Thus the end box comes one frame after the last frame.
+    - In a compound clip, t follows the frame of the inner clip that shows. A reversed compound plays the zoom backward, and a frozen one holds it.
+    - **Turned on**, it is a pull out from 125%, with Linear. The start box has the size 0.8 and the end box the size 1, both in the middle.
+    - **How it plays:** a clip with a Dynamic Zoom is placed over the tracks below it. The viewer and the export draw the same frame.
+    - **In the viewer**, Alt+T shows the boxes on the clip that T uses (X65).
+    - The viewer then draws that clip without its Dynamic Zoom, so that both boxes show.
+    - The green box is the start, the red box is the end, and a line joins their centers.
+    - A drag inside a box moves it, and Shift keeps the move on one axis.
+    - A drag at a corner resizes the box about its center. One `picture.set` follows on release.
+    - Dashed boxes show a clip without a Dynamic Zoom, and a drag turns it on.
+    - **From a script**, `picture.set` takes `dynamic_zoom`: the fields given replace their own, and null removes it.
+    - `picture.clear` with the tool `dynamic_zoom` removes it too.
+    - **In an OTIO file**, the Dynamic Zoom is in the `vidcut` metadata of the clip and in Resolve's Dynamic Zoom effect.
+    - An import reads Resolve's effect when its center and its scale each have exactly two keys.
+    - Otherwise the effect stays on the clip unplayed (X9), with Transform, Cropping and Retime and Scaling.

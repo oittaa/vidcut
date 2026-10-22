@@ -228,6 +228,7 @@ impl Workspace {
                 let run = Run {
                     at: at - start,
                     of: length,
+                    held: false,
                 };
                 run.top(0, h, f64::from(bh)) as f32 - y
             } else {

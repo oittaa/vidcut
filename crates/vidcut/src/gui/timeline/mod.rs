@@ -2094,6 +2094,7 @@ impl Workspace {
             for (label, tool) in [
                 ("Transform  (T)", PictureTool::Transform),
                 ("Crop  (Shift+T)", PictureTool::Crop),
+                ("Dynamic Zoom  (Alt+T)", PictureTool::DynamicZoom),
             ] {
                 if ui.button(keys(label)).clicked() {
                     self.send("selection.set", json!({ "clips": [c.id] }));
@@ -2104,7 +2105,11 @@ impl Workspace {
                     ui.close();
                 }
             }
-            for (label, tool) in [("Reset Transform", "transform"), ("Reset Crop", "crop")] {
+            for (label, tool) in [
+                ("Reset Transform", "transform"),
+                ("Reset Crop", "crop"),
+                ("Reset Dynamic Zoom", "dynamic_zoom"),
+            ] {
                 if ui.button(label).clicked() {
                     self.send("picture.clear", json!({ "clips": clips, "tool": tool }));
                     ui.close();

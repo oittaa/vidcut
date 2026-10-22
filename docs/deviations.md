@@ -995,7 +995,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Text+ and Fusion titles are Fusion compositions, and vidcut does not have Fusion (spec §1).
   - Resolve writes Text+ to an OTIO file as a `MissingReference` with nothing of the title in it.
   - Thus neither Text+ nor Fusion titles could come from Resolve or go to Resolve.
-  - Keyframes, cropping and blend modes are out for every clip (spec §1).
+  - Keyframes and blend modes are out for every clip (spec §1).
+  - Other clips have Transform, Crop and Dynamic Zoom ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). A title does not.
   - The place, zoom, rotation and opacity of a title do what Transform and the opacity of Composite would do.
   - A title has no speed. The speed of a scroll comes from the length of its clip.
   - Other clips have Transform and Crop ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom is [to do](todo/clip-transform.md).
@@ -1260,6 +1261,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The place, zoom and crop of a picture are fractions of the frame and of the source ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The requests are `picture.get`, `picture.set` and `picture.clear`.
   - `gui.show transform` or `crop` shows the handles. `gui.show tools` shows the row.
+  - Dynamic Zoom: Alt+T shows the start box and the end box of the clip in the viewer. Alt+T again hides them.
+  - T, Shift+T and Alt+T change between the three tools. F1 lists Alt+T.
+  - The Tools row has Dynamic Zoom, lit while its boxes show. With it come Swap, a menu of the four eases and Reset.
+  - The right-click menu of the clip has Dynamic Zoom and Reset Dynamic Zoom. `gui.show dynamic_zoom` shows the boxes.
 - **Why:**
   - There is a key for everything.
   - The row shows only while Tools is on. Thus the picture keeps its space.
@@ -1289,3 +1294,19 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A folder keeps its folders as bins, as the Bin list of the manual does.
   - The Cut page has a Bin dropdown, not a Bin list (p. 655).
   - Nothing about a drop needs macOS.
+
+## X67. The eases of Dynamic Zoom are curves
+
+- **Resolve:**
+  - The ease of a Dynamic Zoom is Linear, Ease In, Ease Out or Ease In and Out (p. 768).
+  - Resolve Studio 21.1.1 keeps the ease and writes it to OTIO files.
+  - But it plays all four eases as the same straight line ([gotchas](gotchas.md#resolves-otio-files)).
+- **vidcut:** t is the part of the clip that has played, from 0 to 1. The box goes from the start box to the end box as e goes from 0 to 1:
+  - Linear: e = t.
+  - Ease In: e = t², slow at the start.
+  - Ease Out: e = 1 − (1 − t)², slow at the end.
+  - Ease In and Out: e = 3t² − 2t³, slow at the two ends.
+- **Why:**
+  - An ease that changes nothing is of no use.
+  - These curves do what the names of the eases tell.
+  - In Resolve, a clip with one of these eases plays at one speed.

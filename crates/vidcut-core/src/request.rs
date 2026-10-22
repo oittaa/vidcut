@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    PictureTool, Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle, TrackClip,
+    DynamicZoom, Ease, PictureTool, Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle,
+    TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -1553,15 +1554,16 @@ pub enum Request {
 
     /// Where a clip's picture goes over the frame (`c3`, or `V2@15s`): the
     /// `position` of its middle, its `zoom` across and down, its `rotation`,
-    /// its flips and its `crop`, every value given, usual ones too.
+    /// its flips, its `crop` and its `dynamic_zoom` (null when it has
+    /// none), every value given, usual ones too.
     #[serde(rename = "picture.get")]
     PictureGet { clip: ClipRef },
-    /// Move, zoom, turn, flip or crop clips' pictures: footage, stills,
-    /// image sequences and compound clips; a title has its own place
-    /// (`titles.set`). Each field given replaces its own. At its usual
-    /// values a picture is fitted into the frame; the tracks below show
-    /// wherever it doesn't cover the frame: in its bars, around it and
-    /// where it is cropped.
+    /// Move, zoom, turn, flip or crop clips' pictures, or give them a
+    /// Dynamic Zoom: footage, stills, image sequences and compound clips; a
+    /// title has its own place (`titles.set`). Each field given replaces
+    /// its own. At its usual values a picture is fitted into the frame; the
+    /// tracks below show wherever it doesn't cover the frame: in its bars,
+    /// around it and where it is cropped.
     #[serde(rename = "picture.set")]
     PictureSet {
         clips: OneOrMany<ClipRef>,
@@ -1598,10 +1600,18 @@ pub enum Request {
         /// What is cut off its bottom, as a fraction of its height.
         #[serde(default)]
         crop_bottom: Option<f64>,
+        /// A slow push or pull and pan across the clip, from a start box to
+        /// an end box; null takes it off. `{}` turns it on as it starts.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        dynamic_zoom: Option<Option<DynamicZoomSet>>,
     },
     /// Put clips' pictures back at their usual values: the `transform`
-    /// (position, zoom, rotation and flips), the `crop`, or both when no
-    /// `tool` is given.
+    /// (position, zoom, rotation and flips), the `crop`, the
+    /// `dynamic_zoom`, or all of them when no `tool` is given.
     #[serde(rename = "picture.clear")]
     PictureClear {
         clips: OneOrMany<ClipRef>,
@@ -2065,10 +2075,10 @@ pub enum Request {
     /// `help` (the keyboard shortcuts), `transcription` (the words of the
     /// source clip or the timeline), `metadata` (the strip at the top of the
     /// Media Pool), `clip_info` (the media selected in the pool), or the
-    /// viewer's `transform` or `crop` handles on the selected clip (the
-    /// topmost clip at the playhead when none is selected), or `tools`, the
-    /// viewer's row of Transform, Crop, the flips and Reset. Answers what
-    /// `gui.state` does.
+    /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the
+    /// selected clip (the topmost clip at the playhead when none is
+    /// selected), or `tools`, the viewer's row of Transform, Crop, Dynamic
+    /// Zoom and their buttons. Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
@@ -2661,7 +2671,11 @@ pub enum GuiPanel {
     Transform,
     /// The viewer's Crop handles on the selected clip, one on each side.
     Crop,
-    /// The viewer's Tools row: Transform and Crop, the flips and Reset.
+    /// The viewer's Dynamic Zoom boxes on the selected clip: the start box
+    /// and the end box.
+    DynamicZoom,
+    /// The viewer's Tools row: Transform, Crop and Dynamic Zoom, the flips,
+    /// Swap, the ease and Reset.
     Tools,
 }
 
@@ -2828,6 +2842,64 @@ pub struct ProjectSet {
     /// language, `null` goes back to them.
     #[serde(default)]
     pub fillers: Option<std::collections::BTreeMap<String, Option<Vec<String>>>>,
+}
+
+/// A change to a clip's Dynamic Zoom: each field given replaces its own,
+/// and the rest stay as they are. A clip without one starts from a start
+/// box 0.8 of the picture and an end box all of it, both in the middle,
+/// `linear`: a pull out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DynamicZoomSet {
+    /// The box on the clip's first frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<ZoomBoxSet>,
+    /// The box a frame after its last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<ZoomBoxSet>,
+    /// How it goes from one to the other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ease: Option<Ease>,
+}
+
+/// A change to a box of a Dynamic Zoom, which has the picture's shape.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ZoomBoxSet {
+    /// Its middle, `[x, y]` as fractions of the picture from its top left,
+    /// as it shows after the flips, each from -100 to 100: `[0.5, 0.5]` is
+    /// the picture's middle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 2]>,
+    /// Its width and height as a fraction of the picture's, from 1/100 to
+    /// 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+}
+
+impl ZoomBoxSet {
+    fn on(&self, b: ZoomBox) -> ZoomBox {
+        ZoomBox {
+            center: self.center.unwrap_or(b.center),
+            size: self.size.unwrap_or(b.size),
+        }
+    }
+}
+
+impl DynamicZoomSet {
+    pub fn on(&self, z: DynamicZoom) -> DynamicZoom {
+        DynamicZoom {
+            start: self.start.map_or(z.start, |b| b.on(z.start)),
+            end: self.end.map_or(z.end, |b| b.on(z.end)),
+            ease: self.ease.unwrap_or(z.ease),
+        }
+    }
+}
+
+fn given<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
 }
 
 /// One value or a list (`"c1"` or `["c1", "c2"]`).

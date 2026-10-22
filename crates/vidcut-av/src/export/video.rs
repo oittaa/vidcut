@@ -1017,6 +1017,7 @@ impl VideoFrames {
                     }
                     continue;
                 };
+                let placed: Vec<Placed> = placed.iter().map(|p| p.after(k)).collect();
                 let still = Pictures::of(image.as_ref()) == Pictures::Still;
                 let backward = pace.speed < 0.0 && !still;
                 let k = if still { 0 } else { k };
@@ -1050,7 +1051,7 @@ impl VideoFrames {
                         let at_layer =
                             vidcut_core::place::fitted(layer, upright_fit(f, rotation, layer));
                         let frame_size = (f64::from(w), f64::from(h));
-                        Some((Placing::new(placed, frame_size, at_out), at_layer))
+                        Some((Placing::new(&placed, frame_size, at_out), at_layer))
                     }
                     _ => None,
                 };

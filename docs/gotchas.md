@@ -307,6 +307,18 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - When vidcut writes a file, it leaves the anchor at the middle.
 - **Resolve's Pan and Tilt go from −4 to 4.**
   - vidcut writes a picture moved further at 4, and names its clip in the notes of the export.
+- **Resolve's Dynamic Zoom is a `Resolve Effect` of type 59.**
+  - `dynamicZoomCenter` (POINTF) is the middle of a box. It is from the middle of the picture, in fractions of the picture, y up.
+  - `dynamicZoomScale` (Double) is the size of the box as a fraction of the picture.
+  - Each has two keys, at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
+  - Resolve reads the earlier key as the start and the later key as the end, whatever their times.
+  - The box is in fractions of Resolve's picture, as Pan and Tilt are.
+  - vidcut reads a crop, fill or stretch as a zoom after the box, and that zoom scales the box with the picture. Thus `otio::picture` reads and writes the box as it is.
+- **Resolve plays each ease of Dynamic Zoom as a straight line.**
+  - It keeps `dynamicZoomEase` (UInt: 0 Linear, 1 Ease In, 2 Ease Out, 3 Ease In and Out) and writes it.
+  - All four play the same straight line, in stills and in a Deliver render.
+  - This is so when the ease is set through scripting and when it is read from a file. Its Inspector menu was not tried.
+  - vidcut's eases are curves ([X67](deviations.md#x67-the-eases-of-dynamic-zoom-are-curves)). Thus a clip with an ease other than Linear plays differently in Resolve.
 
 ## transcribe.cpp and its models
 

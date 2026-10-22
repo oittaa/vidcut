@@ -1,2 +1,1 @@
-docs/todo/clip-transform.md
 docs/todo/ducking.md
