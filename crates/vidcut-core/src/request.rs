@@ -3416,8 +3416,68 @@ mod tests {
         }
         for params in [json!({ "autoo": true }), json!({ "autoo": false })] {
             let e = Request::from_parts("proxy.generate", Some(params)).unwrap_err();
-            assert!(e.contains("unknown parameter(s) autoo"), "{e}");
+            assert_eq!(
+                e,
+                "unknown parameter(s) autoo for proxy.generate; see `vidcut schema proxy.generate`"
+            );
         }
+    }
+
+    #[test]
+    fn an_empty_search_list_is_a_parameter() {
+        let request =
+            Request::from_parts("media.relink", Some(serde_json::json!({ "search": [] }))).unwrap();
+        assert_eq!(
+            request,
+            Request::MediaRelink {
+                media: None,
+                path: None,
+                search: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn null_params_are_missing_params() {
+        let request = Request::from_parts("project.get", Some(serde_json::Value::Null)).unwrap();
+        assert_eq!(request, Request::ProjectGet {});
+    }
+
+    #[test]
+    fn a_bad_parameter_in_apply_names_the_entry() {
+        let e = Request::from_parts(
+            "apply",
+            Some(serde_json::json!({
+                "commands": [
+                    {"method": "project.get", "params": {}},
+                    {"method": "proxy.generate", "params": {"autoo": true}}
+                ]
+            })),
+        )
+        .unwrap_err();
+        assert_eq!(
+            e,
+            "entry 2: unknown parameter(s) autoo for proxy.generate; see `vidcut schema proxy.generate`"
+        );
+    }
+
+    #[test]
+    fn an_unknown_method_in_apply_names_the_entry() {
+        let e = Request::from_parts(
+            "apply",
+            Some(serde_json::json!({
+                "commands": [
+                    {"method": "project.get", "params": {}},
+                    {"method": "no.such", "params": {}}
+                ]
+            })),
+        )
+        .unwrap_err();
+        assert_eq!(
+            e,
+            "entry 2: unknown method \"no.such\"; see `vidcut schema`"
+        );
+        assert!(!e.contains("unknown method \"apply\""));
     }
 
     #[test]
