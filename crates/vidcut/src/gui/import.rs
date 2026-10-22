@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -26,8 +26,8 @@ pub(super) fn media_types() -> Vec<&'static str> {
 #[derive(Default)]
 pub(super) struct ImportUi {
     pub(super) ctx: Option<egui::Context>,
-    picked: Arc<Mutex<Option<Picked>>>,
-    folder: Arc<Mutex<Option<PickedFolder>>>,
+    picks: Picks,
+    dropped: Vec<PathBuf>,
     choice: Option<Choice>,
 }
 
@@ -37,12 +37,36 @@ impl ImportUi {
     }
 }
 
-type Picked = (Vec<PathBuf>, Option<String>);
+type Picks = Arc<Mutex<VecDeque<Pick>>>;
+
+enum Pick {
+    Files(Vec<PathBuf>, Option<String>),
+    Folder(PickedFolder),
+}
 
 struct PickedFolder {
     path: PathBuf,
     bin: Option<String>,
     runs: Vec<(PathBuf, ImageSequence)>,
+}
+
+impl PickedFolder {
+    fn read(path: PathBuf, bin: Option<String>) -> Self {
+        let runs = vidcut_core::folder::read(&path)
+            .map(|f| f.runs())
+            .unwrap_or_default();
+        Self { path, bin, runs }
+    }
+}
+
+fn push(picks: &Picks, ctx: Option<&egui::Context>, pick: Pick) {
+    picks
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push_back(pick);
+    if let Some(ctx) = ctx {
+        ctx.request_repaint();
+    }
 }
 
 struct Choice {
@@ -153,9 +177,9 @@ impl Workspace {
             return;
         }
         let (bin, folder) = self.import_from();
-        let (dialogs, slot, ctx) = (
+        let (dialogs, picks, ctx) = (
             self.dialogs.clone(),
-            self.import.folder.clone(),
+            self.import.picks.clone(),
             self.import.ctx.clone(),
         );
         let _ = crate::threads::spawn(
@@ -165,14 +189,8 @@ impl Workspace {
                 let Some(path) = dialogs.pick_folder("Import Media Folder", &folder) else {
                     return;
                 };
-                let runs = vidcut_core::folder::read(&path)
-                    .map(|f| f.runs())
-                    .unwrap_or_default();
-                *slot.lock().unwrap_or_else(|e| e.into_inner()) =
-                    Some(PickedFolder { path, bin, runs });
-                if let Some(ctx) = ctx {
-                    ctx.request_repaint();
-                }
+                let folder = PickedFolder::read(path, bin);
+                push(&picks, ctx.as_ref(), Pick::Folder(folder));
             },
         );
     }
@@ -182,9 +200,9 @@ impl Workspace {
             return;
         }
         let (bin, folder) = self.import_from();
-        let (dialogs, slot, ctx) = (
+        let (dialogs, picks, ctx) = (
             self.dialogs.clone(),
-            self.import.picked.clone(),
+            self.import.picks.clone(),
             self.import.ctx.clone(),
         );
         let _ = crate::threads::spawn(
@@ -197,76 +215,146 @@ impl Workspace {
                     .map(|(name, types)| (*name, types.as_slice()))
                     .collect();
                 let files = dialogs.pick_files("Import Media", &folder, &filters);
-                *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some((files, bin));
-                if let Some(ctx) = ctx {
-                    ctx.request_repaint();
+                if !files.is_empty() {
+                    push(&picks, ctx.as_ref(), Pick::Files(files, bin));
                 }
             },
         );
     }
 
+    fn import_dropped(&self, paths: Vec<PathBuf>) {
+        if self.project().is_none() {
+            return;
+        }
+        let (bin, _) = self.import_from();
+        let (picks, ctx) = (self.import.picks.clone(), self.import.ctx.clone());
+        let _ = crate::threads::spawn(
+            "vidcut-import-drop",
+            crate::threads::Work::Interactive,
+            move || {
+                let (folders, files): (Vec<PathBuf>, Vec<PathBuf>) =
+                    paths.into_iter().partition(|p| p.is_dir());
+                if !files.is_empty() {
+                    push(&picks, ctx.as_ref(), Pick::Files(files, bin.clone()));
+                }
+                for path in folders {
+                    let folder = PickedFolder::read(path, bin.clone());
+                    push(&picks, ctx.as_ref(), Pick::Folder(folder));
+                }
+            },
+        );
+    }
+
+    fn take_dropped(&mut self, ctx: &egui::Context) {
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .collect()
+        });
+        if !dropped.is_empty() {
+            self.import.dropped.extend(dropped);
+            ctx.request_repaint();
+        } else if !self.import.dropped.is_empty() {
+            let paths = std::mem::take(&mut self.import.dropped);
+            self.import_dropped(paths);
+        }
+    }
+
+    pub(super) fn drop_hint(&self, ctx: &egui::Context, pool: egui::Rect) {
+        if self.project().is_none() || ctx.input(|i| i.raw.hovered_files.is_empty()) {
+            return;
+        }
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Tooltip,
+            egui::Id::unique("import-drop"),
+        ));
+        let colors = super::theme::colors();
+        let card = super::theme::card(colors.panel);
+        let rect = pool - card.outer_margin;
+        painter.rect_filled(rect, card.corner_radius, colors.panel.gamma_multiply(0.9));
+        painter.rect_stroke(
+            rect,
+            card.corner_radius,
+            egui::Stroke::new(2.0, colors.accent),
+            egui::StrokeKind::Inside,
+        );
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "Drop to Import",
+            egui::TextStyle::Heading.resolve(&ctx.global_style()),
+            colors.text,
+        );
+    }
+
+    fn picked_folder(&mut self, f: PickedFolder) {
+        let parent = f.path.parent().unwrap_or(&f.path);
+        self.folders.remember(super::folders::Kind::Media, parent);
+        if f.runs.is_empty() {
+            self.send("media.add_folder", json!({ "path": f.path, "bin": f.bin }));
+            return;
+        }
+        let frames = f
+            .runs
+            .iter()
+            .any(|(file, _)| FRAME_TYPES.contains(&extension(file).as_str()));
+        let runs = f
+            .runs
+            .into_iter()
+            .map(|(file, s)| Run {
+                name: s.display(),
+                count: s.count,
+                file,
+            })
+            .collect();
+        self.import.choice = Some(Choice {
+            runs,
+            others: Vec::new(),
+            files: Vec::new(),
+            folder: Some(f.path),
+            bin: f.bin,
+            sequences: frames,
+            fps: self.fps().decimal(),
+            error: None,
+        });
+    }
+
+    fn picked_files(&mut self, files: Vec<PathBuf>, bin: Option<String>) {
+        self.folders
+            .remember(super::folders::Kind::Media, &files[0]);
+        let (runs, others, frames) = runs(&files);
+        if runs.is_empty() {
+            self.send("media.add", json!({ "paths": files, "bin": bin }));
+            return;
+        }
+        self.import.choice = Some(Choice {
+            runs,
+            others,
+            files,
+            folder: None,
+            bin,
+            sequences: frames,
+            fps: self.fps().decimal(),
+            error: None,
+        });
+    }
+
     pub(super) fn import_window(&mut self, ctx: &egui::Context) {
         self.import.ctx = Some(ctx.clone());
-        let picked = self
-            .import
-            .picked
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        let folder = self
-            .import
-            .folder
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        if let Some(f) = folder {
-            let parent = f.path.parent().unwrap_or(&f.path);
-            self.folders.remember(super::folders::Kind::Media, parent);
-            if f.runs.is_empty() {
-                self.send("media.add_folder", json!({ "path": f.path, "bin": f.bin }));
-            } else {
-                let frames = f
-                    .runs
-                    .iter()
-                    .any(|(file, _)| FRAME_TYPES.contains(&extension(file).as_str()));
-                let runs = f
-                    .runs
-                    .into_iter()
-                    .map(|(file, s)| Run {
-                        name: s.display(),
-                        count: s.count,
-                        file,
-                    })
-                    .collect();
-                self.import.choice = Some(Choice {
-                    runs,
-                    others: Vec::new(),
-                    files: Vec::new(),
-                    folder: Some(f.path),
-                    bin: f.bin,
-                    sequences: frames,
-                    fps: self.fps().decimal(),
-                    error: None,
-                });
-            }
-        }
-        if let Some((files, bin)) = picked.filter(|(files, _)| !files.is_empty()) {
-            self.folders
-                .remember(super::folders::Kind::Media, &files[0]);
-            let (runs, others, frames) = runs(&files);
-            if runs.is_empty() {
-                self.send("media.add", json!({ "paths": files, "bin": bin }));
-            } else {
-                self.import.choice = Some(Choice {
-                    runs,
-                    others,
-                    files,
-                    folder: None,
-                    bin,
-                    sequences: frames,
-                    fps: self.fps().decimal(),
-                    error: None,
-                });
+        self.take_dropped(ctx);
+        while self.import.choice.is_none() {
+            let pick = self
+                .import
+                .picks
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .pop_front();
+            match pick {
+                Some(Pick::Folder(f)) => self.picked_folder(f),
+                Some(Pick::Files(files, bin)) => self.picked_files(files, bin),
+                None => break,
             }
         }
         let Some(choice) = self.import.choice.as_mut() else {
@@ -318,6 +406,9 @@ impl Workspace {
             },
             Some(false) => self.import.choice = None,
             None => {}
+        }
+        if self.import.choice.is_none() {
+            ctx.request_repaint();
         }
     }
 }

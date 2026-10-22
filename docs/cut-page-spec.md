@@ -46,6 +46,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 - **Import** (p. 654):
   - Ctrl+I, the Import Media button, or right-click > Import Media opens a file dialog with multi-select.
   - Import Media Folder, the button beside Import Media, opens a folder dialog and brings the folder in as a bin inside the open bin, with a bin for each folder in it, and opens that bin (pp. 654, 658; D53). Resolve Studio 21.1.1's Cut page has no File-menu or right-click item for it, and Keyboard Customization lists no command by that name; vidcut adds both items (deviation X25).
+  - Clips dragged from the file system go into the Media Pool, or a bin in the Bin list (p. 364); for the Cut page the manual says macOS only (p. 372). Folders dragged into the Bin list come in as bins (p. 365). vidcut takes files and folders dropped anywhere on its window into the open bin, the files as Import Media brings them in and each folder as Import Media Folder (deviation X66).
   - In a project created without a format, the first video sets it without asking (D37).
 - **Stills and image sequences** (pp. 114, 366, 1194): an image file, or a GIF or WebP of one frame, comes in as a still (D38); numbered image files, as one clip (D39).
 - **Remove** (p. 654): Delete or Backspace, after a confirmation. Only the pool entry goes; files on disk stay.
