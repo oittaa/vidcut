@@ -1403,7 +1403,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - **Dynamic Zoom:** Off or On, Start Zoom, Start X, Start Y, End Zoom, End X, End Y, the Ease, Show Boxes and Swap.
     - A value typed while Dynamic Zoom is off turns it on.
     - Show Boxes shows the start box and the end box in the viewer, as Alt+T does. On also shows them.
-    - While the boxes show, the viewer draws the whole picture. The boxes stay in place on it, also while the clip plays (D75).
+    - The viewer shows the clip with its Dynamic Zoom, also while the boxes show.
+    - The boxes stay in place. They show where the picture is at the start and at the end (D75).
     - If the playhead is not on a selected clip, Show Boxes and On move it to the first frame of the first selected clip.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - **Units:**
@@ -1412,8 +1413,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Zoom is in percent, as the viewer shows it while the user zooms.
     - Rotation is in degrees, counterclockwise.
     - Crop is in pixels of the picture as it is fitted into the frame, before the zoom, as in Resolve.
-    - The zoom of a Dynamic Zoom box is in percent. A box of half the picture is 200%. Below 100%, the box is larger than the picture.
-    - The X and Y of a box are pixels of the fitted picture from its middle, with Y up.
+    - The zoom of a Dynamic Zoom box is in percent. At 200%, the picture shows at twice its size. At 50%, it shows at half its size.
+    - The X and Y of a box are the middle of the part of the picture that shows.
+    - They are in pixels of the fitted picture from its middle, with Y up.
+    - Thus a larger X moves the picture to the left.
   - A drag on a field changes its value. A click on a field lets the user type a value.
   - The picture follows a drag in the viewer. One change follows on release.
   - A typed value is one change. Each change is one undo step.

@@ -119,6 +119,8 @@ struct Shown {
     middle: [f64; 2],
     origin: Pos2,
     scale: Vec2,
+    plain: Level,
+    ends: [Level; 2],
 }
 
 impl Shown {
@@ -158,25 +160,49 @@ impl Shown {
         self.picture.dynamic_zoom.unwrap_or_default()
     }
 
-    fn box_point(&self, at: [f64; 2]) -> Pos2 {
-        self.screen(flipped(&self.picture, at))
+    fn on(&self, l: &Level, uv: [f64; 2]) -> Pos2 {
+        let [x, y] = l.forward(uv);
+        self.origin + vec2(x as f32 * self.scale.x, y as f32 * self.scale.y)
     }
 
-    fn box_corners(&self, b: ZoomBox) -> [Pos2; 4] {
-        let ([x, y], r) = (b.center, b.size / 2.0);
-        [
-            [x - r, y - r],
-            [x + r, y - r],
-            [x + r, y + r],
-            [x - r, y + r],
-        ]
-        .map(|q| self.box_point(q))
+    fn back(&self, l: &Level, p: Pos2) -> [f64; 2] {
+        let x = f64::from((p.x - self.origin.x) / self.scale.x);
+        let y = f64::from((p.y - self.origin.y) / self.scale.y);
+        let [a, b, e, c, d, f] = l.back;
+        [a * x + b * y + e, c * x + d * y + f]
     }
 
-    fn box_holds(&self, b: ZoomBox, p: Pos2) -> bool {
-        let [x, y] = flipped(&self.picture, self.uv(p));
-        let r = b.size / 2.0;
-        (x - b.center[0]).abs() <= r && (y - b.center[1]).abs() <= r
+    fn end(&self, e: Boxed) -> &Level {
+        match e {
+            Boxed::Start => &self.ends[0],
+            Boxed::End => &self.ends[1],
+        }
+    }
+
+    fn end_corners(&self, e: Boxed) -> [Pos2; 4] {
+        let l = self.end(e);
+        let [u0, v0, u1, v1] = l.shown;
+        [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|uv| self.on(l, uv))
+    }
+
+    fn end_middle(&self, e: Boxed) -> Pos2 {
+        let l = self.end(e);
+        let [u0, v0, u1, v1] = l.shown;
+        self.on(l, [(u0 + u1) / 2.0, (v0 + v1) / 2.0])
+    }
+
+    fn end_holds(&self, e: Boxed, p: Pos2) -> bool {
+        let l = self.end(e);
+        let [u, v] = self.back(l, p);
+        let [u0, v0, u1, v1] = l.shown;
+        u >= u0 && u <= u1 && v >= v0 && v <= v1
+    }
+
+    fn plain_span(&self) -> [f64; 2] {
+        let l = &self.plain;
+        let across = self.on(l, [1.0, 0.5]) - self.on(l, [0.0, 0.5]);
+        let down = self.on(l, [0.5, 1.0]) - self.on(l, [0.5, 0.0]);
+        [f64::from(across.length()), f64::from(down.length())]
     }
 
     fn flips(&self) -> [f64; 2] {
@@ -185,12 +211,6 @@ impl Shown {
             sign(self.picture.flip_horizontal),
             sign(self.picture.flip_vertical),
         ]
-    }
-
-    fn span(&self) -> [f64; 2] {
-        let across = self.screen([1.0, 0.5]) - self.screen([0.0, 0.5]);
-        let down = self.screen([0.5, 1.0]) - self.screen([0.5, 0.0]);
-        [f64::from(across.length()), f64::from(down.length())]
     }
 
     fn turn_at(&self) -> Pos2 {
@@ -250,13 +270,13 @@ impl Shown {
                 let ends = [Boxed::Start, Boxed::End];
                 if let Some(e) = ends
                     .into_iter()
-                    .find(|e| self.box_corners(e.of(&z)).into_iter().any(near))
+                    .find(|e| self.end_corners(*e).into_iter().any(near))
                 {
                     return Some(Hold::ZoomSize(e));
                 }
                 ends.into_iter()
-                    .filter(|e| self.box_holds(e.of(&z), p))
-                    .min_by(|a, b| a.of(&z).size.total_cmp(&b.of(&z).size))
+                    .filter(|e| self.end_holds(*e, p))
+                    .max_by(|a, b| a.of(&z).size.total_cmp(&b.of(&z).size))
                     .map(Hold::ZoomMove)
             }
         }
@@ -282,7 +302,7 @@ impl Shown {
             Hold::Move | Hold::ZoomMove(_) => CursorIcon::Move,
             Hold::Turn => CursorIcon::PointingHand,
             Hold::Corner => diagonal(p - self.pivot()),
-            Hold::ZoomSize(e) => diagonal(p - self.box_point(e.of(&self.zoom()).center)),
+            Hold::ZoomSize(e) => diagonal(p - self.end_middle(e)),
             Hold::Stretch(s) | Hold::Crop(s) => along(s),
         }
     }
@@ -308,33 +328,38 @@ fn content(p: &Project, c: &Clip, (w, h): (f64, f64)) -> [f64; 4] {
     }
 }
 
-fn shape_of(
-    p: &Project,
-    c: &Clip,
-    shown: Picture,
-    picture: Rect,
-    (at, tool): (i64, PictureTool),
-) -> Option<Shown> {
+fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Option<Shown> {
     let (w, h) = (f64::from(p.settings.width), f64::from(p.settings.height));
-    let drawn = match tool {
-        PictureTool::DynamicZoom => Picture {
-            dynamic_zoom: None,
-            ..shown.clone()
-        },
-        _ => shown.clone(),
-    };
     let run = Run {
         at: at - c.start,
         of: c.duration,
         held: false,
     };
-    let placed = [Placed::of(c, drawn, run)];
+    let fit = content(p, c, (w, h));
+    let level_of = |x: Picture| {
+        Placing::new(&[Placed::of(c, x, run)], (w, h), fit)
+            .levels
+            .pop()
+    };
+    let placed = [Placed::of(c, shown.clone(), run)];
     let middle = placed[0]
         .zoomed()
         .map_or(Picture::MIDDLE, |b| flipped(&shown, b.center));
-    let level = Placing::new(&placed, (w, h), content(p, c, (w, h)))
-        .levels
-        .pop()?;
+    let level = Placing::new(&placed, (w, h), fit).levels.pop()?;
+    let plain = level_of(Picture {
+        dynamic_zoom: None,
+        ..shown.clone()
+    })?;
+    let z = shown.dynamic_zoom.unwrap_or_default();
+    let fixed = |b: ZoomBox| Picture {
+        dynamic_zoom: Some(DynamicZoom {
+            start: b,
+            end: b,
+            ..z
+        }),
+        ..shown.clone()
+    };
+    let ends = [level_of(fixed(z.start))?, level_of(fixed(z.end))?];
     Some(Shown {
         clip: c.id.clone(),
         picture: shown,
@@ -342,6 +367,8 @@ fn shape_of(
         middle,
         origin: picture.min,
         scale: vec2(picture.width() / w as f32, picture.height() / h as f32),
+        plain,
+        ends,
     })
 }
 
@@ -449,38 +476,12 @@ impl Workspace {
         }
     }
 
-    fn previewed(&self, mut wanted: Vec<(String, Picture)>) -> Vec<(String, Picture)> {
-        if self.timeline.picture_grab.tool != Some(PictureTool::DynamicZoom) {
-            return wanted;
-        }
-        let Some(p) = self.project_shared() else {
-            return wanted;
-        };
-        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
-        let Some(c) = target(&p, &self.snap.selection.clips, at) else {
-            return wanted;
-        };
-        match wanted.iter_mut().find(|(id, _)| *id == c.id) {
-            Some((_, picture)) => picture.dynamic_zoom = None,
-            None => {
-                if let Some(picture) = c.picture.as_ref().filter(|x| x.dynamic_zoom.is_some()) {
-                    let whole = Picture {
-                        dynamic_zoom: None,
-                        ..picture.clone()
-                    };
-                    wanted.push((c.id.clone(), whole));
-                }
-            }
-        }
-        wanted
-    }
-
     pub(super) fn sync_picture_preview(&mut self) {
         if self.grab_wanted().is_none() {
             self.timeline.picture_grab.landing = None;
         }
         self.settle_inspector();
-        let shown = self.previewed(self.picture_wanted());
+        let shown = self.picture_wanted();
         let g = &mut self.timeline.picture_grab;
         if shown != g.sent {
             self.live.preview_pictures(shown.clone());
@@ -693,7 +694,7 @@ impl Workspace {
         let p = self.project_shared()?;
         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
         let c = target(&p, &self.snap.selection.clips, at)?;
-        let tool = self.timeline.picture_grab.tool?;
+        self.timeline.picture_grab.tool?;
         let shown = match self
             .picture_wanted()
             .into_iter()
@@ -702,7 +703,7 @@ impl Workspace {
             Some((_, x)) => x,
             None => c.picture.clone().unwrap_or_default(),
         };
-        shape_of(&p, c, shown, picture, (at, tool))
+        shape_of(&p, c, shown, picture, at)
     }
 
     fn picture_moved(
@@ -800,11 +801,11 @@ impl Workspace {
             Hold::ZoomMove(e) => {
                 let mut z = p0.dynamic_zoom.unwrap_or_default();
                 let b = e.of(&z);
-                let ([u0, v0], [u1, v1]) = (s.uv(held.from), s.uv(to));
+                let ([u0, v0], [u1, v1]) = (s.back(&s.plain, held.from), s.back(&s.plain, to));
                 let [sx, sy] = s.flips();
-                let (mut dx, mut dy) = (sx * (u1 - u0), sy * (v1 - v0));
+                let (mut dx, mut dy) = (-sx * (u1 - u0) * b.size, -sy * (v1 - v0) * b.size);
                 if shift {
-                    let [across, down] = s.span();
+                    let [across, down] = s.plain_span();
                     if (dx * across).abs() >= (dy * down).abs() {
                         dy = 0.0;
                     } else {
@@ -819,15 +820,16 @@ impl Workspace {
             Hold::ZoomSize(e) => {
                 let mut z = p0.dynamic_zoom.unwrap_or_default();
                 let b = e.of(&z);
-                let middle = s.box_point(b.center);
+                let middle = s.end_middle(e);
                 let (d0, d1) = (held.from.distance(middle), to.distance(middle));
                 if d0 > 1.0 {
-                    let size = (b.size * f64::from(d1 / d0)).clamp(ZOOM.0, ZOOM.1);
+                    let size = (b.size * f64::from(d0 / d1.max(0.01))).clamp(ZOOM.0, ZOOM.1);
+                    let keep = |c: f64| rounded(0.5 - (0.5 - c) / b.size * size, 4);
                     e.set(
                         &mut z,
                         ZoomBox {
+                            center: [keep(b.center[0]), keep(b.center[1])],
                             size: rounded(size, 4),
-                            ..b
                         },
                     );
                     next.now.dynamic_zoom = Some(z);
@@ -898,7 +900,7 @@ impl Workspace {
         ) && resp.dragged()
             && let Some(s0) = p
                 .clip(&held.clip)
-                .and_then(|c| shape_of(&p, c, held.start.clone(), picture, (at, tool)))
+                .and_then(|c| shape_of(&p, c, held.start.clone(), picture, at))
         {
             self.timeline.picture_grab.held =
                 Some(self.picture_moved(&held, &s0, to, picture, mods));
@@ -1007,16 +1009,11 @@ impl Workspace {
 }
 
 fn paint_boxes(painter: &egui::Painter, s: &Shown) {
-    let z = s.zoom();
     let on = s.picture.dynamic_zoom.is_some();
     let path = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 160));
-    painter.line_segment(
-        [s.box_point(z.start.center), s.box_point(z.end.center)],
-        path,
-    );
+    painter.line_segment([s.end_middle(Boxed::Start), s.end_middle(Boxed::End)], path);
     for (e, color) in [(Boxed::End, END), (Boxed::Start, START)] {
-        let b = e.of(&z);
-        let corners = s.box_corners(b);
+        let corners = s.end_corners(e);
         let line = Stroke::new(1.5, color);
         for i in 0..4 {
             let edge = [corners[i], corners[(i + 1) % 4]];
@@ -1033,7 +1030,7 @@ fn paint_boxes(painter: &egui::Painter, s: &Shown) {
                 color,
             );
         }
-        painter.circle_filled(s.box_point(b.center), GRAB * 0.5, color);
+        painter.circle_filled(s.end_middle(e), GRAB * 0.5, color);
     }
 }
 

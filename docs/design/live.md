@@ -344,7 +344,8 @@ The bar and the Jobs button:
   - A run of wheel notches over the picture (`Wheeled`) also ends in one `picture.set`. `Workspace::settle_picture_wheel` sends it when the wheel is still.
   - The picture that is dragged or wheeled goes to the core with `Handle::preview_pictures`.
   - After the drag or the wheel, the picture that was sent goes to the core until the project has it (`tools::landing`).
-  - While the Dynamic Zoom boxes show, the picture goes to the core without its Dynamic Zoom (`Workspace::previewed`). Thus both boxes show on the whole picture.
+  - The viewer draws a clip with its Dynamic Zoom, also while its boxes show.
+  - The boxes are the picture placed with the start box and with the end box (`Shown::ends`). Thus they stay in place while the clip plays.
 - **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`)
   - It is a tab of the left panel, as the Titles tab is (`LeftTab`). `gui.show` and `gui.close` take `inspector`.
   - It shows the selected clips that can have a picture. It reads their pictures from the snapshot in each frame.

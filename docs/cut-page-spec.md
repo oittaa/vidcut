@@ -1689,9 +1689,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - **Turned on**, it is a pull out from 125%, with Linear. The start box has the size 0.8 and the end box the size 1, both in the middle.
     - **How it plays:** a clip with a Dynamic Zoom is placed over the tracks below it. The viewer and the export draw the same frame.
     - **In the viewer**, Alt+T shows the boxes on the clip that T uses (X65).
-    - The viewer then draws that clip without its Dynamic Zoom, so that both boxes show.
-    - The boxes stay in place on the picture, also while the clip plays. They mark where the zoom starts and where it ends.
-    - The green box is the start, the red box is the end, and a line joins their centers.
+    - The viewer still draws that clip with its Dynamic Zoom, as the output shows it.
+    - The green box shows where the picture is at the start of the clip. The red box shows where it is at the end.
+    - At a zoom of 71%, the box is 71% of the area of the clip.
+    - The boxes stay in place while the clip plays. The picture moves from the green box to the red box.
+    - The manual says that the green box shows the starting size and position of the transform, and the red box the ending ones (p. 768).
+    - A line joins the centers of the two boxes.
     - A drag inside a box moves it, and Shift keeps the move on one axis.
     - A drag at a corner resizes the box about its center. One `picture.set` follows on release.
     - Dashed boxes show a clip without a Dynamic Zoom, and a drag turns it on.
