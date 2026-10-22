@@ -1406,7 +1406,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The viewer shows it until the playhead moves or the clip plays. Then the viewer shows the zoom of the current frame.
     - Show Boxes shows the start box and the end box of the selected clip in the viewer. On also shows them.
     - No other change in the Inspector shows or hides the boxes.
-    - While the boxes show, the viewer darkens the part of the picture that the output does not show.
+    - While the boxes show, the viewer darkens the part of the picture outside the box of the current frame.
+    - While a Start or End preview lasts, the dark part is outside the start or the end box instead.
     - Show Boxes, On, Swap and the Start and End values can move the playhead. Off, the Ease and Reset do not move it.
     - They move it when it is not on a selected clip. It goes to the first frame of the first selected clip.
     - Alt+T shows the same boxes. It selects the clip under the playhead instead.

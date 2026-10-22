@@ -1691,6 +1691,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - **In the viewer**, Alt+T shows the boxes on the clip that T uses (X65).
     - The viewer then draws that clip without its Dynamic Zoom, so that both boxes show.
     - The viewer darkens the part of the picture outside the box of the current frame. That part does not show in the output.
+    - While the Inspector previews the start or the end, the dark part is outside that box instead (X70).
     - The green box is the start, the red box is the end, and a line joins their centers.
     - A drag inside a box moves it, and Shift keeps the move on one axis.
     - A drag at a corner resizes the box about its center. One `picture.set` follows on release.
