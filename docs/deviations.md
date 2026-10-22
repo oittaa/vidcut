@@ -999,7 +999,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Other clips have Transform, Crop and Dynamic Zoom ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). A title does not.
   - The place, zoom, rotation and opacity of a title do what Transform and the opacity of Composite would do.
   - A title has no speed. The speed of a scroll comes from the length of its clip.
-  - Other clips have Transform and Crop ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom is [to do](todo/clip-transform.md).
   - Markup in the text is what a script writes and reads.
   - The buttons give the window what the rich-text controls of an Inspector give.
 
