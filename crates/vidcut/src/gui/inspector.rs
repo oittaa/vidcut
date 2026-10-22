@@ -11,10 +11,11 @@ use vidcut_core::ops::picture::has_picture;
 use vidcut_core::place::upright_fit;
 
 use super::dialog;
-use super::placing::{changed, ease_label};
+use super::placing::{changed, ease_label, target};
 use super::theme;
 use super::timeline::tools::landing;
 use super::workspace::{Workspace, dim};
+use crate::live::PlayerId;
 
 const REACH: f64 = 100.0;
 const ZOOM: (f64, f64) = (0.01, 100.0);
@@ -272,6 +273,7 @@ enum Act {
     Link(bool),
     Flips([Option<bool>; 2]),
     Zooming(bool),
+    Boxes,
     Ease(Ease),
     Swap,
     Clear(PictureTool),
@@ -437,7 +439,7 @@ fn crop(ui: &mut egui::Ui, i: &Inspector, chosen: &[Chosen], acts: &mut Vec<Act>
     });
 }
 
-fn dynamic_zoom(ui: &mut egui::Ui, chosen: &[Chosen], acts: &mut Vec<Act>) {
+fn dynamic_zoom(ui: &mut egui::Ui, chosen: &[Chosen], boxes: bool, acts: &mut Vec<Act>) {
     let zooms: Vec<DynamicZoom> = chosen.iter().filter_map(|c| c.shown.dynamic_zoom).collect();
     let on = !zooms.is_empty();
     let first = chosen[0].shown.dynamic_zoom;
@@ -483,9 +485,15 @@ fn dynamic_zoom(ui: &mut egui::Ui, chosen: &[Chosen], acts: &mut Vec<Act>) {
         }
         ui.end_row();
         label(ui, "", false);
-        if ui.add_enabled(on, egui::Button::new("Swap")).clicked() {
-            acts.push(Act::Swap);
-        }
+        ui.horizontal(|ui| {
+            let show = egui::Button::selectable(boxes, "Show Boxes");
+            if ui.add_enabled(first.is_some() || boxes, show).clicked() {
+                acts.push(Act::Boxes);
+            }
+            if ui.add_enabled(on, egui::Button::new("Swap")).clicked() {
+                acts.push(Act::Swap);
+            }
+        });
         ui.end_row();
     });
 }
@@ -604,6 +612,20 @@ impl Workspace {
         });
     }
 
+    fn show_boxes(&mut self, chosen: &[Chosen]) {
+        self.timeline.picture_grab.tool = Some(PictureTool::DynamicZoom);
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let at = self.snap.player(PlayerId::Timeline).position;
+        let ids: Vec<String> = chosen.iter().map(|c| c.id.clone()).collect();
+        if target(&p, &ids, at).is_none()
+            && let Some(c) = chosen.first().and_then(|c| p.clip(&c.id))
+        {
+            self.seek(PlayerId::Timeline, c.start, false);
+        }
+    }
+
     fn inspect(&mut self, act: Act, chosen: &[Chosen]) {
         let held_on = |i: &Inspector, f: Field| i.held.as_ref().is_some_and(|h| h.field == f);
         match act {
@@ -679,17 +701,29 @@ impl Workspace {
                     ..c.shown.clone()
                 })
             }),
-            Act::Zooming(on) => self.send_pictures(chosen, |c| {
-                let z = c.shown.dynamic_zoom;
-                Some(Picture {
-                    dynamic_zoom: if on {
-                        z.or(Some(DynamicZoom::default()))
-                    } else {
-                        None
-                    },
-                    ..c.shown.clone()
-                })
-            }),
+            Act::Zooming(on) => {
+                self.send_pictures(chosen, |c| {
+                    let z = c.shown.dynamic_zoom;
+                    Some(Picture {
+                        dynamic_zoom: if on {
+                            z.or(Some(DynamicZoom::default()))
+                        } else {
+                            None
+                        },
+                        ..c.shown.clone()
+                    })
+                });
+                if on {
+                    self.show_boxes(chosen);
+                }
+            }
+            Act::Boxes => {
+                if self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom) {
+                    self.timeline.picture_grab.tool = None;
+                } else {
+                    self.show_boxes(chosen);
+                }
+            }
             Act::Ease(ease) => self.send_pictures(chosen, |c| {
                 let z = c.shown.dynamic_zoom?;
                 Some(Picture {
@@ -726,13 +760,14 @@ impl Workspace {
             }
         });
         let mut acts = Vec::new();
+        let boxes = self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom);
         let i = &self.inspector;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 transform(ui, i, &chosen, &mut acts);
                 crop(ui, i, &chosen, &mut acts);
-                dynamic_zoom(ui, &chosen, &mut acts);
+                dynamic_zoom(ui, &chosen, boxes, &mut acts);
             });
         for act in acts {
             self.inspect(act, &chosen);
