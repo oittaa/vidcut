@@ -13,9 +13,10 @@ vidcut is a video cutting tool in Rust. Its model is the Cut page of DaVinci Res
    - Nothing in `crates/` names Resolve or the pages of its manual.
    - Nothing that vidcut shows or prints names Resolve: GUI text, `--help`, the schema, MCP text, errors.
    - The only exception is file-format data that other editors need, for example the OTIO metadata keys that they read.
-   - `crates/` has no comments, with two exceptions: the schema's doc comments and one-line `// SAFETY:` comments.
-   - The schema's doc comments are shipped text: `vidcut schema`, `--help` and MCP show them.
-   - A public unsafe fn also has the `# Safety` section that clippy requires, one line under its heading.
+   - `crates/` has no comments, with three exceptions:
+     - The schema's doc comments. They are shipped text: `vidcut schema`, `--help` and MCP show them.
+     - One-line `// SAFETY:` comments.
+     - The `# Safety` section that clippy requires on a public unsafe fn, one line under its heading.
    - `scripts/check.sh` enforces these rules.
    - The reasons for how the code is built go in the design docs in `docs/design/`.
 3. **Everything is scriptable.** The CLI, IPC and MCP can do every GUI action.
@@ -28,7 +29,7 @@ vidcut is a video cutting tool in Rust. Its model is the Cut page of DaVinci Res
 6. **License:** MIT.
 7. **FFmpeg:** from 8.0 (the latest Ubuntu LTS) to the newest release. Do not write code for FFmpeg before 8.0.
 8. **A unit test is a unit test.** It has one behavior, a fixed input, and the output it must give, written out. Example: `assert_eq!(sha("test text"), "abcd")`.
-   - It does not compute the expected output again with the code under test.
+   - It does not implement the code a second time to compute the expected output.
    - It does not test many things at once, and it is not 100 lines or more.
    - Check by hand what needs more than that. No tests that open a window, play real media or depend on timing.
 9. **The GPU first, where the user lets it work.** With `gpu.acceleration` and `gpu.decoding` on, decoding and encoding run on the GPU in every path where the GPU gives correct results, H.264 too.
@@ -82,7 +83,7 @@ These gates are mandatory.
 
 Each fact is in one doc. The other docs link to it.
 
-The design docs name the things that a reader searches for: types, modules, request methods and thread names. They do not give numbers that change often. `scripts/check-docs.sh` checks that each name in backticks in them is in `crates/`.
+The design docs name the things that a reader searches for: types, modules, request methods and thread names. They do not give tunable numbers. `scripts/check-docs.sh` checks that each name in backticks in them is in `crates/`.
 
 - [README.md](README.md): what vidcut does, the requirements, the build.
 - [docs/cli.md](docs/cli.md): the CLI guide (times, JSON output, exit codes, scripts, running GUIs). `vidcut --help` gives each command and flag.
