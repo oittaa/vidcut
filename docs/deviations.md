@@ -570,7 +570,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A click goes to the step, as in Resolve.
   - The list scrolls only when the current step is out of view, and only as far as it must.
   - Copy as Command in the right-click menu of a step copies its request as a `vidcut rpc` command.
-  - A step saved without its request has no Copy as Command.
+  - A step that another program made by writing the project file has no request, and no Copy as Command.
   - A label that does not fit ends in "…". The pointer on it shows the full label.
   - Edit > History lists the newest twenty steps, as in Resolve.
   - When the current step is older than those, Edit > History lists the twenty steps around the current step.

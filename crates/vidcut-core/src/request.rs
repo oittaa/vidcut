@@ -1832,7 +1832,7 @@ pub enum Request {
     /// clips and frames it changed (`clips`, `spans`), the commands of an
     /// `apply` (`parts`), when the GUI that made it opened the project
     /// (`opened`), its `id`, the `request` that made it (its `method` and
-    /// `params`; older steps have none) and its `kind` (that method), and
+    /// `params`; none for a `file` step) and its `kind` (that method), and
     /// whether it is `done` (redo steps are not). `at` is the step the
     /// project is at. `groups` are runs of steps one client made in a row
     /// (an agent's edits). `branches` are steps a new change replaced after
