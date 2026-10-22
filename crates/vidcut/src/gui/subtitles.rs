@@ -11,7 +11,10 @@ use vidcut_core::model::{
 use super::dialog;
 use super::export::{Ask, Picked};
 use super::folders::Kind;
+use super::history;
 use super::looks::{Parts, Picker, TextFields};
+use super::theme;
+use super::timeline::cues::one_line;
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
 use crate::live::{Answer, PlayerId};
@@ -151,6 +154,49 @@ fn beside(p: &Project, cue: &str, by: isize) -> Option<(String, i64)> {
     let (t, c) = p.find_cue(cue)?;
     let near = p.subtitles[t].cues.get(c.checked_add_signed(by)?)?;
     Some((near.id.clone(), near.start))
+}
+
+const LIST_ROWS: f32 = 8.0;
+
+fn cue_row(
+    ui: &mut egui::Ui,
+    height: f32,
+    (tc, column): (&str, f32),
+    text: &str,
+    on: bool,
+    font: &egui::FontId,
+) -> bool {
+    let (rect, r) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::click(),
+    );
+    let line = one_line(text);
+    r.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::Button, true, on, format!("{tc} {line}"))
+    });
+    let c = theme::colors();
+    let (ink, faint) = if on {
+        ui.painter().rect_filled(rect, 3.0, c.selection);
+        (c.selected_text, c.selected_text)
+    } else {
+        if r.hovered() {
+            ui.painter()
+                .rect_filled(rect, 3.0, c.text.gamma_multiply(0.07));
+        }
+        (c.text, c.text_dim)
+    };
+    let mid = rect.center().y;
+    let x = rect.left() + 6.0;
+    let g = ui
+        .painter()
+        .layout_no_wrap(tc.to_string(), font.clone(), faint);
+    ui.painter()
+        .galley(egui::pos2(x, mid - g.size().y / 2.0), g, faint);
+    let x = x + column + 10.0;
+    let g = history::one_line(ui, &line, rect.right() - 6.0 - x, font.clone(), ink);
+    ui.painter()
+        .galley(egui::pos2(x, mid - g.size().y / 2.0), g, ink);
+    r.clicked()
 }
 
 #[derive(Debug)]
@@ -599,6 +645,7 @@ impl Workspace {
 
     pub(super) fn cue_form(&mut self, ui: &mut egui::Ui) -> bool {
         let Some(mut d) = self.timeline.cue_dialog.take() else {
+            self.timeline.cue_listed = None;
             return false;
         };
         let Some(p) = self.project_shared() else {
@@ -608,9 +655,8 @@ impl Workspace {
         if waiting {
             ui.ctx().request_repaint();
         }
-        let found = p
-            .find_cue(&d.cue)
-            .map(|(t, c)| (&p.subtitles[t], &p.subtitles[t].cues[c]));
+        let at = p.find_cue(&d.cue);
+        let found = at.map(|(t, c)| (&p.subtitles[t], &p.subtitles[t].cues[c]));
         let shown = found.is_some_and(|(_, cue)| settled(&d.cue, &p.speakers, cue) == d.state());
         match found {
             Some((_, cue)) if cue_copies(d.dirty, d.loaded, waiting || shown) => {
@@ -781,6 +827,13 @@ impl Workspace {
             d.pending.sent.extend(sent);
             d.dirty = false;
         }
+        if let Some(at) = at {
+            let follow = self.timeline.cue_listed.as_deref() != Some(d.cue.as_str());
+            if let Some(to) = self.cue_list(ui, &p, at, &d.text, follow) {
+                step = Some(to);
+            }
+            self.timeline.cue_listed = Some(d.cue.clone());
+        }
         ui.separator();
         if !done {
             self.timeline.cue_dialog = Some(d);
@@ -795,6 +848,65 @@ impl Workspace {
         self.inspect_cue(id, false);
         self.send("selection.set", json!({ "cues": [id], "clips": [] }));
         self.seek(PlayerId::Timeline, start, false);
+    }
+
+    fn cue_list(
+        &self,
+        ui: &mut egui::Ui,
+        p: &Project,
+        (track, open): (usize, usize),
+        typed: &str,
+        follow: bool,
+    ) -> Option<(String, i64)> {
+        let cues = &p.subtitles[track].cues;
+        let landed: Vec<(&str, &str)> = self
+            .timeline
+            .cue_landings
+            .iter()
+            .map(Landing::cue_text)
+            .collect();
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let row = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
+        let gap = ui.spacing().item_spacing.y;
+        let stride = row + gap;
+        let faint = theme::colors().text_dim;
+        let column = cues.last().map_or(0.0, |c| {
+            ui.painter()
+                .layout_no_wrap(self.tc(c.start), font.clone(), faint)
+                .size()
+                .x
+        });
+        let mut picked = None;
+        ui.add_space(4.0);
+        egui::ScrollArea::vertical()
+            .id_salt("cue-list")
+            .auto_shrink([false, false])
+            .max_height(LIST_ROWS * stride - gap)
+            .show_rows(ui, row, cues.len(), |ui, range| {
+                let top = ui.max_rect().top() - range.start as f32 * stride;
+                for k in range {
+                    let c = &cues[k];
+                    let text = if k == open {
+                        typed
+                    } else {
+                        landed
+                            .iter()
+                            .find(|(id, _)| *id == c.id)
+                            .map_or(c.text.as_str(), |(_, t)| *t)
+                    };
+                    let tc = self.tc(c.start);
+                    if cue_row(ui, row, (&tc, column), text, k == open, &font) {
+                        picked = Some((c.id.clone(), c.start));
+                    }
+                }
+                let y = top + open as f32 * stride;
+                let clip = ui.clip_rect();
+                if follow && (y < clip.top() || y + row > clip.bottom()) {
+                    let rect = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), y..=y + row);
+                    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                }
+            });
+        picked
     }
 
     pub(super) fn track_form(&mut self, ui: &mut egui::Ui) -> bool {

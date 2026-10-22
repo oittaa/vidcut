@@ -473,9 +473,11 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - One subtitle track shows at a time. When one shows, the others are hidden (p. 1228).
   - Minimize Subtitle Track (Timeline Options, p. 645) makes them shorter.
   - Details: D56; deviation X44.
-- **Cues** (pp. 1231–1233, 1237):
+- **Cues** (pp. 1231–1233, 1236–1237):
   - Add Subtitle, in the right-click menu of a subtitle track, puts a cue at the playhead.
   - You type its text in the Inspector. The text shows on the cue as you type it.
+  - The Captions list, at the bottom of the Inspector, shows every cue of the track (pp. 1231, 1233).
+  - A click on a cue in the list loads it into the Inspector to edit (p. 1236).
   - Prev and Next in the Inspector move to the cue before or after on the track (pp. 1231, 1233).
   - Cues move, trim, split and delete like clips.
   - Details: D56, D57; deviations X43, X44.
@@ -529,7 +531,6 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Fusion templates that style a subtitle track (p. 1242)
   - find and replace (p. 1236)
   - QC thresholds (pp. 1228–1229)
-  - the Captions list (p. 1231)
   - hiding subtitle tracks from the timeline (p. 1232)
   - The rest: [todo/subtitles.md](todo/subtitles.md).
 
