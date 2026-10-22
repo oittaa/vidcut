@@ -14,8 +14,9 @@ use super::folders::Kind;
 use super::looks::{Parts, Picker, TextFields};
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
+use crate::live::Answer;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CueDialog {
     pub cue: String,
     pub text: String,
@@ -25,7 +26,9 @@ pub struct CueDialog {
     person_name: String,
     loaded: bool,
     focus: bool,
-    from: Option<(Typing, String)>,
+    dirty: bool,
+    sent: Vec<Answer>,
+    landed: u64,
 }
 
 impl CueDialog {
@@ -70,6 +73,28 @@ fn person_name(speakers: &Speakers, person: Option<&str>) -> String {
     person
         .and_then(|k| speakers.names.get(k).cloned())
         .unwrap_or_default()
+}
+
+fn settled(id: &str, speakers: &Speakers, c: &Cue) -> (Typing, String) {
+    let color = c.color.clone().unwrap_or_default();
+    (
+        Typing {
+            cue: id.to_string(),
+            text: c.text.clone(),
+            place: c.place,
+            speaker: c.speaker.clone(),
+            color: field(&color),
+        },
+        person_name(speakers, c.speaker.as_deref()),
+    )
+}
+
+fn cue_copies(dirty: bool, loaded: bool, current: bool) -> bool {
+    !loaded || (!dirty && !current)
+}
+
+fn cue_saves(dirty: bool, commit: bool) -> bool {
+    dirty && commit
 }
 
 fn people(p: &Project) -> Vec<(String, String)> {
@@ -312,20 +337,25 @@ impl Workspace {
             .then_some(params)
     }
 
-    fn save_cue(&mut self, d: &CueDialog) {
+    fn save_cue(&mut self, d: &CueDialog) -> Vec<Answer> {
+        let mut sent = Vec::new();
         if let Some(params) = self.typed(d) {
-            self.send("subtitles.set", params);
+            sent.push(self.live.request_answered("subtitles.set", params));
         }
         let Some(person) = d.speaker.clone() else {
-            return;
+            return sent;
         };
         let stored = self
             .project()
             .map(|p| person_name(&p.speakers, Some(&person)));
         let name = d.person_name.trim();
         if stored.is_some_and(|s| s != name) {
-            self.send("speakers.set", json!({ "person": person, "name": name }));
+            sent.push(
+                self.live
+                    .request_answered("speakers.set", json!({ "person": person, "name": name })),
+            );
         }
+        sent
     }
 
     pub(crate) fn open_cue(&mut self, id: &str) {
@@ -335,7 +365,7 @@ impl Workspace {
 
     pub(super) fn close_cue_form(&mut self) {
         if let Some(d) = self.timeline.cue_dialog.take()
-            && d.from.as_ref() != Some(&d.state())
+            && d.dirty
         {
             self.save_cue(&d);
         }
@@ -389,7 +419,9 @@ impl Workspace {
             person_name: String::new(),
             loaded: false,
             focus,
-            from: None,
+            dirty: false,
+            sent: Vec::new(),
+            landed: 0,
         };
         if let Some(p) = self.project()
             && let Some(c) = p.cue(id)
@@ -511,13 +543,26 @@ impl Workspace {
         let Some(p) = self.project_shared() else {
             return false;
         };
+        d.sent.retain(|a| match a.take() {
+            Some(Ok(r)) => {
+                d.landed = d.landed.max(r.rev);
+                false
+            }
+            Some(Err(_)) => false,
+            None => true,
+        });
+        let waiting = !d.sent.is_empty() || p.rev < d.landed;
+        if waiting {
+            ui.ctx().request_repaint();
+        }
         let found = p
             .find_cue(&d.cue)
             .map(|(t, c)| (&p.subtitles[t], &p.subtitles[t].cues[c]));
+        let shown = found.is_some_and(|(_, cue)| settled(&d.cue, &p.speakers, cue) == d.state());
         match found {
-            Some((_, cue)) if !d.loaded || d.from.as_ref() == Some(&d.state()) => {
+            Some((_, cue)) if cue_copies(d.dirty, d.loaded, waiting || shown) => {
                 d.load(&p.speakers, cue);
-                d.from = Some(d.state());
+                d.dirty = false;
             }
             None if d.loaded => return false,
             _ => {}
@@ -535,6 +580,7 @@ impl Workspace {
             ))),
             None => ui.label(dim("Adding…")),
         };
+        let before = d.state();
         let r = ui.add(
             egui::TextEdit::multiline(&mut d.text)
                 .desired_rows(3)
@@ -650,15 +696,23 @@ impl Workspace {
             if let Some(k) = d.speaker.clone().filter(|_| found.is_some()) {
                 let label = format!("Apply to All of {}'s", p.speakers.name(&k));
                 if ui.button(label).clicked() {
-                    self.save_cue(&d);
-                    self.send("subtitles.match_speaker", json!({ "cue": d.cue }));
+                    let sent = self.save_cue(&d);
+                    d.sent.extend(sent);
+                    d.sent.push(
+                        self.live
+                            .request_answered("subtitles.match_speaker", json!({ "cue": d.cue })),
+                    );
                     d.color.clear();
                 }
             }
         });
-        if !done && self.inspector_commits() && d.from.as_ref() != Some(&d.state()) {
-            self.save_cue(&d);
-            d.from = Some(d.state());
+        if d.state() != before {
+            d.dirty = true;
+        }
+        if !done && cue_saves(d.dirty, self.inspector_commits()) {
+            let sent = self.save_cue(&d);
+            d.sent.extend(sent);
+            d.dirty = false;
         }
         ui.separator();
         if !done {
@@ -968,5 +1022,33 @@ impl Workspace {
                 }
             },
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cue_copies;
+    use super::cue_saves;
+
+    #[test]
+    fn a_saved_subtitle_stays_while_the_project_is_still_the_old_text() {
+        assert!(!cue_copies(false, true, true));
+    }
+
+    #[test]
+    fn a_clean_subtitle_copies_the_project_when_it_changes() {
+        assert!(cue_copies(false, true, false));
+    }
+
+    #[test]
+    fn an_edit_in_progress_is_not_replaced_by_the_project() {
+        assert!(!cue_copies(true, true, false));
+    }
+
+    #[test]
+    fn an_edit_is_saved_only_when_the_form_commits() {
+        assert!(cue_saves(true, true));
+        assert!(!cue_saves(true, false));
+        assert!(!cue_saves(false, true));
     }
 }

@@ -92,7 +92,7 @@ The registry and the client:
 
 ## Live
 
-- `Handle::call` and `Handle::request` put a `Msg::Request` on the channel of the `vidcut-session` thread.
+- `Handle::call`, `Handle::request` and `Handle::request_answered` put a `Msg::Request` on the channel of the `vidcut-session` thread.
 - `Live::request` checks the expected project and `if_rev`.
 - `Live::dispatch` answers at once, or schedules the work.
 - Edits go through `Live::edit` to `OpenProject::apply`. It takes the same lock as the headless runs, and reads the file again if it changed. Then it applies the edit and saves before it answers.
