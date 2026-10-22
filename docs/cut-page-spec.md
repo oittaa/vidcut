@@ -1,10 +1,17 @@
 # Cut page behavioral spec
 
-vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This document describes that behavior in our own words, with page numbers of the *DaVinci Resolve 21.1 Reference Manual*: its Cut chapters (33–39, pp. 635–790) and, where marked, others. Printed page numbers equal PDF page numbers. Deviations are in [deviations.md](deviations.md); §12 settles points the manual leaves open.
+vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This document describes that behavior in our own words.
 
-**Reading the manual:** extract text with `pdftotext -f 635 -l 790 <manual>.pdf -`. The developer's copy is in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`). Don't copy its text into the repo.
+It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most pages are in its Cut chapters (33–39, pp. 635–790). Pages of other chapters are marked. The printed page numbers are equal to the PDF page numbers.
 
-**Legend:** **(out)** is out of scope. Cut-page behavior vidcut lacks is listed in [todo/cut-page-gaps.md](todo/cut-page-gaps.md).
+[deviations.md](deviations.md) lists where vidcut is different. §12 decides the points that the manual leaves open.
+
+**Reading the manual:**
+- Extract the text with `pdftotext -f 635 -l 790 <manual>.pdf -`.
+- The developer's copy is in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`).
+- Do not copy its text into the repository.
+
+**Legend:** **(out)** is out of scope. [todo/cut-page-gaps.md](todo/cut-page-gaps.md) lists the Cut-page behavior that vidcut does not have.
 
 ## 1. Scope
 
@@ -30,233 +37,642 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 ## 2. Layout (pp. 636–637)
 
-- **Main areas:** Media Pool on the left, a single Viewer on the right, the timeline area across the bottom, with a movable seam and timeline height.
-- **Top bar:** Media Pool and Mixer tabs (p. 649) on the left, Quick Export and Full Screen viewer on the right. A Titles tab shows the title kinds in the Media Pool's place (p. 762). (Sync Bin, Keyframe Editor, Transitions and Effects tabs and the Inspector: out.) vidcut's bar also has Import, Export and Jobs (deviation X3), Help (X23) and the command log (X5). What doesn't fit a narrow window goes into a ⋯ menu at its right end (D72).
-- **Below the Media Pool:** the edit-function buttons (§7), Cut and Dissolve (§8.11).
-- **Viewer:** mode buttons top-left, Duration field top-right; along the bottom (p. 640) the jog control, Previous Edit, Stop, Play, Next Edit, Loop, Mark In, Mark Out and timecode; an audio meter on the right (p. 642). What doesn't fit a narrow viewer goes into a ⋯ menu (D72).
+- **Main areas:**
+  - The Media Pool is on the left. A single Viewer is on the right.
+  - The timeline area is across the bottom.
+  - You can move the seam between them, and change the timeline height.
+- **Top bar:**
+  - On the left: the Media Pool and Mixer tabs (p. 649).
+  - On the right: Quick Export and the Full Screen viewer.
+  - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
+  - Out: the Sync Bin, Keyframe Editor, Transitions and Effects tabs, and the Inspector.
+  - vidcut's bar also has Import, Export and Jobs (deviation X3), Help (X23) and the command log (X5).
+  - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
+- **Below the Media Pool:** the edit-function buttons (§7), and Cut and Dissolve (§8.11).
+- **Viewer:**
+  - The mode buttons are at the top left. The Duration field is at the top right.
+  - Along the bottom (p. 640): the jog control, Previous Edit, Stop, Play, Next Edit, Loop, Mark In, Mark Out and the timecode.
+  - An audio meter is on the right (p. 642).
+  - Items that do not fit a narrow viewer go into a ⋯ menu (D72).
 - **Timeline menus** (pp. 645–646):
-  - Timeline Options: Ripple On, Snap, Fixed Playhead, Trim to Audio, Trim with Safe Edit, Display Clip Names, Durations and Status, Minimize Subtitle Track, Boring Detector.
-  - Timeline Actions: Add Video/Audio/Subtitle Track, Split Clips, Join Match Edit Clips, Add Marker, Detect Scene Cuts, Add Dissolve to All Edits, Clear Transition from All Edits (vidcut: Add Subtitle too, deviation X44, Create Subtitles from Audio, X46, Re-time Subtitles to Speech, X49, and Ripple Delete Silence).
-  - Edit Actions: Trim Start to Playhead, Trim End to Playhead.
+  - **Timeline Options:**
+    - Ripple On, Snap, Fixed Playhead, Trim to Audio, Trim with Safe Edit.
+    - Display Clip Names, Durations and Status.
+    - Minimize Subtitle Track, Boring Detector.
+  - **Timeline Actions:**
+    - Add Video/Audio/Subtitle Track, Split Clips, Join Match Edit Clips, Add Marker.
+    - Detect Scene Cuts, Add Dissolve to All Edits, Clear Transition from All Edits.
+    - vidcut also has Add Subtitle (deviation X44), Create Subtitles from Audio (X46), Re-time Subtitles to Speech (X49) and Ripple Delete Silence.
+  - **Edit Actions:** Trim Start to Playhead, Trim End to Playhead.
 - **Timeline buttons** (p. 649): Ripple On, Dynamic Trim, Split, Marker.
-- **Upper timeline:** track-number buttons to its left select the target track; the Audio Only and Video Only toggles sit there too (pp. 643, 694).
+- **Upper timeline:**
+  - The track-number buttons to its left select the target track.
+  - The Audio Only and Video Only toggles are there too (pp. 643, 694).
 
 ## 3. Media Pool (Ch. 34, pp. 653–675)
 
 - **Import** (p. 654):
-  - Ctrl+I, the Import Media button, or right-click > Import Media opens a file dialog with multi-select.
-  - Import Media Folder, the button beside Import Media, opens a folder dialog and brings the folder in as a bin inside the open bin, with a bin for each folder in it, and opens that bin (pp. 654, 658; D53). Resolve Studio 21.1.1's Cut page has no File-menu or right-click item for it, and Keyboard Customization lists no command by that name; vidcut adds both items (deviation X25).
-  - Clips dragged from the file system go into the Media Pool, or a bin in the Bin list (p. 364); for the Cut page the manual says macOS only (p. 372). Folders dragged into the Bin list come in as bins (p. 365). vidcut takes files and folders dropped anywhere on its window into the open bin, the files as Import Media brings them in and each folder as Import Media Folder (deviation X66).
-  - In a project created without a format, the first video sets it without asking (D37).
-- **Stills and image sequences** (pp. 114, 366, 1194): an image file, or a GIF or WebP of one frame, comes in as a still (D38); numbered image files, as one clip (D39).
-- **Remove** (p. 654): Delete or Backspace, after a confirmation. Only the pool entry goes; files on disk stay.
+  - Ctrl+I, the Import Media button, or right-click > Import Media opens a file dialog. The dialog can select many files.
+  - **Import Media Folder**, the button beside Import Media, opens a folder dialog (pp. 654, 658; D53):
+    - It brings the folder in as a bin inside the open bin, with a bin for each folder in it.
+    - Then it opens that bin.
+    - Resolve Studio 21.1.1's Cut page has no File-menu or right-click item for it.
+    - Keyboard Customization lists no command with that name.
+    - vidcut adds both items (deviation X25).
+  - **Drag and drop:**
+    - Clips dragged from the file system go into the Media Pool, or into a bin in the Bin list (p. 364).
+    - For the Cut page, the manual says macOS only (p. 372).
+    - Folders dragged into the Bin list come in as bins (p. 365).
+    - vidcut takes files and folders dropped anywhere on its window into the open bin (deviation X66).
+    - It brings in the files as Import Media does, and each folder as Import Media Folder does.
+  - In a project made without a format, the first video sets the format without a question (D37).
+- **Stills and image sequences** (pp. 114, 366, 1194):
+  - An image file, or a GIF or WebP of one frame, comes in as a still (D38).
+  - Numbered image files come in as one clip (D39).
+- **Remove** (p. 654):
+  - Delete or Backspace removes the pool entry, after a confirmation.
+  - Only the pool entry goes. The files on disk stay.
 - **Views** (pp. 638, 664–665):
-  - **Thumbnail:** hovering scrubs the clip, and I/O mark its source In/Out. Clicking a thumbnail's lower-right corner shows its metadata (deviation X60).
-  - **Filmstrip:** each clip is a row of its pictures as wide as the pool, under its name; hovering and I/O work as on a thumbnail.
-  - **List:** a column per field; clicking a header sorts by it.
-  - **Metadata:** a card per clip, with a scrubbable thumbnail and basic metadata.
+  - **Thumbnail:** a hover scrubs the clip, and I/O mark its source In/Out. A click on the lower-right corner of a thumbnail shows its metadata (deviation X60).
+  - **Filmstrip:** each clip is a row of its pictures, as wide as the pool, under its name. Hover and I/O work as on a thumbnail.
+  - **List:** a column for each field. A click on a header sorts by that field.
+  - **Metadata:** a card for each clip, with a thumbnail that scrubs and basic metadata.
   - A sound file shows its waveform.
-  - **Metadata Display** (p. 665): a tag icon beside the search field shows the selected clip's camera name, scene, shot and take, frame rate and resolution at the top of the pool (deviation X60).
-- **Sort and search** (pp. 666–667): Sort Media By Clip Name, Date Imported, Date Modified or Timecode (D59), ascending or descending, which is also the Source Tape order. The search field filters live, through the open bin and the bins inside it.
-- **Bins** (pp. 655–656, 377): the Master bin is the top level. The pool shows the open bin's clips and its bins as folders; a path at the top (Master › Interviews › Day 1), the Bins menu and a double-click open any bin. New Bin is on the File menu (Shift+Ctrl+N), the Bins menu and the pool's right-click menu; a bin's own menu has Rename Bin and Remove Bin, which keeps its clips (deviation X6). Clips dragged onto a bin, or a level of the path, move into it, as do bins; a clip's menu has Move to Bin and Create Bin With Selected Clips (p. 656). Imports go into the open bin (p. 377). Source Tape strings together the open bin's clips and its bins' clips, in the sort order (pp. 680, 696).
-- **Clip Color** (pp. 667–668): right-click clips in the pool or the timeline and pick one of 16 colors, or Clear Color. A timeline clip is tinted with its own color, else its pool item's.
-- **Input Color Space** (pp. 228, 230): a file's color tags say how its pictures' colors are read. Right-click media in the pool to read them as BT.709, BT.601, BT.2100 PQ or BT.2100 HLG instead, for a file tagged wrong, or As Tagged again. The viewer, thumbnails and exports follow it (D35).
-- **Relinking media** (pp. 668–669): an item whose file is missing is marked MISSING, its clips are red on the timeline (pp. 509, 530), and the viewer shows Media Offline. Relink Media finds the files in a chosen folder and its subfolders; a clip's Relink… picks one. vidcut checks each file it finds (deviation X1).
-- **Interaction:** a click selects; in Source Clip mode the Viewer shows the clip, in Source Tape mode the playhead jumps to it (pp. 680, 704). A double-click opens it as Source Clip (p. 680).
+  - **Metadata Display** (p. 665): a tag icon beside the search field shows metadata of the selected clip at the top of the pool (deviation X60). The metadata is the camera name, scene, shot and take, frame rate and resolution.
+- **Sort and search** (pp. 666–667):
+  - Sort Media By has Clip Name, Date Imported, Date Modified and Timecode (D59), ascending or descending.
+  - This order is also the Source Tape order.
+  - The search field filters live, through the open bin and the bins inside it.
+- **Bins** (pp. 655–656, 377):
+  - The Master bin is the top level.
+  - The pool shows the clips of the open bin, and its bins as folders.
+  - A path at the top (Master › Interviews › Day 1), the Bins menu and a double-click open any bin.
+  - New Bin is on the File menu (Shift+Ctrl+N), on the Bins menu and on the right-click menu of the pool.
+  - The menu of a bin has Rename Bin and Remove Bin. Remove Bin keeps the clips of the bin (deviation X6).
+  - Clips and bins dragged onto a bin, or onto a level of the path, move into it.
+  - The menu of a clip has Move to Bin and Create Bin With Selected Clips (p. 656).
+  - Imports go into the open bin (p. 377).
+  - Source Tape strings together the clips of the open bin and of its bins, in the sort order (pp. 680, 696).
+- **Clip Color** (pp. 667–668):
+  - Right-click clips in the pool or the timeline. Then select one of 16 colors, or Clear Color.
+  - A timeline clip has its own color. If it has none, it has the color of its pool item.
+- **Input Color Space** (pp. 228, 230):
+  - The color tags of a file tell how to read the colors of its pictures.
+  - For a file with wrong tags, right-click the media in the pool. Select BT.709, BT.601, BT.2100 PQ or BT.2100 HLG to read it that way.
+  - As Tagged uses the tags again.
+  - The viewer, the thumbnails and the exports follow this setting (D35).
+- **Relinking media** (pp. 668–669):
+  - An item whose file is missing has the mark MISSING.
+  - Its clips are red on the timeline (pp. 509, 530), and the viewer shows Media Offline.
+  - Relink Media finds the files in a folder that you select, and in its subfolders.
+  - Relink… on a clip selects one file.
+  - vidcut checks each file that it finds (deviation X1).
+- **Interaction:**
+  - A click selects a clip.
+  - In Source Clip mode, the Viewer shows the clip. In Source Tape mode, the playhead jumps to it (pp. 680, 704).
+  - A double-click opens it as Source Clip (p. 680).
 - **Selection** (p. 719): click, Shift-click range, Ctrl-click toggle, marquee, Ctrl+A.
 
 ## 4. Viewer (pp. 639–640, 679–693, 713)
 
 ### 4.1 Modes
-- **Source Clip** (p. 680): the selected pool clip. A scroll area under the picture stands for the whole clip, with the playhead, a zoomed-in waveform and draggable In/Out handles. Jog In and Jog Out controls at its ends move the marks frame by frame (p. 692).
-- **Source Tape** (pp. 680–681, 704–706): all pool clips play end to end as one tape, in pool sort order. The clip under the playhead becomes selected in the pool.
-- **Timeline** (p. 681): the timeline at its playhead, with no scroll area; icons mark a clip's first and last frame.
-- **Switching:** Q toggles between Timeline and the last source mode (p. 696); any click or drag in the timeline area switches to Timeline (p. 681).
+- **Source Clip** (p. 680):
+  - The Viewer shows the selected pool clip.
+  - A scroll area under the picture stands for the whole clip. It has the playhead, a zoomed-in waveform and In/Out handles that you can drag.
+  - Jog In and Jog Out controls at its ends move the marks frame by frame (p. 692).
+- **Source Tape** (pp. 680–681, 704–706):
+  - All pool clips play end to end as one tape, in the pool sort order.
+  - The clip under the playhead becomes selected in the pool.
+- **Timeline** (p. 681):
+  - The Viewer shows the timeline at its playhead, with no scroll area.
+  - Icons mark the first and the last frame of a clip.
+- **Switching:**
+  - Q toggles between Timeline and the last source mode (p. 696).
+  - A click or a drag in the timeline area switches to Timeline (p. 681).
 
 ### 4.2 Transport (pp. 640, 687–688, 870–872)
-The keys are in §11. J/K/L shuttle: repeated J/L speeds up, 2× to 64×, K held with J or L plays slowly, and K held with a tap of J or L steps a frame (pp. 696, 871; D54). Ctrl+/ loops playback (D51), and dragging the jog control scrubs finely (p. 640).
+- §11 gives the keys.
+- J/K/L shuttle (pp. 696, 871; D54):
+  - Each repeated J or L makes the speed higher, from 2× to 64×.
+  - K held with J or L plays slowly.
+  - K held with a tap of J or L steps a frame.
+- Ctrl+/ loops playback (D51).
+- A drag on the jog control scrubs finely (p. 640).
 
 ### 4.3 Timecode (pp. 640, 688, 713–714)
-- **Go to a time:** click the timecode field and type, or type `=` and a timecode, or `+` or `-` and a value to jump by. Digits fill a timecode from the right: `100` is 1 second, `10000` 1 minute. A value with a unit (`5s`, `450f`) is that duration.
-- **Display:** source timecode in the source modes, record timecode in Timeline mode, drop-frame where the project counts so (D47). Right-clicking offers the source or record frame count, Timer 1 and 2, and KeyKode.
+- **Go to a time:**
+  - Click the timecode field and type.
+  - Or type `=` and a timecode, or `+` or `-` and a value to jump by.
+  - Digits fill a timecode from the right: `100` is 1 second, and `10000` is 1 minute.
+  - A value with a unit (`5s`, `450f`) is that duration.
+- **Display:**
+  - The source modes show source timecode. Timeline mode shows record timecode.
+  - The timecode is drop-frame where the project counts drop-frame (D47).
+  - A right-click offers the source or record frame count, Timer 1 and 2, and KeyKode.
 
 ### 4.4 In/Out (pp. 691–693, 700)
-- **Source In/Out:** I/O in a source mode or over a pool thumbnail, or the scroll area's handles.
-- **Timeline In/Out:** I/O in Timeline mode, or while dragging either timeline's ruler. The range shows on both rulers and can be dragged there.
+- **Source In/Out:** I/O in a source mode or over a pool thumbnail, or the handles of the scroll area.
+- **Timeline In/Out:**
+  - I/O in Timeline mode, or while you drag the ruler of either timeline.
+  - The range shows on both rulers, and you can drag it there.
 - **Clearing:** Alt+X clears In and Out.
-- **Duration field:** the marked duration. Editing it moves the Out mark: a number of frames, + or − a number to change it by, or a timecode (p. 693; D60).
+- **Duration field:**
+  - It shows the marked duration.
+  - A change to it moves the Out mark (p. 693; D60).
+  - It takes a number of frames, + or − and a number to change it by, or a timecode.
 
 ### 4.5 Other viewer features
-- Full Screen (Shift+F) and Enhanced viewer (Alt+F); safe areas; Fast Review, which plays long clips faster than short ones (p. 640); skimming with C held (p. 640).
-- Audio scrubbing (Shift+S; on by default, p. 876): dragging the playhead, and frame steps, play the sound under it (D42). Timeline > Audio Scrubbing switches it too.
+- Full Screen (Shift+F) and Enhanced viewer (Alt+F).
+- Safe areas.
+- Fast Review, which plays long clips faster than short ones (p. 640).
+- Skimming with C held (p. 640).
+- Audio scrubbing (Shift+S; on by default, p. 876):
+  - A drag of the playhead, and frame steps, play the sound under it (D42).
+  - Timeline > Audio Scrubbing also switches it.
 
 ## 5. Dual timeline (pp. 66, 643–646, 689–692, 716–718)
 
-**Upper timeline:** the whole program at full width, with no zoom. Its playhead moves freely: dragging its ruler, or a sideways two-finger swipe, scrubs the program. Most edits work there, clips can be dragged between the two timelines, and it shows the timeline In/Out and markers.
+**Upper timeline:**
+- It shows the whole program at full width, with no zoom.
+- Its playhead moves freely. A drag on its ruler, or a sideways two-finger swipe, scrubs the program.
+- Most edits work there.
+- You can drag clips between the two timelines.
+- It shows the timeline In/Out and the markers.
 
 **Lower timeline:**
-- A detail view around the playhead (p. 644). Ctrl+wheel (deviation X21), a trackpad pinch and the − and + buttons zoom it: the manual calls its zoom fixed, but Resolve zooms it too. A sideways swipe scrolls it (p. 66).
-- **Fixed Playhead on (default, D1):** the playhead stays at the center and the clips move under it, also when the ruler is dragged or swiped. Clips don't snap to it (p. 717).
-- **Fixed Playhead off:** the clips stay put and the playhead moves; the view pages when it reaches an edge. Clicking the ruler moves the playhead, and it can be dragged.
+- It is a detail view around the playhead (p. 644).
+- Ctrl+wheel (deviation X21), a trackpad pinch and the − and + buttons zoom it.
+- The manual calls its zoom fixed, but Resolve zooms it too.
+- A sideways swipe scrolls it (p. 66).
+- **Fixed Playhead on (default, D1):**
+  - The playhead stays at the center, and the clips move under it.
+  - This is also true when you drag or swipe the ruler.
+  - Clips do not snap to the playhead (p. 717).
+- **Fixed Playhead off:**
+  - The clips stay in place, and the playhead moves.
+  - The view pages when the playhead reaches an edge.
+  - A click on the ruler moves the playhead, and you can drag the playhead.
 
-**Track display:** combined video+audio tracks are numbered 1, 2, …, with audio-only tracks A1, A2, … below them. A video clip shows a filmstrip, each picture the frame under it, the first its first frame, and its audio as a waveform band along the bottom, enlarged with the track (p. 647); its duration shows as seconds:frames, bottom-left. A locked track's clips are stippled, a disabled track's dimmed; a disabled clip is dull; a muted clip shows a mute icon.
+**Track display:**
+- The combined video+audio tracks have numbers (1, 2, …). The audio-only tracks (A1, A2, …) are below them.
+- A video clip shows a filmstrip. Each picture is the frame under it, and the first picture is the first frame of the clip.
+- Its audio shows as a waveform band along the bottom. The band becomes larger with the track (p. 647).
+- Its duration shows as seconds:frames, at the bottom left.
+- The clips of a locked track are stippled. The clips of a disabled track are dimmed.
+- A disabled clip is dull. A muted clip shows a mute icon.
 
 **Track headers** (pp. 647, 678, 717): Enlarge (one track at a time), Lock, Mute (audio) and Video Enable icons (D43).
 
-**Automatic tools** (p. 690): the **Boring Detector** (Timeline Options) highlights clips longer than "Boring Clips" (light gray) and shorter than "Jump Cuts" (red) on the upper timeline, live as you edit; Analyze Timeline Edits sets both (D31). **Detect Scene Cuts** (Timeline Actions) splits the selected clips where their shots change (D30).
+**Automatic tools** (p. 690):
+- The **Boring Detector** (Timeline Options) highlights clips on the upper timeline, live as you edit:
+  - clips longer than "Boring Clips", in light gray
+  - clips shorter than "Jump Cuts", in red
+- Analyze Timeline Edits sets both values (D31).
+- **Detect Scene Cuts** (Timeline Actions) splits the selected clips where their shots change (D30).
 
 ## 6. Track model (pp. 647, 649, 716, 721, 727)
 
-- **Track 1 is the main story (A-roll):** insert, delete, move and trim on it ripple, so it never has gaps. With **Ripple On** off it behaves like the other tracks, and Alt held while trimming turns rippling off for that trim.
+- **Track 1 is the main story (A-roll):**
+  - Insert, delete, move and trim on it ripple. Thus it never has gaps.
+  - With **Ripple On** off, it behaves like the other tracks.
+  - Alt held during a trim turns rippling off for that trim.
 - **Tracks 2+ are B-roll:**
-  - each clip is attached to the Track 1 clip under its In point and follows it when Track 1 ripples (p. 649; D21)
-  - trimming the anchor's Out to before the attached clip's In deletes the attached clip (p. 727)
-  - they ripple only where there is no Track 1 video under them (p. 721; D22), and clips sit freely with gaps
-- **Audio tracks:** A1, A2, … below the video tracks hold sound alone, such as music. Media without video go there by default (D26).
-- **Track header** (p. 647): a click makes the track the target (D3); right-click adds a video or audio track or removes one (D27).
-- **Overlapping video:** the highest enabled track is visible (p. 647). A disabled clip, or a track with its video off, shows what is under it.
-- **Linking:** a clip's video and audio are one combined clip. Trims move both, except that a J/L cut moves only the audio edit (§8.7). There is no link/unlink on the Cut page.
+  - Each clip is attached to the Track 1 clip under its In point. It follows that clip when Track 1 ripples (p. 649; D21).
+  - A trim that moves the Out of the anchor clip to before the In of the attached clip deletes the attached clip (p. 727).
+  - These tracks ripple only where there is no Track 1 video under them (p. 721; D22).
+  - Clips on these tracks sit freely, with gaps.
+- **Audio tracks:**
+  - A1, A2, … are below the video tracks. They hold sound alone, for example music.
+  - Media without video go there by default (D26).
+- **Track header** (p. 647):
+  - A click makes the track the target (D3).
+  - A right-click adds a video or audio track, or removes one (D27).
+- **Overlapping video:**
+  - The highest enabled track is visible (p. 647).
+  - A disabled clip, or a track with its video off, shows what is under it.
+- **Linking:**
+  - The video and audio of a clip are one combined clip.
+  - Trims move both, but a J/L cut moves only the audio edit (§8.7).
+  - The Cut page has no link/unlink.
 
 ## 7. Edit functions (pp. 696–701)
 
-**Workflow** (p. 696): pick a source, mark its In/Out, optionally click a track's header or number to target it, press an edit button or key, then Q to review the result and Q again to go back. Video Only and Audio Only limit what an edit takes (p. 694).
+**Workflow** (p. 696):
+1. Select a source, and mark its In/Out.
+2. Optionally, click the header or number of a track to make it the target.
+3. Push an edit button, or press an edit key.
+4. Press Q to review the result, and Q again to go back.
+
+Video Only and Audio Only limit what an edit takes (p. 694).
 
 ### 7.1 Smart Indicator (p. 696)
-A marker on the ruler shows the edit point nearest the playhead, which some functions use instead of the exact playhead frame. After idling it bobs, and the chosen edit flashes green, or red if the clip there has no media beyond its edge. vidcut shows the colors without the motion (deviation X15).
+- A marker on the ruler shows the edit point nearest the playhead.
+- Some functions use this edit point instead of the exact playhead frame.
+- After a time without input, the marker bobs.
+- Then the edit that it selected flashes green. It flashes red if the clip there has no media past its edge.
+- vidcut shows the colors without the motion (deviation X15).
 
 ### 7.2 Edit functions
-- **Smart Insert** (F9 in the Edit page; p. 697): inserts at the Smart Indicator's edit point on the target track, never at an arbitrary frame. On Track 1, everything after it moves right by the incoming duration.
-- **Append** (Shift+F12; p. 697): ignores the playhead and places the clip after the last clip.
-- **Ripple Overwrite** (Shift+F10; p. 698): with no timeline marks, replaces the whole clip under the playhead; with a timeline In/Out, exactly that range, possibly across clips. Everything after shifts by (incoming − replaced) duration, either way: the source duration always wins.
-- **Overwrite** (F10; p. 701): writes over the target track at the playhead, at the timeline In, or backtimed to a lone timeline Out. Other clips don't move.
-- **Place On Top** (F12; pp. 699–700): goes to the first track above every clip at that position, creating one if needed (D24), whatever the target track, and never ripples. It lines up, in this order of priority:
-  1. a timeline In with the source In;
-  2. a lone timeline Out with the source Out (backtimed);
-  3. with no marks, within 5 frames of an edit, with that edit;
-  4. otherwise with the playhead.
+- **Smart Insert** (F9 in the Edit page; p. 697):
+  - It inserts at the edit point of the Smart Indicator on the target track, never at any other frame.
+  - On Track 1, everything after it moves right by the incoming duration.
+- **Append** (Shift+F12; p. 697): it ignores the playhead, and puts the clip after the last clip.
+- **Ripple Overwrite** (Shift+F10; p. 698):
+  - With no timeline marks, it replaces the whole clip under the playhead.
+  - With a timeline In/Out, it replaces exactly that range, possibly across clips.
+  - In both cases, everything after it moves by (incoming − replaced) duration. The source duration always wins.
+- **Overwrite** (F10; p. 701):
+  - It writes over the target track at the playhead, at the timeline In, or backtimed to a lone timeline Out.
+  - Other clips do not move.
+- **Place On Top** (F12; pp. 699–700):
+  - It goes to the first track above all clips at that position, whatever the target track.
+  - It makes this track if necessary (D24).
+  - It never ripples.
+  - It aligns by the first of these rules that applies:
+    1. a timeline In with the source In;
+    2. a lone timeline Out with the source Out (backtimed);
+    3. with no marks, within 5 frames of an edit, with that edit;
+    4. otherwise with the playhead.
 - **Close Up, Source Overwrite (out).**
 
 ### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
-- **Onto an empty timeline, or left of the first clip:** becomes the first clip.
-- **Past either end of all clips:** appended or prepended.
-- **Onto a clip, released right away** (the whole clip highlights): Ripple Overwrite replaces that clip.
-- **Onto a clip after hovering briefly** (the highlight narrows to the incoming footprint): a plain Overwrite with no ripple, which may split the target.
+- **Onto an empty timeline, or left of the first clip:** the clip becomes the first clip.
+- **Past either end of all clips:** the clip is appended or prepended.
+- **Onto a clip, released immediately** (the whole clip highlights): Ripple Overwrite replaces that clip.
+- **Onto a clip after a short hover** (the highlight narrows to the incoming footprint): a plain Overwrite with no ripple. It can split the target.
 - **Onto an edit point:** insert at that edit.
-- **Into the gray area above the top track:** creates a new video+audio track. Below the bottom track, an audio clip creates an audio-only track.
-- **Onto another track:** an overwrite there, never a ripple (only Track 1 pushes; D23).
+- **Into the gray area above the top track:** this makes a new video+audio track.
+- **Below the bottom track:** an audio clip makes an audio-only track.
+- **Onto another track:** an overwrite there, never a ripple. Only Track 1 pushes clips (D23).
 
 ## 8. Timeline editing (Ch. 36, pp. 715–732)
 
 ### 8.1 Selection (pp. 719–720)
-- **Clips:** click selects, Ctrl+click toggles, Shift+click selects a range, a marquee from empty space selects what it touches. Clicking empty space, or Ctrl+Shift+A, deselects. Alt+Shift+V selects every clip under the playhead.
-- **Edit points:** the pointer at the center of an edit selects both sides (a roll), just left or right of it one side (a resize); Ctrl+click adds edits. V selects the edit nearest the playhead; U cycles both, incoming, outgoing. In both timelines the selected edit is a solid line on the cut with a glow on its selected side, or both, pulsing about once a second: green where that side has media to trim into, red where it has none.
+- **Clips:**
+  - A click selects. Ctrl+click toggles. Shift+click selects a range.
+  - A marquee from empty space selects what it touches.
+  - A click on empty space, or Ctrl+Shift+A, deselects.
+  - Alt+Shift+V selects all clips under the playhead.
+- **Edit points:**
+  - The pointer at the center of an edit selects both sides (a roll).
+  - The pointer just left or right of the edit selects one side (a resize).
+  - Ctrl+click adds edits.
+  - V selects the edit nearest the playhead. U cycles through both, incoming and outgoing.
+  - In both timelines, the selected edit is a solid line on the cut. A glow is on its selected side, or on both sides.
+  - The glow pulses about once a second.
+  - The glow is green where that side has media to trim into, and red where it has none.
 
 ### 8.2 Moving clips (pp. 720–723)
-- **Onto another Track 1 clip, released quickly:** replaces it and ripples.
-- **After hovering first:** overwrites the middle of the target, splitting it; the gap left behind closes on Track 1.
-- **Over a neighbor's edge, the pointer not reaching it** (p. 722): the overlapped part of the neighbor is overwritten and the gap left behind closes.
-- **Onto an edit point** (it highlights): insert-at-edit. The gap left behind closes, and later clips shift with their attached clips.
-- **Track 1 clip dropped onto another track:** can only overwrite (p. 721); Track 1 closes up behind it.
-- **Higher-track clips:** move freely and leave gaps. Moves between tracks: D25.
+- **Onto another Track 1 clip, released quickly:** the clip replaces that clip and ripples.
+- **After a hover:** it overwrites the middle of the target and splits it. On Track 1, the gap that it leaves closes.
+- **Over the edge of a neighbor, with the pointer not on the neighbor** (p. 722):
+  - The overlapped part of the neighbor is overwritten.
+  - The gap left behind closes.
+- **Onto an edit point** (it highlights): insert-at-edit.
+  - The gap left behind closes.
+  - Later clips move with their attached clips.
+- **A Track 1 clip dropped onto another track:** it can only overwrite (p. 721). Track 1 closes up behind it.
+- **Higher-track clips:** they move freely, and leave gaps.
+- Moves between tracks: D25.
 
 ### 8.3 Copy, cut, paste (p. 723)
-Ctrl+C copies. Ctrl+X cuts and ripples the gap closed. Ctrl+V pastes at the playhead on the original track, overwriting.
+- Ctrl+C copies.
+- Ctrl+X cuts, and closes the gap with a ripple.
+- Ctrl+V pastes at the playhead on the original track, and overwrites.
 
 ### 8.4 Delete (pp. 721, 724–725)
-Delete removes the selected clips; on Track 1 with Ripple On it ripples, and attached clips follow. With a timeline In/Out set, it removes that range (D68). D disables or enables a clip's video; right-click > Mute silences its audio.
+- Delete removes the selected clips.
+- On Track 1 with Ripple On, it ripples, and the attached clips follow.
+- With a timeline In/Out set, it removes that range (D68).
+- D disables or enables the video of a clip.
+- Right-click > Mute silences the audio of a clip.
 
 ### 8.5 Split (pp. 646, 723, 950)
-Ctrl+\, the Split button, or Split Clips splits at the playhead. Join Match Edit Clips (Timeline Actions) joins a split clip's parts back into one (D49).
+- The Split button, Split Clips, or Ctrl+\ splits at the playhead.
+- Join Match Edit Clips (Timeline Actions) joins the parts of a split clip back into one clip (D49).
 
 ### 8.6 Trimming (pp. 693, 716, 718, 726–732)
-- **The pointer position picks the operation:**
-  - **Clip edge: resize.** A tooltip shows the frame delta and new duration. On Track 1 with Ripple On it ripples; elsewhere only that clip changes.
-  - **Edit center: roll.** The total duration stays; a white overlay shows the available handle media.
+- **The pointer position selects the operation:**
+  - **Clip edge: resize.**
+    - A tooltip shows the frame delta and the new duration.
+    - On Track 1 with Ripple On, it ripples. On other tracks, only that clip changes.
+  - **Edit center: roll.**
+    - The total duration stays the same.
+    - A white overlay shows the available handle media.
   - **Slip handle at the clip center: slip.** Several selected clips slip together.
   - **Lower audio band at an edit: audio-only roll**, a J/L cut (§8.7).
-- **Safe Edit** (option, p. 732): a trim stops at the neighboring clip, with a small timer on the cursor; keep dragging to overwrite anyway.
-- **Trim to Audio** (option, p. 645): the audio view expands while trimming.
-- **Trim Editor** (pp. 729–730; D52): while an edit is selected and the player is stopped, the Viewer shows the outgoing clip's last frame beside the incoming clip's first, over the outgoing filmstrip on top and the incoming one below. Each frame is numbered from where the edit was when the editor opened, with a bar in the clip's color under the clip's own frames and a grey one under those past its edge. The handles stay at the centre while the filmstrips slide under them, as far as the media allow: the top handle trims the outgoing Out, the bottom one the incoming In, the white one between them rolls. While a handle is dragged, the timeline shows the trim as it would be (Resolve Studio 21.1.1); releasing applies it. A handle turns red where its side has no more media. A pair of ±1-frame buttons each side of the transport nudges the Out (left) and the In (right), or rolls with both sides selected. An edit with a dissolve shows the dissolve between the filmstrips, several frames to a cell; dragging either end makes it longer or shorter about the edit. Esc or Close deselects the edit.
-- **Trim Start/End to Playhead** (Edit Actions, p. 729): moves a clip's head or tail to the playhead.
-- **Change Clip Speed** (R†): a speed, reversed or not, or a freeze frame, for every selected clip (D48).
-- **Change Clip Duration** (Ctrl+D, p. 693): frames or a timecode, or 1, 5 or 15 seconds, for every selected clip. End runs to the end of the media; Extend Beyond Clip Length pads with black.
-- **Dynamic Trim** (W, pp. 730–732): W toggles the mode and shows the timeline. The playhead turns yellow and goes to the selected edit (Out, In or both by U; else the one nearest the playhead), which the Trim Editor shows, or to the selected clip's edge nearer the playhead. J/K/L then trim the edit, or slip or slide the selected clips (right-click the button to choose), instead of playing; with nothing selected they play. A slide keeps a clip's media and lengthens the clip before it as it shortens the one after (p. 731); L slides it right, and slips its content right, to earlier frames, as dragging it does. Space plays around the playhead and Up/Down go to another edit (D32, deviations X11, X28, X29). W again deselects the edit.
+- **Safe Edit** (option, p. 732):
+  - A trim stops at the neighbor clip, with a small timer on the cursor.
+  - Continue the drag to overwrite the neighbor.
+- **Trim to Audio** (option, p. 645): the audio view expands during a trim.
+- **Trim Editor** (pp. 729–730; D52):
+  - It shows while an edit is selected and the player is stopped.
+  - The Viewer shows the last frame of the outgoing clip beside the first frame of the incoming clip.
+  - Under these two frames are two filmstrips: the outgoing filmstrip on top, and the incoming filmstrip below it.
+  - Each frame has a number, counted from the position of the edit when the editor opened.
+  - A bar in the color of the clip is under the frames of the clip. A grey bar is under the frames past its edge.
+  - The handles stay at the centre, and the filmstrips slide under them, as far as the media allow.
+  - The top handle trims the outgoing Out. The bottom handle trims the incoming In. The white handle between them rolls.
+  - While you drag a handle, the timeline shows the trim as it will be (Resolve Studio 21.1.1).
+  - The release of the handle applies the trim.
+  - A handle turns red where its side has no more media.
+  - A pair of ±1-frame buttons is on each side of the transport.
+  - The left pair nudges the Out, and the right pair nudges the In. With both sides selected, they roll.
+  - An edit with a dissolve shows the dissolve between the filmstrips, several frames to a cell.
+  - A drag on either end of the dissolve makes it longer or shorter about the edit.
+  - Esc or Close deselects the edit.
+- **Trim Start/End to Playhead** (Edit Actions, p. 729): moves the head or the tail of a clip to the playhead.
+- **Change Clip Speed** (R†): a speed, reversed or not, or a freeze frame, for each selected clip (D48).
+- **Change Clip Duration** (Ctrl+D, p. 693):
+  - It takes frames or a timecode, or 1, 5 or 15 seconds, for each selected clip.
+  - End runs to the end of the media.
+  - Extend Beyond Clip Length pads with black.
+- **Dynamic Trim** (W, pp. 730–732):
+  - W toggles the mode, and shows the timeline.
+  - The playhead turns yellow.
+  - It goes to the selected edit (Out, In or both by U), else to the edit nearest the playhead. The Trim Editor shows that edit.
+  - Or it goes to the edge of the selected clip that is nearer the playhead.
+  - Then J/K/L trim the edit, or slip or slide the selected clips, instead of playing.
+  - Right-click the button to select slip or slide.
+  - With nothing selected, J/K/L play.
+  - A slide keeps the media of a clip. It makes the clip before it longer as it makes the clip after it shorter (p. 731).
+  - L slides the clip right. It also slips its content right, to earlier frames, as a drag does.
+  - Space plays around the playhead, and Up/Down go to another edit (D32, deviations X11, X28, X29).
+  - W again deselects the edit.
 
 ### 8.7 J/L cuts (p. 728)
-Hover the lower audio part of a clip at an edit until the cursor shows a note, then drag: only the audio edit moves, as an audio roll. A click selects that audio edit, and `,` / `.` move it (D20).
+- Hover over the lower audio part of a clip at an edit until the cursor shows a note. Then drag.
+- Only the audio edit moves, as an audio roll.
+- A click selects that audio edit, and `,` / `.` move it (D20).
 
 ### 8.8 Snapping (pp. 716–717)
-N toggles snapping. Clip edges, markers, the playhead and the timeline In/Out snap to each other, shown by a white line. N pressed mid-drag lasts for that drag; between drags, it sticks.
+- N toggles snapping.
+- Clip edges, markers, the playhead and the timeline In/Out snap to each other.
+- A white line shows the snap.
+- N pressed during a drag applies to that drag only. N pressed between drags stays.
 
 ### 8.9 Markers (pp. 718–719)
-M adds a marker at the playhead, or edits the one there. Shift+Up/Down jumps between markers, which can be dragged. Alt+M deletes the marker at the playhead; Delete removes selected markers.
+- M adds a marker at the playhead, or edits the marker there.
+- Shift+Up/Down jumps between markers.
+- You can drag markers.
+- Alt+M deletes the marker at the playhead. Delete removes the selected markers.
 
 ### 8.10 Undo (pp. 651–652)
-Ctrl+Z / Ctrl+Shift+Z, unlimited. Edit > History lists the last twenty steps, newest on top, the current one checked and the steps that can be redone still listed; choosing one undoes or redoes to it. Open History Window, at the foot of that menu, lists them all, oldest on top from Original, the project as it was before them: the current step has a dot, the steps that can be redone are greyed, and a click on any step goes there at once. A new change discards the steps that could be redone. Details: D55.
+- Ctrl+Z undoes, and Ctrl+Shift+Z redoes. The number of steps has no limit.
+- Edit > History lists the last twenty steps:
+  - The newest step is on top.
+  - The current step has a check mark.
+  - The steps that can be redone are also in the list.
+  - Select a step to undo or redo to it.
+- Open History Window, at the bottom of that menu, lists all the steps:
+  - The oldest step is on top, from Original. Original is the project before all the steps.
+  - The current step has a dot.
+  - The steps that can be redone are grey.
+  - A click on a step goes to it immediately.
+- A new change discards the steps that could be redone.
+- Details: D55.
 
 ### 8.11 Dissolves (pp. 645, 747, 758–761, 895, 1114, 1159, 1173)
-- **Dissolve and Ctrl+T** (p. 758): a one-second Cross Dissolve centered on the edit nearest the playhead. Ctrl+T puts it on the selected edit (V) instead, else on the selected clips (p. 895), else on the edit nearest the playhead. U picks where: ending on the edit (outgoing side), starting on it (incoming) or centered (both). Where the clips' sounds meet at that edit, a Cross Fade goes on the sound too (p. 1114). Details: D50.
+- **Dissolve and Ctrl+T** (p. 758):
+  - Dissolve puts a one-second Cross Dissolve centered on the edit nearest the playhead.
+  - Ctrl+T puts it on the selected edit (V). Else it puts it on the selected clips (p. 895), else on the edit nearest the playhead.
+  - U selects the position: ending on the edit (outgoing side), starting on it (incoming side), or centered (both).
+  - Where the sounds of the clips meet at that edit, a Cross Fade goes on the sound too (p. 1114).
+  - Details: D50.
 - **Cut** (p. 759): the edit nearest the playhead becomes a cut again.
-- **A selected dissolve** (pp. 759, 761): a click selects it. Its right-click menu has Change Transition Duration, then Start on Edit, Center on Edit and End on Edit, the current one greyed. Change Transition Duration takes a timecode or frames (Format, remembered) or a 1, 5 or 15-second preset, and is shortened to the media (deviation X27); Ctrl+D opens it too. Delete removes the dissolve. Dragging a dissolve's edge, in either timeline, makes it longer or shorter evenly about the edit at that timeline's scale, shortened to the media (X27), with a tooltip of the edge's move and the new length, and selects it. Each acts on the Cross Fade at the edit as well.
-- **How it plays** (pp. 747, 760, 1159, 1173): each clip shows its media past its edge, so a dissolve is as long as the clips have frames there. Pictures cross in a straight line, at a gap from or to black; a Cross Fade's level at its middle is +3, 0 or −3 dB.
-- **Out:** other transitions (wipes, Smooth Cut, the Transitions browser), the Transition Inspector, moving a transition to another edit, Change Transition Type, Set as Default Transition, and cutting, copying and pasting transitions.
+- **A selected dissolve** (pp. 759, 761):
+  - A click selects it.
+  - Its right-click menu has Change Transition Duration, then Start on Edit, Center on Edit and End on Edit. The current one is greyed.
+  - Change Transition Duration takes a timecode or frames (Format, remembered), or a 1, 5 or 15-second preset.
+  - The duration is shortened to the media (deviation X27).
+  - Ctrl+D also opens Change Transition Duration.
+  - Delete removes the dissolve.
+  - A drag on an edge of a dissolve, in either timeline, makes it longer or shorter evenly about the edit.
+  - The drag works at the scale of that timeline. The length is shortened to the media (X27).
+  - A tooltip shows the move of the edge and the new length. The drag also selects the dissolve.
+  - Each of these also acts on the Cross Fade at the edit.
+- **How it plays** (pp. 747, 760, 1159, 1173):
+  - Each clip shows its media past its edge. Thus a dissolve is as long as the clips have frames there.
+  - Pictures cross in a straight line. At a gap, they cross from or to black.
+  - The level of a Cross Fade at its middle is +3, 0 or −3 dB.
+- **Out:**
+  - other transitions (wipes, Smooth Cut, the Transitions browser)
+  - the Transition Inspector
+  - moving a transition to another edit
+  - Change Transition Type, Set as Default Transition
+  - cutting, copying and pasting transitions
 
 ### 8.12 Subtitles (pp. 645–646, 702, 1227–1248)
-- **Subtitle tracks** (pp. 646, 702, 1228, 1232, 1245): Add Subtitle Track (Timeline Actions, or a track header's right-click menu) adds one above the video tracks, named Subtitle 1, 2, …; double-clicking its name renames it, and exports use the name. A subtitle track locks like any track. One subtitle track shows at a time: showing one hides the others (p. 1228). Minimize Subtitle Track (Timeline Options, p. 645) makes them shorter. Details: D56; deviation X44.
-- **Cues** (pp. 1232–1233, 1237): Add Subtitle (a subtitle track's right-click menu) puts a cue at the playhead, and its text is typed in the Inspector, showing on the cue as it is typed. Cues move, trim, split and delete like clips. Details: D56, D57; deviations X43, X44.
-- **Import** (pp. 1230–1231): `.srt`, `.srtx`, `.vtt`, `.xml` and `.ttml` files come into the Media Pool as subtitle clips, by any media import or Import Subtitle, with a badge, and relink as video clips do. Insert Selected Subtitles to Timeline Using Timecode puts each cue at its timecode; dragging one onto a subtitle track, or above the video tracks for a new one, puts its first cue where it is dropped. Details: D58; deviations X40, X41.
-- **Export** (pp. 1247–1248): File > Export Subtitle, or a subtitle track header's Export Subtitle, writes a track as SRT or WebVTT. On the Deliver page a render writes each chosen track as a file beside it (IMSC1, DFXP, SRT, WebVTT), burns the shown track in, or embeds it. Details: D58, D61, D64; deviations X42, X45.
-- **Create Subtitles from Audio** (pp. 1234–1235): transcribes the speech of the timeline's In–Out range, or of all of it, onto the highest subtitle track, made when there is none. Its options: the language (Auto finds it), a caption preset, the characters per line (42), one or two lines, and the frames between subtitles (0). A muted track isn't heard. Details: D62; deviations X46 and X56.
-- **Re-timing to speech:** not in the manual. vidcut moves a subtitle track's cues to the timeline's speech: deviation X49.
-- **Style** (p. 1237): a track's font, size, color, outline, background and margin, its bold face, its letters as capitals or small letters (Font Case), and a drop shadow. Details: D61; deviation X51.
-- **Animated subtitles** (pp. 1240–1241, Studio only): Fusion templates from the Titles tab's Animated section, dragged onto a subtitle track's header, show each word as it is spoken from the transcription's word times; Word Highlight colors it. Update Word Timings times a cue's words to the speech after a correction, Synchronize Word Timings a track's, captions not made from the speech too. Details: D69, D70; deviation X58.
-- **Style presets** (pp. 1239–1240): the Subtitle Inspector's option menu saves a track's style under a name, loads one onto a track as one undoable change, replaces one and deletes one, those two after a confirmation, and exports or imports one as a `.preset` file. vidcut: looks, for titles too, some built in (X59). Details: D71.
-- **Out:** a track style's faces other than regular and bold, line spacing, kerning, alignment, position, zoom, opacity and text anchoring (p. 1237); a cue's or a word's style (p. 1238), caption presets (p. 1235), fades (p. 1240), subtitle regions (pp. 1243–1244), linking subtitles to clips (pp. 1242–1243), Fusion templates styling a subtitle track (p. 1242), find and replace (p. 1236), QC thresholds (pp. 1228–1229), the Captions list (p. 1231), hiding subtitle tracks from the timeline (p. 1232). The rest: [todo/subtitles.md](todo/subtitles.md).
+- **Subtitle tracks** (pp. 646, 702, 1228, 1232, 1245):
+  - Add Subtitle Track adds a subtitle track above the video tracks. It is in Timeline Actions, and in the right-click menu of a track header.
+  - The names of the tracks are Subtitle 1, Subtitle 2, and so on.
+  - A double-click on the name renames the track. Exports use the name.
+  - A subtitle track locks like any track.
+  - One subtitle track shows at a time. When one shows, the others are hidden (p. 1228).
+  - Minimize Subtitle Track (Timeline Options, p. 645) makes them shorter.
+  - Details: D56; deviation X44.
+- **Cues** (pp. 1232–1233, 1237):
+  - Add Subtitle, in the right-click menu of a subtitle track, puts a cue at the playhead.
+  - You type its text in the Inspector. The text shows on the cue as you type it.
+  - Cues move, trim, split and delete like clips.
+  - Details: D56, D57; deviations X43, X44.
+- **Import** (pp. 1230–1231):
+  - `.srt`, `.srtx`, `.vtt`, `.xml` and `.ttml` files come into the Media Pool as subtitle clips, with a badge.
+  - Any media import, or Import Subtitle, brings them in.
+  - They relink as video clips do.
+  - Insert Selected Subtitles to Timeline Using Timecode puts each cue at its timecode.
+  - Drag a subtitle clip onto a subtitle track, or above the video tracks for a new track. Its first cue goes where you drop it.
+  - Details: D58; deviations X40, X41.
+- **Export** (pp. 1247–1248):
+  - File > Export Subtitle, or Export Subtitle on a subtitle track header, writes a track as SRT or WebVTT.
+  - On the Deliver page, a render can write each selected track as a file beside it (IMSC1, DFXP, SRT, WebVTT).
+  - A render can also burn in the shown track, or embed it.
+  - Details: D58, D61, D64; deviations X42, X45.
+- **Create Subtitles from Audio** (pp. 1234–1235):
+  - It transcribes the speech of the timeline's In–Out range, or of the whole timeline.
+  - The cues go onto the highest subtitle track. If there is no subtitle track, it makes one.
+  - Its options:
+    - the language (Auto finds it)
+    - a caption preset
+    - the characters per line (42), and one or two lines
+    - the frames between subtitles (0)
+  - A muted track is not heard.
+  - Details: D62; deviations X46 and X56.
+- **Re-timing to speech:** the manual does not have it. vidcut moves the cues of a subtitle track to the speech of the timeline: deviation X49.
+- **Style** (p. 1237):
+  - A track has a style: its font, size, color, outline, background and margin.
+  - The style also has the bold face, the letters as capitals or small letters (Font Case), and a drop shadow.
+  - Details: D61; deviation X51.
+- **Animated subtitles** (pp. 1240–1241, Studio only):
+  - Drag Fusion templates from the Animated section of the Titles tab onto the header of a subtitle track.
+  - Then each word shows as it is spoken, from the word times of the transcription.
+  - Word Highlight colors the word.
+  - Update Word Timings times the words of a cue to the speech after a correction.
+  - Synchronize Word Timings does this for a track, also for captions not made from the speech.
+  - Details: D69, D70; deviation X58.
+- **Style presets** (pp. 1239–1240):
+  - The option menu of the Subtitle Inspector saves the style of a track under a name.
+  - It loads a preset onto a track as one change that you can undo.
+  - It replaces a preset and deletes a preset, each after a confirmation.
+  - It exports or imports a preset as a `.preset` file.
+  - vidcut: looks, for titles too. Some looks are built in (X59). Details: D71.
+- **Out:**
+  - the faces of a track style other than regular and bold, line spacing, kerning, alignment, position, zoom, opacity and text anchoring (p. 1237)
+  - the style of a cue or a word (p. 1238)
+  - caption presets (p. 1235)
+  - fades (p. 1240)
+  - subtitle regions (pp. 1243–1244)
+  - linking subtitles to clips (pp. 1242–1243)
+  - Fusion templates that style a subtitle track (p. 1242)
+  - find and replace (p. 1236)
+  - QC thresholds (pp. 1228–1229)
+  - the Captions list (p. 1231)
+  - hiding subtitle tracks from the timeline (p. 1232)
+  - The rest: [todo/subtitles.md](todo/subtitles.md).
 
 ### 8.13 Text-based editing (pp. 714, 994–1009)
 
-- **Transcripts** (pp. 994–1002; Studio): a Media Pool clip, or a timeline, is transcribed with the Neural Engine. The Transcription window shows the text with its timecodes, who speaks, and the silences as (...); its search highlights what it finds.
-- **Editing from the text** (pp. 999–1000, 1004–1008), on the Cut page too: a click on a word moves the playhead to the word's end; dragging over words sets In and Out, and X selects a sentence. Delete strikes text through and leaves its range out of edits, Undelete brings it back, and Remove Silent Portions deletes every (...). Place on Top, Insert and Append edit the selection into the timeline; Create Subclip and Add Marker use it. In Timeline Transcription mode, Cut, Paste and Delete on the text do the same to the timeline, from its clips' transcripts.
-- **vidcut:** Transcribe Audio in a pool item's right-click menu (`media.transcribe`) keeps its words, and transcribed media show a speech mark, in the pool and on their clips with sound. Its window says when the file is transcribed already, and Transcribe Again then replaces its words (`again`). The Transcription window (Transcription in the top bar) shows the source clip's words, or the timeline's from its clips: clicking a word, dragging over words, X, Delete and Undelete, Remove Silent Portions, Delete Filler Words, Place on Top, Insert and Append, Add Marker on the timeline, search (First, Previous, Next, Last and a count of the matches), Copy and Follow. With speakers, a paragraph starts at each person, under its name: Rename, Same Person As and Separate; Assign To gives the selected words to another person. `analyze.words`, `media.leave_out` and `edit.ripple_delete_words` do the same by request. Details: D63, D73; deviations X50, X61.
+- **Transcripts** (pp. 994–1002; Studio):
+  - The Neural Engine transcribes a Media Pool clip or a timeline.
+  - The Transcription window shows the text with its timecodes, the speakers, and the silences as (...).
+  - Its search highlights the matches.
+- **Editing from the text** (pp. 999–1000, 1004–1008), on the Cut page too:
+  - A click on a word moves the playhead to the end of the word.
+  - A drag over words sets In and Out. X selects a sentence.
+  - Delete strikes text through, and leaves its range out of edits. Undelete brings it back.
+  - Remove Silent Portions deletes all (...).
+  - Place on Top, Insert and Append edit the selection into the timeline. Create Subclip and Add Marker use it.
+  - In Timeline Transcription mode, Cut, Paste and Delete on the text do the same to the timeline, from the transcripts of its clips.
+- **vidcut:**
+  - Transcribe Audio, in the right-click menu of a pool item (`media.transcribe`), keeps its words.
+  - Transcribed media show a speech mark, in the pool and on their clips with sound.
+  - Its window tells when the file is already transcribed. Then Transcribe Again replaces its words (`again`).
+  - The Transcription window (Transcription in the top bar) shows the words of the source clip, or the words of the timeline from its clips.
+  - The Transcription window has:
+    - a click on a word, a drag over words, X, Delete and Undelete
+    - Remove Silent Portions and Delete Filler Words
+    - Place on Top, Insert and Append, and Add Marker on the timeline
+    - search: First, Previous, Next, Last and a count of the matches
+    - Copy and Follow
+  - With speakers, a paragraph starts at each person, under the name of the person.
+  - The speaker commands are Rename, Same Person As and Separate.
+  - Assign To gives the selected words to another person.
+  - `analyze.words`, `media.leave_out` and `edit.ripple_delete_words` do the same by request.
+  - Details: D63, D73; deviations X50, X61.
 
 ### 8.14 Titles (pp. 762–764, 1176–1178)
 
-- **Adding** (pp. 762–763, 1176): title clips are dragged from the Titles browser onto either timeline like any clip, 5 s long by default (p. 763), and are moved, trimmed and superimposed like clips. Hovering a title's thumbnail with Hover Scrub Preview on shows it in the viewer, an animated one moving as the pointer crosses it (p. 762). vidcut: the Titles tab, its cards dragged onto either timeline or double-clicked to add at the playhead, and Add Title in Timeline Actions or the Timeline menu (deviation X52); a title clip shows its title on the timeline. Details: D65, D66.
-- **Editing** (pp. 763–764, 1176): double-clicking a title's text in the viewer edits it there, and the Video Inspector sets its fonts, colors, drop shadows and backgrounds (p. 764). Clicking the text in the viewer gives onscreen controls for its Position, Zoom and Rotation; dragging snaps to the frame's centre and thirds, Shift keeps to one axis and Option turns snapping off (pp. 763–764). vidcut: the Title window, which double-clicking a title in the viewer opens, and the viewer's controls (X52).
-- **Kinds** (p. 1178): L, M and R Lower 3rd put two lines at the bottom left, middle or right of title safe, which is 90% of the picture by default (p. 1178); Text is one body of text; Scroll moves its text from the bottom of the picture to the top, the clip's length setting its speed. vidcut has these five, with words styled apart by markup (X53), placed by a point in fractions of the picture (X54), a scroll's motion and line spacing its own (X55). Details: D65; in OTIO files, D67.
+- **Adding** (pp. 762–763, 1176):
+  - You drag title clips from the Titles browser onto either timeline, like any clip.
+  - Title clips are 5 s long by default (p. 763).
+  - You move, trim and superimpose them like clips.
+  - With Hover Scrub Preview on, a hover over the thumbnail of a title shows the title in the viewer.
+  - An animated title moves as the pointer crosses its thumbnail (p. 762).
+  - vidcut: the Titles tab, and Add Title in Timeline Actions or the Timeline menu (deviation X52).
+  - You drag the cards of the Titles tab onto either timeline, or double-click a card to add it at the playhead.
+  - A title clip shows its title on the timeline.
+  - Details: D65, D66.
+- **Editing** (pp. 763–764, 1176):
+  - A double-click on the text of a title in the viewer edits the text there.
+  - The Video Inspector sets its fonts, colors, drop shadows and backgrounds (p. 764).
+  - A click on the text in the viewer gives onscreen controls for its Position, Zoom and Rotation.
+  - A drag snaps to the centre and the thirds of the frame.
+  - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
+  - vidcut: the Title window and the controls of the viewer (X52). A double-click on a title in the viewer opens the Title window.
+- **Kinds** (p. 1178):
+  - L, M and R Lower 3rd put two lines at the bottom left, middle or right of title safe.
+  - Title safe is 90% of the picture by default (p. 1178).
+  - Text is one body of text.
+  - Scroll moves its text from the bottom of the picture to the top. The length of the clip sets its speed.
+  - vidcut has these five kinds:
+    - Markup in the text styles words separately (X53).
+    - A point in fractions of the picture places a title (X54).
+    - A scroll has its own motion and line spacing (X55).
+  - Details: D65. In OTIO files: D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
-- **Out** (X53): Text+ and Fusion titles (p. 1178); Transform, Cropping, Speed and Composite's blend modes on titles (pp. 763, 1176); animation and keyframes. Safe area overlays (p. 1177) are a viewer gap ([todo](todo/cut-page-gaps.md)), and measuring Resolve's stroke step is open ([todo](todo/titles.md)).
+- **Out** (X53):
+  - Text+ and Fusion titles (p. 1178)
+  - Transform, Cropping, Speed and the blend modes of Composite on titles (pp. 763, 1176)
+  - animation and keyframes
+  - Safe area overlays (p. 1177) are a viewer gap ([todo](todo/cut-page-gaps.md)).
+  - The measurement of Resolve's stroke step is open ([todo](todo/titles.md)).
 
 ### 8.15 Transform and Crop (pp. 766–768)
 
-- **Tools** (pp. 766–767): the viewer's Tools button opens a bar of effects for the current clip, with onscreen controls in the viewer. Each has a toggle that turns it off without losing its settings and a Reset of all its values (p. 767). vidcut: the Tools button under the viewer shows a row: Transform and Crop, lit while their handles show, show and hide them on the selected clip as T and Shift+T do; with Transform come Flip Horizontal, Flip Vertical and Reset, with Crop a Reset. The clip's right-click menu has Transform, Crop, Reset Transform and Reset Crop; no toggle (deviation X65).
-- **Transform** (p. 767): dragging inside the clip's box moves it, a corner resizes it in proportion, a side stretches or squeezes one way, and the center handle turns it; Shift keeps a move to one axis. Its values are Zoom (width and height, linked or not), Position X and Y, Rotation Angle about the anchor point, Pitch, Yaw, and Flip Horizontal and Vertical. vidcut: the title handles' shape and snapping (X52), a picture's values in fractions of the frame (X65). Details: D75.
-- **Crop** (p. 768): a handle on each side crops that side; Crop Left, Right, Top and Bottom are in pixels, and what is cropped away is transparent, so what is underneath shows through. Details: D75.
-- **How they play:** a clip covers the tracks below it only where its picture covers the frame, so they show in the bars around a picture of another shape, around a placed one and where it is cropped. Details: D75.
-- **Out:** Pitch and Yaw (p. 767), crop Softness (p. 768), Dynamic Zoom (p. 768; [todo](todo/clip-transform.md)), Composite's modes and opacity (p. 769), keyframes.
+- **Tools** (pp. 766–767):
+  - The Tools button of the viewer opens a bar of effects for the current clip, with onscreen controls in the viewer.
+  - Each effect has a toggle that turns it off and keeps its settings.
+  - Each effect has a Reset of all its values (p. 767).
+  - vidcut: the Tools button under the viewer shows a row (deviation X65):
+    - Transform and Crop show and hide their handles on the selected clip, as T and Shift+T do.
+    - Each of these two buttons is lit while its handles show.
+    - With Transform come Flip Horizontal, Flip Vertical and Reset. With Crop comes a Reset.
+    - The right-click menu of the clip has Transform, Crop, Reset Transform and Reset Crop.
+    - There is no toggle.
+- **Transform** (p. 767):
+  - A drag inside the box of the clip moves it.
+  - A drag on a corner resizes it in proportion. A drag on a side stretches or squeezes it in one direction.
+  - The center handle turns it.
+  - Shift keeps a move on one axis.
+  - Its values are Zoom (width and height, linked or not), Position X and Y, and Rotation Angle about the anchor point.
+  - Its other values are Pitch, Yaw, and Flip Horizontal and Vertical.
+  - vidcut: the shape and snapping of the title handles (X52), and the values of a picture in fractions of the frame (X65).
+  - Details: D75.
+- **Crop** (p. 768):
+  - A handle on each side crops that side.
+  - Crop Left, Right, Top and Bottom are in pixels.
+  - The cropped area is transparent, so what is under it shows through.
+  - Details: D75.
+- **How they play:** a clip covers the tracks below it only where its picture covers the frame. Details: D75.
+- **Out:** Pitch and Yaw (p. 767), crop Softness (p. 768), Dynamic Zoom (p. 768; [todo](todo/clip-transform.md)), the modes and opacity of Composite (p. 769), keyframes.
 
 ## 9. Audio (pp. 642, 649–650, 743, 771, 773)
 
-- **Meter:** green is safe, yellow near the limit, red risks clipping.
-- **Mixer** (pp. 649–650): a channel strip per track with sound (name, meter, fader in dB, mute and solo) and the mix's meter. Solo silences the tracks that aren't soloed; mute and solo apply to the export too (p. 650). Track pan and FX: out.
-- **Viewer meter** (p. 642): shows what the viewer plays; its speaker button mutes playback only, not the export.
-- **Clip volume:** one gain per clip, and clip mute.
-- **Ripple Delete Silence** (p. 773): Clip > Audio Operations > Ripple Delete Silence on the selected clips (vidcut: the clip's right-click menu or Timeline Actions). Settings: threshold (dB), pre-head, post-tail, minimum to trip; vidcut adds Detect, Sound level or Speech (deviation X47). It shows the parts to remove as red stripes; vidcut lets them be kept, trimmed and played first (deviation X48). Remove cuts them and closes the gaps, as one undo step (D29; no crossfade option, deviation X11).
+- **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
+- **Mixer** (pp. 649–650):
+  - It has a channel strip for each track with sound: name, meter, fader in dB, mute and solo.
+  - It has a meter for the mix.
+  - Solo silences the tracks that are not soloed.
+  - Mute and solo apply to the export too (p. 650).
+  - Track pan and FX: out.
+- **Viewer meter** (p. 642):
+  - It shows what the viewer plays.
+  - Its speaker button mutes only the playback, not the export.
+- **Clip volume:** one gain for each clip, and clip mute.
+- **Ripple Delete Silence** (p. 773):
+  - Clip > Audio Operations > Ripple Delete Silence works on the selected clips.
+  - vidcut: it is also in the right-click menu of the clip and in Timeline Actions.
+  - Settings: threshold (dB), pre-head, post-tail, minimum to trip.
+  - vidcut adds Detect: Sound level or Speech (deviation X47).
+  - It shows the parts to remove as red stripes.
+  - vidcut lets you keep, trim and play them first (deviation X48).
+  - Remove cuts them and closes the gaps, as one undo step (D29).
+  - There is no crossfade option (deviation X11).
 
 ## 10. Quick Export (Ch. 39, pp. 788–790, 4095–4096, 4104–4109)
 
-- **Flow:** File > Quick Export or the toolbar button, then a preset from the icon row, Export, a file name and a progress dialog.
-- **Range:** the timeline In–Out range if set, else the whole timeline.
-- **Output:** one file; individual clips are the Deliver page's, and our Export dialog's.
-- **Preset models** (Deliver page): H.264 Master (QuickTime, AAC 320 kb/s), H.265 Master (Main10), ProRes 422 HQ (LPCM audio), YouTube 720p–2160p (MP4, H.264 High), Vimeo, TikTok (vertical 1080×1920).
-- **User presets** can be added to the Quick Export row.
-- **In vidcut:** the Quick Export row, the Export dialog and jobs are deviation X3. The suggested file name is the project's name.
+- **Flow:** File > Quick Export or the toolbar button. Then a preset from the icon row, Export, a file name and a progress dialog.
+- **Range:** the timeline In–Out range if it is set, else the whole timeline.
+- **Output:** one file. Individual clips are for the Deliver page, and for our Export dialog.
+- **Preset models** (Deliver page):
+  - H.264 Master (QuickTime, AAC 320 kb/s)
+  - H.265 Master (Main10)
+  - ProRes 422 HQ (LPCM audio)
+  - YouTube 720p–2160p (MP4, H.264 High)
+  - Vimeo
+  - TikTok (vertical 1080×1920)
+- **User presets:** you can add them to the Quick Export row.
+- **In vidcut:**
+  - The Quick Export row, the Export dialog and jobs are deviation X3.
+  - The suggested file name is the name of the project.
 
 ## 11. Keyboard shortcuts
 
-Keys from the Cut chapters (pages in §4–§10), with Edit-page keys filling the gaps (†; D13). The manual's Mac keys are named as on Linux and Windows, Command as Ctrl and Option as Alt; macOS keeps the manual's.
-
-Shortcuts do nothing while a text field has focus or a modal question is up; Esc dismisses the question without acting (Cancel, or Keep Running when quitting).
+- The keys come from the Cut chapters (pages in §4–§10). Edit-page keys fill the gaps (†; D13).
+- The manual's Mac keys have their Linux and Windows names here: Command is Ctrl, and Option is Alt.
+- macOS keeps the keys of the manual.
+- Shortcuts do nothing while a text field has focus, or while a modal question shows.
+- Esc dismisses the question and does nothing (Cancel, or Keep Running when quitting).
 
 | Key | Action |
 |---|---|
@@ -299,7 +715,7 @@ Shortcuts do nothing while a text field has focus or a modal question is up; Esc
 | W | Dynamic Trim on/off |
 | Shift+S | Audio scrubbing on/off |
 | Ctrl+wheel | Zoom the lower timeline (X21) |
-| Wheel over the lower timeline's tracks | Scroll them, when they don't fit (X57) |
+| Wheel over the lower timeline's tracks | Scroll them, when they do not fit (X57) |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Ctrl+I | Import media |
 | Shift+Ctrl+N | New bin |
@@ -307,80 +723,908 @@ Shortcuts do nothing while a text field has focus or a modal question is up; Esc
 
 ## 12. Decisions on gaps and contradictions
 
-Each decision holds until the manual or testing shows Resolve behaves otherwise; then the decision and the code change.
+Each decision applies until the manual or a test shows that Resolve behaves differently. Then the decision and the code change.
 
-- **D1. Fixed playhead.** The lower timeline's playhead is fixed by default, with a Timeline Options toggle: the manual calls it fixed (p. 689) but describes a toggle (pp. 645, 716).
-- **D2. What Split cuts.** The selected clips under the playhead, if any, else every clip under it on every unlocked track: a simplification of the Edit page's Auto Select (p. 950). The left halves end up selected.
-- **D3. Target track.** Smart Insert, Ripple Overwrite and Overwrite use the target track (V1 by default; A1 for sound alone, D26). Append, which the manual leaves open, always uses Track 1; Place On Top picks its own (D24).
-- **D4. Trim Start/End to Playhead.** Applies to the selected clips; with none, to the Track 1 clip under the playhead.
-- **D5. Missing source marks.** No source In means the clip's first frame, no Out its last. In Source Tape mode with no marks, an edit takes the whole clip under the playhead.
-- **D6. Marks persist after edits.** Source marks are kept per clip and timeline marks until cleared (Alt+X): the least surprising for scripts.
-- **D7. Overwrite with timeline In and Out set.** A three-point edit: the range sets the duration, from the source In. Too little source media is an error.
-- **D8. Ripple Overwrite with timeline In and Out set.** The source duration wins, and the program ripples by the difference (p. 698).
-- **D9. Lift on Track 1.** Alt+Delete lifts, leaving the gap, as Alt suspends ripple while trimming; with Ripple On off, Delete does too.
-- **D10. Overwrite past the end of Track 1.** With Ripple On it starts at the end instead, so Track 1 stays gapless.
-- **D11. Hover time.** 0.8 s of hovering turns a drop or move onto a clip from replace into overwrite. The manual gives no value.
-- **D12. Clip gain range.** −60 dB to +24 dB, plus mute. The manual gives none.
-- **D13. Keys.** Keys the Cut chapters don't give come from the Edit page (marked † in §11).
-- **D14. J/L cuts belong to an edit point.** A J/L cut (§8.7) is the outgoing clip's `tail` matching the incoming clip's `head`. An edit that gives a clip another neighbor there resets it to a straight cut, as it does the clip's other cut if the clip would be left without sound of its own. Otherwise audio could overlap on a track or run into gaps.
-- **D15. Playhead after an edit function.** After Smart Insert, Append, Overwrite, Ripple Overwrite or Paste, the playhead moves to the frame after the new clips, and the Viewer keeps its mode, so Q reviews the result (p. 696). A drop leaves it alone. This is the Edit page's behavior.
-- **D16. Mark Out includes the frame under the playhead,** as in Resolve. Ranges are stored half-open: O at frame `f` stores `out = f + 1`.
-- **D17. Source Tape In/Out** (p. 692). I/O in Source Tape mode mark the tape, kept as tape frames with that moment's pool order, so an edit takes the same span whatever the pool shows later; within one clip they are also its source marks (D5). An edit places the span as one block, in one undo step. Removing or relinking one of its clips clears them.
-- **D18. Drop and move targets.** Within 6 px of an edit point a drop inserts there; several clips always overwrite. Up to 24 px below the bottom row makes an audio track. Further off the tracks, or Esc, cancels.
-- **D19. Trimming with the pointer.** Edges follow the pointer's movement from the press, snapped (§8.8). A trim, roll, slip or J/L cut stops where the media runs out instead of failing. Safe Edit (p. 732) holds an edge at the neighbor for 0.6 s; pushing on overrides it. Dragging empty space scrubs in the upper timeline and draws a marquee in the lower.
-- **D20. Keyboard trimming.** With an edit selected (V, U or a click), `,` and `.` trim it a frame, with Shift a second: the Out, the In or both. They are the Edit page's nudge keys; the Cut page's own keyboard trimming is Dynamic Trim (D32). On a J/L handle they move the audio edit and leave the picture cut (D36).
-- **D21. Following Track 1** (pp. 649, 727). A clip on another track is attached to the Track 1 picture under its first frame. It moves with that picture, split parts included, and goes where Track 1 closed up when that clip is deleted. Trimming that clip's tail past it deletes it (p. 727), its head moves it to the new start, and replacing the clip leaves it in place. Over a gap it keeps its distance to the Track 1 clips around it. Clips on locked tracks don't follow; one that would land on another clip moves to the next free track of its kind.
-- **D22. Rippling other tracks** (p. 721). With Ripple On, deleting or trimming a clip on another track ripples that track only when Track 1 has no clips from that clip's start on; otherwise it leaves a gap. Deleting a timeline In–Out range takes it out of every unlocked track and closes them together (p. 725).
-- **D23. Edit functions on other tracks.** Only Track 1 pushes clips (p. 697). Elsewhere Smart Insert and insert overwrite, and Ripple Overwrite replaces without moving anything else. Paste puts each clip back on its own track (p. 723), creating missing ones. Split follows D2.
-- **D24. Where Place On Top goes** (pp. 699–700). Onto the video track above the highest one with clips in the incoming span, created if needed; onto Track 1 only if nothing is there (D10 applies). Sound alone goes to the first audio track with room.
-- **D25. Moving clips between tracks.** Moves are given in positions from before the move. A Track 1 clip moved to another track lifts out, and with Ripple On Track 1 closes up. Clips moved onto Track 1 insert or overwrite (§8.2). Video can't go onto an audio track, and a selection across tracks moves only along them.
-- **D26. Sound alone.** An edit without picture (media without video, or Audio Only, p. 694) goes to A1 unless a target track is given; dragged onto a video track, it lands on the first audio track. A clip on an audio track keeps only its audio.
-- **D27. Track numbers are positions.** V1, V2, … count from the bottom, A1, A2, … from the top; removing a track renumbers those after it, and removing one with clips must be confirmed. An edit or move may name the next track to create it. Track 1 can't be removed. Track volume runs from −60 to +24 dB (D12).
-- **D28. Meters.** A bar per channel of the project's channel count (p. 649): linear peaks from −60 dBFS, held 1.5 s. Playing, they show the sound as heard, the mix and each track after its fader; paused or scrubbing, the media's waveforms at the playhead, with the gains. Channels mix, and mute and solo apply, as in the export (p. 650). The monitoring mute silences only the viewer meter.
-- **D29. Ripple Delete Silence** (p. 773). The manual gives no defaults or rule. Silence is where every channel's peak after clip gain stays below the threshold, in 10 ms steps, including a clip past its audio's end and a click (under 0.05 s between 0.1 s of silence). Defaults: −40 dBFS, pre-head and post-tail 0.15 s, minimum 0.5 s, in seconds so the frame rate doesn't change them. Each silence of at least the minimum goes, less post-tail and pre-head (all of it at a clip's ends), in whole frames. It ripples whatever Ripple On says. Remove takes the stripes as they are left (deviation X48).
-- **D30. Finding shots and black.** Detect Scene Cuts (p. 690) gives no algorithm. A frame starts a shot when FFmpeg scdet's score on its luma reaches 10 (0–100: the mean difference from the frame before, or its change if smaller, so steady motion isn't a cut). A frame is black when 98% of its pixels are within 10% of black; black of 0.5 s or more is reported.
-- **D31. Boring Detector defaults** (p. 690). The manual gives none. Clips over 30 s are boring and clips under 10 frames are jump cuts. It looks at video tracks; its settings are view options kept between runs, not part of the project.
-- **D32. Dynamic Trim** (pp. 730–732). L or J runs the trim at shuttle speed (repeat for 2× up to 64×) until the media or a neighbor runs out, playing with sound at that speed what the trim changes under the playhead: a roll or the In side plays the incoming clip on from the cut, the Out side the outgoing clip, a slide the clip beside the edge the playhead is on, and a slip the clip alone as the timeline plays it, backward when L moves it right; Loop doesn't wrap it. The playhead goes to the edit, or the first selected clip's edge nearer it, when the mode starts and when a run starts, and moves with the edit, or a sliding clip's edge, as it runs; on the In side (Ripple On) and in a slip it stays. While it runs, the viewer shows the exact frames on both sides of the edit, or for a slip or slide four: the clip's first and last frames over the frames before and after it; the timeline shows the clips as the trim leaves them. Stopped, an edit shows the Trim Editor and clips the viewer. K, Space, W, Up/Down and the end of the media stop a run and apply it as one request, one undo step (deviation X11); where the media or a neighbor ran out, the cut turns red and the viewer says why (deviation X29). K held with a tap of J or L trims one frame, and with J or L held trims at half speed until one is let go (D54); `,`/`.` trim as usual (D20). Stopped, Space plays from 2 s before the playhead to 2 s after and puts the playhead back.
-- **D33. Rotation metadata.** The manual doesn't say. As in players, a display-matrix rotation (phones store portrait video sideways with one) is applied everywhere, so a portrait clip that sets the format makes a portrait project. Mirrored matrices count as rotations only.
-- **D34. Interlaced sources** (p. 741). A stream is interlaced if its field order says so or its first frame is flagged so. Flagged frames are deinterlaced everywhere with `bwdif`, one frame per frame, the first field kept (deviation X13). Output is never interlaced, nor at the field rate.
-- **D35. HDR and color** (pp. 230–239). A clip is HDR when its transfer is PQ or HLG. SDR output tone-maps it to BT.709, keeping up to 80% of the 203-nit reference white and rolling highlights off up to 1000 nits. HDR output (D44) is BT.2100 in 10 bits, with SDR white at 203 nits (BT.2408), as Resolve's "203 nits" option (p. 238). Untagged media are BT.709 when 1280 wide or over 576 lines, else BT.601, as players guess. A media's Input Color Space (§3) stands in for its tags and drops its HDR metadata.
-- **D36. Which track an edit point is on** (pp. 696, 720, 729–732). The Smart Indicator, V, Smart Insert, Place On Top's alignment and Up/Down use Track 1's edits, the main story. An edit picked by clicking stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
-- **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654). New Project takes any even picture size from 16 px and any positive frame rate. Without them, the first media with video sets both, with no prompt to stop scripts and agents. The size can change at any time, the rate only while the timeline is empty, as positions are whole frames.
-- **D38. Stills** (§3; pp. 114, 1194). The manual gives the standard still duration, 5 s (p. 114), and 10 s (p. 1194); vidcut takes 5 s, as a project setting (deviation X16). A still edited without a range lasts that long; a range or a trim makes it up to 17 h 40 min (p. 1194). Every source frame of a still shows its picture, so only that length bounds its clips, a dissolve's frames included: a head trim or a dissolve can reach before its source start. A clip keeps its source position, which can fall below 0. A GIF or WebP of one frame is a still too; one of more frames is a clip. Resolve Studio 21.1.1 imports a WebP of one frame as a still, but a GIF of one frame only when its frame has no delay (deviation X39). With FFmpeg 8, which can't decode an animated WebP, one comes in as a still that shows nothing ([to-do](todo/animated-webp-ffmpeg-8.md)).
-- **D39. Image sequences** (§3; p. 366). `media.add` with `sequence` brings numbered files (`frame_000001.png`, …) in as one clip, the unbroken run around each file given, at the project's rate unless `fps` says otherwise; `media.add_folder` with `sequence` does so for each run of two or more in its folders. The pool names it as Resolve does: `frame_[000001-000120].png`. Without `sequence`, a numbered image is a still (deviation X17).
-- **D40. Timeline interchange with Resolve** (deviation X9; pp. 527–530, 4160). The manual describes Resolve's OTIO import and export, not the files. vidcut's OTIO takes the shapes Resolve writes and needs (source ranges in media timecode, plain paths, link groups, marker notes), so a cut goes to Resolve and back with its media linked and its audio with its video. Mapping: [deviation X9](deviations.md#x9-opentimelineio-interchange), [model](design/model.md#opentimelineio).
-- **D41. Proxies** (deviation X18; the proxy chapters, pp. 207–218, are outside the Cut page). Videos and image sequences get proxies on demand (Generate Proxy), or from a running GUI for media hard to play: image sequences, pictures over 3840×2160 and files over 150 Mb/s (preferences `proxies.*`), checked as media are added, when `use_proxies` turns on, and when a proxy's file is gone. A proxy whose file is gone counts as none: the pool marks it LOST PROXY, the original plays, and these rules make it again as the project names it: its size, and its codec where this computer makes it. A proxy's longest side is 960 px unless set; `auto` picks a codec the GPU plays ([export](design/export.md#proxies)). A project names a proxy by its file, which each computer keeps in its own proxy folder: `proxies` in the project's folder, or where `proxies.folder` says; a relative folder is in the project's folder, an absolute one is shared by every project (deviation X26). With `use_proxies` on, the preview plays fresh proxies, frame for frame as the originals, so heavy media play in real time; sound, exports and analyses use the originals.
-- **D42. Audio scrubbing** (§4.5; p. 876). The manual says only that dragging the playhead plays the sound. A frame step, and every move of a paused playhead, plays that frame of the mix, faded over 3 ms against clicks, and forward even when stepping back: a reversed frame isn't heard as backward. A newer frame replaces any waiting, so a held key doesn't pile up. Backward play plays the sound reversed.
-- **D43. Enlarging a track** (pp. 647, 678). The enlarged track is three times its height, at least 180 px; in a short timeline the other tracks shrink first, to a line each. It is a view, like the zoom: not in the project or the undo history.
-- **D44. An export's dynamic range and bit depth follow its footage** (§10; deviation X14). With no color management, `video.hdr` `auto` (the default) decides from the pictures an export shows, by duration. It is HDR when more than half of them are and the codec carries HDR (HEVC, AV1, VP9) with a 10-bit encoder here: HLG if every HDR frame is HLG, else PQ. Otherwise SDR, HDR tone-mapped (D35). An unset depth is 10 for HDR, and for SDR when most of the picture has 10 bits or more and the codec's 10 bits play widely (not H.264). The plan says why; the Export dialog notes HDR tone-mapped unasked, with an Export HDR button.
-- **D45. Passes** (§10; Resolve's multi-pass option is on the Deliver page). Two passes bring an export closer to a target bitrate and spread its bits better; at constant quality they gain nothing worth the time. So an unset `video.passes` is two with a bitrate, where the encoder makes them, and one otherwise. Asking two of an encoder that makes one is an error.
-- **D46. HDR metadata follows the footage** (§10; deviation X19). With no grade, an export carries what its sources say (`video.hdr_metadata` `auto`). PQ output gets the widest mastering display of the pictures shown and their highest MaxCLL and MaxFALL, measured where a source states none; SDR pictures count as BT.709 at 203 cd/m², HDR ones without a display as BT.2020 at 1000 cd/m². HLG and SDR output get none. Each frame keeps its HDR10+ and Dolby Vision where its transfer stays: HDR10+ (PQ only) when any picture has it, made from measured light for the rest; Dolby Vision when every picture has it, in one profile.
-- **D47. Drop-frame timecode** (§4.3). At 29.97 and 59.94 fps record timecode can count drop-frame, as Resolve's project settings offer: frame numbers 00 and 01 (00–03 at 59.94) are skipped each minute but every tenth. New Project and Project Settings offer it; the first video setting the format (D37), or an OTIO import into an empty timeline, turns it on when the media's timecode counts so. It shows as `;` before the frames. Typed, `;` means drop-frame, as does `:` in a drop-frame project; a skipped label is refused, and digits that fill one land on the minute's first frame.
-- **D48. Clips at another speed** (§1, §8.6; deviation X9). A clip's constant speed, from Change Clip Speed or an OTIO file, holds wherever its pictures and sound go. Change Clip Speed takes 1% to 10000% either way, or 0, freezing the frame under the playhead. Without ripple the clip keeps its length; with ripple it keeps its source, and later clips follow. Each frame shows the source frame its stretch of the source starts in (backward, its bottom, as Resolve shows it), without blending. Sound keeps its pitch, reversed backward; a freeze is silent. Edits count frames through the speed.
-- **D49. What Join Match Edit Clips joins** (pp. 646, 950). The manual says only that it rejoins a split clip. Two clips join when the second plays on from where the first stops, so nothing seen or heard changes: adjacent on one track, with the same media, speed and settings, no frames missing, no fade or transition between. With two or more clips selected, those that meet join; otherwise those at the playhead, chosen as for Split (D2). The first part keeps its id.
-- **D50. Dissolves** (§8.11; deviations X9, X24, X27). The manual says only that one picture fades as the next comes in; these rules match Resolve's renders. Frame i of an n-frame dissolve shows the incoming picture at (i + ½)/n and the outgoing at the rest, mixed in the output's code values, not linear light; at a gap, with what is under the track. A Cross Fade gives the incoming sound √x (+3 dB), x (0 dB) or x^1.5 (−3 dB) at x of the way, the outgoing the same of 1 − x, with no de-click at its edges. The manual names no track for the edit nearest the playhead, so it is Track 1's (D36). Ctrl+T on selected clips puts a dissolve on both edges of each, on its track, an edit between two of them once. A new dissolve is a second, centered with an odd length's middle frame before the edit and shortened to the media each side has (deviation X27), and adds a Cross Fade +3 dB where the sounds meet. Longer than both sides allow, it fills both, as in Resolve: 999 frames on a cut between two 300-frame clips with long handles make 300 + 300. At a clip's edge with no clip beside it, beside empty track or at the timeline start, it lies inside the clip, ending on its last frame or starting on its first, whether U picks the clip's side or both; the empty side alone takes none. A fade past the last clip, as an OTIO file may hold, lengthens the program.
-- **D51. Loop** (§4.2; p. 640). The manual says only that Loop Playback loops. With it on, play that reaches the end goes on from the start; with both In and Out set in the viewer, play that reaches the Out goes on from the In, and play from past the Out runs to the end, then goes on from the In. Backward play loops the other way round. The sound runs on without a break. It is off at the start and not in the project.
-- **D52. When the Trim Editor shows** (§8.6; pp. 729–731). The manual opens it with a double-click. Resolve Studio 21.1.1 shows it whenever an edit is selected and the player is stopped: a click on the edit, V or a double-click, or a click on a dissolve, which selects its edit and the dissolve. Either way an edit with a dissolve shows the dissolve. Space plays the timeline as usual, through the edit, the editor hidden; stopping brings it back, the edit still selected. Dragging its handles trims at the lower timeline's scale, a dissolve's ends at the filmstrips'.
-- **D53. Import Media Folder** (§3; pp. 654, 658). The manual says each folder imported is a bin, and its bin sync expects bins named as the folders and the folders in them. Resolve Studio 21.1.1 makes a bin named as each folder in it, an empty one and one holding only documents too, and so does vidcut. Files and folders named with a dot stay out, and those Windows marks hidden come in, as in Resolve's Media Storage and its import. Resolve's order of the clips in the new bin changes from one import of the same folder to the next, and so does the video whose frame rate it offers a project with an empty pool: the first in that order. vidcut's media come in by name, ignoring case, a folder's files before the folders in it, so the first video in that order sets the format (D37). A file is media by its extension; the others, and media that don't open, are skipped, as in Resolve, but the result and the GUI's notice name them, and a folder without media is an error (deviation X32). A bin that exists takes the folder's media, and media already in the pool keep their ids and move into their folder's bin (deviation X31), so importing a folder again brings in only its new files, as importing into the bin that holds a file adds nothing in Resolve. Numbered images follow D39: `sequence`, or in the GUI a question. Checked on Resolve Studio 21.1.1's Cut page and through its scripting API, which has no call that makes the bins.
-- **D54. Slow play with K** (§4.2; pp. 731, 871). The manual gives no speed, nor how long a tap lasts. Resolve Studio 21.1.1 plays at half speed with the sound slowed, in playback and in Dynamic Trim (checked by hand); whether it keeps the pitch, whether the playhead steps as J or L goes down, and how a held trim undoes were not checked. With K held, a J or L let go within 0.25 s is a tap: as it is let go, it steps a frame, or in Dynamic Trim trims one. Held longer, it plays that way at half speed, or in Dynamic Trim runs the trim at half speed, until J, L or K is let go; a run then applies as K applies it, as one undo step (D32). The sound plays slowed, its pitch kept, as at any speed but 1× (deviation X30). A held key's repeats are not presses, so holding L alone plays at 1×.
-- **D55. Undo steps** (§8.10; pp. 651–652; deviations X4, X33–X38). The manual doesn't say what a step is or how it is named. Every request that changes the project is one step, an `apply` batch too; undo and redo aren't steps, and neither are views (zoom, enlarged tracks, the selection). Original is the oldest state the history keeps (X4). Resolve Studio 21.1.1 names a step by its kind ("Split Clips", "Remove clips", "Add Transition to Edit Points"); vidcut's names say more (X33). The steps a new change replaces stay as a version (X36), and a step can carry a name (X37).
-- **D56. Subtitle tracks and cues** (§8.12). The manual doesn't say which track a new one shows or how long a new cue lasts. Subtitle tracks are `S1`, `S2`, … from the video up; a new one is the one shown. A new cue lasts 3 s, or until the track's next cue starts. Cues of one track may overlap and show together; on the timeline, cues that overlap share their track's height, each in a lane of its own. Split leaves its text in both parts; join keeps the first cue, to the last one's end, with their texts as lines. The viewer draws the shown track's cues as a burn-in draws them (D61), in the track's style, its font too. While the Subtitle Track window is open for the shown track, the viewer draws the style its fields give, where they are valid.
-- **D57. Cues follow Track 1** (§6, §8.12; p. 1242). The manual says only that subtitles linked to clips move with them. A cue keeps the frames of Track 1 under it: a ripple delete or trim takes out the part of a cue over the frames taken out, and drops a cue left with none; an insert inside a cue splits it, and both parts keep the text; overwriting and lifting leave cues where they are; a timeline In–Out delete takes its range out of cues too. A locked subtitle track doesn't move. Resolve Studio 21.1.1's ripple delete of a Track 1 clip (Edit page, through its scripting API) did the same: the cues inside it went, and a cue across its end kept its part after it.
-- **D58. Subtitle file times** (§8.12; pp. 1230, 1247). Each time goes to the nearest frame. A file in timecode is timed in seconds from 00:00:00:00, counting the timeline's start timecode as frames at the project's rate: Resolve Studio 21.1.1 reads `01:00:00,000` on a 23.976 timeline as 00:59:56:10, and its renders write a cue at 01:00:00:00 as `01:00:03.599` at 23.976 and at 29.97 non-drop (through its scripting API; File > Export Subtitle not checked). A file read in is taken in real time, as Resolve writes and reads it, unless `time_base` on `subtitles.import` says labels (timecode read as a clock: 01:00:00:00 as `01:00:00,000`), or its times with fractions of a second fall on timecode frames and clearly off the frames of real time. Round times (whole seconds, tenths) count for neither, so a round `01:00:00,000` is 3600 s: 00:59:56:10 at 23.976, as Resolve reads it. At whole rates the two are the same. A subtitle file beside an export starts at zero at the output's start; beside an OpenTimelineIO file it is timed in that timeline's timecode, as Insert Selected Subtitles to Timeline Using Timecode needs (from an SRT in timecode it puts each cue where it was; from one timed from zero it inserts nothing; checked by hand). An SRT beside a timeline file has no `{\an8}` position tags, which Resolve shows as text.
-- **D59. Sorting by timecode** (§3; pp. 666–667). The manual names the order, not how it sorts. Timecode sorts by the label of each file's start timecode (a video's recorded timecode, a broadcast WAV's time reference), hours, minutes, seconds and then frames as a part of a second, so files at different rates sort as their labels read: a 29.97 fps non-drop-frame clip at 01:00:00:00 (3.6 s past the hour in real time) comes before a 25 fps one at 01:00:02:00. A file without one counts as 00:00:00:00, the Start TC Resolve Studio 21.1.1 gives such a clip (checked through its scripting API), so it comes first ascending and last descending. Equal labels keep their import order, reversed when descending, as in the other orders.
-- **D60. The Duration field** (§4.4; p. 693). The manual lists what the field takes, not how it reads it or what it counts from. A number alone is frames (`48`), not digits filling a timecode as in the timecode field (§4.3); a timecode, or a time with a unit (`00:00:02:00`, `2s`), is that long; `+` or `−` before either changes the duration shown by that much (`+12`, `-5`). The Out moves to the In plus the new duration. With no In, the duration counts from the clip's or the timeline's first frame, which becomes the In; with no Out, the duration shown runs to the clip's or the timeline's end. A duration under one frame is refused, as is a source Out past the media's end. `marks.set` and `media.marks.set` take the same as `duration`.
-- **D61. Burned-in subtitles** (§8.12; p. 1247; deviations X45, X51). The manual doesn't say how a track looks burned in before it has a style. In a burn-in render of Resolve Studio 21.1.1 over black (made through its scripting API, 3840×2160), a line's tallest letters are 4.2% of the picture's height, two lines 11.3%, both centered at 80.1% of it; its outline or shadow over a bright picture wasn't checked. vidcut draws white text 5.5% of the picture's height, lines 1.31 times that apart, with a black outline a twentieth of the text's height, centered and wrapped at 90% of the width; the block's middle is at 80% of the height, at 50% for a cue placed in the middle and 20% at the top. Measured at 1280×720 with Segoe UI: 4.2% and 11.3%, centered at 80.1%. The font is Open Sans where it is installed, else the system's sans-serif, with the system's fonts for scripts it lacks. Cues showing together at one place are one block, in the order they start. HDR white is 203 cd/m², graphics white in ITU-R BT.2408. A track's style (`track.set`, the Subtitle Track window) replaces that look where it is set: `font`, a family name, drawn in the usual one when it isn't installed; `size`, the text height as a fraction of the picture height, above 0 and at most half; `color`, `#rrggbb`, `#rgb` or a name such as yellow (a color with an opacity is refused); `outline`, a color and a thickness as a fraction of the text height, from 0 to a tenth, the most IMSC1 allows, where 0 draws none; `background`, a color and an opacity from 0 to 1, a box behind each line reaching 0.15 of the text height past it; `margin`, the block's inset from the left and right by that fraction of the width, and from the top or the bottom for a cue placed there by that fraction of the height, from 0 up to but not including half, a cue in the middle staying centered. `bold` takes the font's bold face; `case` draws every letter `upper` or `lower`; `shadow` is a title's drop shadow (D65), behind the text and its outline. A margin moves a block to the edge: without one, a bottom block's middle is at 80% of the height; with one, its bottom edge sits at the margin, so a margin of 5% puts a one-line cue's line, 7.2% of the height (5.5% × 1.31), at 87.8–95% of the height, lower than the usual look. Likewise a top block's top edge sits at the margin, where without one its middle is at 20%. A project file holding a style `track.set` would refuse is refused. The viewer draws it as burned in. An IMSC1 file has the same look (D64), with the bold face and the capitals, and no shadow, which IMSC1's text profile lacks.
-- **D62. Cues from speech** (§8.12; p. 1235). The manual names the options, not how speech becomes cues. A cue holds one sentence, or a part of one: it ends at a sentence's end and where the speech pauses for a second or more, and a sentence too long for one cue is split into cues of about equal length, at a comma where one is near. Words wrap onto the lines at the characters per line. A cue starts at its first word and ends at its last, and stays at least 5/6 s where the next cue allows; the frames between subtitles shorten a cue that would end closer to the next. Parakeet Ultra, the default, times each word. A model that gives no times, Qwen3-ASR until transcribe.cpp runs its aligner, has its text spread over the speech the voice-activity model found, by its characters, in pieces of 10 s at the most: its cues' times are estimates. Where the GPU in use has less memory than the model wants (Parakeet Ultra 2 GB, Whisper large-v3 4 GB, Qwen3-ASR 8 GB), the answer warns, and the model runs anyway; a model file the user names gets no warning. The model hears all sound louder than −40 dBFS (`sound_db`) with quiet of half a second or more left out (Find Speech By Sound Level, `find: sound`, the default), which keeps singing, speech over music and a launch countdown that the voice-activity model drops; with Voice (`find: voice`) it hears what that model finds, and when it keeps under a quarter of a range that is mostly louder than −40 dBFS, the answer says so. Words kept for a file are used again only when found the same way, at the same level, as asked.
-- **D63. Word times and cutting them** (§8.13; pp. 1004–1008). The manual doesn't say how a word's time becomes frames, or what deleting words that touch cuts. `analyze.words` answers with each word, its frames, and whether it joins the word before without a space (`joined`): from a media's transcript in source frames, from each clip's media in timeline frames through the clip's range and speed (a word whose middle is in the clip), or heard from the same mix as Create Subtitles from Audio. Only a model that times words: Parakeet Ultra does; Whisper large-v3 times phrases and Qwen3-ASR gives no times, so they are refused, and the estimates used for their cues are never returned as word times. `edit.ripple_delete_words` takes the named spans out of every unlocked track and closes the gap, ripple on or off; spans that touch are one cut. Times go to the nearest frame, and a word shorter than a frame still takes one. A cut at the model's word edges can take the start of the next word where no pause parts them; with `quiet`, as the Transcription window cuts, each edge moves to the quietest frame boundary nearby in the sound of the tracks heard there, the nearer one when two are as quiet, as far as the clips' transcripts show the words: inward no further than a third into any word wholly inside the cut, whichever track's transcript has it, so every word cut loses its middle, and outward only into the pause beside it, up to the next word, within about a tenth of a second; without a transcript the edges stay. Filler words are marked from built-in lists for each of Parakeet Ultra's 25 languages, in the transcript's language, or the one `language` names; with neither, none are marked. A language's list in the preferences (`transcripts.fillers`) replaces its built-in one, and a project's own (`project.set` `fillers`) replaces both; a word matches whatever its capitals and the punctuation around it. The Transcription window shows a pause of a second or more between words as (...), and X takes the sentence around a word: from after the last word ending with . ! ? or … up to the next such word.
-- **D64. Subtitle file layout** (§8.12; p. 1247). The manual doesn't say how a track's look is written to an IMSC1 file. vidcut writes the look of D61, styled or not. Sizes are percentages, since IMSC1 allows `c` units in a text document only in `ebutts:linePadding`: `ttp:cellResolution` makes the picture 100 rows of cells, the text height is a percentage of one cell (5.5% of the picture is `550%`), and lines are `131%` of it apart. The font family is followed by `proportionalSansSerif`. A name with whitespace in it is in single quotes (`'Open Sans',proportionalSansSerif`): TTML1 §8.3.5 takes a name bare or quoted, and IMSC1 §7.4 asks for no whitespace between the parts of the value. A font name with a quote or a comma in it is refused. The background is a span around each cue's text. Each place has a region as wide as the text wraps, anchored where the block sits (at the margin, or centered at 20%, 50% and 80%), and as tall as the picture allows while a top region's middle stays above 40% of the height and a bottom one's below 60%, so vidcut reads each cue back at its place; a region whose cues need more lines than fit in that takes all the picture allows instead. IMSC1 lets at most four regions show at once (§6.8.3), one more than the three places, and forbids overlap only between regions shown at the same time (§6.8.2), so where cues at two places show at once, their two regions share the room between them, each keeping the lines its cues need where both fit. A cue that still has more lines than its region holds is named in the export's notes and in `subtitles.export`'s warnings, as players may cut it off.
-- **D65. Titles** (§8.14; pp. 763, 1178). The manual doesn't give a title's look, how its text sits, or how it plays over other tracks. A title's usual look is the burn-in's font (D61), white with a black outline a twentieth of the text's height and no background, its text 96/1080 of the picture's height for Text, the height of Resolve's 96-point Text title (D67), and 6% for a lower third, its lines 1.31 times that apart and wrapped at the width of title safe, 90% of the picture's. A Text title's lines are centered, the block's middle at the picture's; a lower third's lines line up left, centered or right, its block's bottom-left corner, bottom middle or bottom-right corner 10%, 50% or 90% across and 88% down, so that its lower line's top sits about a fifth up the picture, where Resolve's own lower thirds put it (D67). `position` moves that point (X54). Words are styled apart by markup in the text (X53): `<b>`, `<i>`, `<u>` and `<font>` with a `color`, a `face` and a `size`, a line taking its largest size's height; a lower third's lines meet one lower line's height above its corner. Size, color, outline and background take the subtitle style's values and limits (D61), the background one box behind the block reaching 0.15 of the text's height past its lines. A drop shadow is a blurred copy of the text and its outline, over the background and under the text, as in Resolve: black, 75% opaque and blurred 20 by default, Resolve's own values, and offset 0.3% of the picture's width right and 0.5% of its height down, where Resolve's default offset of 0 draws no shadow. Zoom draws the text larger, its background box growing with it, and rotation turns the whole title, box and shadow too, counterclockwise; both about a Text title's middle and a lower third's point where its lines meet, the point Resolve turns each of a lower third's lines about (D67). A title shows over the picture of the tracks below it, over black where there are none: a clip on a track above covers it where its picture covers the frame (D75), one fading in or out above it fades over it, and subtitles go over it. A scroll's lines wrap at title safe and line up left, in the middle or right, by default in the middle of the picture; they rise at a steady speed from just below the picture at the clip's first frame to just above it at its last (X55). A dissolve at a title's edge fades it in or out, as Resolve does, the title drawn through all of the dissolve's frames at the dissolve's level, on both sides of its edge; a title's `opacity`, Composite's Opacity in Resolve, fades the whole title. A title has no speed. It draws the same in every export, `frame.render` and the viewer, whatever the subtitle settings; HDR white is graphics white, as for burned-in subtitles.
-- **D66. Where Add Title goes** (§8.14; p. 763). The manual has a title dropped where it is wanted. Add Title and `titles.add` without a track put a 5 s title at the playhead on the video track above the highest one with clips in its frames, made when there is none, over what is there: Place On Top's track (D24). With nothing in those frames it goes on Track 1, with Ripple On no later than Track 1's end (D10). Add Title's title is a Text title reading `Title`; one dragged or double-clicked from the Titles tab reads as its card does: `Title`, `Name` over `Title` for a lower third, and a few lines of credits for a scroll. A drop puts it where the pointer is on the video track under it, as `titles.add` with that track and frame.
-- **D67. Titles in OTIO files** (§8.14; deviation X9). The manual doesn't say how a title goes into an OTIO file. vidcut writes one in the shape of Resolve Studio 21.1.1's own file of its titles (made through its scripting API): a `Clip.2` whose media is a `GeneratorReference` of kind `Rich` for Text, `Rich Lower Left`, `Rich Lower Middle` or `Rich Lower Right` for a lower third, or `Scroll`, named Text, Left, Middle or Right Lower Third, or Scroll. Its parameters are a `Rich Text` group for a Text title and two for a lower third, then `Drop Shadow` at Resolve's defaults, `Stroke` and `Background`. A `Rich Text` group holds its lines as Qt rich text (`title blob`), a span for each run of words styled alike with its font (for a title that names none, the family vidcut draws it in), its size in points, its weight (700 bold, else 400), italic, underline and color, and the lines' alignment, its `anchor` on a 3×3 grid counted from the bottom left (0 bottom left, 4 middle, 8 top right) and its `position`, in fractions of the picture from its left and bottom. Its `transformationZoomX` and `Y` are the title's zoom, its `transformationRotationAngle` its rotation in degrees counterclockwise, both about its anchor point; Resolve zooms the text alone, and turns the background and shadow with it. A point is a pixel of the picture, as Resolve draws a title it reads from a file (its own titles have 1/1080 of the picture's height a point: [gotchas](gotchas.md#resolves-otio-files)). A Text title's `position` is its middle (anchor 4); a lower third's upper line stands on (anchor 0, 1 or 2) and its lower line hangs from (6, 7 or 8) the point where they meet, one line, 1.31 times the text's height, above the title's corner, as Resolve's own lower thirds put their upper line first. A `strokeSize` step is a 160th of the text's height, so 16, Resolve's most, is a tenth, vidcut's, and an outline of 0 is `strokeSize` 0; Resolve draws no stroke on a title read from a file, so the step is not measured. A background is the box vidcut draws, given as `backgroundWidth` and `backgroundHeight` in fractions of the picture and `backgroundCenter` from the anchor point of the last `Rich Text` group, which Resolve centers its box on, with square corners; none is a height of 0. A drop shadow is `shadow offset` in fractions of the picture, right and up, `shadow` its blur, a Gaussian whose radius is that many 3300ths of the picture's height, `shadow opacity` in percent and `shadow color`; none is an offset of 0, which Resolve doesn't draw. A title's opacity is the clip's `Composite` effect's `opacity`, in percent, which Resolve draws (checked at 50%); a `Cross Dissolve` at its edge fades it there as in vidcut (checked frame by frame). The `Title` itself also goes in the clip's `vidcut` metadata, so vidcut reads its own back exactly; Resolve drops it. A Resolve title of those kinds comes in as a title: its lines, its upper line's (a Text title's first) font, size and color, an outline from a `strokeSize` above 0, its other spans as markup where they differ from that one, a background from a `backgroundHeight` above 0, a drop shadow from an offset other than 0, and the zoom (X) and rotation of its lower line or Text group; keyframes and a second zoom or rotation are lost, as the import's warnings say. A lower third's lower line is the group anchored by its top, or else its second. A Text title's lines are centered whatever their alignment, and one anchored elsewhere than its middle has that point taken for its middle. A Scroll has a `Text` group, its plain `text` and its `position`, whose x is the middle of a text box as wide as the picture, and a `Formatting` group, its `font` as Qt writes one, its `size` in points (pixels, as above), its `alignment` (0 left, 1 middle, 2 right in that box), `anchor` and `color`, then `Drop Shadow` and `Background`, with no `Stroke`; vidcut writes its lines' left edge, middle or right edge there, in plain text, as Resolve's Scroll has no rich text, and reads them back with no outline. Other generators stay carried; Text+, which Resolve writes as a `MissingReference` and loses itself, is left out with a warning, as any clip without media is. Resolve Studio 21.1.1 draws a file vidcut writes as vidcut does, within a few pixels at 3840×2160, but for the outline, and vidcut reads Resolve's export of it back to the same titles (checked through its scripting API).
-- **D68. Delete with In and Out past the end** (§8.4; pp. 721, 724–725). The manual doesn't say what Delete does when the timeline In and Out are both past the timeline's end, as they are after cuts shorten it under them. Nothing is there to remove, so Delete takes the selected clips instead.
-- **D69. Animated subtitles** (§8.12; p. 1240; deviation X58). The manual shows Word Highlight coloring each word as it is spoken and says the templates' parameters are set in the Inspector; it doesn't say when a word counts as spoken. A track style's `words` shows a cue's words by its word times (D70): `highlight` draws every word and the spoken one in its `color`, #ffd400 unless set; `reveal` draws each word from its start, those not yet spoken keeping their room unseen; `word` draws only the spoken word. A word is spoken from its start until the next word starts, the last one until the cue ends, and none before the first starts. `pop`, from 1 to 2, draws the spoken word that many times its size as it starts, easing back to its size over 0.2 s as (1 − t / 0.2 s)², about the middle of its place in the line and over its neighbors, which don't move. A cue without word times shows all at once. The viewer and a burn-in draw it alike; subtitle files and streams get the text. Create Subtitles from Audio's looks (`look`) put the cues on a new track with a style and the usual characters and lines: Pop, bold capitals 7.5% of the picture's height with an outline 8% of the text's height, a shadow and a margin of 15%, the spoken word #ffd400 popping at 1.25, 20 characters on one line; Highlight and Reveal, bold at 6.5% with the same outline, shadow and margin, 32 characters on one line; Word, bold capitals at 10% popping at 1.15, 20 characters; Plain, the usual style at 42. Its dialog shows the looks as tiles, each drawing a sample in its look; the looks are D71's. Export and Quick Export burn in the shown track by default when it animates its words, and say so; the request's default stays files.
-- **D70. Word times on cues** (§8.12; p. 1241). The manual has word timings updated by a button; it doesn't say what edits do to them. A cue keeps the frame each word starts on, counted from its start, a word being what spaces and line breaks part in its text without the markup. Create Subtitles from Audio keeps the model's word starts; a model without word times gives the estimates its cues' times come from (D62), which `analyze.words` still never returns (D63). WebVTT inline timestamps import as word times, a word without one spread between its neighbors. Moving a cue's edge keeps each word on its frame, clamped into the cue; a split leaves each part the words of its own frames, those outside it at its edge; a join puts the cues' words one after another; Re-time scales a cue's words with its length; a timeline edit maps each word through the frames its cue follows (D57), a word on a removed frame starting on the next frame kept. New text with as many words keeps their times; with another number, they are read again from the words kept for the files of the clips under the cue, else spread over the cue by their characters. Synchronize Word Timings (`subtitles.time_words`, a subtitle track header's menu) hears the speech as Create Subtitles from Audio does and matches the cues' words to it in order across all the cues timed, as Re-time's words do, so captions off from the speech still find their words; a matched word starts where it was heard, kept inside its cue, and the others are spread between their matched neighbors by their characters.
-- **D71. Looks** (§8.12, §8.14; pp. 1239–1240; deviation X59). The manual saves a subtitle track's style as a named preset and loads it onto a track; it doesn't say where presets are kept, or of any built in. A look is a named style for a subtitle track or a title. A subtitle look holds a track's style and the characters per line and lines Create Subtitles from Audio uses with it (42 and one when it gives none); a title look holds all of a title but its text: its kind, alignment, style, place, zoom, rotation and opacity. Built in for subtitles: Plain, Pop, Highlight, Reveal and Word (D69). Built in for titles: Plain, the usual title (D65); Headline, white at 12% of the picture's height with no outline and a deep soft shadow; Callout, yellow at 11% with an outline a tenth of the text's height and a shadow; Caption, white at 5.5% on a 60% black box, its middle 82% down; News, a lower third at 5% on a blue bar; Soft, a lower third at 5.5% with a soft shadow and no outline. Yours are one TOML file each, in the config folder's `looks/subtitles` and `looks/titles`, named by the look: up to 64 characters without `/ \ : * ? " < > |`, not starting or ending with a dot, matched whatever their case. A built-in look can't be replaced or deleted, and its name can't be taken. Replacing one of yours needs `overwrite` (the GUI's Save button reads Replace), and deleting one asks first in the GUI; neither is undone. A look file that can't be read, or holds what its kind's checks refuse, is left out and listed with why; naming it gives that reason. Applying a look is one undoable change: `track.set` with `look` sets a track's style (a subtitle track header's Apply Look); `titles.add` and `titles.set` with `look` set all of a title but its text, the fields given going on top; `subtitles.transcribe` takes any subtitle look. In the Subtitle Track and Title windows the Look list fills the fields, showing the look they match or Custom, Save as Look… saves them, a subtitle look with its characters and lines, and Delete deletes the look shown when it is yours. The Titles tab shows a card for each title look after Scroll, but Plain, which is Text's.
-- **D72. Narrow windows** (§2; p. 636). The manual doesn't say what the bars do in a window or panel too narrow for them. Nothing overlaps: what doesn't fit goes into a ⋯ menu, which takes the place of the first item to go and lists them in the bar's order, and they come back as there is room. The top bar keeps File, Edit and Timeline and gives up Help, Command log, Mixer, Transcription, History, Export, Quick Export, Import Folder, Import, Jobs, and last the no preview warning. The transport keeps the timecode and gives up the shuttle speed, Clear, Mark Out, Mark In, Loop, the trim buttons, Next Edit, Previous Edit, Stop and Play. The viewer's header keeps Duration and gives up Source Tape, Source Clip and Timeline; the pool's bin bar keeps Bins, the open bin and Sort and gives up the bins above it from Master down; the timeline's bar gives up the In and Out, the clip count and the zoom buttons; the status bar gives up the pid, the decoding, the format, the last change and the version. The shown clip's name, the open bin's, a notice and the Trim Editor's line shorten with … instead. What stays is cut off at the panel's edge when even it doesn't fit.
-- **D73. Speakers** (§8.13; pp. 997–1001; deviation X61). The manual's Speaker Detection numbers speakers and remembers their voices across a project's clips; it doesn't say how a word gets its speaker or how many there can be. vidcut numbers them per run: on this computer, in English and Chinese MOSS-Transcribe-Diarize, which told 7 people apart in a 3-minute press conference where Sortformer told 4, else NVIDIA's Sortformer, per file, up to 4 (more share them, and the answer warns when it tells 4 apart; the Speakers checkbox names the model picked, when it is known before the run). With the language on Auto, MOSS is used when the speech model reports English or Chinese, else Sortformer; a MOSS that isn't downloaded is downloaded with `download`, else the run stops and says so, and a MOSS that fails stops the run with its error, which points to Sortformer under Speakers By; Create Subtitles from Audio over In–Out hears only that part (deviation X56). Speakers By, under Advanced (`speaker_model`), picks one of them instead (its Automatic names that model too), and a kept transcript is used again only when the model picked told its speakers; xAI's diarization over every file of one request; Gemini's over its one request, which takes 30 minutes of speech at most (`SpeechModel::longest_secs`): more is refused before anything is sent. A word is the speaker heard over most of it. A person is `Speaker N` until named; names, colors, speakers joined across files and words given to another person are the project's (`speakers.*`), and a transcript kept with a file keeps only its numbers. A cue of Create Subtitles from Audio ends where the person changes and keeps that person (deviation X63).
-- **D74. Dragging marks on a ruler** (§4.4; pp. 691–693). The manual says the timeline In/Out and markers can be dragged on the rulers, not which part of a ruler grabs them. A ruler's bottom strip, where the In/Out flags and the markers are drawn, drags them, and the pointer turns into a left-right arrow over one; the rest of the ruler, and the space under the lower timeline's tracks, move the playhead. A dragged mark is drawn where it is going, and the change is made on release.
-- **D75. Transform and Crop** (§8.15; pp. 766–768; deviation X65). The manual gives the controls, not the units, the order they work in, or how a placed clip plays over the tracks below; the order and how it plays match Resolve's renders. A clip's picture is fitted into the frame, then cropped, flipped, zoomed, turned and moved, in that order, about the middle of the whole picture: the zoom works across and down in the picture's own axes, before the turn; the rotation is counterclockwise; the crop cuts the source picture, and what is left stays where it was. A clip covers the tracks below it only where its picture covers the frame, at its usual values too: they show in the bars around a picture of another shape, outside a placed one and where it is cropped, black where there are none. One whose fitted picture fills the frame, to within half a pixel, covers them all. Its edges are smoothed over a pixel. The two sides of a dissolve mix into each other first and then go over the tracks below, so these don't show through where both sides cover the frame (D50). The units are vidcut's (X65): `position` is where the picture's middle goes, `[x, y]` in fractions of the frame from its top left, each from −100 to 100 (`[0.5, 0.5]` leaves it in place); `zoom` is how much larger it is drawn across and down, each from 1/100 to 100, one number for both; `rotation` is degrees, from −3600 to 3600; the flips mirror it left to right and top to bottom; the crop cuts each side by a fraction of the source picture, leaving some of it. Values at their usual place are left out of the project file. A compound clip is placed as one picture: the pictures inside it go with it, cut at its frame, and its tracks play over each other as the timeline's do, the tracks below it showing wherever they leave its frame uncovered; the titles inside it stay where they are ([todo](todo/clip-transform.md)), and `edit.decompose` drops its picture, saying so. An export fits a placed picture at the size it shows, up to the source's own, so a punch-in keeps the source's detail, and the viewer draws it from the decoded picture with the same sums. Titles keep their own place (X54). In the viewer, the handles are a title's (X52): a drag inside moves the picture, its middle snapping to the frame's middle and thirds with a guide drawn, Shift keeping to one axis and Alt turning snapping off; a corner zooms both ways in proportion and a side one way, about the middle, the zoom shown by the pointer; the handle above the box, or a drag just outside a corner, turns it, Shift in steps of 15°, the angle shown by the pointer; the Crop handles move one side each, with the uncropped picture dashed. While the Transform handles show, the wheel or a pinch over the picture zooms it as a corner does, 10% a notch, and Alt+wheel turns it, 1° a notch, counterclockwise for wheel up, with Shift too to the next multiple of 15°. The picture follows the drag or the wheel, and one `picture.set` follows on release, or once the wheel has been still a moment, the handles hide, the clip changes or a drag starts. In the Tools row each flip is one `picture.set` and Reset is the right-click menu's `picture.clear`, on the clip the handles go on: the selected one at the playhead, else the top one there; the row's buttons are greyed out while there is none, all but a lit Transform or Crop, which still hides its handles. `picture.get`, `picture.set` and `picture.clear` do the same from a script; `edit.copy` and `edit.paste` carry a clip's picture. In an OTIO file the picture goes in the clip's `vidcut` metadata and in Resolve's Transform, Cropping and Retime and Scaling, fitted; an import takes vidcut's own, or else reads those, Resolve's crop, fill and stretch becoming a zoom and its anchor point a `position` ([gotchas](gotchas.md#resolves-otio-files)). When one has keyframes or other parameters, such as Pitch and Yaw, or they make a picture vidcut refuses, such as a crop leaving nothing, all three stay on the clip unplayed (X9). The export names the clips moved further than Resolve's Pan and Tilt go, 4 pictures, and writes them at 4.
+- **D1. Fixed playhead.**
+  - The playhead of the lower timeline is fixed by default.
+  - A Timeline Options toggle changes it.
+  - Reason: the manual calls it fixed (p. 689), but it also describes a toggle (pp. 645, 716).
+- **D2. What Split cuts.**
+  - Split cuts the selected clips under the playhead, if there are any.
+  - Else it cuts every clip under the playhead on every unlocked track.
+  - This is a simplification of Auto Select on the Edit page (p. 950).
+  - The left halves stay selected.
+- **D3. Target track.**
+  - Smart Insert, Ripple Overwrite and Overwrite use the target track.
+  - The target track is V1 by default, and A1 for sound alone (D26).
+  - The manual does not say which track Append uses. Append always uses Track 1.
+  - Place On Top selects its own track (D24).
+- **D4. Trim Start/End to Playhead.**
+  - It applies to the selected clips.
+  - With no clip selected, it applies to the Track 1 clip under the playhead.
+- **D5. Missing source marks.**
+  - With no source In, the In is the first frame of the clip. With no Out, the Out is its last frame.
+  - In Source Tape mode with no marks, an edit takes the whole clip under the playhead.
+- **D6. Marks persist after edits.**
+  - Source marks stay with each clip.
+  - Timeline marks stay until you clear them (Alt+X).
+  - This is the least surprising behavior for scripts.
+- **D7. Overwrite with timeline In and Out set.**
+  - It is a three-point edit: the range sets the duration, from the source In.
+  - Too little source media is an error.
+- **D8. Ripple Overwrite with timeline In and Out set.**
+  - The source duration wins.
+  - The program ripples by the difference (p. 698).
+- **D9. Lift on Track 1.**
+  - Alt+Delete lifts, and leaves the gap, as Alt stops the ripple during a trim.
+  - With Ripple On off, Delete also lifts.
+- **D10. Overwrite past the end of Track 1.**
+  - With Ripple On, it starts at the end of Track 1 instead.
+  - Thus Track 1 stays without gaps.
+- **D11. Hover time.**
+  - After 0.8 s of hover, a drop or move onto a clip changes from replace to overwrite.
+  - The manual gives no value.
+- **D12. Clip gain range.**
+  - The range is −60 dB to +24 dB, plus mute.
+  - The manual gives no range.
+- **D13. Keys.**
+  - Keys that the Cut chapters do not give come from the Edit page.
+  - §11 marks them with †.
+- **D14. J/L cuts belong to an edit point.**
+  - A J/L cut (§8.7) is the `tail` of the outgoing clip that matches the `head` of the incoming clip.
+  - An edit that gives a clip another neighbor there resets the J/L cut to a straight cut.
+  - The edit also resets the other cut of the clip, if the clip would have no sound of its own.
+  - Reason: otherwise audio could overlap on a track, or run into gaps.
+- **D15. Playhead after an edit function.**
+  - After Smart Insert, Append, Overwrite, Ripple Overwrite or Paste, the playhead moves to the frame after the new clips.
+  - The Viewer keeps its mode, so Q reviews the result (p. 696).
+  - A drop does not move the playhead.
+  - This is the behavior of the Edit page.
+- **D16. Mark Out includes the frame under the playhead,** as in Resolve.
+  - Ranges are stored half-open: O at frame `f` stores `out = f + 1`.
+- **D17. Source Tape In/Out** (p. 692).
+  - In Source Tape mode, I/O mark the tape.
+  - The marks are kept as tape frames, with the pool order of that moment.
+  - Thus an edit takes the same span, whatever the pool shows later.
+  - Within one clip, the marks are also the source marks of that clip (D5).
+  - An edit puts the span as one block, in one undo step.
+  - When one of its clips is removed or relinked, the marks are cleared.
+- **D18. Drop and move targets.**
+  - Within 6 px of an edit point, a drop inserts there.
+  - Several clips always overwrite.
+  - Up to 24 px below the bottom row, a drop makes an audio track.
+  - Further away from the tracks, or with Esc, the drop or move is cancelled.
+- **D19. Trimming with the pointer.**
+  - Edges follow the movement of the pointer from the press, snapped (§8.8).
+  - A trim, roll, slip or J/L cut stops where the media runs out. It does not fail.
+  - Safe Edit (p. 732) holds an edge at the neighbor for 0.6 s. Continue to push to override it.
+  - A drag on empty space scrubs in the upper timeline, and draws a marquee in the lower timeline.
+- **D20. Keyboard trimming.**
+  - With an edit selected (V, U or a click), `,` and `.` trim it by a frame, or with Shift by a second.
+  - They trim the Out, the In or both.
+  - They are the nudge keys of the Edit page. The keyboard trimming of the Cut page is Dynamic Trim (D32).
+  - On a J/L handle, they move the audio edit, and leave the picture cut (D36).
+- **D21. Following Track 1** (pp. 649, 727).
+  - A clip on another track is attached to the Track 1 picture under its first frame.
+  - It moves with that picture, split parts included.
+  - When that Track 1 clip is deleted, the attached clip goes where Track 1 closed up.
+  - A trim of the tail of that Track 1 clip past the attached clip deletes the attached clip (p. 727).
+  - A trim of its head moves the attached clip to the new start.
+  - A replacement of that Track 1 clip leaves the attached clip in place.
+  - Over a gap, the clip keeps its distance to the Track 1 clips around it.
+  - Clips on locked tracks do not follow.
+  - A clip that would land on another clip moves to the next free track of its kind.
+- **D22. Rippling other tracks** (p. 721).
+  - With Ripple On, a delete or a trim of a clip on another track can ripple that track.
+  - It ripples only when Track 1 has no clips from the start of that clip on. Otherwise it leaves a gap.
+  - A delete of a timeline In–Out range takes the range out of every unlocked track, and closes them together (p. 725).
+- **D23. Edit functions on other tracks.**
+  - Only Track 1 pushes clips (p. 697).
+  - On other tracks, Smart Insert and insert overwrite.
+  - On other tracks, Ripple Overwrite replaces, and does not move other clips.
+  - Paste puts each clip back on its own track (p. 723). It makes the missing tracks.
+  - Split follows D2.
+- **D24. Where Place On Top goes** (pp. 699–700).
+  - It goes onto the video track above the highest track with clips in the incoming span. It makes that track if necessary.
+  - It goes onto Track 1 only if no track has clips there (D10 applies).
+  - Sound alone goes to the first audio track with room.
+- **D25. Moving clips between tracks.**
+  - A move gives positions as they are before the move.
+  - A Track 1 clip moved to another track lifts out. With Ripple On, Track 1 closes up.
+  - Clips moved onto Track 1 insert or overwrite (§8.2).
+  - Video cannot go onto an audio track.
+  - A selection across tracks moves only along them.
+- **D26. Sound alone.**
+  - An edit without picture goes to A1, unless a target track is given.
+  - An edit without picture is media without video, or Audio Only (p. 694).
+  - If you drag it onto a video track, it goes onto the first audio track.
+  - A clip on an audio track keeps only its audio.
+- **D27. Track numbers are positions.**
+  - V1, V2, … count from the bottom. A1, A2, … count from the top.
+  - When a track is removed, the tracks after it get new numbers.
+  - The removal of a track with clips needs a confirmation.
+  - An edit or a move can name the next track number. This makes that track.
+  - Track 1 cannot be removed.
+  - Track volume is from −60 to +24 dB (D12).
+- **D28. Meters.**
+  - There is a bar for each channel of the project's channel count (p. 649).
+  - The bars show linear peaks from −60 dBFS. A peak stays for 1.5 s.
+  - During playback, they show the sound as it is heard: the mix, and each track after its fader.
+  - When paused or during a scrub, they show the waveforms of the media at the playhead, with the gains.
+  - Channels mix, and mute and solo apply, as in the export (p. 650).
+  - The monitoring mute silences only the viewer meter.
+- **D29. Ripple Delete Silence** (p. 773).
+  - The manual gives no defaults and no rule.
+  - Silence is where the peak of every channel, after clip gain, stays below the threshold.
+  - The check uses 10 ms steps.
+  - Silence includes a clip past the end of its audio.
+  - Silence also includes a click (under 0.05 s between 0.1 s of silence).
+  - Defaults: −40 dBFS, pre-head and post-tail 0.15 s, and minimum 0.5 s.
+  - The defaults are in seconds, so the frame rate does not change them.
+  - Each silence of at least the minimum goes, less the post-tail and the pre-head.
+  - At the ends of a clip, all of the silence goes.
+  - The cuts are in whole frames.
+  - It ripples, whatever Ripple On is.
+  - Remove takes the stripes as they are left (deviation X48).
+- **D30. Finding shots and black.**
+  - Detect Scene Cuts (p. 690) gives no algorithm.
+  - A frame starts a shot when the FFmpeg scdet score on its luma is 10 or more.
+  - The score is from 0 to 100. It is the mean difference from the frame before, or its change if that is smaller.
+  - Thus steady motion is not a cut.
+  - A frame is black when 98% of its pixels are within 10% of black.
+  - Black of 0.5 s or more is reported.
+- **D31. Boring Detector defaults** (p. 690).
+  - The manual gives none.
+  - Clips longer than 30 s are boring. Clips shorter than 10 frames are jump cuts.
+  - It looks at video tracks.
+  - Its settings are view options, kept between runs. They are not part of the project.
+- **D32. Dynamic Trim** (pp. 730–732).
+  - L or J runs the trim at shuttle speed. Repeat the key for 2× up to 64×.
+  - The run continues until the media or a neighbor runs out.
+  - During the run, it plays with sound, at that speed, what the trim changes under the playhead:
+    - A roll, or the In side, plays the incoming clip on from the cut.
+    - The Out side plays the outgoing clip.
+    - A slide plays the clip beside the edge that the playhead is on.
+    - A slip plays the clip alone, as the timeline plays it. It plays backward when L moves the clip right.
+  - Loop does not wrap the run.
+  - When the mode starts and when a run starts, the playhead goes to the edit. Or it goes to the edge of the first selected clip nearer the playhead.
+  - During the run, the playhead moves with the edit, or with the edge of a sliding clip.
+  - On the In side (Ripple On) and in a slip, the playhead stays.
+  - During the run, the viewer shows the exact frames on both sides of the edit.
+  - For a slip or a slide, it shows four frames: the first and last frames of the clip, over the frames before and after it.
+  - During the run, the timeline shows the clips as the trim leaves them.
+  - While no run occurs, the Trim Editor shows for an edit, and the viewer shows for clips.
+  - K, Space, W, Up/Down and the end of the media stop a run.
+  - They apply the run as one request, and one undo step (deviation X11).
+  - Where the media or a neighbor ran out, the cut turns red, and the viewer tells why (deviation X29).
+  - K held with a tap of J or L trims one frame.
+  - K held with J or L held trims at half speed, until one key is released (D54).
+  - `,`/`.` trim as usual (D20).
+  - While no run occurs, Space plays from 2 s before the playhead to 2 s after it. Then it puts the playhead back.
+- **D33. Rotation metadata.**
+  - The manual does not say.
+  - A display-matrix rotation is applied everywhere, as in players. Phones store portrait video sideways with one.
+  - Thus a portrait clip that sets the format makes a portrait project.
+  - Mirrored matrices count only as rotations.
+- **D34. Interlaced sources** (p. 741).
+  - A stream is interlaced if its field order says so, or if its first frame has the interlaced flag.
+  - Frames with the flag are deinterlaced everywhere with `bwdif`, one frame for each frame (deviation X13).
+  - The deinterlacer keeps the first field.
+  - Output is never interlaced, and never at the field rate.
+- **D35. HDR and color** (pp. 230–239).
+  - A clip is HDR when its transfer is PQ or HLG.
+  - SDR output tone-maps it to BT.709.
+  - The tone-map keeps up to 80% of the 203-nit reference white, and rolls highlights off up to 1000 nits.
+  - HDR output (D44) is BT.2100 in 10 bits, with SDR white at 203 nits (BT.2408).
+  - This is the same as Resolve's "203 nits" option (p. 238).
+  - Untagged media are BT.709 when they are 1280 wide or have more than 576 lines. Else they are BT.601, as players guess.
+  - The Input Color Space of a media (§3) stands in for its tags, and drops its HDR metadata.
+- **D36. Which track an edit point is on** (pp. 696, 720, 729–732).
+  - The Smart Indicator, V, Smart Insert, the alignment of Place On Top, and Up/Down use the edits of Track 1, the main story.
+  - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
+- **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
+  - New Project takes any even picture size from 16 px, and any positive frame rate.
+  - Without them, the first media with video sets both, with no prompt. A prompt would stop scripts and agents.
+  - The size can change at any time.
+  - The rate can change only while the timeline is empty, because positions are whole frames.
+- **D38. Stills** (§3; pp. 114, 1194).
+  - The manual gives two standard still durations: 5 s (p. 114) and 10 s (p. 1194).
+  - vidcut takes 5 s, as a project setting (deviation X16).
+  - A still edited without a range has that duration.
+  - A range or a trim makes it up to 17 h 40 min (p. 1194).
+  - Every source frame of a still shows its picture. Thus only that length limits its clips, the frames of a dissolve too.
+  - A head trim or a dissolve can go before the source start of the still.
+  - A clip keeps its source position, which can be less than 0.
+  - A GIF or WebP of one frame is a still too. A GIF or WebP of more frames is a clip.
+  - Resolve Studio 21.1.1 imports a WebP of one frame as a still.
+  - It imports a GIF of one frame as a still only when its frame has no delay (deviation X39).
+  - FFmpeg 8 cannot decode an animated WebP. With FFmpeg 8, an animated WebP comes in as a still that shows nothing ([to-do](todo/animated-webp-ffmpeg-8.md)).
+- **D39. Image sequences** (§3; p. 366).
+  - `media.add` with `sequence` brings numbered files (`frame_000001.png`, …) in as one clip.
+  - The clip is the unbroken run around each file given.
+  - It is at the project's rate, unless `fps` gives another rate.
+  - `media.add_folder` with `sequence` does this for each run of two or more files in its folders.
+  - The pool names the clip as Resolve does: `frame_[000001-000120].png`.
+  - Without `sequence`, a numbered image is a still (deviation X17).
+- **D40. Timeline interchange with Resolve** (deviation X9; pp. 527–530, 4160).
+  - The manual describes Resolve's OTIO import and export, not the files.
+  - vidcut's OTIO uses the shapes that Resolve writes and needs: source ranges in media timecode, plain paths, link groups, marker notes.
+  - Thus a cut goes to Resolve and back with its media linked, and with its audio together with its video.
+  - Mapping: [deviation X9](deviations.md#x9-opentimelineio-interchange), [model](design/model.md#opentimelineio).
+- **D41. Proxies** (deviation X18; the proxy chapters, pp. 207–218, are outside the Cut page).
+  - Videos and image sequences get proxies on demand (Generate Proxy).
+  - A running GUI also makes proxies for media that are hard to play (preferences `proxies.*`):
+    - image sequences
+    - pictures larger than 3840×2160
+    - files over 150 Mb/s
+  - The GUI checks for these when media are added, when `use_proxies` turns on, and when the file of a proxy is gone.
+  - A proxy whose file is gone counts as no proxy:
+    - The pool marks it LOST PROXY.
+    - The original plays.
+    - These rules make it again as the project names it: its size, and its codec where this computer makes that codec.
+  - The longest side of a proxy is 960 px, unless set.
+  - `auto` selects a codec that the GPU plays ([export](design/export.md#proxies)).
+  - A project names a proxy by its file. Each computer keeps the file in its own proxy folder.
+  - The proxy folder is `proxies` in the project's folder, or the folder that `proxies.folder` gives.
+  - A relative folder is in the project's folder. An absolute folder is shared by every project (deviation X26).
+  - With `use_proxies` on, the preview plays fresh proxies, frame for frame as the originals. Thus heavy media play in real time.
+  - Sound, exports and analyses use the originals.
+- **D42. Audio scrubbing** (§4.5; p. 876).
+  - The manual says only that a drag of the playhead plays the sound.
+  - A frame step, and every move of a paused playhead, plays that frame of the mix.
+  - The frame is faded over 3 ms, against clicks.
+  - It plays forward, also when stepping back: a reversed frame is not heard as backward.
+  - A newer frame replaces any frame that waits. Thus a held key does not pile up frames.
+  - Backward play plays the sound reversed.
+- **D43. Enlarging a track** (pp. 647, 678).
+  - The enlarged track is three times its height, and at least 180 px.
+  - In a short timeline, the other tracks shrink first, to a line each.
+  - It is a view, like the zoom. It is not in the project or in the undo history.
+- **D44. An export's dynamic range and bit depth follow its footage** (§10; deviation X14).
+  - With no color management, `video.hdr` `auto` (the default) decides from the pictures that an export shows, by duration.
+  - The export is HDR when both of these are true:
+    - More than half of the pictures are HDR.
+    - The codec carries HDR (HEVC, AV1, VP9) with a 10-bit encoder on this computer.
+  - HDR output is HLG if every HDR frame is HLG, else PQ.
+  - Otherwise the export is SDR, and HDR is tone-mapped (D35).
+  - An unset depth is 10 for HDR.
+  - It is also 10 for SDR when both of these are true:
+    - Most of the picture has 10 bits or more.
+    - The 10 bits of the codec play widely (not H.264).
+  - The plan tells why.
+  - When HDR is tone-mapped and the user did not ask for it, the Export dialog tells so, with an Export HDR button.
+- **D45. Passes** (§10; Resolve's multi-pass option is on the Deliver page).
+  - Two passes bring an export closer to a target bitrate, and spread its bits better.
+  - At constant quality, they gain nothing worth the time.
+  - Thus an unset `video.passes` is two with a bitrate, where the encoder makes two. Otherwise it is one.
+  - A request for two passes from an encoder that makes one is an error.
+- **D46. HDR metadata follows the footage** (§10; deviation X19).
+  - With no grade, an export carries what its sources give (`video.hdr_metadata` `auto`).
+  - PQ output gets the widest mastering display of the pictures shown.
+  - It also gets their highest MaxCLL and MaxFALL, measured where a source gives none.
+  - SDR pictures count as BT.709 at 203 cd/m². HDR pictures without a display count as BT.2020 at 1000 cd/m².
+  - HLG and SDR output get none.
+  - Each frame keeps its HDR10+ and Dolby Vision where its transfer stays:
+    - HDR10+ (PQ only) when any picture has it. For the other pictures, it is made from measured light.
+    - Dolby Vision when every picture has it, in one profile.
+- **D47. Drop-frame timecode** (§4.3).
+  - At 29.97 and 59.94 fps, record timecode can count drop-frame, as Resolve's project settings offer.
+  - Each minute, drop-frame skips the frame numbers 00 and 01 (00–03 at 59.94), except each tenth minute.
+  - New Project and Project Settings offer it.
+  - It turns on when the media's timecode counts drop-frame, in two cases:
+    - The first video sets the format (D37).
+    - An OTIO import goes into an empty timeline.
+  - It shows as `;` before the frames.
+  - When you type a timecode, `;` means drop-frame. So does `:` in a drop-frame project.
+  - A skipped label is refused. Digits that fill one land on the first frame of the minute.
+- **D48. Clips at another speed** (§1, §8.6; deviation X9).
+  - A clip's constant speed comes from Change Clip Speed or an OTIO file.
+  - The speed applies wherever its pictures and sound go.
+  - Change Clip Speed takes 1% to 10000%, forward or backward.
+  - It also takes 0, which freezes the frame under the playhead.
+  - Without ripple, the clip keeps its length. With ripple, it keeps its source, and later clips follow.
+  - Each frame shows the source frame in which its stretch of the source starts.
+  - Backward, it shows the bottom of the stretch, as Resolve shows it.
+  - There is no blending.
+  - Sound keeps its pitch, and plays reversed when backward. A freeze is silent.
+  - Edits count frames through the speed.
+- **D49. What Join Match Edit Clips joins** (pp. 646, 950).
+  - The manual says only that it rejoins a split clip.
+  - Two clips join when the second plays on from where the first stops. Thus nothing seen or heard changes.
+  - That is, both clips are adjacent on one track, with the same media, speed and settings.
+  - No frames are missing, and no fade or transition is between them.
+  - With two or more clips selected, the selected clips that meet join.
+  - Otherwise the clips at the playhead join. They are selected as for Split (D2).
+  - The first part keeps its id.
+- **D50. Dissolves** (§8.11; deviations X9, X24, X27).
+  - The manual says only that one picture fades as the next comes in.
+  - These rules match Resolve's renders.
+  - Frame i of an n-frame dissolve shows the incoming picture at (i + ½)/n, and the outgoing picture at the rest.
+  - The mix is in the output's code values, not in linear light.
+  - At a gap, the mix is with what is under the track.
+  - A Cross Fade gives the incoming sound √x (+3 dB), x (0 dB) or x^1.5 (−3 dB) at x of the way.
+  - The outgoing sound gets the same of 1 − x.
+  - The Cross Fade has no de-click at its edges.
+  - The manual names no track for the edit nearest the playhead. Thus it is the edit of Track 1 (D36).
+  - Ctrl+T on selected clips puts a dissolve on both edges of each clip, on its track.
+  - An edit between two selected clips gets one dissolve.
+  - A new dissolve is one second long.
+  - It is centered. For an odd length, its middle frame is before the edit.
+  - It is shortened to the media that each side has (deviation X27).
+  - It adds a Cross Fade of +3 dB where the sounds meet.
+  - If it is longer than both sides allow, it fills both sides, as in Resolve.
+  - Example: 999 frames on a cut between two 300-frame clips with long handles make 300 + 300.
+  - At the edge of a clip with no clip beside it, it lies inside the clip. This applies beside an empty track and at the timeline start.
+  - There, it ends on the last frame of the clip, or starts on its first frame.
+  - This is true when U selects the side of the clip, and when U selects both sides.
+  - The empty side alone takes no dissolve.
+  - A fade past the last clip, as an OTIO file can have, makes the program longer.
+- **D51. Loop** (§4.2; p. 640).
+  - The manual says only that Loop Playback loops.
+  - With Loop on, play that reaches the end continues from the start.
+  - With both In and Out set in the viewer, play that reaches the Out continues from the In.
+  - Play from past the Out runs to the end, then continues from the In.
+  - Backward play loops in the opposite direction.
+  - The sound continues without a break.
+  - Loop is off at the start, and it is not in the project.
+- **D52. When the Trim Editor shows** (§8.6; pp. 729–731).
+  - The manual opens it with a double-click.
+  - Resolve Studio 21.1.1 shows it whenever an edit is selected and the player is stopped.
+  - A click on the edit, V or a double-click selects an edit.
+  - A click on a dissolve selects its edit and the dissolve.
+  - In both cases, an edit with a dissolve shows the dissolve (§8.6).
+  - Space plays the timeline as usual, through the edit, with the editor hidden.
+  - When play stops, the editor shows again, with the edit still selected.
+  - A drag on its handles trims at the scale of the lower timeline.
+  - A drag on the ends of a dissolve trims at the scale of the filmstrips.
+- **D53. Import Media Folder** (§3; pp. 654, 658).
+  - The manual says that each imported folder is a bin.
+  - Its bin sync expects bins named as the folders and as the folders in them.
+  - Resolve Studio 21.1.1 makes a bin for each folder in the folder, with the name of that folder.
+  - It does this also for an empty folder, and for a folder that holds only documents. vidcut does the same.
+  - Files and folders with a name that starts with a dot stay out.
+  - Files and folders that Windows marks hidden come in, as in Resolve's Media Storage and its import.
+  - Resolve's order of the clips in the new bin changes from one import of the same folder to the next.
+  - The video whose frame rate Resolve offers a project with an empty pool also changes: it is the first in that order.
+  - vidcut's media come in by name, ignoring case, with the files of a folder before the folders in it.
+  - Thus the first video in that order sets the format (D37).
+  - A file is media by its extension.
+  - The other files, and media that do not open, are skipped, as in Resolve.
+  - But the result and the notice of the GUI name them, and a folder without media is an error (deviation X32).
+  - A bin that exists takes the media of the folder.
+  - Media already in the pool keep their ids, and move into the bin of their folder (deviation X31).
+  - Thus a second import of a folder brings in only its new files.
+  - In Resolve, an import into the bin that holds a file adds nothing.
+  - Numbered images follow D39: `sequence`, or a question in the GUI.
+  - This is checked on the Cut page of Resolve Studio 21.1.1, and through its scripting API.
+  - The scripting API has no call that makes the bins.
+- **D54. Slow play with K** (§4.2; pp. 731, 871).
+  - The manual gives no speed, and no duration for a tap.
+  - Resolve Studio 21.1.1 plays at half speed with the sound slowed, in playback and in Dynamic Trim (checked by hand).
+  - Not checked: whether it keeps the pitch, whether the playhead steps as J or L goes down, and how a held trim undoes.
+  - With K held, a J or L released within 0.25 s is a tap.
+  - On release, a tap steps a frame. In Dynamic Trim, it trims one frame.
+  - Held longer, J or L plays in that direction at half speed until J, L or K is released.
+  - In Dynamic Trim, it runs the trim at half speed.
+  - The run then applies as K applies it, as one undo step (D32).
+  - The sound plays slowed, with its pitch kept, as at any speed other than 1× (deviation X30).
+  - The repeats of a held key are not presses. Thus L held alone plays at 1×.
+- **D55. Undo steps** (§8.10; pp. 651–652; deviations X4, X33–X38).
+  - The manual does not say what a step is, or how a step gets its name.
+  - Every request that changes the project is one step, an `apply` batch too.
+  - Undo and redo are not steps.
+  - Views are not steps: zoom, enlarged tracks, the selection.
+  - Original is the oldest state that the history keeps (X4).
+  - Resolve Studio 21.1.1 names a step by its kind ("Split Clips", "Remove clips", "Add Transition to Edit Points").
+  - vidcut's names tell more (X33).
+  - The steps that a new change replaces stay as a version (X36).
+  - A step can have a name (X37).
+- **D56. Subtitle tracks and cues** (§8.12).
+  - The manual does not say which track shows after a new track is added, or how long a new cue lasts.
+  - Subtitle tracks are `S1`, `S2`, … from the video up.
+  - A new track is the shown track.
+  - A new cue lasts 3 s, or until the next cue of the track starts.
+  - Cues of one track can overlap, and show together.
+  - On the timeline, cues that overlap share the height of their track, each in its own lane.
+  - Split leaves its text in both parts.
+  - Join keeps the first cue, to the end of the last cue, with their texts as lines.
+  - The viewer draws the cues of the shown track as a burn-in draws them (D61), in the style of the track, its font too.
+  - While the Subtitle Track window is open for the shown track, the viewer draws the style of its fields, where they are valid.
+- **D57. Cues follow Track 1** (§6, §8.12; p. 1242).
+  - The manual says only that subtitles linked to clips move with them.
+  - A cue keeps the frames of Track 1 under it:
+    - A ripple delete or trim takes out the part of a cue over the frames taken out.
+    - It drops a cue that has no frames left.
+    - An insert inside a cue splits it. Both parts keep the text.
+    - Overwrite and lift leave cues where they are.
+    - A timeline In–Out delete takes its range out of cues too.
+  - A locked subtitle track does not move.
+  - Resolve Studio 21.1.1 does the same in a ripple delete of a Track 1 clip (Edit page, through its scripting API).
+  - There, the cues inside the clip go, and a cue across its end keeps its part after the clip.
+- **D58. Subtitle file times** (§8.12; pp. 1230, 1247).
+  - Each time goes to the nearest frame.
+  - A file in timecode is timed in seconds from 00:00:00:00.
+  - The start timecode of the timeline counts as frames at the project's rate.
+  - Resolve Studio 21.1.1 does this (checked through its scripting API):
+    - It reads `01:00:00,000` on a 23.976 timeline as 00:59:56:10.
+    - Its renders write a cue at 01:00:00:00 as `01:00:03.599`, at 23.976 and at 29.97 non-drop.
+    - File > Export Subtitle is not checked.
+  - vidcut reads a file in real time, as Resolve writes and reads it. There are two exceptions:
+    - `time_base` on `subtitles.import` says labels: timecode read as a clock, 01:00:00:00 as `01:00:00,000`.
+    - The times of the file with fractions of a second fall on timecode frames, and clearly not on the frames of real time.
+  - Round times (whole seconds, tenths) count for neither.
+  - Thus a round `01:00:00,000` is 3600 s: 00:59:56:10 at 23.976, as Resolve reads it.
+  - At whole rates, the two are the same.
+  - A subtitle file beside an export starts at zero at the start of the output.
+  - A subtitle file beside an OpenTimelineIO file is timed in the timecode of that timeline.
+  - Insert Selected Subtitles to Timeline Using Timecode needs this (checked by hand):
+    - From an SRT in timecode, it puts each cue where it was.
+    - From an SRT timed from zero, it inserts nothing.
+  - An SRT beside a timeline file has no `{\an8}` position tags. Resolve shows these tags as text.
+- **D59. Sorting by timecode** (§3; pp. 666–667).
+  - The manual names the order, not how it sorts.
+  - Timecode sorts by the label of the start timecode of each file.
+  - The start timecode is the recorded timecode of a video, or the time reference of a broadcast WAV.
+  - It sorts by hours, minutes, seconds, and then frames as a part of a second.
+  - Thus files at different rates sort as their labels read.
+  - Example: a 29.97 fps non-drop-frame clip at 01:00:00:00 comes before a 25 fps clip at 01:00:02:00.
+  - The 29.97 fps clip is 3.6 s past the hour in real time.
+  - A file without a start timecode counts as 00:00:00:00.
+  - This is the Start TC that Resolve Studio 21.1.1 gives such a clip (checked through its scripting API).
+  - Thus it comes first in ascending order, and last in descending order.
+  - Equal labels keep their import order, reversed in descending order, as in the other orders.
+- **D60. The Duration field** (§4.4; p. 693).
+  - The manual lists what the field takes. It does not say how it reads it, or what it counts from.
+  - A number alone is frames (`48`). It is not digits that fill a timecode, as in the timecode field (§4.3).
+  - A timecode, or a time with a unit (`00:00:02:00`, `2s`), is that duration.
+  - `+` or `−` before either changes the duration shown by that amount (`+12`, `-5`).
+  - The Out moves to the In plus the new duration.
+  - With no In, the duration counts from the first frame of the clip or the timeline. That frame becomes the In.
+  - With no Out, the duration shown runs to the end of the clip or the timeline.
+  - A duration of less than one frame is refused.
+  - A source Out past the end of the media is refused.
+  - `marks.set` and `media.marks.set` take the same values as `duration`.
+- **D61. Burned-in subtitles** (§8.12; p. 1247; deviations X45, X51).
+  - The manual does not say how a track looks burned in before it has a style.
+  - Resolve's look, from a burn-in render of Resolve Studio 21.1.1 over black (made through its scripting API, 3840×2160):
+    - The tallest letters of a line are 4.2% of the picture height. Those of two lines are 11.3%.
+    - Both are centered at 80.1% of the height.
+    - Its outline or shadow over a bright picture is not checked.
+  - vidcut's look:
+    - White text, 5.5% of the picture height.
+    - Lines 1.31 times that height apart.
+    - A black outline, a twentieth of the text height.
+    - Centered, and wrapped at 90% of the width.
+    - The middle of the block is at 80% of the height.
+    - For a cue placed in the middle, the middle of the block is at 50%. For a cue at the top, it is at 20%.
+    - Measured at 1280×720 with Segoe UI: 4.2% and 11.3%, centered at 80.1%.
+  - The font is Open Sans where it is installed, else the sans-serif font of the system.
+  - For scripts that the font does not have, the system's fonts are used.
+  - Cues that show together at one place are one block, in the order they start.
+  - HDR white is 203 cd/m², the graphics white of ITU-R BT.2408.
+  - A track's style (`track.set`, the Subtitle Track window) replaces that look where it is set:
+    - `font` is a family name. If it is not installed, the text is drawn in the usual font.
+    - `size` is the text height as a fraction of the picture height, above 0 and at most half.
+    - `color` is `#rrggbb`, `#rgb` or a name such as yellow. A color with an opacity is refused.
+    - `outline` is a color and a thickness as a fraction of the text height, from 0 to a tenth.
+    - A tenth is the most that IMSC1 allows. 0 draws no outline.
+    - `background` is a color and an opacity from 0 to 1.
+    - The background is a box behind each line. The box reaches 0.15 of the text height past the line.
+    - `margin` is the inset of the block from the left and right, as that fraction of the width.
+    - For a cue placed at the top or the bottom, `margin` is also the inset from that edge, as that fraction of the height.
+    - `margin` is from 0 up to, but not including, half. A cue in the middle stays centered.
+    - `bold` uses the bold face of the font.
+    - `case` draws every letter `upper` or `lower`.
+    - `shadow` is the drop shadow of a title (D65), behind the text and its outline.
+  - A margin moves a block to the edge:
+    - Without a margin, the middle of a bottom block is at 80% of the height.
+    - With a margin, its bottom edge is at the margin.
+    - Example: a margin of 5% puts the line of a one-line cue at 87.8–95% of the height.
+    - The line is 7.2% of the height (5.5% × 1.31). This is lower than the usual look.
+    - Likewise, with a margin, the top edge of a top block is at the margin. Without a margin, its middle is at 20%.
+  - A project file with a style that `track.set` would refuse is refused.
+  - The viewer draws the style as a burn-in does (D56).
+  - An IMSC1 file has the same look (D64), with the bold face and the capitals.
+  - An IMSC1 file has no shadow, because the IMSC1 text profile does not have one.
+- **D62. Cues from speech** (§8.12; p. 1235).
+  - The manual names the options, not how speech becomes cues.
+  - A cue holds one sentence, or a part of one.
+  - A cue ends at the end of a sentence, and where the speech pauses for a second or more.
+  - A sentence too long for one cue is split into cues of about equal length, at a comma if one is near.
+  - Words wrap onto the lines at the characters per line.
+  - A cue starts at its first word and ends at its last word.
+  - A cue stays at least 5/6 s, where the next cue allows it.
+  - The frames between subtitles shorten a cue that would end closer to the next cue.
+  - Parakeet Ultra, the default, times each word.
+  - A model that gives no times has its text spread over the speech that the voice-activity model found.
+  - Qwen3-ASR gives no times: transcribe.cpp does not run its aligner.
+  - The text is spread by its characters, in pieces of 10 s at the most. Thus the times of its cues are estimates.
+  - Where the GPU in use has less memory than the model wants, the answer warns, and the model runs anyway.
+  - Parakeet Ultra wants 2 GB, Whisper large-v3 4 GB and Qwen3-ASR 8 GB.
+  - A model file that the user names gets no warning.
+  - With Find Speech By Sound Level (`find: sound`, the default), the model hears all sound louder than −40 dBFS (`sound_db`).
+  - Quiet of half a second or more is left out.
+  - This keeps singing, speech over music and a launch countdown. The voice-activity model drops these.
+  - With Voice (`find: voice`), the model hears what the voice-activity model finds.
+  - If that keeps less than a quarter of a range that is mostly louder than −40 dBFS, the answer says so.
+  - Words kept for a file are used again only when they were found the same way, at the same level, as asked.
+- **D63. Word times and cutting them** (§8.13; pp. 1004–1008).
+  - The manual does not say how the time of a word becomes frames.
+  - It does not say what a delete of words that touch cuts.
+  - `analyze.words` answers with each word, its frames, and whether it joins the word before it without a space (`joined`).
+  - The words come from one of these:
+    - the transcript of a media, in source frames
+    - the media of each clip, in timeline frames through the range and speed of the clip (a word whose middle is in the clip)
+    - speech heard from the same mix as Create Subtitles from Audio
+  - Only a model that times words can give them:
+    - Parakeet Ultra times words.
+    - Whisper large-v3 times phrases, and Qwen3-ASR gives no times. Thus they are refused.
+    - The estimates used for their cues are never returned as word times.
+  - `edit.ripple_delete_words` takes the named spans out of every unlocked track, and closes the gap, with ripple on or off.
+  - Spans that touch are one cut.
+  - Times go to the nearest frame. A word shorter than a frame still takes one frame.
+  - A cut at the word edges of the model can take the start of the next word, where no pause separates them.
+  - With `quiet`, as the Transcription window cuts, each edge moves to the quietest frame boundary nearby:
+    - It uses the sound of the tracks heard there.
+    - When two boundaries are equally quiet, it takes the nearer one.
+    - The limits that follow apply as far as the transcripts of the clips show the words.
+    - Inward, it moves no further than a third into any word fully inside the cut, whichever track's transcript has the word.
+    - Thus each word that is cut loses its middle.
+    - Outward, it moves only into the pause beside it, up to the next word, within about a tenth of a second.
+    - Without a transcript, the edges stay.
+  - Filler words are marked from built-in lists, one for each of the 25 languages of Parakeet Ultra.
+  - The list is for the language of the transcript, or for the language that `language` names. With neither, no words are marked.
+  - A list for a language in the preferences (`transcripts.fillers`) replaces its built-in list.
+  - The list of a project (`project.set` `fillers`) replaces both.
+  - A word matches whatever its capitals and the punctuation around it.
+  - The Transcription window shows a pause of a second or more between words as (...).
+  - X takes the sentence around a word: from after the last word that ends with . ! ? or … up to the next such word.
+- **D64. Subtitle file layout** (§8.12; p. 1247).
+  - The manual does not say how the look of a track is written to an IMSC1 file.
+  - vidcut writes the look of D61, styled or not.
+  - Sizes are percentages, because IMSC1 allows `c` units in a text document only in `ebutts:linePadding`.
+  - `ttp:cellResolution` makes the picture 100 rows of cells.
+  - The text height is a percentage of one cell: 5.5% of the picture is `550%`.
+  - Lines are `131%` of it apart.
+  - `proportionalSansSerif` follows the font family.
+  - A name with whitespace in it is in single quotes (`'Open Sans',proportionalSansSerif`).
+  - Reason: TTML1 §8.3.5 takes a name bare or quoted, and IMSC1 §7.4 asks for no whitespace between the parts of the value.
+  - A font name with a quote or a comma in it is refused.
+  - The background is a span around the text of each cue.
+  - Each place has a region:
+    - The region is as wide as the text wraps.
+    - It is anchored where the block is: at the margin, or centered at 20%, 50% and 80%.
+    - It is as tall as the picture allows, while the middle of a top region stays above 40% of the height.
+    - The middle of a bottom region stays below 60%.
+    - Thus vidcut reads each cue back at its place.
+    - A region whose cues need more lines than fit in that height takes all the height that the picture allows.
+  - IMSC1 lets at most four regions show at once (§6.8.3), one more than the three places.
+  - IMSC1 forbids overlap only between regions shown at the same time (§6.8.2).
+  - Thus, where cues at two places show at once, their two regions share the room between them.
+  - Each region keeps the lines its cues need, where both fit.
+  - A cue that still has more lines than its region holds is named in the notes of the export, and in the warnings of `subtitles.export`.
+  - Reason: players can cut it off.
+- **D65. Titles** (§8.14; pp. 763, 1178).
+  - The manual does not give the look of a title, how its text sits, or how it plays over other tracks.
+  - The usual look of a title:
+    - The font of the burn-in (D61).
+    - White, with a black outline a twentieth of the text height, and no background.
+    - Text 96/1080 of the picture height for Text: the height of Resolve's 96-point Text title (D67).
+    - Text 6% of the picture height for a lower third.
+    - Lines 1.31 times the text height apart, wrapped at the width of title safe, 90% of the picture width.
+  - The lines of a Text title are centered. The middle of the block is at the middle of the picture.
+  - The lines of a lower third align left, center or right.
+  - The bottom-left corner, bottom middle or bottom-right corner of its block is 10%, 50% or 90% across and 88% down.
+  - Thus the top of its lower line is about a fifth up the picture, where Resolve's own lower thirds put it (D67).
+  - `position` moves that point (X54).
+  - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>` and `<font>` with a `color`, a `face` and a `size`.
+  - A line takes the height of its largest size.
+  - The lines of a lower third meet one lower-line height above its corner.
+  - Size, color, outline and background take the values and limits of the subtitle style (D61).
+  - The background is one box behind the block. It reaches 0.15 of the text height past its lines.
+  - A drop shadow is a blurred copy of the text and its outline. It is over the background and under the text, as in Resolve.
+  - By default, the shadow is black, 75% opaque and blurred 20. These are Resolve's own values.
+  - Its offset is 0.3% of the picture width right and 0.5% of its height down. Resolve's default offset of 0 draws no shadow.
+  - Zoom draws the text larger, and the background box grows with it.
+  - Rotation turns the whole title, box and shadow too, counterclockwise.
+  - Zoom and rotation work about the middle of a Text title.
+  - For a lower third, they work about the point where its lines meet. Resolve turns each line of a lower third about that point (D67).
+  - Over the tracks below (§8.14):
+    - A clip on a track above covers the title where its picture covers the frame (D75).
+    - A clip that fades in or out above the title fades over it.
+    - Subtitles go over the title.
+  - The lines of a scroll wrap at title safe, and align left, in the middle or right. By default they are in the middle of the picture.
+  - They rise at a steady speed (X55). At the first frame of the clip, they are just below the picture. At its last frame, they are just above it.
+  - A dissolve at the edge of a title fades it in or out, as Resolve does.
+  - The title is drawn through all of the frames of the dissolve, at the level of the dissolve, on both sides of its edge.
+  - The `opacity` of a title fades the whole title. It is Composite's Opacity in Resolve.
+  - A title has no speed.
+  - It draws the same in every export, in `frame.render` and in the viewer, whatever the subtitle settings.
+  - HDR white is graphics white, as for burned-in subtitles.
+- **D66. Where Add Title goes** (§8.14; p. 763).
+  - In the manual, you drop a title where you want it.
+  - Add Title and `titles.add` without a track put a 5 s title at the playhead, over what is there.
+  - The title goes on the video track above the highest track with clips in its frames. If there is no such track, it is made.
+  - This is the track of Place On Top (D24).
+  - With nothing in those frames, the title goes on Track 1. With Ripple On, it is no later than the end of Track 1 (D10).
+  - The title of Add Title is a Text title that reads `Title`.
+  - A title dragged or double-clicked from the Titles tab reads as its card does:
+    - `Title`
+    - `Name` over `Title`, for a lower third
+    - a few lines of credits, for a scroll
+  - A drop puts the title where the pointer is, on the video track under it, as `titles.add` with that track and frame does.
+- **D67. Titles in OTIO files** (§8.14; deviation X9).
+  - The manual does not say how a title goes into an OTIO file.
+  - vidcut writes a title in the shape of Resolve Studio 21.1.1's own file of its titles (made through its scripting API).
+  - **The clip:**
+    - It is a `Clip.2`. Its media is a `GeneratorReference`.
+    - The kind is `Rich` for Text, `Rich Lower Left`, `Rich Lower Middle` or `Rich Lower Right` for a lower third, or `Scroll`.
+    - The name is Text, Left, Middle or Right Lower Third, or Scroll.
+    - The parameters are a `Rich Text` group for a Text title, and two for a lower third.
+    - Then come `Drop Shadow` at Resolve's defaults, `Stroke` and `Background`.
+  - **A `Rich Text` group:**
+    - It holds its lines as Qt rich text (`title blob`).
+    - It has a span for each run of words with the same style.
+    - A span has its font: for a title that names none, the family that vidcut draws it in.
+    - A span also has its size in points, its weight (700 bold, else 400), italic, underline and color.
+    - The group has the alignment of the lines.
+    - Its `anchor` is on a 3×3 grid, counted from the bottom left: 0 bottom left, 4 middle, 8 top right.
+    - Its `position` is in fractions of the picture, from its left and bottom.
+    - Its `transformationZoomX` and `Y` are the zoom of the title.
+    - Its `transformationRotationAngle` is the rotation of the title in degrees, counterclockwise.
+    - The zoom and the rotation are about its anchor point.
+    - Resolve zooms the text alone, and turns the background and shadow with it.
+  - **Points:**
+    - A point is a pixel of the picture, as Resolve draws a title that it reads from a file.
+    - Resolve's own titles have 1/1080 of the picture height to a point ([gotchas](gotchas.md#resolves-otio-files)).
+  - **Positions:**
+    - The `position` of a Text title is its middle (anchor 4).
+    - The upper line of a lower third stands on the point where its lines meet (anchor 0, 1 or 2).
+    - Its lower line hangs from that point (6, 7 or 8).
+    - That point is one line, 1.31 times the text height, above the corner of the title.
+    - Resolve's own lower thirds put their upper line first.
+  - **Stroke:**
+    - A `strokeSize` step is a 160th of the text height.
+    - Thus 16, Resolve's maximum, is a tenth, vidcut's maximum.
+    - An outline of 0 is `strokeSize` 0.
+    - Resolve draws no stroke on a title that it reads from a file. Thus the step is not measured.
+  - **Background:**
+    - It is the box that vidcut draws, with square corners.
+    - `backgroundWidth` and `backgroundHeight` are in fractions of the picture.
+    - `backgroundCenter` is from the anchor point of the last `Rich Text` group. Resolve centers its box on that point.
+    - No background is a height of 0.
+  - **Drop shadow:**
+    - `shadow offset` is in fractions of the picture, right and up.
+    - `shadow` is its blur: a Gaussian whose radius is that many 3300ths of the picture height.
+    - `shadow opacity` is in percent, and `shadow color` is its color.
+    - No shadow is an offset of 0, which Resolve does not draw.
+  - **Opacity:**
+    - The opacity of a title is the `opacity` of the clip's `Composite` effect, in percent.
+    - Resolve draws it (checked at 50%).
+    - A `Cross Dissolve` at its edge fades it there, as in vidcut (checked frame by frame).
+  - The `Title` itself also goes in the `vidcut` metadata of the clip. Thus vidcut reads its own titles back exactly.
+  - Resolve drops this metadata.
+  - **Import:** a Resolve title of those kinds comes in as a title, with these parts:
+    - its lines
+    - the font, size and color of its upper line (of the first line, for a Text title)
+    - an outline, from a `strokeSize` above 0
+    - its other spans as markup, where they are different from that line
+    - a background, from a `backgroundHeight` above 0
+    - a drop shadow, from an offset other than 0
+    - the zoom (X) and the rotation of its lower line or Text group
+  - Keyframes, and a second zoom or rotation, are lost. The warnings of the import tell so.
+  - The lower line of a lower third is the group anchored by its top, else its second group.
+  - The lines of a Text title are centered, whatever their alignment.
+  - If a Text title is anchored at a point other than its middle, that point is taken as its middle.
+  - **A Scroll** has these parts:
+    - a `Text` group, with its plain `text` and its `position`. The x of the position is the middle of a text box as wide as the picture.
+    - a `Formatting` group, with its `font` as Qt writes one, its `size` in points (pixels, as above), its `alignment`, `anchor` and `color`. The `alignment` is 0 left, 1 middle or 2 right in that box.
+    - then `Drop Shadow` and `Background`, with no `Stroke`
+  - vidcut writes the left edge, middle or right edge of its lines there, in plain text, because Resolve's Scroll has no rich text.
+  - vidcut reads a Scroll back with no outline.
+  - vidcut carries other generators.
+  - Resolve writes Text+ as a `MissingReference`, and loses it itself.
+  - vidcut leaves Text+ out with a warning, as it does any clip without media.
+  - Resolve Studio 21.1.1 draws a file that vidcut writes as vidcut does, within a few pixels at 3840×2160, except for the outline.
+  - vidcut reads Resolve's export of that file back to the same titles (checked through its scripting API).
+- **D68. Delete with In and Out past the end** (§8.4; pp. 721, 724–725).
+  - The manual does not say what Delete does when the timeline In and Out are both past the end of the timeline.
+  - This occurs after cuts make the timeline shorter under them.
+  - Nothing is there to remove. Thus Delete takes the selected clips instead.
+- **D69. Animated subtitles** (§8.12; p. 1240; deviation X58).
+  - The manual shows Word Highlight coloring each word as it is spoken.
+  - It says that the Inspector sets the parameters of the templates.
+  - It does not say when a word counts as spoken.
+  - The `words` of a track style shows the words of a cue by their word times (D70):
+    - `highlight` draws every word, and the spoken word in its `color`, #ffd400 unless set.
+    - `reveal` draws each word from its start. The words not yet spoken keep their room, unseen.
+    - `word` draws only the spoken word.
+  - A word is spoken from its start until the next word starts.
+  - The last word is spoken until the cue ends. No word is spoken before the first word starts.
+  - `pop`, from 1 to 2, draws the spoken word that many times its size as it starts.
+  - It eases back to its size over 0.2 s, as (1 − t / 0.2 s)².
+  - It grows about the middle of its place in the line, over its neighbors. The neighbors do not move.
+  - A cue without word times shows all its words at once.
+  - The viewer and a burn-in draw it the same way. Subtitle files and streams get the text.
+  - The looks of Create Subtitles from Audio (`look`) put the cues on a new track, with a style and the usual characters and lines:
+    - Pop: bold capitals, 7.5% of the picture height, an outline 8% of the text height, a shadow and a margin of 15%.
+    - In Pop, the spoken word is #ffd400 and pops at 1.25. Pop has 20 characters on one line.
+    - Highlight and Reveal: bold at 6.5%, with the same outline, shadow and margin. 32 characters on one line.
+    - Word: bold capitals at 10%, popping at 1.15. 20 characters.
+    - Plain: the usual style, at 42.
+  - Its dialog shows the looks as tiles. Each tile draws a sample in its look.
+  - The looks are those of D71.
+  - Export and Quick Export burn in the shown track by default when it animates its words, and say so.
+  - The default of the request stays files.
+- **D70. Word times on cues** (§8.12; p. 1241).
+  - In the manual, a button updates the word timings. It does not say what edits do to them.
+  - A cue keeps the frame on which each word starts, counted from the start of the cue.
+  - A word is what spaces and line breaks separate in its text, without the markup.
+  - Create Subtitles from Audio keeps the word starts of the model.
+  - A model without word times gives the estimates that the times of its cues come from (D62).
+  - `analyze.words` never returns these estimates (D63).
+  - WebVTT inline timestamps import as word times. A word without one is spread between its neighbors.
+  - Edits of cues:
+    - A move of the edge of a cue keeps each word on its frame, clamped into the cue.
+    - A split leaves each part the words of its own frames. The words outside it go to its edge.
+    - A join puts the words of the cues one after another.
+    - Re-time scales the words of a cue with its length.
+    - A timeline edit maps each word through the frames that its cue follows (D57).
+    - A word on a removed frame starts on the next frame that is kept.
+  - New text with the same number of words keeps their times.
+  - With another number of words, the times are read again from the words kept for the files of the clips under the cue.
+  - Else the words are spread over the cue by their characters.
+  - Synchronize Word Timings (`subtitles.time_words`, in the menu of a subtitle track header) hears the speech as Create Subtitles from Audio does.
+  - It matches the words of the cues to the speech in order, across all the cues timed, as Re-time does.
+  - Thus captions that are off from the speech still find their words.
+  - A matched word starts where it was heard, kept inside its cue.
+  - The other words are spread between their matched neighbors by their characters.
+- **D71. Looks** (§8.12, §8.14; pp. 1239–1240; deviation X59).
+  - The manual saves the style of a subtitle track as a named preset, and loads it onto a track.
+  - It does not say where presets are kept, or tell of any built-in presets.
+  - A look is a named style for a subtitle track or a title.
+  - A subtitle look holds the style of a track, and the characters per line and lines that Create Subtitles from Audio uses with it.
+  - When a subtitle look gives no characters and lines, they are 42 and one.
+  - A title look holds all of a title except its text: its kind, alignment, style, place, zoom, rotation and opacity.
+  - Built in for subtitles: Plain, Pop, Highlight, Reveal and Word (D69).
+  - Built in for titles:
+    - Plain: the usual title (D65)
+    - Headline: white at 12% of the picture height, with no outline and a deep soft shadow
+    - Callout: yellow at 11%, with an outline a tenth of the text height and a shadow
+    - Caption: white at 5.5% on a 60% black box, its middle 82% down
+    - News: a lower third at 5% on a blue bar
+    - Soft: a lower third at 5.5%, with a soft shadow and no outline
+  - Your looks are one TOML file each, in `looks/subtitles` and `looks/titles` in the config folder.
+  - The file has the name of the look:
+    - up to 64 characters, without `/ \ : * ? " < > |`
+    - not starting or ending with a dot
+    - matched whatever its case
+  - A built-in look cannot be replaced or deleted, and its name cannot be taken.
+  - The replacement of one of your looks needs `overwrite`. The Save button of the GUI reads Replace.
+  - The GUI asks before it deletes one of your looks.
+  - A replacement or a delete cannot be undone.
+  - A look file that cannot be read is left out, and listed with the reason.
+  - This is also true for a look file that holds what the checks of its kind refuse.
+  - If you name such a look, you get that reason.
+  - The application of a look is one change that you can undo:
+    - `track.set` with `look` sets the style of a track (Apply Look on a subtitle track header).
+    - `titles.add` and `titles.set` with `look` set all of a title except its text. The fields given go on top.
+    - `subtitles.transcribe` takes any subtitle look.
+  - In the Subtitle Track and Title windows:
+    - The Look list fills the fields. It shows the look that they match, or Custom.
+    - Save as Look… saves them. A subtitle look also saves its characters and lines.
+    - Delete deletes the look shown, when it is yours.
+  - The Titles tab shows a card for each title look after Scroll, except Plain. Plain is the card of Text.
+- **D72. Narrow windows** (§2; p. 636).
+  - The manual does not say what the bars do in a window or panel that is too narrow for them.
+  - Nothing overlaps. Items that do not fit go into a ⋯ menu.
+  - The ⋯ menu takes the place of the first item to go. It lists the items in the order of the bar.
+  - The items come back when there is room.
+  - The top bar keeps File, Edit and Timeline.
+  - It gives up Help, Command log, Mixer, Transcription, History, Export, Quick Export, Import Folder, Import, Jobs, and last the no preview warning.
+  - The transport keeps the timecode.
+  - It gives up the shuttle speed, Clear, Mark Out, Mark In, Loop, the trim buttons, Next Edit, Previous Edit, Stop and Play.
+  - The header of the viewer keeps Duration. It gives up Source Tape, Source Clip and Timeline.
+  - The bin bar of the pool keeps Bins, the open bin and Sort. It gives up the bins above the open bin, from Master down.
+  - The bar of the timeline gives up the In and Out, the clip count and the zoom buttons.
+  - The status bar gives up the pid, the decoding, the format, the last change and the version.
+  - These items are shortened with … instead:
+    - the name of the shown clip, and the name of the open bin
+    - a notice, and the line of the Trim Editor
+  - When even the items that stay do not fit, they are cut off at the edge of the panel.
+- **D73. Speakers** (§8.13; pp. 997–1001; deviation X61).
+  - The manual's Speaker Detection numbers speakers, and remembers their voices across the clips of a project.
+  - It does not say how a word gets its speaker, or how many speakers there can be.
+  - vidcut numbers the speakers for each run. It uses one of these:
+    - On this computer: MOSS-Transcribe-Diarize for English and Chinese, else NVIDIA's Sortformer.
+    - xAI's diarization, over every file of one request.
+    - Gemini's diarization, over its one request.
+  - In a 3-minute press conference, MOSS-Transcribe-Diarize tells 7 people apart, where Sortformer tells 4.
+  - Sortformer works for each file, with up to 4 speakers. More speakers share these 4.
+  - The answer warns when Sortformer tells 4 speakers apart.
+  - The Speakers checkbox names the model selected, when it is known before the run.
+  - With the language on Auto, MOSS is used when the speech model reports English or Chinese. Else Sortformer is used.
+  - If MOSS is not downloaded, `download` downloads it. Without `download`, the run stops and says so.
+  - If MOSS fails, the run stops with its error. The error points to Sortformer under Speakers By.
+  - Create Subtitles from Audio over In–Out hears only that part (deviation X56).
+  - Speakers By, under Advanced (`speaker_model`), selects one of the two models on this computer instead.
+  - Its Automatic also names that model.
+  - A kept transcript is used again only when the selected model told its speakers.
+  - A Gemini request takes 30 minutes of speech at most (`SpeechModel::longest_secs`). More is refused before anything is sent.
+  - A word gets the speaker heard over most of it.
+  - A person is `Speaker N` until named.
+  - These belong to the project (`speakers.*`): names, colors, speakers joined across files, and words given to another person.
+  - A transcript kept with a file keeps only its numbers.
+  - A cue of Create Subtitles from Audio ends where the person changes, and keeps that person (deviation X63).
+- **D74. Dragging marks on a ruler** (§4.4; pp. 691–693).
+  - The manual says that you can drag the timeline In/Out and markers on the rulers.
+  - It does not say which part of a ruler grabs them.
+  - The bottom strip of a ruler, where the In/Out flags and the markers are drawn, drags them.
+  - Over a mark, the pointer becomes a left-right arrow.
+  - The rest of the ruler, and the space under the tracks of the lower timeline, move the playhead.
+  - A dragged mark is drawn where it goes. The change occurs on release.
+- **D75. Transform and Crop** (§8.15; pp. 766–768; deviation X65).
+  - The manual gives the controls.
+  - It does not give the units, the order in which they work, or how a placed clip plays over the tracks below.
+  - The order, and how a placed clip plays, match Resolve's renders.
+  - **Order:**
+    - The picture of a clip is fitted into the frame.
+    - Then it is cropped, flipped, zoomed, turned and moved, in that order.
+    - All of these work about the middle of the whole picture.
+    - The zoom works across and down in the picture's own axes, before the turn.
+    - The rotation is counterclockwise.
+    - The crop cuts the source picture, and what is left stays where it was.
+  - **Over the tracks below:**
+    - A clip covers the tracks below it only where its picture covers the frame, at its usual values too.
+    - The tracks below show in the bars around a picture of another shape, outside a placed picture, and where it is cropped.
+    - Where there are no tracks below, these areas are black.
+    - A clip whose fitted picture fills the frame, to within half a pixel, covers them all.
+    - Its edges are smoothed over a pixel.
+    - The two sides of a dissolve mix into each other first, and then go over the tracks below.
+    - Thus the tracks below do not show through where both sides cover the frame (D50).
+  - **Units** (vidcut's, X65):
+    - `position` is where the middle of the picture goes: `[x, y]` in fractions of the frame from its top left.
+    - Each value of `position` is from −100 to 100. `[0.5, 0.5]` leaves the picture in place.
+    - `zoom` is how much larger the picture is drawn across and down, each from 1/100 to 100. One number sets both.
+    - `rotation` is in degrees, from −3600 to 3600.
+    - The flips mirror the picture left to right and top to bottom.
+    - The crop cuts each side by a fraction of the source picture, and leaves some of it.
+    - Values at their usual place are left out of the project file.
+  - **Compound clips:**
+    - A compound clip is placed as one picture. The pictures inside it go with it, cut at its frame.
+    - Its tracks play over each other as the tracks of the timeline do.
+    - The tracks below it show wherever its tracks leave its frame uncovered.
+    - The titles inside it stay where they are ([todo](todo/clip-transform.md)).
+    - `edit.decompose` drops its picture, and says so.
+  - An export fits a placed picture at the size it shows, up to the size of the source. Thus a punch-in keeps the detail of the source.
+  - The viewer draws it from the decoded picture with the same sums.
+  - Titles keep their own place (X54).
+  - **Viewer handles** (those of a title, X52):
+    - A drag inside moves the picture. Its middle snaps to the middle and thirds of the frame, and a guide shows.
+    - Shift keeps the drag on one axis, and Alt turns snapping off.
+    - A corner zooms both ways in proportion, and a side zooms one way, about the middle. The pointer shows the zoom.
+    - The handle above the box, or a drag just outside a corner, turns the picture.
+    - Shift turns it in steps of 15°. The pointer shows the angle.
+    - The Crop handles move one side each. The uncropped picture shows dashed.
+    - While the Transform handles show, the wheel or a pinch over the picture zooms it as a corner does, 10% for each notch.
+    - Alt+wheel turns it, 1° for each notch, counterclockwise for wheel up.
+    - With Shift too, Alt+wheel turns it to the next multiple of 15°.
+    - The picture follows the drag or the wheel.
+    - One `picture.set` follows on release, or when the wheel has been still for a moment.
+    - It also follows when the handles hide, the clip changes or a drag starts.
+  - **Tools row:**
+    - Each flip is one `picture.set`.
+    - Reset is `picture.clear`, as in the right-click menu.
+    - They act on the clip that the handles go on: the selected clip at the playhead, else the top clip there.
+    - While there is no such clip, the buttons of the row are greyed out.
+    - A lit Transform or Crop is not greyed out, and still hides its handles.
+  - `picture.get`, `picture.set` and `picture.clear` do the same from a script.
+  - `edit.copy` and `edit.paste` carry the picture of a clip.
+  - **OTIO:**
+    - The picture goes in the `vidcut` metadata of the clip.
+    - It also goes in Resolve's Transform, Cropping and Retime and Scaling, fitted.
+    - An import takes vidcut's own metadata. Else it reads those effects.
+    - Resolve's crop, fill and stretch become a zoom, and its anchor point becomes a `position` ([gotchas](gotchas.md#resolves-otio-files)).
+    - When one of these effects has keyframes or other parameters, such as Pitch and Yaw, all three stay on the clip, unplayed (X9).
+    - This is also true when they make a picture that vidcut refuses, such as a crop that leaves nothing.
+    - The export names the clips moved further than Resolve's Pan and Tilt go, 4 pictures, and writes them at 4.

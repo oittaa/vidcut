@@ -1,6 +1,5 @@
 README.md
 docs/cli.md
-docs/cut-page-spec.md
 docs/design/analysis.md
 docs/design/export.md
 docs/design/gpu.md
