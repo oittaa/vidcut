@@ -1692,7 +1692,7 @@ impl Workspace {
                     theme::decorated(ui, Deco::Card, |ui| self.mixer_panel(ui))
                 });
         }
-        egui::Panel::left("pool")
+        let pool = egui::Panel::left("pool")
             .resizable(true)
             .default_size(430.0)
             .min_size(260.0)
@@ -1707,7 +1707,9 @@ impl Workspace {
                         self.pool_panel(ui);
                     }
                 })
-            });
+            })
+            .response
+            .rect;
         if self.history.open {
             egui::Panel::left("history")
                 .resizable(true)
@@ -1727,6 +1729,7 @@ impl Workspace {
             tiles.end_frame();
         }
         self.media_drag_overlay(&ctx);
+        self.drop_hint(&ctx, pool);
     }
 }
 
