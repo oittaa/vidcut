@@ -134,8 +134,8 @@ impl Field {
             Field::Top => c.top * fh,
             Field::Bottom => c.bottom * fh,
             Field::StartZoom | Field::EndZoom => 100.0 / b.size,
-            Field::StartX | Field::EndX => (b.center[0] - 0.5) * fw,
-            Field::StartY | Field::EndY => (0.5 - b.center[1]) * fh,
+            Field::StartX | Field::EndX => (0.5 - b.center[0]) / b.size * fw,
+            Field::StartY | Field::EndY => (b.center[1] - 0.5) / b.size * fh,
         }
     }
 
@@ -173,8 +173,8 @@ impl Field {
             Field::Top => side(c.bottom, fh),
             Field::Bottom => side(c.top, fh),
             Field::StartZoom | Field::EndZoom => 100.0 / BOX.1..=100.0 / BOX.0,
-            Field::StartX | Field::EndX => (-REACH - 0.5) * fw..=(REACH - 0.5) * fw,
-            Field::StartY | Field::EndY => (0.5 - REACH) * fh..=(0.5 + REACH) * fh,
+            Field::StartX | Field::EndX => -REACH * fw / BOX.0..=REACH * fw / BOX.0,
+            Field::StartY | Field::EndY => -REACH * fh / BOX.0..=REACH * fh / BOX.0,
         }
     }
 
@@ -213,9 +213,14 @@ impl Field {
                     &mut z.end
                 };
                 match self {
-                    Field::StartZoom | Field::EndZoom => b.size = (100.0 / v).clamp(BOX.0, BOX.1),
-                    Field::StartX | Field::EndX => b.center[0] = at(0.5 + v / fw),
-                    _ => b.center[1] = at(0.5 - v / fh),
+                    Field::StartZoom | Field::EndZoom => {
+                        let size = (100.0 / v).clamp(BOX.0, BOX.1);
+                        let keep = |c: f64| at(0.5 - (0.5 - c) / b.size * size);
+                        b.center = [keep(b.center[0]), keep(b.center[1])];
+                        b.size = size;
+                    }
+                    Field::StartX | Field::EndX => b.center[0] = at(0.5 - v / fw * b.size),
+                    _ => b.center[1] = at(0.5 + v / fh * b.size),
                 }
                 out.dynamic_zoom = Some(z);
             }

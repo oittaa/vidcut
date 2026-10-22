@@ -1414,9 +1414,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Rotation is in degrees, counterclockwise.
     - Crop is in pixels of the picture as it is fitted into the frame, before the zoom, as in Resolve.
     - The zoom of a Dynamic Zoom box is in percent. At 200%, the picture shows at twice its size. At 50%, it shows at half its size.
-    - The X and Y of a box are the middle of the part of the picture that shows.
-    - They are in pixels of the fitted picture from its middle, with Y up.
-    - Thus a larger X moves the picture to the left.
+    - The X and Y of a box are where the middle of the picture is at the start or at the end.
+    - They are in pixels of the fitted picture from the middle of the clip, with Y up.
+    - As with Position, a larger X moves the picture to the right. A new zoom of a box keeps the middle of the picture in place.
   - A drag on a field changes its value. A click on a field lets the user type a value.
   - The picture follows a drag in the viewer. One change follows on release.
   - A typed value is one change. Each change is one undo step.

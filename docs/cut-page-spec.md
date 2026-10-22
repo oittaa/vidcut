@@ -1691,7 +1691,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - **In the viewer**, Alt+T shows the boxes on the clip that T uses (X65).
     - The viewer still draws that clip with its Dynamic Zoom, as the output shows it.
     - The green box shows where the picture is at the start of the clip. The red box shows where it is at the end.
-    - At a zoom of 71%, the box is 71% of the area of the clip.
+    - At a zoom of 71%, the box is 71% of the width and of the height of the clip.
     - The boxes stay in place while the clip plays. The picture moves from the green box to the red box.
     - The manual says that the green box shows the starting size and position of the transform, and the red box the ending ones (p. 768).
     - A line joins the centers of the two boxes.

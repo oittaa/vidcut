@@ -274,7 +274,8 @@ impl Shown {
                 {
                     return Some(Hold::ZoomSize(e));
                 }
-                ends.into_iter()
+                [Boxed::End, Boxed::Start]
+                    .into_iter()
                     .filter(|e| self.end_holds(*e, p))
                     .max_by(|a, b| a.of(&z).size.total_cmp(&b.of(&z).size))
                     .map(Hold::ZoomMove)
