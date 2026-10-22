@@ -1484,3 +1484,35 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Resolve's Audio panel has the Volume and the Voice Isolation of a clip (p. 743). The Audio section has them too.
   - Mute is beside Volume, as in the strip of the Mixer. Thus the user does not need the right-click menu to mute a clip.
   - Voice Isolation uses the controls of the right-click menu. Thus it acts the same, also with the download question.
+
+## X71. Clip volume is a line on the clip, without keyframes
+
+- **Resolve:**
+  - On the Edit page, each clip with sound has a volume overlay. A drag up or down on it sets the level of the clip (p. 1109).
+  - Shift gives finer steps (p. 1109). The overlay is flat at first (p. 1112).
+  - Over the overlay, the Move cursor shows. A drag up raises the volume, and a drag down lowers it (p. 1112).
+  - An Alt-click on the overlay makes a keyframe. Two keyframes or more change the level over time (pp. 1109, 1112).
+  - The Volume of the Cut page's Inspector is the value of the overlay (p. 743). The Cut chapters tell of no drag on the overlay.
+  - The volume commands of the Edit page change several selected clips together. The clips keep the differences between their levels (p. 1110).
+- **vidcut:**
+  - Each clip with sound has a thin line in its sound part, at the height of its gain (`gain_db`).
+  - The line shows where the sound part is tall enough. In a short row, the line is not shown.
+  - Over the line, the pointer becomes an up-down arrow.
+  - A drag on the line moves it, and sets the gain. Shift makes the drag finer.
+  - During the drag, the timeline shows the new gain, and a label beside the line shows its value.
+  - On release, one `clip.set` goes in. It is one undo step.
+  - A drag on a clip that is not selected changes only that clip. It does not select the clip.
+  - A drag on a selected clip changes all the selected clips with sound by the same number of dB:
+    - Thus they keep the differences between their gains. Each gain stops at −60 dB and at +24 dB.
+    - On release, one `apply` holds a `clip.set` for each clip that changes. It is one undo step.
+  - A line on a locked track does not take a drag. A selected clip on a locked track does not change.
+  - A drag on another part of the clip moves, trims or slips the clip.
+  - The scale and the steps are in [D77](cut-page-spec.md#12-decisions-on-gaps-and-contradictions).
+  - The line and the Volume of the Inspector's Audio section ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)) set the same gain.
+  - vidcut has no keyframes. Thus the line stays flat, and an Alt-click on it does what a click does.
+- **Why:**
+  - The line shows the gain of each clip at a glance. A drag sets it without a window.
+  - The Edit page has the overlay, and the Inspector of the Cut page has its value. The line gives the timeline of vidcut the same control.
+  - A drag changes a value by an amount. A move of several clips also moves each clip by the same amount.
+  - Resolve's volume commands also keep the differences between the selected clips.
+  - Keyframes on the volume need keyframes in the model first. The Alt-click stays free for them.
