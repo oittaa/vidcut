@@ -44,6 +44,7 @@ pub(super) struct HistoryUi {
     flash: Option<(u64, f64)>,
     follow: bool,
     offset: f32,
+    height: f32,
     seen: Option<(usize, usize)>,
     find: String,
     kind: Option<&'static str>,
@@ -466,6 +467,7 @@ impl Workspace {
         };
         if self.history.seen != Some((steps.done, steps.line.len())) {
             self.history.seen = Some((steps.done, steps.line.len()));
+            self.history.cursor = None;
             self.history.follow = true;
         }
         ui.horizontal(|ui| {
@@ -682,10 +684,14 @@ impl Workspace {
             self.history.follow = false;
             let top = at as f32 * (ROW + spacing);
             let offset = self.history.offset;
+            let seen = match self.history.height {
+                h if h > 0.0 => h,
+                _ => view.min(ui.available_height()),
+            };
             if top < offset {
                 area = area.vertical_scroll_offset(top);
-            } else if top + ROW > offset + view {
-                area = area.vertical_scroll_offset((top + ROW - view).max(0.0));
+            } else if top + ROW > offset + seen {
+                area = area.vertical_scroll_offset((top + ROW - seen).max(0.0));
             }
         }
         let now = when::now_ms();
@@ -696,6 +702,7 @@ impl Workspace {
             }
         });
         self.history.offset = out.state.clamped_offset().y;
+        self.history.height = out.inner_rect.height();
         let footer = self.history_footer(steps);
         ui.add_space(6.0);
         ui.add(egui::Label::new(RichText::new(footer).color(theme::colors().text_dim)).wrap());
@@ -1034,6 +1041,10 @@ impl Workspace {
                 );
                 ui.painter()
                     .galley(pos2(x, mid - text.size().y / 2.0), text, c.text_dim);
+                if s.request.is_some() {
+                    let project = self.snap.project.as_ref().map(|p| p.path.as_path());
+                    r.context_menu(|ui| copy_command(ui, project, s));
+                }
             }
             Row::Flag(i) => {
                 let s = &steps.line[i];

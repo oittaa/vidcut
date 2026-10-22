@@ -254,7 +254,7 @@ The bar and the Jobs button:
 - A `LogEntry` holds:
   - the origin
   - the method and params
-  - a summary in words (`vidcut_core::describe::describe`)
+  - a summary in words (`vidcut_core::describe::describe`), made from the project before an edit runs (`Job`)
   - success or error
   - the revision
   - whether the project changed

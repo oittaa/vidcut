@@ -110,9 +110,10 @@ impl Fields {
         } else {
             self.list.iter().collect()
         };
-        let parts: Vec<String> = match shown.len() {
-            0 => vec!["unchanged".into()],
-            1 | 2 => shown
+        let loud = shown.iter().filter(|f| !f.quiet).count();
+        let parts: Vec<String> = match (shown.len(), loud) {
+            (0, _) => vec!["unchanged".into()],
+            (_, 0..=2) => shown
                 .iter()
                 .map(|f| match &f.old {
                     _ if f.quiet => f.name.clone(),
@@ -122,7 +123,7 @@ impl Fields {
                 .collect(),
             _ => shown.iter().map(|f| f.name.clone()).collect(),
         };
-        let bare = moved && shown.len() <= 2 && shown.iter().any(|f| f.names && f.old.is_some());
+        let bare = moved && loud <= 2 && shown.iter().any(|f| f.names && f.old.is_some());
         let thing = if bare { self.kind } else { &self.thing };
         format!("{thing}: {}", parts.join(", "))
     }
@@ -294,11 +295,9 @@ fn color_space(v: &Value) -> String {
 }
 
 fn rate(v: &Value) -> String {
-    match v.as_str().and_then(|s| s.parse::<Rational>().ok()) {
-        Some(r) if r.den() == 1 => r.num().to_string(),
-        Some(r) => trim(r.as_f64()),
-        None => raw(v),
-    }
+    v.as_str()
+        .and_then(|s| s.parse::<Rational>().ok())
+        .map_or_else(|| raw(v), Rational::decimal)
 }
 
 fn seconds(v: &Value) -> String {
@@ -306,7 +305,7 @@ fn seconds(v: &Value) -> String {
         .map_or_else(|| raw(v), |n| format!("{}s", trim(n)))
 }
 
-const STYLE: [(&str, &str); 18] = [
+const STYLE: [(&str, &str); 20] = [
     ("font", "Font"),
     ("size", "Size"),
     ("color", "Color"),
@@ -317,11 +316,13 @@ const STYLE: [(&str, &str); 18] = [
     ("background.color", "Background"),
     ("background.opacity", "Opacity"),
     ("shadow", "Shadow"),
+    ("shadow.color", "Shadow Color"),
     ("shadow.opacity", "Shadow Opacity"),
     ("shadow.offset", "Shadow Offset"),
     ("shadow.blur", "Shadow Blur"),
     ("margin", "Margin"),
     ("words", "Words"),
+    ("words.show", "Show Words"),
     ("words.color", "Spoken Word"),
     ("words.pop", "Pop"),
     ("speaker_color", "Speaker Color"),
@@ -333,7 +334,7 @@ fn style_show(key: &str) -> Show<'static> {
         | "words.pop" => &percent,
         "shadow.offset" => &percents,
         "shadow.blur" => &number,
-        "case" | "words" | "speaker_color" => &word,
+        "case" | "words.show" | "speaker_color" => &word,
         _ => &raw,
     }
 }
@@ -359,16 +360,15 @@ fn leaves(style: &Value) -> BTreeMap<String, Value> {
     }
     let mut out = BTreeMap::new();
     walk(style, "", &mut out);
-    for (key, inner, usual) in [("shadow", "color", "black"), ("words", "show", "highlight")] {
+    for key in PRESENT {
         if style[key].is_object() {
-            let shown = out
-                .remove(&format!("{key}.{inner}"))
-                .unwrap_or_else(|| json!(usual));
-            out.insert(key.to_string(), shown);
+            out.insert(key.to_string(), json!(true));
         }
     }
     out
 }
+
+const PRESENT: [&str; 2] = ["shadow", "words"];
 
 fn style(f: &mut Fields, before: &[Value], after: &Value, size: f64) {
     let new = leaves(after);
@@ -387,11 +387,16 @@ fn style(f: &mut Fields, before: &[Value], after: &Value, size: f64) {
         } else {
             Value::Null
         };
+        let absent = if PRESENT.contains(&key.as_str()) {
+            json!(false)
+        } else {
+            Value::Null
+        };
         let olds: Vec<Value> = old
             .iter()
-            .map(|m| m.get(key).cloned().unwrap_or(Value::Null))
+            .map(|m| m.get(key).cloned().unwrap_or_else(|| absent.clone()))
             .collect();
-        let now = new.get(key).cloned().unwrap_or(Value::Null);
+        let now = new.get(key).cloned().unwrap_or(absent);
         f.put(name, &olds, &now, style_show(key), &usual);
     }
 }
@@ -430,8 +435,9 @@ impl Words<'_> {
             s.f.naming();
         }
         s.put("kind", "Kind", &word, |t| json!(t.kind));
-        s.put("align", "Align", &word, |t| json!(t.align()));
         let first = s.of.first().copied();
+        let align = first.map_or(Value::Null, |t| json!(t.align()));
+        s.usual("align", "Align", &word, align, |t| json!(t.align));
         if self.params["style"].is_object() {
             let size = Title::usual_size(first.map_or(TitleKind::Text, |t| t.kind));
             let olds = s.olds(|t| json!(t.style));
@@ -553,8 +559,9 @@ impl Words<'_> {
             s.add("Dynamic Zoom", &on, &raw, Value::Null, |q| {
                 json!(q.dynamic_zoom.is_some())
             });
+            let had = s.of.iter().all(|q| q.dynamic_zoom.is_some());
             let was = |q: &Picture| q.dynamic_zoom.unwrap_or_default();
-            for side in ["start", "end"] {
+            for side in ["start", "end"].into_iter().filter(|_| had) {
                 let of = |z: DynamicZoom| if side == "start" { z.start } else { z.end };
                 let label = title_case(side);
                 if let Some(size) = zoom[side]["size"].as_f64() {
@@ -574,7 +581,7 @@ impl Words<'_> {
                     );
                 }
             }
-            if !zoom["ease"].is_null() {
+            if had && !zoom["ease"].is_null() {
                 s.add("Ease", &zoom["ease"], &ease, Value::Null, |q| {
                     json!(was(q).ease)
                 });
@@ -782,13 +789,25 @@ impl Words<'_> {
                 json!(x.still_secs)
             });
         }
+        let list = |v: &Value| match v.as_array().map(Vec::len) {
+            Some(n) => Shown {
+                text: if n == 1 {
+                    "1 word".into()
+                } else {
+                    format!("{n} words")
+                },
+                value: v.to_string(),
+            },
+            None => Shown::of("usual"),
+        };
         for (language, words) in p["fillers"].as_object().into_iter().flatten() {
             let language = language.trim().to_lowercase();
-            let name = format!("Filler Words ({language})");
-            s.add(name, words, &raw, Value::Null, |x| {
-                json!(x.fillers.get(&language))
-            });
-            s.f.quiet();
+            let old = s
+                .olds(|x| json!(x.fillers.get(&language)))
+                .iter()
+                .map(list)
+                .collect();
+            s.f.shown(format!("Filler Words ({language})"), old, list(words));
         }
         s.f.text()
     }

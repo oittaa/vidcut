@@ -760,23 +760,34 @@ impl Editor {
             Request::HistoryRevert { step } => return self.revert(step, client, dry_run),
             _ => {}
         }
+        let mut working = self.project.clone();
+        let mut parts = Vec::new();
+        let result = match &request {
+            Request::Apply { commands, .. } => batch(
+                &mut working,
+                commands,
+                env,
+                playhead,
+                dry_run,
+                Some(&mut parts),
+            )?,
+            _ => mutate(&mut working, &request, env, playhead, dry_run)?,
+        };
+        let label = match (&request, parts.as_slice()) {
+            (Request::Apply { label: None, .. }, [one]) => one.clone(),
+            (Request::Apply { label: None, .. }, [first, rest @ ..]) => {
+                format!("{first} and {} more", rest.len())
+            }
+            _ => label_of(&request, &self.project, playhead),
+        };
         let step = Step {
-            label: label_of(&request, &self.project, playhead),
+            label,
             kind: Some(request.method()),
             by: client,
             request: crate::steps::Call::of(&request),
-            parts: match &request {
-                Request::Apply { commands, .. } => commands
-                    .iter()
-                    .filter(|c| c.is_mutation())
-                    .map(|c| label_of(c, &self.project, playhead))
-                    .collect(),
-                _ => Vec::new(),
-            },
+            parts,
             ..Step::default()
         };
-        let mut working = self.project.clone();
-        let result = mutate(&mut working, &request, env, playhead, dry_run)?;
         let mut warnings = Vec::new();
         let dropped = otio::transitions::prune(&mut working);
         if dropped > 0 {
@@ -1523,24 +1534,6 @@ fn to_value<T: serde::Serialize + ?Sized>(x: &T) -> Value {
 }
 
 fn label_of(request: &Request, project: &Project, playhead: Option<i64>) -> String {
-    if let Request::Apply {
-        commands,
-        label: None,
-    } = request
-    {
-        let edits: Vec<&Request> = commands.iter().filter(|c| c.is_mutation()).collect();
-        match edits.as_slice() {
-            [one] => return label_of(one, project, playhead),
-            [first, rest @ ..] => {
-                return format!(
-                    "{} and {} more",
-                    label_of(first, project, playhead),
-                    rest.len()
-                );
-            }
-            [] => {}
-        }
-    }
     let json = serde_json::to_value(request).unwrap_or_default();
     let method = json["method"]
         .as_str()
@@ -2301,6 +2294,50 @@ fn without_marks<T>(
 
 fn need(at: Option<i64>, what: &str) -> Result<i64> {
     at.ok_or_else(|| Error::usage(format!("{what} is required (no live playhead)")))
+}
+
+fn batch(
+    p: &mut Project,
+    commands: &[Request],
+    env: &dyn Env,
+    playhead: Option<i64>,
+    dry_run: bool,
+    mut labels: Option<&mut Vec<String>>,
+) -> Result<Value> {
+    let mut results = Vec::new();
+    for (i, cmd) in commands.iter().enumerate() {
+        if matches!(
+            cmd,
+            Request::HistoryUndo { .. }
+                | Request::HistoryRedo { .. }
+                | Request::HistoryGo { .. }
+                | Request::HistoryMark { .. }
+                | Request::HistoryUnmark { .. }
+                | Request::HistoryRestore { .. }
+                | Request::HistoryRevert { .. }
+                | Request::Apply { .. }
+        ) {
+            return Err(Error::usage(format!(
+                "command {i}: {} cannot be batched",
+                cmd.method()
+            )));
+        }
+        let r = if cmd.is_mutation() {
+            if let Some(labels) = labels.as_deref_mut() {
+                labels.push(label_of(cmd, p, playhead));
+            }
+            mutate(p, cmd, env, playhead, dry_run)
+        } else {
+            query(p, &Labels::default(), cmd, env, playhead, dry_run)
+        };
+        results.push(r.map_err(|e| {
+            Error::new(
+                e.code,
+                format!("command {i} ({}): {}", cmd.method(), e.message),
+            )
+        })?);
+    }
+    Ok(json!({ "results": results }))
 }
 
 fn mutate(
@@ -3736,39 +3773,7 @@ fn mutate(
             fill_contents(p, &made, env, at, &mut warnings);
             json!({ "clips": made, "warnings": warnings })
         }
-        Request::Apply { commands, .. } => {
-            let mut results = Vec::new();
-            for (i, cmd) in commands.iter().enumerate() {
-                if matches!(
-                    cmd,
-                    Request::HistoryUndo { .. }
-                        | Request::HistoryRedo { .. }
-                        | Request::HistoryGo { .. }
-                        | Request::HistoryMark { .. }
-                        | Request::HistoryUnmark { .. }
-                        | Request::HistoryRestore { .. }
-                        | Request::HistoryRevert { .. }
-                        | Request::Apply { .. }
-                ) {
-                    return Err(Error::usage(format!(
-                        "command {i}: {} cannot be batched",
-                        cmd.method()
-                    )));
-                }
-                let r = if cmd.is_mutation() {
-                    mutate(p, cmd, env, playhead, dry_run)
-                } else {
-                    query(p, &Labels::default(), cmd, env, playhead, dry_run)
-                };
-                results.push(r.map_err(|e| {
-                    Error::new(
-                        e.code,
-                        format!("command {i} ({}): {}", cmd.method(), e.message),
-                    )
-                })?);
-            }
-            json!({ "results": results })
-        }
+        Request::Apply { commands, .. } => batch(p, commands, env, playhead, dry_run, None)?,
         Request::SpeakersSet {
             person,
             name,

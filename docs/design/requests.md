@@ -146,7 +146,11 @@ sequenceDiagram
 - An edit that changes nothing makes no revision and no undo step.
 - Else the clone becomes the project, and `rev` goes up by one.
 - The history then gets an `Entry`: a label (`describe`) and the `Change`.
-- The label of a request that sets fields of one thing names each field that changed. `describe` takes the old value from the project before the edit, and the new value from the params.
+- The label of a request that sets fields names each field that changed (`describe::set`). [Deviation X33](../deviations.md#x33-each-undo-step-says-what-where-and-how-much) lists these requests and the exceptions.
+  - The old value comes from the project before the edit. The new value comes from the params.
+  - A value that the project does not have shows as "usual". A field shows no old value when the things it changes have different old values.
+  - A quiet field shows only its name, and does not count toward the limit of two fields with values.
+- In an `apply`, `batch` names each command against the project after the commands before it.
 
 `apply`:
 

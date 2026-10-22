@@ -197,6 +197,7 @@ pub(crate) struct Job {
     reply: Option<Reply>,
     rev: Option<u64>,
     dry_run: bool,
+    said: Option<String>,
 }
 
 pub(crate) enum Msg {
@@ -375,6 +376,7 @@ impl Handle {
                         reply: None,
                         rev: None,
                         dry_run: false,
+                        said: None,
                     },
                     result: Err(Error::internal(e)),
                 });
@@ -1421,13 +1423,19 @@ impl Live {
             ),
             _ => (envelope.request.method(), Value::Null),
         };
+        let before = self.project.as_ref().map(|o| o.project());
+        let said = envelope
+            .request
+            .is_mutation()
+            .then(|| vidcut_core::describe::describe(&method, &params, before));
         let job = Job {
             method,
             params,
             origin,
             reply,
-            rev: self.project.as_ref().map(|p| p.project().rev),
+            rev: before.map(|p| p.rev),
             dry_run: envelope.dry_run,
+            said,
         };
         if let Some(expected) = expected {
             let open = self.project.as_ref().map(|p| p.store.path());
@@ -1998,8 +2006,10 @@ impl Live {
     }
 
     fn summary(&self, job: &Job, result: &Result<Response>) -> String {
-        let project = self.project.as_ref().map(|o| o.project());
-        let said = vidcut_core::describe::describe(&job.method, &job.params, project);
+        let said = job.said.clone().unwrap_or_else(|| {
+            let project = self.project.as_ref().map(|o| o.project());
+            vidcut_core::describe::describe(&job.method, &job.params, project)
+        });
         let steps = |key: &str| {
             result
                 .as_ref()

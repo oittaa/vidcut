@@ -509,16 +509,25 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It names the clip by its name, else by the name of its media.
   - It gives the place as a timecode and a track.
   - An example: "Trim the end of Interview.mp4 by -12 frames at 00:01:02:10 on V1".
-  - A step that sets values on one thing names each field that changed, with its old and new value.
+  - A request that sets values names each field that changed, with its old and new value.
+  - These requests do this: `titles.set`, `subtitles.set`, `picture.set`, `track.set`, `clip.set`, `media.set`, `speakers.set`, `markers.set`, `project.set`, `marks.set` and `media.marks.set`.
   - An example: "Title “Intro”: Size 10% → 14%, Color usual → #ffd700".
-  - "usual" is the value of a field that has no value of its own.
-  - A step that changed three fields or more names only the fields.
+  - "usual" is the value of a field that has no value of its own. "none" is a mark that is not set.
+  - A `style` replaces the whole style. Thus the step also names a style field that the request leaves out, which goes back to "usual".
+  - Word Times show only their name. A list of filler words shows its number of words.
+  - With three changed fields or more, the step names only the fields. A field that shows only its name does not count.
+  - When the old values of the clips or media are not all the same, the field shows only its new value.
+  - The boxes of a Dynamic Zoom show their old values only when the clip had a Dynamic Zoom. Else the step says "Dynamic Zoom off → on".
+  - A `look` shows only its name.
+  - `tape.marks.set` shows only the new marks. `preferences.set` changes no project, and its label lists the new values.
+  - In an `apply` batch, each command is named against the project after the commands before it.
   - An `apply` batch lists its commands under it.
   - Edit > Undo and Redo name the step.
   - Ctrl+Z and Ctrl+Shift+Z tell what they undid or redid. For a short time, they also outline where it was in the timeline ([D55](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - Ten lines of "Split Clips" do not tell the user which step to go back to.
   - A step that only says "Change title" does not tell what an undo puts back.
+  - A step never shows an old value that the project did not have.
   - An undo can change something off screen, or something that an agent did. Then it looks as if nothing occurred.
 
 ## X34. The undo history says who made each step, and when
