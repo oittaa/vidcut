@@ -81,6 +81,10 @@ pub struct ShownTitle {
     /// How a dissolve at its clip's edge fades it in or out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fade: Option<Ramp>,
+    /// Where it goes over the frame: the picture of each compound clip it
+    /// plays inside, outward. Empty, it is drawn over the frame as it is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub placed: Vec<Placed>,
 }
 
 /// Where a piece is in its clip, which a moving title and a Dynamic Zoom
@@ -125,6 +129,7 @@ impl ShownTitle {
             title: self.title.clone(),
             run: self.run.after(k),
             fade: self.fade.map(|r| r.after(k)),
+            placed: self.placed.iter().map(|p| p.after(k)).collect(),
         }
     }
 
@@ -912,6 +917,7 @@ impl Layer {
             | Layer::Crossing(VideoPiece::Source { placed, .. }, _) => {
                 placed.len() > outer.len() && placed.ends_with(outer)
             }
+            Layer::Title(t) => !outer.is_empty() && t.placed.ends_with(outer),
             _ => false,
         }
     }
@@ -1061,6 +1067,8 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                 }
             }
             let lettered = |c: &Clip, fade: Option<Ramp>| {
+                let nest =
+                    within.and_then(|w| w.get(t.clips.iter().position(|o| std::ptr::eq(o, c))?));
                 Some(ShownTitle {
                     clip: c.id.clone(),
                     title: c.title.clone()?,
@@ -1070,6 +1078,8 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                         held: false,
                     },
                     fade,
+                    placed: nest
+                        .map_or_else(Vec::new, |n| n.outer.iter().map(|p| p.after(x)).collect()),
                 })
             };
             match played.iter().find(|d| d.frames.0 <= x && x < d.frames.1) {

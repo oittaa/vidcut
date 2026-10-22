@@ -8,7 +8,7 @@ use vidcut_av::hw::Kind;
 use vidcut_av::player::{Layout, Picture, TitleOver, TitlePicture};
 use vidcut_av::thumbs::Image;
 use vidcut_core::model::Hdr;
-use vidcut_core::place::Placing;
+use vidcut_core::place::{Level, Placing, chain, lettered};
 use vidcut_core::render::Placed;
 
 pub struct Gpu {
@@ -458,16 +458,14 @@ impl Mixing {
         let view = texture.create_view(&Default::default());
         let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vidcut dissolve"),
-            size: 48,
+            size: LETTERING as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let (w, h) = (size.0 as f32, size.1 as f32);
-        let bytes: Vec<u8> = [0.0, 0.0, w, h, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
-            .iter()
-            .flat_map(|v: &f32| v.to_le_bytes())
-            .collect();
-        gpu.queue.write_buffer(&params, 0, &bytes);
+        let (w, h) = (f64::from(size.0), f64::from(size.1));
+        let whole = [1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0];
+        gpu.queue
+            .write_buffer(&params, 0, &lettering_of(whole, 1.0, None));
         let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vidcut dissolve"),
             layout: &gpu.lettering_layout,
@@ -566,7 +564,7 @@ impl Letters {
         }
         let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vidcut title"),
-            size: 48,
+            size: LETTERING as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -597,28 +595,26 @@ impl Letters {
     }
 
     fn place(&self, gpu: &Gpu, size: (u32, u32), t: &TitleOver) {
-        let (dx, dy, alpha) = (t.dx, t.dy, t.alpha);
         let p = &self.picture;
         let (fw, fh) = (f64::from(p.frame.0.max(1)), f64::from(p.frame.1.max(1)));
         let (sx, sy) = (f64::from(size.0) / fw, f64::from(size.1) / fh);
-        let place = [
-            f64::from(p.left + dx) * sx,
-            f64::from(p.top + dy) * sy,
-            f64::from(p.width) * sx,
-            f64::from(p.height) * sy,
-            f64::from(alpha),
-            0.0,
-            0.0,
-            0.0,
-            f64::from(t.turn[0]) * sx,
-            f64::from(t.turn[1]) * sy,
+        let (w, h) = (
+            f64::from(p.width.max(1)) * sx,
+            f64::from(p.height.max(1)) * sy,
+        );
+        let own = lettered(
+            [f64::from(t.turn[0]) * sx, f64::from(t.turn[1]) * sy],
             f64::from(t.turn[2]),
             f64::from(t.turn[3]),
-        ];
-        let bytes: Vec<u8> = place
-            .iter()
-            .flat_map(|v| (*v as f32).to_le_bytes())
-            .collect();
+            [f64::from(p.left + t.dx) * sx, f64::from(p.top + t.dy) * sy],
+        );
+        let own = chain(&own, &[1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0]);
+        let frame = (f64::from(size.0), f64::from(size.1));
+        let placing = (!t.placed.is_empty()).then(|| Placing::whole(&t.placed, frame));
+        let map = placing
+            .as_ref()
+            .map_or(own, |l| chain(&l.inner(frame), &own));
+        let bytes = lettering_of(map, f64::from(t.alpha), placing.as_ref());
         gpu.queue.write_buffer(&self.params, 0, &bytes);
     }
 }
@@ -631,6 +627,7 @@ fn same_titles(a: &[TitleOver], b: &[TitleOver]) -> bool {
                 && x.dy == y.dy
                 && x.turn == y.turn
                 && x.alpha == y.alpha
+                && x.placed == y.placed
                 && Arc::ptr_eq(&x.picture, &y.picture)
         })
 }
@@ -1943,6 +1940,36 @@ fn shader() -> String {
 
 const PARAMS: usize = (11 + 3 * LEVELS) * 16;
 
+const LETTERING: usize = (2 + 3 * LEVELS) * 16;
+
+fn innermost(placing: Option<&Placing>) -> &[Level] {
+    placing.map_or(&[][..], |p| {
+        &p.levels[p.levels.len().saturating_sub(LEVELS)..]
+    })
+}
+
+fn level_floats(levels: &[Level]) -> Vec<f64> {
+    let mut floats = Vec::with_capacity(12 * LEVELS);
+    for l in levels {
+        let [a, b, e, c, d, f] = l.back;
+        floats.extend([a, b, e, 0.0, c, d, f, 0.0]);
+        floats.extend(l.shown);
+    }
+    floats.resize(12 * LEVELS, 0.0);
+    floats
+}
+
+fn lettering_of(map: [f64; 6], alpha: f64, placing: Option<&Placing>) -> Vec<u8> {
+    let [a, b, e, c, d, f] = map;
+    let levels = innermost(placing);
+    let mut floats = vec![a, b, e, alpha, c, d, f, levels.len() as f64];
+    floats.extend(level_floats(levels));
+    floats
+        .into_iter()
+        .flat_map(|v| (v as f32).to_le_bytes())
+        .collect()
+}
+
 fn sixteen(layout: Layout) -> bool {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::Yuv422p => false,
@@ -2033,21 +2060,14 @@ fn params_of(
     for v in [hdr, turns, uv, 0, across, down, 0, 0] {
         out.extend_from_slice(&v.to_le_bytes());
     }
-    let levels = placing.map_or(&[][..], |(p, _)| {
-        &p.levels[p.levels.len().saturating_sub(LEVELS)..]
-    });
+    let levels = innermost(placing.map(|(p, _)| p));
     let mut floats = vec![
         levels.len() as f64,
         placing.map_or(0.0, |(_, l)| *l),
         0.0,
         0.0,
     ];
-    for l in levels {
-        let [a, b, e, c, d, f] = l.back;
-        floats.extend([a, b, e, 0.0, c, d, f, 0.0]);
-        floats.extend(l.shown);
-    }
-    floats.resize(4 + 12 * LEVELS, 0.0);
+    floats.extend(level_floats(levels));
     for v in floats {
         out.extend_from_slice(&(v as f32).to_le_bytes());
     }

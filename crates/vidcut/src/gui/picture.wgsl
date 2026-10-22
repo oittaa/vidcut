@@ -92,6 +92,15 @@ fn rgb(s: vec3<f32>) -> vec3<f32> {
     return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>) -> vec3<f32> {
+    let uv = vec2<f32>(dot(a.xy, px) + a.z, dot(b.xy, px) + b.z);
+    let gu = length(a.xy);
+    let gv = length(b.xy);
+    let edges = vec4<f32>((uv.x - s.x) / gu, (s.z - uv.x) / gu, (uv.y - s.y) / gv, (s.w - uv.y) / gv);
+    let e = clamp(edges + 0.5, vec4<f32>(0.0), vec4<f32>(1.0));
+    return vec3<f32>(uv, e.x * e.y * e.z * e.w);
+}
+
 fn placed(px: vec2<f32>) -> vec4<f32> {
     let n = u32(p.placed.x);
     var cover = 1.0;
@@ -101,13 +110,9 @@ fn placed(px: vec2<f32>) -> vec4<f32> {
     for (var i = 0u; i < n; i++) {
         let a = p.levels[i * 3u];
         let b = p.levels[i * 3u + 1u];
-        let s = p.levels[i * 3u + 2u];
-        uv = vec2<f32>(dot(a.xy, px) + a.z, dot(b.xy, px) + b.z);
-        let gu = length(a.xy);
-        let gv = length(b.xy);
-        let edges = vec4<f32>((uv.x - s.x) / gu, (s.z - uv.x) / gu, (uv.y - s.y) / gv, (s.w - uv.y) / gv);
-        let e = clamp(edges + 0.5, vec4<f32>(0.0), vec4<f32>(1.0));
-        cover *= e.x * e.y * e.z * e.w;
+        let c = cut(a, b, p.levels[i * 3u + 2u], px);
+        uv = c.xy;
+        cover *= c.z;
         across = vec2<f32>(a.x, b.x);
         down = vec2<f32>(a.y, b.y);
     }
@@ -154,9 +159,9 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
 }
 
 struct Lettering {
-    place: vec4<f32>,
-    fade: vec4<f32>,
-    turn: vec4<f32>,
+    across: vec4<f32>,
+    down: vec4<f32>,
+    levels: array<vec4<f32>, 3u * LEVELS>,
 };
 
 @group(0) @binding(5) var<uniform> lettering: Lettering;
@@ -164,23 +169,37 @@ struct Lettering {
 
 @fragment
 fn fs_title(in: Out) -> @location(0) vec4<f32> {
-    let d = in.position.xy - lettering.turn.xy;
-    let c = cos(lettering.turn.w);
-    let s = sin(lettering.turn.w);
-    let px = lettering.turn.xy + vec2<f32>(d.x * c - d.y * s, d.x * s + d.y * c) / lettering.turn.z;
-    let rel = (px - lettering.place.xy) / lettering.place.zw;
-    if any(rel < vec2<f32>(0.0)) || any(rel >= vec2<f32>(1.0)) {
+    let px = in.position.xy;
+    let m = lettering.across;
+    let k = lettering.down;
+    let at = vec2<f32>(dot(m.xy, px) + m.z, dot(k.xy, px) + k.z);
+    let across = vec2<f32>(m.x, k.x);
+    let down = vec2<f32>(m.y, k.y);
+    let size = vec2<f32>(textureDimensions(letters));
+    let reach = (abs(across) + abs(down)) * 0.5 + vec2<f32>(0.5) / size;
+    if any(at + reach <= vec2<f32>(0.0)) || any(at - reach >= vec2<f32>(1.0)) {
         discard;
     }
-    let cover = vec2<f32>(textureDimensions(letters)) / lettering.place.zw;
-    let taps = vec2<u32>(clamp(ceil(cover), vec2<f32>(1.0), vec2<f32>(8.0)));
-    let step = vec2<f32>(1.0) / (lettering.place.zw * vec2<f32>(taps));
-    let first = (px - vec2<f32>(0.5) - lettering.place.xy) / lettering.place.zw + step * 0.5;
+    var cover = 1.0;
+    let n = u32(k.w);
+    for (var i = 0u; i < n; i++) {
+        let l = lettering.levels[i * 3u];
+        cover *= cut(l, lettering.levels[i * 3u + 1u], lettering.levels[i * 3u + 2u], px).z;
+    }
+    if cover <= 0.0 {
+        discard;
+    }
+    let spans = vec2<f32>(length(across * size), length(down * size));
+    let taps = vec2<u32>(clamp(ceil(spans), vec2<f32>(1.0), vec2<f32>(8.0)));
     var sum = vec4<f32>(0.0);
     for (var j = 0u; j < taps.y; j++) {
         for (var i = 0u; i < taps.x; i++) {
-            sum += textureSampleLevel(letters, bilinear, first + vec2<f32>(f32(i), f32(j)) * step, 0.0);
+            let o = (vec2<f32>(f32(i), f32(j)) + 0.5) / vec2<f32>(taps) - 0.5;
+            let q = at + across * o.x + down * o.y;
+            let t = q * size;
+            let e = clamp(t + 0.5, vec2<f32>(0.0), vec2<f32>(1.0)) * clamp(size + 0.5 - t, vec2<f32>(0.0), vec2<f32>(1.0));
+            sum += textureSampleLevel(letters, bilinear, q, 0.0) * (e.x * e.y);
         }
     }
-    return sum / f32(taps.x * taps.y) * lettering.fade.x;
+    return sum / f32(taps.x * taps.y) * (cover * m.w);
 }

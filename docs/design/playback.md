@@ -136,6 +136,7 @@ Motions:
   - how many layers go under it
   - how it is moved, scaled and turned from how it was drawn: its place, zoom and rotation, or the `Run::top` of a scroll. The viewer's shader does the transform.
   - the level at which a fade or its opacity draws it (in the shader's `Lettering`)
+  - the pictures of the compound clips that it plays inside (`ShownTitle::placed`). A picture that `Player::preview_picture` drags takes the place of its own.
 - Until a title is drawn, the newest drawing of its clip shows, moved to its place. Thus a drag, a new color or new text does not blink.
 - The frame is not exact until the title is drawn.
 
@@ -220,7 +221,11 @@ The audio device:
   - The draw of a placed layer maps each pixel back through its `place::Placing` levels to the decoded picture. It taps the picture as finely as it is shrunk.
   - The draw of a placed layer also covers its edges in part, and lays the layer over the layers below, premultiplied.
   - The two sides of a dissolve with a placed picture are added into a picture of their own (`Mixing`). That picture is then laid over the frame.
-  - Each title is one more draw after the layers under it (`fs_title`). It is placed by the frame it was drawn for, and shrunk with as many taps as the picture.
+  - Each title is one more draw after the layers under it (`fs_title`).
+  - Its `Lettering` holds one affine map from each pixel back to the drawing (`place::lettered`). The map also goes through the pictures of its compound clips (`Placing::inner`).
+  - `Lettering` also holds the `place::Placing` levels of these compound clips. They cover the edges of each compound clip in part, as for a placed layer.
+  - The draw taps the title as finely as it is shrunk. Outside the drawing, a tap is clear.
+  - For a title in a placed compound clip, these are the sums of the export (`export::place::title`).
 - On the UI thread, `Viewer::sync` shows the target as an egui native texture.
 - A present answers with the frame drawn, if it is exact.
 - A `gui.screenshot` of the viewer reads the target back, to the pixel.

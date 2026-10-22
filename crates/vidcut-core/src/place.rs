@@ -41,10 +41,11 @@ fn level(placed: &Placed, (w, h): (f64, f64), [fx, fy, fw, fh]: [f64; 4]) -> Lev
     }
 }
 
-fn then(outer: &[f64; 6], inner: &[f64; 6], (w, h): (f64, f64)) -> [f64; 6] {
-    let [a1, b1, e1, c1, d1, f1] = *outer;
-    let [a2, b2, e2, c2, d2, f2] = *inner;
-    let (a2, b2, c2, d2) = (a2 * w, b2 * h, c2 * w, d2 * h);
+pub const SAME: [f64; 6] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+
+pub fn chain(first: &[f64; 6], next: &[f64; 6]) -> [f64; 6] {
+    let [a1, b1, e1, c1, d1, f1] = *first;
+    let [a2, b2, e2, c2, d2, f2] = *next;
     [
         a2 * a1 + b2 * c1,
         a2 * b1 + b2 * d1,
@@ -55,11 +56,38 @@ fn then(outer: &[f64; 6], inner: &[f64; 6], (w, h): (f64, f64)) -> [f64; 6] {
     ]
 }
 
-fn ahead(m: &[f64; 6], [u, v]: [f64; 2]) -> [f64; 2] {
+fn scaled(m: &[f64; 6], (w, h): (f64, f64)) -> [f64; 6] {
+    let [a, b, e, c, d, f] = *m;
+    [a * w, b * w, e * w, c * h, d * h, f * h]
+}
+
+fn then(outer: &[f64; 6], inner: &[f64; 6], frame: (f64, f64)) -> [f64; 6] {
+    chain(&scaled(outer, frame), inner)
+}
+
+pub fn apply(m: &[f64; 6], [x, y]: [f64; 2]) -> [f64; 2] {
+    let [a, b, e, c, d, f] = *m;
+    [a * x + b * y + e, c * x + d * y + f]
+}
+
+pub fn ahead(m: &[f64; 6], [u, v]: [f64; 2]) -> [f64; 2] {
     let [a, b, e, c, d, f] = *m;
     let det = a * d - b * c;
     let (u, v) = (u - e, v - f);
     [(d * u - b * v) / det, (a * v - c * u) / det]
+}
+
+pub fn lettered([px, py]: [f64; 2], zoom: f64, radians: f64, [ox, oy]: [f64; 2]) -> [f64; 6] {
+    let (sin, cos) = radians.sin_cos();
+    let (a, b, c, d) = (cos / zoom, -sin / zoom, sin / zoom, cos / zoom);
+    [
+        a,
+        b,
+        px - a * px - b * py - ox,
+        c,
+        d,
+        py - c * px - d * py - oy,
+    ]
 }
 
 impl Level {
@@ -73,7 +101,11 @@ impl Placing {
         let whole = [0.0, 0.0, frame.0, frame.1];
         let mut levels: Vec<Level> = Vec::with_capacity(placed.len());
         for (i, p) in placed.iter().enumerate().rev() {
-            let own = level(p, frame, if i == 0 { fitted } else { whole });
+            let at = if i == 0 { fitted } else { whole };
+            if i == 0 && !levels.is_empty() && at == whole && p.picture.is_usual() {
+                continue;
+            }
+            let own = level(p, frame, at);
             let back = match levels.last() {
                 Some(outer) => then(&outer.back, &own.back, frame),
                 None => own.back,
@@ -84,6 +116,14 @@ impl Placing {
             });
         }
         Self { levels }
+    }
+
+    pub fn whole(placed: &[Placed], frame: (f64, f64)) -> Self {
+        Self::new(placed, frame, [0.0, 0.0, frame.0, frame.1])
+    }
+
+    pub fn inner(&self, frame: (f64, f64)) -> [f64; 6] {
+        self.levels.last().map_or(SAME, |l| scaled(&l.back, frame))
     }
 
     pub fn at(&self, x: f64, y: f64) -> Option<([f64; 2], f64)> {

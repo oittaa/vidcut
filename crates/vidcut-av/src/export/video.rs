@@ -631,7 +631,9 @@ impl Burner {
 struct KeptTitle {
     title: Title,
     size: (u32, u32),
+    upright: bool,
     drawn: Drawn,
+    laid: Option<(Vec<Placed>, i32, Drawn)>,
     used: bool,
 }
 
@@ -650,15 +652,23 @@ impl Titles {
     ) -> Result<frame::Video> {
         let size = (f.width(), f.height());
         for shown in titles {
+            let upright = !shown.placed.is_empty();
             let at = self
                 .kept
                 .iter()
-                .position(|k| k.size == size && k.title == shown.title);
+                .position(|k| k.size == size && k.upright == upright && k.title == shown.title);
             let at = at.unwrap_or_else(|| {
+                let rotation = shown.title.rotation.filter(|_| !upright);
+                let drawn = Title {
+                    rotation,
+                    ..shown.title.clone()
+                };
                 self.kept.push(KeptTitle {
                     title: shown.title.clone(),
                     size,
-                    drawn: Drawn::of(crate::burn::title(&shown.title, size.0, size.1)),
+                    upright,
+                    drawn: Drawn::of(crate::burn::title(&drawn, size.0, size.1)),
+                    laid: None,
                     used: false,
                 });
                 self.kept.len() - 1
@@ -673,9 +683,26 @@ impl Titles {
                 _ => 0,
             };
             let alpha = shown.alpha() as f32;
-            f = k
-                .drawn
-                .over(f, output, &mut self.gpu_failed, "titles", ((0, dy), alpha))?;
+            if !upright {
+                f = k
+                    .drawn
+                    .over(f, output, &mut self.gpu_failed, "titles", ((0, dy), alpha))?;
+                continue;
+            }
+            if k.laid
+                .as_ref()
+                .is_none_or(|(placed, at, _)| *placed != shown.placed || *at != dy)
+            {
+                let sprite =
+                    k.drawn.sprites.first().and_then(|s| {
+                        super::place::title(s, &shown.title, &shown.placed, dy, size)
+                    });
+                let drawn = Drawn::of(sprite.into_iter().collect());
+                k.laid = Some((shown.placed.clone(), dy, drawn));
+            }
+            if let Some((_, _, drawn)) = k.laid.as_mut() {
+                f = drawn.over(f, output, &mut self.gpu_failed, "titles", ((0, 0), alpha))?;
+            }
         }
         Ok(f)
     }

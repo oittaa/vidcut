@@ -1,6 +1,8 @@
-use vidcut_core::place::Placing;
-use vidcut_core::render::WHOLE;
+use vidcut_core::model::Title;
+use vidcut_core::place::{Placing, ahead, apply, chain, lettered};
+use vidcut_core::render::{Placed, WHOLE};
 
+use crate::burn::Sprite;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{ffi, format, frame};
 
@@ -174,6 +176,131 @@ pub(crate) fn over(under: &frame::Video, layer: &Layer) -> Result<frame::Video> 
         });
     }
     Ok(out)
+}
+
+fn texel(s: &Sprite, i: i64, j: i64) -> [f64; 4] {
+    if i < 0 || j < 0 || i >= i64::from(s.width) || j >= i64::from(s.height) {
+        return [0.0; 4];
+    }
+    let p = s.rgba[j as usize * s.width as usize + i as usize].map(f64::from);
+    [p[0] * p[3], p[1] * p[3], p[2] * p[3], p[3]]
+}
+
+fn bilinear(s: &Sprite, [x, y]: [f64; 2]) -> [f64; 4] {
+    let (fx, fy) = (x - 0.5, y - 0.5);
+    let (kx, ky) = (fx.floor(), fy.floor());
+    let (ax, ay) = (fx - kx, fy - ky);
+    let (kx, ky) = (kx as i64, ky as i64);
+    let mut out = [0.0; 4];
+    for (dx, dy, k) in [
+        (0, 0, (1.0 - ax) * (1.0 - ay)),
+        (1, 0, ax * (1.0 - ay)),
+        (0, 1, (1.0 - ax) * ay),
+        (1, 1, ax * ay),
+    ] {
+        for (o, v) in out.iter_mut().zip(texel(s, kx + dx, ky + dy)) {
+            *o += v * k;
+        }
+    }
+    out
+}
+
+pub(crate) fn title(
+    s: &Sprite,
+    t: &Title,
+    placed: &[Placed],
+    dy: i32,
+    (width, height): (u32, u32),
+) -> Option<Sprite> {
+    let frame = (f64::from(width), f64::from(height));
+    let placing = Placing::whole(placed, frame);
+    let [px, py] = t.pivot();
+    let own = lettered(
+        [px * frame.0, py * frame.1],
+        1.0,
+        t.turn().to_radians(),
+        [f64::from(s.x), f64::from(s.y + dy)],
+    );
+    let map = chain(&placing.inner(frame), &own);
+    let (sw, sh) = (f64::from(s.width), f64::from(s.height));
+    let corners = [
+        [-0.5, -0.5],
+        [sw + 0.5, -0.5],
+        [sw + 0.5, sh + 0.5],
+        [-0.5, sh + 0.5],
+    ]
+    .map(|c| ahead(&map, c));
+    let [bx0, by0, bx1, by1] = placing.bounds(frame)?.map(f64::from);
+    let lo = |i: usize| corners.iter().map(|c| c[i]).fold(f64::INFINITY, f64::min) - 1.0;
+    let hi = |i: usize| {
+        corners
+            .iter()
+            .map(|c| c[i])
+            .fold(f64::NEG_INFINITY, f64::max)
+            + 1.0
+    };
+    let x0 = lo(0).floor().clamp(bx0, bx1) as u32;
+    let x1 = hi(0).ceil().clamp(bx0, bx1) as u32;
+    let y0 = lo(1).floor().clamp(by0, by1) as u32;
+    let y1 = hi(1).ceil().clamp(by0, by1) as u32;
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let [a, b, _, c, d, _] = map;
+    let taps = |u: f64, v: f64| (u.hypot(v).ceil() as usize).clamp(1, 8);
+    let (tx, ty) = (taps(a, c), taps(b, d));
+    let shade = |x: u32, y: u32| -> [f32; 4] {
+        let (cx, cy) = (f64::from(x) + 0.5, f64::from(y) + 0.5);
+        let Some((_, cover)) = placing.at(cx, cy) else {
+            return [0.0; 4];
+        };
+        let [qx, qy] = apply(&map, [cx, cy]);
+        let mut sum = [0.0; 4];
+        for j in 0..ty {
+            for i in 0..tx {
+                let ox = (i as f64 + 0.5) / tx as f64 - 0.5;
+                let oy = (j as f64 + 0.5) / ty as f64 - 0.5;
+                let p = bilinear(s, [qx + a * ox + b * oy, qy + c * ox + d * oy]);
+                for (o, v) in sum.iter_mut().zip(p) {
+                    *o += v;
+                }
+            }
+        }
+        let alpha = sum[3] / (tx * ty) as f64 * cover;
+        if alpha <= 0.0 {
+            return [0.0; 4];
+        }
+        [
+            (sum[0] / sum[3]) as f32,
+            (sum[1] / sum[3]) as f32,
+            (sum[2] / sum[3]) as f32,
+            alpha as f32,
+        ]
+    };
+    let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
+    let mut rgba = vec![[0.0f32; 4]; w * h];
+    std::thread::scope(|scope| {
+        let mut rest = rgba.as_mut_slice();
+        for band in bands(0..h) {
+            let (chunk, next) = rest.split_at_mut(band.len() * w);
+            rest = next;
+            let shade = &shade;
+            scope.spawn(move || {
+                for (k, row) in band.enumerate() {
+                    for (col, p) in chunk[k * w..][..w].iter_mut().enumerate() {
+                        *p = shade(x0 + col as u32, y0 + row as u32);
+                    }
+                }
+            });
+        }
+    });
+    Some(Sprite {
+        x: x0 as i32,
+        y: y0 as i32,
+        width: w as u32,
+        height: h as u32,
+        rgba,
+    })
 }
 
 pub(crate) fn overlay(
