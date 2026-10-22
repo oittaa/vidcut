@@ -337,10 +337,7 @@ pub fn tools() -> Result<Vec<Value>> {
         },
     })];
     for variant in root["oneOf"].as_array().into_iter().flatten() {
-        let Some(method) = variant["properties"]["method"]["const"]
-            .as_str()
-            .or_else(|| variant["properties"]["method"]["enum"][0].as_str())
-        else {
+        let Some(&method) = vidcut_core::request::method_names(variant).first() else {
             continue;
         };
         if HIDDEN.contains(&method) {

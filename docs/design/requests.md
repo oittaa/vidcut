@@ -27,7 +27,7 @@ flowchart TD
 ## One vocabulary
 
 - `Request` has one variant per method. It is serialized as `method` and `params`.
-- Its JSON schema (`session::schema`) generates the CLI commands (`cli::command`) and the MCP tools (`mcp::tools`). Thus every door uses the same names.
+- Its JSON schema (`request::protocol_schema`) generates the CLI commands (`cli::command`) and the MCP tools (`mcp::tools`). Thus every door uses the same names.
 - An `Envelope` adds the two options that every request takes:
   - `if_rev`: fail with `ErrorCode::Conflict` unless the project is at that revision.
   - `dry_run`.
@@ -157,6 +157,7 @@ sequenceDiagram
 - `apply` runs a list of requests in order on one clone. It makes one revision and one undo step.
 - Any error fails all the requests in the list.
 - Undo, redo and `apply` cannot be in the list.
+- The commands in the list cannot have `if_rev` or `dry_run`. These options go on the `apply` request.
 
 ## Undo history
 

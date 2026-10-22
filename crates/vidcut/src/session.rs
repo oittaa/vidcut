@@ -578,33 +578,16 @@ fn answer(result: Value) -> Response {
 }
 
 pub fn schema(method: Option<&str>) -> Result<Value> {
-    let root = serde_json::to_value(schemars::schema_for!(Request))
-        .map_err(|e| Error::internal(e.to_string()))?;
+    let root = vidcut_core::request::protocol_schema();
     let Some(method) = method else {
-        return Ok(root);
+        return Ok(root.clone());
     };
-    let variants = root
+    let variant = root
         .get("oneOf")
         .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let names = |v: &Value| -> Vec<String> {
-        let m = &v["properties"]["method"];
-        m.get("const")
-            .and_then(Value::as_str)
-            .map(|s| vec![s.to_string()])
-            .or_else(|| {
-                m.get("enum").and_then(Value::as_array).map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_str().map(String::from))
-                        .collect()
-                })
-            })
-            .unwrap_or_default()
-    };
-    let variant = variants
-        .iter()
-        .find(|v| names(v).iter().any(|n| n == method))
+        .into_iter()
+        .flatten()
+        .find(|v| vidcut_core::request::method_names(v).contains(&method))
         .ok_or_else(|| Error::not_found(format!("unknown method {method:?}")))?;
     Ok(json!({
         "method": method,

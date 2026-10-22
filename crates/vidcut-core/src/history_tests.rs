@@ -224,7 +224,7 @@ fn going_to_a_step_cannot_be_batched() {
         "apply",
         json!({"commands": [{"method": "history.go", "params": {"step": 1}}]}),
     ));
-    assert_eq!(e.message, "command 0: history.go cannot be batched");
+    assert_eq!(e.message, "entry 1: history.go cannot be batched");
 }
 
 #[test]

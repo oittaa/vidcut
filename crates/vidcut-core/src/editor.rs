@@ -2318,7 +2318,8 @@ fn batch(
                 | Request::Apply { .. }
         ) {
             return Err(Error::usage(format!(
-                "command {i}: {} cannot be batched",
+                "entry {}: {} cannot be batched",
+                i + 1,
                 cmd.method()
             )));
         }
@@ -2333,7 +2334,7 @@ fn batch(
         results.push(r.map_err(|e| {
             Error::new(
                 e.code,
-                format!("command {i} ({}): {}", cmd.method(), e.message),
+                format!("entry {} ({}): {}", i + 1, cmd.method(), e.message),
             )
         })?);
     }
