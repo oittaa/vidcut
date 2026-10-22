@@ -215,6 +215,7 @@ pub struct TimelineView {
     pub cue_menu: Option<cues::CueMenu>,
     pub(super) adding: Option<crate::gui::export::Ask>,
     pub cue_dialog: Option<crate::gui::subtitles::CueDialog>,
+    pub(crate) cue_landings: Vec<crate::gui::subtitles::Landing>,
     pub track_dialog: Option<crate::gui::subtitles::TrackDialog>,
     pub(super) adding_title: Option<crate::gui::export::Ask>,
     pub title_dialog: Option<crate::gui::titles::TitleDialog>,
@@ -260,6 +261,7 @@ impl Default for TimelineView {
             cue_menu: None,
             adding: None,
             cue_dialog: None,
+            cue_landings: Vec::new(),
             track_dialog: None,
             adding_title: None,
             title_dialog: None,
@@ -613,11 +615,18 @@ impl Workspace {
             .iter()
             .map(String::as_str)
             .collect();
-        let typing = self
+        let typing: Vec<(&str, &str)> = self
             .timeline
-            .cue_dialog
-            .as_ref()
-            .map(|d| (d.cue.as_str(), d.text.as_str()));
+            .cue_landings
+            .iter()
+            .map(crate::gui::subtitles::Landing::cue_text)
+            .chain(
+                self.timeline
+                    .cue_dialog
+                    .as_ref()
+                    .map(|d| (d.cue.as_str(), d.text.as_str())),
+            )
+            .collect();
         {
             let painter = ui.painter_at(upper_rect);
             paint::ruler(&painter, upper_ruler, &upper_scale, drawn, smart, true);
@@ -631,7 +640,7 @@ impl Workspace {
                         &drawn.speakers,
                         &picked_cues,
                         true,
-                        typing,
+                        &typing,
                     );
                     continue;
                 }
@@ -727,7 +736,7 @@ impl Workspace {
                         &drawn.speakers,
                         &picked_cues,
                         false,
-                        typing,
+                        &typing,
                     );
                     continue;
                 }
