@@ -1,4 +1,6 @@
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -2994,6 +2996,126 @@ impl<T: Clone> OneOrMany<T> {
     }
 }
 
+fn method_params() -> &'static HashMap<String, HashSet<String>> {
+    static PARAMS: OnceLock<HashMap<String, HashSet<String>>> = OnceLock::new();
+    PARAMS.get_or_init(|| {
+        let root = serde_json::to_value(schemars::schema_for!(Request)).expect("protocol schema");
+        let defs = root
+            .get("$defs")
+            .and_then(serde_json::Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let mut out = HashMap::new();
+        for variant in root
+            .get("oneOf")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(name) = method_name(variant) else {
+                continue;
+            };
+            let mut names = HashSet::new();
+            if let Some(params) = variant.pointer("/properties/params") {
+                parameter_names(params, &defs, &mut names, 0);
+            }
+            out.insert(name, names);
+        }
+        out
+    })
+}
+
+fn method_name(variant: &serde_json::Value) -> Option<String> {
+    let method = variant.pointer("/properties/method")?;
+    method
+        .get("const")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            method
+                .pointer("/enum/0")
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::to_string)
+}
+
+fn parameter_names(
+    schema: &serde_json::Value,
+    defs: &serde_json::Map<String, serde_json::Value>,
+    out: &mut HashSet<String>,
+    depth: u8,
+) {
+    if depth == 8 {
+        return;
+    }
+    let schema = resolve_schema(schema, defs);
+    if let Some(props) = schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+    {
+        out.extend(props.keys().cloned());
+    }
+    for key in ["allOf", "anyOf", "oneOf"] {
+        let Some(items) = schema.get(key).and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for item in items {
+            parameter_names(item, defs, out, depth + 1);
+        }
+    }
+}
+
+fn resolve_schema<'a>(
+    schema: &'a serde_json::Value,
+    defs: &'a serde_json::Map<String, serde_json::Value>,
+) -> &'a serde_json::Value {
+    let mut schema = schema;
+    for _ in 0..8 {
+        let Some(name) = schema
+            .get("$ref")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|r| r.strip_prefix("#/$defs/"))
+        else {
+            break;
+        };
+        let Some(next) = defs.get(name) else {
+            break;
+        };
+        schema = next;
+    }
+    schema
+}
+
+fn apply_commands(params: &mut serde_json::Value) -> Result<(), String> {
+    let Some(commands) = params
+        .get_mut("commands")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return Ok(());
+    };
+    for (i, command) in commands.iter_mut().enumerate() {
+        let (method, child) =
+            command_parts(command).map_err(|e| format!("entry {}: {e}", i + 1))?;
+        Request::from_parts(method, child).map_err(|e| format!("entry {}: {e}", i + 1))?;
+        if let Some(obj) = command.as_object_mut()
+            && obj.get("params").is_none_or(serde_json::Value::is_null)
+        {
+            obj.insert("params".to_string(), serde_json::json!({}));
+        }
+    }
+    Ok(())
+}
+
+fn command_parts(command: &serde_json::Value) -> Result<(&str, Option<serde_json::Value>), String> {
+    let Some(obj) = command.as_object() else {
+        return Err("a request must be a JSON object with \"method\"".into());
+    };
+    let method = obj
+        .get("method")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("missing \"method\"")?;
+    Ok((method, obj.get("params").cloned()))
+}
+
 impl Request {
     pub fn method(&self) -> String {
         match serde_json::to_value(self) {
@@ -3007,30 +3129,25 @@ impl Request {
     }
 
     pub fn from_parts(method: &str, params: Option<serde_json::Value>) -> Result<Self, String> {
-        let params = params.unwrap_or_else(|| serde_json::json!({}));
+        let Some(known) = method_params().get(method) else {
+            return Err(format!("unknown method {method:?}; see `vidcut schema`"));
+        };
+        let mut params = match params {
+            None | Some(serde_json::Value::Null) => serde_json::json!({}),
+            Some(params) => params,
+        };
+        if method == "apply" {
+            apply_commands(&mut params)?;
+        }
         let request: Self = serde_json::from_value(
             serde_json::json!({ "method": method, "params": params.clone() }),
         )
-        .map_err(|e| {
-            let text = e.to_string();
-            if text.contains(&format!("unknown variant `{method}`")) {
-                format!("unknown method {method:?}; see `vidcut schema`")
-            } else {
-                format!("invalid params for {method}: {text}")
-            }
-        })?;
-        if let (Some(given), Ok(serde_json::Value::Object(parsed))) =
-            (params.as_object(), serde_json::to_value(&request))
-        {
-            let known: Vec<&str> = parsed
-                .get("params")
-                .and_then(|p| p.as_object())
-                .map(|p| p.keys().map(String::as_str).collect())
-                .unwrap_or_default();
+        .map_err(|e| format!("invalid params for {method}: {e}"))?;
+        if let Some(given) = params.as_object() {
             let unknown: Vec<&str> = given
                 .iter()
-                .filter(|(k, v)| !v.is_null() && !known.contains(&k.as_str()))
-                .map(|(k, _)| k.as_str())
+                .filter(|(key, value)| !value.is_null() && !known.contains(key.as_str()))
+                .map(|(key, _)| key.as_str())
                 .collect();
             if !unknown.is_empty() {
                 return Err(format!(
@@ -3416,8 +3533,68 @@ mod tests {
         }
         for params in [json!({ "autoo": true }), json!({ "autoo": false })] {
             let e = Request::from_parts("proxy.generate", Some(params)).unwrap_err();
-            assert!(e.contains("unknown parameter(s) autoo"), "{e}");
+            assert_eq!(
+                e,
+                "unknown parameter(s) autoo for proxy.generate; see `vidcut schema proxy.generate`"
+            );
         }
+    }
+
+    #[test]
+    fn an_empty_search_list_is_a_parameter() {
+        let request =
+            Request::from_parts("media.relink", Some(serde_json::json!({ "search": [] }))).unwrap();
+        assert_eq!(
+            request,
+            Request::MediaRelink {
+                media: None,
+                path: None,
+                search: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn null_params_are_missing_params() {
+        let request = Request::from_parts("project.get", Some(serde_json::Value::Null)).unwrap();
+        assert_eq!(request, Request::ProjectGet {});
+    }
+
+    #[test]
+    fn a_bad_parameter_in_apply_names_the_entry() {
+        let e = Request::from_parts(
+            "apply",
+            Some(serde_json::json!({
+                "commands": [
+                    {"method": "project.get", "params": {}},
+                    {"method": "proxy.generate", "params": {"autoo": true}}
+                ]
+            })),
+        )
+        .unwrap_err();
+        assert_eq!(
+            e,
+            "entry 2: unknown parameter(s) autoo for proxy.generate; see `vidcut schema proxy.generate`"
+        );
+    }
+
+    #[test]
+    fn an_unknown_method_in_apply_names_the_entry() {
+        let e = Request::from_parts(
+            "apply",
+            Some(serde_json::json!({
+                "commands": [
+                    {"method": "project.get", "params": {}},
+                    {"method": "no.such", "params": {}}
+                ]
+            })),
+        )
+        .unwrap_err();
+        assert_eq!(
+            e,
+            "entry 2: unknown method \"no.such\"; see `vidcut schema`"
+        );
+        assert!(!e.contains("unknown method \"apply\""));
     }
 
     #[test]
