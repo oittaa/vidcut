@@ -34,6 +34,11 @@ pub fn violations(p: &Project) -> Vec<String> {
                 t.id, t.volume_db
             ));
         }
+        if let Some(d) = &t.duck
+            && let Err(e) = crate::duck::checked(p, &t.id, d)
+        {
+            v.push(format!("track {}: {}", t.id, e.message));
+        }
         for x in &t.transitions {
             if !ids.insert(x.id.as_str()) {
                 v.push(format!("duplicate id {}", x.id));

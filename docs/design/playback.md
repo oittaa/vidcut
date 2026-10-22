@@ -156,7 +156,7 @@ Motions:
 flowchart TD
   ctl["Control"] -- "AudioSnap" --> mix
   subgraph audio["vidcut-play-audio"]
-    mix["export::audio::AudioMix<br>lanes, gains, fades"]
+    mix["export::audio::AudioMix<br>lanes, gains, fades, ducking"]
     stretch["Stretch<br>pitch kept"]
   end
   mix -- "samples at 1x" --> ring["Ring<br>lock-free"]
@@ -248,6 +248,14 @@ The audio device:
   - de-click fades at cuts
   - clips at other speeds, with their pitch kept (spec D48)
 - Fader gains (`AudioMix::set_lane_db`) and the mute go on top. When the sound is muted, the clock runs on.
+- The ducking of the plan (`Dip`) goes on each lane as in an export ([export](export.md#sound)). A new plan brings its own (`AudioMix::replan`).
+
+Ducking in the preview:
+
+- `Live::hear_ducking` hears the sources of the timeline's plan before the player gets it.
+- It takes only the measurements that this process keeps (`env::kept_measure`). Thus the session thread reads no file.
+- It measures the rest on `vidcut-measure`, as a job. Until then, those clips dip nothing.
+- `Msg::DuckHeard` then loads the timeline again. A measurement that failed shows as a notice, and is not tried again until the next `track.set` with `duck`.
 - Other play speeds go through `Stretch`, which keeps the pitch.
 - To play backward, `audio::run` reads blocks forward and reverses them.
 - The `Ring` holds a short queue, with one writer and one reader, and no locks. A seek, pause or new plan empties it.
@@ -302,6 +310,7 @@ Ripple Delete Silence:
 ## Code
 
 - `crates/vidcut-core/src/render.rs`
+- `crates/vidcut-core/src/duck.rs`
 - `crates/vidcut-core/src/preview.rs`
 - `crates/vidcut/src/live/mod.rs`
 - `crates/vidcut/src/live/player.rs`

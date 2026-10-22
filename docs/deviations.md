@@ -1310,3 +1310,72 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - An ease that changes nothing is of no use.
   - These curves do what the names of the eases tell.
   - In Resolve, a clip with one of these eases plays at one speed.
+
+## X68. Ducking times every track as a mono track
+
+- **Resolve:**
+  - The Ducker times a mono target track by its controls (pp. 778–779; [D76](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - On a stereo target track, Rise Time, Hold and Recovery Time act at half their values.
+  - These facts come from renders of Resolve Studio 21.1.1. The left channel had a sine and the right channel a cosine, so the gain of each channel is known.
+  - The times of the table are for the right channel, in ms. A fall time is from the start of the source. A recovery time is from its end.
+
+  | Duck Amount | Lookahead | Rise Time | Hold | Recovery Time | Fall starts | Full dip | Recovery starts | Recovery ends |
+  |---|---|---|---|---|---|---|---|---|
+  | 2.7 | 15 | 10 | 150 | 750 | −40 | −30 | +60 | +430 |
+  | 10 | 15 | 10 | 150 | 750 | −40 | −26 | +60 | +430 |
+  | 10 | 15 | 200 | 150 | 750 | −230 | −130 | −29 | +348 |
+  | 10 | 15 | 10 | 500 | 750 | −40 | −26 | +231 | +608 |
+  | 10 | 15 | 10 | 150 | 1000 | −40 | −26 | +60 | +556 |
+  | 10 | 100 | 10 | 150 | 750 | −120 | −106 | +20 | +390 |
+
+  - The fall starts at the same time as on a mono track.
+  - The fall with a Rise Time of 200 ms lasts 100 ms. The recovery lasts 376 ms at 750, and 500 ms at 1000.
+  - The recovery starts (Hold − Lookahead − Rise Time) / 2 after the source ends, to within 7 ms.
+  - The recovery, and the fall with a Rise Time of 200 ms, are half cosines, as on a mono track.
+  - The two channels get different gains while the gain changes.
+  - At 10 dB with a Rise Time of 10 ms, the right channel falls 8.2 dB in the first 16 samples. The left channel falls 0.4 dB.
+  - In a fall, the gain of each channel jumps at the 10 ms steps.
+  - In the recovery, the left channel is 1 to 9 ms later than the right, and 0.2 dB apart at most.
+  - The cause of these differences is not known.
+- **vidcut:**
+  - Every track has the timing of a mono track, whatever its channels.
+  - Every channel of the track gets the same gain.
+- **Why:**
+  - The mono timing matches the controls. A Hold of 150 ms holds the dip for 150 ms.
+  - Gains that differ between the channels move the stereo image while the track dips.
+  - The cause of the stereo timing is not known. Thus vidcut copies only the timing that matches the controls.
+
+## X69. Ducking follows speech by default, with one fall shape
+
+- **Resolve:**
+  - The Ducker follows the level of its sources (pp. 778–779).
+  - A fixed threshold, measured between −48 and −36 dBFS peak, makes a source active ([D76](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - With a Rise Time of 10 ms, the fall is a one-pole curve on the linear gain, not a half cosine.
+  - In each 16 samples of that fall, the gain closes 7.0 % of the remaining distance. Thus its time constant is 4.6 ms.
+  - With a Rise Time of 200 ms, the fall is a half cosine of 202 ms. The fit error is 0.04 dB rms.
+  - Each fall starts at a whole multiple of 10 ms from the start of the timeline.
+  - A fall starts Lookahead + Rise Time + 10 to 15 ms before the source.
+  - The gain changes in steps of 16 samples.
+  - A new Ducker on a timeline with two audio tracks has the other track as Source 1. With three tracks, Source 1 is empty.
+  - A typed Recovery Time of 2000 ms becomes 1000 ms.
+- **vidcut:**
+  - Detect selects Speech, the default, or Sound level.
+  - Speech: a source is active where Silero VAD hears speech in it, as Ripple Delete Silence finds it ([X47](#x47-ripple-delete-silence-can-keep-only-speech)).
+  - Sound level: a source is active where its peak, after its clip gain and fader, is at or above the Threshold.
+  - The Threshold is −42 dBFS by default, the middle of the measured range. It is under Advanced.
+  - The fall is a half cosine in dB over the Rise Time, for every Rise Time.
+  - Each fall starts Lookahead + Rise Time before the source, with no 10 ms steps.
+  - The gain changes on each sample.
+  - A new ducking has every other track with sound as its sources.
+  - `track.set` refuses a value outside its range.
+  - Alt + D turns the ducking of the selected clip's track on or off. It is vidcut's own key.
+  - A track without ducking then gets the usual values, under the other tracks with sound.
+  - The requests are `duck` on `track.set`, with its `detect` and `threshold_db`.
+- **Why:**
+  - Room noise, breaths, bumps and music on a dialogue track are louder than a fixed threshold. They dip the target where nobody speaks.
+  - A speech detector tells speech apart from them. vidcut already detects speech for Ripple Delete Silence and subtitles.
+  - Sound level keeps the behavior of the Ducker, for sound effects and music as sources.
+  - One fall shape for every Rise Time is easier to predict. The half cosine is the shape of Resolve's fall at 200 ms, and of its recoveries.
+  - A start on a grid of 10 ms is of no use to the user.
+  - The usual mix ducks music under every other track. With speech as the default, tracks without speech dip nothing.
+  - A value that changes without a word is a different setting than the one asked for.

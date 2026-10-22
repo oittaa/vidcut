@@ -46,6 +46,8 @@ flowchart TD
   - Speech ends at a frame more than 0.15 below the threshold, when no frame reaches the threshold again within Minimum to Trip.
   - Speech no longer than Shortest Speech does not count.
 - What lies between the speech is cut, less Pre Head and Post Tail, as for silence (`analysis::silent_parts`).
+- Ducking by speech uses the same probabilities. `analysis::speech_frames` gives the speech of a source clip in timeline frames, by Silero's defaults (`retime::SPEECH`, `retime::SHORTEST_SPEECH`, `retime::SHORTEST_PAUSE`).
+- Ducking by level uses the levels. `analysis::loud_frames` gives where a clip's peak, with its gains, reaches the threshold ([export](export.md#sound)).
 
 **Why** probabilities, not the segments of transcribe.cpp:
 
@@ -55,6 +57,7 @@ flowchart TD
 ## In a GUI
 
 - `Live::measuring` lists the media (and audio streams) of the clips that the two edits name.
+- `Live::duck_measure` does the same for `track.set` with `duck`: the files of the sources that the ducking will have (`duck::patched`, `duck::sounds`).
 - A `vidcut-measure` thread at job priority measures them into the memo and disk cache of `AvEnv`. This thread yields to playback.
 - Then it sends `Msg::Measured`.
 - The session thread then runs the edit on the project as it is at that time. The measurements of the edit return at once.
@@ -70,6 +73,7 @@ Create Subtitles from Audio (`subtitles.transcribe`) splits in the same way.
 With `hear: mix`:
 
 - The editor flattens the range of the tracks heard into one channel at 16 kHz (`RATE`), as an export would mix it.
+- This mix has no ducking.
 - `heard_tracks` gives the tracks heard: the `tracks` of the request, or the tracks that playback hears.
 - The editor asks `Env::transcribe` for what was said.
 - `transcribe::transcribe` in vidcut-av hears the mix with the prebuilt library of transcribe.cpp, through the `transcribe_cpp` crate.
@@ -120,6 +124,9 @@ flowchart TD
   - It is pinned and fetched in the same way, by `isolate::get_ready`, when the `download` of an edit allows it.
   - The live session fetches it on a job before the edit (`Step::Measure`).
   - The GUI first asks with the question of the speech dialog (`Workspace::isolation_prompt`).
+- **Ducking by speech** (`Workspace::duck`)
+  - It needs the speech detector: transcribe.cpp's library and Silero VAD.
+  - The GUI asks with the same question before a `track.set` that needs them (`Workspace::ducking_windows`).
 - **The GUI's dialog** (`Workspace::speech_window`)
   - It asks `transcribe::needed` and `transcribe::short_of_memory` before it sends the request. Thus it can ask before a download, and warn before the run.
   - The run is a job, as for the CLI.
@@ -133,6 +140,7 @@ flowchart TD
   - `transcribe::get_ready` gets them before anything is heard. It does this for these requests, each of which takes `download`:
     - `subtitles.transcribe` and `subtitles.retime`
     - `edit.ripple_delete_silence` and `analyze.silence` with `detect: speech`
+    - `track.set` with a `duck` by speech, and `export.start` of a timeline with one
 - **Finding the speech:**
   - By default (`find: sound`): the stretches louder than `sound_db` that `transcript::sounding` finds in the levels of 32 ms frames, parted by half a second of quiet.
   - With `find: voice`: the stretches of Silero VAD.

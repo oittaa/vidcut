@@ -32,7 +32,7 @@ The values in the Priority column:
 | `vidcut-viewer` | `Viewer::start` | draws the viewer | interactive |
 | `vidcut-ipc`, `vidcut-ipc-conn` | `ipc::server::start`; one per connection | accepts; serves one | interactive |
 | `vidcut-mcp-call` | `mcp::serve`, per tool call | one MCP call | interactive |
-| `vidcut-task`, `vidcut-make`, `vidcut-measure` | the core, per `Step` | their step | task: its `Work`; make: interactive; measure: job |
+| `vidcut-task`, `vidcut-make`, `vidcut-measure` | the core, per `Step`; `Live::hear_ducking` also starts `vidcut-measure` | their step; the measurements that the ducking of the preview misses | task: its `Work`; make: interactive; measure: job |
 | vidcut-j1, vidcut-j2, … | `Live::start_export`, `Live::start_encode` | an export, proxy or transcription job | job |
 | `vidcut-history` | `OpenProject::apply` | `Store::compact` | job |
 | `vidcut-cache` | `main`, for the GUI | `disk_cache::start`: the index from one listing at startup, then `disk_cache::rebuild` every hour | job |

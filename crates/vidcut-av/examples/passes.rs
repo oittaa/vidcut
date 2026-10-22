@@ -61,6 +61,7 @@ fn main() {
         frames,
         video: vec![piece.clone()],
         audio: vec![],
+        ducking: vec![],
         range: (0, frames),
         name: "passes".into(),
     };

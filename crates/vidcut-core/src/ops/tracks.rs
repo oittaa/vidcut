@@ -83,8 +83,17 @@ pub fn remove_track(p: &mut Project, id: &str, force: bool) -> Result<()> {
             t.clips.len()
         )));
     }
+    let before: Vec<String> = p.tracks.iter().map(|t| t.id.clone()).collect();
     p.tracks.remove(ti);
     renumber(p);
+    let names: std::collections::HashMap<String, String> = before
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| *i != ti)
+        .map(|(_, id)| id)
+        .zip(p.tracks.iter().map(|t| t.id.clone()))
+        .collect();
+    crate::duck::renamed(p, &names);
     Ok(())
 }
 
@@ -95,6 +104,7 @@ pub struct TrackProps {
     pub solo: Option<bool>,
     pub volume_db: Option<f64>,
     pub voice_isolation: Option<Option<f64>>,
+    pub duck: Option<Option<crate::model::Duck>>,
     pub video_enabled: Option<bool>,
     pub name: Option<Option<String>>,
 }
@@ -104,6 +114,9 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
         && !(-60.0..=24.0).contains(&v)
     {
         return Err(Error::invalid(format!("volume {v} dB outside -60..24 dB")));
+    }
+    if let Some(Some(d)) = &props.duck {
+        crate::duck::checked(p, id, d)?;
     }
     let t = p
         .track_mut(id)
@@ -125,6 +138,9 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     }
     if let Some(v) = props.voice_isolation {
         t.voice_isolation = v;
+    }
+    if let Some(d) = &props.duck {
+        t.duck = d.clone();
     }
     if let Some(v) = props.video_enabled {
         t.video_enabled = v;

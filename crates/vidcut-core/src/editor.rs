@@ -3033,6 +3033,7 @@ fn mutate(
             solo: None,
             volume_db: None,
             voice_isolation: None,
+            duck: None,
             video_enabled: None,
             ..
         } if track.starts_with('S') => {
@@ -3077,6 +3078,7 @@ fn mutate(
             solo,
             volume_db,
             voice_isolation,
+            duck,
             download,
             video_enabled,
             name,
@@ -3086,12 +3088,24 @@ fn mutate(
             if voice_isolation.is_some_and(|v| v > 0.0) && !dry_run {
                 env.voice_isolation(*download)?;
             }
+            let duck = match duck {
+                Some(Some(set)) => {
+                    let d = crate::duck::patched(p, track, set)?;
+                    if d.on && !dry_run {
+                        crate::duck::measure(p, track, &d, env, *download)?;
+                    }
+                    Some(Some(d))
+                }
+                Some(None) => Some(None),
+                None => None,
+            };
             let props = ops::TrackProps {
                 locked: *locked,
                 muted: *muted,
                 solo: *solo,
                 volume_db: *volume_db,
                 voice_isolation: voice_isolation.map(|v| (v > 0.0).then_some(v)),
+                duck,
                 video_enabled: *video_enabled,
                 name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
             };
@@ -5301,8 +5315,10 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                     .filter(|v| *v > 0.0);
                 track.video_enabled = s.video_enabled;
                 track.name = s.name.clone();
+                track.duck = s.duck.clone();
             }
         }
+        crate::duck::tidy(p);
     }
     Ok(())
 }
@@ -5772,6 +5788,9 @@ pub fn query(
                     }
                     if let Some(n) = &t.name {
                         v["name"] = json!(n);
+                    }
+                    if let Some(d) = &t.duck {
+                        v["duck"] = d.shown();
                     }
                     v
                 })
@@ -6275,7 +6294,8 @@ pub fn query(
             if b <= a {
                 return Err(Error::invalid("nothing to measure: the range is empty"));
             }
-            let plan = crate::render::flatten(p, a, b)?;
+            let mut plan = crate::render::flatten(p, a, b)?;
+            crate::duck::hear_with(&mut plan, p, env, false)?;
             let l = env.loudness(&plan)?;
             json!({
                 "integrated": finite(l.integrated), "range": l.range,

@@ -5,6 +5,7 @@ mod bar;
 mod cells;
 mod clip_info;
 mod dialog;
+mod ducking;
 pub mod export;
 mod file_manager;
 mod fillers;

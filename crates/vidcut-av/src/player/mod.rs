@@ -1282,6 +1282,7 @@ mod tests {
             frames: 1,
             video: vec![VideoPiece::Black { frames: 1 }],
             audio: Vec::new(),
+            ducking: Vec::new(),
             range: (0, 1),
             name: "copies".into(),
         };

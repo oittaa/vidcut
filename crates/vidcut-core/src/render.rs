@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, ColorSpace, Media, Picture, Project, Title, TrackKind};
+use crate::model::{Clip, ColorSpace, DuckDetect, Media, Picture, Project, Title, TrackKind};
 use crate::otio::transitions;
 use crate::time::Rational;
 
@@ -20,10 +20,93 @@ pub struct RenderPlan {
     pub video: Vec<VideoPiece>,
     /// Audio lanes to mix; each covers all of [`samples`](Self::samples).
     pub audio: Vec<Vec<AudioPiece>>,
+    /// The ducking of audio lanes (decision D76).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ducking: Vec<Ducking>,
     /// Timeline range this plan renders, `[start, end)`.
     pub range: (i64, i64),
     /// A name for the output (per-clip exports: the clip's name).
     pub name: String,
+}
+
+/// A ducked track's lanes, and the sounds that dip them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Ducking {
+    /// The lanes of the plan's `audio` that it dips: its track's.
+    pub lanes: Vec<usize>,
+    pub dip: Dip,
+    pub detect: DuckDetect,
+    /// The peak in dBFS from which a source is active, by level.
+    pub threshold_db: f64,
+    /// The sound of its sources, where it can reach the plan.
+    pub sources: Vec<DuckSource>,
+}
+
+/// The gain of a ducked lane over the plan's samples. The times are in
+/// samples.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Dip {
+    pub amount_db: f64,
+    pub lookahead: f64,
+    pub rise: f64,
+    pub hold: f64,
+    pub recovery: f64,
+    /// Where a source is active, in samples of the plan, sorted and apart.
+    /// Empty until the sources are heard (`duck::hear`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active: Vec<(i64, i64)>,
+}
+
+/// The sound of a ducking source's clip.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DuckSource {
+    pub media: String,
+    pub stream: u32,
+    /// Raw timestamp (s) that source position 0 refers to.
+    pub origin: f64,
+    /// The timeline frames where it sounds, `[start, end)`.
+    pub frames: (i64, i64),
+    /// The clip's first frame, its source position there, and its pace.
+    pub start: i64,
+    pub source_in: i64,
+    pub pace: Pace,
+    /// The clip gain and the track's fader, in dB.
+    pub gain_db: f64,
+}
+
+impl Dip {
+    pub fn gain_db(&self, s: i64) -> f64 {
+        let x = s as f64;
+        let (rise, recovery) = (self.rise.max(1.0), self.recovery.max(1.0));
+        let after = self.hold + recovery;
+        let first = self.active.partition_point(|&(_, b)| b as f64 + after <= x);
+        let mut db = 0.0f64;
+        for &(a, b) in &self.active[first..] {
+            let (a, b) = (a as f64, b as f64);
+            let fall = a - self.lookahead - rise;
+            if x < fall {
+                break;
+            }
+            let g = if x < a - self.lookahead {
+                (1.0 - (std::f64::consts::PI * (x - fall) / rise).cos()) / 2.0
+            } else if x < b + self.hold {
+                1.0
+            } else {
+                (1.0 + (std::f64::consts::PI * (x - b - self.hold) / recovery).cos()) / 2.0
+            };
+            db = db.min(-self.amount_db * g);
+        }
+        db
+    }
+
+    pub fn gain(&self, s: i64) -> f32 {
+        let db = self.gain_db(s);
+        if db == 0.0 {
+            1.0
+        } else {
+            10f64.powf(db / 20.0) as f32
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -774,6 +857,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 for n in k.tracks.iter().filter(|n| n.kind == t.kind) {
                     let mut v = n.clone();
                     v.id = t.id.clone();
+                    v.duck = None;
                     v.muted |= t.muted;
                     v.solo = t.solo;
                     v.volume_db = t.volume_db;
@@ -1220,6 +1304,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         }
     }
 
+    let ducking = crate::duck::planned(p, &lanes, a, b);
     let plan = RenderPlan {
         fps: s.fps,
         width: s.width,
@@ -1229,6 +1314,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         frames: b - a,
         video,
         audio,
+        ducking,
         range: (a, b),
         name: "timeline".into(),
     };
@@ -1404,6 +1490,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
         frames: t,
         video,
         audio: vec![lane],
+        ducking: Vec::new(),
         range: (0, t),
         name: "tape".into(),
     };

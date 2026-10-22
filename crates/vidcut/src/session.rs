@@ -460,6 +460,12 @@ pub fn export_media(
         vidcut_av::isolate::get_ready(&crate::paths::models_dir(), params.download)
             .map_err(|e| export::av_error(&e, ErrorCode::Export, String::new()))?;
     }
+    if prepared.settings.audio.is_some() {
+        let env = AvEnv::for_project(path);
+        for o in &mut prepared.outputs {
+            vidcut_core::duck::hear_with(&mut o.plan, p, &env, params.download)?;
+        }
+    }
     export::as_preferred(&mut prepared, crate::preferences::gpu_acceleration());
     let available = if export::needs_gpu_info(&prepared.settings) {
         export::availability(false)

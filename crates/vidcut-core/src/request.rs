@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    DynamicZoom, Ease, PictureTool, Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle,
-    TrackClip, ZoomBox,
+    DuckDetect, DynamicZoom, Ease, PictureTool, Place, SubtitleStyle, TitleAlign, TitleKind,
+    TitleStyle, TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -933,7 +933,7 @@ pub enum Request {
         force: bool,
     },
     /// Track header toggles (lock, mute, video on or off) and the mixer (solo,
-    /// volume in dB, Voice Isolation). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
+    /// volume in dB, Voice Isolation, ducking). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
     /// `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
     TrackSet {
@@ -953,9 +953,21 @@ pub enum Request {
         /// when `download` allows it.
         #[serde(default)]
         voice_isolation: Option<f64>,
-        /// Download Voice Isolation's model if this computer doesn't have it
-        /// yet, checked against its SHA-256. Without it, a missing model is
-        /// an error that says what would be downloaded.
+        /// Ducking: the track dips by its Duck Amount where any of its
+        /// sources is active, by speech or by sound level. Each field given
+        /// replaces its own; null takes it off with its settings. `{}`
+        /// turns it on with the usual values, under every other track with
+        /// sound. Sources not measured yet are measured first.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        duck: Option<Option<DuckSet>>,
+        /// Download what this computer doesn't have yet: Voice Isolation's
+        /// model, or the speech detector of ducking by speech, each checked
+        /// against its SHA-256. Without it, a missing file is an error that
+        /// says what would be downloaded.
         #[serde(default)]
         download: bool,
         #[serde(default)]
@@ -2894,6 +2906,49 @@ impl DynamicZoomSet {
             ease: self.ease.unwrap_or(z.ease),
         }
     }
+}
+
+/// A change to a track's ducking: each field given replaces its own, and
+/// the rest stay as they are. A new one is on, under every other track
+/// with sound, at the usual values: Duck Amount 2.7 dB, Lookahead 15 ms,
+/// Rise Time 10 ms, Hold 150 ms, Recovery Time 750 ms, by speech, and from
+/// -42 dBFS by level.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DuckSet {
+    /// On or off. Off keeps the settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// The tracks whose sound dips it (`V1`, `A2`), never its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sources: Option<Vec<String>>,
+    /// The Duck Amount: how far it dips, in dB, from 0 to 60.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount_db: Option<f64>,
+    /// How long before a source starts the full dip is reached, in ms,
+    /// from 0 to 1000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lookahead_ms: Option<f64>,
+    /// The Rise Time: how long the gain takes to fall to the full dip, in
+    /// ms, from 1 to 1000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rise_ms: Option<f64>,
+    /// How long the full dip stays after a source stops, in ms, from 0 to
+    /// 5000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_ms: Option<f64>,
+    /// The Recovery Time: how long the gain takes to come back after the
+    /// hold, in ms, from 1 to 1000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_ms: Option<f64>,
+    /// What makes a source active: `speech`, or `level`, its sound at or
+    /// above `threshold_db`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detect: Option<DuckDetect>,
+    /// With `level`: the peak in dBFS, after the source's clip gain and
+    /// fader, from which it is active, from -96 to 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold_db: Option<f64>,
 }
 
 fn given<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(

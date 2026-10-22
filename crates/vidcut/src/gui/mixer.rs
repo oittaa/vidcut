@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use eframe::egui::{self, Color32, CornerRadius, Rect, RichText, Stroke, StrokeKind, pos2, vec2};
 use serde_json::json;
-use vidcut_core::model::{Project, Track, TrackKind};
+use vidcut_core::model::{Project, Track};
 use vidcut_core::request::ViewerMode;
 
 use super::theme;
@@ -26,6 +26,16 @@ const FADER_MARKS: [f32; 7] = [0.0, 12.0, -12.0, -24.0, 24.0, -60.0, -40.0];
 const FADER_SCALE_W: f32 = 26.0;
 
 const STRIP_ROOM: f32 = 106.0;
+
+const DUCK_ROW: f32 = 24.0;
+
+fn ducking_room(p: &Project) -> f32 {
+    let ducked = p
+        .tracks
+        .iter()
+        .any(|t| t.duck.as_ref().is_some_and(|d| d.on));
+    DUCK_ROW + if ducked { 3.0 * DUCK_ROW } else { 0.0 }
+}
 
 fn scale_font() -> egui::FontId {
     egui::FontId::proportional(10.0)
@@ -365,13 +375,12 @@ impl Workspace {
         });
         ui.separator();
         let meters = self.timeline_levels();
-        let height = ui.available_height().clamp(160.0, 320.0);
+        let height =
+            (ui.available_height().clamp(160.0, 320.0) - ducking_room(&p)).max(STRIP_ROOM + 40.0);
         egui::ScrollArea::horizontal().show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 for t in p.tracks.iter() {
-                    let has_sound =
-                        t.kind == TrackKind::Audio || t.clips.iter().any(|c| c.audio.is_some());
-                    if !has_sound {
+                    if !t.has_sound() {
                         continue;
                     }
                     let level = meters
@@ -380,7 +389,7 @@ impl Workspace {
                         .find(|(id, _)| id == &t.id)
                         .map(|l| l.1.clone())
                         .unwrap_or_else(|| vec![0.0; project_channels(&p)]);
-                    self.strip(ui, t, &level, height);
+                    self.strip(ui, &p, t, &level, height);
                     ui.separator();
                 }
                 self.master_strip(ui, &meters.mix, height);
@@ -391,7 +400,7 @@ impl Workspace {
         }
     }
 
-    fn strip(&mut self, ui: &mut egui::Ui, t: &Track, level: &[f32], height: f32) {
+    fn strip(&mut self, ui: &mut egui::Ui, p: &Project, t: &Track, level: &[f32], height: f32) {
         let n = level.len().max(1);
         ui.vertical(|ui| {
             ui.set_width(meter_column_width(n) + FADER_SCALE_W + 40.0);
@@ -463,6 +472,7 @@ impl Workspace {
             });
             let on = super::isolation::Isolate::Track(t.id.clone());
             self.isolation_controls(ui, on, t.voice_isolation, "Voice Isolation");
+            self.ducking_controls(ui, p, t);
         });
     }
 

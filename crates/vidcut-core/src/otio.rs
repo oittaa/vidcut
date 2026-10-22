@@ -693,6 +693,9 @@ pub fn export_drawn(
         if let Some(v) = t.voice_isolation {
             meta["voice_isolation"] = json!(v);
         }
+        if let Some(d) = &t.duck {
+            meta["duck"] = json!(d);
+        }
         let mut sound = json!({ "Locked": t.locked, "SoloOn": t.solo });
         if let Some(&n) = channels.first()
             && channels.iter().all(|&x| x == n)
@@ -1079,6 +1082,7 @@ pub struct ImportedTrack {
     pub solo: bool,
     pub volume_db: f64,
     pub voice_isolation: Option<f64>,
+    pub duck: Option<crate::model::Duck>,
     pub video_enabled: bool,
     pub name: Option<String>,
 }
@@ -1101,6 +1105,7 @@ impl ImportedTrack {
                 .unwrap_or(false),
             volume_db: meta["volume_db"].as_f64().unwrap_or(0.0),
             voice_isolation: meta["voice_isolation"].as_f64(),
+            duck: serde_json::from_value(meta["duck"].clone()).ok(),
             video_enabled: meta["video_enabled"].as_bool().unwrap_or(audio || enabled),
             name: match meta.get("name") {
                 Some(name) => name.as_str().map(String::from),
@@ -2123,6 +2128,27 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         has_audio_tracks: !audio_tracks.is_empty(),
         project,
         warnings,
+    })
+}
+
+pub fn unheard_ducking(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    let (a, b) = span.unwrap_or((0, p.end()));
+    let named: Vec<String> = p
+        .tracks
+        .iter()
+        .filter(|t| t.duck.as_ref().is_some_and(|d| d.on))
+        .filter(|t| {
+            t.clips
+                .iter()
+                .any(|c| c.audio.is_some() && exported(c, a, b))
+        })
+        .map(|t| t.id.clone())
+        .collect();
+    (!named.is_empty()).then(|| {
+        format!(
+            "Ducking stays in vidcut's own metadata, so other editors won't hear it: {}",
+            named.join(", ")
+        )
     })
 }
 

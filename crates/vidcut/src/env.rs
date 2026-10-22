@@ -105,6 +105,30 @@ fn measured<T>(
     Ok(value)
 }
 
+fn kept<T>(memo: &Memo<T>, key: (PathBuf, Origin)) -> Option<Arc<T>> {
+    memo.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&key)
+        .cloned()
+}
+
+pub fn kept_measure(
+    media: &Media,
+    stream: u32,
+    detect: vidcut_core::model::DuckDetect,
+) -> Option<vidcut_core::duck::Measured> {
+    use vidcut_core::duck::Measured;
+    use vidcut_core::model::DuckDetect;
+    match detect {
+        DuckDetect::Speech => {
+            kept(&VOICES, analysis_file(media, &format!("speech{stream}"))).map(Measured::Speech)
+        }
+        DuckDetect::Level => {
+            kept(&LEVELS, analysis_file(media, &format!("levels{stream}"))).map(Measured::Levels)
+        }
+    }
+}
+
 fn transcript_file(media: &Media, stream: u32) -> (PathBuf, Origin) {
     analysis_file(media, &format!("words{stream}"))
 }

@@ -117,6 +117,7 @@ pub struct Workspace {
     pub(super) shuttle: super::shuttle::Shuttle,
     pub(super) speech: super::speech::SpeechUi,
     pub(super) isolation: super::isolation::IsolationUi,
+    pub(super) ducking: super::ducking::DuckingUi,
     pub(super) transcription: super::transcription::TranscriptionUi,
     pub(super) clip_info: super::clip_info::ClipInfo,
     pub(super) metadata_strip: bool,
@@ -202,6 +203,7 @@ impl Workspace {
             shuttle: Default::default(),
             speech: Default::default(),
             isolation: Default::default(),
+            ducking: Default::default(),
             transcription: Default::default(),
             clip_info: Default::default(),
             metadata_strip: super::pool::strip_kept(),
@@ -1363,7 +1365,18 @@ impl Workspace {
                 }
             }
         }
-        if pressed(Key::D) && !m.command && !self.snap.selection.clips.is_empty() {
+        if pressed(Key::D)
+            && m.alt
+            && !m.command
+            && !m.shift
+            && let Some(track) = self.project().and_then(|p| {
+                let id = self.snap.selection.clips.first()?;
+                p.find_clip(id).map(|(t, _)| p.tracks[t].id.clone())
+            })
+        {
+            self.toggle_duck(&track);
+        }
+        if pressed(Key::D) && !m.command && !m.alt && !self.snap.selection.clips.is_empty() {
             let enabled = self
                 .project()
                 .and_then(|p| p.clip(&self.snap.selection.clips[0]))
@@ -1654,6 +1667,7 @@ impl Workspace {
         self.remove_media_window(&ctx);
         self.speech_window(&ctx);
         self.isolation_prompt(&ctx);
+        self.ducking_windows(&ctx);
         self.transcription_window(&ctx);
         self.clip_info_window(&ctx);
         let panel = theme::colors().panel;

@@ -874,6 +874,42 @@ impl Words<'_> {
         if !p["volume_db"].is_null() {
             parts.push(format!("volume {}", db(&p["volume_db"])));
         }
+        match p.get("duck") {
+            Some(Value::Null) => parts.push("no ducking".to_string()),
+            Some(Value::Object(d)) => {
+                let before = parts.len();
+                match d.get("on").and_then(Value::as_bool) {
+                    Some(false) => parts.push("ducking off".to_string()),
+                    Some(true) => parts.push("ducking on".to_string()),
+                    None => {}
+                }
+                if let Some(s) = d.get("sources").and_then(Value::as_array) {
+                    let names: Vec<&str> = s.iter().filter_map(Value::as_str).collect();
+                    parts.push(match names.as_slice() {
+                        [] => "ducked under nothing".to_string(),
+                        _ => format!("ducked under {}", names.join(", ")),
+                    });
+                }
+                if let Some(v) = d.get("amount_db").and_then(Value::as_f64) {
+                    parts.push(format!("ducking by {v:.1} dB"));
+                }
+                let more = [
+                    "lookahead_ms",
+                    "rise_ms",
+                    "hold_ms",
+                    "recovery_ms",
+                    "detect",
+                    "threshold_db",
+                ];
+                if more.iter().any(|k| d.contains_key(*k)) {
+                    parts.push("ducking settings".to_string());
+                }
+                if parts.len() == before {
+                    parts.push("ducking on".to_string());
+                }
+            }
+            _ => {}
+        }
         if let Some(n) = p["name"].as_str() {
             parts.push(format!("named \u{201c}{n}\u{201d}"));
         }

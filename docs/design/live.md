@@ -110,6 +110,14 @@ Looks:
   - the Look of Create Subtitles from Audio, in `subtitles.transcribe`
   - the look cards of the Titles tab, in `titles.add`
 
+Ducking:
+
+- `Workspace::ducking_controls` puts Ducking, its sources and its Amount on each strip of the Mixer.
+- Each change is one `track.set` with `duck`, so one undo step. The Amount goes when its drag ends.
+- Advanced opens the Ducking window (`Workspace::ducking_windows`). Apply sends its values in one `track.set`.
+- Alt+D sends a `track.set` for the track of the selected clip (`Workspace::toggle_duck`).
+- Before a change that needs the speech detector, the GUI asks to download it (`Workspace::duck`).
+
 ## The core
 
 - `live::start` runs `Live::run` on `vidcut-session`.
@@ -144,7 +152,7 @@ The snapshot:
 | `Wait` | nothing: seeks, steps, screenshots, `jobs.wait` join the waits | `Live::tick` finds its `Until` met |
 | `Task` | `vidcut-task`, at its `Work`: plans, frames, storyboards, analyses, project-less requests, UI answers | `Msg::TaskDone` |
 | `Make` | `vidcut-make`: a project from an OpenTimelineIO file | `Msg::Made`; the core opens it |
-| `Measure` | `vidcut-measure`, a job: measuring for Ripple Delete Silence or Detect Scene Cuts, unpacking an `.otioz` | `Msg::Measured`; the edit runs here |
+| `Measure` | `vidcut-measure`, a job: measuring for Ripple Delete Silence, Detect Scene Cuts or ducking, unpacking an `.otioz` | `Msg::Measured`; the edit runs here |
 | `Encode` | a job thread: proxies; Create Subtitles from Audio; Re-time to Speech | `Msg::Measured`; the edit records them, adds the cues, or moves them |
 
 Work off the core uses a copy of the project from the time that the request arrived.
@@ -486,6 +494,7 @@ sequenceDiagram
 - `crates/vidcut/src/gui/trim_strips.rs`, `crates/vidcut/src/gui/timeline/`
 - `crates/vidcut/src/gui/subtitles.rs`, `crates/vidcut/src/gui/titles.rs`
 - `crates/vidcut/src/gui/speech.rs`, `crates/vidcut/src/gui/retime.rs`
+- `crates/vidcut/src/gui/mixer.rs`, `crates/vidcut/src/gui/ducking.rs`
 - `crates/vidcut/src/gui/dialog.rs`, `crates/vidcut/src/gui/look_tiles.rs`
 - `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/snapshot.rs`, `crates/vidcut/src/live/project.rs`, `crates/vidcut/src/live/jobs.rs`
 - `crates/vidcut/src/live/missing.rs`, `crates/vidcut/src/live/workers.rs`, `crates/vidcut/src/live/player.rs`
