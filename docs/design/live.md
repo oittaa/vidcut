@@ -101,9 +101,9 @@ Requests:
 
 Looks:
 
-- The Subtitle Track and Title windows share their style rows (`TextFields`) and one look picker (`Workspace::look_picker`). The state of the picker is a `Picker`.
+- The Subtitle Track and Title sections of the Inspector share their style rows (`TextFields`) and one look picker (`Workspace::look_picker`). The state of the picker is a `Picker`.
 - The GUI reads the looks itself (`Looks`, `looks::all`). It reads them again two seconds after the last read, and after a save or delete.
-- A pick of a look fills the fields of the window. The viewer shows them as for any edit.
+- A pick of a look fills the fields of the section. The viewer shows them as for any edit.
 - Save as Look… and Delete send `looks.save` and `looks.delete` with `Ask::send`.
 - These controls send the name of the look:
   - Apply Look in the menu of a subtitle track header, in `track.set`
@@ -307,22 +307,22 @@ The bar and the Jobs button:
   - `Workspace::sync_subtitles` hands the shown track to the core (`Handle::show_subtitles`). It does this when the track, the text being typed or the style being set changes.
   - The typed text and the style go in place of those of the cue and the track.
   - The core hands the track to the player while the timeline plays. Thus the viewer draws the cues as an export burns them in ([playback](playback.md)).
-  - The Subtitle Track window (`TrackDialog`) keeps the style that its fields give. `style_of` works it out as a field changes. While the fields are not valid, there is no style.
-  - The viewer draws this style in place of the track's style until Done sends it with `track.set` ([deviation X51](../deviations.md#x51-a-subtitle-tracks-style-is-set-in-its-own-window)).
+  - The Subtitle Track section (`TrackDialog`) keeps the style that its fields give. `style_of` works it out as a field changes. While the fields are not valid, there is no style.
+  - The viewer draws this style in place of the track's style until the user leaves the field. Then `track.set` sends it ([deviation X51](../deviations.md#x51-a-subtitle-tracks-style-goes-in-when-the-user-leaves-a-field)).
   - Its color fields have the color picker of egui beside them.
-  - Its font field has a list of the installed fonts, read once when the window opens (`burn::families`).
-  - The Subtitle window (`CueDialog`) keeps the text being typed. The timeline and the viewer draw it in place of the cue's text until Done sends it.
+  - Its font field has a list of the installed fonts, read once when the section opens (`burn::families`).
+  - The Subtitle section (`CueDialog`) keeps the text being typed. The timeline and the viewer draw it in place of the cue's text until the user leaves the text box.
   - The selected cues are part of the session's `Selection`, as clips are.
 - **Titles.**
-  - The Title window (`TitleDialog`) works out the title that its fields give (`title_of`). While the fields are not valid, there is no title.
-  - Done sends the changes as one `titles.set` ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab-or-add-title-and-are-edited-in-a-title-window)).
-  - Add Title asks `titles.add`, and opens the window on the clip of the answer.
+  - The Title section (`TitleDialog`) works out the title that its fields give (`title_of`). While the fields are not valid, there is no title.
+  - When the user leaves a field, the changes go as one `titles.set` ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab-or-add-title-and-are-edited-in-the-inspector)).
+  - Add Title asks `titles.add`, and opens the Title section on the clip of the answer.
   - The onscreen controls of the viewer (`onscreen::Grab`, `Workspace::title_controls`) find the titles at the playhead.
   - They box each title from one upright drawing by `burn::title`, moved and scaled to its place and zoom. The drawings used last are kept in an `Lru`.
-  - They send one `titles.set` when a drag ends. When the window is open on the title, it takes this as its place.
+  - They send one `titles.set` when a drag ends. When the Title section is open on the title, it takes this as its place.
   - One title is previewed at a time: the title that `Workspace::title_wanted` gives. In order:
     1. the title that is dragged
-    2. else the title of the window, while it differs from the stored title
+    2. else the title of the Title section, while it differs from the stored title
     3. else a title just sent with `titles.set`, until the project that the GUI holds has it: at most a second, as for the playhead's `tools::landing`
   - The preview is boxed in its place.
   - `Workspace::sync_title_preview` hands the preview to the core as it changes (`Handle::preview_title`). The core hands it to the player.
@@ -348,7 +348,10 @@ The bar and the Jobs button:
   - The boxes are the picture placed with the start box and with the end box (`Shown::ends`). Thus they stay in place while the clip plays.
 - **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`)
   - It is a tab of the left panel, as the Titles tab is (`LeftTab`). `gui.show` and `gui.close` take `inspector`.
-  - It shows the selected clips that can have a picture. It reads their pictures from the snapshot in each frame.
+  - At its top, `Workspace::title_form`, `Workspace::cue_form` and `Workspace::track_form` draw the open Title, Subtitle and Subtitle Track sections.
+  - `Workspace::open_title`, `Workspace::open_cue` and `Workspace::open_track_dialog` open them and show the tab.
+  - `Workspace::follow_selection` shows the section of the selected title or subtitle. A section that closes puts its changes in first.
+  - Below them, it shows the selected clips that can have a picture. It reads their pictures from the snapshot in each frame.
   - A picture that the handles, the wheel or the Inspector preview goes first (`Workspace::picture_wanted`). Thus the fields follow a drag in the viewer.
   - Each field changes between the picture and its own unit (`Field::read`, `Field::put`). The fitted size comes from `place::upright_fit`, as in an export.
   - The `Shape` of each clip holds the size of the frame and the fitted size of its picture.

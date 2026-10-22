@@ -1,12 +1,12 @@
-use eframe::egui::{self, Key, RichText};
+use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
 use vidcut_core::model::{Title, TitleAlign, TitleKind};
 
 use super::export::Ask;
-use super::keys;
 use super::looks::{Parts, Picker, TextFields, kept_plain, plain};
 use super::subtitles::{font_list, kept_number, percent, swatch};
+use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
 
 #[derive(Debug)]
@@ -26,6 +26,7 @@ pub struct TitleDialog {
     shown: Option<Title>,
     loaded: bool,
     focus: bool,
+    dirty: bool,
     selection: (usize, usize),
     word_color: String,
     word_size: String,
@@ -62,6 +63,7 @@ impl TitleDialog {
             shown: None,
             loaded: false,
             focus: true,
+            dirty: false,
             base: None,
             picker: None,
         };
@@ -213,27 +215,42 @@ impl Workspace {
     }
 
     pub(crate) fn open_title(&mut self, id: &str) {
+        self.left = LeftTab::Inspector;
+        self.inspect_title(id, true);
+    }
+
+    pub(super) fn inspect_title(&mut self, id: &str, focus: bool) {
+        self.close_cue_form();
+        self.close_track_form();
+        self.inspector_saw_selection();
         if let Some(d) = &mut self.timeline.title_dialog
             && d.clip == id
         {
-            d.focus = true;
+            d.focus |= focus;
             return;
         }
+        self.close_title_form();
+        let found = self.stored_title(id);
+        self.looks.reread();
+        let mut d = TitleDialog::new(id, found.as_ref());
+        d.focus = focus;
+        self.timeline.title_dialog = Some(d);
+    }
+
+    pub(super) fn close_title_form(&mut self) {
         if let Some((clip, params, t)) = self
             .timeline
             .title_dialog
-            .as_ref()
-            .and_then(|d| self.title_changes(d))
+            .take()
+            .filter(|d| d.dirty)
+            .and_then(|d| self.title_changes(&d))
         {
             self.send("titles.set", params);
             self.title_landing(&clip, &t);
         }
-        let found = self.stored_title(id);
-        self.looks.reread();
-        self.timeline.title_dialog = Some(TitleDialog::new(id, found.as_ref()));
     }
 
-    pub(super) fn title_windows(&mut self, ctx: &egui::Context) {
+    pub(super) fn title_tick(&mut self) {
         if let Some(result) = self.timeline.adding_title.as_ref().and_then(Ask::take) {
             self.timeline.adding_title = None;
             match result {
@@ -246,16 +263,15 @@ impl Workspace {
                 Err(e) => self.say(format!("Add Title: {}", e.message)),
             }
         }
-        self.title_window(ctx);
         self.sync_title_preview();
     }
 
-    fn title_window(&mut self, ctx: &egui::Context) {
+    pub(super) fn title_form(&mut self, ui: &mut egui::Ui) -> bool {
         let Some(mut d) = self.timeline.title_dialog.take() else {
-            return;
+            return false;
         };
         let Some(p) = self.project_shared() else {
-            return;
+            return false;
         };
         let found = p.find_clip(&d.clip).and_then(|(t, c)| {
             let clip = &p.tracks[t].clips[c];
@@ -263,204 +279,190 @@ impl Workspace {
         });
         match found {
             Some((_, _, t)) if !d.loaded => d.load(t),
-            None if d.loaded => return,
+            None if d.loaded => return false,
             _ => {}
         }
         let stored = found.map(|(_, _, t)| t.clone());
-        let mut open = true;
-        let mut done = false;
         let mut changed = false;
-        egui::Window::new("Title")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                match found {
-                    Some((track, clip, _)) => ui.label(dim(format!(
-                        "{}   {} – {}   ({})",
-                        track.id,
-                        self.tc(clip.start),
-                        self.tc(clip.end()),
-                        self.src_tc(clip.duration)
-                    ))),
-                    None => ui.label(dim("Adding…")),
-                };
-                let save = ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::Enter));
-                if let Some(s) = stored.as_ref() {
-                    let current = title_of(&d, s).map(|t| Styled::Titles(TitleLook::of(&t)));
-                    let mut picker = d.picker.take().unwrap_or_else(|| {
-                        Picker::new(
-                            LookKind::Titles,
-                            self.looks.of(LookKind::Titles),
-                            &Styled::Titles(TitleLook::of(s)),
-                        )
-                    });
-                    if let Some(Styled::Titles(l)) = self.look_picker(ui, &mut picker, current) {
-                        d.load(&l.on(&d.text));
-                        changed = true;
-                    }
-                    d.picker = Some(picker);
-                }
-                let before = d.kind;
-                ui.horizontal(|ui| {
-                    ui.label("Kind");
-                    changed |= ui
-                        .radio_value(&mut d.kind, TitleKind::Text, "Text")
-                        .changed();
-                    changed |= ui
-                        .radio_value(&mut d.kind, TitleKind::LowerThird, "Lower Third")
-                        .changed();
-                    changed |= ui
-                        .radio_value(&mut d.kind, TitleKind::Scroll, "Scroll")
-                        .changed();
-                });
-                if d.kind != before {
-                    d.align = Title {
-                        kind: d.kind,
-                        ..Title::new("")
-                    }
-                    .align();
-                }
-                ui.horizontal(|ui| {
-                    ui.add_enabled_ui(d.kind != TitleKind::Text, |ui| {
-                        ui.label("Align");
-                        for (align, label) in ALIGNS {
-                            changed |= ui.radio_value(&mut d.align, align, label).changed();
-                        }
-                    });
-                    if d.kind == TitleKind::Text {
-                        super::dialog::why(ui, "a Text title is centered on its position");
-                    }
-                });
-                let out = egui::TextEdit::multiline(&mut d.text)
-                    .desired_rows(3)
-                    .desired_width(380.0)
-                    .hint_text("Its text; Enter starts a new line")
-                    .show(ui);
-                if let Some(range) = out.cursor_range {
-                    let r = range.as_sorted_char_range();
-                    d.selection = (r.start.0, r.end.0);
-                }
-                let r = out.response.response;
-                changed |= r.changed();
-                ui.horizontal_wrapped(|ui| {
-                    let wrap = |d: &mut TitleDialog, open: String, close: &str| {
-                        d.text = styled(&d.text, d.selection, &open, close);
-                        d.selection = (0, 0);
-                        true
-                    };
-                    if ui.button(RichText::new("B").strong()).clicked() {
-                        changed |= wrap(&mut d, "<b>".into(), "</b>");
-                    }
-                    if ui.button(RichText::new("I").italics()).clicked() {
-                        changed |= wrap(&mut d, "<i>".into(), "</i>");
-                    }
-                    if ui.button(RichText::new("U").underline()).clicked() {
-                        changed |= wrap(&mut d, "<u>".into(), "</u>");
-                    }
-                    swatch(ui, &mut d.word_color, [255, 215, 0]);
-                    if ui.button("Color").clicked()
-                        && let Some(c) = vidcut_core::subtitles::color(&d.word_color)
-                    {
-                        changed |= wrap(&mut d, format!("<font color=\"{c}\">"), "</font>");
-                    }
-                    ui.add(
-                        egui::TextEdit::singleline(&mut d.word_size)
-                            .hint_text("size %")
-                            .desired_width(56.0),
-                    );
-                    if ui.button("Size").clicked()
-                        && let Ok(Some(s)) = kept_number(&d.word_size, None, "size")
-                    {
-                        changed |= wrap(&mut d, format!("<font size=\"{s}\">"), "</font>");
-                    }
-                    let mut face = d.word_font.clone();
-                    font_list(ui, "title-word-font", &mut face, &d.families);
-                    d.word_font = face;
-                    if ui.button("Font").clicked() && !d.word_font.trim().is_empty() {
-                        let f = vidcut_core::rich::escape(d.word_font.trim()).replace('"', "");
-                        changed |= wrap(&mut d, format!("<font face=\"{f}\">"), "</font>");
-                    }
-                    if ui.button("Plain").clicked() {
-                        d.text = unstyled(&d.text, d.selection);
-                        d.selection = (0, 0);
-                        changed = true;
-                    }
-                });
-                if d.focus {
-                    r.request_focus();
-                    d.focus = false;
-                }
-                let scroll = d.kind == TitleKind::Scroll;
-                let usual = Title::usual_position(d.kind, d.align);
-                let size_hint = format!(
-                    "{}% of the picture",
-                    percent(Some(Title::usual_size(d.kind)))
-                );
-                let across_hint = format!("{}%", percent(Some(usual[0])));
-                let down_hint = format!("{}%", percent(Some(usual[1])));
-                egui::Grid::new("title-style-fields").show(ui, |ui| {
-                    changed |= d.fields.rows(ui, "title", &d.families, &size_hint).0;
-                    let row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
-                        ui.label(label);
-                        ui.add(
-                            egui::TextEdit::singleline(text)
-                                .hint_text(hint)
-                                .min_size(egui::vec2(240.0, 0.0)),
-                        )
-                        .changed()
-                    };
-                    changed |= row(ui, "Across", &mut d.across, &across_hint);
-                    ui.end_row();
-                    if !scroll {
-                        changed |= row(ui, "Down", &mut d.down, &down_hint);
-                        ui.end_row();
-                        changed |= row(ui, "Zoom", &mut d.zoom, "100%");
-                        ui.end_row();
-                        changed |= row(ui, "Rotation", &mut d.rotation, "0°");
-                        ui.end_row();
-                    }
-                    changed |= row(ui, "Title opacity", &mut d.title_opacity, "100%");
-                    ui.end_row();
-                });
-                ui.label(dim(match d.kind {
-                    TitleKind::LowerThird => {
-                        "Across and Down: the corner, in percents of the picture."
-                    }
-                    TitleKind::Scroll => {
-                        "Across: the lines' edge by Align, in percents of the picture."
-                    }
-                    TitleKind::Text => {
-                        "Across and Down: the text's middle, in percents of the picture."
-                    }
-                }));
-                if !d.error.is_empty() {
-                    ui.colored_label(ui.visuals().error_fg_color, &d.error);
-                }
-                ui.horizontal(|ui| {
-                    if ui.button(keys("Done  (Ctrl+Enter)")).clicked() || save {
-                        match stored.as_ref().map(|s| (title_of(&d, s), s)) {
-                            Some((Ok(t), s)) => {
-                                if let Some(params) = changes(&d.clip, &t, s) {
-                                    self.send("titles.set", params);
-                                    self.title_landing(&d.clip, &t);
-                                }
-                                done = true;
-                            }
-                            Some((Err(e), _)) => d.error = e,
-                            None => done = true,
-                        }
-                    }
-                    if ui.button("Cancel").clicked() {
-                        done = true;
-                    }
-                });
+        ui.label(RichText::new("Title").strong());
+        match found {
+            Some((track, clip, _)) => ui.label(dim(format!(
+                "{}   {} – {}   ({})",
+                track.id,
+                self.tc(clip.start),
+                self.tc(clip.end()),
+                self.src_tc(clip.duration)
+            ))),
+            None => ui.label(dim("Adding…")),
+        };
+        if let Some(s) = stored.as_ref() {
+            let current = title_of(&d, s).map(|t| Styled::Titles(TitleLook::of(&t)));
+            let mut picker = d.picker.take().unwrap_or_else(|| {
+                Picker::new(
+                    LookKind::Titles,
+                    self.looks.of(LookKind::Titles),
+                    &Styled::Titles(TitleLook::of(s)),
+                )
             });
+            if let Some(Styled::Titles(l)) = self.look_picker(ui, &mut picker, current) {
+                d.load(&l.on(&d.text));
+                changed = true;
+            }
+            d.picker = Some(picker);
+        }
+        let before = d.kind;
+        ui.horizontal(|ui| {
+            ui.label("Kind");
+            changed |= ui
+                .radio_value(&mut d.kind, TitleKind::Text, "Text")
+                .changed();
+            changed |= ui
+                .radio_value(&mut d.kind, TitleKind::LowerThird, "Lower Third")
+                .changed();
+            changed |= ui
+                .radio_value(&mut d.kind, TitleKind::Scroll, "Scroll")
+                .changed();
+        });
+        if d.kind != before {
+            d.align = Title {
+                kind: d.kind,
+                ..Title::new("")
+            }
+            .align();
+        }
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(d.kind != TitleKind::Text, |ui| {
+                ui.label("Align");
+                for (align, label) in ALIGNS {
+                    changed |= ui.radio_value(&mut d.align, align, label).changed();
+                }
+            });
+            if d.kind == TitleKind::Text {
+                super::dialog::why(ui, "a Text title is centered on its position");
+            }
+        });
+        let out = egui::TextEdit::multiline(&mut d.text)
+            .desired_rows(3)
+            .desired_width(f32::INFINITY)
+            .hint_text("Its text; Enter starts a new line")
+            .show(ui);
+        if let Some(range) = out.cursor_range {
+            let r = range.as_sorted_char_range();
+            d.selection = (r.start.0, r.end.0);
+        }
+        let r = out.response.response;
+        changed |= r.changed();
+        ui.horizontal_wrapped(|ui| {
+            let wrap = |d: &mut TitleDialog, open: String, close: &str| {
+                d.text = styled(&d.text, d.selection, &open, close);
+                d.selection = (0, 0);
+                true
+            };
+            if ui.button(RichText::new("B").strong()).clicked() {
+                changed |= wrap(&mut d, "<b>".into(), "</b>");
+            }
+            if ui.button(RichText::new("I").italics()).clicked() {
+                changed |= wrap(&mut d, "<i>".into(), "</i>");
+            }
+            if ui.button(RichText::new("U").underline()).clicked() {
+                changed |= wrap(&mut d, "<u>".into(), "</u>");
+            }
+            swatch(ui, &mut d.word_color, [255, 215, 0]);
+            if ui.button("Color").clicked()
+                && let Some(c) = vidcut_core::subtitles::color(&d.word_color)
+            {
+                changed |= wrap(&mut d, format!("<font color=\"{c}\">"), "</font>");
+            }
+            ui.add(
+                egui::TextEdit::singleline(&mut d.word_size)
+                    .hint_text("size %")
+                    .desired_width(56.0),
+            );
+            if ui.button("Size").clicked()
+                && let Ok(Some(s)) = kept_number(&d.word_size, None, "size")
+            {
+                changed |= wrap(&mut d, format!("<font size=\"{s}\">"), "</font>");
+            }
+            let mut face = d.word_font.clone();
+            font_list(ui, "title-word-font", &mut face, &d.families);
+            d.word_font = face;
+            if ui.button("Font").clicked() && !d.word_font.trim().is_empty() {
+                let f = vidcut_core::rich::escape(d.word_font.trim()).replace('"', "");
+                changed |= wrap(&mut d, format!("<font face=\"{f}\">"), "</font>");
+            }
+            if ui.button("Plain").clicked() {
+                d.text = unstyled(&d.text, d.selection);
+                d.selection = (0, 0);
+                changed = true;
+            }
+        });
+        if d.focus {
+            r.request_focus();
+            d.focus = false;
+        }
+        let scroll = d.kind == TitleKind::Scroll;
+        let usual = Title::usual_position(d.kind, d.align);
+        let size_hint = format!(
+            "{}% of the picture",
+            percent(Some(Title::usual_size(d.kind)))
+        );
+        let across_hint = format!("{}%", percent(Some(usual[0])));
+        let down_hint = format!("{}%", percent(Some(usual[1])));
+        egui::Grid::new("title-style-fields").show(ui, |ui| {
+            changed |= d.fields.rows(ui, "title", &d.families, &size_hint).0;
+            let row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
+                ui.label(label);
+                ui.add(
+                    egui::TextEdit::singleline(text)
+                        .hint_text(hint)
+                        .min_size(egui::vec2(240.0, 0.0)),
+                )
+                .changed()
+            };
+            changed |= row(ui, "Across", &mut d.across, &across_hint);
+            ui.end_row();
+            if !scroll {
+                changed |= row(ui, "Down", &mut d.down, &down_hint);
+                ui.end_row();
+                changed |= row(ui, "Zoom", &mut d.zoom, "100%");
+                ui.end_row();
+                changed |= row(ui, "Rotation", &mut d.rotation, "0°");
+                ui.end_row();
+            }
+            changed |= row(ui, "Title opacity", &mut d.title_opacity, "100%");
+            ui.end_row();
+        });
+        ui.label(dim(match d.kind {
+            TitleKind::LowerThird => "Across and Down: the corner, in percents of the picture.",
+            TitleKind::Scroll => "Across: the lines' edge by Align, in percents of the picture.",
+            TitleKind::Text => "Across and Down: the text's middle, in percents of the picture.",
+        }));
+        if !d.error.is_empty() {
+            ui.colored_label(ui.visuals().error_fg_color, &d.error);
+        }
+        d.dirty |= changed;
+        if d.dirty
+            && ui.ctx().memory(|m| m.focused().is_none())
+            && let Some(s) = stored.as_ref()
+        {
+            match title_of(&d, s) {
+                Ok(t) => {
+                    if let Some(params) = changes(&d.clip, &t, s) {
+                        self.send("titles.set", params);
+                        self.title_landing(&d.clip, &t);
+                    }
+                    d.dirty = false;
+                    d.error.clear();
+                }
+                Err(e) => d.error = e,
+            }
+        }
+        ui.separator();
         if changed && let Some(s) = &stored {
             d.shown = title_of(&d, s).ok().filter(|t| t != s);
         }
-        if open && !done {
-            self.timeline.title_dialog = Some(d);
-        }
+        self.timeline.title_dialog = Some(d);
+        self.sync_title_preview();
+        true
     }
 }
