@@ -11,8 +11,10 @@ use vidcut_core::model::{
 };
 use vidcut_core::ops::picture::has_picture;
 use vidcut_core::place::upright_fit;
+use vidcut_core::validate::GAIN;
 
 use super::dialog;
+use super::isolation::{Isolate, heard};
 use super::placing::{changed, ease_label, target};
 use super::theme;
 use super::timeline::tools::landing;
@@ -45,6 +47,12 @@ enum Field {
     EndZoom,
     EndX,
     EndY,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Key {
+    Picture(Field),
+    Volume,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -229,13 +237,51 @@ impl Field {
     }
 }
 
+impl Key {
+    fn label(self) -> &'static str {
+        match self {
+            Key::Picture(f) => f.label(),
+            Key::Volume => "Volume",
+        }
+    }
+
+    fn suffix(self) -> &'static str {
+        match self {
+            Key::Picture(f) => f.suffix(),
+            Key::Volume => " dB",
+        }
+    }
+
+    fn speed(self) -> f64 {
+        match self {
+            Key::Picture(f) => f.speed(),
+            Key::Volume => 0.1,
+        }
+    }
+
+    fn decimals(self) -> (usize, usize) {
+        match self {
+            Key::Picture(_) => (0, 2),
+            Key::Volume => (1, 1),
+        }
+    }
+
+    fn usual(self) -> f64 {
+        match self {
+            Key::Picture(f) => f.usual(),
+            Key::Volume => 0.0,
+        }
+    }
+}
+
 fn typed(text: &str) -> Option<f64> {
-    let t: String = text
+    let t = text
         .chars()
         .filter(|c| !c.is_whitespace() && !matches!(c, '%' | '°'))
         .map(|c| if c == '−' { '-' } else { c })
-        .collect();
-    t.parse().ok()
+        .collect::<String>()
+        .to_ascii_lowercase();
+    t.strip_suffix("db").unwrap_or(&t).parse().ok()
 }
 
 fn shape(p: &Project, c: &Clip) -> Shape {
@@ -315,8 +361,16 @@ struct Chosen {
 }
 
 #[derive(Debug, Clone)]
+struct Sound {
+    id: String,
+    stored: f64,
+    gain: f64,
+    muted: bool,
+}
+
+#[derive(Debug, Clone)]
 struct Held {
-    field: Field,
+    field: Key,
     value: f64,
     from: f64,
     start: Vec<Chosen>,
@@ -329,11 +383,19 @@ struct Landing {
     pictures: Vec<(String, Picture, Picture)>,
 }
 
+#[derive(Debug, Clone)]
+struct Gained {
+    since: Instant,
+    from: Vec<(String, f64)>,
+    to: f64,
+}
+
 #[derive(Debug, Default)]
 pub struct Inspector {
     unlinked: bool,
     held: Option<Held>,
     landing: Option<Landing>,
+    gained: Option<Gained>,
     seen: Option<(Vec<String>, Vec<String>)>,
     focus: Option<egui::Id>,
     moved: bool,
@@ -341,12 +403,13 @@ pub struct Inspector {
 }
 
 enum Act {
-    Hold(Field, f64),
-    Drag(Field, f64),
-    Land(Field),
-    Put(Field, f64),
-    Edit(Field, f64),
-    Release(Field),
+    Hold(Key, f64),
+    Drag(Key, f64),
+    Land(Key),
+    Put(Key, f64),
+    Edit(Key, f64),
+    Release(Key),
+    Mute(bool),
     Link(bool),
     Flips([Option<bool>; 2]),
     Zooming(bool),
@@ -379,10 +442,23 @@ fn number(
 ) {
     let first = &chosen[0];
     let set = chosen.iter().any(|c| !f.is_usual(&c.shown));
+    let shown = f.read(&first.shown, &first.shape);
+    let range = f.range(&first.shown, &first.shape);
+    entry(ui, (Key::Picture(f), link), i, (set, shown, range), acts);
+}
+
+fn entry(
+    ui: &mut egui::Ui,
+    (f, link): (Key, Option<bool>),
+    i: &Inspector,
+    (set, shown, range): (bool, f64, RangeInclusive<f64>),
+    acts: &mut Vec<Act>,
+) {
     label(ui, f.label(), set);
     let held = i.held.as_ref().filter(|h| h.field == f);
-    let mut v = held.map_or_else(|| f.read(&first.shown, &first.shape), |h| h.value);
+    let mut v = held.map_or(shown, |h| h.value);
     let before = v;
+    let (fewest, most) = f.decimals();
     ui.horizontal(|ui| {
         let r = ui
             .push_id(f, |ui| {
@@ -390,9 +466,10 @@ fn number(
                     egui::DragValue::new(&mut v)
                         .update_while_editing(false)
                         .clamp_existing_to_range(false)
-                        .range(f.range(&first.shown, &first.shape))
+                        .range(range)
                         .speed(f.speed())
-                        .max_decimals(2)
+                        .min_decimals(fewest)
+                        .max_decimals(most)
                         .suffix(f.suffix())
                         .custom_parser(typed)
                         .min_size(vec2(FIELD_WIDTH, ui.spacing().interact_size.y)),
@@ -431,6 +508,29 @@ fn number(
     ui.end_row();
 }
 
+fn group<R>(
+    ui: &mut egui::Ui,
+    name: &str,
+    header: impl FnOnce(&mut egui::Ui) -> R,
+    rows: impl FnOnce(&mut egui::Ui),
+) -> R {
+    let id = ui.make_persistent_id(("inspector", name));
+    let (_, header, _) =
+        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
+            .show_header(ui, |ui| {
+                ui.label(RichText::new(name).strong());
+                header(ui)
+            })
+            .body(|ui| {
+                egui::Grid::new(("inspector-rows", name))
+                    .num_columns(3)
+                    .min_col_width(84.0)
+                    .spacing([8.0, 6.0])
+                    .show(ui, rows);
+            });
+    header.inner
+}
+
 fn section(
     ui: &mut egui::Ui,
     (name, tool): (&str, PictureTool),
@@ -438,24 +538,13 @@ fn section(
     acts: &mut Vec<Act>,
     rows: impl FnOnce(&mut egui::Ui, &mut Vec<Act>),
 ) {
-    let id = ui.make_persistent_id(("inspector", name));
-    let (_, header, _) =
-        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
-            .show_header(ui, |ui| {
-                ui.label(RichText::new(name).strong());
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.add_enabled(set, egui::Button::new("Reset")).clicked()
-                })
-                .inner
-            })
-            .body(|ui| {
-                egui::Grid::new(("inspector-rows", name))
-                    .num_columns(3)
-                    .min_col_width(84.0)
-                    .spacing([8.0, 6.0])
-                    .show(ui, |ui| rows(ui, acts));
-            });
-    if header.inner {
+    let reset = |ui: &mut egui::Ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.add_enabled(set, egui::Button::new("Reset")).clicked()
+        })
+        .inner
+    };
+    if group(ui, name, reset, |ui| rows(ui, acts)) {
         acts.push(Act::Clear(tool));
     }
 }
@@ -634,14 +723,46 @@ impl Workspace {
             .collect()
     }
 
+    fn sounds(&self) -> Vec<Sound> {
+        let Some(p) = self.project() else {
+            return Vec::new();
+        };
+        let gained = self.inspector.gained.as_ref();
+        self.snap
+            .selection
+            .clips
+            .iter()
+            .filter_map(|id| {
+                let c = p.clip(id)?;
+                let a = c.audio.as_ref()?;
+                let gain = gained
+                    .and_then(|g| {
+                        let (_, from) = g.from.iter().find(|(f, _)| f == id)?;
+                        landing(g.to, g.since.elapsed(), *from, a.gain_db)
+                    })
+                    .unwrap_or(a.gain_db);
+                Some(Sound {
+                    id: c.id.clone(),
+                    stored: a.gain_db,
+                    gain,
+                    muted: a.muted,
+                })
+            })
+            .collect()
+    }
+
     pub(super) fn inspector_wanted(&self) -> Vec<(String, Picture)> {
         match self.inspector.held.as_ref().filter(|h| h.dragging) {
-            Some(h) => h
-                .start
+            Some(Held {
+                field: Key::Picture(f),
+                value,
+                start,
+                ..
+            }) => start
                 .iter()
-                .map(|c| (c.id.clone(), h.field.put(&c.shown, &c.shape, h.value)))
+                .map(|c| (c.id.clone(), f.put(&c.shown, &c.shape, *value)))
                 .collect(),
-            None => self.inspector_landed(),
+            _ => self.inspector_landed(),
         }
     }
 
@@ -713,6 +834,68 @@ impl Workspace {
         });
     }
 
+    fn send_volume(&mut self, sounds: &[Sound], to: f64) {
+        let to = to.clamp(*GAIN.start(), *GAIN.end());
+        let from: Vec<(String, f64)> = sounds
+            .iter()
+            .filter(|s| s.gain != to)
+            .map(|s| (s.id.clone(), s.stored))
+            .collect();
+        if from.is_empty() {
+            return;
+        }
+        let ids: Vec<&str> = from.iter().map(|(id, _)| id.as_str()).collect();
+        self.send("clip.set", json!({ "clips": ids, "gain_db": to }));
+        self.inspector.gained = Some(Gained {
+            since: Instant::now(),
+            from,
+            to,
+        });
+    }
+
+    fn put(&mut self, key: Key, value: f64, chosen: &[Chosen], sounds: &[Sound]) {
+        match key {
+            Key::Picture(f) => {
+                self.send_pictures(chosen, |c| Some(f.put(&c.shown, &c.shape, value)));
+            }
+            Key::Volume => self.send_volume(sounds, value),
+        }
+    }
+
+    fn audio_section(
+        &mut self,
+        ui: &mut egui::Ui,
+        p: &Project,
+        sounds: &[Sound],
+        acts: &mut Vec<Act>,
+    ) {
+        let count = sounds.len();
+        let header = |ui: &mut egui::Ui| {
+            if count > 1 {
+                ui.label(dim(format!("{count} clips")));
+            }
+        };
+        group(ui, "Audio", header, |ui| {
+            let first = &sounds[0];
+            let set = sounds.iter().any(|s| s.gain != Key::Volume.usual());
+            let volume = (set, first.gain, GAIN);
+            entry(ui, (Key::Volume, None), &self.inspector, volume, acts);
+            label(ui, "Mute", sounds.iter().any(|s| s.muted));
+            let mut on = first.muted;
+            if ui.checkbox(&mut on, "").clicked() {
+                acts.push(Act::Mute(on));
+            }
+            ui.end_row();
+            let isolated = sounds.iter().any(|s| heard(p, &s.id).flatten().is_some());
+            label(ui, "Voice Isolation", isolated);
+            ui.horizontal(|ui| {
+                let on = Isolate::Clips(sounds.iter().map(|s| s.id.clone()).collect());
+                self.isolation_controls(ui, on, heard(p, &first.id).flatten(), "");
+            });
+            ui.end_row();
+        });
+    }
+
     fn show_boxes(&mut self, chosen: &[Chosen]) {
         self.timeline.picture_grab.tool = Some(PictureTool::DynamicZoom);
         let Some(p) = self.project_shared() else {
@@ -727,8 +910,8 @@ impl Workspace {
         }
     }
 
-    fn inspect(&mut self, act: Act, chosen: &[Chosen]) {
-        let held_on = |i: &Inspector, f: Field| i.held.as_ref().is_some_and(|h| h.field == f);
+    fn inspect(&mut self, act: Act, chosen: &[Chosen], sounds: &[Sound]) {
+        let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
         match act {
             Act::Hold(field, value) => {
                 self.inspector.held = Some(Held {
@@ -753,14 +936,14 @@ impl Workspace {
                     return;
                 };
                 if h.value != h.from {
-                    self.send_pictures(&h.start, |c| Some(field.put(&c.shown, &c.shape, h.value)));
+                    self.put(field, h.value, &h.start, sounds);
                 }
             }
             Act::Put(field, value) => {
                 if held_on(&self.inspector, field) {
                     self.inspector.held = None;
                 }
-                self.send_pictures(chosen, |c| Some(field.put(&c.shown, &c.shape, value)));
+                self.put(field, value, chosen, sounds);
             }
             Act::Edit(field, value) => {
                 if !held_on(&self.inspector, field) {
@@ -840,6 +1023,16 @@ impl Workspace {
                 })
             }),
             Act::Clear(tool) => self.clear_pictures(chosen, tool),
+            Act::Mute(on) => {
+                let ids: Vec<&str> = sounds
+                    .iter()
+                    .filter(|s| s.muted != on)
+                    .map(|s| s.id.as_str())
+                    .collect();
+                if !ids.is_empty() {
+                    self.send("clip.set", json!({ "clips": ids, "muted": on }));
+                }
+            }
         }
     }
 
@@ -883,6 +1076,17 @@ impl Workspace {
         i.moved &= !i.commit;
         self.follow_selection();
         let chosen = self.chosen();
+        let sounds = self.sounds();
+        if sounds.iter().all(|s| s.gain == s.stored) {
+            self.inspector.gained = None;
+        }
+        let gone = |k: Key| match k {
+            Key::Picture(_) => chosen.is_empty(),
+            Key::Volume => sounds.is_empty(),
+        };
+        if self.inspector.held.as_ref().is_some_and(|h| gone(h.field)) {
+            self.inspector.held = None;
+        }
         let mut acts = Vec::new();
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -891,10 +1095,13 @@ impl Workspace {
                 let Some(p) = self.project_shared() else {
                     return;
                 };
-                let Some(first) = chosen.first().and_then(|c| p.clip(&c.id)) else {
-                    self.inspector.held = None;
+                let top = chosen.first().map(|c| &c.id);
+                let Some(first) = top
+                    .or(sounds.first().map(|s| &s.id))
+                    .and_then(|id| p.clip(id))
+                else {
                     if !forms {
-                        ui.label(dim("Select a clip with a picture"));
+                        ui.label(dim("Select a clip with a picture or sound"));
                     }
                     return;
                 };
@@ -904,14 +1111,19 @@ impl Workspace {
                         ui.label(dim(format!("{} clips selected", chosen.len())));
                     }
                 });
-                let boxes = self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom);
-                let i = &self.inspector;
-                transform(ui, i, &chosen, &mut acts);
-                crop(ui, i, &chosen, &mut acts);
-                dynamic_zoom(ui, i, &chosen, boxes, &mut acts);
+                if !chosen.is_empty() {
+                    let boxes = self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom);
+                    let i = &self.inspector;
+                    transform(ui, i, &chosen, &mut acts);
+                    crop(ui, i, &chosen, &mut acts);
+                    dynamic_zoom(ui, i, &chosen, boxes, &mut acts);
+                }
+                if !sounds.is_empty() {
+                    self.audio_section(ui, &p, &sounds, &mut acts);
+                }
             });
         for act in acts {
-            self.inspect(act, &chosen);
+            self.inspect(act, &chosen, &sounds);
         }
         self.sync_picture_preview();
     }

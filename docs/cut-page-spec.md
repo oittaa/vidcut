@@ -643,7 +643,10 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Transform has Zoom X and Y, linked or not, Position X and Y, Rotation Angle, Anchor Point, Pitch, Yaw and Flip.
   - Cropping has Left, Right, Top and Bottom in pixels, Softness, and Retain Image Position.
   - Dynamic Zoom has Ease and Swap.
+  - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
+  - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
+  - vidcut: its Audio section has Volume, Mute and Voice Isolation for the selected clips with sound (X70).
 - **The units of the Inspector,** measured in Resolve Studio 21.1.1:
   - The timeline was 1920×1080. A 1280×720 chart and a 960×720 chart were fitted into it.
   - OTIO exports on 1080 and 2160 timelines gave the values in the file.
@@ -682,6 +685,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - It shows what the viewer plays.
   - Its speaker button mutes only the playback, not the export.
 - **Clip volume:** one gain for each clip, and clip mute.
+  - Each clip has one Volume control in the Audio panel of the Inspector (p. 743).
+  - vidcut: Volume and Mute in the Audio section of the Inspector (X70). `clip.set` sets `gain_db` and `muted`. D12 gives the range.
 - **Ripple Delete Silence** (p. 773):
   - Clip > Audio Operations > Ripple Delete Silence works on the selected clips.
   - vidcut: it is also in the right-click menu of the clip and in Timeline Actions.

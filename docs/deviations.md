@@ -1415,10 +1415,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Position X and Y are timeline pixels from the middle, with Y up.
   - A picture narrower than the frame moves less than its number. On a 4:3 picture in a 16:9 timeline, Position X 200 moves it 150 pixels.
   - Crop is in pixels of the fitted picture. Zoom is a factor, and Rotation is in degrees.
+  - Its Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
+  - In the Audio panel, each clip has one Volume control (p. 743).
+  - The Audio panel also has Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (pp. 743–744).
+  - The manual names no Mute in the Audio panel (pp. 742–744).
 - **vidcut:**
   - An Inspector tab is beside the Media Pool and Titles tabs. It opens in the same place.
   - `gui.show inspector` shows it.
-  - It shows what the user selects: the Title section of a title, the Subtitle section of a subtitle, or the picture sections of other clips.
+  - It shows what the user selects: the Title section of a title, the Subtitle section of a subtitle, or the sections of other clips.
+  - The sections of other clips are the picture sections and the Audio section.
   - A double-click on the name of a subtitle track shows its Subtitle Track section (X51).
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
   - With nothing of these selected, it shows one line.
@@ -1437,6 +1442,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The viewer shows the clip with its Dynamic Zoom, also while the boxes show.
     - The boxes stay in place. They show where the picture is at the start and at the end (D75).
     - If the playhead is not on a selected clip, Show Boxes and On move it to the first frame of the first selected clip.
+  - **Audio:** Volume, Mute and Voice Isolation of the selected clips with sound. These are the video clips with sound and the audio clips.
+    - The Audio section is below the picture sections. For an audio clip, it is the only section.
+    - With several clips with sound, it shows the first one. Its header gives the number of these clips.
+    - Volume is the gain of the clip, from −60 dB to +24 dB (D12). It shows one decimal and the unit.
+    - The Reset of Volume sets 0 dB. The Audio section has no Reset of the whole section.
+    - A drag on Volume sends one change on release. The sound does not change during the drag.
+    - Mute does what Mute and Unmute in the right-click menu of the clip do.
+    - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([X64](#x64-voice-isolation-is-free-on-a-clip-or-a-track)).
+    - The Audio section has no Pan, Pitch, Equalizer, Dialogue Leveler or Music Remixer.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - **Units:**
     - Position X and Y are frame pixels from the middle of the frame, with Y up.
@@ -1454,9 +1468,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The fields show a change from a script, an agent, the viewer handles or the wheel at once.
   - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
   - With several clips, the accent color and the Reset show when one of the clips has such a value.
-  - A value goes to all the selected clips that can have a picture. It changes only that value on each clip.
-  - A Reset also acts on all of these clips.
-  - Not in the Inspector: Speed, Volume, Anchor Point, Pitch, Yaw, Softness and Composite ([todo](todo/inspector.md)).
+  - A picture value goes to all the selected clips that can have a picture. An Audio value goes to all the selected clips with sound.
+  - A value changes only that value on each clip. A Reset also acts on all of these clips.
+  - Not in the Inspector: Speed, Anchor Point, Pitch, Yaw, Softness and Composite ([todo](todo/inspector.md)).
 - **Why:**
   - The Titles tab of the Cut page is in the place of the Media Pool. The Inspector goes beside it. Thus the viewer and the timeline keep their size.
   - Resolve also sets titles, subtitles and subtitle tracks in the Inspector (pp. 764, 1233, 1237).
@@ -1467,3 +1481,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The same value on several clips is a usual need, for example the same Position for the clips of a picture in picture.
   - The requests keep their fractions ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Thus only the GUI shows pixels.
   - Resolve's Inspector has only Ease and Swap for Dynamic Zoom. Numbers show each box exactly, and bring back a box that is out of the viewer.
+  - Resolve's Audio panel has the Volume and the Voice Isolation of a clip (p. 743). The Audio section has them too.
+  - Mute is beside Volume, as in the strip of the Mixer. Thus the user does not need the right-click menu to mute a clip.
+  - Voice Isolation uses the controls of the right-click menu. Thus it acts the same, also with the download question.
