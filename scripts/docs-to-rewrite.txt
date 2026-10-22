@@ -1,7 +1,2 @@
-README.md
-docs/cli.md
-docs/gotchas.md
-docs/roadmap.md
 docs/todo/clip-transform.md
 docs/todo/ducking.md
-docs/tools.md
