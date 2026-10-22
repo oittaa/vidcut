@@ -9,7 +9,7 @@ mod workers;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -188,6 +188,22 @@ pub(crate) enum ReplyEvent {
 pub(crate) struct Reply {
     tx: Sender<ReplyEvent>,
     cancel: Arc<AtomicBool>,
+    notice: bool,
+}
+
+#[derive(Debug)]
+pub struct Answer(Receiver<ReplyEvent>);
+
+impl Answer {
+    pub fn take(&self) -> Option<Result<Response>> {
+        match self.0.try_recv() {
+            Ok(ReplyEvent::Done(r)) => Some(r),
+            Ok(ReplyEvent::Progress(_)) | Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => {
+                Some(Err(Error::no_instance("the vidcut GUI is shutting down")))
+            }
+        }
+    }
 }
 
 pub(crate) struct Job {
@@ -312,20 +328,31 @@ impl Handle {
     }
 
     pub fn send(&self, envelope: Envelope) {
-        self.send_from(envelope, false);
+        self.send_from(envelope, false, None);
     }
 
-    fn send_from(&self, envelope: Envelope, drag: bool) {
+    fn send_from(&self, envelope: Envelope, drag: bool, reply: Option<Reply>) {
         let _ = self.tx.send(Msg::Request {
             envelope,
             origin: Origin::Gui { drag },
             project: None,
-            reply: None,
+            reply,
         });
     }
 
     pub fn request(&self, method: &str, params: Value) {
-        self.request_from(method, params, false);
+        self.request_from(method, params, false, None);
+    }
+
+    pub fn request_answered(&self, method: &str, params: Value) -> Answer {
+        let (tx, rx) = channel();
+        let reply = Reply {
+            tx,
+            cancel: Arc::new(AtomicBool::new(false)),
+            notice: true,
+        };
+        self.request_from(method, params, false, Some(reply));
+        Answer(rx)
     }
 
     pub fn audition(&self, audition: Option<Audition>) {
@@ -361,19 +388,19 @@ impl Handle {
     }
 
     pub fn request_drag(&self, method: &str, params: Value) {
-        self.request_from(method, params, true);
+        self.request_from(method, params, true, None);
     }
 
-    fn request_from(&self, method: &str, params: Value, drag: bool) {
+    fn request_from(&self, method: &str, params: Value, drag: bool, reply: Option<Reply>) {
         match Envelope::from_json(json!({ "method": method, "params": params })) {
-            Ok(e) => self.send_from(e, drag),
+            Ok(e) => self.send_from(e, drag, reply),
             Err(e) => {
                 let _ = self.tx.send(Msg::TaskDone {
                     job: Job {
                         method: method.into(),
                         params,
                         origin: Origin::Gui { drag },
-                        reply: None,
+                        reply,
                         rev: None,
                         dry_run: false,
                         said: None,
@@ -404,6 +431,7 @@ impl Handle {
                 reply: Some(Reply {
                     tx,
                     cancel: cancel.clone(),
+                    notice: false,
                 }),
             })
             .map_err(|_| Error::no_instance("the vidcut GUI is shutting down"))?;
@@ -1991,7 +2019,8 @@ impl Live {
                 self.log.pop_front();
             }
         }
-        if let (Err(e), Origin::Gui { .. }, None) = (&result, job.origin, &job.reply)
+        if let (Err(e), Origin::Gui { .. }) = (&result, job.origin)
+            && job.reply.as_ref().is_none_or(|r| r.notice)
             && e.code != vidcut_core::ErrorCode::Conflict
         {
             self.notice(format!("{}: {}", job.method, e.message), true);

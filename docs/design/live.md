@@ -98,6 +98,9 @@ Requests:
 - A gesture is one request. `Workspace::send` calls `Handle::request`: a `Msg::Request` with `Origin::Gui` and no reply.
 - A failure comes back as a notice.
 - Where the UI needs the answer (presets, export plans, preferences), `Ask::send` calls `Handle::call` on a `vidcut-ask` thread. It leaves the result in a slot.
+- Where the UI needs to know that its edit went in, `Handle::request_answered` sends the request from the UI thread and gives an `Answer`.
+  - Thus the request keeps its place among the other gestures.
+  - A failure still comes back as a notice.
 
 Looks:
 
@@ -312,6 +315,8 @@ The bar and the Jobs button:
   - Its color fields have the color picker of egui beside them.
   - Its font field has a list of the installed fonts, read once when the section opens (`burn::families`).
   - The Subtitle section (`CueDialog`) keeps the text being typed. The timeline and the viewer draw it in place of the cue's text until the user leaves the text box.
+  - The Subtitle section sends its changes with `Handle::request_answered`. It keeps what it sent until each `Answer` comes and the project has that revision.
+  - Then, while the user does not edit it, it shows the cue of the project. Thus a change that the project refuses goes away. The field does not jump back while a change is on its way.
   - The selected cues are part of the session's `Selection`, as clips are.
 - **Titles.**
   - The Title section (`TitleDialog`) works out the title that its fields give (`title_of`). While the fields are not valid, there is no title.

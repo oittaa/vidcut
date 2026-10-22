@@ -14,8 +14,9 @@ use super::folders::Kind;
 use super::looks::{Parts, Picker, TextFields};
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
+use crate::live::Answer;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CueDialog {
     pub cue: String,
     pub text: String,
@@ -26,7 +27,8 @@ pub struct CueDialog {
     loaded: bool,
     focus: bool,
     dirty: bool,
-    from: Option<(Typing, String)>,
+    sent: Vec<Answer>,
+    landed: u64,
 }
 
 impl CueDialog {
@@ -87,8 +89,8 @@ fn settled(id: &str, speakers: &Speakers, c: &Cue) -> (Typing, String) {
     )
 }
 
-fn cue_copies(dirty: bool, loaded: bool, adopted_is_project: bool) -> bool {
-    !loaded || (!dirty && !adopted_is_project)
+fn cue_copies(dirty: bool, loaded: bool, current: bool) -> bool {
+    !loaded || (!dirty && !current)
 }
 
 fn cue_saves(dirty: bool, commit: bool) -> bool {
@@ -335,20 +337,25 @@ impl Workspace {
             .then_some(params)
     }
 
-    fn save_cue(&mut self, d: &CueDialog) {
+    fn save_cue(&mut self, d: &CueDialog) -> Vec<Answer> {
+        let mut sent = Vec::new();
         if let Some(params) = self.typed(d) {
-            self.send("subtitles.set", params);
+            sent.push(self.live.request_answered("subtitles.set", params));
         }
         let Some(person) = d.speaker.clone() else {
-            return;
+            return sent;
         };
         let stored = self
             .project()
             .map(|p| person_name(&p.speakers, Some(&person)));
         let name = d.person_name.trim();
         if stored.is_some_and(|s| s != name) {
-            self.send("speakers.set", json!({ "person": person, "name": name }));
+            sent.push(
+                self.live
+                    .request_answered("speakers.set", json!({ "person": person, "name": name })),
+            );
         }
+        sent
     }
 
     pub(crate) fn open_cue(&mut self, id: &str) {
@@ -413,7 +420,8 @@ impl Workspace {
             loaded: false,
             focus,
             dirty: false,
-            from: None,
+            sent: Vec::new(),
+            landed: 0,
         };
         if let Some(p) = self.project()
             && let Some(c) = p.cue(id)
@@ -535,15 +543,25 @@ impl Workspace {
         let Some(p) = self.project_shared() else {
             return false;
         };
+        d.sent.retain(|a| match a.take() {
+            Some(Ok(r)) => {
+                d.landed = d.landed.max(r.rev);
+                false
+            }
+            Some(Err(_)) => false,
+            None => true,
+        });
+        let waiting = !d.sent.is_empty() || p.rev < d.landed;
+        if waiting {
+            ui.ctx().request_repaint();
+        }
         let found = p
             .find_cue(&d.cue)
             .map(|(t, c)| (&p.subtitles[t], &p.subtitles[t].cues[c]));
-        let adopted_is_project = found
-            .is_some_and(|(_, cue)| d.from.as_ref() == Some(&settled(&d.cue, &p.speakers, cue)));
+        let shown = found.is_some_and(|(_, cue)| settled(&d.cue, &p.speakers, cue) == d.state());
         match found {
-            Some((_, cue)) if cue_copies(d.dirty, d.loaded, adopted_is_project) => {
+            Some((_, cue)) if cue_copies(d.dirty, d.loaded, waiting || shown) => {
                 d.load(&p.speakers, cue);
-                d.from = Some(d.state());
                 d.dirty = false;
             }
             None if d.loaded => return false,
@@ -678,8 +696,12 @@ impl Workspace {
             if let Some(k) = d.speaker.clone().filter(|_| found.is_some()) {
                 let label = format!("Apply to All of {}'s", p.speakers.name(&k));
                 if ui.button(label).clicked() {
-                    self.save_cue(&d);
-                    self.send("subtitles.match_speaker", json!({ "cue": d.cue }));
+                    let sent = self.save_cue(&d);
+                    d.sent.extend(sent);
+                    d.sent.push(
+                        self.live
+                            .request_answered("subtitles.match_speaker", json!({ "cue": d.cue })),
+                    );
                     d.color.clear();
                 }
             }
@@ -688,7 +710,8 @@ impl Workspace {
             d.dirty = true;
         }
         if !done && cue_saves(d.dirty, self.inspector_commits()) {
-            self.save_cue(&d);
+            let sent = self.save_cue(&d);
+            d.sent.extend(sent);
             d.dirty = false;
         }
         ui.separator();
