@@ -84,7 +84,7 @@ impl Rational {
     }
 
     pub fn timecode_base(self) -> i64 {
-        (self.num + self.den / 2) / self.den
+        ((self.num + self.den / 2) / self.den).max(1)
     }
 
     pub fn dropped_per_minute(self) -> i64 {
@@ -698,6 +698,13 @@ mod tests {
         assert_eq!(ntsc.frame_to_sample(30_000, 48_000), 48_048_000);
         let pal = Rational::new(25, 1).unwrap();
         assert_eq!(pal.frame_to_sample(1, 44_100), 1764);
+    }
+
+    #[test]
+    fn a_rate_below_half_a_frame_still_has_a_timecode_base() {
+        let slow = Rational::new(1, 3).unwrap();
+        assert_eq!(slow.timecode_base(), 1);
+        assert_eq!(format_timecode(0, slow, 0, false), "00:00:00:00");
     }
 
     #[test]
