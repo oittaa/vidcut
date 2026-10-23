@@ -84,7 +84,8 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 
 - Zoom changes in value. From 0.1 to 0.4 over 30 frames, it is 0.25 at the middle.
 - Position, rotation and crop change in value too.
-- The eases of the picture are not measured.
+- An ease of the picture is a Bezier handle, as on the volume. Ease Out and Ease In put a flat handle at a third of the gap.
+  - Thus the two together play an S-curve, as vidcut's eases do ([gotchas](../gotchas.md#resolves-otio-files)).
 
 **The Cut page:**
 
@@ -97,7 +98,6 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 
 **Better than Resolve** (proposals for the stages):
 
-- The eases of the picture use the Bezier curve of the volume ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)). Thus Ease In and Out plays an S-curve.
 - The ease menu is on each keyframe: on the Keyframe button and in the Keyframe Editor.
 
 ## Scope
@@ -194,7 +194,6 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 
 **Unknown:**
 
-- The curves of the eases of the picture.
 - The key times of Dynamic Zoom for media with a timecode. The test media has none.
 - The key times of a clip that plays backward, and of a clip at another speed in media with a timecode.
   - vidcut writes the volume keyframes of a clip that plays backward as for speed 1.
