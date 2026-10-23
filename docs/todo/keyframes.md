@@ -70,12 +70,14 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 **The file** (OTIO, as Resolve exports it):
 
 - A keyframe time is a whole frame. It counts from the first source frame of the clip, the start of its `source_range`.
+  - This is so in media with a timecode too. A key on the second frame of a clip is at `1`.
 - Transform: Zoom X and Zoom Y have keyframes of their own. Pan and Tilt are fractions of the width and the height of the timeline. Rotation is in degrees.
   - A keyframe on Position keys X and Y. A later change of X alone adds a keyframe to X only.
 - Cropping: Crop Left is a fraction of the width, as its plain value is.
 - With keyframes, `Parameter Value` is not the value at the playhead, and not the value of the last keyframe. An import reads the keyframes.
 - Dynamic Zoom: Resolve writes its keyframes at the source frames 0 and 1000, on a clip with Dynamic Zoom on or off.
-  - In the file, these times are −s and 1000 − s. s is the first source frame of the clip.
+  - In the file, these times are −s and 1000 − s. s is the first source frame of the clip, counted from the first frame of the media, also in media with a timecode.
+  - For a still, they are −g and 1000 − g. g is the timeline's `global_start_time` in frames.
 - Resolve reads a written file as written. Times, values and eases come back in its Inspector and in its next export.
 
 **Speed:** a speed change that stretches the keyframes keeps each keyframe on its source frame. In the file, a stretched keyframe is at its frame of the clip.
@@ -194,7 +196,6 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 
 **Unknown:**
 
-- The key times of Dynamic Zoom for media with a timecode. The test media has none.
 - The key times of a clip that plays backward, and of a clip at another speed in media with a timecode.
   - vidcut writes the volume keyframes of a clip that plays backward as for speed 1.
 

@@ -329,6 +329,13 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - A lean about the anchor in the picture's own axes misses by up to 39 px.
   - The earlier render of a 45° turn with Yaw 0.5 agrees with the lean about the middle.
   - The anchor point of the scripting API is in pixels of the source picture.
+  - Resolve flips the picture before the lean. A flip mirrors what the leaned shape shows, and keeps the shape.
+    - Yaw 0.3 with Flip X put each corner mark on the place of its mirror mark without the flip, within 0.1 px.
+    - Pitch 0.3 with Flip Y did the same, top for bottom.
+  - Resolve crops the source before the lean. Thus the cut edge leans with the picture.
+    - With Yaw 0.3, a crop of 384 source pixels on the left put the edge at x = 609.
+    - The lean of the source puts it at 607. A crop of the frame would put it at 672.
+  - `place::level` flips and crops in the same order.
 - **Resolve's Pan and Tilt go from −4 to 4.**
   - vidcut writes a picture moved further at 4, and names its clip in the notes of the export.
 - **Resolve's Dynamic Zoom is a `Resolve Effect` of type 59.**
@@ -336,6 +343,8 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - `dynamicZoomScale` (Double) is the size of the box as a fraction of the picture.
   - Resolve writes two keys for each, at −s and 1000 − s. s is the first source frame of the clip, in media without a timecode.
   - For a still, Resolve writes them at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
+  - In media with a timecode, s still counts from the first frame of the media, not from its timecode.
+    - A clip from frame 90 of media at 10:00:00:00 has its keys at −90 and 910. Its `source_range` starts at 1080090.
   - vidcut writes the keys at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
   - Resolve reads the earlier key as the start and the later key as the end, whatever their times.
   - The box is in fractions of Resolve's picture, as Pan and Tilt are.
