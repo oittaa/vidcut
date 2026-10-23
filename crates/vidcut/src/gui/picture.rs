@@ -425,6 +425,7 @@ pub struct Screen {
     slots: Vec<Slot>,
     letters: Vec<Letters>,
     imports_before: u64,
+    wiped: Option<(usize, u32, u32, Arc<Picture>)>,
 }
 
 struct Letters {
@@ -695,6 +696,37 @@ impl Screen {
         self.imports_before + self.slots.iter().map(|s| s.imports).sum::<u64>()
     }
 
+    fn flat_wipe(
+        &mut self,
+        picture: Option<&Arc<Picture>>,
+        size: (u32, u32),
+    ) -> Option<Arc<Picture>> {
+        let picture = picture.filter(|p| p.over().iter().any(|o| o.wipe.is_some()))?;
+        let key = (Arc::as_ptr(picture) as usize, size.0, size.1);
+        if let Some((ptr, w, h, cached)) = &self.wiped
+            && *ptr == key.0
+            && (*w, *h) == (key.1, key.2)
+        {
+            return Some(cached.clone());
+        }
+        match picture.at_wipe(size.0, size.1) {
+            Ok(Some(flat)) => {
+                let flat = Arc::new(flat);
+                self.wiped = Some((key.0, key.1, key.2, flat.clone()));
+                Some(flat)
+            }
+            Ok(None) => {
+                self.wiped = None;
+                None
+            }
+            Err(e) => {
+                eprintln!("vidcut: a wipe did not draw: {e}");
+                self.wiped = None;
+                None
+            }
+        }
+    }
+
     pub fn draw(
         &mut self,
         gpu: &Gpu,
@@ -706,6 +738,13 @@ impl Screen {
     ) -> Drawn {
         let max = gpu.device.limits().max_texture_dimension_2d;
         let size = (width.clamp(2, max), height.clamp(2, max));
+        let flat = self.flat_wipe(picture, size);
+        let picture = flat.as_ref().or(picture);
+        let (placed, crosses) = if flat.is_some() {
+            (&[][..], &[][..])
+        } else {
+            (placed, crosses)
+        };
         let mut drawn = Drawn::Picture;
         if self.target.as_ref().is_none_or(|t| t.size != size) {
             self.target = Some(make_target(&gpu.device, size));

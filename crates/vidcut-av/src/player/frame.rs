@@ -51,6 +51,7 @@ pub struct Picture {
 pub struct Over {
     pub picture: Arc<Picture>,
     pub weight: u32,
+    pub wipe: Option<vidcut_core::render::Wipe>,
 }
 
 impl Over {
@@ -149,6 +150,7 @@ impl Picture {
                 Ok(Over {
                     picture: Arc::new(o.picture.copied_down()?),
                     weight: o.weight,
+                    wipe: o.wipe,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -194,6 +196,10 @@ impl Picture {
         if self.in_video_memory().is_some() {
             return self.copied_down()?.to_rgba(width, height);
         }
+        if self.over.iter().any(|o| o.wipe.is_some()) {
+            let flat = self.at_wipe(width, height)?.expect("a wipe");
+            return flat.to_rgba(width, height);
+        }
         if !self.over.is_empty() {
             let alone = Self::new(
                 crate::export::video::frame_ref(&self.frame)?,
@@ -231,6 +237,47 @@ impl Picture {
             rgba,
         })
     }
+
+    pub fn at_wipe(&self, width: u32, height: u32) -> Result<Option<Self>> {
+        if self.over.iter().all(|o| o.wipe.is_none()) {
+            return Ok(None);
+        }
+        let width = width.max(2) & !1;
+        let height = height.max(2) & !1;
+        let mut mixed = fitted(self, width, height)?;
+        for o in &self.over {
+            let top = fitted(&o.picture, width, height)?;
+            mixed = match o.wipe {
+                Some(mask) => crate::export::mix::wipe(&mixed, &top, mask)?,
+                None => crate::export::mix::mix(&mixed, &top, o.weight)?,
+            };
+        }
+        Ok(Some(Self::new(mixed, 0, None, None)))
+    }
+}
+
+fn fitted(picture: &Picture, width: u32, height: u32) -> Result<frame::Video> {
+    let frame = match picture.gpu() {
+        None => crate::export::video::frame_ref(picture.frame())?,
+        Some(_) => crate::hw::download(picture.frame())?,
+    };
+    if frame.format() == format::Pixel::YUV420P
+        && frame.width() == width
+        && frame.height() == height
+        && picture.rotation().is_multiple_of(360)
+    {
+        return Ok(frame);
+    }
+    let mut normalizer = Normalizer::new(
+        &frame,
+        picture.rotation(),
+        width,
+        height,
+        format::Pixel::YUV420P,
+        None,
+        crate::decode::Reading::Stream,
+    )?;
+    normalizer.run(&frame)
 }
 
 fn bytes_of(frame: &frame::Video) -> usize {
