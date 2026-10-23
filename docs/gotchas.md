@@ -310,7 +310,8 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
 - **Resolve's Dynamic Zoom is a `Resolve Effect` of type 59.**
   - `dynamicZoomCenter` (POINTF) is the middle of a box. It is from the middle of the picture, in fractions of the picture, y up.
   - `dynamicZoomScale` (Double) is the size of the box as a fraction of the picture.
-  - Each has two keys, at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
+  - Resolve writes two keys for each, at −s and 1000 − s. s is the first source frame of the clip, in media without a timecode.
+  - vidcut writes the keys at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
   - Resolve reads the earlier key as the start and the later key as the end, whatever their times.
   - The box is in fractions of Resolve's picture, as Pan and Tilt are.
   - vidcut reads a crop, fill or stretch as a zoom after the box, and that zoom scales the box with the picture. Thus `otio::picture` reads and writes the box as it is.
