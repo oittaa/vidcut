@@ -4,7 +4,7 @@ use eframe::egui::{
     self, Align, Color32, Layout, Pos2, Rect, RichText, Sense, Shape, Stroke, pos2, vec2,
 };
 use serde_json::{Value, json};
-use vidcut_core::keyframes::{ease_of, eases, handle_point, value_mapped};
+use vidcut_core::keyframes::{ease_of, eases, handle_point, value_mapped, value_paired};
 use vidcut_core::model::{Clip, Ease, Handle, Keyframe, Picture};
 use vidcut_core::request::KeyParam;
 use vidcut_core::validate::GAIN;
@@ -514,9 +514,6 @@ fn value_ends(rows: &[Shown]) -> (f64, f64) {
             .flatten()
         {
             push(&mut lo, &mut hi, row.key.value + h.value);
-            if row.paired {
-                push(&mut lo, &mut hi, row.y + h.value);
-            }
         }
     }
     if !lo.is_finite() {
@@ -988,14 +985,17 @@ impl Workspace {
         let paint = CurvePaint {
             painter: &painter,
             clip,
-            keys: &keys,
             map,
             values,
         };
-        sample_curve(&paint, 1.5, theme::colors().text, |i| keys[i].value);
+        sample_curve(&paint, 1.5, theme::colors().text, |source| {
+            value_mapped(&keys, source, |i| keys[i].value)
+        });
         if rows.first().is_some_and(|r| r.paired) {
             let ys: Vec<f64> = rows.iter().map(|r| r.y).collect();
-            sample_curve(&paint, 1.0, theme::colors().text_dim, |i| ys[i]);
+            sample_curve(&paint, 1.0, theme::colors().text_dim, |source| {
+                value_paired(&keys, source, |i| ys[i])
+            });
         }
         playhead(&painter, map, rect, plot.play);
         let mut handles = Vec::new();
@@ -1316,16 +1316,19 @@ struct Press<'a> {
 struct CurvePaint<'a> {
     painter: &'a egui::Painter,
     clip: &'a Clip,
-    keys: &'a [Keyframe],
     map: TimeMap,
     values: ValueMap,
 }
 
-fn sample_curve(paint: &CurvePaint<'_>, width: f32, color: Color32, at: impl Fn(usize) -> f64) {
+fn sample_curve(
+    paint: &CurvePaint<'_>,
+    width: f32,
+    color: Color32,
+    at: impl Fn(f64) -> Option<f64>,
+) {
     let CurvePaint {
         painter,
         clip,
-        keys,
         map,
         values,
     } = *paint;
@@ -1335,7 +1338,7 @@ fn sample_curve(paint: &CurvePaint<'_>, width: f32, color: Color32, at: impl Fn(
         let x = map.left + map.width * i as f32 / n as f32;
         let t = map.lo + f64::from((x - map.left) / map.width) * (map.hi - map.lo);
         let source = clip.sound_at(t);
-        let Some(v) = value_mapped(keys, source, &at) else {
+        let Some(v) = at(source) else {
             continue;
         };
         pts.push(pos2(x, values.y(v)));
@@ -1513,6 +1516,25 @@ mod tests {
             group_at(&items, 10),
             vec![mark(KeyParam::Position, 5), mark(KeyParam::Zoom, 7)]
         );
+    }
+
+    #[test]
+    fn a_paired_y_ignores_the_handle_value() {
+        let row = Shown {
+            from: 0,
+            key: Keyframe {
+                frame: 0,
+                value: 1.0,
+                in_handle: None,
+                out_handle: Some(Handle {
+                    frames: 10.0,
+                    value: 4.0,
+                }),
+            },
+            y: 2.0,
+            paired: true,
+        };
+        assert_eq!(value_ends(&[row]), (1.0, 5.0));
     }
 
     #[test]

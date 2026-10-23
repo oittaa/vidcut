@@ -251,6 +251,7 @@ impl Workspace {
             GuiPanel::Transcription => self.transcription.open = true,
             GuiPanel::Titles => self.left = LeftTab::Titles,
             GuiPanel::Inspector => self.left = LeftTab::Inspector,
+            GuiPanel::Keyframes => self.left = LeftTab::Keyframes,
             GuiPanel::Metadata => self.show_metadata_strip(true),
             GuiPanel::ClipInfo => self.open_clip_info(None),
             GuiPanel::Transform => self.show_picture_tool(PictureTool::Transform),
@@ -300,9 +301,10 @@ impl Workspace {
             GuiPanel::Help => self.help.open = false,
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
-            GuiPanel::Titles | GuiPanel::Inspector => {
+            GuiPanel::Titles | GuiPanel::Inspector | GuiPanel::Keyframes => {
                 let tab = match panel {
                     GuiPanel::Titles => LeftTab::Titles,
+                    GuiPanel::Keyframes => LeftTab::Keyframes,
                     _ => LeftTab::Inspector,
                 };
                 if self.left == tab {
@@ -341,6 +343,7 @@ impl Workspace {
             (GuiPanel::Transcription, self.transcription.open),
             (GuiPanel::Titles, self.left == LeftTab::Titles),
             (GuiPanel::Inspector, self.left == LeftTab::Inspector),
+            (GuiPanel::Keyframes, self.left == LeftTab::Keyframes),
             (GuiPanel::Metadata, self.metadata_strip),
             (GuiPanel::ClipInfo, self.clip_info.open),
             (GuiPanel::Transform, tool == Some(PictureTool::Transform)),

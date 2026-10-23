@@ -1744,6 +1744,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - A Keyframes tab sits beside the Inspector.
   - The Timeline menu opens that tab.
+  - `gui.show keyframes` opens that tab.
   - A right-click on a keyframe sets Linear, Ease In, Ease Out or Ease In and Out.
   - The ease is the volume Bezier curve ([X74](#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
   - `keyframes.set` writes that ease. A drag uses `keyframes.move` or `keyframes.set`.

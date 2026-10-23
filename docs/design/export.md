@@ -414,7 +414,8 @@ A picture value with keyframes is sampled on that same `Placing` (D75):
 - `Placed` holds the source frame of the piece and its `Pace`.
 - `Placed::after` moves that source frame with the piece, as it moves the `Run`.
 - `Picture::sampled` reads position, zoom, rotation and each crop side at that source frame.
-- The curve is the volume Bezier curve (`value_at`).
+- The key's own value follows the volume Bezier curve (`value_at`).
+- Position Y and zoom Y keep the handle frames and use a value offset of 0.
 - `place::detail` uses the largest zoom key in the piece, as it uses the closer Dynamic Zoom box.
 - The viewer and the export both take this `Placing`. There is no second draw path.
 

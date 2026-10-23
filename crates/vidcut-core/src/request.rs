@@ -2319,10 +2319,10 @@ pub enum Request {
     /// `jobs`, `mixer`, `preferences`, `history` (the undo history),
     /// `help` (the keyboard shortcuts), `transcription` (the words of the
     /// source clip or the timeline), `metadata` (the strip at the top of the
-    /// Media Pool), `clip_info` (the media selected in the pool), `titles`
-    /// or `inspector` (tabs in the Media Pool's place), or the viewer's
-    /// `transform`, `crop` or `dynamic_zoom` handles on the selected clip
-    /// (the topmost clip at the playhead when none is selected), or
+    /// Media Pool), `clip_info` (the media selected in the pool), `titles`,
+    /// `inspector` or `keyframes` (tabs in the Media Pool's place), or the
+    /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
+    /// clip (the topmost clip at the playhead when none is selected), or
     /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom and their
     /// buttons. Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
@@ -3034,6 +3034,9 @@ pub enum GuiPanel {
     /// The Inspector tab, in the Media Pool's place: the transform, crop
     /// and Dynamic Zoom of the selected clips, as numbers to type or drag.
     Inspector,
+    /// The Keyframes tab, in the Media Pool's place: the keyed values of
+    /// the first selected clip.
+    Keyframes,
     /// The viewer's Transform handles on the selected clip: move, zoom,
     /// stretch and turn its picture.
     Transform,
@@ -3850,6 +3853,21 @@ mod tests {
     fn an_unknown_method_names_the_method() {
         let e = Request::from_parts("no.such", None).unwrap_err();
         assert_eq!(e, "unknown method \"no.such\"; see `vidcut schema`");
+    }
+
+    #[test]
+    fn keyframes_parses_as_a_panel() {
+        let request = Request::from_parts(
+            "gui.show",
+            Some(serde_json::json!({ "panel": "keyframes" })),
+        )
+        .unwrap();
+        assert_eq!(
+            request,
+            Request::GuiShow {
+                panel: GuiPanel::Keyframes,
+            }
+        );
     }
 
     #[test]

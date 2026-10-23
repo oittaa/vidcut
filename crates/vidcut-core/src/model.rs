@@ -1348,7 +1348,8 @@ pub struct Picture {
     pub position: Option<[f64; 2]>,
     /// Position keyframes, one for X and Y (decision D75). `value` is X.
     /// `position_y` is Y, one number for each keyframe, in the same order.
-    /// Left out when the position has no keyframes.
+    /// A handle value moves X. Y keeps the handle frames and a value
+    /// offset of 0. Left out when the position has no keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_keys: Vec<Keyframe>,
     /// Y of each `position_keys` entry. Left out with those keyframes.
@@ -1361,7 +1362,8 @@ pub struct Picture {
     pub zoom: Option<[f64; 2]>,
     /// Zoom keyframes, one for X and Y (decision D75). `value` is X.
     /// `zoom_y` is Y, one number for each keyframe, in the same order.
-    /// Left out when the zoom has no keyframes.
+    /// A handle value moves X. Y keeps the handle frames and a value
+    /// offset of 0. Left out when the zoom has no keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zoom_keys: Vec<Keyframe>,
     /// Y of each `zoom_keys` entry. Left out with those keyframes.

@@ -137,7 +137,8 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - `Placed` holds the clip's picture, the source frame of the piece and its pace.
 - `Placed::after` moves that source frame with the piece, as it moves a Dynamic Zoom.
 - `Picture::sampled` reads each keyed value at that source frame.
-- The curve is the volume Bezier curve.
+- The curve of the key's own value is the volume Bezier curve.
+- Position Y and zoom Y keep the handle frames and use a value offset of 0.
 - `place::detail` uses the largest zoom key in the piece.
 - The viewer and the export take that placing. The GPU paths take it too.
 - Dynamic Zoom still uses its `Run` and `Placed::zoomed`.
@@ -205,6 +206,7 @@ Rule 3: each GUI action has a request.
 - `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take the values of the picture in `param`.
 - `picture.set` takes an `at`. On a value with keyframes, it sets a keyframe at `at`, or at the playhead, as `clip.set` does for the volume ([D82](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - `timeline.get` names the values of a clip that have keyframes, as it names `volume` now.
+- `gui.show keyframes` opens the Keyframes tab. `gui.close keyframes` closes it.
 
 ## Open questions
 

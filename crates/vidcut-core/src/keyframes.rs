@@ -18,11 +18,24 @@ pub fn value_at(keys: &[Keyframe], frame: f64) -> Option<f64> {
     Some(between(&keys[i - 1], &keys[i], frame))
 }
 
-fn between(a: &Keyframe, b: &Keyframe, frame: f64) -> f64 {
-    between_values(a, a.value, b, b.value, frame)
+#[derive(Clone, Copy)]
+enum ValueOffset {
+    Handle,
+    Zero,
 }
 
-fn between_values(a: &Keyframe, av: f64, b: &Keyframe, bv: f64, frame: f64) -> f64 {
+fn between(a: &Keyframe, b: &Keyframe, frame: f64) -> f64 {
+    between_values(a, a.value, b, b.value, frame, ValueOffset::Handle)
+}
+
+fn between_values(
+    a: &Keyframe,
+    av: f64,
+    b: &Keyframe,
+    bv: f64,
+    frame: f64,
+    offset: ValueOffset,
+) -> f64 {
     let len = (b.frame - a.frame) as f64;
     let x = frame - a.frame as f64;
     if a.out_handle.is_none() && b.in_handle.is_none() {
@@ -32,10 +45,27 @@ fn between_values(a: &Keyframe, av: f64, b: &Keyframe, bv: f64, frame: f64) -> f
     let x1 = out.frames.clamp(0.0, len);
     let x2 = len + into.frames.clamp(-len, 0.0);
     let u = solve(|u| cubic([0.0, x1, x2, len], u), x);
-    cubic([av, av + out.value, bv + into.value, bv], u)
+    let (ov, iv) = match offset {
+        ValueOffset::Handle => (out.value, into.value),
+        ValueOffset::Zero => (0.0, 0.0),
+    };
+    cubic([av, av + ov, bv + iv, bv], u)
 }
 
 pub fn value_mapped(keys: &[Keyframe], frame: f64, value: impl Fn(usize) -> f64) -> Option<f64> {
+    mapped(keys, frame, ValueOffset::Handle, value)
+}
+
+pub fn value_paired(keys: &[Keyframe], frame: f64, value: impl Fn(usize) -> f64) -> Option<f64> {
+    mapped(keys, frame, ValueOffset::Zero, value)
+}
+
+fn mapped(
+    keys: &[Keyframe],
+    frame: f64,
+    offset: ValueOffset,
+    value: impl Fn(usize) -> f64,
+) -> Option<f64> {
     let (first, last) = (keys.first()?, keys.last()?);
     if frame <= first.frame as f64 {
         return Some(value(0));
@@ -50,6 +80,7 @@ pub fn value_mapped(keys: &[Keyframe], frame: f64, value: impl Fn(usize) -> f64)
         &keys[i],
         value(i),
         frame,
+        offset,
     ))
 }
 
@@ -366,7 +397,7 @@ fn pair_at(keys: &[Keyframe], y: &[f64], frame: f64) -> Option<[f64; 2]> {
     if keys.is_empty() || keys.len() != y.len() {
         return None;
     }
-    Some([value_at(keys, frame)?, value_mapped(keys, frame, |i| y[i])?])
+    Some([value_at(keys, frame)?, value_paired(keys, frame, |i| y[i])?])
 }
 
 fn one_at(keys: &[Keyframe], frame: f64) -> Option<f64> {
@@ -909,5 +940,20 @@ mod tests {
             ..Picture::default()
         };
         assert_eq!(p.scale_at(15.0), [0.25, 0.25]);
+    }
+
+    #[test]
+    fn a_sideways_position_handle_keeps_y_at_zero() {
+        let mut first = key(0, 0.0);
+        first.out_handle = Some(Handle {
+            frames: 10.0,
+            value: 4.0,
+        });
+        let p = Picture {
+            position_keys: vec![first, key(30, 10.0)],
+            position_y: vec![0.0, 0.0],
+            ..Picture::default()
+        };
+        assert_eq!(p.place_at(15.0)[1], 0.0);
     }
 }
