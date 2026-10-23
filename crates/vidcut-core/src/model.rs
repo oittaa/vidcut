@@ -466,6 +466,12 @@ impl Media {
     }
 }
 
+pub const FRAME_PAD_MAX: usize = 32;
+
+pub fn padded_frame(n: u64, width: usize) -> String {
+    format!("{n:0width$}", width = width.min(FRAME_PAD_MAX))
+}
+
 /// Numbered image files making one clip: the pictures of a render
 /// or a scan, one file per frame.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -492,7 +498,11 @@ impl ImageSequence {
                 continue;
             }
             let digits = rest.find('d').unwrap_or(0);
-            out.push_str(&number(rest[..digits].parse().unwrap_or(0)));
+            let width = rest[..digits]
+                .parse::<usize>()
+                .unwrap_or(0)
+                .min(FRAME_PAD_MAX);
+            out.push_str(&number(width));
             rest = &rest[(digits + 1).min(rest.len())..];
         }
         out.push_str(rest);
@@ -510,12 +520,18 @@ impl ImageSequence {
     }
 
     pub fn name(&self, n: u64) -> String {
-        self.fill(|w| format!("{n:0w$}"))
+        self.fill(|w| padded_frame(n, w))
     }
 
     pub fn display(&self) -> String {
         let last = self.first + self.count.saturating_sub(1);
-        self.fill(|w| format!("[{:0w$}-{last:0w$}]", self.first))
+        self.fill(|w| {
+            format!(
+                "[{}-{}]",
+                padded_frame(self.first, w),
+                padded_frame(last, w)
+            )
+        })
     }
 
     pub fn file(&self, dir: &Path, k: u64) -> PathBuf {
@@ -1381,18 +1397,20 @@ pub struct ZoomBox {
 }
 
 /// How a Dynamic Zoom goes from its start box to its end box, with `t` the
-/// share of the clip played, from 0 to 1.
+/// share of the clip played, from 0 to 1. On a keyframe, the handles it
+/// gets: flat, a third of the way to the keyframe before (In) or after
+/// (Out).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Ease {
-    /// At one speed: `t`.
+    /// At one speed: `t`. On a keyframe: no handles.
     #[default]
     Linear,
-    /// Slow at first: `t²`.
+    /// Slow at first: `t²`. On a keyframe: an In handle.
     EaseIn,
-    /// Slow at the end: `1 − (1 − t)²`.
+    /// Slow at the end: `1 − (1 − t)²`. On a keyframe: an Out handle.
     EaseOut,
-    /// Slow at both ends: `3t² − 2t³`.
+    /// Slow at both ends: `3t² − 2t³`. On a keyframe: both handles.
     EaseInOut,
 }
 
@@ -1549,6 +1567,36 @@ pub struct Effects {
     pub list: Vec<Kept>,
 }
 
+/// A value of a clip at one of its source frames (decision D81). Before
+/// the first keyframe, the value is the first one's; after the last, the
+/// last one's. Between two keyframes, it follows the cubic Bezier curve
+/// through the first, its Out handle, the second's In handle and the
+/// second. A missing handle is on its keyframe, so without handles the
+/// change is a straight line.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Keyframe {
+    /// The source frame, counted as a clip's `source_in` is: the keyframe
+    /// stays on its content through trims, slips and splits.
+    pub frame: i64,
+    /// The value there: the volume in dB, from -60 to 24.
+    pub value: f64,
+    /// The In handle, which shapes the change before the keyframe.
+    #[serde(rename = "in", default, skip_serializing_if = "Option::is_none")]
+    pub in_handle: Option<Handle>,
+    /// The Out handle, which shapes the change after the keyframe.
+    #[serde(rename = "out", default, skip_serializing_if = "Option::is_none")]
+    pub out_handle: Option<Handle>,
+}
+
+/// A Bezier handle of a keyframe: a point `frames` and `value` from it.
+/// An In handle is before its keyframe (`frames` at most 0), an Out handle
+/// after it. The curve takes a handle no farther than the next keyframe.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Handle {
+    pub frames: f64,
+    pub value: f64,
+}
+
 /// A clip with the track it is on: what `edit.copy` returns and `edit.paste`
 /// takes (paste puts clips back on their own tracks).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1568,10 +1616,17 @@ pub struct ClipAudio {
     pub head: i64,
     /// Audio ends this many frames after the clip end (positive: an L cut).
     pub tail: i64,
+    /// The volume in dB, from -60 to 24, while the clip has no volume
+    /// keyframes.
     pub gain_db: f64,
+    /// The volume keyframes (decision D81), in the order of their frames,
+    /// one at most on a frame. With them, the volume is their curve.
+    /// Left out when the clip has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gain_keys: Vec<Keyframe>,
     pub muted: bool,
     /// Effects on its sound, carried from another editor. The clip volume
-    /// is `gain_db`.
+    /// is `gain_db` and `gain_keys`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Effects>,
     /// Voice Isolation's Amount, from 1 to 100: that much of the voice the
@@ -2445,7 +2500,7 @@ impl Eq for SubtitleWords {}
 
 #[cfg(test)]
 mod tests {
-    use super::{Kept, Settings};
+    use super::{FRAME_PAD_MAX, ImageSequence, Kept, Settings, padded_frame};
     use crate::time::TimeSpec;
 
     #[test]
@@ -2455,6 +2510,18 @@ mod tests {
             serde_json::to_string(&kept).unwrap(),
             r#"{"OTIO_SCHEMA":"Transition.1"}"#
         );
+    }
+
+    #[test]
+    fn a_huge_frame_pad_stays_within_the_cap() {
+        assert_eq!(padded_frame(7, FRAME_PAD_MAX + 1_000).len(), FRAME_PAD_MAX);
+        let s = ImageSequence {
+            pattern: "%0999999999d.png".into(),
+            first: 1,
+            count: 1,
+        };
+        assert_eq!(s.name(1).len(), FRAME_PAD_MAX + ".png".len());
+        assert_eq!(s.parts().1, FRAME_PAD_MAX);
     }
 
     #[test]

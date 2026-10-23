@@ -652,8 +652,10 @@ impl Words<'_> {
         };
         s.put("enabled", "Enabled", &raw, |c| json!(c.enabled));
         s.put("muted", "Mute", &raw, |c| audio(c, |a| json!(a.muted)));
-        s.put("gain_db", "Volume", &decibels, |c| {
-            audio(c, |a| json!(a.gain_db))
+        let at = self.frame(&self.params["at"]);
+        s.put("gain_db", "Volume", &decibels, |c| match (&c.audio, at) {
+            (Some(a), Some(t)) if a.is_keyed() => json!(c.gain_at(t as f64)),
+            _ => audio(c, |a| json!(a.gain_db)),
         });
         if s.put("name", "Name", &text, |c| json!(c.name)) && named {
             s.f.naming();

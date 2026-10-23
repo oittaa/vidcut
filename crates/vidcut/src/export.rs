@@ -580,7 +580,10 @@ fn file_name(template: &str, index: usize, name: &str, clip: &str, media: &str) 
             break;
         };
         let width: usize = s[start + 8..start + end].parse().unwrap_or(1);
-        s.replace_range(start..start + end + 1, &format!("{index:0width$}"));
+        s.replace_range(
+            start..start + end + 1,
+            &vidcut_core::model::padded_frame(index as u64, width),
+        );
     }
     sanitize(&s)
 }

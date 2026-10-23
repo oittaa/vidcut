@@ -172,6 +172,23 @@ pub fn describe_at(
         "track.set" => d.track_set(),
         "clip.set" => d.clip_set(),
         "clip.normalize" => format!("Normalize the audio levels of {}", d.clips("clips")),
+        "keyframes.add" => format!(
+            "Volume keyframe on {} at {}{}",
+            d.clips("clips"),
+            d.time("at"),
+            match &d.params["value"] {
+                Value::Null => String::new(),
+                v => format!(", {}", db(v)),
+            }
+        ),
+        "keyframes.set" => format!(
+            "Change {} of {}: {}",
+            d.keyframes(),
+            d.clips("clips"),
+            d.key_change()
+        ),
+        "keyframes.move" => format!("Move {} of {} {}", d.keyframes(), d.clips("clips"), d.by()),
+        "keyframes.remove" => format!("Remove {} of {}", d.keyframes(), d.clips("clips")),
         "marks.set" => d.marks_set("Timeline marks".into(), project.map(|p| &p.marks)),
         "marks.clear" => "Clear the timeline marks".into(),
         "markers.add" => format!("Marker at {}{}", d.time("at"), d.named()),
@@ -749,6 +766,46 @@ impl Words<'_> {
             Some(n) => format!("by {}", frames(n)),
             None => format!("to {}", self.time("to")),
         }
+    }
+
+    fn keyframes(&self) -> String {
+        let count = |key: &str| match &self.params[key] {
+            Value::Array(a) => a.len(),
+            Value::Null => 0,
+            _ => 1,
+        };
+        match (count("frames") + count("at"), count("at")) {
+            (0, _) => "the volume keyframes".into(),
+            (1, 1) => format!("the volume keyframe at {}", self.time("at")),
+            (1, _) => "a volume keyframe".into(),
+            (n, _) => format!("{n} volume keyframes"),
+        }
+    }
+
+    fn key_change(&self) -> String {
+        let p = self.params;
+        let mut parts = Vec::new();
+        if !p["value"].is_null() {
+            parts.push(db(&p["value"]));
+        }
+        if !p["by"].is_null() {
+            parts.push(format!("by {}", db(&p["by"])));
+        }
+        if let Some(e) = p["ease"].as_str() {
+            parts.push(
+                match e {
+                    "ease_in" => "Ease In",
+                    "ease_out" => "Ease Out",
+                    "ease_in_out" => "Ease In and Out",
+                    _ => "Linear",
+                }
+                .to_string(),
+            );
+        }
+        if p.get("in").is_some() || p.get("out").is_some() {
+            parts.push("the curve".into());
+        }
+        parts.join(", ")
     }
 
     fn cues(&self, key: &str) -> String {

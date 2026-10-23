@@ -10,6 +10,7 @@ pub mod export;
 pub mod fingerprint;
 pub mod folder;
 mod history;
+pub mod keyframes;
 pub mod looks;
 pub mod lru;
 pub mod model;
