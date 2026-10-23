@@ -649,8 +649,9 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Its values are Zoom (width and height, linked or not), Position X and Y, and Rotation Angle about the anchor point.
   - Its other values are Pitch, Yaw, and Flip Horizontal and Vertical.
   - vidcut: the shape and snapping of the title handles (X52), and the values of a picture in fractions of the frame (X65).
-  - vidcut: the Inspector tab shows these values in pixels, percent and degrees (X70).
+  - vidcut: the Inspector shows lengths in pixels, zoom in percent and rotation in degrees (X70).
   - vidcut: the zoom and the rotation work about the anchor point, and a cross marks it in the viewer (D92, X82).
+  - vidcut: Pitch and Yaw are in the Inspector, and the viewer does not set them (D93, X83).
   - Details: D75.
 - **Crop** (p. 768):
   - A handle on each side crops that side.
@@ -685,7 +686,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Thus a picture narrower than the frame moves less than its number. On the 4:3 chart in the 16:9 timeline, Position X 200 moves it 150 pixels.
   - Crop is in pixels of the picture as it is fitted in the timeline. Crop Left 100 on the 4:3 chart is a `cropLeft` of 100/1440 in the OTIO file.
   - Zoom is a factor (1.000). Rotation is in degrees.
-- **Out:** Pitch and Yaw (p. 767), crop Softness (p. 768), the modes and opacity of Composite (p. 769), keyframes.
+- **Out:** crop Softness (p. 768), the modes and opacity of Composite (p. 769), keyframes.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -1680,8 +1681,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Order:**
     - The picture of a clip is fitted into the frame.
     - Then it is cropped, flipped, zoomed, turned and moved, in that order.
+    - Then pitch and yaw follow the move, about the anchor, in screen axes (D93).
     - The crop and the flips work about the middle of the whole picture.
     - The zoom and the turn work about its anchor point (D92). The usual anchor point is the middle.
+    - Pitch and yaw work about that anchor too (D93).
     - The zoom works across and down in the picture's own axes, before the turn.
     - The rotation is counterclockwise.
     - The crop cuts the source picture, and what is left stays where it was.
@@ -1698,7 +1701,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Each value of `position` is from −100 to 100. `[0.5, 0.5]` leaves the picture in place.
     - `zoom` is how much larger the picture is drawn across and down, each from 1/100 to 100. One number sets both.
     - `rotation` is in degrees, from −3600 to 3600.
-    - `anchor` is the point that the zoom and the turn work about, in fractions of the picture (D92).
+    - `anchor` is the point that the zoom, the turn, the pitch and the yaw work about, in fractions of the picture (D92, D93).
+    - `pitch` and `yaw` are each from −1.5 to 1.5. Usual: 0.
+    - Positive pitch puts the top farther away. Positive yaw puts the left closer.
     - The flips mirror the picture left to right and top to bottom.
     - The crop cuts each side by a fraction of the source picture, and leaves some of it.
     - Values at their usual place are left out of the project file.
@@ -1742,7 +1747,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It also goes in Resolve's Transform, Cropping and Retime and Scaling, fitted.
     - An import takes vidcut's own metadata. Else it reads those effects.
     - Resolve's crop, fill and stretch become a zoom, and its anchor point becomes the `anchor` ([gotchas](gotchas.md#resolves-otio-files)).
-    - When one of these effects has keyframes or other parameters, such as Pitch and Yaw, all three stay on the clip, unplayed (X9).
+    - When one of these effects has keyframes, or a parameter vidcut does not play, all three stay on the clip, unplayed (X9).
+    - Pitch and yaw on their own are played (D93).
     - This is also true when they make a picture that vidcut refuses, such as a crop that leaves nothing.
     - The export names the clips moved further than Resolve's Pan and Tilt go, 4 pictures, and writes them at 4.
   - **Dynamic Zoom.** The manual gives the boxes and the eases, not the units or the timing.
@@ -1751,7 +1757,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The `center` of a box is `[x, y]` in fractions of the picture from its top left, each from −100 to 100.
     - The `size` of a box is its width and height as a fraction of those of the picture, from 1/100 to 100.
     - **The order.** The picture is drawn at 1/size about the center of the box, and that center goes to the middle of the picture.
-    - This step comes after the flips and before the zoom: fit, crop, flip, Dynamic Zoom, zoom, turn and move.
+    - This step comes after the flips and before the zoom: fit, crop, flip, Dynamic Zoom, zoom, turn, move, pitch and yaw.
     - The crop moves with the picture, and the outline of the picture grows with the zoom.
     - **The timing.** On frame k of the clip's n frames, t is k/n, and e is the ease of t.
     - The box is e of the way from `start` to `end`, on a straight line. Thus the end box comes one frame after the last frame.
@@ -2020,7 +2026,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - It says that all transforms are centered on the anchor point, and that the rotation turns about it (pp. 735, 767).
   - Resolve's files show that Resolve flips about the middle ([gotchas](gotchas.md#resolves-otio-files)). vidcut does the same.
   - The zoom and the turn work about the anchor point. The flips and the Dynamic Zoom work about the middle.
-  - **Order:** fit, crop, flip, Dynamic Zoom, zoom and turn about the anchor point, move.
+  - **Order:** fit, crop, flip, Dynamic Zoom, zoom and turn about the anchor point, move, then pitch and yaw (D93).
   - `position` is the move. The anchor point stays where `position` puts it, whatever the zoom and the turn.
   - Thus the zoom and turn handles of the viewer keep the anchor point still. They do not change `position`.
   - The anchor point is a point of the picture as it shows after the flips.
@@ -2032,3 +2038,18 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **OTIO:** an import reads the anchor point of Resolve's Transform as `anchor`. An export writes it back.
   - With a crop, fill or stretch, the move that the scaling makes about the middle goes into `position` ([gotchas](gotchas.md#resolves-otio-files)).
   - `picture.set` takes `anchor`. `picture.clear` with `transform` puts it back in the middle.
+- **D93. Pitch and yaw** (§8.15; pp. 735, 767; deviation X83).
+  - The manual lists Pitch and Yaw with the other Transform values (pp. 735, 767).
+  - It does not give their units or the order in which they work.
+  - Each is a number from −1.5 to 1.5. Usual: 0. The project file leaves 0 out.
+  - They work about the anchor, in screen axes, after the zoom, the turn and the move.
+  - The lean is a projective divide about the anchor. There is no cosine foreshortening.
+  - Positive pitch puts the top farther away, and the bottom closer.
+  - Positive yaw puts the left closer, and the right farther.
+  - With no rotation, yaw keeps vertical edges vertical.
+  - With no rotation, pitch keeps horizontal edges horizontal.
+  - The viewer and the export use the same map.
+  - The Inspector sets them. The viewer handles do not set them (X83).
+  - `picture.set` takes `pitch` and `yaw`. `picture.clear` with `transform` puts both back to 0.
+  - An import reads `transformationPitch` and `transformationYaw`. An export writes them back.
+  - A plain value plays. Keyframes on either one leave the Transform unplayed (X9).

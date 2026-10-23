@@ -1490,7 +1490,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Audio clips, titles and subtitles have no picture.
   - With several clips selected, it shows the first one that can have a picture. Its header gives the number of these clips.
   - Its picture sections are Transform, Crop and Dynamic Zoom. Each picture section has a Reset of the whole section.
-  - **Transform:** Zoom, Position X and Y, Rotation, Anchor X and Y, Flip Horizontal and Flip Vertical.
+  - **Transform:** Zoom, Position X and Y, Rotation, Anchor X and Y, Pitch, Yaw, Flip Horizontal and Flip Vertical.
     - The link button beside Zoom shows Zoom X and Zoom Y. A picture with two different zooms shows them both.
     - The link button turns the link on again, and makes Zoom Y equal to Zoom X.
   - **Crop:** Left, Right, Top and Bottom.
@@ -1528,6 +1528,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Zoom is in percent, as the viewer shows it while the user zooms.
     - Rotation is in degrees, counterclockwise.
     - Anchor X and Y are pixels of the fitted picture from its middle, with Y up. At 100% zoom, these are frame pixels.
+    - Pitch and Yaw go from −1.5 to 1.5. They have no unit (D93).
+    - Positive pitch puts the top farther away. Positive yaw puts the left closer.
     - Crop is in pixels of the picture as it is fitted into the frame, before the zoom, as in Resolve.
     - The zoom of a Dynamic Zoom box is in percent. At 200%, the picture shows at twice its size. At 50%, it shows at half its size.
     - The X and Y of a box are where the middle of the picture is at the start or at the end.
@@ -1542,7 +1544,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A picture value goes to all the selected clips that can have a picture. An Audio value goes to all the selected clips with sound.
   - A Speed value goes to all the selected clips that can change speed. Duration gives each clip the speed that fills it.
   - A value changes only that value on each clip. A Reset also acts on all of these clips.
-  - Not in the Inspector: Pitch, Yaw, Softness and Composite ([todo](todo/inspector.md)).
+  - Not in the Inspector: Softness and Composite ([todo](todo/inspector.md)).
 - **Why:**
   - The Titles tab of the Cut page is in the place of the Media Pool. The Inspector goes beside it. Thus the viewer and the timeline keep their size.
   - Resolve also sets titles, subtitles and subtitle tracks in the Inspector (pp. 764, 1233, 1237).
@@ -1697,3 +1699,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The corners, the sides, the turn handle and the wheel work about the anchor point. Thus the user sees that point.
   - A drag inside the box already moves the picture.
+
+## X83. Pitch and yaw are Inspector values
+
+- **Resolve:**
+  - The onscreen Transform controls set Zoom, Position, Rotation, Pitch, Yaw and Flip (p. 767).
+  - The Inspector sets Pitch and Yaw too (p. 735).
+- **vidcut:**
+  - Pitch and Yaw are in the Inspector, after Anchor X and Y ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
+  - `picture.set` sets them from a script.
+  - The Transform handles in the viewer do not set Pitch or Yaw.
+- **Why:**
+  - Pitch and yaw are numbers, as Rotation is.
+  - The Inspector is where those numbers are set.
+  - The viewer handles move, zoom, turn and crop the picture.
