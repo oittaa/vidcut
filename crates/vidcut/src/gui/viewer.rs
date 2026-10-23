@@ -6,13 +6,14 @@ use eframe::egui::{
 };
 use serde_json::json;
 use vidcut_core::model::{Media, Project, TrackKind};
-use vidcut_core::request::ViewerMode;
+use vidcut_core::request::{TimecodeDisplay, ViewerMode};
+use vidcut_core::time::parse_frame_number;
 
 use super::pool::elide;
 use super::row::Row;
 use super::theme;
-use super::workspace::{Drag, TimecodeEntry, Workspace, dim, fit};
-use crate::live::PlayerId;
+use super::workspace::{Drag, PasteWatch, TimecodeEntry, Workspace, dim, fit};
+use crate::live::{PlayerId, seek_frame};
 
 #[derive(Clone)]
 pub struct TwoUp {
@@ -948,7 +949,7 @@ impl Workspace {
                     T::Timecode => {
                         ui.scope(|ui| {
                             ui.add_space(12.0);
-                            ws.timecode_field(ui, id);
+                            ws.timecode_field(ui);
                         })
                         .response
                     }
@@ -1087,12 +1088,8 @@ impl Workspace {
         self.seek(id, target, false);
     }
 
-    fn timecode_field(&mut self, ui: &mut egui::Ui, id: PlayerId) {
-        let position = self.snap.player(id).position;
-        let current = match self.snap.viewer {
-            ViewerMode::Timeline => self.tc(position),
-            _ => self.src_tc(self.snap.source_at().map_or(position, |(_, f)| f)),
-        };
+    fn timecode_field(&mut self, ui: &mut egui::Ui) {
+        let current = self.snap.timecode_text();
         let font = FontId::monospace(18.0);
         if let Some(entry) = &mut self.timecode {
             let r = ui.add(
@@ -1113,18 +1110,14 @@ impl Workspace {
             if r.lost_focus() {
                 let submit = ui.input(|i| i.key_pressed(Key::Enter));
                 let entry = self.timecode.take().expect("editing");
-                if submit && let Some(spec) = timecode_input(&entry.text, self.dropped()) {
-                    let at = match entry.sign {
-                        Some(1) => format!("+{spec}"),
-                        Some(_) => format!("-{spec}"),
-                        None => spec,
-                    };
-                    self.send("player.seek", json!({ "at": at }));
+                if submit {
+                    self.submit_timecode(&entry);
                 }
             }
         } else {
             let r =
                 ui.add(egui::Label::new(RichText::new(&current).font(font)).sense(Sense::click()));
+            r.context_menu(|ui| self.timecode_menu(ui, &current));
             if r.clicked() {
                 self.timecode = Some(TimecodeEntry {
                     sign: None,
@@ -1132,6 +1125,92 @@ impl Workspace {
                     focus: true,
                 });
             }
+        }
+    }
+
+    fn timecode_menu(&mut self, ui: &mut egui::Ui, text: &str) {
+        use TimecodeDisplay::{
+            Auto, RecordFrame, RecordTimecode, SourceFrame, SourceTimecode, Timer1, Timer2,
+        };
+        let current = self.snap.timecode_display;
+        for (label, display) in [
+            ("Auto", Auto),
+            ("Source Timecode", SourceTimecode),
+            ("Source Frame", SourceFrame),
+            ("Record Timecode", RecordTimecode),
+            ("Record Frame", RecordFrame),
+            ("Timer 1", Timer1),
+            ("Timer 2", Timer2),
+        ] {
+            if ui.selectable_label(current == display, label).clicked() {
+                self.send("viewer.set", json!({ "display": display }));
+                ui.close();
+            }
+        }
+        ui.separator();
+        if ui.button("Reset Timer 1").clicked() {
+            self.send("viewer.set", json!({ "reset_timer1": true }));
+            ui.close();
+        }
+        if ui.button("Copy Timecode").clicked() {
+            ui.ctx().copy_text(text.to_string());
+            ui.close();
+        }
+        if ui.button("Paste Timecode").clicked() {
+            self.paste_timecode = PasteWatch::Wait;
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+            ui.close();
+        }
+    }
+
+    fn submit_timecode(&self, entry: &TimecodeEntry) {
+        let raw = entry.text.trim();
+        if raw.is_empty() {
+            return;
+        }
+        if let Some(sign) = entry.sign {
+            let Some(spec) = timecode_input(raw, self.dropped()) else {
+                return;
+            };
+            let at = if sign > 0 {
+                format!("+{spec}")
+            } else {
+                format!("-{spec}")
+            };
+            self.send("player.seek", json!({ "at": at }));
+            return;
+        }
+        let view = self.snap.timecode_view();
+        if view.display == TimecodeDisplay::Auto {
+            let Some(spec) = timecode_input(raw, self.dropped()) else {
+                return;
+            };
+            self.send("player.seek", json!({ "at": spec }));
+            return;
+        }
+        let text = if matches!(
+            view.display,
+            TimecodeDisplay::SourceFrame | TimecodeDisplay::RecordFrame
+        ) {
+            if parse_frame_number(raw).is_none() {
+                self.send("viewer.set", json!({ "paste": raw }));
+                return;
+            }
+            raw.to_string()
+        } else {
+            let Some(spec) = timecode_input(raw, self.dropped()) else {
+                return;
+            };
+            if !spec.contains([':', ';']) {
+                self.send("player.seek", json!({ "at": spec }));
+                return;
+            }
+            spec
+        };
+        match seek_frame(&text, &view) {
+            Ok(frame) => self.send("player.seek", json!({ "at": format!("{frame}f") })),
+            Err(_) => self.send("viewer.set", json!({ "paste": text })),
         }
     }
 

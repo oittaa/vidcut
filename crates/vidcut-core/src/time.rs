@@ -230,6 +230,40 @@ pub fn timecode_frames(h: i64, m: i64, s: i64, f: i64, fps: Rational, drop: bool
     Some((minutes * 60 + s) * base + f - dropped * (minutes - minutes / 10))
 }
 
+pub fn parse_frame_number(text: &str) -> Option<i64> {
+    let text = text.trim();
+    if text.contains([':', ';']) {
+        return None;
+    }
+    let (neg, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text),
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let n = digits.parse::<i64>().ok()?;
+    Some(if neg { -n } else { n })
+}
+
+pub fn parse_counter(text: &str, fps: Rational, drop: bool, start_tc: i64) -> Option<i64> {
+    let text = text.trim();
+    let (neg, body) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest.trim_start()),
+        None => (false, text),
+    };
+    let fields: Vec<i64> = body
+        .split([':', ';'])
+        .map(|f| f.trim().parse().ok())
+        .collect::<Option<_>>()?;
+    let [h, m, s, f] = fields[..] else {
+        return None;
+    };
+    let label = timecode_frames(h, m, s, f, fps, drop)?;
+    let frames = if neg { -label } else { label };
+    Some(frames - start_tc)
+}
+
 pub fn parse_media_timecode(s: &str, fps: Rational) -> Option<i64> {
     let s = s.trim();
     let drop = s.contains([';', '.']);
@@ -729,5 +763,27 @@ mod tests {
         assert_eq!(r("450f..end"), (450, 9000));
         assert_eq!(r("100f..+00:00:01:00"), (100, 125));
         assert!(RangeSpec::parse("10s").is_err());
+    }
+
+    #[test]
+    fn a_frame_number_is_digits() {
+        assert_eq!(parse_frame_number("100"), Some(100));
+    }
+
+    #[test]
+    fn a_timecode_is_not_a_frame_number() {
+        assert_eq!(parse_frame_number("00:00:01:00"), None);
+    }
+
+    #[test]
+    fn a_counter_is_the_frame_under_its_label() {
+        let fps = Rational::new(24, 1).unwrap();
+        assert_eq!(parse_counter("01:00:00:00", fps, false, 86400), Some(0));
+    }
+
+    #[test]
+    fn a_skipped_drop_frame_label_is_not_a_counter() {
+        let fps = Rational::new(30000, 1001).unwrap();
+        assert_eq!(parse_counter("00:01:00;00", fps, true, 0), None);
     }
 }

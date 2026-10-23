@@ -143,6 +143,7 @@ Each pass:
 The snapshot:
 
 - The `Snapshot` carries the project, players, selection, notices, filmstrips, waveforms, missing media and jobs.
+- The snapshot carries the timecode count (`TimecodeDisplay`) and the Timer 1 zeros (`Timer1Origin`) for this session.
 - `Port` passes `Renderer::attach`, `Renderer::present` and `Renderer::capture_viewer` to the viewer thread. It passes the rest to the UI.
 
 ## Steps and waits

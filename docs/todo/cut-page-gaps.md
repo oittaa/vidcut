@@ -9,7 +9,6 @@ What [the spec](../cut-page-spec.md) describes and vidcut doesn't do yet.
 - Zoomed-in waveform in the Source Clip scroll area ([§4.1](../cut-page-spec.md#41-modes))
 - Jog In and Jog Out controls ([§4.1](../cut-page-spec.md#41-modes))
 - Jog control ([§4.2](../cut-page-spec.md#42-transport-pp-640-687688-870872))
-- Timecode right-click menu: frame counts, Timer 1 and 2, KeyKode ([§4.3](../cut-page-spec.md#43-timecode-pp-640-688-713714))
 - Full Screen viewer (Shift+F) and Enhanced viewer (Alt+F) ([§4.5](../cut-page-spec.md#45-other-viewer-features))
 - Fast Review ([§4.5](../cut-page-spec.md#45-other-viewer-features))
 - Skimming with C held ([§4.5](../cut-page-spec.md#45-other-viewer-features))

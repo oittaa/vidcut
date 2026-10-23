@@ -1189,9 +1189,14 @@ fn state_line(v: &Value) -> String {
         ),
         None => "source -".to_string(),
     };
+    let count = match v["timecode_display"].as_str() {
+        Some(d) if d != "auto" => format!(", {d}"),
+        _ => String::new(),
+    };
     format!(
-        "viewer {}{} | timeline {} | {} {}",
+        "viewer {}{}{} | timeline {} | {} {}",
         v["viewer"].as_str().unwrap_or("-"),
+        count,
         if v["loop"].as_bool() == Some(true) {
             ", looping"
         } else {

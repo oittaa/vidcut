@@ -26,6 +26,13 @@ pub(super) struct TimecodeEntry {
     pub focus: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum PasteWatch {
+    Off,
+    Wait,
+    Miss,
+}
+
 pub(super) struct Thumbs {
     pub strip: Arc<Filmstrip>,
     pub textures: Vec<egui::TextureHandle>,
@@ -76,6 +83,7 @@ pub struct Workspace {
     pub(super) search: String,
     pub(super) bins: super::pool::BinsUi,
     pub(super) timecode: Option<TimecodeEntry>,
+    pub(super) paste_timecode: PasteWatch,
     pub(super) duration_text: Option<String>,
     pub(super) hover: Option<(String, i64)>,
     pub(super) pool_clicked: Option<String>,
@@ -157,6 +165,7 @@ impl Workspace {
             search: String::new(),
             bins: Default::default(),
             timecode: None,
+            paste_timecode: PasteWatch::Off,
             duration_text: None,
             hover: None,
             pool_clicked: None,
@@ -1016,6 +1025,34 @@ impl Workspace {
         self.import.asking() || self.export.asking(&self.snap.jobs) || self.removing.is_some()
     }
 
+    fn take_timecode_paste(&mut self, ctx: &egui::Context) {
+        if self.paste_timecode == PasteWatch::Off {
+            return;
+        }
+        let mut text = None;
+        ctx.input_mut(|i| {
+            i.events.retain(|e| match e {
+                egui::Event::Paste(s) => {
+                    text = Some(s.clone());
+                    false
+                }
+                _ => true,
+            });
+        });
+        if let Some(text) = text {
+            self.paste_timecode = PasteWatch::Off;
+            let text = text.trim();
+            if !text.is_empty() {
+                self.send("viewer.set", json!({ "paste": text }));
+            }
+            return;
+        }
+        self.paste_timecode = match self.paste_timecode {
+            PasteWatch::Wait => PasteWatch::Miss,
+            PasteWatch::Miss | PasteWatch::Off => PasteWatch::Off,
+        };
+    }
+
     fn keys(&mut self, ctx: &egui::Context) {
         if vidcut_av::debug() {
             ctx.input(|i| {
@@ -1033,6 +1070,7 @@ impl Workspace {
                 }
             });
         }
+        self.take_timecode_paste(ctx);
         if ctx.egui_wants_keyboard_input() {
             return;
         }

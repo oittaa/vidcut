@@ -846,12 +846,37 @@ impl Words<'_> {
     }
 
     fn viewer(&self) -> String {
-        match self.params["mode"].as_str() {
-            Some("timeline") => "Timeline".into(),
-            Some("source_clip") => "Source Clip".into(),
-            Some("source_tape") => "Source Tape".into(),
-            Some(m) => m.to_string(),
-            None => "?".into(),
+        if let Some(mode) = self.params["mode"].as_str() {
+            return match mode {
+                "timeline" => "Timeline".into(),
+                "source_clip" => "Source Clip".into(),
+                "source_tape" => "Source Tape".into(),
+                m => m.to_string(),
+            };
+        }
+        let mut parts = Vec::new();
+        if let Some(d) = self.params["display"].as_str() {
+            parts.push(match d {
+                "auto" => "Auto".into(),
+                "source_timecode" => "Source Timecode".into(),
+                "source_frame" => "Source Frame".into(),
+                "record_timecode" => "Record Timecode".into(),
+                "record_frame" => "Record Frame".into(),
+                "timer1" => "Timer 1".into(),
+                "timer2" => "Timer 2".into(),
+                other => other.to_string(),
+            });
+        }
+        if self.params["reset_timer1"] == true {
+            parts.push("Reset Timer 1".into());
+        }
+        if let Some(text) = self.params["paste"].as_str() {
+            parts.push(format!("Paste {text}"));
+        }
+        match parts.as_slice() {
+            [] => "?".into(),
+            [one] => one.clone(),
+            _ => parts.join(", "),
         }
     }
 }

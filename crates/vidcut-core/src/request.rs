@@ -2049,9 +2049,24 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start_tc: Option<TimeSpec>,
     },
-    /// Show the viewer in a mode: `source_clip`, `source_tape` or `timeline`.
+    /// What the viewer shows, and how its timecode field counts.
+    /// `mode` is `source_clip`, `source_tape`, or `timeline`. Omitted, the viewer stays.
+    /// `display` is the count (decision D91). Omitted, the count stays.
+    /// `reset_timer1` stores the playhead on screen as Timer 1's zero for that player.
+    /// The zero lasts for this session.
+    /// `paste` seeks that playhead to a copied count, read in the display this call leaves.
+    /// Give one of `mode`, `display`, `reset_timer1`, or `paste`.
     #[serde(rename = "viewer.set")]
-    ViewerSet { mode: ViewerMode },
+    ViewerSet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<ViewerMode>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display: Option<TimecodeDisplay>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reset_timer1: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        paste: Option<String>,
+    },
     /// Viewer framing and safe-area guides (decision D90). Stored in
     /// preferences, not the project. A field that is left out stays as it is.
     /// With no fields, toggles framing guides on or off.
@@ -2117,6 +2132,10 @@ pub enum Request {
         viewer: Option<ViewerMode>,
     },
     /// Viewer mode, both playheads, the source clip and selection.
+    /// `timecode` is the text in the timecode field, or `-`.
+    /// `timecode_display` is how that field counts (decision D91).
+    /// `timer1_origin` is each player's Timer 1 zero, `source` and
+    /// `timeline`, or null until a reset. The zeros last for this session.
     #[serde(rename = "player.state")]
     PlayerState {},
     /// Mute what the viewer plays, without changing the project (the monitoring
@@ -2747,6 +2766,20 @@ pub enum ImportMode {
     Compound,
     /// Only its media, into the pool.
     Media,
+}
+
+/// How the viewer's timecode field counts (decision D91).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TimecodeDisplay {
+    #[default]
+    Auto,
+    SourceTimecode,
+    SourceFrame,
+    RecordTimecode,
+    RecordFrame,
+    Timer1,
+    Timer2,
 }
 
 /// What the single viewer shows.
@@ -3782,6 +3815,24 @@ mod tests {
         .unwrap();
         let paths: Vec<_> = r.paths_mut().into_iter().map(|p| p.clone()).collect();
         assert_eq!(paths, ["a.mp4", "b.mp4", "c.otio", "d"].map(PathBuf::from));
+    }
+
+    #[test]
+    fn viewer_set_reads_a_count_without_a_mode() {
+        let r = Request::from_parts(
+            "viewer.set",
+            Some(serde_json::json!({ "display": "timer1" })),
+        )
+        .unwrap();
+        assert_eq!(
+            r,
+            Request::ViewerSet {
+                mode: None,
+                display: Some(TimecodeDisplay::Timer1),
+                reset_timer1: false,
+                paste: None,
+            }
+        );
     }
 
     #[test]
