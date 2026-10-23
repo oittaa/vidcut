@@ -16,6 +16,7 @@ mod history;
 mod import;
 mod inspector;
 mod isolation;
+mod keyframe_editor;
 mod look_tiles;
 mod looks;
 mod mixer;

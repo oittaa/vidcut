@@ -130,6 +130,7 @@ pub struct Workspace {
     pub(super) transcription: super::transcription::TranscriptionUi,
     pub(super) clip_info: super::clip_info::ClipInfo,
     pub(super) metadata_strip: bool,
+    pub(super) key_editor: super::keyframe_editor::Editor,
 }
 
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
@@ -217,6 +218,7 @@ impl Workspace {
             transcription: Default::default(),
             clip_info: Default::default(),
             metadata_strip: super::pool::strip_kept(),
+            key_editor: Default::default(),
         }
     }
 
@@ -862,6 +864,10 @@ impl Workspace {
                 });
             });
             ui.menu_button("Timeline", |ui| {
+                if ui.button("Keyframes").clicked() {
+                    self.left = LeftTab::Keyframes;
+                    ui.close();
+                }
                 let mut on = self.snap.audio_scrubbing;
                 if ui.checkbox(&mut on, "Audio Scrubbing").clicked() {
                     self.send("player.audio_scrubbing", json!({ "on": on }));
@@ -1721,6 +1727,9 @@ impl Workspace {
                     if self.left != LeftTab::Inspector {
                         self.leave_inspector();
                     }
+                    if self.left != LeftTab::Keyframes {
+                        self.key_editor.leave();
+                    }
                     match self.left {
                         LeftTab::Pool => self.pool_panel(ui),
                         LeftTab::Titles => {
@@ -1730,6 +1739,10 @@ impl Workspace {
                         LeftTab::Inspector => {
                             self.pool_focus = false;
                             self.inspector_panel(ui);
+                        }
+                        LeftTab::Keyframes => {
+                            self.pool_focus = false;
+                            self.keyframe_panel(ui);
                         }
                     }
                 })

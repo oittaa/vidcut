@@ -156,6 +156,7 @@ pub enum LeftTab {
     Pool,
     Titles,
     Inspector,
+    Keyframes,
 }
 
 pub struct Browser {
@@ -279,6 +280,7 @@ impl Workspace {
                 (LeftTab::Pool, "Media Pool"),
                 (LeftTab::Titles, "Titles"),
                 (LeftTab::Inspector, "Inspector"),
+                (LeftTab::Keyframes, "Keyframes"),
             ] {
                 if ui.selectable_label(self.left == tab, label).clicked() {
                     self.left = tab;

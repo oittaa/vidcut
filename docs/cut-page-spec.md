@@ -51,7 +51,18 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - vidcut's Full Screen button is on the viewer (deviation X86).
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
   - The Inspector button is at the top right of the UI toolbar (§8.15). vidcut has an Inspector tab beside the Titles tab instead (deviation X70).
-  - Later: the Sync Bin, Keyframe Editor, Transitions and Effects tabs.
+  - A Keyframes tab sits beside the Inspector ([X87](deviations.md#x87-the-keyframes-tab-has-an-ease-menu)).
+  - The Timeline menu opens that tab.
+  - The tab shows the first selected clip.
+  - Each keyed value has a track, in a group for its section.
+  - Volume is a track. Position is one track. Zoom is one track.
+  - A drag on a keyframe moves it in time.
+  - A drag on a curve point also changes the value.
+  - A drag on a group track moves that group's keyframes at that time.
+  - Each value has a curve. A drag on an In or Out handle changes that handle.
+  - One click selects one keyframe. Shift or Ctrl adds to the selection.
+  - A right-click on a keyframe sets its ease (X87).
+  - Later: the Sync Bin, Transitions and Effects tabs.
   - vidcut's bar also has Import, Export and Jobs (deviation X3), and Help (X23).
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
 - **Below the Media Pool:** the edit-function buttons (§7), and Cut and Dissolve (§8.11).

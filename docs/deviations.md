@@ -1734,3 +1734,20 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - Full screen and the enhanced viewer cover the top bar.
   - The button stays on the viewer, so it can be clicked while they are on.
+
+## X87. The Keyframes tab has an ease menu
+
+- **Resolve:**
+  - The Cut page has a Keyframe Editor tab on the left (p. 636).
+  - A Timeline control at the upper left opens it (p. 649).
+  - A right-click on a keyframe in that editor opens no menu.
+- **vidcut:**
+  - A Keyframes tab sits beside the Inspector.
+  - The Timeline menu opens that tab.
+  - A right-click on a keyframe sets Linear, Ease In, Ease Out or Ease In and Out.
+  - The ease is the volume Bezier curve ([X74](#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
+  - `keyframes.set` writes that ease. A drag uses `keyframes.move` or `keyframes.set`.
+- **Why:**
+  - The ease belongs on the keyframe the user is editing.
+  - The same four eases already play on the volume line.
+  - One tab row holds the Keyframes tab, as it holds the Inspector.
