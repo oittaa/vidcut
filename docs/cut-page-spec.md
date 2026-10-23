@@ -1073,10 +1073,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Each silence of at least the minimum goes, less the post-tail and the pre-head.
   - At the ends of a clip, all of the silence goes.
   - The cuts are in whole frames.
-  - It ripples, whatever Ripple On is.
   - Remove takes the stripes as they are left (deviation X48).
+  - Remove takes those stretches of the timeline out of every unlocked track, and closes them up, whatever Ripple On is.
+    - Thus the other tracks lose the same frames, and stay in sync.
+    - The track of each clip must be unlocked. Clips on locked tracks stay where they are.
+    - The window warns when other unlocked tracks lose frames.
   - Cross Fade Audio (`cross_fade`) is off by default.
-    - With it, a Cross Fade 0 dB goes on the sound where two parts that stay meet after the cut.
+    - With it, a Cross Fade 0 dB goes on the sound where two parts of the same clip meet after the cut.
+    - The cuts on other tracks get no cross fade.
     - The cross fade is 2 frames long, centered on the cut. A side with no frames past the cut gets less.
     - Without it, the cuts get the 3 ms de-click fades that every cut gets.
   - **Resolve Studio 21.1.1** (its Edit page):
@@ -1085,6 +1089,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Its window keeps the last values used. Thus its factory defaults are not known.
     - On the install that was checked, it opened at −25 dB, no pre head or post tail, and a minimum of 24 frames.
     - Cross fade audio was off.
+    - With a clip on V2 over a full V1, V1 and A1 lost the same frames. A later V2 clip moved left.
+    - With V1 and A1 locked, they stayed, and V2 and A2 closed up.
+    - With the clip on V1, a V2 clip over the silence lost the same frames.
+    - Only the clip's own sound got the cross fade.
 - **D30. Finding shots and black.**
   - Detect Scene Cuts (p. 690) gives no algorithm.
   - A frame starts a shot when the FFmpeg scdet score on its luma is 10 or more.

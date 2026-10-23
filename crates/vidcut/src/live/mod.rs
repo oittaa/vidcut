@@ -3421,7 +3421,7 @@ impl Live {
         if vidcut_core::ops::remove_parts(&mut q, parts).is_err() {
             return false;
         }
-        let skips = vidcut_core::ops::removed_time(p, parts);
+        let skips = vidcut_core::ops::removed_time(parts);
         let at = skipped_to(&skips, self.player.position(TIMELINE));
         self.audition(Some(Audition {
             timeline: Box::new(q),

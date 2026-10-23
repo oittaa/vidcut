@@ -778,58 +778,7 @@ pub fn split_clip(p: &mut Project, id: &str, at: &[i64]) -> Result<Vec<String>> 
 
 pub type ClipSpans = (String, Vec<(i64, i64)>);
 
-pub fn remove_parts(p: &mut Project, parts: &[ClipSpans]) -> Result<Vec<(usize, i64)>> {
-    let (mut doomed, mut kept) = (Vec::new(), Vec::new());
-    for (id, spans) in parts {
-        let edges: Vec<i64> = spans.iter().flat_map(|&(a, b)| [a, b]).collect();
-        let mut pieces = vec![id.clone()];
-        pieces.extend(split_clip(p, id, &edges)?);
-        for piece in pieces {
-            let c = p.clip(&piece).expect("just split");
-            if spans.iter().any(|&(a, b)| a <= c.start && c.end() <= b) {
-                doomed.push(piece);
-            } else {
-                kept.push(piece);
-            }
-        }
-    }
-    let touching = |p: &Project| -> Vec<(usize, String, String)> {
-        p.tracks
-            .iter()
-            .enumerate()
-            .flat_map(|(ti, t)| {
-                t.clips
-                    .windows(2)
-                    .filter(|w| w[0].end() == w[1].start)
-                    .map(move |w| (ti, w[0].id.clone(), w[1].id.clone()))
-            })
-            .collect()
-    };
-    let before = touching(p);
-    if !doomed.is_empty() {
-        delete_clips(p, &doomed, true)?;
-    }
-    Ok(touching(p)
-        .into_iter()
-        .filter(|(_, a, b)| kept.contains(a) && kept.contains(b))
-        .filter(|j| !before.contains(j))
-        .filter_map(|(ti, a, _)| p.clip(&a).map(|c| (ti, c.end())))
-        .collect())
-}
-
-pub fn removed_time(p: &Project, parts: &[ClipSpans]) -> Vec<(i64, i64)> {
-    let main = &p.tracks[main_index(p)];
-    let mut spans: Vec<(i64, i64)> = parts
-        .iter()
-        .filter(|(id, _)| main.clips.iter().any(|c| &c.id == id))
-        .flat_map(|(_, spans)| spans.iter().copied())
-        .chain(
-            parts
-                .iter()
-                .flat_map(|(_, spans)| spans.iter().copied())
-                .filter(|&(a, _)| main_empty_from(p, a)),
-        )
-        .collect();
+fn merged(mut spans: Vec<(i64, i64)>) -> Vec<(i64, i64)> {
     spans.sort_unstable();
     let mut out: Vec<(i64, i64)> = Vec::new();
     for (a, b) in spans {
@@ -839,6 +788,47 @@ pub fn removed_time(p: &Project, parts: &[ClipSpans]) -> Vec<(i64, i64)> {
         }
     }
     out
+}
+
+pub fn remove_parts(p: &mut Project, parts: &[ClipSpans]) -> Result<Vec<(usize, i64)>> {
+    let mut owned = Vec::new();
+    for (id, spans) in parts {
+        let (ti, ci) = locate(p, id)?;
+        unlocked(p, ti)?;
+        let c = &p.tracks[ti].clips[ci];
+        owned.extend(spans.iter().map(|&span| (ti, c.start, c.end(), span)));
+    }
+    let gone = merged(owned.iter().map(|o| o.3).filter(|(a, b)| a < b).collect());
+    for &(a, b) in gone.iter().rev() {
+        take_out(p, a, b, true);
+    }
+    let after = |x: i64| {
+        x - gone
+            .iter()
+            .filter(|&&(_, b)| b <= x)
+            .map(|(a, b)| b - a)
+            .sum::<i64>()
+    };
+    let mut joins: Vec<(usize, i64)> = owned
+        .iter()
+        .filter_map(|&(ti, start, end, (a, _))| {
+            let &(x, y) = gone.iter().find(|&&(x, y)| x <= a && a < y)?;
+            (start < x && y < end).then(|| (ti, after(x)))
+        })
+        .collect();
+    joins.sort_unstable();
+    joins.dedup();
+    Ok(joins)
+}
+
+pub fn removed_time(parts: &[ClipSpans]) -> Vec<(i64, i64)> {
+    merged(
+        parts
+            .iter()
+            .flat_map(|(_, spans)| spans.iter().copied())
+            .filter(|(a, b)| a < b)
+            .collect(),
+    )
 }
 
 pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
@@ -908,7 +898,11 @@ pub fn delete_range(p: &mut Project, a: i64, b: i64, lift: bool) -> Result<()> {
         return Err(Error::usage(format!("empty range {a}..{b}")));
     }
     unlocked(p, main_index(p))?;
-    let ripple = !lift && p.settings.ripple_on;
+    take_out(p, a, b, !lift && p.settings.ripple_on);
+    Ok(())
+}
+
+fn take_out(p: &mut Project, a: i64, b: i64, ripple: bool) {
     for ti in 0..p.tracks.len() {
         if p.tracks[ti].locked {
             continue;
@@ -924,7 +918,6 @@ pub fn delete_range(p: &mut Project, a: i64, b: i64, lift: bool) -> Result<()> {
         x if ripple && x >= b => Some(x - (b - a)),
         x => Some(x),
     });
-    Ok(())
 }
 
 pub fn close_gap(p: &mut Project, at: i64) -> Result<()> {
