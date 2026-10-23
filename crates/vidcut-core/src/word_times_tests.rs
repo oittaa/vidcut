@@ -32,7 +32,7 @@ fn spoken(text: &str, start: f64) -> Spoken {
 
 fn words_of(f: &Fixture, cue: &str) -> Vec<i64> {
     let (ti, ci) = f.editor.project().find_cue(cue).unwrap();
-    f.editor.project().subtitles[ti].cues[ci].words.clone()
+    f.editor.project().subtitles[ti].cues[ci].times()
 }
 
 fn one_cue(f: &mut Fixture) {

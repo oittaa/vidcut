@@ -13,6 +13,8 @@ pub struct Piece {
     pub color: Option<String>,
     pub hidden: bool,
     pub popped: bool,
+    pub face: Option<String>,
+    pub size_scale: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -106,9 +108,95 @@ fn by_word(pieces: Vec<Piece>) -> Vec<(Piece, Option<usize>)> {
     out
 }
 
+fn paint_word(
+    p: &mut Piece,
+    word: Option<usize>,
+    style: &SubtitleStyle,
+    word_styles: &[Option<SubtitleStyle>],
+) {
+    let Some(over) = word
+        .and_then(|i| word_styles.get(i))
+        .and_then(|s| s.as_ref())
+    else {
+        return;
+    };
+    if over.case.is_some() {
+        p.text = cased(&p.text, over.case);
+    }
+    if over.font.is_some() {
+        p.face = over.font.clone();
+    }
+    if let Some(size) = over.size {
+        let cue = style.text_fraction();
+        p.size_scale = (cue > 0.0).then_some((size / cue * 1000.0).round() as u32);
+    }
+    if over.bold == Some(true) {
+        p.bold = true;
+    }
+    if over.color.is_some() {
+        let [r, g, b] = style.for_cue(Some(over)).ink();
+        p.color = Some(format!("#{r:02x}{g:02x}{b:02x}"));
+    }
+}
+
+pub fn parts(text: &str) -> Vec<(Piece, Option<usize>)> {
+    by_word(pieces(text))
+}
+
+pub fn marked(text: &str, cue: &SubtitleStyle, words: &[Option<SubtitleStyle>]) -> String {
+    if words.iter().all(|s| s.is_none()) {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    let mut current = None;
+    let mut open_bold = false;
+    let mut open_font = false;
+    for (piece, word) in parts(text) {
+        let over = word.and_then(|i| words.get(i)).and_then(|s| s.as_ref());
+        if word != current {
+            if open_font {
+                out.push_str("</font>");
+                open_font = false;
+            }
+            if open_bold {
+                out.push_str("</b>");
+                open_bold = false;
+            }
+            current = word;
+            if over.is_some_and(|s| s.bold == Some(true)) {
+                out.push_str("<b>");
+                open_bold = true;
+            }
+            if over.is_some_and(|s| s.color.is_some() || s.font.is_some()) {
+                let look = cue.for_cue(over);
+                let mut attrs = String::new();
+                if let Some(font) = over.and_then(|s| s.font.as_ref()) {
+                    attrs.push_str(&format!(" face=\"{font}\""));
+                }
+                if over.is_some_and(|s| s.color.is_some()) {
+                    let [r, g, b] = look.ink();
+                    attrs.push_str(&format!(" color=\"#{r:02x}{g:02x}{b:02x}\""));
+                }
+                out.push_str(&format!("<font{attrs}>"));
+                open_font = true;
+            }
+        }
+        let case = over.and_then(|s| s.case).or(cue.case);
+        out.push_str(&cased(&piece.text, case));
+    }
+    if open_font {
+        out.push_str("</font>");
+    }
+    if open_bold {
+        out.push_str("</b>");
+    }
+    out
+}
+
 pub fn shown(
     text: &str,
     words: &[i64],
+    word_styles: &[Option<SubtitleStyle>],
     style: &SubtitleStyle,
     frame: i64,
     fps: f64,
@@ -125,8 +213,19 @@ pub fn shown(
             p.color = whole.map(String::from);
         }
     }
+    let still_pieces = if word_styles.iter().any(|s| s.is_some()) {
+        by_word(all.clone())
+            .into_iter()
+            .map(|(mut p, word)| {
+                paint_word(&mut p, word, style, word_styles);
+                p
+            })
+            .collect()
+    } else {
+        all.clone()
+    };
     let still = Shown {
-        pieces: all.clone(),
+        pieces: still_pieces,
         spoken: None,
         step: None,
         pop: 1.0,
@@ -170,6 +269,7 @@ pub fn shown(
             }
             p.popped = step.is_some();
         }
+        paint_word(&mut p, word, style, word_styles);
         out.push(p);
     }
     Shown {

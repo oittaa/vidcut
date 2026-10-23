@@ -197,6 +197,11 @@ pub fn describe_at(
         "markers.remove" => format!("Remove marker {}", d.text("marker")),
         "subtitles.add" => format!("Subtitle {} at {}", quoted(&d.text("text")), d.time("at")),
         "subtitles.set" => d.cue_set(),
+        "subtitles.set_word" => format!(
+            "Style word {} of {}",
+            d.params["word"].as_u64().unwrap_or(0) + 1,
+            d.cues("cue")
+        ),
         "subtitles.move" if d.params["track"].is_string() => {
             format!("Move {} to {}", d.cues("cues"), d.text("track"))
         }

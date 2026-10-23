@@ -63,6 +63,7 @@ pub fn read(source: &str) -> Read {
                 words: Vec::new(),
                 speaker: None,
                 style: None,
+                word_styles: Vec::new(),
             });
         }
     };
@@ -119,7 +120,7 @@ pub fn write(cues: &[Timed], positions: bool, style: &SubtitleStyle) -> String {
             n + 1,
             clock(c.start, ','),
             clock(c.end, ','),
-            c.text.replace('\n', "\r\n")
+            super::marked(&c.text, &look, &c.word_styles).replace('\n', "\r\n")
         ));
     }
     out

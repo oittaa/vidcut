@@ -1321,6 +1321,19 @@ pub enum Request {
         #[serde(default)]
         style: Option<SubtitleStyle>,
     },
+    /// Set the style of one word of a cue (`q3`, or `S1@15s`). `word` counts
+    /// from 0, in the order of the words of the cue's text. A style field
+    /// left out keeps the cue's style, which keeps the track's where the cue
+    /// leaves a field out. `{}` drops the word's style. The other words stay
+    /// as they are.
+    #[serde(rename = "subtitles.set_word")]
+    SubtitlesSetWord {
+        cue: String,
+        /// The word, counted from 0.
+        word: usize,
+        /// Its own style. A field left out keeps the cue's. `{}` drops it.
+        style: SubtitleStyle,
+    },
     /// Apply to All: `cue`'s own color becomes its speaker's, and every cue
     /// of that speaker on its track takes its place and drops a color of
     /// its own. Returns the cues changed.

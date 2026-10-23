@@ -2161,6 +2161,32 @@ pub struct SubtitleTrack {
     pub cues: Vec<Cue>,
 }
 
+/// One word of a cue. `at` is left out when the word has no start frame.
+/// `style` is left out when the word keeps the cue's style. A field left
+/// out of `style` keeps the cue's style.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+pub struct CueWord {
+    /// The frame it starts on, counted from the cue's start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<i64>,
+    /// Its own style. The whole value is left out when it keeps the cue's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<SubtitleStyle>,
+}
+
+impl CueWord {
+    pub fn at(frame: i64) -> Self {
+        Self {
+            at: Some(frame),
+            style: None,
+        }
+    }
+
+    pub fn from_times(times: &[i64]) -> Vec<Self> {
+        times.iter().copied().map(Self::at).collect()
+    }
+}
+
 /// One subtitle: its text over a span of the timeline.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Cue {
@@ -2175,11 +2201,11 @@ pub struct Cue {
     /// Where it shows on the picture: the bottom unless set.
     #[serde(default, skip_serializing_if = "Place::is_bottom")]
     pub place: Place,
-    /// The frame each of its words starts on, counted from the cue's start:
-    /// one for each word of its text without the markup, words being parted
-    /// by spaces and line breaks. Empty when its words have no times.
+    /// Its words, in order. Left out when no word has a start frame or a
+    /// style. A word with no `at` has no start frame. A word with no
+    /// `style` keeps the cue's style.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub words: Vec<i64>,
+    pub words: Vec<CueWord>,
     /// The person saying it, as `speakers.list` gives them. Create
     /// Subtitles from Audio sets it when it tells the speakers apart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2213,6 +2239,18 @@ impl Place {
 impl Cue {
     pub fn end(&self) -> i64 {
         self.start + self.duration
+    }
+
+    pub fn has_times(&self) -> bool {
+        self.words.iter().any(|w| w.at.is_some())
+    }
+
+    pub fn times(&self) -> Vec<i64> {
+        if self.has_times() {
+            self.words.iter().map(|w| w.at.unwrap_or(0)).collect()
+        } else {
+            Vec::new()
+        }
     }
 }
 

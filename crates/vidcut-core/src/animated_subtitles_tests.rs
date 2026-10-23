@@ -33,6 +33,7 @@ fn the_spoken_word_is_colored() {
     let s = shown(
         TEXT,
         &WORDS,
+        &[],
         &animated(WordsShow::Highlight, None),
         12,
         25.0,
@@ -55,6 +56,7 @@ fn reveal_hides_the_words_not_yet_spoken() {
     let s = shown(
         TEXT,
         &WORDS,
+        &[],
         &animated(WordsShow::Reveal, None),
         12,
         25.0,
@@ -77,6 +79,7 @@ fn only_the_spoken_word_shows_as_a_word() {
     let s = shown(
         TEXT,
         &WORDS,
+        &[],
         &animated(WordsShow::Word, None),
         12,
         25.0,
@@ -90,7 +93,7 @@ fn a_spoken_word_starts_at_its_pop_and_settles_in_a_fifth_of_a_second() {
     let style = animated(WordsShow::Highlight, Some(1.5));
     let pops: Vec<f64> = [10, 15]
         .iter()
-        .map(|&f| shown(TEXT, &WORDS, &style, f, 25.0, None).pop)
+        .map(|&f| shown(TEXT, &WORDS, &[], &style, f, 25.0, None).pop)
         .collect();
     assert_eq!(pops, vec![1.5, 1.0]);
 }
@@ -120,6 +123,7 @@ fn an_imsc1_file_writes_capitals_and_bold() {
             words: Vec::new(),
             speaker: None,
             style: None,
+            word_styles: Vec::new(),
         }],
         SubtitleFormat::Ttml,
         &Writing {

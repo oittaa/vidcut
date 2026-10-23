@@ -44,7 +44,7 @@ fn webvtt(source: &str) -> Read {
 }
 
 fn colors(text: &str, words: &[i64], style: &SubtitleStyle) -> Vec<Option<String>> {
-    shown(text, words, style, 12, 25.0, Some("#00ff00"))
+    shown(text, words, &[], style, 12, 25.0, Some("#00ff00"))
         .pieces
         .into_iter()
         .map(|p| p.color)
@@ -137,6 +137,7 @@ fn webvtt_writes_the_speaker_as_a_voice() {
         words: Vec::new(),
         speaker: Some("Nikki".into()),
         style: None,
+        word_styles: Vec::new(),
     }];
     let how = Writing {
         language: None,

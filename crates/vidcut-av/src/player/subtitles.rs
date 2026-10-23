@@ -42,9 +42,12 @@ fn key_at(view: &SubtitleView, plan: &Plan, t: i64) -> Option<Key> {
         .filter(|c| c.start <= t && t < c.end())
         .map(|c| {
             let style = view.style.for_cue(c.style.as_ref());
+            let styles: Vec<Option<SubtitleStyle>> =
+                c.words.iter().map(|w| w.style.clone()).collect();
             let words = vidcut_core::subtitles::shown(
                 &c.text,
-                &c.words,
+                &c.times(),
+                &styles,
                 &style,
                 t - c.start,
                 fps,

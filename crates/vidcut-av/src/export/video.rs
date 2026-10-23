@@ -592,6 +592,7 @@ impl Burner {
                 let s = vidcut_core::subtitles::shown(
                     &c.text,
                     &c.words,
+                    &c.word_styles,
                     &style,
                     j - c.start,
                     self.fps,

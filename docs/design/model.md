@@ -259,7 +259,10 @@ Relinking:
 - A `Cue` spans whole frames, as a clip does.
 - Its `text` is lines, with `<i>`, `<b>`, `<u>` and `<font color>` around words.
 - `Place` says where on the picture the cue goes.
-- `words` gives the frame on which each of its words starts, counted from its start ([spec D70](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `words` holds each `CueWord`, in the order of the words of the text. The cue leaves `words` out when no word has a start frame or a style.
+- A word's `at` is the frame it starts on, counted from the cue's start ([spec D70](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). The word leaves `at` out when it has no start frame.
+- A word's `style` is its own style. A field left out keeps the cue style. The word leaves `style` out when it keeps the cue style.
+- `SubtitleStyle::for_cue` merges one style over the style under it. The cue uses it on the track style. A word uses it on that result.
 - `speaker` is the person who says it.
 - `color` is its own color, over the color of the person ([deviation X63](../deviations.md#x63-subtitles-keep-their-speaker-painted-in-the-persons-color)). `Speakers::color_of` resolves it.
 - `style` is the cue's own style. A field left out keeps the track style. The cue leaves `style` out when it keeps the track style.

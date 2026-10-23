@@ -1,7 +1,8 @@
 use serde_json::{Value, json};
 
 use crate::model::{
-    Place, Project, Settings, SubtitleAlign, SubtitleBackground, SubtitleOutline, SubtitleStyle,
+    LetterCase, Place, Project, Settings, SubtitleAlign, SubtitleBackground, SubtitleOutline,
+    SubtitleStyle,
 };
 use crate::ops::subtitles::{TrackProps, add_track, checked_style, set_track};
 use crate::request::SubtitleFormat;
@@ -153,6 +154,7 @@ fn an_imsc1_file_writes_the_track_style() {
             words: Vec::new(),
             speaker: None,
             style: None,
+            word_styles: Vec::new(),
         }],
         SubtitleFormat::Ttml,
         &crate::subtitles::Writing {
@@ -210,6 +212,7 @@ fn a_styled_file_keeps_each_cues_place() {
                 words: Vec::new(),
                 speaker: None,
                 style: None,
+                word_styles: Vec::new(),
             },
             Timed {
                 start: 3.0,
@@ -219,6 +222,7 @@ fn a_styled_file_keeps_each_cues_place() {
                 words: Vec::new(),
                 speaker: None,
                 style: None,
+                word_styles: Vec::new(),
             },
             Timed {
                 start: 5.0,
@@ -228,6 +232,7 @@ fn a_styled_file_keeps_each_cues_place() {
                 words: Vec::new(),
                 speaker: None,
                 style: None,
+                word_styles: Vec::new(),
             },
         ],
         SubtitleFormat::Ttml,
@@ -333,6 +338,116 @@ fn setting_one_cue_leaves_the_other_on_the_track_style() {
 }
 
 #[test]
+fn a_word_keeps_the_cue_fields_it_leaves_out() {
+    let cue = SubtitleStyle {
+        color: Some("#ffffff".into()),
+        size: Some(0.08),
+        ..SubtitleStyle::default()
+    };
+    let word = SubtitleStyle {
+        size: Some(0.04),
+        bold: Some(true),
+        ..SubtitleStyle::default()
+    };
+    assert_eq!(
+        cue.for_cue(Some(&word)),
+        SubtitleStyle {
+            color: Some("#ffffff".into()),
+            size: Some(0.04),
+            bold: Some(true),
+            ..SubtitleStyle::default()
+        }
+    );
+}
+
+#[test]
+fn setting_one_word_leaves_the_other_on_the_cue_style() {
+    let mut f = Fixture::new(&[]);
+    f.ok(req(
+        "subtitles.add",
+        json!({"text": "one two", "at": "0f", "duration": "10f"}),
+    ));
+    f.ok(req(
+        "subtitles.set_word",
+        json!({"cue": "q1", "word": 0, "style": {"color": "#ff0000", "size": 0.04}}),
+    ));
+    let cue = &f.editor.project().subtitles[0].cues[0];
+    assert_eq!(
+        cue.words[0].style,
+        Some(SubtitleStyle {
+            color: Some("#ff0000".into()),
+            size: Some(0.04),
+            ..SubtitleStyle::default()
+        })
+    );
+    assert_eq!(cue.words.get(1).and_then(|w| w.style.clone()), None);
+}
+
+#[test]
+fn the_viewer_paints_one_word_and_leaves_the_other() {
+    let cue = SubtitleStyle {
+        color: Some("#ffffff".into()),
+        ..SubtitleStyle::default()
+    };
+    let word = SubtitleStyle {
+        color: Some("#ff0000".into()),
+        size: Some(0.11),
+        bold: Some(true),
+        case: Some(LetterCase::Upper),
+        ..SubtitleStyle::default()
+    };
+    let shown = crate::subtitles::shown("one two", &[], &[None, Some(word)], &cue, 0, 25.0, None);
+    let got: Vec<(String, Option<String>, bool, Option<u32>)> = shown
+        .pieces
+        .iter()
+        .map(|p| (p.text.clone(), p.color.clone(), p.bold, p.size_scale))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            ("one".into(), None, false, None),
+            (" ".into(), None, false, None),
+            ("TWO".into(), Some("#ff0000".into()), true, Some(2000)),
+        ]
+    );
+}
+
+#[test]
+fn an_imsc1_file_writes_one_words_style() {
+    let word = SubtitleStyle {
+        color: Some("#ff0000".into()),
+        size: Some(0.11),
+        bold: Some(true),
+        case: Some(LetterCase::Upper),
+        ..SubtitleStyle::default()
+    };
+    let text = write(
+        &[Timed {
+            start: 1.0,
+            end: 2.0,
+            text: "one two".into(),
+            place: Place::Bottom,
+            words: Vec::new(),
+            speaker: None,
+            style: None,
+            word_styles: vec![None, Some(word)],
+        }],
+        SubtitleFormat::Ttml,
+        &Writing {
+            language: None,
+            frame_rate: None,
+            positions: false,
+            style: &SubtitleStyle::default(),
+        },
+    )
+    .text;
+    let want =
+        "one <span tts:color=\"#ff0000\" tts:fontSize=\"1100%\" tts:fontWeight=\"bold\">TWO</span>";
+    let at = text.find(want);
+    assert_eq!(at.map(|i| &text[i..i + want.len()]), Some(want));
+}
+
+#[test]
 fn webvtt_writes_a_cues_alignment_and_position() {
     let style = SubtitleStyle {
         align: Some(SubtitleAlign::Left),
@@ -348,6 +463,7 @@ fn webvtt_writes_a_cues_alignment_and_position() {
             words: Vec::new(),
             speaker: None,
             style: Some(style),
+            word_styles: Vec::new(),
         }],
         SubtitleFormat::Vtt,
         &Writing {
