@@ -1622,8 +1622,18 @@ fn fade(color: egui::Color32, alpha: f32) -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied(r, g, b, (f32::from(a) * alpha) as u8)
 }
 
+fn sweep_span(width: f32, height: f32) -> f32 {
+    let lo = height * 2.0;
+    let hi = width;
+    if lo <= hi {
+        (width * 0.36).clamp(lo, hi)
+    } else {
+        hi
+    }
+}
+
 fn paint_sweep(painter: &egui::Painter, bar: egui::Rect, color: egui::Color32, time: f64) {
-    let span = (bar.width() * 0.36).clamp(bar.height() * 2.0, bar.width());
+    let span = sweep_span(bar.width(), bar.height());
     let (t, forward) = sweep(time);
     let x = bar.left() + (bar.width() - span) * t;
     let body = egui::Rect::from_min_size(egui::pos2(x, bar.top()), egui::vec2(span, bar.height()));
@@ -2907,6 +2917,11 @@ fn settings_form(
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    #[test]
+    fn a_job_bar_taller_than_it_is_wide_still_sweeps() {
+        assert_eq!(super::sweep_span(10.0, 8.0), 10.0);
+    }
 
     use super::{auto_label, command_params, decoded_on, detail_rows, details_text, metadata_line};
     use crate::live::JobInfo;
