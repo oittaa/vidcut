@@ -18,9 +18,8 @@ pub struct SubtitleView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Key {
-    style: SubtitleStyle,
     size: (u32, u32),
-    cues: Vec<(Words, Place)>,
+    cues: Vec<(Words, Place, SubtitleStyle)>,
 }
 
 #[derive(Default)]
@@ -37,25 +36,25 @@ pub(crate) struct Subtitles {
 
 fn key_at(view: &SubtitleView, plan: &Plan, t: i64) -> Option<Key> {
     let fps = plan.fps().as_f64();
-    let cues: Vec<(Words, Place)> = view
+    let cues: Vec<(Words, Place, SubtitleStyle)> = view
         .cues
         .iter()
         .filter(|c| c.start <= t && t < c.end())
         .map(|c| {
+            let style = view.style.for_cue(c.style.as_ref());
             let words = vidcut_core::subtitles::shown(
                 &c.text,
                 &c.words,
-                &view.style,
+                &style,
                 t - c.start,
                 fps,
                 c.color.as_deref(),
             );
-            (words, c.place)
+            (words, c.place, style)
         })
-        .filter(|(w, _)| !w.pieces.is_empty())
+        .filter(|(w, _, _)| !w.pieces.is_empty())
         .collect();
     (!cues.is_empty()).then(|| Key {
-        style: view.style.clone(),
         size: plan.size(),
         cues,
     })
@@ -111,8 +110,16 @@ impl Subtitles {
             return false;
         }
         let (w, h) = key.size;
-        let cues: Vec<(&Words, Place)> = key.cues.iter().map(|(s, p)| (s, *p)).collect();
-        let pictures: Vec<Arc<TitlePicture>> = crate::burn::draw(&cues, w, h, &key.style)
+        let cues: Vec<crate::burn::Painted<'_>> = key
+            .cues
+            .iter()
+            .map(|(shown, place, style)| crate::burn::Painted {
+                shown,
+                place: *place,
+                style,
+            })
+            .collect();
+        let pictures: Vec<Arc<TitlePicture>> = crate::burn::paint(&cues, w, h)
             .all()
             .into_iter()
             .map(|s| {

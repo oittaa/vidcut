@@ -1,6 +1,6 @@
 use super::text::{self, Dialect};
 use super::{Read, Timed, clock};
-use crate::model::Place;
+use crate::model::SubtitleStyle;
 
 pub fn time(s: &str) -> Option<f64> {
     let s = s.trim();
@@ -62,6 +62,7 @@ pub fn read(source: &str) -> Read {
                 place: place.unwrap_or_default(),
                 words: Vec::new(),
                 speaker: None,
+                style: None,
             });
         }
     };
@@ -105,13 +106,13 @@ pub fn read(source: &str) -> Read {
     }
 }
 
-pub fn write(cues: &[Timed], positions: bool) -> String {
+pub fn write(cues: &[Timed], positions: bool, style: &SubtitleStyle) -> String {
     let mut out = String::new();
     for (n, c) in cues.iter().enumerate() {
-        let prefix = match (positions, c.place) {
-            (true, Place::Top) => "{\\an8}",
-            (true, Place::Middle) => "{\\an5}",
-            _ => "",
+        let look = style.for_cue(c.style.as_ref());
+        let prefix = match positions {
+            true => super::ass_align(c.place, look.line_align()).unwrap_or(""),
+            false => "",
         };
         out.push_str(&format!(
             "{}\r\n{} --> {}\r\n{prefix}{}\r\n\r\n",

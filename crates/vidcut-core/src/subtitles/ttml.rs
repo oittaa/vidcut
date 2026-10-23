@@ -5,7 +5,7 @@ use roxmltree::{Document, Node, ParsingOptions};
 use super::text::{self, Tag, Token, escape_xml};
 use super::{Read, Timed, clock};
 use crate::error::{Error, Result};
-use crate::model::{Place, SubtitleStyle};
+use crate::model::{Place, SubtitleAlign, SubtitleStyle};
 
 const TTP: &str = "http://www.w3.org/ns/ttml#parameter";
 const TTS: &str = "http://www.w3.org/ns/ttml#styling";
@@ -305,6 +305,7 @@ impl Walk<'_, '_> {
                 .map_or(Place::Bottom, |r| self.sheet.place(r)),
             words: Vec::new(),
             speaker: None,
+            style: None,
         });
     }
 }
@@ -751,10 +752,11 @@ fn style_attrs(style: &SubtitleStyle) -> String {
     };
     let mut attrs = format!(
         "tts:color=\"{}\" tts:fontFamily=\"{font}\" tts:fontSize=\"{}%\" tts:lineHeight=\"{}%\" \
-         tts:textAlign=\"center\"",
+         tts:textAlign=\"{}\"",
         hex(style.ink()),
         plain_number(style.text_fraction() * 10_000.0),
         plain_number(SubtitleStyle::LINE * 100.0),
+        align_name(style.line_align()),
     );
     if style.bold == Some(true) {
         attrs.push_str(" tts:fontWeight=\"bold\"");
@@ -765,6 +767,44 @@ fn style_attrs(style: &SubtitleStyle) -> String {
             hex(rgb),
             plain_number(size * 100.0)
         ));
+    }
+    attrs
+}
+
+fn align_name(align: SubtitleAlign) -> &'static str {
+    match align {
+        SubtitleAlign::Left => "left",
+        SubtitleAlign::Center => "center",
+        SubtitleAlign::Right => "right",
+    }
+}
+
+fn cue_attrs(track: &SubtitleStyle, cue: &Timed) -> String {
+    let Some(over) = &cue.style else {
+        return String::new();
+    };
+    let look = track.over(over);
+    let mut attrs = String::new();
+    if over.align.is_some() {
+        attrs.push_str(&format!(
+            " tts:textAlign=\"{}\"",
+            align_name(look.line_align())
+        ));
+    }
+    if over.color.is_some() {
+        attrs.push_str(&format!(" tts:color=\"{}\"", hex(look.ink())));
+    }
+    if over.size.is_some() {
+        attrs.push_str(&format!(
+            " tts:fontSize=\"{}%\"",
+            plain_number(look.text_fraction() * 10_000.0)
+        ));
+    }
+    if over.bold == Some(true) {
+        attrs.push_str(" tts:fontWeight=\"bold\"");
+    }
+    if let Some(font) = &over.font {
+        attrs.push_str(&format!(" tts:fontFamily=\"{}\"", escape_xml(font)));
     }
     attrs
 }
@@ -815,18 +855,24 @@ pub fn write(
         rate_attr(frame_rate),
         style_attrs(style),
     );
-    let background = background(style);
+    let track_background = background(style);
     for c in cues {
-        let body = paragraph(&super::cased_markup(&c.text, style.case));
-        let text = match &background {
+        let look = style.for_cue(c.style.as_ref());
+        let body = paragraph(&super::cased_markup(&c.text, look.case));
+        let backing = match c.style.as_ref().and_then(|s| s.background.as_ref()) {
+            Some(_) => background(&look),
+            None => track_background.clone(),
+        };
+        let text = match &backing {
             Some(color) => format!("<span tts:backgroundColor=\"{color}\">{body}</span>"),
             None => body,
         };
         out.push_str(&format!(
-            "      <p begin=\"{}\" end=\"{}\" region=\"{}\">{text}</p>\n",
+            "      <p begin=\"{}\" end=\"{}\" region=\"{}\"{}>{text}</p>\n",
             clock(c.start, '.'),
             clock(c.end, '.'),
-            name(c.place)
+            name(c.place),
+            cue_attrs(style, c)
         ));
     }
     out.push_str("    </div>\n  </body>\n</tt>\n");

@@ -24,6 +24,7 @@ fn cue(speaker: Option<&str>, color: Option<&str>) -> Cue {
         words: Vec::new(),
         speaker: speaker.map(String::from),
         color: color.map(String::from),
+        style: None,
     }
 }
 
@@ -135,6 +136,7 @@ fn webvtt_writes_the_speaker_as_a_voice() {
         place: Place::Bottom,
         words: Vec::new(),
         speaker: Some("Nikki".into()),
+        style: None,
     }];
     let how = Writing {
         language: None,

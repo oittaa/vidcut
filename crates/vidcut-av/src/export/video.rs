@@ -582,35 +582,42 @@ impl Burner {
     fn burn(&mut self, f: frame::Video, output: &Output) -> Result<frame::Video> {
         let j = self.frame;
         self.frame += 1;
-        let shown: Vec<(usize, vidcut_core::subtitles::Shown)> = self
+        let shown: Vec<(usize, vidcut_core::subtitles::Shown, SubtitleStyle)> = self
             .cues
             .iter()
             .enumerate()
             .filter(|(_, c)| c.start <= j && j < c.end)
             .map(|(i, c)| {
+                let style = self.style.for_cue(c.style.as_ref());
                 let s = vidcut_core::subtitles::shown(
                     &c.text,
                     &c.words,
-                    &self.style,
+                    &style,
                     j - c.start,
                     self.fps,
                     c.color.as_deref(),
                 );
-                (i, s)
+                (i, s, style)
             })
             .collect();
         if shown.is_empty() {
             return Ok(f);
         }
-        let showing: Vec<(usize, Option<usize>, Option<i64>)> =
-            shown.iter().map(|(i, s)| (*i, s.spoken, s.step)).collect();
+        let showing: Vec<(usize, Option<usize>, Option<i64>)> = shown
+            .iter()
+            .map(|(i, s, _)| (*i, s.spoken, s.step))
+            .collect();
         let size = (f.width(), f.height());
         if showing != self.showing || size != self.size {
-            let cues: Vec<(&vidcut_core::subtitles::Shown, vidcut_core::model::Place)> = shown
+            let cues: Vec<crate::burn::Painted<'_>> = shown
                 .iter()
-                .map(|(i, s)| (s, self.cues[*i].place))
+                .map(|(i, s, style)| crate::burn::Painted {
+                    shown: s,
+                    place: self.cues[*i].place,
+                    style,
+                })
                 .collect();
-            let drawing = crate::burn::draw(&cues, size.0, size.1, &self.style);
+            let drawing = crate::burn::paint(&cues, size.0, size.1);
             let steady = |s: &[(usize, Option<usize>, Option<i64>)]| -> Vec<_> {
                 s.iter()
                     .map(|&(i, w, step)| (i, w, step.is_some()))

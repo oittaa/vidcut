@@ -3481,6 +3481,7 @@ fn mutate(
             words,
             speaker,
             color,
+            style,
         } => {
             let id = resolve_cue(p, cue, playhead)?;
             let start = start
@@ -3501,6 +3502,9 @@ fn mutate(
                 time_from_kept(p, env, &id)?;
             }
             ops::subtitles::set_who(p, &id, speaker.as_deref(), color.as_deref())?;
+            if let Some(style) = style {
+                ops::subtitles::set_style(p, &id, style.clone())?;
+            }
             Value::Null
         }
         Request::SubtitlesMatchSpeaker { cue } => {

@@ -1881,6 +1881,15 @@ pub struct SubtitleStyle {
     /// `words`, else `text`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker_color: Option<SpeakerPaint>,
+    /// `left`, `center` or `right`. Usual: `center`. On a cue, left out
+    /// keeps the track's alignment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub align: Option<SubtitleAlign>,
+    /// Where the block's alignment point sits, `[x, y]` as fractions of
+    /// the picture from its top left, each from 0 to 1. Usual: the cue's
+    /// place. On a cue, left out keeps the track's position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f64; 2]>,
 }
 
 /// What a cue's own or its speaker's color paints.
@@ -1890,6 +1899,15 @@ pub enum SpeakerPaint {
     Text,
     Spoken,
     None,
+}
+
+/// How the lines of a subtitle sit in their block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SubtitleAlign {
+    Left,
+    Center,
+    Right,
 }
 
 /// Letters drawn all as capitals or all as small letters.
@@ -1970,6 +1988,37 @@ impl SubtitleStyle {
             && self.shadow.is_none()
             && self.words.is_none()
             && self.speaker_color.is_none()
+            && self.align.is_none()
+            && self.position.is_none()
+    }
+
+    pub fn over(&self, cue: &Self) -> Self {
+        Self {
+            font: cue.font.clone().or_else(|| self.font.clone()),
+            size: cue.size.or(self.size),
+            color: cue.color.clone().or_else(|| self.color.clone()),
+            outline: cue.outline.clone().or_else(|| self.outline.clone()),
+            background: cue.background.clone().or_else(|| self.background.clone()),
+            margin: cue.margin.or(self.margin),
+            bold: cue.bold.or(self.bold),
+            case: cue.case.or(self.case),
+            shadow: cue.shadow.clone().or_else(|| self.shadow.clone()),
+            words: cue.words.clone().or_else(|| self.words.clone()),
+            speaker_color: cue.speaker_color.or(self.speaker_color),
+            align: cue.align.or(self.align),
+            position: cue.position.or(self.position),
+        }
+    }
+
+    pub fn line_align(&self) -> SubtitleAlign {
+        self.align.unwrap_or(SubtitleAlign::Center)
+    }
+
+    pub fn for_cue(&self, cue: Option<&Self>) -> Self {
+        match cue {
+            Some(over) => self.over(over),
+            None => self.clone(),
+        }
     }
 
     pub fn paints(&self) -> SpeakerPaint {
@@ -2017,6 +2066,27 @@ impl SubtitleStyle {
     pub fn block_top(&self, place: Place, picture_height: f64, lines: f64) -> f64 {
         let (at, above) = self.anchor(place);
         picture_height * at - lines * above
+    }
+
+    pub fn block_box(
+        &self,
+        place: Place,
+        (picture_w, picture_h): (f64, f64),
+        wrap: f64,
+        lines: f64,
+    ) -> (f64, f64) {
+        let (at, above) = self.anchor(place);
+        match self.position {
+            Some([x, y]) => {
+                let across = match self.line_align() {
+                    SubtitleAlign::Left => 0.0,
+                    SubtitleAlign::Center => 0.5,
+                    SubtitleAlign::Right => 1.0,
+                };
+                (picture_w * x - wrap * across, picture_h * y - lines * above)
+            }
+            None => ((picture_w - wrap) / 2.0, picture_h * at - lines * above),
+        }
     }
 }
 
@@ -2083,6 +2153,10 @@ pub struct Cue {
     /// track's `speaker_color` says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Its own style. A field left out keeps the track's style. The whole
+    /// value is left out when the cue keeps the track's style.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<SubtitleStyle>,
 }
 
 /// Where a cue shows on the picture.
@@ -2477,6 +2551,8 @@ impl Hash for SubtitleStyle {
             shadow,
             words,
             speaker_color,
+            align,
+            position,
         } = self;
         (font, floats_bits(*size), color, outline, background).hash(h);
         (
@@ -2486,6 +2562,8 @@ impl Hash for SubtitleStyle {
             shadow,
             words,
             speaker_color,
+            align,
+            pair_bits(*position),
         )
             .hash(h);
     }

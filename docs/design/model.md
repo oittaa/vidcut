@@ -262,12 +262,16 @@ Relinking:
 - `words` gives the frame on which each of its words starts, counted from its start ([spec D70](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - `speaker` is the person who says it.
 - `color` is its own color, over the color of the person ([deviation X63](../deviations.md#x63-subtitles-keep-their-speaker-painted-in-the-persons-color)). `Speakers::color_of` resolves it.
+- `style` is the cue's own style. A field left out keeps the track style. The cue leaves `style` out when it keeps the track style.
+- `SubtitleStyle::for_cue` merges the track style with that value.
 - The cues of a track are sorted by start, and can overlap.
 - The `SubtitleStyle` of a track holds:
   - its font, size, color, outline, background and margin ([spec D61](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
   - its bold face, letter case and shadow
   - `SubtitleWords`: how its words show as they are spoken ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
   - `SpeakerPaint`: what the color of a cue paints (`SubtitleStyle::paints`; `subtitles::shown` applies it)
+  - `SubtitleAlign`: `left`, `center` or `right`. Left out, the lines are centered.
+  - `position`: `[x, y]` as fractions of the picture from the top left. Left out, the block stays in the cue's place.
 - `ops::subtitles` holds the edits.
 - `editor::resolve_cue` reads a cue reference: its id, or a track and a time (S1@15s).
 

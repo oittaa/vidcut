@@ -119,6 +119,7 @@ fn an_imsc1_file_writes_capitals_and_bold() {
             place: Place::Bottom,
             words: Vec::new(),
             speaker: None,
+            style: None,
         }],
         SubtitleFormat::Ttml,
         &Writing {

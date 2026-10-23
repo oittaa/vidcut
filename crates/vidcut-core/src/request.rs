@@ -1280,7 +1280,9 @@ pub enum Request {
     },
     /// Change a cue (`q3`, or `S1@15s` for the cue on S1 at 15 s): its text,
     /// its start or end (each moves that edge alone), where it shows, its
-    /// words' times, its speaker or its own color. Moving an edge keeps each word on its frame. New text
+    /// words' times, its speaker, its own color, or its own style. A style
+    /// field left out keeps the track's style. `{}` drops the cue's style.
+    /// Moving an edge keeps each word on its frame. New text
     /// with as many words keeps their times; with another number of words,
     /// they are read again from the words kept for the clips' files under
     /// it, as `subtitles.time_words` reads them, else spread over the cue by
@@ -1308,6 +1310,11 @@ pub enum Request {
         /// name such as `yellow`. `""` goes back to its speaker's.
         #[serde(default)]
         color: Option<String>,
+        /// Its own style. A field left out keeps the track's. `{}` drops it.
+        /// `align` is `left`, `center` or `right`. `position` is `[x, y]`,
+        /// fractions of the picture from the top left, each from 0 to 1.
+        #[serde(default)]
+        style: Option<SubtitleStyle>,
     },
     /// Apply to All: `cue`'s own color becomes its speaker's, and every cue
     /// of that speaker on its track takes its place and drops a color of

@@ -6,7 +6,7 @@ use cosmic_text::{
 };
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
-    Place, SubtitleStyle, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle,
+    Place, SubtitleAlign, SubtitleStyle, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle,
 };
 use vidcut_core::subtitles::{Piece, Shown, rgb};
 
@@ -678,7 +678,7 @@ fn block(
         font: style.font.as_deref(),
         size,
         wrap: (style.wrap_width(w, h) as f32).max(size),
-        align: Align::Center,
+        align: text_align(style),
         ink: style.ink(),
         stroke: style.stroke(),
         backing: style.backing(),
@@ -695,8 +695,8 @@ fn block(
     let Some(laid) = laid_line(line, &look) else {
         return (None, None);
     };
-    let left = (width as f32 - look.wrap) / 2.0;
-    let top = style.block_top(place, h, f64::from(laid.lines)) as f32;
+    let (left, top) = style.block_box(place, (w, h), f64::from(look.wrap), f64::from(laid.lines));
+    let (left, top) = (left as f32, top as f32);
     let drawn = laid.sprite.map(|s| placed(s, left, top));
     let Some((cx, cy)) = laid.popped else {
         return (drawn, None);
@@ -741,35 +741,67 @@ impl Drawing {
     }
 }
 
-pub fn draw(cues: &[(&Shown, Place)], width: u32, height: u32, style: &SubtitleStyle) -> Drawing {
+fn text_align(style: &SubtitleStyle) -> Align {
+    match style.line_align() {
+        SubtitleAlign::Left => Align::Left,
+        SubtitleAlign::Center => Align::Center,
+        SubtitleAlign::Right => Align::Right,
+    }
+}
+
+pub struct Painted<'a> {
+    pub shown: &'a Shown,
+    pub place: Place,
+    pub style: &'a SubtitleStyle,
+}
+
+pub fn paint(cues: &[Painted<'_>], width: u32, height: u32) -> Drawing {
     let mut drawing = Drawing::default();
     for place in [Place::Top, Place::Middle, Place::Bottom] {
-        let (line, pop) = {
-            let here: Vec<&Shown> = cues
-                .iter()
-                .filter(|(s, p)| *p == place && !s.pieces.is_empty())
-                .map(|(s, _)| *s)
-                .collect();
+        let here: Vec<&Painted<'_>> = cues
+            .iter()
+            .filter(|c| c.place == place && !c.shown.pieces.is_empty())
+            .collect();
+        let mut i = 0;
+        while i < here.len() {
+            let style = here[i].style;
+            let mut j = i + 1;
+            while j < here.len() && here[j].style == style {
+                j += 1;
+            }
             let mut pieces: Vec<Piece> = Vec::new();
-            for (i, s) in here.iter().enumerate() {
-                if i > 0 {
+            for (k, c) in here[i..j].iter().enumerate() {
+                if k > 0 {
                     pieces.push(Piece {
                         text: "\n".into(),
                         ..Piece::default()
                     });
                 }
-                pieces.extend(s.pieces.iter().cloned());
+                pieces.extend(c.shown.pieces.iter().cloned());
             }
-            let pop = here.iter().map(|s| s.pop).fold(1.0, f64::max);
-            match pieces.is_empty() {
+            let pop = here[i..j].iter().map(|c| c.shown.pop).fold(1.0, f64::max);
+            let (line, popped) = match pieces.is_empty() {
                 true => (None, None),
                 false => block(&pieces, pop, place, width, height, style),
-            }
-        };
-        drawing.lines.extend(line);
-        drawing.pops.extend(pop);
+            };
+            drawing.lines.extend(line);
+            drawing.pops.extend(popped);
+            i = j;
+        }
     }
     drawing
+}
+
+pub fn draw(cues: &[(&Shown, Place)], width: u32, height: u32, style: &SubtitleStyle) -> Drawing {
+    let painted: Vec<Painted<'_>> = cues
+        .iter()
+        .map(|(shown, place)| Painted {
+            shown,
+            place: *place,
+            style,
+        })
+        .collect();
+    paint(&painted, width, height)
 }
 
 pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
