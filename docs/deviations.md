@@ -713,8 +713,16 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - The user types the text of a selected subtitle in the Captions panel of the Inspector.
   - The text shows on the clip while the user types (p. 1233).
-  - A list at the bottom of the Captions panel shows the subtitles of the track. Its Prev and Next buttons move through them (pp. 1231, 1233).
+  - A list at the bottom of the Captions panel shows every subtitle of the track (p. 1231).
+  - Each new subtitle adds an entry to the list. Prev and Next move through the list (p. 1233).
+  - A click on a caption in the list loads it into the Caption box, where the user edits its text (p. 1236).
+  - The Add New button above the list adds a subtitle (p. 1233).
   - The manual does not tell where the playhead goes.
+  - In Resolve Studio 21.1.1, the panel is as the screenshots on pp. 1231 and 1233 show it:
+    - Add New is at the left of the line above the list. Prev and Next are at its right.
+    - The list has the columns "#" (the number of the row), "Time In/Out" (the In above the Out), "Caption" and "CPS".
+    - CPS is the number of characters for each second of the subtitle, rounded up (D78).
+    - Add New adds a subtitle at the playhead on the track of the list, as Add Subtitle in the right-click menu of the track does.
 - **vidcut:**
   - The Subtitle section of the Inspector tab has the text and the position of the cue.
   - These open it and show the Inspector tab:
@@ -726,14 +734,29 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The text shows on the cue and in the viewer while the user types.
   - The position shows in the viewer when the user selects it.
   - The text goes in as one change when the user leaves the text box. The other rows go in at once. Ctrl+Z undoes a change.
-  - vidcut has no Captions list. Thus Previous and Next are at the top of the Subtitle section.
+  - A list at the bottom of the Subtitle section shows every cue of the track, by start time.
+  - The list has the columns of Resolve's list. Their names are "#", "In/Out", "Text" and "CPS".
+  - Each row shows the number of the row, the start above the end, the text and the CPS of the cue.
+  - The text shows on two lines at most. A longer text is cut to fit.
+  - CPS counts the characters as Resolve does (D78).
+  - The row of the open cue is highlighted.
+  - When another cue opens and its row is out of view, the list scrolls the row to its middle.
+  - While the user types, the row of the open cue shows the typed text, as the cue on the timeline does.
+  - The list has a fixed height and scrolls. It draws only the rows that show. Thus a track with thousands of cues stays fast.
+  - Add New is at the left of the line above the list. It does what Add Subtitle in the right-click menu of the track does ([X44](#x44-add-subtitle-uses-the-shown-subtitle-track)).
+  - Thus the new cue opens in the section. Add New is off while a cue is being added.
+  - Previous and Next are on the heading line of the Subtitle section.
   - Previous opens the cue before this cue on its track, by start time. Next opens the cue after it.
+  - A click on a row of the list opens its cue, as Next does.
   - The changes of the section go in first, as when the user leaves the section.
-  - The button also selects the cue and moves the playhead to its start. The playhead move is a decision of vidcut.
-  - A button is off when there is no cue before or after, and while the section shows "Adding…".
+  - The button or the click also selects the cue and moves the playhead to its start. The playhead move is a decision of vidcut.
+  - A button is off when there is no cue before or after. While the section shows "Adding…", the buttons are off, and Add New and the list do not show.
+  - The Delete button of the section deletes the open cue.
 - **Why:**
   - One change for each edit of the text keeps typing out of the undo history.
   - With the playhead at the start of the cue, the viewer shows the cue.
+  - On the heading line, Previous and Next stay in one place. Above the list, the rows change. The text box grows with the text. The Name row shows only for a cue with a person.
+  - The Inspector can be narrow. Thus the names of the columns are short. The GUI of vidcut does not use the word "caption". Thus the text column is "Text".
 
 ## X44. Add Subtitle uses the shown subtitle track
 
