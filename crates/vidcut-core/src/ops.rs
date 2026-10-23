@@ -11,8 +11,8 @@ mod tracks;
 use std::collections::{BTreeMap, HashSet};
 
 pub use dissolve::{
-    Align, Made, Shape, dissolve, dissolve_clips, room_at as dissolve_room, set_transition,
-    split as dissolve_frames, to_cut,
+    Align, Made, Shape, cross_fade_joins, dissolve, dissolve_clips, room_at as dissolve_room,
+    set_transition, split as dissolve_frames, to_cut,
 };
 use serde_json::json;
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
@@ -778,8 +778,8 @@ pub fn split_clip(p: &mut Project, id: &str, at: &[i64]) -> Result<Vec<String>> 
 
 pub type ClipSpans = (String, Vec<(i64, i64)>);
 
-pub fn remove_parts(p: &mut Project, parts: &[ClipSpans]) -> Result<Vec<String>> {
-    let mut doomed = Vec::new();
+pub fn remove_parts(p: &mut Project, parts: &[ClipSpans]) -> Result<Vec<(usize, i64)>> {
+    let (mut doomed, mut kept) = (Vec::new(), Vec::new());
     for (id, spans) in parts {
         let edges: Vec<i64> = spans.iter().flat_map(|&(a, b)| [a, b]).collect();
         let mut pieces = vec![id.clone()];
@@ -788,13 +788,33 @@ pub fn remove_parts(p: &mut Project, parts: &[ClipSpans]) -> Result<Vec<String>>
             let c = p.clip(&piece).expect("just split");
             if spans.iter().any(|&(a, b)| a <= c.start && c.end() <= b) {
                 doomed.push(piece);
+            } else {
+                kept.push(piece);
             }
         }
     }
+    let touching = |p: &Project| -> Vec<(usize, String, String)> {
+        p.tracks
+            .iter()
+            .enumerate()
+            .flat_map(|(ti, t)| {
+                t.clips
+                    .windows(2)
+                    .filter(|w| w[0].end() == w[1].start)
+                    .map(move |w| (ti, w[0].id.clone(), w[1].id.clone()))
+            })
+            .collect()
+    };
+    let before = touching(p);
     if !doomed.is_empty() {
         delete_clips(p, &doomed, true)?;
     }
-    Ok(doomed)
+    Ok(touching(p)
+        .into_iter()
+        .filter(|(_, a, b)| kept.contains(a) && kept.contains(b))
+        .filter(|j| !before.contains(j))
+        .filter_map(|(ti, a, _)| p.clip(&a).map(|c| (ti, c.end())))
+        .collect())
 }
 
 pub fn removed_time(p: &Project, parts: &[ClipSpans]) -> Vec<(i64, i64)> {

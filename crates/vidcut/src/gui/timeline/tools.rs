@@ -56,6 +56,7 @@ pub struct SilenceDialog {
     undone: Vec<Shot>,
     redone: Vec<Shot>,
     download: bool,
+    cross_fade: bool,
 }
 
 impl SilenceDialog {
@@ -79,6 +80,7 @@ impl SilenceDialog {
             undone: Vec::new(),
             redone: Vec::new(),
             download: false,
+            cross_fade: false,
         }
     }
 
@@ -208,6 +210,7 @@ impl SilenceDialog {
     pub fn remove_params(&self) -> Value {
         let mut p = self.params();
         p["parts"] = self.cut_parts();
+        p["cross_fade"] = json!(self.cross_fade);
         p
     }
 
@@ -730,6 +733,9 @@ impl Workspace {
                             .speed(0.01)
                             .suffix(" s"),
                     );
+                });
+                dialog::row(ui, "Cross Fade Audio", |ui| {
+                    ui.checkbox(&mut d.cross_fade, "")
                 });
             });
             if edited {

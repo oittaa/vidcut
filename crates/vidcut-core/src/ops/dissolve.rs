@@ -325,6 +325,40 @@ pub fn dissolve(
     Ok(made)
 }
 
+pub fn cross_fade_joins(p: &mut Project, joins: &[(usize, i64)]) -> Vec<Made> {
+    let mut made = Vec::new();
+    for &(ti, e) in joins {
+        let shape = Shape::Length(2, Align::Center);
+        let Some(m) = put(p, ti, true, e, shape, PictureTransition::Dissolve) else {
+            continue;
+        };
+        if let Some(t) = p.tracks[ti].transitions.iter_mut().find(|t| t.id == m.id) {
+            t.otio = zero_db().into();
+        }
+        made.push(m);
+    }
+    made
+}
+
+fn zero_db() -> Value {
+    json!({
+        "OTIO_SCHEMA": "Transition.1",
+        "name": "Cross Fade 0 dB",
+        "transition_type": "SMPTE_Dissolve",
+        "metadata": {"Resolve_OTIO": {
+            "Effects": {
+                "Display Type": 1,
+                "Effect Name": "Cross Fade 0 dB",
+                "Enabled": true,
+                "Name": "Cross Fade",
+                "Parameters": [],
+                "Type": 40
+            },
+            "Transition Type": "Cross Fade 0DB"
+        }}
+    })
+}
+
 pub fn dissolve_clips(
     p: &mut Project,
     clips: &[String],

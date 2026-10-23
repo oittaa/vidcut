@@ -844,7 +844,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - It shows the parts to remove as red stripes.
   - vidcut lets you keep, trim and play them first (deviation X48).
   - Remove cuts them and closes the gaps, as one undo step (D29).
-  - There is no crossfade option (deviation X11).
+  - Cross Fade Audio puts a short cross fade where two parts meet (D29).
 - **Normalize Audio Levels** (pp. 1110–1111):
   - The Edit page and the Fairlight page have it. The Cut chapters do not name it.
   - It sets the volume of the selected clips so that their level reaches a target. It applies no dynamics.
@@ -1075,6 +1075,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The cuts are in whole frames.
   - It ripples, whatever Ripple On is.
   - Remove takes the stripes as they are left (deviation X48).
+  - Cross Fade Audio (`cross_fade`) is off by default.
+    - With it, a Cross Fade 0 dB goes on the sound where two parts that stay meet after the cut.
+    - The cross fade is 2 frames long, centered on the cut. A side with no frames past the cut gets less.
+    - Without it, the cuts get the 3 ms de-click fades that every cut gets.
+  - **Resolve Studio 21.1.1** (its Edit page):
+    - Cross fade audio made a Cross Fade 0 dB, 2 frames long and centered.
+    - It did so with a pre head and a post tail of 6 frames, and of 24 frames.
+    - Its window keeps the last values used. Thus its factory defaults are not known.
+    - On the install that was checked, it opened at −25 dB, no pre head or post tail, and a minimum of 24 frames.
+    - Cross fade audio was off.
 - **D30. Finding shots and black.**
   - Detect Scene Cuts (p. 690) gives no algorithm.
   - A frame starts a shot when the FFmpeg scdet score on its luma is 10 or more.
@@ -2021,26 +2031,45 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Resolve Studio 21.1.1** (its Edit page):
     - The window keeps the last choice that was applied, in all projects. Thus its factory defaults are not known.
     - On the install that was checked, it opened at Sample Peak Program, −9.0 dBFS, and Relative for two clips.
-    - The modes are Sample Peak Program, True Peak and loudness standards, such as EBU R128, ATSC A/85 and YouTube.
-    - A standard fixes its loudness and its true-peak limit. YouTube is −14 LUFS and −1.0 dBTP.
     - Set Level shows only when two or more clips are selected.
+    - A mode with a loudness target and a peak limit takes the lower volume of the two.
+      - A clip at −30 LUFS with peaks near 0 dBTP got −1.0 dB with YouTube, not the +16 dB that −14 LUFS needs.
+    - ITU-R BS.1770-1, ITU-R BS.1770-4 and Netflix measured a clip that is half silence as the gated loudness.
+  - **Modes** (`NormalizeMode`). vidcut has the modes of Resolve, with the numbers that its window showed:
+
+    | Mode | Loudness (LUFS) | Peak limit (dBTP) |
+    |---|---|---|
+    | Sample Peak, True Peak | the target is a peak, −1 by default | none |
+    | ITU-R BS.1770-1 | −23, can change | none |
+    | ITU-R BS.1770-4 | −23, can change | −2, can change |
+    | ATSC A/85, OP-59, AGCOM 219/09/CSP | −24 | −2 |
+    | EBU R128 | −23 | −1, can change |
+    | TR-B32 | −24 | −1 |
+    | Netflix, Disney 5.1+ | −27 | −2 |
+    | YouTube | −14 | −1 |
+    | Disney 2.0 | −24 | none |
+    | Tencent Video | −16, can change | −2, can change |
+
   - **Defaults:**
-    - The mode is Loudness, at −14 LUFS. This is the value for YouTube that the export's loudness setting names.
-    - Sample Peak and True Peak start at −1 dB. This is the true-peak limit of the export's loudness setting.
+    - The mode is YouTube: −14 LUFS with a −1 dBTP peak limit.
+    - It is the value for YouTube that the export's loudness setting names. The limit keeps loud peaks under full scale.
+    - Sample Peak and True Peak start at −1 dB. Resolve's window showed −9.0 and −2.0, which it can have kept from earlier use.
     - Set Level is Independent.
-  - **Range:** −60 to −5 LUFS, as the export's loudness setting takes. A peak target is from −60 to 0 dB.
+  - **Range:** −60 to −5 LUFS, as the export's loudness setting takes. A peak target and a peak limit are from −60 to 0 dB.
   - **Measured part:** the sound that the clip plays, with its J or L cut and at its speed.
     - The clip is measured alone, without its volume, mute and Voice Isolation, and without transitions.
     - Its track's volume, mute, solo, Voice Isolation and ducking do not apply.
     - Thus the mixer does not change the result. A muted clip is measured too.
   - **Levels:**
-    - Loudness is the integrated loudness of EBU R128. A loudness at or below −70 LUFS counts as no level.
+    - Every loudness mode measures the integrated loudness of EBU R128. A loudness at or below −70 LUFS counts as no level.
     - Sample Peak is the highest sample. True Peak is the highest true peak of ITU-R BS.1770.
   - **Gain:**
     - Independent: the new volume is the target less the level. A clip with no level keeps its volume.
     - Relative: the highest level plus volume reaches the target. Every volume changes by that same number of dB.
     - The manual names the highest peak for Relative. vidcut uses the highest level for each mode.
+    - A peak limit lowers the change to the limit less the true peak. In Relative, it uses the highest true peak plus volume.
   - Each volume stops at −60 dB and +24 dB (D12). The result marks each clip that stopped (`held`).
+  - The result also marks each clip that the peak limit stopped (`limited`).
   - Reason: the export already measures EBU R128 loudness and true peak. Thus the two features agree.
 - **D81. Volume keyframes** (§9; pp. 1109, 1112–1113, 1258; deviations X73, X74).
   - The manual does not give the curve between audio keyframes, or what edits do with them.
@@ -2102,6 +2131,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Ripple Delete Silence by sound level (X47)
     - the quiet edges of `edit.ripple_delete_words`
     - the meters of the Mixer
+  - Resolve Studio 21.1.1 does the same in Ripple Delete Silence. It cut exactly the part that keyframes turned down to −60 dB.
   - Reason: they measure what the user hears. A part that a keyframe makes quiet is quiet for them too.
 - **D85. Keyframe keys** (§11; pp. 1113, 1251).
   - In the manual, [ and ] go from keyframe to keyframe (p. 1251). Backspace deletes the selected keyframes (p. 1113).

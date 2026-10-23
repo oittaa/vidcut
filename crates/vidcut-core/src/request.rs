@@ -805,6 +805,8 @@ pub enum Request {
     /// red stripes, `removed`). `parts` cuts a list of them instead, edited
     /// as the stripes are (deviation X48): the dry run's `removed` with
     /// parts left out to keep them and `start` or `end` moved to trim them.
+    /// Returns the parts `removed`, their `frames`, and the number of
+    /// `cross_fades` made.
     #[serde(rename = "edit.ripple_delete_silence")]
     EditRippleDeleteSilence {
         clips: OneOrMany<ClipRef>,
@@ -836,6 +838,10 @@ pub enum Request {
         /// The shortest silence removed ("minimum to trip").
         #[serde(default = "silence_min")]
         min: TimeSpec,
+        /// Cross Fade Audio: a 2-frame Cross Fade 0 dB on the sound where
+        /// two parts that stay meet after the cut.
+        #[serde(default)]
+        cross_fade: bool,
         /// `detect: speech` hears with transcribe.cpp's library and Silero VAD:
         /// download them if this computer doesn't have them yet, each checked
         /// against its SHA-256. Without it, a missing one is an error that
@@ -1072,20 +1078,28 @@ pub enum Request {
     /// its track's mixer. The volume of a clip with volume keyframes is its
     /// highest keyframe, and every keyframe moves by the same dB (decision
     /// D83). The volume stops at -60 and +24 dB. One undo step; a dry run
-    /// gives the volumes and changes nothing. Returns each clip's `level`
-    /// (null when silent), its volume before (`from_db`) and after
-    /// (`gain_db`), and `held` when the volume stopped short of the target.
+    /// gives the volumes and changes nothing. Returns the `target`, the
+    /// `peak_limit` (null without one), and each clip's `level` (null when
+    /// silent), its volume before (`from_db`) and after (`gain_db`), `held`
+    /// when the volume stopped at its own limit, and `limited` when the peak
+    /// limit stopped it.
     #[serde(rename = "clip.normalize")]
     ClipNormalize {
         clips: OneOrMany<ClipRef>,
-        /// What is measured and brought to `target`.
+        /// What is measured and brought to `target`. Default: `youtube`.
         #[serde(default)]
         mode: NormalizeMode,
-        /// The level to reach: LUFS with `loudness` (-60 to -5), dBFS with
-        /// `sample_peak` and dBTP with `true_peak` (-60 to 0). Default: -14
-        /// LUFS, as the export's loudness, or -1 for a peak.
+        /// The level to reach: LUFS with a loudness mode (-60 to -5), dBFS
+        /// with `sample_peak` and dBTP with `true_peak` (-60 to 0). Default:
+        /// the mode's. A mode with a fixed target takes only that value.
         #[serde(default)]
         target: Option<f64>,
+        /// The highest true peak allowed, in dBTP (-60 to 0), for a mode
+        /// that has a peak limit. The volume stops where the peaks reach it,
+        /// even below `target`. Default: the mode's. A fixed limit takes only
+        /// that value.
+        #[serde(default)]
+        peak_limit: Option<f64>,
         /// Set Level Relative: the clips count as one, so the loudest, with
         /// its volume, reaches `target`, and every volume changes by the
         /// same dB. Otherwise (Independent) each clip reaches `target`, and
@@ -2868,19 +2882,44 @@ impl KeyValue {
     }
 }
 
-/// What `clip.normalize` measures (deviation X72).
+/// What `clip.normalize` measures and the levels it aims at (decision D80).
+/// The loudness modes all measure integrated loudness (ITU-R BS.1770, with
+/// its gates), in LUFS; they differ in their target and their peak limit.
+/// "fixed" values can't be changed; the others are defaults.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NormalizeMode {
-    /// Integrated loudness (EBU R128, ITU-R BS.1770), in LUFS: how loud the
-    /// clip sounds over its length.
-    #[default]
-    Loudness,
-    /// The highest sample, in dBFS.
+    /// The highest sample, in dBFS. Target -1.
     SamplePeak,
-    /// The highest true peak, between the samples too (ITU-R BS.1770), in
-    /// dBTP.
+    /// The highest true peak, between the samples too, in dBTP. Target -1.
     TruePeak,
+    /// Loudness, target -23 LUFS, no peak limit.
+    #[serde(rename = "bs1770_1")]
+    Bs1770v1,
+    /// Loudness, target -23 LUFS, peak limit -2 dBTP.
+    #[serde(rename = "bs1770_4")]
+    Bs1770v4,
+    /// ATSC A/85: -24 LUFS and -2 dBTP, fixed.
+    AtscA85,
+    /// EBU R128: -23 LUFS fixed, peak limit -1 dBTP.
+    EbuR128,
+    /// OP-59: -24 LUFS and -2 dBTP, fixed.
+    Op59,
+    /// TR-B32: -24 LUFS and -1 dBTP, fixed.
+    TrB32,
+    /// AGCOM 219/09/CSP: -24 LUFS and -2 dBTP, fixed.
+    Agcom,
+    /// Netflix: -27 LUFS and -2 dBTP, fixed.
+    Netflix,
+    /// YouTube: -14 LUFS and -1 dBTP, fixed.
+    #[default]
+    Youtube,
+    /// Disney, stereo: -24 LUFS fixed, no peak limit.
+    DisneyStereo,
+    /// Disney, 5.1 and up: -27 LUFS and -2 dBTP, fixed.
+    DisneySurround,
+    /// Tencent Video: target -16 LUFS, peak limit -2 dBTP.
+    TencentVideo,
 }
 
 /// Where `timeline.import` puts the timeline (deviation X9).
