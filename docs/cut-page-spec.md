@@ -192,9 +192,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Social Media: 1:1, 4:5, 9:16, 1.91:1 and 16:9.
     - Broadcast and Film: Default (the timeline's aspect), 1.33, 1.66, 1.77, 1.85 and 2.35.
   - Safe-area lines, each on its own: Extents, Action, Title and Center.
-  - Those lines draw when they are on, also while framing guides are off.
-  - The framing guides add a box of the chosen aspect inside the picture.
-  - Default uses the picture itself. Extents is the boundary of that box.
+  - The framing box is the chosen aspect, fitted inside the picture.
+  - Default uses the picture itself.
+  - Extents is the boundary of the framing box.
+  - The safe-area lines use that box, also while framing guides are off.
+  - Framing guides shade outside that box when it does not fill the picture.
   - Action is 93% of the extents width and height, centered. Title is 90% (D90).
   - Center is a cross through the middle of the extents.
   - The guides draw in Timeline mode and in both source modes.

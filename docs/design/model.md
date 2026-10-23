@@ -477,7 +477,7 @@ The file:
 - Preferences are not in the project.
 - They are in `preferences.toml` in the config dir (`preferences::path`).
 - The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnail, cache, proxy, transcript, services and viewer ([the disk cache limit](analysis.md#the-disk-cache-limit)).
-- `Viewer.guides` (`Guides`, `Framing`) holds the framing aspect and the safe-area lines.
+- `ViewerPrefs.guides` (`Guides`, `Framing`) holds the framing aspect and the safe-area lines.
 - No key of a service is ever in the file.
 
 Requests:

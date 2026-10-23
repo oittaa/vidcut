@@ -1603,21 +1603,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Without it, the Cut page has no way to match the levels of clips.
   - The export's loudness setting uses EBU R128. Thus Loudness and the export agree.
 
-## X80. Safe Area guides are a preference, and skip two-up views
+## X80. Safe area guides skip the Trim Editor and Dynamic Trim
 
 - **Resolve:**
-  - The Safe Area button and View > Safe Area set framing and safe-area overlays for the viewer (pp. 682–683, 1177).
-  - The choice is a view setting of the application.
-  - The viewer keeps showing one picture while you trim.
+  - The Safe Area button and View > Safe Area set overlays on the viewer (pp. 682–683, 1177).
+  - The viewer keeps one picture while you trim.
 - **vidcut:**
-  - The same button and View > Safe Area send `viewer.guides`.
-  - The choice is stored in `preferences.toml` under `viewer.guides`.
-  - `preferences.set` can change the same fields.
-  - The guides draw in Timeline mode and both source modes ([D90](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The same controls draw guides in Timeline mode and both source modes ([D90](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Trim Editor and Dynamic Trim show no guides. Those views are two pictures, or four.
   - An export never shows the guides. A viewer screenshot is the picture without them.
 - **Why:**
-  - A preference follows the user across projects.
-  - One request keeps the GUI, CLI, IPC and MCP in step.
   - The guides belong on the one picture fitted to the timeline.
   - A two-up view has no single frame for one crop.
