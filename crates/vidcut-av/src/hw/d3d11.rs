@@ -69,17 +69,31 @@ pub(crate) unsafe fn device_of(frames: *mut ffi::AVBufferRef) -> *const DeviceCo
     }
 }
 
+struct Locked {
+    unlock: Option<unsafe extern "C" fn(*mut c_void)>,
+    lock_ctx: *mut c_void,
+}
+
+impl Drop for Locked {
+    fn drop(&mut self) {
+        // SAFETY: locked in `locked`, by the same device context.
+        if let Some(unlock) = self.unlock {
+            unsafe { unlock(self.lock_ctx) };
+        }
+    }
+}
+
 unsafe fn locked<T>(dev: &DeviceContext, work: impl FnOnce() -> T) -> T {
-    // SAFETY: the device's own lock.
+    // SAFETY: the device's own lock; `Locked` unlocks on panic or return.
     unsafe {
         if let Some(lock) = dev.lock {
             lock(dev.lock_ctx);
         }
-        let done = work();
-        if let Some(unlock) = dev.unlock {
-            unlock(dev.lock_ctx);
-        }
-        done
+        let _held = Locked {
+            unlock: dev.unlock,
+            lock_ctx: dev.lock_ctx,
+        };
+        work()
     }
 }
 
