@@ -21,14 +21,14 @@ pub struct Preferences {
     pub proxies: Proxies,
     pub transcripts: Transcripts,
     pub services: Services,
-    pub viewer: Viewer,
+    pub viewer: ViewerPrefs,
 }
 
 /// Viewer framing and safe-area guides (decision D90). They draw only in the
 /// viewer. An export never shows them.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
-pub struct Viewer {
+pub struct ViewerPrefs {
     pub guides: Guides,
 }
 
@@ -41,7 +41,7 @@ pub struct Guides {
     /// Which aspect crop the framing guides use. `default` is the timeline's
     /// own aspect.
     pub framing: Framing,
-    /// The outer boundary of the framing crop (or of the picture).
+    /// The outer boundary of the framing box. Default uses the picture.
     pub extents: bool,
     /// Action safe: 93% of the extents width and height (decision D90).
     pub action: bool,
@@ -238,19 +238,20 @@ impl Guides {
         self.patched(patch)
     }
 
-    /// Geometry for the viewer. Empty when nothing would draw.
-    pub fn overlay(self, picture_w: f32, picture_h: f32) -> Option<GuideOverlay> {
-        if !(picture_w > 0.0 && picture_h > 0.0) {
+    /// Geometry for one picture. `project_aspect` is width over height of the
+    /// timeline. Safe-area lines use the framing box even when framing guides
+    /// are off. Empty when nothing would draw.
+    pub fn overlay(self, picture: GuideBox, project_aspect: f32) -> Option<GuideOverlay> {
+        if !(picture.w > 0.0
+            && picture.h > 0.0
+            && project_aspect.is_finite()
+            && project_aspect > 0.0)
+        {
             return None;
         }
-        let picture = GuideBox::from_size(picture_w, picture_h);
-        let frame = if self.enabled {
-            match self.framing.aspect() {
-                Some(a) => picture.fit_aspect(a),
-                None => picture,
-            }
-        } else {
-            picture
+        let frame = match self.framing.aspect() {
+            Some(aspect) => picture.fit_aspect(aspect),
+            None => picture,
         };
         let crop = self.enabled
             && ((picture.w - frame.w).abs() > 0.5 || (picture.h - frame.h).abs() > 0.5);
@@ -272,10 +273,10 @@ impl Guides {
     }
 }
 
-/// Patch for [`Viewer`].
+/// Patch for [`ViewerPrefs`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ViewerPatch {
+pub struct ViewerPrefsPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guides: Option<GuidesPatch>,
 }
@@ -562,7 +563,7 @@ pub struct PreferencesPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub services: Option<ServicesPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub viewer: Option<ViewerPatch>,
+    pub viewer: Option<ViewerPrefsPatch>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -880,38 +881,81 @@ mod tests {
         );
     }
 
+    fn wide() -> GuideBox {
+        GuideBox::from_size(1920.0, 1080.0)
+    }
+
+    #[test]
+    fn framing_aspects_are_the_labeled_ratios() {
+        assert_eq!(Framing::Default.aspect(), None);
+        assert_eq!(Framing::Social1_1.aspect(), Some(1.0));
+        assert_eq!(Framing::Social4_5.aspect(), Some(0.8));
+        assert_eq!(Framing::Social9_16.aspect(), Some(0.5625));
+        assert_eq!(Framing::Social1_91.aspect(), Some(1.91));
+        assert_eq!(Framing::Social16_9.aspect(), Some(16.0 / 9.0));
+        assert_eq!(Framing::Broadcast1_33.aspect(), Some(1.33));
+        assert_eq!(Framing::Broadcast1_66.aspect(), Some(1.66));
+        assert_eq!(Framing::Broadcast1_77.aspect(), Some(1.77));
+        assert_eq!(Framing::Broadcast1_85.aspect(), Some(1.85));
+        assert_eq!(Framing::Broadcast2_35.aspect(), Some(2.35));
+    }
+
+    #[test]
+    fn framing_wire_names_round_trip() {
+        for (framing, name) in [
+            (Framing::Default, "default"),
+            (Framing::Social1_1, "social_1_1"),
+            (Framing::Social4_5, "social_4_5"),
+            (Framing::Social9_16, "social_9_16"),
+            (Framing::Social1_91, "social_1_91"),
+            (Framing::Social16_9, "social_16_9"),
+            (Framing::Broadcast1_33, "broadcast_1_33"),
+            (Framing::Broadcast1_66, "broadcast_1_66"),
+            (Framing::Broadcast1_77, "broadcast_1_77"),
+            (Framing::Broadcast1_85, "broadcast_1_85"),
+            (Framing::Broadcast2_35, "broadcast_2_35"),
+        ] {
+            let text = serde_json::to_string(&framing).unwrap();
+            assert_eq!(text, format!("\"{name}\""));
+            assert_eq!(serde_json::from_str::<Framing>(&text).unwrap(), framing);
+        }
+    }
+
     #[test]
     fn action_safe_is_ninety_three_percent_of_extents() {
         let g = Guides {
-            enabled: true,
+            enabled: false,
             framing: Framing::Default,
-            extents: true,
+            extents: false,
             action: true,
             title: false,
             center: false,
         };
-        let o = g.overlay(1920.0, 1080.0).unwrap();
+        let o = g.overlay(wide(), 16.0 / 9.0).unwrap();
         let a = o.action.unwrap();
-        assert!((a.w - 1920.0 * ACTION_SAFE).abs() < 0.01);
-        assert!((a.h - 1080.0 * ACTION_SAFE).abs() < 0.01);
-        assert!((a.x - 1920.0 * (1.0 - ACTION_SAFE) * 0.5).abs() < 0.01);
+        assert!((a.w - 1785.6).abs() < 0.05);
+        assert!((a.h - 1004.4).abs() < 0.05);
+        assert!((a.x - 67.2).abs() < 0.05);
+        assert!((a.y - 37.8).abs() < 0.05);
+        assert!(!o.crop);
     }
 
     #[test]
     fn title_safe_is_ninety_percent_of_extents() {
         let g = Guides {
-            enabled: true,
+            enabled: false,
             framing: Framing::Default,
             extents: false,
             action: false,
             title: true,
             center: false,
         };
-        let o = g.overlay(1000.0, 1000.0).unwrap();
+        let o = g.overlay(GuideBox::from_size(1000.0, 1000.0), 1.0).unwrap();
         let t = o.title.unwrap();
-        assert!((t.w - 900.0).abs() < 0.01);
-        assert!((t.h - 900.0).abs() < 0.01);
-        assert!((t.x - 50.0).abs() < 0.01);
+        assert!((t.w - 900.0).abs() < 0.05);
+        assert!((t.h - 900.0).abs() < 0.05);
+        assert!((t.x - 50.0).abs() < 0.05);
+        assert!((t.y - 50.0).abs() < 0.05);
     }
 
     #[test]
@@ -922,26 +966,59 @@ mod tests {
             extents: true,
             action: false,
             title: false,
-            center: false,
+            center: true,
         };
-        let o = g.overlay(1920.0, 1080.0).unwrap();
+        let o = g.overlay(wide(), 16.0 / 9.0).unwrap();
+        assert!(o.crop);
         let e = o.extents.unwrap();
-        assert!((e.h - 1080.0).abs() < 0.01);
-        assert!((e.w - 1080.0 * 9.0 / 16.0).abs() < 0.01);
-        assert!((e.x - (1920.0 - e.w) * 0.5).abs() < 0.01);
+        assert!((e.w - 607.5).abs() < 0.05);
+        assert!((e.h - 1080.0).abs() < 0.05);
+        assert!((e.x - 656.25).abs() < 0.05);
+        assert!((e.y - 0.0).abs() < 0.05);
+        assert_eq!(o.center, Some((960.0, 540.0)));
     }
 
     #[test]
-    fn guides_patch_sets_only_named_fields() {
-        let g = Guides::default().patched(&GuidesPatch {
-            enabled: Some(true),
-            framing: Some(Framing::Broadcast2_35),
+    fn safe_lines_follow_the_framing_box_while_guides_are_off() {
+        let g = Guides {
+            enabled: false,
+            framing: Framing::Social1_1,
+            extents: true,
+            action: false,
+            title: false,
+            center: false,
+        };
+        let o = g.overlay(wide(), 16.0 / 9.0).unwrap();
+        assert!(!o.crop);
+        let e = o.extents.unwrap();
+        assert!((e.w - 1080.0).abs() < 0.05);
+        assert!((e.h - 1080.0).abs() < 0.05);
+        assert!((e.x - 420.0).abs() < 0.05);
+        assert!((e.y - 0.0).abs() < 0.05);
+    }
+
+    #[test]
+    fn an_empty_guides_patch_toggles_framing_guides() {
+        let off = Guides::default().applied(&GuidesPatch::default());
+        assert!(off.enabled);
+        assert_eq!(off.framing, Framing::Default);
+        let on = off.applied(&GuidesPatch {
+            center: Some(true),
             ..GuidesPatch::default()
         });
-        assert!(g.enabled);
-        assert_eq!(g.framing, Framing::Broadcast2_35);
-        assert!(g.extents);
-        assert!(!g.center);
+        assert!(on.enabled);
+        assert!(on.center);
+    }
+
+    #[test]
+    fn preferences_set_does_not_toggle_framing_guides() {
+        let patch =
+            PreferencesPatch::from_pairs(&["viewer.guides.action=false".to_string()]).unwrap();
+        let p = Preferences::default().patched(&patch).unwrap();
+        assert!(!p.viewer.guides.enabled);
+        assert!(!p.viewer.guides.action);
+        assert!(p.viewer.guides.title);
+        assert!(p.viewer.guides.extents);
     }
 
     #[test]
@@ -954,6 +1031,21 @@ mod tests {
             title: false,
             center: false,
         };
-        assert_eq!(g.overlay(100.0, 100.0), None);
+        assert_eq!(g.overlay(GuideBox::from_size(100.0, 100.0), 1.0), None);
+    }
+
+    #[test]
+    fn a_framing_crop_draws_with_no_lines() {
+        let g = Guides {
+            enabled: true,
+            framing: Framing::Social9_16,
+            extents: false,
+            action: false,
+            title: false,
+            center: false,
+        };
+        let o = g.overlay(wide(), 16.0 / 9.0).unwrap();
+        assert!(o.crop);
+        assert!(o.extents.is_none());
     }
 }

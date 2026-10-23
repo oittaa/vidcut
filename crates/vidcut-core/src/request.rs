@@ -3659,4 +3659,53 @@ mod tests {
         let paths: Vec<_> = r.paths_mut().into_iter().map(|p| p.clone()).collect();
         assert_eq!(paths, ["a.mp4", "b.mp4", "c.otio", "d"].map(PathBuf::from));
     }
+
+    #[test]
+    fn viewer_guides_round_trips() {
+        let request = Request::from_parts(
+            "viewer.guides",
+            Some(serde_json::json!({ "framing": "social_9_16", "center": true })),
+        )
+        .unwrap();
+        assert!(matches!(
+            request,
+            Request::ViewerGuides {
+                enabled: None,
+                framing: Some(crate::preferences::Framing::Social9_16),
+                extents: None,
+                action: None,
+                title: None,
+                center: Some(true),
+            }
+        ));
+        let back = serde_json::to_value(&request).unwrap();
+        assert_eq!(back["method"], "viewer.guides");
+        assert_eq!(back["params"]["framing"], "social_9_16");
+        assert_eq!(back["params"]["center"], true);
+        assert!(back["params"].get("enabled").is_none());
+    }
+
+    #[test]
+    fn viewer_guides_with_no_fields_is_empty() {
+        let request = Request::from_parts("viewer.guides", Some(serde_json::json!({}))).unwrap();
+        assert!(matches!(
+            request,
+            Request::ViewerGuides {
+                enabled: None,
+                framing: None,
+                extents: None,
+                action: None,
+                title: None,
+                center: None,
+            }
+        ));
+    }
+
+    #[test]
+    fn viewer_guides_is_a_projectless_preference() {
+        let request = Request::from_parts("viewer.guides", Some(serde_json::json!({}))).unwrap();
+        assert!(request.is_projectless());
+        assert!(!request.is_live());
+        assert!(!request.is_mutation());
+    }
 }

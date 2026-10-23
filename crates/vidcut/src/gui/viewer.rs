@@ -281,7 +281,7 @@ impl Workspace {
                 }
             }
         }
-        paint_guides(&painter, picture, &self.snap.guides);
+        paint_guides(&painter, picture, aspect, &self.snap.guides);
         let offline = self.project().and_then(|p| {
             let source = self.snap.source_at().map(|(m, _)| m);
             offline_media(p, &self.snap.missing, mode, player.position, source)
@@ -1023,10 +1023,7 @@ impl Workspace {
             ("1.91:1", Framing::Social1_91),
             ("16:9", Framing::Social16_9),
         ] {
-            if ui
-                .selectable_label(g.framing == framing && g.enabled, label)
-                .clicked()
-            {
+            if ui.selectable_label(g.framing == framing, label).clicked() {
                 self.send(
                     "viewer.guides",
                     json!({ "enabled": true, "framing": framing }),
@@ -1044,10 +1041,7 @@ impl Workspace {
             ("1.85", Framing::Broadcast1_85),
             ("2.35", Framing::Broadcast2_35),
         ] {
-            if ui
-                .selectable_label(g.framing == framing && g.enabled, label)
-                .clicked()
-            {
+            if ui.selectable_label(g.framing == framing, label).clicked() {
                 self.send(
                     "viewer.guides",
                     json!({ "enabled": true, "framing": framing }),
@@ -1220,8 +1214,16 @@ enum Transport {
     Timecode,
 }
 
-fn paint_guides(painter: &egui::Painter, picture: Rect, guides: &vidcut_core::preferences::Guides) {
-    let Some(o) = guides.overlay(picture.width(), picture.height()) else {
+fn paint_guides(
+    painter: &egui::Painter,
+    picture: Rect,
+    aspect: f32,
+    guides: &vidcut_core::preferences::Guides,
+) {
+    let Some(o) = guides.overlay(
+        vidcut_core::preferences::GuideBox::from_size(picture.width(), picture.height()),
+        aspect,
+    ) else {
         return;
     };
     let stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 180));
