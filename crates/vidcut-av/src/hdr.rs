@@ -356,13 +356,15 @@ pub fn copy_dynamic(from: &frame::Video, to: &mut frame::Video, keep: Dynamic) -
     for t in wanted {
         unsafe {
             let sd = ffi::av_frame_get_side_data(from.as_ptr(), t);
-            if sd.is_null() {
+            if sd.is_null() || (*sd).buf.is_null() {
                 continue;
             }
-            let buf = ffi::av_buffer_ref((*sd).buf);
-            if buf.is_null()
-                || ffi::av_frame_new_side_data_from_buf(to.as_mut_ptr(), t, buf).is_null()
-            {
+            let mut buf = ffi::av_buffer_ref((*sd).buf);
+            if buf.is_null() {
+                return Err(Error::Invalid("out of memory for HDR metadata".into()));
+            }
+            if ffi::av_frame_new_side_data_from_buf(to.as_mut_ptr(), t, buf).is_null() {
+                ffi::av_buffer_unref(&mut buf);
                 return Err(Error::Invalid("out of memory for HDR metadata".into()));
             }
         }
@@ -383,8 +385,12 @@ pub fn hdr10plus_t35(f: &frame::Video) -> Option<Vec<u8>> {
             return None;
         }
         let mut out = HDR10PLUS_T35.to_vec();
-        out.extend_from_slice(std::slice::from_raw_parts(data, size));
-        ffi::av_free(data.cast());
+        if !data.is_null() && size > 0 {
+            out.extend_from_slice(std::slice::from_raw_parts(data, size));
+        }
+        if !data.is_null() {
+            ffi::av_free(data.cast());
+        }
         Some(out)
     }
 }
