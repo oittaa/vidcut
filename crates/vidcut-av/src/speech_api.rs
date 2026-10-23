@@ -623,14 +623,44 @@ fn xai_fields(asked: &Asked) -> Vec<(&'static str, String)> {
     fields
 }
 
-fn xai(key: &str, path: &Path, asked: &Asked, started: Instant) -> Result<String> {
-    let boundary = format!("vidcut-{}", transcribe::run_id());
-    let mut head = String::new();
-    for (name, value) in xai_fields(asked) {
-        head.push_str(&format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
-        ));
+fn field_fits(boundary: &str, value: &str) -> bool {
+    !value.contains(['\r', '\n']) && !value.contains(boundary)
+}
+
+fn boundary_fits(boundary: &str, fields: &[(&str, String)]) -> bool {
+    fields.iter().all(|(_, value)| field_fits(boundary, value))
+}
+
+fn form_part(boundary: &str, name: &str, value: &str) -> String {
+    format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n")
+}
+
+fn xai_head(fields: &[(&str, String)]) -> Result<(String, String)> {
+    for (name, value) in fields {
+        if value.contains(['\r', '\n']) {
+            return Err(Error::Invalid(format!(
+                "{name} contains a line break, so it can't be sent"
+            )));
+        }
     }
+    for _ in 0..8 {
+        let boundary = format!("vidcut-{}", transcribe::run_id());
+        if !boundary_fits(&boundary, fields) {
+            continue;
+        }
+        let mut head = String::new();
+        for (name, value) in fields {
+            head.push_str(&form_part(&boundary, name, value));
+        }
+        return Ok((boundary, head));
+    }
+    Err(Error::Invalid(
+        "a speech field contains the form boundary, so it can't be sent".into(),
+    ))
+}
+
+fn xai(key: &str, path: &Path, asked: &Asked, started: Instant) -> Result<String> {
+    let (boundary, mut head) = xai_head(&xai_fields(asked))?;
     head.push_str(&format!(
         "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.flac\"\r\n\
          Content-Type: audio/flac\r\n\r\n"
@@ -735,22 +765,34 @@ fn google(key: &str, path: &Path, asked: &Asked, started: Instant) -> Result<Str
         return Err(refused("Google", &uploaded));
     }
     let file: Value = serde_json::from_str(&uploaded.text).unwrap_or(Value::Null);
-    let name = file["file"]["name"]
+    let raw_name = file["file"]["name"]
         .as_str()
-        .ok_or_else(|| Error::Invalid("Google's upload answer has no file name".into()))?
-        .to_string();
+        .ok_or_else(|| Error::Invalid("Google's upload answer has no file name".into()))?;
+    let url = google_file_url(raw_name)?;
     let uri = file["file"]["uri"].as_str().unwrap_or_default().to_string();
-    let got = google_transcribe(key, &name, &uri, asked, started);
-    let _ = agent()
-        .delete(&format!("{GOOGLE}/v1beta/{name}"))
-        .header("x-goog-api-key", key)
-        .call();
+    let got = google_transcribe(key, &url, &uri, asked, started);
+    let _ = agent().delete(&url).header("x-goog-api-key", key).call();
     got
+}
+
+fn google_file_url(name: &str) -> Result<String> {
+    let id = name.strip_prefix("files/").filter(|id| {
+        !id.is_empty()
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    });
+    let Some(id) = id else {
+        return Err(Error::Invalid(format!(
+            "Google's file name {name:?} is not a files id"
+        )));
+    };
+    Ok(format!("{GOOGLE}/v1beta/files/{id}"))
 }
 
 fn google_transcribe(
     key: &str,
-    name: &str,
+    url: &str,
     uri: &str,
     asked: &Asked,
     started: Instant,
@@ -758,12 +800,7 @@ fn google_transcribe(
     let mut ready = false;
     for _ in 0..300 {
         crate::cancel::stop()?;
-        let a = answer(
-            agent()
-                .get(&format!("{GOOGLE}/v1beta/{name}"))
-                .header("x-goog-api-key", key)
-                .call(),
-        )?;
+        let a = answer(agent().get(url).header("x-goog-api-key", key).call())?;
         if a.status != 200 {
             return Err(refused("Google", &a));
         }
@@ -926,7 +963,10 @@ fn keep_reply(key: &str, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Heard, kept_note, offset, reply_key, xai_words};
+    use super::{
+        Heard, boundary_fits, form_part, google_file_url, kept_note, offset, reply_key, xai_head,
+        xai_words,
+    };
     use serde_json::json;
 
     #[test]
@@ -971,6 +1011,48 @@ mod tests {
                 text: "hi".into(),
                 speaker: Some(1)
             }]
+        );
+    }
+
+    #[test]
+    fn a_line_break_is_not_sent() {
+        let err = xai_head(&[("language", "en\r\nx".into())]).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "language contains a line break, so it can't be sent"
+        );
+    }
+
+    #[test]
+    fn the_form_boundary_does_not_fit_a_field() {
+        assert!(!boundary_fits(
+            "vidcut-fixed",
+            &[("keyterm", "--vidcut-fixed".into())]
+        ));
+    }
+
+    #[test]
+    fn a_plain_form_field_is_one_part() {
+        assert_eq!(
+            form_part("vidcut-fixed", "language", "fi"),
+            "--vidcut-fixed\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\nfi\r\n"
+        );
+    }
+
+    #[test]
+    fn a_google_file_name_is_one_id() {
+        assert_eq!(
+            google_file_url("files/abc-123").unwrap(),
+            "https://generativelanguage.googleapis.com/v1beta/files/abc-123"
+        );
+    }
+
+    #[test]
+    fn a_google_file_name_cannot_change_the_request() {
+        let err = google_file_url("files/../v1beta/models").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Google's file name \"files/../v1beta/models\" is not a files id"
         );
     }
 
