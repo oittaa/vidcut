@@ -364,7 +364,7 @@ These stay, and do not count:
 
 Files that are still written:
 
-- A file with a `part` piece in its name is still being written, and does not count.
+- A hidden name with a `part` piece, or a name that ends in `.part`, is still being written, and does not count.
 - Such a file that a killed job left goes at the next listing, when it is a day old.
 
 The parts:
