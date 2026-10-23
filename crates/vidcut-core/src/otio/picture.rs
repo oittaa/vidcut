@@ -16,6 +16,8 @@ const ZOOM_LINK: &str = "transformationZoomLink";
 const PAN: &str = "transformationPan";
 const TILT: &str = "transformationTilt";
 const ROTATION: &str = "transformationRotationAngle";
+const PITCH: &str = "transformationPitch";
+const YAW: &str = "transformationYaw";
 const ANCHOR: &str = "transformationAnchorPoint";
 const FLIP_X: &str = "transformationFlipX";
 const FLIP_Y: &str = "transformationFlipY";
@@ -28,6 +30,7 @@ const SIZE: &str = "dynamicZoomScale";
 const FIT: u8 = 2;
 const REACH: f64 = 4.0;
 const TURNS: f64 = 3600.0;
+const LEAN: f64 = 1.5;
 const LATER: i64 = 1000;
 const SIZES: (f64, f64) = (0.01, 100.0);
 
@@ -85,7 +88,7 @@ pub fn is_placing(e: &Value) -> bool {
 fn known(name: &str) -> &'static [&'static str] {
     match name {
         TRANSFORM => &[
-            ZOOM_X, ZOOM_Y, ZOOM_LINK, PAN, TILT, ROTATION, ANCHOR, FLIP_X, FLIP_Y,
+            ZOOM_X, ZOOM_Y, ZOOM_LINK, PAN, TILT, ROTATION, PITCH, YAW, ANCHOR, FLIP_X, FLIP_Y,
         ],
         CROPPING => &CROPS,
         ZOOMING => &[EASE, CENTER, SIZE],
@@ -195,6 +198,8 @@ struct Placement {
     zoom: [f64; 2],
     moved: [f64; 2],
     turn: f64,
+    pitch: f64,
+    yaw: f64,
     anchor: [f64; 2],
     flips: [bool; 2],
     crop: [f64; 4],
@@ -245,6 +250,8 @@ fn placement(effects: &[Value]) -> Option<Placement> {
         zoom: [number(ZOOM_X, 1.0)?, number(ZOOM_Y, 1.0)?],
         moved: [number(PAN, 0.0)?, number(TILT, 0.0)?],
         turn: number(ROTATION, 0.0)?,
+        pitch: number(PITCH, 0.0)?,
+        yaw: number(YAW, 0.0)?,
         anchor,
         flips: [switch(FLIP_X)?, switch(FLIP_Y)?],
         crop,
@@ -268,11 +275,15 @@ impl Placement {
             self.turn
         };
         let [left, right, top, bottom] = self.crop.map(rounded);
+        let pitch = rounded(self.pitch);
+        let yaw = rounded(self.yaw);
         Picture {
             position: Some([rounded(0.5 + d[0] / w), rounded(0.5 + d[1] / h)]),
             zoom: Some([rounded(pw / fw * zx), rounded(ph / fh * zy)]),
             rotation: Some(rounded(turn)),
             anchor: Some([rounded(0.5 + ax), rounded(0.5 - ay)]),
+            pitch: (pitch != 0.0).then_some(pitch),
+            yaw: (yaw != 0.0).then_some(yaw),
             flip_horizontal: self.flips[0],
             flip_vertical: self.flips[1],
             crop: Crop {
@@ -378,6 +389,8 @@ pub fn effects(p: &Picture, shape: &Shape, g: i64) -> Vec<Value> {
         double(PAN, pan, 0.0, reach),
         double(TILT, tilt, 0.0, reach),
         double(ROTATION, p.turn(), 0.0, (-100000.0, 100000.0)),
+        double(PITCH, p.pitch(), 0.0, (-LEAN, LEAN)),
+        double(YAW, p.yaw(), 0.0, (-LEAN, LEAN)),
         point(ANCHOR, [rounded(ax - 0.5), rounded(0.5 - ay)], [0.0, 0.0]),
         boolean(FLIP_X, p.flip_horizontal, false),
         boolean(FLIP_Y, p.flip_vertical, false),
@@ -529,6 +542,17 @@ mod tests {
             zoom: Some([2.0, 2.0]),
             rotation: Some(30.0),
             anchor: Some([0.75, 0.4]),
+            ..Picture::default()
+        };
+        let shape = Shape::whole((1920, 1080));
+        assert_eq!(read(&effects(&p, &shape, 0), &shape), Some(p));
+    }
+
+    #[test]
+    fn a_written_pitch_and_yaw_read_back_the_same() {
+        let p = Picture {
+            pitch: Some(0.25),
+            yaw: Some(-0.5),
             ..Picture::default()
         };
         let shape = Shape::whole((1920, 1080));

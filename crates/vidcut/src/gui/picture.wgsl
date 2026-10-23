@@ -93,9 +93,15 @@ fn rgb(s: vec3<f32>) -> vec3<f32> {
 }
 
 fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>) -> vec3<f32> {
-    let uv = vec2<f32>(dot(a.xy, px) + a.z, dot(b.xy, px) + b.z);
-    let gu = length(a.xy);
-    let gv = length(b.xy);
+    let w = dot(vec3<f32>(px, 1.0), vec3<f32>(a.w, b.w, 1.0));
+    if abs(w) < 1e-6 {
+        return vec3<f32>(0.0);
+    }
+    let uv = vec2<f32>(dot(a.xy, px) + a.z, dot(b.xy, px) + b.z) / w;
+    let du = vec2<f32>(a.x - uv.x * a.w, a.y - uv.x * b.w) / w;
+    let dv = vec2<f32>(b.x - uv.y * a.w, b.y - uv.y * b.w) / w;
+    let gu = length(du);
+    let gv = length(dv);
     let edges = vec4<f32>((uv.x - s.x) / gu, (s.z - uv.x) / gu, (uv.y - s.y) / gv, (s.w - uv.y) / gv);
     let e = clamp(edges + 0.5, vec4<f32>(0.0), vec4<f32>(1.0));
     return vec3<f32>(uv, e.x * e.y * e.z * e.w);
@@ -113,8 +119,11 @@ fn placed(px: vec2<f32>) -> vec4<f32> {
         let c = cut(a, b, p.levels[i * 3u + 2u], px);
         uv = c.xy;
         cover *= c.z;
-        across = vec2<f32>(a.x, b.x);
-        down = vec2<f32>(a.y, b.y);
+        let w = dot(vec3<f32>(px, 1.0), vec3<f32>(a.w, b.w, 1.0));
+        if abs(w) >= 1e-6 {
+            across = vec2<f32>(a.x - uv.x * a.w, b.x - uv.y * a.w) / w;
+            down = vec2<f32>(a.y - uv.x * b.w, b.y - uv.y * b.w) / w;
+        }
     }
     if cover <= 0.0 {
         discard;
@@ -161,6 +170,7 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
 struct Lettering {
     across: vec4<f32>,
     down: vec4<f32>,
+    tilt: vec4<f32>,
     levels: array<vec4<f32>, 3u * LEVELS>,
 };
 
@@ -172,9 +182,13 @@ fn fs_title(in: Out) -> @location(0) vec4<f32> {
     let px = in.position.xy;
     let m = lettering.across;
     let k = lettering.down;
-    let at = vec2<f32>(dot(m.xy, px) + m.z, dot(k.xy, px) + k.z);
-    let across = vec2<f32>(m.x, k.x);
-    let down = vec2<f32>(m.y, k.y);
+    let w = dot(vec3<f32>(px, 1.0), vec3<f32>(lettering.tilt.xy, 1.0));
+    if abs(w) < 1e-6 {
+        discard;
+    }
+    let at = vec2<f32>(dot(m.xy, px) + m.z, dot(k.xy, px) + k.z) / w;
+    let across = vec2<f32>(m.x - at.x * lettering.tilt.x, k.x - at.y * lettering.tilt.x) / w;
+    let down = vec2<f32>(m.y - at.x * lettering.tilt.y, k.y - at.y * lettering.tilt.y) / w;
     let size = vec2<f32>(textureDimensions(letters));
     let reach = (abs(across) + abs(down)) * 0.5 + vec2<f32>(0.5) / size;
     if any(at + reach <= vec2<f32>(0.0)) || any(at - reach >= vec2<f32>(1.0)) {

@@ -338,7 +338,8 @@ Writing:
   - where the middle of the whole picture goes before the zoom and the rotation (`position`)
   - its `zoom` across and down
   - its `rotation`
-  - its `anchor`, the point that the zoom and the rotation work about (`Picture::pivot`)
+  - its `anchor`, the point that the zoom and the turn work about (`Picture::pivot`)
+  - its `pitch` and its `yaw`, from −1.5 to 1.5, left out at 0 (`Picture::pitch`, `Picture::yaw`)
   - its flips
   - a `Crop` of each side
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
@@ -351,6 +352,10 @@ Writing:
 - `place::Placing` turns the picture of a clip, with the pictures of the compound clips that it plays inside, into maps.
   - Each map goes from a pixel of the frame back to a picture (`place::Level`: the map and the part shown).
   - Each map zooms and turns the picture about its anchor point. `place::anchored` gives the pixel where the anchor point lands.
+  - Pitch and yaw lean the picture about its middle, in its own axes, before the zoom and the turn ([spec D93](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Thus the lean is a map of the picture itself. Each level undoes the move, the turn and the zoom first, then the lean.
+  - `Level.back` holds `[a, b, e, c, d, f, g, h]`. A pixel `(x, y)` maps to `((a x + b y + e) / (g x + h y + 1), (c x + d y + f) / (g x + h y + 1))`.
+  - `g` and `h` are 0 when the map is affine.
   - An export and the viewer both draw by these maps ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
 
 ## Ducking
