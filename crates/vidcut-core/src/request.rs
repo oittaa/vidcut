@@ -2102,6 +2102,13 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         center: Option<bool>,
     },
+    /// Full screen or the enhanced viewer.
+    /// `full_screen` fills the display with the viewer (Shift+F).
+    /// `enhanced` fills the page with the viewer (Alt+F).
+    /// `page` is the usual layout. Esc in the GUI returns to `page`.
+    /// The choice lasts for this session. It is not in the project.
+    #[serde(rename = "viewer.frame")]
+    ViewerFrame { mode: ViewerFrame },
     /// Open a media item in the viewer as Source Clip, optionally at a source time.
     #[serde(rename = "viewer.load")]
     ViewerLoad {
@@ -2816,6 +2823,37 @@ impl ViewerMode {
     }
 }
 
+/// How much of the window the viewer fills.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerFrame {
+    #[default]
+    Page,
+    Enhanced,
+    FullScreen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewerFrameKey {
+    FullScreen,
+    Enhanced,
+    Escape,
+}
+
+pub fn viewer_frame_after(frame: ViewerFrame, key: ViewerFrameKey) -> ViewerFrame {
+    match key {
+        ViewerFrameKey::Escape => ViewerFrame::Page,
+        ViewerFrameKey::FullScreen => match frame {
+            ViewerFrame::FullScreen => ViewerFrame::Page,
+            ViewerFrame::Page | ViewerFrame::Enhanced => ViewerFrame::FullScreen,
+        },
+        ViewerFrameKey::Enhanced => match frame {
+            ViewerFrame::Enhanced => ViewerFrame::Page,
+            ViewerFrame::Page | ViewerFrame::FullScreen => ViewerFrame::Enhanced,
+        },
+    }
+}
+
 /// What a trim of an edit moves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -3384,6 +3422,7 @@ impl Request {
             self,
             Self::ProjectOpen { .. }
                 | Self::ViewerSet { .. }
+                | Self::ViewerFrame { .. }
                 | Self::ViewerLoad { .. }
                 | Self::PlayerPlay { .. }
                 | Self::PlayerPause { .. }
@@ -3891,6 +3930,68 @@ mod tests {
                 center: None,
             }
         ));
+    }
+
+    #[test]
+    fn viewer_frame_sets_full_screen() {
+        let request = Request::from_parts(
+            "viewer.frame",
+            Some(serde_json::json!({ "mode": "full_screen" })),
+        )
+        .unwrap();
+        assert_eq!(
+            request,
+            Request::ViewerFrame {
+                mode: ViewerFrame::FullScreen,
+            }
+        );
+    }
+
+    #[test]
+    fn viewer_frame_sets_the_enhanced_viewer() {
+        let request = Request::from_parts(
+            "viewer.frame",
+            Some(serde_json::json!({ "mode": "enhanced" })),
+        )
+        .unwrap();
+        assert_eq!(
+            request,
+            Request::ViewerFrame {
+                mode: ViewerFrame::Enhanced,
+            }
+        );
+    }
+
+    #[test]
+    fn shift_f_toggles_full_screen() {
+        assert_eq!(
+            viewer_frame_after(ViewerFrame::Page, ViewerFrameKey::FullScreen),
+            ViewerFrame::FullScreen
+        );
+    }
+
+    #[test]
+    fn shift_f_again_returns_to_the_page() {
+        assert_eq!(
+            viewer_frame_after(ViewerFrame::FullScreen, ViewerFrameKey::FullScreen),
+            ViewerFrame::Page
+        );
+    }
+
+    #[test]
+    fn alt_f_from_full_screen_opens_the_enhanced_viewer() {
+        assert_eq!(
+            viewer_frame_after(ViewerFrame::FullScreen, ViewerFrameKey::Enhanced),
+            ViewerFrame::Enhanced
+        );
+    }
+
+    #[test]
+    fn escape_leaves_the_enhanced_viewer() {
+        assert_eq!(
+            viewer_frame_after(ViewerFrame::Enhanced, ViewerFrameKey::Escape),
+            ViewerFrame::Page
+        );
     }
 
     #[test]

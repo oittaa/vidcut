@@ -23,7 +23,7 @@ use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
     Client, ClientKind, Detect, DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget,
-    TimecodeDisplay, TimelineOptions, TrimSide, ViewerMode,
+    TimecodeDisplay, TimelineOptions, TrimSide, ViewerFrame, ViewerMode,
 };
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -505,6 +505,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         socket: config.socket.clone(),
         project: None,
         viewer: ViewerMode::Timeline,
+        viewer_frame: ViewerFrame::Page,
         last_source: ViewerMode::SourceClip,
         source: PlayerSnap::default(),
         timeline: PlayerSnap::default(),
@@ -563,6 +564,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         project: None,
         project_snap: None,
         viewer: ViewerMode::Timeline,
+        viewer_frame: ViewerFrame::Page,
         last_source: ViewerMode::SourceClip,
         source_media: None,
         source_content: None,
@@ -830,6 +832,7 @@ struct Live {
     project: Option<OpenProject>,
     project_snap: Option<ProjectSnap>,
     viewer: ViewerMode,
+    viewer_frame: ViewerFrame,
     last_source: ViewerMode,
     source_media: Option<String>,
     source_content: Option<SourceContent>,
@@ -1354,6 +1357,7 @@ impl Live {
             socket: self.instance.as_ref().map(|i| i.socket.clone()),
             project: self.project_snap.clone(),
             viewer: self.viewer,
+            viewer_frame: self.viewer_frame,
             last_source: self.last_source,
             source: self.player.snap(SOURCE),
             timeline: self.player.snap(TIMELINE),
@@ -2460,6 +2464,10 @@ impl Live {
                 Ok(motion) => self.shown(motion),
                 Err(e) => Step::Now(Err(e)),
             },
+            Request::ViewerFrame { mode } => {
+                self.viewer_frame = mode;
+                Step::Now(Ok(self.state_response()))
+            }
             Request::PlayerPlay { speed, viewer } => {
                 if let Some(v) = viewer {
                     self.set_viewer(v);
@@ -3914,6 +3922,7 @@ impl Live {
         json!({
             "project": self.project.as_ref().map(|o| o.store.path()),
             "viewer": self.viewer,
+            "viewer_frame": self.viewer_frame,
             "last_source": self.last_source,
             "source_media": self.source_media,
             "source": source,

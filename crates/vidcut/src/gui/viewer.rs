@@ -6,7 +6,9 @@ use eframe::egui::{
 };
 use serde_json::json;
 use vidcut_core::model::{Media, Project, TrackKind};
-use vidcut_core::request::{TimecodeDisplay, ViewerMode};
+use vidcut_core::request::{
+    TimecodeDisplay, ViewerFrame, ViewerFrameKey, ViewerMode, viewer_frame_after,
+};
 use vidcut_core::time::parse_frame_number;
 
 use super::pool::elide;
@@ -134,6 +136,59 @@ impl Workspace {
     }
 
     pub(super) fn viewer_panel(&mut self, ui: &mut egui::Ui) {
+        self.viewer_keys(ui.ctx());
+        let frame = self.snap.viewer_frame;
+        super::window::show_fullscreen(ui.ctx(), frame == ViewerFrame::FullScreen);
+        if frame == ViewerFrame::Page {
+            self.viewer_body(ui);
+            return;
+        }
+        let ctx = ui.ctx().clone();
+        let screen = ctx.input(|i| i.viewport_rect());
+        egui::Area::new(egui::Id::unique("viewer-frame"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .show(&ctx, |ui| {
+                ui.set_min_size(screen.size());
+                let rect = Rect::from_min_size(screen.min, screen.size());
+                ui.painter()
+                    .rect_filled(rect, CornerRadius::ZERO, theme::colors().panel_dark);
+                let _cover = ui.interact(rect, ui.scope_id().with("cover"), Sense::click());
+                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink(8.0)));
+                self.viewer_body(&mut child);
+            });
+    }
+
+    fn viewer_keys(&mut self, ctx: &egui::Context) {
+        if ctx.egui_wants_keyboard_input() || self.asking() {
+            return;
+        }
+        let frame = self.snap.viewer_frame;
+        if frame != ViewerFrame::Page
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape))
+        {
+            self.send_frame(ViewerFrame::Page);
+            return;
+        }
+        let key = ctx.input_mut(|i| {
+            if i.consume_key(egui::Modifiers::SHIFT, Key::F) {
+                Some(ViewerFrameKey::FullScreen)
+            } else if i.consume_key(egui::Modifiers::ALT, Key::F) {
+                Some(ViewerFrameKey::Enhanced)
+            } else {
+                None
+            }
+        });
+        if let Some(key) = key {
+            self.send_frame(viewer_frame_after(frame, key));
+        }
+    }
+
+    fn send_frame(&self, mode: ViewerFrame) {
+        self.send("viewer.frame", json!({ "mode": mode }));
+    }
+
+    fn viewer_body(&mut self, ui: &mut egui::Ui) {
         let mode = self.snap.viewer;
         let id = PlayerId::of(mode);
         let modes = [
@@ -144,12 +199,12 @@ impl Workspace {
         let row = Row {
             left: &modes,
             fill: Some((Header::Title, Align::Min)),
-            right: &[Header::Duration],
-            leaving: &[modes[1], modes[0], modes[2]],
+            right: &[Header::FullScreen, Header::Duration],
+            leaving: &[modes[1], modes[0], modes[2], Header::FullScreen],
             group: |h| match h {
                 Header::Mode(_) => 0,
                 Header::Title => 1,
-                Header::Duration => 2,
+                Header::FullScreen | Header::Duration => 2,
             },
         };
         ui.horizontal(|ui| {
@@ -168,6 +223,17 @@ impl Workspace {
                 }
                 Header::Title => {
                     ui.add(egui::Label::new(RichText::new(ws.viewer_title()).strong()).truncate())
+                }
+                Header::FullScreen => {
+                    let on = ws.snap.viewer_frame == ViewerFrame::FullScreen;
+                    let r = ui.selectable_label(on, "Full Screen");
+                    if r.clicked() {
+                        ws.send_frame(viewer_frame_after(
+                            ws.snap.viewer_frame,
+                            ViewerFrameKey::FullScreen,
+                        ));
+                    }
+                    r
                 }
                 Header::Duration => ui.scope(|ui| ws.duration_field(ui)).response,
             });
@@ -1259,6 +1325,7 @@ impl Workspace {
 enum Header {
     Mode(ViewerMode),
     Title,
+    FullScreen,
     Duration,
 }
 

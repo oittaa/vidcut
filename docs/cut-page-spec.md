@@ -47,6 +47,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Top bar:**
   - On the left: the Media Pool and Mixer tabs (p. 649).
   - On the right: Quick Export and the Full Screen viewer.
+    - vidcut's Full Screen button is on the viewer (deviation X86).
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
   - The Inspector button is at the top right of the UI toolbar (§8.15). vidcut has an Inspector tab beside the Titles tab instead (deviation X70).
   - Later: the Sync Bin, Keyframe Editor, Transitions and Effects tabs.
@@ -188,7 +189,15 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - It takes a number of frames, + or − and a number to change it by, or a timecode.
 
 ### 4.5 Other viewer features
-- Full Screen (Shift+F) and Enhanced viewer (Alt+F).
+- Full Screen (Shift+F) fills the display with the viewer.
+  - Shift+F again returns to the page.
+  - The Full Screen button on the viewer does the same thing (deviation X86).
+  - `viewer.frame` with `full_screen` or `page` does it from a script.
+- Enhanced viewer (Alt+F) fills the page with the viewer.
+  - The Media Pool, the timelines and the bars are covered.
+  - Alt+F again returns to the page.
+  - `viewer.frame` with `enhanced` does it from a script.
+- Esc returns to the page from full screen and from the enhanced viewer.
 - Safe areas (pp. 682–683, 1177):
   - A Safe Area control at the right of the viewer's transport toggles framing guides.
   - Its menu, and View > Safe Area, pick the framing aspect and the safe-area lines.

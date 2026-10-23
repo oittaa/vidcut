@@ -141,6 +141,16 @@ impl Window {
     }
 }
 
+pub(super) fn show_fullscreen(ctx: &egui::Context, on: bool) {
+    let id = egui::Id::unique("vidcut-fullscreen");
+    let sent = ctx.data(|d| d.get_temp::<bool>(id));
+    if sent == Some(on) {
+        return;
+    }
+    ctx.data_mut(|d| d.insert_temp(id, on));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(on));
+}
+
 #[cfg(windows)]
 mod native {
     use eframe::wgpu::rwh::RawWindowHandle;

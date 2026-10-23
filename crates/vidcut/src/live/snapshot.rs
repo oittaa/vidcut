@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::Value;
 use vidcut_core::model::{Clip, TrackKind};
 use vidcut_core::render::TapeEntry;
-use vidcut_core::request::{TimecodeDisplay, ViewerMode};
+use vidcut_core::request::{TimecodeDisplay, ViewerFrame, ViewerMode};
 use vidcut_core::steps::{Span, Steps};
 use vidcut_core::time::{Rational, format_timecode, parse_counter, parse_frame_number};
 use vidcut_core::{Error, Project};
@@ -165,6 +165,7 @@ pub struct Snapshot {
     pub socket: Option<PathBuf>,
     pub project: Option<ProjectSnap>,
     pub viewer: ViewerMode,
+    pub viewer_frame: ViewerFrame,
     pub last_source: ViewerMode,
     pub source: PlayerSnap,
     pub timeline: PlayerSnap,
