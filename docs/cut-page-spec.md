@@ -481,8 +481,9 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A click on a cue in the list loads it into the Inspector to edit (p. 1236).
   - Add New, above the list, adds a cue at the playhead on the track of the list (p. 1233).
   - Prev and Next in the Inspector move to the cue before or after on the track (pp. 1231, 1233).
+  - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. The new range overwrites the other cues of the track.
   - Cues move, trim, split and delete like clips.
-  - Details: D56, D57, D78; deviations X43, X44.
+  - Details: D56, D57, D78, D79; deviations X43, X44.
 - **Import** (pp. 1230–1231):
   - `.srt`, `.srtx`, `.vtt`, `.xml` and `.ttml` files come into the Media Pool as subtitle clips, with a badge.
   - Any media import, or Import Subtitle, brings them in.
@@ -1828,3 +1829,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - vidcut counts the characters of the text that shows, as Resolve does. The style tags (`<i>`, `<b>`, `<u>` and `<font>`) do not count.
   - A line break counts as one character, as the space between two words on one line does.
   - Thus a text has the same CPS on one line and on two lines.
+- **D79. A cue across the part that the In or Out field covers** (§8.12; deviation X43).
+  - A new In or Out overwrites only the part that it newly covers (X43).
+  - The measurements in Resolve do not show a subtitle that covers all of that part and more.
+  - In vidcut, only a cue that already overlaps the edited cue can do that (D56).
+  - Such a cue stays as it is. Thus both cues show in that part, as they show together in the overlap.
+  - Reason: a split would show its text twice. A trim would take frames outside the newly covered part.

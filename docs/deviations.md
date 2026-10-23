@@ -719,12 +719,21 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Add New button above the list adds a subtitle (p. 1233).
   - The manual does not tell where the playhead goes.
   - In Resolve Studio 21.1.1, the panel is as the screenshots on pp. 1231 and 1233 show it:
+    - Above the text box, a line has an In field and an Out field. At its right, a dim "11 Characters" counts the characters of the text.
     - Add New is at the left of the line above the list. Prev and Next are at its right.
     - The list has the columns "#" (the number of the row), "Time In/Out" (the In above the Out), "Caption" and "CPS".
+  - These facts come from Resolve Studio 21.1.1:
     - CPS is the number of characters for each second of the subtitle, rounded up (D78).
     - Add New adds a subtitle at the playhead on the track of the list, as Add Subtitle in the right-click menu of the track does.
+    - A new In changes only the start. The end stays. An In of 01:00:14:15 made a subtitle of 01:00:14:00–01:00:16:00 into 01:00:14:15–01:00:16:00.
+    - A new Out changes only the end. The start stays.
+    - The new range overwrites the other subtitles of the track. The change and the overwrite are one undo step.
+    - A subtitle that the new range fully covers is deleted. An In moved earlier past the whole subtitle before it deleted that subtitle.
+    - A subtitle that the new range partly covers is trimmed to the new edge.
+    - An Out moved 10 frames into the next subtitle moved the start of that subtitle to the new Out. Its end stayed.
+    - An Out before the In does nothing, and the field shows the old value again.
 - **vidcut:**
-  - The Subtitle section of the Inspector tab has the text and the position of the cue.
+  - The Subtitle section of the Inspector tab has the In, the Out, the text and the position of the cue.
   - These open it and show the Inspector tab:
     - a double-click on a cue
     - Enter with one cue selected
@@ -734,6 +743,23 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The text shows on the cue and in the viewer while the user types.
   - The position shows in the viewer when the user selects it.
   - The text goes in as one change when the user leaves the text box. The other rows go in at once. Ctrl+Z undoes a change.
+  - A line under the heading has the In and Out fields, the duration, and "N Characters" at its right.
+  - "N Characters" counts the characters as CPS does (D78).
+  - The fields show the start and the end of the cue as timecodes, as the project shows them.
+  - A click in a field selects its timecode, and the user types a new one. Digits fill a timecode from the right, as in the timecode field of the viewer.
+  - A `+` or `-` before the value moves the edge by that much.
+  - Enter, Tab or a click outside the field puts the change in. Esc puts the old value back.
+  - In sends a new start only, and Out a new end only, as in Resolve.
+  - A value that does not parse, or an Out at or before the In, changes nothing. The field shows the value of the project again.
+  - The new range overwrites the other cues of the track, as in Resolve. Only the newly covered part counts:
+    - from the new In to the old In, when the In moves earlier
+    - from the old Out to the new Out, when the Out moves later
+  - A cue of the track that lies fully inside that part is removed.
+  - A cue that reaches into the part from one side loses its frames in the part. Thus its end moves to the new In, or its start to the new Out.
+  - A cue that covers all of the part and more stays as it is (D79).
+  - An In moved later or an Out moved earlier changes no other cue.
+  - The change and the overwrite go as one `apply`. Thus they are one undo step.
+  - `subtitles.set` alone does not overwrite. Scripts and imports keep the cues that overlap (D56). A script that wants the overwrite sends its own `apply`.
   - A list at the bottom of the Subtitle section shows every cue of the track, by start time.
   - The list has the columns of Resolve's list. Their names are "#", "In/Out", "Text" and "CPS".
   - Each row shows the number of the row, the start above the end, the text and the CPS of the cue.
@@ -745,6 +771,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The list has a fixed height and scrolls. It draws only the rows that show. Thus a track with thousands of cues stays fast.
   - Add New is at the left of the line above the list. It does what Add Subtitle in the right-click menu of the track does ([X44](#x44-add-subtitle-uses-the-shown-subtitle-track)).
   - Thus the new cue opens in the section. Add New is off while a cue is being added.
+  - The name of the track is at the right of the line with Add New.
   - Previous and Next are on the heading line of the Subtitle section.
   - Previous opens the cue before this cue on its track, by start time. Next opens the cue after it.
   - A click on a row of the list opens its cue, as Next does.
@@ -757,6 +784,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - With the playhead at the start of the cue, the viewer shows the cue.
   - On the heading line, Previous and Next stay in one place. Above the list, the rows change. The text box grows with the text. The Name row shows only for a cue with a person.
   - The Inspector can be narrow. Thus the names of the columns are short. The GUI of vidcut does not use the word "caption". Thus the text column is "Text".
+  - With the overwrite, a cue that the user makes longer does not show together with its neighbor, as in Resolve.
+  - Imports and scripts can need cues that overlap (D56). Thus `subtitles.set` alone keeps them.
 
 ## X44. Add Subtitle uses the shown subtitle track
 

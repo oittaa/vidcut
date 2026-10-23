@@ -7,7 +7,7 @@ use vidcut_core::model::{
     Cue, LetterCase, Place, Project, SpeakerPaint, Speakers, SubtitleStyle, SubtitleTrack,
     SubtitleWords, WordsShow,
 };
-use vidcut_core::time::Rational;
+use vidcut_core::time::{Rational, TimeSpec};
 
 use super::dialog;
 use super::export::{Ask, Picked};
@@ -30,6 +30,20 @@ pub struct CueDialog {
     focus: bool,
     dirty: bool,
     pending: Pending,
+    times: Times,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Edge {
+    In,
+    Out,
+}
+
+#[derive(Debug, Default)]
+struct Times {
+    typing: Option<(Edge, String)>,
+    select: bool,
+    held: Option<(i64, i64)>,
 }
 
 #[derive(Debug, Default)]
@@ -163,6 +177,95 @@ fn beside(p: &Project, cue: &str, by: isize) -> Option<(String, i64)> {
     let (t, c) = p.find_cue(cue)?;
     let near = p.subtitles[t].cues.get(c.checked_add_signed(by)?)?;
     Some((near.id.clone(), near.start))
+}
+
+fn edge_field(
+    ui: &mut egui::Ui,
+    t: &mut Times,
+    (edge, salt): (Edge, (&str, &str)),
+    shown: String,
+    width: f32,
+) -> Option<String> {
+    let mine = matches!(&t.typing, Some((e, _)) if *e == edge);
+    let mut text = match &t.typing {
+        Some((e, typed)) if *e == edge => typed.clone(),
+        _ => shown,
+    };
+    let out = egui::TextEdit::singleline(&mut text)
+        .id_salt(salt)
+        .desired_width(width)
+        .show(ui);
+    let r = &out.response;
+    if r.has_focus() {
+        t.select |= !mine;
+        if t.select && !ui.input(|i| i.pointer.any_down()) {
+            let mut state = out.state;
+            let all = egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(text.chars().count()),
+            );
+            state.cursor.set_char_range(Some(all));
+            state.store(ui.ctx(), r.id);
+            t.select = false;
+        }
+        t.typing = Some((edge, text));
+        return None;
+    }
+    if !mine {
+        return None;
+    }
+    let (_, typed) = t.typing.take()?;
+    if !r.lost_focus() {
+        return None;
+    }
+    let esc = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape));
+    (!esc).then_some(typed)
+}
+
+fn typed_frame(p: &Project, text: &str, base: i64, (playhead, dropped): (i64, i64)) -> Option<i64> {
+    let spec = super::viewer::timecode_input(text, dropped)?;
+    let sign = match text.trim().chars().next() {
+        Some(c @ ('+' | '-')) => c.to_string(),
+        _ => String::new(),
+    };
+    let spec = TimeSpec::parse(&format!("{sign}{spec}")).ok()?;
+    p.time_context(Some(playhead))
+        .resolve_from(&spec, base)
+        .ok()
+}
+
+fn command(method: &str, params: Value) -> Value {
+    json!({ "method": method, "params": params })
+}
+
+fn overwrite(cues: &[Cue], id: &str, was: (i64, i64), now: (i64, i64)) -> Vec<Value> {
+    let (from, to) = if now.0 < was.0 {
+        (now.0, was.0)
+    } else if now.1 > was.1 {
+        (was.1, now.1)
+    } else {
+        return Vec::new();
+    };
+    let set =
+        |cue: &str, edge: &str, at: i64| command("subtitles.set", json!({ "cue": cue, edge: at }));
+    let mut commands = Vec::new();
+    let mut gone = Vec::new();
+    for c in cues.iter().filter(|c| c.id != id) {
+        let (start, end) = (c.start, c.end());
+        if end <= from || start >= to {
+            continue;
+        }
+        match (start < from, end > to) {
+            (false, false) => gone.push(c.id.clone()),
+            (true, false) => commands.push(set(&c.id, "end", from)),
+            (false, true) => commands.push(set(&c.id, "start", to)),
+            (true, true) => {}
+        }
+    }
+    if !gone.is_empty() {
+        commands.push(command("subtitles.remove", json!({ "cues": gone })));
+    }
+    commands
 }
 
 const LIST_ROWS: f32 = 5.0;
@@ -604,6 +707,7 @@ impl Workspace {
             focus,
             dirty: false,
             pending: Pending::default(),
+            times: Times::default(),
         };
         if let Some(p) = self.project()
             && let Some(c) = p.cue(id)
@@ -776,15 +880,11 @@ impl Workspace {
             });
         });
         match found {
-            Some((track, cue)) => ui.label(dim(format!(
-                "{}   {} – {}   ({})",
-                track.display_name(),
-                self.tc(cue.start),
-                self.tc(cue.end()),
-                self.src_tc(cue.duration)
-            ))),
-            None => ui.label(dim("Adding…")),
-        };
+            Some((_, cue)) => self.cue_times(ui, &mut d, &p, cue, waiting),
+            None => {
+                ui.label(dim("Adding…"));
+            }
+        }
         let before = d.state();
         let r = ui.add(
             egui::TextEdit::multiline(&mut d.text)
@@ -922,10 +1022,14 @@ impl Workspace {
         if let Some(at) = at {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
+                let track = &p.subtitles[at.0];
                 let free = self.timeline.adding.is_none();
                 if ui.add_enabled(free, egui::Button::new("Add New")).clicked() {
-                    self.add_subtitle(ui.ctx(), Some(&p.subtitles[at.0].id));
+                    self.add_subtitle(ui.ctx(), Some(&track.id));
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(dim(track.display_name()));
+                });
             });
             let follow = self.timeline.cue_listed.as_deref() != Some(d.cue.as_str());
             if let Some(to) = self.cue_list(ui, &p, at, &d.text, follow) {
@@ -947,6 +1051,96 @@ impl Workspace {
         self.inspect_cue(id, false);
         self.send("selection.set", json!({ "cues": [id], "clips": [] }));
         self.seek(PlayerId::Timeline, start, false);
+    }
+
+    fn cue_times(
+        &self,
+        ui: &mut egui::Ui,
+        d: &mut CueDialog,
+        p: &Project,
+        cue: &Cue,
+        waiting: bool,
+    ) {
+        if !waiting {
+            d.times.held = None;
+        }
+        let (start, end) = d.times.held.unwrap_or((cue.start, cue.end()));
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let faint = theme::colors().text_dim;
+        let wide = |text: String| {
+            ui.painter()
+                .layout_no_wrap(text, font.clone(), faint)
+                .size()
+                .x
+        };
+        let width = wide(self.tc(end)) + 16.0;
+        let count = shown_text(&d.text).chars().count();
+        let counted = match count {
+            1 => "1 Character".to_string(),
+            n => format!("{n} Characters"),
+        };
+        let counted_width = wide(counted.clone());
+        let mut put = None;
+        ui.horizontal_wrapped(|ui| {
+            for (edge, label, at) in [(Edge::In, "In", start), (Edge::Out, "Out", end)] {
+                ui.label(dim(label));
+                if let Some(text) = edge_field(
+                    ui,
+                    &mut d.times,
+                    (edge, (label, &d.cue)),
+                    self.tc(at),
+                    width,
+                ) {
+                    put = Some((edge, text));
+                }
+            }
+            let length = format!("Duration {}", self.src_tc(end - start));
+            ui.add(egui::Label::new(dim(length)).extend());
+            if ui.available_width() < counted_width {
+                ui.end_row();
+            }
+            ui.add_space((ui.available_width() - counted_width - 1.0).max(0.0));
+            ui.add(egui::Label::new(dim(counted)).extend());
+        });
+        if let Some((edge, text)) = put {
+            self.put_edge(d, p, (edge, &text), (start, end));
+        }
+    }
+
+    fn put_edge(
+        &self,
+        d: &mut CueDialog,
+        p: &Project,
+        (edge, text): (Edge, &str),
+        was: (i64, i64),
+    ) {
+        let Some((t, _)) = p.find_cue(&d.cue) else {
+            return;
+        };
+        let (base, key) = match edge {
+            Edge::In => (was.0, "start"),
+            Edge::Out => (was.1, "end"),
+        };
+        let context = (self.snap.timeline.position, self.dropped());
+        let Some(at) = typed_frame(p, text, base, context) else {
+            return;
+        };
+        let now = match edge {
+            Edge::In => (at, was.1),
+            Edge::Out => (was.0, at),
+        };
+        if now == was || now.0 < 0 || now.1 <= now.0 {
+            return;
+        }
+        let params = json!({ "cue": d.cue, key: at });
+        let label = vidcut_core::describe::describe("subtitles.set", &params, Some(p));
+        let mut commands = vec![command("subtitles.set", params)];
+        commands.extend(overwrite(&p.subtitles[t].cues, &d.cue, was, now));
+        let batch = json!({ "commands": commands, "label": label });
+        d.pending
+            .sent
+            .push(self.live.request_answered("apply", batch));
+        d.times.held = Some(now);
     }
 
     fn cue_list(
