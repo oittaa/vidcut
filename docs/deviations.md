@@ -1501,6 +1501,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The Reset of Volume sets 0 dB. The Audio section has no Reset of the whole section.
     - A drag on Volume sends one change on release. The sound does not change during the drag.
     - Mute does what Mute and Unmute in the right-click menu of the clip do.
+    - Normalize in the header opens Normalize Audio Levels for the clips of the section ([X72](#x72-normalize-audio-levels-on-the-cut-page)).
     - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([X64](#x64-voice-isolation-is-free-on-a-clip-or-a-track)).
     - The Audio section has no Pan, Pitch, Equalizer, Dialogue Leveler or Music Remixer.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
@@ -1568,3 +1569,23 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A drag changes a value by an amount. A move of several clips also moves each clip by the same amount.
   - Resolve's volume commands also keep the differences between the selected clips.
   - Keyframes on the volume need keyframes in the model first. The Alt-click stays free for them.
+
+## X72. Normalize Audio Levels on the Cut page
+
+- **Resolve:**
+  - The Edit page and the Fairlight page have Normalize Audio Levels in the right-click menu of clips (pp. 1110–1111).
+  - The Cut chapters do not name it.
+  - Its Normalization Mode has several loudness standards, Sample Peak and True Peak.
+  - Set Level is Relative or Independent. It changes only the volume of each clip, with no dynamics.
+- **vidcut:**
+  - `clip.normalize` sets `gain_db` of the clips so that their level reaches `target` ([D80](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Audio Operations in the right-click menu of a clip has Normalize Audio Levels. It acts on the selected clips with sound.
+  - The header of the Inspector's Audio section ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)) has Normalize. It opens the same window for the clips of the section.
+  - The window has Mode, Target and, with two or more clips, Set Level. Normalize and Cancel are at the bottom right.
+  - Mode has Loudness, Sample Peak and True Peak. Loudness is by EBU R128 only.
+  - A change of Mode sets the default target of that mode.
+  - While it measures, the window shows Measuring. Cancel stops the measurement, and nothing changes.
+  - A normalize is one undo step. A short message tells how many clips stopped at the volume limit.
+- **Why:**
+  - Without it, the Cut page has no way to match the levels of clips.
+  - The export's loudness setting uses EBU R128. Thus Loudness and the export agree.

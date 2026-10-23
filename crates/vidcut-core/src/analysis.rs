@@ -141,6 +141,8 @@ pub struct Loudness {
     pub range: f64,
     /// Highest true peak, dBTP.
     pub true_peak: f64,
+    /// Highest sample, dBFS.
+    pub sample_peak: f64,
 }
 
 fn linear(db: f64) -> f64 {

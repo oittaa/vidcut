@@ -155,7 +155,7 @@ The snapshot:
 | `Wait` | nothing: seeks, steps, screenshots, `jobs.wait` join the waits | `Live::tick` finds its `Until` met |
 | `Task` | `vidcut-task`, at its `Work`: plans, frames, storyboards, analyses, project-less requests, UI answers | `Msg::TaskDone` |
 | `Make` | `vidcut-make`: a project from an OpenTimelineIO file | `Msg::Made`; the core opens it |
-| `Measure` | `vidcut-measure`, a job: measuring for Ripple Delete Silence, Detect Scene Cuts or ducking, unpacking an `.otioz` | `Msg::Measured`; the edit runs here |
+| `Measure` | `vidcut-measure`, a job: measuring for Ripple Delete Silence, Detect Scene Cuts, Normalize Audio Levels or ducking, unpacking an `.otioz` | `Msg::Measured`; the edit runs here |
 | `Encode` | a job thread: proxies; Create Subtitles from Audio; Re-time to Speech | `Msg::Measured`; the edit records them, adds the cues, or moves them |
 
 Work off the core uses a copy of the project from the time that the request arrived.

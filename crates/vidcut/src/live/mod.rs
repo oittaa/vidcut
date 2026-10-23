@@ -1592,6 +1592,30 @@ impl Live {
         }))
     }
 
+    fn loudness_measure(&self, envelope: &Envelope) -> Option<Measure> {
+        let p = self.project.as_ref()?.project();
+        let Request::ClipNormalize { clips, .. } = &envelope.request else {
+            return None;
+        };
+        let playhead = Some(self.player.position(TIMELINE));
+        let plans: Vec<_> = clips
+            .to_vec()
+            .iter()
+            .filter_map(|r| resolve_clip(p, r, playhead).ok())
+            .filter_map(|id| vidcut_core::render::sound_alone(p, &id).ok())
+            .collect();
+        if plans.is_empty() {
+            return None;
+        }
+        Some(Box::new(move || {
+            let env = AvEnv::new();
+            for plan in &plans {
+                env.loudness(plan)?;
+            }
+            Ok(())
+        }))
+    }
+
     fn measuring(&self, envelope: &Envelope) -> Option<Measure> {
         let p = self.project.as_ref()?.project();
         let playhead = Some(self.player.position(TIMELINE));
@@ -2781,6 +2805,10 @@ impl Live {
                 };
                 Step::Measure(Box::new(fetch), Box::new(envelope))
             }
+            Request::ClipNormalize { .. } => match self.loudness_measure(&envelope) {
+                Some(measure) => Step::Measure(measure, Box::new(envelope)),
+                None => Step::Now(self.edit(envelope, job.origin)),
+            },
             Request::EditRippleDeleteSilence { .. }
             | Request::EditDetectSceneCuts { .. }
             | Request::EditRippleDeleteWords { quiet: true, .. } => {

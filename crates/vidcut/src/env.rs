@@ -46,6 +46,21 @@ impl AvEnv {
 const HEARD_KEPT: usize = 8;
 static HEARD: Mutex<Lru<String, Arc<Speech>, HEARD_KEPT>> = Mutex::new(Lru::new());
 static PAID: Mutex<Lru<String, Vec<Arc<Speech>>, HEARD_KEPT>> = Mutex::new(Lru::new());
+const LOUD_KEPT: usize = 4096;
+static LOUD: Mutex<Lru<String, Loudness, LOUD_KEPT>> = Mutex::new(Lru::new());
+
+fn loud_key(plan: &RenderPlan) -> String {
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "audio": plan.audio,
+        "ducking": plan.ducking,
+        "frames": plan.frames,
+        "fps": plan.fps,
+        "sample_rate": plan.sample_rate,
+        "channels": plan.channels,
+    }))
+    .unwrap_or_default();
+    vidcut_core::fingerprint::digest(&bytes)
+}
 
 fn heard_key(plan: &RenderPlan, asked: &Asked) -> String {
     let bytes = serde_json::to_vec(&serde_json::json!({
@@ -286,7 +301,16 @@ impl Env for AvEnv {
     }
 
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
-        vidcut_av::analysis::loudness(plan).map_err(av_error)
+        let lock = || LOUD.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = loud_key(plan);
+        if self.heard_only
+            && let Some(l) = lock().get(&key)
+        {
+            return Ok(*l);
+        }
+        let l = vidcut_av::analysis::loudness(plan).map_err(av_error)?;
+        lock().insert(key, l);
+        Ok(l)
     }
 
     fn transcribe(&self, plan: &RenderPlan, asked: &Asked) -> Result<Arc<Speech>> {

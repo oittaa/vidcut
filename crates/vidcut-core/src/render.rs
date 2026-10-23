@@ -1385,6 +1385,37 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     Ok(plan)
 }
 
+pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
+    let c = p
+        .clip(clip)
+        .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?
+        .clone();
+    let a = c
+        .audio
+        .as_ref()
+        .ok_or_else(|| Error::invalid(format!("{clip} has no sound")))?;
+    let (from, to) = ((c.start + a.head).max(0), c.end() + a.tail);
+    let mut alone = p.clone();
+    for t in &mut alone.tracks {
+        t.clips.retain(|x| x.id == c.id);
+        t.transitions.clear();
+        t.muted = false;
+        t.solo = false;
+        t.volume_db = 0.0;
+        t.voice_isolation = None;
+        t.duck = None;
+        for x in &mut t.clips {
+            x.enabled = true;
+            if let Some(s) = x.audio.as_mut() {
+                s.gain_db = 0.0;
+                s.muted = false;
+                s.voice_isolation = None;
+            }
+        }
+    }
+    flatten(&alone, from, to)
+}
+
 pub fn clip_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
     let mut alone = p.clone();
     for t in &mut alone.tracks {
