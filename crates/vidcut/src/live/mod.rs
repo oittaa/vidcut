@@ -527,6 +527,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         stats: false,
         timecode_display: TimecodeDisplay::Auto,
         timer1_origin: Timer1Origin::default(),
+        guides: crate::preferences::load()
+            .map(|p| p.viewer.guides)
+            .unwrap_or_default(),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
         budget,
@@ -601,6 +604,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         stats: false,
         timecode_display: TimecodeDisplay::Auto,
         timer1_origin: Timer1Origin::default(),
+        guides: crate::preferences::load()
+            .map(|p| p.viewer.guides)
+            .unwrap_or_default(),
         audio_noticed: None,
         playing: false,
         waits: Vec::new(),
@@ -865,6 +871,7 @@ struct Live {
     stats: bool,
     timecode_display: TimecodeDisplay,
     timer1_origin: Timer1Origin,
+    guides: vidcut_core::preferences::Guides,
     audio_noticed: Option<String>,
     playing: bool,
     waits: Vec<Wait>,
@@ -1076,6 +1083,13 @@ impl Live {
                 let fillers = crate::preferences::filler_lists();
                 if *self.fillers != fillers {
                     self.fillers = Arc::new(fillers);
+                    changed = true;
+                }
+                let guides = crate::preferences::load()
+                    .map(|p| p.viewer.guides)
+                    .unwrap_or_default();
+                if self.guides != guides {
+                    self.guides = guides;
                     changed = true;
                 }
                 self.follow_budget();
@@ -1362,6 +1376,7 @@ impl Live {
             stats: self.stats,
             timecode_display: self.timecode_display,
             timer1_origin: self.timer1_origin,
+            guides: self.guides,
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
             budget: self.player.budget(),
@@ -2345,6 +2360,36 @@ impl Live {
             self.refresh_timeline();
         }
         match request {
+            Request::ViewerGuides {
+                enabled,
+                framing,
+                extents,
+                action,
+                title,
+                center,
+            } => {
+                let patch = vidcut_core::preferences::GuidesPatch {
+                    enabled,
+                    framing,
+                    extents,
+                    action,
+                    title,
+                    center,
+                };
+                match crate::preferences::set_guides(patch, envelope.dry_run) {
+                    Ok(v) => {
+                        if !envelope.dry_run
+                            && let Ok(guides) = serde_json::from_value::<
+                                vidcut_core::preferences::Guides,
+                            >(v["guides"].clone())
+                        {
+                            self.guides = guides;
+                        }
+                        Step::Now(Ok(answer(v)))
+                    }
+                    Err(e) => Step::Now(Err(e)),
+                }
+            }
             r if r.is_projectless() => Step::Task(
                 Work::Interactive,
                 Box::new(move |_| crate::session::run(None, envelope)),
@@ -3887,6 +3932,7 @@ impl Live {
             "timecode": timecode,
             "stats": self.player.stats(self.renderer.viewer_stats()),
             "stats_shown": self.stats,
+            "guides": self.guides,
             "two_up": self.renderer.two_up(),
             "clipboard": self.clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),

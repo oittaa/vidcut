@@ -191,7 +191,10 @@ const GROUPS: &[(&str, &str)] = &[
         "The timeline: clips and gaps, edit points, the Boring Detector, OTIO import",
     ),
     ("track", "Tracks: their header and mixer settings"),
-    ("viewer", "What the viewer shows (running GUI)"),
+    (
+        "viewer",
+        "What the viewer shows. Framing guides are a preference; the mode needs a running GUI",
+    ),
 ];
 
 const EXAMPLES: &[(&str, &str)] = &[
@@ -225,6 +228,13 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "media.marks.set",
         "vidcut media marks set m1 --in 5s --out 10s",
+    ),
+    (
+        "viewer.guides",
+        "vidcut viewer guides\n  \
+         vidcut viewer guides --enabled true --framing social_9_16\n  \
+         vidcut viewer guides --center true\n  \
+         vidcut preferences set viewer.guides.action=false",
     ),
     ("media.set", "vidcut media set m1 m2 --color teal"),
     (

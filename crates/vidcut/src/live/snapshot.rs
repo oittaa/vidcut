@@ -187,6 +187,7 @@ pub struct Snapshot {
     pub stats: bool,
     pub timecode_display: TimecodeDisplay,
     pub timer1_origin: Timer1Origin,
+    pub guides: vidcut_core::preferences::Guides,
     pub preview_error: Option<String>,
     pub theme: Arc<crate::themes::Theme>,
     pub budget: vidcut_av::player::Budget,

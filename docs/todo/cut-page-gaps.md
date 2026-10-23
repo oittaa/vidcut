@@ -10,7 +10,6 @@ What [the spec](../cut-page-spec.md) describes and vidcut doesn't do yet.
 - Jog In and Jog Out controls ([§4.1](../cut-page-spec.md#41-modes))
 - Jog control ([§4.2](../cut-page-spec.md#42-transport-pp-640-687688-870872))
 - Full Screen viewer (Shift+F) and Enhanced viewer (Alt+F) ([§4.5](../cut-page-spec.md#45-other-viewer-features))
-- Safe areas ([§4.5](../cut-page-spec.md#45-other-viewer-features))
 - Fast Review ([§4.5](../cut-page-spec.md#45-other-viewer-features))
 - Skimming with C held ([§4.5](../cut-page-spec.md#45-other-viewer-features))
 - Several edit points selected with Ctrl+click ([§8.1](../cut-page-spec.md#81-selection-pp-719720))

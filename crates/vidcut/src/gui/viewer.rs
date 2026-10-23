@@ -282,6 +282,7 @@ impl Workspace {
                 }
             }
         }
+        paint_guides(&painter, picture, &self.snap.guides);
         let offline = self.project().and_then(|p| {
             let source = self.snap.source_at().map(|(m, _)| m);
             offline_media(p, &self.snap.missing, mode, player.position, source)
@@ -840,7 +841,7 @@ impl Workspace {
         let row = Row {
             left: &left,
             fill: None,
-            right: &[T::Timecode],
+            right: &[T::SafeArea, T::Timecode],
             leaving: &[
                 T::Speed,
                 T::Clear,
@@ -854,6 +855,7 @@ impl Workspace {
                 T::Previous,
                 T::Stop,
                 T::Play,
+                T::SafeArea,
             ],
             group: |t| match t {
                 T::Tools => 5,
@@ -861,6 +863,7 @@ impl Workspace {
                 T::Previous | T::Stop | T::Play | T::Next | T::Loop => 1,
                 T::TrimIn => 2,
                 T::MarkIn | T::MarkOut | T::Clear | T::Speed => 3,
+                T::SafeArea => 6,
                 T::Timecode => 4,
             },
         };
@@ -942,6 +945,7 @@ impl Workspace {
                     T::Speed => ui.label(
                         RichText::new(format!("{:+}×", player.speed)).color(theme::colors().accent),
                     ),
+                    T::SafeArea => ws.safe_area_control(ui),
                     T::Timecode => {
                         ui.scope(|ui| {
                             ui.add_space(12.0);
@@ -994,6 +998,74 @@ impl Workspace {
                 true => "trimming the other side",
             };
             super::dialog::why(ui, why);
+        }
+    }
+
+    pub(super) fn safe_area_control(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        let on = self.snap.guides.enabled;
+        let r = ui.selectable_label(on, "Safe Area");
+        if r.clicked() {
+            self.send("viewer.guides", json!({}));
+        }
+        let tip = r.on_hover_text("Framing Guides");
+        tip.context_menu(|ui| self.safe_area_menu(ui));
+        let menu = ui.menu_button("▾", |ui| self.safe_area_menu(ui));
+        tip.union(menu.response)
+    }
+
+    pub(super) fn safe_area_menu(&mut self, ui: &mut egui::Ui) {
+        use vidcut_core::preferences::Framing;
+        let g = &self.snap.guides;
+        ui.label(RichText::new("Social Media").weak());
+        for (label, framing) in [
+            ("1:1", Framing::Social1_1),
+            ("4:5", Framing::Social4_5),
+            ("9:16", Framing::Social9_16),
+            ("1.91:1", Framing::Social1_91),
+            ("16:9", Framing::Social16_9),
+        ] {
+            if ui.selectable_label(g.framing == framing, label).clicked() {
+                self.send(
+                    "viewer.guides",
+                    json!({ "enabled": true, "framing": framing }),
+                );
+                ui.close();
+            }
+        }
+        ui.separator();
+        ui.label(RichText::new("Broadcast and Film").weak());
+        for (label, framing) in [
+            ("Default", Framing::Default),
+            ("1.33", Framing::Broadcast1_33),
+            ("1.66", Framing::Broadcast1_66),
+            ("1.77", Framing::Broadcast1_77),
+            ("1.85", Framing::Broadcast1_85),
+            ("2.35", Framing::Broadcast2_35),
+        ] {
+            if ui.selectable_label(g.framing == framing, label).clicked() {
+                self.send(
+                    "viewer.guides",
+                    json!({ "enabled": true, "framing": framing }),
+                );
+                ui.close();
+            }
+        }
+        ui.separator();
+        let mut extents = g.extents;
+        if ui.checkbox(&mut extents, "Extents").clicked() {
+            self.send("viewer.guides", json!({ "extents": extents }));
+        }
+        let mut action = g.action;
+        if ui.checkbox(&mut action, "Action").clicked() {
+            self.send("viewer.guides", json!({ "action": action }));
+        }
+        let mut title = g.title;
+        if ui.checkbox(&mut title, "Title").clicked() {
+            self.send("viewer.guides", json!({ "title": title }));
+        }
+        let mut center = g.center;
+        if ui.checkbox(&mut center, "Center").clicked() {
+            self.send("viewer.guides", json!({ "center": center }));
         }
     }
 
@@ -1217,7 +1289,92 @@ enum Transport {
     MarkOut,
     Clear,
     Speed,
+    SafeArea,
     Timecode,
+}
+
+fn paint_guides(painter: &egui::Painter, picture: Rect, guides: &vidcut_core::preferences::Guides) {
+    let Some(o) = guides.overlay(vidcut_core::preferences::GuideBox::from_size(
+        picture.width(),
+        picture.height(),
+    )) else {
+        return;
+    };
+    let stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 180));
+    let to_rect = |b: vidcut_core::preferences::GuideBox| {
+        Rect::from_min_size(
+            pos2(picture.min.x + b.x, picture.min.y + b.y),
+            vec2(b.w, b.h),
+        )
+    };
+    if o.crop {
+        let frame = to_rect(o.frame);
+        let shade = Color32::from_rgba_unmultiplied(0, 0, 0, 120);
+        if frame.top() > picture.top() {
+            painter.rect_filled(
+                Rect::from_min_max(picture.left_top(), pos2(picture.right(), frame.top())),
+                CornerRadius::ZERO,
+                shade,
+            );
+        }
+        if frame.bottom() < picture.bottom() {
+            painter.rect_filled(
+                Rect::from_min_max(pos2(picture.left(), frame.bottom()), picture.right_bottom()),
+                CornerRadius::ZERO,
+                shade,
+            );
+        }
+        if frame.left() > picture.left() {
+            painter.rect_filled(
+                Rect::from_min_max(
+                    pos2(picture.left(), frame.top()),
+                    pos2(frame.left(), frame.bottom()),
+                ),
+                CornerRadius::ZERO,
+                shade,
+            );
+        }
+        if frame.right() < picture.right() {
+            painter.rect_filled(
+                Rect::from_min_max(
+                    pos2(frame.right(), frame.top()),
+                    pos2(picture.right(), frame.bottom()),
+                ),
+                CornerRadius::ZERO,
+                shade,
+            );
+        }
+    }
+    if let Some(b) = o.extents {
+        painter.rect_stroke(
+            to_rect(b),
+            CornerRadius::ZERO,
+            stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
+    if let Some(b) = o.action {
+        painter.rect_stroke(
+            to_rect(b),
+            CornerRadius::ZERO,
+            stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
+    if let Some(b) = o.title {
+        painter.rect_stroke(
+            to_rect(b),
+            CornerRadius::ZERO,
+            stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
+    if let Some((cx, cy)) = o.center {
+        let c = pos2(picture.min.x + cx, picture.min.y + cy);
+        let frame = to_rect(o.frame);
+        painter.line_segment([pos2(frame.left(), c.y), pos2(frame.right(), c.y)], stroke);
+        painter.line_segment([pos2(c.x, frame.top()), pos2(c.x, frame.bottom())], stroke);
+    }
 }
 
 fn stats_panel(painter: &egui::Painter, picture: Rect, stats: &crate::live::stats::PlayerStats) {
