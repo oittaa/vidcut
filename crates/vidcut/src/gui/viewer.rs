@@ -1388,7 +1388,7 @@ impl Workspace {
             return;
         }
         let view = self.snap.timecode_view();
-        if view.display == TimecodeDisplay::Auto {
+        if view.display == TimecodeDisplay::Auto && !view.viewer.is_source() {
             let Some(spec) = timecode_input(raw, self.dropped()) else {
                 return;
             };

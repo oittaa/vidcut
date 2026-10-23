@@ -2141,6 +2141,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Copy Timecode copies the text in the field.
   - `player.state` returns that text, the count, and the zeros.
   - Paste Timecode and Enter move the playhead on screen to that count.
+  - In Auto, a source viewer reads a typed timecode as Source Timecode. Thus the text that the field shows goes to the frame on screen.
   - A typed frame count is a whole number.
   - Digits in a frame count are not filled as a timecode.
   - `viewer.set` sets the viewer, the count, the zero, and a paste.
