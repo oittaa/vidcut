@@ -495,7 +495,7 @@ Kept data:
 | clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`. Keyframes stay on their source frames (the `from` field of `Effects`, set by `carry`), and fades stay at the clip's ends through splits; the clip volume's level is the gain |
 | the `Key Frames` of the clip volume (`effects::gain_keys`) | `ClipAudio::gain_keys`, taken out of the kept effect (`effects::drop_gain_keys`) |
 
-| `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
+| `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves, wipes and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`), else `Generator`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
@@ -503,6 +503,8 @@ Kept data:
 Which kept transitions play (`otio::transitions`):
 
 - On picture: an `SMPTE_Dissolve` whose editor metadata names no effect but a cross dissolve.
+- On picture: an Edge Wipe at 0, 90, 180 or −90 degrees (`transitions::wipe_otio`). It plays as a wipe from the bottom, left, top or right edge.
+  - vidcut writes its wipes in this form. Its other parameters, such as a border, are kept but do not play.
 - On sound: a cross fade found by its effect type or name (+3, 0 or −3 dB), or a plain `SMPTE_Dissolve` at 0 dB.
 - A transition plays only where its two clips cover its frames, and no other clip of the track reaches into them.
 - Of two transitions that overlap, the first plays.

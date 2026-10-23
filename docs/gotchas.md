@@ -364,6 +364,13 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - All four play the same straight line, in stills and in a Deliver render.
   - This is so when the ease is set through scripting and when it is read from a file. Its Inspector menu was not tried.
   - vidcut's eases are curves ([X67](deviations.md#x67-the-eases-of-dynamic-zoom-are-curves)). Thus a clip with an ease other than Linear plays differently in Resolve.
+- **Resolve reads a wipe only as its Edge Wipe effect.**
+  - It writes a `Custom_Transition` named `Edge Wipe`, with `"Transition Type": "Edge Wipe"` and an effect of type 13 in its metadata.
+  - The `angle` parameter (`Int`, −360 to 360) gives the edge. 0 is the bottom, 90 the left, 180 the top and −90 the right.
+  - Resolve leaves out an angle of 0. The incoming picture comes in from that edge, and the edge moves at an even speed.
+  - Without `Transition Type`, or with the name alone, Resolve makes a cross dissolve. It also does so for a transition with metadata it does not know.
+  - Resolve refuses the whole timeline when an `Int` has a decimal point, for example `90.0`.
+  - Measured with renders of 24-frame wipes at 0, 90, 180 and −90 degrees.
 
 ## transcribe.cpp and its models
 

@@ -1758,8 +1758,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - Wipes are transitions (pp. 758–761).
   - The spec gives no edge for a wipe.
+  - Its Edge Wipe has an angle, a border, a feather and an ease. At 0 degrees the incoming picture comes in from the bottom ([gotchas](gotchas.md#resolves-otio-files)).
 - **vidcut:**
   - A wipe has one direction: left, right, up or down.
+  - An OTIO file holds it as an Edge Wipe at 90, −90, 180 or 0 degrees.
   - A left wipe reveals the incoming picture from the left edge toward the right.
   - At half of the duration, the left half is the incoming picture.
   - The right half is the outgoing picture.
