@@ -38,6 +38,12 @@ impl Resampler {
     pub(crate) fn new(src: &frame::Audio, rate: u32, channels: u16) -> Result<Self> {
         unsafe {
             let f = &*src.as_ptr();
+            let Some(in_fmt) = sample_format(f.format) else {
+                return Err(Error::Invalid(format!(
+                    "cannot convert audio ({} Hz, {} channels) to {rate} Hz",
+                    f.sample_rate, f.ch_layout.nb_channels
+                )));
+            };
             let mut in_layout: ffi::AVChannelLayout = std::mem::zeroed();
             if f.ch_layout.order == ffi::AVChannelOrder::AV_CHANNEL_ORDER_UNSPEC
                 || f.ch_layout.nb_channels == 0
@@ -49,12 +55,6 @@ impl Resampler {
             let mut out_layout: ffi::AVChannelLayout = std::mem::zeroed();
             ffi::av_channel_layout_default(&mut out_layout, i32::from(channels));
             let mut swr = std::ptr::null_mut();
-            let Some(in_fmt) = sample_format(f.format) else {
-                return Err(Error::Invalid(format!(
-                    "cannot convert audio ({} Hz, {} channels) to {rate} Hz",
-                    f.sample_rate, f.ch_layout.nb_channels
-                )));
-            };
             let ret = ffi::swr_alloc_set_opts2(
                 &mut swr,
                 &out_layout,
