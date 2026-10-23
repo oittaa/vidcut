@@ -2352,6 +2352,36 @@ impl Live {
             self.refresh_timeline();
         }
         match request {
+            Request::ViewerGuides {
+                enabled,
+                framing,
+                extents,
+                action,
+                title,
+                center,
+            } => {
+                let patch = vidcut_core::preferences::GuidesPatch {
+                    enabled,
+                    framing,
+                    extents,
+                    action,
+                    title,
+                    center,
+                };
+                match crate::preferences::set_guides(patch, envelope.dry_run) {
+                    Ok(v) => {
+                        if !envelope.dry_run
+                            && let Ok(guides) = serde_json::from_value::<
+                                vidcut_core::preferences::Guides,
+                            >(v["guides"].clone())
+                        {
+                            self.guides = guides;
+                        }
+                        Step::Now(Ok(answer(v)))
+                    }
+                    Err(e) => Step::Now(Err(e)),
+                }
+            }
             r if r.is_projectless() => Step::Task(
                 Work::Interactive,
                 Box::new(move |_| crate::session::run(None, envelope)),
