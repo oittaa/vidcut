@@ -65,20 +65,18 @@ jobs:
           set -euo pipefail
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.cargo/bin:$PATH"
-          rustup show active-toolchain
-          rustc --version
+          scripts/ci-pin-rust.sh
           cargo fmt --version
           cargo clippy --version
-          channel=$(awk -F'"' '/^channel/ { print $2; exit }' rust-toolchain.toml)
-          got=$(rustc --version | awk '{ print $2 }')
-          if [ "$got" != "$channel" ]; then
-            echo "expected rustc ${channel} from rust-toolchain.toml, got ${got}" >&2
-            exit 1
-          fi
 
       # After the toolchain step: the cache key includes the rustc version.
+      # Save only on master. PR caches are scoped to refs/pull/N/merge and
+      # burn the 10 GiB quota without helping other PRs. PRs still restore
+      # from master.
       - name: Cache compiled dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Fast gate
         run: make doctor check
@@ -116,19 +114,12 @@ jobs:
           "$RUNNER_TEMP/$name/bin/ffmpeg.exe" -hide_banner -version | head -1
 
       - name: Install the pinned Rust toolchain
-        run: |
-          set -euo pipefail
-          rustup show active-toolchain
-          rustc --version
-          channel=$(awk -F'"' '/^channel/ { print $2; exit }' rust-toolchain.toml)
-          got=$(rustc --version | awk '{ print $2 }')
-          if [ "$got" != "$channel" ]; then
-            echo "expected rustc ${channel} from rust-toolchain.toml, got ${got}" >&2
-            exit 1
-          fi
+        run: scripts/ci-pin-rust.sh
 
       - name: Cache compiled dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Fast gate
         run: scripts/check.sh
@@ -157,19 +148,12 @@ jobs:
           "${prefix}/bin/ffmpeg" -hide_banner -filters | grep -w zscale
 
       - name: Install the pinned Rust toolchain
-        run: |
-          set -euo pipefail
-          rustup show active-toolchain
-          rustc --version
-          channel=$(awk -F'"' '/^channel/ { print $2; exit }' rust-toolchain.toml)
-          got=$(rustc --version | awk '{ print $2 }')
-          if [ "$got" != "$channel" ]; then
-            echo "expected rustc ${channel} from rust-toolchain.toml, got ${got}" >&2
-            exit 1
-          fi
+        run: scripts/ci-pin-rust.sh
 
       - name: Cache compiled dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Fast gate
         run: make doctor check
