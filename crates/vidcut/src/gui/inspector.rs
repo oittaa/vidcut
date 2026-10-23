@@ -11,13 +11,16 @@ use vidcut_core::model::{
 };
 use vidcut_core::ops::picture::has_picture;
 use vidcut_core::place::upright_fit;
+use vidcut_core::time::TimeSpec;
 use vidcut_core::validate::GAIN;
 
 use super::dialog;
 use super::isolation::{Isolate, heard};
 use super::placing::{changed, ease_label, target};
 use super::theme;
+use super::timeline::SpeedDialog;
 use super::timeline::tools::landing;
+use super::viewer::timecode_input;
 use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
 
@@ -53,6 +56,45 @@ enum Field {
 enum Key {
     Picture(Field),
     Volume,
+    Speed,
+    Rate,
+    Length,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Direction {
+    Forward,
+    Reverse,
+    Freeze,
+}
+
+impl Direction {
+    const ALL: [Direction; 3] = [Direction::Forward, Direction::Reverse, Direction::Freeze];
+
+    fn of(speed: f64) -> Self {
+        if speed == 0.0 {
+            Direction::Freeze
+        } else if speed < 0.0 {
+            Direction::Reverse
+        } else {
+            Direction::Forward
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Direction::Forward => "Forward",
+            Direction::Reverse => "Reverse",
+            Direction::Freeze => "Freeze",
+        }
+    }
+
+    fn turn(self, d: &mut SpeedDialog) {
+        d.freeze = self == Direction::Freeze;
+        if !d.freeze {
+            d.reverse = self == Direction::Reverse;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -242,6 +284,9 @@ impl Key {
         match self {
             Key::Picture(f) => f.label(),
             Key::Volume => "Volume",
+            Key::Speed => "Speed",
+            Key::Rate => "Frames per Second",
+            Key::Length => "Duration",
         }
     }
 
@@ -249,6 +294,9 @@ impl Key {
         match self {
             Key::Picture(f) => f.suffix(),
             Key::Volume => " dB",
+            Key::Speed => "%",
+            Key::Rate => " fps",
+            Key::Length => "",
         }
     }
 
@@ -256,6 +304,8 @@ impl Key {
         match self {
             Key::Picture(f) => f.speed(),
             Key::Volume => 0.1,
+            Key::Speed | Key::Length => 1.0,
+            Key::Rate => 0.1,
         }
     }
 
@@ -263,6 +313,9 @@ impl Key {
         match self {
             Key::Picture(_) => (0, 2),
             Key::Volume => (1, 1),
+            Key::Speed => (0, 2),
+            Key::Rate => (0, 3),
+            Key::Length => (0, 0),
         }
     }
 
@@ -270,6 +323,8 @@ impl Key {
         match self {
             Key::Picture(f) => f.usual(),
             Key::Volume => 0.0,
+            Key::Speed => 100.0,
+            Key::Rate | Key::Length => 0.0,
         }
     }
 }
@@ -281,7 +336,25 @@ fn typed(text: &str) -> Option<f64> {
         .map(|c| if c == '−' { '-' } else { c })
         .collect::<String>()
         .to_ascii_lowercase();
-    t.strip_suffix("db").unwrap_or(&t).parse().ok()
+    t.strip_suffix("db")
+        .or_else(|| t.strip_suffix("fps"))
+        .unwrap_or(&t)
+        .parse()
+        .ok()
+}
+
+fn frames(p: &Project, text: &str, dropped: i64) -> Option<f64> {
+    let spec = TimeSpec::parse(&timecode_input(text, dropped)?).ok()?;
+    let n = p.time_context(None).duration(&spec).ok()?;
+    Some(n as f64)
+}
+
+fn rate(p: &Project, c: &Clip) -> f64 {
+    p.media(&c.media)
+        .and_then(|m| m.info.video.as_ref())
+        .filter(|v| !v.still)
+        .map_or(p.settings.fps, |v| v.fps)
+        .as_f64()
 }
 
 fn shape(p: &Project, c: &Clip) -> Shape {
@@ -368,6 +441,31 @@ struct Sound {
     muted: bool,
 }
 
+type Lists<'a> = (&'a [Chosen], &'a [Sound], &'a [Paced]);
+
+type Pace = (f64, i64);
+
+#[derive(Debug, Clone)]
+struct Paced {
+    id: String,
+    stored: Pace,
+    shown: Pace,
+    rate: f64,
+}
+
+#[derive(Debug, Clone)]
+struct Retimed {
+    since: Instant,
+    clips: Vec<(String, Pace, Pace)>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct Look<'a> {
+    off: bool,
+    why: Option<&'static str>,
+    timecode: Option<(&'a Project, i64)>,
+}
+
 #[derive(Debug, Clone)]
 struct Held {
     field: Key,
@@ -396,6 +494,8 @@ pub struct Inspector {
     held: Option<Held>,
     landing: Option<Landing>,
     gained: Option<Gained>,
+    retimed: Option<Retimed>,
+    ripple: Option<bool>,
     seen: Option<(Vec<String>, Vec<String>)>,
     focus: Option<egui::Id>,
     moved: bool,
@@ -409,6 +509,9 @@ enum Act {
     Put(Key, f64),
     Edit(Key, f64),
     Release(Key),
+    Direction(Direction),
+    Ripple(bool),
+    FullSpeed,
     Mute(bool),
     Link(bool),
     Flips([Option<bool>; 2]),
@@ -449,9 +552,20 @@ fn number(
 
 fn entry(
     ui: &mut egui::Ui,
+    key: (Key, Option<bool>),
+    i: &Inspector,
+    values: (bool, f64, RangeInclusive<f64>),
+    acts: &mut Vec<Act>,
+) {
+    field(ui, key, i, values, Look::default(), acts);
+}
+
+fn field(
+    ui: &mut egui::Ui,
     (f, link): (Key, Option<bool>),
     i: &Inspector,
     (set, shown, range): (bool, f64, RangeInclusive<f64>),
+    look: Look<'_>,
     acts: &mut Vec<Act>,
 ) {
     label(ui, f.label(), set);
@@ -460,22 +574,33 @@ fn entry(
     let before = v;
     let (fewest, most) = f.decimals();
     ui.horizontal(|ui| {
+        if look.off {
+            ui.disable();
+        }
         let r = ui
             .push_id(f, |ui| {
-                ui.add(
-                    egui::DragValue::new(&mut v)
-                        .update_while_editing(false)
-                        .clamp_existing_to_range(false)
-                        .range(range)
-                        .speed(f.speed())
-                        .min_decimals(fewest)
-                        .max_decimals(most)
-                        .suffix(f.suffix())
-                        .custom_parser(typed)
-                        .min_size(vec2(FIELD_WIDTH, ui.spacing().interact_size.y)),
-                )
+                let mut drag = egui::DragValue::new(&mut v)
+                    .update_while_editing(false)
+                    .clamp_existing_to_range(false)
+                    .range(range)
+                    .speed(f.speed())
+                    .min_decimals(fewest)
+                    .max_decimals(most)
+                    .suffix(f.suffix())
+                    .custom_parser(typed)
+                    .min_size(vec2(FIELD_WIDTH, ui.spacing().interact_size.y));
+                if let Some((p, dropped)) = look.timecode {
+                    drag = drag
+                        .custom_formatter(|n, _| p.settings.length_timecode(n.round() as i64))
+                        .custom_parser(move |t| frames(p, t, dropped));
+                }
+                ui.add(drag)
             })
             .inner;
+        let r = match look.why {
+            Some(why) => r.on_disabled_hover_text(why),
+            None => r,
+        };
         if r.drag_started() {
             acts.push(Act::Hold(f, before));
         }
@@ -680,6 +805,86 @@ fn dynamic_zoom(
     });
 }
 
+fn speed_section(
+    ui: &mut egui::Ui,
+    (i, p, dropped): (&Inspector, &Project, i64),
+    paced: &[Paced],
+    ripple: bool,
+    acts: &mut Vec<Act>,
+) {
+    let (speed, length) = paced[0].shown;
+    let rate = paced[0].rate;
+    let frozen = speed == 0.0;
+    let count = paced.len();
+    let turned = paced.iter().any(|c| c.shown.0 <= 0.0);
+    let sped = paced
+        .iter()
+        .any(|c| c.shown.0 != 0.0 && c.shown.0.abs() != 1.0);
+    let header = |ui: &mut egui::Ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let whole = ui
+                .add_enabled(turned || sped, egui::Button::new("Reset"))
+                .clicked();
+            if count > 1 {
+                ui.label(dim(format!("{count} clips")));
+            }
+            whole
+        })
+        .inner
+    };
+    let whole = group(ui, "Speed", header, |ui| {
+        label(ui, "Direction", turned);
+        dialog::switch(ui, |ui| {
+            for d in Direction::ALL {
+                let on = Direction::of(speed) == d;
+                if ui.add(egui::Button::selectable(on, d.label())).clicked() && !on {
+                    acts.push(Act::Direction(d));
+                }
+            }
+        });
+        if reset(ui, turned) {
+            acts.push(Act::Direction(Direction::Forward));
+        }
+        ui.end_row();
+        let moving = Look {
+            off: frozen,
+            ..Look::default()
+        };
+        let (least, most) = (
+            *SpeedDialog::PERCENT.start() / 100.0,
+            *SpeedDialog::PERCENT.end() / 100.0,
+        );
+        let percent = (sped, speed.abs() * 100.0, SpeedDialog::PERCENT);
+        field(ui, (Key::Speed, None), i, percent, moving, acts);
+        let fps = (false, speed.abs() * rate, least * rate..=most * rate);
+        field(ui, (Key::Rate, None), i, fps, moving, acts);
+        let span = length as f64 * speed.abs();
+        let lengths = (span / most).ceil().max(1.0)..=(span / least).floor().max(1.0);
+        let timed = Look {
+            off: frozen || !ripple,
+            why: (!frozen && !ripple).then_some("Needs Ripple Timeline"),
+            timecode: Some((p, dropped)),
+        };
+        field(
+            ui,
+            (Key::Length, None),
+            i,
+            (false, length as f64, lengths),
+            timed,
+            acts,
+        );
+        label(ui, "Ripple Timeline", false);
+        let mut on = ripple;
+        if ui.checkbox(&mut on, "").clicked() {
+            acts.push(Act::Ripple(on));
+        }
+        ui.end_row();
+    });
+    if whole {
+        acts.push(Act::FullSpeed);
+    }
+}
+
 impl Workspace {
     fn chosen(&self) -> Vec<Chosen> {
         let Some(p) = self.project_shared() else {
@@ -749,6 +954,103 @@ impl Workspace {
                 })
             })
             .collect()
+    }
+
+    fn paced(&self) -> Vec<Paced> {
+        let Some(p) = self.project() else {
+            return Vec::new();
+        };
+        let retimed = self.inspector.retimed.as_ref();
+        self.snap
+            .selection
+            .clips
+            .iter()
+            .filter_map(|id| {
+                let c = p
+                    .clip(id)
+                    .filter(|c| !c.is_generator() && c.title.is_none())?;
+                let stored = (c.speed(), c.duration);
+                let shown = retimed
+                    .and_then(|r| {
+                        let (_, from, to) = r.clips.iter().find(|(f, _, _)| f == id)?;
+                        landing(*to, r.since.elapsed(), *from, stored)
+                    })
+                    .unwrap_or(stored);
+                Some(Paced {
+                    id: c.id.clone(),
+                    stored,
+                    shown,
+                    rate: rate(p, c),
+                })
+            })
+            .collect()
+    }
+
+    fn ripple(&self) -> bool {
+        self.inspector
+            .ripple
+            .unwrap_or_else(|| self.project().is_some_and(|p| p.settings.ripple_on))
+    }
+
+    fn send_speeds(
+        &mut self,
+        paced: &[Paced],
+        length: Option<i64>,
+        change: impl Fn(&mut SpeedDialog, &Paced),
+    ) {
+        let ripple = self.ripple();
+        let mut groups: Vec<(SpeedDialog, Vec<String>)> = Vec::new();
+        let mut clips = Vec::new();
+        for c in paced {
+            let mut d = SpeedDialog::of(c.shown.0, ripple);
+            change(&mut d, c);
+            let to = d.speed();
+            if (to - c.shown.0).abs() < SAME {
+                continue;
+            }
+            let (from, frames) = c.shown;
+            let length = length.unwrap_or(if ripple && to != 0.0 && from != 0.0 {
+                ((frames as f64 * from.abs() / to.abs()) + 1e-6)
+                    .floor()
+                    .max(1.0) as i64
+            } else {
+                frames
+            });
+            clips.push((c.id.clone(), c.stored, (to, length)));
+            match groups.iter_mut().find(|(g, _)| g.speed() == to) {
+                Some((_, ids)) => ids.push(c.id.clone()),
+                None => groups.push((d, vec![c.id.clone()])),
+            }
+        }
+        let mut params: Vec<Value> = groups.iter().map(|(d, ids)| d.params(ids)).collect();
+        match params.len() {
+            0 => return,
+            1 => self.send("edit.change_speed", params.remove(0)),
+            _ => {
+                let commands: Vec<Value> = params
+                    .into_iter()
+                    .map(|p| json!({ "method": "edit.change_speed", "params": p }))
+                    .collect();
+                self.send("apply", json!({ "commands": commands }));
+            }
+        }
+        self.inspector.retimed = Some(Retimed {
+            since: Instant::now(),
+            clips,
+        });
+    }
+
+    fn send_percent(
+        &mut self,
+        paced: &[Paced],
+        length: Option<i64>,
+        percent: impl Fn(&Paced) -> f64,
+    ) {
+        self.send_speeds(paced, length, |d, c| {
+            if !d.freeze {
+                d.set_percent(percent(c));
+            }
+        });
     }
 
     pub(super) fn inspector_wanted(&self) -> Vec<(String, Picture)> {
@@ -853,12 +1155,20 @@ impl Workspace {
         });
     }
 
-    fn put(&mut self, key: Key, value: f64, chosen: &[Chosen], sounds: &[Sound]) {
+    fn put(&mut self, key: Key, value: f64, (chosen, sounds, paced): Lists<'_>) {
         match key {
             Key::Picture(f) => {
                 self.send_pictures(chosen, |c| Some(f.put(&c.shown, &c.shape, value)));
             }
             Key::Volume => self.send_volume(sounds, value),
+            Key::Speed => self.send_percent(paced, None, |_| value),
+            Key::Rate => self.send_percent(paced, None, |c| value / c.rate * 100.0),
+            Key::Length => {
+                let frames = value.round().max(1.0);
+                self.send_percent(paced, Some(frames as i64), |c| {
+                    c.shown.1 as f64 * c.shown.0.abs() / frames * 100.0
+                });
+            }
         }
     }
 
@@ -910,7 +1220,7 @@ impl Workspace {
         }
     }
 
-    fn inspect(&mut self, act: Act, chosen: &[Chosen], sounds: &[Sound]) {
+    fn inspect(&mut self, act: Act, (chosen, sounds, paced): Lists<'_>) {
         let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
         match act {
             Act::Hold(field, value) => {
@@ -936,14 +1246,14 @@ impl Workspace {
                     return;
                 };
                 if h.value != h.from {
-                    self.put(field, h.value, &h.start, sounds);
+                    self.put(field, h.value, (&h.start, sounds, paced));
                 }
             }
             Act::Put(field, value) => {
                 if held_on(&self.inspector, field) {
                     self.inspector.held = None;
                 }
-                self.put(field, value, chosen, sounds);
+                self.put(field, value, (chosen, sounds, paced));
             }
             Act::Edit(field, value) => {
                 if !held_on(&self.inspector, field) {
@@ -966,6 +1276,12 @@ impl Workspace {
                     self.inspector.held = None;
                 }
             }
+            Act::Direction(to) => self.send_speeds(paced, None, |d, _| to.turn(d)),
+            Act::Ripple(on) => self.inspector.ripple = Some(on),
+            Act::FullSpeed => self.send_speeds(paced, None, |d, _| {
+                Direction::Forward.turn(d);
+                d.set_percent(Key::Speed.usual());
+            }),
             Act::Link(on) => {
                 self.inspector.unlinked = !on;
                 if on {
@@ -1080,9 +1396,16 @@ impl Workspace {
         if sounds.iter().all(|s| s.gain == s.stored) {
             self.inspector.gained = None;
         }
+        let paced = self.paced();
+        if paced.iter().all(|c| c.shown == c.stored) {
+            self.inspector.retimed = None;
+        }
+        let ripple = self.ripple();
+        let dropped = self.dropped();
         let gone = |k: Key| match k {
             Key::Picture(_) => chosen.is_empty(),
             Key::Volume => sounds.is_empty(),
+            Key::Speed | Key::Rate | Key::Length => paced.is_empty(),
         };
         if self.inspector.held.as_ref().is_some_and(|h| gone(h.field)) {
             self.inspector.held = None;
@@ -1099,6 +1422,7 @@ impl Workspace {
                 let top = chosen.first().map(|c| &c.id);
                 let Some(first) = top
                     .or(sounds.first().map(|s| &s.id))
+                    .or(paced.first().map(|c| &c.id))
                     .and_then(|id| p.clip(id))
                 else {
                     if !forms {
@@ -1119,12 +1443,16 @@ impl Workspace {
                     crop(ui, i, &chosen, &mut acts);
                     dynamic_zoom(ui, i, &chosen, boxes, &mut acts);
                 }
+                if !paced.is_empty() {
+                    let at = (&self.inspector, &*p, dropped);
+                    speed_section(ui, at, &paced, ripple, &mut acts);
+                }
                 if !sounds.is_empty() {
                     self.audio_section(ui, &p, &sounds, &mut acts);
                 }
             });
         for act in acts {
-            self.inspect(act, &chosen, &sounds);
+            self.inspect(act, (&chosen, &sounds, &paced));
         }
         self.sync_picture_preview();
     }
