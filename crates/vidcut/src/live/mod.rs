@@ -23,7 +23,7 @@ use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
     Client, ClientKind, Detect, DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget,
-    TimelineOptions, TrimSide, ViewerMode,
+    TimecodeDisplay, TimelineOptions, TrimSide, ViewerMode,
 };
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -525,6 +525,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         audio_scrubbing: true,
         looping: false,
         stats: false,
+        timecode_display: TimecodeDisplay::Auto,
+        timer1_origin: Timer1Origin::default(),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
         budget,
@@ -597,6 +599,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         audio_scrubbing: true,
         looping: false,
         stats: false,
+        timecode_display: TimecodeDisplay::Auto,
+        timer1_origin: Timer1Origin::default(),
         audio_noticed: None,
         playing: false,
         waits: Vec::new(),
@@ -859,6 +863,8 @@ struct Live {
     audio_scrubbing: bool,
     looping: bool,
     stats: bool,
+    timecode_display: TimecodeDisplay,
+    timer1_origin: Timer1Origin,
     audio_noticed: Option<String>,
     playing: bool,
     waits: Vec<Wait>,
@@ -1354,6 +1360,8 @@ impl Live {
             audio_scrubbing: self.audio_scrubbing,
             looping: self.looping,
             stats: self.stats,
+            timecode_display: self.timecode_display,
+            timer1_origin: self.timer1_origin,
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
             budget: self.player.budget(),
@@ -2397,10 +2405,12 @@ impl Live {
                         .map(|()| self.state_response()),
                 )
             }
-            Request::ViewerSet { mode } => {
-                let motion = self.set_viewer(mode);
-                self.shown(motion)
-            }
+            Request::ViewerSet {
+                mode,
+                display,
+                reset_timer1,
+                paste,
+            } => self.viewer_set(mode, display, reset_timer1, paste),
             Request::ViewerLoad { media, at } => match self.load_source(&media, at.as_ref()) {
                 Ok(motion) => self.shown(motion),
                 Err(e) => Step::Now(Err(e)),
@@ -3476,6 +3486,63 @@ impl Live {
         }
     }
 
+    fn viewer_set(
+        &mut self,
+        mode: Option<ViewerMode>,
+        display: Option<TimecodeDisplay>,
+        reset_timer1: bool,
+        paste: Option<String>,
+    ) -> Step {
+        if mode.is_none() && display.is_none() && !reset_timer1 && paste.is_none() {
+            return Step::Now(Err(Error::usage(
+                "viewer.set needs mode, display, reset_timer1, or paste",
+            )));
+        }
+        let viewer = mode.unwrap_or(self.viewer);
+        let shown = display.unwrap_or(self.timecode_display);
+        let id = PlayerId::of(viewer);
+        let playhead = self.player.position(id);
+        let zero = if reset_timer1 {
+            playhead
+        } else {
+            self.timer1_origin.zero(id)
+        };
+        let target = if let Some(text) = &paste {
+            let view = timecode_view(
+                self.project.as_ref().map(|open| open.project()),
+                viewer,
+                playhead,
+                self.tape.as_slice(),
+                shown,
+                zero,
+            );
+            match seek_frame(text, &view) {
+                Ok(frame) => Some(frame),
+                Err(e) => return Step::Now(Err(e)),
+            }
+        } else {
+            None
+        };
+        let motion = mode.and_then(|mode| self.set_viewer(mode));
+        if reset_timer1 {
+            let id = PlayerId::of(self.viewer);
+            self.timer1_origin.reset(id, self.player.position(id));
+        }
+        if let Some(display) = display {
+            self.timecode_display = display;
+        }
+        let Some(mut frame) = target else {
+            return self.shown(motion);
+        };
+        if reset_timer1 && shown == TimecodeDisplay::Timer1 {
+            let id = PlayerId::of(self.viewer);
+            frame = frame - zero + self.timer1_origin.zero(id);
+        }
+        let id = PlayerId::of(self.viewer);
+        let motion = self.seek(id, frame, true).or(motion);
+        self.shown(motion)
+    }
+
     fn set_viewer(&mut self, mode: ViewerMode) -> Option<u64> {
         if mode == self.viewer && (!mode.is_source() || mode == self.last_source) {
             return None;
@@ -3754,6 +3821,16 @@ impl Live {
     fn state_json(&self) -> Value {
         let (late, skipped) = self.player.misses();
         let p = self.project.as_ref().map(|o| o.project());
+        let id = PlayerId::of(self.viewer);
+        let timecode = format_timecode_field(&timecode_view(
+            p,
+            self.viewer,
+            self.player.position(id),
+            self.tape.as_slice(),
+            self.timecode_display,
+            self.timer1_origin.zero(id),
+        ))
+        .unwrap_or_else(|| "-".into());
         let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps);
         let drop = p.is_some_and(|p| p.settings.counts_drop_frame());
         let tc = |f: i64, stc: i64| format_timecode(f, fps, stc, drop);
@@ -3805,6 +3882,9 @@ impl Live {
             "audio_error": self.player.audio_error,
             "audio_scrubbing": self.audio_scrubbing,
             "loop": self.looping,
+            "timecode_display": self.timecode_display,
+            "timer1_origin": self.timer1_origin,
+            "timecode": timecode,
             "stats": self.player.stats(self.renderer.viewer_stats()),
             "stats_shown": self.stats,
             "two_up": self.renderer.two_up(),
