@@ -218,7 +218,9 @@ fn checked_position(at: Option<[f64; 2]>) -> Result<Option<[f64; 2]>> {
 pub fn set_style(p: &mut Project, id: &str, style: SubtitleStyle) -> Result<()> {
     let (ti, ci) = find(p, id)?;
     unlocked(p, ti)?;
-    let style = checked_style(&style)?;
+    let bold = style.bold;
+    let mut style = checked_style(&style)?;
+    style.bold = bold;
     p.subtitles[ti].cues[ci].style = (!style.is_empty()).then_some(style);
     Ok(())
 }
