@@ -146,6 +146,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 **Better than Resolve** (proposals for the stages):
 
 - Ease In and Out plays the S-curve that the Bezier points give.
+- A drag on a handle changes the curve, from stage 1 on the volume line.
 - A click on a keyframe selects that keyframe only. Shift or Ctrl adds to the selection.
 - The ease menu is on each keyframe: on the volume line, on the Keyframe button and in the Keyframe Editor.
 - The volume line takes keyframes in vidcut's own timeline ([X71](../deviations.md#x71-clip-volume-is-a-line-on-the-clip-without-keyframes)).
@@ -158,9 +159,11 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - GUI: the volume line takes the controls of the Edit page's Volume overlay above.
   - Alt+click adds a keyframe. A drag moves a keyframe, or the part between two keyframes.
   - A right-click sets the ease. Delete removes the selected keyframes.
+  - A selected keyframe with an ease shows its handles. A drag on a handle changes the curve.
 - Spec:
   - §1 takes volume keyframes in. [§9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gets them, with the pages above.
   - The Cut page's timeline has no volume overlay. Thus a deviation records that the volume line takes the controls of the Edit page.
+  - A deviation records that Ease In and Out plays an S-curve, and that the handles drag on the volume line.
   - [X9](../deviations.md#x9-opentimelineio-interchange) says that keyed volume from a file plays.
 
 **Stage 2: Transform, Crop and Dynamic Zoom keyframes, with Inspector buttons.**
@@ -183,21 +186,28 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 
 - A Keyframe Editor tab beside the Inspector tab, as the tab of p. 636. The Timeline control of p. 649 opens it.
 - A track for each value, in a group track for each section. A drag moves keyframes. A drag on a group track moves the keyframes of the group.
+- A curve view for each value, with the handles of its keyframes, as the Curve Editor of p. 1261. A drag on a handle changes the curve.
 - Spec: [§2](../cut-page-spec.md#2-layout-pp-636637) takes the tab in.
-- Not in stage 3: the Curve Editor, Bezier handles, Step, Loop, Ping Pong, Reverse, the Shape Box, the keyframe tray and motion paths.
+- Not in stage 3: Step, Loop, Ping Pong, Reverse, the Shape Box, the keyframe tray and motion paths.
 
 **Still out of scope:** keyframes of speed, opacity, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
 
 ## Model
 
-**A keyframe** has a time, a value and an ease.
+**A keyframe** has a time, a value, an In handle and an Out handle.
 
 - **Time:** a source frame of the clip, counted as the `source_in` of a `Clip` is.
   - Thus a keyframe stays on the content of its frame.
   - The kept effects of a file do the same. Their times count from the `from` field of `Effects`, which `carry` sets in `place_imported`.
-- **Ease:** Linear, Ease In, Ease Out, or Ease In and Out, as in Resolve. The default is Linear.
-  - Ease In shapes the change before the keyframe. Ease Out shapes the change after it.
-  - The curve is the cubic Bezier curve that Resolve uses ([Measured](#measured-in-resolve-studio-2111)).
+- **Handles:** each handle is a time and a value from its keyframe, as `InBez` and `OutBez` in Resolve's files.
+  - The In handle shapes the change before the keyframe. The Out handle shapes the change after it.
+  - A keyframe without handles is Linear. This is the default.
+  - The curve between two keyframes is the cubic Bezier curve of the two keyframes and their handles ([Measured](#measured-in-resolve-studio-2111)).
+  - Thus Ease Out on one keyframe and Ease In on the next one give an S-curve. Resolve holds the value and jumps.
+- **Eases:** the ease menu sets the handles as Resolve does.
+  - Ease In sets a flat In handle, a third of the way to the keyframe before. Ease Out sets a flat Out handle, a third of the way to the next one.
+  - Ease In and Out sets both. Linear removes both.
+  - A drag on a handle changes the handle. The menu then shows no ease as set.
   - The eases of Dynamic Zoom stay as `Ease::of` gives them ([X67](../deviations.md#x67-the-eases-of-dynamic-zoom-are-curves)).
 - Before the first keyframe, the value is that of the first keyframe. After the last keyframe, it is that of the last.
 - A value with keyframes takes its value from them only. When its last keyframe goes, the value of that keyframe stays as the plain value.
@@ -218,9 +228,9 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - **Slip:** the keyframes go with the content, as in Resolve.
 - **Move and ripple:** the keyframes go with the clip.
 - **Speed** ([D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
-  - The Cut page's speed tool keeps each keyframe at its frame of the clip. The Edit page can also stretch them (p. 1217).
-  - Keyframes on source frames stretch by themselves. To keep their frames, a speed change moves their source frames.
-  - Which of the two vidcut does is an open question.
+  - A speed change keeps each keyframe at its frame of the clip, as the Cut page's speed tool does.
+  - Thus a speed change moves the source frame of each keyframe. The keyframes do not stretch with the clip.
+  - vidcut has no stretch choice, as the Cut page has none. The Edit page has one (p. 1217).
   - A freeze shows one source frame, so it shows one value.
   - A clip that plays backward plays its keyframes backward.
 - **Compound clips:** the keyframes of a compound clip count its frames.
@@ -318,7 +328,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - The gain keyframes go into the clip volume effect (`effects::sound`).
 - An import plays the keyframes of Transform, Cropping and the volume when they fit the model.
 - Some keyframes stay in the kept effects, unplayed, with the warning of the import:
-  - a handle that is not an ease, and Step
+  - Step
   - an anchor point with keyed zoom or rotation
 
 **Unknown:**
@@ -334,7 +344,7 @@ Rule 3: each GUI action has a request. These requests are new:
 - `keyframes.list`: the keyframes of clips. For each clip and value, each keyframe has its timeline time, its source frame, its value and its ease.
 - `keyframes.add`: clips, a value (`param`), a time (`at`, a timeline time or `playhead`), and a value and an ease if given.
   - Without a value, the keyframe takes the value that the clip has there, as Alt+click does.
-- `keyframes.set`: the value or the ease of the keyframes at given times.
+- `keyframes.set`: the value, the ease or the handles of the keyframes at given times.
 - `keyframes.move`: the keyframes at given times, by frames or to a time.
 - `keyframes.remove`: the keyframes at given times, or all the keyframes of a value, as a Reset does.
 
@@ -348,10 +358,6 @@ Each request is one undo step, and its step says what changed ([X33](../deviatio
 
 ## Open questions
 
-- **Speed:** the Cut page keeps each keyframe at its frame of the clip. Does vidcut do the same, or stretch the keyframes?
-  - To keep the frames, a speed change moves the source frame of each keyframe.
-  - A freeze holds one value in both.
-- **Ease In and Out:** Resolve holds the value and jumps. vidcut plays the S-curve of the handles, as a deviation?
 - **`clip.set` on a keyed gain:** a keyframe at the playhead, or a shift of all keyframes by the same dB?
 - **Several selected clips:** the Inspector sets a value on all of them (X70). Does a keyframe go on each clip at the playhead?
 - **The other users of the gain:** do the Mixer meters, ducking by level and Ripple Delete Silence follow keyed gain?
