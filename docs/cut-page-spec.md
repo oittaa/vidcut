@@ -73,6 +73,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Upper timeline:**
   - The track-number buttons to its left select the target track.
   - The Audio Only and Video Only toggles are there too (pp. 643, 694).
+    - The two cannot both be on.
+    - `gui.only` sets them. The choice lasts for this session.
 
 ## 3. Media Pool (Ch. 34, pp. 653–675)
 

@@ -2317,6 +2317,18 @@ pub enum Request {
     /// the timeline's zoom and Timeline Options, and the windows open.
     #[serde(rename = "gui.state")]
     GuiState {},
+    /// What an edit takes from the source. The toggles beside the upper timeline.
+    /// `video_only` drops the sound. `audio_only` drops the picture.
+    /// The two cannot both be on. Setting one on turns the other off.
+    /// A field left out stays as it is.
+    /// The choice lasts for this session. It is not in the project.
+    #[serde(rename = "gui.only")]
+    GuiOnly {
+        #[serde(default)]
+        video_only: Option<bool>,
+        #[serde(default)]
+        audio_only: Option<bool>,
+    },
     /// The target track, as a click on a track header's name picks it:
     /// edit functions put clips there (spec D3). Answers what `gui.state`
     /// does.
@@ -3455,6 +3467,7 @@ impl Request {
                 | Self::GuiShow { .. }
                 | Self::GuiClose { .. }
                 | Self::GuiState {}
+                | Self::GuiOnly { .. }
                 | Self::GuiTarget { .. }
                 | Self::GuiTimeline(_)
                 | Self::GuiTrimEditor { .. }
@@ -3940,6 +3953,20 @@ mod tests {
                 center: None,
             }
         ));
+    }
+
+    #[test]
+    fn gui_only_reads_video_only() {
+        let request =
+            Request::from_parts("gui.only", Some(serde_json::json!({ "video_only": true })))
+                .unwrap();
+        assert_eq!(
+            request,
+            Request::GuiOnly {
+                video_only: Some(true),
+                audio_only: None,
+            }
+        );
     }
 
     #[test]

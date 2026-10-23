@@ -497,6 +497,7 @@ impl Workspace {
         let Some(p) = self.shown_project() else {
             return;
         };
+        self.take_edit_only(ui);
         self.history_update(ui.ctx());
         self.timeline_toolbar(ui, &p);
         let trimmed = self.trim_drawn(&p);
@@ -1186,6 +1187,7 @@ impl Workspace {
                     self.target = (t.id != MAIN).then(|| t.id.clone());
                 }
             }
+            self.edit_only_toggles(ui);
         });
         let mut child =
             ui.new_child(egui::UiBuilder::new().max_rect(lower.shrink2(vec2(3.0, 1.0))));
@@ -1194,6 +1196,37 @@ impl Workspace {
         child.spacing_mut().button_padding = vec2(2.0, 0.0);
         child.spacing_mut().interact_size.y = BOX_CONTROL;
         child.horizontal_centered(|ui| self.timeline_tools(ui, p));
+    }
+
+    fn take_edit_only(&mut self, ui: &egui::Ui) {
+        let id = egui::Id::unique("edit-only-rev");
+        let seen = ui.data(|d| d.get_temp::<u64>(id).unwrap_or(0));
+        if self.snap.edit_only_rev != seen {
+            ui.data_mut(|d| d.insert_temp(id, self.snap.edit_only_rev));
+            self.video_only = self.snap.video_only;
+            self.audio_only = self.snap.audio_only;
+        }
+    }
+
+    fn edit_only_toggles(&mut self, ui: &mut egui::Ui) {
+        let video = self.video_only;
+        if ui.selectable_label(video, "Video Only").clicked() {
+            let on = !video;
+            self.video_only = on;
+            if on {
+                self.audio_only = false;
+            }
+            self.send("gui.only", json!({ "video_only": on }));
+        }
+        let audio = self.audio_only;
+        if ui.selectable_label(audio, "Audio Only").clicked() {
+            let on = !audio;
+            self.audio_only = on;
+            if on {
+                self.video_only = false;
+            }
+            self.send("gui.only", json!({ "audio_only": on }));
+        }
     }
 
     fn timeline_tools(&mut self, ui: &mut egui::Ui, p: &Project) {

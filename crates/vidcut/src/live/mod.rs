@@ -526,6 +526,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         audio_scrubbing: true,
         looping: false,
         fast_review: false,
+        video_only: false,
+        audio_only: false,
+        edit_only_rev: 0,
         stats: false,
         timecode_display: TimecodeDisplay::Auto,
         timer1_origin: Timer1Origin::default(),
@@ -606,6 +609,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         looping: false,
         fast_review: false,
         review_speed: None,
+        video_only: false,
+        audio_only: false,
+        edit_only_rev: 0,
         stats: false,
         timecode_display: TimecodeDisplay::Auto,
         timer1_origin: Timer1Origin::default(),
@@ -876,6 +882,9 @@ struct Live {
     looping: bool,
     fast_review: bool,
     review_speed: Option<f64>,
+    video_only: bool,
+    audio_only: bool,
+    edit_only_rev: u64,
     stats: bool,
     timecode_display: TimecodeDisplay,
     timer1_origin: Timer1Origin,
@@ -1384,6 +1393,9 @@ impl Live {
             audio_scrubbing: self.audio_scrubbing,
             looping: self.looping,
             fast_review: self.fast_review,
+            video_only: self.video_only,
+            audio_only: self.audio_only,
+            edit_only_rev: self.edit_only_rev,
             stats: self.stats,
             timecode_display: self.timecode_display,
             timer1_origin: self.timer1_origin,
@@ -2764,6 +2776,21 @@ impl Live {
                 self.gui_change(vec![GuiChange::Close(panel)], |s| json!(s))
             }
             Request::GuiState {} => self.gui_change(Vec::new(), |s| json!(s)),
+            Request::GuiOnly {
+                video_only,
+                audio_only,
+            } => match edit_only(self.video_only, self.audio_only, video_only, audio_only) {
+                Ok((video, audio)) => {
+                    self.video_only = video;
+                    self.audio_only = audio;
+                    self.edit_only_rev = self.edit_only_rev.saturating_add(1);
+                    Step::Now(Ok(answer(json!({
+                        "video_only": video,
+                        "audio_only": audio,
+                    }))))
+                }
+                Err(message) => Step::Now(Err(Error::usage(message))),
+            },
             Request::GuiTarget { track } => {
                 let known = self
                     .project
@@ -4030,6 +4057,8 @@ impl Live {
             "audio_scrubbing": self.audio_scrubbing,
             "loop": self.looping,
             "fast_review": self.fast_review,
+            "video_only": self.video_only,
+            "audio_only": self.audio_only,
             "timecode_display": self.timecode_display,
             "timer1_origin": self.timer1_origin,
             "timecode": timecode,
@@ -4270,6 +4299,29 @@ fn folder_notice(result: &Value) -> String {
     text
 }
 
+fn edit_only(
+    video: bool,
+    audio: bool,
+    set_video: Option<bool>,
+    set_audio: Option<bool>,
+) -> std::result::Result<(bool, bool), &'static str> {
+    if set_video == Some(true) && set_audio == Some(true) {
+        return Err("video only and audio only cannot both be on");
+    }
+    let mut video = set_video.unwrap_or(video);
+    let mut audio = set_audio.unwrap_or(audio);
+    if set_video == Some(true) {
+        audio = false;
+    }
+    if set_audio == Some(true) {
+        video = false;
+    }
+    if video && audio {
+        return Err("video only and audio only cannot both be on");
+    }
+    Ok((video, audio))
+}
+
 pub(crate) fn fast_review_rate(frames: i64, fps: f64) -> f64 {
     if frames <= 0 || !fps.is_finite() || fps <= 0.0 {
         return 1.0;
@@ -4287,6 +4339,30 @@ pub(crate) fn fast_review_rate(frames: i64, fps: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn video_only_turns_audio_only_off() {
+        assert_eq!(
+            edit_only(false, true, Some(true), None).unwrap(),
+            (true, false)
+        );
+    }
+
+    #[test]
+    fn audio_only_turns_video_only_off() {
+        assert_eq!(
+            edit_only(true, false, None, Some(true)).unwrap(),
+            (false, true)
+        );
+    }
+
+    #[test]
+    fn both_on_in_one_request_is_refused() {
+        assert_eq!(
+            edit_only(false, false, Some(true), Some(true)),
+            Err("video only and audio only cannot both be on")
+        );
+    }
 
     #[test]
     fn a_ten_second_clip_plays_at_normal_speed() {
