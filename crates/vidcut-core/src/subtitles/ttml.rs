@@ -853,8 +853,10 @@ fn cue_attrs(track: &SubtitleStyle, cue: &Timed) -> String {
             plain_number(look.text_fraction() * 10_000.0)
         ));
     }
-    if over.bold == Some(true) {
-        attrs.push_str(" tts:fontWeight=\"bold\"");
+    match over.bold {
+        Some(true) => attrs.push_str(" tts:fontWeight=\"bold\""),
+        Some(false) => attrs.push_str(" tts:fontWeight=\"normal\""),
+        None => {}
     }
     if let Some(font) = &over.font {
         attrs.push_str(&format!(" tts:fontFamily=\"{}\"", escape_xml(font)));

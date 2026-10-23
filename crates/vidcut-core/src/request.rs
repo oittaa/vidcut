@@ -456,8 +456,9 @@ pub enum Request {
         #[serde(default = "black_min")]
         min: TimeSpec,
     },
-    /// Loudness of the timeline's mix (EBU R128): integrated LUFS, range and
-    /// true peak, over `range` (default: In–Out if set, else everything).
+    /// Loudness of the timeline's mix (EBU R128): integrated LUFS, range,
+    /// true peak (dBTP) and sample peak (dBFS), over `range` (default: In–Out
+    /// if set, else everything).
     #[serde(rename = "analyze.loudness")]
     AnalyzeLoudness {
         #[serde(default)]

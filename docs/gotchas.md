@@ -329,16 +329,36 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - A lean about the anchor in the picture's own axes misses by up to 39 px.
   - The earlier render of a 45° turn with Yaw 0.5 agrees with the lean about the middle.
   - The anchor point of the scripting API is in pixels of the source picture.
+  - Resolve flips the picture before the lean. A flip mirrors what the leaned shape shows, and keeps the shape.
+    - Yaw 0.3 with Flip X put each corner mark on the place of its mirror mark without the flip, within 0.1 px.
+    - Pitch 0.3 with Flip Y did the same, top for bottom.
+  - Resolve crops the source before the lean. Thus the cut edge leans with the picture.
+    - With Yaw 0.3, a crop of 384 source pixels on the left put the edge at x = 609.
+    - The lean of the source puts it at 607. A crop of the frame would put it at 672.
+  - `place::level` flips and crops in the same order.
 - **Resolve's Pan and Tilt go from −4 to 4.**
   - vidcut writes a picture moved further at 4, and names its clip in the notes of the export.
 - **Resolve's Dynamic Zoom is a `Resolve Effect` of type 59.**
   - `dynamicZoomCenter` (POINTF) is the middle of a box. It is from the middle of the picture, in fractions of the picture, y up.
   - `dynamicZoomScale` (Double) is the size of the box as a fraction of the picture.
   - Resolve writes two keys for each, at −s and 1000 − s. s is the first source frame of the clip, in media without a timecode.
+  - For a still, Resolve writes them at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
+  - In media with a timecode, s still counts from the first frame of the media, not from its timecode.
+    - A clip from frame 90 of media at 10:00:00:00 has its keys at −90 and 910. Its `source_range` starts at 1080090.
   - vidcut writes the keys at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
   - Resolve reads the earlier key as the start and the later key as the end, whatever their times.
   - The box is in fractions of Resolve's picture, as Pan and Tilt are.
   - vidcut reads a crop, fill or stretch as a zoom after the box, and that zoom scales the box with the picture. Thus `otio::picture` reads and writes the box as it is.
+- **Resolve reads a Bezier handle of a keyframe only in its own form.**
+  - It writes `"OutBez": {"OutBez": [20.0, 0.0], "Variant Type": "POINTF"}`, and `InBez` in the same way.
+  - The first number is the time from the keyframe in frames. The second is a value in the units of the parameter.
+  - Resolve refuses the whole timeline when a handle is a bare array. This is so for the volume and for Transform.
+  - Resolve also refuses it when a number of a `POINTF` has no decimal point, for example `0` in place of `0.0`.
+  - `otio::effects` reads and writes the handles of the volume and the picture in Resolve's form.
+- **Resolve's eases of the picture are Bezier handles, as on the volume.**
+  - In the Inspector, Ease Out and Ease In put a flat handle at a third of the gap. Thus the two together play an S-curve.
+  - Renders of an eased zoom fit the cubic Bezier curve within 0.0004 of the zoom.
+  - A handle raised by 0.2 fits the curve with its value in units of zoom.
 - **Resolve plays each ease of Dynamic Zoom as a straight line.**
   - It keeps `dynamicZoomEase` (UInt: 0 Linear, 1 Ease In, 2 Ease Out, 3 Ease In and Out) and writes it.
   - All four play the same straight line, in stills and in a Deliver render.

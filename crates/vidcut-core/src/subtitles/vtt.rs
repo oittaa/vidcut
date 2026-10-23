@@ -193,17 +193,21 @@ fn percent(v: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-fn settings(c: &Timed, style: &SubtitleStyle) -> String {
-    let look = style.for_cue(c.style.as_ref());
+pub fn settings(place: Place, look: &SubtitleStyle) -> String {
     let mut parts = Vec::new();
     match look.position {
         Some([x, y]) => {
+            let edge = match look.anchor(place).1 {
+                a if a <= 0.0 => "",
+                a if a >= 1.0 => ",end",
+                _ => ",center",
+            };
             parts.push(format!("position:{}%", percent(x)));
-            parts.push(format!("line:{}%", percent(y)));
+            parts.push(format!("line:{}%{edge}", percent(y)));
         }
-        None => match c.place {
+        None => match place {
             Place::Top => parts.push("line:0".into()),
-            Place::Middle => parts.push("line:50%".into()),
+            Place::Middle => parts.push("line:50%,center".into()),
             Place::Bottom => {}
         },
     }
@@ -212,10 +216,7 @@ fn settings(c: &Timed, style: &SubtitleStyle) -> String {
         SubtitleAlign::Right => parts.push("align:right".into()),
         SubtitleAlign::Center => {}
     }
-    match parts.is_empty() {
-        true => String::new(),
-        false => format!(" {}", parts.join(" ")),
-    }
+    parts.join(" ")
 }
 
 pub fn write(cues: &[Timed], style: &SubtitleStyle) -> String {
@@ -241,13 +242,16 @@ pub fn write(cues: &[Timed], style: &SubtitleStyle) -> String {
         out.push('\n');
     }
     for c in cues {
-        let settings = settings(c, style);
+        let look = style.for_cue(c.style.as_ref());
+        let settings = match settings(c.place, &look) {
+            s if s.is_empty() => s,
+            s => format!(" {s}"),
+        };
         let voice = c
             .speaker
             .as_deref()
             .map(|n| format!("<v {}>", text::escape_xml(n).replace('\n', " ")))
             .unwrap_or_default();
-        let look = style.for_cue(c.style.as_ref());
         out.push_str(&format!(
             "{} --> {}{settings}\n{voice}{}\n\n",
             clock(c.start, '.'),

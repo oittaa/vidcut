@@ -418,6 +418,8 @@ flowchart LR
 
 - A bundle holds `content.otio`, `version.txt` in a zip, and the media used, under `media`. This is how the adapters of OpenTimelineIO lay them out.
 - The media used include the media that compound clips play, in picture or sound (`otio::used_media`). They are whole and uncompressed.
+- In a file name under `media`, `_` replaces each character that some file systems refuse.
+- An image sequence keeps one name pattern. Its files and its references in the timeline text use the same changed pattern.
 - In the kept `Stack` of a compound clip, a reference that names a file that the compound clips play also points into `media`.
 - Such a reference names the file by its path, or by a file name that no other of them has (`otio::same_media`).
 - Other references keep their URLs.

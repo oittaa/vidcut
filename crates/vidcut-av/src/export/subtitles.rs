@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use serde::Serialize;
 use vidcut_core::model::{Place, SubtitleStyle};
-use vidcut_core::subtitles::{Tag, Token, three_letter, tokens};
+use vidcut_core::subtitles::{Tag, Token, three_letter, tokens, vtt_settings};
 use vidcut_core::time::Rational;
 
 use crate::error::{Context, Error, Result};
@@ -293,27 +293,6 @@ fn encode_one(ctx: *mut ffi::AVCodecContext, line: &str, buf: &mut [u8]) -> Resu
     Ok(n as usize)
 }
 
-fn settings(place: Place, style: &SubtitleStyle) -> Option<Vec<u8>> {
-    let mut parts = Vec::new();
-    match style.position {
-        Some([x, y]) => {
-            parts.push(format!("position:{}%", (x * 100.0).round() as i64));
-            parts.push(format!("line:{}%", (y * 100.0).round() as i64));
-        }
-        None => match place {
-            Place::Top => parts.push("line:0".into()),
-            Place::Middle => parts.push("line:50%".into()),
-            Place::Bottom => {}
-        },
-    }
-    match style.line_align() {
-        vidcut_core::model::SubtitleAlign::Left => parts.push("align:left".into()),
-        vidcut_core::model::SubtitleAlign::Right => parts.push("align:right".into()),
-        vidcut_core::model::SubtitleAlign::Center => {}
-    }
-    (!parts.is_empty()).then(|| parts.join(" ").into_bytes())
-}
-
 pub(crate) struct SubtitleOut {
     stream: usize,
     frame_tb: ffmpeg::Rational,
@@ -376,7 +355,8 @@ impl SubtitleOut {
             p.set_pts(Some(cue.start));
             p.set_dts(Some(cue.start));
             p.set_duration(cue.end - cue.start);
-            if html && let Some(s) = settings(cue.place, &look) {
+            let s = vtt_settings(cue.place, &look);
+            if html && !s.is_empty() {
                 // SAFETY: a live packet; the side data has room for `s`.
                 unsafe {
                     let data = ffi::av_packet_new_side_data(

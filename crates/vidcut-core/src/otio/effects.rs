@@ -17,6 +17,16 @@ pub(super) fn rounded(v: f64) -> f64 {
     (v * 1e6).round() / 1e6
 }
 
+pub(super) fn handle_value(name: &str, frames: f64, value: f64) -> Value {
+    let mut v = json!({ "Variant Type": "POINTF" });
+    v[name] = json!([rounded(frames), rounded(value)]);
+    v
+}
+
+pub(super) fn handle_point<'a>(key: &'a Value, name: &str) -> Option<&'a Vec<Value>> {
+    key.get(name)?.get(name)?.as_array()
+}
+
 pub(super) fn plain(id: &str, value: Value, usual: Value, variant: &str) -> Value {
     json!({
         "Default Parameter Value": usual,
@@ -135,8 +145,8 @@ pub(super) fn gain_keys(item: &Value, timing: &Timing) -> Vec<Keyframe> {
     let Some(keys) = volume_param(item).and_then(|p| p["Key Frames"].as_object()) else {
         return Vec::new();
     };
-    let handle = |b: &Value, before: bool| {
-        let b = b.as_array()?;
+    let handle = |k: &Value, name: &str, before: bool| {
+        let b = handle_point(k, name)?;
         let h = Handle {
             frames: b.first()?.as_f64()? * timing.scale(),
             value: b.get(1)?.as_f64()?,
@@ -149,8 +159,8 @@ pub(super) fn gain_keys(item: &Value, timing: &Timing) -> Vec<Keyframe> {
             Some(Keyframe {
                 frame: timing.source(t.parse::<f64>().ok()?).round() as i64,
                 value: k["Value"].as_f64()?.clamp(*GAIN.start(), *GAIN.end()),
-                in_handle: handle(&k["InBez"], true),
-                out_handle: handle(&k["OutBez"], false),
+                in_handle: handle(k, "InBez", true),
+                out_handle: handle(k, "OutBez", false),
             })
         })
         .collect();
@@ -177,12 +187,11 @@ fn key_frames(keys: &[Keyframe], source: i64, timing: &Timing) -> Value {
     for k in keys {
         let at = timing.file((k.frame - source) as f64).round();
         let mut v = json!({ "Value": k.value, "Variant Type": "Double" });
-        let bez = |h: Handle| json!([rounded(h.frames / timing.scale()), rounded(h.value)]);
         if let Some(h) = k.in_handle {
-            v["InBez"] = bez(h);
+            v["InBez"] = handle_value("InBez", h.frames / timing.scale(), h.value);
         }
         if let Some(h) = k.out_handle {
-            v["OutBez"] = bez(h);
+            v["OutBez"] = handle_value("OutBez", h.frames / timing.scale(), h.value);
         }
         out.insert(frame_key(at), v);
     }
@@ -394,7 +403,10 @@ impl Effects {
             };
             for k in keys.values_mut() {
                 for name in ["InBez", "OutBez"] {
-                    if let Some(b) = k.get_mut(name).and_then(Value::as_array_mut)
+                    if let Some(b) = k
+                        .get_mut(name)
+                        .and_then(|h| h.get_mut(name))
+                        .and_then(Value::as_array_mut)
                         && let Some(frames) = b.first().and_then(Value::as_f64)
                     {
                         b[0] = json!(frames * ratio);
