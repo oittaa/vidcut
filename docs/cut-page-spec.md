@@ -145,6 +145,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The Viewer shows the selected pool clip.
   - A scroll area under the picture stands for the whole clip. It has the playhead, a zoomed-in waveform and In/Out handles that you can drag.
   - Jog In and Jog Out controls at its ends move the marks frame by frame (p. 692).
+    - Jog In is at the left of the scroll area. Jog Out is at the right.
+    - A drag moves that mark. 8 pixels is one frame (D97).
+    - A click moves that mark one frame later.
+    - `media.marks.set` sets a clip mark. `tape.marks.set` sets a tape mark.
 - **Source Tape** (pp. 680–681, 704–706):
   - All pool clips play end to end as one tape, in the pool sort order.
   - The clip under the playhead becomes selected in the pool.
@@ -162,7 +166,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - K held with J or L plays slowly.
   - K held with a tap of J or L steps a frame.
 - Ctrl+/ loops playback (D51).
-- A drag on the jog control scrubs finely (p. 640).
+- A drag on the jog control scrubs finely (p. 640, D97).
+  - The Jog control is on the viewer transport, before Previous.
+  - A drag of 8 pixels moves one frame.
+  - `player.seek` moves the playhead the same way.
 
 ### 4.3 Timecode (pp. 640, 688, 713–714)
 - **Go to a time:**
@@ -235,6 +242,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - A longer clip plays at its seconds divided by 10.
   - The speed is at most 8×.
   - 10 seconds is one short shot. 8× stays slow enough to see the picture.
+  - The jog control and Jog In and Jog Out move one frame for each 8 pixels.
+  - 8 pixels is a small drag, so the scrub stays fine.
 - Audio scrubbing (Shift+S; on by default, p. 876):
   - A drag of the playhead, and frame steps, play the sound under it (D42).
   - Timeline > Audio Scrubbing also switches it.

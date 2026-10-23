@@ -403,7 +403,12 @@ impl Workspace {
             });
         }
         if mode.is_source() {
-            self.scroll_bar(ui);
+            ui.horizontal(|ui| {
+                self.jog_edge(ui, true);
+                let width = (ui.available_width() - 88.0).max(40.0);
+                ui.allocate_ui(vec2(width, 28.0), |ui| self.scroll_bar(ui));
+                self.jog_edge(ui, false);
+            });
         } else {
             self.clip_edge_hint(ui);
         }
@@ -874,6 +879,100 @@ impl Workspace {
         });
     }
 
+    fn jog_control(&mut self, ui: &mut egui::Ui, id: PlayerId, position: i64) -> egui::Response {
+        let r = ui.button("Jog");
+        let key = r.id;
+        if r.drag_started() {
+            ui.data_mut(|d| d.insert_temp(key, (position, 0.0f32, position)));
+        }
+        if r.dragged()
+            && let Some((origin, mut px, mut sent)) =
+                ui.data(|d| d.get_temp::<(i64, f32, i64)>(key))
+        {
+            px += r.drag_delta().x;
+            let frame = origin + jog_steps(px);
+            if frame != sent {
+                sent = frame;
+                self.seek(id, frame, true);
+            }
+            ui.data_mut(|d| d.insert_temp(key, (origin, px, sent)));
+        }
+        if r.drag_stopped() {
+            ui.data_mut(|d| d.remove_temp::<(i64, f32, i64)>(key));
+        }
+        r.on_hover_text("Drag to scrub")
+    }
+
+    fn jog_edge(&mut self, ui: &mut egui::Ui, is_in: bool) {
+        let r = ui.button(if is_in { "Jog In" } else { "Jog Out" });
+        let key = r.id;
+        if r.drag_started() {
+            ui.data_mut(|d| d.insert_temp(key, (0.0f32, 0i64)));
+        }
+        let mut dragged = false;
+        if r.dragged()
+            && let Some((mut px, mut sent)) = ui.data(|d| d.get_temp::<(f32, i64)>(key))
+        {
+            dragged = true;
+            px += r.drag_delta().x;
+            let steps = jog_steps(px);
+            let by = steps - sent;
+            if by != 0 {
+                self.nudge_mark(is_in, by);
+                sent = steps;
+            }
+            ui.data_mut(|d| d.insert_temp(key, (px, sent)));
+        }
+        if r.drag_stopped() {
+            ui.data_mut(|d| d.remove_temp::<(f32, i64)>(key));
+        }
+        if r.clicked() && !dragged {
+            self.nudge_mark(is_in, 1);
+        }
+    }
+
+    fn nudge_mark(&mut self, is_in: bool, by: i64) {
+        if self.snap.viewer == ViewerMode::SourceTape
+            && let Some((inn, out)) = self.crossing_span()
+        {
+            let tape_end = self
+                .snap
+                .tape
+                .last()
+                .map(|e| e.start + e.frames)
+                .unwrap_or(0);
+            let len = tape_end.max(self.snap.source.frames).max(0);
+            let (inn, out) = jogged_mark(is_in, inn, out, by, len);
+            let order = self.tape_order();
+            if is_in {
+                self.send("tape.marks.set", json!({ "in": inn, "order": order }));
+            } else {
+                self.send("tape.marks.set", json!({ "out": out, "order": order }));
+            }
+            return;
+        }
+        let Some(media) = self.snap.source_at().map(|(m, _)| m.to_string()) else {
+            return;
+        };
+        let len = self.media_frames(&media);
+        let marks = self
+            .project()
+            .and_then(|p| p.media(&media).map(|m| m.marks.clone()))
+            .unwrap_or_default();
+        let (inn, out) = jogged_mark(
+            is_in,
+            marks.mark_in.unwrap_or(0),
+            marks.mark_out.unwrap_or(len),
+            by,
+            len,
+        );
+        if is_in {
+            self.send("media.marks.set", json!({ "media": media, "in": inn }));
+        } else {
+            self.send("media.marks.set", json!({ "media": media, "out": out }));
+        }
+    }
+
     fn skim(&mut self, ui: &egui::Ui, id: PlayerId, rect: Rect, frames: i64) {
         if ui.ctx().egui_wants_keyboard_input() || self.asking() {
             return;
@@ -918,6 +1017,7 @@ impl Workspace {
         let left: Vec<Transport> = [
             tools.then_some(T::Tools),
             trim.map(|_| T::TrimOut),
+            Some(T::Jog),
             Some(T::Previous),
             Some(T::Stop),
             Some(T::Play),
@@ -944,6 +1044,7 @@ impl Workspace {
                 T::MarkIn,
                 T::Tools,
                 T::FastReview,
+                T::Jog,
                 T::Loop,
                 T::TrimIn,
                 T::TrimOut,
@@ -956,7 +1057,7 @@ impl Workspace {
             group: |t| match t {
                 T::Tools => 5,
                 T::TrimOut => 0,
-                T::Previous | T::Stop | T::Play | T::Next | T::Loop | T::FastReview => 1,
+                T::Jog | T::Previous | T::Stop | T::Play | T::Next | T::Loop | T::FastReview => 1,
                 T::TrimIn => 2,
                 T::MarkIn | T::MarkOut | T::Clear | T::Speed => 3,
                 T::SafeArea => 6,
@@ -980,6 +1081,7 @@ impl Workspace {
                         ui.horizontal(|ui| ws.trim_pair(ui, e, t == T::TrimOut))
                             .response
                     }
+                    T::Jog => ws.jog_control(ui, id, player.position),
                     T::Previous => {
                         let r = ui.button(big("⏮"));
                         if r.clicked() {
@@ -1384,6 +1486,7 @@ const TOOLS_ROW: f32 = 28.0;
 enum Transport {
     Tools,
     TrimOut,
+    Jog,
     Previous,
     Stop,
     Play,
@@ -1397,6 +1500,29 @@ enum Transport {
     Speed,
     SafeArea,
     Timecode,
+}
+
+const JOG_PIXELS: f32 = 8.0;
+
+fn jog_steps(pixels: f32) -> i64 {
+    if !pixels.is_finite() {
+        return 0;
+    }
+    (pixels / JOG_PIXELS).trunc() as i64
+}
+
+fn jogged_mark(is_in: bool, inn: i64, out: i64, by: i64, len: i64) -> (i64, i64) {
+    let len = len.max(0);
+    if len == 0 {
+        return (inn, out);
+    }
+    if is_in {
+        let limit = (out - 1).clamp(0, len);
+        ((inn + by).clamp(0, limit), out)
+    } else {
+        let start = inn.saturating_add(1).min(len);
+        (inn, (out + by).clamp(start, len))
+    }
 }
 
 fn skim_frame(x: f32, left: f32, width: f32, frames: i64) -> i64 {
@@ -1573,7 +1699,42 @@ pub(super) fn timecode_input(text: &str, dropped: i64) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{skim_frame, tape_mark, timecode_input};
+    use super::{jog_steps, jogged_mark, skim_frame, tape_mark, timecode_input};
+
+    #[test]
+    fn eight_pixels_move_one_frame() {
+        assert_eq!(jog_steps(8.0), 1);
+    }
+
+    #[test]
+    fn a_drag_left_moves_one_frame_earlier() {
+        assert_eq!(jog_steps(-8.0), -1);
+    }
+
+    #[test]
+    fn seven_pixels_stay_on_the_frame() {
+        assert_eq!(jog_steps(7.0), 0);
+    }
+
+    #[test]
+    fn jog_in_moves_the_in_mark_one_frame_later() {
+        assert_eq!(jogged_mark(true, 10, 40, 1, 100), (11, 40));
+    }
+
+    #[test]
+    fn jog_in_stops_before_the_out_mark() {
+        assert_eq!(jogged_mark(true, 39, 40, 5, 100), (39, 40));
+    }
+
+    #[test]
+    fn jog_out_moves_the_out_mark_one_frame_earlier() {
+        assert_eq!(jogged_mark(false, 10, 40, -1, 100), (10, 39));
+    }
+
+    #[test]
+    fn an_empty_clip_keeps_its_marks() {
+        assert_eq!(jogged_mark(true, 0, 0, 1, 0), (0, 0));
+    }
 
     #[test]
     fn the_left_edge_skims_the_first_frame() {
