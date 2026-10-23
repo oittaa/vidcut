@@ -485,6 +485,7 @@ fn subtitle_track(p: &Project, ti: usize, (a, b): (i64, i64)) -> engine::subtitl
                     place: c.place,
                     words: c.words.iter().map(|w| (w - cut).max(0)).collect(),
                     color: p.speakers.color_of(c),
+                    style: c.style.clone(),
                 }
             })
             .collect(),

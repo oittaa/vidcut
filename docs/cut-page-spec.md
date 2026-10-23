@@ -535,7 +535,21 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Style** (p. 1237):
   - A track has a style: its font, size, color, outline, background and margin.
   - The style also has the bold face, the letters as capitals or small letters (Font Case), and a drop shadow.
+  - Alignment is `left`, `center` or `right`. The usual alignment is center.
+  - Position is `[x, y]`, two fractions of the picture from the top left.
+  - Each fraction is from 0 to 1. Left out, the block stays in the cue's place.
+  - With a position, that point is where the alignment of the block sits.
   - Details: D61; deviation X51.
+- **Style of one cue** (p. 1238):
+  - A cue stores its own style when you set one.
+  - A field left out of that style keeps the track's style.
+  - The cue leaves the whole style out when it keeps the track's style.
+  - The viewer and a burn-in draw that one result.
+  - WebVTT writes the cue's alignment and its position.
+  - SRT writes the alignment together with the cue's place.
+  - An IMSC1 paragraph takes a font, size, color, bold face, or alignment that the cue sets.
+  - `subtitles.set` takes `style`. An empty style drops the cue's own style.
+  - Other cues on the track stay as they were.
 - **Animated subtitles** (pp. 1240–1241, Studio only):
   - Drag Fusion templates from the Animated section of the Titles tab onto the header of a subtitle track.
   - Then each word shows as it is spoken, from the word times of the transcription.
@@ -550,8 +564,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - It exports or imports a preset as a `.preset` file.
   - vidcut: looks, for titles too. Some looks are built in (X59). Details: D71.
 - **Later:**
-  - the faces of a track style other than regular and bold, line spacing, kerning, alignment, position, zoom, opacity and text anchoring (p. 1237)
-  - the style of a cue or a word (p. 1238)
+  - the faces of a track style other than regular and bold, line spacing, kerning, zoom, opacity and text anchoring beyond alignment (p. 1237)
+  - the style of a word (p. 1238)
   - caption presets (p. 1235)
   - fades (p. 1240)
   - subtitle regions (pp. 1243–1244)

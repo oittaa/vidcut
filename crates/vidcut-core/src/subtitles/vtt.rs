@@ -1,7 +1,7 @@
 use super::text::{self, Dialect, PALETTE, Tag, Token};
 use super::{Read, Timed, clock, srt};
 use crate::error::{Error, Result};
-use crate::model::Place;
+use crate::model::{Place, SubtitleAlign, SubtitleStyle};
 
 fn place(settings: &str) -> Place {
     let Some(line) = settings
@@ -68,6 +68,7 @@ pub fn read(source: &str) -> Result<Read> {
             place: place(&settings),
             words,
             speaker: text::voice(&raw),
+            style: None,
         });
     }
     Ok(Read {
@@ -78,6 +79,11 @@ pub fn read(source: &str) -> Result<Read> {
 }
 
 fn word_times(raw: &str, classes: &[(String, String)], span: (f64, f64), text: &str) -> Vec<f64> {
+    let (lo, hi) = if span.0 <= span.1 {
+        (span.0, span.1)
+    } else {
+        (span.1, span.0)
+    };
     let words = super::words(text);
     let mut known = vec![None; words.len()];
     let mut from = 0;
@@ -106,7 +112,7 @@ fn word_times(raw: &str, classes: &[(String, String)], span: (f64, f64), text: &
             .get_mut(before.split_whitespace().count())
             .filter(|k| k.is_none())
         {
-            *k = Some(t.clamp(span.0, span.1));
+            *k = Some(t.clamp(lo, hi));
         }
     }
     if known.iter().all(Option::is_none) {
@@ -116,7 +122,7 @@ fn word_times(raw: &str, classes: &[(String, String)], span: (f64, f64), text: &
         .iter()
         .map(|w| w.chars().count() as f64 + 1.0)
         .collect();
-    super::fill_times(&known, &weights, span.0, span.1)
+    super::fill_times(&known, &weights, lo, hi)
 }
 
 fn style_colors(css: &str) -> Vec<(String, String)> {
@@ -180,7 +186,38 @@ fn body(text: &str) -> String {
     s
 }
 
-pub fn write(cues: &[Timed]) -> String {
+fn percent(v: f64) -> String {
+    let p = v * 100.0;
+    let s = format!("{p:.3}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn settings(c: &Timed, style: &SubtitleStyle) -> String {
+    let look = style.for_cue(c.style.as_ref());
+    let mut parts = Vec::new();
+    match look.position {
+        Some([x, y]) => {
+            parts.push(format!("position:{}%", percent(x)));
+            parts.push(format!("line:{}%", percent(y)));
+        }
+        None => match c.place {
+            Place::Top => parts.push("line:0".into()),
+            Place::Middle => parts.push("line:50%".into()),
+            Place::Bottom => {}
+        },
+    }
+    match look.line_align() {
+        SubtitleAlign::Left => parts.push("align:left".into()),
+        SubtitleAlign::Right => parts.push("align:right".into()),
+        SubtitleAlign::Center => {}
+    }
+    match parts.is_empty() {
+        true => String::new(),
+        false => format!(" {}", parts.join(" ")),
+    }
+}
+
+pub fn write(cues: &[Timed], style: &SubtitleStyle) -> String {
     let mut out = String::from("WEBVTT\n\n");
     let mut colors: Vec<String> = Vec::new();
     for c in cues {
@@ -201,11 +238,7 @@ pub fn write(cues: &[Timed]) -> String {
         out.push('\n');
     }
     for c in cues {
-        let settings = match c.place {
-            Place::Top => " line:0",
-            Place::Middle => " line:50%",
-            Place::Bottom => "",
-        };
+        let settings = settings(c, style);
         let voice = c
             .speaker
             .as_deref()

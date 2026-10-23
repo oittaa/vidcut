@@ -299,7 +299,9 @@ Cancel:
 
 **Burning in** ([spec D61](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
-- `VideoFrames::with_burn` draws the cues over every picture they span, in the `SubtitleStyle` of the track.
+- `VideoFrames::with_burn` draws the cues over every picture they span.
+- A cue with its own style uses `SubtitleStyle::for_cue`. A field it leaves out keeps the track style.
+- `burn::paint` draws that result. Cues that share a place and a style stay one block.
 - It draws them in both runs of a two-pass encode.
 - `subtitles::shown` gives what each cue that shows draws at the frame ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
   - its pieces
@@ -311,7 +313,7 @@ Drawing:
 
 - `burn::draw` lays out the cues with cosmic-text: shaping, right-to-left text, and the system's fonts for scripts that the first font lacks.
 - A hidden word has no ink, outline or shadow.
-- `burn::draw` draws one picture for each place with ink. A popping word is a picture of its own over it.
+- `burn::paint` draws one picture for each run of cues that share a place and a style. A popping word is a picture of its own over it.
 - The last few lines laid out are kept (`laid_line`, an `Lru`). Thus a pop draws only its word again.
 - A line whose only ink is the popping word keeps its layout, which places the word. It draws no picture of its own.
 - The `Burner` keeps the pictures while the same pieces show. Thus an animated track is drawn again at each word and each pop step.

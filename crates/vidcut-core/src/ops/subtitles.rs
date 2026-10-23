@@ -184,6 +184,7 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
         .map(super::titles::checked_shadow)
         .transpose()?;
     let words = style.words.as_ref().map(checked_words_style).transpose()?;
+    let position = checked_position(style.position)?;
     Ok(SubtitleStyle {
         font,
         size,
@@ -196,7 +197,30 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
         shadow,
         words,
         speaker_color: style.speaker_color,
+        align: style.align,
+        position,
     })
+}
+
+fn checked_position(at: Option<[f64; 2]>) -> Result<Option<[f64; 2]>> {
+    let Some(at) = at else {
+        return Ok(None);
+    };
+    if at.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)) {
+        Ok(Some(at))
+    } else {
+        Err(Error::invalid(
+            "a subtitle position is two fractions of the picture, from 0 to 1",
+        ))
+    }
+}
+
+pub fn set_style(p: &mut Project, id: &str, style: SubtitleStyle) -> Result<()> {
+    let (ti, ci) = find(p, id)?;
+    unlocked(p, ti)?;
+    let style = checked_style(&style)?;
+    p.subtitles[ti].cues[ci].style = (!style.is_empty()).then_some(style);
+    Ok(())
 }
 
 fn checked_words_style(w: &SubtitleWords) -> Result<SubtitleWords> {
@@ -372,6 +396,7 @@ pub fn add_cue(
             words,
             speaker: None,
             color: None,
+            style: None,
         },
     );
     Ok(id)
@@ -795,6 +820,7 @@ pub fn import(
                 place: c.place,
                 speaker,
                 color: None,
+                style: None,
             },
         );
         count += 1;
@@ -829,6 +855,7 @@ pub fn collect(p: &Project, ti: usize, range: (i64, i64), timecode: bool) -> Vec
             place: c.place,
             words: Vec::new(),
             speaker: c.speaker.as_deref().map(|k| p.speakers.name(k)),
+            style: c.style.clone(),
         })
         .collect()
 }

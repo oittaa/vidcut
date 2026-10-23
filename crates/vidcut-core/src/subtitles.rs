@@ -8,7 +8,7 @@ mod vtt;
 use std::path::Path;
 
 use crate::error::{Error, Result};
-use crate::model::{Place, Settings, SubtitleStyle};
+use crate::model::{Place, Settings, SubtitleAlign, SubtitleStyle};
 use crate::request::SubtitleFormat;
 
 pub use languages::three_letter;
@@ -23,6 +23,7 @@ pub struct Timed {
     pub place: Place,
     pub words: Vec<f64>,
     pub speaker: Option<String>,
+    pub style: Option<SubtitleStyle>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -139,11 +140,25 @@ pub struct Written {
 
 pub fn write(cues: &[Timed], format: SubtitleFormat, how: &Writing) -> Written {
     let (text, warnings) = match format {
-        SubtitleFormat::Srt => (srt::write(cues, how.positions), Vec::new()),
-        SubtitleFormat::Vtt => (vtt::write(cues), Vec::new()),
+        SubtitleFormat::Srt => (srt::write(cues, how.positions, how.style), Vec::new()),
+        SubtitleFormat::Vtt => (vtt::write(cues, how.style), Vec::new()),
         SubtitleFormat::Ttml => ttml::write(cues, how.language, how.frame_rate, how.style),
     };
     Written { text, warnings }
+}
+
+pub fn ass_align(place: Place, align: SubtitleAlign) -> Option<&'static str> {
+    match (place, align) {
+        (Place::Bottom, SubtitleAlign::Center) => None,
+        (Place::Bottom, SubtitleAlign::Left) => Some("{\\an1}"),
+        (Place::Bottom, SubtitleAlign::Right) => Some("{\\an3}"),
+        (Place::Middle, SubtitleAlign::Left) => Some("{\\an4}"),
+        (Place::Middle, SubtitleAlign::Center) => Some("{\\an5}"),
+        (Place::Middle, SubtitleAlign::Right) => Some("{\\an6}"),
+        (Place::Top, SubtitleAlign::Left) => Some("{\\an7}"),
+        (Place::Top, SubtitleAlign::Center) => Some("{\\an8}"),
+        (Place::Top, SubtitleAlign::Right) => Some("{\\an9}"),
+    }
 }
 
 pub fn normalize(text: &str) -> String {

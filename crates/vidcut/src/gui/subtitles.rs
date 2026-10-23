@@ -4,8 +4,8 @@ use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
 use vidcut_core::looks::{LookKind, Styled, SubtitleLook};
 use vidcut_core::model::{
-    Cue, LetterCase, Place, Project, SpeakerPaint, Speakers, SubtitleStyle, SubtitleTrack,
-    SubtitleWords, WordsShow,
+    Cue, LetterCase, Place, Project, SpeakerPaint, Speakers, SubtitleAlign, SubtitleStyle,
+    SubtitleTrack, SubtitleWords, WordsShow,
 };
 use vidcut_core::time::{Rational, TimeSpec};
 
@@ -26,6 +26,16 @@ pub struct CueDialog {
     speaker: Option<String>,
     color: String,
     person_name: String,
+    align: Option<SubtitleAlign>,
+    across: String,
+    down: String,
+    fields: TextFields,
+    margin: String,
+    bold: bool,
+    case: Option<LetterCase>,
+    base: SubtitleStyle,
+    families: Vec<String>,
+    error: String,
     loaded: bool,
     focus: bool,
     dirty: bool,
@@ -86,6 +96,10 @@ impl CueDialog {
         self.place = c.place;
         self.color = c.color.clone().unwrap_or_default();
         self.take_person(speakers, c.speaker.clone());
+        self.apply_style(c.style.as_ref());
+        if self.families.is_empty() {
+            self.families = vidcut_av::burn::families();
+        }
         self.loaded = true;
     }
 
@@ -95,7 +109,21 @@ impl CueDialog {
         self.speaker = l.typing.speaker;
         self.color = l.typing.color.unwrap_or_default();
         self.person_name = l.person_name;
+        self.apply_style(l.typing.style.as_ref());
         self.pending = l.pending;
+    }
+
+    fn apply_style(&mut self, style: Option<&SubtitleStyle>) {
+        let own = style.cloned().unwrap_or_default();
+        self.align = own.align;
+        self.across = percent(own.position.map(|p| p[0]));
+        self.down = percent(own.position.map(|p| p[1]));
+        self.fields = TextFields::load(&Parts::of_subtitles(&own));
+        self.margin = percent(own.margin);
+        self.bold = own.bold == Some(true);
+        self.case = own.case;
+        self.base = own;
+        self.error.clear();
     }
 
     fn take_person(&mut self, speakers: &Speakers, person: Option<String>) {
@@ -103,19 +131,99 @@ impl CueDialog {
         self.speaker = person;
     }
 
-    fn state(&self) -> (Typing, String) {
-        (self.typing(), self.person_name.clone())
+    fn state(&self) -> (Typing, String, LookRaw) {
+        (self.typing(), self.person_name.clone(), self.raw())
+    }
+
+    fn raw(&self) -> LookRaw {
+        LookRaw {
+            align: self.align,
+            across: self.across.clone(),
+            down: self.down.clone(),
+            fields: self.fields.clone(),
+            margin: self.margin.clone(),
+            bold: self.bold,
+            case: self.case,
+        }
+    }
+
+    fn own_style(&self) -> Result<Option<SubtitleStyle>, String> {
+        let style = self.cue_style()?;
+        let checked = vidcut_core::ops::subtitles::checked_style(&style).map_err(|e| e.message)?;
+        Ok((!checked.is_empty()).then_some(checked))
+    }
+
+    fn cue_style(&self) -> Result<SubtitleStyle, String> {
+        let parts = self.fields.parts(&Parts::of_subtitles(&self.base))?;
+        Ok(SubtitleStyle {
+            font: parts.font,
+            size: parts.size,
+            color: parts.color,
+            outline: parts.outline,
+            background: parts.background,
+            margin: kept_number(&self.margin, self.base.margin, "margin")?,
+            bold: self.bold.then_some(true),
+            case: self.case,
+            shadow: parts.shadow,
+            words: self.base.words.clone(),
+            speaker_color: self.base.speaker_color,
+            align: self.align,
+            position: position_of(&self.across, &self.down, self.base.position)?,
+        })
     }
 
     fn typing(&self) -> Typing {
+        let style = self.own_style().unwrap_or_else(|_| {
+            let style = self.base.clone();
+            (!style.is_empty()).then_some(style)
+        });
         Typing {
             cue: self.cue.clone(),
             text: self.text.clone(),
             place: self.place,
             speaker: self.speaker.clone(),
             color: field(&self.color),
+            style,
         }
     }
+}
+
+fn position_of(
+    across: &str,
+    down: &str,
+    stored: Option<[f64; 2]>,
+) -> Result<Option<[f64; 2]>, String> {
+    let x = kept_number(across, stored.map(|p| p[0]), "across")?;
+    let y = kept_number(down, stored.map(|p| p[1]), "down")?;
+    match (x, y) {
+        (None, None) => Ok(None),
+        (Some(x), Some(y)) => Ok(Some([x, y])),
+        _ => Err("Across and Down go together".into()),
+    }
+}
+
+fn raw_of(style: Option<&SubtitleStyle>) -> LookRaw {
+    let own = style.cloned().unwrap_or_default();
+    LookRaw {
+        align: own.align,
+        across: percent(own.position.map(|p| p[0])),
+        down: percent(own.position.map(|p| p[1])),
+        fields: TextFields::load(&Parts::of_subtitles(&own)),
+        margin: percent(own.margin),
+        bold: own.bold == Some(true),
+        case: own.case,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct LookRaw {
+    align: Option<SubtitleAlign>,
+    across: String,
+    down: String,
+    fields: TextFields,
+    margin: String,
+    bold: bool,
+    case: Option<LetterCase>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -125,6 +233,7 @@ pub(crate) struct Typing {
     place: Place,
     speaker: Option<String>,
     color: Option<String>,
+    style: Option<SubtitleStyle>,
 }
 
 fn person_name(speakers: &Speakers, person: Option<&str>) -> String {
@@ -133,7 +242,7 @@ fn person_name(speakers: &Speakers, person: Option<&str>) -> String {
         .unwrap_or_default()
 }
 
-fn settled(id: &str, speakers: &Speakers, c: &Cue) -> (Typing, String) {
+fn settled(id: &str, speakers: &Speakers, c: &Cue) -> (Typing, String, LookRaw) {
     let color = c.color.clone().unwrap_or_default();
     (
         Typing {
@@ -142,8 +251,10 @@ fn settled(id: &str, speakers: &Speakers, c: &Cue) -> (Typing, String) {
             place: c.place,
             speaker: c.speaker.clone(),
             color: field(&color),
+            style: c.style.clone(),
         },
         person_name(speakers, c.speaker.as_deref()),
+        raw_of(c.style.as_ref()),
     )
 }
 
@@ -400,6 +511,9 @@ pub struct TrackDialog {
     spoken: String,
     pop: String,
     paint: Option<SpeakerPaint>,
+    align: Option<SubtitleAlign>,
+    across: String,
+    down: String,
     base: SubtitleStyle,
     dirty: bool,
     from: Option<(Option<String>, Option<String>, SubtitleStyle)>,
@@ -423,6 +537,9 @@ impl TrackDialog {
             .unwrap_or_default();
         self.pop = percent(s.words.as_ref().and_then(|w| w.pop));
         self.paint = s.speaker_color;
+        self.align = s.align;
+        self.across = percent(s.position.map(|p| p[0]));
+        self.down = percent(s.position.map(|p| p[1]));
         self.base = s.clone();
     }
 }
@@ -481,6 +598,19 @@ const PLACES: [(Place, &str); 3] = [
     (Place::Bottom, "Bottom"),
     (Place::Middle, "Middle"),
     (Place::Top, "Top"),
+];
+
+const CUE_ALIGNS: [(Option<SubtitleAlign>, &str); 4] = [
+    (None, "Track"),
+    (Some(SubtitleAlign::Left), "Left"),
+    (Some(SubtitleAlign::Center), "Center"),
+    (Some(SubtitleAlign::Right), "Right"),
+];
+
+const TRACK_ALIGNS: [(Option<SubtitleAlign>, &str); 3] = [
+    (None, "Center"),
+    (Some(SubtitleAlign::Left), "Left"),
+    (Some(SubtitleAlign::Right), "Right"),
 ];
 
 pub(super) fn percent(v: Option<f64>) -> String {
@@ -542,6 +672,8 @@ fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
         shadow: parts.shadow,
         words,
         speaker_color: d.paint,
+        align: d.align,
+        position: position_of(&d.across, &d.down, stored.position)?,
     };
     vidcut_core::ops::subtitles::checked_style(&style).map_err(|e| e.message)
 }
@@ -586,8 +718,11 @@ pub(super) fn font_list(
 }
 
 impl Workspace {
-    fn typed(&self, d: &CueDialog) -> Option<serde_json::Value> {
-        let cue = self.project()?.cue(&d.cue)?;
+    fn typed(&self, d: &CueDialog) -> Result<Option<serde_json::Value>, String> {
+        let cue = self
+            .project()
+            .and_then(|p| p.cue(&d.cue).cloned())
+            .ok_or_else(String::new)?;
         let mut params = json!({ "cue": d.cue });
         if vidcut_core::subtitles::normalize(&d.text) != cue.text {
             params["text"] = json!(d.text);
@@ -602,16 +737,26 @@ impl Workspace {
         if own != cue.color {
             params["color"] = json!(own.unwrap_or_default());
         }
-        params
+        let style = d.own_style()?;
+        if style != cue.style {
+            params["style"] = serde_json::to_value(style.unwrap_or_default()).unwrap_or(json!({}));
+        }
+        Ok(params
             .as_object()
             .is_some_and(|o| o.len() > 1)
-            .then_some(params)
+            .then_some(params))
     }
 
-    fn save_cue(&mut self, d: &CueDialog) -> Vec<Answer> {
+    fn save_cue(&mut self, d: &mut CueDialog) -> Vec<Answer> {
         let mut sent = Vec::new();
-        if let Some(params) = self.typed(d) {
-            sent.push(self.live.request_answered("subtitles.set", params));
+        match self.typed(d) {
+            Ok(Some(params)) => {
+                d.error.clear();
+                sent.push(self.live.request_answered("subtitles.set", params));
+            }
+            Ok(None) => d.error.clear(),
+            Err(e) if e.is_empty() => {}
+            Err(e) => d.error = e,
         }
         let Some(person) = d.speaker.clone() else {
             return sent;
@@ -639,7 +784,7 @@ impl Workspace {
             return;
         };
         if d.dirty {
-            let sent = self.save_cue(&d);
+            let sent = self.save_cue(&mut d);
             d.pending.sent.extend(sent);
         }
         let rev = self.project().map_or(0, |p| p.rev);
@@ -704,6 +849,16 @@ impl Workspace {
             speaker: None,
             color: String::new(),
             person_name: String::new(),
+            align: None,
+            across: String::new(),
+            down: String::new(),
+            fields: TextFields::default(),
+            margin: String::new(),
+            bold: false,
+            case: None,
+            base: SubtitleStyle::default(),
+            families: Vec::new(),
+            error: String::new(),
             loaded: false,
             focus,
             dirty: false,
@@ -748,6 +903,9 @@ impl Workspace {
             spoken: String::new(),
             pop: String::new(),
             paint: None,
+            align: None,
+            across: String::new(),
+            down: String::new(),
             base: SubtitleStyle::default(),
             dirty: false,
             from: None,
@@ -803,6 +961,7 @@ impl Workspace {
                 c.place = ty.place;
                 c.speaker = ty.speaker.clone();
                 c.color = ty.color.clone();
+                c.style = ty.style.clone();
             }
             for c in &mut cues {
                 c.color = p.speakers.color_of(c);
@@ -990,7 +1149,52 @@ impl Workspace {
                     }
                 });
             });
+            dialog::row(ui, "Alignment", |ui| {
+                dialog::switch(ui, |ui| {
+                    for (align, label) in CUE_ALIGNS {
+                        ui.selectable_value(&mut d.align, align, label);
+                    }
+                });
+            });
+            dialog::row(ui, "Across", |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut d.across)
+                        .hint_text("the track")
+                        .desired_width(80.0),
+                );
+                ui.label(dim("%"));
+            });
+            dialog::row(ui, "Down", |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut d.down)
+                        .hint_text("the track")
+                        .desired_width(80.0),
+                );
+                ui.label(dim("%"));
+            });
         });
+        egui::Grid::new("cue-style-fields").show(ui, |ui| {
+            let _ = d.fields.rows(ui, "cue-style", &d.families, "the track");
+            ui.label("Margin");
+            ui.add(
+                egui::TextEdit::singleline(&mut d.margin)
+                    .hint_text("the track")
+                    .min_size(egui::vec2(240.0, 0.0)),
+            );
+            ui.end_row();
+            ui.label("Letters");
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut d.bold, "Bold");
+                for (case, label) in CASES {
+                    ui.radio_value(&mut d.case, case, label);
+                }
+            });
+            ui.end_row();
+        });
+        dialog::note(ui, "An empty field keeps the track style.");
+        if !d.error.is_empty() {
+            ui.colored_label(ui.visuals().error_fg_color, &d.error);
+        }
         dialog::footer(ui, |ui| {
             if ui
                 .add_enabled(found.is_some(), egui::Button::new("Delete"))
@@ -1002,13 +1206,17 @@ impl Workspace {
             if let Some(k) = d.speaker.clone().filter(|_| found.is_some()) {
                 let label = format!("Apply to All of {}'s", p.speakers.name(&k));
                 if ui.button(label).clicked() {
-                    let sent = self.save_cue(&d);
-                    d.pending.sent.extend(sent);
-                    d.pending.sent.push(
-                        self.live
-                            .request_answered("subtitles.match_speaker", json!({ "cue": d.cue })),
-                    );
-                    d.color.clear();
+                    let sent = self.save_cue(&mut d);
+                    if d.error.is_empty() {
+                        d.pending.sent.extend(sent);
+                        d.pending.sent.push(
+                            self.live.request_answered(
+                                "subtitles.match_speaker",
+                                json!({ "cue": d.cue }),
+                            ),
+                        );
+                        d.color.clear();
+                    }
                 }
             }
         });
@@ -1016,9 +1224,11 @@ impl Workspace {
             d.dirty = true;
         }
         if !done && cue_saves(d.dirty, self.inspector_commits()) {
-            let sent = self.save_cue(&d);
+            let sent = self.save_cue(&mut d);
             d.pending.sent.extend(sent);
-            d.dirty = false;
+            if d.error.is_empty() {
+                d.dirty = false;
+            }
         }
         if let Some(at) = at {
             ui.add_space(4.0);
@@ -1287,6 +1497,19 @@ impl Workspace {
                 r.changed()
             };
             changed |= row(ui, "Margin", &mut d.margin, "none: centered at 80% or 20%");
+            ui.end_row();
+            ui.label("Alignment");
+            ui.horizontal(|ui| {
+                for (align, label) in TRACK_ALIGNS {
+                    changed |= ui.selectable_value(&mut d.align, align, label).changed();
+                }
+            });
+            ui.end_row();
+            changed |= row(ui, "Across", &mut d.across, "the place");
+            ui.label(dim("%"));
+            ui.end_row();
+            changed |= row(ui, "Down", &mut d.down, "the place");
+            ui.label(dim("%"));
             ui.end_row();
             ui.label("Letters");
             ui.horizontal(|ui| {

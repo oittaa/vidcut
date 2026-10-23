@@ -1074,4 +1074,40 @@ mod tests {
         unexplained(&command(), &mut out);
         assert_eq!(out, Vec::<String>::new());
     }
+
+    #[test]
+    fn subtitles_set_style_matches_the_request() {
+        use vidcut_core::model::{SubtitleAlign, SubtitleStyle};
+
+        let cli = Cli::try_parse_from([
+            "vidcut",
+            "subtitles",
+            "set",
+            "q1",
+            "--style",
+            r#"{"align":"left","position":[0.25,0.4]}"#,
+        ])
+        .unwrap();
+        let Some(Action::Run(env)) = cli.action().unwrap() else {
+            panic!("a subtitle command runs a request");
+        };
+        assert_eq!(
+            env.request,
+            Request::SubtitlesSet {
+                cue: "q1".into(),
+                text: None,
+                start: None,
+                end: None,
+                place: None,
+                words: None,
+                speaker: None,
+                color: None,
+                style: Some(SubtitleStyle {
+                    align: Some(SubtitleAlign::Left),
+                    position: Some([0.25, 0.4]),
+                    ..SubtitleStyle::default()
+                }),
+            }
+        );
+    }
 }

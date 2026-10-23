@@ -16,6 +16,7 @@ pub struct Cue {
     pub place: Place,
     pub words: Vec<i64>,
     pub color: Option<String>,
+    pub style: Option<SubtitleStyle>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -102,12 +103,15 @@ fn turn_on(tag: &Tag) -> String {
     }
 }
 
-pub(crate) fn dialog(text: &str, place: Place, html: bool) -> String {
+pub(crate) fn dialog(
+    text: &str,
+    place: Place,
+    align: vidcut_core::model::SubtitleAlign,
+    html: bool,
+) -> String {
     let mut out = String::from("0,0,Default,,0,0,0,,");
-    match place {
-        Place::Top => out.push_str("{\\an8}"),
-        Place::Middle => out.push_str("{\\an5}"),
-        Place::Bottom => {}
+    if let Some(tag) = vidcut_core::subtitles::ass_align(place, align) {
+        out.push_str(tag);
     }
     let mut open: Vec<Tag> = Vec::new();
     for t in tokens(text) {
@@ -164,8 +168,14 @@ pub(crate) fn segments(cues: &[Cue], by_place: bool) -> Vec<Cue> {
                 .collect::<Vec<_>>()
                 .join("\n");
             let place = if by_place { place } else { first.place };
+            let style = first.style.clone();
             match out.iter_mut().rev().find(|c| c.place == place || !by_place) {
-                Some(last) if last.end == a && last.text == text && last.place == place => {
+                Some(last)
+                    if last.end == a
+                        && last.text == text
+                        && last.place == place
+                        && last.style == style =>
+                {
                     last.end = b;
                 }
                 _ => out.push(Cue {
@@ -175,6 +185,7 @@ pub(crate) fn segments(cues: &[Cue], by_place: bool) -> Vec<Cue> {
                     place,
                     words: Vec::new(),
                     color: None,
+                    style,
                 }),
             }
         }
@@ -208,12 +219,25 @@ fn encode_one(ctx: *mut ffi::AVCodecContext, line: &str, buf: &mut [u8]) -> Resu
     Ok(n as usize)
 }
 
-fn settings(place: Place) -> Option<&'static [u8]> {
-    match place {
-        Place::Top => Some(b"line:0"),
-        Place::Middle => Some(b"line:50%"),
-        Place::Bottom => None,
+fn settings(place: Place, style: &SubtitleStyle) -> Option<Vec<u8>> {
+    let mut parts = Vec::new();
+    match style.position {
+        Some([x, y]) => {
+            parts.push(format!("position:{}%", (x * 100.0).round() as i64));
+            parts.push(format!("line:{}%", (y * 100.0).round() as i64));
+        }
+        None => match place {
+            Place::Top => parts.push("line:0".into()),
+            Place::Middle => parts.push("line:50%".into()),
+            Place::Bottom => {}
+        },
     }
+    match style.line_align() {
+        vidcut_core::model::SubtitleAlign::Left => parts.push("align:left".into()),
+        vidcut_core::model::SubtitleAlign::Right => parts.push("align:right".into()),
+        vidcut_core::model::SubtitleAlign::Center => {}
+    }
+    (!parts.is_empty()).then(|| parts.join(" ").into_bytes())
 }
 
 pub(crate) struct SubtitleOut {
@@ -260,7 +284,8 @@ impl SubtitleOut {
         let mut buf = vec![0u8; 1 << 20];
         let mut packets = VecDeque::new();
         for cue in segments(&track.cues, by_place) {
-            let line = dialog(&cue.text, cue.place, html);
+            let look = track.style.for_cue(cue.style.as_ref());
+            let line = dialog(&cue.text, cue.place, look.line_align(), html);
             // SAFETY: `encoder` is open.
             let n = encode_one(unsafe { encoder.as_mut_ptr() }, &line, &mut buf)?;
             if n == 0 {
@@ -270,7 +295,7 @@ impl SubtitleOut {
             p.set_pts(Some(cue.start));
             p.set_dts(Some(cue.start));
             p.set_duration(cue.end - cue.start);
-            if html && let Some(s) = settings(cue.place) {
+            if html && let Some(s) = settings(cue.place, &look) {
                 // SAFETY: a live packet; the side data has room for `s`.
                 unsafe {
                     let data = ffi::av_packet_new_side_data(

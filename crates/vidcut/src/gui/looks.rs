@@ -320,7 +320,7 @@ impl Parts {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct TextFields {
     font: String,
     size: String,

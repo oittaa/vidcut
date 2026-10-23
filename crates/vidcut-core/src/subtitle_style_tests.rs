@@ -1,7 +1,12 @@
-use crate::model::{Place, Project, Settings, SubtitleBackground, SubtitleOutline, SubtitleStyle};
+use serde_json::{Value, json};
+
+use crate::model::{
+    Place, Project, Settings, SubtitleAlign, SubtitleBackground, SubtitleOutline, SubtitleStyle,
+};
 use crate::ops::subtitles::{TrackProps, add_track, checked_style, set_track};
 use crate::request::SubtitleFormat;
-use crate::subtitles::{Timed, write};
+use crate::subtitles::{Timed, Writing, write};
+use crate::test_support::Fixture;
 
 fn style() -> SubtitleStyle {
     SubtitleStyle {
@@ -52,6 +57,19 @@ fn a_track_style_is_stored_in_canonical_form() {
             margin: Some(0.08),
             ..SubtitleStyle::default()
         }
+    );
+}
+
+#[test]
+fn a_subtitle_position_outside_the_picture_is_refused() {
+    let err = checked_style(&SubtitleStyle {
+        position: Some([1.5, 0.4]),
+        ..SubtitleStyle::default()
+    })
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "a subtitle position is two fractions of the picture, from 0 to 1"
     );
 }
 
@@ -134,6 +152,7 @@ fn an_imsc1_file_writes_the_track_style() {
             place: Place::Bottom,
             words: Vec::new(),
             speaker: None,
+            style: None,
         }],
         SubtitleFormat::Ttml,
         &crate::subtitles::Writing {
@@ -190,6 +209,7 @@ fn a_styled_file_keeps_each_cues_place() {
                 place: Place::Bottom,
                 words: Vec::new(),
                 speaker: None,
+                style: None,
             },
             Timed {
                 start: 3.0,
@@ -198,6 +218,7 @@ fn a_styled_file_keeps_each_cues_place() {
                 place: Place::Middle,
                 words: Vec::new(),
                 speaker: None,
+                style: None,
             },
             Timed {
                 start: 5.0,
@@ -206,6 +227,7 @@ fn a_styled_file_keeps_each_cues_place() {
                 place: Place::Top,
                 words: Vec::new(),
                 speaker: None,
+                style: None,
             },
         ],
         SubtitleFormat::Ttml,
@@ -222,5 +244,122 @@ fn a_styled_file_keeps_each_cues_place() {
     assert_eq!(
         read.cues.iter().map(|c| c.place).collect::<Vec<_>>(),
         vec![Place::Bottom, Place::Middle, Place::Top]
+    );
+}
+
+#[test]
+fn a_cue_keeps_the_track_fields_it_leaves_out() {
+    let track = SubtitleStyle {
+        color: Some("#ffffff".into()),
+        size: Some(0.08),
+        ..SubtitleStyle::default()
+    };
+    let cue = SubtitleStyle {
+        size: Some(0.04),
+        align: Some(SubtitleAlign::Left),
+        position: Some([0.25, 0.4]),
+        ..SubtitleStyle::default()
+    };
+    assert_eq!(
+        track.over(&cue),
+        SubtitleStyle {
+            color: Some("#ffffff".into()),
+            size: Some(0.04),
+            align: Some(SubtitleAlign::Left),
+            position: Some([0.25, 0.4]),
+            ..SubtitleStyle::default()
+        }
+    );
+}
+
+#[test]
+fn a_set_position_places_the_left_edge_on_that_point() {
+    let style = SubtitleStyle {
+        align: Some(SubtitleAlign::Left),
+        position: Some([0.25, 0.4]),
+        ..SubtitleStyle::default()
+    };
+    assert_eq!(
+        style.block_box(Place::Bottom, (1000.0, 500.0), 200.0, 40.0),
+        (250.0, 180.0)
+    );
+}
+
+#[test]
+fn alignment_without_a_position_keeps_the_block_centered() {
+    let style = SubtitleStyle {
+        align: Some(SubtitleAlign::Left),
+        ..SubtitleStyle::default()
+    };
+    assert_eq!(
+        style.block_box(Place::Bottom, (1000.0, 500.0), 200.0, 40.0),
+        (400.0, 380.0)
+    );
+}
+
+fn req(method: &str, params: Value) -> Value {
+    json!({ "method": method, "params": params })
+}
+
+#[test]
+fn setting_one_cue_leaves_the_other_on_the_track_style() {
+    let mut f = Fixture::new(&[]);
+    f.ok(req(
+        "subtitles.add",
+        json!({"text": "one", "at": "0f", "duration": "10f"}),
+    ));
+    f.ok(req(
+        "subtitles.add",
+        json!({"text": "two", "at": "20f", "duration": "10f"}),
+    ));
+    f.ok(req(
+        "subtitles.set",
+        json!({
+            "cue": "q1",
+            "style": {"align": "left", "position": [0.25, 0.4], "size": 0.04}
+        }),
+    ));
+    let cues = &f.editor.project().subtitles[0].cues;
+    assert_eq!(
+        cues[0].style,
+        Some(SubtitleStyle {
+            size: Some(0.04),
+            align: Some(SubtitleAlign::Left),
+            position: Some([0.25, 0.4]),
+            ..SubtitleStyle::default()
+        })
+    );
+    assert_eq!(cues[1].style, None);
+}
+
+#[test]
+fn webvtt_writes_a_cues_alignment_and_position() {
+    let style = SubtitleStyle {
+        align: Some(SubtitleAlign::Left),
+        position: Some([0.25, 0.4]),
+        ..SubtitleStyle::default()
+    };
+    let text = write(
+        &[Timed {
+            start: 1.0,
+            end: 2.0,
+            text: "Hi".into(),
+            place: Place::Bottom,
+            words: Vec::new(),
+            speaker: None,
+            style: Some(style),
+        }],
+        SubtitleFormat::Vtt,
+        &Writing {
+            language: None,
+            frame_rate: None,
+            positions: true,
+            style: &SubtitleStyle::default(),
+        },
+    )
+    .text;
+    assert_eq!(
+        text,
+        "WEBVTT\n\n00:00:01.000 --> 00:00:02.000 position:25% line:40% align:left\nHi\n\n"
     );
 }
