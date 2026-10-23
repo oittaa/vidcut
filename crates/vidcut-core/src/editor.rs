@@ -6545,7 +6545,7 @@ pub fn query(
             let l = env.loudness(&plan)?;
             json!({
                 "integrated": finite(l.integrated), "range": l.range,
-                "true_peak": finite(l.true_peak),
+                "true_peak": finite(l.true_peak), "sample_peak": finite(l.sample_peak),
                 "from": a, "to": b, "from_tc": tc(a), "to_tc": tc(b),
             })
         }

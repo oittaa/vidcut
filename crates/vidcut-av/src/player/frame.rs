@@ -5,7 +5,6 @@ use crate::decode::Decoding;
 use crate::error::Result;
 use crate::export::normalize::Normalizer;
 use crate::ffmpeg::{self, format, frame};
-use crate::thumbs::Image;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layout {
@@ -190,52 +189,6 @@ impl Picture {
         std::iter::once((self.bytes, self.gpu()))
             .chain(self.over.iter().flat_map(|o| o.picture.layers()))
             .collect()
-    }
-
-    pub fn to_rgba(&self, width: u32, height: u32) -> Result<Image> {
-        if self.in_video_memory().is_some() {
-            return self.copied_down()?.to_rgba(width, height);
-        }
-        if self.over.iter().any(|o| o.wipe.is_some()) {
-            let flat = self.at_wipe(width, height, &[], &[])?.expect("a wipe");
-            return flat.to_rgba(width, height);
-        }
-        if !self.over.is_empty() {
-            let alone = Self::new(
-                crate::export::video::frame_ref(&self.frame)?,
-                self.rotation,
-                self.decoder,
-                self.decoding.clone(),
-            );
-            let mut mixed = alone.to_rgba(width, height)?;
-            for o in &self.over {
-                let top = o.picture.to_rgba(width, height)?;
-                mixed = crate::export::renderer::mixed_image(&mixed, &top, o.weight);
-            }
-            return Ok(mixed);
-        }
-        let mut normalizer = Normalizer::new(
-            &self.frame,
-            self.rotation,
-            width,
-            height,
-            format::Pixel::RGBA,
-            None,
-            crate::decode::Reading::Stream,
-        )?;
-        let out = normalizer.run(&self.frame)?;
-        let stride = out.stride(0);
-        let row = width as usize * 4;
-        let data = out.data(0);
-        let mut rgba = Vec::with_capacity(row * height as usize);
-        for y in 0..height as usize {
-            rgba.extend_from_slice(&data[y * stride..y * stride + row]);
-        }
-        Ok(Image {
-            width,
-            height,
-            rgba,
-        })
     }
 
     pub fn at_wipe(
