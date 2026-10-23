@@ -2867,6 +2867,7 @@ fn mutate(
             pre_head,
             post_tail,
             min,
+            cross_fade,
             download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -2917,8 +2918,13 @@ fn mutate(
                 .iter()
                 .flat_map(|(_, spans)| spans.iter().map(|(a, b)| b - a))
                 .sum();
-            ops::remove_parts(p, &parts)?;
-            json!({ "removed": removed, "frames": frames })
+            let joins = ops::remove_parts(p, &parts)?;
+            let faded = if *cross_fade {
+                ops::cross_fade_joins(p, &joins).len()
+            } else {
+                0
+            };
+            json!({ "removed": removed, "frames": frames, "cross_fades": faded })
         }
         Request::EditDetectSceneCuts { clips, threshold } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -3023,13 +3029,14 @@ fn mutate(
             clips,
             mode,
             target,
+            peak_limit,
             relative,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             if ids.is_empty() {
                 return Err(Error::usage("clip.normalize needs at least one clip"));
             }
-            let target = ops::normalize::checked_target(*mode, *target)?;
+            let (target, limit) = ops::normalize::checked(*mode, *target, *peak_limit)?;
             let mut measured = Vec::new();
             for id in &ids {
                 let plan = crate::render::sound_alone(p, id)?;
@@ -3037,14 +3044,16 @@ fn mutate(
                     .clip(id)
                     .and_then(|c| c.audio.as_ref())
                     .map_or(0.0, |a| a.top_db());
+                let loudness = env.loudness(&plan)?;
                 measured.push(ops::normalize::Measured {
                     id: id.clone(),
                     gain_db,
-                    level: ops::normalize::level(*mode, &env.loudness(&plan)?),
+                    level: ops::normalize::level(*mode, &loudness),
+                    peak: loudness.true_peak.is_finite().then_some(loudness.true_peak),
                 });
             }
             let mut out = Vec::new();
-            for n in ops::normalize::gains(&measured, target, *relative) {
+            for n in ops::normalize::gains(&measured, target, limit, *relative) {
                 let (ti, ci) = p
                     .find_clip(&n.id)
                     .ok_or_else(|| Error::not_found(format!("no clip {}", n.id)))?;
@@ -3055,10 +3064,10 @@ fn mutate(
                 }
                 out.push(json!({
                     "clip": n.id, "level": n.level, "from_db": n.from_db,
-                    "gain_db": n.gain_db, "held": n.held,
+                    "gain_db": n.gain_db, "held": n.held, "limited": n.limited,
                 }));
             }
-            json!({ "target": target, "clips": out })
+            json!({ "target": target, "peak_limit": limit, "clips": out })
         }
         Request::KeyframesAdd {
             clips,

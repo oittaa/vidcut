@@ -56,6 +56,7 @@ pub struct SilenceDialog {
     undone: Vec<Shot>,
     redone: Vec<Shot>,
     download: bool,
+    cross_fade: bool,
 }
 
 impl SilenceDialog {
@@ -79,6 +80,7 @@ impl SilenceDialog {
             undone: Vec::new(),
             redone: Vec::new(),
             download: false,
+            cross_fade: false,
         }
     }
 
@@ -208,6 +210,7 @@ impl SilenceDialog {
     pub fn remove_params(&self) -> Value {
         let mut p = self.params();
         p["parts"] = self.cut_parts();
+        p["cross_fade"] = json!(self.cross_fade);
         p
     }
 
@@ -658,6 +661,16 @@ impl Workspace {
             true => ("what isn't speech", "spoken", "Finding speech…"),
         };
         let edited = d.edited();
+        let others = self.project().is_some_and(|p| {
+            d.cut().any(|s| {
+                let own = p.find_clip(&s.clip).map(|(ti, _)| ti);
+                p.tracks.iter().enumerate().any(|(ti, t)| {
+                    Some(ti) != own
+                        && !t.locked
+                        && t.clips.iter().any(|c| c.start < s.end && s.start < c.end())
+                })
+            })
+        });
         let settled = d.current();
         let before = d.shot();
         use super::super::dialog;
@@ -731,12 +744,18 @@ impl Workspace {
                             .suffix(" s"),
                     );
                 });
+                dialog::row(ui, "Cross Fade Audio", |ui| {
+                    ui.checkbox(&mut d.cross_fade, "")
+                });
             });
             if edited {
                 dialog::warn(
                     ui,
                     "A changed setting finds stripes again; Ctrl+Z brings edits back",
                 );
+            }
+            if others {
+                dialog::warn(ui, "Other unlocked tracks lose these parts too");
             }
             let all = d.stripes.len();
             let n = d.cut().count();

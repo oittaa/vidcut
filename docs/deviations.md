@@ -169,21 +169,16 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Agents use MCP to find and call tools.
   - vidcut makes the tools from the request schema. Thus the tools stay complete and the same as the CLI.
 
-## X11. Dynamic Trim and Ripple Delete Silence, simplified
+## X11. Dynamic Trim, simplified
 
 - **Resolve:**
   - A Dynamic Trim run changes the project while it runs. Each run is one undo step (pp. 730–731).
-  - Ripple Delete Silence can crossfade the remaining audio (p. 773).
 - **vidcut:**
   - A Dynamic Trim run plays while it runs, and the timeline and the viewer show it.
   - The project changes once, when the run stops ([D32](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - Ripple Delete Silence has no crossfade. Its cuts get the 3 ms de-click fades that every cut gets.
-  - It can also cut what is not speech ([X47](#x47-ripple-delete-silence-can-keep-only-speech)).
-  - The user can edit its stripes before Remove ([X48](#x48-ripple-delete-silences-stripes-can-be-edited-before-remove)).
 - **Why:**
   - One change at the end keeps edits at many times a second out of the file, the history and other clients.
   - It is one undo step, the same as in Resolve.
-  - The de-click fades already keep the cuts silent.
 
 ## X12. Preferences hold only what vidcut needs
 
@@ -1609,14 +1604,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - `clip.normalize` sets `gain_db` of the clips so that their level reaches `target` ([D80](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - Audio Operations in the right-click menu of a clip has Normalize Audio Levels. It acts on the selected clips with sound.
   - The header of the Inspector's Audio section ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)) has Normalize. It opens the same window for the clips of the section.
-  - The window has Mode, Target and, with two or more clips, Set Level. Normalize and Cancel are at the bottom right.
-  - Mode has Loudness, Sample Peak and True Peak. Loudness is by EBU R128 only.
-  - A change of Mode sets the default target of that mode.
+  - The window has Mode, the target, Peak Limit and, with two or more clips, Set Level. Normalize and Cancel are at the bottom right.
+  - Mode has the modes of Resolve, with their numbers ([D80](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - A change of Mode sets the target and the peak limit of that mode. A value that the mode fixes cannot be changed.
+  - The window starts at the last choice applied in this session, as Resolve's window does.
   - While it measures, the window shows Measuring. Cancel stops the measurement, and nothing changes.
-  - A normalize is one undo step. A short message tells how many clips stopped at the volume limit.
+  - A normalize is one undo step. A short message tells how many clips stopped at the volume limit or at the peak limit.
 - **Why:**
   - Without it, the Cut page has no way to match the levels of clips.
-  - The export's loudness setting uses EBU R128. Thus Loudness and the export agree.
+  - The loudness modes use the integrated loudness that the export's loudness setting measures. Thus the two agree.
 
 ## X73. The volume line takes the keyframe controls of the Edit page
 
