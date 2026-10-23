@@ -423,6 +423,10 @@ fn get_ready(dir: &Path, files: &[&File], vad: bool, download: bool) -> Result<(
 
 fn unpack(archive: &Path, runtime: &Runtime, dir: &Path) -> Result<()> {
     let home = runtime.home(dir);
+    let _held = vidcut_core::temp::lock(&home)?;
+    if runtime.present(dir) {
+        return Ok(());
+    }
     let part = vidcut_core::temp::dir(&home)?;
     let gz = flate2::read::GzDecoder::new(std::fs::File::open(archive)?);
     tar::Archive::new(gz).unpack(part.path())?;
@@ -1263,6 +1267,20 @@ mod tests {
             super::speakers_by(None, Default::default()).map(|f| f.name),
             None
         );
+    }
+
+    #[test]
+    fn an_existing_library_is_not_unpacked_again() {
+        let Some(runtime) = super::RUNTIME else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let home = runtime.home(dir.path());
+        std::fs::create_dir_all(&home).unwrap();
+        let library = home.join(runtime.library);
+        std::fs::write(&library, b"kept").unwrap();
+        super::unpack(&dir.path().join("missing.tar.gz"), &runtime, dir.path()).unwrap();
+        assert_eq!(std::fs::read(&library).unwrap(), b"kept");
     }
 
     #[test]
