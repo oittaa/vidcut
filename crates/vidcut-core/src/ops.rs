@@ -1495,6 +1495,11 @@ pub fn change_speed(
         if let (Some(a), Some(keys)) = (n.audio.as_mut(), keys) {
             a.gain_keys = keys;
         }
+        if n.picture.as_ref().is_some_and(|pic| pic.is_keyed()) {
+            let mut pic = n.picture.take().expect("keyed");
+            pic.retimed_to(&c, &n);
+            n.picture = Some(pic);
+        }
         let (ti, ci) = locate(p, &id)?;
         p.tracks[ti].clips[ci] = n;
         if lo != c.duration {

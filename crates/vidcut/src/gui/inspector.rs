@@ -3,11 +3,13 @@ use std::time::Instant;
 
 use eframe::egui::{self, Align, Layout, RichText, vec2};
 use egui_phosphor::regular::{
-    ARROW_COUNTER_CLOCKWISE, FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK,
+    ARROW_COUNTER_CLOCKWISE, CARET_LEFT, CARET_RIGHT, DIAMOND, FLIP_HORIZONTAL, FLIP_VERTICAL,
+    LINK_SIMPLE, LINK_SIMPLE_BREAK,
 };
 use serde_json::{Value, json};
+use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Clip, Crop, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind, ZoomBox,
+    Clip, Crop, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project, TrackKind, ZoomBox,
 };
 use vidcut_core::ops::picture::has_picture;
 use vidcut_core::place::upright_fit;
@@ -179,7 +181,24 @@ impl Field {
         }
     }
 
-    fn read(self, p: &Picture, s: &Shape) -> f64 {
+    fn channel(self) -> Option<PictureValue> {
+        match self {
+            Field::Zoom | Field::ZoomX | Field::ZoomY => Some(PictureValue::Zoom),
+            Field::X | Field::Y => Some(PictureValue::Position),
+            Field::Rotation => Some(PictureValue::Rotation),
+            Field::Left => Some(PictureValue::CropLeft),
+            Field::Right => Some(PictureValue::CropRight),
+            Field::Top => Some(PictureValue::CropTop),
+            Field::Bottom => Some(PictureValue::CropBottom),
+            _ => None,
+        }
+    }
+
+    fn read(self, p: &Picture, s: &Shape, frame: Option<i64>) -> f64 {
+        let owned = frame
+            .filter(|_| self.channel().is_some_and(|v| p.has_keys(v)))
+            .map(|f| p.sampled(f as f64));
+        let p = owned.as_ref().unwrap_or(p);
         let ([x, y], [zx, zy], c) = (p.place(), p.scale(), p.crop);
         let ([w, h], [fw, fh], [ax, ay]) = (s.frame, s.fitted, p.pivot());
         let b = self.zoom_box(&p.dynamic_zoom.unwrap_or_default());
@@ -249,13 +268,22 @@ impl Field {
         }
     }
 
-    fn put(self, p: &Picture, s: &Shape, v: f64) -> Picture {
+    fn put_at(self, p: &Picture, s: &Shape, v: f64, frame: Option<i64>) -> Picture {
         let r = self.range(p, s);
         let v = v.clamp(*r.start(), *r.end());
-        if (self.read(p, s) - v).abs() < SAME {
+        if (self.read(p, s, frame) - v).abs() < SAME {
             return p.clone();
         }
-        let ([x, y], [zx, zy], [ax, ay]) = (p.place(), p.scale(), p.pivot());
+        let at = frame.unwrap_or(0) as f64;
+        let place = frame
+            .filter(|_| p.has_keys(PictureValue::Position))
+            .map(|_| p.place_at(at))
+            .unwrap_or_else(|| p.place());
+        let scale = frame
+            .filter(|_| p.has_keys(PictureValue::Zoom))
+            .map(|_| p.scale_at(at))
+            .unwrap_or_else(|| p.scale());
+        let ([x, y], [zx, zy], [ax, ay]) = (place, scale, p.pivot());
         let ([w, h], [fw, fh]) = (s.frame, s.fitted);
         let zoom = |v: f64| (v / 100.0).clamp(ZOOM.0, ZOOM.1);
         let at = |v: f64| v.clamp(-REACH, REACH);
@@ -408,15 +436,26 @@ fn name(p: &Project, c: &Clip) -> String {
 
 fn cleared(p: &Picture, tool: PictureTool) -> Picture {
     match tool {
-        PictureTool::Transform => Picture {
-            crop: p.crop,
-            dynamic_zoom: p.dynamic_zoom,
-            ..Picture::default()
-        },
-        PictureTool::Crop => Picture {
-            crop: Crop::default(),
-            ..p.clone()
-        },
+        PictureTool::Transform => {
+            let mut kept = Picture {
+                crop: p.crop,
+                dynamic_zoom: p.dynamic_zoom,
+                ..Picture::default()
+            };
+            kept.crop_left_keys = p.crop_left_keys.clone();
+            kept.crop_right_keys = p.crop_right_keys.clone();
+            kept.crop_top_keys = p.crop_top_keys.clone();
+            kept.crop_bottom_keys = p.crop_bottom_keys.clone();
+            kept
+        }
+        PictureTool::Crop => {
+            let mut kept = Picture {
+                crop: Crop::default(),
+                ..p.clone()
+            };
+            kept.clear_crop_keys();
+            kept
+        }
         PictureTool::DynamicZoom => Picture {
             dynamic_zoom: None,
             ..p.clone()
@@ -456,6 +495,7 @@ struct Chosen {
     stored: Picture,
     shown: Picture,
     shape: Shape,
+    frame: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -547,6 +587,18 @@ enum Act {
     Swap,
     Clear(PictureTool),
     Unkey,
+    Step(Key, i64),
+    Toggle(Key),
+    KeyEase(Key, Ease),
+    ResetChannel(Field),
+}
+
+fn param_name(key: Key) -> Option<&'static str> {
+    match key {
+        Key::Volume => Some("volume"),
+        Key::Picture(f) => f.channel().map(PictureValue::name),
+        _ => None,
+    }
 }
 
 fn label(ui: &mut egui::Ui, text: &str, set: bool) {
@@ -567,14 +619,52 @@ fn number(
     ui: &mut egui::Ui,
     (f, link): (Field, Option<bool>),
     i: &Inspector,
+    p: &Project,
+    at: i64,
     chosen: &[Chosen],
     acts: &mut Vec<Act>,
 ) {
     let first = &chosen[0];
-    let set = chosen.iter().any(|c| !f.is_usual(&c.shown));
-    let shown = f.read(&first.shown, &first.shape);
+    let set = chosen
+        .iter()
+        .any(|c| !f.is_usual(&c.stored) || f.channel().is_some_and(|v| c.stored.has_keys(v)));
+    let shown = f.read(&first.shown, &first.shape, Some(first.frame));
     let range = f.range(&first.shown, &first.shape);
-    entry(ui, (Key::Picture(f), link), i, (set, shown, range), acts);
+    let keys = f.channel().and_then(|v| {
+        let c = p.clip(&first.id)?;
+        let picture = c.picture.clone().unwrap_or_default();
+        Some(mark(c, picture.keys_of(v), at))
+    });
+    entry(
+        ui,
+        (Key::Picture(f), link),
+        i,
+        (set, shown, range),
+        keys,
+        acts,
+    );
+}
+
+struct KeyMark {
+    on: bool,
+    prev: bool,
+    next: bool,
+}
+
+fn mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
+    let time = |k: &Keyframe| c.key_time(k.frame).round() as i64;
+    let inside = |t: i64| c.start <= t && t < c.end();
+    KeyMark {
+        on: keys.iter().any(|k| time(k) == at),
+        prev: keys.iter().any(|k| {
+            let t = time(k);
+            inside(t) && t < at
+        }),
+        next: keys.iter().any(|k| {
+            let t = time(k);
+            inside(t) && t > at
+        }),
+    }
 }
 
 fn entry(
@@ -582,9 +672,10 @@ fn entry(
     key: (Key, Option<bool>),
     i: &Inspector,
     values: (bool, f64, RangeInclusive<f64>),
+    keys: Option<KeyMark>,
     acts: &mut Vec<Act>,
 ) {
-    field(ui, key, i, values, Look::default(), acts);
+    field(ui, key, i, values, Look::default(), keys, acts);
 }
 
 fn field(
@@ -593,6 +684,7 @@ fn field(
     i: &Inspector,
     (set, shown, range): (bool, f64, RangeInclusive<f64>),
     look: Look<'_>,
+    keys: Option<KeyMark>,
     acts: &mut Vec<Act>,
 ) {
     label(ui, f.label(), set);
@@ -643,6 +735,29 @@ fn field(
         } else if held.is_some() && !r.dragged() {
             acts.push(Act::Release(f));
         }
+        if let Some(keys) = keys {
+            let prev = ui.add_enabled(keys.prev, egui::Button::new(CARET_LEFT).frame(false));
+            if prev.clicked() {
+                acts.push(Act::Step(f, -1));
+            }
+            let diamond = ui.add(egui::Button::selectable(keys.on, DIAMOND).frame(false));
+            if diamond.clicked() {
+                acts.push(Act::Toggle(f));
+            }
+            if keys.on {
+                diamond.context_menu(|ui| {
+                    for e in Ease::ALL {
+                        if ui.button(ease_label(e)).clicked() {
+                            acts.push(Act::KeyEase(f, e));
+                        }
+                    }
+                });
+            }
+            let next = ui.add_enabled(keys.next, egui::Button::new(CARET_RIGHT).frame(false));
+            if next.clicked() {
+                acts.push(Act::Step(f, 1));
+            }
+        }
         if let Some(lit) = link {
             let icon = if lit { LINK_SIMPLE } else { LINK_SIMPLE_BREAK };
             let b = ui.add(egui::Button::selectable(lit, icon));
@@ -657,6 +772,7 @@ fn field(
     if reset(ui, set) {
         acts.push(match f {
             Key::Volume => Act::Unkey,
+            Key::Picture(field) if field.channel().is_some() => Act::ResetChannel(field),
             f => Act::Put(f, f.usual()),
         });
     }
@@ -704,7 +820,14 @@ fn section(
     }
 }
 
-fn transform(ui: &mut egui::Ui, i: &Inspector, chosen: &[Chosen], acts: &mut Vec<Act>) {
+fn transform(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    p: &Project,
+    at: i64,
+    chosen: &[Chosen],
+    acts: &mut Vec<Act>,
+) {
     let first = &chosen[0];
     let set = chosen
         .iter()
@@ -717,18 +840,18 @@ fn transform(ui: &mut egui::Ui, i: &Inspector, chosen: &[Chosen], acts: &mut Vec
         |ui, acts| {
             let [zx, zy] = first.shown.scale();
             if !i.unlinked && zx == zy {
-                number(ui, (Field::Zoom, Some(true)), i, chosen, acts);
+                number(ui, (Field::Zoom, Some(true)), i, p, at, chosen, acts);
             } else {
-                number(ui, (Field::ZoomX, Some(false)), i, chosen, acts);
-                number(ui, (Field::ZoomY, None), i, chosen, acts);
+                number(ui, (Field::ZoomX, Some(false)), i, p, at, chosen, acts);
+                number(ui, (Field::ZoomY, None), i, p, at, chosen, acts);
             }
-            number(ui, (Field::X, None), i, chosen, acts);
-            number(ui, (Field::Y, None), i, chosen, acts);
-            number(ui, (Field::Rotation, None), i, chosen, acts);
-            number(ui, (Field::AnchorX, None), i, chosen, acts);
-            number(ui, (Field::AnchorY, None), i, chosen, acts);
-            number(ui, (Field::Pitch, None), i, chosen, acts);
-            number(ui, (Field::Yaw, None), i, chosen, acts);
+            number(ui, (Field::X, None), i, p, at, chosen, acts);
+            number(ui, (Field::Y, None), i, p, at, chosen, acts);
+            number(ui, (Field::Rotation, None), i, p, at, chosen, acts);
+            number(ui, (Field::AnchorX, None), i, p, at, chosen, acts);
+            number(ui, (Field::AnchorY, None), i, p, at, chosen, acts);
+            number(ui, (Field::Pitch, None), i, p, at, chosen, acts);
+            number(ui, (Field::Yaw, None), i, p, at, chosen, acts);
             let flipped = chosen
                 .iter()
                 .any(|c| c.shown.flip_horizontal || c.shown.flip_vertical);
@@ -755,11 +878,18 @@ fn transform(ui: &mut egui::Ui, i: &Inspector, chosen: &[Chosen], acts: &mut Vec
     );
 }
 
-fn crop(ui: &mut egui::Ui, i: &Inspector, chosen: &[Chosen], acts: &mut Vec<Act>) {
+fn crop(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    p: &Project,
+    at: i64,
+    chosen: &[Chosen],
+    acts: &mut Vec<Act>,
+) {
     let set = chosen.iter().any(|c| uses(&c.shown, PictureTool::Crop));
     section(ui, ("Crop", PictureTool::Crop), set, acts, |ui, acts| {
         for f in [Field::Left, Field::Right, Field::Top, Field::Bottom] {
-            number(ui, (f, None), i, chosen, acts);
+            number(ui, (f, None), i, p, at, chosen, acts);
         }
     });
 }
@@ -767,6 +897,8 @@ fn crop(ui: &mut egui::Ui, i: &Inspector, chosen: &[Chosen], acts: &mut Vec<Act>
 fn dynamic_zoom(
     ui: &mut egui::Ui,
     i: &Inspector,
+    p: &Project,
+    at: i64,
     chosen: &[Chosen],
     boxes: bool,
     acts: &mut Vec<Act>,
@@ -805,7 +937,7 @@ fn dynamic_zoom(
             Field::EndX,
             Field::EndY,
         ] {
-            number(ui, (f, None), i, chosen, acts);
+            number(ui, (f, None), i, p, at, chosen, acts);
         }
         let eased = zooms.iter().any(|z| z.ease != Ease::Linear);
         label(ui, "Ease", eased);
@@ -889,9 +1021,9 @@ fn speed_section(
             *SpeedDialog::PERCENT.end() / 100.0,
         );
         let percent = (sped, speed.abs() * 100.0, SpeedDialog::PERCENT);
-        field(ui, (Key::Speed, None), i, percent, moving, acts);
+        field(ui, (Key::Speed, None), i, percent, moving, None, acts);
         let fps = (false, speed.abs() * rate, least * rate..=most * rate);
-        field(ui, (Key::Rate, None), i, fps, moving, acts);
+        field(ui, (Key::Rate, None), i, fps, moving, None, acts);
         let span = length as f64 * speed.abs();
         let lengths = (span / most).ceil().max(1.0)..=(span / least).floor().max(1.0);
         let timed = Look {
@@ -905,6 +1037,7 @@ fn speed_section(
             i,
             (false, length as f64, lengths),
             timed,
+            None,
             acts,
         );
         label(ui, "Ripple Timeline", false);
@@ -943,6 +1076,7 @@ impl Workspace {
                         stored,
                         shown,
                         shape: shape(&p, c),
+                        frame: c.source_at(self.snap.timeline.position),
                     }
                 })
             })
@@ -1099,7 +1233,12 @@ impl Workspace {
                 ..
             }) => start
                 .iter()
-                .map(|c| (c.id.clone(), f.put(&c.shown, &c.shape, *value)))
+                .map(|c| {
+                    (
+                        c.id.clone(),
+                        f.put_at(&c.shown, &c.shape, *value, Some(c.frame)),
+                    )
+                })
                 .collect(),
             _ => self.inspector_landed(),
         }
@@ -1131,9 +1270,15 @@ impl Workspace {
                 Some((c.id.clone(), c.stored.clone(), p))
             })
             .collect();
+        let at = self.snap.timeline.position;
         let params: Vec<Value> = list
             .iter()
-            .filter_map(|(id, from, to)| changed(id, from, to))
+            .filter_map(|(id, from, to)| {
+                changed(id, from, to).map(|mut p| {
+                    p["at"] = json!(at);
+                    p
+                })
+            })
             .collect();
         if params.is_empty() {
             return;
@@ -1193,10 +1338,209 @@ impl Workspace {
         });
     }
 
+    fn step_key(&mut self, key: Key, dir: i64, chosen: &[Chosen], sounds: &[Sound]) {
+        let at = self.snap.timeline.position;
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let id = match key {
+            Key::Volume => sounds.first().map(|s| s.id.clone()),
+            Key::Picture(_) => chosen.first().map(|c| c.id.clone()),
+            _ => None,
+        };
+        let Some(id) = id else {
+            return;
+        };
+        let Some(c) = p.clip(&id) else {
+            return;
+        };
+        let times: Vec<i64> = match key {
+            Key::Volume => c
+                .audio
+                .as_ref()
+                .map(|a| {
+                    a.gain_keys
+                        .iter()
+                        .map(|k| c.key_time(k.frame).round() as i64)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            Key::Picture(f) => {
+                let Some(v) = f.channel() else {
+                    return;
+                };
+                c.picture
+                    .as_ref()
+                    .map(|pic| {
+                        pic.keys_of(v)
+                            .iter()
+                            .map(|k| c.key_time(k.frame).round() as i64)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
+            _ => return,
+        };
+        let inside = |t: i64| c.start <= t && t < c.end();
+        let target = if dir < 0 {
+            times.into_iter().filter(|t| inside(*t) && *t < at).max()
+        } else {
+            times.into_iter().filter(|t| inside(*t) && *t > at).min()
+        };
+        if let Some(t) = target {
+            self.seek(PlayerId::Timeline, t, false);
+        }
+    }
+
+    fn toggle_key(&mut self, key: Key, chosen: &[Chosen], sounds: &[Sound]) {
+        let Some(param) = param_name(key) else {
+            return;
+        };
+        let at = self.snap.timeline.position;
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let ids: Vec<String> = match key {
+            Key::Volume => sounds.iter().map(|s| s.id.clone()).collect(),
+            Key::Picture(_) => chosen.iter().map(|c| c.id.clone()).collect(),
+            _ => return,
+        };
+        let on = ids.iter().any(|id| {
+            p.clip(id).is_some_and(|c| match key {
+                Key::Volume => c.audio.as_ref().is_some_and(|a| {
+                    a.gain_keys
+                        .iter()
+                        .any(|k| c.key_time(k.frame).round() as i64 == at)
+                }),
+                Key::Picture(f) => f.channel().is_some_and(|v| {
+                    c.picture.as_ref().is_some_and(|pic| {
+                        pic.keys_of(v)
+                            .iter()
+                            .any(|k| c.key_time(k.frame).round() as i64 == at)
+                    })
+                }),
+                _ => false,
+            })
+        });
+        if on {
+            let keyed: Vec<&str> = ids
+                .iter()
+                .filter(|id| {
+                    p.clip(id).is_some_and(|c| match key {
+                        Key::Volume => c.audio.as_ref().is_some_and(|a| a.is_keyed()),
+                        Key::Picture(f) => f
+                            .channel()
+                            .is_some_and(|v| c.picture.as_ref().is_some_and(|pic| pic.has_keys(v))),
+                        _ => false,
+                    })
+                })
+                .map(String::as_str)
+                .collect();
+            if !keyed.is_empty() {
+                self.send(
+                    "keyframes.remove",
+                    json!({ "clips": keyed, "param": param, "at": at }),
+                );
+            }
+        } else if !ids.is_empty() {
+            self.send(
+                "keyframes.add",
+                json!({ "clips": ids, "param": param, "at": at }),
+            );
+        }
+    }
+
+    fn ease_key(&mut self, key: Key, ease: Ease, chosen: &[Chosen], sounds: &[Sound]) {
+        let Some(param) = param_name(key) else {
+            return;
+        };
+        let at = self.snap.timeline.position;
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let ids: Vec<&str> = match key {
+            Key::Volume => sounds.iter().map(|s| s.id.as_str()).collect(),
+            Key::Picture(_) => chosen.iter().map(|c| c.id.as_str()).collect(),
+            _ => return,
+        };
+        let ids: Vec<&str> = ids
+            .into_iter()
+            .filter(|id| {
+                p.clip(id).is_some_and(|c| match key {
+                    Key::Volume => c.audio.as_ref().is_some_and(|a| {
+                        a.gain_keys
+                            .iter()
+                            .any(|k| c.key_time(k.frame).round() as i64 == at)
+                    }),
+                    Key::Picture(f) => f.channel().is_some_and(|v| {
+                        c.picture.as_ref().is_some_and(|pic| {
+                            pic.keys_of(v)
+                                .iter()
+                                .any(|k| c.key_time(k.frame).round() as i64 == at)
+                        })
+                    }),
+                    _ => false,
+                })
+            })
+            .collect();
+        if !ids.is_empty() {
+            self.send(
+                "keyframes.set",
+                json!({ "clips": ids, "param": param, "at": at, "ease": ease }),
+            );
+        }
+    }
+
+    fn reset_channel(&mut self, field: Field, chosen: &[Chosen]) {
+        let Some(v) = field.channel() else {
+            return;
+        };
+        let keyed: Vec<&str> = chosen
+            .iter()
+            .filter(|c| c.stored.has_keys(v))
+            .map(|c| c.id.as_str())
+            .collect();
+        let at = self.snap.timeline.position;
+        let sets: Vec<Value> = chosen
+            .iter()
+            .filter_map(|c| {
+                let base = c.stored.adopt(c.frame as f64);
+                let to = field.put_at(&base, &c.shape, field.usual(), Some(c.frame));
+                changed(&c.id, &base, &to).map(|mut p| {
+                    p["at"] = json!(at);
+                    p
+                })
+            })
+            .collect();
+        let mut commands = Vec::new();
+        if !keyed.is_empty() {
+            commands.push(json!({
+                "method": "keyframes.remove",
+                "params": { "clips": keyed, "param": v.name() }
+            }));
+        }
+        for params in sets {
+            commands.push(json!({ "method": "picture.set", "params": params }));
+        }
+        match commands.len() {
+            0 => {}
+            1 => {
+                let one = commands.remove(0);
+                self.send(
+                    one["method"].as_str().unwrap_or("picture.set"),
+                    one["params"].clone(),
+                );
+            }
+            _ => self.send("apply", json!({ "commands": commands })),
+        }
+    }
+
     fn put(&mut self, key: Key, value: f64, (chosen, sounds, paced): Lists<'_>) {
         match key {
             Key::Picture(f) => {
-                self.send_pictures(chosen, |c| Some(f.put(&c.shown, &c.shape, value)));
+                self.send_pictures(chosen, |c| {
+                    Some(f.put_at(&c.shown, &c.shape, value, Some(c.frame)))
+                });
             }
             Key::Volume => self.send_volume(sounds, value),
             Key::Speed => self.send_percent(paced, None, |_| value),
@@ -1233,8 +1577,13 @@ impl Workspace {
             let set = sounds
                 .iter()
                 .any(|s| s.keyed || s.gain != Key::Volume.usual());
-            let volume = (set, first.gain, GAIN);
-            entry(ui, (Key::Volume, None), &self.inspector, volume, acts);
+            let volume = (set, first.gain, *GAIN.start()..=*GAIN.end());
+            let keys = p.clip(&first.id).and_then(|c| {
+                c.audio
+                    .as_ref()
+                    .map(|a| mark(c, &a.gain_keys, self.snap.timeline.position))
+            });
+            entry(ui, (Key::Volume, None), &self.inspector, volume, keys, acts);
             label(ui, "Mute", sounds.iter().any(|s| s.muted));
             let mut on = first.muted;
             if ui.checkbox(&mut on, "").clicked() {
@@ -1397,6 +1746,10 @@ impl Workspace {
                     self.send("clip.set", json!({ "clips": ids, "muted": on }));
                 }
             }
+            Act::Step(key, dir) => self.step_key(key, dir, chosen, sounds),
+            Act::Toggle(key) => self.toggle_key(key, chosen, sounds),
+            Act::KeyEase(key, ease) => self.ease_key(key, ease, chosen, sounds),
+            Act::ResetChannel(field) => self.reset_channel(field, chosen),
             Act::Unkey => {
                 let keyed: Vec<&str> = sounds
                     .iter()
@@ -1504,9 +1857,10 @@ impl Workspace {
                 if !chosen.is_empty() {
                     let boxes = self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom);
                     let i = &self.inspector;
-                    transform(ui, i, &chosen, &mut acts);
-                    crop(ui, i, &chosen, &mut acts);
-                    dynamic_zoom(ui, i, &chosen, boxes, &mut acts);
+                    let at = self.snap.timeline.position;
+                    transform(ui, i, &p, at, &chosen, &mut acts);
+                    crop(ui, i, &p, at, &chosen, &mut acts);
+                    dynamic_zoom(ui, i, &p, at, &chosen, boxes, &mut acts);
                 }
                 if !paced.is_empty() {
                     let at = (&self.inspector, &*p, dropped);

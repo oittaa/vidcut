@@ -21,6 +21,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - dissolves: cross dissolves, fades to and from black, audio cross fades (§8.11)
 - clip/track audio levels and waveforms
 - volume keyframes of a clip (§9, D81)
+- keyframes of Transform and Crop (§8.15, D75)
 - Voice Isolation, free (X64)
 - ducking, the Ducker Track FX (§9)
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
@@ -30,7 +31,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 
 **Later (later):**
 - other effects, other transitions, other titles, generators
-- keyframes other than those of the clip volume
+- keyframes other than Transform, Crop and the clip volume
 - color, Fusion, Smart Reframe, Close Up
 - Sync Bin, Multi Source, Source Overwrite, Live Overwrite
 - Replay, voiceover
@@ -715,6 +716,18 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - vidcut: Alt+T shows the boxes, and the Tools row has Dynamic Zoom (X65). The eases are curves of their own (X67).
   - Details: D75.
 - **How they play:** a clip covers the tracks below it only where its picture covers the frame. Details: D75.
+- **Keyframes** (D75):
+  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y.
+  - Rotation is its own value. Each crop side is its own value.
+  - The flips, the anchor, Pitch and Yaw have no keyframes.
+  - Dynamic Zoom has no Keyframe button. Its two boxes stay at the ends of the clip.
+  - A Keyframe button sits between Previous and Next arrows on each keyed value (X70).
+  - A right-click on the button sets the ease. The ease is the volume curve (X74).
+  - After the first keyframe, a change at another frame adds a keyframe.
+  - This applies to the Inspector and to the viewer handles.
+  - The Reset of a value removes its keyframes. The Reset of a section removes that section's keyframes.
+  - A clip with keyframes shows a mark on the timeline.
+  - The Volume of the Audio section has the same button.
 - **Inspector** (pp. 734–744):
   - The Inspector button at the top right of the UI toolbar opens it.
   - Its panels are Video, Audio, Effects, Transition, Image and File. A panel that does not apply is gray.
@@ -735,7 +748,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Thus a picture narrower than the frame moves less than its number. On the 4:3 chart in the 16:9 timeline, Position X 200 moves it 150 pixels.
   - Crop is in pixels of the picture as it is fitted in the timeline. Crop Left 100 on the 4:3 chart is a `cropLeft` of 100/1440 in the OTIO file.
   - Zoom is a factor (1.000). Rotation is in degrees.
-- **Later:** crop Softness (p. 768), the modes and opacity of Composite (p. 769), keyframes.
+- **Later:** crop Softness (p. 768), the modes and opacity of Composite (p. 769).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -1755,6 +1768,30 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The flips mirror the picture left to right and top to bottom.
     - The crop cuts each side by a fraction of the source picture, and leaves some of it.
     - Values at their usual place are left out of the project file.
+  - **Keyframes:**
+    - Position, zoom, rotation and each crop side can have keyframes.
+    - A keyframe is the volume `Keyframe`: a source frame, a value, an In handle and an Out handle (D81).
+    - Position stores X on the keyframe and Y beside it, one Y for each keyframe.
+    - Zoom does the same. Rotation and each crop side store one value.
+    - The curve between two keyframes is the volume Bezier curve (X74).
+    - Before the first keyframe the value is the first. After the last it is the last.
+    - With keyframes, that curve is the value. The plain value is not played.
+    - When the last keyframes of a value go, the first of them stays as the plain value.
+    - The viewer and the export sample the curve at the source frame of each frame.
+    - A change of a keyed value at `at` sets a keyframe there, as volume does (D82).
+    - `picture.set` takes `at`. With no `at`, it uses the playhead.
+    - A value with no keyframes ignores `at`.
+    - `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take these values in `param`.
+    - `timeline.get` names each picture value that has keyframes, as it names `volume`.
+    - The Inspector shows the value at the playhead. Its Keyframe button adds or removes the keyframe there (X70).
+    - Previous and Next move the playhead to the keyframe before or after it, inside the clip.
+    - A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out.
+    - The Reset of one value removes its keyframes and puts the usual value back.
+    - The Reset of Transform or Crop removes the keyframes of that section.
+    - A clip with any keyframes shows a mark on its timeline bar.
+    - Flips, the anchor, Pitch, Yaw and Dynamic Zoom have no keyframes.
+    - A speed change keeps each keyframe at its frame of the clip, as volume does (D81).
+    - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
     - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
@@ -1795,7 +1832,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It also goes in Resolve's Transform, Cropping and Retime and Scaling, fitted.
     - An import takes vidcut's own metadata. Else it reads those effects.
     - Resolve's crop, fill and stretch become a zoom, and its anchor point becomes the `anchor` ([gotchas](gotchas.md#resolves-otio-files)).
-    - When one of these effects has keyframes, or a parameter vidcut does not play, all three stay on the clip, unplayed (X9).
+    - Keyframes of position, zoom, rotation and crop are read and played when they fit this model.
+    - A parameter vidcut does not key, or a keyframe it cannot read, leaves Transform, Cropping and Retime and Scaling on the clip, unplayed (X9).
     - Pitch and yaw on their own are played (D93).
     - This is also true when they make a picture that vidcut refuses, such as a crop that leaves nothing.
     - The export names the clips moved further than Resolve's Pan and Tilt go, 4 pictures, and writes them at 4.

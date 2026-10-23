@@ -24,7 +24,8 @@ pub fn anchored(p: &Picture, (w, h): (f64, f64), [fx, fy, fw, fh]: [f64; 4]) -> 
 }
 
 fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4]) -> Level {
-    let p = &placed.picture;
+    let sampled = placed.picture.sampled(placed.source as f64);
+    let p = &sampled;
     let [_, _, fw, fh] = fitted;
     let [zx, zy] = p.scale();
     let [ax, ay] = p.pivot();
@@ -325,9 +326,8 @@ pub fn detail(placed: &[Placed]) -> f64 {
     placed
         .iter()
         .map(|p| {
-            let [x, y] = p.picture.scale();
             let near = p.picture.dynamic_zoom.map_or(1.0, |z| z.closest());
-            x.max(y) / near
+            p.picture.largest_zoom() / near
         })
         .product()
 }
@@ -341,10 +341,46 @@ mod tests {
             clip: "c1".into(),
             picture,
             run: None,
+            source: 0,
+            pace: crate::render::Pace::default(),
+            start: 0,
+            ready: true,
         };
         let frame = (1920.0, 1080.0);
         let level = Placing::whole(&[placed], frame).levels[0];
         level.forward(uv).map(|v| (v * 1e6).round() / 1e6)
+    }
+
+    #[test]
+    fn the_largest_zoom_key_sets_the_detail() {
+        let picture = Picture {
+            zoom_keys: vec![
+                crate::model::Keyframe {
+                    frame: 0,
+                    value: 0.1,
+                    in_handle: None,
+                    out_handle: None,
+                },
+                crate::model::Keyframe {
+                    frame: 30,
+                    value: 0.4,
+                    in_handle: None,
+                    out_handle: None,
+                },
+            ],
+            zoom_y: vec![0.1, 0.4],
+            ..Picture::default()
+        };
+        let placed = Placed {
+            clip: "c1".into(),
+            picture,
+            run: None,
+            source: 0,
+            pace: crate::render::Pace::default(),
+            start: 0,
+            ready: true,
+        };
+        assert_eq!(detail(&[placed]), 0.4);
     }
 
     #[test]

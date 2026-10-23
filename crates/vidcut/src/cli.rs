@@ -138,7 +138,7 @@ const GROUPS: &[(&str, &str)] = &[
     ),
     (
         "keyframes",
-        "Volume keyframes of clips: the curve of a clip's volume",
+        "Volume, position, zoom, rotation and crop keyframes",
     ),
     ("keys", "Keyboard shortcuts"),
     (

@@ -3049,7 +3049,7 @@ fn mutate(
         }
         Request::KeyframesAdd {
             clips,
-            param: _,
+            param,
             at,
             value,
             ease,
@@ -3060,7 +3060,7 @@ fn mutate(
                 None => playhead
                     .ok_or_else(|| Error::usage("keyframes.add needs `at` (no playhead)"))?,
             };
-            let added = ops::keyframes::add(p, &ids, at, *value, *ease)?;
+            let added = ops::keyframes::add(p, &ids, *param, at, *value, *ease)?;
             let added: Vec<Value> = added
                 .into_iter()
                 .map(|(clip, frame)| json!({ "clip": clip, "frame": frame }))
@@ -3069,7 +3069,7 @@ fn mutate(
         }
         Request::KeyframesSet {
             clips,
-            param: _,
+            param,
             frames,
             at,
             value,
@@ -3087,12 +3087,12 @@ fn mutate(
                 in_handle: *in_handle,
                 out_handle: *out_handle,
             };
-            ops::keyframes::set(p, &ids, &pick, &change)?;
+            ops::keyframes::set(p, &ids, *param, &pick, &change)?;
             Value::Null
         }
         Request::KeyframesMove {
             clips,
-            param: _,
+            param,
             frames,
             at,
             by,
@@ -3101,18 +3101,18 @@ fn mutate(
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
-            ops::keyframes::shift(p, &ids, &pick, *by, to)?;
+            ops::keyframes::shift(p, &ids, *param, &pick, *by, to)?;
             Value::Null
         }
         Request::KeyframesRemove {
             clips,
-            param: _,
+            param,
             frames,
             at,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
-            ops::keyframes::remove(p, &ids, &pick)?;
+            ops::keyframes::remove(p, &ids, *param, &pick)?;
             Value::Null
         }
         Request::EditCut { clips } => {
@@ -3440,9 +3440,14 @@ fn mutate(
             crop_right,
             crop_top,
             crop_bottom,
+            at,
             dynamic_zoom,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
             let change = ops::picture::PictureChange {
                 dynamic_zoom: *dynamic_zoom,
                 position: position
@@ -3464,7 +3469,7 @@ fn mutate(
                 flip_vertical: *flip_vertical,
                 crop: [*crop_left, *crop_right, *crop_top, *crop_bottom],
             };
-            ops::picture::set(p, &ids, &change)?;
+            ops::picture::set(p, &ids, &change, at)?;
             Value::Null
         }
         Request::PictureClear { clips, tool } => {
@@ -4529,7 +4534,9 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
                 from: 0,
                 list: std::mem::take(list).into_iter().map(Kept::from).collect(),
             };
-            e.retime(|x| (x * to.as_f64() / from.as_f64()).round());
+            let ratio = to.as_f64() / from.as_f64();
+            e.retime(|x| (x * ratio).round());
+            e.scale_handles(ratio);
             *list = e.list.into_iter().map(Kept::into_value).collect();
         }
     };
@@ -4562,6 +4569,10 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
                 }
             }
             c.gain_keys.dedup_by_key(|k| k.frame);
+            if let Some(picture) = c.picture.as_mut() {
+                let ratio = to.as_f64() / from.as_f64();
+                picture.scale_times(&conv, ratio);
+            }
         }
         (c.start, c.duration) = (start, end - start);
     }
@@ -4586,10 +4597,12 @@ fn imported_picture(
     match shape.filter(|_| c.has_picture()) {
         None => (c.effects.clone(), c.picture.clone()),
         Some(shape) => {
-            otio::picture::take(&c.effects, c.picture.as_ref(), &shape).unwrap_or_else(|names| {
-                otio::note_kept(warnings, &names);
-                (c.effects.clone(), None)
-            })
+            let speed = c.speed.as_ref().and_then(|s| s.scalar()).unwrap_or(1.0);
+            otio::picture::take(&c.effects, c.picture.as_ref(), &shape, c.source_in, speed)
+                .unwrap_or_else(|names| {
+                    otio::note_kept(warnings, &names);
+                    (c.effects.clone(), None)
+                })
         }
     }
 }
@@ -5182,7 +5195,10 @@ fn give_picture(p: &mut Project, block: &Clip, picture: &Picture, made: &[String
         let whole = picture.dynamic_zoom.is_none()
             || (c.start == block.start && c.duration == block.duration);
         if c.title.is_none() && c.picture.is_none() && fills && whole {
-            p.tracks[ti].clips[ci].picture = Some(picture.clone());
+            let clip = c.clone();
+            let mut given = picture.clone();
+            given.retarget(|frame| clip.source_at(block.key_time(frame).round() as i64));
+            p.tracks[ti].clips[ci].picture = Some(given);
         } else {
             dropped.push(id.clone());
         }
@@ -7350,9 +7366,16 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
         if let Some(e) = &a.effects {
             v["audio"]["effects"] = json!(e.names());
         }
-        if a.is_keyed() {
-            v["keyframes"] = json!(["volume"]);
-        }
+    }
+    let mut keyed: Vec<&str> = Vec::new();
+    if c.audio.as_ref().is_some_and(|a| a.is_keyed()) {
+        keyed.push("volume");
+    }
+    if let Some(picture) = &c.picture {
+        keyed.extend(picture.keyed_names());
+    }
+    if !keyed.is_empty() {
+        v["keyframes"] = json!(keyed);
     }
     v
 }

@@ -1102,9 +1102,12 @@ pub enum Request {
         param: KeyParam,
         #[serde(default)]
         at: Option<TimeSpec>,
-        /// The volume in dB, from -60 to 24.
+        /// The value at the keyframe. A number for volume (dB, from -60
+        /// to 24), rotation (degrees) and a crop side (a fraction). For
+        /// position and zoom, two numbers, x then y, or one number for
+        /// both axes of zoom.
         #[serde(default)]
-        value: Option<f64>,
+        value: Option<KeyValue>,
         #[serde(default)]
         ease: Option<Ease>,
     },
@@ -1121,12 +1124,14 @@ pub enum Request {
         frames: Option<OneOrMany<i64>>,
         #[serde(default)]
         at: Option<OneOrMany<TimeSpec>>,
-        /// The new volume in dB, from -60 to 24.
+        /// The new value. A number, or two numbers for position and zoom.
         #[serde(default)]
-        value: Option<f64>,
-        /// dB to add to each value. Each stops at -60 and +24 dB.
+        value: Option<KeyValue>,
+        /// Added to each value. A number, or two numbers for position and
+        /// zoom. Volume stops at -60 and +24 dB. A picture value stops at
+        /// its own limits.
         #[serde(default)]
-        by: Option<f64>,
+        by: Option<KeyValue>,
         /// Sets the handles: flat, a third of the way to the keyframe
         /// before (In) and after (Out). `linear` takes them off.
         #[serde(default)]
@@ -1781,6 +1786,11 @@ pub enum Request {
         /// What is cut off its bottom, as a fraction of its height.
         #[serde(default)]
         crop_bottom: Option<f64>,
+        /// Where a change of a value that has keyframes goes, as a
+        /// keyframe: the playhead by default (decision D75). A value with
+        /// no keyframes ignores it.
+        #[serde(default)]
+        at: Option<TimeSpec>,
         /// A slow push or pull and pan across the clip, from a start box to
         /// an end box; null takes it off. `{}` turns it on as it starts.
         #[serde(
@@ -2781,13 +2791,53 @@ pub enum Detect {
     Speech,
 }
 
-/// The value that keyframes set (decision D81).
+/// The value that keyframes set (decisions D75 and D81).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyParam {
     /// The volume of a clip's sound, in dB.
     #[default]
     Volume,
+    /// Position X and Y, one keyframe for both, as fractions of the frame.
+    Position,
+    /// Zoom X and Y, one keyframe for both. One number in `value` sets both.
+    Zoom,
+    /// Rotation in degrees.
+    Rotation,
+    /// Crop Left, as a fraction of the width.
+    CropLeft,
+    /// Crop Right, as a fraction of the width.
+    CropRight,
+    /// Crop Top, as a fraction of the height.
+    CropTop,
+    /// Crop Bottom, as a fraction of the height.
+    CropBottom,
+}
+
+/// A keyframe value: one number, or x and y for position and zoom.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum KeyValue {
+    /// One number.
+    Scalar(f64),
+    /// X then Y.
+    Pair([f64; 2]),
+}
+
+impl KeyValue {
+    pub fn pair(self) -> [f64; 2] {
+        match self {
+            KeyValue::Scalar(n) => [n, n],
+            KeyValue::Pair(v) => v,
+        }
+    }
+
+    pub fn scalar(self) -> Option<f64> {
+        match self {
+            KeyValue::Scalar(n) => Some(n),
+            KeyValue::Pair(_) => None,
+        }
+    }
 }
 
 /// What `clip.normalize` measures (deviation X72).

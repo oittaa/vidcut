@@ -96,7 +96,7 @@ fn is_volume(e: &Value) -> bool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct Timing {
+pub(crate) struct Timing {
     pub speed: f64,
     pub start: f64,
 }
@@ -110,7 +110,7 @@ impl Timing {
         self.start * (1.0 - 1.0 / self.speed)
     }
 
-    fn file(&self, frames: f64) -> f64 {
+    pub(crate) fn file(&self, frames: f64) -> f64 {
         if self.retimed() {
             frames / self.speed + self.offset()
         } else {
@@ -118,7 +118,7 @@ impl Timing {
         }
     }
 
-    fn source(&self, at: f64) -> f64 {
+    pub(crate) fn source(&self, at: f64) -> f64 {
         if self.retimed() {
             self.speed * (at - self.offset())
         } else {
@@ -126,7 +126,7 @@ impl Timing {
         }
     }
 
-    fn scale(&self) -> f64 {
+    pub(crate) fn scale(&self) -> f64 {
         if self.retimed() { self.speed } else { 1.0 }
     }
 }
@@ -382,6 +382,26 @@ impl Effects {
             }
         }
         self.list.retain(|k| in_use(k));
+    }
+
+    pub fn scale_handles(&mut self, ratio: f64) {
+        if ratio == 1.0 {
+            return;
+        }
+        for p in params_mut(&mut self.list) {
+            let Some(Value::Object(keys)) = p.get_mut("Key Frames") else {
+                continue;
+            };
+            for k in keys.values_mut() {
+                for name in ["InBez", "OutBez"] {
+                    if let Some(b) = k.get_mut(name).and_then(Value::as_array_mut)
+                        && let Some(frames) = b.first().and_then(Value::as_f64)
+                    {
+                        b[0] = json!(frames * ratio);
+                    }
+                }
+            }
+        }
     }
 
     pub fn retime(&mut self, f: impl Fn(f64) -> f64) {

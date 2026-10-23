@@ -1343,17 +1343,39 @@ pub struct Picture {
     /// rotation, `[x, y]` as fractions of the frame from its top left, each
     /// from -100 to 100. With an anchor away from the middle, the zoom and
     /// the rotation then move the middle about the anchor. Usual: `[0.5,
-    /// 0.5]`.
+    /// 0.5]`. With `position_keys`, the place at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
+    /// Position keyframes, one for X and Y (decision D75). `value` is X.
+    /// `position_y` is Y, one number for each keyframe, in the same order.
+    /// Left out when the position has no keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub position_keys: Vec<Keyframe>,
+    /// Y of each `position_keys` entry. Left out with those keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub position_y: Vec<f64>,
     /// How much larger it is drawn across and down, about its anchor, `[x,
-    /// y]`, each from 1/100 to 100. Usual: `[1, 1]`.
+    /// y]`, each from 1/100 to 100. Usual: `[1, 1]`. With `zoom_keys`, the
+    /// zoom at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zoom: Option<[f64; 2]>,
+    /// Zoom keyframes, one for X and Y (decision D75). `value` is X.
+    /// `zoom_y` is Y, one number for each keyframe, in the same order.
+    /// Left out when the zoom has no keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zoom_keys: Vec<Keyframe>,
+    /// Y of each `zoom_keys` entry. Left out with those keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zoom_y: Vec<f64>,
     /// Degrees it is turned counterclockwise about its anchor, from -3600 to
-    /// 3600. Usual: 0.
+    /// 3600. Usual: 0. With `rotation_keys`, the angle at a frame is that
+    /// curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<f64>,
+    /// Rotation keyframes, in degrees (decision D75). Left out when the
+    /// rotation has no keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rotation_keys: Vec<Keyframe>,
     /// The point of the picture that the zoom and the rotation work about,
     /// `[x, y]` as fractions of the picture from its top left, as it shows
     /// after the flips, each from -100 to 100. A Dynamic Zoom does not move
@@ -1377,9 +1399,22 @@ pub struct Picture {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub flip_vertical: bool,
     /// What is cut off each side, as fractions of the source picture; the
-    /// rest stays where it was.
+    /// rest stays where it was. A side with keyframes takes its curve at
+    /// the frame (`crop_left_keys` and the three beside it).
     #[serde(default, skip_serializing_if = "Crop::is_none")]
     pub crop: Crop,
+    /// Crop Left keyframes, as fractions of the width (decision D75).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crop_left_keys: Vec<Keyframe>,
+    /// Crop Right keyframes, as fractions of the width.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crop_right_keys: Vec<Keyframe>,
+    /// Crop Top keyframes, as fractions of the height.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crop_top_keys: Vec<Keyframe>,
+    /// Crop Bottom keyframes, as fractions of the height.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crop_bottom_keys: Vec<Keyframe>,
     /// A slow push or pull and pan across the clip, from a start box to an
     /// end box. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]

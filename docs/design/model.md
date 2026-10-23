@@ -348,6 +348,9 @@ Writing:
   - a `Crop` of each side
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
 - Each value is left out at its usual value. Thus a picture that `Picture::is_usual` accepts is only fitted into the frame.
+- Position, zoom, rotation and each crop side can hold `Keyframe`s beside the plain value (D75).
+- `position_keys` holds X. `position_y` holds Y, one number for each keyframe. Zoom does the same.
+- `Picture::is_usual` is false while any of these values has keyframes.
 - `ops::picture` holds the edits:
   - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share. It leaves usual values out.
   - `ops::picture::has_picture` says which clips take a picture: not titles, generators or sound.

@@ -253,14 +253,24 @@ fn shape_of(p: &Project, c: &Clip, m: Option<&Media>) -> picture::Shape {
     }
 }
 
-fn with_picture(c: &Clip, shape: &picture::Shape, effects: Vec<Value>, g: i64) -> Vec<Value> {
+fn with_picture(
+    c: &Clip,
+    shape: &picture::Shape,
+    effects: Vec<Value>,
+    g: i64,
+    source: i64,
+) -> Vec<Value> {
     let Some(x) = &c.picture else {
         return effects;
+    };
+    let timing = effects::Timing {
+        speed: c.speed(),
+        start: source as f64,
     };
     effects
         .into_iter()
         .filter(|e| !picture::is_placing(e))
-        .chain(picture::effects(x, shape, g))
+        .chain(picture::effects(x, shape, g, source, &timing))
         .collect()
 }
 
@@ -593,7 +603,7 @@ pub fn export_drawn(
                 );
                 let effects = match &c.title {
                     Some(t) => titles::with_opacity(t, effects),
-                    None => with_picture(c, &shape_of(p, c, m), effects, g),
+                    None => with_picture(c, &shape_of(p, c, m), effects, g, c.source_at(s)),
                 };
                 let mut it = match &c.compound {
                     Some(k) => block(c, k, &label, c.source_at(s), e - s, effects),

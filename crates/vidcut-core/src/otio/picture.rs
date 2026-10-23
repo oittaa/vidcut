@@ -2,7 +2,7 @@ use serde_json::{Map, Value, json};
 
 use super::EDITOR;
 use super::effects::{effect, group, keyed, plain, ranged, rounded};
-use crate::model::{Crop, DynamicZoom, Ease, Picture, VideoInfo, ZoomBox};
+use crate::model::{Crop, DynamicZoom, Ease, Handle, Keyframe, Picture, VideoInfo, ZoomBox};
 
 const TRANSFORM: &str = "Transform";
 const CROPPING: &str = "Cropping";
@@ -100,6 +100,25 @@ fn animated(name: &str, id: &str) -> bool {
     name == ZOOMING && (id == CENTER || id == SIZE)
 }
 
+fn playable(name: &str, id: &str) -> bool {
+    match name {
+        TRANSFORM => matches!(id, ZOOM_X | ZOOM_Y | PAN | TILT | ROTATION),
+        CROPPING => CROPS.contains(&id),
+        _ => false,
+    }
+}
+
+fn plain_keys(p: &Value) -> bool {
+    p["Key Frames"].as_object().is_some_and(|keys| {
+        keys.values().all(|k| {
+            k.as_object().is_some_and(|o| {
+                o.keys()
+                    .all(|n| matches!(n.as_str(), "Value" | "Variant Type" | "InBez" | "OutBez"))
+            })
+        })
+    })
+}
+
 fn keyframed(p: &Value) -> bool {
     match &p["Key Frames"] {
         Value::Null => false,
@@ -131,7 +150,15 @@ fn parameters(effects: &[Value]) -> Option<Parameters<'_>> {
             .flatten()
         {
             let id = p["Parameter ID"].as_str()?;
-            if !known(name).contains(&id) || keyframed(p) != animated(name, id) {
+            if !known(name).contains(&id) {
+                return None;
+            }
+            let keyed = keyframed(p);
+            if keyed && animated(name, id) {
+                values.push((id, p));
+                continue;
+            }
+            if keyed && !(playable(name, id) && plain_keys(p)) {
                 return None;
             }
             values.push((id, p));
@@ -293,7 +320,76 @@ impl Placement {
                 bottom,
             },
             dynamic_zoom: self.dynamic,
+            ..Picture::default()
         }
+    }
+
+    fn with_keys(
+        self,
+        effects: &[Value],
+        shape: &Shape,
+        timing: &super::effects::Timing,
+        origin: i64,
+    ) -> Option<Picture> {
+        let (_, values) = parameters(effects)?;
+        let keys = |id: &str| match values.iter().find(|(k, _)| *k == id) {
+            None => Some(Vec::new()),
+            Some((_, p)) => read_keys(p, timing, origin),
+        };
+        let mut picture = self.picture(shape);
+        let zoom = merge(keys(ZOOM_X)?, keys(ZOOM_Y)?, self.zoom[0], self.zoom[1])?;
+        let [pw, ph] = shape.picture(self.scale);
+        let [fw, fh] = shape.fitted;
+        (picture.zoom_keys, picture.zoom_y) = scaled_pair(zoom, pw / fw, ph / fh);
+        let moved = merge(keys(PAN)?, keys(TILT)?, self.moved[0], self.moved[1])?;
+        (picture.position_keys, picture.position_y) =
+            placed_pair(moved, self.anchor, self.scale, shape);
+        picture.rotation_keys = keys(ROTATION)?
+            .into_iter()
+            .map(|k| Keyframe {
+                value: if k.value.abs() > TURNS {
+                    rounded(k.value % 360.0)
+                } else {
+                    rounded(k.value)
+                },
+                ..k
+            })
+            .collect();
+        let crop = [
+            keys(CROPS[0])?,
+            keys(CROPS[1])?,
+            keys(CROPS[2])?,
+            keys(CROPS[3])?,
+        ];
+        picture.crop_left_keys = crop[0]
+            .iter()
+            .map(|k| Keyframe {
+                value: rounded(k.value),
+                ..*k
+            })
+            .collect();
+        picture.crop_right_keys = crop[1]
+            .iter()
+            .map(|k| Keyframe {
+                value: rounded(k.value),
+                ..*k
+            })
+            .collect();
+        picture.crop_top_keys = crop[2]
+            .iter()
+            .map(|k| Keyframe {
+                value: rounded(k.value),
+                ..*k
+            })
+            .collect();
+        picture.crop_bottom_keys = crop[3]
+            .iter()
+            .map(|k| Keyframe {
+                value: rounded(k.value),
+                ..*k
+            })
+            .collect();
+        Some(picture)
     }
 }
 
@@ -305,6 +401,8 @@ pub fn take(
     effects: &[Value],
     ours: Option<&Picture>,
     shape: &Shape,
+    origin: i64,
+    speed: f64,
 ) -> Result<(Vec<Value>, Option<Picture>), Vec<String>> {
     let rest = || -> Vec<Value> { effects.iter().filter(|e| !is_placing(e)).cloned().collect() };
     if let Some(p) = ours {
@@ -313,7 +411,14 @@ pub fn take(
     let Some(read) = placement(effects) else {
         return Ok((effects.to_vec(), None));
     };
-    match crate::ops::picture::checked(&read.picture(shape)) {
+    let timing = super::effects::Timing {
+        speed,
+        start: origin as f64,
+    };
+    let Some(picture) = read.with_keys(effects, shape, &timing, origin) else {
+        return Ok((effects.to_vec(), None));
+    };
+    match crate::ops::picture::checked(&picture) {
         Ok(picture) => Ok((rest(), picture)),
         Err(_) => {
             let mut names: Vec<String> = Vec::new();
@@ -341,8 +446,186 @@ pub fn reaches(p: &Picture, shape: &Shape) -> bool {
     moved(p, shape).iter().all(|v| v.abs() <= REACH)
 }
 
+fn moved_at([x, y]: [f64; 2], shape: &Shape) -> [f64; 2] {
+    let ([w, h], [fw, fh]) = (shape.frame, shape.fitted);
+    [rounded((x - 0.5) * w / fw), rounded(-(y - 0.5) * h / fh)]
+}
+
+fn read_keys(p: &Value, timing: &super::effects::Timing, origin: i64) -> Option<Vec<Keyframe>> {
+    let Some(keys) = p.get("Key Frames").and_then(Value::as_object) else {
+        return Some(Vec::new());
+    };
+    if keys.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut out = Vec::new();
+    for (t, k) in keys {
+        let at = t.parse::<f64>().ok()?;
+        let frame = (timing.source(at) + origin as f64).round() as i64;
+        let value = k["Value"].as_f64()?;
+        let handle = |name: &str, before: bool| {
+            let b = k.get(name)?.as_array()?;
+            let h = Handle {
+                frames: b.first()?.as_f64()? * timing.scale(),
+                value: b.get(1)?.as_f64()?,
+            };
+            crate::keyframes::checked_handle(h, before).ok()
+        };
+        out.push(Keyframe {
+            frame,
+            value,
+            in_handle: handle("InBez", true),
+            out_handle: handle("OutBez", false),
+        });
+    }
+    out.sort_by_key(|k| k.frame);
+    out.dedup_by_key(|k| k.frame);
+    Some(out)
+}
+
+fn merge(
+    x: Vec<Keyframe>,
+    y: Vec<Keyframe>,
+    x_plain: f64,
+    y_plain: f64,
+) -> Option<(Vec<Keyframe>, Vec<f64>)> {
+    if x.is_empty() && y.is_empty() {
+        return Some((Vec::new(), Vec::new()));
+    }
+    if x.is_empty() {
+        let ys: Vec<f64> = y.iter().map(|k| k.value).collect();
+        let keys = y
+            .into_iter()
+            .map(|k| Keyframe {
+                value: x_plain,
+                ..k
+            })
+            .collect();
+        return Some((keys, ys));
+    }
+    if y.is_empty() {
+        return Some((x.clone(), vec![y_plain; x.len()]));
+    }
+    if x.len() != y.len() || x.iter().zip(&y).any(|(a, b)| a.frame != b.frame) {
+        return None;
+    }
+    Some((x, y.into_iter().map(|k| k.value).collect()))
+}
+
+fn scale_handle(h: Option<Handle>, factor: f64) -> Option<Handle> {
+    h.map(|h| Handle {
+        frames: h.frames,
+        value: h.value * factor,
+    })
+}
+
+fn scaled_pair((x, y): (Vec<Keyframe>, Vec<f64>), fx: f64, fy: f64) -> (Vec<Keyframe>, Vec<f64>) {
+    if x.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let keys = x
+        .into_iter()
+        .map(|k| Keyframe {
+            value: rounded(k.value * fx),
+            in_handle: scale_handle(k.in_handle, fx),
+            out_handle: scale_handle(k.out_handle, fx),
+            ..k
+        })
+        .collect();
+    (keys, y.into_iter().map(|v| rounded(v * fy)).collect())
+}
+
+fn placed_pair(
+    (x, y): (Vec<Keyframe>, Vec<f64>),
+    anchor: [f64; 2],
+    scale: u8,
+    shape: &Shape,
+) -> (Vec<Keyframe>, Vec<f64>) {
+    if x.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let [pw, _] = shape.picture(scale);
+    let ([w, _], _) = (shape.frame, shape.fitted);
+    let fx = pw / w;
+    let mut keys = Vec::new();
+    let mut ys = Vec::new();
+    for (k, tilt) in x.into_iter().zip(y) {
+        let at = position_of(k.value, tilt, anchor, scale, shape);
+        keys.push(Keyframe {
+            value: at[0],
+            in_handle: scale_handle(k.in_handle, fx),
+            out_handle: scale_handle(k.out_handle, fx),
+            frame: k.frame,
+        });
+        ys.push(at[1]);
+    }
+    (keys, ys)
+}
+
+fn position_of(pan: f64, tilt: f64, anchor: [f64; 2], scale: u8, shape: &Shape) -> [f64; 2] {
+    let [pw, ph] = shape.picture(scale);
+    let ([w, h], [fw, fh]) = (shape.frame, shape.fitted);
+    let [ax, ay] = anchor;
+    let d = [ax * (pw - fw) + pan * pw, -ay * (ph - fh) - tilt * ph];
+    [rounded(0.5 + d[0] / w), rounded(0.5 + d[1] / h)]
+}
+
+fn file_curve(
+    keys: &[Keyframe],
+    y: Option<&[f64]>,
+    source: i64,
+    timing: &super::effects::Timing,
+    map: impl Fn(f64) -> f64,
+    slope: f64,
+) -> Option<Value> {
+    if keys.is_empty() {
+        return None;
+    }
+    let mut out = serde_json::Map::new();
+    for (i, k) in keys.iter().enumerate() {
+        let at = timing.file((k.frame - source) as f64).round();
+        let raw = y.and_then(|ys| ys.get(i).copied()).unwrap_or(k.value);
+        let mut v = json!({ "Value": map(raw), "Variant Type": "Double" });
+        let bez = |h: Handle| json!([rounded(h.frames / timing.scale()), rounded(h.value * slope)]);
+        if let Some(h) = k.in_handle {
+            v["InBez"] = bez(h);
+        }
+        if let Some(h) = k.out_handle {
+            v["OutBez"] = bez(h);
+        }
+        let name = if at.fract() == 0.0 {
+            format!("{}", at as i64)
+        } else {
+            at.to_string()
+        };
+        out.insert(name, v);
+    }
+    Some(Value::Object(out))
+}
+
 fn double(id: &str, value: f64, usual: f64, (low, high): (f64, f64)) -> Option<Value> {
     (value != usual).then(|| ranged(keyed(id, json!(value), json!(usual), "Double"), low, high))
+}
+
+fn double_frames(
+    id: &str,
+    value: f64,
+    usual: f64,
+    range: (f64, f64),
+    frames: Option<Value>,
+) -> Option<Value> {
+    match frames {
+        None => double(id, value, usual, range),
+        Some(frames) => {
+            let mut p = ranged(
+                keyed(id, json!(value), json!(usual), "Double"),
+                range.0,
+                range.1,
+            );
+            p["Key Frames"] = frames;
+            Some(p)
+        }
+    }
 }
 
 fn boolean(id: &str, value: bool, usual: bool) -> Option<Value> {
@@ -377,18 +660,67 @@ fn zooming(z: &DynamicZoom, g: i64) -> Vec<Value> {
     vec![ease, center, size]
 }
 
-pub fn effects(p: &Picture, shape: &Shape, g: i64) -> Vec<Value> {
+pub(crate) fn effects(
+    p: &Picture,
+    shape: &Shape,
+    g: i64,
+    source: i64,
+    timing: &super::effects::Timing,
+) -> Vec<Value> {
     let [zx, zy] = p.scale();
     let [ax, ay] = p.pivot();
     let [pan, tilt] = moved(p, shape).map(|v| v.clamp(-REACH, REACH));
     let (zoom, reach) = ((0.0, 100.0), (-REACH, REACH));
+    let (sx, sy) = (
+        shape.frame[0] / shape.fitted[0],
+        shape.frame[1] / shape.fitted[1],
+    );
+    let zoom_x = file_curve(&p.zoom_keys, None, source, timing, |v| v, 1.0);
+    let zoom_y = file_curve(&p.zoom_keys, Some(&p.zoom_y), source, timing, |v| v, 1.0);
+    let pan_keys = file_curve(
+        &p.position_keys,
+        None,
+        source,
+        timing,
+        |v| moved_at([v, 0.5], shape)[0],
+        sx,
+    );
+    let tilt_keys = file_curve(
+        &p.position_keys,
+        Some(&p.position_y),
+        source,
+        timing,
+        |v| moved_at([0.5, v], shape)[1],
+        -sy,
+    );
+    let turn_keys = file_curve(&p.rotation_keys, None, source, timing, |v| v, 1.0);
+    let zx = p.zoom_keys.first().map_or(zx, |k| k.value);
+    let zy = p.zoom_y.first().copied().unwrap_or(zy);
+    let pan = p
+        .position_keys
+        .first()
+        .map_or(pan, |k| moved_at([k.value, 0.5], shape)[0]);
+    let tilt = p
+        .position_y
+        .first()
+        .copied()
+        .map_or(tilt, |y| moved_at([0.5, y], shape)[1]);
+    let turn = p.rotation_keys.first().map_or(p.turn(), |k| k.value);
+    let linked = match p.zoom_keys.is_empty() {
+        true => zx == zy,
+        false => p
+            .zoom_keys
+            .iter()
+            .zip(&p.zoom_y)
+            .all(|(k, y)| k.value == *y),
+    };
     let transform: Vec<Value> = [
-        double(ZOOM_X, zx, 1.0, zoom),
-        double(ZOOM_Y, zy, 1.0, zoom),
-        boolean(ZOOM_LINK, zx == zy, true),
-        double(PAN, pan, 0.0, reach),
-        double(TILT, tilt, 0.0, reach),
-        double(ROTATION, p.turn(), 0.0, (-100000.0, 100000.0)),
+        double_frames(ZOOM_X, zx, 1.0, zoom, zoom_x),
+        double_frames(ZOOM_Y, zy, 1.0, zoom, zoom_y),
+        boolean(ZOOM_LINK, linked, true),
+        double_frames(PAN, pan, 0.0, reach, pan_keys),
+        double_frames(TILT, tilt, 0.0, reach, tilt_keys),
+        double_frames(ROTATION, turn, 0.0, (-100000.0, 100000.0), turn_keys),
         double(PITCH, p.pitch(), 0.0, (-LEAN, LEAN)),
         double(YAW, p.yaw(), 0.0, (-LEAN, LEAN)),
         point(ANCHOR, [rounded(ax - 0.5), rounded(0.5 - ay)], [0.0, 0.0]),
@@ -398,10 +730,21 @@ pub fn effects(p: &Picture, shape: &Shape, g: i64) -> Vec<Value> {
     .into_iter()
     .flatten()
     .collect();
+    let crop_keys = [
+        &p.crop_left_keys,
+        &p.crop_right_keys,
+        &p.crop_top_keys,
+        &p.crop_bottom_keys,
+    ];
     let cropping: Vec<Value> = CROPS
         .into_iter()
         .zip(p.crop.sides())
-        .filter_map(|(id, v)| double(id, v, 0.0, (0.0, 1.0)))
+        .zip(crop_keys)
+        .filter_map(|((id, v), keys)| {
+            let frames = file_curve(keys, None, source, timing, |n| n, 1.0);
+            let value = keys.first().map_or(v, |k| k.value);
+            double_frames(id, value, 0.0, (0.0, 1.0), frames)
+        })
         .collect();
     let scaling = vec![keyed(SCALE, json!(FIT), json!(0), "UInt")];
     let dynamic = p.dynamic_zoom.map_or_else(Vec::new, |z| zooming(&z, g));
@@ -456,8 +799,15 @@ mod tests {
         given(&transform, 3)
     }
 
+    fn steady() -> crate::otio::effects::Timing {
+        crate::otio::effects::Timing {
+            speed: 1.0,
+            start: 0.0,
+        }
+    }
+
     fn read(effects: &[Value], shape: &Shape) -> Option<Picture> {
-        take(effects, None, shape).expect("read").1
+        take(effects, None, shape, 0, 1.0).expect("read").1
     }
 
     #[test]
@@ -499,6 +849,10 @@ mod tests {
             clip: "c1".into(),
             picture,
             run: None,
+            source: 0,
+            pace: crate::render::Pace::default(),
+            start: 0,
+            ready: true,
         };
         let fitted = [240.0, 0.0, 1440.0, 1080.0];
         let level = Placing::new(&[placed], (1920.0, 1080.0), fitted).levels[0];
@@ -525,7 +879,7 @@ mod tests {
             anchor: Some([0.75, 0.4]),
             ..Picture::default()
         };
-        let written = effects(&p, &Shape::whole((1920, 1080)), 0);
+        let written = effects(&p, &Shape::whole((1920, 1080)), 0, 0, &steady());
         let anchor = written[0]["metadata"][EDITOR]["Parameters"]
             .as_array()
             .into_iter()
@@ -545,7 +899,7 @@ mod tests {
             ..Picture::default()
         };
         let shape = Shape::whole((1920, 1080));
-        assert_eq!(read(&effects(&p, &shape, 0), &shape), Some(p));
+        assert_eq!(read(&effects(&p, &shape, 0, 0, &steady()), &shape), Some(p));
     }
 
     #[test]
@@ -556,6 +910,6 @@ mod tests {
             ..Picture::default()
         };
         let shape = Shape::whole((1920, 1080));
-        assert_eq!(read(&effects(&p, &shape, 0), &shape), Some(p));
+        assert_eq!(read(&effects(&p, &shape, 0, 0, &steady()), &shape), Some(p));
     }
 }
