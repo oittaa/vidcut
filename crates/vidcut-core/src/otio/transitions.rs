@@ -36,30 +36,64 @@ pub fn mixes(t: &Transition) -> bool {
     dissolves(t) || wipe_of(t).is_some()
 }
 
+const EDGE_WIPE: &str = "Edge Wipe";
+
 pub fn wipe_otio(direction: WipeDirection) -> Value {
+    let parameters = match edge_angle(direction) {
+        0 => Vec::new(),
+        angle => vec![json!({
+            "Default Parameter Value": 0,
+            "Parameter ID": "angle",
+            "Parameter Value": angle,
+            "Variant Type": "Int",
+            "maxValue": 360.0,
+            "minValue": -360.0,
+        })],
+    };
     json!({
         "OTIO_SCHEMA": "Transition.1",
-        "name": "Wipe",
+        "name": EDGE_WIPE,
         "transition_type": "Custom_Transition",
-        "metadata": { VIDCUT: { "wipe": wipe_name(direction) } }
+        "metadata": { EDITOR: {
+            "Effects": {
+                "Display Type": 1,
+                "Effect Name": EDGE_WIPE,
+                "Enabled": true,
+                "Name": EDGE_WIPE,
+                "Parameters": parameters,
+                "Type": 13,
+            },
+            "Transition Type": EDGE_WIPE,
+        }}
     })
 }
 
-fn wipe_name(direction: WipeDirection) -> &'static str {
+fn edge_angle(direction: WipeDirection) -> i64 {
     match direction {
-        WipeDirection::Left => "left",
-        WipeDirection::Right => "right",
-        WipeDirection::Up => "up",
-        WipeDirection::Down => "down",
+        WipeDirection::Down => 0,
+        WipeDirection::Left => 90,
+        WipeDirection::Up => 180,
+        WipeDirection::Right => -90,
     }
 }
 
 fn wipe_in(o: &Value) -> Option<WipeDirection> {
-    match o["metadata"][VIDCUT]["wipe"].as_str() {
-        Some("left") => Some(WipeDirection::Left),
-        Some("right") => Some(WipeDirection::Right),
-        Some("up") => Some(WipeDirection::Up),
-        Some("down") => Some(WipeDirection::Down),
+    let editor = &o["metadata"][EDITOR];
+    if editor["Transition Type"] != EDGE_WIPE {
+        return None;
+    }
+    let angle = match editor["Effects"]["Parameters"]
+        .as_array()
+        .and_then(|ps| ps.iter().find(|p| p["Parameter ID"] == "angle"))
+    {
+        Some(p) => p["Parameter Value"].as_i64()?,
+        None => 0,
+    };
+    match angle.rem_euclid(360) {
+        0 => Some(WipeDirection::Down),
+        90 => Some(WipeDirection::Left),
+        180 => Some(WipeDirection::Up),
+        270 => Some(WipeDirection::Right),
         _ => None,
     }
 }

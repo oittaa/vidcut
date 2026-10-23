@@ -339,6 +339,13 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - Resolve reads the earlier key as the start and the later key as the end, whatever their times.
   - The box is in fractions of Resolve's picture, as Pan and Tilt are.
   - vidcut reads a crop, fill or stretch as a zoom after the box, and that zoom scales the box with the picture. Thus `otio::picture` reads and writes the box as it is.
+- **Resolve reads a wipe only as its Edge Wipe effect.**
+  - It writes a `Custom_Transition` named `Edge Wipe`, with `"Transition Type": "Edge Wipe"` and an effect of type 13 in its metadata.
+  - The `angle` parameter (`Int`, −360 to 360) gives the edge. 0 is the bottom, 90 the left, 180 the top and −90 the right.
+  - Resolve leaves out an angle of 0. The incoming picture comes in from that edge, and the edge moves at an even speed.
+  - Without `Transition Type`, or with the name alone, Resolve makes a cross dissolve. It also does so for a transition with metadata it does not know.
+  - Resolve refuses the whole timeline when an `Int` has a decimal point, for example `90.0`.
+  - Measured with renders of 24-frame wipes at 0, 90, 180 and −90 degrees.
 - **Resolve plays each ease of Dynamic Zoom as a straight line.**
   - It keeps `dynamicZoomEase` (UInt: 0 Linear, 1 Ease In, 2 Ease Out, 3 Ease In and Out) and writes it.
   - All four play the same straight line, in stills and in a Deliver render.
