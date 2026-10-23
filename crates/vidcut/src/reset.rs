@@ -95,10 +95,7 @@ fn sweep(
         let same = keep.contains(&e) || real.as_ref().is_some_and(|r| keep.contains(r));
         if same {
             found.1.push(e);
-        } else if keep
-            .iter()
-            .any(|k| k.starts_with(&e) || real.as_ref().is_some_and(|r| k.starts_with(r)))
-        {
+        } else if keep.iter().any(|k| k.starts_with(&e)) {
             sweep(&e, keep, others, found)?;
         } else {
             found.0.push(e);
@@ -259,6 +256,45 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(target.join("a.txt")).unwrap(),
             "safe"
+        );
+        assert!(!r.join("cache/thumbs").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_a_folder_around_a_kept_file_is_not_walked() {
+        let root = tempfile::tempdir().unwrap();
+        let r = &vidcut_core::dirs::canonical(root.path()).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = &vidcut_core::dirs::canonical(outside.path()).unwrap();
+        std::fs::create_dir_all(target.join("project")).unwrap();
+        std::fs::write(target.join("project/open.jsonl"), "hist").unwrap();
+        std::fs::write(target.join("precious.txt"), "keep-me").unwrap();
+        tree(r, &["cache/thumbs/a.jpg"]);
+        symlink(target, r.join("cache/link")).unwrap();
+        let (d, keep) = resolved(
+            dirs(r, "config", "cache", "state"),
+            vec![target.join("project/open.jsonl")],
+        );
+        let (removed, kept) = plan(&d, &keep).unwrap();
+        assert_eq!(
+            (names(r, &removed), names(r, &kept)),
+            (
+                vec!["cache/link".to_string(), "cache/thumbs".into()],
+                vec![]
+            )
+        );
+        for path in &removed {
+            remove(path).unwrap();
+        }
+        assert!(std::fs::symlink_metadata(r.join("cache/link")).is_err());
+        assert_eq!(
+            std::fs::read_to_string(target.join("precious.txt")).unwrap(),
+            "keep-me"
+        );
+        assert_eq!(
+            std::fs::read_to_string(target.join("project/open.jsonl")).unwrap(),
+            "hist"
         );
         assert!(!r.join("cache/thumbs").exists());
     }
