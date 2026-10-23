@@ -87,15 +87,16 @@ jobs:
           set -euo pipefail
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.cargo/bin:$PATH"
-          rustup show active-toolchain
-          rustc --version
+          scripts/ci-pin-rust.sh
 
       # A cache per FFmpeg: ffmpeg-sys-next generates its bindings from
       # FFmpeg's headers, and cargo doesn't notice when those change.
+      # Save only on master: see check.yml.
       - name: Cache compiled dependencies
         uses: Swatinem/rust-cache@v2
         with:
           key: ffmpeg-${{ matrix.ffmpeg }}-${{ steps.source.outputs.ref }}-${{ hashFiles('scripts/ffmpeg/release.env') }}
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Build
         run: |
