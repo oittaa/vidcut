@@ -31,10 +31,15 @@ fn entry(service: SpeechService) -> Result<keyring::Entry> {
         .map_err(|e| Error::internal(format!("the keychain: {e}")))
 }
 
+fn kept_secret(raw: &str) -> Option<&str> {
+    let key = raw.trim();
+    if key.is_empty() { None } else { Some(key) }
+}
+
 fn from_environment(service: SpeechService) -> Option<String> {
     std::env::var(variable(service))
         .ok()
-        .filter(|k| !k.trim().is_empty())
+        .and_then(|raw| kept_secret(&raw).map(str::to_string))
 }
 
 fn from_keychain(service: SpeechService) -> Option<String> {
@@ -95,4 +100,14 @@ pub fn remove_key(service: SpeechService, dry_run: bool) -> Result<Value> {
         }
     }
     Ok(json!({ "service": service, "key": Value::Null }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::kept_secret;
+
+    #[test]
+    fn an_environment_key_loses_its_surrounding_space() {
+        assert_eq!(kept_secret("  sk-test \n"), Some("sk-test"));
+    }
 }

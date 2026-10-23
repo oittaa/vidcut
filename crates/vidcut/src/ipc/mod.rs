@@ -3,6 +3,7 @@ pub mod registry;
 pub mod server;
 pub mod transport;
 
+use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -186,15 +187,181 @@ pub fn runtime_dir() -> PathBuf {
 pub fn private_dir(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir)?;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+        private_dir_unix(dir)
     }
     #[cfg(not(unix))]
-    std::fs::create_dir_all(dir)
+    {
+        std::fs::create_dir_all(dir)
+    }
+}
+
+pub(crate) fn read_capped_line(
+    reader: &mut impl std::io::BufRead,
+    max: u64,
+) -> std::io::Result<Option<String>> {
+    let mut buf = Vec::new();
+    let n = reader
+        .by_ref()
+        .take(max.saturating_add(1))
+        .read_until(b'\n', &mut buf)?;
+    if n == 0 && buf.is_empty() {
+        return Ok(None);
+    }
+    if buf.last() == Some(&b'\n') {
+        buf.pop();
+        if buf.last() == Some(&b'\r') {
+            buf.pop();
+        }
+    }
+    if buf.len() as u64 > max {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("a line is limited to {max} bytes"),
+        ));
+    }
+    String::from_utf8(buf)
+        .map(Some)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+#[cfg(unix)]
+fn private_dir_unix(dir: &Path) -> std::io::Result<()> {
+    use std::io::ErrorKind;
+    use std::os::unix::fs::DirBuilderExt;
+    let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+    if let Ok(meta) = std::fs::symlink_metadata(&dir)
+        && !real_directory(&meta)
+    {
+        return Err(not_private(&dir));
+    }
+    let mut missing = Vec::new();
+    let mut cursor = dir.clone();
+    loop {
+        match std::fs::symlink_metadata(&cursor) {
+            Ok(_) => break,
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                let Some(parent) = cursor.parent().map(Path::to_path_buf) else {
+                    return Err(not_private(&cursor));
+                };
+                if parent.as_os_str().is_empty() || parent == cursor {
+                    return Err(not_private(&cursor));
+                }
+                missing.push(cursor);
+                cursor = parent;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    if cursor != dir {
+        ready_parent(&cursor)?;
+    } else if let Some(parent) = dir.parent()
+        && !parent.as_os_str().is_empty()
+        && std::fs::symlink_metadata(parent).is_ok()
+    {
+        ready_parent(parent)?;
+    }
+    for path in missing.iter().rev() {
+        match std::fs::DirBuilder::new().mode(0o700).create(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+        tighten(path)?;
+    }
+    if missing.is_empty() {
+        tighten(&dir)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn ready_parent(parent: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::symlink_metadata(parent)?;
+    if !real_directory(&meta) {
+        return Err(not_private(parent));
+    }
+    let uid = current_uid();
+    if meta.uid() != uid && !sticky(&meta) {
+        return Err(not_private(parent));
+    }
+    if meta.uid() == uid && vidcut_dir_name(parent) {
+        tighten(parent)?;
+    }
+    let meta = std::fs::symlink_metadata(parent)?;
+    if strangers_can_replace(&meta) {
+        return Err(not_private(parent));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn tighten(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let uid = current_uid();
+    let meta = std::fs::symlink_metadata(path)?;
+    if meta.uid() != uid || !real_directory(&meta) {
+        return Err(not_private(path));
+    }
+    if meta.mode() & 0o777 != 0o700 {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    let meta = std::fs::symlink_metadata(path)?;
+    if private_bits(
+        meta.uid(),
+        uid,
+        meta.mode(),
+        meta.file_type().is_symlink(),
+        meta.file_type().is_dir(),
+    ) {
+        Ok(())
+    } else {
+        Err(not_private(path))
+    }
+}
+
+#[cfg(unix)]
+fn real_directory(meta: &std::fs::Metadata) -> bool {
+    meta.file_type().is_dir()
+}
+
+#[cfg(unix)]
+fn sticky(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    meta.mode() & 0o1000 != 0
+}
+
+#[cfg(unix)]
+fn strangers_can_replace(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let mode = meta.mode();
+    mode & 0o1000 == 0 && mode & 0o022 != 0
+}
+
+#[cfg(unix)]
+fn vidcut_dir_name(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    name == "vidcut" || name == "instances" || name.starts_with("vidcut-")
+}
+
+#[cfg(unix)]
+fn current_uid() -> u32 {
+    unsafe { libc::getuid() }
+}
+
+#[cfg(unix)]
+fn private_bits(owner: u32, uid: u32, mode: u32, symlink: bool, dir: bool) -> bool {
+    dir && !symlink && owner == uid && mode & 0o777 == 0o700
+}
+
+#[cfg(unix)]
+fn not_private(path: &Path) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!("{} is not a private directory", path.display()),
+    )
 }
 
 #[cfg(test)]
@@ -209,5 +376,108 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(route(None, &opts, &r).unwrap(), Route::Headless);
+    }
+
+    #[test]
+    fn a_line_past_the_limit_is_refused() {
+        let mut input = std::io::Cursor::new(&b"abcdef\n"[..]);
+        let err = read_capped_line(&mut input, 4).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(err.to_string(), "a line is limited to 4 bytes");
+    }
+
+    #[test]
+    fn a_line_at_the_limit_is_read() {
+        let mut input = std::io::Cursor::new(&b"abcd\n"[..]);
+        assert_eq!(
+            read_capped_line(&mut input, 4).unwrap().as_deref(),
+            Some("abcd")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn another_owner_is_not_private() {
+        assert!(!super::private_bits(0, 1000, 0o700, false, true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_is_not_a_private_directory() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let link = root.path().join("vidcut-link");
+        symlink(&target, &link).unwrap();
+        let err = private_dir(&link).unwrap_err();
+        let link = std::path::absolute(&link).unwrap();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            err.to_string(),
+            format!("{} is not a private directory", link.display())
+        );
+        let mode = std::fs::symlink_metadata(&target)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o755);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_runtime_directory_is_mode_0700() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o1777)).unwrap();
+        let dir = root.path().join("vidcut-1000");
+        private_dir(&dir).unwrap();
+        let meta = std::fs::symlink_metadata(&dir).unwrap();
+        assert_eq!(meta.permissions().mode() & 0o777, 0o700);
+        assert_eq!(meta.uid(), unsafe { libc::getuid() });
+        let parent = std::fs::symlink_metadata(root.path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777;
+        assert_eq!(parent, 0o1777);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_open_vidcut_parent_is_closed() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let parent = root.path().join("vidcut-9");
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let child = parent.join("instances");
+        private_dir(&child).unwrap();
+        let mode = |p: &std::path::Path| {
+            std::fs::symlink_metadata(p).unwrap().permissions().mode() & 0o777
+        };
+        assert_eq!(mode(&parent), 0o700);
+        assert_eq!(mode(&child), 0o700);
+        assert_eq!(mode(root.path()), 0o755);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_shared_parent_is_not_a_private_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        let dir = root.path().join("instances");
+        let err = private_dir(&dir).unwrap_err();
+        let parent = std::path::absolute(root.path()).unwrap();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            err.to_string(),
+            format!("{} is not a private directory", parent.display())
+        );
+        assert!(std::fs::symlink_metadata(&dir).is_err());
     }
 }

@@ -1,5 +1,14 @@
 pub use imp::{Listener, Stream, exists};
 
+#[cfg(any(windows, test))]
+const PIPE_PREFIX: &str = r"\\.\pipe\";
+
+#[cfg(any(windows, test))]
+fn has_pipe_prefix(text: &str) -> bool {
+    text.get(..PIPE_PREFIX.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(PIPE_PREFIX))
+}
+
 #[cfg(unix)]
 mod imp {
     use std::io::{self, Read, Write};
@@ -148,9 +157,9 @@ mod imp {
     }
 
     fn pipe_name(path: &Path) -> Vec<u16> {
-        const PREFIX: &str = r"\\.\pipe\";
+        const PREFIX: &str = super::PIPE_PREFIX;
         let text = path.to_string_lossy();
-        if text.len() > PREFIX.len() && text[..PREFIX.len()].eq_ignore_ascii_case(PREFIX) {
+        if super::has_pipe_prefix(&text) {
             return wide(&text);
         }
         let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
@@ -521,5 +530,30 @@ mod imp {
         let name = pipe_name(path);
         // SAFETY: `name` is NUL-terminated.
         unsafe { WaitNamedPipeW(name.as_ptr(), 1) != 0 || GetLastError() == ERROR_SEM_TIMEOUT }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_pipe_prefix;
+
+    #[test]
+    fn a_multibyte_character_does_not_panic_in_the_pipe_prefix() {
+        let text = "C:\\abc\u{1F600}";
+        let n = r"\\.\pipe\".len();
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = &text[..n];
+            })
+            .is_err()
+        );
+        assert!(!has_pipe_prefix(text));
+    }
+
+    #[test]
+    fn a_pipe_prefix_matches_in_either_case() {
+        assert!(has_pipe_prefix(r"\\.\pipe\vidcut-1"));
+        assert!(has_pipe_prefix(r"\\.\PIPE\vidcut-1"));
+        assert!(!has_pipe_prefix(r"C:\vidcut"));
     }
 }

@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{RecvTimeoutError, channel};
@@ -76,13 +76,22 @@ fn read_answer(
     progress: &mut dyn FnMut(&Value),
 ) -> Result<Response> {
     let lost = |e: std::io::Error| Error::no_instance(format!("lost the vidcut GUI: {e}"));
+    let max = super::server::Limits::default().line;
     loop {
-        let mut buf = String::new();
-        if reader.read_line(&mut buf).map_err(lost)? == 0 {
-            return Err(Error::no_instance(
-                "the vidcut GUI closed the connection without answering",
-            ));
-        }
+        let buf = match super::read_capped_line(&mut reader, max) {
+            Ok(None) => {
+                return Err(Error::no_instance(
+                    "the vidcut GUI closed the connection without answering",
+                ));
+            }
+            Ok(Some(buf)) => buf,
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                return Err(Error::internal(format!(
+                    "bad reply from the vidcut GUI: {e}"
+                )));
+            }
+            Err(e) => return Err(lost(e)),
+        };
         let v: Value = serde_json::from_str(&buf)
             .map_err(|e| Error::internal(format!("bad reply from the vidcut GUI: {e}")))?;
         if let Some(e) = v.get("error") {
