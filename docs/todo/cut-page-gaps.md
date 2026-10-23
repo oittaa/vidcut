@@ -9,8 +9,6 @@ What [the spec](../cut-page-spec.md) describes and vidcut doesn't do yet.
 - Zoomed-in waveform in the Source Clip scroll area ([§4.1](../cut-page-spec.md#41-modes))
 - Jog In and Jog Out controls ([§4.1](../cut-page-spec.md#41-modes))
 - Jog control ([§4.2](../cut-page-spec.md#42-transport-pp-640-687688-870872))
-- Fast Review ([§4.5](../cut-page-spec.md#45-other-viewer-features))
-- Skimming with C held ([§4.5](../cut-page-spec.md#45-other-viewer-features))
 - Several edit points selected with Ctrl+click ([§8.1](../cut-page-spec.md#81-selection-pp-719720))
 - Trim to Audio ([§8.6](../cut-page-spec.md#86-trimming-pp-693-716-718-726732))
 - Extend Beyond Clip Length in Change Clip Duration ([§8.6](../cut-page-spec.md#86-trimming-pp-693-716-718-726732))

@@ -522,6 +522,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
     key(App, &["F1"], "Keyboard shortcuts", None),
     key(
         Play,
+        &["C"],
+        "Skim",
+        Some("Hold C and move the pointer across the picture. The playhead follows."),
+    ),
+    key(
+        Play,
         &["Shift", "F"],
         "Full screen",
         Some("The viewer fills the display. Press Shift+F again, or Esc, to leave."),

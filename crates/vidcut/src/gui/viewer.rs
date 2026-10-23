@@ -394,6 +394,7 @@ impl Workspace {
         if let Some(stats) = self.stats.as_ref().filter(|_| self.snap.stats) {
             stats_panel(&painter, picture, stats);
         }
+        self.skim(ui, id, picture, player.frames);
 
         ui.add_space(4.0);
         if tools {
@@ -657,6 +658,7 @@ impl Workspace {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, CornerRadius::same(2), theme::colors().track);
         let frames = self.snap.source.frames.max(1);
+        self.skim(ui, PlayerId::Source, rect, frames);
         let x = |f: i64| rect.left() + rect.width() * (f as f32 / frames as f32);
         let frame_at = |px: f32| {
             (((px - rect.left()) / rect.width()).clamp(0.0, 1.0) * frames as f32).round() as i64
@@ -872,6 +874,37 @@ impl Workspace {
         });
     }
 
+    fn skim(&mut self, ui: &egui::Ui, id: PlayerId, rect: Rect, frames: i64) {
+        if ui.ctx().egui_wants_keyboard_input() || self.asking() {
+            return;
+        }
+        let (held, pos) = ui.input(|i| {
+            let held = i.key_down(Key::C) && !i.modifiers.command && !i.modifiers.alt;
+            (held, i.pointer.hover_pos())
+        });
+        let key = egui::Id::unique("skim-frame");
+        if !held {
+            ui.data_mut(|d| d.remove_temp::<i64>(key));
+            return;
+        }
+        let Some(pos) = pos.filter(|p| rect.contains(*p)) else {
+            return;
+        };
+        if self.drag.is_some() {
+            return;
+        }
+        let frame = skim_frame(pos.x, rect.left(), rect.width(), frames);
+        let seen = ui.data(|d| d.get_temp::<i64>(key));
+        if seen == Some(frame) {
+            return;
+        }
+        ui.data_mut(|d| d.insert_temp(key, frame));
+        if seen.is_none() && self.snap.player(id).playing {
+            self.send("player.pause", json!({}));
+        }
+        self.seek(id, frame, true);
+    }
+
     fn transport(
         &mut self,
         ui: &mut egui::Ui,
@@ -890,6 +923,7 @@ impl Workspace {
             Some(T::Play),
             Some(T::Next),
             Some(T::Loop),
+            Some(T::FastReview),
             trim.map(|_| T::TrimIn),
             Some(T::MarkIn),
             Some(T::MarkOut),
@@ -909,6 +943,7 @@ impl Workspace {
                 T::MarkOut,
                 T::MarkIn,
                 T::Tools,
+                T::FastReview,
                 T::Loop,
                 T::TrimIn,
                 T::TrimOut,
@@ -921,7 +956,7 @@ impl Workspace {
             group: |t| match t {
                 T::Tools => 5,
                 T::TrimOut => 0,
-                T::Previous | T::Stop | T::Play | T::Next | T::Loop => 1,
+                T::Previous | T::Stop | T::Play | T::Next | T::Loop | T::FastReview => 1,
                 T::TrimIn => 2,
                 T::MarkIn | T::MarkOut | T::Clear | T::Speed => 3,
                 T::SafeArea => 6,
@@ -979,6 +1014,14 @@ impl Workspace {
                         let r = ui.selectable_label(looping, big(egui_phosphor::regular::REPEAT));
                         if r.clicked() {
                             ws.send("player.loop", json!({ "on": !looping }));
+                        }
+                        r
+                    }
+                    T::FastReview => {
+                        let on = ws.snap.fast_review;
+                        let r = ui.selectable_label(on, "Fast Review");
+                        if r.clicked() {
+                            ws.send("player.fast_review", json!({ "on": !on }));
                         }
                         r
                     }
@@ -1346,6 +1389,7 @@ enum Transport {
     Play,
     Next,
     Loop,
+    FastReview,
     TrimIn,
     MarkIn,
     MarkOut,
@@ -1353,6 +1397,15 @@ enum Transport {
     Speed,
     SafeArea,
     Timecode,
+}
+
+fn skim_frame(x: f32, left: f32, width: f32, frames: i64) -> i64 {
+    if frames <= 1 || !width.is_finite() || width <= 0.0 {
+        return 0;
+    }
+    let t = ((x - left) / width).clamp(0.0, 1.0);
+    let frame = (t * frames as f32).floor() as i64;
+    frame.clamp(0, frames - 1)
 }
 
 fn tape_mark(pointer: i64, end: i64, is_in: bool) -> i64 {
@@ -1520,7 +1573,22 @@ pub(super) fn timecode_input(text: &str, dropped: i64) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{tape_mark, timecode_input};
+    use super::{skim_frame, tape_mark, timecode_input};
+
+    #[test]
+    fn the_left_edge_skims_the_first_frame() {
+        assert_eq!(skim_frame(0.0, 0.0, 100.0, 10), 0);
+    }
+
+    #[test]
+    fn the_right_edge_skims_the_last_frame() {
+        assert_eq!(skim_frame(100.0, 0.0, 100.0, 10), 9);
+    }
+
+    #[test]
+    fn an_empty_picture_skims_frame_zero() {
+        assert_eq!(skim_frame(40.0, 0.0, 100.0, 0), 0);
+    }
 
     #[test]
     fn an_empty_source_keeps_a_tape_in_mark_at_frame_zero() {

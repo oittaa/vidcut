@@ -525,6 +525,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         jobs: Arc::new(Vec::new()),
         audio_scrubbing: true,
         looping: false,
+        fast_review: false,
         stats: false,
         timecode_display: TimecodeDisplay::Auto,
         timer1_origin: Timer1Origin::default(),
@@ -603,6 +604,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         hearing: 0,
         audio_scrubbing: true,
         looping: false,
+        fast_review: false,
+        review_speed: None,
         stats: false,
         timecode_display: TimecodeDisplay::Auto,
         timer1_origin: Timer1Origin::default(),
@@ -871,6 +874,8 @@ struct Live {
     hearing: usize,
     audio_scrubbing: bool,
     looping: bool,
+    fast_review: bool,
+    review_speed: Option<f64>,
     stats: bool,
     timecode_display: TimecodeDisplay,
     timer1_origin: Timer1Origin,
@@ -1256,6 +1261,7 @@ impl Live {
         }
         self.sync_tape_selection();
         self.sync_loop();
+        self.follow_review();
         let mut i = 0;
         while i < self.waits.len() {
             if matches!(self.waits[i].until, Until::Settled { .. }) && self.settled() {
@@ -1377,6 +1383,7 @@ impl Live {
             jobs: self.jobs.clone(),
             audio_scrubbing: self.audio_scrubbing,
             looping: self.looping,
+            fast_review: self.fast_review,
             stats: self.stats,
             timecode_display: self.timecode_display,
             timer1_origin: self.timer1_origin,
@@ -2472,19 +2479,26 @@ impl Live {
                 if let Some(v) = viewer {
                     self.set_viewer(v);
                 }
+                let omitted = speed.is_none();
                 let speed = speed.unwrap_or(1.0);
                 if !speed.is_finite() || speed == 0.0 || speed.abs() > MAX_SPEED {
                     return Step::Now(Err(Error::usage(format!(
                         "speed must be non-zero, within ±{MAX_SPEED}"
                     ))));
                 }
-                self.play(speed);
+                if omitted && self.fast_review {
+                    self.play_reviewed();
+                } else {
+                    self.review_speed = None;
+                    self.play(speed);
+                }
                 Step::Now(Ok(self.state_response()))
             }
             Request::PlayerPause { viewer } => {
                 if let Some(v) = viewer {
                     self.set_viewer(v);
                 }
+                self.review_speed = None;
                 self.player.pause();
                 Step::Now(Ok(self.state_response()))
             }
@@ -2493,8 +2507,12 @@ impl Live {
                     self.set_viewer(v);
                 }
                 if self.player.playing() {
+                    self.review_speed = None;
                     self.player.pause();
+                } else if self.fast_review {
+                    self.play_reviewed();
                 } else {
+                    self.review_speed = None;
                     self.play(1.0);
                 }
                 Step::Now(Ok(self.state_response()))
@@ -2545,6 +2563,19 @@ impl Live {
             Request::PlayerLoop { on } => {
                 self.looping = on.unwrap_or(!self.looping);
                 self.sync_loop();
+                Step::Now(Ok(self.state_response()))
+            }
+            Request::PlayerFastReview { on } => {
+                self.fast_review = on.unwrap_or(!self.fast_review);
+                let id = PlayerId::of(self.viewer);
+                let snap = self.player.snap(id);
+                if self.fast_review {
+                    if snap.playing && (snap.speed - 1.0).abs() < 0.001 {
+                        self.play_reviewed();
+                    }
+                } else if self.review_speed.take().is_some() && snap.playing {
+                    self.play(1.0);
+                }
                 Step::Now(Ok(self.state_response()))
             }
             Request::PlayerStats { show } => {
@@ -3292,6 +3323,68 @@ impl Live {
         }
     }
 
+    fn play_reviewed(&mut self) {
+        let rate = self.review_rate();
+        self.review_speed = Some(rate);
+        self.play(rate);
+    }
+
+    fn follow_review(&mut self) {
+        let Some(applied) = self.review_speed else {
+            return;
+        };
+        if !self.player.playing() {
+            return;
+        }
+        let rate = self.review_rate();
+        if (rate - applied).abs() > 0.001 {
+            self.review_speed = Some(rate);
+            self.play(rate);
+        }
+    }
+
+    fn review_rate(&self) -> f64 {
+        fast_review_rate(self.reviewed_frames(), self.project_fps())
+    }
+
+    fn project_fps(&self) -> f64 {
+        self.project
+            .as_ref()
+            .map_or(30.0, |o| o.project().settings.fps.as_f64())
+    }
+
+    fn reviewed_frames(&self) -> i64 {
+        let Some(open) = &self.project else {
+            return 0;
+        };
+        let p = open.project();
+        match self.viewer {
+            ViewerMode::Timeline => {
+                let at = self.player.position(TIMELINE);
+                p.tracks
+                    .iter()
+                    .rev()
+                    .filter(|t| t.kind == vidcut_core::model::TrackKind::Video && t.video_enabled)
+                    .find_map(|t| {
+                        t.clip_at(at)
+                            .map(|i| (t.clips[i].end() - t.clips[i].start).max(0))
+                    })
+                    .unwrap_or(0)
+            }
+            ViewerMode::SourceClip => self
+                .source_media
+                .as_ref()
+                .and_then(|id| p.media(id).map(|m| p.media_frames(m)))
+                .unwrap_or(0),
+            ViewerMode::SourceTape => {
+                let at = self.player.position(SOURCE);
+                tape_at(&self.tape, at)
+                    .map(|e| e.frames.max(0))
+                    .unwrap_or(0)
+            }
+        }
+    }
+
     fn play_skipping(&mut self, speed: f64) -> bool {
         let (Some(parts), Some(open)) = (&self.skipping, &self.project) else {
             return false;
@@ -3936,6 +4029,7 @@ impl Live {
             "audio_error": self.player.audio_error,
             "audio_scrubbing": self.audio_scrubbing,
             "loop": self.looping,
+            "fast_review": self.fast_review,
             "timecode_display": self.timecode_display,
             "timer1_origin": self.timer1_origin,
             "timecode": timecode,
@@ -4176,9 +4270,43 @@ fn folder_notice(result: &Value) -> String {
     text
 }
 
+pub(crate) fn fast_review_rate(frames: i64, fps: f64) -> f64 {
+    if frames <= 0 || !fps.is_finite() || fps <= 0.0 {
+        return 1.0;
+    }
+    let rate = frames as f64 / fps / 10.0;
+    if !rate.is_finite() || rate <= 1.0 {
+        1.0
+    } else if rate >= 8.0 {
+        8.0
+    } else {
+        rate
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_ten_second_clip_plays_at_normal_speed() {
+        assert_eq!(fast_review_rate(240, 24.0), 1.0);
+    }
+
+    #[test]
+    fn a_twenty_second_clip_plays_at_twice_normal_speed() {
+        assert_eq!(fast_review_rate(480, 24.0), 2.0);
+    }
+
+    #[test]
+    fn a_long_clip_plays_at_most_at_eight_times() {
+        assert_eq!(fast_review_rate(2400, 24.0), 8.0);
+    }
+
+    #[test]
+    fn an_empty_clip_plays_at_normal_speed() {
+        assert_eq!(fast_review_rate(0, 24.0), 1.0);
+    }
 
     #[test]
     fn the_folder_notice_names_the_files_skipped() {

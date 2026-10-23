@@ -185,6 +185,7 @@ pub struct Snapshot {
     pub jobs: Arc<Vec<super::JobInfo>>,
     pub audio_scrubbing: bool,
     pub looping: bool,
+    pub fast_review: bool,
     pub stats: bool,
     pub timecode_display: TimecodeDisplay,
     pub timer1_origin: Timer1Origin,

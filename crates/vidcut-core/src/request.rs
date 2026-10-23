@@ -2194,6 +2194,15 @@ pub enum Request {
         #[serde(default)]
         on: Option<bool>,
     },
+    /// Fast Review (decision D97): Play and Space run a long clip faster than
+    /// a short one. A clip of 10 seconds or less plays at 1×. A longer clip
+    /// plays at its seconds divided by 10, at most 8×. J and L keep their
+    /// shuttle speeds. Off by default. Not saved. Without `on`, toggles.
+    #[serde(rename = "player.fast_review")]
+    PlayerFastReview {
+        #[serde(default)]
+        on: Option<bool>,
+    },
     /// Hear `track`'s fader at `volume_db` in the timeline preview at once,
     /// without changing the project: what the Mixer's fader does while it is
     /// dragged; `track.set` keeps a level. `live: false` in the result:
@@ -3434,6 +3443,7 @@ impl Request {
                 | Self::PlayerStats { .. }
                 | Self::PlayerAudioScrubbing { .. }
                 | Self::PlayerLoop { .. }
+                | Self::PlayerFastReview { .. }
                 | Self::MixerPreview { .. }
                 | Self::PoolSet { .. }
                 | Self::SelectionGet {}
@@ -3930,6 +3940,13 @@ mod tests {
                 center: None,
             }
         ));
+    }
+
+    #[test]
+    fn fast_review_with_no_field_toggles() {
+        let request =
+            Request::from_parts("player.fast_review", Some(serde_json::json!({}))).unwrap();
+        assert_eq!(request, Request::PlayerFastReview { on: None });
     }
 
     #[test]

@@ -218,8 +218,23 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The choice is a user preference (`viewer.guides`), not part of the project.
   - With no fields, `viewer.guides` toggles framing guides.
   - A field that is left out stays as it is. `preferences.set` does not toggle.
-- Fast Review, which plays long clips faster than short ones (p. 640).
+- Fast Review plays a long clip faster than a short clip (p. 640, D97).
+  - The Fast Review button is on the viewer transport.
+  - `player.fast_review` turns it on or off. It lasts for this session.
+  - A clip of 10 seconds or less plays at 1×.
+  - A longer clip plays at its length in seconds divided by 10, at most 8×.
+  - Play and Space use that speed. J and L keep their shuttle speeds.
 - Skimming with C held (p. 640).
+  - Hold C and move the pointer across the picture.
+  - The horizontal place of the pointer is the frame.
+  - The playhead goes there with `player.seek`.
+- **D97. Fast Review speed** (p. 640).
+  - The manual says that a long clip plays faster than a short clip.
+  - It does not give the speed.
+  - A clip of 10 seconds or less plays at 1×.
+  - A longer clip plays at its seconds divided by 10.
+  - The speed is at most 8×.
+  - 10 seconds is one short shot. 8× stays slow enough to see the picture.
 - Audio scrubbing (Shift+S; on by default, p. 876):
   - A drag of the playhead, and frame steps, play the sound under it (D42).
   - Timeline > Audio Scrubbing also switches it.
