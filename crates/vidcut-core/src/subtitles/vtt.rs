@@ -69,6 +69,7 @@ pub fn read(source: &str) -> Result<Read> {
             words,
             speaker: text::voice(&raw),
             style: None,
+            word_styles: Vec::new(),
         });
     }
     Ok(Read {
@@ -221,7 +222,9 @@ pub fn write(cues: &[Timed], style: &SubtitleStyle) -> String {
     let mut out = String::from("WEBVTT\n\n");
     let mut colors: Vec<String> = Vec::new();
     for c in cues {
-        for t in text::tokens(&c.text) {
+        let look = style.for_cue(c.style.as_ref());
+        let text = super::marked(&c.text, &look, &c.word_styles);
+        for t in text::tokens(&text) {
             if let Token::Open(Tag::Color(hex)) = t
                 && !PALETTE.iter().any(|(_, h)| *h == hex)
                 && !colors.contains(&hex)
@@ -244,11 +247,12 @@ pub fn write(cues: &[Timed], style: &SubtitleStyle) -> String {
             .as_deref()
             .map(|n| format!("<v {}>", text::escape_xml(n).replace('\n', " ")))
             .unwrap_or_default();
+        let look = style.for_cue(c.style.as_ref());
         out.push_str(&format!(
             "{} --> {}{settings}\n{voice}{}\n\n",
             clock(c.start, '.'),
             clock(c.end, '.'),
-            body(&c.text)
+            body(&super::marked(&c.text, &look, &c.word_styles))
         ));
     }
     out

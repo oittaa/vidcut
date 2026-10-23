@@ -3512,6 +3512,11 @@ fn mutate(
             }
             Value::Null
         }
+        Request::SubtitlesSetWord { cue, word, style } => {
+            let id = resolve_cue(p, cue, playhead)?;
+            ops::subtitles::set_word_style(p, &id, *word, style.clone())?;
+            Value::Null
+        }
         Request::SubtitlesMatchSpeaker { cue } => {
             let id = resolve_cue(p, cue, playhead)?;
             json!({ "cues": ops::subtitles::match_speaker(p, &id)? })
@@ -7166,7 +7171,7 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
     let old: Vec<(String, i64, i64, Vec<i64>)> = p.subtitles[ti]
         .cues
         .iter()
-        .map(|c| (c.id.clone(), c.start, c.end(), c.words.clone()))
+        .map(|c| (c.id.clone(), c.start, c.end(), c.times()))
         .collect();
     let (mut moved, mut cut, mut removed) = (0, 0, Vec::new());
     for (i, (cue, s0, e0, words)) in old.into_iter().enumerate() {

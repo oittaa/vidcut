@@ -46,6 +46,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("subtitles.list", &["track"]),
     ("subtitles.add", &["text"]),
     ("subtitles.set", &["cue"]),
+    ("subtitles.set_word", &["cue", "word"]),
     ("subtitles.move", &["cues"]),
     ("subtitles.remove", &["cues"]),
     ("subtitles.split", &["cue"]),
@@ -1073,6 +1074,36 @@ mod tests {
         let mut out = Vec::new();
         unexplained(&command(), &mut out);
         assert_eq!(out, Vec::<String>::new());
+    }
+
+    #[test]
+    fn subtitles_set_word_style_matches_the_request() {
+        use vidcut_core::model::SubtitleStyle;
+
+        let cli = Cli::try_parse_from([
+            "vidcut",
+            "subtitles",
+            "set-word",
+            "q1",
+            "1",
+            "--style",
+            r##"{"color":"#ff0000"}"##,
+        ])
+        .unwrap();
+        let Some(Action::Run(env)) = cli.action().unwrap() else {
+            panic!("a subtitle command runs a request");
+        };
+        assert_eq!(
+            env.request,
+            Request::SubtitlesSetWord {
+                cue: "q1".into(),
+                word: 1,
+                style: SubtitleStyle {
+                    color: Some("#ff0000".into()),
+                    ..SubtitleStyle::default()
+                },
+            }
+        );
     }
 
     #[test]
