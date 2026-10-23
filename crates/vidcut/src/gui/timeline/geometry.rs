@@ -2,6 +2,7 @@ use eframe::egui::{Pos2, Rect, pos2, vec2};
 use vidcut_core::model::{Clip, Project, Track, TrackKind, Transition};
 use vidcut_core::ops::{Edge, MAIN};
 use vidcut_core::otio::transitions::Cuts;
+use vidcut_core::validate::GAIN;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scale {
@@ -287,6 +288,9 @@ const EDGE: f32 = 10.0;
 const AUDIO_EDIT: f32 = 12.0;
 const SLIP: f32 = 9.0;
 const FADE_EDGE: f32 = 5.0;
+const VOLUME_BAND: f32 = 20.0;
+const VOLUME_INSET: f32 = 2.0;
+const VOLUME_GRAB: f32 = 4.0;
 
 pub fn clips_in(track: &Track, a: i64, b: i64) -> std::ops::Range<usize> {
     let first = track.clips.partition_point(|c| c.end() <= a);
@@ -393,6 +397,72 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
         return Hit::Clip(c.id.clone());
     }
     Hit::Empty
+}
+
+pub fn sound_band(tr: &TrackRect, scale: &Scale, c: &Clip) -> Option<Rect> {
+    let (ra, rb) = c.audio_range()?;
+    let (a0, a1) = (scale.xf(ra), scale.xf(rb).max(scale.xf(ra) + 1.0));
+    Some(Rect::from_x_y_ranges(
+        a0..=a1,
+        tr.audio_top..=tr.rect.bottom(),
+    ))
+}
+
+pub fn volume_level(gain_db: f64) -> f64 {
+    let (lo, hi) = (*GAIN.start(), *GAIN.end());
+    let zero = lo / (lo - hi);
+    let g = gain_db.clamp(lo, hi);
+    let (x, room) = if g >= 0.0 {
+        (g / hi, 1.0 - zero)
+    } else {
+        (-g / lo, zero)
+    };
+    zero + room * x * (2.0 - x.abs())
+}
+
+pub fn volume_gain(level: f64) -> f64 {
+    let (lo, hi) = (*GAIN.start(), *GAIN.end());
+    let zero = lo / (lo - hi);
+    let level = level.clamp(0.0, 1.0);
+    let (part, end) = if level >= zero {
+        ((level - zero) / (1.0 - zero), hi)
+    } else {
+        ((zero - level) / zero, lo)
+    };
+    end * (1.0 - (1.0 - part).max(0.0).sqrt())
+}
+
+pub fn volume_span(band: Rect) -> f32 {
+    (band.height() - 2.0 * VOLUME_INSET).max(1.0)
+}
+
+pub fn volume_y(band: Rect, gain_db: f64) -> Option<f32> {
+    (band.height() >= VOLUME_BAND)
+        .then(|| band.bottom() - VOLUME_INSET - volume_span(band) * volume_level(gain_db) as f32)
+}
+
+pub fn volume_at(
+    track: &Track,
+    scale: &Scale,
+    tr: &TrackRect,
+    pos: Pos2,
+) -> Option<(String, Rect)> {
+    if track.locked || !matches!(hit(track, scale, tr, pos), Hit::Clip(_) | Hit::Slip(_)) {
+        return None;
+    }
+    let frame = scale.under(pos.x);
+    let range = clips_in(track, frame - 1, frame + 2);
+    let range = range.start.saturating_sub(1)..(range.end + 1).min(track.clips.len());
+    track.clips[range]
+        .iter()
+        .filter_map(|c| {
+            let band = sound_band(tr, scale, c)?;
+            let y = volume_y(band, c.audio.as_ref()?.gain_db)?;
+            let off = (pos.y - y).abs();
+            (band.contains(pos) && off <= VOLUME_GRAB).then(|| (off, c.id.clone(), band))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, id, band)| (id, band))
 }
 
 pub fn picture_transition<'a>(p: &Project, track: &'a Track, at: i64) -> Option<&'a Transition> {

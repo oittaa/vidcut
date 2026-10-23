@@ -298,6 +298,9 @@ The bar and the Jobs button:
   - When they still overflow, `TimelineView::rows_lift` lifts them by up to `Rows::overflow`.
   - The wheel over the rows (`scroll_rows`) and the scrollbar (`row_scrollbar`) set the lift.
   - Rows, their headers and drag previews are clipped to the area of the rows. `Rows::at` finds no row outside it ([deviation X57](../deviations.md#x57-the-lower-timeline-keeps-its-height-and-its-tracks-scroll)).
+- **Clip volume.**
+  - `paint::track` draws the volume line of each clip with sound at `geometry::volume_y`. `geometry::volume_at` finds the line under the pointer.
+  - A drag on it is a `Gesture::Volume`. The timeline draws the dragged gains (`Preview::gains`). On release, `Workspace::trim_sent` shows them until the project has them ([deviation X71](../deviations.md#x71-clip-volume-is-a-line-on-the-clip-without-keyframes)).
 - **Subtitles.**
   - `Rows::layout` puts the rows of the subtitle tracks above the video tracks.
   - `cues::paint_track` draws their cues, with a stripe in the color of the cue.
@@ -318,6 +321,7 @@ The bar and the Jobs button:
   - The Subtitle section sends its changes with `Handle::request_answered`. It keeps what it sent until each `Answer` comes and the project has that revision.
   - Then, while the user does not edit it, it shows the cue of the project. Thus a change that the project refuses goes away. The field does not jump back while a change is on its way.
   - When the section closes while it waits, its text stays as a `Landing`. The timeline and the viewer draw it until the same answers and revision come.
+  - When the cue opens again before that, its section takes back the `Landing`: the sent text and the wait. Thus the field does not show the old text.
   - The selected cues are part of the session's `Selection`, as clips are.
 - **Titles.**
   - The Title section (`TitleDialog`) works out the title that its fields give (`title_of`). While the fields are not valid, there is no title.
@@ -358,6 +362,9 @@ The bar and the Jobs button:
   - `Workspace::open_title`, `Workspace::open_cue` and `Workspace::open_track_dialog` open them and show the tab.
   - `Workspace::follow_selection` shows the section of the selected title or subtitle. A section that closes puts its changes in first.
   - Previous and Next in the Subtitle section open the cue before or after with `Workspace::inspect_cue`. Then they send `selection.set` and a `player.seek` to its start.
+  - The list of the Subtitle section (`Workspace::cue_list`) draws only its visible rows (`show_rows`). A click on a row does what Next does (`Workspace::step_cue`).
+  - Add New above the list calls `Workspace::add_subtitle` with the track of the open cue, as the right-click menu of the track does.
+  - The In and Out fields (`Workspace::cue_times`) send one `apply`: a `subtitles.set` for the cue, then `subtitles.set` and `subtitles.remove` for the cues that it overwrites. Until the project has it, the fields show the times that they sent.
   - Below them, it shows the selected clips that can have a picture. It reads their pictures from the snapshot in each frame.
   - A picture that the handles, the wheel or the Inspector preview goes first (`Workspace::picture_wanted`). Thus the fields follow a drag in the viewer.
   - Each field changes between the picture and its own unit (`Field::read`, `Field::put`). The fitted size comes from `place::upright_fit`, as in an export.
@@ -372,6 +379,7 @@ The bar and the Jobs button:
   - An `apply` is necessary because a `position` holds X and Y. Thus Position X goes with the Y of each clip.
   - Also, a crop in pixels is a different fraction of each picture.
   - After the request, the sent pictures go to the core until the project has them (`tools::landing`).
+  - `Workspace::audio_section` shows the selected clips with sound below the picture sections. Volume and Mute each send one `clip.set`. Voice Isolation uses `Workspace::isolation_controls`, as the right-click menu does.
 - **Silence stripes.**
   - `SilenceDialog` keeps the dry run of Ripple Delete Silence as `Stripe`s, and the person's edits to them:
     - A click keeps or cuts a stripe (`stripe_press`).

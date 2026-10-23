@@ -11,7 +11,7 @@ use vidcut_core::ops;
 use vidcut_core::otio::transitions;
 use vidcut_core::time::Rational;
 
-use super::geometry::{Rows, Scale, TrackRect, clips_in, covered};
+use super::geometry::{Rows, Scale, TrackRect, clips_in, covered, sound_band, volume_y};
 use super::gesture::{Preview, Target};
 use crate::gui::pool::elide;
 use crate::gui::theme;
@@ -357,9 +357,7 @@ fn clip(
         let band = Rect::from_x_y_ranges(x0..=x1, tr.audio_top..=rect.bottom());
         painter.rect_filled(parted(band), corners, fill);
     }
-    if let Some((ra, rb)) = c.audio_range() {
-        let (a0, a1) = (scale.xf(ra), scale.xf(rb).max(scale.xf(ra) + 1.0));
-        let audio = Rect::from_x_y_ranges(a0..=a1, tr.audio_top..=rect.bottom());
+    if let Some(audio) = sound_band(tr, scale, c) {
         let muted = c.audio.as_ref().is_some_and(|x| x.muted) || t.muted;
         let color = if offline {
             theme::colors().offline
@@ -375,6 +373,14 @@ fn clip(
         ap.rect_filled(parted(audio), corners, color);
         if look.waveforms && !muted && !offline && audio.height() >= 8.0 {
             waveform(&ap, audio, scale, p, c, assets, fps);
+        }
+        if let Some(y) = c.audio.as_ref().and_then(|a| volume_y(audio, a.gain_db)) {
+            let across = |y: f32| [pos2(audio.left(), y), pos2(audio.right(), y)];
+            ap.line_segment(
+                across(y + 1.0),
+                Stroke::new(1.0, Color32::from_black_alpha(140)),
+            );
+            ap.line_segment(across(y), Stroke::new(1.0, Color32::from_white_alpha(230)));
         }
         if muted && look.status {
             ap.text(

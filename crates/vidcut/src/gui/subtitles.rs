@@ -7,11 +7,13 @@ use vidcut_core::model::{
     Cue, LetterCase, Place, Project, SpeakerPaint, Speakers, SubtitleStyle, SubtitleTrack,
     SubtitleWords, WordsShow,
 };
+use vidcut_core::time::{Rational, TimeSpec};
 
 use super::dialog;
 use super::export::{Ask, Picked};
 use super::folders::Kind;
 use super::looks::{Parts, Picker, TextFields};
+use super::theme;
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
 use crate::live::{Answer, PlayerId};
@@ -28,6 +30,20 @@ pub struct CueDialog {
     focus: bool,
     dirty: bool,
     pending: Pending,
+    times: Times,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Edge {
+    In,
+    Out,
+}
+
+#[derive(Debug, Default)]
+struct Times {
+    typing: Option<(Edge, String)>,
+    select: bool,
+    held: Option<(i64, i64)>,
 }
 
 #[derive(Debug, Default)]
@@ -54,6 +70,7 @@ impl Pending {
 #[derive(Debug)]
 pub(crate) struct Landing {
     typing: Typing,
+    person_name: String,
     pending: Pending,
 }
 
@@ -70,6 +87,15 @@ impl CueDialog {
         self.color = c.color.clone().unwrap_or_default();
         self.take_person(speakers, c.speaker.clone());
         self.loaded = true;
+    }
+
+    fn resume(&mut self, l: Landing) {
+        self.text = l.typing.text;
+        self.place = l.typing.place;
+        self.speaker = l.typing.speaker;
+        self.color = l.typing.color.unwrap_or_default();
+        self.person_name = l.person_name;
+        self.pending = l.pending;
     }
 
     fn take_person(&mut self, speakers: &Speakers, person: Option<String>) {
@@ -151,6 +177,213 @@ fn beside(p: &Project, cue: &str, by: isize) -> Option<(String, i64)> {
     let (t, c) = p.find_cue(cue)?;
     let near = p.subtitles[t].cues.get(c.checked_add_signed(by)?)?;
     Some((near.id.clone(), near.start))
+}
+
+fn edge_field(
+    ui: &mut egui::Ui,
+    t: &mut Times,
+    (edge, salt): (Edge, (&str, &str)),
+    shown: String,
+    width: f32,
+) -> Option<String> {
+    let mine = matches!(&t.typing, Some((e, _)) if *e == edge);
+    let mut text = match &t.typing {
+        Some((e, typed)) if *e == edge => typed.clone(),
+        _ => shown,
+    };
+    let out = egui::TextEdit::singleline(&mut text)
+        .id_salt(salt)
+        .desired_width(width)
+        .clip_text(false)
+        .show(ui);
+    let r = &out.response;
+    if r.has_focus() {
+        t.select |= !mine;
+        if t.select && !ui.input(|i| i.pointer.any_down()) {
+            let mut state = out.state;
+            let all = egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(text.chars().count()),
+            );
+            state.cursor.set_char_range(Some(all));
+            state.store(ui.ctx(), r.id);
+            t.select = false;
+        }
+        t.typing = Some((edge, text));
+        return None;
+    }
+    if !mine {
+        return None;
+    }
+    let (_, typed) = t.typing.take()?;
+    if !r.lost_focus() {
+        return None;
+    }
+    let esc = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape));
+    (!esc).then_some(typed)
+}
+
+fn typed_frame(p: &Project, text: &str, base: i64, (playhead, dropped): (i64, i64)) -> Option<i64> {
+    let spec = super::viewer::timecode_input(text, dropped)?;
+    let sign = match text.trim().chars().next() {
+        Some(c @ ('+' | '-')) => c.to_string(),
+        _ => String::new(),
+    };
+    let spec = TimeSpec::parse(&format!("{sign}{spec}")).ok()?;
+    p.time_context(Some(playhead))
+        .resolve_from(&spec, base)
+        .ok()
+}
+
+fn command(method: &str, params: Value) -> Value {
+    json!({ "method": method, "params": params })
+}
+
+fn overwrite(cues: &[Cue], id: &str, was: (i64, i64), now: (i64, i64)) -> Vec<Value> {
+    let (from, to) = if now.0 < was.0 {
+        (now.0, was.0)
+    } else if now.1 > was.1 {
+        (was.1, now.1)
+    } else {
+        return Vec::new();
+    };
+    let set =
+        |cue: &str, edge: &str, at: i64| command("subtitles.set", json!({ "cue": cue, edge: at }));
+    let mut commands = Vec::new();
+    let mut gone = Vec::new();
+    for c in cues.iter().filter(|c| c.id != id) {
+        let (start, end) = (c.start, c.end());
+        if end <= from || start >= to {
+            continue;
+        }
+        match (start < from, end > to) {
+            (false, false) => gone.push(c.id.clone()),
+            (true, false) => commands.push(set(&c.id, "end", from)),
+            (false, true) => commands.push(set(&c.id, "start", to)),
+            (true, true) => {}
+        }
+    }
+    if !gone.is_empty() {
+        commands.push(command("subtitles.remove", json!({ "cues": gone })));
+    }
+    commands
+}
+
+const LIST_ROWS: f32 = 5.0;
+const PAD: f32 = 6.0;
+const GAP: f32 = 10.0;
+
+fn shown_text(text: &str) -> String {
+    vidcut_core::subtitles::plain(&vidcut_core::subtitles::normalize(text))
+}
+
+fn per_second(characters: usize, frames: i64, fps: Rational) -> u64 {
+    let read = characters as u64 * fps.num().unsigned_abs();
+    let shown = frames.max(1).unsigned_abs() * fps.den().unsigned_abs();
+    read.div_ceil(shown)
+}
+
+struct Columns {
+    number: f32,
+    times: f32,
+    cps: f32,
+}
+
+impl Columns {
+    fn text_span(&self, left: f32, right: f32) -> (f32, f32) {
+        let x = left + PAD + self.number + GAP + self.times + GAP;
+        (x, right - PAD - self.cps - GAP - x)
+    }
+}
+
+struct ListRow<'a> {
+    number: usize,
+    times: [String; 2],
+    text: &'a str,
+    cps: u64,
+    on: bool,
+}
+
+fn two_lines(
+    ui: &egui::Ui,
+    text: &str,
+    width: f32,
+    font: egui::FontId,
+    color: egui::Color32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple(text.to_string(), font, color, width.max(8.0));
+    job.wrap.max_rows = 2;
+    job.wrap.overflow_character = Some('…');
+    ui.painter().layout_job(job)
+}
+
+fn list_heading(ui: &mut egui::Ui, width: f32, cols: &Columns, font: &egui::FontId) {
+    let height = ui.text_style_height(&egui::TextStyle::Body);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let faint = theme::colors().text_dim;
+    let painter = ui.painter();
+    let at = |text: &str, x: f32, right: bool| {
+        let g = painter.layout_no_wrap(text.to_string(), font.clone(), faint);
+        let x = if right { x - g.size().x } else { x };
+        painter.galley(egui::pos2(x, rect.top()), g, faint);
+    };
+    let left = rect.left() + PAD;
+    at("#", left + cols.number, true);
+    at("In/Out", left + cols.number + GAP, false);
+    at("Text", cols.text_span(rect.left(), rect.right()).0, false);
+    at("CPS", rect.right() - PAD, true);
+}
+
+fn cue_row(
+    ui: &mut egui::Ui,
+    height: f32,
+    cols: &Columns,
+    row: &ListRow,
+    font: &egui::FontId,
+) -> bool {
+    let (rect, r) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::click(),
+    );
+    let [start, end] = &row.times;
+    r.widget_info(|| {
+        let what = format!(
+            "{} {start} {end} {}",
+            row.number,
+            row.text.replace('\n', " / ")
+        );
+        egui::WidgetInfo::selected(egui::Role::Button, true, row.on, what)
+    });
+    let c = theme::colors();
+    let (ink, faint) = if row.on {
+        ui.painter().rect_filled(rect, 3.0, c.selection);
+        (c.selected_text, c.selected_text)
+    } else {
+        if r.hovered() {
+            ui.painter()
+                .rect_filled(rect, 3.0, c.text.gamma_multiply(0.07));
+        }
+        (c.text, c.text_dim)
+    };
+    let (x, width) = cols.text_span(rect.left(), rect.right());
+    let shown = two_lines(ui, row.text, width, font.clone(), ink);
+    let painter = ui.painter();
+    let mid = rect.center().y;
+    painter.galley(egui::pos2(x, mid - shown.size().y / 2.0), shown, ink);
+    let at_right = |text: String, x: f32| {
+        let g = painter.layout_no_wrap(text, font.clone(), faint);
+        painter.galley(egui::pos2(x - g.size().x, mid - g.size().y / 2.0), g, faint);
+    };
+    at_right(row.number.to_string(), rect.left() + PAD + cols.number);
+    at_right(row.cps.to_string(), rect.right() - PAD);
+    let line = (height - PAD) / 2.0;
+    let x = rect.left() + PAD + cols.number + GAP;
+    for (i, tc) in row.times.iter().enumerate() {
+        let g = painter.layout_no_wrap(tc.clone(), font.clone(), faint);
+        let y = rect.top() + PAD / 2.0 + i as f32 * line;
+        painter.galley(egui::pos2(x, y), g, faint);
+    }
+    r.clicked()
 }
 
 #[derive(Debug)]
@@ -413,6 +646,7 @@ impl Workspace {
         if d.pending.waiting(rev) {
             self.timeline.cue_landings.push(Landing {
                 typing: d.typing(),
+                person_name: d.person_name,
                 pending: d.pending,
             });
         }
@@ -457,7 +691,12 @@ impl Workspace {
             return;
         }
         self.close_cue_form();
-        self.timeline.cue_landings.retain(|l| l.typing.cue != id);
+        let landing = self
+            .timeline
+            .cue_landings
+            .iter()
+            .position(|l| l.typing.cue == id)
+            .map(|i| self.timeline.cue_landings.remove(i));
         let mut d = CueDialog {
             cue: id.to_string(),
             text: String::new(),
@@ -469,11 +708,15 @@ impl Workspace {
             focus,
             dirty: false,
             pending: Pending::default(),
+            times: Times::default(),
         };
         if let Some(p) = self.project()
             && let Some(c) = p.cue(id)
         {
             d.load(&p.speakers, c);
+        }
+        if let Some(l) = landing {
+            d.resume(l);
         }
         self.timeline.cue_dialog = Some(d);
     }
@@ -599,6 +842,7 @@ impl Workspace {
 
     pub(super) fn cue_form(&mut self, ui: &mut egui::Ui) -> bool {
         let Some(mut d) = self.timeline.cue_dialog.take() else {
+            self.timeline.cue_listed = None;
             return false;
         };
         let Some(p) = self.project_shared() else {
@@ -608,9 +852,8 @@ impl Workspace {
         if waiting {
             ui.ctx().request_repaint();
         }
-        let found = p
-            .find_cue(&d.cue)
-            .map(|(t, c)| (&p.subtitles[t], &p.subtitles[t].cues[c]));
+        let at = p.find_cue(&d.cue);
+        let found = at.map(|(t, c)| (&p.subtitles[t], &p.subtitles[t].cues[c]));
         let shown = found.is_some_and(|(_, cue)| settled(&d.cue, &p.speakers, cue) == d.state());
         match found {
             Some((_, cue)) if cue_copies(d.dirty, d.loaded, waiting || shown) => {
@@ -638,15 +881,11 @@ impl Workspace {
             });
         });
         match found {
-            Some((track, cue)) => ui.label(dim(format!(
-                "{}   {} – {}   ({})",
-                track.display_name(),
-                self.tc(cue.start),
-                self.tc(cue.end()),
-                self.src_tc(cue.duration)
-            ))),
-            None => ui.label(dim("Adding…")),
-        };
+            Some((_, cue)) => self.cue_times(ui, &mut d, &p, cue, waiting),
+            None => {
+                ui.label(dim("Adding…"));
+            }
+        }
         let before = d.state();
         let r = ui.add(
             egui::TextEdit::multiline(&mut d.text)
@@ -781,6 +1020,24 @@ impl Workspace {
             d.pending.sent.extend(sent);
             d.dirty = false;
         }
+        if let Some(at) = at {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                let track = &p.subtitles[at.0];
+                let free = self.timeline.adding.is_none();
+                if ui.add_enabled(free, egui::Button::new("Add New")).clicked() {
+                    self.add_subtitle(ui.ctx(), Some(&track.id));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(dim(track.display_name()));
+                });
+            });
+            let follow = self.timeline.cue_listed.as_deref() != Some(d.cue.as_str());
+            if let Some(to) = self.cue_list(ui, &p, at, &d.text, follow) {
+                step = Some(to);
+            }
+            self.timeline.cue_listed = Some(d.cue.clone());
+        }
         ui.separator();
         if !done {
             self.timeline.cue_dialog = Some(d);
@@ -795,6 +1052,168 @@ impl Workspace {
         self.inspect_cue(id, false);
         self.send("selection.set", json!({ "cues": [id], "clips": [] }));
         self.seek(PlayerId::Timeline, start, false);
+    }
+
+    fn cue_times(
+        &self,
+        ui: &mut egui::Ui,
+        d: &mut CueDialog,
+        p: &Project,
+        cue: &Cue,
+        waiting: bool,
+    ) {
+        if !waiting {
+            d.times.held = None;
+        }
+        let (start, end) = d.times.held.unwrap_or((cue.start, cue.end()));
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let faint = theme::colors().text_dim;
+        let wide = |text: String| {
+            ui.painter()
+                .layout_no_wrap(text, font.clone(), faint)
+                .size()
+                .x
+        };
+        let width = wide(self.tc(end)) + 16.0;
+        let count = shown_text(&d.text).chars().count();
+        let counted = match count {
+            1 => "1 Character".to_string(),
+            n => format!("{n} Characters"),
+        };
+        let mut put = None;
+        ui.horizontal_wrapped(|ui| {
+            for (edge, label, at) in [(Edge::In, "In", start), (Edge::Out, "Out", end)] {
+                ui.label(dim(label));
+                if let Some(text) = edge_field(
+                    ui,
+                    &mut d.times,
+                    (edge, (label, &d.cue)),
+                    self.tc(at),
+                    width,
+                ) {
+                    put = Some((edge, text));
+                }
+            }
+            let length = format!("Duration {}", self.src_tc(end - start));
+            ui.add(egui::Label::new(dim(length)).extend());
+            ui.add(egui::Label::new(dim(counted)).extend());
+        });
+        if let Some((edge, text)) = put {
+            self.put_edge(d, p, (edge, &text), (start, end));
+        }
+    }
+
+    fn put_edge(
+        &self,
+        d: &mut CueDialog,
+        p: &Project,
+        (edge, text): (Edge, &str),
+        was: (i64, i64),
+    ) {
+        let Some((t, _)) = p.find_cue(&d.cue) else {
+            return;
+        };
+        let (base, key) = match edge {
+            Edge::In => (was.0, "start"),
+            Edge::Out => (was.1, "end"),
+        };
+        let context = (self.snap.timeline.position, self.dropped());
+        let Some(at) = typed_frame(p, text, base, context) else {
+            return;
+        };
+        let now = match edge {
+            Edge::In => (at, was.1),
+            Edge::Out => (was.0, at),
+        };
+        if now == was || now.0 < 0 || now.1 <= now.0 {
+            return;
+        }
+        let params = json!({ "cue": d.cue, key: at });
+        let label = vidcut_core::describe::describe("subtitles.set", &params, Some(p));
+        let mut commands = vec![command("subtitles.set", params)];
+        commands.extend(overwrite(&p.subtitles[t].cues, &d.cue, was, now));
+        let batch = json!({ "commands": commands, "label": label });
+        d.pending
+            .sent
+            .push(self.live.request_answered("apply", batch));
+        d.times.held = Some(now);
+    }
+
+    fn cue_list(
+        &self,
+        ui: &mut egui::Ui,
+        p: &Project,
+        (track, open): (usize, usize),
+        typed: &str,
+        follow: bool,
+    ) -> Option<(String, i64)> {
+        let cues = &p.subtitles[track].cues;
+        let landed: Vec<(&str, &str)> = self
+            .timeline
+            .cue_landings
+            .iter()
+            .map(Landing::cue_text)
+            .collect();
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let row = 2.0 * ui.text_style_height(&egui::TextStyle::Body) + PAD;
+        let gap = ui.spacing().item_spacing.y;
+        let stride = row + gap;
+        let height = LIST_ROWS * stride - gap;
+        let wide = |text: String| {
+            ui.painter()
+                .layout_no_wrap(text, font.clone(), egui::Color32::WHITE)
+                .size()
+                .x
+        };
+        let cols = Columns {
+            number: wide(cues.len().to_string()).max(wide("#".into())),
+            times: cues
+                .last()
+                .map_or(0.0, |c| wide(self.tc(c.end())))
+                .max(wide("In/Out".into())),
+            cps: wide("000".into()).max(wide("CPS".into())),
+        };
+        let fps = p.settings.fps;
+        let mut picked = None;
+        let room = dialog::scroll_room(ui);
+        list_heading(ui, ui.available_width() - room, &cols, &font);
+        egui::ScrollArea::vertical()
+            .id_salt("cue-list")
+            .auto_shrink([false, false])
+            .max_height(height)
+            .show_rows(ui, row, cues.len(), |ui, range| {
+                ui.set_max_width(ui.available_width() - room);
+                let top = ui.max_rect().top() - range.start as f32 * stride;
+                for k in range {
+                    let c = &cues[k];
+                    let text = if k == open {
+                        typed
+                    } else {
+                        landed
+                            .iter()
+                            .find(|(id, _)| *id == c.id)
+                            .map_or(c.text.as_str(), |(_, t)| *t)
+                    };
+                    let shown = shown_text(text);
+                    let line = ListRow {
+                        number: k + 1,
+                        times: [self.tc(c.start), self.tc(c.end())],
+                        text: &shown,
+                        cps: per_second(shown.chars().count(), c.duration, fps),
+                        on: k == open,
+                    };
+                    if cue_row(ui, row, &cols, &line, &font) {
+                        picked = Some((c.id.clone(), c.start));
+                    }
+                }
+                let y = top + open as f32 * stride;
+                let clip = ui.clip_rect();
+                if follow && (y < clip.top() || y + row > clip.bottom()) {
+                    let rect = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), y..=y + row);
+                    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                }
+            });
+        picked
     }
 
     pub(super) fn track_form(&mut self, ui: &mut egui::Ui) -> bool {

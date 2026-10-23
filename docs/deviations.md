@@ -713,10 +713,27 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - The user types the text of a selected subtitle in the Captions panel of the Inspector.
   - The text shows on the clip while the user types (p. 1233).
-  - A list at the bottom of the Captions panel shows the subtitles of the track. Its Prev and Next buttons move through them (pp. 1231, 1233).
+  - A list at the bottom of the Captions panel shows every subtitle of the track (p. 1231).
+  - Each new subtitle adds an entry to the list. Prev and Next move through the list (p. 1233).
+  - A click on a caption in the list loads it into the Caption box, where the user edits its text (p. 1236).
+  - The Add New button above the list adds a subtitle (p. 1233).
   - The manual does not tell where the playhead goes.
+  - In Resolve Studio 21.1.1, the panel is as the screenshots on pp. 1231 and 1233 show it:
+    - Above the text box, a line has an In field and an Out field. At its right, a dim "11 Characters" counts the characters of the text.
+    - Add New is at the left of the line above the list. Prev and Next are at its right.
+    - The list has the columns "#" (the number of the row), "Time In/Out" (the In above the Out), "Caption" and "CPS".
+  - These facts come from Resolve Studio 21.1.1:
+    - CPS is the number of characters for each second of the subtitle, rounded up (D78).
+    - Add New adds a subtitle at the playhead on the track of the list, as Add Subtitle in the right-click menu of the track does.
+    - A new In changes only the start. The end stays. An In of 01:00:14:15 made a subtitle of 01:00:14:00–01:00:16:00 into 01:00:14:15–01:00:16:00.
+    - A new Out changes only the end. The start stays.
+    - The new range overwrites the other subtitles of the track. The change and the overwrite are one undo step.
+    - A subtitle that the new range fully covers is deleted. An In moved earlier past the whole subtitle before it deleted that subtitle.
+    - A subtitle that the new range partly covers is trimmed to the new edge.
+    - An Out moved 10 frames into the next subtitle moved the start of that subtitle to the new Out. Its end stayed.
+    - An Out before the In does nothing, and the field shows the old value again.
 - **vidcut:**
-  - The Subtitle section of the Inspector tab has the text and the position of the cue.
+  - The Subtitle section of the Inspector tab has the In, the Out, the text and the position of the cue.
   - These open it and show the Inspector tab:
     - a double-click on a cue
     - Enter with one cue selected
@@ -726,14 +743,49 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The text shows on the cue and in the viewer while the user types.
   - The position shows in the viewer when the user selects it.
   - The text goes in as one change when the user leaves the text box. The other rows go in at once. Ctrl+Z undoes a change.
-  - vidcut has no Captions list. Thus Previous and Next are at the top of the Subtitle section.
+  - A line under the heading has the In and Out fields, the duration and "N Characters", in that order. In a narrow panel, the line wraps.
+  - "N Characters" counts the characters as CPS does (D78).
+  - The fields show the start and the end of the cue as timecodes, as the project shows them.
+  - A click in a field selects its timecode, and the user types a new one. Digits fill a timecode from the right, as in the timecode field of the viewer.
+  - A `+` or `-` before the value moves the edge by that much.
+  - Enter, Tab or a click outside the field puts the change in. Esc puts the old value back.
+  - In sends a new start only, and Out a new end only, as in Resolve.
+  - A value that does not parse, or an Out at or before the In, changes nothing. The field shows the value of the project again.
+  - The new range overwrites the other cues of the track, as in Resolve. Only the newly covered part counts:
+    - from the new In to the old In, when the In moves earlier
+    - from the old Out to the new Out, when the Out moves later
+  - A cue of the track that lies fully inside that part is removed.
+  - A cue that reaches into the part from one side loses its frames in the part. Thus its end moves to the new In, or its start to the new Out.
+  - A cue that covers all of the part and more stays as it is (D79).
+  - An In moved later or an Out moved earlier changes no other cue.
+  - The change and the overwrite go as one `apply`. Thus they are one undo step.
+  - `subtitles.set` alone does not overwrite. Scripts and imports keep the cues that overlap (D56). A script that wants the overwrite sends its own `apply`.
+  - A list at the bottom of the Subtitle section shows every cue of the track, by start time.
+  - The list has the columns of Resolve's list. Their names are "#", "In/Out", "Text" and "CPS".
+  - Each row shows the number of the row, the start above the end, the text and the CPS of the cue.
+  - The text shows on two lines at most. A longer text is cut to fit.
+  - CPS counts the characters as Resolve does (D78).
+  - The row of the open cue is highlighted.
+  - When another cue opens and its row is out of view, the list scrolls the row to its middle.
+  - While the user types, the row of the open cue shows the typed text, as the cue on the timeline does.
+  - The list has a fixed height and scrolls. It draws only the rows that show. Thus a track with thousands of cues stays fast.
+  - Add New is at the left of the line above the list. It does what Add Subtitle in the right-click menu of the track does ([X44](#x44-add-subtitle-uses-the-shown-subtitle-track)).
+  - Thus the new cue opens in the section. Add New is off while a cue is being added.
+  - The name of the track is at the right of the line with Add New.
+  - Previous and Next are on the heading line of the Subtitle section.
   - Previous opens the cue before this cue on its track, by start time. Next opens the cue after it.
+  - A click on a row of the list opens its cue, as Next does.
   - The changes of the section go in first, as when the user leaves the section.
-  - The button also selects the cue and moves the playhead to its start. The playhead move is a decision of vidcut.
-  - A button is off when there is no cue before or after, and while the section shows "Adding…".
+  - The button or the click also selects the cue and moves the playhead to its start. The playhead move is a decision of vidcut.
+  - A button is off when there is no cue before or after. While the section shows "Adding…", the buttons are off, and Add New and the list do not show.
+  - The Delete button of the section deletes the open cue.
 - **Why:**
   - One change for each edit of the text keeps typing out of the undo history.
   - With the playhead at the start of the cue, the viewer shows the cue.
+  - On the heading line, Previous and Next stay in one place. Above the list, the rows change. The text box grows with the text. The Name row shows only for a cue with a person.
+  - The Inspector can be narrow. Thus the names of the columns are short. The GUI of vidcut does not use the word "caption". Thus the text column is "Text".
+  - With the overwrite, a cue that the user makes longer does not show together with its neighbor, as in Resolve.
+  - Imports and scripts can need cues that overlap (D56). Thus `subtitles.set` alone keeps them.
 
 ## X44. Add Subtitle uses the shown subtitle track
 
@@ -1415,10 +1467,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Position X and Y are timeline pixels from the middle, with Y up.
   - A picture narrower than the frame moves less than its number. On a 4:3 picture in a 16:9 timeline, Position X 200 moves it 150 pixels.
   - Crop is in pixels of the fitted picture. Zoom is a factor, and Rotation is in degrees.
+  - Its Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
+  - In the Audio panel, each clip has one Volume control (p. 743).
+  - The Audio panel also has Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (pp. 743–744).
+  - The manual names no Mute in the Audio panel (pp. 742–744).
 - **vidcut:**
   - An Inspector tab is beside the Media Pool and Titles tabs. It opens in the same place.
   - `gui.show inspector` shows it.
-  - It shows what the user selects: the Title section of a title, the Subtitle section of a subtitle, or the picture sections of other clips.
+  - It shows what the user selects: the Title section of a title, the Subtitle section of a subtitle, or the sections of other clips.
+  - The sections of other clips are the picture sections and the Audio section.
   - A double-click on the name of a subtitle track shows its Subtitle Track section (X51).
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
   - With nothing of these selected, it shows one line.
@@ -1437,6 +1494,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The viewer shows the clip with its Dynamic Zoom, also while the boxes show.
     - The boxes stay in place. They show where the picture is at the start and at the end (D75).
     - If the playhead is not on a selected clip, Show Boxes and On move it to the first frame of the first selected clip.
+  - **Audio:** Volume, Mute and Voice Isolation of the selected clips with sound. These are the video clips with sound and the audio clips.
+    - The Audio section is below the picture sections. For an audio clip, it is the only section.
+    - With several clips with sound, it shows the first one. Its header gives the number of these clips.
+    - Volume is the gain of the clip, from −60 dB to +24 dB (D12). It shows one decimal and the unit.
+    - The Reset of Volume sets 0 dB. The Audio section has no Reset of the whole section.
+    - A drag on Volume sends one change on release. The sound does not change during the drag.
+    - Mute does what Mute and Unmute in the right-click menu of the clip do.
+    - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([X64](#x64-voice-isolation-is-free-on-a-clip-or-a-track)).
+    - The Audio section has no Pan, Pitch, Equalizer, Dialogue Leveler or Music Remixer.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - **Units:**
     - Position X and Y are frame pixels from the middle of the frame, with Y up.
@@ -1454,9 +1520,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The fields show a change from a script, an agent, the viewer handles or the wheel at once.
   - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
   - With several clips, the accent color and the Reset show when one of the clips has such a value.
-  - A value goes to all the selected clips that can have a picture. It changes only that value on each clip.
-  - A Reset also acts on all of these clips.
-  - Not in the Inspector: Speed, Volume, Anchor Point, Pitch, Yaw, Softness and Composite ([todo](todo/inspector.md)).
+  - A picture value goes to all the selected clips that can have a picture. An Audio value goes to all the selected clips with sound.
+  - A value changes only that value on each clip. A Reset also acts on all of these clips.
+  - Not in the Inspector: Speed, Anchor Point, Pitch, Yaw, Softness and Composite ([todo](todo/inspector.md)).
 - **Why:**
   - The Titles tab of the Cut page is in the place of the Media Pool. The Inspector goes beside it. Thus the viewer and the timeline keep their size.
   - Resolve also sets titles, subtitles and subtitle tracks in the Inspector (pp. 764, 1233, 1237).
@@ -1467,3 +1533,38 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The same value on several clips is a usual need, for example the same Position for the clips of a picture in picture.
   - The requests keep their fractions ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Thus only the GUI shows pixels.
   - Resolve's Inspector has only Ease and Swap for Dynamic Zoom. Numbers show each box exactly, and bring back a box that is out of the viewer.
+  - Resolve's Audio panel has the Volume and the Voice Isolation of a clip (p. 743). The Audio section has them too.
+  - Mute is beside Volume, as in the strip of the Mixer. Thus the user does not need the right-click menu to mute a clip.
+  - Voice Isolation uses the controls of the right-click menu. Thus it acts the same, also with the download question.
+
+## X71. Clip volume is a line on the clip, without keyframes
+
+- **Resolve:**
+  - On the Edit page, each clip with sound has a volume overlay. A drag up or down on it sets the level of the clip (p. 1109).
+  - Shift gives finer steps (p. 1109). The overlay is flat at first (p. 1112).
+  - Over the overlay, the Move cursor shows. A drag up raises the volume, and a drag down lowers it (p. 1112).
+  - An Alt-click on the overlay makes a keyframe. Two keyframes or more change the level over time (pp. 1109, 1112).
+  - The Volume of the Cut page's Inspector is the value of the overlay (p. 743). The Cut chapters tell of no drag on the overlay.
+  - The volume commands of the Edit page change several selected clips together. The clips keep the differences between their levels (p. 1110).
+- **vidcut:**
+  - Each clip with sound has a thin line in its sound part, at the height of its gain (`gain_db`).
+  - The line shows where the sound part is tall enough. In a short row, the line is not shown.
+  - Over the line, the pointer becomes an up-down arrow.
+  - A drag on the line moves it, and sets the gain. Shift makes the drag finer.
+  - During the drag, the timeline shows the new gain, and a label beside the line shows its value.
+  - On release, one `clip.set` goes in. It is one undo step.
+  - A drag on a clip that is not selected changes only that clip. It does not select the clip.
+  - A drag on a selected clip changes all the selected clips with sound by the same number of dB:
+    - Thus they keep the differences between their gains. Each gain stops at −60 dB and at +24 dB.
+    - On release, one `apply` holds a `clip.set` for each clip that changes. It is one undo step.
+  - A line on a locked track does not take a drag. A selected clip on a locked track does not change.
+  - A drag on another part of the clip moves, trims or slips the clip.
+  - The scale and the steps are in [D77](cut-page-spec.md#12-decisions-on-gaps-and-contradictions).
+  - The line and the Volume of the Inspector's Audio section ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)) set the same gain.
+  - vidcut has no keyframes. Thus the line stays flat, and an Alt-click on it does what a click does.
+- **Why:**
+  - The line shows the gain of each clip at a glance. A drag sets it without a window.
+  - The Edit page has the overlay, and the Inspector of the Cut page has its value. The line gives the timeline of vidcut the same control.
+  - A drag changes a value by an amount. A move of several clips also moves each clip by the same amount.
+  - Resolve's volume commands also keep the differences between the selected clips.
+  - Keyframes on the volume need keyframes in the model first. The Alt-click stays free for them.
