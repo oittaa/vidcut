@@ -530,8 +530,10 @@ fn word_open(cue: &SubtitleStyle, word: &SubtitleStyle) -> String {
             plain_number(look.text_fraction() * 10_000.0)
         ));
     }
-    if word.bold == Some(true) {
-        attrs.push_str(" tts:fontWeight=\"bold\"");
+    match word.bold {
+        Some(true) => attrs.push_str(" tts:fontWeight=\"bold\""),
+        Some(false) => attrs.push_str(" tts:fontWeight=\"normal\""),
+        None => {}
     }
     if let Some(font) = &word.font {
         attrs.push_str(&format!(" tts:fontFamily=\"{}\"", escape_xml(font)));

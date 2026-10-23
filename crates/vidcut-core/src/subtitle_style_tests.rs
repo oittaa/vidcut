@@ -413,6 +413,89 @@ fn the_viewer_paints_one_word_and_leaves_the_other() {
 }
 
 #[test]
+fn a_bold_cue_draws_a_word_plain_when_the_word_is_not_bold() {
+    let cue = SubtitleStyle {
+        bold: Some(true),
+        ..SubtitleStyle::default()
+    };
+    let word = SubtitleStyle {
+        bold: Some(false),
+        ..SubtitleStyle::default()
+    };
+    let shown = crate::subtitles::shown(
+        "<b>one two</b>",
+        &[],
+        &[Some(word), None],
+        &cue,
+        0,
+        25.0,
+        None,
+    );
+    let bold = shown
+        .pieces
+        .iter()
+        .find(|p| p.text == "one")
+        .map(|p| p.bold);
+    assert_eq!(bold, Some(false));
+}
+
+#[test]
+fn a_bold_cue_keeps_a_word_bold_when_that_word_leaves_bold_out() {
+    let cue = SubtitleStyle {
+        bold: Some(true),
+        ..SubtitleStyle::default()
+    };
+    let word = SubtitleStyle {
+        bold: Some(false),
+        ..SubtitleStyle::default()
+    };
+    let shown = crate::subtitles::shown("one two", &[], &[Some(word), None], &cue, 0, 25.0, None);
+    let bold = shown
+        .pieces
+        .iter()
+        .find(|p| p.text == "two")
+        .map(|p| p.bold);
+    assert_eq!(bold, Some(true));
+}
+
+#[test]
+fn a_plain_cue_draws_a_bold_word_bold() {
+    let word = SubtitleStyle {
+        bold: Some(true),
+        ..SubtitleStyle::default()
+    };
+    let shown = crate::subtitles::shown(
+        "one two",
+        &[],
+        &[Some(word), None],
+        &SubtitleStyle::default(),
+        0,
+        25.0,
+        None,
+    );
+    let bold = shown
+        .pieces
+        .iter()
+        .find(|p| p.text == "one")
+        .map(|p| p.bold);
+    assert_eq!(bold, Some(true));
+}
+
+#[test]
+fn a_bold_run_closes_around_a_word_that_is_not_bold() {
+    let word = SubtitleStyle {
+        bold: Some(false),
+        ..SubtitleStyle::default()
+    };
+    let text = crate::subtitles::marked(
+        "<b>one two</b>",
+        &SubtitleStyle::default(),
+        &[None, Some(word)],
+    );
+    assert_eq!(text, "<b>one </b>two");
+}
+
+#[test]
 fn an_imsc1_file_writes_one_words_style() {
     let word = SubtitleStyle {
         color: Some("#ff0000".into()),
