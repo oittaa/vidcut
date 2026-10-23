@@ -1,6 +1,7 @@
 mod dissolve;
 pub mod filmstrip;
 mod follow;
+pub mod keyframes;
 pub mod normalize;
 pub mod picture;
 pub mod subtitles;
@@ -243,6 +244,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             head: 0,
             tail: 0,
             gain_db: 0.0,
+            gain_keys: Vec::new(),
             muted: false,
             effects: None,
             voice_isolation: None,
@@ -1486,6 +1488,13 @@ pub fn change_speed(
                 hi = mid;
             }
         }
+        let keys = n
+            .audio
+            .as_ref()
+            .map(|a| crate::keyframes::retimed(&a.gain_keys, &c, &n));
+        if let (Some(a), Some(keys)) = (n.audio.as_mut(), keys) {
+            a.gain_keys = keys;
+        }
         let (ti, ci) = locate(p, &id)?;
         p.tracks[ti].clips[ci] = n;
         if lo != c.duration {
@@ -1521,6 +1530,7 @@ pub struct ClipProps {
     pub enabled: Option<bool>,
     pub muted: Option<bool>,
     pub gain_db: Option<f64>,
+    pub at: Option<i64>,
     pub name: Option<Option<String>>,
     pub color: Option<Option<String>>,
     pub voice_isolation: Option<f64>,
@@ -1545,9 +1555,13 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
     if let Some(Some(c)) = &props.color {
         check_clip_color(c)?;
     }
+    if props.gain_db.is_some() {
+        keyframes::check_keyed_gain(p, ids, props.at)?;
+    }
     for id in ids {
         let (ti, ci) = locate(p, id)?;
         let c = &mut p.tracks[ti].clips[ci];
+        let at = props.at.filter(|&t| c.sounds_at(t)).map(|t| c.source_at(t));
         if let Some(e) = props.enabled {
             c.enabled = e;
         }
@@ -1565,8 +1579,11 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
             if let Some(m) = props.muted {
                 a.muted = m;
             }
-            if let Some(g) = props.gain_db {
-                a.gain_db = g;
+            match (props.gain_db, at) {
+                (Some(g), Some(frame)) if a.is_keyed() => keyframes::put_value(a, frame, g),
+                (Some(_), None) if a.is_keyed() => {}
+                (Some(g), _) => a.gain_db = g,
+                (None, _) => {}
             }
             if let Some(v) = props.voice_isolation {
                 a.voice_isolation = Some(v);
@@ -2067,7 +2084,9 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
                 )));
             }
             if c.audio.as_ref().is_some_and(|a| {
-                a.stream as usize >= media.info.audio.len() || !(-60.0..=24.0).contains(&a.gain_db)
+                a.stream as usize >= media.info.audio.len()
+                    || !(-60.0..=24.0).contains(&a.gain_db)
+                    || crate::keyframes::problem(&a.gain_keys).is_some()
             }) {
                 return Err(Error::invalid(format!(
                     "pasted clip {} has invalid audio settings",

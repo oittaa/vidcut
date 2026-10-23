@@ -439,6 +439,7 @@ struct Sound {
     stored: f64,
     gain: f64,
     muted: bool,
+    keyed: bool,
 }
 
 type Lists<'a> = (&'a [Chosen], &'a [Sound], &'a [Paced]);
@@ -520,6 +521,7 @@ enum Act {
     Ease(Ease),
     Swap,
     Clear(PictureTool),
+    Unkey,
 }
 
 fn label(ui: &mut egui::Ui, text: &str, set: bool) {
@@ -628,7 +630,10 @@ fn field(
         }
     });
     if reset(ui, set) {
-        acts.push(Act::Put(f, f.usual()));
+        acts.push(match f {
+            Key::Volume => Act::Unkey,
+            f => Act::Put(f, f.usual()),
+        });
     }
     ui.end_row();
 }
@@ -933,6 +938,7 @@ impl Workspace {
             return Vec::new();
         };
         let gained = self.inspector.gained.as_ref();
+        let at = self.snap.timeline.position as f64;
         self.snap
             .selection
             .clips
@@ -940,17 +946,19 @@ impl Workspace {
             .filter_map(|id| {
                 let c = p.clip(id)?;
                 let a = c.audio.as_ref()?;
+                let stored = c.gain_at(at)?;
                 let gain = gained
                     .and_then(|g| {
                         let (_, from) = g.from.iter().find(|(f, _)| f == id)?;
-                        landing(g.to, g.since.elapsed(), *from, a.gain_db)
+                        landing(g.to, g.since.elapsed(), *from, stored)
                     })
-                    .unwrap_or(a.gain_db);
+                    .unwrap_or(stored);
                 Some(Sound {
                     id: c.id.clone(),
-                    stored: a.gain_db,
+                    stored,
                     gain,
                     muted: a.muted,
+                    keyed: a.is_keyed(),
                 })
             })
             .collect()
@@ -1147,7 +1155,8 @@ impl Workspace {
             return;
         }
         let ids: Vec<&str> = from.iter().map(|(id, _)| id.as_str()).collect();
-        self.send("clip.set", json!({ "clips": ids, "gain_db": to }));
+        let at = self.snap.timeline.position;
+        self.send("clip.set", json!({ "clips": ids, "gain_db": to, "at": at }));
         self.inspector.gained = Some(Gained {
             since: Instant::now(),
             from,
@@ -1192,7 +1201,9 @@ impl Workspace {
         };
         let normalize = group(ui, "Audio", header, |ui| {
             let first = &sounds[0];
-            let set = sounds.iter().any(|s| s.gain != Key::Volume.usual());
+            let set = sounds
+                .iter()
+                .any(|s| s.keyed || s.gain != Key::Volume.usual());
             let volume = (set, first.gain, GAIN);
             entry(ui, (Key::Volume, None), &self.inspector, volume, acts);
             label(ui, "Mute", sounds.iter().any(|s| s.muted));
@@ -1356,6 +1367,23 @@ impl Workspace {
                 if !ids.is_empty() {
                     self.send("clip.set", json!({ "clips": ids, "muted": on }));
                 }
+            }
+            Act::Unkey => {
+                let keyed: Vec<&str> = sounds
+                    .iter()
+                    .filter(|s| s.keyed)
+                    .map(|s| s.id.as_str())
+                    .collect();
+                if keyed.is_empty() {
+                    self.send_volume(sounds, Key::Volume.usual());
+                    return;
+                }
+                let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
+                let commands = json!([
+                    { "method": "keyframes.remove", "params": { "clips": keyed } },
+                    { "method": "clip.set", "params": { "clips": ids, "gain_db": 0.0 } },
+                ]);
+                self.send("apply", json!({ "commands": commands }));
             }
         }
     }

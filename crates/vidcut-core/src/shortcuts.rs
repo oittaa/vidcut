@@ -255,9 +255,10 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Delete",
         Some(
             "Removes the selected clips and subtitles. On Track 1 the gap closes: Track 1 holds \
-             the main story and never has holes. Backspace does the same. With a dissolve selected, it \
-             removes the dissolve and its Cross Fade. After a click in the Media Pool, it \
-             removes the selected media from the pool instead, after asking.",
+             the main story and never has holes. Backspace does the same. With volume keyframes \
+             selected, it removes only them. With a dissolve selected, it removes the dissolve and \
+             its Cross Fade. After a click in the Media Pool, it removes the selected media from \
+             the pool instead, after asking.",
         ),
     ),
     key(
@@ -355,6 +356,21 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Enter"],
         "Edit the selected subtitle",
         Some("Shows its text and position in the Inspector."),
+    ),
+    key(
+        Clips,
+        &["]"],
+        "Next keyframe",
+        Some(
+            "The playhead goes to the next volume keyframe of the selected clips. While Ripple \
+             Delete Silence is open, ] goes to its next stripe instead.",
+        ),
+    ),
+    key(
+        Clips,
+        &["["],
+        "Previous keyframe",
+        Some("The playhead goes to the volume keyframe of the selected clips before it."),
     ),
     key(
         Clips,

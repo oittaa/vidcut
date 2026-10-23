@@ -187,7 +187,8 @@ fn track_channels(p: &Project, t: &Track, at: i64, waveforms: &Waves) -> Vec<f32
         });
         let s = c.source_at(at) as f64 / fps + origin;
         let gained = map_channels(&source_peaks(w, s, s + 1.0 / fps), n);
-        let g = linear(audio.gain_db + t.volume_db) * share as f32;
+        let gain = c.gain_at(at as f64).unwrap_or(audio.gain_db);
+        let g = linear(gain + t.volume_db) * share as f32;
         for (dst, src) in level.iter_mut().zip(gained) {
             *dst = f32::max(*dst, src * g);
         }

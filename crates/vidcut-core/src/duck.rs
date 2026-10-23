@@ -308,7 +308,12 @@ pub(crate) fn planned(p: &Project, lanes: &[LaneTrack], a: i64, b: i64) -> Vec<D
                     start: c.start,
                     source_in: c.source_in,
                     pace: c.pace(),
-                    gain_db: au.gain_db + x.volume_db,
+                    gain_db: if au.is_keyed() {
+                        x.volume_db
+                    } else {
+                        au.gain_db + x.volume_db
+                    },
+                    keys: au.gain_keys.clone(),
                 });
             }
         }
@@ -371,7 +376,13 @@ pub fn hear(plan: &mut RenderPlan, p: &Project, measured: &mut Measure) -> Resul
             let found = match measured(m, s.stream, d.detect)? {
                 Some(Measured::Speech(va)) => analysis::speech_frames(&span, s.frames, &va),
                 Some(Measured::Levels(l)) => {
-                    analysis::loud_frames(&span, s.frames, &l, d.threshold_db, s.gain_db)
+                    let gain = crate::keyframes::Gain {
+                        db: s.gain_db,
+                        keys: &s.keys,
+                        origin: s.origin,
+                        fps: f,
+                    };
+                    analysis::loud_frames(&span, s.frames, &l, d.threshold_db, &gain)
                 }
                 None => {
                     let u = Unmeasured {

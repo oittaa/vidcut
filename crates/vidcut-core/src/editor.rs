@@ -2029,15 +2029,15 @@ fn quiet_edges(p: &Project, env: &dyn Env, spans: &[(i64, i64)]) -> Result<Vec<(
                         .map(|(_, a, b)| (a, b)),
                 );
             }
-            sources.push((span, env.audio_levels(m, a.stream)?, a.gain_db));
+            sources.push((span, env.audio_levels(m, a.stream)?, a));
         }
     }
     let heard: Vec<analysis::Heard> = sources
         .iter()
-        .map(|(span, levels, gain_db)| analysis::Heard {
+        .map(|(span, levels, a)| analysis::Heard {
             span,
             levels,
-            gain_db: *gain_db,
+            gain: crate::keyframes::Gain::of(a, 0.0, span.origin, fps.as_f64()),
         })
         .collect();
     Ok(spans
@@ -2152,6 +2152,27 @@ pub fn resolve_clip(p: &Project, r: &ClipRef, playhead: Option<i64>) -> Result<S
 
 fn resolve_clips(p: &Project, refs: &[ClipRef], playhead: Option<i64>) -> Result<Vec<String>> {
     refs.iter().map(|r| resolve_clip(p, r, playhead)).collect()
+}
+
+fn key_pick(
+    p: &Project,
+    frames: &Option<OneOrMany<i64>>,
+    at: &Option<OneOrMany<TimeSpec>>,
+    playhead: Option<i64>,
+) -> Result<ops::keyframes::Pick> {
+    let at = at
+        .as_ref()
+        .map(|a| {
+            a.to_vec()
+                .iter()
+                .map(|t| resolve(p, t, playhead))
+                .collect::<Result<Vec<_>>>()
+        })
+        .transpose()?;
+    Ok(ops::keyframes::Pick {
+        frames: frames.as_ref().map(OneOrMany::to_vec),
+        at,
+    })
 }
 
 pub fn resolve_cue(p: &Project, r: &str, playhead: Option<i64>) -> Result<String> {
@@ -2956,12 +2977,17 @@ fn mutate(
             enabled,
             muted,
             gain_db,
+            at,
             name,
             color,
             voice_isolation,
             download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
             let or_none =
                 |v: &Option<String>| v.as_ref().map(|v| (!v.is_empty()).then(|| v.clone()));
             let voice_isolation = voice_isolation.map(ops::checked_isolation).transpose()?;
@@ -2972,6 +2998,7 @@ fn mutate(
                 enabled: *enabled,
                 muted: *muted,
                 gain_db: *gain_db,
+                at,
                 name: or_none(name),
                 color: or_none(color),
                 voice_isolation,
@@ -2996,7 +3023,7 @@ fn mutate(
                 let gain_db = p
                     .clip(id)
                     .and_then(|c| c.audio.as_ref())
-                    .map_or(0.0, |a| a.gain_db);
+                    .map_or(0.0, |a| a.top_db());
                 measured.push(ops::normalize::Measured {
                     id: id.clone(),
                     gain_db,
@@ -3005,17 +3032,95 @@ fn mutate(
             }
             let mut out = Vec::new();
             for n in ops::normalize::gains(&measured, target, *relative) {
-                let props = ClipProps {
-                    gain_db: Some(n.gain_db),
-                    ..ClipProps::default()
-                };
-                ops::set_clips(p, std::slice::from_ref(&n.id), &props)?;
+                let (ti, ci) = p
+                    .find_clip(&n.id)
+                    .ok_or_else(|| Error::not_found(format!("no clip {}", n.id)))?;
+                match p.tracks[ti].clips[ci].audio.as_mut() {
+                    Some(a) if a.is_keyed() => a.raise(n.gain_db - n.from_db),
+                    Some(a) => a.gain_db = n.gain_db,
+                    None => return Err(Error::invalid(format!("{} has no audio", n.id))),
+                }
                 out.push(json!({
                     "clip": n.id, "level": n.level, "from_db": n.from_db,
                     "gain_db": n.gain_db, "held": n.held,
                 }));
             }
             json!({ "target": target, "clips": out })
+        }
+        Request::KeyframesList { clips } => {
+            let ids = clips
+                .as_ref()
+                .map(|c| resolve_clips(p, &c.to_vec(), playhead))
+                .transpose()?;
+            ops::keyframes::list(p, ids.as_deref())?
+        }
+        Request::KeyframesAdd {
+            clips,
+            param: _,
+            at,
+            value,
+            ease,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let at = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => playhead
+                    .ok_or_else(|| Error::usage("keyframes.add needs `at` (no playhead)"))?,
+            };
+            let added = ops::keyframes::add(p, &ids, at, *value, *ease)?;
+            let added: Vec<Value> = added
+                .into_iter()
+                .map(|(clip, frame)| json!({ "clip": clip, "frame": frame }))
+                .collect();
+            json!({ "at": at, "clips": added })
+        }
+        Request::KeyframesSet {
+            clips,
+            param: _,
+            frames,
+            at,
+            value,
+            by,
+            ease,
+            in_handle,
+            out_handle,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let pick = key_pick(p, frames, at, playhead)?;
+            let change = ops::keyframes::KeyChange {
+                value: *value,
+                by: *by,
+                ease: *ease,
+                in_handle: *in_handle,
+                out_handle: *out_handle,
+            };
+            ops::keyframes::set(p, &ids, &pick, &change)?;
+            Value::Null
+        }
+        Request::KeyframesMove {
+            clips,
+            param: _,
+            frames,
+            at,
+            by,
+            to,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let pick = key_pick(p, frames, at, playhead)?;
+            let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
+            ops::keyframes::shift(p, &ids, &pick, *by, to)?;
+            Value::Null
+        }
+        Request::KeyframesRemove {
+            clips,
+            param: _,
+            frames,
+            at,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let pick = key_pick(p, frames, at, playhead)?;
+            ops::keyframes::remove(p, &ids, &pick)?;
+            Value::Null
         }
         Request::EditCut { clips } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -4442,6 +4547,16 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
         }
         retime(&mut c.effects);
         retime(&mut c.audio_effects);
+        if from != to {
+            let ratio = to.as_f64() / from.as_f64();
+            for k in &mut c.gain_keys {
+                k.frame = conv(k.frame);
+                for h in [&mut k.in_handle, &mut k.out_handle].into_iter().flatten() {
+                    h.frames *= ratio;
+                }
+            }
+            c.gain_keys.dedup_by_key(|k| k.frame);
+        }
         (c.start, c.duration) = (start, end - start);
     }
     for x in &mut t.transitions {
@@ -4639,6 +4754,14 @@ fn place_imported(
                     head: h,
                     tail: tl,
                     gain_db: c.gain_db.clamp(*GAIN.start(), *GAIN.end()),
+                    gain_keys: c
+                        .gain_keys
+                        .iter()
+                        .map(|k| crate::model::Keyframe {
+                            frame: k.frame + sound_from,
+                            ..*k
+                        })
+                        .collect(),
                     muted: c.muted,
                     effects: carry(&c.audio_effects, sound_from),
                     voice_isolation: c
@@ -6648,10 +6771,12 @@ fn silent_parts(
     download: bool,
 ) -> Result<Vec<(i64, i64)>> {
     let m = target.media(p)?;
+    let (_, origin) = p.media_origin(&m.id)?;
+    let fps = p.settings.fps.as_f64();
     let (stream, gain) = match target {
-        Target::Media(_) => (0, 0.0),
+        Target::Media(_) => (0, crate::keyframes::Gain::flat(0.0)),
         Target::Clip(c) => match &c.audio {
-            Some(a) => (a.stream, a.gain_db),
+            Some(a) => (a.stream, crate::keyframes::Gain::of(a, 0.0, origin, fps)),
             None => {
                 return Err(Error::invalid(format!(
                     "{} has no sound to find silence in",
@@ -6671,7 +6796,7 @@ fn silent_parts(
         }
         None => {
             let levels = env.audio_levels(m, stream)?;
-            analysis::silent_parts(&span, &levels, gain, settings)
+            analysis::silent_parts(&span, &levels, &gain, settings)
         }
     })
 }
@@ -7210,6 +7335,9 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
         v["audio"] = json!({ "stream": a.stream, "head": a.head, "tail": a.tail, "gain_db": a.gain_db, "muted": a.muted });
         if let Some(e) = &a.effects {
             v["audio"]["effects"] = json!(e.names());
+        }
+        if a.is_keyed() {
+            v["keyframes"] = json!(["volume"]);
         }
     }
     v

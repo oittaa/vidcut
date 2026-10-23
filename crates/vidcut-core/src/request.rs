@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    DuckDetect, DynamicZoom, Ease, PictureTool, Place, SubtitleStyle, TitleAlign, TitleKind,
-    TitleStyle, TrackClip, ZoomBox,
+    DuckDetect, DynamicZoom, Ease, Handle, PictureTool, Place, SubtitleStyle, TitleAlign,
+    TitleKind, TitleStyle, TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -1019,8 +1019,15 @@ pub enum Request {
         enabled: Option<bool>,
         #[serde(default)]
         muted: Option<bool>,
+        /// The volume. A clip with volume keyframes gets it as a keyframe
+        /// at `at` (decision D82). Such a clip without sound there keeps
+        /// its volume.
         #[serde(default)]
         gain_db: Option<f64>,
+        /// Where `gain_db` goes as a keyframe on clips with volume
+        /// keyframes: the playhead by default.
+        #[serde(default)]
+        at: Option<TimeSpec>,
         /// Empty string clears the name.
         #[serde(default)]
         name: Option<String>,
@@ -1045,12 +1052,14 @@ pub enum Request {
     },
     /// Normalize Audio Levels: set the volume (`gain_db`) of `clips` so
     /// that their level reaches `target`. Each clip is measured over the
-    /// sound it plays, as the export mixes it, without its volume, mute,
-    /// Voice Isolation and transitions, and without its track's mixer. The
-    /// volume stops at -60 and +24 dB. One undo step; a dry run gives the
-    /// volumes and changes nothing. Returns each clip's `level` (null when
-    /// silent), its volume before (`from_db`) and after (`gain_db`), and
-    /// `held` when the volume stopped short of the target.
+    /// sound it plays, as the export mixes it, without its volume and its
+    /// volume keyframes, mute, Voice Isolation and transitions, and without
+    /// its track's mixer. The volume of a clip with volume keyframes is its
+    /// highest keyframe, and every keyframe moves by the same dB (decision
+    /// D83). The volume stops at -60 and +24 dB. One undo step; a dry run
+    /// gives the volumes and changes nothing. Returns each clip's `level`
+    /// (null when silent), its volume before (`from_db`) and after
+    /// (`gain_db`), and `held` when the volume stopped short of the target.
     #[serde(rename = "clip.normalize")]
     ClipNormalize {
         clips: OneOrMany<ClipRef>,
@@ -1068,6 +1077,111 @@ pub enum Request {
         /// a silent clip keeps its volume.
         #[serde(default)]
         relative: bool,
+    },
+    /// The keyframes of `clips`, or of every clip that has some (decision
+    /// D81). Each clip gives its `track`, the value (`param`) and its
+    /// keyframes in order: the source `frame`, the timeline frame `at` and
+    /// its timecode, the `value`, the `ease` (null when a handle was
+    /// dragged), and the `in` and `out` handles. Previous and Next Keyframe
+    /// are this and `player.seek`.
+    #[serde(rename = "keyframes.list")]
+    KeyframesList {
+        #[serde(default)]
+        clips: Option<OneOrMany<ClipRef>>,
+    },
+    /// Add a keyframe at `at` (the playhead by default) to each of `clips`
+    /// whose sound is there, on the source frame under `at`. Without a
+    /// `value`, it takes the value the clip has there. A keyframe already
+    /// on that frame takes the value and the ease. With its first
+    /// keyframe, a clip's volume follows its keyframes. Returns the
+    /// `clips` with the source `frame` of each new keyframe.
+    #[serde(rename = "keyframes.add")]
+    KeyframesAdd {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default)]
+        param: KeyParam,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        /// The volume in dB, from -60 to 24.
+        #[serde(default)]
+        value: Option<f64>,
+        #[serde(default)]
+        ease: Option<Ease>,
+    },
+    /// Change the keyframes of `clips`: those on the source `frames`, those
+    /// at the timeline frames `at`, or, with neither, all of them. Give a
+    /// `value` or `by`, and an `ease` or handles. A handle given makes the
+    /// keyframe's ease none of the four.
+    #[serde(rename = "keyframes.set")]
+    KeyframesSet {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default)]
+        param: KeyParam,
+        #[serde(default)]
+        frames: Option<OneOrMany<i64>>,
+        #[serde(default)]
+        at: Option<OneOrMany<TimeSpec>>,
+        /// The new volume in dB, from -60 to 24.
+        #[serde(default)]
+        value: Option<f64>,
+        /// dB to add to each value. Each stops at -60 and +24 dB.
+        #[serde(default)]
+        by: Option<f64>,
+        /// Sets the handles: flat, a third of the way to the keyframe
+        /// before (In) and after (Out). `linear` takes them off.
+        #[serde(default)]
+        ease: Option<Ease>,
+        /// The In handle: `frames` (at most 0) and `value` (dB) from the
+        /// keyframe. Null takes it off.
+        #[serde(
+            rename = "in",
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        in_handle: Option<Option<Handle>>,
+        /// The Out handle: `frames` (at least 0) and `value` (dB) from the
+        /// keyframe. Null takes it off.
+        #[serde(
+            rename = "out",
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        out_handle: Option<Option<Handle>>,
+    },
+    /// Move the keyframes of `clips` (those on the source `frames`, those
+    /// at the timeline frames `at`, or all of them) `by` timeline frames,
+    /// or move one keyframe `to` a timeline frame. A keyframe stays on a
+    /// whole source frame, and two cannot share one.
+    #[serde(rename = "keyframes.move")]
+    KeyframesMove {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default)]
+        param: KeyParam,
+        #[serde(default)]
+        frames: Option<OneOrMany<i64>>,
+        #[serde(default)]
+        at: Option<OneOrMany<TimeSpec>>,
+        /// Timeline frames. Negative moves them earlier.
+        #[serde(default)]
+        by: Option<i64>,
+        #[serde(default)]
+        to: Option<TimeSpec>,
+    },
+    /// Remove the keyframes of `clips`: those on the source `frames`, those
+    /// at the timeline frames `at`, or, with neither, all of them. When a
+    /// clip's last keyframes go, the value of the first of them stays as
+    /// its volume.
+    #[serde(rename = "keyframes.remove")]
+    KeyframesRemove {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default)]
+        param: KeyParam,
+        #[serde(default)]
+        frames: Option<OneOrMany<i64>>,
+        #[serde(default)]
+        at: Option<OneOrMany<TimeSpec>>,
     },
     /// The timeline's In and Out marks.
     #[serde(rename = "marks.get")]
@@ -2578,6 +2692,15 @@ pub enum Detect {
     Speech,
 }
 
+/// The value that keyframes set (decision D81).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyParam {
+    /// The volume of a clip's sound, in dB.
+    #[default]
+    Volume,
+}
+
 /// What `clip.normalize` measures (deviation X72).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -3263,6 +3386,7 @@ impl Request {
                     | Self::TrackList {}
                     | Self::BinsList {}
                     | Self::MarksGet {}
+                    | Self::KeyframesList { .. }
                     | Self::MarkersList {}
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }

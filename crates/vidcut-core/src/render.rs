@@ -4,7 +4,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, ColorSpace, DuckDetect, Media, Picture, Project, Title, TrackKind};
+use crate::model::{
+    Clip, ColorSpace, DuckDetect, Keyframe, Media, Picture, Project, Title, TrackKind,
+};
 use crate::otio::transitions;
 use crate::time::Rational;
 
@@ -70,8 +72,12 @@ pub struct DuckSource {
     pub start: i64,
     pub source_in: i64,
     pub pace: Pace,
-    /// The clip gain and the track's fader, in dB.
+    /// The clip gain and the track's fader, in dB; with `keys`, the fader
+    /// only.
     pub gain_db: f64,
+    /// The clip's volume keyframes (decision D81), on top of `gain_db`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<Keyframe>,
 }
 
 impl Dip {
@@ -350,6 +356,11 @@ pub enum AudioPiece {
         /// `gain_db`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fade: Option<Fade>,
+        /// Its clip's volume keyframes (decision D81): their gain at each
+        /// source sample, on top of `gain_db`, which then holds the
+        /// track's fader only.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keyed: Option<Keyed>,
         /// Voice Isolation's Amount over it, from 1 to 100: the clip's own,
         /// else its track's; left out when the clip's own is 0.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -358,6 +369,28 @@ pub enum AudioPiece {
     Silence {
         samples: i64,
     },
+}
+
+/// A clip's volume keyframes over a piece of its sound.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Keyed {
+    /// The keyframes, their frames in project frames from the piece's
+    /// `origin`.
+    pub keys: Vec<Keyframe>,
+    /// Plan samples in a project frame.
+    pub per_frame: f64,
+}
+
+impl Keyed {
+    pub fn db_at(&self, sample: f64) -> f64 {
+        crate::keyframes::value_at(&self.keys, sample / self.per_frame).map_or(0.0, |v| {
+            v.clamp(*crate::validate::GAIN.start(), *crate::validate::GAIN.end())
+        })
+    }
+
+    pub fn gain(&self, sample: f64) -> f32 {
+        10f64.powf(self.db_at(sample) / 20.0) as f32
+    }
 }
 
 /// A sound's gain through a cross fade (decision D50): rising from silence
@@ -732,6 +765,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 speed,
                 fade,
                 isolation,
+                keyed,
                 ..
             }),
             AudioPiece::Source {
@@ -743,12 +777,14 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 speed: sp2,
                 fade: f2,
                 isolation: i2,
+                keyed: k2,
                 ..
             },
         ) if media == m2
             && stream == st2
             && gain_db == g2
             && isolation == i2
+            && keyed == k2
             && *speed == 1.0
             && *sp2 == 1.0
             && fade.is_none()
@@ -1346,6 +1382,10 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         fps.frame_to_sample(c.source_in, rate)
             + (c.pace().sound(0.0) * per_frame + since as f64 * speed).round() as i64
     };
+    let keyed = audio.is_keyed().then(|| Keyed {
+        keys: audio.gain_keys.clone(),
+        per_frame: f64::from(rate) / fps.as_f64(),
+    });
     AudioPiece::Source {
         media: c.media.clone(),
         path,
@@ -1353,10 +1393,11 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         origin,
         source_sample,
         samples,
-        gain_db: audio.gain_db,
+        gain_db: if keyed.is_some() { 0.0 } else { audio.gain_db },
         speed,
         fade: None,
         isolation: audio.voice_isolation,
+        keyed,
     }
 }
 
@@ -1408,6 +1449,7 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
             x.enabled = true;
             if let Some(s) = x.audio.as_mut() {
                 s.gain_db = 0.0;
+                s.gain_keys.clear();
                 s.muted = false;
                 s.voice_isolation = None;
             }
@@ -1509,6 +1551,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     gain_db: 0.0,
                     fade: None,
                     isolation: None,
+                    keyed: None,
                 },
             );
         }

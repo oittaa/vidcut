@@ -35,6 +35,11 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("track.remove", &["track"]),
     ("track.set", &["track"]),
     ("clip.set", &["clips"]),
+    ("keyframes.list", &["clips"]),
+    ("keyframes.add", &["clips"]),
+    ("keyframes.set", &["clips"]),
+    ("keyframes.move", &["clips"]),
+    ("keyframes.remove", &["clips"]),
     ("markers.move", &["marker"]),
     ("markers.remove", &["marker"]),
     ("markers.set", &["marker"]),
@@ -131,6 +136,10 @@ const GROUPS: &[(&str, &str)] = &[
         "jobs",
         "Export, proxy and transcription jobs of the running GUI",
     ),
+    (
+        "keyframes",
+        "Volume keyframes of clips: the curve of a clip's volume",
+    ),
     ("keys", "Keyboard shortcuts"),
     (
         "looks",
@@ -221,6 +230,10 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "clip.set",
         "vidcut clip set c4 --color pink\n  vidcut clip set c4 --color \"\"\n  vidcut clip set c4 --voice-isolation 75 --download\n  vidcut clip set c4 --voice-isolation 0",
+    ),
+    (
+        "keyframes.add",
+        "vidcut keyframes add c4 --at 10s\n  vidcut keyframes add c4 --at 12s --value -20 --ease ease_in\n  vidcut keyframes list c4",
     ),
     (
         "proxy.generate",
