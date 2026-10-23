@@ -2025,6 +2025,7 @@ fn shared_usable(size: u64, need: u64, free: bool) -> bool {
     free && size >= need
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn reclaim<T>(raws: &mut Vec<T>, mut destroy: impl FnMut(T)) {
     for raw in raws.drain(..) {
         destroy(raw);
