@@ -47,7 +47,7 @@ impl Kind {
         unsafe {
             let (a, b) = (&*self.params.as_ptr(), &*other.params.as_ptr());
             let bytes = |p: *const u8, n: usize| {
-                if n == 0 {
+                if p.is_null() || n == 0 {
                     &[][..]
                 } else {
                     std::slice::from_raw_parts(p, n)
@@ -57,6 +57,9 @@ impl Kind {
                 bytes(p.extradata, usize::try_from(p.extradata_size).unwrap_or(0))
             };
             let side_data = |p: &ffi::AVCodecParameters| {
+                if p.coded_side_data.is_null() {
+                    return Vec::new();
+                }
                 let n = usize::try_from(p.nb_coded_side_data).unwrap_or(0);
                 (0..n)
                     .map(|i| {
