@@ -225,9 +225,8 @@ impl Fit {
         let decoded = if self.space.is_tagged() {
             decoded
         } else {
-            // SAFETY: a new frame on the same buffers, so the tags change on it alone.
-            let mut f =
-                unsafe { frame::Video::wrap(ffmpeg::ffi::av_frame_clone(decoded.as_ptr())) };
+            // SAFETY: `decoded` is a live frame. A failed clone is an error.
+            let mut f = unsafe { cloned_frame(decoded.as_ptr())? };
             crate::color::retag(&mut f, self.space);
             retagged = f;
             &retagged
@@ -509,6 +508,19 @@ fn next_frame(
     }
 }
 
+fn cloned_frame(src: *const ffmpeg::ffi::AVFrame) -> Result<frame::Video> {
+    // SAFETY: `src` is a live frame. A null clone is refused before it is wrapped.
+    frame_from_clone(unsafe { ffmpeg::ffi::av_frame_clone(src) })
+}
+
+fn frame_from_clone(ptr: *mut ffmpeg::ffi::AVFrame) -> Result<frame::Video> {
+    if ptr.is_null() {
+        return Err(Error::Invalid("no memory for a thumbnail".into()));
+    }
+    // SAFETY: `ptr` is a new frame, freed when this value drops.
+    Ok(unsafe { frame::Video::wrap(ptr) })
+}
+
 fn packed(f: &frame::Video) -> Image {
     let (w, h) = (f.width(), f.height());
     let stride = f.stride(0);
@@ -522,5 +534,18 @@ fn packed(f: &frame::Video) -> Image {
         width: w,
         height: h,
         rgba,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frame_from_clone;
+
+    #[test]
+    fn a_failed_frame_clone_is_refused() {
+        match frame_from_clone(std::ptr::null_mut()) {
+            Err(err) => assert_eq!(err.to_string(), "no memory for a thumbnail"),
+            Ok(_) => panic!("a null clone was wrapped"),
+        }
     }
 }
