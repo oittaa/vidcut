@@ -4625,6 +4625,19 @@ fn imported_picture(
     }
 }
 
+fn reach(most: i64, ok: impl Fn(i64) -> bool) -> i64 {
+    let (mut low, mut high) = (0, most.max(0));
+    while low < high {
+        let mid = (low + high + 1) / 2;
+        if ok(mid) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    low
+}
+
 fn place_imported(
     p: &mut Project,
     t: &otio::Imported,
@@ -4757,10 +4770,22 @@ fn place_imported(
             start -= source_in;
             source_in = 0;
         }
-        let duration = (end - start).min(if still { frames } else { frames - source_in });
+        let speed = c.speed.as_ref().and_then(|s| s.scalar()).unwrap_or(1.0);
+        let pace = crate::render::Pace::of(speed, c.speed.as_ref().map_or(0, |s| s.skip));
+        let inside = |k: i64| (0..frames).contains(&(source_in + pace.offset(k)));
+        let duration = if still {
+            (end - start).min(frames)
+        } else {
+            reach(end - start, |d| d < 1 || inside(d - 1))
+        };
         if duration < end - start {
+            let side = if speed < 0.0 {
+                "before the start"
+            } else {
+                "past the end"
+            };
             warnings.push(format!(
-                "{label}: {} frame(s) past the end of {} were left out",
+                "{label}: {} frame(s) {side} of {} were left out",
                 end - start - duration.max(0),
                 m.name
             ));
@@ -4780,8 +4805,15 @@ fn place_imported(
             .filter(|_| !m.info.audio.is_empty())
             .and_then(|(h, tl)| {
                 let floor = floors.get(&track_of(&c.track)).copied().unwrap_or(0);
-                let h = h.max(-source_in).max(floor - start);
-                let tl = tl.min(frames - source_in - duration);
+                let h = match h {
+                    h if h < 0 => -reach(-h, |n| inside(-n)),
+                    h => h,
+                }
+                .max(floor - start);
+                let tl = match tl {
+                    tl if tl > 0 => reach(tl, |n| inside(duration + n - 1)),
+                    tl => tl,
+                };
                 (duration + tl - h >= 1).then_some(ClipAudio {
                     stream: if (c.stream as usize) < m.info.audio.len() {
                         c.stream

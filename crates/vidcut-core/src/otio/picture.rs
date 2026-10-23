@@ -411,10 +411,7 @@ pub fn take(
     let Some(read) = placement(effects) else {
         return Ok((effects.to_vec(), None));
     };
-    let timing = super::effects::Timing {
-        speed,
-        start: origin as f64,
-    };
+    let timing = super::effects::Timing { speed };
     let Some(picture) = read.with_keys(effects, shape, &timing, origin) else {
         return Ok((effects.to_vec(), None));
     };
@@ -458,6 +455,7 @@ fn read_keys(p: &Value, timing: &super::effects::Timing, origin: i64) -> Option<
     if keys.is_empty() {
         return Some(Vec::new());
     }
+    let [before, after] = timing.handle_names();
     let mut out = Vec::new();
     for (t, k) in keys {
         let at = t.parse::<f64>().ok()?;
@@ -474,8 +472,8 @@ fn read_keys(p: &Value, timing: &super::effects::Timing, origin: i64) -> Option<
         out.push(Keyframe {
             frame,
             value,
-            in_handle: handle("InBez", true),
-            out_handle: handle("OutBez", false),
+            in_handle: handle(before, true),
+            out_handle: handle(after, false),
         });
     }
     out.sort_by_key(|k| k.frame);
@@ -593,11 +591,12 @@ fn file_curve(
             };
             handle_value(name, h.frames / timing.scale(), value)
         };
+        let [before, after] = timing.handle_names();
         if let Some(h) = k.in_handle {
-            v["InBez"] = bez("InBez", h);
+            v[before] = bez(before, h);
         }
         if let Some(h) = k.out_handle {
-            v["OutBez"] = bez("OutBez", h);
+            v[after] = bez(after, h);
         }
         let name = if at.fract() == 0.0 {
             format!("{}", at as i64)
@@ -806,10 +805,7 @@ mod tests {
     }
 
     fn steady() -> crate::otio::effects::Timing {
-        crate::otio::effects::Timing {
-            speed: 1.0,
-            start: 0.0,
-        }
+        crate::otio::effects::Timing { speed: 1.0 }
     }
 
     fn read(effects: &[Value], shape: &Shape) -> Option<Picture> {
