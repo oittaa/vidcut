@@ -1538,14 +1538,6 @@ impl Picture {
     pub fn pivot(&self) -> [f64; 2] {
         self.anchor.unwrap_or(Self::MIDDLE)
     }
-
-    pub fn moved(&self) -> bool {
-        self.position.is_some()
-            || self.zoom.is_some()
-            || self.rotation.is_some()
-            || self.flip_horizontal
-            || self.flip_vertical
-    }
 }
 
 /// A compound clip or nested timeline from another editor's file
