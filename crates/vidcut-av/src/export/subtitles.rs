@@ -132,28 +132,24 @@ fn dialog_words(
 ) -> String {
     let mut current = None;
     for (piece, word) in vidcut_core::subtitles::parts(text) {
+        let over = word
+            .and_then(|i| word_styles.get(i))
+            .and_then(|s| s.as_ref());
         if word != current {
             if current.is_some() {
                 out.push_str("{\\r}");
             }
             current = word;
-            if let Some(over) = word
-                .and_then(|i| word_styles.get(i))
-                .and_then(|s| s.as_ref())
-            {
+            if let Some(over) = over {
                 out.push_str(&word_override(cue, over));
             }
         }
-        let case = word
-            .and_then(|i| word_styles.get(i))
-            .and_then(|s| s.as_ref())
-            .and_then(|s| s.case)
-            .or(cue.case);
+        let case = over.and_then(|s| s.case).or(cue.case);
         let text = vidcut_core::subtitles::cased(&piece.text, case);
         if piece.italic {
             out.push_str("{\\i1}");
         }
-        if piece.bold {
+        if piece.bold && over.and_then(|s| s.bold).is_none() {
             out.push_str("{\\b1}");
         }
         if piece.underline {

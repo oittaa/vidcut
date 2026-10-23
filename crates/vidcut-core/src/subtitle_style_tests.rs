@@ -4,7 +4,9 @@ use crate::model::{
     LetterCase, Place, Project, Settings, SubtitleAlign, SubtitleBackground, SubtitleOutline,
     SubtitleStyle,
 };
-use crate::ops::subtitles::{TrackProps, add_track, checked_style, set_track};
+use crate::ops::subtitles::{
+    TrackProps, add_cue, add_track, checked_style, set_style, set_track, set_word_style,
+};
 use crate::request::SubtitleFormat;
 use crate::subtitles::{Timed, Writing, write};
 use crate::test_support::Fixture;
@@ -384,6 +386,109 @@ fn setting_one_word_leaves_the_other_on_the_cue_style() {
 }
 
 #[test]
+fn a_bold_cue_stores_a_word_that_is_not_bold() {
+    let mut p = Project::new(Settings::default());
+    add_track(&mut p, None);
+    let id = add_cue(&mut p, 0, 0, None, Some(10), "one", None, Vec::new()).unwrap();
+    set_style(
+        &mut p,
+        &id,
+        SubtitleStyle {
+            bold: Some(true),
+            ..SubtitleStyle::default()
+        },
+    )
+    .unwrap();
+    set_word_style(
+        &mut p,
+        &id,
+        0,
+        SubtitleStyle {
+            bold: Some(false),
+            ..SubtitleStyle::default()
+        },
+    )
+    .unwrap();
+    let cue = &p.subtitles[0].cues[0];
+    let stored = cue
+        .words
+        .first()
+        .and_then(|w| w.style.as_ref())
+        .and_then(|s| s.bold);
+    let cue_style = cue.style.clone();
+    let text = cue.text.clone();
+    let times = cue.times();
+    let word_styles: Vec<_> = cue.words.iter().map(|w| w.style.clone()).collect();
+    let style = p.subtitles[0].style.for_cue(cue_style.as_ref());
+    let shown = crate::subtitles::shown(
+        &text,
+        &times,
+        &word_styles,
+        &style,
+        0,
+        p.settings.fps.as_f64(),
+        None,
+    );
+    let drawn = shown
+        .pieces
+        .iter()
+        .find(|piece| piece.text == "one")
+        .map(|piece| piece.bold);
+    assert_eq!(stored, Some(false));
+    assert_eq!(drawn, Some(false));
+}
+
+#[test]
+fn a_bold_track_stores_a_cue_that_is_not_bold() {
+    let mut p = Project::new(Settings::default());
+    let track = add_track(&mut p, None);
+    set_track(
+        &mut p,
+        &track,
+        &TrackProps {
+            style: Some(SubtitleStyle {
+                bold: Some(true),
+                ..SubtitleStyle::default()
+            }),
+            ..TrackProps::default()
+        },
+    )
+    .unwrap();
+    let id = add_cue(&mut p, 0, 0, None, Some(10), "one", None, Vec::new()).unwrap();
+    set_style(
+        &mut p,
+        &id,
+        SubtitleStyle {
+            bold: Some(false),
+            ..SubtitleStyle::default()
+        },
+    )
+    .unwrap();
+    let cue = &p.subtitles[0].cues[0];
+    let stored = cue.style.as_ref().and_then(|s| s.bold);
+    let cue_style = cue.style.clone();
+    let text = cue.text.clone();
+    let times = cue.times();
+    let word_styles: Vec<_> = cue.words.iter().map(|w| w.style.clone()).collect();
+    let style = p.subtitles[0].style.for_cue(cue_style.as_ref());
+    let shown = crate::subtitles::shown(
+        &text,
+        &times,
+        &word_styles,
+        &style,
+        0,
+        p.settings.fps.as_f64(),
+        None,
+    );
+    let drawn = shown
+        .pieces
+        .iter()
+        .find(|piece| piece.text == "one")
+        .map(|piece| piece.bold);
+    assert_eq!((stored, drawn), (Some(false), Some(false)));
+}
+
+#[test]
 fn the_viewer_paints_one_word_and_leaves_the_other() {
     let cue = SubtitleStyle {
         color: Some("#ffffff".into()),
@@ -410,6 +515,89 @@ fn the_viewer_paints_one_word_and_leaves_the_other() {
             ("TWO".into(), Some("#ff0000".into()), true, Some(2000)),
         ]
     );
+}
+
+#[test]
+fn a_bold_cue_draws_a_word_plain_when_the_word_is_not_bold() {
+    let cue = SubtitleStyle {
+        bold: Some(true),
+        ..SubtitleStyle::default()
+    };
+    let word = SubtitleStyle {
+        bold: Some(false),
+        ..SubtitleStyle::default()
+    };
+    let shown = crate::subtitles::shown(
+        "<b>one two</b>",
+        &[],
+        &[Some(word), None],
+        &cue,
+        0,
+        25.0,
+        None,
+    );
+    let bold = shown
+        .pieces
+        .iter()
+        .find(|p| p.text == "one")
+        .map(|p| p.bold);
+    assert_eq!(bold, Some(false));
+}
+
+#[test]
+fn a_bold_cue_keeps_a_word_bold_when_that_word_leaves_bold_out() {
+    let cue = SubtitleStyle {
+        bold: Some(true),
+        ..SubtitleStyle::default()
+    };
+    let word = SubtitleStyle {
+        bold: Some(false),
+        ..SubtitleStyle::default()
+    };
+    let shown = crate::subtitles::shown("one two", &[], &[Some(word), None], &cue, 0, 25.0, None);
+    let bold = shown
+        .pieces
+        .iter()
+        .find(|p| p.text == "two")
+        .map(|p| p.bold);
+    assert_eq!(bold, Some(true));
+}
+
+#[test]
+fn a_plain_cue_draws_a_bold_word_bold() {
+    let word = SubtitleStyle {
+        bold: Some(true),
+        ..SubtitleStyle::default()
+    };
+    let shown = crate::subtitles::shown(
+        "one two",
+        &[],
+        &[Some(word), None],
+        &SubtitleStyle::default(),
+        0,
+        25.0,
+        None,
+    );
+    let bold = shown
+        .pieces
+        .iter()
+        .find(|p| p.text == "one")
+        .map(|p| p.bold);
+    assert_eq!(bold, Some(true));
+}
+
+#[test]
+fn a_bold_run_closes_around_a_word_that_is_not_bold() {
+    let word = SubtitleStyle {
+        bold: Some(false),
+        ..SubtitleStyle::default()
+    };
+    let text = crate::subtitles::marked(
+        "<b>one two</b>",
+        &SubtitleStyle::default(),
+        &[None, Some(word)],
+    );
+    assert_eq!(text, "<b>one </b>two");
 }
 
 #[test]
