@@ -120,7 +120,7 @@ fn entries(dir: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn remove(path: &Path) -> Result<()> {
-    let removed = match std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()) {
+    let removed = match path.is_dir() {
         true => std::fs::remove_dir_all(path),
         false => std::fs::remove_file(path),
     };
