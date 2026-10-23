@@ -744,12 +744,7 @@ impl Workspace {
                     }
                 }
                 Some(Drag::TapeMark { frame, is_in, .. }) if resp.dragged() => {
-                    let end = self.snap.source.frames;
-                    *frame = if *is_in {
-                        f.clamp(0, end - 1)
-                    } else {
-                        (f + 1).clamp(1, end)
-                    };
+                    *frame = tape_mark(f, self.snap.source.frames, *is_in);
                 }
                 _ => {}
             }
@@ -1293,6 +1288,15 @@ enum Transport {
     Timecode,
 }
 
+fn tape_mark(pointer: i64, end: i64, is_in: bool) -> i64 {
+    let end = end.max(1);
+    if is_in {
+        pointer.clamp(0, end - 1)
+    } else {
+        (pointer + 1).clamp(1, end)
+    }
+}
+
 fn paint_guides(painter: &egui::Painter, picture: Rect, guides: &vidcut_core::preferences::Guides) {
     let Some(o) = guides.overlay(vidcut_core::preferences::GuideBox::from_size(
         picture.width(),
@@ -1449,7 +1453,22 @@ pub(super) fn timecode_input(text: &str, dropped: i64) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::timecode_input;
+    use super::{tape_mark, timecode_input};
+
+    #[test]
+    fn an_empty_source_keeps_a_tape_in_mark_at_frame_zero() {
+        assert_eq!(tape_mark(4, 0, true), 0);
+    }
+
+    #[test]
+    fn an_empty_source_keeps_a_tape_out_mark_at_frame_one() {
+        assert_eq!(tape_mark(4, 0, false), 1);
+    }
+
+    #[test]
+    fn a_tape_in_mark_stops_on_the_last_frame() {
+        assert_eq!(tape_mark(40, 10, true), 9);
+    }
 
     #[test]
     fn digits_fill_timecodes_from_the_right() {
