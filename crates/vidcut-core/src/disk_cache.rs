@@ -129,7 +129,8 @@ pub const REBUILD_EVERY: Duration = Duration::from_secs(60 * 60);
 const UNFINISHED_FOR: Duration = Duration::from_secs(24 * 60 * 60);
 
 fn unfinished(name: &str) -> bool {
-    name.split('.').any(|piece| piece == "part")
+    name.ends_with(".part")
+        || (name.starts_with('.') && name.split('.').any(|piece| piece == "part"))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -480,5 +481,22 @@ fn listed(dir: &Path, counts: &dyn Fn(&str) -> bool, found: &mut Found, left: &m
         } else if used.elapsed().is_ok_and(|age| age > UNFINISHED_FOR) {
             left.push(e.path());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unfinished;
+
+    #[test]
+    fn temp_dot_part_names_are_unfinished() {
+        assert!(unfinished(".clip.deadbeef.part.mkv"));
+        assert!(unfinished("model.bin.part"));
+    }
+
+    #[test]
+    fn media_names_with_part_are_finished() {
+        assert!(!unfinished("movie.part.1-1280x720-h264.mkv"));
+        assert!(!unfinished("part1.mkv"));
     }
 }
