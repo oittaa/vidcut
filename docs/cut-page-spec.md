@@ -2018,7 +2018,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Reason: a split would show its text twice. A trim would take frames outside the newly covered part.
 - **D80. Normalize Audio Levels** (§9; pp. 1110–1111; deviation X72).
   - The manual does not give the defaults, the range of the target, or the part of a clip that is measured.
-  - Resolve's defaults were not checked.
+  - **Resolve Studio 21.1.1** (its Edit page):
+    - The window keeps the last choice that was applied, in all projects. Thus its factory defaults are not known.
+    - On the install that was checked, it opened at Sample Peak Program, −9.0 dBFS, and Relative for two clips.
+    - The modes are Sample Peak Program, True Peak and loudness standards, such as EBU R128, ATSC A/85 and YouTube.
+    - A standard fixes its loudness and its true-peak limit. YouTube is −14 LUFS and −1.0 dBTP.
+    - Set Level shows only when two or more clips are selected.
   - **Defaults:**
     - The mode is Loudness, at −14 LUFS. This is the value for YouTube that the export's loudness setting names.
     - Sample Peak and True Peak start at −1 dB. This is the true-peak limit of the export's loudness setting.
@@ -2084,6 +2089,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Reason: a change at one point keeps the rest of the curve, as in Resolve. A drag of several lines keeps the differences between the clips (X71).
 - **D83. Normalize Audio Levels on a clip with volume keyframes** (§9; deviation X72).
   - The manual does not tell what Normalize does with keyframes.
+  - Resolve Studio 21.1.1 moved each of four volume keyframes of a clip by the same −3.4 dB. Thus the curve kept its shape.
   - vidcut measures the clip without its volume and without its keyframes, as for every clip (D80).
   - The volume of a clip with keyframes is the value of its highest keyframe. Normalize sets that volume as it sets the volume of other clips.
   - Every keyframe of the clip then moves by the same dB. Each stops at −60 and +24 dB.
