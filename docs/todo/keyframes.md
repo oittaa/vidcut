@@ -1,6 +1,6 @@
 # Keyframes
 
-**When:** not decided; after the volume line.
+**When:** not decided.
 
 A keyframe is a value of a clip at one frame. Between two keyframes, the value goes from one to the other. In this file, a keyframe is never a video keyframe of a codec.
 
@@ -14,7 +14,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   2. Transform, Crop and Dynamic Zoom keyframes, with buttons in the Inspector.
   3. A Keyframe Editor.
 
-The volume line is not in vidcut yet. It is a line over the waveform of a clip that sets the gain of the clip.
+The volume line is a line over the sound of a clip. A drag on it sets the gain of the clip ([X71](../deviations.md#x71-clip-volume-is-a-line-on-the-clip-without-keyframes)). An Alt+click on it does what a click does. Thus Alt+click is free for keyframes.
 
 ## What Resolve has
 
@@ -62,6 +62,12 @@ The volume line is not in vidcut yet. It is a line over the waveform of a clip t
 - A right-click on keyframes sets Linear, Ease In, Ease Out or Ease In and Out (p. 1113).
 - Cut, copy and paste work on keyframes. Backspace deletes them (p. 1113).
 - Audio keyframes can be between frames (p. 1113).
+- Resolve 21's own list of changes (version 21) adds, for the Cut and Edit pages:
+  - keyframes and markers between frames
+  - keyframes and curves on several selected clips at once
+  - eases, loop, ping pong, reverse and stretch for keyframes
+  - retime keyframes with Bezier curves
+- In Resolve Studio 21.1.1, the toolbar of the Cut page has a Keyframes tab.
 - Change Clip Speed has Maintain Timing and Stretch to fit (p. 1217).
   - Maintain Timing keeps the keyframes where they are.
   - Stretch scales the Composite, Transform and Cropping keyframes with the clip.
