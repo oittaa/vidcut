@@ -21,6 +21,263 @@ pub struct Preferences {
     pub proxies: Proxies,
     pub transcripts: Transcripts,
     pub services: Services,
+    pub viewer: Viewer,
+}
+
+/// Viewer framing and safe-area guides (decision D90). They draw only in the
+/// viewer. An export never shows them.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Viewer {
+    pub guides: Guides,
+}
+
+/// Framing and safe-area overlay choices for the viewer.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Guides {
+    /// Framing guides (aspect crops) are drawn when this is on.
+    pub enabled: bool,
+    /// Which aspect crop the framing guides use. `default` is the timeline's
+    /// own aspect.
+    pub framing: Framing,
+    /// The outer boundary of the framing crop (or of the picture).
+    pub extents: bool,
+    /// Action safe: 93% of the extents width and height (decision D90).
+    pub action: bool,
+    /// Title safe: 90% of the extents width and height (decision D90).
+    pub title: bool,
+    /// Horizontal and vertical center lines of the extents.
+    pub center: bool,
+}
+
+impl Default for Guides {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            framing: Framing::Default,
+            extents: true,
+            action: true,
+            title: true,
+            center: false,
+        }
+    }
+}
+
+/// Share of the extents used for action safe (SMPTE ST 2046-1 / EBU R 95).
+pub const ACTION_SAFE: f32 = 0.93;
+
+/// Share of the extents used for title safe (SMPTE ST 2046-1 / EBU R 95).
+pub const TITLE_SAFE: f32 = 0.90;
+
+/// Aspect ratio for a framing guide. `Default` is the project's frame.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum Framing {
+    #[default]
+    #[serde(rename = "default")]
+    Default,
+    #[serde(rename = "social_1_1")]
+    Social1_1,
+    #[serde(rename = "social_4_5")]
+    Social4_5,
+    #[serde(rename = "social_9_16")]
+    Social9_16,
+    #[serde(rename = "social_1_91")]
+    Social1_91,
+    #[serde(rename = "social_16_9")]
+    Social16_9,
+    #[serde(rename = "broadcast_1_33")]
+    Broadcast1_33,
+    #[serde(rename = "broadcast_1_66")]
+    Broadcast1_66,
+    #[serde(rename = "broadcast_1_77")]
+    Broadcast1_77,
+    #[serde(rename = "broadcast_1_85")]
+    Broadcast1_85,
+    #[serde(rename = "broadcast_2_35")]
+    Broadcast2_35,
+}
+
+impl Framing {
+    /// Width over height for the crop. `None` for the project's own aspect.
+    pub fn aspect(self) -> Option<f32> {
+        Some(match self {
+            Self::Default => return None,
+            Self::Social1_1 => 1.0,
+            Self::Social4_5 => 4.0 / 5.0,
+            Self::Social9_16 => 9.0 / 16.0,
+            Self::Social1_91 => 1.91,
+            Self::Social16_9 => 16.0 / 9.0,
+            Self::Broadcast1_33 => 1.33,
+            Self::Broadcast1_66 => 1.66,
+            Self::Broadcast1_77 => 1.77,
+            Self::Broadcast1_85 => 1.85,
+            Self::Broadcast2_35 => 2.35,
+        })
+    }
+}
+
+/// Axis-aligned box as `x`, `y`, `w`, `h` in the same units as the picture.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GuideBox {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl GuideBox {
+    pub fn from_size(w: f32, h: f32) -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            w,
+            h,
+        }
+    }
+
+    pub fn fit_aspect(self, aspect: f32) -> Self {
+        let outer = self.w / self.h.max(1e-6);
+        if outer > aspect {
+            let h = self.h;
+            let w = h * aspect;
+            Self {
+                x: self.x + (self.w - w) * 0.5,
+                y: self.y,
+                w,
+                h,
+            }
+        } else {
+            let w = self.w;
+            let h = w / aspect.max(1e-6);
+            Self {
+                x: self.x,
+                y: self.y + (self.h - h) * 0.5,
+                w,
+                h,
+            }
+        }
+    }
+
+    pub fn inset_fraction(self, fraction: f32) -> Self {
+        let w = self.w * fraction;
+        let h = self.h * fraction;
+        Self {
+            x: self.x + (self.w - w) * 0.5,
+            y: self.y + (self.h - h) * 0.5,
+            w,
+            h,
+        }
+    }
+
+    pub fn center(self) -> (f32, f32) {
+        (self.x + self.w * 0.5, self.y + self.h * 0.5)
+    }
+}
+
+/// What to paint over one picture. `crop` shades outside the framing box.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GuideOverlay {
+    pub frame: GuideBox,
+    pub crop: bool,
+    pub extents: Option<GuideBox>,
+    pub action: Option<GuideBox>,
+    pub title: Option<GuideBox>,
+    pub center: Option<(f32, f32)>,
+}
+
+/// Patch for [`Guides`]: omitted fields stay as they are.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GuidesPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub framing: Option<Framing>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extents: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<bool>,
+}
+
+impl GuidesPatch {
+    pub fn is_empty(&self) -> bool {
+        self.enabled.is_none()
+            && self.framing.is_none()
+            && self.extents.is_none()
+            && self.action.is_none()
+            && self.title.is_none()
+            && self.center.is_none()
+    }
+}
+
+impl Guides {
+    pub fn patched(self, patch: &GuidesPatch) -> Self {
+        Self {
+            enabled: patch.enabled.unwrap_or(self.enabled),
+            framing: patch.framing.unwrap_or(self.framing),
+            extents: patch.extents.unwrap_or(self.extents),
+            action: patch.action.unwrap_or(self.action),
+            title: patch.title.unwrap_or(self.title),
+            center: patch.center.unwrap_or(self.center),
+        }
+    }
+
+    /// Empty patch toggles framing guides. Named fields change; others stay.
+    pub fn applied(self, patch: &GuidesPatch) -> Self {
+        if patch.is_empty() {
+            return Self {
+                enabled: !self.enabled,
+                ..self
+            };
+        }
+        self.patched(patch)
+    }
+
+    /// Geometry for the viewer. Empty when nothing would draw.
+    pub fn overlay(self, picture_w: f32, picture_h: f32) -> Option<GuideOverlay> {
+        if !(picture_w > 0.0 && picture_h > 0.0) {
+            return None;
+        }
+        let picture = GuideBox::from_size(picture_w, picture_h);
+        let frame = if self.enabled {
+            match self.framing.aspect() {
+                Some(a) => picture.fit_aspect(a),
+                None => picture,
+            }
+        } else {
+            picture
+        };
+        let crop = self.enabled
+            && ((picture.w - frame.w).abs() > 0.5 || (picture.h - frame.h).abs() > 0.5);
+        let extents = self.extents.then_some(frame);
+        let action = self.action.then(|| frame.inset_fraction(ACTION_SAFE));
+        let title = self.title.then(|| frame.inset_fraction(TITLE_SAFE));
+        let center = self.center.then(|| frame.center());
+        if !crop && extents.is_none() && action.is_none() && title.is_none() && center.is_none() {
+            return None;
+        }
+        Some(GuideOverlay {
+            frame,
+            crop,
+            extents,
+            action,
+            title,
+            center,
+        })
+    }
+}
+
+/// Patch for [`Viewer`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ViewerPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guides: Option<GuidesPatch>,
 }
 
 /// The paid speech services, xAI and Google. A key comes from the
@@ -304,6 +561,8 @@ pub struct PreferencesPatch {
     pub transcripts: Option<TranscriptsPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub services: Option<ServicesPatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewer: Option<ViewerPatch>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -500,6 +759,9 @@ impl Preferences {
             s.ask_xai = x.ask_xai.unwrap_or(s.ask_xai);
             s.ask_google = x.ask_google.unwrap_or(s.ask_google);
         }
+        if let Some(g) = patch.viewer.as_ref().and_then(|v| v.guides.as_ref()) {
+            p.viewer.guides = p.viewer.guides.patched(g);
+        }
         p.check()?;
         Ok(p)
     }
@@ -616,5 +878,82 @@ mod tests {
             e.message,
             "proxies.folder: write the home folder out; `~` is not expanded"
         );
+    }
+
+    #[test]
+    fn action_safe_is_ninety_three_percent_of_extents() {
+        let g = Guides {
+            enabled: true,
+            framing: Framing::Default,
+            extents: true,
+            action: true,
+            title: false,
+            center: false,
+        };
+        let o = g.overlay(1920.0, 1080.0).unwrap();
+        let a = o.action.unwrap();
+        assert!((a.w - 1920.0 * ACTION_SAFE).abs() < 0.01);
+        assert!((a.h - 1080.0 * ACTION_SAFE).abs() < 0.01);
+        assert!((a.x - 1920.0 * (1.0 - ACTION_SAFE) * 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn title_safe_is_ninety_percent_of_extents() {
+        let g = Guides {
+            enabled: true,
+            framing: Framing::Default,
+            extents: false,
+            action: false,
+            title: true,
+            center: false,
+        };
+        let o = g.overlay(1000.0, 1000.0).unwrap();
+        let t = o.title.unwrap();
+        assert!((t.w - 900.0).abs() < 0.01);
+        assert!((t.h - 900.0).abs() < 0.01);
+        assert!((t.x - 50.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn social_nine_sixteen_crops_a_wide_picture() {
+        let g = Guides {
+            enabled: true,
+            framing: Framing::Social9_16,
+            extents: true,
+            action: false,
+            title: false,
+            center: false,
+        };
+        let o = g.overlay(1920.0, 1080.0).unwrap();
+        let e = o.extents.unwrap();
+        assert!((e.h - 1080.0).abs() < 0.01);
+        assert!((e.w - 1080.0 * 9.0 / 16.0).abs() < 0.01);
+        assert!((e.x - (1920.0 - e.w) * 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn guides_patch_sets_only_named_fields() {
+        let g = Guides::default().patched(&GuidesPatch {
+            enabled: Some(true),
+            framing: Some(Framing::Broadcast2_35),
+            ..GuidesPatch::default()
+        });
+        assert!(g.enabled);
+        assert_eq!(g.framing, Framing::Broadcast2_35);
+        assert!(g.extents);
+        assert!(!g.center);
+    }
+
+    #[test]
+    fn nothing_to_draw_yields_no_overlay() {
+        let g = Guides {
+            enabled: true,
+            framing: Framing::Default,
+            extents: false,
+            action: false,
+            title: false,
+            center: false,
+        };
+        assert_eq!(g.overlay(100.0, 100.0), None);
     }
 }

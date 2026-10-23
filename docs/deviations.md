@@ -193,6 +193,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - File > Preferences (Ctrl+,) holds the settings of `preferences.toml` ([design/model.md](design/model.md#preferences)).
   - These are the theme, GPU use, and the memory and the audio device of the player.
   - They also include the limit of the disk cache, the thumbnails, the proxy rules and folder, and the filler words.
+  - The viewer guides are in the same file. The Safe Area control sets them, not a page of this window.
   - `preferences get|set|reset` give scripts access to them.
   - A sidebar selects one page at a time:
     - General: the theme, the preferences file and Reset vidcut…
@@ -1601,3 +1602,22 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - Without it, the Cut page has no way to match the levels of clips.
   - The export's loudness setting uses EBU R128. Thus Loudness and the export agree.
+
+## X80. Safe Area guides are a preference, and skip two-up views
+
+- **Resolve:**
+  - The Safe Area button and View > Safe Area set framing and safe-area overlays for the viewer (pp. 682–683, 1177).
+  - The choice is a view setting of the application.
+  - The viewer keeps showing one picture while you trim.
+- **vidcut:**
+  - The same button and View > Safe Area send `viewer.guides`.
+  - The choice is stored in `preferences.toml` under `viewer.guides`.
+  - `preferences.set` can change the same fields.
+  - The guides draw in Timeline mode and both source modes ([D90](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The Trim Editor and Dynamic Trim show no guides. Those views are two pictures, or four.
+  - An export never shows the guides. A viewer screenshot is the picture without them.
+- **Why:**
+  - A preference follows the user across projects.
+  - One request keeps the GUI, CLI, IPC and MCP in step.
+  - The guides belong on the one picture fitted to the timeline.
+  - A two-up view has no single frame for one crop.

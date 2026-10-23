@@ -270,6 +270,14 @@ pub fn describe_at(
             ),
         },
         "viewer.set" => format!("Viewer: {}", d.viewer()),
+        "viewer.guides" => match params["enabled"].as_bool() {
+            Some(true) => "Framing guides on".into(),
+            Some(false) => "Framing guides off".into(),
+            None if params.as_object().is_some_and(|o| o.is_empty()) => {
+                "Framing guides on or off".into()
+            }
+            None => format!("Viewer guides: {}", compact(params)),
+        },
         "viewer.load" => format!("Show {} in the viewer", d.media("media")),
         "player.play" => "Play".into(),
         "player.pause" => "Pause".into(),

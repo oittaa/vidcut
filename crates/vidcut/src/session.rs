@@ -229,6 +229,24 @@ pub fn run_with(
         }
         Request::PreferencesSet(patch) => answer(crate::preferences::set(patch, envelope.dry_run)?),
         Request::PreferencesReset {} => answer(crate::preferences::reset(envelope.dry_run)?),
+        Request::ViewerGuides {
+            enabled,
+            framing,
+            extents,
+            action,
+            title,
+            center,
+        } => {
+            let patch = vidcut_core::preferences::GuidesPatch {
+                enabled: *enabled,
+                framing: *framing,
+                extents: *extents,
+                action: *action,
+                title: *title,
+                center: *center,
+            };
+            answer(crate::preferences::set_guides(patch, envelope.dry_run)?)
+        }
         Request::ExportStart(params) if params.background => {
             return Err(Error::no_instance(
                 "background exports run in a vidcut GUI (they would stop with this \

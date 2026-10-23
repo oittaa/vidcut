@@ -185,7 +185,24 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 
 ### 4.5 Other viewer features
 - Full Screen (Shift+F) and Enhanced viewer (Alt+F).
-- Safe areas.
+- Safe areas (pp. 682–683, 1177):
+  - A Safe Area control at the right of the viewer's transport toggles framing guides.
+  - Its menu, and View > Safe Area, pick the framing aspect and the safe-area lines.
+  - Framing aspects:
+    - Social Media: 1:1, 4:5, 9:16, 1.91:1 and 16:9.
+    - Broadcast and Film: Default (the timeline's aspect), 1.33, 1.66, 1.77, 1.85 and 2.35.
+  - Safe-area lines, each on its own: Extents, Action, Title and Center.
+  - Those lines draw when they are on, also while framing guides are off.
+  - The framing guides add a box of the chosen aspect inside the picture.
+  - Default uses the picture itself. Extents is the boundary of that box.
+  - Action is 93% of the extents width and height, centered. Title is 90% (D90).
+  - Center is a cross through the middle of the extents.
+  - The guides draw in Timeline mode and in both source modes.
+  - They do not draw in the Trim Editor or during Dynamic Trim (X80).
+  - An export never shows them.
+  - The choice is a user preference (`viewer.guides`), not part of the project.
+  - With no fields, `viewer.guides` toggles framing guides.
+  - A field that is left out stays as it is. `preferences.set` does not toggle.
 - Fast Review, which plays long clips faster than short ones (p. 640).
 - Skimming with C held (p. 640).
 - Audio scrubbing (Shift+S; on by default, p. 876):
@@ -603,7 +620,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Text+ and Fusion titles (p. 1178)
   - Transform, Cropping, Speed and the blend modes of Composite on titles (pp. 763, 1176)
   - animation and keyframes
-  - Safe area overlays (p. 1177) are a viewer gap ([todo](todo/cut-page-gaps.md)).
+  - Safe area overlays in the viewer are in §4.5 (D90).
   - The measurement of Resolve's stroke step is open ([todo](todo/titles.md)).
 
 ### 8.15 Transform and Crop (pp. 766–768)
@@ -1865,3 +1882,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The manual names the highest peak for Relative. vidcut uses the highest level for each mode.
   - Each volume stops at −60 dB and +24 dB (D12). The result marks each clip that stopped (`held`).
   - Reason: the export already measures EBU R128 loudness and true peak. Thus the two features agree.
+- **D90. Safe Area sizes** (§4.5; pp. 682–683, 1177).
+  - The manual does not give the Action and Title sizes as percents of the frame.
+  - Action safe is 93% of the extents width and of its height, centered.
+  - Title safe is 90% of the extents width and of its height, centered.
+  - These are the values in SMPTE ST 2046-1 and EBU R 95.
+  - Title layout still uses 90% of the picture (D65). The overlay uses the same share of the extents.
+  - The extents are the framing box. Default framing uses the picture.

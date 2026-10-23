@@ -224,6 +224,18 @@ pub fn set(patch: &PreferencesPatch, dry_run: bool) -> Result<Value> {
     Ok(describe(&p))
 }
 
+pub fn set_guides(patch: vidcut_core::preferences::GuidesPatch, dry_run: bool) -> Result<Value> {
+    let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = load()?;
+    p.viewer.guides = p.viewer.guides.applied(&patch);
+    p.check()?;
+    if dry_run {
+        return Ok(json!({ "guides": p.viewer.guides }));
+    }
+    write(&p)?;
+    Ok(json!({ "guides": p.viewer.guides }))
+}
+
 fn write(p: &Preferences) -> Result<()> {
     let path = path();
     let dir = path.parent().expect("in the config dir");

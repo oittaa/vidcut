@@ -865,6 +865,9 @@ impl Workspace {
                     None => super::dialog::why(ui, "open a project for the rest"),
                 }
             });
+            ui.menu_button("View", |ui| {
+                ui.menu_button("Safe Area", |ui| self.safe_area_menu(ui));
+            });
             ui.separator();
             self.bar_buttons(ui);
         });

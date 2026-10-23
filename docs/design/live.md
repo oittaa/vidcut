@@ -348,6 +348,10 @@ The bar and the Jobs button:
     - the right-click menu of the clip
     - the Tools row (`Workspace::picture_tools_row`, shown by `Grab::row`)
     - `gui.show transform`, `crop` or `dynamic_zoom`
+  - Framing and safe-area guides (`Guides`, `GuideOverlay`) draw in egui over the picture after the texture and before the handles (`paint_guides`).
+  - `Guides::overlay` builds the boxes. `Screen::draw` does not, so an export leaves them out ([deviation X80](../deviations.md#x80-safe-area-guides-are-a-preference-and-skip-two-up-views)).
+  - `viewer.guides` and `preferences.set` change `Viewer` (`Preferences.viewer`). The snapshot carries `guides`.
+  - `Workspace::safe_area_control` and View > Safe Area send `viewer.guides`.
   - `Workspace::picture_controls` draws the handles of the tool on the selected clip at the playhead. It boxes them through the same `place::Placing` as the picture ([deviation X65](../deviations.md#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)).
   - While the handles are under the pointer, the title controls wait.
   - A drag works on the picture that it started from, and ends in one `picture.set`.

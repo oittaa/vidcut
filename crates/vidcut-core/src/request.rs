@@ -1938,6 +1938,24 @@ pub enum Request {
     /// Show the viewer in a mode: `source_clip`, `source_tape` or `timeline`.
     #[serde(rename = "viewer.set")]
     ViewerSet { mode: ViewerMode },
+    /// Viewer framing and safe-area guides (decision D90). Stored in
+    /// preferences, not the project. A field that is left out stays as it is.
+    /// With no fields, toggles framing guides on or off.
+    #[serde(rename = "viewer.guides")]
+    ViewerGuides {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enabled: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        framing: Option<crate::preferences::Framing>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        extents: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        center: Option<bool>,
+    },
     /// Open a media item in the viewer as Source Clip, optionally at a source time.
     #[serde(rename = "viewer.load")]
     ViewerLoad {
@@ -3246,6 +3264,7 @@ impl Request {
                 | Self::PreferencesGet {}
                 | Self::PreferencesSet(_)
                 | Self::PreferencesReset {}
+                | Self::ViewerGuides { .. }
                 | Self::KeysList {}
                 | Self::ServicesSetKey { .. }
                 | Self::ServicesRemoveKey { .. }
@@ -3302,6 +3321,7 @@ impl Request {
                     | Self::PreferencesGet {}
                     | Self::PreferencesSet(_)
                     | Self::PreferencesReset {}
+                    | Self::ViewerGuides { .. }
                     | Self::KeysList {}
                     | Self::ServicesSetKey { .. }
                     | Self::ServicesRemoveKey { .. }

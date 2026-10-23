@@ -525,6 +525,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         audio_scrubbing: true,
         looping: false,
         stats: false,
+        guides: crate::preferences::load()
+            .map(|p| p.viewer.guides)
+            .unwrap_or_default(),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
         budget,
@@ -597,6 +600,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         audio_scrubbing: true,
         looping: false,
         stats: false,
+        guides: crate::preferences::load()
+            .map(|p| p.viewer.guides)
+            .unwrap_or_default(),
         audio_noticed: None,
         playing: false,
         waits: Vec::new(),
@@ -859,6 +865,7 @@ struct Live {
     audio_scrubbing: bool,
     looping: bool,
     stats: bool,
+    guides: vidcut_core::preferences::Guides,
     audio_noticed: Option<String>,
     playing: bool,
     waits: Vec<Wait>,
@@ -1070,6 +1077,13 @@ impl Live {
                 let fillers = crate::preferences::filler_lists();
                 if *self.fillers != fillers {
                     self.fillers = Arc::new(fillers);
+                    changed = true;
+                }
+                let guides = crate::preferences::load()
+                    .map(|p| p.viewer.guides)
+                    .unwrap_or_default();
+                if self.guides != guides {
+                    self.guides = guides;
                     changed = true;
                 }
                 self.follow_budget();
@@ -1354,6 +1368,7 @@ impl Live {
             audio_scrubbing: self.audio_scrubbing,
             looping: self.looping,
             stats: self.stats,
+            guides: self.guides,
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
             budget: self.player.budget(),
@@ -3807,6 +3822,7 @@ impl Live {
             "loop": self.looping,
             "stats": self.player.stats(self.renderer.viewer_stats()),
             "stats_shown": self.stats,
+            "guides": self.guides,
             "two_up": self.renderer.two_up(),
             "clipboard": self.clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),
