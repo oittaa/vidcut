@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(any(not(windows), test))]
+use std::path::PathBuf;
 
 pub fn show(path: &Path) {
     let path = path.to_path_buf();
