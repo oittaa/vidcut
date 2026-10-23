@@ -18,17 +18,22 @@ pub fn flipped(p: &Picture, [x, y]: [f64; 2]) -> [f64; 2] {
     [0.5 + sx * (x - 0.5), 0.5 + sy * (y - 0.5)]
 }
 
-fn level(placed: &Placed, (w, h): (f64, f64), [fx, fy, fw, fh]: [f64; 4]) -> Level {
+pub fn anchored(p: &Picture, (w, h): (f64, f64), [fx, fy, fw, fh]: [f64; 4]) -> [f64; 2] {
+    let ([px, py], [ax, ay]) = (p.place(), p.pivot());
+    [fx + ax * fw + (px - 0.5) * w, fy + ay * fh + (py - 0.5) * h]
+}
+
+fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4]) -> Level {
     let p = &placed.picture;
-    let [px, py] = p.place();
+    let [_, _, fw, fh] = fitted;
     let [zx, zy] = p.scale();
+    let [ax, ay] = p.pivot();
     let (sin, cos) = p.turn().to_radians().sin_cos();
     let sx = if p.flip_horizontal { -1.0 } else { 1.0 };
     let sy = if p.flip_vertical { -1.0 } else { 1.0 };
-    let (ox, oy) = (
-        fx + fw / 2.0 + (px - 0.5) * w,
-        fy + fh / 2.0 + (py - 0.5) * h,
-    );
+    let [qx, qy] = anchored(p, frame, fitted);
+    let (dx, dy) = (zx * (ax - 0.5) * fw, zy * (ay - 0.5) * fh);
+    let (ox, oy) = (qx - cos * dx - sin * dy, qy + sin * dx - cos * dy);
     let (k, [u0, v0]) = placed
         .zoomed()
         .map_or((1.0, Picture::MIDDLE), |b| (b.size, flipped(p, b.center)));
@@ -239,4 +244,62 @@ pub fn detail(placed: &[Placed]) -> f64 {
             x.max(y) / near
         })
         .product()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn landing(picture: Picture, uv: [f64; 2]) -> [f64; 2] {
+        let placed = Placed {
+            clip: "c1".into(),
+            picture,
+            run: None,
+        };
+        let frame = (1920.0, 1080.0);
+        let level = Placing::whole(&[placed], frame).levels[0];
+        level.forward(uv).map(|v| (v * 1e6).round() / 1e6)
+    }
+
+    #[test]
+    fn a_zoom_works_about_the_anchor() {
+        let p = Picture {
+            anchor: Some([0.75, 0.5]),
+            zoom: Some([2.0, 2.0]),
+            ..Picture::default()
+        };
+        assert_eq!(landing(p, [0.5, 0.5]), [480.0, 540.0]);
+    }
+
+    #[test]
+    fn a_rotation_works_about_the_anchor() {
+        let p = Picture {
+            anchor: Some([0.75, 0.5]),
+            rotation: Some(90.0),
+            ..Picture::default()
+        };
+        assert_eq!(landing(p, [0.5, 0.5]), [1440.0, 1020.0]);
+    }
+
+    #[test]
+    fn the_anchor_stays_where_the_position_puts_it() {
+        let p = Picture {
+            anchor: Some([0.75, 0.5]),
+            zoom: Some([2.0, 2.0]),
+            rotation: Some(90.0),
+            ..Picture::default()
+        };
+        assert_eq!(landing(p, [0.75, 0.5]), [1440.0, 540.0]);
+    }
+
+    #[test]
+    fn the_anchor_is_a_point_of_the_flipped_picture() {
+        let p = Picture {
+            anchor: Some([0.75, 0.5]),
+            zoom: Some([2.0, 2.0]),
+            flip_horizontal: true,
+            ..Picture::default()
+        };
+        assert_eq!(landing(p, [0.25, 0.5]), [1440.0, 540.0]);
+    }
 }

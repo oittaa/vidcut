@@ -274,6 +274,7 @@ impl Placement {
             position: Some([rounded(0.5 + d[0] / w), rounded(0.5 + d[1] / h)]),
             zoom: Some([rounded(pw / fw * zx), rounded(ph / fh * zy)]),
             rotation: Some(rounded(turn)),
+            anchor: None,
             flip_horizontal: self.flips[0],
             flip_vertical: self.flips[1],
             crop: Crop {

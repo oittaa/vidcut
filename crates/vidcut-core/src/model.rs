@@ -1339,19 +1339,27 @@ impl Title {
 /// another shape, around it and where it is cropped.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Picture {
-    /// Where the middle of the whole picture goes, `[x, y]` as fractions of
-    /// the frame from its top left, each from -100 to 100. Usual: `[0.5,
+    /// Where the middle of the whole picture goes before the zoom and the
+    /// rotation, `[x, y]` as fractions of the frame from its top left, each
+    /// from -100 to 100. With an anchor away from the middle, the zoom and
+    /// the rotation then move the middle about the anchor. Usual: `[0.5,
     /// 0.5]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
-    /// How much larger it is drawn across and down, `[x, y]`, each from
-    /// 1/100 to 100. Usual: `[1, 1]`.
+    /// How much larger it is drawn across and down, about its anchor, `[x,
+    /// y]`, each from 1/100 to 100. Usual: `[1, 1]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zoom: Option<[f64; 2]>,
-    /// Degrees it is turned counterclockwise about its middle, from -3600 to
+    /// Degrees it is turned counterclockwise about its anchor, from -3600 to
     /// 3600. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<f64>,
+    /// The point of the picture that the zoom and the rotation work about,
+    /// `[x, y]` as fractions of the picture from its top left, as it shows
+    /// after the flips, each from -100 to 100. A Dynamic Zoom does not move
+    /// it. Usual: `[0.5, 0.5]`, the middle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<[f64; 2]>,
     /// Mirrored left to right.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub flip_horizontal: bool,
@@ -1497,8 +1505,8 @@ impl Crop {
     }
 }
 
-/// Which of a picture's tools: `transform` (its position, zoom, rotation
-/// and flips), `crop` or `dynamic_zoom`.
+/// Which of a picture's tools: `transform` (its position, zoom, rotation,
+/// anchor and flips), `crop` or `dynamic_zoom`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PictureTool {
@@ -1525,6 +1533,10 @@ impl Picture {
 
     pub fn turn(&self) -> f64 {
         self.rotation.unwrap_or(0.0)
+    }
+
+    pub fn pivot(&self) -> [f64; 2] {
+        self.anchor.unwrap_or(Self::MIDDLE)
     }
 
     pub fn moved(&self) -> bool {

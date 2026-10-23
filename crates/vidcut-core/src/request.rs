@@ -1711,8 +1711,8 @@ pub enum Request {
 
     /// Where a clip's picture goes over the frame (`c3`, or `V2@15s`): the
     /// `position` of its middle, its `zoom` across and down, its `rotation`,
-    /// its flips, its `crop` and its `dynamic_zoom` (null when it has
-    /// none), every value given, usual ones too.
+    /// its `anchor`, its flips, its `crop` and its `dynamic_zoom` (null when
+    /// it has none), every value given, usual ones too.
     #[serde(rename = "picture.get")]
     PictureGet { clip: ClipRef },
     /// Move, zoom, turn, flip or crop clips' pictures, or give them a
@@ -1724,19 +1724,26 @@ pub enum Request {
     #[serde(rename = "picture.set")]
     PictureSet {
         clips: OneOrMany<ClipRef>,
-        /// Where the middle of the whole picture goes, `[x, y]` as
-        /// fractions of the frame from its top left, each from -100 to 100,
-        /// or `[]` for the middle.
+        /// Where the middle of the whole picture goes before the zoom and
+        /// the rotation, `[x, y]` as fractions of the frame from its top
+        /// left, each from -100 to 100, or `[]` for the middle.
         #[serde(default)]
         position: Option<Vec<f64>>,
-        /// How much larger it is drawn, from 1/100 to 100: one number for
-        /// both ways, or `[x, y]` across and down. 1 for its usual size.
+        /// How much larger it is drawn about its anchor, from 1/100 to 100:
+        /// one number for both ways, or `[x, y]` across and down. 1 for its
+        /// usual size.
         #[serde(default)]
         zoom: Option<OneOrMany<f64>>,
-        /// Degrees turned counterclockwise about its middle, from -3600 to
+        /// Degrees turned counterclockwise about its anchor, from -3600 to
         /// 3600; 0 for none.
         #[serde(default)]
         rotation: Option<f64>,
+        /// The point of the picture that the zoom and the rotation work
+        /// about, `[x, y]` as fractions of the picture from its top left, as
+        /// it shows after the flips, each from -100 to 100, or `[]` for the
+        /// middle.
+        #[serde(default)]
+        anchor: Option<Vec<f64>>,
         /// Mirrored left to right.
         #[serde(default)]
         flip_horizontal: Option<bool>,
@@ -1767,7 +1774,7 @@ pub enum Request {
         dynamic_zoom: Option<Option<DynamicZoomSet>>,
     },
     /// Put clips' pictures back at their usual values: the `transform`
-    /// (position, zoom, rotation and flips), the `crop`, the
+    /// (position, zoom, rotation, anchor and flips), the `crop`, the
     /// `dynamic_zoom`, or all of them when no `tool` is given.
     #[serde(rename = "picture.clear")]
     PictureClear {

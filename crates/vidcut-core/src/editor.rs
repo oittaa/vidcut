@@ -3431,6 +3431,7 @@ fn mutate(
             position,
             zoom,
             rotation,
+            anchor,
             flip_horizontal,
             flip_vertical,
             crop_left,
@@ -3444,13 +3445,17 @@ fn mutate(
                 dynamic_zoom: *dynamic_zoom,
                 position: position
                     .as_deref()
-                    .map(ops::picture::position)
+                    .map(|at| ops::picture::point("position", at))
                     .transpose()?,
                 zoom: zoom
                     .as_ref()
                     .map(|z| ops::picture::zoom(&z.to_vec()))
                     .transpose()?,
                 rotation: *rotation,
+                anchor: anchor
+                    .as_deref()
+                    .map(|at| ops::picture::point("anchor", at))
+                    .transpose()?,
                 flip_horizontal: *flip_horizontal,
                 flip_vertical: *flip_vertical,
                 crop: [*crop_left, *crop_right, *crop_top, *crop_bottom],
