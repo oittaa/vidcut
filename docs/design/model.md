@@ -89,7 +89,7 @@ classDiagram
   }
   class Picture {
     position, zoom, rotation
-    flips, crop
+    anchor, flips, crop
   }
   Project *-- Settings : settings
   Project *-- "*" Media : media
@@ -335,9 +335,10 @@ Writing:
 ## Pictures
 
 - A clip of footage, a still, an image sequence or a compound clip can carry a `Picture` ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
-  - where the middle of the whole picture goes (`position`)
+  - where the middle of the whole picture goes before the zoom and the rotation (`position`)
   - its `zoom` across and down
   - its `rotation`
+  - its `anchor`, the point that the zoom and the rotation work about (`Picture::pivot`)
   - its flips
   - a `Crop` of each side
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
@@ -349,6 +350,7 @@ Writing:
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
 - `place::Placing` turns the picture of a clip, with the pictures of the compound clips that it plays inside, into maps.
   - Each map goes from a pixel of the frame back to a picture (`place::Level`: the map and the part shown).
+  - Each map zooms and turns the picture about its anchor point. `place::anchored` gives the pixel where the anchor point lands.
   - An export and the viewer both draw by these maps ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
 
 ## Ducking

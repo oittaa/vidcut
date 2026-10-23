@@ -525,3 +525,49 @@ fn an_unknown_clip_color_is_refused() {
     let mut f = three_clips();
     f.err(req("clip.set", json!({"clips": "c1", "color": "red"})));
 }
+
+#[test]
+fn a_picture_keeps_the_anchor_it_is_given() {
+    let mut f = three_clips();
+    f.ok(req(
+        "picture.set",
+        json!({"clips": "c1", "anchor": [0.75, 0.4]}),
+    ));
+    let got = f.ok(req("picture.get", json!({"clip": "c1"})));
+    assert_eq!(got.result["anchor"], json!([0.75, 0.4]));
+}
+
+#[test]
+fn an_anchor_in_the_middle_leaves_the_picture_usual() {
+    let mut f = three_clips();
+    f.ok(req(
+        "picture.set",
+        json!({"clips": "c1", "anchor": [0.5, 0.5]}),
+    ));
+    assert_eq!(f.editor.project().clip("c1").unwrap().picture, None);
+}
+
+#[test]
+fn an_anchor_past_100_is_refused() {
+    let mut f = three_clips();
+    let e = f.err(req(
+        "picture.set",
+        json!({"clips": "c1", "anchor": [101.0, 0.5]}),
+    ));
+    assert_eq!(e.code, ErrorCode::InvalidEdit);
+}
+
+#[test]
+fn resetting_the_transform_puts_the_anchor_back_in_the_middle() {
+    let mut f = three_clips();
+    f.ok(req(
+        "picture.set",
+        json!({"clips": "c1", "anchor": [0.75, 0.4]}),
+    ));
+    f.ok(req(
+        "picture.clear",
+        json!({"clips": "c1", "tool": "transform"}),
+    ));
+    let got = f.ok(req("picture.get", json!({"clip": "c1"})));
+    assert_eq!(got.result["anchor"], json!([0.5, 0.5]));
+}

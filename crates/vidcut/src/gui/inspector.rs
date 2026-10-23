@@ -40,6 +40,8 @@ enum Field {
     X,
     Y,
     Rotation,
+    AnchorX,
+    AnchorY,
     Left,
     Right,
     Top,
@@ -112,6 +114,8 @@ impl Field {
             Field::X => "Position X",
             Field::Y => "Position Y",
             Field::Rotation => "Rotation",
+            Field::AnchorX => "Anchor X",
+            Field::AnchorY => "Anchor Y",
             Field::Left => "Left",
             Field::Right => "Right",
             Field::Top => "Top",
@@ -171,7 +175,7 @@ impl Field {
 
     fn read(self, p: &Picture, s: &Shape) -> f64 {
         let ([x, y], [zx, zy], c) = (p.place(), p.scale(), p.crop);
-        let ([w, h], [fw, fh]) = (s.frame, s.fitted);
+        let ([w, h], [fw, fh], [ax, ay]) = (s.frame, s.fitted, p.pivot());
         let b = self.zoom_box(&p.dynamic_zoom.unwrap_or_default());
         match self {
             Field::Zoom | Field::ZoomX => zx * 100.0,
@@ -179,6 +183,8 @@ impl Field {
             Field::X => (x - 0.5) * w,
             Field::Y => (0.5 - y) * h,
             Field::Rotation => p.turn(),
+            Field::AnchorX => (ax - 0.5) * fw,
+            Field::AnchorY => (0.5 - ay) * fh,
             Field::Left => c.left * fw,
             Field::Right => c.right * fw,
             Field::Top => c.top * fh,
@@ -190,7 +196,7 @@ impl Field {
     }
 
     fn is_usual(self, p: &Picture) -> bool {
-        let ([x, y], [zx, zy], c) = (p.place(), p.scale(), p.crop);
+        let ([x, y], [zx, zy], [ax, ay], c) = (p.place(), p.scale(), p.pivot(), p.crop);
         let usual = self.zoom_box(&DynamicZoom::default());
         let b = p.dynamic_zoom.map_or(usual, |z| self.zoom_box(&z));
         match self {
@@ -200,6 +206,8 @@ impl Field {
             Field::X => x == 0.5,
             Field::Y => y == 0.5,
             Field::Rotation => p.turn() == 0.0,
+            Field::AnchorX => ax == 0.5,
+            Field::AnchorY => ay == 0.5,
             Field::Left => c.left == 0.0,
             Field::Right => c.right == 0.0,
             Field::Top => c.top == 0.0,
@@ -218,6 +226,8 @@ impl Field {
             Field::X => (-REACH - 0.5) * w..=(REACH - 0.5) * w,
             Field::Y => (0.5 - REACH) * h..=(0.5 + REACH) * h,
             Field::Rotation => -TURNS..=TURNS,
+            Field::AnchorX => (-REACH - 0.5) * fw..=(REACH - 0.5) * fw,
+            Field::AnchorY => (0.5 - REACH) * fh..=(0.5 + REACH) * fh,
             Field::Left => side(c.right, fw),
             Field::Right => side(c.left, fw),
             Field::Top => side(c.bottom, fh),
@@ -234,7 +244,7 @@ impl Field {
         if (self.read(p, s) - v).abs() < SAME {
             return p.clone();
         }
-        let ([x, y], [zx, zy]) = (p.place(), p.scale());
+        let ([x, y], [zx, zy], [ax, ay]) = (p.place(), p.scale(), p.pivot());
         let ([w, h], [fw, fh]) = (s.frame, s.fitted);
         let zoom = |v: f64| (v / 100.0).clamp(ZOOM.0, ZOOM.1);
         let at = |v: f64| v.clamp(-REACH, REACH);
@@ -246,6 +256,8 @@ impl Field {
             Field::X => out.position = Some([at(0.5 + v / w), y]),
             Field::Y => out.position = Some([x, at(0.5 - v / h)]),
             Field::Rotation => out.rotation = Some(v),
+            Field::AnchorX => out.anchor = Some([at(0.5 + v / fw), ay]),
+            Field::AnchorY => out.anchor = Some([ax, at(0.5 - v / fh)]),
             Field::Left => out.crop.left = v / fw,
             Field::Right => out.crop.right = v / fw,
             Field::Top => out.crop.top = v / fh,
@@ -700,6 +712,8 @@ fn transform(ui: &mut egui::Ui, i: &Inspector, chosen: &[Chosen], acts: &mut Vec
             number(ui, (Field::X, None), i, chosen, acts);
             number(ui, (Field::Y, None), i, chosen, acts);
             number(ui, (Field::Rotation, None), i, chosen, acts);
+            number(ui, (Field::AnchorX, None), i, chosen, acts);
+            number(ui, (Field::AnchorY, None), i, chosen, acts);
             let flipped = chosen
                 .iter()
                 .any(|c| c.shown.flip_horizontal || c.shown.flip_vertical);

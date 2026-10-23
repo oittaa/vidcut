@@ -32,6 +32,13 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
             "a picture's rotation is degrees, from -3600 to 3600",
         ));
     }
+    if let Some(at) = p.anchor
+        && !at.iter().all(|v| v.is_finite() && v.abs() <= REACH)
+    {
+        return Err(Error::invalid(
+            "a picture's anchor is two fractions of the picture, each from -100 to 100",
+        ));
+    }
     let c = p.crop;
     if !c
         .sides()
@@ -51,6 +58,7 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
         position: p.position.filter(|at| *at != Picture::MIDDLE),
         zoom: p.zoom.filter(|z| *z != [1.0, 1.0]),
         rotation: p.rotation.filter(|r| *r != 0.0),
+        anchor: p.anchor.filter(|at| *at != Picture::MIDDLE),
         ..p.clone()
     };
     Ok((!out.is_usual()).then_some(out))
@@ -100,6 +108,7 @@ pub struct PictureChange {
     pub position: Option<Option<[f64; 2]>>,
     pub zoom: Option<[f64; 2]>,
     pub rotation: Option<f64>,
+    pub anchor: Option<Option<[f64; 2]>>,
     pub flip_horizontal: Option<bool>,
     pub flip_vertical: Option<bool>,
     pub crop: [Option<f64>; 4],
@@ -122,6 +131,9 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
     }
     if let Some(r) = change.rotation {
         p.rotation = Some(r);
+    }
+    if let Some(at) = change.anchor {
+        p.anchor = at;
     }
     if let Some(f) = change.flip_horizontal {
         p.flip_horizontal = f;
@@ -150,7 +162,7 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
 pub fn set(p: &mut Project, ids: &[String], change: &PictureChange) -> Result<()> {
     if change.is_empty() {
         return Err(Error::usage(
-            "picture.set needs a position, zoom, rotation, flip, crop or Dynamic Zoom",
+            "picture.set needs a position, zoom, rotation, anchor, flip, crop or Dynamic Zoom",
         ));
     }
     for id in ids {
@@ -200,6 +212,7 @@ pub fn shown(c: &Clip) -> Value {
         "position": p.place(),
         "zoom": p.scale(),
         "rotation": p.turn(),
+        "anchor": p.pivot(),
         "flip_horizontal": p.flip_horizontal,
         "flip_vertical": p.flip_vertical,
         "crop": {
@@ -223,13 +236,13 @@ pub fn get(p: &Project, id: &str) -> Result<Value> {
     Ok(shown(c))
 }
 
-pub fn position(raw: &[f64]) -> Result<Option<[f64; 2]>> {
+pub fn point(what: &str, raw: &[f64]) -> Result<Option<[f64; 2]>> {
     match raw {
         [] => Ok(None),
         [x, y] => Ok(Some([*x, *y])),
-        _ => Err(Error::usage(
-            "a picture's position is two fractions, x and y, or none for the middle",
-        )),
+        _ => Err(Error::usage(format!(
+            "a picture's {what} is two fractions, x and y, or none for the middle"
+        ))),
     }
 }
 

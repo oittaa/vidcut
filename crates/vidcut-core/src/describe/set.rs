@@ -540,6 +540,9 @@ impl Words<'_> {
         s.usual("rotation", "Rotation", &degrees, json!(0.0), |q| {
             json!(q.rotation)
         });
+        s.usual("anchor", "Anchor", &percents, json!(Picture::MIDDLE), |q| {
+            json!(q.anchor)
+        });
         s.put("flip_horizontal", "Flip Horizontal", &raw, |q| {
             json!(q.flip_horizontal)
         });

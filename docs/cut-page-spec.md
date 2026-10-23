@@ -650,6 +650,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Its other values are Pitch, Yaw, and Flip Horizontal and Vertical.
   - vidcut: the shape and snapping of the title handles (X52), and the values of a picture in fractions of the frame (X65).
   - vidcut: the Inspector tab shows these values in pixels, percent and degrees (X70).
+  - vidcut: the zoom and the rotation work about the anchor point, and a cross marks it in the viewer (D92, X82).
   - Details: D75.
 - **Crop** (p. 768):
   - A handle on each side crops that side.
@@ -1679,7 +1680,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Order:**
     - The picture of a clip is fitted into the frame.
     - Then it is cropped, flipped, zoomed, turned and moved, in that order.
-    - All of these work about the middle of the whole picture.
+    - The crop and the flips work about the middle of the whole picture.
+    - The zoom and the turn work about its anchor point (D92). The usual anchor point is the middle.
     - The zoom works across and down in the picture's own axes, before the turn.
     - The rotation is counterclockwise.
     - The crop cuts the source picture, and what is left stays where it was.
@@ -1692,10 +1694,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The two sides of a dissolve mix into each other first, and then go over the tracks below.
     - Thus the tracks below do not show through where both sides cover the frame (D50).
   - **Units** (vidcut's, X65):
-    - `position` is where the middle of the picture goes: `[x, y]` in fractions of the frame from its top left.
+    - `position` is where the middle of the picture goes before the zoom and the turn: `[x, y]` in fractions of the frame from its top left.
     - Each value of `position` is from −100 to 100. `[0.5, 0.5]` leaves the picture in place.
     - `zoom` is how much larger the picture is drawn across and down, each from 1/100 to 100. One number sets both.
     - `rotation` is in degrees, from −3600 to 3600.
+    - `anchor` is the point that the zoom and the turn work about, in fractions of the picture (D92).
     - The flips mirror the picture left to right and top to bottom.
     - The crop cuts each side by a fraction of the source picture, and leaves some of it.
     - Values at their usual place are left out of the project file.
@@ -1713,10 +1716,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The viewer draws it from the decoded picture with the same sums.
   - Titles keep their own place (X54).
   - **Viewer handles** (those of a title, X52):
-    - A drag inside moves the picture. Its middle snaps to the middle and thirds of the frame, and a guide shows.
+    - A drag inside moves the picture. Its middle, as drawn, snaps to the middle and thirds of the frame, and a guide shows.
     - Shift keeps the drag on one axis, and Alt turns snapping off.
-    - A corner zooms both ways in proportion, and a side zooms one way, about the middle. The pointer shows the zoom.
-    - The handle above the box, or a drag just outside a corner, turns the picture.
+    - A corner zooms both ways in proportion, and a side zooms one way, about the anchor point. The pointer shows the zoom.
+    - The handle above the box, or a drag just outside a corner, turns the picture about the anchor point.
+    - A cross marks the anchor point. It has no drag (X82).
     - Shift turns it in steps of 15°. The pointer shows the angle.
     - The Crop handles move one side each. The uncropped picture shows dashed.
     - While the Transform handles show, the wheel or a pinch over the picture zooms it as a corner does, 10% for each notch.
@@ -1737,7 +1741,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The picture goes in the `vidcut` metadata of the clip.
     - It also goes in Resolve's Transform, Cropping and Retime and Scaling, fitted.
     - An import takes vidcut's own metadata. Else it reads those effects.
-    - Resolve's crop, fill and stretch become a zoom, and its anchor point becomes a `position` ([gotchas](gotchas.md#resolves-otio-files)).
+    - Resolve's crop, fill and stretch become a zoom, and its anchor point becomes the `anchor` ([gotchas](gotchas.md#resolves-otio-files)).
     - When one of these effects has keyframes or other parameters, such as Pitch and Yaw, all three stay on the clip, unplayed (X9).
     - This is also true when they make a picture that vidcut refuses, such as a crop that leaves nothing.
     - The export names the clips moved further than Resolve's Pan and Tilt go, 4 pictures, and writes them at 4.
@@ -2011,3 +2015,20 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A typed frame count is a whole number.
   - Digits in a frame count are not filled as a timecode.
   - `viewer.set` sets the viewer, the count, the zero, and a paste.
+- **D92. The anchor point** (§8.15; pp. 735, 767; deviation X82).
+  - The manual gives Anchor Point X and Y in the Inspector (p. 735).
+  - It says that all transforms are centered on the anchor point, and that the rotation turns about it (pp. 735, 767).
+  - Resolve's files show that Resolve flips about the middle ([gotchas](gotchas.md#resolves-otio-files)). vidcut does the same.
+  - The zoom and the turn work about the anchor point. The flips and the Dynamic Zoom work about the middle.
+  - **Order:** fit, crop, flip, Dynamic Zoom, zoom and turn about the anchor point, move.
+  - `position` is the move. The anchor point stays where `position` puts it, whatever the zoom and the turn.
+  - Thus the zoom and turn handles of the viewer keep the anchor point still. They do not change `position`.
+  - The anchor point is a point of the picture as it shows after the flips.
+  - **Units:** `anchor` is `[x, y]` in fractions of the picture from its top left, each from −100 to 100.
+  - `[0.5, 0.5]` is the middle. This is the usual value, and the project file leaves it out.
+  - **Dynamic Zoom:** the anchor point is a point of the place of the picture, not of its content. A Dynamic Zoom does not move it.
+  - Thus the picture zooms and turns about one point of the screen for the whole clip.
+  - An anchor point on the content would move across the screen while the box moves.
+  - **OTIO:** an import reads the anchor point of Resolve's Transform as `anchor`. An export writes it back.
+  - With a crop, fill or stretch, the move that the scaling makes about the middle goes into `position` ([gotchas](gotchas.md#resolves-otio-files)).
+  - `picture.set` takes `anchor`. `picture.clear` with `transform` puts it back in the middle.

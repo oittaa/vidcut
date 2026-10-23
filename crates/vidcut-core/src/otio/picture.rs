@@ -257,13 +257,11 @@ impl Placement {
     fn picture(&self, shape: &Shape) -> Picture {
         let [pw, ph] = shape.picture(self.scale);
         let ([w, h], [fw, fh]) = (shape.frame, shape.fitted);
-        let [zx, zy] = self.zoom;
-        let (sin, cos) = self.turn.to_radians().sin_cos();
-        let a = [self.anchor[0] * pw, -self.anchor[1] * ph];
-        let s = [zx * a[0], zy * a[1]];
-        let r = [cos * s[0] + sin * s[1], -sin * s[0] + cos * s[1]];
-        let t = [self.moved[0] * pw, -self.moved[1] * ph];
-        let d = [a[0] - r[0] + t[0], a[1] - r[1] + t[1]];
+        let ([zx, zy], [ax, ay]) = (self.zoom, self.anchor);
+        let d = [
+            ax * (pw - fw) + self.moved[0] * pw,
+            -ay * (ph - fh) - self.moved[1] * ph,
+        ];
         let turn = if self.turn.abs() > TURNS {
             self.turn % 360.0
         } else {
@@ -274,6 +272,7 @@ impl Placement {
             position: Some([rounded(0.5 + d[0] / w), rounded(0.5 + d[1] / h)]),
             zoom: Some([rounded(pw / fw * zx), rounded(ph / fh * zy)]),
             rotation: Some(rounded(turn)),
+            anchor: Some([rounded(0.5 + ax), rounded(0.5 - ay)]),
             flip_horizontal: self.flips[0],
             flip_vertical: self.flips[1],
             crop: Crop {
@@ -339,6 +338,10 @@ fn boolean(id: &str, value: bool, usual: bool) -> Option<Value> {
     (value != usual).then(|| keyed(id, json!(value), json!(usual), "Bool"))
 }
 
+fn point(id: &str, value: [f64; 2], usual: [f64; 2]) -> Option<Value> {
+    (value != usual).then(|| keyed(id, json!(value), json!(usual), "POINTF"))
+}
+
 fn zooming(z: &DynamicZoom, g: i64) -> Vec<Value> {
     let keys = |a: Value, b: Value, variant: &str| {
         let mut m = Map::new();
@@ -365,6 +368,7 @@ fn zooming(z: &DynamicZoom, g: i64) -> Vec<Value> {
 
 pub fn effects(p: &Picture, shape: &Shape, g: i64) -> Vec<Value> {
     let [zx, zy] = p.scale();
+    let [ax, ay] = p.pivot();
     let [pan, tilt] = moved(p, shape).map(|v| v.clamp(-REACH, REACH));
     let (zoom, reach) = ((0.0, 100.0), (-REACH, REACH));
     let transform: Vec<Value> = [
@@ -374,6 +378,7 @@ pub fn effects(p: &Picture, shape: &Shape, g: i64) -> Vec<Value> {
         double(PAN, pan, 0.0, reach),
         double(TILT, tilt, 0.0, reach),
         double(ROTATION, p.turn(), 0.0, (-100000.0, 100000.0)),
+        point(ANCHOR, [rounded(ax - 0.5), rounded(0.5 - ay)], [0.0, 0.0]),
         boolean(FLIP_X, p.flip_horizontal, false),
         boolean(FLIP_Y, p.flip_vertical, false),
     ]
@@ -397,4 +402,136 @@ pub fn effects(p: &Picture, shape: &Shape, g: i64) -> Vec<Value> {
     .filter(|(_, _, list)| !list.is_empty())
     .map(|(name, kind, list)| effect(group(name, kind, 1, list)))
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::place::Placing;
+    use crate::render::Placed;
+    use crate::test_support::still_info;
+
+    fn given(transform: &[(&str, Value)], scale: u8) -> Vec<Value> {
+        let param = |(id, v): &(&str, Value)| json!({ "Parameter ID": id, "Parameter Value": v });
+        let made = |name: &str, kind: u32, params: Vec<Value>| {
+            json!({
+                "OTIO_SCHEMA": "Effect.1",
+                "metadata": { EDITOR: {
+                    "Effect Name": name, "Enabled": true, "Name": name,
+                    "Parameters": params, "Type": kind,
+                } },
+            })
+        };
+        vec![
+            made(TRANSFORM, 2, transform.iter().map(param).collect()),
+            made(SCALING, 22, vec![param(&(SCALE, json!(scale)))]),
+        ]
+    }
+
+    fn filled() -> Shape {
+        let v = still_info(1440, 1080).video.expect("video");
+        Shape::of(&v, (1920, 1080))
+    }
+
+    fn filled_turned() -> Vec<Value> {
+        let transform = [
+            (ZOOM_X, json!(1.5)),
+            (ZOOM_Y, json!(1.5)),
+            (ROTATION, json!(90.0)),
+            (ANCHOR, json!([0.25, 0.1])),
+        ];
+        given(&transform, 3)
+    }
+
+    fn read(effects: &[Value], shape: &Shape) -> Option<Picture> {
+        take(effects, None, shape).expect("read").1
+    }
+
+    #[test]
+    fn a_fitted_pictures_anchor_leaves_its_position_to_the_pan() {
+        let transform = [
+            (ZOOM_X, json!(2.0)),
+            (ZOOM_Y, json!(2.0)),
+            (ROTATION, json!(30.0)),
+            (PAN, json!(0.1)),
+            (ANCHOR, json!([0.25, 0.1])),
+        ];
+        let got = read(&given(&transform, FIT), &Shape::whole((1920, 1080)));
+        let want = Picture {
+            position: Some([0.6, 0.5]),
+            zoom: Some([2.0, 2.0]),
+            rotation: Some(30.0),
+            anchor: Some([0.75, 0.4]),
+            ..Picture::default()
+        };
+        assert_eq!(got, Some(want));
+    }
+
+    #[test]
+    fn a_filled_pictures_scaling_move_goes_into_its_position() {
+        let want = Picture {
+            position: Some([0.5625, 0.466667]),
+            zoom: Some([2.0, 2.0]),
+            rotation: Some(90.0),
+            anchor: Some([0.75, 0.4]),
+            ..Picture::default()
+        };
+        assert_eq!(read(&filled_turned(), &filled()), Some(want));
+    }
+
+    #[test]
+    fn a_filled_pictures_middle_lands_where_the_file_puts_it() {
+        let picture = read(&filled_turned(), &filled()).expect("a picture");
+        let placed = Placed {
+            clip: "c1".into(),
+            picture,
+            run: None,
+        };
+        let fitted = [240.0, 0.0, 1440.0, 1080.0];
+        let level = Placing::new(&[placed], (1920.0, 1080.0), fitted).levels[0];
+        let middle = level
+            .forward([0.5, 0.5])
+            .map(|v| (v * 100.0).round() / 100.0);
+        assert_eq!(middle, [1656.0, 1116.0]);
+    }
+
+    #[test]
+    fn a_transform_without_an_anchor_reads_without_one() {
+        let transform = [(ZOOM_X, json!(2.0)), (ZOOM_Y, json!(2.0))];
+        let got = read(&given(&transform, FIT), &Shape::whole((1920, 1080)));
+        let want = Picture {
+            zoom: Some([2.0, 2.0]),
+            ..Picture::default()
+        };
+        assert_eq!(got, Some(want));
+    }
+
+    #[test]
+    fn the_anchor_is_written_from_the_middle_with_y_up() {
+        let p = Picture {
+            anchor: Some([0.75, 0.4]),
+            ..Picture::default()
+        };
+        let written = effects(&p, &Shape::whole((1920, 1080)), 0);
+        let anchor = written[0]["metadata"][EDITOR]["Parameters"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|q| q["Parameter ID"] == ANCHOR)
+            .map(|q| q["Parameter Value"].clone());
+        assert_eq!(anchor, Some(json!([0.25, 0.1])));
+    }
+
+    #[test]
+    fn a_written_anchor_reads_back_the_same() {
+        let p = Picture {
+            position: Some([0.6, 0.5]),
+            zoom: Some([2.0, 2.0]),
+            rotation: Some(30.0),
+            anchor: Some([0.75, 0.4]),
+            ..Picture::default()
+        };
+        let shape = Shape::whole((1920, 1080));
+        assert_eq!(read(&effects(&p, &shape, 0), &shape), Some(p));
+    }
 }

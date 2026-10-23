@@ -6,9 +6,6 @@ The Inspector tab shows and sets the transform, the crop and the Dynamic Zoom of
 Its Speed section sets the speed of the selected clips. Its Audio section sets the Volume, the Mute and the Voice Isolation of the selected clips with sound.
 It also shows the open title, subtitle and subtitle track. These parts are still to do.
 
-- **Anchor Point.**
-  - Now: vidcut has no anchor. It folds the anchor of a Resolve file into the position ([gotchas](../gotchas.md#resolves-otio-files)).
-  - Why: Resolve zooms and turns about the anchor point.
 - **Pitch, Yaw, crop Softness and Composite.**
   - Now: the spec has them out of scope (§8.15).
   - Why: Resolve's Video panel has them. They need a change of scope first.
