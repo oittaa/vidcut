@@ -308,6 +308,19 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - Resolve scales its picture to P about the middle. Then it zooms about the anchor point. P is the size of Resolve's picture.
   - vidcut does both in its `zoom`, about the anchor point. Thus it adds the difference, A·(P − F), to `position`. F is the fitted size.
   - With fit, P is F, and `position` is Pan and Tilt alone.
+- **Resolve's Pitch and Yaw are a projective divide about the anchor,** `transformationPitch` and `transformationYaw` ([D93](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The scripting API and OTIO both use −1.5 to 1.5. Usual: 0. The file leaves 0 out.
+  - They work in screen axes, after zoom, turn and position. Y grows down.
+  - Let `(X, Y)` be the offset from the anchor, divided by half the zoomed fitted size.
+  - Then `W = 1 − yaw·X + pitch·Y`, and the pre-image is that offset divided by `W`.
+  - There is no cosine foreshortening. A 3D rotate-and-project model did not fit the stills.
+  - Positive pitch puts the top farther. Positive yaw puts the left closer.
+  - Measured on Resolve Studio 21. A 1920×1080 still filled the frame. Zoom was 0.5. Pitch or Yaw was set through the scripting API. Deliver wrote one PNG per value. The silhouette corners of those PNGs are below. The map predicts them to about one pixel when no corner hits the frame edge.
+  - Identity corners, top-left first, then clockwise: (480, 270), (1439, 270), (1439, 809), (480, 809).
+  - Yaw 0.25: (319, 179), (1343, 323), (1344, 755), (319, 900).
+  - Pitch 0.25: (576, 323), (1343, 323), (1600, 900), (319, 900).
+  - Yaw −0.5 and Pitch −0.5 were also rendered. Their near corners hit the frame edge, so they were not used as a fit target.
+  - An OTIO export of Pitch 0.5 and Yaw −0.75 wrote `transformationPitch` and `transformationYaw` with those values.
 - **Resolve's Pan and Tilt go from −4 to 4.**
   - vidcut writes a picture moved further at 4, and names its clip in the notes of the export.
 - **Resolve's Dynamic Zoom is a `Resolve Effect` of type 59.**

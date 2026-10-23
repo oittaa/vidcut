@@ -2041,6 +2041,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D93. Pitch and yaw** (§8.15; pp. 735, 767; deviation X83).
   - The manual lists Pitch and Yaw with the other Transform values (pp. 735, 767).
   - It does not give their units or the order in which they work.
+  - The range, the order and the lean come from Resolve Studio 21 stills and OTIO ([gotchas](gotchas.md#resolves-otio-files)).
   - Each is a number from −1.5 to 1.5. Usual: 0. The project file leaves 0 out.
   - They work about the anchor, in screen axes, after the zoom, the turn and the move.
   - The lean is a projective divide about the anchor. There is no cosine foreshortening.
