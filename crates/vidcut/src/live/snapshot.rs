@@ -237,6 +237,7 @@ impl Snapshot {
             &self.tape,
             self.timecode_display,
             self.timer1_origin.zero(PlayerId::of(self.viewer)),
+            self.source_media.as_deref(),
         )
     }
 
@@ -311,6 +312,7 @@ pub struct TimecodeView<'a> {
     pub fps: Rational,
     pub drop: bool,
     pub start_tc: i64,
+    pub source_tc: i64,
     pub timer_zero: i64,
     pub source_frame: Option<i64>,
     pub tape_start: i64,
@@ -325,6 +327,7 @@ pub fn timecode_view<'a>(
     tape: &'a [TapeEntry],
     display: TimecodeDisplay,
     timer_zero: i64,
+    source_media: Option<&str>,
 ) -> TimecodeView<'a> {
     let entry = if viewer == ViewerMode::SourceTape {
         tape_at(tape, playhead)
@@ -339,6 +342,20 @@ pub fn timecode_view<'a>(
         ),
         None => (Rational::new(30, 1).expect("valid"), false, 0),
     };
+    let clip = match viewer {
+        ViewerMode::Timeline => project.and_then(|p| shown_clip(p, playhead)),
+        ViewerMode::SourceClip | ViewerMode::SourceTape => None,
+    };
+    let media = match viewer {
+        ViewerMode::SourceClip => source_media,
+        ViewerMode::SourceTape => entry.map(|e| e.media.as_str()),
+        ViewerMode::Timeline => clip.map(|c| c.media.as_str()),
+    };
+    let source_tc = project
+        .zip(media)
+        .and_then(|(p, m)| p.media(m))
+        .and_then(|m| m.info.timecode)
+        .map_or(0, |tc| tc.frames_at(fps).round() as i64);
     TimecodeView {
         display,
         viewer,
@@ -346,14 +363,12 @@ pub fn timecode_view<'a>(
         fps,
         drop,
         start_tc,
+        source_tc,
         timer_zero,
         source_frame: source_frame_at(project, viewer, playhead, tape),
         tape_start: entry.map_or(0, |e| e.start),
         tape_frames: entry.map(|e| e.frames),
-        clip: match viewer {
-            ViewerMode::Timeline => project.and_then(|p| shown_clip(p, playhead)),
-            ViewerMode::SourceClip | ViewerMode::SourceTape => None,
-        },
+        clip,
     }
 }
 
@@ -365,12 +380,12 @@ pub fn format_timecode_field(view: &TimecodeView<'_>) -> Option<String> {
     let n = view.source_frame.unwrap_or(0);
     Some(match view.display {
         TimecodeDisplay::Auto if view.viewer.is_source() => {
-            format_timecode(n, view.fps, 0, view.drop)
+            format_timecode(n, view.fps, view.source_tc, view.drop)
         }
         TimecodeDisplay::Auto | TimecodeDisplay::RecordTimecode => {
             format_timecode(view.playhead, view.fps, view.start_tc, view.drop)
         }
-        TimecodeDisplay::SourceTimecode => format_timecode(n, view.fps, 0, view.drop),
+        TimecodeDisplay::SourceTimecode => format_timecode(n, view.fps, view.source_tc, view.drop),
         TimecodeDisplay::SourceFrame => n.to_string(),
         TimecodeDisplay::RecordFrame => view.playhead.to_string(),
         TimecodeDisplay::Timer2 => format_timecode(view.playhead, view.fps, 0, view.drop),
@@ -418,9 +433,8 @@ fn read_count(text: &str, view: &TimecodeView<'_>) -> Result<i64, Error> {
     let start = match view.display {
         TimecodeDisplay::RecordTimecode => view.start_tc,
         TimecodeDisplay::Auto if !view.viewer.is_source() => view.start_tc,
-        TimecodeDisplay::Auto
-        | TimecodeDisplay::SourceTimecode
-        | TimecodeDisplay::SourceFrame
+        TimecodeDisplay::Auto | TimecodeDisplay::SourceTimecode => view.source_tc,
+        TimecodeDisplay::SourceFrame
         | TimecodeDisplay::RecordFrame
         | TimecodeDisplay::Timer1
         | TimecodeDisplay::Timer2 => 0,
@@ -467,6 +481,7 @@ mod tests {
             fps: rate(24, 1),
             drop: false,
             start_tc: 0,
+            source_tc: 0,
             timer_zero: 0,
             source_frame: None,
             tape_start: 0,

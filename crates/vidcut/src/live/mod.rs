@@ -3688,6 +3688,7 @@ impl Live {
                 self.tape.as_slice(),
                 shown,
                 zero,
+                self.source_media.as_deref(),
             );
             match seek_frame(text, &view) {
                 Ok(frame) => Some(frame),
@@ -4002,6 +4003,7 @@ impl Live {
             self.tape.as_slice(),
             self.timecode_display,
             self.timer1_origin.zero(id),
+            self.source_media.as_deref(),
         ))
         .unwrap_or_else(|| "-".into());
         let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps);

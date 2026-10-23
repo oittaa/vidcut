@@ -2112,11 +2112,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The extents are the framing box. Default framing uses the picture.
 - **D91. The viewer timecode menu** (§4.3; pp. 713–714; deviation X81).
   - Auto is the default. It follows the viewer.
-  - Source modes show a timecode from the first frame of the media.
+  - Source modes show Source Timecode.
   - Timeline mode shows record timecode.
-  - This is the field vidcut shows today (X8).
-  - Source Timecode is the media frame on screen, as that timecode.
-  - The file start timecode is not added (X8).
+  - Source Timecode is the media frame on screen plus the file start timecode (X8).
+  - A file without a start timecode starts at 00:00:00:00.
   - Source Frame is that frame as a whole number, from 0.
   - Record Timecode is the playhead on screen plus the timeline start.
   - Record Frame is that playhead as a whole number, from 0.
