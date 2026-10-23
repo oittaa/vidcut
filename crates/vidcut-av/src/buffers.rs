@@ -57,6 +57,16 @@ unsafe extern "C" fn get_buffer(
     }
 }
 
+pub(crate) fn pixel_format(n: c_int) -> Option<ffi::AVPixelFormat> {
+    let min = ffi::AVPixelFormat::AV_PIX_FMT_NONE as c_int;
+    let max = ffi::AVPixelFormat::AV_PIX_FMT_NB as c_int;
+    if n < min || n > max {
+        return None;
+    }
+    // SAFETY: the discriminants from NONE through NB are contiguous.
+    Some(unsafe { std::mem::transmute::<c_int, ffi::AVPixelFormat>(n) })
+}
+
 pub(crate) fn owned(f: &frame::Video) -> Result<frame::Video> {
     if freed_with(f) {
         return crate::export::video::frame_ref(f);
@@ -69,7 +79,8 @@ pub(crate) fn owned(f: &frame::Video) -> Result<frame::Video> {
     // SAFETY: `out` is fresh, given planes sized for `f`'s format and size; `f` is in memory.
     unsafe {
         let (src, dst) = (f.as_ptr(), out.as_mut_ptr());
-        let format = std::mem::transmute::<c_int, ffi::AVPixelFormat>((*src).format);
+        let format = pixel_format((*src).format)
+            .ok_or_else(|| Error::Invalid("a kept picture's format is not known".into()))?;
         let mut linesize = [0; 4];
         let ret = ffi::av_image_fill_linesizes(linesize.as_mut_ptr(), format, (*src).width);
         if ret < 0 {
@@ -312,8 +323,22 @@ impl Spares {
 
 #[cfg(test)]
 mod tests {
-    use super::{Spares, layout, owned};
+    use super::{Spares, layout, owned, pixel_format};
     use crate::ffmpeg::{codec, decoder, ffi, format::Pixel, frame};
+
+    #[test]
+    fn a_pixel_format_past_the_list_is_refused() {
+        let past = ffi::AVPixelFormat::AV_PIX_FMT_NB as i32 + 1;
+        assert_eq!(pixel_format(past), None);
+    }
+
+    #[test]
+    fn yuv420p_is_a_pixel_format() {
+        assert_eq!(
+            pixel_format(0),
+            Some(ffi::AVPixelFormat::AV_PIX_FMT_YUV420P)
+        );
+    }
 
     fn pooled() -> frame::Video {
         let mut f = frame::Video::empty();
