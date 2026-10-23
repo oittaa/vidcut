@@ -51,41 +51,35 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4]) -> Level {
         0.0,
     ];
     Level {
-        back: leaned(
-            affine,
-            [qx, qy],
-            [zx * fw / 2.0, zy * fh / 2.0],
-            p.pitch(),
-            p.yaw(),
-        ),
+        back: leaned(affine, [u0, v0], [k * sx, k * sy], p.pitch(), p.yaw()),
         shown: [c0.left, c0.top, 1.0 - c0.right, 1.0 - c0.bottom],
     }
 }
 
 fn leaned(
     affine: [f64; 8],
-    [qx, qy]: [f64; 2],
-    [hw, hh]: [f64; 2],
+    [u0, v0]: [f64; 2],
+    [su, sv]: [f64; 2],
     pitch: f64,
     yaw: f64,
 ) -> [f64; 8] {
-    if (pitch == 0.0 && yaw == 0.0) || hw.abs() < 1e-12 || hh.abs() < 1e-12 {
+    if pitch == 0.0 && yaw == 0.0 {
         return affine;
     }
-    let [a, b, e, c, d, f, _, _] = affine;
-    let g0 = -yaw / hw;
-    let h0 = pitch / hh;
-    let w0 = 1.0 + yaw * qx / hw - pitch * qy / hh;
-    let row = |p: f64, q: f64, r: f64| {
-        [
-            p * (qx * g0 + 1.0) + q * (qy * g0) + r * g0,
-            p * (qx * h0) + q * (qy * h0 + 1.0) + r * h0,
-            p * qx * (w0 - 1.0) + q * qy * (w0 - 1.0) + r * w0,
-        ]
-    };
-    let [a, b, e] = row(a, b, e);
-    let [c, d, f] = row(c, d, f);
-    unit([a, b, e, c, d, f, g0, h0, w0])
+    let (g, h) = (-2.0 * yaw / su, 2.0 * pitch / sv);
+    let i = 1.0 - g * u0 - h * v0;
+    let lean = unit([
+        1.0 + u0 * g,
+        u0 * h,
+        u0 * (i - 1.0),
+        v0 * g,
+        1.0 + v0 * h,
+        v0 * (i - 1.0),
+        g,
+        h,
+        i,
+    ]);
+    chain(&affine, &lean)
 }
 
 fn unit([a, b, e, c, d, f, g, h, i]: [f64; 9]) -> [f64; 8] {

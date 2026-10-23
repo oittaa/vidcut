@@ -1680,11 +1680,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The order, and how a placed clip plays, match Resolve's renders.
   - **Order:**
     - The picture of a clip is fitted into the frame.
-    - Then it is cropped, flipped, zoomed, turned and moved, in that order.
-    - Then pitch and yaw follow the move, about the anchor, in screen axes (D93).
+    - Then it is cropped, flipped, leaned by pitch and yaw, zoomed, turned and moved, in that order (D93).
     - The crop and the flips work about the middle of the whole picture.
     - The zoom and the turn work about its anchor point (D92). The usual anchor point is the middle.
-    - Pitch and yaw work about that anchor too (D93).
+    - Pitch and yaw work about the middle of the picture, in its own axes (D93).
     - The zoom works across and down in the picture's own axes, before the turn.
     - The rotation is counterclockwise.
     - The crop cuts the source picture, and what is left stays where it was.
@@ -1701,7 +1700,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Each value of `position` is from −100 to 100. `[0.5, 0.5]` leaves the picture in place.
     - `zoom` is how much larger the picture is drawn across and down, each from 1/100 to 100. One number sets both.
     - `rotation` is in degrees, from −3600 to 3600.
-    - `anchor` is the point that the zoom, the turn, the pitch and the yaw work about, in fractions of the picture (D92, D93).
+    - `anchor` is the point that the zoom and the turn work about, in fractions of the picture (D92).
     - `pitch` and `yaw` are each from −1.5 to 1.5. Usual: 0.
     - Positive pitch puts the top farther away. Positive yaw puts the left closer.
     - The flips mirror the picture left to right and top to bottom.
@@ -1757,7 +1756,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The `center` of a box is `[x, y]` in fractions of the picture from its top left, each from −100 to 100.
     - The `size` of a box is its width and height as a fraction of those of the picture, from 1/100 to 100.
     - **The order.** The picture is drawn at 1/size about the center of the box, and that center goes to the middle of the picture.
-    - This step comes after the flips and before the zoom: fit, crop, flip, Dynamic Zoom, zoom, turn, move, pitch and yaw.
+    - This step comes after the flips and before the zoom: fit, crop, flip, Dynamic Zoom, pitch and yaw, zoom, turn, move.
     - The crop moves with the picture, and the outline of the picture grows with the zoom.
     - **The timing.** On frame k of the clip's n frames, t is k/n, and e is the ease of t.
     - The box is e of the way from `start` to `end`, on a straight line. Thus the end box comes one frame after the last frame.
@@ -2026,7 +2025,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - It says that all transforms are centered on the anchor point, and that the rotation turns about it (pp. 735, 767).
   - Resolve's files show that Resolve flips about the middle ([gotchas](gotchas.md#resolves-otio-files)). vidcut does the same.
   - The zoom and the turn work about the anchor point. The flips and the Dynamic Zoom work about the middle.
-  - **Order:** fit, crop, flip, Dynamic Zoom, zoom and turn about the anchor point, move, then pitch and yaw (D93).
+  - **Order:** fit, crop, flip, Dynamic Zoom, pitch and yaw about the middle (D93), zoom and turn about the anchor point, move.
   - `position` is the move. The anchor point stays where `position` puts it, whatever the zoom and the turn.
   - Thus the zoom and turn handles of the viewer keep the anchor point still. They do not change `position`.
   - The anchor point is a point of the picture as it shows after the flips.
@@ -2043,8 +2042,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - It does not give their units or the order in which they work.
   - The range, the order and the lean come from Resolve Studio 21 stills and OTIO ([gotchas](gotchas.md#resolves-otio-files)).
   - Each is a number from −1.5 to 1.5. Usual: 0. The project file leaves 0 out.
-  - They work about the anchor, in screen axes, after the zoom, the turn and the move.
-  - The lean is a projective divide about the anchor. There is no cosine foreshortening.
+  - They lean the picture about its middle, in its own axes.
+  - The lean comes before the zoom and the turn about the anchor, and before the move.
+  - The lean is a projective divide about the middle. There is no cosine foreshortening.
+  - The renders do not show where the lean comes relative to the flips, the crop and the Dynamic Zoom.
+  - vidcut leans the picture as it shows after them.
   - Positive pitch puts the top farther away, and the bottom closer.
   - Positive yaw puts the left closer, and the right farther.
   - With no rotation, yaw keeps vertical edges vertical.

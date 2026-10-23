@@ -1744,12 +1744,14 @@ pub enum Request {
         /// middle.
         #[serde(default)]
         anchor: Option<Vec<f64>>,
-        /// Pitch about the anchor, in screen axes, from -1.5 to 1.5.
-        /// Positive puts the top farther away. 0 for none.
+        /// Pitch about the middle of the picture, in its own axes, before
+        /// the zoom and the rotation, from -1.5 to 1.5. Positive puts the
+        /// top farther away. 0 for none.
         #[serde(default)]
         pitch: Option<f64>,
-        /// Yaw about the anchor, in screen axes, from -1.5 to 1.5.
-        /// Positive puts the left closer. 0 for none.
+        /// Yaw about the middle of the picture, in its own axes, before
+        /// the zoom and the rotation, from -1.5 to 1.5. Positive puts the
+        /// left closer. 0 for none.
         #[serde(default)]
         yaw: Option<f64>,
         /// Mirrored left to right.

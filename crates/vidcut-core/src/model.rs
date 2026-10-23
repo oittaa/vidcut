@@ -1360,12 +1360,14 @@ pub struct Picture {
     /// it. Usual: `[0.5, 0.5]`, the middle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<[f64; 2]>,
-    /// Pitch about the anchor, in screen axes, from -1.5 to 1.5. Positive
-    /// puts the top farther away. Usual: 0.
+    /// Pitch about the middle of the picture, in its own axes, before the
+    /// zoom and the rotation, from -1.5 to 1.5. Positive puts the top
+    /// farther away. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pitch: Option<f64>,
-    /// Yaw about the anchor, in screen axes, from -1.5 to 1.5. Positive
-    /// puts the left closer. Usual: 0.
+    /// Yaw about the middle of the picture, in its own axes, before the
+    /// zoom and the rotation, from -1.5 to 1.5. Positive puts the left
+    /// closer. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yaw: Option<f64>,
     /// Mirrored left to right.
