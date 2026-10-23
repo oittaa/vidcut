@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    DuckDetect, DynamicZoom, Ease, Handle, PictureTool, Place, SubtitleStyle, TitleAlign,
-    TitleKind, TitleStyle, TrackClip, ZoomBox,
+    DuckDetect, DynamicZoom, Ease, Handle, PictureTool, PictureTransition, Place, SubtitleStyle,
+    TitleAlign, TitleKind, TitleStyle, TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -693,6 +693,20 @@ pub enum Request {
         sound: bool,
         #[serde(default)]
         all: bool,
+        /// A cross dissolve, or one wipe. Left out, a cross dissolve.
+        #[serde(default, skip_serializing_if = "PictureTransition::is_dissolve")]
+        transition: PictureTransition,
+    },
+    /// Sets the type of the picture transition on the edit of `track`
+    /// (default V1) nearest `at` (default: the playhead). The length stays.
+    /// A dissolve can become a wipe, and a wipe a dissolve.
+    #[serde(rename = "edit.transition")]
+    EditTransition {
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        #[serde(default)]
+        track: Option<String>,
+        transition: PictureTransition,
     },
     /// The Cut button (decision D50): the edit of `track` (default V1)
     /// nearest `at` (default: the playhead) becomes a cut again, its

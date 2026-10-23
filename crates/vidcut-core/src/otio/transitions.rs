@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::{EDITOR, VIDCUT, gap, rt, schema};
-use crate::model::{Clip, Media, Project, Track, Transition};
+use crate::model::{Clip, Media, Project, Track, Transition, WipeDirection};
 use crate::render::Curve;
 
 pub fn name(t: &Transition) -> String {
@@ -28,6 +28,42 @@ pub fn dissolves(t: &Transition) -> bool {
     dissolves_in(&t.otio)
 }
 
+pub fn wipe_of(t: &Transition) -> Option<WipeDirection> {
+    (!t.sound).then(|| wipe_in(&t.otio)).flatten()
+}
+
+pub fn mixes(t: &Transition) -> bool {
+    dissolves(t) || wipe_of(t).is_some()
+}
+
+pub fn wipe_otio(direction: WipeDirection) -> Value {
+    json!({
+        "OTIO_SCHEMA": "Transition.1",
+        "name": "Wipe",
+        "transition_type": "Custom_Transition",
+        "metadata": { VIDCUT: { "wipe": wipe_name(direction) } }
+    })
+}
+
+fn wipe_name(direction: WipeDirection) -> &'static str {
+    match direction {
+        WipeDirection::Left => "left",
+        WipeDirection::Right => "right",
+        WipeDirection::Up => "up",
+        WipeDirection::Down => "down",
+    }
+}
+
+fn wipe_in(o: &Value) -> Option<WipeDirection> {
+    match o["metadata"][VIDCUT]["wipe"].as_str() {
+        Some("left") => Some(WipeDirection::Left),
+        Some("right") => Some(WipeDirection::Right),
+        Some("up") => Some(WipeDirection::Up),
+        Some("down") => Some(WipeDirection::Down),
+        _ => None,
+    }
+}
+
 fn dissolves_in(o: &Value) -> bool {
     let effect = &o["metadata"][EDITOR]["Effects"]["Effect Name"];
     o["transition_type"] == "SMPTE_Dissolve"
@@ -38,7 +74,7 @@ pub(super) fn plays_in(o: &Value, sound: bool) -> bool {
     if sound {
         cross_fade_in(o).is_some()
     } else {
-        dissolves_in(o)
+        dissolves_in(o) || wipe_in(o).is_some()
     }
 }
 

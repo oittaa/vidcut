@@ -265,6 +265,11 @@ const EXAMPLES: &[(&str, &str)] = &[
         "vidcut edit dissolve\n  vidcut edit dissolve --at 1m --length 12f --align start\n  vidcut edit dissolve --at 1m --before 10f --after 17f\n  vidcut edit dissolve --clips c3,c4\n  vidcut edit dissolve --all",
     ),
     (
+        "edit.transition",
+        "vidcut edit transition --at 1m --transition '{\"type\":\"wipe\",\"direction\":\"left\"}'\n  \
+         vidcut edit transition --at 1m --transition '{\"type\":\"dissolve\"}'",
+    ),
+    (
         "edit.remove_transition",
         "vidcut edit remove-transition --at 1m\n  vidcut edit remove-transition --all",
     ),

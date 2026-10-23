@@ -518,8 +518,17 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Each clip shows its media past its edge. Thus a dissolve is as long as the clips have frames there.
   - Pictures cross in a straight line. At a gap, they cross from or to black.
   - The level of a Cross Fade at its middle is +3, 0 or −3 dB.
+- **A wipe:**
+  - A wipe is another transition on an edit.
+  - It uses the same length rules as a dissolve.
+  - It has one direction: left, right, up or down.
+  - A left wipe reveals the incoming picture from the left edge toward the right.
+  - The other directions start at their own edge.
+  - The edge moves in fractions of the duration (deviation X89).
+  - A request can make a wipe.
+  - A request can change a dissolve into a wipe, and a wipe into a dissolve.
 - **Later:**
-  - other transitions (wipes, Smooth Cut, the Transitions browser)
+  - the Transitions browser and Smooth Cut
   - the Transition Inspector
   - moving a transition to another edit
   - Change Transition Type, Set as Default Transition

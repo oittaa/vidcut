@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::model::{
     Clip, ColorSpace, DuckDetect, Keyframe, Media, Picture, Project, Title, TrackKind,
+    WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -325,13 +326,20 @@ pub struct Ramp {
     pub of: i64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub falling: bool,
+    /// A wipe's edge, from this direction. Left out, the level is a dissolve.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wipe: Option<WipeDirection>,
 }
 
 pub const WHOLE: u32 = 1 << 16;
 
 impl Ramp {
+    pub fn rising(&self, k: i64) -> (i64, i64) {
+        (2 * (self.at + k) + 1, 2 * self.of)
+    }
+
     pub fn fraction(&self, k: i64) -> (i64, i64) {
-        let rising = (2 * (self.at + k) + 1, 2 * self.of);
+        let rising = self.rising(k);
         if self.falling {
             (rising.1 - rising.0, rising.1)
         } else {
@@ -355,6 +363,41 @@ impl Ramp {
             at: self.at + k,
             ..*self
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Wipe {
+    pub direction: WipeDirection,
+    pub along: (i64, i64),
+    pub falling: bool,
+}
+
+pub fn wipe_shows_incoming(
+    direction: WipeDirection,
+    along: (i64, i64),
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> bool {
+    let (n, d) = along;
+    if d <= 0 || width == 0 || height == 0 {
+        return false;
+    }
+    let n = n.clamp(0, d);
+    let (x, y, w, h) = (
+        i128::from(x),
+        i128::from(y),
+        i128::from(width),
+        i128::from(height),
+    );
+    let (n, d) = (i128::from(n), i128::from(d));
+    match direction {
+        WipeDirection::Left => x * d < n * w,
+        WipeDirection::Right => x * d >= (d - n) * w,
+        WipeDirection::Up => y * d < n * h,
+        WipeDirection::Down => y * d >= (d - n) * h,
     }
 }
 
@@ -1121,7 +1164,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         .unzip();
     let dissolves: Vec<_> = tracks
         .iter()
-        .map(|t| transitions::playing(p, t, false, transitions::dissolves))
+        .map(|t| transitions::playing(p, t, false, transitions::mixes))
         .collect();
     let mut cuts = vec![a, b];
     for (t, played) in tracks.iter().zip(&dissolves) {
@@ -1181,10 +1224,12 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
             };
             match played.iter().find(|d| d.frames.0 <= x && x < d.frames.1) {
                 Some(d) => {
+                    let wipe = transitions::wipe_of(d.transition);
                     let ramp = |falling| Ramp {
                         at: x - d.frames.0,
                         of: d.frames.1 - d.frames.0,
                         falling,
+                        wipe,
                     };
                     let below = !stack.is_empty();
                     match (d.before.filter(shows), d.after.filter(shows)) {
@@ -1249,6 +1294,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                         at: x - d.frames.0,
                         of: d.frames.1 - d.frames.0,
                         falling,
+                        wipe: None,
                     };
                     for (c, falling) in [(d.before, true), (d.after, false)] {
                         if let Some(s) = c
@@ -1901,6 +1947,7 @@ mod tests {
             at: 0,
             of: 4,
             falling: false,
+            wipe: None,
         };
         let levels: Vec<(i64, i64)> = (0..4).map(|k| ramp.fraction(k)).collect();
         assert_eq!(levels, [(1, 8), (3, 8), (5, 8), (7, 8)]);
@@ -1912,6 +1959,7 @@ mod tests {
             at: 0,
             of: 4,
             falling: true,
+            wipe: None,
         };
         assert_eq!(ramp.fraction(0), (7, 8));
     }
@@ -1922,8 +1970,40 @@ mod tests {
             at: 0,
             of: 3,
             falling: false,
+            wipe: None,
         };
         assert_eq!(ramp.weight(0), 10923);
+    }
+
+    #[test]
+    fn a_left_wipe_at_its_middle_splits_the_frame_in_half() {
+        let incoming: Vec<bool> = (0..4)
+            .map(|x| wipe_shows_incoming(WipeDirection::Left, (1, 2), x, 0, 4, 1))
+            .collect();
+        assert_eq!(incoming, vec![true, true, false, false]);
+    }
+
+    #[test]
+    fn a_left_wipe_is_on_the_incoming_ramp() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        req(
+            &mut f,
+            "edit.dissolve",
+            json!({"at": 50, "transition": {"type": "wipe", "direction": "left"}}),
+        );
+        let plan = flatten(f.editor.project(), 0, 100).unwrap();
+        let ramp = plan
+            .video
+            .iter()
+            .find_map(|p| match p {
+                VideoPiece::Mix { over, .. } => over.iter().find_map(|o| o.ramp),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(ramp.wipe, Some(WipeDirection::Left));
+        assert!(!ramp.falling);
     }
 
     #[test]

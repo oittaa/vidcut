@@ -70,11 +70,30 @@ pub fn describe_at(
         "edit.split" => d.split(),
         "edit.join" if d.list("clips").len() > 1 => format!("Join {}", d.clips("clips")),
         "edit.join" => format!("Join the clips at {}", d.time("at")),
+        "edit.dissolve" if d.flag("all") && asked_wipe(&d) => "Add wipes to all edits".to_string(),
         "edit.dissolve" if d.flag("all") => "Add dissolves to all edits".to_string(),
+        "edit.dissolve" if !d.list("clips").is_empty() && asked_wipe(&d) => {
+            format!("Add wipes to {}", d.clips("clips"))
+        }
         "edit.dissolve" if !d.list("clips").is_empty() => {
             format!("Add dissolves to {}", d.clips("clips"))
         }
+        "edit.dissolve" if asked_wipe(&d) => {
+            format!("Add a wipe at {}{}", d.time("at"), d.track_or_v1())
+        }
         "edit.dissolve" => format!("Add a dissolve at {}{}", d.time("at"), d.track_or_v1()),
+        "edit.transition" if asked_wipe(&d) => {
+            format!(
+                "Make the transition at {}{} a wipe",
+                d.time("at"),
+                d.track_or_v1()
+            )
+        }
+        "edit.transition" => format!(
+            "Make the transition at {}{} a dissolve",
+            d.time("at"),
+            d.track_or_v1()
+        ),
         "edit.remove_transition" if d.flag("all") => {
             "Clear the transitions from all edits".to_string()
         }
@@ -370,6 +389,10 @@ pub fn describe_at(
             }
         }
     }
+}
+
+fn asked_wipe(d: &Words) -> bool {
+    d.params["transition"]["type"] == "wipe"
 }
 
 fn edit_side(side: &Value) -> &'static str {

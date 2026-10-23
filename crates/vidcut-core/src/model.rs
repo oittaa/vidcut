@@ -905,6 +905,37 @@ pub struct Transition {
     pub otio: Kept,
 }
 
+/// How the pictures of a transition meet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PictureTransition {
+    /// A cross dissolve.
+    #[default]
+    Dissolve,
+    /// One wipe, from `direction`.
+    Wipe { direction: WipeDirection },
+}
+
+impl PictureTransition {
+    pub fn is_dissolve(&self) -> bool {
+        matches!(self, Self::Dissolve)
+    }
+}
+
+/// The edge a wipe starts from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WipeDirection {
+    /// From the left edge toward the right.
+    Left,
+    /// From the right edge toward the left.
+    Right,
+    /// From the top edge toward the bottom.
+    Up,
+    /// From the bottom edge toward the top.
+    Down,
+}
+
 /// A clip on the timeline.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Clip {

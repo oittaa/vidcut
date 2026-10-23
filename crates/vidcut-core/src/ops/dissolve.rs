@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Project, TrackKind, Transition};
+use crate::model::{Clip, PictureTransition, Project, TrackKind, Transition};
 use crate::otio::transitions::{self, Cuts};
 
 /// Where a dissolve goes about its edit (decision D50).
@@ -52,7 +52,7 @@ fn wanted(shape: Shape, outgoing: bool, incoming: bool) -> Option<(i64, i64)> {
     }
 }
 
-fn otio(sound: bool, frames: i64) -> Value {
+fn otio(sound: bool, frames: i64, kind: PictureTransition) -> Value {
     if sound {
         return json!({
             "OTIO_SCHEMA": "Transition.1",
@@ -77,7 +77,7 @@ fn otio(sound: bool, frames: i64) -> Value {
         frames.to_string(),
         json!({"Value": 1.0, "Variant Type": "Double"}),
     );
-    json!({
+    let dissolve = json!({
         "OTIO_SCHEMA": "Transition.1",
         "name": "Cross Dissolve",
         "transition_type": "SMPTE_Dissolve",
@@ -100,7 +100,11 @@ fn otio(sound: bool, frames: i64) -> Value {
             },
             "Transition Type": "Cross Dissolve"
         }}
-    })
+    });
+    match kind {
+        PictureTransition::Dissolve => dissolve,
+        PictureTransition::Wipe { direction } => crate::otio::transitions::wipe_otio(direction),
+    }
 }
 
 fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
@@ -219,7 +223,14 @@ pub struct Made {
     pub after: i64,
 }
 
-fn put(p: &mut Project, ti: usize, sound: bool, e: i64, shape: Shape) -> Option<Made> {
+fn put(
+    p: &mut Project,
+    ti: usize,
+    sound: bool,
+    e: i64,
+    shape: Shape,
+    kind: PictureTransition,
+) -> Option<Made> {
     let (from, to) = sides(p, ti, sound, e);
     if from.is_none() && to.is_none() || compound_at(p, ti, sound, e).is_some() {
         return None;
@@ -237,7 +248,7 @@ fn put(p: &mut Project, ti: usize, sound: bool, e: i64, shape: Shape) -> Option<
         to,
         before,
         after,
-        otio: otio(sound, before + after).into(),
+        otio: otio(sound, before + after, kind).into(),
     };
     let cuts = Cuts::of(p, &p.tracks[ti]);
     if cuts.place(p, &t) != Some(e) {
@@ -264,6 +275,7 @@ fn put(p: &mut Project, ti: usize, sound: bool, e: i64, shape: Shape) -> Option<
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn dissolve(
     p: &mut Project,
     track: &str,
@@ -272,6 +284,7 @@ pub fn dissolve(
     picture: bool,
     sound: bool,
     all: bool,
+    kind: PictureTransition,
 ) -> Result<Vec<Made>> {
     let ti = p
         .track_index(track)
@@ -285,7 +298,7 @@ pub fn dissolve(
             }
             for e in edits(p, ti, band) {
                 if let (Some(_), Some(_)) = sides(p, ti, band, e)
-                    && let Some(m) = put(p, ti, band, e, shape)
+                    && let Some(m) = put(p, ti, band, e, shape, kind)
                 {
                     made.push(m);
                 }
@@ -298,7 +311,7 @@ pub fn dissolve(
     if pictures && let Some(c) = compound_at(p, ti, false, e) {
         return Err(compound_error(&c));
     }
-    let made = at_edit(p, ti, pictures, sound, e, shape);
+    let made = at_edit(p, ti, pictures, sound, e, shape, kind);
     if made.is_empty() {
         let (from, to) = sides(p, ti, !pictures, e);
         return Err(Error::invalid(
@@ -318,6 +331,7 @@ pub fn dissolve_clips(
     shape: Shape,
     picture: bool,
     sound: bool,
+    kind: PictureTransition,
 ) -> Result<Vec<Made>> {
     let mut points: Vec<(usize, bool, i64)> = p
         .tracks
@@ -336,7 +350,7 @@ pub fn dissolve_clips(
     points.dedup();
     let mut made = Vec::new();
     for &(ti, pictures, e) in &points {
-        made.extend(at_edit(p, ti, pictures, sound, e, shape));
+        made.extend(at_edit(p, ti, pictures, sound, e, shape, kind));
     }
     if made.is_empty() {
         return Err(points
@@ -363,17 +377,18 @@ fn at_edit(
     sound: bool,
     e: i64,
     shape: Shape,
+    kind: PictureTransition,
 ) -> Vec<Made> {
     let mut made = Vec::new();
     let sound_e = if pictures {
         let (from, to) = sides(p, ti, false, e);
-        made.extend(put(p, ti, false, e, shape));
+        made.extend(put(p, ti, false, e, shape, kind));
         sound_edit(p, ti, from.as_deref(), to.as_deref())
     } else {
         Some(e)
     };
     if sound && let Some(e) = sound_e {
-        made.extend(put(p, ti, true, e, shape));
+        made.extend(put(p, ti, true, e, shape, kind));
     }
     made
 }
@@ -390,6 +405,40 @@ fn sound_edit(p: &Project, ti: usize, from: Option<&str>, to: Option<&str>) -> O
         (None, Some((a, _)), None, _) => Some(a),
         _ => None,
     }
+}
+
+pub fn set_transition(
+    p: &mut Project,
+    track: &str,
+    at: i64,
+    kind: PictureTransition,
+) -> Result<Made> {
+    let ti = p
+        .track_index(track)
+        .ok_or_else(|| Error::not_found(format!("no track {track}")))?;
+    if p.tracks[ti].kind != TrackKind::Video {
+        return Err(Error::invalid(format!("{track} has no picture transition")));
+    }
+    let e =
+        nearest(p, ti, false, at).ok_or_else(|| Error::invalid(format!("{track} has no edit")))?;
+    let cuts = Cuts::of(p, &p.tracks[ti]);
+    let slot = p.tracks[ti]
+        .transitions
+        .iter()
+        .position(|t| !t.sound && cuts.place(p, t) == Some(e));
+    let Some(slot) = slot else {
+        return Err(Error::invalid("the edit has no picture transition"));
+    };
+    let t = &mut p.tracks[ti].transitions[slot];
+    let frames = t.before + t.after;
+    *t.otio.make_mut() = otio(false, frames, kind);
+    Ok(Made {
+        id: t.id.clone(),
+        sound: false,
+        cut: e,
+        before: t.before,
+        after: t.after,
+    })
 }
 
 pub fn to_cut(
@@ -710,6 +759,7 @@ mod tests {
             true,
             false,
             false,
+            crate::model::PictureTransition::Dissolve,
         );
         assert!(made.is_err());
     }
@@ -723,6 +773,7 @@ mod tests {
             super::Shape::Length(25, super::Align::Center),
             true,
             false,
+            crate::model::PictureTransition::Dissolve,
         )
         .unwrap_err();
         assert_eq!(
@@ -768,5 +819,86 @@ mod tests {
     #[test]
     fn a_dissolve_of_odd_length_has_its_middle_frame_before_the_edit() {
         assert_eq!(super::split(7, super::Align::Center), (4, 3));
+    }
+
+    #[test]
+    fn a_dissolve_request_can_make_a_left_wipe() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        req(
+            &mut f,
+            "edit.dissolve",
+            json!({"at": 50, "transition": {"type": "wipe", "direction": "left"}}),
+        );
+        let p = f.editor.project();
+        let t = p
+            .track("V1")
+            .unwrap()
+            .transitions
+            .iter()
+            .find(|t| !t.sound)
+            .unwrap();
+        assert_eq!(
+            crate::otio::transitions::wipe_of(t),
+            Some(crate::model::WipeDirection::Left)
+        );
+    }
+
+    #[test]
+    fn a_transition_request_turns_a_dissolve_into_a_left_wipe() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        req(&mut f, "edit.dissolve", json!({"at": 50, "sound": false}));
+        let (before, after) = {
+            let p = f.editor.project();
+            let t = &p.track("V1").unwrap().transitions[0];
+            (t.before, t.after)
+        };
+        req(
+            &mut f,
+            "edit.transition",
+            json!({"at": 50, "transition": {"type": "wipe", "direction": "left"}}),
+        );
+        let p = f.editor.project();
+        let t = &p.track("V1").unwrap().transitions[0];
+        assert_eq!(
+            (t.before, t.after, crate::otio::transitions::wipe_of(t)),
+            (before, after, Some(crate::model::WipeDirection::Left))
+        );
+    }
+
+    #[test]
+    fn a_transition_request_turns_a_wipe_into_a_dissolve() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        req(
+            &mut f,
+            "edit.dissolve",
+            json!({"at": 50, "sound": false, "transition": {"type": "wipe", "direction": "right"}}),
+        );
+        let (before, after) = {
+            let p = f.editor.project();
+            let t = &p.track("V1").unwrap().transitions[0];
+            (t.before, t.after)
+        };
+        req(
+            &mut f,
+            "edit.transition",
+            json!({"at": 50, "transition": {"type": "dissolve"}}),
+        );
+        let p = f.editor.project();
+        let t = &p.track("V1").unwrap().transitions[0];
+        assert_eq!(
+            (
+                t.before,
+                t.after,
+                crate::otio::transitions::dissolves(t),
+                crate::otio::transitions::wipe_of(t)
+            ),
+            (before, after, true, None)
+        );
     }
 }
