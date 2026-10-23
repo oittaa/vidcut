@@ -299,6 +299,41 @@ pub struct SpeedDialog {
     pub ripple: bool,
 }
 
+impl SpeedDialog {
+    pub const PERCENT: std::ops::RangeInclusive<f64> = 1.0..=10000.0;
+
+    pub fn of(speed: f64, ripple: bool) -> Self {
+        SpeedDialog {
+            percent: if speed == 0.0 {
+                100.0
+            } else {
+                speed.abs() * 100.0
+            },
+            reverse: speed < 0.0,
+            freeze: speed == 0.0,
+            ripple,
+        }
+    }
+
+    pub fn set_percent(&mut self, percent: f64) {
+        self.percent = percent.clamp(*Self::PERCENT.start(), *Self::PERCENT.end());
+    }
+
+    pub fn speed(&self) -> f64 {
+        if self.freeze {
+            0.0
+        } else if self.reverse {
+            -self.percent / 100.0
+        } else {
+            self.percent / 100.0
+        }
+    }
+
+    pub fn params(&self, clips: &[String]) -> Value {
+        json!({ "clips": clips, "speed": self.speed(), "ripple": self.ripple })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MarkerDialog {
     pub id: String,
@@ -2713,17 +2748,7 @@ impl Workspace {
             .first()
             .and_then(|id| p.clip(id))
             .map_or(1.0, |c| c.speed());
-        let ripple = p.settings.ripple_on;
-        self.timeline.speed_dialog = Some(SpeedDialog {
-            percent: if speed == 0.0 {
-                100.0
-            } else {
-                speed.abs() * 100.0
-            },
-            reverse: speed < 0.0,
-            freeze: speed == 0.0,
-            ripple,
-        });
+        self.timeline.speed_dialog = Some(SpeedDialog::of(speed, p.settings.ripple_on));
     }
 
     fn speed_window(&mut self, ctx: &egui::Context) {
@@ -2740,7 +2765,7 @@ impl Workspace {
                     ui.add_enabled(
                         !d.freeze,
                         egui::DragValue::new(&mut d.percent)
-                            .range(1.0..=10000.0)
+                            .range(SpeedDialog::PERCENT)
                             .speed(1.0)
                             .suffix(" %"),
                     );
@@ -2756,17 +2781,7 @@ impl Workspace {
                 let change = super::dialog::main_button(ui, "Change", true)
                     || ui.input(|i| i.key_pressed(Key::Enter));
                 if change {
-                    let speed = if d.freeze {
-                        0.0
-                    } else if d.reverse {
-                        -d.percent / 100.0
-                    } else {
-                        d.percent / 100.0
-                    };
-                    self.send(
-                        "edit.change_speed",
-                        json!({ "clips": clips, "speed": speed, "ripple": d.ripple }),
-                    );
+                    self.send("edit.change_speed", d.params(&clips));
                     done = true;
                 }
                 if ui.button("Cancel").clicked() {

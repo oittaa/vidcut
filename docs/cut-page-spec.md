@@ -385,6 +385,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Esc or Close deselects the edit.
 - **Trim Start/End to Playhead** (Edit Actions, p. 729): moves the head or the tail of a clip to the playhead.
 - **Change Clip Speed** (R†): a speed, reversed or not, or a freeze frame, for each selected clip (D48).
+  - The Speed Change controls of the Inspector set the same (pp. 736–737).
+  - vidcut: the Speed section of the Inspector tab (X70).
 - **Change Clip Duration** (Ctrl+D, p. 693):
   - It takes frames or a timecode, or 1, 5 or 15 seconds, for each selected clip.
   - End runs to the end of the media.
@@ -1087,7 +1089,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - When you type a timecode, `;` means drop-frame. So does `:` in a drop-frame project.
   - A skipped label is refused. Digits that fill one land on the first frame of the minute.
 - **D48. Clips at another speed** (§1, §8.6; deviation X9).
-  - A clip's constant speed comes from Change Clip Speed or an OTIO file.
+  - A clip's constant speed comes from Change Clip Speed, the Speed section of the Inspector, or an OTIO file.
   - The speed applies wherever its pictures and sound go.
   - Change Clip Speed takes 1% to 10000%, forward or backward.
   - It also takes 0, which freezes the frame under the playhead.

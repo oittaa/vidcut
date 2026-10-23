@@ -379,6 +379,10 @@ The bar and the Jobs button:
   - An `apply` is necessary because a `position` holds X and Y. Thus Position X goes with the Y of each clip.
   - Also, a crop in pixels is a different fraction of each picture.
   - After the request, the sent pictures go to the core until the project has them (`tools::landing`).
+  - `speed_section` shows the selected clips that can change speed (`Workspace::paced`), above the Audio section.
+    - Each change sends what the Change Clip Speed window sends (`SpeedDialog::params`).
+    - That is one `edit.change_speed`, or an `apply` with one `edit.change_speed` for each speed.
+    - Until the project has the change, the section shows the speed and the length that it sent (`Retimed`).
   - `Workspace::audio_section` shows the selected clips with sound below the picture sections. Volume and Mute each send one `clip.set`. Voice Isolation uses `Workspace::isolation_controls`, as the right-click menu does.
 - **Silence stripes.**
   - `SilenceDialog` keeps the dry run of Ripple Delete Silence as `Stripe`s, and the person's edits to them:

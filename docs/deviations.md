@@ -1471,11 +1471,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - In the Audio panel, each clip has one Volume control (p. 743).
   - The Audio panel also has Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (pp. 743–744).
   - The manual names no Mute in the Audio panel (pp. 742–744).
+  - Its Video panel also has Speed Change: Direction, Speed %, Frames Per Second, Duration, Ripple Sequence and Pitch Correction (pp. 736–737).
 - **vidcut:**
   - An Inspector tab is beside the Media Pool and Titles tabs. It opens in the same place.
   - `gui.show inspector` shows it.
   - It shows what the user selects: the Title section of a title, the Subtitle section of a subtitle, or the sections of other clips.
-  - The sections of other clips are the picture sections and the Audio section.
+  - The sections of other clips are the picture sections, the Speed section and the Audio section.
   - A double-click on the name of a subtitle track shows its Subtitle Track section (X51).
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
   - With nothing of these selected, it shows one line.
@@ -1494,6 +1495,16 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The viewer shows the clip with its Dynamic Zoom, also while the boxes show.
     - The boxes stay in place. They show where the picture is at the start and at the end (D75).
     - If the playhead is not on a selected clip, Show Boxes and On move it to the first frame of the first selected clip.
+  - **Speed:** Direction, Speed, Frames per Second, Duration and Ripple Timeline of the selected clips that can change speed.
+    - These are all clips but titles and generators. The Speed section is between the picture sections and the Audio section.
+    - With several clips, it shows the first one. Its header gives the number of these clips.
+    - Each change sends what Change Clip Speed sends (D48). Thus a freeze holds the frame under the playhead.
+    - Frames per Second is the speed times the frame rate of the source.
+    - Duration sets the speed so that all the frames of the clip play in that time.
+    - Duration needs Ripple Timeline. Without ripple, a clip keeps its length (D48).
+    - Ripple Timeline starts as Ripple On. A change of it applies to the Inspector only.
+    - The Reset of the section sets Forward at 100%.
+    - There is no Pitch Correction. Sound always keeps its pitch (D48).
   - **Audio:** Volume, Mute and Voice Isolation of the selected clips with sound. These are the video clips with sound and the audio clips.
     - The Audio section is below the picture sections. For an audio clip, it is the only section.
     - With several clips with sound, it shows the first one. Its header gives the number of these clips.
@@ -1522,8 +1533,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
   - With several clips, the accent color and the Reset show when one of the clips has such a value.
   - A picture value goes to all the selected clips that can have a picture. An Audio value goes to all the selected clips with sound.
+  - A Speed value goes to all the selected clips that can change speed. Duration gives each clip the speed that fills it.
   - A value changes only that value on each clip. A Reset also acts on all of these clips.
-  - Not in the Inspector: Speed, Anchor Point, Pitch, Yaw, Softness and Composite ([todo](todo/inspector.md)).
+  - Not in the Inspector: Anchor Point, Pitch, Yaw, Softness and Composite ([todo](todo/inspector.md)).
 - **Why:**
   - The Titles tab of the Cut page is in the place of the Media Pool. The Inspector goes beside it. Thus the viewer and the timeline keep their size.
   - Resolve also sets titles, subtitles and subtitle tracks in the Inspector (pp. 764, 1233, 1237).
