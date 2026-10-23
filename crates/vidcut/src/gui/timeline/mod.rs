@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sense, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use vidcut_core::model::{PictureTool, Project, Track};
+use vidcut_core::model::{Ease, PictureTool, Project, Track};
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::request::ViewerMode;
 
@@ -195,6 +195,8 @@ pub struct TimelineView {
     pub fade_dialog: Option<fades::FadeDialog>,
     pub fade_in_frames: bool,
     pub clip_menu: Option<(bool, String)>,
+    pub keys: Vec<(String, i64)>,
+    pub key_menu: Option<(bool, String, i64)>,
     pub scrub_sent: Option<i64>,
     pub swipe: Option<(f64, Instant)>,
     pub marker_dialog: Option<MarkerDialog>,
@@ -243,6 +245,8 @@ impl Default for TimelineView {
             fade_dialog: None,
             fade_in_frames: false,
             clip_menu: None,
+            keys: Vec::new(),
+            key_menu: None,
             scrub_sent: None,
             swipe: None,
             marker_dialog: None,
@@ -629,6 +633,7 @@ impl Workspace {
         let (waveforms, missing) = (self.snap.waveforms.clone(), self.snap.missing.clone());
         let transcribed = self.snap.transcribed.clone();
         let title_thumbs = self.title_thumbs.prepare(ui.ctx(), drawn).clone();
+        let chosen_keys = self.timeline.keys.clone();
         let assets = Assets {
             thumbs: &thumbs,
             waveforms: &waveforms,
@@ -637,6 +642,7 @@ impl Workspace {
             transcribed: &transcribed,
             pool: &pool,
             titles: &title_thumbs,
+            keys: &chosen_keys,
         };
         let look = self.look();
         let smart = (end > 0).then(|| ops::nearest_edit(drawn, playhead));
@@ -882,6 +888,10 @@ impl Workspace {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
                     None
                 }
+                Gesture::Key { .. } | Gesture::KeyHandle { .. } => {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    None
+                }
                 _ => None,
             };
             if let Some(kind) = pointer {
@@ -917,10 +927,14 @@ impl Workspace {
                     continue;
                 }
                 let (track, what) = hit_rows(&p, rows, scale, pos);
-                let on_volume = rows
-                    .at(pos.y)
-                    .and_then(|r| geometry::volume_at(p.track(&r.track)?, scale, &r.rect, pos))
-                    .is_some();
+                let on_volume = rows.at(pos.y).and_then(|r| {
+                    let t = p.track(&r.track)?;
+                    geometry::volume_target(t, scale, &r.rect, pos, &self.timeline.keys)
+                });
+                let on_key = on_volume
+                    .as_ref()
+                    .is_some_and(|(_, _, on)| *on != geometry::OnVolume::Line);
+                let on_volume = on_volume.is_some();
                 if let Hit::AudioEdit { outgoing, .. } = &what
                     && let Some(row) = track.as_deref().and_then(|t| rows.get(t))
                     && let Some(c) = p.clip(outgoing)
@@ -996,7 +1010,9 @@ impl Workspace {
                     Hit::Roll { .. } | Hit::AudioEdit { .. } => Some(paint::TrimPointer::Roll),
                     _ => None,
                 };
-                if on_volume {
+                if on_key {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                } else if on_volume {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
                 } else if let Some(kind) = pointer {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::None);
@@ -1627,11 +1643,17 @@ impl Workspace {
                 after: x.after,
                 sound,
             }
-        } else if let Some((clip, band)) = rows
-            .at(press.y)
-            .and_then(|r| geometry::volume_at(p.track(&r.track)?, &scale, &r.rect, press))
-        {
-            self.volume_gesture(p, clip, band, press)
+        } else if let Some((clip, band, on)) = rows.at(press.y).and_then(|r| {
+            let t = p.track(&r.track)?;
+            geometry::volume_target(t, &scale, &r.rect, press, &self.timeline.keys)
+        }) {
+            match on {
+                geometry::OnVolume::Line => {
+                    self.volume_gesture(p, clip, band, press, scale.frame(press.x))
+                }
+                geometry::OnVolume::Key(frame) => self.key_gesture(p, clip, frame),
+                geometry::OnVolume::Handle(frame, out) => Gesture::KeyHandle { clip, frame, out },
+            }
         } else {
             let track = track.unwrap_or_else(|| MAIN.to_string());
             let ripples = |clip: &str| {
@@ -1711,7 +1733,42 @@ impl Workspace {
         });
     }
 
-    fn volume_gesture(&self, p: &Project, clip: String, band: Rect, press: Pos2) -> Gesture {
+    fn key_gesture(&self, p: &Project, clip: String, frame: i64) -> Gesture {
+        let pressed = (clip.clone(), frame);
+        let keys = if self.timeline.keys.contains(&pressed) {
+            self.timeline
+                .keys
+                .iter()
+                .filter(|(id, f)| {
+                    p.find_clip(id).is_some_and(|(ti, ci)| {
+                        let c = &p.tracks[ti].clips[ci];
+                        !p.tracks[ti].locked
+                            && c.audio
+                                .as_ref()
+                                .is_some_and(|a| a.gain_keys.iter().any(|k| k.frame == *f))
+                    })
+                })
+                .cloned()
+                .collect()
+        } else {
+            vec![pressed]
+        };
+        Gesture::Key {
+            clip,
+            frame,
+            keys,
+            across: None,
+        }
+    }
+
+    fn volume_gesture(
+        &self,
+        p: &Project,
+        clip: String,
+        band: Rect,
+        press: Pos2,
+        at: f64,
+    ) -> Gesture {
         let sounding = |id: &String| {
             p.find_clip(id).is_some_and(|(ti, ci)| {
                 !p.tracks[ti].locked && p.tracks[ti].clips[ci].audio.is_some()
@@ -1728,16 +1785,14 @@ impl Workspace {
         } else {
             vec![clip.clone()]
         };
-        let gain = p
-            .clip(&clip)
-            .and_then(|c| c.audio.as_ref())
-            .map_or(0.0, |a| a.gain_db);
+        let gain = p.clip(&clip).and_then(|c| c.gain_at(at)).unwrap_or(0.0);
         Gesture::Volume {
             clips,
             clip,
             level: geometry::volume_level(gain),
             last: press.y,
             span: geometry::volume_span(band),
+            at,
         }
     }
 
@@ -1844,6 +1899,9 @@ impl Workspace {
                 {
                     self.trim_sent(q);
                 }
+                if let Some(g) = d.preview.gains.as_ref().filter(|g| !g.picked.is_empty()) {
+                    self.timeline.keys.clone_from(&g.picked);
+                }
             }
             if scrubbing && let Some(f) = self.timeline.scrub_sent.take() {
                 self.seek(PlayerId::Timeline, f, false);
@@ -1924,10 +1982,35 @@ impl Workspace {
         } else {
             (layout.lower_ruler, &layout.lower, layout.lower_scale)
         };
+        let keys = self.timeline.keys.clone();
+        let on_volume = |pos: Pos2| {
+            rows.at(pos.y).and_then(|r| {
+                let t = p.track(&r.track)?;
+                geometry::volume_target(t, &scale, &r.rect, pos, &keys)
+                    .map(|(clip, _, on)| (clip, on))
+            })
+        };
+        let key_hit = resp
+            .interact_pointer_pos()
+            .and_then(|pos| match on_volume(pos) {
+                Some((clip, geometry::OnVolume::Key(f))) => Some((clip, f)),
+                _ => None,
+            });
         if resp.secondary_clicked()
+            && let Some((clip, f)) = key_hit.clone()
+        {
+            if !self.timeline.keys.contains(&(clip.clone(), f)) {
+                self.timeline.keys = vec![(clip.clone(), f)];
+            }
+            self.timeline.key_menu = Some((upper, clip, f));
+            self.timeline.clip_menu = None;
+            self.timeline.transition_menu = None;
+            self.timeline.cue_menu = None;
+        } else if resp.secondary_clicked()
             && let Some(pos) = resp.interact_pointer_pos()
             && !self.cue_secondary(p, rows, &scale, pos, upper)
         {
+            self.timeline.key_menu = None;
             self.timeline.cue_menu = None;
             let faded = rows.at(pos.y).and_then(|r| {
                 let at = geometry::transition_at(p, p.track(&r.track)?, &scale, &r.rect, pos)?;
@@ -1955,6 +2038,14 @@ impl Workspace {
             && resp.context_menu(|ui| self.transition_menu(ui)).is_none()
         {
             self.timeline.transition_menu = None;
+        }
+        if let Some((on_upper, clip, f)) = self.timeline.key_menu.clone()
+            && on_upper == upper
+            && resp
+                .context_menu(|ui| self.key_menu(ui, p, &clip, f))
+                .is_none()
+        {
+            self.timeline.key_menu = None;
         }
         if let Some((on_upper, id)) = self.timeline.clip_menu.clone()
             && on_upper == upper
@@ -2021,6 +2112,18 @@ impl Workspace {
                 self.select_transition(track, at);
                 return;
             }
+            match on_volume(pos) {
+                Some((clip, geometry::OnVolume::Line)) if mods.alt => {
+                    self.add_key(p, &clip, scale.under(pos.x));
+                    return;
+                }
+                Some((clip, geometry::OnVolume::Key(f))) => {
+                    self.click_key(clip, f, mods);
+                    return;
+                }
+                Some((_, geometry::OnVolume::Handle(..))) => return,
+                _ => self.timeline.keys.clear(),
+            }
             match &what {
                 Hit::Clip(id) | Hit::Slip(id) => self.click_clip(id, mods, p),
                 Hit::Edge(id, edge) => {
@@ -2069,6 +2172,144 @@ impl Workspace {
                     }
                 }
             }
+        }
+    }
+
+    fn add_key(&mut self, p: &Project, clip: &str, at: i64) {
+        let Some(c) = p.clip(clip).filter(|c| c.sounds_at(at)) else {
+            return;
+        };
+        self.send("keyframes.add", json!({ "clips": [clip], "at": at }));
+        self.timeline.keys = vec![(clip.to_string(), c.source_at(at))];
+    }
+
+    fn click_key(&mut self, clip: String, frame: i64, mods: egui::Modifiers) {
+        let key = (clip, frame);
+        let at = self.timeline.keys.iter().position(|k| *k == key);
+        match at {
+            Some(i) if mods.command => {
+                self.timeline.keys.remove(i);
+            }
+            Some(_) if mods.shift => {}
+            None if mods.command || mods.shift => self.timeline.keys.push(key),
+            _ => self.timeline.keys = vec![key],
+        }
+    }
+
+    fn chosen_keys(&self, p: &Project) -> Vec<(String, Vec<i64>)> {
+        let mut out: Vec<(String, Vec<i64>)> = Vec::new();
+        for (id, f) in &self.timeline.keys {
+            let there = p
+                .clip(id)
+                .and_then(|c| c.audio.as_ref())
+                .is_some_and(|a| a.gain_keys.iter().any(|k| k.frame == *f));
+            if !there {
+                continue;
+            }
+            match out.iter_mut().find(|(c, _)| c == id) {
+                Some((_, v)) => v.push(*f),
+                None => out.push((id.clone(), vec![*f])),
+            }
+        }
+        out
+    }
+
+    fn send_each(&self, method: &str, commands: Vec<Value>) {
+        match commands.as_slice() {
+            [] => {}
+            [only] => self.send(method, only.clone()),
+            _ => {
+                let commands: Vec<Value> = commands
+                    .into_iter()
+                    .map(|params| json!({ "method": method, "params": params }))
+                    .collect();
+                self.send("apply", json!({ "commands": commands }));
+            }
+        }
+    }
+
+    pub(crate) fn delete_keys(&mut self) -> bool {
+        let Some(p) = self.project_shared() else {
+            return false;
+        };
+        let chosen = self.chosen_keys(&p);
+        self.timeline.keys.clear();
+        if chosen.is_empty() {
+            return false;
+        }
+        let commands = chosen
+            .into_iter()
+            .map(|(id, frames)| json!({ "clips": [id], "frames": frames }))
+            .collect();
+        self.send_each("keyframes.remove", commands);
+        true
+    }
+
+    fn key_menu(&mut self, ui: &mut egui::Ui, p: &Project, clip: &str, frame: i64) {
+        let Some(keys) = p
+            .clip(clip)
+            .and_then(|c| c.audio.as_ref())
+            .map(|a| a.gain_keys.clone())
+        else {
+            return;
+        };
+        let Some(i) = keys.iter().position(|k| k.frame == frame) else {
+            return;
+        };
+        let current = vidcut_core::keyframes::ease_of(&keys, i);
+        for e in vidcut_core::keyframes::eases(&keys, i) {
+            let label = match e {
+                Ease::Linear => "Linear",
+                Ease::EaseIn => "Ease In",
+                Ease::EaseOut => "Ease Out",
+                Ease::EaseInOut => "Ease In and Out",
+            };
+            if ui.selectable_label(current == Some(e), label).clicked() {
+                let commands = self
+                    .chosen_keys(p)
+                    .into_iter()
+                    .map(|(id, frames)| json!({ "clips": [id], "frames": frames, "ease": e }))
+                    .collect();
+                self.send_each("keyframes.set", commands);
+                ui.close();
+            }
+        }
+        ui.separator();
+        if ui.button("Delete Keyframes").clicked() {
+            self.delete_keys();
+            ui.close();
+        }
+    }
+
+    pub(super) fn step_keys(&mut self, dir: i64) {
+        let Some(p) = self.shown_project() else {
+            return;
+        };
+        let at = self.drawn_playhead();
+        let mut times: Vec<i64> = self
+            .snap
+            .selection
+            .clips
+            .iter()
+            .filter_map(|id| p.clip(id))
+            .flat_map(|c| {
+                let keys = c.audio.as_ref().map_or(&[][..], |a| &a.gain_keys[..]);
+                keys.iter()
+                    .map(|k| c.key_time(k.frame).round() as i64)
+                    .filter(|t| (c.start..c.end()).contains(t))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        times.sort_unstable();
+        times.dedup();
+        let to = if dir < 0 {
+            times.iter().rev().find(|&&t| t < at)
+        } else {
+            times.iter().find(|&&t| t > at)
+        };
+        if let Some(&to) = to {
+            self.show_timeline();
+            self.seek(PlayerId::Timeline, to, false);
         }
     }
 
@@ -2534,6 +2775,20 @@ impl Workspace {
         }
         if pressed(Key::W) && !input.modifiers.command {
             self.toggle_dynamic();
+        }
+        if self.timeline.silence.is_none() {
+            let struck = |k: Key| {
+                input.events.iter().any(|e| {
+                    matches!(e, egui::Event::Key { key, physical_key, pressed: true, .. }
+                        if *key == k || *physical_key == Some(k))
+                })
+            };
+            if struck(Key::OpenBracket) && !input.modifiers.any() {
+                self.step_keys(-1);
+            }
+            if struck(Key::CloseBracket) && !input.modifiers.any() {
+                self.step_keys(1);
+            }
         }
         self.silence_keys(input);
     }
@@ -3209,6 +3464,7 @@ mod tests {
                 head: 0,
                 tail,
                 gain_db: 0.0,
+                gain_keys: Vec::new(),
                 muted: false,
                 effects: None,
                 voice_isolation: None,

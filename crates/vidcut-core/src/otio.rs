@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Compound, Marks, Media, Picture, Project, Speed, Title, TrackKind};
+use crate::model::{
+    Clip, Compound, Keyframe, Marks, Media, Picture, Project, Speed, Title, TrackKind,
+};
 use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
 use crate::time::Rational;
 
@@ -394,6 +396,10 @@ fn own_pace(meta: &mut Value, c: &Clip, s: i64) {
     }
 }
 
+fn our_keys(meta: &Value) -> Option<Vec<Keyframe>> {
+    serde_json::from_value(meta.get("gain_keys")?.clone()).ok()
+}
+
 fn with_speed(c: &Clip, mut effects: Vec<Value>) -> Vec<Value> {
     if let Some(speed) = &c.speed {
         effects.insert(0, (*speed.effect).clone());
@@ -560,6 +566,9 @@ pub fn export_drawn(
                 if let Some(au) = &c.audio {
                     meta["stream"] = json!(au.stream);
                     meta["gain_db"] = json!(au.gain_db);
+                    if au.is_keyed() {
+                        meta["gain_keys"] = json!(effects::relative(&au.gain_keys, c.source_at(s)));
+                    }
                     meta["muted"] = json!(au.muted);
                     if let Some(v) = au.voice_isolation {
                         meta["voice_isolation"] = json!(v);
@@ -625,6 +634,9 @@ pub fn export_drawn(
                 if let Some(v) = au.voice_isolation {
                     meta["voice_isolation"] = json!(v);
                 }
+                if au.is_keyed() {
+                    meta["gain_keys"] = json!(effects::relative(&au.gain_keys, c.source_at(s)));
+                }
                 own_pace(&mut meta, c, s);
                 let n = m
                     .and_then(|m| m.info.audio.get(au.stream as usize))
@@ -642,9 +654,13 @@ pub fn export_drawn(
                     editor["Media In"] = json!(x);
                 }
                 let whole = c.audio_range().expect("has audio");
+                let timing = effects::Timing {
+                    speed: c.speed(),
+                    start: c.source_at(s) as f64,
+                };
                 let effects = with_speed(
                     c,
-                    effects::sound(au, c.source_at(s), s > whole.0, e < whole.1),
+                    effects::sound(au, c.source_at(s), (s > whole.0, e < whole.1), &timing),
                 );
                 let mut it = item(
                     &label,
@@ -981,6 +997,7 @@ pub struct ImportedClip {
     pub audio: Option<(i64, i64)>,
     pub stream: u32,
     pub gain_db: f64,
+    pub gain_keys: Vec<Keyframe>,
     pub muted: bool,
     pub voice_isolation: Option<f64>,
     pub link: Option<i64>,
@@ -1042,6 +1059,7 @@ impl ImportedClip {
             audio: None,
             stream: 0,
             gain_db: 0.0,
+            gain_keys: Vec::new(),
             muted: false,
             voice_isolation: None,
             link: None,
@@ -1754,6 +1772,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         audio: None,
                         stream: meta["stream"].as_u64().unwrap_or(0) as u32,
                         gain_db: meta["gain_db"].as_f64().unwrap_or(0.0),
+                        gain_keys: our_keys(meta).unwrap_or_default(),
                         muted: meta["muted"].as_bool().unwrap_or(false),
                         voice_isolation: meta["voice_isolation"].as_f64(),
                         link: link_group(item),
@@ -1794,7 +1813,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             if !(is_clip(item) || stack) || len <= 0 {
                 continue;
             }
-            let (effects, speed) = effects::read(item);
+            let (mut effects, speed) = effects::read(item);
             let mut speed = speed_of(speed);
             let x = scalar(speed.as_ref());
             if stack {
@@ -1817,17 +1836,22 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 clips.push(c);
                 continue;
             }
-            let (media, source_in, timecoded) = match clip_source(item, fps, base) {
+            let (media, source_in, timecoded, timing) = match clip_source(item, fps, base) {
                 Ok((media, start, timecoded)) => {
                     let meta = &item["metadata"][VIDCUT];
                     let (first, skip) = first_shown(start, len, x);
                     if let Some(s) = speed.as_mut() {
                         s.skip = meta["skip"].as_i64().unwrap_or(skip);
                     }
+                    let timing = effects::Timing {
+                        speed: x,
+                        start: start as f64,
+                    };
                     (
                         media,
                         meta["source_in"].as_i64().unwrap_or(first),
                         timecoded,
+                        timing,
                     )
                 }
                 Err(e) => {
@@ -1841,6 +1865,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let muted = item["enabled"].as_bool() == Some(false);
             let link = link_group(item);
             let gain = meta["gain_db"].as_f64().or_else(|| effects::gain(item));
+            let gain_keys = our_keys(meta).unwrap_or_else(|| effects::gain_keys(item, &timing));
+            effects::drop_gain_keys(&mut effects);
             let voice_isolation = meta["voice_isolation"].as_f64();
             let stream = meta["stream"]
                 .as_u64()
@@ -1883,6 +1909,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if let Some(g) = gain {
                     c.gain_db = g;
                 }
+                if !gain_keys.is_empty() {
+                    c.gain_keys = gain_keys;
+                }
                 if let Some(s) = stream {
                     c.stream = s;
                 }
@@ -1922,6 +1951,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 audio: Some((0, 0)),
                 stream: stream.unwrap_or(0),
                 gain_db: gain.unwrap_or(0.0),
+                gain_keys,
                 muted,
                 voice_isolation,
                 link,

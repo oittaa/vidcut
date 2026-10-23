@@ -1,7 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{EDITOR, schema};
-use crate::model::{ClipAudio, Effects, Kept};
+use crate::model::{ClipAudio, Effects, Handle, Kept, Keyframe};
+use crate::validate::GAIN;
 
 const VOLUME: &str = "Fairlight Clip Volume and Fades";
 
@@ -75,15 +76,126 @@ pub(super) fn volume(db: f64) -> Value {
 }
 
 pub(super) fn gain(item: &Value) -> Option<f64> {
-    let e = item["effects"]
-        .as_array()?
-        .iter()
-        .find(|e| e["metadata"][EDITOR]["Effect Name"] == VOLUME)
-        .filter(|e| e["metadata"][EDITOR]["Enabled"] != false)?;
-    let level = params(e).find(|p| p["Parameter ID"] == "volume")?;
+    let level = volume_param(item)?;
     level["Parameter Value"]
         .as_f64()
         .map(|g| (g * 100.0).round() / 100.0)
+}
+
+fn volume_param(item: &Value) -> Option<&Value> {
+    let e = item["effects"]
+        .as_array()?
+        .iter()
+        .find(|e| is_volume(e))
+        .filter(|e| e["metadata"][EDITOR]["Enabled"] != false)?;
+    params(e).find(|p| p["Parameter ID"] == "volume")
+}
+
+fn is_volume(e: &Value) -> bool {
+    e["metadata"][EDITOR]["Effect Name"] == VOLUME
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Timing {
+    pub speed: f64,
+    pub start: f64,
+}
+
+impl Timing {
+    fn retimed(&self) -> bool {
+        self.speed > 0.0 && self.speed != 1.0
+    }
+
+    fn offset(&self) -> f64 {
+        self.start * (1.0 - 1.0 / self.speed)
+    }
+
+    fn file(&self, frames: f64) -> f64 {
+        if self.retimed() {
+            frames / self.speed + self.offset()
+        } else {
+            frames
+        }
+    }
+
+    fn source(&self, at: f64) -> f64 {
+        if self.retimed() {
+            self.speed * (at - self.offset())
+        } else {
+            at
+        }
+    }
+
+    fn scale(&self) -> f64 {
+        if self.retimed() { self.speed } else { 1.0 }
+    }
+}
+
+pub(super) fn gain_keys(item: &Value, timing: &Timing) -> Vec<Keyframe> {
+    let Some(keys) = volume_param(item).and_then(|p| p["Key Frames"].as_object()) else {
+        return Vec::new();
+    };
+    let handle = |b: &Value, before: bool| {
+        let b = b.as_array()?;
+        let h = Handle {
+            frames: b.first()?.as_f64()? * timing.scale(),
+            value: b.get(1)?.as_f64()?,
+        };
+        crate::keyframes::checked_handle(h, before).ok()
+    };
+    let mut out: Vec<Keyframe> = keys
+        .iter()
+        .filter_map(|(t, k)| {
+            Some(Keyframe {
+                frame: timing.source(t.parse::<f64>().ok()?).round() as i64,
+                value: k["Value"].as_f64()?.clamp(*GAIN.start(), *GAIN.end()),
+                in_handle: handle(&k["InBez"], true),
+                out_handle: handle(&k["OutBez"], false),
+            })
+        })
+        .collect();
+    out.sort_by_key(|k| k.frame);
+    out.dedup_by_key(|k| k.frame);
+    out
+}
+
+pub(super) fn drop_gain_keys(list: &mut Vec<Value>) {
+    for e in list.iter_mut().filter(|e| is_volume(e)) {
+        for p in params_of(e).into_iter().flatten() {
+            if p["Parameter ID"] == "volume"
+                && let Some(o) = p.as_object_mut()
+            {
+                o.remove("Key Frames");
+            }
+        }
+    }
+    list.retain(|e| !is_volume(e) || in_use(e));
+}
+
+fn key_frames(keys: &[Keyframe], source: i64, timing: &Timing) -> Value {
+    let mut out = serde_json::Map::new();
+    for k in keys {
+        let at = timing.file((k.frame - source) as f64).round();
+        let mut v = json!({ "Value": k.value, "Variant Type": "Double" });
+        let bez = |h: Handle| json!([rounded(h.frames / timing.scale()), rounded(h.value)]);
+        if let Some(h) = k.in_handle {
+            v["InBez"] = bez(h);
+        }
+        if let Some(h) = k.out_handle {
+            v["OutBez"] = bez(h);
+        }
+        out.insert(frame_key(at), v);
+    }
+    Value::Object(out)
+}
+
+pub(super) fn relative(keys: &[Keyframe], source: i64) -> Vec<Keyframe> {
+    keys.iter()
+        .map(|k| Keyframe {
+            frame: k.frame - source,
+            ..*k
+        })
+        .collect()
 }
 
 pub(super) fn read(item: &Value) -> (Vec<Value>, Option<Value>) {
@@ -296,21 +408,37 @@ impl Effects {
     }
 }
 
-pub(super) fn sound(au: &ClipAudio, source: i64, head: bool, tail: bool) -> Vec<Value> {
+pub(super) fn sound(
+    au: &ClipAudio,
+    source: i64,
+    (head, tail): (bool, bool),
+    timing: &Timing,
+) -> Vec<Value> {
     let mut list = au
         .effects
         .as_ref()
         .map_or_else(Vec::new, |e| e.written(source, head, tail));
-    let carried = list
-        .iter_mut()
-        .find(|e| e["metadata"][EDITOR]["Effect Name"] == VOLUME)
-        .and_then(params_of);
+    let db = au.gain_keys.first().map_or(au.gain_db, |k| k.value);
+    let mut level = volume(db)["metadata"][EDITOR]["Parameters"][0].clone();
+    if au.is_keyed() {
+        level["Key Frames"] = key_frames(&au.gain_keys, source, timing);
+    }
+    let carried = list.iter_mut().find(|e| is_volume(e)).and_then(params_of);
     match carried {
         Some(ps) => match ps.iter_mut().find(|p| p["Parameter ID"] == "volume") {
-            Some(p) => p["Parameter Value"] = json!(au.gain_db),
-            None => ps.push(volume(au.gain_db)["metadata"][EDITOR]["Parameters"][0].clone()),
+            Some(p) => {
+                p["Parameter Value"] = json!(db);
+                if let Some(keys) = level.get("Key Frames") {
+                    p["Key Frames"] = keys.clone();
+                }
+            }
+            None => ps.push(level),
         },
-        None if au.gain_db != 0.0 => list.insert(0, volume(au.gain_db)),
+        None if db != 0.0 || au.is_keyed() => {
+            let mut v = volume(db);
+            v["metadata"][EDITOR]["Parameters"][0] = level;
+            list.insert(0, v);
+        }
         None => {}
     }
     list

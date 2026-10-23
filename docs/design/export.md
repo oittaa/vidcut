@@ -196,6 +196,9 @@ Pictures:
 ## Sound
 
 - `AudioMix` mixes the lanes sample-exact: clip gains, cross fades, de-click fades at cuts, and clips at other speeds, stretched with their pitch kept.
+- A piece of a clip with volume keyframes carries them (`Keyed`), and its `gain_db` holds only the fader of the track.
+  - `AudioMix` multiplies each sample by `Keyed::gain` at the source position of the sample, as it multiplies by `Fade::gain`.
+  - Thus the player and the export play the same curve ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - With `audio.loudness`, `analysis::mix_loudness` first measures the mix as it will be encoded, ducking included.
 - `loudness_gain` gives one gain (`AudioMix::set_gain_db`) that reaches the target, with the true peak under a ceiling. Thus it comes after the ducking.
 
@@ -206,7 +209,8 @@ Ducking ([spec D76](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)
 - The range of the sources reaches Hold + Recovery Time before the plan, and Lookahead + Rise Time after it. Thus a range dips as the whole timeline does.
 - `duck::hear` finds where the sources are active, from the measurements of their files:
   - by speech: `analysis::speech_frames`, from the `VoiceActivity` of the file
-  - by level: `analysis::loud_frames`, from its `AudioLevels`
+  - by level: `analysis::loud_frames`, from its `AudioLevels`, with the gain of the clip at each level (`keyframes::Gain`). A `DuckSource` carries the volume keyframes of its clip.
+
   - It puts these parts, in samples of the plan, into `Dip::active`.
 - `session::export_media` calls `duck::hear_with`, which measures what is missing. A missing speech detector needs `download`.
 - `AudioMix::ducked` gives each lane its `Dip`. A lane multiplies each sample by `Dip::gain`, on every channel.

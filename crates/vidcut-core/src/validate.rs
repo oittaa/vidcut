@@ -114,6 +114,9 @@ pub fn violations(p: &Project) -> Vec<String> {
                                 c.id, a.gain_db
                             ));
                         }
+                        if let Some(why) = crate::keyframes::problem(&a.gain_keys) {
+                            v.push(format!("{}: {why}", c.id));
+                        }
                         if a.stream as usize >= m.info.audio.len() {
                             v.push(format!(
                                 "{}: no audio stream {} in {}",

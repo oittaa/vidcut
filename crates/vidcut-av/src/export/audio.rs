@@ -665,6 +665,7 @@ impl Lane {
                 speed,
                 fade: cross,
                 isolation,
+                keyed,
                 ..
             } = &piece
             {
@@ -748,6 +749,9 @@ impl Lane {
                     let mut g = gain;
                     if let Some(f) = cross {
                         g *= f.gain(p) as f32;
+                    }
+                    if let Some(k) = keyed {
+                        g *= k.gain(*source_sample as f64 + p as f64 * speed);
                     }
                     if fade_in && p < fade {
                         g *= (p + 1) as f32 / fade as f32;

@@ -1,5 +1,5 @@
 use eframe::egui::{Pos2, Rect, pos2, vec2};
-use vidcut_core::model::{Clip, Project, Track, TrackKind, Transition};
+use vidcut_core::model::{Clip, Keyframe, Project, Track, TrackKind, Transition};
 use vidcut_core::ops::{Edge, MAIN};
 use vidcut_core::otio::transitions::Cuts;
 use vidcut_core::validate::GAIN;
@@ -291,6 +291,7 @@ const FADE_EDGE: f32 = 5.0;
 const VOLUME_BAND: f32 = 20.0;
 const VOLUME_INSET: f32 = 2.0;
 const VOLUME_GRAB: f32 = 4.0;
+const KEY_GRAB: f32 = 5.0;
 
 pub fn clips_in(track: &Track, a: i64, b: i64) -> std::ops::Range<usize> {
     let first = track.clips.partition_point(|c| c.end() <= a);
@@ -436,33 +437,103 @@ pub fn volume_span(band: Rect) -> f32 {
     (band.height() - 2.0 * VOLUME_INSET).max(1.0)
 }
 
+pub fn level_at(band: Rect, y: f32) -> f64 {
+    f64::from((band.bottom() - VOLUME_INSET - y) / volume_span(band)).clamp(0.0, 1.0)
+}
+
 pub fn volume_y(band: Rect, gain_db: f64) -> Option<f32> {
     (band.height() >= VOLUME_BAND)
         .then(|| band.bottom() - VOLUME_INSET - volume_span(band) * volume_level(gain_db) as f32)
 }
 
-pub fn volume_at(
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OnVolume {
+    Line,
+    Key(i64),
+    Handle(i64, bool),
+}
+
+pub fn curve_y(band: Rect, c: &Clip, t: f64) -> Option<f32> {
+    volume_y(band, c.gain_at(t)?)
+}
+
+pub fn key_point(band: Rect, scale: &Scale, c: &Clip, k: &Keyframe) -> Option<Pos2> {
+    let x = scale.x(c.key_time(k.frame));
+    band.x_range()
+        .contains(x)
+        .then(|| Some(pos2(x, volume_y(band, k.value)?)))
+        .flatten()
+}
+
+pub fn handle_point(band: Rect, scale: &Scale, c: &Clip, i: usize, out: bool) -> Option<Pos2> {
+    let keys = &c.audio.as_ref()?.gain_keys;
+    let (a, b) = if out {
+        (keys.get(i)?, keys.get(i + 1)?)
+    } else {
+        (keys.get(i.checked_sub(1)?)?, keys.get(i)?)
+    };
+    let (frame, value) = vidcut_core::keyframes::handle_point(a, b, out)?;
+    let x = scale.x(c.time_of(frame));
+    let y = volume_y(band, value.clamp(*GAIN.start(), *GAIN.end()))?;
+    band.x_range().contains(x).then_some(pos2(x, y))
+}
+
+pub fn chosen_on(chosen: &[(String, i64)], c: &Clip, frame: i64) -> bool {
+    chosen.iter().any(|(id, f)| *id == c.id && *f == frame)
+}
+
+pub fn volume_target(
     track: &Track,
     scale: &Scale,
     tr: &TrackRect,
     pos: Pos2,
-) -> Option<(String, Rect)> {
-    if track.locked || !matches!(hit(track, scale, tr, pos), Hit::Clip(_) | Hit::Slip(_)) {
+    chosen: &[(String, i64)],
+) -> Option<(String, Rect, OnVolume)> {
+    if track.locked {
         return None;
     }
     let frame = scale.under(pos.x);
     let range = clips_in(track, frame - 1, frame + 2);
     let range = range.start.saturating_sub(1)..(range.end + 1).min(track.clips.len());
-    track.clips[range]
+    let clips = &track.clips[range];
+    let near = |q: Pos2| (q - pos).length() <= KEY_GRAB;
+    for c in clips {
+        let Some(band) = sound_band(tr, scale, c).filter(|b| b.height() >= VOLUME_BAND) else {
+            continue;
+        };
+        let keys = c.audio.as_ref().map_or(&[][..], |a| &a.gain_keys[..]);
+        for (i, k) in keys.iter().enumerate() {
+            if !chosen_on(chosen, c, k.frame) {
+                continue;
+            }
+            for out in [false, true] {
+                if handle_point(band, scale, c, i, out).is_some_and(near) {
+                    return Some((c.id.clone(), band, OnVolume::Handle(k.frame, out)));
+                }
+            }
+        }
+    }
+    if !matches!(hit(track, scale, tr, pos), Hit::Clip(_) | Hit::Slip(_)) {
+        return None;
+    }
+    clips
         .iter()
         .filter_map(|c| {
-            let band = sound_band(tr, scale, c)?;
-            let y = volume_y(band, c.audio.as_ref()?.gain_db)?;
+            let band = sound_band(tr, scale, c).filter(|b| b.contains(pos))?;
+            let a = c.audio.as_ref()?;
+            if let Some(k) = a
+                .gain_keys
+                .iter()
+                .find(|k| key_point(band, scale, c, k).is_some_and(near))
+            {
+                return Some((0.0, c.id.clone(), band, OnVolume::Key(k.frame)));
+            }
+            let y = curve_y(band, c, scale.frame(pos.x))?;
             let off = (pos.y - y).abs();
-            (band.contains(pos) && off <= VOLUME_GRAB).then(|| (off, c.id.clone(), band))
+            (off <= VOLUME_GRAB).then(|| (off, c.id.clone(), band, OnVolume::Line))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, id, band)| (id, band))
+        .map(|(_, id, band, on)| (id, band, on))
 }
 
 pub fn picture_transition<'a>(p: &Project, track: &'a Track, at: i64) -> Option<&'a Transition> {
@@ -637,6 +708,7 @@ mod tests {
                 head,
                 tail,
                 gain_db: 0.0,
+                gain_keys: Vec::new(),
                 muted: false,
                 effects: None,
                 voice_isolation: None,

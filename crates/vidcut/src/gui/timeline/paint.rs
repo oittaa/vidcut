@@ -11,7 +11,10 @@ use vidcut_core::ops;
 use vidcut_core::otio::transitions;
 use vidcut_core::time::Rational;
 
-use super::geometry::{Rows, Scale, TrackRect, clips_in, covered, sound_band, volume_y};
+use super::geometry::{
+    Rows, Scale, TrackRect, chosen_on, clips_in, covered, curve_y, handle_point, key_point,
+    sound_band, volume_y,
+};
 use super::gesture::{Preview, Target};
 use crate::gui::pool::elide;
 use crate::gui::theme;
@@ -36,6 +39,7 @@ pub struct Assets<'a> {
     pub transcribed: &'a HashSet<String>,
     pub pool: &'a HashMap<&'a str, &'a Media>,
     pub titles: &'a HashMap<String, egui::TextureId>,
+    pub keys: &'a [(String, i64)],
 }
 
 pub type Placed = HashMap<String, Vec<(i64, usize)>>;
@@ -374,14 +378,7 @@ fn clip(
         if look.waveforms && !muted && !offline && audio.height() >= 8.0 {
             waveform(&ap, audio, scale, p, c, assets, fps);
         }
-        if let Some(y) = c.audio.as_ref().and_then(|a| volume_y(audio, a.gain_db)) {
-            let across = |y: f32| [pos2(audio.left(), y), pos2(audio.right(), y)];
-            ap.line_segment(
-                across(y + 1.0),
-                Stroke::new(1.0, Color32::from_black_alpha(140)),
-            );
-            ap.line_segment(across(y), Stroke::new(1.0, Color32::from_white_alpha(230)));
-        }
+        volume_line(&ap, audio, scale, c, assets.keys);
         if muted && look.status {
             ap.text(
                 audio.left_center() + vec2(4.0, 0.0),
@@ -516,6 +513,65 @@ fn transition(painter: &Painter, tr: &TrackRect, scale: &Scale, at: i64, x: &Tra
         Stroke::new(1.0, Color32::from_white_alpha(170)),
         StrokeKind::Inside,
     );
+}
+
+fn volume_line(painter: &Painter, band: Rect, scale: &Scale, c: &Clip, chosen: &[(String, i64)]) {
+    let Some(a) = c.audio.as_ref() else {
+        return;
+    };
+    let shadow = Stroke::new(1.0, Color32::from_black_alpha(140));
+    let line = Stroke::new(1.0, Color32::from_white_alpha(230));
+    if !a.is_keyed() {
+        if let Some(y) = volume_y(band, a.gain_db) {
+            let across = |y: f32| [pos2(band.left(), y), pos2(band.right(), y)];
+            painter.line_segment(across(y + 1.0), shadow);
+            painter.line_segment(across(y), line);
+        }
+        return;
+    }
+    let shown = band.intersect(painter.clip_rect());
+    let (x0, x1) = (shown.left().floor(), shown.right().ceil());
+    let mut points = Vec::new();
+    let mut x = x0;
+    while x <= x1 {
+        if let Some(y) = curve_y(band, c, scale.frame(x)) {
+            points.push(pos2(x, y));
+        }
+        x += 2.0;
+    }
+    if points.len() < 2 {
+        return;
+    }
+    let lowered: Vec<Pos2> = points.iter().map(|p| *p + vec2(0.0, 1.0)).collect();
+    painter.add(egui::Shape::line(lowered, shadow));
+    painter.add(egui::Shape::line(points, line));
+    let accent = theme::colors().accent;
+    for (i, k) in a.gain_keys.iter().enumerate() {
+        let Some(at) = key_point(band, scale, c, k) else {
+            continue;
+        };
+        let picked = chosen_on(chosen, c, k.frame);
+        if picked {
+            for out in [false, true] {
+                if let Some(h) = handle_point(band, scale, c, i, out) {
+                    painter.line_segment([at, h], Stroke::new(1.0, accent));
+                    painter.circle_filled(h, 2.5, accent);
+                }
+            }
+        }
+        let diamond = vec![
+            at + vec2(0.0, -4.0),
+            at + vec2(4.0, 0.0),
+            at + vec2(0.0, 4.0),
+            at + vec2(-4.0, 0.0),
+        ];
+        let fill = if picked { accent } else { Color32::WHITE };
+        painter.add(egui::Shape::convex_polygon(
+            diamond,
+            fill,
+            Stroke::new(1.0, Color32::from_black_alpha(180)),
+        ));
+    }
 }
 
 fn effects_badge(painter: &Painter, band: Rect, effects: &Effects) {

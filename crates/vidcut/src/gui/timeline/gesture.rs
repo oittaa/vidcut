@@ -3,18 +3,20 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{Pos2, Rect};
 use serde_json::{Value, json};
-use vidcut_core::model::{Clip, Marks, Project, Track, TrackKind};
+use vidcut_core::model::{Clip, Handle, Keyframe, Marks, Project, Track, TrackKind};
 use vidcut_core::ops::{Edge, MAIN};
 use vidcut_core::validate::GAIN;
 
 use super::geometry::{
-    Hit, Rows, SNAP_PX, Scale, Snap, clips_in, edit_near, hit_rows, sound_band, volume_gain,
-    volume_y,
+    Hit, Rows, SNAP_PX, Scale, Snap, clips_in, edit_near, hit_rows, level_at, sound_band,
+    volume_gain, volume_level, volume_span, volume_y,
 };
 
 pub const HOVER: Duration = Duration::from_millis(800);
 
 const VOLUME_FINE: f64 = 0.1;
+
+const AXIS_PX: f32 = 3.0;
 
 pub const SAFE_EDIT_HOLD: Duration = Duration::from_millis(600);
 
@@ -106,6 +108,18 @@ pub enum Gesture {
         level: f64,
         last: f32,
         span: f32,
+        at: f64,
+    },
+    Key {
+        clip: String,
+        frame: i64,
+        keys: Vec<(String, i64)>,
+        across: Option<bool>,
+    },
+    KeyHandle {
+        clip: String,
+        frame: i64,
+        out: bool,
     },
 }
 
@@ -139,6 +153,8 @@ pub struct Preview {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Gains {
     pub clips: Vec<(String, f64)>,
+    pub keys: Vec<(String, Vec<Keyframe>)>,
+    pub picked: Vec<(String, i64)>,
     pub shown: f64,
     pub y: Option<f32>,
 }
@@ -162,6 +178,13 @@ impl Preview {
                 && let Some(a) = moved.tracks[ti].clips[ci].audio.as_mut()
             {
                 a.gain_db = *gain;
+            }
+        }
+        for (id, keys) in self.gains.iter().flat_map(|g| &g.keys) {
+            if let Some((ti, ci)) = moved.find_clip(id)
+                && let Some(a) = moved.tracks[ti].clips[ci].audio.as_mut()
+            {
+                a.gain_keys.clone_from(keys);
             }
         }
         Some(moved)
@@ -241,19 +264,37 @@ impl Drag {
     }
 
     pub fn update(&mut self, pos: Pos2, now: Instant, ctx: &Ctx) -> Preview {
-        if let Gesture::Volume {
-            clips,
-            clip,
-            level,
-            last,
-            span,
-        } = &mut self.gesture
-        {
-            let step = if self.fine { VOLUME_FINE } else { 1.0 };
-            let moved = f64::from(*last - pos.y) / f64::from(span.max(1.0)) * step;
-            *level = (*level + moved).clamp(0.0, 1.0);
-            *last = pos.y;
-            return volume_preview(ctx, clips, clip, *level);
+        match &mut self.gesture {
+            Gesture::Volume {
+                clips,
+                clip,
+                level,
+                last,
+                span,
+                at,
+            } => {
+                let step = if self.fine { VOLUME_FINE } else { 1.0 };
+                let moved = f64::from(*last - pos.y) / f64::from(span.max(1.0)) * step;
+                *level = (*level + moved).clamp(0.0, 1.0);
+                *last = pos.y;
+                return volume_preview(ctx, clips, clip, *level, *at);
+            }
+            Gesture::Key {
+                clip,
+                frame,
+                keys,
+                across,
+            } => {
+                let d = pos - self.press;
+                if self.fine && across.is_none() && d.length() >= AXIS_PX {
+                    *across = Some(d.x.abs() >= d.y.abs());
+                }
+                return key_preview(ctx, (self.press, pos), *across, clip, *frame, keys);
+            }
+            Gesture::KeyHandle { clip, frame, out } => {
+                return handle_preview(ctx, pos, clip, *frame, *out);
+            }
+            _ => {}
         }
         let under = match hit_rows(ctx.project, ctx.rows, &ctx.scale, pos).1 {
             Hit::Clip(id) | Hit::Slip(id) | Hit::Edge(id, _) => Some(id),
@@ -306,7 +347,11 @@ impl Drag {
                 &under,
                 &hovered,
             ),
-            Gesture::Bin { .. } | Gesture::Volume { .. } => Preview::default(),
+            Gesture::Bin { .. }
+            | Gesture::Volume { .. }
+            | Gesture::Key { .. }
+            | Gesture::KeyHandle { .. } => Preview::default(),
+
             Gesture::Subtitles { media, cues } => subtitles_preview(ctx, pos, media, cues),
             Gesture::Title { template, len } => title_preview(ctx, pos, template, *len),
             Gesture::Trim {
@@ -842,60 +887,261 @@ fn kept(gain_db: f64) -> f64 {
     if g == 0.0 { 0.0 } else { g }
 }
 
-fn volume_preview(ctx: &Ctx, clips: &[String], clip: &str, level: f64) -> Preview {
-    let gain = |id: &str| {
-        ctx.clip(id)
-            .and_then(|c| c.audio.as_ref())
-            .map(|a| a.gain_db)
+fn band_of(ctx: &Ctx, clip: &str) -> Option<Rect> {
+    let c = ctx.clip(clip)?;
+    let r = ctx.rows.get(&ctx.track_of(clip)?.id)?;
+    sound_band(&r.rect, &ctx.scale, c)
+}
+
+fn command(method: &str, params: Value) -> Value {
+    json!({ "method": method, "params": params })
+}
+
+fn one_or_all(commands: Vec<Value>) -> Option<Value> {
+    match commands.as_slice() {
+        [] => None,
+        [only] => Some(only.clone()),
+        _ => request("apply", json!({ "commands": commands })),
+    }
+}
+
+fn segment(c: &Clip, at: f64) -> Vec<i64> {
+    let keys = c.audio.as_ref().map_or(&[][..], |a| &a.gain_keys[..]);
+    let mut timed: Vec<(f64, i64)> = keys
+        .iter()
+        .map(|k| (c.key_time(k.frame), k.frame))
+        .collect();
+    timed.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let i = timed.partition_point(|(t, _)| *t <= at);
+    match i {
+        0 => timed.first().map(|k| vec![k.1]).unwrap_or_default(),
+        i if i == timed.len() => vec![timed[i - 1].1],
+        i => vec![timed[i - 1].1, timed[i].1],
+    }
+}
+
+fn raised(keys: &[Keyframe], frames: Option<&[i64]>, by: f64) -> Vec<Keyframe> {
+    keys.iter()
+        .map(|k| {
+            let picked = frames.is_none_or(|f| f.contains(&k.frame));
+            Keyframe {
+                value: if picked {
+                    kept((k.value + by).clamp(*GAIN.start(), *GAIN.end()))
+                } else {
+                    k.value
+                },
+                ..*k
+            }
+        })
+        .collect()
+}
+
+fn volume_preview(ctx: &Ctx, clips: &[String], clip: &str, level: f64, at: f64) -> Preview {
+    let Some(c) = ctx.clip(clip) else {
+        return Preview::default();
     };
-    let Some(base) = gain(clip) else {
+    let Some(base) = c.gain_at(at) else {
         return Preview::default();
     };
     let to = Some(tenth(volume_gain(level)))
         .filter(|&g| g != tenth(base))
         .unwrap_or(base);
     let by = to - base;
-    let set: Vec<(String, f64)> = clips
-        .iter()
-        .filter_map(|id| {
-            let g = match gain(id)? {
-                _ if id == clip => to,
-                g if by == 0.0 => g,
-                g => kept((g + by).clamp(*GAIN.start(), *GAIN.end())),
-            };
-            Some((id.clone(), g))
-        })
-        .collect();
-    let changed: Vec<Value> = set
-        .iter()
-        .filter(|(id, g)| gain(id) != Some(*g))
-        .map(|(id, g)| json!({ "clips": [id], "gain_db": g }))
-        .collect();
-    let request = match changed.as_slice() {
-        [] => None,
-        [only] => request("clip.set", only.clone()),
-        many => request(
-            "apply",
-            json!({
-                "commands": many
-                    .iter()
-                    .map(|params| json!({ "method": "clip.set", "params": params }))
-                    .collect::<Vec<_>>(),
-            }),
-        ),
-    };
-    let y = ctx
-        .track_of(clip)
-        .and_then(|t| ctx.rows.get(&t.id))
-        .zip(ctx.clip(clip))
-        .and_then(|(r, c)| volume_y(sound_band(&r.rect, &ctx.scale, c)?, to));
+    let (mut flat, mut keys, mut commands) = (Vec::new(), Vec::new(), Vec::new());
+    let keyed = c.audio.as_ref().is_some_and(|a| a.is_keyed());
+    for id in clips.iter().filter(|id| *id == clip || !keyed) {
+        let Some(a) = ctx.clip(id).and_then(|c| c.audio.as_ref()) else {
+            continue;
+        };
+        if a.is_keyed() {
+            if by == 0.0 {
+                continue;
+            }
+            let frames = (id == clip).then(|| segment(c, at));
+            keys.push((id.clone(), raised(&a.gain_keys, frames.as_deref(), by)));
+            let mut params = json!({ "clips": [id], "by": kept(by) });
+            if let Some(f) = frames {
+                params["frames"] = json!(f);
+            }
+            commands.push(command("keyframes.set", params));
+            continue;
+        }
+        let g = match a.gain_db {
+            _ if id == clip => to,
+            g if by == 0.0 => g,
+            g => kept((g + by).clamp(*GAIN.start(), *GAIN.end())),
+        };
+        flat.push((id.clone(), g));
+        if g != a.gain_db {
+            commands.push(command("clip.set", json!({ "clips": [id], "gain_db": g })));
+        }
+    }
+    let y = band_of(ctx, clip).and_then(|band| volume_y(band, to));
     Preview {
-        request,
+        request: one_or_all(commands),
         gains: Some(Gains {
-            clips: set,
+            clips: flat,
+            keys,
+            picked: Vec::new(),
             shown: to,
             y,
         }),
+        ..Preview::default()
+    }
+}
+
+fn key_preview(
+    ctx: &Ctx,
+    (press, pos): (Pos2, Pos2),
+    across: Option<bool>,
+    clip: &str,
+    frame: i64,
+    keys: &[(String, i64)],
+) -> Preview {
+    let (Some(c), Some(band)) = (ctx.clip(clip), band_of(ctx, clip)) else {
+        return Preview::default();
+    };
+    let Some(k) = c
+        .audio
+        .as_ref()
+        .and_then(|a| a.gain_keys.iter().find(|k| k.frame == frame))
+        .copied()
+    else {
+        return Preview::default();
+    };
+    let (mut dx, mut dy) = (pos.x - press.x, pos.y - press.y);
+    match across {
+        Some(true) => dy = 0.0,
+        Some(false) => dx = 0.0,
+        None => {}
+    }
+    let level =
+        (volume_level(k.value) - f64::from(dy) / f64::from(volume_span(band))).clamp(0.0, 1.0);
+    let to = Some(tenth(volume_gain(level)))
+        .filter(|&g| g != tenth(k.value))
+        .unwrap_or(k.value);
+    let dv = to - k.value;
+    let mut per: Vec<(&Clip, Vec<i64>)> = Vec::new();
+    for (id, f) in keys {
+        let Some(c) = ctx.clip(id) else {
+            continue;
+        };
+        match per.iter_mut().find(|(x, _)| x.id == *id) {
+            Some((_, v)) => v.push(*f),
+            None => per.push((c, vec![*f])),
+        }
+    }
+    let shifted = |c: &Clip, f: i64, dt: i64| c.sound_at(c.key_time(f) + dt as f64).round() as i64;
+    let fits = |dt: i64| {
+        per.iter().all(|(c, moving)| {
+            if c.speed() == 0.0 {
+                return dt == 0;
+            }
+            let all = c.audio.as_ref().map_or(&[][..], |a| &a.gain_keys[..]);
+            let still: Vec<i64> = all
+                .iter()
+                .map(|k| k.frame)
+                .filter(|f| !moving.contains(f))
+                .collect();
+            let mut new: Vec<i64> = moving.iter().map(|&f| shifted(c, f, dt)).collect();
+            let kept_order = moving.iter().zip(&new).all(|(&f, &n)| {
+                let lo = still.iter().filter(|&&s| s < f).max();
+                let hi = still.iter().filter(|&&s| s > f).min();
+                lo.is_none_or(|&l| l < n) && hi.is_none_or(|&h| n < h)
+            });
+            new.sort_unstable();
+            kept_order && new.windows(2).all(|w| w[0] < w[1])
+        })
+    };
+    let mut dt = (f64::from(dx) / ctx.scale.ppf).round() as i64;
+    while dt != 0 && !fits(dt) {
+        dt -= dt.signum();
+    }
+    let (mut commands, mut shown, mut picked) = (Vec::new(), Vec::new(), Vec::new());
+    for (c, moving) in &per {
+        picked.extend(moving.iter().map(|&f| (c.id.clone(), shifted(c, f, dt))));
+        let Some(a) = c.audio.as_ref() else {
+            continue;
+        };
+        let mut next = a.gain_keys.clone();
+        vidcut_core::keyframes::reshape(&mut next, |marked| {
+            for (k, _) in marked.iter_mut().filter(|(k, _)| moving.contains(&k.frame)) {
+                k.value = kept((k.value + dv).clamp(*GAIN.start(), *GAIN.end()));
+                k.frame = shifted(c, k.frame, dt);
+            }
+        });
+        if dv != 0.0 {
+            let params = json!({ "clips": [c.id], "frames": moving, "by": kept(dv) });
+            commands.push(command("keyframes.set", params));
+        }
+        if dt != 0 {
+            let params = json!({ "clips": [c.id], "frames": moving, "by": dt });
+            commands.push(command("keyframes.move", params));
+        }
+        shown.push((c.id.clone(), next));
+    }
+    Preview {
+        request: one_or_all(commands),
+        gains: Some(Gains {
+            clips: Vec::new(),
+            keys: shown,
+            picked,
+            shown: to,
+            y: volume_y(band, to),
+        }),
+        ..Preview::default()
+    }
+}
+
+fn handle_preview(ctx: &Ctx, pos: Pos2, clip: &str, frame: i64, out: bool) -> Preview {
+    let (Some(c), Some(band)) = (ctx.clip(clip), band_of(ctx, clip)) else {
+        return Preview::default();
+    };
+    let keys = c.audio.as_ref().map_or(&[][..], |a| &a.gain_keys[..]);
+    let Some(i) = keys.iter().position(|k| k.frame == frame) else {
+        return Preview::default();
+    };
+    let other = if out {
+        keys.get(i + 1)
+    } else {
+        i.checked_sub(1).and_then(|j| keys.get(j))
+    };
+    let Some(other) = other else {
+        return Preview::default();
+    };
+    let k = keys[i];
+    let len = (other.frame - k.frame).abs() as f64;
+    let along = c.sound_at(ctx.scale.frame(pos.x)) - k.frame as f64;
+    let frames = if out {
+        along.clamp(0.0, len)
+    } else {
+        along.clamp(-len, 0.0)
+    };
+    let value = tenth(volume_gain(level_at(band, pos.y)) - k.value);
+    let h = Handle {
+        frames: (frames * 100.0).round() / 100.0,
+        value,
+    };
+    let mut next = keys.to_vec();
+    let side = if out {
+        &mut next[i].out_handle
+    } else {
+        &mut next[i].in_handle
+    };
+    let changed = *side != Some(h);
+    *side = Some(h);
+    let mut params = json!({ "clips": [clip], "frames": [frame] });
+    params[if out { "out" } else { "in" }] = json!(h);
+    Preview {
+        request: changed.then(|| command("keyframes.set", params)),
+        gains: Some(Gains {
+            clips: Vec::new(),
+            keys: vec![(clip.to_string(), next)],
+            picked: Vec::new(),
+            shown: k.value + value,
+            y: Some(pos.y),
+        }),
+
         ..Preview::default()
     }
 }
@@ -1171,6 +1417,7 @@ mod tests {
                 head: 0,
                 tail: 0,
                 gain_db: 0.0,
+                gain_keys: Vec::new(),
                 muted: false,
                 effects: None,
                 voice_isolation: None,
