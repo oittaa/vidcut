@@ -362,6 +362,8 @@ The bar and the Jobs button:
   - `viewer.guides` on a running GUI copies `guides` onto the snapshot at once.
   - `Workspace::safe_area_control` and View > Safe Area send `viewer.guides`.
   - `Workspace::picture_controls` draws the handles of the tool on the selected clip at the playhead. It boxes them through the same `place::Placing` as the picture ([deviation X65](../deviations.md#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)).
+  - The corners, the sides and the turn handle work about the anchor point (`Shown::pivot`, from `place::anchored`). A cross marks that point.
+  - A move snaps the middle of the picture as drawn, not its `position`. The two differ by the zoom and the turn about the anchor point.
   - While the handles are under the pointer, the title controls wait.
   - A drag works on the picture that it started from, and ends in one `picture.set`.
   - A run of wheel notches over the picture (`Wheeled`) also ends in one `picture.set`. `Workspace::settle_picture_wheel` sends it when the wheel is still.

@@ -1336,6 +1336,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The right-click menu of the clip has Transform, Crop, Reset Transform and Reset Crop.
   - There is no toggle.
   - The handles are those of a title (X52), with the same snapping.
+  - The corners, the sides, the turn handle and the wheel work about the anchor point ([D92](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - A cross marks the anchor point ([X82](#x82-the-viewer-marks-the-anchor-point)).
   - vidcut adds controls that the Cut page does not have. While the Transform handles show, the wheel or a pinch over the picture zooms it.
   - Alt+wheel turns it, and a drag just outside a corner turns it.
   - The place, zoom and crop of a picture are fractions of the frame and of the source ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
@@ -1488,7 +1490,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Audio clips, titles and subtitles have no picture.
   - With several clips selected, it shows the first one that can have a picture. Its header gives the number of these clips.
   - Its picture sections are Transform, Crop and Dynamic Zoom. Each picture section has a Reset of the whole section.
-  - **Transform:** Zoom, Position X and Y, Rotation, Flip Horizontal and Flip Vertical.
+  - **Transform:** Zoom, Position X and Y, Rotation, Anchor X and Y, Flip Horizontal and Flip Vertical.
     - The link button beside Zoom shows Zoom X and Zoom Y. A picture with two different zooms shows them both.
     - The link button turns the link on again, and makes Zoom Y equal to Zoom X.
   - **Crop:** Left, Right, Top and Bottom.
@@ -1525,6 +1527,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Thus Position X 200 moves every picture 200 frame pixels, whatever its shape.
     - Zoom is in percent, as the viewer shows it while the user zooms.
     - Rotation is in degrees, counterclockwise.
+    - Anchor X and Y are pixels of the fitted picture from its middle, with Y up. At 100% zoom, these are frame pixels.
     - Crop is in pixels of the picture as it is fitted into the frame, before the zoom, as in Resolve.
     - The zoom of a Dynamic Zoom box is in percent. At 200%, the picture shows at twice its size. At 50%, it shows at half its size.
     - The X and Y of a box are where the middle of the picture is at the start or at the end.
@@ -1539,7 +1542,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A picture value goes to all the selected clips that can have a picture. An Audio value goes to all the selected clips with sound.
   - A Speed value goes to all the selected clips that can change speed. Duration gives each clip the speed that fills it.
   - A value changes only that value on each clip. A Reset also acts on all of these clips.
-  - Not in the Inspector: Anchor Point, Pitch, Yaw, Softness and Composite ([todo](todo/inspector.md)).
+  - Not in the Inspector: Pitch, Yaw, Softness and Composite ([todo](todo/inspector.md)).
 - **Why:**
   - The Titles tab of the Cut page is in the place of the Media Pool. The Inspector goes beside it. Thus the viewer and the timeline keep their size.
   - Resolve also sets titles, subtitles and subtitle tracks in the Inspector (pp. 764, 1233, 1237).
@@ -1681,3 +1684,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - vidcut has no film-scan metadata to show.
   - The rest of that menu is [D91](cut-page-spec.md#12-decisions-on-gaps-and-contradictions).
+
+## X82. The viewer marks the anchor point
+
+- **Resolve:**
+  - Anchor Point X and Y in the Inspector set the point that the zoom and the rotation work about (p. 735).
+- **vidcut:**
+  - Anchor X and Y in the Inspector set the anchor point ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)). `picture.set` sets it from a script.
+  - While the Transform handles show, a small cross marks the anchor point in the viewer.
+  - The cross has no drag.
+- **Why:**
+  - The corners, the sides, the turn handle and the wheel work about the anchor point. Thus the user sees that point.
+  - A drag inside the box already moves the picture.

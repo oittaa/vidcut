@@ -302,9 +302,11 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
 - **Resolve zooms and turns about the anchor point,** `transformationAnchorPoint`.
   - The anchor point is from the middle of the picture, in fractions of the picture, y up.
   - Resolve flips about the middle.
-  - vidcut has no anchor. When it reads a file, it folds the anchor into `position`.
   - The middle lands at A − R·S·A, plus the move of Pan and Tilt. A is the anchor, S the zoom and R the turn.
-  - When vidcut writes a file, it leaves the anchor at the middle.
+  - vidcut reads the anchor point as `anchor`, and writes it back ([D92](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Resolve's anchor point is a fraction of Resolve's picture. vidcut's `anchor` is a fraction of the fitted picture.
+  - With crop, fill or stretch, the scaling also moves the anchor point about the middle. vidcut adds that move to `position`.
+  - That move is A·(P − F), with P the size of Resolve's picture and F the fitted size. With fit, P is F.
 - **Resolve's Pan and Tilt go from −4 to 4.**
   - vidcut writes a picture moved further at 4, and names its clip in the notes of the export.
 - **Resolve's Dynamic Zoom is a `Resolve Effect` of type 59.**
