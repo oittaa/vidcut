@@ -1181,17 +1181,14 @@ impl Workspace {
         };
         let fps = p.settings.fps;
         let mut picked = None;
-        let bar = if cues.len() as f32 * stride - gap > height {
-            ui.spacing().scroll.allocated_width()
-        } else {
-            0.0
-        };
-        list_heading(ui, ui.available_width() - bar, &cols, &font);
+        let room = dialog::scroll_room(ui);
+        list_heading(ui, ui.available_width() - room, &cols, &font);
         egui::ScrollArea::vertical()
             .id_salt("cue-list")
             .auto_shrink([false, false])
             .max_height(height)
             .show_rows(ui, row, cues.len(), |ui, range| {
+                ui.set_max_width(ui.available_width() - room);
                 let top = ui.max_rect().top() - range.start as f32 * stride;
                 for k in range {
                     let c = &cues[k];
