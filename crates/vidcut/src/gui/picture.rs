@@ -1405,8 +1405,13 @@ impl Slot {
             rows: ch,
         };
         let need = uv.offset + uv.pitch * ch;
-        self.shared.retain(|s| s.size() >= need);
-        let free = |shared: &[super::shared::Shared]| shared.iter().position(|s| s.free());
+        self.shared
+            .retain(|s| shared_kept(s.size(), need, s.free()));
+        let free = |shared: &[super::shared::Shared]| {
+            shared
+                .iter()
+                .position(|s| shared_usable(s.size(), need, s.free()))
+        };
         let i = match free(&self.shared) {
             Some(i) => i,
             None if self.shared.len() < MAX_SHARED => {
@@ -2006,6 +2011,14 @@ fn chroma_size(layout: Layout, w: u32, h: u32) -> (u32, u32) {
     (w.div_ceil(across), h.div_ceil(down))
 }
 
+fn shared_kept(size: u64, need: u64, free: bool) -> bool {
+    size >= need || !free
+}
+
+fn shared_usable(size: u64, need: u64, free: bool) -> bool {
+    free && size >= need
+}
+
 fn params_of(
     picture: &Picture,
     size: (u32, u32),
@@ -2077,6 +2090,21 @@ fn params_of(
 #[cfg(test)]
 mod tests {
     use super::{Kind, Takes, shown_from_gpu};
+
+    #[test]
+    fn a_busy_picture_buffer_stays_when_the_next_picture_is_larger() {
+        assert!(super::shared_kept(1_000, 4_000, false));
+    }
+
+    #[test]
+    fn a_free_picture_buffer_that_is_too_small_is_dropped() {
+        assert!(!super::shared_kept(1_000, 4_000, true));
+    }
+
+    #[test]
+    fn a_free_picture_buffer_that_is_too_small_is_not_reused() {
+        assert!(!super::shared_usable(1_000, 4_000, true));
+    }
 
     #[test]
     fn a_display_on_cudas_gpu_shows_vulkans_pictures_from_gpu_memory() {
