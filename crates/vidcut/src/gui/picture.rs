@@ -1049,7 +1049,11 @@ impl Slot {
         let (w, h) = (picture.width(), picture.height());
         let ours = self.planes.as_ref().expect("made by upload");
         let label = Some("vidcut VA-API plane");
-        let mut imports = Vec::new();
+        let mut held = HeldPlanes {
+            gpu,
+            raws: Vec::new(),
+        };
+        let mut specs = Vec::new();
         for (plane, (width, height), format, texture) in [
             (y, (w, h), one, &ours.y),
             (uv, (w.div_ceil(2), h.div_ceil(2)), two, &ours.u),
@@ -1085,12 +1089,14 @@ impl Slot {
                 )
                 .map_err(|e| format!("importing a VA-API surface: {e}"))?
             };
-            imports.push((raw, size, format, texture));
+            held.raws.push(raw);
+            specs.push((size, format, texture));
         }
         let textures = gpu.checked(|| {
-            imports
-                .into_iter()
-                .map(|(raw, size, format, texture)| {
+            held.raws
+                .drain(..)
+                .zip(specs)
+                .map(|(raw, (size, format, texture))| {
                     // SAFETY: `raw` is this device's, as described; acquired below into `COPY_SRC`.
                     let imported = unsafe {
                         gpu.device.create_texture_from_hal::<Vulkan>(
@@ -2019,6 +2025,31 @@ fn shared_usable(size: u64, need: u64, free: bool) -> bool {
     free && size >= need
 }
 
+fn reclaim<T>(raws: &mut Vec<T>, mut destroy: impl FnMut(T)) {
+    for raw in raws.drain(..) {
+        destroy(raw);
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct HeldPlanes<'a> {
+    gpu: &'a Gpu,
+    raws: Vec<wgpu::hal::vulkan::Texture>,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for HeldPlanes<'_> {
+    fn drop(&mut self) {
+        let Some(hal) = (unsafe { self.gpu.device.as_hal::<wgpu::hal::api::Vulkan>() }) else {
+            return;
+        };
+        reclaim(&mut self.raws, |raw| {
+            // SAFETY: each image was made on this device and was not given to wgpu.
+            unsafe { wgpu::hal::Device::destroy_texture(&*hal, raw) };
+        });
+    }
+}
+
 fn params_of(
     picture: &Picture,
     size: (u32, u32),
@@ -2104,6 +2135,15 @@ mod tests {
     #[test]
     fn a_free_picture_buffer_that_is_too_small_is_not_reused() {
         assert!(!super::shared_usable(1_000, 4_000, true));
+    }
+
+    #[test]
+    fn planes_left_out_of_the_display_are_reclaimed() {
+        let mut left = vec!["y", "uv"];
+        let mut freed = Vec::new();
+        super::reclaim(&mut left, |plane| freed.push(plane));
+        assert_eq!(freed, ["y", "uv"]);
+        assert!(left.is_empty());
     }
 
     #[test]
