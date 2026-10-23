@@ -9,6 +9,7 @@ use super::locate;
 const ZOOM: (f64, f64) = (0.01, 100.0);
 const REACH: f64 = 100.0;
 const TURNS: f64 = 3600.0;
+const LEAN: f64 = 1.5;
 
 pub fn checked(p: &Picture) -> Result<Option<Picture>> {
     if let Some(at) = p.position
@@ -39,6 +40,16 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
             "a picture's anchor is two fractions of the picture, each from -100 to 100",
         ));
     }
+    if let Some(v) = p.pitch
+        && !(v.is_finite() && v.abs() <= LEAN)
+    {
+        return Err(Error::invalid("a picture's pitch is from -1.5 to 1.5"));
+    }
+    if let Some(v) = p.yaw
+        && !(v.is_finite() && v.abs() <= LEAN)
+    {
+        return Err(Error::invalid("a picture's yaw is from -1.5 to 1.5"));
+    }
     let c = p.crop;
     if !c
         .sides()
@@ -59,6 +70,8 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
         zoom: p.zoom.filter(|z| *z != [1.0, 1.0]),
         rotation: p.rotation.filter(|r| *r != 0.0),
         anchor: p.anchor.filter(|at| *at != Picture::MIDDLE),
+        pitch: p.pitch.filter(|v| *v != 0.0),
+        yaw: p.yaw.filter(|v| *v != 0.0),
         ..p.clone()
     };
     Ok((!out.is_usual()).then_some(out))
@@ -109,6 +122,8 @@ pub struct PictureChange {
     pub zoom: Option<[f64; 2]>,
     pub rotation: Option<f64>,
     pub anchor: Option<Option<[f64; 2]>>,
+    pub pitch: Option<f64>,
+    pub yaw: Option<f64>,
     pub flip_horizontal: Option<bool>,
     pub flip_vertical: Option<bool>,
     pub crop: [Option<f64>; 4],
@@ -134,6 +149,12 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
     }
     if let Some(at) = change.anchor {
         p.anchor = at;
+    }
+    if let Some(v) = change.pitch {
+        p.pitch = Some(v);
+    }
+    if let Some(v) = change.yaw {
+        p.yaw = Some(v);
     }
     if let Some(f) = change.flip_horizontal {
         p.flip_horizontal = f;
@@ -162,7 +183,7 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
 pub fn set(p: &mut Project, ids: &[String], change: &PictureChange) -> Result<()> {
     if change.is_empty() {
         return Err(Error::usage(
-            "picture.set needs a position, zoom, rotation, anchor, flip, crop or Dynamic Zoom",
+            "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop or Dynamic Zoom",
         ));
     }
     for id in ids {
@@ -213,6 +234,8 @@ pub fn shown(c: &Clip) -> Value {
         "zoom": p.scale(),
         "rotation": p.turn(),
         "anchor": p.pivot(),
+        "pitch": p.pitch(),
+        "yaw": p.yaw(),
         "flip_horizontal": p.flip_horizontal,
         "flip_vertical": p.flip_vertical,
         "crop": {

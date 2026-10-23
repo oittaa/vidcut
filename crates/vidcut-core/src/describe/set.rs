@@ -543,6 +543,8 @@ impl Words<'_> {
         s.usual("anchor", "Anchor", &percents, json!(Picture::MIDDLE), |q| {
             json!(q.anchor)
         });
+        s.usual("pitch", "Pitch", &number, json!(0.0), |q| json!(q.pitch));
+        s.usual("yaw", "Yaw", &number, json!(0.0), |q| json!(q.yaw));
         s.put("flip_horizontal", "Flip Horizontal", &raw, |q| {
             json!(q.flip_horizontal)
         });

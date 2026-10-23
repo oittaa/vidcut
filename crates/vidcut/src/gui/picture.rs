@@ -463,7 +463,7 @@ impl Mixing {
             mapped_at_creation: false,
         });
         let (w, h) = (f64::from(size.0), f64::from(size.1));
-        let whole = [1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0];
+        let whole = [1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0];
         gpu.queue
             .write_buffer(&params, 0, &lettering_of(whole, 1.0, None));
         let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -608,7 +608,7 @@ impl Letters {
             f64::from(t.turn[3]),
             [f64::from(p.left + t.dx) * sx, f64::from(p.top + t.dy) * sy],
         );
-        let own = chain(&own, &[1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0]);
+        let own = chain(&own, &[1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0]);
         let frame = (f64::from(size.0), f64::from(size.1));
         let placing = (!t.placed.is_empty()).then(|| Placing::whole(&t.placed, frame));
         let map = placing
@@ -1940,7 +1940,7 @@ fn shader() -> String {
 
 const PARAMS: usize = (11 + 3 * LEVELS) * 16;
 
-const LETTERING: usize = (2 + 3 * LEVELS) * 16;
+const LETTERING: usize = (3 + 3 * LEVELS) * 16;
 
 fn innermost(placing: Option<&Placing>) -> &[Level] {
     placing.map_or(&[][..], |p| {
@@ -1951,18 +1951,18 @@ fn innermost(placing: Option<&Placing>) -> &[Level] {
 fn level_floats(levels: &[Level]) -> Vec<f64> {
     let mut floats = Vec::with_capacity(12 * LEVELS);
     for l in levels {
-        let [a, b, e, c, d, f] = l.back;
-        floats.extend([a, b, e, 0.0, c, d, f, 0.0]);
+        let [a, b, e, c, d, f, g, h] = l.back;
+        floats.extend([a, b, e, g, c, d, f, h]);
         floats.extend(l.shown);
     }
     floats.resize(12 * LEVELS, 0.0);
     floats
 }
 
-fn lettering_of(map: [f64; 6], alpha: f64, placing: Option<&Placing>) -> Vec<u8> {
-    let [a, b, e, c, d, f] = map;
+fn lettering_of(map: [f64; 8], alpha: f64, placing: Option<&Placing>) -> Vec<u8> {
+    let [a, b, e, c, d, f, g, h] = map;
     let levels = innermost(placing);
-    let mut floats = vec![a, b, e, alpha, c, d, f, levels.len() as f64];
+    let mut floats = vec![a, b, e, alpha, c, d, f, levels.len() as f64, g, h, 0.0, 0.0];
     floats.extend(level_floats(levels));
     floats
         .into_iter()

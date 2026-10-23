@@ -3432,6 +3432,8 @@ fn mutate(
             zoom,
             rotation,
             anchor,
+            pitch,
+            yaw,
             flip_horizontal,
             flip_vertical,
             crop_left,
@@ -3456,6 +3458,8 @@ fn mutate(
                     .as_deref()
                     .map(|at| ops::picture::point("anchor", at))
                     .transpose()?,
+                pitch: *pitch,
+                yaw: *yaw,
                 flip_horizontal: *flip_horizontal,
                 flip_vertical: *flip_vertical,
                 crop: [*crop_left, *crop_right, *crop_top, *crop_bottom],

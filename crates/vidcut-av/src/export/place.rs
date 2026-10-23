@@ -246,7 +246,7 @@ pub(crate) fn title(
     if x1 <= x0 || y1 <= y0 {
         return None;
     }
-    let [a, b, _, c, d, _] = map;
+    let [a, b, _, c, d, _, g, h] = map;
     let taps = |u: f64, v: f64| (u.hypot(v).ceil() as usize).clamp(1, 8);
     let (tx, ty) = (taps(a, c), taps(b, d));
     let shade = |x: u32, y: u32| -> [f32; 4] {
@@ -254,13 +254,19 @@ pub(crate) fn title(
         let Some((_, cover)) = placing.at(cx, cy) else {
             return [0.0; 4];
         };
+        let w = g * cx + h * cy + 1.0;
+        if !w.is_finite() || w.abs() < 1e-12 {
+            return [0.0; 4];
+        }
         let [qx, qy] = apply(&map, [cx, cy]);
+        let (dx, dy) = ((a - qx * g) / w, (c - qy * g) / w);
+        let (ex, ey) = ((b - qx * h) / w, (d - qy * h) / w);
         let mut sum = [0.0; 4];
         for j in 0..ty {
             for i in 0..tx {
                 let ox = (i as f64 + 0.5) / tx as f64 - 0.5;
                 let oy = (j as f64 + 0.5) / ty as f64 - 0.5;
-                let p = bilinear(s, [qx + a * ox + b * oy, qy + c * ox + d * oy]);
+                let p = bilinear(s, [qx + dx * ox + ex * oy, qy + dy * ox + ey * oy]);
                 for (o, v) in sum.iter_mut().zip(p) {
                     *o += v;
                 }
@@ -431,7 +437,7 @@ impl<'a> Shading<'a> {
         let (cx, cy) = ((x as f64 + 0.5) * across, (y as f64 + 0.5) * down);
         let (_, cover) = self.placing.at(cx, cy)?;
         let [fx, fy, fw, fh] = self.fitted;
-        let back = self.placing.levels.last().map_or([0.0; 6], |l| l.back);
+        let back = self.placing.levels.last().map_or([0.0; 8], |l| l.back);
         let (tx, ty) = self.taps;
         let (cols, rows) = self.grid;
         let c = &self.comp;
@@ -442,8 +448,12 @@ impl<'a> Shading<'a> {
             for i in 0..tx {
                 let px = x as f64 * across + (i as f64 + 0.5) / tx as f64 * across;
                 let py = y as f64 * down + (j as f64 + 0.5) / ty as f64 * down;
-                let u = back[0] * px + back[1] * py + back[2];
-                let v = back[3] * px + back[4] * py + back[5];
+                let w = back[6] * px + back[7] * py + 1.0;
+                if !w.is_finite() || w.abs() < 1e-12 {
+                    continue;
+                }
+                let u = (back[0] * px + back[1] * py + back[2]) / w;
+                let v = (back[3] * px + back[4] * py + back[5]) / w;
                 let sx = ((fx + u * fw) / across - 0.5).clamp(self.lo.0, self.hi.0.max(self.lo.0));
                 let sy = ((fy + v * fh) / down - 0.5).clamp(self.lo.1, self.hi.1.max(self.lo.1));
                 let (kx, ky) = (sx.floor(), sy.floor());

@@ -6,7 +6,7 @@ use vidcut_core::model::{
     Clip, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind, ZoomBox,
 };
 use vidcut_core::ops::picture::{has_picture, zoom_shown};
-use vidcut_core::place::{Level, Placing, anchored, flipped};
+use vidcut_core::place::{Level, Placing, anchored, apply, flipped};
 use vidcut_core::render::{Placed, Run};
 
 use super::timeline::tools::landing;
@@ -112,6 +112,16 @@ impl Grab {
     }
 }
 
+fn slopes(back: &[f64; 8], [x, y]: [f64; 2]) -> [f64; 2] {
+    let [u, v] = apply(back, [x, y]);
+    let [a, b, _, c, d, _, g, h] = *back;
+    let w = (g * x + h * y + 1.0).abs().max(1e-9);
+    [
+        (a - u * g).hypot(b - u * h) / w,
+        (c - v * g).hypot(d - v * h) / w,
+    ]
+}
+
 struct Shown {
     clip: String,
     picture: Picture,
@@ -133,11 +143,11 @@ impl Shown {
         self.at(self.level.forward(uv))
     }
 
-    fn uv(&self, p: Pos2) -> [f64; 2] {
-        let x = f64::from((p.x - self.origin.x) / self.scale.x);
-        let y = f64::from((p.y - self.origin.y) / self.scale.y);
-        let [a, b, e, c, d, f] = self.level.back;
-        [a * x + b * y + e, c * x + d * y + f]
+    fn frame_at(&self, p: Pos2) -> [f64; 2] {
+        [
+            f64::from((p.x - self.origin.x) / self.scale.x),
+            f64::from((p.y - self.origin.y) / self.scale.y),
+        ]
     }
 
     fn corners(&self) -> [Pos2; 4] {
@@ -169,10 +179,7 @@ impl Shown {
     }
 
     fn back(&self, l: &Level, p: Pos2) -> [f64; 2] {
-        let x = f64::from((p.x - self.origin.x) / self.scale.x);
-        let y = f64::from((p.y - self.origin.y) / self.scale.y);
-        let [a, b, e, c, d, f] = l.back;
-        [a * x + b * y + e, c * x + d * y + f]
+        apply(&l.back, self.frame_at(p))
     }
 
     fn end(&self, e: Boxed) -> &Level {
@@ -236,10 +243,11 @@ impl Shown {
     }
 
     fn inside(&self, p: Pos2, margin: f32) -> bool {
-        let [u, v] = self.uv(p);
-        let [a, b, _, c, d, _] = self.level.back;
-        let per = |x: f64, y: f64| f64::from(margin / self.scale.x) * x.hypot(y);
-        let (mu, mv) = (per(a, b), per(c, d));
+        let at = self.frame_at(p);
+        let [u, v] = apply(&self.level.back, at);
+        let [du, dv] = slopes(&self.level.back, at);
+        let per = |d: f64| f64::from(margin / self.scale.x) * d;
+        let (mu, mv) = (per(du), per(dv));
         let [u0, v0, u1, v1] = self.level.shown;
         u >= u0 - mu && u <= u1 + mu && v >= v0 - mv && v <= v1 + mv
     }
@@ -793,10 +801,11 @@ impl Workspace {
                 next.now.rotation = Some(rounded(wrapped(r), 2));
             }
             Hold::Crop(side) => {
-                let [u, v] = s.uv(to);
-                let [a, b, _, c, d, _] = s.level.back;
-                let least = |x: f64, y: f64| f64::from(LEFT_SHOWING / s.scale.x) * x.hypot(y);
-                let (lu, lv) = (least(a, b), least(c, d));
+                let at = s.frame_at(to);
+                let [u, v] = apply(&s.level.back, at);
+                let [du, dv] = slopes(&s.level.back, at);
+                let least = |d: f64| f64::from(LEFT_SHOWING / s.scale.x) * d;
+                let (lu, lv) = (least(du), least(dv));
                 let k = &mut next.now.crop;
                 let side_of = |v: f64, other: f64, least: f64| {
                     rounded(v.clamp(0.0, (1.0 - other - least).max(0.0)), 4)
@@ -1064,6 +1073,12 @@ pub(super) fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
     }
     if a.pivot() != b.pivot() {
         params["anchor"] = json!(b.pivot());
+    }
+    if a.pitch() != b.pitch() {
+        params["pitch"] = json!(b.pitch());
+    }
+    if a.yaw() != b.yaw() {
+        params["yaw"] = json!(b.yaw());
     }
     if a.flip_horizontal != b.flip_horizontal {
         params["flip_horizontal"] = json!(b.flip_horizontal);

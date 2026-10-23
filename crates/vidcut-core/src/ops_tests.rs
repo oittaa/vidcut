@@ -558,6 +558,34 @@ fn an_anchor_past_100_is_refused() {
 }
 
 #[test]
+fn a_picture_keeps_the_pitch_and_yaw_it_is_given() {
+    let mut f = three_clips();
+    f.ok(req(
+        "picture.set",
+        json!({"clips": "c1", "pitch": 1.5, "yaw": -1.5}),
+    ));
+    let got = f.ok(req("picture.get", json!({"clip": "c1"})));
+    assert_eq!(
+        (got.result["pitch"].clone(), got.result["yaw"].clone()),
+        (json!(1.5), json!(-1.5))
+    );
+}
+
+#[test]
+fn a_pitch_past_one_and_a_half_is_refused() {
+    let mut f = three_clips();
+    let e = f.err(req("picture.set", json!({"clips": "c1", "pitch": 1.6})));
+    assert_eq!(e.code, ErrorCode::InvalidEdit);
+}
+
+#[test]
+fn a_pitch_of_zero_leaves_the_picture_usual() {
+    let mut f = three_clips();
+    f.ok(req("picture.set", json!({"clips": "c1", "pitch": 0.0})));
+    assert_eq!(f.editor.project().clip("c1").unwrap().picture, None);
+}
+
+#[test]
 fn resetting_the_transform_puts_the_anchor_back_in_the_middle() {
     let mut f = three_clips();
     f.ok(req(

@@ -3,7 +3,7 @@ use crate::render::Placed;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Level {
-    pub back: [f64; 6],
+    pub back: [f64; 8],
     pub shown: [f64; 4],
 }
 
@@ -40,49 +40,99 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4]) -> Level {
     let (a, b) = (k * sx * cos / (zx * fw), -k * sx * sin / (zx * fw));
     let (c, d) = (k * sy * sin / (zy * fh), k * sy * cos / (zy * fh));
     let c0 = p.crop;
+    let affine = [
+        a,
+        b,
+        u0 - a * ox - b * oy,
+        c,
+        d,
+        v0 - c * ox - d * oy,
+        0.0,
+        0.0,
+    ];
     Level {
-        back: [a, b, u0 - a * ox - b * oy, c, d, v0 - c * ox - d * oy],
+        back: leaned(affine, [u0, v0], [k * sx, k * sy], p.pitch(), p.yaw()),
         shown: [c0.left, c0.top, 1.0 - c0.right, 1.0 - c0.bottom],
     }
 }
 
-pub const SAME: [f64; 6] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+fn leaned(
+    affine: [f64; 8],
+    [u0, v0]: [f64; 2],
+    [su, sv]: [f64; 2],
+    pitch: f64,
+    yaw: f64,
+) -> [f64; 8] {
+    if pitch == 0.0 && yaw == 0.0 {
+        return affine;
+    }
+    let (g, h) = (-2.0 * yaw / su, 2.0 * pitch / sv);
+    let i = 1.0 - g * u0 - h * v0;
+    let lean = unit([
+        1.0 + u0 * g,
+        u0 * h,
+        u0 * (i - 1.0),
+        v0 * g,
+        1.0 + v0 * h,
+        v0 * (i - 1.0),
+        g,
+        h,
+        i,
+    ]);
+    chain(&affine, &lean)
+}
 
-pub fn chain(first: &[f64; 6], next: &[f64; 6]) -> [f64; 6] {
-    let [a1, b1, e1, c1, d1, f1] = *first;
-    let [a2, b2, e2, c2, d2, f2] = *next;
-    [
-        a2 * a1 + b2 * c1,
-        a2 * b1 + b2 * d1,
+fn unit([a, b, e, c, d, f, g, h, i]: [f64; 9]) -> [f64; 8] {
+    let s = if i.abs() < 1e-8 {
+        if i.is_sign_negative() { -1e-8 } else { 1e-8 }
+    } else {
+        i
+    };
+    [a / s, b / s, e / s, c / s, d / s, f / s, g / s, h / s]
+}
+
+pub const SAME: [f64; 8] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
+
+pub fn chain(first: &[f64; 8], next: &[f64; 8]) -> [f64; 8] {
+    let [a1, b1, e1, c1, d1, f1, g1, h1] = *first;
+    let [a2, b2, e2, c2, d2, f2, g2, h2] = *next;
+    unit([
+        a2 * a1 + b2 * c1 + e2 * g1,
+        a2 * b1 + b2 * d1 + e2 * h1,
         a2 * e1 + b2 * f1 + e2,
-        c2 * a1 + d2 * c1,
-        c2 * b1 + d2 * d1,
+        c2 * a1 + d2 * c1 + f2 * g1,
+        c2 * b1 + d2 * d1 + f2 * h1,
         c2 * e1 + d2 * f1 + f2,
-    ]
+        g2 * a1 + h2 * c1 + g1,
+        g2 * b1 + h2 * d1 + h1,
+        g2 * e1 + h2 * f1 + 1.0,
+    ])
 }
 
-fn scaled(m: &[f64; 6], (w, h): (f64, f64)) -> [f64; 6] {
-    let [a, b, e, c, d, f] = *m;
-    [a * w, b * w, e * w, c * h, d * h, f * h]
+fn scaled(m: &[f64; 8], (w, h): (f64, f64)) -> [f64; 8] {
+    let [a, b, e, c, d, f, g, k] = *m;
+    [a * w, b * w, e * w, c * h, d * h, f * h, g, k]
 }
 
-fn then(outer: &[f64; 6], inner: &[f64; 6], frame: (f64, f64)) -> [f64; 6] {
+fn then(outer: &[f64; 8], inner: &[f64; 8], frame: (f64, f64)) -> [f64; 8] {
     chain(&scaled(outer, frame), inner)
 }
 
-pub fn apply(m: &[f64; 6], [x, y]: [f64; 2]) -> [f64; 2] {
-    let [a, b, e, c, d, f] = *m;
-    [a * x + b * y + e, c * x + d * y + f]
+pub fn apply(m: &[f64; 8], [x, y]: [f64; 2]) -> [f64; 2] {
+    let [a, b, e, c, d, f, g, h] = *m;
+    let w = g * x + h * y + 1.0;
+    [(a * x + b * y + e) / w, (c * x + d * y + f) / w]
 }
 
-pub fn ahead(m: &[f64; 6], [u, v]: [f64; 2]) -> [f64; 2] {
-    let [a, b, e, c, d, f] = *m;
+pub fn ahead(m: &[f64; 8], [u, v]: [f64; 2]) -> [f64; 2] {
+    let [a, b, e, c, d, f, g, h] = *m;
+    let (a, b, c, d) = (a - u * g, b - u * h, c - v * g, d - v * h);
     let det = a * d - b * c;
     let (u, v) = (u - e, v - f);
     [(d * u - b * v) / det, (a * v - c * u) / det]
 }
 
-pub fn lettered([px, py]: [f64; 2], zoom: f64, radians: f64, [ox, oy]: [f64; 2]) -> [f64; 6] {
+pub fn lettered([px, py]: [f64; 2], zoom: f64, radians: f64, [ox, oy]: [f64; 2]) -> [f64; 8] {
     let (sin, cos) = radians.sin_cos();
     let (a, b, c, d) = (cos / zoom, -sin / zoom, sin / zoom, cos / zoom);
     [
@@ -92,6 +142,8 @@ pub fn lettered([px, py]: [f64; 2], zoom: f64, radians: f64, [ox, oy]: [f64; 2])
         c,
         d,
         py - c * px - d * py - oy,
+        0.0,
+        0.0,
     ]
 }
 
@@ -127,7 +179,7 @@ impl Placing {
         Self::new(placed, frame, [0.0, 0.0, frame.0, frame.1])
     }
 
-    pub fn inner(&self, frame: (f64, f64)) -> [f64; 6] {
+    pub fn inner(&self, frame: (f64, f64)) -> [f64; 8] {
         self.levels.last().map_or(SAME, |l| scaled(&l.back, frame))
     }
 
@@ -135,9 +187,19 @@ impl Placing {
         let mut cover = 1.0;
         let mut uv = [0.0, 0.0];
         for l in &self.levels {
-            let [a, b, e, c, d, f] = l.back;
-            let (u, v) = (a * x + b * y + e, c * x + d * y + f);
-            let (du, dv) = (a.hypot(b), c.hypot(d));
+            let [a, b, e, c, d, f, g, h] = l.back;
+            let w = g * x + h * y + 1.0;
+            if !w.is_finite() || w.abs() < 1e-12 {
+                return None;
+            }
+            let (u, v) = ((a * x + b * y + e) / w, (c * x + d * y + f) / w);
+            if !u.is_finite() || !v.is_finite() {
+                return None;
+            }
+            let (du, dv) = (
+                (a - u * g).hypot(b - u * h) / w.abs(),
+                (c - v * g).hypot(d - v * h) / w.abs(),
+            );
             let [u0, v0, u1, v1] = l.shown;
             for edge in [(u - u0) / du, (u1 - u) / du, (v - v0) / dv, (v1 - v) / dv] {
                 cover *= (edge + 0.5).clamp(0.0, 1.0);
@@ -152,7 +214,7 @@ impl Placing {
 
     pub fn step(&self) -> [f64; 4] {
         self.levels.last().map_or([0.0; 4], |l| {
-            let [a, b, _, c, d, _] = l.back;
+            let [a, b, _, c, d, _, _, _] = l.back;
             [a, b, c, d]
         })
     }
@@ -161,9 +223,14 @@ impl Placing {
         let Some(l) = self.levels.last() else {
             return 0.0;
         };
-        let [a, b, _, c, d, _] = l.back;
         let [u0, v0, u1, v1] = l.shown;
-        let quad = (u1 - u0) * (v1 - v0) / (a * d - b * c).abs();
+        let [a, b, _, c, d, _, g, k] = l.back;
+        let corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|p| ahead(&l.back, p));
+        let quad = if g == 0.0 && k == 0.0 {
+            (u1 - u0) * (v1 - v0) / (a * d - b * c).abs()
+        } else {
+            quad_area(corners).unwrap_or(0.0)
+        };
         let boxed = self.bounds((w, h)).map_or(0.0, |[x0, y0, x1, y1]| {
             f64::from(x1 - x0) * f64::from(y1 - y0)
         });
@@ -175,6 +242,12 @@ impl Placing {
         for l in &self.levels {
             let [u0, v0, u1, v1] = l.shown;
             let corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&l.back, c));
+            if corners
+                .iter()
+                .any(|c| !c[0].is_finite() || !c[1].is_finite())
+            {
+                continue;
+            }
             let xs = corners.map(|c| c[0]);
             let ys = corners.map(|c| c[1]);
             let lo = |v: [f64; 4]| v.into_iter().fold(f64::INFINITY, f64::min) - 1.0;
@@ -191,6 +264,19 @@ impl Placing {
         let (x1, y1) = (x1.ceil().min(w) as u32, y1.ceil().min(h) as u32);
         (x1 > x0 && y1 > y0).then_some([x0, y0, x1, y1])
     }
+}
+
+fn quad_area(c: [[f64; 2]; 4]) -> Option<f64> {
+    if c.iter().any(|p| !p[0].is_finite() || !p[1].is_finite()) {
+        return None;
+    }
+    let mut s = 0.0;
+    for i in 0..4 {
+        let [x0, y0] = c[i];
+        let [x1, y1] = c[(i + 1) % 4];
+        s += x0 * y1 - x1 * y0;
+    }
+    Some((s * 0.5).abs())
 }
 
 pub fn fit(w: u32, h: u32, sar: (i32, i32), out_w: u32, out_h: u32) -> (u32, u32) {
@@ -301,5 +387,23 @@ mod tests {
             ..Picture::default()
         };
         assert_eq!(landing(p, [0.25, 0.5]), [1440.0, 540.0]);
+    }
+
+    #[test]
+    fn a_yaw_of_one_half_lands_the_top_left_corner() {
+        let p = Picture {
+            yaw: Some(0.5),
+            ..Picture::default()
+        };
+        assert_eq!(landing(p, [0.0, 0.0]), [-960.0, -540.0]);
+    }
+
+    #[test]
+    fn a_pitch_of_one_half_lands_the_bottom_right_corner() {
+        let p = Picture {
+            pitch: Some(0.5),
+            ..Picture::default()
+        };
+        assert_eq!(landing(p, [1.0, 1.0]), [2880.0, 1620.0]);
     }
 }
