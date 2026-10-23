@@ -743,7 +743,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The text shows on the cue and in the viewer while the user types.
   - The position shows in the viewer when the user selects it.
   - The text goes in as one change when the user leaves the text box. The other rows go in at once. Ctrl+Z undoes a change.
-  - A line under the heading has the In and Out fields, the duration, and "N Characters" at its right.
+  - A line under the heading has the In and Out fields, the duration and "N Characters", in that order. In a narrow panel, the line wraps.
   - "N Characters" counts the characters as CPS does (D78).
   - The fields show the start and the end of the cue as timecodes, as the project shows them.
   - A click in a field selects its timecode, and the user types a new one. Digits fill a timecode from the right, as in the timecode field of the viewer.

@@ -1080,7 +1080,6 @@ impl Workspace {
             1 => "1 Character".to_string(),
             n => format!("{n} Characters"),
         };
-        let counted_width = wide(counted.clone());
         let mut put = None;
         ui.horizontal_wrapped(|ui| {
             for (edge, label, at) in [(Edge::In, "In", start), (Edge::Out, "Out", end)] {
@@ -1097,12 +1096,7 @@ impl Workspace {
             }
             let length = format!("Duration {}", self.src_tc(end - start));
             ui.add(egui::Label::new(dim(length)).extend());
-            if ui.available_width() < counted_width {
-                ui.end_row();
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(dim(counted));
-            });
+            ui.add(egui::Label::new(dim(counted)).extend());
         });
         if let Some((edge, text)) = put {
             self.put_edge(d, p, (edge, &text), (start, end));
