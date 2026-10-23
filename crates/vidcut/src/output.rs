@@ -917,8 +917,16 @@ fn live(method: &str, r: &Response) -> Option<()> {
         | "player.loop"
         | "viewer.set"
         | "viewer.load"
+        | "viewer.guides"
         | "project.open" => {
-            println!("{}", state_line(v));
+            if method == "viewer.guides" {
+                println!(
+                    "guides: {}",
+                    serde_json::to_string(&v["guides"]).unwrap_or_default()
+                );
+            } else {
+                println!("{}", state_line(v));
+            }
         }
         "player.stats" => {
             println!("{}", state_line(v));

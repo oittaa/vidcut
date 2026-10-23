@@ -183,6 +183,7 @@ pub struct Snapshot {
     pub audio_scrubbing: bool,
     pub looping: bool,
     pub stats: bool,
+    pub guides: vidcut_core::preferences::Guides,
     pub preview_error: Option<String>,
     pub theme: Arc<crate::themes::Theme>,
     pub budget: vidcut_av::player::Budget,

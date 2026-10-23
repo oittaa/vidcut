@@ -6516,7 +6516,8 @@ pub fn query(
         | Request::LooksSave { .. }
         | Request::LooksDelete { .. }
         | Request::EncodersList { .. }
-        | Request::DecodersList {} => {
+        | Request::DecodersList {}
+        | Request::ViewerGuides { .. } => {
             return Err(Error::internal(format!(
                 "{} is answered by the session, not the editor",
                 request.method()

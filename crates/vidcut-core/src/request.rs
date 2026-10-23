@@ -2052,6 +2052,24 @@ pub enum Request {
     /// Show the viewer in a mode: `source_clip`, `source_tape` or `timeline`.
     #[serde(rename = "viewer.set")]
     ViewerSet { mode: ViewerMode },
+    /// Viewer framing and safe-area guides (decision D90). Stored in
+    /// preferences, not the project. A field that is left out stays as it is.
+    /// With no fields, toggles framing guides on or off.
+    #[serde(rename = "viewer.guides")]
+    ViewerGuides {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enabled: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        framing: Option<crate::preferences::Framing>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        extents: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        center: Option<bool>,
+    },
     /// Open a media item in the viewer as Source Clip, optionally at a source time.
     #[serde(rename = "viewer.load")]
     ViewerLoad {
@@ -3369,6 +3387,7 @@ impl Request {
                 | Self::PreferencesGet {}
                 | Self::PreferencesSet(_)
                 | Self::PreferencesReset {}
+                | Self::ViewerGuides { .. }
                 | Self::KeysList {}
                 | Self::ServicesSetKey { .. }
                 | Self::ServicesRemoveKey { .. }
@@ -3426,6 +3445,7 @@ impl Request {
                     | Self::PreferencesGet {}
                     | Self::PreferencesSet(_)
                     | Self::PreferencesReset {}
+                    | Self::ViewerGuides { .. }
                     | Self::KeysList {}
                     | Self::ServicesSetKey { .. }
                     | Self::ServicesRemoveKey { .. }
@@ -3762,5 +3782,54 @@ mod tests {
         .unwrap();
         let paths: Vec<_> = r.paths_mut().into_iter().map(|p| p.clone()).collect();
         assert_eq!(paths, ["a.mp4", "b.mp4", "c.otio", "d"].map(PathBuf::from));
+    }
+
+    #[test]
+    fn viewer_guides_round_trips() {
+        let request = Request::from_parts(
+            "viewer.guides",
+            Some(serde_json::json!({ "framing": "social_9_16", "center": true })),
+        )
+        .unwrap();
+        assert!(matches!(
+            request,
+            Request::ViewerGuides {
+                enabled: None,
+                framing: Some(crate::preferences::Framing::Social9_16),
+                extents: None,
+                action: None,
+                title: None,
+                center: Some(true),
+            }
+        ));
+        let back = serde_json::to_value(&request).unwrap();
+        assert_eq!(back["method"], "viewer.guides");
+        assert_eq!(back["params"]["framing"], "social_9_16");
+        assert_eq!(back["params"]["center"], true);
+        assert!(back["params"].get("enabled").is_none());
+    }
+
+    #[test]
+    fn viewer_guides_with_no_fields_is_empty() {
+        let request = Request::from_parts("viewer.guides", Some(serde_json::json!({}))).unwrap();
+        assert!(matches!(
+            request,
+            Request::ViewerGuides {
+                enabled: None,
+                framing: None,
+                extents: None,
+                action: None,
+                title: None,
+                center: None,
+            }
+        ));
+    }
+
+    #[test]
+    fn viewer_guides_is_a_projectless_preference() {
+        let request = Request::from_parts("viewer.guides", Some(serde_json::json!({}))).unwrap();
+        assert!(request.is_projectless());
+        assert!(!request.is_live());
+        assert!(!request.is_mutation());
     }
 }
