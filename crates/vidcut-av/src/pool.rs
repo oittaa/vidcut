@@ -116,7 +116,7 @@ fn pool() -> &'static Pool {
                 .name(format!("{name}-{i}"))
                 .spawn(move || {
                     if job {
-                        crate::first::lowest_priority();
+                        crate::first::as_job();
                     }
                     work(pool)
                 });

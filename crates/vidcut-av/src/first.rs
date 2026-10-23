@@ -144,6 +144,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn as_job_marks_the_thread_to_yield() {
+        assert!(!yields());
+        as_job();
+        assert!(yields());
+        set_yields(false);
+    }
+
+    #[test]
     fn threads_that_do_not_yield_never_wait() {
         let mut claim = Claim::default();
         claim.set(true);
