@@ -449,8 +449,14 @@ impl Keeper {
             crate::export::video::frame_ref(f)?,
             crate::export::video::frame_ref(&out)?,
         ));
-        Ok(Some(out))
+        handed_back(self.settle(), out).map(Some)
     }
+}
+
+#[cfg(target_os = "linux")]
+fn handed_back<T, E>(settled: std::result::Result<(), E>, frame: T) -> std::result::Result<T, E> {
+    settled?;
+    Ok(frame)
 }
 
 #[cfg(target_os = "linux")]
@@ -618,6 +624,18 @@ mod tests {
     #[test]
     fn a_copy_object_is_laid_out_as_va_h_has_it() {
         assert_eq!(std::mem::size_of::<CopyObject>(), 40);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_kept_frame_waits_until_the_copy_settles() {
+        assert!(super::handed_back(Err("sync"), 4u8).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_settled_copy_returns_the_kept_frame() {
+        assert_eq!(super::handed_back(Ok::<(), &str>(()), 4u8).unwrap(), 4);
     }
     use crate::route::Ops;
 
