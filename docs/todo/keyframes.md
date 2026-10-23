@@ -7,7 +7,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
 - **Now:**
   - A clip has volume keyframes on its volume line ([spec §9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
   - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` holds the volume keyframes.
-  - The picture has no keyframes. The spec has them out of scope ([§1](../cut-page-spec.md#1-scope), [§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768)).
+  - The picture has no keyframes yet. The spec lists them for later ([§1](../cut-page-spec.md#1-scope), [§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768)).
   - vidcut keeps the keyframes of Resolve's other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
   - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
 - **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
@@ -126,7 +126,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - Spec: [§2](../cut-page-spec.md#2-layout-pp-636637) takes the tab in.
 - Not in stage 3: Step, Loop, Ping Pong, Reverse, the Shape Box, the keyframe tray and motion paths.
 
-**Still out of scope:** keyframes of speed, opacity, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
+**After stage 3:** keyframes of speed, opacity, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
 
 ## Model
 
