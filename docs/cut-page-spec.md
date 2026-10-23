@@ -11,7 +11,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - The developer's copy is in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`).
 - Do not copy its text into the repository.
 
-**Legend:** **(out)** is out of scope. [todo/cut-page-gaps.md](todo/cut-page-gaps.md) lists the Cut-page behavior that vidcut does not have.
+**Legend:** **(later)** is not built yet, and comes after the work in progress. [todo/cut-page-gaps.md](todo/cut-page-gaps.md) lists the Cut-page behavior that vidcut does not have.
 
 ## 1. Scope
 
@@ -28,7 +28,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - a clip's Transform, Crop and Dynamic Zoom (§8.15)
 - Quick Export, plus our Export dialog
 
-**Out of scope (out):**
+**Later (later):**
 - other effects, other transitions, other titles, generators
 - keyframes other than those of the clip volume
 - color, Fusion, Smart Reframe, Close Up
@@ -49,7 +49,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - On the right: Quick Export and the Full Screen viewer.
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
   - The Inspector button is at the top right of the UI toolbar (§8.15). vidcut has an Inspector tab beside the Titles tab instead (deviation X70).
-  - Out: the Sync Bin, Keyframe Editor, Transitions and Effects tabs.
+  - Later: the Sync Bin, Keyframe Editor, Transitions and Effects tabs.
   - vidcut's bar also has Import, Export and Jobs (deviation X3), and Help (X23).
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
 - **Below the Media Pool:** the edit-function buttons (§7), and Cut and Dissolve (§8.11).
@@ -318,7 +318,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
     2. a lone timeline Out with the source Out (backtimed);
     3. with no marks, within 5 frames of an edit, with that edit;
     4. otherwise with the playhead.
-- **Close Up, Source Overwrite (out).**
+- **Close Up, Source Overwrite (later).**
 
 ### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
 - **Onto an empty timeline, or left of the first clip:** the clip becomes the first clip.
@@ -482,7 +482,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Each clip shows its media past its edge. Thus a dissolve is as long as the clips have frames there.
   - Pictures cross in a straight line. At a gap, they cross from or to black.
   - The level of a Cross Fade at its middle is +3, 0 or −3 dB.
-- **Out:**
+- **Later:**
   - other transitions (wipes, Smooth Cut, the Transitions browser)
   - the Transition Inspector
   - moving a transition to another edit
@@ -549,7 +549,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - It replaces a preset and deletes a preset, each after a confirmation.
   - It exports or imports a preset as a `.preset` file.
   - vidcut: looks, for titles too. Some looks are built in (X59). Details: D71.
-- **Out:**
+- **Later:**
   - the faces of a track style other than regular and bold, line spacing, kerning, alignment, position, zoom, opacity and text anchoring (p. 1237)
   - the style of a cue or a word (p. 1238)
   - caption presets (p. 1235)
@@ -622,7 +622,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
     - A scroll has its own motion and line spacing (X55).
   - Details: D65. In OTIO files: D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
-- **Out** (X53):
+- **Later** (X53):
   - Text+ and Fusion titles (p. 1178)
   - Transform, Cropping, Speed and the blend modes of Composite on titles (pp. 763, 1176)
   - animation and keyframes
@@ -686,7 +686,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Thus a picture narrower than the frame moves less than its number. On the 4:3 chart in the 16:9 timeline, Position X 200 moves it 150 pixels.
   - Crop is in pixels of the picture as it is fitted in the timeline. Crop Left 100 on the 4:3 chart is a `cropLeft` of 100/1440 in the OTIO file.
   - Zoom is a factor (1.000). Rotation is in degrees.
-- **Out:** crop Softness (p. 768), the modes and opacity of Composite (p. 769), keyframes.
+- **Later:** crop Softness (p. 768), the modes and opacity of Composite (p. 769), keyframes.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

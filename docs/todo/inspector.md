@@ -7,5 +7,5 @@ Its Speed section sets the speed of the selected clips. Its Audio section sets t
 It also shows the open title, subtitle and subtitle track. These parts are still to do.
 
 - **Crop Softness and Composite.**
-  - Now: the spec has them out of scope (§8.15).
-  - Why: Resolve's Video panel has them. They need a change of scope first.
+  - Now: they are not built yet (§8.15).
+  - Why: Resolve's Video panel has them.
