@@ -1110,6 +1110,13 @@ impl Workspace {
             return;
         }
         let view = self.snap.timecode_view();
+        if view.display == TimecodeDisplay::Auto {
+            let Some(spec) = timecode_input(raw, self.dropped()) else {
+                return;
+            };
+            self.send("player.seek", json!({ "at": spec }));
+            return;
+        }
         let text = if matches!(
             view.display,
             TimecodeDisplay::SourceFrame | TimecodeDisplay::RecordFrame
