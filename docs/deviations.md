@@ -118,7 +118,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - Source viewers step through project frames. They count from the first frame of the clip.
   - They sample frames as the export samples them ([design/export.md](design/export.md#which-source-frame)). For media at the project rate, these are the frames of the media.
-  - Source viewers do not show embedded start timecodes.
+  - Source Timecode adds the start timecode of the file, as project frames ([spec D91](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - All positions, also source positions, are in project frames ([design/model.md](design/model.md#time)).
   - Thus what the user marks is exactly what goes into the timeline and the export.
