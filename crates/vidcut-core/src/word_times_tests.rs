@@ -140,3 +140,10 @@ fn webvtt_timestamps_become_word_times() {
     let (read, _, _) = parse(vtt.as_bytes(), Path::new("a.vtt")).unwrap();
     assert_eq!(read.cues[0].words, vec![1.0, 2.0, 3.0]);
 }
+
+#[test]
+fn a_reversed_webvtt_cue_keeps_its_word_time_inside_the_span() {
+    let vtt = "WEBVTT\n\n00:00:02.000 --> 00:00:01.000\nhello <00:00:01.500>world\n";
+    let (read, _, _) = parse(vtt.as_bytes(), Path::new("a.vtt")).unwrap();
+    assert_eq!(read.cues[0].words, vec![1.0, 1.5]);
+}

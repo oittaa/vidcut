@@ -78,6 +78,11 @@ pub fn read(source: &str) -> Result<Read> {
 }
 
 fn word_times(raw: &str, classes: &[(String, String)], span: (f64, f64), text: &str) -> Vec<f64> {
+    let (lo, hi) = if span.0 <= span.1 {
+        (span.0, span.1)
+    } else {
+        (span.1, span.0)
+    };
     let words = super::words(text);
     let mut known = vec![None; words.len()];
     let mut from = 0;
@@ -106,7 +111,7 @@ fn word_times(raw: &str, classes: &[(String, String)], span: (f64, f64), text: &
             .get_mut(before.split_whitespace().count())
             .filter(|k| k.is_none())
         {
-            *k = Some(t.clamp(span.0, span.1));
+            *k = Some(t.clamp(lo, hi));
         }
     }
     if known.iter().all(Option::is_none) {
@@ -116,7 +121,7 @@ fn word_times(raw: &str, classes: &[(String, String)], span: (f64, f64), text: &
         .iter()
         .map(|w| w.chars().count() as f64 + 1.0)
         .collect();
-    super::fill_times(&known, &weights, span.0, span.1)
+    super::fill_times(&known, &weights, lo, hi)
 }
 
 fn style_colors(css: &str) -> Vec<(String, String)> {
