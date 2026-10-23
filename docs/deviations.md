@@ -139,6 +139,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Clip effects, transitions, generators, compound clips and speed changes come in as data. vidcut writes them back while they fit.
   - Dissolves, cross fades ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) and speeds ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) play.
   - Other transitions play as cuts, and generators play as gaps. Other effects do not play.
+  - The keyframes of the clip volume effect play as volume keyframes ([D81](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Text and lower-third titles of Resolve come in as titles of vidcut. The titles of vidcut go out in the shape that Resolve uses ([D67](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Transform, Cropping and Retime and Scaling of Resolve come in as the picture of a clip. The picture of a clip goes out as these effects ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - Resolve Studio 21.1.1 imports `.otio` and `.otioz` files. It imports an `.otiod` folder by its `content.otio`.
@@ -1067,14 +1068,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The B, I, U, Color, Size, Font and Plain buttons of the Title section put this markup around the selected words.
   - A line of a lower third takes its own size in this way.
   - The lines of a title share one zoom and one rotation.
-  - vidcut does not have Text+ and Fusion titles, or keyframes.
+  - vidcut does not have Text+ and Fusion titles. A title has no keyframes.
   - A title clip has no Transform, Cropping, Speed or blend modes.
 - **Why:**
   - Most cuts need a block of text, a lower third and credits.
   - Text+ and Fusion titles are Fusion compositions, and vidcut does not have Fusion (spec §1).
   - Resolve writes Text+ to an OTIO file as a `MissingReference` with nothing of the title in it.
   - Thus neither Text+ nor Fusion titles could come from Resolve or go to Resolve.
-  - Keyframes and blend modes are out for every clip (spec §1).
+  - Keyframes other than those of the clip volume, and blend modes, are out (spec §1).
+
   - Other clips have Transform, Crop and Dynamic Zoom ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). A title does not.
   - The place, zoom, rotation and opacity of a title do what Transform and the opacity of Composite would do.
   - A title has no speed. The speed of a scroll comes from the length of its clip.
@@ -1510,7 +1512,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The Audio section is below the picture sections. For an audio clip, it is the only section.
     - With several clips with sound, it shows the first one. Its header gives the number of these clips.
     - Volume is the gain of the clip, from −60 dB to +24 dB (D12). It shows one decimal and the unit.
-    - The Reset of Volume sets 0 dB. The Audio section has no Reset of the whole section.
+    - On a clip with volume keyframes, Volume shows the volume at the playhead. A change sets a keyframe there ([D82](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+    - The Reset of Volume sets 0 dB and removes the volume keyframes. The Audio section has no Reset of the whole section.
     - A drag on Volume sends one change on release. The sound does not change during the drag.
     - Mute does what Mute and Unmute in the right-click menu of the clip do.
     - Normalize in the header opens Normalize Audio Levels for the clips of the section ([X72](#x72-normalize-audio-levels-on-the-cut-page)).
@@ -1551,7 +1554,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Mute is beside Volume, as in the strip of the Mixer. Thus the user does not need the right-click menu to mute a clip.
   - Voice Isolation uses the controls of the right-click menu. Thus it acts the same, also with the download question.
 
-## X71. Clip volume is a line on the clip, without keyframes
+## X71. Clip volume is a line on the clip
 
 - **Resolve:**
   - On the Edit page, each clip with sound has a volume overlay. A drag up or down on it sets the level of the clip (p. 1109).
@@ -1570,18 +1573,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A drag on a clip that is not selected changes only that clip. It does not select the clip.
   - A drag on a selected clip changes all the selected clips with sound by the same number of dB:
     - Thus they keep the differences between their gains. Each gain stops at −60 dB and at +24 dB.
-    - On release, one `apply` holds a `clip.set` for each clip that changes. It is one undo step.
+    - A selected clip with volume keyframes moves all its keyframes by that number of dB ([D82](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+    - On release, one `apply` holds a `clip.set` or a `keyframes.set` for each clip that changes. It is one undo step.
   - A line on a locked track does not take a drag. A selected clip on a locked track does not change.
   - A drag on another part of the clip moves, trims or slips the clip.
   - The scale and the steps are in [D77](cut-page-spec.md#12-decisions-on-gaps-and-contradictions).
   - The line and the Volume of the Inspector's Audio section ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)) set the same gain.
-  - vidcut has no keyframes. Thus the line stays flat, and an Alt-click on it does what a click does.
+  - With volume keyframes, the line shows their curve, and it takes the keyframe controls of the Edit page ([X73](#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
 - **Why:**
   - The line shows the gain of each clip at a glance. A drag sets it without a window.
   - The Edit page has the overlay, and the Inspector of the Cut page has its value. The line gives the timeline of vidcut the same control.
   - A drag changes a value by an amount. A move of several clips also moves each clip by the same amount.
   - Resolve's volume commands also keep the differences between the selected clips.
-  - Keyframes on the volume need keyframes in the model first. The Alt-click stays free for them.
 
 ## X72. Normalize Audio Levels on the Cut page
 
@@ -1602,6 +1605,58 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - Without it, the Cut page has no way to match the levels of clips.
   - The export's loudness setting uses EBU R128. Thus Loudness and the export agree.
+
+## X73. The volume line takes the keyframe controls of the Edit page
+
+- **Resolve:**
+  - The timeline of the Cut page shows no volume overlay, and no keyframe marks on clips (Resolve Studio 21.1.1).
+  - On the Cut page, the Inspector and the Keyframe Editor set volume keyframes (pp. 743, 1255).
+  - On the Edit page, the volume overlay of a clip takes keyframes (pp. 1109, 1112–1113):
+    - An Alt-click adds a keyframe.
+    - A drag moves a keyframe in time and in level. Shift keeps the first direction of the drag.
+    - A drag on the line between two keyframes raises or lowers that part.
+    - A right-click on a keyframe sets Linear, Ease In, Ease Out or Ease In and Out on the selected keyframes.
+    - Backspace deletes the selected keyframes.
+  - In Resolve Studio 21.1.1, a click on a keyframe of the overlay adds it to the selection.
+  - Its ease menu gives the first keyframe Linear and Ease Out only, and the last keyframe Linear and Ease In only.
+- **vidcut:**
+  - The volume line of a clip ([X71](#x71-clip-volume-is-a-line-on-the-clip)) shows the curve of its keyframes, with a mark on each keyframe.
+  - An Alt-click on the line adds a keyframe on that frame, at the volume of the line there. The new keyframe is selected.
+  - A click on a keyframe selects only that keyframe. Shift adds it to the selection. Ctrl adds it or takes it out.
+  - A click on another part of a clip takes the keyframes out of the selection.
+  - A drag on a keyframe moves it, or all the selected keyframes when it is one of them, in time and in volume.
+    - Shift keeps the first direction of the drag, as on the Edit page.
+    - A keyframe stays on a whole source frame and does not pass its neighbors.
+  - A drag on the line between two keyframes raises or lowers both. Before the first or after the last keyframe, it moves that keyframe.
+  - A right-click on a keyframe opens the eases, as on the Edit page, and Delete Keyframes. An ease goes to all the selected keyframes.
+  - Delete or Backspace removes the selected keyframes ([D85](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - A selected keyframe with an ease shows its handles ([X74](#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
+  - During a drag, the timeline shows the new curve and the volume beside the pointer.
+  - A drag sends its requests on release, as one undo step. A drag of keyframes on several clips sends one `apply`.
+  - The selection of keyframes is in the GUI. The requests take keyframes by their source frames or their timeline frames.
+- **Why:**
+  - vidcut's timeline has the volume line. The controls of the Edit page fit it, and the user does not need a second editor for the volume.
+  - A click selects only that keyframe, as a click on a clip selects only that clip. Shift and Ctrl add to the selection, as they do for clips.
+
+## X74. Eases are Bezier handles that drag on the volume line
+
+- **Resolve:**
+  - These facts come from Resolve Studio 21.1.1, from its renders and its OTIO files:
+    - An ease is a Bezier handle on its keyframe. Ease In is an In handle, and Ease Out is an Out handle.
+    - The curve between two keyframes is the cubic Bezier curve of the two keyframes and their handles.
+    - With Ease Out on one keyframe and Ease In on the next one, the volume holds the first value. It jumps at the second keyframe.
+  - The manual says that an ease starts or stops a change slowly (p. 1112).
+  - The handles drag in the Curve Editor (p. 1261), not on the volume overlay.
+- **vidcut:**
+  - The curve between two keyframes is always the Bezier curve of the keyframes and their handles ([D81](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Thus Ease Out followed by Ease In gives a smooth S-curve.
+  - The ease menu sets the handles as Resolve does: flat, a third of the way to the neighbor keyframe.
+  - A selected keyframe with a handle shows the handle on the volume line. A drag on the handle changes its time and its value.
+  - After such a drag, the menu shows no ease as set.
+  - `keyframes.set` takes the `in` and `out` handles exactly.
+- **Why:**
+  - The S-curve is what the manual describes, and what the handles give. A hold and a jump is a step in the sound.
+  - A handle on the line changes the curve where the user sees it, without a second editor.
 
 ## X80. Safe area guides skip the Trim Editor and Dynamic Trim
 

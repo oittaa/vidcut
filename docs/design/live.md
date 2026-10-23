@@ -299,8 +299,15 @@ The bar and the Jobs button:
   - The wheel over the rows (`scroll_rows`) and the scrollbar (`row_scrollbar`) set the lift.
   - Rows, their headers and drag previews are clipped to the area of the rows. `Rows::at` finds no row outside it ([deviation X57](../deviations.md#x57-the-lower-timeline-keeps-its-height-and-its-tracks-scroll)).
 - **Clip volume.**
-  - `paint::track` draws the volume line of each clip with sound at `geometry::volume_y`. `geometry::volume_at` finds the line under the pointer.
-  - A drag on it is a `Gesture::Volume`. The timeline draws the dragged gains (`Preview::gains`). On release, `Workspace::trim_sent` shows them until the project has them ([deviation X71](../deviations.md#x71-clip-volume-is-a-line-on-the-clip-without-keyframes)).
+  - `paint::track` draws the volume line of each clip with sound (`paint::volume_line`), at `geometry::volume_y`.
+  - With volume keyframes, the line is the curve (`geometry::curve_y`), with a mark on each keyframe (`geometry::key_point`). A selected keyframe shows its handles (`geometry::handle_point`).
+  - `geometry::volume_target` finds what is under the pointer: a handle of a selected keyframe, a keyframe, or the line (`OnVolume`).
+  - A drag on the line is a `Gesture::Volume`. On a curve, it raises the two keyframes around the pointer (`keyframes.set` with `by`).
+  - A drag on a keyframe is a `Gesture::Key`. It moves the selected keyframes with `keyframes.set` and `keyframes.move` in one `apply`.
+  - A drag on a handle is a `Gesture::KeyHandle` (`keyframes.set` with `in` or `out`).
+  - The timeline draws the dragged gains and curves (`Preview::gains`). On release, `Workspace::trim_sent` shows them until the project has them ([deviation X71](../deviations.md#x71-clip-volume-is-a-line-on-the-clip)).
+  - `TimelineView::keys` holds the selected keyframes, as clips and source frames. `TimelineView::key_menu` is the ease menu of a keyframe ([deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
+
 - **Subtitles.**
   - `Rows::layout` puts the rows of the subtitle tracks above the video tracks.
   - `cues::paint_track` draws their cues, with a stripe in the color of the cue.

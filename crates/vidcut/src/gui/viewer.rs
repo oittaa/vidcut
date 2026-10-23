@@ -281,7 +281,7 @@ impl Workspace {
                 }
             }
         }
-        paint_guides(&painter, picture, aspect, &self.snap.guides);
+        paint_guides(&painter, picture, &self.snap.guides);
         let offline = self.project().and_then(|p| {
             let source = self.snap.source_at().map(|(m, _)| m);
             offline_media(p, &self.snap.missing, mode, player.position, source)
@@ -1214,16 +1214,11 @@ enum Transport {
     Timecode,
 }
 
-fn paint_guides(
-    painter: &egui::Painter,
-    picture: Rect,
-    aspect: f32,
-    guides: &vidcut_core::preferences::Guides,
-) {
-    let Some(o) = guides.overlay(
-        vidcut_core::preferences::GuideBox::from_size(picture.width(), picture.height()),
-        aspect,
-    ) else {
+fn paint_guides(painter: &egui::Painter, picture: Rect, guides: &vidcut_core::preferences::Guides) {
+    let Some(o) = guides.overlay(vidcut_core::preferences::GuideBox::from_size(
+        picture.width(),
+        picture.height(),
+    )) else {
         return;
     };
     let stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 180));

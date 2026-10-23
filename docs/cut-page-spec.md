@@ -20,6 +20,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - editing and trimming, constant speed changes (D48)
 - dissolves: cross dissolves, fades to and from black, audio cross fades (§8.11)
 - clip/track audio levels and waveforms
+- volume keyframes of a clip (§9, D81)
 - Voice Isolation, free (X64)
 - ducking, the Ducker Track FX (§9)
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
@@ -28,7 +29,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Quick Export, plus our Export dialog
 
 **Out of scope (out):**
-- other effects, other transitions, other titles, generators, keyframes
+- other effects, other transitions, other titles, generators
+- keyframes other than those of the clip volume
 - color, Fusion, Smart Reframe, Close Up
 - Sync Bin, Multi Source, Source Overwrite, Live Overwrite
 - Replay, voiceover
@@ -710,16 +712,28 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - It shows what the viewer plays.
   - Its speaker button mutes only the playback, not the export.
 - **Clip volume** (pp. 743, 1109–1110, 1112):
-  - Each clip has one gain, and a mute.
+  - Each clip has a gain, and a mute.
   - The Inspector has the Volume of the clip, in its Audio panel. This is the value of the volume overlay of the clip (p. 743).
   - On the Edit page, each clip with sound has a volume overlay. A drag up or down on it sets the level of the clip (p. 1109).
   - Shift gives finer steps (p. 1109). The overlay is flat at first (p. 1112).
-  - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112).
   - The volume commands of the Edit page change several selected clips together. The clips keep the differences between their levels (p. 1110).
   - vidcut: Volume and Mute in the Audio section of the Inspector (X70). `clip.set` sets `gain_db` and `muted`. D12 gives the range.
   - vidcut: a line on each clip with sound that is tall enough. A drag on it sets `gain_db` with `clip.set` (X71).
   - The scale of the line and the step of Shift are in D77.
-  - vidcut has no keyframes (X71).
+- **Volume keyframes** (pp. 1109, 1111–1113, 1251, 1255):
+  - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112). Two keyframes or more change the level over time (p. 1112).
+  - Keyframes of the Inspector's Volume also show on the overlay (p. 1111).
+  - A drag on the line between two keyframes raises or lowers that part (p. 1112).
+  - A drag on a keyframe changes its level and its time. Shift keeps one direction (p. 1113).
+  - A right-click on keyframes sets Linear, Ease In, Ease Out or Ease In and Out (p. 1113).
+  - Cut, copy and paste work on keyframes. Backspace deletes them (p. 1113).
+  - Audio keyframes can be between frames (p. 1113).
+  - The Cut page has a Keyframe Editor (p. 1255). Its timeline has no volume overlay.
+  - vidcut: the volume line takes the keyframe controls of the Edit page (X73). Its eases are Bezier handles that drag (X74).
+  - vidcut: `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` (D81).
+  - A keyframe is on a whole source frame. vidcut has no copy and paste of keyframes alone (D81).
+  - A volume change on a clip with keyframes is in D82. Normalize Audio Levels with keyframes is in D83.
+  - Ducking, Ripple Delete Silence and the meters follow the keyframes (D84). The keys are in D85.
 - **Ripple Delete Silence** (p. 773):
   - Clip > Audio Operations > Ripple Delete Silence works on the selected clips.
   - vidcut: it is also in the right-click menu of the clip and in Timeline Actions.
@@ -784,7 +798,10 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 | Shift+F12† | Append |
 | Ctrl+\ or Ctrl+B | Split at playhead: the selected clips and subtitles there, or with nothing selected, every clip there |
 | Ctrl+T | Dissolve (§8.11) |
-| Delete / Backspace | Delete (ripples on Track 1); a selected dissolve; selected subtitles |
+| Delete / Backspace | Delete (ripples on Track 1); a selected dissolve; selected subtitles; selected volume keyframes (D85) |
+| [ / ] | Previous / next volume keyframe of the selected clips (D85) |
+| Alt+click on the volume line | Add a volume keyframe (X73) |
+
 | Alt+Delete | Lift the selection (D9) |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
@@ -1884,6 +1901,72 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The manual names the highest peak for Relative. vidcut uses the highest level for each mode.
   - Each volume stops at −60 dB and +24 dB (D12). The result marks each clip that stopped (`held`).
   - Reason: the export already measures EBU R128 loudness and true peak. Thus the two features agree.
+- **D81. Volume keyframes** (§9; pp. 1109, 1112–1113, 1258; deviations X73, X74).
+  - The manual does not give the curve between audio keyframes, or what edits do with them.
+  - These facts come from Resolve Studio 21.1.1, from its renders and its OTIO files:
+    - A volume keyframe is on a whole frame. Its value is in dB.
+    - An ease is a Bezier handle on the keyframe: a time and a value from it (`InBez` and `OutBez`).
+    - The curve between two keyframes is the cubic Bezier curve of the two keyframes and their handles. It fits the renders within 0.01 dB.
+    - A missing handle is on its keyframe. Thus a Linear change is a straight line in dB.
+    - Trims, slips and moves keep the keyframes on their source frames. A split gives all of them to both parts.
+    - The speed tool of the Cut page keeps each keyframe at its frame of the clip.
+  - **Model:**
+    - A keyframe has a source frame, a value, an In handle and an Out handle (`Keyframe`).
+    - The source frame is a whole frame, as in Resolve's files. vidcut has no keyframes between frames.
+    - Before the first keyframe, the volume is the value of the first. After the last keyframe, it is the value of the last.
+    - Between two keyframes, the volume follows the Bezier curve. A handle reaches no farther than the next keyframe.
+    - With keyframes, the curve is the volume of the clip. `gain_db` is not heard.
+    - When the last keyframes go, the value of the first of them becomes `gain_db`.
+    - A keyframe and the curve take −60 to +24 dB (D12).
+  - **Eases:**
+    - Ease In sets a flat In handle a third of the way to the keyframe before. Ease Out sets a flat Out handle a third of the way to the next one.
+    - Ease In and Out sets both. Linear removes both.
+    - A keyframe keeps its ease when a neighbor comes, goes or moves. Its handles then go a third of the way to the new neighbors.
+    - A handle that was dragged or given (`in`, `out`) stays as it is. Its keyframe then has no ease of the four.
+  - **Edits:**
+    - Trims, slips, moves and ripples keep the keyframes on their source frames. A keyframe can be outside the clip.
+    - A split gives all the keyframes to both parts. Thus `edit.join` gives back the clip.
+    - A speed change keeps each keyframe at its frame of the clip (D48). Thus its source frame changes. A freeze keeps them as they are.
+    - A clip that plays backward plays its keyframes backward.
+    - `edit.copy` and `edit.paste` carry the keyframes with the clip. vidcut has no copy and paste of keyframes alone.
+    - Compound clips have no volume of their own. Thus they have no volume keyframes.
+  - **Play and export:** each sample takes the volume of the curve at its source position. The player and the export use the same mixer.
+  - **OTIO:**
+    - vidcut writes the keyframes in the `vidcut` metadata of the clip, and in the `Key Frames` of the clip volume effect.
+    - An import reads the `vidcut` metadata first, else the `Key Frames` of the clip volume effect. Then they play (X9).
+    - A time in `Key Frames` counts from the first source frame of the item. On a clip at a speed s other than 1, Resolve adds f × (1 − 1/s) and divides the frames from f by s. f is the first source frame.
+  - **Requests:** each request that changes keyframes is one undo step. `keyframes.set`, `keyframes.move` and `keyframes.remove` take keyframes by their source frames (`frames`) or their timeline frames (`at`).
+  - Reason: the curve is the curve that Resolve plays and writes. Whole frames keep the files that Resolve reads.
+- **D82. A volume change on a clip with volume keyframes** (§9; p. 1251; deviation X70).
+  - After the first keyframe of a value, Resolve's Inspector adds a keyframe at the playhead for each change of the value (p. 1251).
+  - vidcut does the same. `clip.set` with `gain_db`, and the Inspector's Volume, set a keyframe at `at`, or at the playhead.
+  - A keyframe that is already on that frame takes the new value.
+  - With several clips, each clip with keyframes whose sound is at the playhead gets a keyframe. Each clip without keyframes takes the plain value.
+  - A clip with keyframes and no sound at the playhead keeps its volume. If no clip takes the value, the request fails.
+  - The Inspector shows the volume of the curve at the playhead. The Reset of Volume removes the keyframes and sets 0 dB.
+  - A drag on the flat volume line of a selected clip also moves all the keyframes of the other selected clips by the same dB.
+  - Reason: a change at one point keeps the rest of the curve, as in Resolve. A drag of several lines keeps the differences between the clips (X71).
+- **D83. Normalize Audio Levels on a clip with volume keyframes** (§9; deviation X72).
+  - The manual does not tell what Normalize does with keyframes.
+  - vidcut measures the clip without its volume and without its keyframes, as for every clip (D80).
+  - The volume of a clip with keyframes is the value of its highest keyframe. Normalize sets that volume as it sets the volume of other clips.
+  - Every keyframe of the clip then moves by the same dB. Each stops at −60 and +24 dB.
+  - `from_db` and `gain_db` of the result give the highest keyframe before and after.
+  - Reason: Normalize changes the volume of a clip. The curve keeps its shape, and its loudest part gets the volume that a flat clip would get.
+- **D84. The volume curve in the measurements** (§9; deviations X47, X69).
+  - The manual does not tell what these measurements do with keyframes.
+  - These take the volume of the curve at each frame, as the mix plays it:
+    - ducking by sound level (D76)
+    - Ripple Delete Silence by sound level (X47)
+    - the quiet edges of `edit.ripple_delete_words`
+    - the meters of the Mixer
+  - Reason: they measure what the user hears. A part that a keyframe makes quiet is quiet for them too.
+- **D85. Keyframe keys** (§11; pp. 1113, 1251).
+  - In the manual, [ and ] go from keyframe to keyframe (p. 1251). Backspace deletes the selected keyframes (p. 1113).
+  - vidcut: [ and ] go to the previous and the next volume keyframe of the selected clips. Only keyframes inside the clips count.
+  - While Ripple Delete Silence is open, [ and ] go to its stripes (X48).
+  - Delete and Backspace remove the selected keyframes, and nothing else.
+  - Reason: these are the keys of the manual. The window of Ripple Delete Silence needs [ and ] for its stripes while it is open.
 - **D90. Safe Area sizes** (§4.5; pp. 682–683, 1177).
   - The manual does not give the Action and Title sizes as percents of the frame.
   - Action safe is 93% of the extents width and of its height, centered.

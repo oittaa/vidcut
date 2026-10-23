@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::keyframes::Gain;
 use crate::model::{Clip, Project, TrackKind};
 use crate::render::Pace;
 use crate::time::Rational;
@@ -192,7 +193,7 @@ impl Span {
 pub struct Heard<'a> {
     pub span: &'a Span,
     pub levels: &'a AudioLevels,
-    pub gain_db: f64,
+    pub gain: Gain<'a>,
 }
 
 const QUIET_AROUND: f64 = 0.02;
@@ -210,12 +211,13 @@ fn level_at(heard: &[Heard], frame: i64) -> f64 {
         .filter(|h| h.span.pace.speed != 0.0 && h.span.start <= frame && frame <= h.span.end)
         .map(|h| {
             let rate = f64::from(h.levels.per_second.max(1));
-            let i = ((h.span.time(frame as f64) - h.levels.start) * rate).floor() as i64;
+            let at = h.span.time(frame as f64);
+            let i = ((at - h.levels.start) * rate).floor() as i64;
             let reach = (QUIET_AROUND * rate).round().max(1.0) as i64;
             let peak = (i - reach..=i + reach)
                 .filter_map(|i| usize::try_from(i).ok().and_then(|i| h.levels.peaks.get(i)))
                 .fold(0.0_f32, |m, &p| m.max(p));
-            f64::from(peak) * linear(h.gain_db)
+            f64::from(peak) * linear(h.gain.at(at))
         })
         .sum()
 }
@@ -258,13 +260,13 @@ pub fn silences(
     from: f64,
     to: f64,
     threshold_db: f64,
-    gain_db: f64,
+    gain: &Gain,
     min: f64,
 ) -> Vec<(f64, f64)> {
     let rate = f64::from(levels.per_second.max(1));
-    let limit = linear(threshold_db - gain_db) as f32;
     let bucket = |x: f64| ((x - levels.start) * rate).floor() as i64;
     let time = |i: i64| levels.start + i as f64 / rate;
+    let limit = limits(gain, threshold_db, rate, &time);
     let (first, last) = (bucket(from), bucket(to - 1e-9));
     let gap = (CLICK_GAP * rate).round().max(1.0) as usize;
     let lo = first - gap as i64;
@@ -273,7 +275,7 @@ pub fn silences(
             usize::try_from(i)
                 .ok()
                 .and_then(|i| levels.peaks.get(i))
-                .is_none_or(|&p| p < limit)
+                .is_none_or(|&p| p < limit(i))
         })
         .collect();
     for (a, b) in clicks(&quiet, (CLICK * rate).round() as usize, gap) {
@@ -296,6 +298,22 @@ pub fn silences(
         }
     }
     out
+}
+
+fn limits<'a>(
+    gain: &'a Gain,
+    threshold_db: f64,
+    rate: f64,
+    time: &'a dyn Fn(i64) -> f64,
+) -> impl Fn(i64) -> f32 + 'a {
+    let flat = linear(threshold_db - gain.db) as f32;
+    move |i| {
+        if gain.is_flat() {
+            flat
+        } else {
+            linear(threshold_db - gain.at(time(i) + 0.5 / rate)) as f32
+        }
+    }
 }
 
 fn clicks(quiet: &[bool], len: usize, gap: usize) -> Vec<(usize, usize)> {
@@ -409,11 +427,11 @@ pub struct SpeechSettings {
 pub fn silent_parts(
     span: &Span,
     levels: &AudioLevels,
-    gain_db: f64,
+    gain: &Gain,
     s: &SilenceSettings,
 ) -> Vec<(i64, i64)> {
     parts_of(span, s, |from, to, min| {
-        silences(levels, from, to, s.threshold_db, gain_db, min)
+        silences(levels, from, to, s.threshold_db, gain, min)
     })
 }
 
@@ -456,13 +474,13 @@ pub fn loud_frames(
     frames: (i64, i64),
     levels: &AudioLevels,
     threshold_db: f64,
-    gain_db: f64,
+    gain: &Gain,
 ) -> Vec<(f64, f64)> {
     sounding_frames(span, frames, |from, to| {
         let rate = f64::from(levels.per_second.max(1));
-        let limit = linear(threshold_db - gain_db) as f32;
         let bucket = |x: f64| ((x - levels.start) * rate).floor() as i64;
         let time = |i: i64| levels.start + i as f64 / rate;
+        let limit = limits(gain, threshold_db, rate, &time);
         let (first, last) = (bucket(from), bucket(to - 1e-9));
         let mut out = Vec::new();
         let mut run: Option<i64> = None;
@@ -471,7 +489,7 @@ pub fn loud_frames(
                 && usize::try_from(i)
                     .ok()
                     .and_then(|i| levels.peaks.get(i))
-                    .is_some_and(|&p| p >= limit);
+                    .is_some_and(|&p| p >= limit(i));
             match (loud, run) {
                 (true, None) => run = Some(i),
                 (false, Some(s)) => {
@@ -640,27 +658,33 @@ mod tests {
     #[test]
     fn silences_are_runs_below_the_threshold() {
         let l = levels(4.0, &[(1.0, 1.5), (3.0, 3.2)]);
-        let s = silences(&l, 0.0, 4.0, -40.0, 0.0, 0.9);
+        let s = silences(&l, 0.0, 4.0, -40.0, &Gain::flat(0.0), 0.9);
         assert_eq!(
             s,
             vec![(0.0, 1.0), (1.5, 3.0)],
             "0.8 s at the end is too short"
         );
-        assert!(silences(&l, 0.0, 4.0, -40.0, 30.0, 0.1).is_empty());
-        assert_eq!(silences(&l, 3.5, 5.0, -40.0, 0.0, 1.0), vec![(3.5, 5.0)]);
+        assert!(silences(&l, 0.0, 4.0, -40.0, &Gain::flat(30.0), 0.1).is_empty());
+        assert_eq!(
+            silences(&l, 3.5, 5.0, -40.0, &Gain::flat(0.0), 1.0),
+            vec![(3.5, 5.0)]
+        );
     }
 
     #[test]
     fn a_click_in_silence_is_silent() {
         let l = levels(2.0, &[(1.0, 1.02)]);
-        assert_eq!(silences(&l, 0.0, 2.0, -40.0, 0.0, 0.5), vec![(0.0, 2.0)]);
+        assert_eq!(
+            silences(&l, 0.0, 2.0, -40.0, &Gain::flat(0.0), 0.5),
+            vec![(0.0, 2.0)]
+        );
     }
 
     #[test]
     fn a_click_just_after_sound_is_sound() {
         let l = levels(3.0, &[(1.0, 1.5), (1.55, 1.57)]);
         assert_eq!(
-            silences(&l, 0.0, 3.0, -40.0, 0.0, 0.5),
+            silences(&l, 0.0, 3.0, -40.0, &Gain::flat(0.0), 0.5),
             vec![(0.0, 1.0), (1.57, 3.0)]
         );
     }
@@ -683,7 +707,7 @@ mod tests {
             min: 5,
         };
         assert_eq!(
-            silent_parts(&span, &l, 0.0, &s),
+            silent_parts(&span, &l, &Gain::flat(0.0), &s),
             vec![(100, 108), (118, 128), (135, 140)]
         );
     }

@@ -49,6 +49,10 @@ classDiagram
     head, tail
     gain_db, muted
   }
+  class Keyframe {
+    frame, value
+    in_handle, out_handle
+  }
   class Transition {
     id
     from, to
@@ -99,6 +103,7 @@ classDiagram
   Track *-- "*" Clip : clips
   Track *-- "*" Transition : transitions
   Clip *-- "0..1" ClipAudio : audio
+  ClipAudio *-- "*" Keyframe : gain_keys
   Clip *-- "0..1" Title : title
   Clip *-- "0..1" Picture : picture
   Clip ..> Media : media id
@@ -113,6 +118,10 @@ classDiagram
 - `bins` are slash-separated paths. Each `Media` names its `bin` (spec §3).
 - `tracks` are video tracks first, then audio tracks.
 - A clip on a video track carries its picture. In `ClipAudio`, it carries its sound, with J/L offsets (`head`, `tail`).
+- `ClipAudio::gain_keys` holds the volume keyframes of a clip, in order, on whole source frames ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - With keyframes, the volume is their curve (`keyframes::value_at`), and `gain_db` is not heard.
+  - `keyframes::reshape` makes each change: it keeps the order, one keyframe on a frame, and the ease of each keyframe.
+  - `ops::keyframes` holds the requests. `ops::change_speed` moves the keyframes with `keyframes::retimed`.
 - Audio tracks hold sound-only clips.
 - `MediaInfo` keeps what probing found: streams, duration, start timecode.
 - One project is one timeline ([deviation X2](../deviations.md#x2-one-timeline-per-project-file)).
@@ -411,9 +420,9 @@ The metadata:
 
 | Metadata | Holds |
 |---|---|
-| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `source_in` and `skip` for stills and speeds, which the source range rounds; a title's `Title`; a placed clip's `Picture`, a compound clip's too, read back before Resolve's effects |
+| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `gain_keys` from the item's first source frame; `source_in` and `skip` for stills and speeds, which the source range rounds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
-| `Resolve_OTIO` on clips | `Link Group ID`, `Channels`, a clip volume effect, and `Media In` on reversed clips |
+| `Resolve_OTIO` on clips | `Link Group ID`, `Channels`, a clip volume effect with the volume keyframes in its `Key Frames` (`effects::sound`), and `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Retime and Scaling, and Dynamic Zoom (`otio::picture`), fitted, in place of carried ones |
 | `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content; a `Link Group ID` that joins the picture and sound of one compound at the same place (`compound_links`) |
 | `Resolve_OTIO` on tracks | `Locked`, `SoloOn` and `Audio Type` |
@@ -458,6 +467,8 @@ Kept data:
 | OTIO | Kept as |
 |---|---|
 | clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`. Keyframes stay on their source frames (the `from` field of `Effects`, set by `carry`), and fades stay at the clip's ends through splits; the clip volume's level is the gain |
+| the `Key Frames` of the clip volume (`effects::gain_keys`) | `ClipAudio::gain_keys`, taken out of the kept effect (`effects::drop_gain_keys`) |
+
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`), else `Generator`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |

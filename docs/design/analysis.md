@@ -30,7 +30,7 @@ flowchart TD
 | `edit.detect_scene_cuts`, `analyze.scenes` | `Env::picture_stats`: the smaller of each frame's difference from the last and the change in that difference; the first frame scores 0 | `analysis::scene_cuts`; the edit then calls `ops::split_clip` |
 | `analyze.black` | `Env::picture_stats`: each frame's black share | `analysis::black_parts` |
 | `analyze.loudness` | `Env::loudness` of the flattened timeline | none |
-| `clip.normalize` | `Env::loudness` of each clip alone (`render::sound_alone`) | `normalize::gains`; the edit then calls `ops::set_clips` |
+| `clip.normalize` | `Env::loudness` of each clip alone (`render::sound_alone`), without its volume keyframes | `normalize::gains`; the edit then sets each `gain_db`, or moves all the keyframes of a clip (`ClipAudio::raise`) |
 | `timeline.boring` | none: clip lengths | `analysis::boring` |
 
 - Given `parts`, `edit.ripple_delete_silence` measures nothing.
@@ -49,6 +49,7 @@ flowchart TD
 - What lies between the speech is cut, less Pre Head and Post Tail, as for silence (`analysis::silent_parts`).
 - Ducking by speech uses the same probabilities. `analysis::speech_frames` gives the speech of a source clip in timeline frames, by Silero's defaults (`retime::SPEECH`, `retime::SHORTEST_SPEECH`, `retime::SHORTEST_PAUSE`).
 - Ducking by level uses the levels. `analysis::loud_frames` gives where a clip's peak, with its gains, reaches the threshold ([export](export.md#sound)).
+- The gains of a clip with volume keyframes change over the clip. `keyframes::Gain` gives the gain at each level, for silence, ducking and the quiet edges of `edit.ripple_delete_words` ([spec D84](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
 **Why** probabilities, not the segments of transcribe.cpp:
 

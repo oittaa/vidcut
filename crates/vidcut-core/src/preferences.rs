@@ -56,18 +56,16 @@ impl Default for Guides {
         Self {
             enabled: false,
             framing: Framing::Default,
-            extents: true,
-            action: true,
-            title: true,
+            extents: false,
+            action: false,
+            title: false,
             center: false,
         }
     }
 }
 
-/// Share of the extents used for action safe (SMPTE ST 2046-1 / EBU R 95).
 pub const ACTION_SAFE: f32 = 0.93;
 
-/// Share of the extents used for title safe (SMPTE ST 2046-1 / EBU R 95).
 pub const TITLE_SAFE: f32 = 0.90;
 
 /// Aspect ratio for a framing guide. `Default` is the project's frame.
@@ -99,7 +97,6 @@ pub enum Framing {
 }
 
 impl Framing {
-    /// Width over height for the crop. `None` for the project's own aspect.
     pub fn aspect(self) -> Option<f32> {
         Some(match self {
             Self::Default => return None,
@@ -117,7 +114,6 @@ impl Framing {
     }
 }
 
-/// Axis-aligned box as `x`, `y`, `w`, `h` in the same units as the picture.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GuideBox {
     pub x: f32,
@@ -175,7 +171,6 @@ impl GuideBox {
     }
 }
 
-/// What to paint over one picture. `crop` shades outside the framing box.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GuideOverlay {
     pub frame: GuideBox,
@@ -227,7 +222,6 @@ impl Guides {
         }
     }
 
-    /// Empty patch toggles framing guides. Named fields change; others stay.
     pub fn applied(self, patch: &GuidesPatch) -> Self {
         if patch.is_empty() {
             return Self {
@@ -238,15 +232,8 @@ impl Guides {
         self.patched(patch)
     }
 
-    /// Geometry for one picture. `project_aspect` is width over height of the
-    /// timeline. Safe-area lines use the framing box even when framing guides
-    /// are off. Empty when nothing would draw.
-    pub fn overlay(self, picture: GuideBox, project_aspect: f32) -> Option<GuideOverlay> {
-        if !(picture.w > 0.0
-            && picture.h > 0.0
-            && project_aspect.is_finite()
-            && project_aspect > 0.0)
-        {
+    pub fn overlay(self, picture: GuideBox) -> Option<GuideOverlay> {
+        if !(picture.w > 0.0 && picture.h > 0.0) {
             return None;
         }
         let frame = match self.framing.aspect() {
@@ -931,7 +918,7 @@ mod tests {
             title: false,
             center: false,
         };
-        let o = g.overlay(wide(), 16.0 / 9.0).unwrap();
+        let o = g.overlay(wide()).unwrap();
         let a = o.action.unwrap();
         assert!((a.w - 1785.6).abs() < 0.05);
         assert!((a.h - 1004.4).abs() < 0.05);
@@ -950,7 +937,7 @@ mod tests {
             title: true,
             center: false,
         };
-        let o = g.overlay(GuideBox::from_size(1000.0, 1000.0), 1.0).unwrap();
+        let o = g.overlay(GuideBox::from_size(1000.0, 1000.0)).unwrap();
         let t = o.title.unwrap();
         assert!((t.w - 900.0).abs() < 0.05);
         assert!((t.h - 900.0).abs() < 0.05);
@@ -968,7 +955,7 @@ mod tests {
             title: false,
             center: true,
         };
-        let o = g.overlay(wide(), 16.0 / 9.0).unwrap();
+        let o = g.overlay(wide()).unwrap();
         assert!(o.crop);
         let e = o.extents.unwrap();
         assert!((e.w - 607.5).abs() < 0.05);
@@ -988,7 +975,7 @@ mod tests {
             title: false,
             center: false,
         };
-        let o = g.overlay(wide(), 16.0 / 9.0).unwrap();
+        let o = g.overlay(wide()).unwrap();
         assert!(!o.crop);
         let e = o.extents.unwrap();
         assert!((e.w - 1080.0).abs() < 0.05);
@@ -1013,12 +1000,17 @@ mod tests {
     #[test]
     fn preferences_set_does_not_toggle_framing_guides() {
         let patch =
-            PreferencesPatch::from_pairs(&["viewer.guides.action=false".to_string()]).unwrap();
+            PreferencesPatch::from_pairs(&["viewer.guides.action=true".to_string()]).unwrap();
         let p = Preferences::default().patched(&patch).unwrap();
         assert!(!p.viewer.guides.enabled);
-        assert!(!p.viewer.guides.action);
-        assert!(p.viewer.guides.title);
-        assert!(p.viewer.guides.extents);
+        assert!(p.viewer.guides.action);
+        assert!(!p.viewer.guides.title);
+        assert!(!p.viewer.guides.extents);
+    }
+
+    #[test]
+    fn default_guides_draw_nothing() {
+        assert_eq!(Guides::default().overlay(wide()), None);
     }
 
     #[test]
@@ -1031,7 +1023,7 @@ mod tests {
             title: false,
             center: false,
         };
-        assert_eq!(g.overlay(GuideBox::from_size(100.0, 100.0), 1.0), None);
+        assert_eq!(g.overlay(GuideBox::from_size(100.0, 100.0)), None);
     }
 
     #[test]
@@ -1044,7 +1036,7 @@ mod tests {
             title: false,
             center: false,
         };
-        let o = g.overlay(wide(), 16.0 / 9.0).unwrap();
+        let o = g.overlay(wide()).unwrap();
         assert!(o.crop);
         assert!(o.extents.is_none());
     }
