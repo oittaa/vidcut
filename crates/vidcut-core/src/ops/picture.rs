@@ -65,6 +65,9 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
     if let Some(z) = &p.dynamic_zoom {
         zoom_checked(z)?;
     }
+    if let Some(why) = crate::keyframes::picture_problem(p) {
+        return Err(Error::invalid(why));
+    }
     let out = Picture {
         position: p.position.filter(|at| *at != Picture::MIDDLE),
         zoom: p.zoom.filter(|z| *z != [1.0, 1.0]),
@@ -180,19 +183,83 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
     p
 }
 
-pub fn set(p: &mut Project, ids: &[String], change: &PictureChange) -> Result<()> {
+pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i64>) -> Result<()> {
     if change.is_empty() {
         return Err(Error::usage(
             "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop or Dynamic Zoom",
         ));
     }
+    let mut applied = false;
+    let mut missed = false;
     for id in ids {
         let (ti, ci) = locate(p, id)?;
         let c = &p.tracks[ti].clips[ci];
         takes(p, ti, c)?;
         let old = c.picture.clone().unwrap_or_default();
-        let picture = checked(&changed(&old, change))?;
+        let next = changed(&old, change);
+        let frame = at
+            .filter(|&t| c.start <= t && t < c.end())
+            .map(|t| c.source_at(t));
+        let mut picture = old.clone();
+        let mut wrote = false;
+        for v in crate::keyframes::PictureValue::ALL {
+            let was = crate::keyframes::plain_channel(&old, v);
+            let now = crate::keyframes::plain_channel(&next, v);
+            if was == now {
+                continue;
+            }
+            if old.has_keys(v) {
+                match frame {
+                    Some(f) => {
+                        picture.put_channel(v, f, now);
+                        wrote = true;
+                    }
+                    None => missed = true,
+                }
+            } else {
+                crate::keyframes::write_channel(&mut picture, v, now);
+                wrote = true;
+            }
+        }
+        if next.anchor != old.anchor {
+            picture.anchor = next.anchor;
+            wrote = true;
+        }
+        if next.pitch != old.pitch {
+            picture.pitch = next.pitch;
+            wrote = true;
+        }
+        if next.yaw != old.yaw {
+            picture.yaw = next.yaw;
+            wrote = true;
+        }
+        if next.flip_horizontal != old.flip_horizontal {
+            picture.flip_horizontal = next.flip_horizontal;
+            wrote = true;
+        }
+        if next.flip_vertical != old.flip_vertical {
+            picture.flip_vertical = next.flip_vertical;
+            wrote = true;
+        }
+        if next.dynamic_zoom != old.dynamic_zoom {
+            picture.dynamic_zoom = next.dynamic_zoom;
+            wrote = true;
+        }
+        if !wrote {
+            continue;
+        }
+        applied = true;
+        let picture = checked(&picture)?;
         p.tracks[ti].clips[ci].picture = picture;
+    }
+    if !applied {
+        return Err(if missed {
+            Error::invalid("no clip with keyframes on that value shows at the frame")
+        } else {
+            Error::usage(
+                "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop or Dynamic Zoom",
+            )
+        });
     }
     Ok(())
 }
@@ -206,15 +273,26 @@ pub fn clear(p: &mut Project, ids: &[String], tool: Option<PictureTool>) -> Resu
         };
         let kept = match tool {
             None => Picture::default(),
-            Some(PictureTool::Transform) => Picture {
-                crop: old.crop,
-                dynamic_zoom: old.dynamic_zoom,
-                ..Picture::default()
-            },
-            Some(PictureTool::Crop) => Picture {
-                crop: Crop::default(),
-                ..old
-            },
+            Some(PictureTool::Transform) => {
+                let mut kept = Picture {
+                    crop: old.crop,
+                    dynamic_zoom: old.dynamic_zoom,
+                    ..Picture::default()
+                };
+                kept.crop_left_keys = old.crop_left_keys;
+                kept.crop_right_keys = old.crop_right_keys;
+                kept.crop_top_keys = old.crop_top_keys;
+                kept.crop_bottom_keys = old.crop_bottom_keys;
+                kept
+            }
+            Some(PictureTool::Crop) => {
+                let mut kept = Picture {
+                    crop: Crop::default(),
+                    ..old
+                };
+                kept.clear_crop_keys();
+                kept
+            }
             Some(PictureTool::DynamicZoom) => Picture {
                 dynamic_zoom: None,
                 ..old

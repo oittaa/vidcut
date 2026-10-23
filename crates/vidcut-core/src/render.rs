@@ -250,6 +250,23 @@ pub struct Placed {
     /// Dynamic Zoom.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<Run>,
+    /// Source frame this picture shows. Keyed values are read here.
+    /// `after` moves it with the piece (decision D75).
+    #[serde(default, skip_serializing_if = "zero_i64")]
+    pub source: i64,
+    /// How `after` moves `source`. A normal pace is left out.
+    #[serde(default, skip_serializing_if = "Pace::is_normal")]
+    pub pace: Pace,
+    /// Timeline start of the clip, until the first `after` places it.
+    #[serde(default, skip_serializing_if = "zero_i64")]
+    pub start: i64,
+    /// Set once `after` has placed this picture on a timeline frame.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ready: bool,
+}
+
+fn zero_i64(n: &i64) -> bool {
+    *n == 0
 }
 
 impl Placed {
@@ -258,13 +275,37 @@ impl Placed {
             clip: clip.id.clone(),
             run: picture.dynamic_zoom.map(|_| run),
             picture,
+            source: clip.source_in,
+            pace: clip.pace(),
+            start: clip.start,
+            ready: false,
+        }
+    }
+
+    pub fn at(clip: &Clip, picture: Picture, run: Run, time: i64) -> Self {
+        let into = time - clip.start;
+        let run = picture.dynamic_zoom.map(|_| run);
+        Self {
+            clip: clip.id.clone(),
+            picture,
+            run,
+            source: clip.source_at(time),
+            pace: clip.pace().after(into),
+            start: clip.start,
+            ready: true,
         }
     }
 
     pub fn after(&self, k: i64) -> Self {
+        let into = if self.ready { k } else { k - self.start };
         Self {
+            clip: self.clip.clone(),
+            picture: self.picture.clone(),
             run: self.run.map(|r| r.after(k)),
-            ..self.clone()
+            source: self.source + self.pace.offset(into),
+            pace: self.pace.after(into),
+            start: self.start,
+            ready: true,
         }
     }
 
@@ -942,7 +983,7 @@ fn placed_of(c: &Clip, nest: Option<&Nest>, over: bool, x: i64) -> Vec<Placed> {
         return Vec::new();
     }
     let run = run_of(c, nest.and_then(|n| n.run)).after(x);
-    let own = Placed::of(c, own.unwrap_or_default(), run);
+    let own = Placed::at(c, own.unwrap_or_default(), run, x);
     std::iter::once(own)
         .chain(outer.iter().map(|p| p.after(x)))
         .collect()

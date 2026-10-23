@@ -400,6 +400,23 @@ fn clip(
             speed_badge(&ap, audio, speed);
         }
     }
+    if c.audio.as_ref().is_some_and(|a| a.is_keyed())
+        || c.picture.as_ref().is_some_and(|p| p.is_keyed())
+    {
+        let band = if has_picture { video } else { rect };
+        let at = pos2(x0.max(painter.clip_rect().left()) + 8.0, band.top() + 8.0);
+        let diamond = vec![
+            at + vec2(0.0, -3.5),
+            at + vec2(3.5, 0.0),
+            at + vec2(0.0, 3.5),
+            at + vec2(-3.5, 0.0),
+        ];
+        painter.add(egui::Shape::convex_polygon(
+            diamond,
+            theme::colors().accent,
+            Stroke::new(1.0, Color32::from_black_alpha(180)),
+        ));
+    }
     if look.names && width > 30.0 {
         let name = c
             .name

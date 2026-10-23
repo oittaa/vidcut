@@ -349,11 +349,11 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
     };
     let fit = content(p, c, (w, h));
     let level_of = |x: Picture| {
-        Placing::new(&[Placed::of(c, x, run)], (w, h), fit)
+        Placing::new(&[Placed::at(c, x, run, at)], (w, h), fit)
             .levels
             .pop()
     };
-    let placed = [Placed::of(c, shown.clone(), run)];
+    let placed = [Placed::at(c, shown.clone(), run, at)];
     let middle = placed[0]
         .zoomed()
         .map_or(Picture::MIDDLE, |b| flipped(&shown, b.center));
@@ -483,9 +483,48 @@ impl Workspace {
     }
 
     pub(super) fn picture_wanted(&self) -> Vec<(String, Picture)> {
+        let frame = self.snap.timeline.position;
+        let preview = |id: &str, baseline: &Picture, picture: &Picture| {
+            let Some(p) = self.project() else {
+                return (id.to_string(), picture.clone());
+            };
+            let Some(c) = p.clip(id) else {
+                return (id.to_string(), picture.clone());
+            };
+            let stored = c.picture.clone().unwrap_or_default();
+            let at = c.source_at(frame);
+            (id.to_string(), stored.preview(baseline, picture, at))
+        };
         match self.grab_wanted() {
-            Some(w) => vec![w],
-            None => self.inspector_wanted(),
+            Some((id, picture)) => {
+                let baseline = self
+                    .timeline
+                    .picture_grab
+                    .held
+                    .as_ref()
+                    .map(|h| h.start.clone())
+                    .or_else(|| {
+                        self.timeline
+                            .picture_grab
+                            .wheel
+                            .as_ref()
+                            .map(|w| w.start.clone())
+                    })
+                    .unwrap_or_else(|| picture.clone());
+                vec![preview(&id, &baseline, &picture)]
+            }
+            None => self
+                .inspector_wanted()
+                .into_iter()
+                .map(|(id, picture)| {
+                    let stored = self
+                        .project()
+                        .and_then(|p| p.clip(&id))
+                        .and_then(|c| c.picture.clone())
+                        .unwrap_or_default();
+                    preview(&id, &stored, &picture)
+                })
+                .collect(),
         }
     }
 
@@ -503,7 +542,14 @@ impl Workspace {
     }
 
     fn land_picture(&mut self, clip: &str, from: &Picture, to: &Picture) {
-        if let Some(params) = changed(clip, from, to) {
+        if let Some(mut params) = changed(clip, from, to) {
+            let keyed = self
+                .project()
+                .and_then(|p| p.clip(clip))
+                .and_then(|c| c.picture.as_ref().filter(|pic| pic.is_keyed()).map(|_| ()));
+            if keyed.is_some() {
+                params["at"] = json!(self.snap.timeline.position);
+            }
             self.send("picture.set", params);
             self.timeline.picture_grab.landing =
                 Some((clip.to_string(), to.clone(), Instant::now(), from.clone()));
@@ -543,16 +589,24 @@ impl Workspace {
         if k == 1.0 && turn == 0.0 {
             return;
         }
+        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+        let frame = self
+            .project_shared()
+            .and_then(|p| p.clip(&s.clip).map(|c| c.source_at(at)));
+        let adopted = frame
+            .map(|f| s.picture.adopt(f as f64))
+            .unwrap_or_else(|| s.picture.clone());
+        let turn0 = adopted.turn();
         let w = self
             .timeline
             .picture_grab
             .wheel
             .get_or_insert_with(|| Wheeled {
                 clip: s.clip.clone(),
-                start: s.picture.clone(),
-                now: s.picture.clone(),
+                now: adopted.clone(),
+                start: adopted,
                 zoom: 1.0,
-                turn: s.picture.turn(),
+                turn: turn0,
                 steps: 0.0,
                 last: Instant::now(),
             });
@@ -901,7 +955,13 @@ impl Workspace {
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
             && let Some(hold) = s.grip(press, tool)
         {
-            let start = s.picture.clone();
+            let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+            let frame = self
+                .project_shared()
+                .and_then(|p| p.clip(&s.clip).map(|c| c.source_at(at)));
+            let start = frame
+                .map(|f| s.picture.adopt(f as f64))
+                .unwrap_or_else(|| s.picture.clone());
             self.timeline.picture_grab.held = Some(Held {
                 clip: s.clip.clone(),
                 hold,

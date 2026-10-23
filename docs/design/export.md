@@ -407,6 +407,15 @@ A picture with a Dynamic Zoom is placed on each frame by its own box:
 - `layer_size` fits the layer for the smaller of the two boxes (`DynamicZoom::closest`).
 - The NVENC path is the same, as `cuda::burn::Overlay::of` takes the frame's `Placing`.
 
+A picture value with keyframes is sampled on that same `Placing` (D75):
+
+- `Placed` holds the source frame of the piece and its `Pace`.
+- `Placed::after` moves that source frame with the piece, as it moves the `Run`.
+- `Picture::sampled` reads position, zoom, rotation and each crop side at that source frame.
+- The curve is the volume Bezier curve (`value_at`).
+- `place::detail` uses the largest zoom key in the piece, as it uses the closer Dynamic Zoom box.
+- The viewer and the export both take this `Placing`. There is no second draw path.
+
 ## Proxies
 
 - `proxy.generate` uses the same machinery (spec D41).

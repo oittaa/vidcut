@@ -7,13 +7,14 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
 - **Now:**
   - A clip has volume keyframes on its volume line ([spec §9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
   - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` holds the volume keyframes.
-  - The picture has no keyframes yet. The spec lists them for later ([§1](../cut-page-spec.md#1-scope), [§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768)).
-  - vidcut keeps the keyframes of Resolve's other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
+  - Stage 2 is built. Transform and Crop values have keyframes on `Picture` ([§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), D75).
+  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. Rotation is its own value. Each crop side is its own value.
+  - The flips have no keyframes. Dynamic Zoom stays the two end boxes and has no Keyframe button.
+  - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
   - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
 - **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
-- **To do:** two more stages, in this order:
-  1. Transform, Crop and Dynamic Zoom keyframes, with buttons in the Inspector.
-  2. A Keyframe Editor.
+- **To do:** one more stage:
+  1. A Keyframe Editor.
 
 ## What Resolve has
 
@@ -100,22 +101,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 
 ## Scope
 
-**Stage 2: Transform, Crop and Dynamic Zoom keyframes, with Inspector buttons.**
-
-- Values of a `Picture`: `position`, `zoom`, `rotation` and each side of its `crop`.
-  - The position has one keyframe for X and Y, and the zoom one for X and Y, as the tracks of p. 1256.
-  - The flips have no keyframes.
-- Dynamic Zoom: its start box and end box stay at the two ends of the clip ([D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - Resolve's Inspector has no Keyframe button for Dynamic Zoom. vidcut gives it none.
-- GUI, in the Inspector tab ([X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)):
-  - A Keyframe button with Previous and Next arrows beside each value. A right-click on it sets the ease.
-  - A value with keyframes gets a keyframe at the playhead when it changes. This applies to the Inspector and to the viewer handles.
-  - The Reset of a value removes its keyframes. The Reset of a section removes the keyframes of the section.
-  - A clip with keyframes shows a keyframe mark in the timeline.
-  - The Volume of the Audio section gets the same button.
-- Spec:
-  - §1 takes the picture keyframes in. §8.15 takes keyframes off its Out list. D75 gets the keyed values.
-  - X70 gets the buttons.
+**Stage 2 is built.** Transform, Crop and the volume line use `Keyframe`. The spec is [§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768) and D75. The buttons are in [X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels).
 
 **Stage 3: a Keyframe Editor.**
 
