@@ -8,13 +8,14 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - A clip has volume keyframes on its volume line ([spec §9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
   - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` holds the volume keyframes.
   - Stage 2 is built. Transform and Crop values have keyframes on `Picture` ([§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), D75).
+  - Stage 3 is built. The Keyframes tab shows the keyed values of the first selected clip.
+  - Each value has a track and a curve. A drag moves a keyframe, a group or a handle.
   - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. Rotation is its own value. Each crop side is its own value.
   - The flips have no keyframes. Dynamic Zoom stays the two end boxes and has no Keyframe button.
   - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
   - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
 - **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
-- **To do:** one more stage:
-  1. A Keyframe Editor.
+- **To do:** keyframes of speed, opacity, Pitch, Yaw, the anchor point and titles.
 
 ## What Resolve has
 
@@ -103,14 +104,17 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 
 **Stage 2 is built.** Transform, Crop and the volume line use `Keyframe`. The spec is [§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768) and D75. The buttons are in [X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels).
 
-**Stage 3: a Keyframe Editor.**
+**Stage 3 is built.** The Keyframes tab sits beside the Inspector. The Timeline menu opens it. The spec is [§2](../cut-page-spec.md#2-layout-pp-636637) and [X87](../deviations.md#x87-the-keyframes-tab-has-an-ease-menu).
 
-- A Keyframe Editor tab beside the Inspector tab, as the tab of p. 636. The Timeline control of p. 649 opens it.
-- A track for each value, in a group track for each section. A drag moves keyframes. A drag on a group track moves the keyframes of the group.
-- The volume keyframes are a track too.
-- A curve view for each value, with the handles of its keyframes, as the Curve Editor of p. 1261. A drag on a handle changes the curve.
-- Spec: [§2](../cut-page-spec.md#2-layout-pp-636637) takes the tab in.
-- Not in stage 3: Step, Loop, Ping Pong, Reverse, the Shape Box, the keyframe tray and motion paths.
+- One track for each keyed value, in a group for its section.
+- A drag on a keyframe moves it in time. A drag on a curve point also changes the value.
+- A drag on a group track moves that group's keyframes at that time.
+- Volume is a track in the Audio group.
+- Each value has a curve. A drag on an In or Out handle changes that handle.
+- One click selects one keyframe. Shift or Ctrl adds to the selection.
+- A right-click sets that keyframe's ease, with the volume Bezier ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
+- `keyframes.set` and `keyframes.move` do these edits.
+- Not in this stage: Step, Loop, Ping Pong, Reverse, the Shape Box, the keyframe tray and motion paths.
 
 **After stage 3:** keyframes of speed, opacity, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
 
@@ -128,24 +132,17 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 
 ## Playback and export
 
-**Now, the picture:**
+**Now:**
 
-- `render::placed_of` makes one `Placed` for each piece, with the `Picture` of its clip (`Placed::of`).
-- Only Dynamic Zoom changes from frame to frame.
-  - `Placed` has a `Run`, and `Placed::zoomed` gives the box of the frame (`DynamicZoom::at`).
-  - `VideoPiece::part` and `Placed::after` move the `Run` with the piece.
-- An export makes a `place::Placing` for each frame in `VideoFrames`. The viewer moves the `Run` to each frame (`Plan::placed_at`).
-- `layer_size` sizes a layer by `place::detail`, with the closer box of a Dynamic Zoom.
-- `Picture::is_usual` decides if a clip that fills the frame takes the place of the tracks below (`render::flatten_lanes`).
-- For NVENC, `cuda::burn::Overlay::of` takes the `Placing` of the frame.
-
-**To do:**
-
-- `Placed` gets the keyed values, the source frame of the first frame of its piece, and its `Pace`.
-- `Placed::after` moves that source frame with the piece, as it moves the `Run`.
-- `place::Placing` takes each value at the source frame of the frame.
-- `layer_size` takes the largest zoom of the keyframes in the piece, as it takes the closer box of a Dynamic Zoom.
-- The GPU paths need no new work. They take a `Placing` for each frame already ([placed pictures](../design/export.md#placed-pictures)).
+- `Placed` holds the clip's picture, the source frame of the piece and its pace.
+- `Placed::after` moves that source frame with the piece, as it moves a Dynamic Zoom.
+- `Picture::sampled` reads each keyed value at that source frame.
+- The curve of the key's own value is the volume Bezier curve.
+- Position Y and zoom Y keep the handle frames and use a value offset of 0.
+- `place::detail` uses the largest zoom key in the piece.
+- The viewer and the export take that placing. The GPU paths take it too.
+- Dynamic Zoom still uses its `Run` and `Placed::zoomed`.
+- The placed pictures are in [export](../design/export.md#placed-pictures).
 
 ## Interchange
 
@@ -209,6 +206,7 @@ Rule 3: each GUI action has a request.
 - `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take the values of the picture in `param`.
 - `picture.set` takes an `at`. On a value with keyframes, it sets a keyframe at `at`, or at the playhead, as `clip.set` does for the volume ([D82](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - `timeline.get` names the values of a clip that have keyframes, as it names `volume` now.
+- `gui.show keyframes` opens the Keyframes tab. `gui.close keyframes` closes it.
 
 ## Open questions
 

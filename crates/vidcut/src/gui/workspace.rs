@@ -130,6 +130,7 @@ pub struct Workspace {
     pub(super) transcription: super::transcription::TranscriptionUi,
     pub(super) clip_info: super::clip_info::ClipInfo,
     pub(super) metadata_strip: bool,
+    pub(super) key_editor: super::keyframe_editor::Editor,
 }
 
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
@@ -217,6 +218,7 @@ impl Workspace {
             transcription: Default::default(),
             clip_info: Default::default(),
             metadata_strip: super::pool::strip_kept(),
+            key_editor: Default::default(),
         }
     }
 
@@ -249,6 +251,7 @@ impl Workspace {
             GuiPanel::Transcription => self.transcription.open = true,
             GuiPanel::Titles => self.left = LeftTab::Titles,
             GuiPanel::Inspector => self.left = LeftTab::Inspector,
+            GuiPanel::Keyframes => self.left = LeftTab::Keyframes,
             GuiPanel::Metadata => self.show_metadata_strip(true),
             GuiPanel::ClipInfo => self.open_clip_info(None),
             GuiPanel::Transform => self.show_picture_tool(PictureTool::Transform),
@@ -298,9 +301,10 @@ impl Workspace {
             GuiPanel::Help => self.help.open = false,
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
-            GuiPanel::Titles | GuiPanel::Inspector => {
+            GuiPanel::Titles | GuiPanel::Inspector | GuiPanel::Keyframes => {
                 let tab = match panel {
                     GuiPanel::Titles => LeftTab::Titles,
+                    GuiPanel::Keyframes => LeftTab::Keyframes,
                     _ => LeftTab::Inspector,
                 };
                 if self.left == tab {
@@ -339,6 +343,7 @@ impl Workspace {
             (GuiPanel::Transcription, self.transcription.open),
             (GuiPanel::Titles, self.left == LeftTab::Titles),
             (GuiPanel::Inspector, self.left == LeftTab::Inspector),
+            (GuiPanel::Keyframes, self.left == LeftTab::Keyframes),
             (GuiPanel::Metadata, self.metadata_strip),
             (GuiPanel::ClipInfo, self.clip_info.open),
             (GuiPanel::Transform, tool == Some(PictureTool::Transform)),
@@ -862,6 +867,10 @@ impl Workspace {
                 });
             });
             ui.menu_button("Timeline", |ui| {
+                if ui.button("Keyframes").clicked() {
+                    self.left = LeftTab::Keyframes;
+                    ui.close();
+                }
                 let mut on = self.snap.audio_scrubbing;
                 if ui.checkbox(&mut on, "Audio Scrubbing").clicked() {
                     self.send("player.audio_scrubbing", json!({ "on": on }));
@@ -1721,6 +1730,9 @@ impl Workspace {
                     if self.left != LeftTab::Inspector {
                         self.leave_inspector();
                     }
+                    if self.left != LeftTab::Keyframes {
+                        self.key_editor.leave();
+                    }
                     match self.left {
                         LeftTab::Pool => self.pool_panel(ui),
                         LeftTab::Titles => {
@@ -1730,6 +1742,10 @@ impl Workspace {
                         LeftTab::Inspector => {
                             self.pool_focus = false;
                             self.inspector_panel(ui);
+                        }
+                        LeftTab::Keyframes => {
+                            self.pool_focus = false;
+                            self.keyframe_panel(ui);
                         }
                     }
                 })

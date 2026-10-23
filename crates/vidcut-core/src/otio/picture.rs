@@ -586,7 +586,13 @@ fn file_curve(
         let at = timing.file((k.frame - source) as f64).round();
         let raw = y.and_then(|ys| ys.get(i).copied()).unwrap_or(k.value);
         let mut v = json!({ "Value": map(raw), "Variant Type": "Double" });
-        let bez = |h: Handle| json!([rounded(h.frames / timing.scale()), rounded(h.value * slope)]);
+        let bez = |h: Handle| {
+            let value = match y {
+                Some(_) => 0.0,
+                None => h.value * slope,
+            };
+            json!([rounded(h.frames / timing.scale()), rounded(value)])
+        };
         if let Some(h) = k.in_handle {
             v["InBez"] = bez(h);
         }
@@ -911,5 +917,39 @@ mod tests {
         };
         let shape = Shape::whole((1920, 1080));
         assert_eq!(read(&effects(&p, &shape, 0, 0, &steady()), &shape), Some(p));
+    }
+
+    #[test]
+    fn an_out_handle_offset_is_scaled_on_x_and_zero_on_y() {
+        let handle = Handle {
+            frames: 12.0,
+            value: 4.0,
+        };
+        let at = |value| Keyframe {
+            frame: 0,
+            value,
+            in_handle: None,
+            out_handle: Some(handle),
+        };
+        let p = Picture {
+            position_keys: vec![at(0.5)],
+            position_y: vec![0.5],
+            zoom_keys: vec![at(1.0)],
+            zoom_y: vec![1.0],
+            ..Picture::default()
+        };
+        let v = still_info(960, 1080).video.expect("video");
+        let written = effects(&p, &Shape::of(&v, (1920, 1080)), 0, 0, &steady());
+        let out = |id: &str| {
+            written[0]["metadata"][EDITOR]["Parameters"]
+                .as_array()
+                .and_then(|ps| ps.iter().find(|q| q["Parameter ID"] == id))
+                .and_then(|q| q["Key Frames"]["0"]["OutBez"].get(1))
+                .and_then(Value::as_f64)
+                .expect("out handle")
+        };
+        assert_eq!(out(PAN), 8.0);
+        assert_eq!(out(TILT), 0.0);
+        assert_eq!((out(ZOOM_X), out(ZOOM_Y)), (4.0, 0.0));
     }
 }
