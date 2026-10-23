@@ -6,7 +6,7 @@ use vidcut_core::model::{
     Clip, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind, ZoomBox,
 };
 use vidcut_core::ops::picture::{has_picture, zoom_shown};
-use vidcut_core::place::{Level, Placing, flipped};
+use vidcut_core::place::{Level, Placing, anchored, flipped};
 use vidcut_core::render::{Placed, Run};
 
 use super::timeline::tools::landing;
@@ -117,6 +117,7 @@ struct Shown {
     picture: Picture,
     level: Level,
     middle: [f64; 2],
+    anchor: [f64; 2],
     origin: Pos2,
     scale: Vec2,
     plain: Level,
@@ -124,9 +125,12 @@ struct Shown {
 }
 
 impl Shown {
-    fn screen(&self, uv: [f64; 2]) -> Pos2 {
-        let [x, y] = self.level.forward(uv);
+    fn at(&self, [x, y]: [f64; 2]) -> Pos2 {
         self.origin + vec2(x as f32 * self.scale.x, y as f32 * self.scale.y)
+    }
+
+    fn screen(&self, uv: [f64; 2]) -> Pos2 {
+        self.at(self.level.forward(uv))
     }
 
     fn uv(&self, p: Pos2) -> [f64; 2] {
@@ -153,7 +157,7 @@ impl Shown {
     }
 
     fn pivot(&self) -> Pos2 {
-        self.screen(self.middle)
+        self.at(self.anchor)
     }
 
     fn zoom(&self) -> DynamicZoom {
@@ -161,8 +165,7 @@ impl Shown {
     }
 
     fn on(&self, l: &Level, uv: [f64; 2]) -> Pos2 {
-        let [x, y] = l.forward(uv);
-        self.origin + vec2(x as f32 * self.scale.x, y as f32 * self.scale.y)
+        self.at(l.forward(uv))
     }
 
     fn back(&self, l: &Level, p: Pos2) -> [f64; 2] {
@@ -363,6 +366,7 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
     let ends = [level_of(fixed(z.start))?, level_of(fixed(z.end))?];
     Some(Shown {
         clip: c.id.clone(),
+        anchor: anchored(&shown, (w, h), fit),
         picture: shown,
         level,
         middle,
@@ -731,6 +735,11 @@ impl Workspace {
                     d.y = 0.0;
                 }
                 let [x0, y0] = p0.place();
+                let m = s.screen(s.middle);
+                let (ex, ey) = (
+                    f64::from((m.x - picture.min.x) / picture.width()) - x0,
+                    f64::from((m.y - picture.min.y) / picture.height()) - y0,
+                );
                 let mut x = x0 + f64::from(d.x / picture.width());
                 let mut y = y0 + f64::from(d.y / picture.height());
                 let mut guides = (None, None);
@@ -740,12 +749,12 @@ impl Workspace {
                             .into_iter()
                             .find(|l| ((v - l).abs() as f32) * span <= SNAP)
                     };
-                    if let Some(l) = near(x, picture.width()).filter(|_| x_free) {
-                        x = l;
+                    if let Some(l) = near(x + ex, picture.width()).filter(|_| x_free) {
+                        x = l - ex;
                         guides.0 = Some(l);
                     }
-                    if let Some(l) = near(y, picture.height()).filter(|_| y_free) {
-                        y = l;
+                    if let Some(l) = near(y + ey, picture.height()).filter(|_| y_free) {
+                        y = l - ey;
                         guides.1 = Some(l);
                     }
                 }
@@ -974,6 +983,10 @@ impl Workspace {
                 };
                 painter.line_segment([s.side(top), s.turn_at()], stroke);
                 painter.circle_filled(s.turn_at(), GRAB * 0.9, accent);
+                let anchor = s.pivot();
+                for arm in [vec2(GRAB, 0.0), vec2(0.0, GRAB)] {
+                    painter.line_segment([anchor - arm, anchor + arm], stroke);
+                }
             }
             PictureTool::Crop => {
                 let whole = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]].map(|uv| s.screen(uv));
@@ -1048,6 +1061,9 @@ pub(super) fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
     }
     if a.turn() != b.turn() {
         params["rotation"] = json!(b.turn());
+    }
+    if a.pivot() != b.pivot() {
+        params["anchor"] = json!(b.pivot());
     }
     if a.flip_horizontal != b.flip_horizontal {
         params["flip_horizontal"] = json!(b.flip_horizontal);
