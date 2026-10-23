@@ -108,36 +108,35 @@ fn is_volume(e: &Value) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Timing {
     pub speed: f64,
-    pub start: f64,
 }
 
 impl Timing {
-    fn retimed(&self) -> bool {
-        self.speed > 0.0 && self.speed != 1.0
-    }
-
-    fn offset(&self) -> f64 {
-        self.start * (1.0 - 1.0 / self.speed)
+    fn moving(&self) -> bool {
+        self.speed != 0.0
     }
 
     pub(crate) fn file(&self, frames: f64) -> f64 {
-        if self.retimed() {
-            frames / self.speed + self.offset()
+        if self.moving() {
+            frames / self.speed
         } else {
             frames
         }
     }
 
     pub(crate) fn source(&self, at: f64) -> f64 {
-        if self.retimed() {
-            self.speed * (at - self.offset())
-        } else {
-            at
-        }
+        if self.moving() { self.speed * at } else { at }
     }
 
     pub(crate) fn scale(&self) -> f64 {
-        if self.retimed() { self.speed } else { 1.0 }
+        if self.moving() { self.speed } else { 1.0 }
+    }
+
+    pub(crate) fn handle_names(&self) -> [&'static str; 2] {
+        if self.speed < 0.0 {
+            ["OutBez", "InBez"]
+        } else {
+            ["InBez", "OutBez"]
+        }
     }
 }
 
@@ -153,14 +152,15 @@ pub(super) fn gain_keys(item: &Value, timing: &Timing) -> Vec<Keyframe> {
         };
         crate::keyframes::checked_handle(h, before).ok()
     };
+    let [before, after] = timing.handle_names();
     let mut out: Vec<Keyframe> = keys
         .iter()
         .filter_map(|(t, k)| {
             Some(Keyframe {
                 frame: timing.source(t.parse::<f64>().ok()?).round() as i64,
                 value: k["Value"].as_f64()?.clamp(*GAIN.start(), *GAIN.end()),
-                in_handle: handle(k, "InBez", true),
-                out_handle: handle(k, "OutBez", false),
+                in_handle: handle(k, before, true),
+                out_handle: handle(k, after, false),
             })
         })
         .collect();
@@ -183,15 +183,16 @@ pub(super) fn drop_gain_keys(list: &mut Vec<Value>) {
 }
 
 fn key_frames(keys: &[Keyframe], source: i64, timing: &Timing) -> Value {
+    let [before, after] = timing.handle_names();
     let mut out = serde_json::Map::new();
     for k in keys {
         let at = timing.file((k.frame - source) as f64).round();
         let mut v = json!({ "Value": k.value, "Variant Type": "Double" });
         if let Some(h) = k.in_handle {
-            v["InBez"] = handle_value("InBez", h.frames / timing.scale(), h.value);
+            v[before] = handle_value(before, h.frames / timing.scale(), h.value);
         }
         if let Some(h) = k.out_handle {
-            v["OutBez"] = handle_value("OutBez", h.frames / timing.scale(), h.value);
+            v[after] = handle_value(after, h.frames / timing.scale(), h.value);
         }
         out.insert(frame_key(at), v);
     }

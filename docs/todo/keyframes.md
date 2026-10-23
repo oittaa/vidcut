@@ -69,7 +69,8 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 
 **The file** (OTIO, as Resolve exports it):
 
-- A keyframe time is a whole frame. It counts from the first source frame of the clip, the start of its `source_range`.
+- A keyframe time is a whole frame of the clip: the timeline frames from its first frame.
+  - At speed 1, this is the source frame less the first source frame of the clip, the start of its `source_range`.
   - This is so in media with a timecode too. A key on the second frame of a clip is at `1`.
 - Transform: Zoom X and Zoom Y have keyframes of their own. Pan and Tilt are fractions of the width and the height of the timeline. Rotation is in degrees.
   - A keyframe on Position keys X and Y. A later change of X alone adds a keyframe to X only.
@@ -80,7 +81,16 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - For a still, they are −g and 1000 − g. g is the timeline's `global_start_time` in frames.
 - Resolve reads a written file as written. Times, values and eases come back in its Inspector and in its next export.
 
-**Speed:** a speed change that stretches the keyframes keeps each keyframe on its source frame. In the file, a stretched keyframe is at its frame of the clip.
+**Speed:** a key time is the frame of the clip at any speed. The source frame is the first frame that the clip shows, plus the time times the speed.
+
+- At 50 %, a key 30 source frames into the clip is at `60`. At 200 %, it is at `15`.
+- A clip that plays backward shows its highest source frame first. Frame f shows that frame less f.
+  - A render of a clip with numbered frames showed this. vidcut plays a reversed clip the same way.
+  - Thus a key on source frame 239 of a clip that shows 388 first is at `149`.
+- These facts hold in media with a timecode too.
+- A speed change that stretches the keyframes keeps each key on its source frame. Played backward, Resolve's stretch moves each key by one source frame.
+- A speed change that does not stretch keeps the numbers in the file. Thus the keys go to other frames of the clip.
+- `Timing` converts the times both ways. In a clip that plays backward, the file's time runs against the source. Thus `Timing` swaps `InBez` and `OutBez`.
 
 **Curves** (from renders):
 
@@ -193,11 +203,6 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - Some keyframes stay in the kept effects, unplayed, with the warning of the import:
   - Step
   - an anchor point with keyed zoom or rotation
-
-**Unknown:**
-
-- The key times of a clip that plays backward, and of a clip at another speed in media with a timecode.
-  - vidcut writes the volume keyframes of a clip that plays backward as for speed 1.
 
 ## Scripting
 

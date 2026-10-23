@@ -291,10 +291,7 @@ fn with_picture(
     let Some(x) = &c.picture else {
         return effects;
     };
-    let timing = effects::Timing {
-        speed: c.speed(),
-        start: source as f64,
-    };
+    let timing = effects::Timing { speed: c.speed() };
     effects
         .into_iter()
         .filter(|e| !picture::is_placing(e))
@@ -705,10 +702,7 @@ pub fn export_drawn(
                     editor["Media In"] = json!(x);
                 }
                 let whole = c.audio_range().expect("has audio");
-                let timing = effects::Timing {
-                    speed: c.speed(),
-                    start: c.source_at(s) as f64,
-                };
+                let timing = effects::Timing { speed: c.speed() };
                 let effects = with_speed(
                     c,
                     effects::sound(au, c.source_at(s), (s > whole.0, e < whole.1), &timing),
@@ -1887,10 +1881,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     if let Some(s) = speed.as_mut() {
                         s.skip = meta["skip"].as_i64().unwrap_or(skip);
                     }
-                    let timing = effects::Timing {
-                        speed: x,
-                        start: start as f64,
-                    };
+                    let timing = effects::Timing { speed: x };
                     (
                         media,
                         meta["source_in"].as_i64().unwrap_or(first),

@@ -470,6 +470,7 @@ Import:
 - Names other than the defaults (`default_track_name`) name tracks.
 - Markers on clips, tracks and the stack become timeline markers.
 - Nested tracks, unknown items, clips without media and overlapping clips are left out, with a warning.
+- A clip and its sound keep only the frames that fall inside their media, at the clip's speed and in its direction. A warning tells how many frames went.
 - Media are looked for in this order:
   1. at the path
   2. by its last parts beside the file (`MediaRef::paths`)
