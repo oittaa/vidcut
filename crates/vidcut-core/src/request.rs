@@ -1043,6 +1043,32 @@ pub enum Request {
         #[serde(default)]
         download: bool,
     },
+    /// Normalize Audio Levels: set the volume (`gain_db`) of `clips` so
+    /// that their level reaches `target`. Each clip is measured over the
+    /// sound it plays, as the export mixes it, without its volume, mute,
+    /// Voice Isolation and transitions, and without its track's mixer. The
+    /// volume stops at -60 and +24 dB. One undo step; a dry run gives the
+    /// volumes and changes nothing. Returns each clip's `level` (null when
+    /// silent), its volume before (`from_db`) and after (`gain_db`), and
+    /// `held` when the volume stopped short of the target.
+    #[serde(rename = "clip.normalize")]
+    ClipNormalize {
+        clips: OneOrMany<ClipRef>,
+        /// What is measured and brought to `target`.
+        #[serde(default)]
+        mode: NormalizeMode,
+        /// The level to reach: LUFS with `loudness` (-60 to -5), dBFS with
+        /// `sample_peak` and dBTP with `true_peak` (-60 to 0). Default: -14
+        /// LUFS, as the export's loudness, or -1 for a peak.
+        #[serde(default)]
+        target: Option<f64>,
+        /// Set Level Relative: the clips count as one, so the loudest, with
+        /// its volume, reaches `target`, and every volume changes by the
+        /// same dB. Otherwise (Independent) each clip reaches `target`, and
+        /// a silent clip keeps its volume.
+        #[serde(default)]
+        relative: bool,
+    },
     /// The timeline's In and Out marks.
     #[serde(rename = "marks.get")]
     MarksGet {},
@@ -2550,6 +2576,21 @@ pub enum Detect {
     /// Whatever the speech detector (Silero VAD, on the CPU) doesn't hear as
     /// speech: applause and room noise too.
     Speech,
+}
+
+/// What `clip.normalize` measures (deviation X72).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NormalizeMode {
+    /// Integrated loudness (EBU R128, ITU-R BS.1770), in LUFS: how loud the
+    /// clip sounds over its length.
+    #[default]
+    Loudness,
+    /// The highest sample, in dBFS.
+    SamplePeak,
+    /// The highest true peak, between the samples too (ITU-R BS.1770), in
+    /// dBTP.
+    TruePeak,
 }
 
 /// Where `timeline.import` puts the timeline (deviation X9).

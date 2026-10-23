@@ -243,6 +243,7 @@ impl Env for FakeEnv {
             integrated,
             range: 0.0,
             true_peak: integrated + 6.0,
+            sample_peak: integrated + 5.0,
         })
     }
 

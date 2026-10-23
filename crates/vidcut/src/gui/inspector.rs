@@ -1181,11 +1181,16 @@ impl Workspace {
     ) {
         let count = sounds.len();
         let header = |ui: &mut egui::Ui| {
-            if count > 1 {
-                ui.label(dim(format!("{count} clips")));
-            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let normalize = ui.button("Normalize…").clicked();
+                if count > 1 {
+                    ui.label(dim(format!("{count} clips")));
+                }
+                normalize
+            })
+            .inner
         };
-        group(ui, "Audio", header, |ui| {
+        let normalize = group(ui, "Audio", header, |ui| {
             let first = &sounds[0];
             let set = sounds.iter().any(|s| s.gain != Key::Volume.usual());
             let volume = (set, first.gain, GAIN);
@@ -1204,6 +1209,9 @@ impl Workspace {
             });
             ui.end_row();
         });
+        if normalize {
+            self.open_normalize(sounds.iter().map(|s| s.id.clone()).collect());
+        }
     }
 
     fn show_boxes(&mut self, chosen: &[Chosen]) {

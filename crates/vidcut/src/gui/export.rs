@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use eframe::egui::{self, RichText};
@@ -19,6 +20,7 @@ use crate::live::{self, JobInfo, JobState, Origin};
 #[derive(Debug)]
 pub(super) struct Ask {
     slot: Arc<Mutex<Option<vidcut_core::Result<Response>>>>,
+    stop: Arc<AtomicBool>,
 }
 
 impl Ask {
@@ -29,16 +31,22 @@ impl Ask {
         params: Value,
     ) -> Self {
         let slot = Arc::new(Mutex::new(None));
-        let (out, live, ctx) = (slot.clone(), live.clone(), ctx.clone());
+        let stop = Arc::new(AtomicBool::new(false));
+        let (out, halt, live, ctx) = (slot.clone(), stop.clone(), live.clone(), ctx.clone());
         let envelope = Envelope::from_json(json!({ "method": method, "params": params }));
         let _ = crate::threads::spawn("vidcut-ask", crate::threads::Work::Interactive, move || {
+            let mut going = |_| !halt.load(Ordering::Relaxed);
             let result = envelope
                 .map_err(Error::internal)
-                .and_then(|e| live.call(e, Origin::Gui { drag: false }, None, &mut |_| true));
+                .and_then(|e| live.call(e, Origin::Gui { drag: false }, None, &mut going));
             *out.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
             ctx.request_repaint();
         });
-        Self { slot }
+        Self { slot, stop }
+    }
+
+    pub(super) fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 
     pub(super) fn take(&self) -> Option<vidcut_core::Result<Response>> {

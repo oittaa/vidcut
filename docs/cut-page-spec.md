@@ -710,6 +710,13 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - vidcut lets you keep, trim and play them first (deviation X48).
   - Remove cuts them and closes the gaps, as one undo step (D29).
   - There is no crossfade option (deviation X11).
+- **Normalize Audio Levels** (pp. 1110–1111):
+  - The Edit page and the Fairlight page have it. The Cut chapters do not name it.
+  - It sets the volume of the selected clips so that their level reaches a target. It applies no dynamics.
+  - Normalization Mode: several loudness standards, Sample Peak or True Peak.
+  - Set Level: Relative treats the clips as one clip. Independent gives each clip its own change.
+  - vidcut: `clip.normalize`, in Audio Operations of the right-click menu and in the Audio section of the Inspector (deviation X72).
+  - The defaults, the range and the measured part of a clip are in D80.
 
 ## 10. Quick Export (Ch. 39, pp. 788–790, 4095–4096, 4104–4109)
 
@@ -1837,3 +1844,24 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - In vidcut, only a cue that already overlaps the edited cue can do that (D56).
   - Such a cue stays as it is. Thus both cues show in that part, as they show together in the overlap.
   - Reason: a split would show its text twice. A trim would take frames outside the newly covered part.
+- **D80. Normalize Audio Levels** (§9; pp. 1110–1111; deviation X72).
+  - The manual does not give the defaults, the range of the target, or the part of a clip that is measured.
+  - Resolve's defaults were not checked.
+  - **Defaults:**
+    - The mode is Loudness, at −14 LUFS. This is the value for YouTube that the export's loudness setting names.
+    - Sample Peak and True Peak start at −1 dB. This is the true-peak limit of the export's loudness setting.
+    - Set Level is Independent.
+  - **Range:** −60 to −5 LUFS, as the export's loudness setting takes. A peak target is from −60 to 0 dB.
+  - **Measured part:** the sound that the clip plays, with its J or L cut and at its speed.
+    - The clip is measured alone, without its volume, mute and Voice Isolation, and without transitions.
+    - Its track's volume, mute, solo, Voice Isolation and ducking do not apply.
+    - Thus the mixer does not change the result. A muted clip is measured too.
+  - **Levels:**
+    - Loudness is the integrated loudness of EBU R128. A loudness at or below −70 LUFS counts as no level.
+    - Sample Peak is the highest sample. True Peak is the highest true peak of ITU-R BS.1770.
+  - **Gain:**
+    - Independent: the new volume is the target less the level. A clip with no level keeps its volume.
+    - Relative: the highest level plus volume reaches the target. Every volume changes by that same number of dB.
+    - The manual names the highest peak for Relative. vidcut uses the highest level for each mode.
+  - Each volume stops at −60 dB and +24 dB (D12). The result marks each clip that stopped (`held`).
+  - Reason: the export already measures EBU R128 loudness and true peak. Thus the two features agree.

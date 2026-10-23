@@ -30,6 +30,7 @@ flowchart TD
 | `edit.detect_scene_cuts`, `analyze.scenes` | `Env::picture_stats`: the smaller of each frame's difference from the last and the change in that difference; the first frame scores 0 | `analysis::scene_cuts`; the edit then calls `ops::split_clip` |
 | `analyze.black` | `Env::picture_stats`: each frame's black share | `analysis::black_parts` |
 | `analyze.loudness` | `Env::loudness` of the flattened timeline | none |
+| `clip.normalize` | `Env::loudness` of each clip alone (`render::sound_alone`) | `normalize::gains`; the edit then calls `ops::set_clips` |
 | `timeline.boring` | none: clip lengths | `analysis::boring` |
 
 - Given `parts`, `edit.ripple_delete_silence` measures nothing.
@@ -58,6 +59,7 @@ flowchart TD
 
 - `Live::measuring` lists the media (and audio streams) of the clips that the two edits name.
 - `Live::duck_measure` does the same for `track.set` with `duck`: the files of the sources that the ducking will have (`duck::patched`, `duck::sounds`).
+- `Live::loudness_measure` measures each clip of `clip.normalize` alone. `AvEnv` keeps each loudness by its plan (`LOUD`), and the edit reads it there.
 - A `vidcut-measure` thread at job priority measures them into the memo and disk cache of `AvEnv`. This thread yields to playback.
 - Then it sends `Msg::Measured`.
 - The session thread then runs the edit on the project as it is at that time. The measurements of the edit return at once.

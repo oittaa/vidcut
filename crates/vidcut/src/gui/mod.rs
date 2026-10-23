@@ -19,6 +19,7 @@ mod isolation;
 mod look_tiles;
 mod looks;
 mod mixer;
+mod normalize;
 mod onscreen;
 pub mod picture;
 mod placing;

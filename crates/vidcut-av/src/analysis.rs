@@ -415,6 +415,7 @@ pub fn mix_loudness(
         integrated: f64::NEG_INFINITY,
         range: 0.0,
         true_peak: f64::NEG_INFINITY,
+        sample_peak: f64::NEG_INFINITY,
     };
     let drain = |graph: &mut filter::Graph, result: &mut Loudness| {
         let mut out = frame::Audio::empty();
@@ -440,12 +441,17 @@ pub fn mix_loudness(
     };
     let ch = usize::from(channels);
     let mut done = 0i64;
+    let mut peak = 0f32;
     while done < total {
         if stopped(cancel) {
             return Err(Error::Invalid(crate::export::CANCELLED.into()));
         }
         let n = (total - done).min(4096) as usize;
         let samples = mix.read(n)?;
+        peak = samples
+            .iter()
+            .take(n * ch)
+            .fold(peak, |m, s| m.max(s.abs()));
         let mut f = frame::Audio::new(
             format::Sample::F32(format::sample::Type::Packed),
             n,
@@ -475,6 +481,9 @@ pub fn mix_loudness(
     drain(&mut graph, &mut result);
     if result.integrated <= -70.0 {
         result.integrated = f64::NEG_INFINITY;
+    }
+    if peak > 0.0 {
+        result.sample_peak = 20.0 * f64::from(peak).log10();
     }
     Ok(result)
 }

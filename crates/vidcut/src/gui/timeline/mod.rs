@@ -201,6 +201,7 @@ pub struct TimelineView {
     pub duration_dialog: Option<String>,
     pub speed_dialog: Option<SpeedDialog>,
     pub silence: Option<tools::SilenceDialog>,
+    pub normalize: Option<super::normalize::NormalizeDialog>,
     pub boring_dialog: Option<(f64, i64)>,
     pub dynamic: Option<tools::Dynamic>,
     pub strip_drag: Option<(EditSel, i64)>,
@@ -249,6 +250,7 @@ impl Default for TimelineView {
             speed_dialog: None,
             enlarged: None,
             silence: None,
+            normalize: None,
             boring_dialog: None,
             dynamic: None,
             strip_drag: None,
@@ -1044,6 +1046,7 @@ impl Workspace {
         self.fade_window(ui.ctx());
         self.speed_window(ui.ctx());
         self.silence_window(ui.ctx());
+        self.normalize_window(ui.ctx());
         self.boring_window(ui.ctx());
         self.subtitle_windows(ui.ctx());
         self.title_tick();
@@ -2245,6 +2248,10 @@ impl Workspace {
             ui.menu_button("Audio Operations", |ui| {
                 if ui.button("Ripple Delete Silence…").clicked() {
                     self.open_silence(clips.clone());
+                    ui.close();
+                }
+                if ui.button("Normalize Audio Levels…").clicked() {
+                    self.open_normalize(sounding.clone());
                     ui.close();
                 }
             });

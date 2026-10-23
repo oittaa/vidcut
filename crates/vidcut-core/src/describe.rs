@@ -171,6 +171,7 @@ pub fn describe_at(
         "track.remove" => format!("Remove track {}", d.text("track")),
         "track.set" => d.track_set(),
         "clip.set" => d.clip_set(),
+        "clip.normalize" => format!("Normalize the audio levels of {}", d.clips("clips")),
         "marks.set" => d.marks_set("Timeline marks".into(), project.map(|p| &p.marks)),
         "marks.clear" => "Clear the timeline marks".into(),
         "markers.add" => format!("Marker at {}{}", d.time("at"), d.named()),

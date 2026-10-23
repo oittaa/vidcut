@@ -1,6 +1,7 @@
 mod dissolve;
 pub mod filmstrip;
 mod follow;
+pub mod normalize;
 pub mod picture;
 pub mod subtitles;
 pub mod titles;

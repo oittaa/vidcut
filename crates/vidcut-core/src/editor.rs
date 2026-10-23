@@ -2979,6 +2979,44 @@ fn mutate(
             ops::set_clips(p, &ids, &props)?;
             Value::Null
         }
+        Request::ClipNormalize {
+            clips,
+            mode,
+            target,
+            relative,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            if ids.is_empty() {
+                return Err(Error::usage("clip.normalize needs at least one clip"));
+            }
+            let target = ops::normalize::checked_target(*mode, *target)?;
+            let mut measured = Vec::new();
+            for id in &ids {
+                let plan = crate::render::sound_alone(p, id)?;
+                let gain_db = p
+                    .clip(id)
+                    .and_then(|c| c.audio.as_ref())
+                    .map_or(0.0, |a| a.gain_db);
+                measured.push(ops::normalize::Measured {
+                    id: id.clone(),
+                    gain_db,
+                    level: ops::normalize::level(*mode, &env.loudness(&plan)?),
+                });
+            }
+            let mut out = Vec::new();
+            for n in ops::normalize::gains(&measured, target, *relative) {
+                let props = ClipProps {
+                    gain_db: Some(n.gain_db),
+                    ..ClipProps::default()
+                };
+                ops::set_clips(p, std::slice::from_ref(&n.id), &props)?;
+                out.push(json!({
+                    "clip": n.id, "level": n.level, "from_db": n.from_db,
+                    "gain_db": n.gain_db, "held": n.held,
+                }));
+            }
+            json!({ "target": target, "clips": out })
+        }
         Request::EditCut { clips } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let copied = ops::copy_clips(p, &ids)?;
