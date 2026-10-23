@@ -52,7 +52,7 @@ pub fn find_among(path: &Path, names: &HashSet<String>) -> Result<ImageSequence>
             })
         });
     let named = |k: u64| match padded {
-        true => format!("{prefix}{k:0width$}{suffix}"),
+        true => format!("{prefix}{}{suffix}", crate::model::padded_frame(k, width)),
         false => format!("{prefix}{k}{suffix}"),
     };
     if !names.contains(&named(n)) {

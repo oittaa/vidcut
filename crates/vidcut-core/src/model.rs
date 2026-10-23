@@ -466,6 +466,12 @@ impl Media {
     }
 }
 
+pub const FRAME_PAD_MAX: usize = 32;
+
+pub fn padded_frame(n: u64, width: usize) -> String {
+    format!("{n:0width$}", width = width.min(FRAME_PAD_MAX))
+}
+
 /// Numbered image files making one clip: the pictures of a render
 /// or a scan, one file per frame.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -492,7 +498,11 @@ impl ImageSequence {
                 continue;
             }
             let digits = rest.find('d').unwrap_or(0);
-            out.push_str(&number(rest[..digits].parse().unwrap_or(0)));
+            let width = rest[..digits]
+                .parse::<usize>()
+                .unwrap_or(0)
+                .min(FRAME_PAD_MAX);
+            out.push_str(&number(width));
             rest = &rest[(digits + 1).min(rest.len())..];
         }
         out.push_str(rest);
@@ -510,12 +520,18 @@ impl ImageSequence {
     }
 
     pub fn name(&self, n: u64) -> String {
-        self.fill(|w| format!("{n:0w$}"))
+        self.fill(|w| padded_frame(n, w))
     }
 
     pub fn display(&self) -> String {
         let last = self.first + self.count.saturating_sub(1);
-        self.fill(|w| format!("[{:0w$}-{last:0w$}]", self.first))
+        self.fill(|w| {
+            format!(
+                "[{}-{}]",
+                padded_frame(self.first, w),
+                padded_frame(last, w)
+            )
+        })
     }
 
     pub fn file(&self, dir: &Path, k: u64) -> PathBuf {
@@ -2484,7 +2500,7 @@ impl Eq for SubtitleWords {}
 
 #[cfg(test)]
 mod tests {
-    use super::{Kept, Settings};
+    use super::{FRAME_PAD_MAX, ImageSequence, Kept, Settings, padded_frame};
     use crate::time::TimeSpec;
 
     #[test]
@@ -2494,6 +2510,18 @@ mod tests {
             serde_json::to_string(&kept).unwrap(),
             r#"{"OTIO_SCHEMA":"Transition.1"}"#
         );
+    }
+
+    #[test]
+    fn a_huge_frame_pad_stays_within_the_cap() {
+        assert_eq!(padded_frame(7, FRAME_PAD_MAX + 1_000).len(), FRAME_PAD_MAX);
+        let s = ImageSequence {
+            pattern: "%0999999999d.png".into(),
+            first: 1,
+            count: 1,
+        };
+        assert_eq!(s.name(1).len(), FRAME_PAD_MAX + ".png".len());
+        assert_eq!(s.parts().1, FRAME_PAD_MAX);
     }
 
     #[test]

@@ -1415,6 +1415,9 @@ fn sequence_ref(r: &Value, base: Option<&Path>, fps: Rational) -> Result<MediaRe
     }
     let start = r["start_frame"].as_i64().unwrap_or(1);
     let padding = r["frame_zero_padding"].as_u64().unwrap_or(0) as usize;
+    if padding > crate::model::FRAME_PAD_MAX {
+        return Err(bad("pads the frame number too much"));
+    }
     let first = format!(
         "{}{start:0padding$}{}",
         r["name_prefix"].as_str().unwrap_or(""),
