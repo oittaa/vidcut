@@ -3047,13 +3047,6 @@ fn mutate(
             }
             json!({ "target": target, "clips": out })
         }
-        Request::KeyframesList { clips } => {
-            let ids = clips
-                .as_ref()
-                .map(|c| resolve_clips(p, &c.to_vec(), playhead))
-                .transpose()?;
-            ops::keyframes::list(p, ids.as_deref())?
-        }
         Request::KeyframesAdd {
             clips,
             param: _,
@@ -5960,6 +5953,13 @@ pub fn query(
                 })
                 .collect();
             json!({ "at": at, "at_tc": tc(at), "clips": items })
+        }
+        Request::KeyframesList { clips } => {
+            let ids = clips
+                .as_ref()
+                .map(|c| resolve_clips(p, &c.to_vec(), playhead))
+                .transpose()?;
+            ops::keyframes::list(p, ids.as_deref())?
         }
         Request::TimelineEditPoints {} => {
             let points = p
