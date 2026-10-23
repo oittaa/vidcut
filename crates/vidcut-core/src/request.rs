@@ -2109,6 +2109,13 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         center: Option<bool>,
     },
+    /// Full screen or the enhanced viewer.
+    /// `full_screen` fills the display with the viewer (Shift+F).
+    /// `enhanced` fills the page with the viewer (Alt+F).
+    /// `page` is the usual layout. Esc in the GUI returns to `page`.
+    /// The choice lasts for this session. It is not in the project.
+    #[serde(rename = "viewer.frame")]
+    ViewerFrame { mode: ViewerFrame },
     /// Open a media item in the viewer as Source Clip, optionally at a source time.
     #[serde(rename = "viewer.load")]
     ViewerLoad {
@@ -2191,6 +2198,15 @@ pub enum Request {
     /// not saved with the project. Without `on`, toggles (Ctrl+/).
     #[serde(rename = "player.loop")]
     PlayerLoop {
+        #[serde(default)]
+        on: Option<bool>,
+    },
+    /// Fast Review (decision D97): Play and Space run a long clip faster than
+    /// a short one. A clip of 10 seconds or less plays at 1×. A longer clip
+    /// plays at its seconds divided by 10, at most 8×. J and L keep their
+    /// shuttle speeds. Off by default. Not saved. Without `on`, toggles.
+    #[serde(rename = "player.fast_review")]
+    PlayerFastReview {
         #[serde(default)]
         on: Option<bool>,
     },
@@ -2308,6 +2324,18 @@ pub enum Request {
     /// the timeline's zoom and Timeline Options, and the windows open.
     #[serde(rename = "gui.state")]
     GuiState {},
+    /// What an edit takes from the source. The toggles beside the upper timeline.
+    /// `video_only` drops the sound. `audio_only` drops the picture.
+    /// The two cannot both be on. Setting one on turns the other off.
+    /// A field left out stays as it is.
+    /// The choice lasts for this session. It is not in the project.
+    #[serde(rename = "gui.only")]
+    GuiOnly {
+        #[serde(default)]
+        video_only: Option<bool>,
+        #[serde(default)]
+        audio_only: Option<bool>,
+    },
     /// The target track, as a click on a track header's name picks it:
     /// edit functions put clips there (spec D3). Answers what `gui.state`
     /// does.
@@ -2820,6 +2848,37 @@ pub enum ViewerMode {
 impl ViewerMode {
     pub fn is_source(self) -> bool {
         self != Self::Timeline
+    }
+}
+
+/// How much of the window the viewer fills.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerFrame {
+    #[default]
+    Page,
+    Enhanced,
+    FullScreen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewerFrameKey {
+    FullScreen,
+    Enhanced,
+    Escape,
+}
+
+pub fn viewer_frame_after(frame: ViewerFrame, key: ViewerFrameKey) -> ViewerFrame {
+    match key {
+        ViewerFrameKey::Escape => ViewerFrame::Page,
+        ViewerFrameKey::FullScreen => match frame {
+            ViewerFrame::FullScreen => ViewerFrame::Page,
+            ViewerFrame::Page | ViewerFrame::Enhanced => ViewerFrame::FullScreen,
+        },
+        ViewerFrameKey::Enhanced => match frame {
+            ViewerFrame::Enhanced => ViewerFrame::Page,
+            ViewerFrame::Page | ViewerFrame::FullScreen => ViewerFrame::Enhanced,
+        },
     }
 }
 
@@ -3391,6 +3450,7 @@ impl Request {
             self,
             Self::ProjectOpen { .. }
                 | Self::ViewerSet { .. }
+                | Self::ViewerFrame { .. }
                 | Self::ViewerLoad { .. }
                 | Self::PlayerPlay { .. }
                 | Self::PlayerPause { .. }
@@ -3402,6 +3462,7 @@ impl Request {
                 | Self::PlayerStats { .. }
                 | Self::PlayerAudioScrubbing { .. }
                 | Self::PlayerLoop { .. }
+                | Self::PlayerFastReview { .. }
                 | Self::MixerPreview { .. }
                 | Self::PoolSet { .. }
                 | Self::SelectionGet {}
@@ -3413,6 +3474,7 @@ impl Request {
                 | Self::GuiShow { .. }
                 | Self::GuiClose { .. }
                 | Self::GuiState {}
+                | Self::GuiOnly { .. }
                 | Self::GuiTarget { .. }
                 | Self::GuiTimeline(_)
                 | Self::GuiTrimEditor { .. }
@@ -3898,6 +3960,89 @@ mod tests {
                 center: None,
             }
         ));
+    }
+
+    #[test]
+    fn gui_only_reads_video_only() {
+        let request =
+            Request::from_parts("gui.only", Some(serde_json::json!({ "video_only": true })))
+                .unwrap();
+        assert_eq!(
+            request,
+            Request::GuiOnly {
+                video_only: Some(true),
+                audio_only: None,
+            }
+        );
+    }
+
+    #[test]
+    fn fast_review_with_no_field_toggles() {
+        let request =
+            Request::from_parts("player.fast_review", Some(serde_json::json!({}))).unwrap();
+        assert_eq!(request, Request::PlayerFastReview { on: None });
+    }
+
+    #[test]
+    fn viewer_frame_sets_full_screen() {
+        let request = Request::from_parts(
+            "viewer.frame",
+            Some(serde_json::json!({ "mode": "full_screen" })),
+        )
+        .unwrap();
+        assert_eq!(
+            request,
+            Request::ViewerFrame {
+                mode: ViewerFrame::FullScreen,
+            }
+        );
+    }
+
+    #[test]
+    fn viewer_frame_sets_the_enhanced_viewer() {
+        let request = Request::from_parts(
+            "viewer.frame",
+            Some(serde_json::json!({ "mode": "enhanced" })),
+        )
+        .unwrap();
+        assert_eq!(
+            request,
+            Request::ViewerFrame {
+                mode: ViewerFrame::Enhanced,
+            }
+        );
+    }
+
+    #[test]
+    fn shift_f_toggles_full_screen() {
+        assert_eq!(
+            viewer_frame_after(ViewerFrame::Page, ViewerFrameKey::FullScreen),
+            ViewerFrame::FullScreen
+        );
+    }
+
+    #[test]
+    fn shift_f_again_returns_to_the_page() {
+        assert_eq!(
+            viewer_frame_after(ViewerFrame::FullScreen, ViewerFrameKey::FullScreen),
+            ViewerFrame::Page
+        );
+    }
+
+    #[test]
+    fn alt_f_from_full_screen_opens_the_enhanced_viewer() {
+        assert_eq!(
+            viewer_frame_after(ViewerFrame::FullScreen, ViewerFrameKey::Enhanced),
+            ViewerFrame::Enhanced
+        );
+    }
+
+    #[test]
+    fn escape_leaves_the_enhanced_viewer() {
+        assert_eq!(
+            viewer_frame_after(ViewerFrame::Enhanced, ViewerFrameKey::Escape),
+            ViewerFrame::Page
+        );
     }
 
     #[test]

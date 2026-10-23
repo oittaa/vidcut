@@ -6,7 +6,9 @@ use eframe::egui::{
 };
 use serde_json::json;
 use vidcut_core::model::{Media, Project, TrackKind};
-use vidcut_core::request::{TimecodeDisplay, ViewerMode};
+use vidcut_core::request::{
+    TimecodeDisplay, ViewerFrame, ViewerFrameKey, ViewerMode, viewer_frame_after,
+};
 use vidcut_core::time::parse_frame_number;
 
 use super::pool::elide;
@@ -134,6 +136,59 @@ impl Workspace {
     }
 
     pub(super) fn viewer_panel(&mut self, ui: &mut egui::Ui) {
+        self.viewer_keys(ui.ctx());
+        let frame = self.snap.viewer_frame;
+        super::window::show_fullscreen(ui.ctx(), frame == ViewerFrame::FullScreen);
+        if frame == ViewerFrame::Page {
+            self.viewer_body(ui);
+            return;
+        }
+        let ctx = ui.ctx().clone();
+        let screen = ctx.input(|i| i.viewport_rect());
+        egui::Area::new(egui::Id::unique("viewer-frame"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .show(&ctx, |ui| {
+                ui.set_min_size(screen.size());
+                let rect = Rect::from_min_size(screen.min, screen.size());
+                ui.painter()
+                    .rect_filled(rect, CornerRadius::ZERO, theme::colors().panel_dark);
+                let _cover = ui.interact(rect, ui.scope_id().with("cover"), Sense::click());
+                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink(8.0)));
+                self.viewer_body(&mut child);
+            });
+    }
+
+    fn viewer_keys(&mut self, ctx: &egui::Context) {
+        if ctx.egui_wants_keyboard_input() || self.asking() {
+            return;
+        }
+        let frame = self.snap.viewer_frame;
+        if frame != ViewerFrame::Page
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape))
+        {
+            self.send_frame(ViewerFrame::Page);
+            return;
+        }
+        let key = ctx.input_mut(|i| {
+            if i.consume_key(egui::Modifiers::SHIFT, Key::F) {
+                Some(ViewerFrameKey::FullScreen)
+            } else if i.consume_key(egui::Modifiers::ALT, Key::F) {
+                Some(ViewerFrameKey::Enhanced)
+            } else {
+                None
+            }
+        });
+        if let Some(key) = key {
+            self.send_frame(viewer_frame_after(frame, key));
+        }
+    }
+
+    fn send_frame(&self, mode: ViewerFrame) {
+        self.send("viewer.frame", json!({ "mode": mode }));
+    }
+
+    fn viewer_body(&mut self, ui: &mut egui::Ui) {
         let mode = self.snap.viewer;
         let id = PlayerId::of(mode);
         let modes = [
@@ -144,12 +199,12 @@ impl Workspace {
         let row = Row {
             left: &modes,
             fill: Some((Header::Title, Align::Min)),
-            right: &[Header::Duration],
-            leaving: &[modes[1], modes[0], modes[2]],
+            right: &[Header::FullScreen, Header::Duration],
+            leaving: &[modes[1], modes[0], modes[2], Header::FullScreen],
             group: |h| match h {
                 Header::Mode(_) => 0,
                 Header::Title => 1,
-                Header::Duration => 2,
+                Header::FullScreen | Header::Duration => 2,
             },
         };
         ui.horizontal(|ui| {
@@ -168,6 +223,17 @@ impl Workspace {
                 }
                 Header::Title => {
                     ui.add(egui::Label::new(RichText::new(ws.viewer_title()).strong()).truncate())
+                }
+                Header::FullScreen => {
+                    let on = ws.snap.viewer_frame == ViewerFrame::FullScreen;
+                    let r = ui.selectable_label(on, "Full Screen");
+                    if r.clicked() {
+                        ws.send_frame(viewer_frame_after(
+                            ws.snap.viewer_frame,
+                            ViewerFrameKey::FullScreen,
+                        ));
+                    }
+                    r
                 }
                 Header::Duration => ui.scope(|ui| ws.duration_field(ui)).response,
             });
@@ -328,6 +394,7 @@ impl Workspace {
         if let Some(stats) = self.stats.as_ref().filter(|_| self.snap.stats) {
             stats_panel(&painter, picture, stats);
         }
+        self.skim(ui, id, picture, player.frames);
 
         ui.add_space(4.0);
         if tools {
@@ -336,7 +403,12 @@ impl Workspace {
             });
         }
         if mode.is_source() {
-            self.scroll_bar(ui);
+            ui.horizontal(|ui| {
+                self.jog_edge(ui, true);
+                let width = (ui.available_width() - 88.0).max(40.0);
+                ui.allocate_ui(vec2(width, 28.0), |ui| self.scroll_bar(ui));
+                self.jog_edge(ui, false);
+            });
         } else {
             self.clip_edge_hint(ui);
         }
@@ -591,6 +663,7 @@ impl Workspace {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, CornerRadius::same(2), theme::colors().track);
         let frames = self.snap.source.frames.max(1);
+        self.skim(ui, PlayerId::Source, rect, frames);
         let x = |f: i64| rect.left() + rect.width() * (f as f32 / frames as f32);
         let frame_at = |px: f32| {
             (((px - rect.left()) / rect.width()).clamp(0.0, 1.0) * frames as f32).round() as i64
@@ -744,12 +817,7 @@ impl Workspace {
                     }
                 }
                 Some(Drag::TapeMark { frame, is_in, .. }) if resp.dragged() => {
-                    let end = self.snap.source.frames;
-                    *frame = if *is_in {
-                        f.clamp(0, end - 1)
-                    } else {
-                        (f + 1).clamp(1, end)
-                    };
+                    *frame = tape_mark(f, self.snap.source.frames, *is_in);
                 }
                 _ => {}
             }
@@ -811,6 +879,131 @@ impl Workspace {
         });
     }
 
+    fn jog_control(&mut self, ui: &mut egui::Ui, id: PlayerId, position: i64) -> egui::Response {
+        let r = ui.button("Jog");
+        let key = r.id;
+        if r.drag_started() {
+            ui.data_mut(|d| d.insert_temp(key, (position, 0.0f32, position)));
+        }
+        if r.dragged()
+            && let Some((origin, mut px, mut sent)) =
+                ui.data(|d| d.get_temp::<(i64, f32, i64)>(key))
+        {
+            px += r.drag_delta().x;
+            let frame = origin + jog_steps(px);
+            if frame != sent {
+                sent = frame;
+                self.seek(id, frame, true);
+            }
+            ui.data_mut(|d| d.insert_temp(key, (origin, px, sent)));
+        }
+        if r.drag_stopped() {
+            ui.data_mut(|d| d.remove_temp::<(i64, f32, i64)>(key));
+        }
+        r.on_hover_text("Drag to scrub")
+    }
+
+    fn jog_edge(&mut self, ui: &mut egui::Ui, is_in: bool) {
+        let r = ui.button(if is_in { "Jog In" } else { "Jog Out" });
+        let key = r.id;
+        if r.drag_started() {
+            ui.data_mut(|d| d.insert_temp(key, (0.0f32, 0i64)));
+        }
+        let mut dragged = false;
+        if r.dragged()
+            && let Some((mut px, mut sent)) = ui.data(|d| d.get_temp::<(f32, i64)>(key))
+        {
+            dragged = true;
+            px += r.drag_delta().x;
+            let steps = jog_steps(px);
+            let by = steps - sent;
+            if by != 0 {
+                self.nudge_mark(is_in, by);
+                sent = steps;
+            }
+            ui.data_mut(|d| d.insert_temp(key, (px, sent)));
+        }
+        if r.drag_stopped() {
+            ui.data_mut(|d| d.remove_temp::<(f32, i64)>(key));
+        }
+        if r.clicked() && !dragged {
+            self.nudge_mark(is_in, 1);
+        }
+    }
+
+    fn nudge_mark(&mut self, is_in: bool, by: i64) {
+        if self.snap.viewer == ViewerMode::SourceTape
+            && let Some((inn, out)) = self.crossing_span()
+        {
+            let tape_end = self
+                .snap
+                .tape
+                .last()
+                .map(|e| e.start + e.frames)
+                .unwrap_or(0);
+            let len = tape_end.max(self.snap.source.frames).max(0);
+            let (inn, out) = jogged_mark(is_in, inn, out, by, len);
+            let order = self.tape_order();
+            if is_in {
+                self.send("tape.marks.set", json!({ "in": inn, "order": order }));
+            } else {
+                self.send("tape.marks.set", json!({ "out": out, "order": order }));
+            }
+            return;
+        }
+        let Some(media) = self.snap.source_at().map(|(m, _)| m.to_string()) else {
+            return;
+        };
+        let len = self.media_frames(&media);
+        let marks = self
+            .project()
+            .and_then(|p| p.media(&media).map(|m| m.marks.clone()))
+            .unwrap_or_default();
+        let (inn, out) = jogged_mark(
+            is_in,
+            marks.mark_in.unwrap_or(0),
+            marks.mark_out.unwrap_or(len),
+            by,
+            len,
+        );
+        if is_in {
+            self.send("media.marks.set", json!({ "media": media, "in": inn }));
+        } else {
+            self.send("media.marks.set", json!({ "media": media, "out": out }));
+        }
+    }
+
+    fn skim(&mut self, ui: &egui::Ui, id: PlayerId, rect: Rect, frames: i64) {
+        if ui.ctx().egui_wants_keyboard_input() || self.asking() {
+            return;
+        }
+        let (held, pos) = ui.input(|i| {
+            let held = i.key_down(Key::C) && !i.modifiers.command && !i.modifiers.alt;
+            (held, i.pointer.hover_pos())
+        });
+        let key = egui::Id::unique("skim-frame");
+        if !held {
+            ui.data_mut(|d| d.remove_temp::<i64>(key));
+            return;
+        }
+        let Some(pos) = pos.filter(|p| rect.contains(*p)) else {
+            return;
+        };
+        if self.drag.is_some() {
+            return;
+        }
+        let frame = skim_frame(pos.x, rect.left(), rect.width(), frames);
+        let seen = ui.data(|d| d.get_temp::<i64>(key));
+        if seen == Some(frame) {
+            return;
+        }
+        ui.data_mut(|d| d.insert_temp(key, frame));
+        if seen.is_none() && self.snap.player(id).playing {
+            self.send("player.pause", json!({}));
+        }
+        self.seek(id, frame, true);
+    }
+
     fn transport(
         &mut self,
         ui: &mut egui::Ui,
@@ -824,11 +1017,13 @@ impl Workspace {
         let left: Vec<Transport> = [
             tools.then_some(T::Tools),
             trim.map(|_| T::TrimOut),
+            Some(T::Jog),
             Some(T::Previous),
             Some(T::Stop),
             Some(T::Play),
             Some(T::Next),
             Some(T::Loop),
+            Some(T::FastReview),
             trim.map(|_| T::TrimIn),
             Some(T::MarkIn),
             Some(T::MarkOut),
@@ -848,6 +1043,8 @@ impl Workspace {
                 T::MarkOut,
                 T::MarkIn,
                 T::Tools,
+                T::FastReview,
+                T::Jog,
                 T::Loop,
                 T::TrimIn,
                 T::TrimOut,
@@ -860,7 +1057,7 @@ impl Workspace {
             group: |t| match t {
                 T::Tools => 5,
                 T::TrimOut => 0,
-                T::Previous | T::Stop | T::Play | T::Next | T::Loop => 1,
+                T::Jog | T::Previous | T::Stop | T::Play | T::Next | T::Loop | T::FastReview => 1,
                 T::TrimIn => 2,
                 T::MarkIn | T::MarkOut | T::Clear | T::Speed => 3,
                 T::SafeArea => 6,
@@ -884,6 +1081,7 @@ impl Workspace {
                         ui.horizontal(|ui| ws.trim_pair(ui, e, t == T::TrimOut))
                             .response
                     }
+                    T::Jog => ws.jog_control(ui, id, player.position),
                     T::Previous => {
                         let r = ui.button(big("⏮"));
                         if r.clicked() {
@@ -918,6 +1116,14 @@ impl Workspace {
                         let r = ui.selectable_label(looping, big(egui_phosphor::regular::REPEAT));
                         if r.clicked() {
                             ws.send("player.loop", json!({ "on": !looping }));
+                        }
+                        r
+                    }
+                    T::FastReview => {
+                        let on = ws.snap.fast_review;
+                        let r = ui.selectable_label(on, "Fast Review");
+                        if r.clicked() {
+                            ws.send("player.fast_review", json!({ "on": !on }));
                         }
                         r
                     }
@@ -1264,6 +1470,7 @@ impl Workspace {
 enum Header {
     Mode(ViewerMode),
     Title,
+    FullScreen,
     Duration,
 }
 
@@ -1279,11 +1486,13 @@ const TOOLS_ROW: f32 = 28.0;
 enum Transport {
     Tools,
     TrimOut,
+    Jog,
     Previous,
     Stop,
     Play,
     Next,
     Loop,
+    FastReview,
     TrimIn,
     MarkIn,
     MarkOut,
@@ -1291,6 +1500,47 @@ enum Transport {
     Speed,
     SafeArea,
     Timecode,
+}
+
+const JOG_PIXELS: f32 = 8.0;
+
+fn jog_steps(pixels: f32) -> i64 {
+    if !pixels.is_finite() {
+        return 0;
+    }
+    (pixels / JOG_PIXELS).trunc() as i64
+}
+
+fn jogged_mark(is_in: bool, inn: i64, out: i64, by: i64, len: i64) -> (i64, i64) {
+    let len = len.max(0);
+    if len == 0 {
+        return (inn, out);
+    }
+    if is_in {
+        let limit = (out - 1).clamp(0, len);
+        ((inn + by).clamp(0, limit), out)
+    } else {
+        let start = inn.saturating_add(1).min(len);
+        (inn, (out + by).clamp(start, len))
+    }
+}
+
+fn skim_frame(x: f32, left: f32, width: f32, frames: i64) -> i64 {
+    if frames <= 1 || !width.is_finite() || width <= 0.0 {
+        return 0;
+    }
+    let t = ((x - left) / width).clamp(0.0, 1.0);
+    let frame = (t * frames as f32).floor() as i64;
+    frame.clamp(0, frames - 1)
+}
+
+fn tape_mark(pointer: i64, end: i64, is_in: bool) -> i64 {
+    let end = end.max(1);
+    if is_in {
+        pointer.clamp(0, end - 1)
+    } else {
+        (pointer + 1).clamp(1, end)
+    }
 }
 
 fn paint_guides(painter: &egui::Painter, picture: Rect, guides: &vidcut_core::preferences::Guides) {
@@ -1449,7 +1699,72 @@ pub(super) fn timecode_input(text: &str, dropped: i64) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::timecode_input;
+    use super::{jog_steps, jogged_mark, skim_frame, tape_mark, timecode_input};
+
+    #[test]
+    fn eight_pixels_move_one_frame() {
+        assert_eq!(jog_steps(8.0), 1);
+    }
+
+    #[test]
+    fn a_drag_left_moves_one_frame_earlier() {
+        assert_eq!(jog_steps(-8.0), -1);
+    }
+
+    #[test]
+    fn seven_pixels_stay_on_the_frame() {
+        assert_eq!(jog_steps(7.0), 0);
+    }
+
+    #[test]
+    fn jog_in_moves_the_in_mark_one_frame_later() {
+        assert_eq!(jogged_mark(true, 10, 40, 1, 100), (11, 40));
+    }
+
+    #[test]
+    fn jog_in_stops_before_the_out_mark() {
+        assert_eq!(jogged_mark(true, 39, 40, 5, 100), (39, 40));
+    }
+
+    #[test]
+    fn jog_out_moves_the_out_mark_one_frame_earlier() {
+        assert_eq!(jogged_mark(false, 10, 40, -1, 100), (10, 39));
+    }
+
+    #[test]
+    fn an_empty_clip_keeps_its_marks() {
+        assert_eq!(jogged_mark(true, 0, 0, 1, 0), (0, 0));
+    }
+
+    #[test]
+    fn the_left_edge_skims_the_first_frame() {
+        assert_eq!(skim_frame(0.0, 0.0, 100.0, 10), 0);
+    }
+
+    #[test]
+    fn the_right_edge_skims_the_last_frame() {
+        assert_eq!(skim_frame(100.0, 0.0, 100.0, 10), 9);
+    }
+
+    #[test]
+    fn an_empty_picture_skims_frame_zero() {
+        assert_eq!(skim_frame(40.0, 0.0, 100.0, 0), 0);
+    }
+
+    #[test]
+    fn an_empty_source_keeps_a_tape_in_mark_at_frame_zero() {
+        assert_eq!(tape_mark(4, 0, true), 0);
+    }
+
+    #[test]
+    fn an_empty_source_keeps_a_tape_out_mark_at_frame_one() {
+        assert_eq!(tape_mark(4, 0, false), 1);
+    }
+
+    #[test]
+    fn a_tape_in_mark_stops_on_the_last_frame() {
+        assert_eq!(tape_mark(40, 10, true), 9);
+    }
 
     #[test]
     fn digits_fill_timecodes_from_the_right() {

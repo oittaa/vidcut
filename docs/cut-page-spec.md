@@ -47,6 +47,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Top bar:**
   - On the left: the Media Pool and Mixer tabs (p. 649).
   - On the right: Quick Export and the Full Screen viewer.
+    - vidcut's Full Screen button is on the viewer (deviation X86).
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
   - The Inspector button is at the top right of the UI toolbar (§8.15). vidcut has an Inspector tab beside the Titles tab instead (deviation X70).
   - Later: the Sync Bin, Keyframe Editor, Transitions and Effects tabs.
@@ -72,6 +73,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Upper timeline:**
   - The track-number buttons to its left select the target track.
   - The Audio Only and Video Only toggles are there too (pp. 643, 694).
+    - The two cannot both be on.
+    - `gui.only` sets them. The choice lasts for this session.
 
 ## 3. Media Pool (Ch. 34, pp. 653–675)
 
@@ -144,6 +147,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The Viewer shows the selected pool clip.
   - A scroll area under the picture stands for the whole clip. It has the playhead, a zoomed-in waveform and In/Out handles that you can drag.
   - Jog In and Jog Out controls at its ends move the marks frame by frame (p. 692).
+    - Jog In is at the left of the scroll area. Jog Out is at the right.
+    - A drag moves that mark. 8 pixels is one frame (D97).
+    - A click moves that mark one frame later.
+    - `media.marks.set` sets a clip mark. `tape.marks.set` sets a tape mark.
 - **Source Tape** (pp. 680–681, 704–706):
   - All pool clips play end to end as one tape, in the pool sort order.
   - The clip under the playhead becomes selected in the pool.
@@ -161,7 +168,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - K held with J or L plays slowly.
   - K held with a tap of J or L steps a frame.
 - Ctrl+/ loops playback (D51).
-- A drag on the jog control scrubs finely (p. 640).
+- A drag on the jog control scrubs finely (p. 640, D97).
+  - The Jog control is on the viewer transport, before Previous.
+  - A drag of 8 pixels moves one frame.
+  - `player.seek` moves the playhead the same way.
 
 ### 4.3 Timecode (pp. 640, 688, 713–714)
 - **Go to a time:**
@@ -188,7 +198,15 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - It takes a number of frames, + or − and a number to change it by, or a timecode.
 
 ### 4.5 Other viewer features
-- Full Screen (Shift+F) and Enhanced viewer (Alt+F).
+- Full Screen (Shift+F) fills the display with the viewer.
+  - Shift+F again returns to the page.
+  - The Full Screen button on the viewer does the same thing (deviation X86).
+  - `viewer.frame` with `full_screen` or `page` does it from a script.
+- Enhanced viewer (Alt+F) fills the page with the viewer.
+  - The Media Pool, the timelines and the bars are covered.
+  - Alt+F again returns to the page.
+  - `viewer.frame` with `enhanced` does it from a script.
+- Esc returns to the page from full screen and from the enhanced viewer.
 - Safe areas (pp. 682–683, 1177):
   - A Safe Area control at the right of the viewer's transport toggles framing guides.
   - Its menu, and View > Safe Area, pick the framing aspect and the safe-area lines.
@@ -209,8 +227,25 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The choice is a user preference (`viewer.guides`), not part of the project.
   - With no fields, `viewer.guides` toggles framing guides.
   - A field that is left out stays as it is. `preferences.set` does not toggle.
-- Fast Review, which plays long clips faster than short ones (p. 640).
+- Fast Review plays a long clip faster than a short clip (p. 640, D97).
+  - The Fast Review button is on the viewer transport.
+  - `player.fast_review` turns it on or off. It lasts for this session.
+  - A clip of 10 seconds or less plays at 1×.
+  - A longer clip plays at its length in seconds divided by 10, at most 8×.
+  - Play and Space use that speed. J and L keep their shuttle speeds.
 - Skimming with C held (p. 640).
+  - Hold C and move the pointer across the picture.
+  - The horizontal place of the pointer is the frame.
+  - The playhead goes there with `player.seek`.
+- **D97. Fast Review speed** (p. 640).
+  - The manual says that a long clip plays faster than a short clip.
+  - It does not give the speed.
+  - A clip of 10 seconds or less plays at 1×.
+  - A longer clip plays at its seconds divided by 10.
+  - The speed is at most 8×.
+  - 10 seconds is one short shot. 8× stays slow enough to see the picture.
+  - The jog control and Jog In and Jog Out move one frame for each 8 pixels.
+  - 8 pixels is a small drag, so the scrub stays fine.
 - Audio scrubbing (Shift+S; on by default, p. 876):
   - A drag of the playhead, and frame steps, play the sound under it (D42).
   - Timeline > Audio Scrubbing also switches it.

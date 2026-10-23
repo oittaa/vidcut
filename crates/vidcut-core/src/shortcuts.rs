@@ -520,4 +520,28 @@ pub const SHORTCUTS: &[Shortcut] = &[
     key(App, &["Ctrl", "Shift", "N"], "New bin", None),
     key(App, &["Ctrl", ","], "Preferences", None),
     key(App, &["F1"], "Keyboard shortcuts", None),
+    key(
+        Play,
+        &["C"],
+        "Skim",
+        Some("Hold C and move the pointer across the picture. The playhead follows."),
+    ),
+    key(
+        Play,
+        &["Shift", "F"],
+        "Full screen",
+        Some("The viewer fills the display. Press Shift+F again, or Esc, to leave."),
+    ),
+    key(
+        Play,
+        &["Alt", "F"],
+        "Enhanced viewer",
+        Some("The viewer fills the page. Press Alt+F again, or Esc, to leave."),
+    ),
+    key(
+        Play,
+        &["Escape"],
+        "Leave full screen",
+        Some("Also leaves the enhanced viewer."),
+    ),
 ];

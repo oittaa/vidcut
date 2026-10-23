@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::Value;
 use vidcut_core::model::{Clip, TrackKind};
 use vidcut_core::render::TapeEntry;
-use vidcut_core::request::{TimecodeDisplay, ViewerMode};
+use vidcut_core::request::{TimecodeDisplay, ViewerFrame, ViewerMode};
 use vidcut_core::steps::{Span, Steps};
 use vidcut_core::time::{Rational, format_timecode, parse_counter, parse_frame_number};
 use vidcut_core::{Error, Project};
@@ -165,6 +165,7 @@ pub struct Snapshot {
     pub socket: Option<PathBuf>,
     pub project: Option<ProjectSnap>,
     pub viewer: ViewerMode,
+    pub viewer_frame: ViewerFrame,
     pub last_source: ViewerMode,
     pub source: PlayerSnap,
     pub timeline: PlayerSnap,
@@ -184,6 +185,10 @@ pub struct Snapshot {
     pub jobs: Arc<Vec<super::JobInfo>>,
     pub audio_scrubbing: bool,
     pub looping: bool,
+    pub fast_review: bool,
+    pub video_only: bool,
+    pub audio_only: bool,
+    pub edit_only_rev: u64,
     pub stats: bool,
     pub timecode_display: TimecodeDisplay,
     pub timer1_origin: Timer1Origin,

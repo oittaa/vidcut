@@ -1713,3 +1713,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Pitch and yaw are numbers, as Rotation is.
   - The Inspector is where those numbers are set.
   - The viewer handles move, zoom, turn and crop the picture.
+
+## X86. The Full Screen button is on the viewer
+
+- **Resolve:**
+  - The Full Screen control is at the right of the top bar (p. 636).
+  - Shift+F fills the display with the viewer.
+  - Esc leaves full screen.
+- **vidcut:**
+  - The Full Screen button is on the viewer, beside the duration.
+  - Shift+F and `viewer.frame` do the same thing.
+  - Esc leaves full screen and the enhanced viewer.
+- **Why:**
+  - Full screen and the enhanced viewer cover the top bar.
+  - The button stays on the viewer, so it can be clicked while they are on.
