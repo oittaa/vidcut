@@ -194,6 +194,7 @@ fn edge_field(
     let out = egui::TextEdit::singleline(&mut text)
         .id_salt(salt)
         .desired_width(width)
+        .clip_text(false)
         .show(ui);
     let r = &out.response;
     if r.has_focus() {
@@ -1099,8 +1100,9 @@ impl Workspace {
             if ui.available_width() < counted_width {
                 ui.end_row();
             }
-            ui.add_space((ui.available_width() - counted_width - 1.0).max(0.0));
-            ui.add(egui::Label::new(dim(counted)).extend());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(dim(counted));
+            });
         });
         if let Some((edge, text)) = put {
             self.put_edge(d, p, (edge, &text), (start, end));
