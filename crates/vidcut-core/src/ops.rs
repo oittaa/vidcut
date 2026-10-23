@@ -11,7 +11,7 @@ mod tracks;
 use std::collections::{BTreeMap, HashSet};
 
 pub use dissolve::{
-    Align, Made, Shape, dissolve, dissolve_clips, room_at as dissolve_room,
+    Align, Made, Shape, dissolve, dissolve_clips, room_at as dissolve_room, set_transition,
     split as dissolve_frames, to_cut,
 };
 use serde_json::json;

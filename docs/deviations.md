@@ -137,7 +137,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A project holds one timeline (X2). Thus File > Import Timeline (`timeline import`) appends, replaces the timeline, adds one compound clip, or brings in only the media.
   - An OTIO file also opens as a new project.
   - Clip effects, transitions, generators, compound clips and speed changes come in as data. vidcut writes them back while they fit.
-  - Dissolves, cross fades ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) and speeds ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) play.
+  - Dissolves, cross fades ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), wipes ([X89](#x89-a-wipe-reveals-from-one-edge)) and speeds ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) play.
   - Other transitions play as cuts, and generators play as gaps. Other effects do not play.
   - The keyframes of the clip volume effect play as volume keyframes ([D81](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Text and lower-third titles of Resolve come in as titles of vidcut. The titles of vidcut go out in the shape that Resolve uses ([D67](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
@@ -1752,3 +1752,23 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The ease belongs on the keyframe the user is editing.
   - The same four eases already play on the volume line.
   - One tab row holds the Keyframes tab, as it holds the Inspector.
+
+## X89. A wipe reveals from one edge
+
+- **Resolve:**
+  - Wipes are transitions (pp. 758–761).
+  - The spec gives no edge for a wipe.
+- **vidcut:**
+  - A wipe has one direction: left, right, up or down.
+  - A left wipe reveals the incoming picture from the left edge toward the right.
+  - At half of the duration, the left half is the incoming picture.
+  - The right half is the outgoing picture.
+  - Right reveals from the right edge toward the left.
+  - Up reveals from the top edge toward the bottom.
+  - Down reveals from the bottom edge toward the top.
+  - The edge is the same fraction of the duration as a dissolve's level ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The viewer and the export use that fraction.
+- **Why:**
+  - The spec gives no wipe geometry.
+  - One edge covers the four directions.
+  - The same fraction keeps the wipe on the dissolve's clock.

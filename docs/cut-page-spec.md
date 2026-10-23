@@ -532,8 +532,17 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Each clip shows its media past its edge. Thus a dissolve is as long as the clips have frames there.
   - Pictures cross in a straight line. At a gap, they cross from or to black.
   - The level of a Cross Fade at its middle is +3, 0 or −3 dB.
+- **A wipe:**
+  - A wipe is another transition on an edit.
+  - It uses the same length rules as a dissolve.
+  - It has one direction: left, right, up or down.
+  - A left wipe reveals the incoming picture from the left edge toward the right.
+  - The other directions start at their own edge.
+  - The edge moves in fractions of the duration (deviation X89).
+  - A request can make a wipe.
+  - A request can change a dissolve into a wipe, and a wipe into a dissolve.
 - **Later:**
-  - other transitions (wipes, Smooth Cut, the Transitions browser)
+  - the Transitions browser and Smooth Cut
   - the Transition Inspector
   - moving a transition to another edit
   - Change Transition Type, Set as Default Transition
@@ -600,6 +609,20 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - An IMSC1 paragraph takes a font, size, color, bold face, or alignment that the cue sets.
   - `subtitles.set` takes `style`. An empty style drops the cue's own style.
   - Other cues on the track stay as they were.
+- **Style of one word** (p. 1238):
+  - A word stores its own style when you set one.
+  - That style is the same style a cue stores.
+  - A field left out of the word style keeps the cue's style.
+  - The cue's style keeps the track's style where the cue leaves a field out.
+  - `SubtitleStyle::for_cue` does both merges.
+  - The word leaves the whole style out when it keeps the cue's style.
+  - A word with no start frame can still store a style.
+  - The viewer, a burn-in and an export draw that word with this merged style.
+  - That drawing uses its font, size, color, bold face and letter case.
+  - Outline, background, shadow, alignment, position and margin stay with the cue.
+  - The other words of the cue stay as they were.
+  - `subtitles.set_word` sets the style. An empty style drops it.
+  - The word counts from 0, in the order of the words of the cue's text.
 - **Animated subtitles** (pp. 1240–1241, Studio only):
   - Drag Fusion templates from the Animated section of the Titles tab onto the header of a subtitle track.
   - Then each word shows as it is spoken, from the word times of the transcription.
@@ -615,7 +638,6 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - vidcut: looks, for titles too. Some looks are built in (X59). Details: D71.
 - **Later:**
   - the faces of a track style other than regular and bold, line spacing, kerning, zoom, opacity and text anchoring beyond alignment (p. 1237)
-  - the style of a word (p. 1238)
   - caption presets (p. 1235)
   - fades (p. 1240)
   - subtitle regions (pp. 1243–1244)

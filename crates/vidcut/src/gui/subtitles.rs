@@ -33,6 +33,8 @@ pub struct CueDialog {
     margin: String,
     bold: bool,
     case: Option<LetterCase>,
+    word: Option<usize>,
+    kept: Option<SubtitleStyle>,
     base: SubtitleStyle,
     families: Vec<String>,
     error: String,
@@ -96,6 +98,8 @@ impl CueDialog {
         self.place = c.place;
         self.color = c.color.clone().unwrap_or_default();
         self.take_person(speakers, c.speaker.clone());
+        self.word = None;
+        self.kept = c.style.clone();
         self.apply_style(c.style.as_ref());
         if self.families.is_empty() {
             self.families = vidcut_av::burn::families();
@@ -109,7 +113,13 @@ impl CueDialog {
         self.speaker = l.typing.speaker;
         self.color = l.typing.color.unwrap_or_default();
         self.person_name = l.person_name;
-        self.apply_style(l.typing.style.as_ref());
+        self.word = l.typing.word;
+        self.kept = l.typing.style.clone();
+        let shown = match l.typing.word {
+            Some(_) => l.typing.word_style.as_ref(),
+            None => l.typing.style.as_ref(),
+        };
+        self.apply_style(shown);
         self.pending = l.pending;
     }
 
@@ -173,10 +183,14 @@ impl CueDialog {
     }
 
     fn typing(&self) -> Typing {
-        let style = self.own_style().unwrap_or_else(|_| {
+        let edited = self.own_style().unwrap_or_else(|_| {
             let style = self.base.clone();
             (!style.is_empty()).then_some(style)
         });
+        let (style, word_style) = match self.word {
+            None => (edited, None),
+            Some(_) => (self.kept.clone(), edited),
+        };
         Typing {
             cue: self.cue.clone(),
             text: self.text.clone(),
@@ -184,6 +198,8 @@ impl CueDialog {
             speaker: self.speaker.clone(),
             color: field(&self.color),
             style,
+            word: self.word,
+            word_style,
         }
     }
 }
@@ -234,6 +250,8 @@ pub(crate) struct Typing {
     speaker: Option<String>,
     color: Option<String>,
     style: Option<SubtitleStyle>,
+    word: Option<usize>,
+    word_style: Option<SubtitleStyle>,
 }
 
 fn person_name(speakers: &Speakers, person: Option<&str>) -> String {
@@ -242,8 +260,18 @@ fn person_name(speakers: &Speakers, person: Option<&str>) -> String {
         .unwrap_or_default()
 }
 
-fn settled(id: &str, speakers: &Speakers, c: &Cue) -> (Typing, String, LookRaw) {
+fn settled(
+    id: &str,
+    speakers: &Speakers,
+    c: &Cue,
+    word: Option<usize>,
+) -> (Typing, String, LookRaw) {
     let color = c.color.clone().unwrap_or_default();
+    let word_style = word.and_then(|i| c.words.get(i).and_then(|w| w.style.clone()));
+    let fields = match word {
+        None => c.style.clone(),
+        Some(_) => word_style.clone(),
+    };
     (
         Typing {
             cue: id.to_string(),
@@ -252,9 +280,11 @@ fn settled(id: &str, speakers: &Speakers, c: &Cue) -> (Typing, String, LookRaw) 
             speaker: c.speaker.clone(),
             color: field(&color),
             style: c.style.clone(),
+            word,
+            word_style,
         },
         person_name(speakers, c.speaker.as_deref()),
-        raw_of(c.style.as_ref()),
+        raw_of(fields.as_ref()),
     )
 }
 
@@ -737,9 +767,12 @@ impl Workspace {
         if own != cue.color {
             params["color"] = json!(own.unwrap_or_default());
         }
-        let style = d.own_style()?;
-        if style != cue.style {
-            params["style"] = serde_json::to_value(style.unwrap_or_default()).unwrap_or(json!({}));
+        if d.word.is_none() {
+            let style = d.own_style()?;
+            if style != cue.style {
+                params["style"] =
+                    serde_json::to_value(style.unwrap_or_default()).unwrap_or(json!({}));
+            }
         }
         Ok(params
             .as_object()
@@ -757,6 +790,25 @@ impl Workspace {
             Ok(None) => d.error.clear(),
             Err(e) if e.is_empty() => {}
             Err(e) => d.error = e,
+        }
+        if d.error.is_empty()
+            && let Some(index) = d.word
+            && let Ok(style) = d.own_style()
+        {
+            let stored = self
+                .project()
+                .and_then(|p| p.cue(&d.cue))
+                .and_then(|c| c.words.get(index).and_then(|w| w.style.clone()));
+            if style != stored {
+                sent.push(self.live.request_answered(
+                    "subtitles.set_word",
+                    json!({
+                        "cue": d.cue,
+                        "word": index,
+                        "style": serde_json::to_value(style.unwrap_or_default()).unwrap_or(json!({})),
+                    }),
+                ));
+            }
         }
         let Some(person) = d.speaker.clone() else {
             return sent;
@@ -856,6 +908,8 @@ impl Workspace {
             margin: String::new(),
             bold: false,
             case: None,
+            word: None,
+            kept: None,
             base: SubtitleStyle::default(),
             families: Vec::new(),
             error: String::new(),
@@ -952,16 +1006,29 @@ impl Workspace {
                     continue;
                 };
                 let text = vidcut_core::subtitles::normalize(&ty.text);
-                if !c.words.is_empty()
-                    && vidcut_core::subtitles::words(&text).len() != c.words.len()
-                {
-                    c.words = vidcut_core::subtitles::spread_words(&text, c.duration);
+                if c.has_times() && vidcut_core::subtitles::words(&text).len() != c.times().len() {
+                    c.words = vidcut_core::model::CueWord::from_times(
+                        &vidcut_core::subtitles::spread_words(&text, c.duration),
+                    );
                 }
                 c.text = text;
                 c.place = ty.place;
                 c.speaker = ty.speaker.clone();
                 c.color = ty.color.clone();
                 c.style = ty.style.clone();
+                if let Some(i) = ty.word
+                    && let Some(slot) = c.words.get_mut(i)
+                {
+                    slot.style = ty.word_style.clone();
+                } else if let Some(i) = ty.word
+                    && !c.has_times()
+                {
+                    c.words
+                        .resize(i + 1, vidcut_core::model::CueWord::default());
+                    if let Some(slot) = c.words.get_mut(i) {
+                        slot.style = ty.word_style.clone();
+                    }
+                }
             }
             for c in &mut cues {
                 c.color = p.speakers.color_of(c);
@@ -1013,7 +1080,8 @@ impl Workspace {
         }
         let at = p.find_cue(&d.cue);
         let found = at.map(|(t, c)| (&p.subtitles[t], &p.subtitles[t].cues[c]));
-        let shown = found.is_some_and(|(_, cue)| settled(&d.cue, &p.speakers, cue) == d.state());
+        let shown =
+            found.is_some_and(|(_, cue)| settled(&d.cue, &p.speakers, cue, d.word) == d.state());
         match found {
             Some((_, cue)) if cue_copies(d.dirty, d.loaded, waiting || shown) => {
                 d.load(&p.speakers, cue);
@@ -1149,6 +1217,54 @@ impl Workspace {
                     }
                 });
             });
+            let words = vidcut_core::subtitles::words(&d.text);
+            if d.word.is_some_and(|i| i >= words.len()) {
+                d.word = None;
+                let kept = d.kept.clone();
+                d.apply_style(kept.as_ref());
+            }
+            if !words.is_empty() {
+                dialog::row(ui, "Style Of", |ui| {
+                    let label = d
+                        .word
+                        .and_then(|i| words.get(i))
+                        .map(String::as_str)
+                        .unwrap_or("Cue");
+                    let mut pick = None;
+                    egui::ComboBox::from_id_salt("cue-word-style")
+                        .selected_text(label)
+                        .width(200.0)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(d.word.is_none(), "Cue").clicked() {
+                                pick = Some(None);
+                            }
+                            for (i, word) in words.iter().enumerate() {
+                                if ui.selectable_label(d.word == Some(i), word).clicked() {
+                                    pick = Some(Some(i));
+                                }
+                            }
+                        });
+                    if let Some(next) = pick {
+                        match next {
+                            None => {
+                                d.word = None;
+                                let kept = d.kept.clone();
+                                d.apply_style(kept.as_ref());
+                            }
+                            Some(i) => {
+                                if d.word.is_none() {
+                                    d.kept = d.own_style().ok().flatten();
+                                }
+                                d.word = Some(i);
+                                let style = found.and_then(|(_, c)| {
+                                    c.words.get(i).and_then(|w| w.style.clone())
+                                });
+                                d.apply_style(style.as_ref());
+                            }
+                        }
+                    }
+                });
+            }
             dialog::row(ui, "Alignment", |ui| {
                 dialog::switch(ui, |ui| {
                     for (align, label) in CUE_ALIGNS {
@@ -1191,7 +1307,14 @@ impl Workspace {
             });
             ui.end_row();
         });
-        dialog::note(ui, "An empty field keeps the track style.");
+        dialog::note(
+            ui,
+            if d.word.is_some() {
+                "An empty field keeps the cue style."
+            } else {
+                "An empty field keeps the track style."
+            },
+        );
         if !d.error.is_empty() {
             ui.colored_label(ui.visuals().error_fg_color, &d.error);
         }

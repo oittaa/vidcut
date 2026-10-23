@@ -2712,6 +2712,7 @@ fn mutate(
             picture,
             sound,
             all,
+            transition,
         } => {
             let at = match at {
                 Some(t) => resolve(p, t, playhead)?,
@@ -2748,16 +2749,28 @@ fn mutate(
             }
             let made = if clips.is_empty() {
                 let track = track.as_deref().unwrap_or(ops::MAIN);
-                ops::dissolve(p, track, at, shape, *picture, *sound, *all)?
+                ops::dissolve(p, track, at, shape, *picture, *sound, *all, *transition)?
             } else if track.is_some() || *all {
                 return Err(Error::usage(
                     "dissolves on `clips` go on their own edits; leave out `track` and `all`",
                 ));
             } else {
                 let ids = resolve_clips(p, clips, playhead)?;
-                ops::dissolve_clips(p, &ids, shape, *picture, *sound)?
+                ops::dissolve_clips(p, &ids, shape, *picture, *sound, *transition)?
             };
             json!({ "transitions": made })
+        }
+        Request::EditTransition {
+            at,
+            track,
+            transition,
+        } => {
+            let at = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => playhead.unwrap_or(0),
+            };
+            let track = track.as_deref().unwrap_or(ops::MAIN);
+            json!({ "transition": ops::set_transition(p, track, at, *transition)? })
         }
         Request::EditRemoveTransition {
             at,
@@ -3510,6 +3523,11 @@ fn mutate(
             if let Some(style) = style {
                 ops::subtitles::set_style(p, &id, style.clone())?;
             }
+            Value::Null
+        }
+        Request::SubtitlesSetWord { cue, word, style } => {
+            let id = resolve_cue(p, cue, playhead)?;
+            ops::subtitles::set_word_style(p, &id, *word, style.clone())?;
             Value::Null
         }
         Request::SubtitlesMatchSpeaker { cue } => {
@@ -7166,7 +7184,7 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
     let old: Vec<(String, i64, i64, Vec<i64>)> = p.subtitles[ti]
         .cues
         .iter()
-        .map(|c| (c.id.clone(), c.start, c.end(), c.words.clone()))
+        .map(|c| (c.id.clone(), c.start, c.end(), c.times()))
         .collect();
     let (mut moved, mut cut, mut removed) = (0, 0, Vec::new());
     for (i, (cue, s0, e0, words)) in old.into_iter().enumerate() {

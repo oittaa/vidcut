@@ -569,7 +569,7 @@ impl Workspace {
     fn animated_track(&self) -> Option<(String, String)> {
         let p = self.project()?;
         let t = p.subtitles.iter().find(|t| t.shown)?;
-        let words = t.style.words.is_some() && t.cues.iter().any(|c| !c.words.is_empty());
+        let words = t.style.words.is_some() && t.cues.iter().any(|c| c.has_times());
         words.then(|| (t.id.clone(), t.display_name()))
     }
 

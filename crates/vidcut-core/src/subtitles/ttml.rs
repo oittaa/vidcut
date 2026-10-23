@@ -306,6 +306,7 @@ impl Walk<'_, '_> {
             words: Vec::new(),
             speaker: None,
             style: None,
+            word_styles: Vec::new(),
         });
     }
 }
@@ -515,6 +516,58 @@ fn span_style(tags: &[Tag]) -> String {
         }
     }
     attrs
+}
+
+fn word_open(cue: &SubtitleStyle, word: &SubtitleStyle) -> String {
+    let look = cue.for_cue(Some(word));
+    let mut attrs = String::new();
+    if word.color.is_some() {
+        attrs.push_str(&format!(" tts:color=\"{}\"", hex(look.ink())));
+    }
+    if word.size.is_some() {
+        attrs.push_str(&format!(
+            " tts:fontSize=\"{}%\"",
+            plain_number(look.text_fraction() * 10_000.0)
+        ));
+    }
+    match word.bold {
+        Some(true) => attrs.push_str(" tts:fontWeight=\"bold\""),
+        Some(false) => attrs.push_str(" tts:fontWeight=\"normal\""),
+        None => {}
+    }
+    if let Some(font) = &word.font {
+        attrs.push_str(&format!(" tts:fontFamily=\"{}\"", escape_xml(font)));
+    }
+    format!("<span{attrs}>")
+}
+
+fn styled_body(text: &str, cue: &SubtitleStyle, words: &[Option<SubtitleStyle>]) -> String {
+    if words.iter().all(|s| s.is_none()) {
+        return paragraph(&super::cased_markup(text, cue.case));
+    }
+    let mut out = String::new();
+    let mut open = false;
+    let mut current = None;
+    for (piece, word) in super::parts(text) {
+        let over = word.and_then(|i| words.get(i)).and_then(|s| s.as_ref());
+        if word != current {
+            if open {
+                out.push_str("</span>");
+                open = false;
+            }
+            current = word;
+            if let Some(over) = over {
+                out.push_str(&word_open(cue, over));
+                open = true;
+            }
+        }
+        let case = over.and_then(|s| s.case).or(cue.case);
+        out.push_str(&escape_xml(&super::cased(&piece.text, case)));
+    }
+    if open {
+        out.push_str("</span>");
+    }
+    out
 }
 
 fn paragraph(text: &str) -> String {
@@ -858,7 +911,7 @@ pub fn write(
     let track_background = background(style);
     for c in cues {
         let look = style.for_cue(c.style.as_ref());
-        let body = paragraph(&super::cased_markup(&c.text, look.case));
+        let body = styled_body(&c.text, &look, &c.word_styles);
         let backing = match c.style.as_ref().and_then(|s| s.background.as_ref()) {
             Some(_) => background(&look),
             None => track_background.clone(),

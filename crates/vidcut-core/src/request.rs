@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    DuckDetect, DynamicZoom, Ease, Handle, PictureTool, Place, SubtitleStyle, TitleAlign,
-    TitleKind, TitleStyle, TrackClip, ZoomBox,
+    DuckDetect, DynamicZoom, Ease, Handle, PictureTool, PictureTransition, Place, SubtitleStyle,
+    TitleAlign, TitleKind, TitleStyle, TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -693,6 +693,20 @@ pub enum Request {
         sound: bool,
         #[serde(default)]
         all: bool,
+        /// A cross dissolve, or one wipe. Left out, a cross dissolve.
+        #[serde(default, skip_serializing_if = "PictureTransition::is_dissolve")]
+        transition: PictureTransition,
+    },
+    /// Sets the type of the picture transition on the edit of `track`
+    /// (default V1) nearest `at` (default: the playhead). The length stays.
+    /// A dissolve can become a wipe, and a wipe a dissolve.
+    #[serde(rename = "edit.transition")]
+    EditTransition {
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        #[serde(default)]
+        track: Option<String>,
+        transition: PictureTransition,
     },
     /// The Cut button (decision D50): the edit of `track` (default V1)
     /// nearest `at` (default: the playhead) becomes a cut again, its
@@ -1320,6 +1334,19 @@ pub enum Request {
         /// fractions of the picture from the top left, each from 0 to 1.
         #[serde(default)]
         style: Option<SubtitleStyle>,
+    },
+    /// Set the style of one word of a cue (`q3`, or `S1@15s`). `word` counts
+    /// from 0, in the order of the words of the cue's text. A style field
+    /// left out keeps the cue's style, which keeps the track's where the cue
+    /// leaves a field out. `{}` drops the word's style. The other words stay
+    /// as they are.
+    #[serde(rename = "subtitles.set_word")]
+    SubtitlesSetWord {
+        cue: String,
+        /// The word, counted from 0.
+        word: usize,
+        /// Its own style. A field left out keeps the cue's. `{}` drops it.
+        style: SubtitleStyle,
     },
     /// Apply to All: `cue`'s own color becomes its speaker's, and every cue
     /// of that speaker on its track takes its place and drops a color of

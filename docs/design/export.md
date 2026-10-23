@@ -301,6 +301,8 @@ Cancel:
 
 - `VideoFrames::with_burn` draws the cues over every picture they span.
 - A cue with its own style uses `SubtitleStyle::for_cue`. A field it leaves out keeps the track style.
+- A word with its own style uses `SubtitleStyle::for_cue` on that result. A field it leaves out keeps the cue style.
+- The burn-in and a subtitle stream draw that word's font, size, color, bold face and letter case.
 - `burn::paint` draws that result. Cues that share a place and a style stay one block.
 - It draws them in both runs of a two-pass encode.
 - `subtitles::shown` gives what each cue that shows draws at the frame ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):

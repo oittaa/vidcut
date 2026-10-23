@@ -1,4 +1,4 @@
-use vidcut_core::render::WHOLE;
+use vidcut_core::render::{WHOLE, Wipe, wipe_shows_incoming};
 
 use crate::error::{Error, Result};
 use crate::ffmpeg::{ffi, frame};
@@ -47,6 +47,68 @@ impl Samples {
         // SAFETY: fills four line sizes for a known format.
         unsafe { ffi::av_image_fill_linesizes(lines.as_mut_ptr(), self.format, width as i32) };
         lines.map(|l| l.max(0) as usize)
+    }
+}
+
+pub(crate) fn wipe(under: &frame::Video, over: &frame::Video, mask: Wipe) -> Result<frame::Video> {
+    let format = under.format();
+    if over.format() != format || (over.width(), over.height()) != (under.width(), under.height()) {
+        return Err(Error::Invalid(
+            "pictures of different sizes or formats can't be mixed".into(),
+        ));
+    }
+    let samples = Samples::of(format)?;
+    let (fw, fh) = (under.width(), under.height());
+    let mut out = frame::Video::new(format, fw, fh);
+    let rows = samples.row_bytes(fw);
+    for (p, &bytes) in rows.iter().enumerate().take(samples.planes) {
+        let height = under.plane_height(p);
+        let (stride_a, stride_b, stride_o) = (under.stride(p), over.stride(p), out.stride(p));
+        let (a, b) = (under.data(p), over.data(p));
+        let o = out.data_mut(p);
+        let sample_bytes = samples.bytes;
+        let row_samples = bytes / sample_bytes;
+        let (group, plane_w) = plane_group(p, fw, fh, row_samples as u32, height);
+        let group = group as usize;
+        for y in 0..height {
+            let (ya, yb, yo) = (y as usize, y as usize, y as usize);
+            let (ra, rb) = (
+                &a[ya * stride_a..ya * stride_a + bytes],
+                &b[yb * stride_b..yb * stride_b + bytes],
+            );
+            let ro = &mut o[yo * stride_o..yo * stride_o + bytes];
+            let pixels = row_samples / group;
+            for x in 0..pixels {
+                let incoming =
+                    wipe_shows_incoming(mask.direction, mask.along, x as u32, y, plane_w, height);
+                let take_over = if mask.falling { !incoming } else { incoming };
+                let from = if take_over { rb } else { ra };
+                let at = x * group * sample_bytes;
+                let n = group * sample_bytes;
+                ro[at..at + n].copy_from_slice(&from[at..at + n]);
+            }
+        }
+    }
+    // SAFETY: `out` and `under` are valid frames.
+    unsafe { ffi::av_frame_copy_props(out.as_mut_ptr(), under.as_ptr()) };
+    Ok(out)
+}
+
+fn plane_group(
+    plane: usize,
+    frame_w: u32,
+    frame_h: u32,
+    row_samples: u32,
+    plane_h: u32,
+) -> (u32, u32) {
+    if plane == 0 || frame_w == 0 || plane_h == 0 || row_samples == 0 {
+        return (1, row_samples.max(1));
+    }
+    let sub_y = (frame_h / plane_h).max(1);
+    if row_samples == frame_w && sub_y > 1 {
+        (2, row_samples / 2)
+    } else {
+        (1, row_samples)
     }
 }
 
@@ -150,7 +212,7 @@ pub(crate) fn crossed(
 
 #[cfg(test)]
 mod tests {
-    use super::{mix, mixed};
+    use super::{mix, mixed, wipe};
     use crate::export::video::fill_black;
     use crate::ffmpeg::{format::Pixel, frame};
 
@@ -177,5 +239,28 @@ mod tests {
             u16::from_le_bytes([out.data(0)[0], out.data(0)[1]]),
             283 << 6
         );
+    }
+
+    #[test]
+    fn a_left_wipe_at_its_middle_keeps_the_left_half_of_the_picture_over() {
+        use vidcut_core::model::WipeDirection;
+        use vidcut_core::render::Wipe;
+
+        let mut under = frame::Video::new(Pixel::YUV420P, 4, 2);
+        fill_black(&mut under).unwrap();
+        let mut over = frame::Video::new(Pixel::YUV420P, 4, 2);
+        fill_black(&mut over).unwrap();
+        over.data_mut(0)[..4].fill(200);
+        let out = wipe(
+            &under,
+            &over,
+            Wipe {
+                direction: WipeDirection::Left,
+                along: (1, 2),
+                falling: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(&out.data(0)[..4], &[200, 200, 16, 16]);
     }
 }

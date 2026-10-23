@@ -109,19 +109,30 @@ const POPPED: usize = 2;
 fn spans<'a>(
     pieces: &[Piece],
     family: Family<'a>,
+    faces: &'a [Option<String>],
     ink: Color,
-    bold: bool,
+    size: f32,
 ) -> Vec<(String, Attrs<'a>)> {
     pieces
         .iter()
-        .map(|p| {
+        .enumerate()
+        .map(|(i, p)| {
             let mut a = Attrs::new()
-                .family(family)
+                .family(
+                    faces
+                        .get(i)
+                        .and_then(|n| n.as_deref())
+                        .map_or(family, Family::Name),
+                )
                 .color(p.color.as_deref().and_then(rgb).map_or(ink, color));
+            if let Some(scale) = p.size_scale {
+                let px = (size * scale as f32 / 1000.0).max(1.0);
+                a = a.metrics(Metrics::new(px, px * SubtitleStyle::LINE as f32));
+            }
             if p.italic {
                 a = a.style(Style::Italic);
             }
-            if p.bold || bold {
+            if p.bold {
                 a = a.weight(Weight::BOLD);
             }
             if p.underline {
@@ -198,7 +209,7 @@ struct Look<'a> {
 
 #[derive(Debug, Clone, Copy)]
 enum Markup<'a> {
-    Pieces(&'a [Piece], bool),
+    Pieces(&'a [Piece]),
     Title(&'a str, f32),
 }
 
@@ -440,8 +451,15 @@ fn lay_out(look: &Look) -> Option<Laid> {
         .iter()
         .map(|r| r.look.face.as_deref().and_then(|n| installed(f, n)))
         .collect();
+    let word_faces: Vec<Option<String>> = match look.markup {
+        Markup::Pieces(pieces) => pieces
+            .iter()
+            .map(|p| p.face.as_deref().and_then(|n| installed(f, n)))
+            .collect(),
+        Markup::Title(..) => Vec::new(),
+    };
     let spans = match look.markup {
-        Markup::Pieces(pieces, bold) => spans(pieces, family, color(look.ink), bold),
+        Markup::Pieces(pieces) => spans(pieces, family, &word_faces, color(look.ink), size),
         Markup::Title(_, per) => runs
             .iter()
             .zip(&faces)
@@ -673,7 +691,6 @@ fn block(
 ) -> (Option<Sprite>, Option<Sprite>) {
     let (w, h) = (f64::from(width), f64::from(height));
     let size = (height as f32 * style.text_fraction() as f32).max(1.0);
-    let bold = style.bold == Some(true);
     let look = Look {
         font: style.font.as_deref(),
         size,
@@ -684,7 +701,7 @@ fn block(
         backing: style.backing(),
         shadow: style.shadow.as_ref().map(|s| shade(s, w, h)),
         boxed: false,
-        markup: Markup::Pieces(pieces, bold),
+        markup: Markup::Pieces(pieces),
     };
     let line = Line {
         pieces: pieces.to_vec(),
@@ -715,7 +732,7 @@ fn block(
             size: size * pop as f32,
             wrap: width as f32 * 4.0,
             backing: None,
-            markup: Markup::Pieces(&word, bold),
+            markup: Markup::Pieces(&word),
             ..look
         };
         let popped = lay_out(&big).and_then(|l| {
@@ -1332,6 +1349,20 @@ mod tests {
             ..Piece::default()
         });
         assert_eq!(d, Drawing::default());
+    }
+
+    #[test]
+    fn a_word_color_changes_its_ink() {
+        let plain = drawn(Piece {
+            text: "Hi".into(),
+            ..Piece::default()
+        });
+        let red = drawn(Piece {
+            text: "Hi".into(),
+            color: Some("#ff0000".into()),
+            ..Piece::default()
+        });
+        assert_ne!(plain.lines, red.lines);
     }
 
     #[test]

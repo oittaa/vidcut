@@ -12,7 +12,9 @@ use crate::model::{Place, Settings, SubtitleAlign, SubtitleStyle};
 use crate::request::SubtitleFormat;
 
 pub use languages::three_letter;
-pub use spoken::{HIGHLIGHT, POP_SECS, Piece, Shown, cased, cased_markup, pieces, shown};
+pub use spoken::{
+    HIGHLIGHT, POP_SECS, Piece, Shown, cased, cased_markup, marked, parts, pieces, shown,
+};
 pub use text::{Encoding, Tag, Token, color, plain, rgb, tokens};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +26,7 @@ pub struct Timed {
     pub words: Vec<f64>,
     pub speaker: Option<String>,
     pub style: Option<SubtitleStyle>,
+    pub word_styles: Vec<Option<SubtitleStyle>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

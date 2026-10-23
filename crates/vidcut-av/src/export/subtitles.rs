@@ -15,6 +15,7 @@ pub struct Cue {
     pub text: String,
     pub place: Place,
     pub words: Vec<i64>,
+    pub word_styles: Vec<Option<SubtitleStyle>>,
     pub color: Option<String>,
     pub style: Option<SubtitleStyle>,
 }
@@ -103,15 +104,81 @@ fn turn_on(tag: &Tag) -> String {
     }
 }
 
+fn word_override(cue: &SubtitleStyle, word: &SubtitleStyle) -> String {
+    let mut out = String::new();
+    if word.bold == Some(true) {
+        out.push_str("{\\b1}");
+    }
+    if word.color.is_some() {
+        let [r, g, b] = cue.for_cue(Some(word)).ink();
+        out.push_str(&format!("{{\\c&H{b:02x}{g:02x}{r:02x}&}}"));
+    }
+    if let Some(font) = &word.font {
+        out.push_str(&format!("{{\\fn{font}}}"));
+    }
+    if let Some(size) = word.size {
+        let px = (size * 288.0).round().max(1.0) as i64;
+        out.push_str(&format!("{{\\fs{px}}}"));
+    }
+    out
+}
+
+fn dialog_words(
+    mut out: String,
+    text: &str,
+    html: bool,
+    word_styles: &[Option<SubtitleStyle>],
+    cue: &SubtitleStyle,
+) -> String {
+    let mut current = None;
+    for (piece, word) in vidcut_core::subtitles::parts(text) {
+        let over = word
+            .and_then(|i| word_styles.get(i))
+            .and_then(|s| s.as_ref());
+        if word != current {
+            if current.is_some() {
+                out.push_str("{\\r}");
+            }
+            current = word;
+            if let Some(over) = over {
+                out.push_str(&word_override(cue, over));
+            }
+        }
+        let case = over.and_then(|s| s.case).or(cue.case);
+        let text = vidcut_core::subtitles::cased(&piece.text, case);
+        if piece.italic {
+            out.push_str("{\\i1}");
+        }
+        if piece.bold && over.and_then(|s| s.bold).is_none() {
+            out.push_str("{\\b1}");
+        }
+        if piece.underline {
+            out.push_str("{\\u1}");
+        }
+        if let Some(color) = &piece.color {
+            let hex = color.trim_start_matches('#');
+            let part = |at: usize| hex.get(at..at + 2).unwrap_or("ff");
+            out.push_str(&format!("{{\\c&H{}{}{}&}}", part(4), part(2), part(0)));
+        }
+        out.push_str(&escape(&text, html));
+    }
+    out
+}
+
 pub(crate) fn dialog(
     text: &str,
     place: Place,
     align: vidcut_core::model::SubtitleAlign,
     html: bool,
+    word_styles: &[Option<SubtitleStyle>],
+    cue: &SubtitleStyle,
 ) -> String {
     let mut out = String::from("0,0,Default,,0,0,0,,");
     if let Some(tag) = vidcut_core::subtitles::ass_align(place, align) {
         out.push_str(tag);
+    }
+    if word_styles.iter().any(|s| s.is_some()) {
+        return dialog_words(out, text, html, word_styles, cue);
     }
     let mut open: Vec<Tag> = Vec::new();
     for t in tokens(text) {
@@ -169,12 +236,18 @@ pub(crate) fn segments(cues: &[Cue], by_place: bool) -> Vec<Cue> {
                 .join("\n");
             let place = if by_place { place } else { first.place };
             let style = first.style.clone();
+            let word_styles = if active.len() == 1 {
+                first.word_styles.clone()
+            } else {
+                Vec::new()
+            };
             match out.iter_mut().rev().find(|c| c.place == place || !by_place) {
                 Some(last)
                     if last.end == a
                         && last.text == text
                         && last.place == place
-                        && last.style == style =>
+                        && last.style == style
+                        && last.word_styles == word_styles =>
                 {
                     last.end = b;
                 }
@@ -184,6 +257,7 @@ pub(crate) fn segments(cues: &[Cue], by_place: bool) -> Vec<Cue> {
                     text,
                     place,
                     words: Vec::new(),
+                    word_styles,
                     color: None,
                     style,
                 }),
@@ -285,7 +359,14 @@ impl SubtitleOut {
         let mut packets = VecDeque::new();
         for cue in segments(&track.cues, by_place) {
             let look = track.style.for_cue(cue.style.as_ref());
-            let line = dialog(&cue.text, cue.place, look.line_align(), html);
+            let line = dialog(
+                &cue.text,
+                cue.place,
+                look.line_align(),
+                html,
+                &cue.word_styles,
+                &look,
+            );
             // SAFETY: `encoder` is open.
             let n = encode_one(unsafe { encoder.as_mut_ptr() }, &line, &mut buf)?;
             if n == 0 {
@@ -370,5 +451,33 @@ impl SubtitleOut {
             super::write_packet(octx, &p)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dialog;
+    use vidcut_core::model::{Place, SubtitleAlign, SubtitleStyle};
+
+    #[test]
+    fn a_stream_paints_one_word_and_leaves_the_other() {
+        let cue = SubtitleStyle {
+            color: Some("#ffffff".into()),
+            ..SubtitleStyle::default()
+        };
+        let word = SubtitleStyle {
+            color: Some("#ff0000".into()),
+            bold: Some(true),
+            ..SubtitleStyle::default()
+        };
+        let line = dialog(
+            "one two",
+            Place::Bottom,
+            SubtitleAlign::Center,
+            false,
+            &[None, Some(word)],
+            &cue,
+        );
+        assert_eq!(line, "0,0,Default,,0,0,0,,one{\\r} {\\b1}{\\c&H0000ff&}two");
     }
 }

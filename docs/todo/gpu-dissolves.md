@@ -4,6 +4,7 @@
 
 - On these GPUs, the frames of a dissolve come down, and the CPU mixes them. The mix goes back up to the encoder (spec D50, `hw::can_mix`).
 - vidcut mixes NVIDIA's frames on the GPU (`cuda/mix.rs`).
+- The CPU draws a wipe that skips the CUDA mix.
 - Each GPU below needs a mix with the sums of `export::mix`.
 - Compare each mix with the CPU's pictures (`tests/dissolves.rs`).
 

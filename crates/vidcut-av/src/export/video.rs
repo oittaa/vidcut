@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use vidcut_core::model::{ColorSpace, Hdr, SubtitleStyle, Title};
 use vidcut_core::place::Placing;
-use vidcut_core::render::{Image, Placed, ShownTitle, VideoPiece, WHOLE};
+use vidcut_core::render::{Image, Placed, Ramp, ShownTitle, VideoPiece, WHOLE, Wipe};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
@@ -351,6 +351,7 @@ pub(crate) struct Layer {
     made_on_gpu: bool,
     placing: Option<(Placing, [f64; 4])>,
     crossing: bool,
+    pub(crate) wipe: Option<Wipe>,
 }
 
 impl Layer {
@@ -364,14 +365,40 @@ impl Layer {
             made_on_gpu: false,
             placing: None,
             crossing: false,
+            wipe: None,
         }
     }
+}
+
+fn mask_of(ramp: Option<Ramp>, k: i64) -> Option<Wipe> {
+    ramp.and_then(|r| {
+        r.wipe.map(|direction| Wipe {
+            direction,
+            along: r.rising(k),
+            falling: r.falling,
+        })
+    })
 }
 
 fn upright_fit(f: &frame::Video, rotation: u16, out: (u32, u32)) -> (u32, u32) {
     let sar = f.aspect_ratio();
     let sar = (sar.numerator(), sar.denominator());
     vidcut_core::place::upright_fit((f.width(), f.height()), sar, rotation, out)
+}
+
+pub(crate) fn placing_of(
+    source: &frame::Video,
+    rotation: u16,
+    layer: (u32, u32),
+    out: (u32, u32),
+    placed: &[Placed],
+) -> (Placing, [f64; 4]) {
+    let at_out = vidcut_core::place::fitted(out, upright_fit(source, rotation, out));
+    let at_layer = vidcut_core::place::fitted(layer, upright_fit(source, rotation, layer));
+    (
+        Placing::new(placed, (f64::from(out.0), f64::from(out.1)), at_out),
+        at_layer,
+    )
 }
 
 const PLACED_MOST: f64 = 16384.0;
@@ -592,6 +619,7 @@ impl Burner {
                 let s = vidcut_core::subtitles::shown(
                     &c.text,
                     &c.words,
+                    &c.word_styles,
                     &style,
                     j - c.start,
                     self.fps,
@@ -1024,6 +1052,7 @@ impl VideoFrames {
             let mut made = Vec::with_capacity(layers.len());
             for (i, (layer, ramp)) in layers.into_iter().enumerate() {
                 let weight = ramp.map(|r| r.weight(k));
+                let wipe = mask_of(ramp, k);
                 let VideoPiece::Source {
                     image,
                     pace,
@@ -1047,6 +1076,7 @@ impl VideoFrames {
                             made_on_gpu: false,
                             placing: None,
                             crossing: crosses.get(i).copied().unwrap_or(false),
+                            wipe,
                         });
                     }
                     continue;
@@ -1079,13 +1109,13 @@ impl VideoFrames {
                 let placing = match (&self.open[s].current, placed.is_empty() || decoded) {
                     (Some((f, _)), false) => {
                         let (w, h, _) = self.maker.out();
-                        let at_out =
-                            vidcut_core::place::fitted((w, h), upright_fit(f, rotation, (w, h)));
-                        let layer = (frame.width(), frame.height());
-                        let at_layer =
-                            vidcut_core::place::fitted(layer, upright_fit(f, rotation, layer));
-                        let frame_size = (f64::from(w), f64::from(h));
-                        Some((Placing::new(&placed, frame_size, at_out), at_layer))
+                        Some(placing_of(
+                            f,
+                            rotation,
+                            (frame.width(), frame.height()),
+                            (w, h),
+                            &placed,
+                        ))
                     }
                     _ => None,
                 };
@@ -1098,6 +1128,7 @@ impl VideoFrames {
                     made_on_gpu: self.open[s].fitting.route == Some(Route::Gpu),
                     placing,
                     crossing: crosses.get(i).copied().unwrap_or(false),
+                    wipe,
                 });
             }
             return Ok(Some(picture.then_some(made)));
@@ -1146,8 +1177,9 @@ impl VideoFrames {
             _ => None,
         };
         let (w, h, _) = self.maker.out();
+        let wiped = layers.iter().any(|l| l.wipe.is_some());
         let on_gpu = match self.maker.output() {
-            Output::Cuda { frames, .. } if self.gpu_mixes() => {
+            Output::Cuda { frames, .. } if self.gpu_mixes() && !wiped => {
                 match cuda_mix(frames, &layers, black.as_ref(), (w, h)) {
                     Ok(mixed) => Some(mixed),
                     Err(e) => {
@@ -1175,8 +1207,45 @@ impl VideoFrames {
                 };
                 let mut mixed = in_memory(layers[0].frame.as_ref())?;
                 let mut below: Option<frame::Video> = None;
-                for l in &layers[1..] {
+                let mut i = 1;
+                while i < layers.len() {
+                    let l = &layers[i];
                     let over = in_memory(l.frame.as_ref())?;
+                    if let Some(mask) = l.wipe {
+                        let covered =
+                            |under: &frame::Video, over: &frame::Video, l: &Layer| match &l.placing
+                            {
+                                Some((placing, fitted)) => super::place::over(
+                                    under,
+                                    &super::place::Layer {
+                                        picture: over,
+                                        placing,
+                                        fitted: *fitted,
+                                        weight: WHOLE,
+                                    },
+                                ),
+                                None => frame_ref(over),
+                            };
+                        let hold = layers
+                            .get(i + 1)
+                            .is_some_and(|n| n.crossing && n.wipe.is_some());
+                        if hold {
+                            let full = covered(&mixed, &over, l)?;
+                            below = Some(std::mem::replace(&mut mixed, full));
+                        } else if l.crossing {
+                            let full = match &below {
+                                Some(bg) => covered(bg, &over, l)?,
+                                None => covered(&mixed, &over, l)?,
+                            };
+                            mixed = super::mix::wipe(&mixed, &full, mask)?;
+                        } else {
+                            let top = covered(&mixed, &over, l)?;
+                            let next = super::mix::wipe(&mixed, &top, mask)?;
+                            below = Some(std::mem::replace(&mut mixed, next));
+                        }
+                        i += 1;
+                        continue;
+                    }
                     let weight = l.weight.unwrap_or(WHOLE);
                     let laid = |under: &frame::Video| match &l.placing {
                         Some((placing, fitted)) => super::place::over(
@@ -1198,6 +1267,7 @@ impl VideoFrames {
                         let next = laid(&mixed)?;
                         below = Some(std::mem::replace(&mut mixed, next));
                     }
+                    i += 1;
                 }
                 match self.maker.output() {
                     Output::Cuda { frames, .. } => frames.upload(&mixed)?,

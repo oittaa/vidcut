@@ -198,8 +198,15 @@ pub fn violations(p: &Project) -> Vec<String> {
             if c.start < 0 {
                 v.push(format!("{}: starts before 0 ({})", c.id, c.start));
             }
-            if let Err(e) = crate::ops::subtitles::checked_words(&c.text, c.duration, &c.words) {
+            if let Err(e) = crate::ops::subtitles::checked_words(&c.text, c.duration, &c.times()) {
                 v.push(format!("{}: {}", c.id, e.message));
+            }
+            for w in &c.words {
+                if let Some(s) = &w.style
+                    && let Err(e) = crate::ops::subtitles::checked_style(s)
+                {
+                    v.push(format!("{}: {}", c.id, e.message));
+                }
             }
             if let Err(e) = crate::ops::subtitles::checked_color(c.color.as_deref(), "cue") {
                 v.push(format!("{}: {}", c.id, e.message));
