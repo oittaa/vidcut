@@ -72,6 +72,85 @@ The volume line is a line over the sound of a clip. A drag on it sets the gain o
   - Maintain Timing keeps the keyframes where they are.
   - Stretch scales the Composite, Transform and Cropping keyframes with the clip.
 
+## Measured in Resolve Studio 21.1.1
+
+These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 1920×1080 at 30 fps, and started at 01:00:00:00.
+
+**Scripting:**
+
+- Resolve's scripting API has no call that adds, reads or removes the keyframes of a clip.
+- A scripted value on a parameter with keyframes changes nothing that Resolve shows or plays.
+- A script can change the speed, with or without stretching the keyframes, and can export and import OTIO.
+
+**The file** (OTIO, as Resolve exports it):
+
+- A keyframe time is a whole frame. It counts from the first source frame of the clip, the start of its `source_range`.
+- An imported time of 40.5 becomes 40. Thus the files hold whole frames only.
+- Volume: the effect `Fairlight Clip Volume and Fades`, with the parameter `volume`, in dB.
+- Transform: Zoom X and Zoom Y have keyframes of their own. Pan and Tilt are fractions of the width and the height of the timeline. Rotation is in degrees.
+  - A keyframe on Position keys X and Y. A later change of X alone adds a keyframe to X only.
+- Cropping: Crop Left is a fraction of the width, as its plain value is.
+- An ease is a Bezier handle on the keyframe:
+  - Linear: no handle.
+  - Ease In: `"InBez": [-t, 0.0]`. Ease Out: `"OutBez": [t, 0.0]`. Ease In and Out: both.
+  - t is a third of the frames to the keyframe before (In) or after (Out). It is 10 for 30 frames, and 20 for 60 frames.
+- With keyframes, `Parameter Value` is not the value at the playhead, and not the value of the last keyframe. An import reads the keyframes.
+- Dynamic Zoom: Resolve writes its keyframes at the source frames 0 and 1000, on a clip with Dynamic Zoom on or off.
+  - In the file, these times are −s and 1000 − s. s is the first source frame of the clip.
+- Resolve reads a written file as written. Times, values and eases come back in its Inspector and in its next export.
+
+**Edits:** the keyframes stay on their source frames.
+
+- A trim of 15 frames at the head moves the times by −15.
+- A slip of 15 frames moves the times by +15. Thus the keyframes go with the picture.
+- A move does not change the times.
+- A split gives all the keyframes to both parts. Each part counts from its own first source frame.
+
+**Speed:**
+
+- The Cut page's speed tool (R) has no stretch choice. It keeps each keyframe at its frame of the clip, and it ripples the timeline.
+- A speed change that stretches the keyframes keeps each keyframe on its source frame.
+- In the file, a kept keyframe moves by s × (1 − 1 / speed). With s = 90, this is +45 at 200% and −90 at 50%.
+- In the file, a stretched keyframe is at its frame of the clip.
+
+**Curves** (from renders):
+
+- Volume changes in dB. A Linear change from 0 to −24 dB over 30 frames falls 0.8 dB on each frame.
+- Zoom changes in value. From 0.1 to 0.4 over 30 frames, it is 0.25 at the middle.
+- Position, rotation and crop change in value too.
+- An ease is a cubic Bezier curve in time and value. Its points are the keyframe, its Out handle, the In handle of the next keyframe, and the next keyframe.
+  - A missing handle is on its keyframe. Thus Linear is a straight line.
+  - This curve fits the rendered volume within 0.01 dB, for Ease Out and for Ease In.
+- Ease Out on one keyframe with Ease In on the next one: the volume holds the first value, and jumps at the second keyframe.
+  - Two renders gave this. The curve on the clip in the timeline shows it too.
+- The eases of the picture are not measured.
+
+**The Cut page:**
+
+- The Inspector has a Keyframe button between Previous and Next arrows on each value and each group. Dynamic Zoom has no button.
+  - The groups with buttons: Transform, Cropping, Composite, Speed Change, Lens Correction, Retime and Scaling, Volume and Pan.
+- The Keyframes tab shows the Keyframe Editor: a track for each value with its keyframes, Volume and Pan too.
+- The timeline shows no volume overlay and no keyframe marks on clips.
+- The Mark menu has Add Keyframe (Ctrl+[), Delete Keyframe (Alt+[), Delete All Keyframes, and Move Selected Keyframes Left, Right, Up and Down.
+- The speed tool of the viewer has its own Keyframe button.
+- A right-click on a keyframe in the Keyframe Editor opens no menu, on the Cut page and on the Edit page.
+- The ease menu of the Edit page's volume overlay:
+  - The first keyframe has Linear and Ease Out only. The last keyframe has Linear and Ease In only.
+  - A click on a keyframe adds it to the selection. An ease from the menu goes to all the selected keyframes.
+
+**Where the program and the manual differ:**
+
+- p. 743 ties the Volume of the Inspector to a volume overlay on the clip. The Cut page has no overlay.
+- p. 1112 says that an ease starts or stops slowly. With both eases on one change, the program jumps instead.
+
+**Better than Resolve** (proposals for the stages):
+
+- Ease In and Out plays the S-curve that the Bezier points give.
+- A drag on a handle changes the curve, from stage 1 on the volume line.
+- A click on a keyframe selects that keyframe only. Shift or Ctrl adds to the selection.
+- The ease menu is on each keyframe: on the volume line, on the Keyframe button and in the Keyframe Editor.
+- The volume line takes keyframes in vidcut's own timeline ([X71](../deviations.md#x71-clip-volume-is-a-line-on-the-clip-without-keyframes)).
+
 ## Scope
 
 **Stage 1: volume keyframes on the volume line.**
@@ -80,9 +159,11 @@ The volume line is a line over the sound of a clip. A drag on it sets the gain o
 - GUI: the volume line takes the controls of the Edit page's Volume overlay above.
   - Alt+click adds a keyframe. A drag moves a keyframe, or the part between two keyframes.
   - A right-click sets the ease. Delete removes the selected keyframes.
+  - A selected keyframe with an ease shows its handles. A drag on a handle changes the curve.
 - Spec:
   - §1 takes volume keyframes in. [§9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gets them, with the pages above.
-  - If the Cut page's timeline has no volume overlay (run R7), a deviation records the behavior of the Edit page.
+  - The Cut page's timeline has no volume overlay. Thus a deviation records that the volume line takes the controls of the Edit page.
+  - A deviation records that Ease In and Out plays an S-curve, and that the handles drag on the volume line.
   - [X9](../deviations.md#x9-opentimelineio-interchange) says that keyed volume from a file plays.
 
 **Stage 2: Transform, Crop and Dynamic Zoom keyframes, with Inspector buttons.**
@@ -91,7 +172,7 @@ The volume line is a line over the sound of a clip. A drag on it sets the gain o
   - The position has one keyframe for X and Y, and the zoom one for X and Y, as the tracks of p. 1256.
   - The flips have no keyframes.
 - Dynamic Zoom: its start box and end box stay at the two ends of the clip ([D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - Its values get keyframe buttons only if Resolve's Inspector gives them buttons (run R7).
+  - Resolve's Inspector has no Keyframe button for Dynamic Zoom. vidcut gives it none.
 - GUI, in the Inspector tab ([X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)):
   - A Keyframe button with Previous and Next arrows beside each value. A right-click on it sets the ease.
   - A value with keyframes gets a keyframe at the playhead when it changes. This applies to the Inspector and to the viewer handles.
@@ -105,21 +186,29 @@ The volume line is a line over the sound of a clip. A drag on it sets the gain o
 
 - A Keyframe Editor tab beside the Inspector tab, as the tab of p. 636. The Timeline control of p. 649 opens it.
 - A track for each value, in a group track for each section. A drag moves keyframes. A drag on a group track moves the keyframes of the group.
+- A curve view for each value, with the handles of its keyframes, as the Curve Editor of p. 1261. A drag on a handle changes the curve.
 - Spec: [§2](../cut-page-spec.md#2-layout-pp-636637) takes the tab in.
-- Not in stage 3: the Curve Editor, Bezier handles, Step, Loop, Ping Pong, Reverse, the Shape Box, the keyframe tray and motion paths.
+- Not in stage 3: Step, Loop, Ping Pong, Reverse, the Shape Box, the keyframe tray and motion paths.
 
 **Still out of scope:** keyframes of speed, opacity, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
 
 ## Model
 
-**A keyframe** has a time, a value and an ease.
+**A keyframe** has a time, a value, an In handle and an Out handle.
 
 - **Time:** a source frame of the clip, counted as the `source_in` of a `Clip` is.
   - Thus a keyframe stays on the content of its frame.
   - The kept effects of a file do the same. Their times count from the `from` field of `Effects`, which `carry` sets in `place_imported`.
-- **Ease:** an `Ease`, with the curves of `Ease::of` ([X67](../deviations.md#x67-the-eases-of-dynamic-zoom-are-curves)).
-  - The ease of a keyframe shapes the change to the next keyframe. The default is Linear.
-  - Resolve's meaning of Ease In and Ease Out on one keyframe is not known (run R5).
+- **Handles:** each handle is a time and a value from its keyframe, as `InBez` and `OutBez` in Resolve's files.
+  - The In handle shapes the change before the keyframe. The Out handle shapes the change after it.
+  - A keyframe without handles is Linear. This is the default.
+  - The curve between two keyframes is the cubic Bezier curve of the two keyframes and their handles ([Measured](#measured-in-resolve-studio-2111)).
+  - Thus Ease Out on one keyframe and Ease In on the next one give an S-curve. Resolve holds the value and jumps.
+- **Eases:** the ease menu sets the handles as Resolve does.
+  - Ease In sets a flat In handle, a third of the way to the keyframe before. Ease Out sets a flat Out handle, a third of the way to the next one.
+  - Ease In and Out sets both. Linear removes both.
+  - A drag on a handle changes the handle. The menu then shows no ease as set.
+  - The eases of Dynamic Zoom stay as `Ease::of` gives them ([X67](../deviations.md#x67-the-eases-of-dynamic-zoom-are-curves)).
 - Before the first keyframe, the value is that of the first keyframe. After the last keyframe, it is that of the last.
 - A value with keyframes takes its value from them only. When its last keyframe goes, the value of that keyframe stays as the plain value.
 - **Where:**
@@ -136,13 +225,14 @@ The volume line is a line over the sound of a clip. A drag on it sets the gain o
   - A keyframe outside a part stays, as Resolve keeps a keyframe outside a trimmed clip (p. 1258).
   - Thus `edit.join` gives back the clip from before the split.
 - **Trim:** the keyframes stay on their source frames. The frames that stay show the same values.
-- **Slip:** the keyframes go with the content. Resolve's behavior is not known (run R3).
+- **Slip:** the keyframes go with the content, as in Resolve.
 - **Move and ripple:** the keyframes go with the clip.
 - **Speed** ([D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
-  - The keyframes scale with the speed, as Stretch to fit does (p. 1217).
+  - A speed change keeps each keyframe at its frame of the clip, as the Cut page's speed tool does.
+  - Thus a speed change moves the source frame of each keyframe. The keyframes do not stretch with the clip.
+  - vidcut has no stretch choice, as the Cut page has none. The Edit page has one (p. 1217).
   - A freeze shows one source frame, so it shows one value.
   - A clip that plays backward plays its keyframes backward.
-  - What the Cut page does is not known (run R4).
 - **Compound clips:** the keyframes of a compound clip count its frames.
   - `edit.decompose` moves them to the source frames of each clip inside.
 - **Copy and paste:** `edit.copy` and `edit.paste` carry the keyframes with the clip.
@@ -203,7 +293,8 @@ The volume line is a line over the sound of a clip. A drag on it sets the gain o
 - `otio::picture` reads Transform, Cropping and Retime and Scaling as a `Picture` only when no parameter has keyframes.
   - The center and scale of Dynamic Zoom need exactly two keyframes (`ends`). The earlier keyframe is the start box.
 - vidcut writes the two keyframes of Dynamic Zoom at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
-  - The [gotchas](../gotchas.md#resolves-otio-files) give this as the form of Resolve's files.
+  - Resolve writes them at −s and 1000 − s. s is the first source frame of the clip ([Measured](#measured-in-resolve-studio-2111)).
+  - Resolve reads the earlier key as the start, whatever the times ([gotchas](../gotchas.md#resolves-otio-files)). Thus both forms play the same.
 - vidcut writes its other picture parameters with an empty `Key Frames`.
 - The clip volume is `Fairlight Clip Volume and Fades` (type 62), with the parameter `volume` in dB.
   - vidcut writes it without `Key Frames`. `effects::gain` reads the gain from its `Parameter Value`.
@@ -236,67 +327,15 @@ The volume line is a line over the sound of a clip. A drag on it sets the gain o
 - Resolve's effects get each keyframe in the `Key Frames` of its parameter, in Resolve's units through `Shape`, as `otio::picture::effects` converts plain values.
 - The gain keyframes go into the clip volume effect (`effects::sound`).
 - An import plays the keyframes of Transform, Cropping and the volume when they fit the model.
-- Bezier, Step, or an anchor point with keyed zoom or rotation stays in the kept effects, unplayed, with the warning of the import.
+- Some keyframes stay in the kept effects, unplayed, with the warning of the import:
+  - Step
+  - an anchor point with keyed zoom or rotation
 
 **Unknown:**
 
-- The base of the keyframe times: the first source frame of the item, its first frame in the timeline, or a count with g.
-- Why a Dynamic Zoom that is on has keyframes at −g and 1000 − g, and one that is off has keyframes at 0 and 1000.
-- How an ease is written, and whether a time can have a fraction.
-- Where keyed volume goes, and its `Parameter Value`.
-- How Zoom X and Y, and Pan and Tilt, are keyed: together or apart.
-
-### Measurement plan
-
-These runs answer the unknowns. They are for the user to approve, and are not run yet.
-
-- **Setup** (10 min):
-  - Resolve Studio 21.1.1. A project at 1920×1080 and 30 fps. The timeline starts at 01:00:00:00, so g is 108000.
-  - Media from `$VIDCUT_TEST_DATA/fixtures/`: `bc_h264_1920x1080_30-1_g30b2_900f_aac48k2_o0.mp4` (900 barcode frames with sound) and `bc_h264_320x180_30-1_g30b2_300f_aac48k2tone_o0.mp4` (a tone).
-  - Clip A: the barcode clip at timeline frame 60, from source frame 90, 300 frames long.
-  - Clip B: the same media at timeline frame 600, with Dynamic Zoom on.
-- **R0. The scripting API** (10 min):
-  - Look for keyframe calls on timeline items in the documentation of the 21.1.1 scripting API.
-  - Answers: which of R1 to R8 a script can do. The other steps are by hand.
-- **R1. Volume keyframes** (15 min):
-  - Edit page: Alt+click the overlay of clip A at clip frames 0, 30, 60 and 90. Set 0, −12, −12 and 0 dB. Set Ease In on the second keyframe.
-  - Export OTIO.
-  - Answers: the effect and parameter of volume keyframes, the base of their times, the unit, the form of an ease, and the `Parameter Value`.
-- **R2. Transform and Cropping keyframes** (15 min):
-  - Inspector, on clip A: keyframes at clip frames 0 and 60.
-  - The values: Zoom 1 to 2, Position X 0 to 200, Rotation Angle 0 to 45, and Crop Left 0 to 100.
-  - Set Ease Out on one keyframe. Export OTIO.
-  - Answers: the shape and units of keyed Transform and Cropping, and whether X and Y are keyed together.
-- **R3. Edits** (25 min):
-  - From R1 and R2, in four copies: trim the head of clip A by 15 frames; slip it by 15 frames; move it and clip B by 30 frames; split clip A at clip frame 45.
-  - Export each copy.
-  - Answers: the base of the times; whether keyframes follow the source in a trim and a slip; what a split keeps; whether Dynamic Zoom's times change with the place of clip B.
-- **R4. Speed** (20 min):
-  - Cut page: Change Clip Speed to 200% and to 50%. Edit page: 200% with Maintain Timing, then with Stretch to fit (p. 1217).
-  - Export each.
-  - Answers: what the Cut page does to keyframes on a speed change, and the times in the file of a clip at another speed.
-- **R5. Curves** (35 min):
-  - Position X from 0 to 960 over 30 frames, with Linear.
-  - Then Ease In, Ease Out and Ease In and Out on the first keyframe, and then on the second. This gives seven renders.
-  - Read the position on each frame, from stills or a Deliver render.
-  - Zoom from 1 to 4 over 30 frames, Linear: read the zoom at frame 15.
-  - The tone from 0 to −24 dB over 30 frames, Linear: read the level each 10 ms.
-  - Answers: the curves; whether the eases play (those of Dynamic Zoom do not); whether gain changes in dB or in amplitude.
-- **R6. Read back** (15 min):
-  - Change the R1 and R2 files by hand: move each time by 10, and change one value. Import them into Resolve.
-  - Read where the keyframes are in the Inspector and the Keyframe Editor.
-  - Answers: whether Resolve reads the times in the base that R3 found. Thus vidcut can write them.
-- **R7. The Cut page** (15 min):
-  - Look for a volume overlay on clips in the Cut page timeline, and for Alt+click on it.
-  - Look for keyframe buttons in the Video panel: one for each value, or one for each group, and on Dynamic Zoom.
-  - Look at the Keyframe Editor tab, its Timeline control, the keyframe tray, [ and ], and a mark on a clip with keyframes.
-  - Answers: which behavior is the Cut page's, and which is only the Edit page's (rule 1).
-- **R8. Fractions and silence** (15 min):
-  - Edit page, zoomed in: add a volume keyframe between two frames (p. 1113). Export OTIO.
-  - Ripple Delete Silence (p. 773) on a clip whose keyframes lower a loud part to −60 dB.
-  - Answers: whether a time can have a fraction; whether Ripple Delete Silence hears the keyed volume.
-
-**Total:** 175 min, about 3 hours.
+- Whether Ripple Delete Silence hears keyed volume. The command was not available for the test clip.
+- The curves of the eases of the picture.
+- The key times of Dynamic Zoom for media with a timecode. The test media has none.
 
 ## Scripting
 
@@ -305,7 +344,7 @@ Rule 3: each GUI action has a request. These requests are new:
 - `keyframes.list`: the keyframes of clips. For each clip and value, each keyframe has its timeline time, its source frame, its value and its ease.
 - `keyframes.add`: clips, a value (`param`), a time (`at`, a timeline time or `playhead`), and a value and an ease if given.
   - Without a value, the keyframe takes the value that the clip has there, as Alt+click does.
-- `keyframes.set`: the value or the ease of the keyframes at given times.
+- `keyframes.set`: the value, the ease or the handles of the keyframes at given times.
 - `keyframes.move`: the keyframes at given times, by frames or to a time.
 - `keyframes.remove`: the keyframes at given times, or all the keyframes of a value, as a Reset does.
 
@@ -319,12 +358,9 @@ Each request is one undo step, and its step says what changed ([X33](../deviatio
 
 ## Open questions
 
-- **Speed:** if the Cut page keeps keyframe times on a speed change (R4), does vidcut follow it? Source frames cannot do this. A freeze would also hold one value.
-- **The ease of a keyframe:** does it shape the change before the keyframe, after it, or both? R5 tells Resolve's curve. vidcut's choice follows it or is a deviation.
-- **Fractions:** if audio keyframes can be between frames (R8), does the model hold fractions of a frame?
 - **`clip.set` on a keyed gain:** a keyframe at the playhead, or a shift of all keyframes by the same dB?
 - **Several selected clips:** the Inspector sets a value on all of them (X70). Does a keyframe go on each clip at the playhead?
-- **The other users of the gain:** do the Mixer meters and ducking by level follow keyed gain? R8 answers this for Ripple Delete Silence only.
+- **The other users of the gain:** do the Mixer meters, ducking by level and Ripple Delete Silence follow keyed gain?
 - **Shortcuts:** [ and ] go from keyframe to keyframe (p. 1251). vidcut uses [ and ] for the stripes of Ripple Delete Silence while it is open.
 - **Compound clips:** what does `edit.decompose` do with the keyframes of a compound clip for a clip inside that is frozen or plays backward?
 - **Dynamic Zoom:** can its boxes have times other than the ends of the clip?
