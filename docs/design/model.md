@@ -404,7 +404,13 @@ flowchart LR
 - Such a reference names the file by its path, or by a file name that no other of them has (`otio::same_media`).
 - Other references keep their URLs.
 - `bundle::open` unpacks an `.otioz` into a folder named after it, or into `unpack`. It keeps files whose CRC-32 matches.
-- Anything else in the way is an error.
+- It reads the timeline text up to a fixed limit. A different length is an error.
+- It refuses a symbolic link in the zip.
+- It refuses media whose declared size is above a fixed limit.
+- A file whose length differs from the declared size is an error.
+- Anything else in the way is an error. A symbolic link at the destination is in the way.
+- `bundle::write` moves the old `.otiod` folder aside before the new folder takes its place.
+- An image sequence frame name is changed the same way as a media file name.
 
 | vidcut | Written as |
 |---|---|
