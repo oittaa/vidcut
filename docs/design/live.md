@@ -363,6 +363,7 @@ The bar and the Jobs button:
   - `Workspace::follow_selection` shows the section of the selected title or subtitle. A section that closes puts its changes in first.
   - Previous and Next in the Subtitle section open the cue before or after with `Workspace::inspect_cue`. Then they send `selection.set` and a `player.seek` to its start.
   - The list of the Subtitle section (`Workspace::cue_list`) draws only its visible rows (`show_rows`). A click on a row does what Next does (`Workspace::step_cue`).
+  - Add New above the list calls `Workspace::add_subtitle` with the track of the open cue, as the right-click menu of the track does.
   - Below them, it shows the selected clips that can have a picture. It reads their pictures from the snapshot in each frame.
   - A picture that the handles, the wheel or the Inspector preview goes first (`Workspace::picture_wanted`). Thus the fields follow a drag in the viewer.
   - Each field changes between the picture and its own unit (`Field::read`, `Field::put`). The fitted size comes from `place::upright_fit`, as in an export.

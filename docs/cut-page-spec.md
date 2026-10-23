@@ -477,10 +477,12 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Add Subtitle, in the right-click menu of a subtitle track, puts a cue at the playhead.
   - You type its text in the Inspector. The text shows on the cue as you type it.
   - The Captions list, at the bottom of the Inspector, shows every cue of the track (pp. 1231, 1233).
+  - Each row of the list has its number, its In above its Out, its text and its characters per second (CPS).
   - A click on a cue in the list loads it into the Inspector to edit (p. 1236).
+  - Add New, above the list, adds a cue at the playhead on the track of the list (p. 1233).
   - Prev and Next in the Inspector move to the cue before or after on the track (pp. 1231, 1233).
   - Cues move, trim, split and delete like clips.
-  - Details: D56, D57; deviations X43, X44.
+  - Details: D56, D57, D78; deviations X43, X44.
 - **Import** (pp. 1230–1231):
   - `.srt`, `.srtx`, `.vtt`, `.xml` and `.ttml` files come into the Media Pool as subtitle clips, with a badge.
   - Any media import, or Import Subtitle, brings them in.
@@ -1815,3 +1817,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The gain of the dragged clip goes in steps of 0.1 dB. During the drag, a label beside the line shows it with one decimal.
     - A drag that ends at the gain of the clip, to one decimal, changes nothing.
   - Reason: the usual gains are near 0 dB, as on a fader. `clip.set` sets an exact value anywhere in the range.
+- **D78. Characters per second** (§8.12; pp. 1231, 1233; deviation X43).
+  - The manual shows the CPS column of the Captions list. It does not tell how CPS is counted.
+  - These facts come from the Cut page of Resolve Studio 21.1.1:
+    - The count of characters includes the spaces. "Second line" has 11 characters.
+    - CPS is the count of characters divided by the duration in seconds, rounded up.
+    - 11 characters over 2 s give 6. 11 characters over 1.5 s give 8. 10 characters over 2 s give 5.
+    - CPS changes when the duration changes.
+  - The manual and these measurements do not tell how Resolve counts a line break.
+  - vidcut counts the characters of the text that shows, as Resolve does. The style tags (`<i>`, `<b>`, `<u>` and `<font>`) do not count.
+  - A line break counts as one character, as the space between two words on one line does.
+  - Thus a text has the same CPS on one line and on two lines.

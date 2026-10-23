@@ -200,7 +200,7 @@ fn full_on_hover(r: &egui::Response, shown: &egui::Galley, full: &str) {
     }
 }
 
-pub(super) fn one_line(
+fn one_line(
     ui: &egui::Ui,
     text: &str,
     width: f32,

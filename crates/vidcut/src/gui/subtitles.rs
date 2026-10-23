@@ -7,14 +7,13 @@ use vidcut_core::model::{
     Cue, LetterCase, Place, Project, SpeakerPaint, Speakers, SubtitleStyle, SubtitleTrack,
     SubtitleWords, WordsShow,
 };
+use vidcut_core::time::Rational;
 
 use super::dialog;
 use super::export::{Ask, Picked};
 use super::folders::Kind;
-use super::history;
 use super::looks::{Parts, Picker, TextFields};
 use super::theme;
-use super::timeline::cues::one_line;
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
 use crate::live::{Answer, PlayerId};
@@ -166,26 +165,93 @@ fn beside(p: &Project, cue: &str, by: isize) -> Option<(String, i64)> {
     Some((near.id.clone(), near.start))
 }
 
-const LIST_ROWS: f32 = 8.0;
+const LIST_ROWS: f32 = 5.0;
+const PAD: f32 = 6.0;
+const GAP: f32 = 10.0;
+
+fn shown_text(text: &str) -> String {
+    vidcut_core::subtitles::plain(&vidcut_core::subtitles::normalize(text))
+}
+
+fn per_second(characters: usize, frames: i64, fps: Rational) -> u64 {
+    let read = characters as u64 * fps.num().unsigned_abs();
+    let shown = frames.max(1).unsigned_abs() * fps.den().unsigned_abs();
+    read.div_ceil(shown)
+}
+
+struct Columns {
+    number: f32,
+    times: f32,
+    cps: f32,
+}
+
+impl Columns {
+    fn text_span(&self, left: f32, right: f32) -> (f32, f32) {
+        let x = left + PAD + self.number + GAP + self.times + GAP;
+        (x, right - PAD - self.cps - GAP - x)
+    }
+}
+
+struct ListRow<'a> {
+    number: usize,
+    times: [String; 2],
+    text: &'a str,
+    cps: u64,
+    on: bool,
+}
+
+fn two_lines(
+    ui: &egui::Ui,
+    text: &str,
+    width: f32,
+    font: egui::FontId,
+    color: egui::Color32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple(text.to_string(), font, color, width.max(8.0));
+    job.wrap.max_rows = 2;
+    job.wrap.overflow_character = Some('…');
+    ui.painter().layout_job(job)
+}
+
+fn list_heading(ui: &mut egui::Ui, width: f32, cols: &Columns, font: &egui::FontId) {
+    let height = ui.text_style_height(&egui::TextStyle::Body);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let faint = theme::colors().text_dim;
+    let painter = ui.painter();
+    let at = |text: &str, x: f32, right: bool| {
+        let g = painter.layout_no_wrap(text.to_string(), font.clone(), faint);
+        let x = if right { x - g.size().x } else { x };
+        painter.galley(egui::pos2(x, rect.top()), g, faint);
+    };
+    let left = rect.left() + PAD;
+    at("#", left + cols.number, true);
+    at("In/Out", left + cols.number + GAP, false);
+    at("Text", cols.text_span(rect.left(), rect.right()).0, false);
+    at("CPS", rect.right() - PAD, true);
+}
 
 fn cue_row(
     ui: &mut egui::Ui,
     height: f32,
-    (tc, column): (&str, f32),
-    text: &str,
-    on: bool,
+    cols: &Columns,
+    row: &ListRow,
     font: &egui::FontId,
 ) -> bool {
     let (rect, r) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
         egui::Sense::click(),
     );
-    let line = one_line(text);
+    let [start, end] = &row.times;
     r.widget_info(|| {
-        egui::WidgetInfo::selected(egui::Role::Button, true, on, format!("{tc} {line}"))
+        let what = format!(
+            "{} {start} {end} {}",
+            row.number,
+            row.text.replace('\n', " / ")
+        );
+        egui::WidgetInfo::selected(egui::Role::Button, true, row.on, what)
     });
     let c = theme::colors();
-    let (ink, faint) = if on {
+    let (ink, faint) = if row.on {
         ui.painter().rect_filled(rect, 3.0, c.selection);
         (c.selected_text, c.selected_text)
     } else {
@@ -195,17 +261,24 @@ fn cue_row(
         }
         (c.text, c.text_dim)
     };
+    let (x, width) = cols.text_span(rect.left(), rect.right());
+    let shown = two_lines(ui, row.text, width, font.clone(), ink);
+    let painter = ui.painter();
     let mid = rect.center().y;
-    let x = rect.left() + 6.0;
-    let g = ui
-        .painter()
-        .layout_no_wrap(tc.to_string(), font.clone(), faint);
-    ui.painter()
-        .galley(egui::pos2(x, mid - g.size().y / 2.0), g, faint);
-    let x = x + column + 10.0;
-    let g = history::one_line(ui, &line, rect.right() - 6.0 - x, font.clone(), ink);
-    ui.painter()
-        .galley(egui::pos2(x, mid - g.size().y / 2.0), g, ink);
+    painter.galley(egui::pos2(x, mid - shown.size().y / 2.0), shown, ink);
+    let at_right = |text: String, x: f32| {
+        let g = painter.layout_no_wrap(text, font.clone(), faint);
+        painter.galley(egui::pos2(x - g.size().x, mid - g.size().y / 2.0), g, faint);
+    };
+    at_right(row.number.to_string(), rect.left() + PAD + cols.number);
+    at_right(row.cps.to_string(), rect.right() - PAD);
+    let line = (height - PAD) / 2.0;
+    let x = rect.left() + PAD + cols.number + GAP;
+    for (i, tc) in row.times.iter().enumerate() {
+        let g = painter.layout_no_wrap(tc.clone(), font.clone(), faint);
+        let y = rect.top() + PAD / 2.0 + i as f32 * line;
+        painter.galley(egui::pos2(x, y), g, faint);
+    }
     r.clicked()
 }
 
@@ -847,6 +920,13 @@ impl Workspace {
             d.dirty = false;
         }
         if let Some(at) = at {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                let free = self.timeline.adding.is_none();
+                if ui.add_enabled(free, egui::Button::new("Add New")).clicked() {
+                    self.add_subtitle(ui.ctx(), Some(&p.subtitles[at.0].id));
+                }
+            });
             let follow = self.timeline.cue_listed.as_deref() != Some(d.cue.as_str());
             if let Some(to) = self.cue_list(ui, &p, at, &d.text, follow) {
                 step = Some(to);
@@ -885,22 +965,36 @@ impl Workspace {
             .map(Landing::cue_text)
             .collect();
         let font = egui::TextStyle::Body.resolve(ui.style());
-        let row = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
+        let row = 2.0 * ui.text_style_height(&egui::TextStyle::Body) + PAD;
         let gap = ui.spacing().item_spacing.y;
         let stride = row + gap;
-        let faint = theme::colors().text_dim;
-        let column = cues.last().map_or(0.0, |c| {
+        let height = LIST_ROWS * stride - gap;
+        let wide = |text: String| {
             ui.painter()
-                .layout_no_wrap(self.tc(c.start), font.clone(), faint)
+                .layout_no_wrap(text, font.clone(), egui::Color32::WHITE)
                 .size()
                 .x
-        });
+        };
+        let cols = Columns {
+            number: wide(cues.len().to_string()).max(wide("#".into())),
+            times: cues
+                .last()
+                .map_or(0.0, |c| wide(self.tc(c.end())))
+                .max(wide("In/Out".into())),
+            cps: wide("000".into()).max(wide("CPS".into())),
+        };
+        let fps = p.settings.fps;
         let mut picked = None;
-        ui.add_space(4.0);
+        let bar = if cues.len() as f32 * stride - gap > height {
+            ui.spacing().scroll.allocated_width()
+        } else {
+            0.0
+        };
+        list_heading(ui, ui.available_width() - bar, &cols, &font);
         egui::ScrollArea::vertical()
             .id_salt("cue-list")
             .auto_shrink([false, false])
-            .max_height(LIST_ROWS * stride - gap)
+            .max_height(height)
             .show_rows(ui, row, cues.len(), |ui, range| {
                 let top = ui.max_rect().top() - range.start as f32 * stride;
                 for k in range {
@@ -913,8 +1007,15 @@ impl Workspace {
                             .find(|(id, _)| *id == c.id)
                             .map_or(c.text.as_str(), |(_, t)| *t)
                     };
-                    let tc = self.tc(c.start);
-                    if cue_row(ui, row, (&tc, column), text, k == open, &font) {
+                    let shown = shown_text(text);
+                    let line = ListRow {
+                        number: k + 1,
+                        times: [self.tc(c.start), self.tc(c.end())],
+                        text: &shown,
+                        cps: per_second(shown.chars().count(), c.duration, fps),
+                        on: k == open,
+                    };
+                    if cue_row(ui, row, &cols, &line, &font) {
                         picked = Some((c.id.clone(), c.start));
                     }
                 }
