@@ -9,6 +9,16 @@ use crate::ffmpeg::{self, codec, ffi, format, frame, media};
 use crate::isolate::Isolator;
 use crate::stretch::Stretch;
 
+pub(crate) fn sample_format(n: i32) -> Option<ffi::AVSampleFormat> {
+    let min = ffi::AVSampleFormat::AV_SAMPLE_FMT_NONE as i32;
+    let max = ffi::AVSampleFormat::AV_SAMPLE_FMT_NB as i32;
+    if n < min || n > max {
+        return None;
+    }
+    // SAFETY: the discriminants from NONE through NB are contiguous.
+    Some(unsafe { std::mem::transmute::<i32, ffi::AVSampleFormat>(n) })
+}
+
 pub(crate) struct Resampler {
     swr: *mut ffi::SwrContext,
     channels: usize,
@@ -39,7 +49,12 @@ impl Resampler {
             let mut out_layout: ffi::AVChannelLayout = std::mem::zeroed();
             ffi::av_channel_layout_default(&mut out_layout, i32::from(channels));
             let mut swr = std::ptr::null_mut();
-            let in_fmt: ffi::AVSampleFormat = std::mem::transmute(f.format);
+            let Some(in_fmt) = sample_format(f.format) else {
+                return Err(Error::Invalid(format!(
+                    "cannot convert audio ({} Hz, {} channels) to {rate} Hz",
+                    f.sample_rate, f.ch_layout.nb_channels
+                )));
+            };
             let ret = ffi::swr_alloc_set_opts2(
                 &mut swr,
                 &out_layout,
@@ -935,5 +950,25 @@ impl AudioMix {
             }
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sample_format;
+    use crate::ffmpeg::ffi;
+
+    #[test]
+    fn a_sample_format_past_the_list_is_refused() {
+        let past = ffi::AVSampleFormat::AV_SAMPLE_FMT_NB as i32 + 1;
+        assert_eq!(sample_format(past), None);
+    }
+
+    #[test]
+    fn float_is_a_sample_format() {
+        assert_eq!(
+            sample_format(ffi::AVSampleFormat::AV_SAMPLE_FMT_FLT as i32),
+            Some(ffi::AVSampleFormat::AV_SAMPLE_FMT_FLT)
+        );
     }
 }
