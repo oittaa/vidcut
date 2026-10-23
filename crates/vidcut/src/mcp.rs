@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -80,8 +80,17 @@ pub fn serve(project: Option<PathBuf>, options: RouteOptions) -> Result<()> {
         client: Mutex::new(None),
     });
     let mut calls = Vec::new();
-    for line in std::io::stdin().lock().lines() {
-        let Ok(line) = line else { break };
+    let max = crate::ipc::server::Limits::default().line;
+    let mut input = std::io::stdin().lock();
+    loop {
+        let line = match crate::ipc::read_capped_line(&mut input, max) {
+            Ok(None) => break,
+            Ok(Some(line)) => line,
+            Err(e) => {
+                out.error(&Value::Null, -32700, &format!("parse error: {e}"));
+                break;
+            }
+        };
         if line.trim().is_empty() {
             continue;
         }
