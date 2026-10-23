@@ -1746,20 +1746,7 @@ impl Workspace {
             if ui.button("Dissolve").clicked() {
                 self.send("edit.dissolve", json!({ "at": at }));
             }
-            if ui
-                .toggle_value(&mut self.video_only, "Video Only")
-                .changed()
-                && self.video_only
-            {
-                self.audio_only = false;
-            }
-            if ui
-                .toggle_value(&mut self.audio_only, "Audio Only")
-                .changed()
-                && self.audio_only
-            {
-                self.video_only = false;
-            }
+            self.edit_only_toggles(ui);
         });
         let sources = self.edit_sources();
         let text = match sources.len() {

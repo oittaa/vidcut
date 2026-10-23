@@ -664,6 +664,6 @@ fn webvtt_writes_a_cues_alignment_and_position() {
     .text;
     assert_eq!(
         text,
-        "WEBVTT\n\n00:00:01.000 --> 00:00:02.000 position:25% line:40% align:left\nHi\n\n"
+        "WEBVTT\n\n00:00:01.000 --> 00:00:02.000 position:25% line:40%,center align:left\nHi\n\n"
     );
 }

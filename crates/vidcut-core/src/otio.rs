@@ -5,7 +5,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, Compound, Keyframe, Marks, Media, Picture, Project, Speed, Title, TrackKind,
+    Clip, Compound, ImageSequence, Keyframe, Marks, Media, Picture, Project, Speed, Title,
+    TrackKind,
 };
 use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
 use crate::time::Rational;
@@ -158,18 +159,21 @@ fn media_reference(p: &Project, m: &Media, locations: Locations, rate: f64) -> V
         Locations::Absolute => None,
     };
     if let Some(s) = &m.sequence {
-        let base = bundled.unwrap_or_else(|| {
-            let mut dir = m
-                .path
-                .parent()
-                .unwrap_or(Path::new("/"))
-                .to_string_lossy()
-                .into_owned();
-            if !dir.ends_with(['/', std::path::MAIN_SEPARATOR]) {
-                dir.push(std::path::MAIN_SEPARATOR);
+        let (base, s) = match bundled {
+            Some(at) => bundled_sequence(&at, s),
+            None => {
+                let mut dir = m
+                    .path
+                    .parent()
+                    .unwrap_or(Path::new("/"))
+                    .to_string_lossy()
+                    .into_owned();
+                if !dir.ends_with(['/', std::path::MAIN_SEPARATOR]) {
+                    dir.push(std::path::MAIN_SEPARATOR);
+                }
+                (dir, s.clone())
             }
-            dir
-        });
+        };
         let (prefix, padding, suffix) = s.parts();
         let pictures = m.info.video.as_ref().map_or(fps, |v| v.fps).as_f64();
         return json!({
@@ -203,14 +207,38 @@ fn media_reference(p: &Project, m: &Media, locations: Locations, rate: f64) -> V
     })
 }
 
-fn written_path(m: &Media, locations: Locations) -> PathBuf {
-    match locations {
-        Locations::Bundle(names) => match (names.get(&m.id), &m.sequence) {
-            (Some(dir), Some(_)) => PathBuf::from(dir).join(m.path.file_name().unwrap_or_default()),
-            (Some(path), None) => PathBuf::from(path),
-            (None, _) => m.path.clone(),
+fn bundled_sequence(location: &str, s: &ImageSequence) -> (String, ImageSequence) {
+    match location.rsplit_once('/') {
+        Some((dir, pattern)) if !pattern.is_empty() => (
+            format!("{dir}/"),
+            ImageSequence {
+                pattern: pattern.to_string(),
+                ..s.clone()
+            },
+        ),
+        _ => (location.to_string(), s.clone()),
+    }
+}
+
+fn written(m: &Media, locations: Locations) -> Media {
+    let at = match locations {
+        Locations::Bundle(names) => names.get(&m.id),
+        Locations::Absolute => None,
+    };
+    match (at, &m.sequence) {
+        (Some(at), Some(s)) => {
+            let (dir, s) = bundled_sequence(at, s);
+            Media {
+                path: PathBuf::from(dir).join(s.name(s.first)),
+                sequence: Some(s),
+                ..m.clone()
+            }
+        }
+        (Some(path), None) => Media {
+            path: PathBuf::from(path),
+            ..m.clone()
         },
-        Locations::Absolute => m.path.clone(),
+        (None, _) => m.clone(),
     }
 }
 
@@ -338,8 +366,21 @@ fn bundle_nested(
         None
     };
     if let Some((key, r)) = found {
-        if let Some(to) = same_media(&r, bundled).and_then(|m| names.get(&m.id)) {
-            v[key] = json!(to);
+        let m = same_media(&r, bundled);
+        match (
+            m.and_then(|m| names.get(&m.id)),
+            m.and_then(|m| m.sequence.as_ref()),
+        ) {
+            (Some(to), Some(s)) if key == "target_url_base" => {
+                let (base, s) = bundled_sequence(to, s);
+                let (prefix, padding, suffix) = s.parts();
+                v["target_url_base"] = json!(base);
+                v["name_prefix"] = json!(prefix);
+                v["name_suffix"] = json!(suffix);
+                v["frame_zero_padding"] = json!(padding);
+            }
+            (Some(to), _) => v[key] = json!(to),
+            (None, _) => {}
         }
         return;
     }
@@ -786,14 +827,7 @@ pub fn export_drawn(
     if span.is_none() {
         ours["project"] = json!(ProjectMeta {
             settings: p.settings.clone(),
-            media: p
-                .media
-                .iter()
-                .map(|m| Media {
-                    path: written_path(m, locations),
-                    ..m.clone()
-                })
-                .collect(),
+            media: p.media.iter().map(|m| written(m, locations)).collect(),
             bins: p.bins.clone(),
             tape_marks: p.tape_marks.clone(),
             next_id: p.next_id.clone(),

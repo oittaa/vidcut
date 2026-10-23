@@ -373,10 +373,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 None => "silent".into(),
             };
             println!(
-                "{} integrated, range {:.1} LU, true peak {} ({} -> {})",
+                "{} integrated, range {:.1} LU, true peak {}, sample peak {} ({} -> {})",
                 db("integrated", "LUFS"),
                 v["range"].as_f64().unwrap_or(0.0),
                 db("true_peak", "dBTP"),
+                db("sample_peak", "dBFS"),
                 v["from_tc"].as_str().unwrap_or_default(),
                 v["to_tc"].as_str().unwrap_or_default()
             );

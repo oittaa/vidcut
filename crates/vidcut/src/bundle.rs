@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex, PoisonError};
 
 use vidcut_core::editor::{TimelineFile, Unpacked};
+use vidcut_core::model::ImageSequence;
 use vidcut_core::{Error, ErrorCode, Project, Result};
 use zip::write::SimpleFileOptions;
 
@@ -123,12 +124,16 @@ pub fn plan(p: &Project, ids: &[String]) -> Result<Vec<Item>> {
                     .file_name()
                     .map_or("pictures".into(), |n| portable(&n.to_string_lossy()));
                 let folder = unique(&mut taken, &folder);
+                let named = ImageSequence {
+                    pattern: portable(&s.pattern),
+                    ..s.clone()
+                };
                 for k in 0..s.count {
                     let file = s.file(dir, k);
                     match size(&file) {
                         Some(n) => {
                             item.bytes += n;
-                            let name = portable(&s.name(s.first + k));
+                            let name = named.name(named.first + k);
                             item.files.push((file, format!("{folder}/{name}")));
                         }
                         None => {
@@ -137,7 +142,7 @@ pub fn plan(p: &Project, ids: &[String]) -> Result<Vec<Item>> {
                         }
                     }
                 }
-                item.location = format!("{folder}/");
+                item.location = format!("{folder}/{}", named.pattern);
             }
             None => match size(&m.path) {
                 Some(n) => {

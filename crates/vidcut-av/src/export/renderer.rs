@@ -64,20 +64,6 @@ pub(crate) fn frames(
     }
 }
 
-pub(crate) fn mixed_image(under: &Image, over: &Image, weight: u32) -> Image {
-    let rgba = under
-        .rgba
-        .iter()
-        .zip(&over.rgba)
-        .map(|(&a, &b)| super::mix::mixed(u32::from(a), u32::from(b), weight) as u8)
-        .collect();
-    Image {
-        width: under.width,
-        height: under.height,
-        rgba,
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn window(
     frames: &mut VideoFrames,

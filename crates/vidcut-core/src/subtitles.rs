@@ -16,6 +16,7 @@ pub use spoken::{
     HIGHLIGHT, POP_SECS, Piece, Shown, cased, cased_markup, marked, parts, pieces, shown,
 };
 pub use text::{Encoding, Tag, Token, color, plain, rgb, tokens};
+pub use vtt::settings as vtt_settings;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Timed {
