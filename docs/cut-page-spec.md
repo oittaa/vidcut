@@ -2015,8 +2015,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A typed frame count is a whole number.
   - Digits in a frame count are not filled as a timecode.
   - `viewer.set` sets the viewer, the count, the zero, and a paste.
-- **D92. The anchor point** (§8.15; p. 735; deviation X82).
-  - The manual gives Anchor Point X and Y in the Inspector. They set the point that the zoom and the rotation work about.
+- **D92. The anchor point** (§8.15; pp. 735, 767; deviation X82).
+  - The manual gives Anchor Point X and Y in the Inspector (p. 735).
+  - It says that all transforms are centered on the anchor point, and that the rotation turns about it (pp. 735, 767).
+  - Resolve's files show that Resolve flips about the middle ([gotchas](gotchas.md#resolves-otio-files)). vidcut does the same.
   - The zoom and the turn work about the anchor point. The flips and the Dynamic Zoom work about the middle.
   - **Order:** fit, crop, flip, Dynamic Zoom, zoom and turn about the anchor point, move.
   - `position` is the move. The anchor point stays where `position` puts it, whatever the zoom and the turn.

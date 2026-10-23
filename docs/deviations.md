@@ -1688,11 +1688,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
 ## X82. The viewer marks the anchor point
 
 - **Resolve:**
-  - Anchor Point X and Y in the Inspector set the point that the zoom and the rotation work about (p. 735).
+  - Anchor Point X and Y in the Inspector set the point that all transforms are centered on (p. 735).
+  - The onscreen Transform controls set Zoom, Position, Rotation, Pitch, Yaw and Flip (p. 767). The anchor point is not one of them.
 - **vidcut:**
   - Anchor X and Y in the Inspector set the anchor point ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)). `picture.set` sets it from a script.
   - While the Transform handles show, a small cross marks the anchor point in the viewer.
-  - The cross has no drag.
+  - The cross has no drag. Thus, as in Resolve, the viewer does not set the anchor point.
 - **Why:**
   - The corners, the sides, the turn handle and the wheel work about the anchor point. Thus the user sees that point.
   - A drag inside the box already moves the picture.
