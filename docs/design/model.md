@@ -511,6 +511,9 @@ Reset:
   - the speech models and kept paid replies (with `keep_downloads`)
   - a proxy folder set as an absolute path, compared after parent steps and links are resolved (`dirs::canonical`)
   - the undo history of the project that its own GUI has open (`Store::history_path`)
+- A directory entry is compared after links are resolved (`dirs::canonical`).
+- Reset does not follow a link to reach a kept path.
+- When reset removes a link, the folder that the link names stays.
 - It refuses while another GUI runs (the registry). That GUI keeps view settings and folders in memory, and writes them back.
 - When the reset is confirmed, the GUI that asks drops its own view state to defaults (`Workspace::forget_view_state`).
 - Thus nothing that this GUI writes during the delete brings old settings back.
