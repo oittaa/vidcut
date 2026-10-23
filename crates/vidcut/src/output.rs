@@ -822,12 +822,14 @@ pub fn print(method: &str, r: &Response, json: bool) {
             let crop = &v["crop"];
             let side = |k: &str| crop[k].as_f64().unwrap_or_default();
             println!(
-                "{}  position {}  zoom {}  rotation {}°  anchor {}",
+                "{}  position {}  zoom {}  rotation {}°  anchor {}  pitch {}  yaw {}",
                 v["clip"].as_str().unwrap_or_default(),
                 pair("position"),
                 pair("zoom"),
                 v["rotation"].as_f64().unwrap_or_default(),
-                pair("anchor")
+                pair("anchor"),
+                v["pitch"].as_f64().unwrap_or_default(),
+                v["yaw"].as_f64().unwrap_or_default(),
             );
             let flips: Vec<&str> = [
                 ("flip_horizontal", "horizontal"),

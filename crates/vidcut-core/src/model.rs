@@ -1514,7 +1514,7 @@ impl Crop {
 }
 
 /// Which of a picture's tools: `transform` (its position, zoom, rotation,
-/// anchor and flips), `crop` or `dynamic_zoom`.
+/// anchor, pitch, yaw and flips), `crop` or `dynamic_zoom`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PictureTool {

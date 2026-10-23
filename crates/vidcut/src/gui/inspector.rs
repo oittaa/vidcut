@@ -28,6 +28,7 @@ const REACH: f64 = 100.0;
 const ZOOM: (f64, f64) = (0.01, 100.0);
 const BOX: (f64, f64) = (0.01, 100.0);
 const TURNS: f64 = 3600.0;
+const LEAN: f64 = 1.5;
 const LEFT_SHOWING: f64 = 1.0;
 const SAME: f64 = 1e-9;
 const FIELD_WIDTH: f32 = 76.0;
@@ -42,6 +43,8 @@ enum Field {
     Rotation,
     AnchorX,
     AnchorY,
+    Pitch,
+    Yaw,
     Left,
     Right,
     Top,
@@ -116,6 +119,8 @@ impl Field {
             Field::Rotation => "Rotation",
             Field::AnchorX => "Anchor X",
             Field::AnchorY => "Anchor Y",
+            Field::Pitch => "Pitch",
+            Field::Yaw => "Yaw",
             Field::Left => "Left",
             Field::Right => "Right",
             Field::Top => "Top",
@@ -161,6 +166,7 @@ impl Field {
             | Field::Rotation
             | Field::StartZoom
             | Field::EndZoom => 0.5,
+            Field::Pitch | Field::Yaw => 0.01,
             _ => 1.0,
         }
     }
@@ -185,6 +191,8 @@ impl Field {
             Field::Rotation => p.turn(),
             Field::AnchorX => (ax - 0.5) * fw,
             Field::AnchorY => (0.5 - ay) * fh,
+            Field::Pitch => p.pitch(),
+            Field::Yaw => p.yaw(),
             Field::Left => c.left * fw,
             Field::Right => c.right * fw,
             Field::Top => c.top * fh,
@@ -208,6 +216,8 @@ impl Field {
             Field::Rotation => p.turn() == 0.0,
             Field::AnchorX => ax == 0.5,
             Field::AnchorY => ay == 0.5,
+            Field::Pitch => p.pitch() == 0.0,
+            Field::Yaw => p.yaw() == 0.0,
             Field::Left => c.left == 0.0,
             Field::Right => c.right == 0.0,
             Field::Top => c.top == 0.0,
@@ -228,6 +238,7 @@ impl Field {
             Field::Rotation => -TURNS..=TURNS,
             Field::AnchorX => (-REACH - 0.5) * fw..=(REACH - 0.5) * fw,
             Field::AnchorY => (0.5 - REACH) * fh..=(0.5 + REACH) * fh,
+            Field::Pitch | Field::Yaw => -LEAN..=LEAN,
             Field::Left => side(c.right, fw),
             Field::Right => side(c.left, fw),
             Field::Top => side(c.bottom, fh),
@@ -258,6 +269,8 @@ impl Field {
             Field::Rotation => out.rotation = Some(v),
             Field::AnchorX => out.anchor = Some([at(0.5 + v / fw), ay]),
             Field::AnchorY => out.anchor = Some([ax, at(0.5 - v / fh)]),
+            Field::Pitch => out.pitch = Some(v),
+            Field::Yaw => out.yaw = Some(v),
             Field::Left => out.crop.left = v / fw,
             Field::Right => out.crop.right = v / fw,
             Field::Top => out.crop.top = v / fh,
@@ -714,6 +727,8 @@ fn transform(ui: &mut egui::Ui, i: &Inspector, chosen: &[Chosen], acts: &mut Vec
             number(ui, (Field::Rotation, None), i, chosen, acts);
             number(ui, (Field::AnchorX, None), i, chosen, acts);
             number(ui, (Field::AnchorY, None), i, chosen, acts);
+            number(ui, (Field::Pitch, None), i, chosen, acts);
+            number(ui, (Field::Yaw, None), i, chosen, acts);
             let flipped = chosen
                 .iter()
                 .any(|c| c.shown.flip_horizontal || c.shown.flip_vertical);

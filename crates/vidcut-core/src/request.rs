@@ -1711,16 +1711,16 @@ pub enum Request {
 
     /// Where a clip's picture goes over the frame (`c3`, or `V2@15s`): the
     /// `position` of its middle, its `zoom` across and down, its `rotation`,
-    /// its `anchor`, its flips, its `crop` and its `dynamic_zoom` (null when
-    /// it has none), every value given, usual ones too.
+    /// its `anchor`, its `pitch`, its `yaw`, its flips, its `crop` and its
+    /// `dynamic_zoom` (null when it has none), every value given, usual ones too.
     #[serde(rename = "picture.get")]
     PictureGet { clip: ClipRef },
-    /// Move, zoom, turn, flip or crop clips' pictures, or give them a
-    /// Dynamic Zoom: footage, stills, image sequences and compound clips; a
-    /// title has its own place (`titles.set`). Each field given replaces
-    /// its own. At its usual values a picture is fitted into the frame; the
-    /// tracks below show wherever it doesn't cover the frame: in its bars,
-    /// around it and where it is cropped.
+    /// Move, zoom, turn, pitch, yaw, flip or crop clips' pictures, or give
+    /// them a Dynamic Zoom: footage, stills, image sequences and compound
+    /// clips; a title has its own place (`titles.set`). Each field given
+    /// replaces its own. At its usual values a picture is fitted into the
+    /// frame; the tracks below show wherever it doesn't cover the frame: in
+    /// its bars, around it and where it is cropped.
     #[serde(rename = "picture.set")]
     PictureSet {
         clips: OneOrMany<ClipRef>,
@@ -1744,6 +1744,14 @@ pub enum Request {
         /// middle.
         #[serde(default)]
         anchor: Option<Vec<f64>>,
+        /// Pitch about the anchor, in screen axes, from -1.5 to 1.5.
+        /// Positive puts the top farther away. 0 for none.
+        #[serde(default)]
+        pitch: Option<f64>,
+        /// Yaw about the anchor, in screen axes, from -1.5 to 1.5.
+        /// Positive puts the left closer. 0 for none.
+        #[serde(default)]
+        yaw: Option<f64>,
         /// Mirrored left to right.
         #[serde(default)]
         flip_horizontal: Option<bool>,
@@ -1774,8 +1782,8 @@ pub enum Request {
         dynamic_zoom: Option<Option<DynamicZoomSet>>,
     },
     /// Put clips' pictures back at their usual values: the `transform`
-    /// (position, zoom, rotation, anchor and flips), the `crop`, the
-    /// `dynamic_zoom`, or all of them when no `tool` is given.
+    /// (position, zoom, rotation, anchor, pitch, yaw and flips), the `crop`,
+    /// the `dynamic_zoom`, or all of them when no `tool` is given.
     #[serde(rename = "picture.clear")]
     PictureClear {
         clips: OneOrMany<ClipRef>,

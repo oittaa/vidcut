@@ -1074,6 +1074,12 @@ pub(super) fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
     if a.pivot() != b.pivot() {
         params["anchor"] = json!(b.pivot());
     }
+    if a.pitch() != b.pitch() {
+        params["pitch"] = json!(b.pitch());
+    }
+    if a.yaw() != b.yaw() {
+        params["yaw"] = json!(b.yaw());
+    }
     if a.flip_horizontal != b.flip_horizontal {
         params["flip_horizontal"] = json!(b.flip_horizontal);
     }
