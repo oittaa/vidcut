@@ -425,7 +425,7 @@ pub struct Screen {
     slots: Vec<Slot>,
     letters: Vec<Letters>,
     imports_before: u64,
-    wiped: Option<(usize, u32, u32, Arc<Picture>)>,
+    wiped: Option<Wiped>,
 }
 
 struct Letters {
@@ -672,6 +672,14 @@ type D3d11Formats = (
     wgpu::TextureFormat,
 );
 
+struct Wiped {
+    picture: usize,
+    size: (u32, u32),
+    placed: Vec<Vec<Placed>>,
+    crosses: Vec<bool>,
+    flat: Arc<Picture>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Drawn {
     Same,
@@ -699,20 +707,30 @@ impl Screen {
     fn flat_wipe(
         &mut self,
         picture: Option<&Arc<Picture>>,
+        placed: &[Vec<Placed>],
+        crosses: &[bool],
         size: (u32, u32),
     ) -> Option<Arc<Picture>> {
         let picture = picture.filter(|p| p.over().iter().any(|o| o.wipe.is_some()))?;
-        let key = (Arc::as_ptr(picture) as usize, size.0, size.1);
-        if let Some((ptr, w, h, cached)) = &self.wiped
-            && *ptr == key.0
-            && (*w, *h) == (key.1, key.2)
+        let picture_id = Arc::as_ptr(picture) as usize;
+        if let Some(kept) = &self.wiped
+            && kept.picture == picture_id
+            && kept.size == size
+            && kept.placed == placed
+            && kept.crosses == crosses
         {
-            return Some(cached.clone());
+            return Some(kept.flat.clone());
         }
-        match picture.at_wipe(size.0, size.1) {
+        match picture.at_wipe(size.0, size.1, placed, crosses) {
             Ok(Some(flat)) => {
                 let flat = Arc::new(flat);
-                self.wiped = Some((key.0, key.1, key.2, flat.clone()));
+                self.wiped = Some(Wiped {
+                    picture: picture_id,
+                    size,
+                    placed: placed.to_vec(),
+                    crosses: crosses.to_vec(),
+                    flat: flat.clone(),
+                });
                 Some(flat)
             }
             Ok(None) => {
@@ -738,7 +756,7 @@ impl Screen {
     ) -> Drawn {
         let max = gpu.device.limits().max_texture_dimension_2d;
         let size = (width.clamp(2, max), height.clamp(2, max));
-        let flat = self.flat_wipe(picture, size);
+        let flat = self.flat_wipe(picture, placed, crosses, size);
         let picture = flat.as_ref().or(picture);
         let (placed, crosses) = if flat.is_some() {
             (&[][..], &[][..])

@@ -386,6 +386,21 @@ fn upright_fit(f: &frame::Video, rotation: u16, out: (u32, u32)) -> (u32, u32) {
     vidcut_core::place::upright_fit((f.width(), f.height()), sar, rotation, out)
 }
 
+pub(crate) fn placing_of(
+    source: &frame::Video,
+    rotation: u16,
+    layer: (u32, u32),
+    out: (u32, u32),
+    placed: &[Placed],
+) -> (Placing, [f64; 4]) {
+    let at_out = vidcut_core::place::fitted(out, upright_fit(source, rotation, out));
+    let at_layer = vidcut_core::place::fitted(layer, upright_fit(source, rotation, layer));
+    (
+        Placing::new(placed, (f64::from(out.0), f64::from(out.1)), at_out),
+        at_layer,
+    )
+}
+
 const PLACED_MOST: f64 = 16384.0;
 
 fn layer_size(out: (u32, u32), f: &frame::Video, rotation: u16, placed: &[Placed]) -> (u32, u32) {
@@ -1093,13 +1108,13 @@ impl VideoFrames {
                 let placing = match (&self.open[s].current, placed.is_empty() || decoded) {
                     (Some((f, _)), false) => {
                         let (w, h, _) = self.maker.out();
-                        let at_out =
-                            vidcut_core::place::fitted((w, h), upright_fit(f, rotation, (w, h)));
-                        let layer = (frame.width(), frame.height());
-                        let at_layer =
-                            vidcut_core::place::fitted(layer, upright_fit(f, rotation, layer));
-                        let frame_size = (f64::from(w), f64::from(h));
-                        Some((Placing::new(&placed, frame_size, at_out), at_layer))
+                        Some(placing_of(
+                            f,
+                            rotation,
+                            (frame.width(), frame.height()),
+                            (w, h),
+                            &placed,
+                        ))
                     }
                     _ => None,
                 };
