@@ -496,7 +496,9 @@ pub fn set_words(p: &mut Project, ti: usize, ci: usize, words: Vec<i64>) {
 pub fn set_word_style(p: &mut Project, id: &str, index: usize, style: SubtitleStyle) -> Result<()> {
     let (ti, ci) = find(p, id)?;
     unlocked(p, ti)?;
-    let style = checked_style(&style)?;
+    let bold = style.bold;
+    let mut style = checked_style(&style)?;
+    style.bold = bold;
     let style = (!style.is_empty()).then_some(style);
     let c = &mut p.subtitles[ti].cues[ci];
     let n = subtitles::words(&c.text).len();

@@ -4,7 +4,9 @@ use crate::model::{
     LetterCase, Place, Project, Settings, SubtitleAlign, SubtitleBackground, SubtitleOutline,
     SubtitleStyle,
 };
-use crate::ops::subtitles::{TrackProps, add_track, checked_style, set_track};
+use crate::ops::subtitles::{
+    TrackProps, add_cue, add_track, checked_style, set_style, set_track, set_word_style,
+};
 use crate::request::SubtitleFormat;
 use crate::subtitles::{Timed, Writing, write};
 use crate::test_support::Fixture;
@@ -381,6 +383,59 @@ fn setting_one_word_leaves_the_other_on_the_cue_style() {
         })
     );
     assert_eq!(cue.words.get(1).and_then(|w| w.style.clone()), None);
+}
+
+#[test]
+fn a_bold_cue_stores_a_word_that_is_not_bold() {
+    let mut p = Project::new(Settings::default());
+    add_track(&mut p, None);
+    let id = add_cue(&mut p, 0, 0, None, Some(10), "one", None, Vec::new()).unwrap();
+    set_style(
+        &mut p,
+        &id,
+        SubtitleStyle {
+            bold: Some(true),
+            ..SubtitleStyle::default()
+        },
+    )
+    .unwrap();
+    set_word_style(
+        &mut p,
+        &id,
+        0,
+        SubtitleStyle {
+            bold: Some(false),
+            ..SubtitleStyle::default()
+        },
+    )
+    .unwrap();
+    let cue = &p.subtitles[0].cues[0];
+    let stored = cue
+        .words
+        .first()
+        .and_then(|w| w.style.as_ref())
+        .and_then(|s| s.bold);
+    let cue_style = cue.style.clone();
+    let text = cue.text.clone();
+    let times = cue.times();
+    let word_styles: Vec<_> = cue.words.iter().map(|w| w.style.clone()).collect();
+    let style = p.subtitles[0].style.for_cue(cue_style.as_ref());
+    let shown = crate::subtitles::shown(
+        &text,
+        &times,
+        &word_styles,
+        &style,
+        0,
+        p.settings.fps.as_f64(),
+        None,
+    );
+    let drawn = shown
+        .pieces
+        .iter()
+        .find(|piece| piece.text == "one")
+        .map(|piece| piece.bold);
+    assert_eq!(stored, Some(false));
+    assert_eq!(drawn, Some(false));
 }
 
 #[test]
