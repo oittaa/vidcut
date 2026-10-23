@@ -170,7 +170,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Display:**
   - The source modes show source timecode. Timeline mode shows record timecode.
   - The timecode is drop-frame where the project counts drop-frame (D47).
-  - A right-click offers the source or record frame count, Timer 1 and 2, and KeyKode.
+  - That default is Auto (D91).
+  - A right-click chooses another count (D91).
+  - There is no KeyKode (X81).
 
 ### 4.4 In/Out (pp. 691–693, 700)
 - **Source In/Out:** I/O in a source mode or over a pool thumbnail, or the handles of the scroll area.
@@ -1865,3 +1867,38 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The manual names the highest peak for Relative. vidcut uses the highest level for each mode.
   - Each volume stops at −60 dB and +24 dB (D12). The result marks each clip that stopped (`held`).
   - Reason: the export already measures EBU R128 loudness and true peak. Thus the two features agree.
+- **D91. The viewer timecode menu** (§4.3; pp. 713–714; deviation X81).
+  - Auto is the default. It follows the viewer.
+  - Source modes show a timecode from the first frame of the media.
+  - Timeline mode shows record timecode.
+  - This is the field vidcut shows today (X8).
+  - Source Timecode is the media frame on screen, as that timecode.
+  - The file start timecode is not added (X8).
+  - Source Frame is that frame as a whole number, from 0.
+  - Record Timecode is the playhead on screen plus the timeline start.
+  - Record Frame is that playhead as a whole number, from 0.
+  - On a tape, Source Frame is the frame inside the clip.
+  - Record Frame on a tape is the frame along the tape.
+  - On the timeline, the source frame is the top shown clip.
+  - `Clip::source_at` gives it, so a speed is included.
+  - A gap, a title, a generator, or a compound has no source frame.
+  - The field then shows a dash.
+  - Timer 2 is the playhead as a timecode from 0.
+  - It ignores the timeline start. It has no reset.
+  - Timer 1 is the playhead minus a zero, as a timecode from 0.
+  - Reset Timer 1 stores the playhead on screen as that player's zero.
+  - The other player's zero stays.
+  - Until a reset, Timer 1 matches Timer 2.
+  - The count and the zeros last for the session.
+  - They are not in the project, and not in `preferences.toml`.
+  - A new session starts at Auto, with no zeros.
+  - Opening a project leaves them.
+  - Drop-frame follows D47.
+  - A timecode uses `;` before the frames when the project drops frames.
+  - A frame count has no drop-frame mark.
+  - Copy Timecode copies the text in the field.
+  - `player.state` returns that text, the count, and the zeros.
+  - Paste Timecode and Enter move the playhead on screen to that count.
+  - A typed frame count is a whole number.
+  - Digits in a frame count are not filled as a timecode.
+  - `viewer.set` sets the viewer, the count, the zero, and a paste.

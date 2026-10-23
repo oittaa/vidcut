@@ -1601,3 +1601,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - Without it, the Cut page has no way to match the levels of clips.
   - The export's loudness setting uses EBU R128. Thus Loudness and the export agree.
+
+## X81. No KeyKode in the timecode menu
+
+- **Resolve:**
+  - A right-click on the viewer timecode offers KeyKode (pp. 713–714).
+- **vidcut:**
+  - The menu has no KeyKode.
+  - vidcut does not read film edge numbers.
+- **Why:**
+  - vidcut has no film-scan metadata to show.
+  - The rest of that menu is [D91](cut-page-spec.md#12-decisions-on-gaps-and-contradictions).
