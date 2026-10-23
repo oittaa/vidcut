@@ -1,7 +1,7 @@
 use serde_json::{Map, Value, json};
 
 use super::EDITOR;
-use super::effects::{effect, group, keyed, plain, ranged, rounded};
+use super::effects::{effect, group, handle_point, handle_value, keyed, plain, ranged, rounded};
 use crate::model::{Crop, DynamicZoom, Ease, Handle, Keyframe, Picture, VideoInfo, ZoomBox};
 
 const TRANSFORM: &str = "Transform";
@@ -464,7 +464,7 @@ fn read_keys(p: &Value, timing: &super::effects::Timing, origin: i64) -> Option<
         let frame = (timing.source(at) + origin as f64).round() as i64;
         let value = k["Value"].as_f64()?;
         let handle = |name: &str, before: bool| {
-            let b = k.get(name)?.as_array()?;
+            let b = handle_point(k, name)?;
             let h = Handle {
                 frames: b.first()?.as_f64()? * timing.scale(),
                 value: b.get(1)?.as_f64()?,
@@ -586,18 +586,18 @@ fn file_curve(
         let at = timing.file((k.frame - source) as f64).round();
         let raw = y.and_then(|ys| ys.get(i).copied()).unwrap_or(k.value);
         let mut v = json!({ "Value": map(raw), "Variant Type": "Double" });
-        let bez = |h: Handle| {
+        let bez = |name: &str, h: Handle| {
             let value = match y {
                 Some(_) => 0.0,
                 None => h.value * slope,
             };
-            json!([rounded(h.frames / timing.scale()), rounded(value)])
+            handle_value(name, h.frames / timing.scale(), value)
         };
         if let Some(h) = k.in_handle {
-            v["InBez"] = bez(h);
+            v["InBez"] = bez("InBez", h);
         }
         if let Some(h) = k.out_handle {
-            v["OutBez"] = bez(h);
+            v["OutBez"] = bez("OutBez", h);
         }
         let name = if at.fract() == 0.0 {
             format!("{}", at as i64)
@@ -944,7 +944,7 @@ mod tests {
             written[0]["metadata"][EDITOR]["Parameters"]
                 .as_array()
                 .and_then(|ps| ps.iter().find(|q| q["Parameter ID"] == id))
-                .and_then(|q| q["Key Frames"]["0"]["OutBez"].get(1))
+                .and_then(|q| q["Key Frames"]["0"]["OutBez"]["OutBez"].get(1))
                 .and_then(Value::as_f64)
                 .expect("out handle")
         };
