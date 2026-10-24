@@ -1,3 +1,5 @@
+use std::sync::{Mutex, PoisonError};
+
 use crate::error::{Error, Result};
 
 pub(crate) fn gpu_error(what: &str, e: impl std::fmt::Display) -> Error {
@@ -110,6 +112,28 @@ pub(crate) fn half(v: f32) -> u16 {
     sign | (bits + u32::from(up)) as u16
 }
 
+const SERIAL: usize = 1 << 16;
+
 pub(crate) fn halves(v: &[f32]) -> Vec<u8> {
-    v.iter().flat_map(|f| half(*f).to_le_bytes()).collect()
+    let mut out = vec![0u8; v.len() * 2];
+    let parts = if v.len() < SERIAL {
+        1
+    } else {
+        crate::pool::threads()
+    };
+    let each = v.len().div_ceil(parts.max(1)).max(1);
+    let slices: Vec<Mutex<(&[f32], &mut [u8])>> = v
+        .chunks(each)
+        .zip(out.chunks_mut(each * 2))
+        .map(Mutex::new)
+        .collect();
+    crate::pool::run(slices.len(), &|i| {
+        let mut part = slices[i].lock().unwrap_or_else(PoisonError::into_inner);
+        let (src, dst) = &mut *part;
+        for (f, d) in src.iter().zip(dst.as_chunks_mut::<2>().0) {
+            *d = half(*f).to_le_bytes();
+        }
+    });
+    drop(slices);
+    out
 }

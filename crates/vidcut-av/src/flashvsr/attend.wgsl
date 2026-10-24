@@ -9,7 +9,6 @@ struct P { qbs: u32, first: u32, count: u32, s: u32, stride: u32, dense: u32, pa
 @group(0) @binding(7) var<storage, read> counts: array<u32>;
 @group(0) @binding(8) var<storage, read_write> dst: array<vec4<u32>>;
 
-var<workgroup> qs: array<vec4<u32>, 1024>;
 var<workgroup> ks: array<vec4<u32>, 512>;
 var<workgroup> ps: array<u32, 1024>;
 var<workgroup> mx: array<f32, 512>;
@@ -17,9 +16,14 @@ var<workgroup> blocks: u32;
 
 fn half8(v: vec4<u32>) -> array<vec4<f32>, 2> {
     return array<vec4<f32>, 2>(
-        vec4<f32>(unpack2x16float(v.x), unpack2x16float(v.y)),
-        vec4<f32>(unpack2x16float(v.z), unpack2x16float(v.w)),
+        vec4<f32>(h2(v.x), h2(v.y)),
+        vec4<f32>(h2(v.z), h2(v.w)),
     );
+}
+
+fn dots(a: array<vec4<f32>, 2>, k: vec4<u32>) -> f32 {
+    let v = half8(k);
+    return dot(a[0], v[0]) + dot(a[1], v[1]);
 }
 
 fn row_of(kb: u32) -> vec2<u32> {
@@ -58,12 +62,12 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3
     let part = idx % 2u;
     let h = (idx / 2u) % 12u;
     let qb = p.first + idx / 24u;
-    let g = li / 8u;
-    let kq = li % 8u;
+    let r = li / 4u;
+    let kq = li % 4u;
     let q0 = qb * 128u + part * 64u;
-    for (var j = 0u; j < 4u; j++) {
-        let e = li + j * 256u;
-        qs[e] = q[(q0 + e / 16u) * 192u + h * 16u + e % 16u];
+    var qr: array<vec4<u32>, 16>;
+    for (var c = 0u; c < 16u; c++) {
+        qr[c] = q[(q0 + r) * 192u + h * 16u + c];
     }
     if (li == 0u) {
         if (p.dense > 0u) {
@@ -73,19 +77,19 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3
         }
     }
     let n = workgroupUniformLoad(&blocks);
-    var m0 = -3.0e38;
-    var m1 = -3.0e38;
-    var l0 = 0.0;
-    var l1 = 0.0;
-    var o0a = vec4<f32>(0.0);
-    var o0b = vec4<f32>(0.0);
-    var o0c = vec4<f32>(0.0);
-    var o0d = vec4<f32>(0.0);
-    var o1a = vec4<f32>(0.0);
-    var o1b = vec4<f32>(0.0);
-    var o1c = vec4<f32>(0.0);
-    var o1d = vec4<f32>(0.0);
+    var m = -3.0e38;
+    var la = 0.0;
+    var lb = 0.0;
+    var o0 = vec4<f32>(0.0);
+    var o1 = vec4<f32>(0.0);
+    var o2 = vec4<f32>(0.0);
+    var o3 = vec4<f32>(0.0);
+    var o4 = vec4<f32>(0.0);
+    var o5 = vec4<f32>(0.0);
+    var o6 = vec4<f32>(0.0);
+    var o7 = vec4<f32>(0.0);
     let scale = 1.0 / sqrt(128.0);
+    let k0 = kq * 8u;
     for (var b = 0u; b < n; b++) {
         var kb = b;
         if (p.dense == 0u) {
@@ -98,121 +102,107 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3
                 ks[e] = key(at, (at.y + t0 + e / 16u) * 192u + h * 16u + e % 16u);
             }
             workgroupBarrier();
-            var s0 = vec4<f32>(0.0);
-            var s1 = vec4<f32>(0.0);
+            var sa = vec4<f32>(0.0);
+            var sb = vec4<f32>(0.0);
             for (var c = 0u; c < 16u; c++) {
-                let a = half8(qs[(g * 2u) * 16u + c]);
-                let z = half8(qs[(g * 2u + 1u) * 16u + c]);
-                let k0 = half8(ks[(kq * 4u) * 16u + c]);
-                let k1 = half8(ks[(kq * 4u + 1u) * 16u + c]);
-                let k2 = half8(ks[(kq * 4u + 2u) * 16u + c]);
-                let k3 = half8(ks[(kq * 4u + 3u) * 16u + c]);
-                s0 += vec4<f32>(
-                    dot(a[0], k0[0]) + dot(a[1], k0[1]),
-                    dot(a[0], k1[0]) + dot(a[1], k1[1]),
-                    dot(a[0], k2[0]) + dot(a[1], k2[1]),
-                    dot(a[0], k3[0]) + dot(a[1], k3[1]),
+                let a = half8(qr[c]);
+                sa += vec4<f32>(
+                    dots(a, ks[k0 * 16u + c]),
+                    dots(a, ks[(k0 + 1u) * 16u + c]),
+                    dots(a, ks[(k0 + 2u) * 16u + c]),
+                    dots(a, ks[(k0 + 3u) * 16u + c]),
                 );
-                s1 += vec4<f32>(
-                    dot(z[0], k0[0]) + dot(z[1], k0[1]),
-                    dot(z[0], k1[0]) + dot(z[1], k1[1]),
-                    dot(z[0], k2[0]) + dot(z[1], k2[1]),
-                    dot(z[0], k3[0]) + dot(z[1], k3[1]),
+                sb += vec4<f32>(
+                    dots(a, ks[(k0 + 4u) * 16u + c]),
+                    dots(a, ks[(k0 + 5u) * 16u + c]),
+                    dots(a, ks[(k0 + 6u) * 16u + c]),
+                    dots(a, ks[(k0 + 7u) * 16u + c]),
                 );
             }
-            s0 *= scale;
-            s1 *= scale;
-            mx[(g * 2u) * 8u + kq] = max(max(s0.x, s0.y), max(s0.z, s0.w));
-            mx[(g * 2u + 1u) * 8u + kq] = max(max(s1.x, s1.y), max(s1.z, s1.w));
+            sa *= scale;
+            sb *= scale;
+            mx[r * 4u + kq] = max(max(max(sa.x, sa.y), max(sa.z, sa.w)), max(max(sb.x, sb.y), max(sb.z, sb.w)));
             workgroupBarrier();
-            var t0m = m0;
-            var t1m = m1;
-            for (var i = 0u; i < 8u; i++) {
-                t0m = max(t0m, mx[(g * 2u) * 8u + i]);
-                t1m = max(t1m, mx[(g * 2u + 1u) * 8u + i]);
+            var tm = m;
+            for (var i = 0u; i < 4u; i++) {
+                tm = max(tm, mx[r * 4u + i]);
             }
-            let a0 = exp(m0 - t0m);
-            let a1 = exp(m1 - t1m);
-            m0 = t0m;
-            m1 = t1m;
-            let e0 = exp(s0 - vec4<f32>(m0));
-            let e1 = exp(s1 - vec4<f32>(m1));
-            l0 = l0 * a0 + e0.x + e0.y + e0.z + e0.w;
-            l1 = l1 * a1 + e1.x + e1.y + e1.z + e1.w;
-            o0a *= a0;
-            o0b *= a0;
-            o0c *= a0;
-            o0d *= a0;
-            o1a *= a1;
-            o1b *= a1;
-            o1c *= a1;
-            o1d *= a1;
-            ps[(g * 2u) * 16u + kq * 2u] = pack2x16float(e0.xy);
-            ps[(g * 2u) * 16u + kq * 2u + 1u] = pack2x16float(e0.zw);
-            ps[(g * 2u + 1u) * 16u + kq * 2u] = pack2x16float(e1.xy);
-            ps[(g * 2u + 1u) * 16u + kq * 2u + 1u] = pack2x16float(e1.zw);
+            let f = exp(m - tm);
+            m = tm;
+            let ea = exp(sa - vec4<f32>(m));
+            let eb = exp(sb - vec4<f32>(m));
+            la = la * f + ea.x + ea.y + ea.z + ea.w;
+            lb = lb * f + eb.x + eb.y + eb.z + eb.w;
+            o0 *= f;
+            o1 *= f;
+            o2 *= f;
+            o3 *= f;
+            o4 *= f;
+            o5 *= f;
+            o6 *= f;
+            o7 *= f;
+            ps[r * 16u + kq * 4u] = pack2x16float(ea.xy);
+            ps[r * 16u + kq * 4u + 1u] = pack2x16float(ea.zw);
+            ps[r * 16u + kq * 4u + 2u] = pack2x16float(eb.xy);
+            ps[r * 16u + kq * 4u + 3u] = pack2x16float(eb.zw);
             for (var j = 0u; j < 2u; j++) {
                 let e = li + j * 256u;
                 ks[e] = value(at, (at.y + t0 + e / 16u) * 192u + h * 16u + e % 16u);
             }
             workgroupBarrier();
             for (var kk = 0u; kk < 16u; kk++) {
-                let r0 = unpack2x16float(ps[(g * 2u) * 16u + kk]);
-                let r1 = unpack2x16float(ps[(g * 2u + 1u) * 16u + kk]);
+                let w2 = h2(ps[r * 16u + kk]);
                 for (var e = 0u; e < 2u; e++) {
-                    let row = (kk * 2u + e) * 16u + kq * 2u;
+                    let row = (kk * 2u + e) * 16u + kq * 4u;
                     let va = half8(ks[row]);
                     let vb = half8(ks[row + 1u]);
-                    let w0 = vec4<f32>(r0[e]);
-                    let w1 = vec4<f32>(r1[e]);
-                    o0a = fma(w0, va[0], o0a);
-                    o0b = fma(w0, va[1], o0b);
-                    o0c = fma(w0, vb[0], o0c);
-                    o0d = fma(w0, vb[1], o0d);
-                    o1a = fma(w1, va[0], o1a);
-                    o1b = fma(w1, va[1], o1b);
-                    o1c = fma(w1, vb[0], o1c);
-                    o1d = fma(w1, vb[1], o1d);
+                    let vc = half8(ks[row + 2u]);
+                    let vd = half8(ks[row + 3u]);
+                    let w = vec4<f32>(w2[e]);
+                    o0 = fma(w, va[0], o0);
+                    o1 = fma(w, va[1], o1);
+                    o2 = fma(w, vb[0], o2);
+                    o3 = fma(w, vb[1], o3);
+                    o4 = fma(w, vc[0], o4);
+                    o5 = fma(w, vc[1], o5);
+                    o6 = fma(w, vd[0], o6);
+                    o7 = fma(w, vd[1], o7);
                 }
             }
             workgroupBarrier();
         }
     }
-    mx[(g * 2u) * 8u + kq] = l0;
-    mx[(g * 2u + 1u) * 8u + kq] = l1;
+    mx[r * 8u + kq * 2u] = la;
+    mx[r * 8u + kq * 2u + 1u] = lb;
     workgroupBarrier();
-    var sum0 = 0.0;
-    var sum1 = 0.0;
+    var sum = 0.0;
     for (var i = 0u; i < 8u; i++) {
-        sum0 += mx[(g * 2u) * 8u + i];
-        sum1 += mx[(g * 2u + 1u) * 8u + i];
+        sum += mx[r * 8u + i];
     }
-    let r0 = (q0 + g * 2u) * 192u + h * 16u + kq * 2u;
-    let r1 = r0 + 192u;
-    let i0 = 1.0 / sum0;
-    let i1 = 1.0 / sum1;
-    dst[r0] = vec4<u32>(
-        pack2x16float(o0a.xy * i0),
-        pack2x16float(o0a.zw * i0),
-        pack2x16float(o0b.xy * i0),
-        pack2x16float(o0b.zw * i0),
+    let place = (q0 + r) * 192u + h * 16u + kq * 4u;
+    let inv = 1.0 / sum;
+    dst[place] = vec4<u32>(
+        pack2x16float(o0.xy * inv),
+        pack2x16float(o0.zw * inv),
+        pack2x16float(o1.xy * inv),
+        pack2x16float(o1.zw * inv),
     );
-    dst[r0 + 1u] = vec4<u32>(
-        pack2x16float(o0c.xy * i0),
-        pack2x16float(o0c.zw * i0),
-        pack2x16float(o0d.xy * i0),
-        pack2x16float(o0d.zw * i0),
+    dst[place + 1u] = vec4<u32>(
+        pack2x16float(o2.xy * inv),
+        pack2x16float(o2.zw * inv),
+        pack2x16float(o3.xy * inv),
+        pack2x16float(o3.zw * inv),
     );
-    dst[r1] = vec4<u32>(
-        pack2x16float(o1a.xy * i1),
-        pack2x16float(o1a.zw * i1),
-        pack2x16float(o1b.xy * i1),
-        pack2x16float(o1b.zw * i1),
+    dst[place + 2u] = vec4<u32>(
+        pack2x16float(o4.xy * inv),
+        pack2x16float(o4.zw * inv),
+        pack2x16float(o5.xy * inv),
+        pack2x16float(o5.zw * inv),
     );
-    dst[r1 + 1u] = vec4<u32>(
-        pack2x16float(o1c.xy * i1),
-        pack2x16float(o1c.zw * i1),
-        pack2x16float(o1d.xy * i1),
-        pack2x16float(o1d.zw * i1),
+    dst[place + 3u] = vec4<u32>(
+        pack2x16float(o6.xy * inv),
+        pack2x16float(o6.zw * inv),
+        pack2x16float(o7.xy * inv),
+        pack2x16float(o7.zw * inv),
     );
 }

@@ -202,28 +202,50 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - Before an export starts, `flashvsr::check` refuses media that AI Best cannot take (`flashvsr::unfit`). It also refuses AI Best without the weights or without a GPU that can run it. It loads the model then.
   - It also refuses a size that does not fit (`run::plan`). It takes the size from the media and the output size (`flashvsr::enlarged`). A zoomed picture can be larger; then `flashvsr::Stream::open` refuses it when the export reaches it.
   - `Source::best_picture` gives the picture at the size that it shows at, but not more than 4 times the shown source size (`flashvsr::SCALE`).
-    - It keeps one `flashvsr::Stream` for the source. It reads the frames in order with the second `VideoReader`, from the first frame that is asked for.
+    - It keeps one `flashvsr::Stream` for the source. It reads the frames in order from the source's own reader, from the first frame that is asked for. Thus each frame is decoded once.
+      - It keeps a copy in main memory of each frame that it reads ahead. The source then takes its next frames from that queue (`Source::advance`). The copies leave the GPU decoder's surfaces free.
+      - When the source reads past the stream, the stream gets those frames later (`Source::miss`).
+      - When the stream needs another reading of the frames than the source, it reads them with the second `VideoReader`.
     - A frame before the kept pictures, or more than 48 frames after the last frame read (`BEST_JUMP`), starts a new stream there.
     - At the end of the file, the stream repeats the last frame, as the official code does.
   - The stream works in chunks of 16 frames (`run::Stream`). The first chunk reads 17 frames and gives 13. Each later chunk reads 16 and gives 16. Thus the output is 4 frames behind the input.
     - Each frame first gets PIL's bicubic enlargement, with PIL's fixed-point weights (`resize::coefficients`). The edges are repeated up to a multiple of 128.
+    - The frames go to the GPU and come back as packed RGB24, 3 bytes for each pixel, with no conversion on the CPU.
     - The LQ projection (16× pixel unshuffle, two causal 3-D convolutions, a linear layer) makes one token frame from each 4 frames. Its convolutions keep the last 2 frames of each clip.
     - The 30 DiT blocks run one step at the fixed time 1000. The adaLN values for that time are computed once, at load.
     - A block is 128 tokens, and a window is 2 latent frames.
     - Blocks 0, 6, 12, 18 and 24 attend to 11×11 blocks in the current chunk and in the last 3 windows.
     - The other blocks attend to 3×3 blocks in the current chunk and in the last window.
     - Pooled scores choose the blocks when the candidate blocks are more than the top-k count. A softmax per query block comes first.
+      - `scores.wgsl` keeps the scores of each thread in registers through the softmax. A row takes at most 1024 key blocks.
     - Then a radix select finds the threshold on the bits of the 32-bit values (`hist.wgsl`, `pick.wgsl`). It keeps the official rule: the value at place k+1, and strictly greater.
+      - `pick.wgsl` finds the bin with a suffix sum on 256 threads, one bin for each thread.
     - `attend.wgsl` is a flash attention over the chosen key blocks, with an online softmax in 32-bit floats. Cross-attention to the fixed prompt uses it too.
+      - Four threads share a query row. Each keeps the row's query in registers and does 8 keys and 32 output values. The partial sums keep the same groups, so the results do not depend on the layout.
     - The KV cache of each block is a ring of windows (`Cache`).
     - `run::plan` keeps the caches on the GPU while all of the work fits in three quarters of the GPU's memory. The caches of the other blocks stay in main memory between chunks (`Keys::Host`). Each comes back to the GPU just before its block runs, and its new windows go back after it.
+      - The new windows go to a mapped buffer in the first submission of the block. The block reads them at its end, while the GPU runs its feed-forward part.
     - The results are the same in both places.
     - Without a size for the GPU's memory, all caches stay on the GPU.
     - A size that does not fit even with every cache in main memory is refused. So is a size whose caches need more than half of main memory.
     - The TC decoder gives 4 frames for each latent frame. Its memory blocks keep the features of the previous frame. Its full-size stage runs in bands of 64 rows.
-  - One matrix multiply shader (`gemm::run`) runs every linear layer and convolution. It splits its work into dispatches of at most 150 G multiply-adds. Its loaders gather the convolution taps, and its stores join bias, activation and residual adds.
-    - The weights are 16-bit floats on the GPU. The files hold 32-bit floats; they are rounded at load.
+      - A memory block works in three buffers: its input, its memory and one work buffer. The third stage makes its buffers once for the 4 frames of a latent frame.
+    - The other 3×3 convolutions of the decoder use Winograd F(2×2, 3×3). At load, `wino` transforms their weights into 16 matrices of 16-bit floats.
+      - For each band of 32 rows, `winoin.wgsl` transforms each 4×4 block of input into 16 values, as 16-bit floats.
+      - 16 matrix multiplies (`gemm::run`) make the products, with 32-bit sums. Then `winoout.wgsl` makes each 2×2 block of output, with the bias and the ReLU or the skip add.
+      - The rounding is not the rounding of a direct convolution. Thus the pictures are a little different.
+    - The decoder's last convolution (128 to 3 channels) has a shader of its own (`last.wgsl`), which also writes the picture. It sums in the order of the matrix multiply, so the pictures are the same.
+  - One matrix multiply shader (`gemm::run`) runs every linear layer and every other convolution. It splits its work into dispatches of at most 150 G multiply-adds. Its loaders gather the convolution taps, and its stores join bias, activation and residual adds.
+    - Each thread finds the place of its rows once, before the loop over k (`a_row`). It then steps the tap and the channel as k grows.
+    - The tiles wait in workgroup memory as pairs of 16-bit floats, as they come from the buffers (`a_word`). The patch input holds 32-bit floats, so its tile stays 32-bit.
+    - The weights are 16-bit floats on the GPU. The files hold 32-bit floats; they are rounded at load, on all cores (`compute::halves`).
     - The residual stream of the DiT stays in 32-bit floats. The other values between the steps are 16-bit floats, with 32-bit sums.
+    - Where the GPU has 16-bit float shaders (`SHADER_F16`), the matrix multiply and the attention read the 16-bit pairs with a bit cast (`Gpu::half`).
+      - There, the matrix multiply sums each step of 16 products in 16-bit floats, and adds that sum to its 32-bit sum. Thus the pictures are a little different on such a GPU.
+  - Each dispatch takes its parameters from a slot of 256 bytes in one uniform buffer, at a dynamic offset. `Gpu::flush` writes the new slots once, before each submission.
+    - When the buffer is full, a new buffer takes its place. Thus the work in flight keeps its slots.
+    - Each pipeline has a layout from the bindings of its shader. `Gpu::set` keeps the bind groups until the submission, so dispatches with the same buffers share one.
+    - The full-size stage of the decoder sends all of its bands in one submission. The feed-forward part of a DiT block does the same with its slabs.
   - `flashvsr` has a wgpu device of its own. Its pipelines and weights stay. The work buffers of a chunk are freed after it.
 - The other GPUs fit pictures as before ([todo](../todo/super-scale.md)).
 
