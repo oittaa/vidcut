@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Read;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError, mpsc};
@@ -495,22 +498,27 @@ fn winograd(c: &Conv) -> Vec<f32> {
     u
 }
 
-fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool) -> String {
+fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool, half: bool) -> String {
+    let (acc, zero, lane) = if half {
+        ("vec4<f16>", "0.0h", "h2")
+    } else {
+        ("vec4<f32>", "0.0", "unh")
+    };
     let mut decl = String::new();
     for k in 0..8 {
         for h in 0..2 {
-            decl += &format!("    var a{k}{h} = vec4<f32>(0.0);\n");
+            decl += &format!("    var a{k}{h} = {acc}({zero});\n");
         }
     }
     let mut body = String::new();
     for ci in 0..8 {
         body += &format!(
-            "        {{\n        let vq = sm[({ci}u * 16u + tv) * 4u + a];\n        let uq = sm[512u + ({ci}u * 16u + t) * 4u + b];\n        let v0 = vec4<f32>(unpack2x16float(vq.x), unpack2x16float(vq.y));\n        let v1 = vec4<f32>(unpack2x16float(vq.z), unpack2x16float(vq.w));\n        let u0 = vec4<f32>(unpack2x16float(uq.x), unpack2x16float(uq.y));\n        let u1 = vec4<f32>(unpack2x16float(uq.z), unpack2x16float(uq.w));\n"
+            "        {{\n        let vq = sm[({ci}u * 16u + tv) * 4u + a];\n        let uq = sm[512u + ({ci}u * 16u + t) * 4u + b];\n        let v0 = {acc}({lane}(vq.x), {lane}(vq.y));\n        let v1 = {acc}({lane}(vq.z), {lane}(vq.w));\n        let u0 = {acc}({lane}(uq.x), {lane}(uq.y));\n        let u1 = {acc}({lane}(uq.z), {lane}(uq.w));\n"
         );
         for k in 0..8 {
             let v = format!("v{}.{}", k / 4, ["x", "y", "z", "w"][k % 4]);
             for h in 0..2 {
-                body += &format!("        a{k}{h} = fma(vec4<f32>({v}), u{h}, a{k}{h});\n");
+                body += &format!("        a{k}{h} = fma({acc}({v}), u{h}, a{k}{h});\n");
             }
         }
         body += "        }\n";
@@ -519,7 +527,7 @@ fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool) -> String {
     for k in 0..8 {
         let (from, c) = (["va", "vb"][k / 4], ["x", "y", "z", "w"][k % 4]);
         store += &format!(
-            "            {{\n            let t = th * 8u + {k}u;\n            sm[(tc * 16u + (t ^ (t >> 3u))) * 4u + tp / 4u][tp % 4u] = pack2x16float(vec2<f32>({from}0.{c}, {from}1.{c}));\n            }}\n"
+            "            {{\n            let t = th * 8u + {k}u;\n            sm[(tc * 16u + (t ^ (t >> 3u))) * 4u + tp / 4u][tp % 4u] = pah(vec2<f32>({from}0.{c}, {from}1.{c}));\n            }}\n"
         );
     }
     let mut epilogue = String::new();
@@ -527,45 +535,49 @@ fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool) -> String {
         for kk in 0..2 {
             for h in 0..2 {
                 epilogue += &format!(
-                    "    sm[(t * 8u + a * 2u + {kk}u) * 8u + ((b * 2u + {h}u) ^ (a & 1u))] = bitcast<vec4<u32>>(a{k}{h});\n",
+                    "    sm[(t * 8u + a * 2u + {kk}u) * 8u + ((b * 2u + {h}u) ^ (a & 1u))] = bitcast<vec4<u32>>(vec4<f32>(a{k}{h}));\n",
                     k = 2 * r + kk
                 );
             }
         }
-        epilogue += "    workgroupBarrier();\n    if (li < 64u) {\n";
+        let nine = |n: &str| {
+            (0..9)
+                .map(|i| format!("{n}{r}_{i}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
         if shuffle {
-            for (n, q) in [("a", 0), ("b", 1)] {
-                for j in 0..12 {
+            epilogue += "    workgroupBarrier();\n    if (li < 128u) {\n";
+            for (n, quad) in [("a", 0), ("b", 1)] {
+                for i in 0..3 {
+                    for k in 0..3 {
+                        epilogue += &format!(
+                            "        let {n}{r}_{} = bitcast<vec4<f32>>(sm[(((p + {i}u) * 4u + sq + {k}u) * 8u + ej) * 8u + ((2u * qp + {quad}u) ^ ((ej / 2u) & 1u))]);\n",
+                            i * 3 + k
+                        );
+                    }
+                }
+            }
+            epilogue += &format!(
+                "        place(x0 + ({}u + ej % 2u) * 2u + sq, y0 + (ej / 2u) * 2u + p, base + qp * 8u, spixel(array<vec4<f32>, 9>({}), p, sq), spixel(array<vec4<f32>, 9>({}), p, sq));\n",
+                r * 2,
+                nine("a"),
+                nine("b")
+            );
+        } else {
+            epilogue += "    workgroupBarrier();\n    {\n";
+            for i in 0..3 {
+                for k in 0..3 {
                     epilogue += &format!(
-                        "        let n{r}{n}_{j} = bitcast<vec4<f32>>(sm[((4u * p + {j}u) * 8u + ej) * 8u + ((2u * qp + {q}u) ^ ((ej / 2u) & 1u))]);\n"
+                        "        let m{r}_{} = bitcast<vec4<f32>>(sm[(((pp + {i}u) * 4u + qq + {k}u) * 8u + ej) * 8u + (cq ^ ((ej / 2u) & 1u))]);\n",
+                        i * 3 + k
                     );
                 }
             }
-            let list = |n: &str| {
-                (0..12)
-                    .map(|j| format!("n{r}{n}_{j}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
             epilogue += &format!(
-                "        shuffled(array<vec4<f32>, 12>({}), array<vec4<f32>, 12>({}), p, base + qp * 8u, x0 + ({}u + ej % 2u) * 2u, y0 + (ej / 2u) * 2u);\n",
-                list("a"),
-                list("b"),
-                r * 2
-            );
-        } else {
-            for t in 0..16 {
-                epilogue += &format!(
-                    "        let m{r}_{t} = bitcast<vec4<f32>>(sm[({t}u * 8u + ej) * 8u + (cq ^ ((ej / 2u) & 1u))]);\n"
-                );
-            }
-            let list = (0..16)
-                .map(|t| format!("m{r}_{t}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            epilogue += &format!(
-                "        emit(array<vec4<f32>, 16>({list}), base + cq * 4u, x0 + ({}u + ej % 2u) * 2u, y0 + (ej / 2u) * 2u);\n",
-                r * 2
+                "        put(x0 + ({}u + ej % 2u) * 2u + qq, y0 + (ej / 2u) * 2u + pp, base + cq * 4u, pixel(array<vec4<f32>, 9>({}), pp, qq));\n",
+                r * 2,
+                nine("m")
             );
         }
         epilogue += "    }\n    workgroupBarrier();\n";
@@ -581,21 +593,45 @@ fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool) -> String {
 fn fetch(i: u32) -> array<vec2<f32>, 4> {
     let q = src[i];
     let r = src2[i];
-    return array<vec2<f32>, 4>(unpack2x16float(q.x) + unpack2x16float(r.x), unpack2x16float(q.y) + unpack2x16float(r.y), unpack2x16float(q.z) + unpack2x16float(r.z), unpack2x16float(q.w) + unpack2x16float(r.w));
+    return array<vec2<f32>, 4>(unh(q.x) + unh(r.x), unh(q.y) + unh(r.y), unh(q.z) + unh(r.z), unh(q.w) + unh(r.w));
 }"
     } else {
         "fn fetch(i: u32) -> array<vec2<f32>, 4> {
     let q = src[i];
-    return array<vec2<f32>, 4>(unpack2x16float(q.x), unpack2x16float(q.y), unpack2x16float(q.z), unpack2x16float(q.w));
+    return array<vec2<f32>, 4>(unh(q.x), unh(q.y), unh(q.z), unh(q.w));
+}"
+    };
+    let halves = if half {
+        "enable f16;
+
+fn unh(x: u32) -> vec2<f32> {
+    return unpack2x16float(x);
+}
+
+fn pah(v: vec2<f32>) -> u32 {
+    return pack2x16float(v);
+}
+
+fn h2(x: u32) -> vec2<f16> {
+    return vec2<f16>(unpack2x16float(x));
+}"
+    } else {
+        "fn unh(x: u32) -> vec2<f32> {
+    return unpack2x16float(x);
+}
+
+fn pah(v: vec2<f32>) -> u32 {
+    return pack2x16float(v);
 }"
     };
     format!(
-        r#"
+        r#"{halves}
+
 const CIN: u32 = {FEATURES}u;
 const COUT: u32 = {cout}u;
 const CK: u32 = 8u;
 
-struct Size {{ w: u32, h: u32 }}
+struct Size {{ w: u32, h: u32, sw: u32, ox: u32, oy: u32, p0: u32, p1: u32, p2: u32 }}
 @group(0) @binding(0) var<uniform> size: Size;
 @group(0) @binding(1) var<storage, read> src: array<vec4<u32>>;
 @group(0) @binding(2) var<storage, read> weights: array<vec4<u32>>;
@@ -617,8 +653,8 @@ fn put(px: u32, py: u32, co: u32, y: vec4<f32>) {{
     if (px < size.w && py < size.h) {{
         let v = act4(y, co);
         let o = (py * size.w + px) * (COUT / 2u) + co / 2u;
-        dst[o] = pack2x16float(v.xy);
-        dst[o + 1u] = pack2x16float(v.zw);
+        dst[o] = pah(v.xy);
+        dst[o + 1u] = pah(v.zw);
     }}
 }}
 
@@ -628,32 +664,30 @@ fn place(px: u32, py: u32, co: u32, y0: vec4<f32>, y1: vec4<f32>) {{
         let b = act4(y1, co + 4u);
         let ow = size.w * 2u;
         let o = (py * 2u * ow + px * 2u) * (COUT / 8u) + co / 8u;
-        dst[o] = pack2x16float(vec2<f32>(a.x, b.x));
-        dst[o + COUT / 8u] = pack2x16float(vec2<f32>(a.y, b.y));
-        dst[o + ow * (COUT / 8u)] = pack2x16float(vec2<f32>(a.z, b.z));
-        dst[o + (ow + 1u) * (COUT / 8u)] = pack2x16float(vec2<f32>(a.w, b.w));
+        dst[o] = pah(vec2<f32>(a.x, b.x));
+        dst[o + COUT / 8u] = pah(vec2<f32>(a.y, b.y));
+        dst[o + ow * (COUT / 8u)] = pah(vec2<f32>(a.z, b.z));
+        dst[o + (ow + 1u) * (COUT / 8u)] = pah(vec2<f32>(a.w, b.w));
     }}
 }}
 
-fn rows4(n: array<vec4<f32>, 12>, s: f32) -> array<vec4<f32>, 4> {{
-    return array<vec4<f32>, 4>(n[0] + s * (n[4] + n[8]), n[1] + s * (n[5] + n[9]), n[2] + s * (n[6] + n[10]), n[3] + s * (n[7] + n[11]));
+fn down(a: vec4<f32>, b: vec4<f32>, d: vec4<f32>, p: u32) -> vec4<f32> {{
+    return select(a + b + d, a - b - d, p == 1u);
 }}
 
-fn shuffled(n0: array<vec4<f32>, 12>, n1: array<vec4<f32>, 12>, p: u32, co: u32, px: u32, py: u32) {{
+fn pixel(m: array<vec4<f32>, 9>, p: u32, q: u32) -> vec4<f32> {{
+    let u0 = down(m[0], m[3], m[6], p);
+    let u1 = down(m[1], m[4], m[7], p);
+    let u2 = down(m[2], m[5], m[8], p);
+    return down(u0, u1, u2, q);
+}}
+
+fn spixel(m: array<vec4<f32>, 9>, p: u32, q: u32) -> vec4<f32> {{
     let s = select(1.0, -1.0, p == 1u);
-    let r0 = rows4(n0, s);
-    let r1 = rows4(n1, s);
-    place(px, py + p, co, r0[0] + r0[1] + r0[2], r1[0] + r1[1] + r1[2]);
-    place(px + 1u, py + p, co, r0[1] - r0[2] - r0[3], r1[1] - r1[2] - r1[3]);
-}}
-
-fn emit(m: array<vec4<f32>, 16>, co: u32, px: u32, py: u32) {{
-    let t0 = array<vec4<f32>, 4>(m[0] + m[4] + m[8], m[1] + m[5] + m[9], m[2] + m[6] + m[10], m[3] + m[7] + m[11]);
-    let t1 = array<vec4<f32>, 4>(m[4] - m[8] - m[12], m[5] - m[9] - m[13], m[6] - m[10] - m[14], m[7] - m[11] - m[15]);
-    put(px, py, co, t0[0] + t0[1] + t0[2]);
-    put(px + 1u, py, co, t0[1] - t0[2] - t0[3]);
-    put(px, py + 1u, co, t1[0] + t1[1] + t1[2]);
-    put(px + 1u, py + 1u, co, t1[1] - t1[2] - t1[3]);
+    let u0 = m[0] + s * (m[3] + m[6]);
+    let u1 = m[1] + s * (m[4] + m[7]);
+    let u2 = m[2] + s * (m[5] + m[8]);
+    return down(u0, u1, u2, q);
 }}
 
 fn spread(w: vec4<f32>) -> vec4<f32> {{
@@ -678,7 +712,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
     let rin = li < 180u && rx >= 0 && ry >= 0 && rx < i32(size.w) && ry < i32(size.h);
     var rsrc = 0u;
     if (rin) {{
-        rsrc = (u32(ry) * size.w + u32(rx)) * (CIN / 8u);
+        rsrc = ((u32(ry) + size.oy) * size.sw + u32(rx) + size.ox) * (CIN / 8u);
     }}
     let rk = (li / 18u) * 12u + (li % 18u) / 2u;
     let re = li & 1u;
@@ -729,10 +763,14 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
 {body}
     }}
     workgroupBarrier();
-    let ej = li / 8u;
-    let cq = li % 8u;
-    let qp = (li / 2u) % 4u;
-    let p = li % 2u;
+    let jb = li % 64u;
+    let ej = jb / 8u;
+    let cq = jb % 8u;
+    let qp = (jb / 2u) % 4u;
+    let p = jb % 2u;
+    let sq = li / 64u;
+    let pp = li / 128u;
+    let qq = (li / 64u) % 2u;
 {epilogue}
 }}
 "#
@@ -742,8 +780,17 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
 const PACK: &str = r#"
 struct Size { w: u32, h: u32 }
 @group(0) @binding(0) var<uniform> size: Size;
-@group(0) @binding(1) var<storage, read> rgba: array<u32>;
+@group(0) @binding(1) var<storage, read> rgb: array<u32>;
 @group(0) @binding(2) var<storage, read_write> dst: array<u32>;
+
+fn byte(at: u32) -> u32 {
+    return (rgb[at / 4u] >> (8u * (at % 4u))) & 255u;
+}
+
+fn texel(p: u32) -> u32 {
+    let at = p * 3u;
+    return byte(at) | (byte(at + 1u) << 8u) | (byte(at + 2u) << 16u) | (255u << 24u);
+}
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -751,29 +798,11 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let p = id.y * size.w + id.x;
-    let v = unpack4x8unorm(rgba[p]);
+    let v = unpack4x8unorm(texel(p));
     dst[p * 4u] = pack2x16float(v.xy);
     dst[p * 4u + 1u] = pack2x16float(vec2<f32>(v.z, 0.0));
     dst[p * 4u + 2u] = 0u;
     dst[p * 4u + 3u] = 0u;
-}
-"#;
-
-const CROP: &str = r#"
-struct Crop { src_w: u32, x0: u32, y0: u32, w: u32, h: u32, words: u32, pad0: u32, pad1: u32 }
-@group(0) @binding(0) var<uniform> crop: Crop;
-@group(0) @binding(1) var<storage, read> src: array<u32>;
-@group(0) @binding(2) var<storage, read_write> dst: array<u32>;
-
-@compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-    if (id.x >= crop.w * crop.words || id.y >= crop.h) {
-        return;
-    }
-    let x = id.x / crop.words;
-    let k = id.x % crop.words;
-    let s = ((crop.y0 + id.y) * crop.src_w + crop.x0 + x) * crop.words + k;
-    dst[(id.y * crop.w + x) * crop.words + k] = src[s];
 }
 "#;
 
@@ -812,11 +841,16 @@ struct Last {{ w: array<vec4<f32>, 288>, b: vec4<f32> }}
 @group(0) @binding(0) var<uniform> place: Place;
 @group(0) @binding(1) var<storage, read> src: array<vec4<u32>>;
 @group(0) @binding(2) var<uniform> wts: Last;
-@group(0) @binding(3) var<storage, read> rgba: array<u32>;
+@group(0) @binding(3) var<storage, read> pixels: array<u32>;
 @group(0) @binding(4) var<storage, read_write> out: array<u32>;
 
+fn byte(at: u32) -> u32 {{
+    return (pixels[at / 4u] >> (8u * (at % 4u))) & 255u;
+}}
+
 fn px(x: u32, y: u32) -> vec3<f32> {{
-    return unpack4x8unorm(rgba[y * place.fw + x]).xyz;
+    let at = (y * place.fw + x) * 3u;
+    return unpack4x8unorm(byte(at) | (byte(at + 1u) << 8u) | (byte(at + 2u) << 16u) | (255u << 24u)).xyz;
 }}
 
 fn base(gx: u32, gy: u32) -> vec3<f32> {{
@@ -927,7 +961,6 @@ fn checked<T>(device: &wgpu::Device, run: impl FnOnce() -> Result<T>) -> Result<
 struct Pipelines {
     convs: Vec<(Shape, wgpu::ComputePipeline)>,
     pack: wgpu::ComputePipeline,
-    crop: wgpu::ComputePipeline,
     last: wgpu::ComputePipeline,
 }
 
@@ -936,7 +969,7 @@ struct Frame {
     h: usize,
     count: usize,
     size: wgpu::Buffer,
-    rgba: Vec<wgpu::Buffer>,
+    rgb: Vec<wgpu::Buffer>,
     input: wgpu::Buffer,
     feats: wgpu::Buffer,
     xa: wgpu::Buffer,
@@ -954,13 +987,12 @@ struct Job {
     ch: usize,
     size1: wgpu::Buffer,
     size2: wgpu::Buffer,
-    crop: wgpu::Buffer,
     place: wgpu::Buffer,
 }
 
 struct Tiles {
+    size: (usize, usize),
     jobs: Vec<Job>,
-    feat: wgpu::Buffer,
     s1: wgpu::Buffer,
     s2: wgpu::Buffer,
     out: wgpu::Buffer,
@@ -977,9 +1009,12 @@ struct Engine {
     frame: Option<Frame>,
     tiles: Option<Tiles>,
     pending: Option<Pending>,
+    groups: RefCell<Groups>,
 }
 
 type Rest = Box<dyn FnOnce(Result<Vec<Vec<u8>>>) + Send>;
+
+type Groups = HashMap<u64, Vec<(wgpu::ComputePipeline, Vec<wgpu::Buffer>, wgpu::BindGroup)>>;
 
 struct Pending {
     wanted: usize,
@@ -1017,9 +1052,12 @@ impl Engine {
                 adapter.get_info().name
             ));
         }
+        let half_feature = adapter.features() & wgpu::Features::SHADER_F16;
+        let half = !half_feature.is_empty();
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("vidcut-upscale"),
             required_limits: limits,
+            required_features: half_feature,
             ..Default::default()
         }))
         .map_err(|e| format!("the GPU did not open for the AI Fast upscaler: {e}"))?;
@@ -1035,7 +1073,7 @@ impl Engine {
             .into_iter()
             .map(|shape| {
                 let source = if shape.wino {
-                    wino_shader(shape.cout, shape.act, shape.sum, shape.shuffle)
+                    wino_shader(shape.cout, shape.act, shape.sum, shape.shuffle, half)
                 } else {
                     conv_shader(shape)
                 };
@@ -1045,7 +1083,6 @@ impl Engine {
             let pipelines = Pipelines {
                 convs,
                 pack: pipeline(&device, PACK.into()),
-                crop: pipeline(&device, CROP.into()),
                 last: pipeline(&device, last_shader()),
             };
             let none = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1065,6 +1102,7 @@ impl Engine {
             frame: None,
             tiles: None,
             pending: None,
+            groups: RefCell::default(),
         })
     }
 
@@ -1154,6 +1192,7 @@ impl Engine {
             return;
         }
         self.frame = None;
+        self.groups.get_mut().clear();
         use wgpu::BufferUsages as U;
         let px = w * h;
         let feat = px * FEATURES * 2;
@@ -1162,9 +1201,9 @@ impl Engine {
             w,
             h,
             count,
-            size: buffer(d, 8, U::UNIFORM | U::COPY_DST),
-            rgba: (0..count)
-                .map(|_| buffer(d, px * 4, U::STORAGE | U::COPY_DST))
+            size: buffer(d, 32, U::UNIFORM | U::COPY_DST),
+            rgb: (0..count)
+                .map(|_| buffer(d, px * 3, U::STORAGE | U::COPY_DST))
                 .collect(),
             input: buffer(d, px * PADDED * 2, U::STORAGE),
             feats: buffer(d, feat, U::STORAGE),
@@ -1178,6 +1217,7 @@ impl Engine {
     }
 
     fn make_tiles(&mut self) {
+        self.groups.get_mut().clear();
         let f = self.frame.as_ref().expect("frame made");
         let (w, h) = (f.w, f.h);
         use wgpu::BufferUsages as U;
@@ -1201,20 +1241,19 @@ impl Engine {
                     th,
                     cw,
                     ch,
-                    size1: uniform(&[tw, th]),
-                    size2: uniform(&[tw * 2, th * 2]),
-                    crop: uniform(&[w, rx, ry, tw, th, FEATURES / 2, 0, 0]),
+                    size1: uniform(&[tw, th, w, rx, ry, 0, 0, 0]),
+                    size2: uniform(&[tw * 2, th * 2, tw * 2, 0, 0, 0, 0, 0]),
                     place: uniform(&[w, h, rx, ry, tw, th, col.core.0, row.core.0, cw, ch, 0, 0]),
                 });
             }
         }
         let side = TILE + 2 * MARGIN;
-        let (p1, p2, p4) = (side * side, side * side * 4, side * side * 16);
+        let (p2, p4) = (side * side * 4, side * side * 16);
         let shown = w * h * (SCALE * SCALE) as usize * 3;
         let d = &self.device;
         self.tiles = Some(Tiles {
+            size: (w, h),
             jobs,
-            feat: buffer(d, p1 * FEATURES * 2, U::STORAGE),
             s1: buffer(d, p2 * FEATURES * 2, U::STORAGE),
             s2: buffer(d, p4 * 32 * 2, U::STORAGE),
             out: buffer(d, shown, U::STORAGE | U::COPY_SRC),
@@ -1243,7 +1282,7 @@ impl Engine {
             dst,
         ];
         buffers.extend(&src[1..]);
-        let bind = group(&self.device, pipeline, &buffers);
+        let bind = self.bound(pipeline, &buffers);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind, &[]);
         let (x, y, z) = if shape.wino {
@@ -1258,6 +1297,35 @@ impl Engine {
         pass.dispatch_workgroups(x as u32, y as u32, z as u32);
     }
 
+    fn bound(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        buffers: &[&wgpu::Buffer],
+    ) -> wgpu::BindGroup {
+        let mut hasher = DefaultHasher::new();
+        pipeline.hash(&mut hasher);
+        for b in buffers {
+            b.hash(&mut hasher);
+        }
+        let mut groups = self.groups.borrow_mut();
+        let same = groups.entry(hasher.finish()).or_default();
+        let found = same.iter().find(|(p, bs, _)| {
+            p == pipeline
+                && bs.len() == buffers.len()
+                && bs.iter().zip(buffers).all(|(a, b)| a == *b)
+        });
+        if let Some((_, _, bind)) = found {
+            return bind.clone();
+        }
+        let bind = group(&self.device, pipeline, buffers);
+        same.push((
+            pipeline.clone(),
+            buffers.iter().map(|b| (*b).clone()).collect(),
+            bind.clone(),
+        ));
+        bind
+    }
+
     fn simple(
         &self,
         pass: &mut wgpu::ComputePass,
@@ -1265,7 +1333,7 @@ impl Engine {
         buffers: &[&wgpu::Buffer],
         (x, y): (u32, u32),
     ) {
-        let bind = group(&self.device, pipeline, buffers);
+        let bind = self.bound(pipeline, buffers);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind, &[]);
         pass.dispatch_workgroups(x, y, 1);
@@ -1283,7 +1351,7 @@ impl Engine {
         self.simple(
             pass,
             &self.pipelines.pack,
-            &[&f.size, &f.rgba[i], &f.input],
+            &[&f.size, &f.rgb[i], &f.input],
             (blocks(w), blocks(h)),
         );
         self.conv(pass, &net.extract, (&f.size, &[&f.input], &f.feats), (w, h));
@@ -1311,18 +1379,17 @@ impl Engine {
             let clock = Instant::now();
             self.load()?;
             self.make_frame((w, h), frames.len());
-            self.make_tiles();
+            if self.tiles.as_ref().is_none_or(|t| t.size != (w, h)) {
+                self.make_tiles();
+            }
             let f = self.frame.as_ref().expect("frame made");
-            self.queue
-                .write_buffer(&f.size, 0, &words(&[w as u32, h as u32]));
+            self.queue.write_buffer(
+                &f.size,
+                0,
+                &words(&[w as u32, h as u32, w as u32, 0, 0, 0, 0, 0]),
+            );
             for (i, rgb) in frames.iter().enumerate() {
-                let rgba: Vec<u32> = rgb
-                    .as_chunks::<3>()
-                    .0
-                    .iter()
-                    .map(|p| u32::from_le_bytes([p[0], p[1], p[2], 255]))
-                    .collect();
-                self.queue.write_buffer(&f.rgba[i], 0, &words(&rgba));
+                self.queue.write_buffer(&f.rgb[i], 0, rgb);
             }
             let net = self.net.as_ref().expect("loaded");
             let n = frames.len();
@@ -1379,8 +1446,6 @@ impl Engine {
         };
         let device = self.device.clone();
         let done = checked(&device, || self.others(wanted, size, &mut outs)).map(|()| outs);
-        self.frame = None;
-        self.tiles = None;
         rest(done);
     }
 
@@ -1440,13 +1505,7 @@ impl Engine {
         let net = self.net.as_ref().expect("loaded");
         for job in &t.jobs {
             let (tw, th) = (job.tw, job.th);
-            self.simple(
-                pass,
-                &self.pipelines.crop,
-                &[&job.crop, &f.fused, &t.feat],
-                (blocks(tw * FEATURES / 2), blocks(th)),
-            );
-            self.conv(pass, &net.up1, (&job.size1, &[&t.feat], &t.s1), (tw, th));
+            self.conv(pass, &net.up1, (&job.size1, &[&f.fused], &t.s1), (tw, th));
             self.conv(
                 pass,
                 &net.up2,
@@ -1456,7 +1515,7 @@ impl Engine {
             self.simple(
                 pass,
                 &self.pipelines.last,
-                &[&job.place, &t.s2, &net.last, &f.rgba[i], &t.out],
+                &[&job.place, &t.s2, &net.last, &f.rgb[i], &t.out],
                 (blocks(job.cw), blocks(job.ch * 4)),
             );
         }
@@ -1504,6 +1563,7 @@ pub(crate) fn upscale(
         let Ok(first) = first else {
             e.frame = None;
             e.tiles = None;
+            e.groups.get_mut().clear();
             return first;
         };
         let mut outs = vec![Vec::new(); frames.len()];

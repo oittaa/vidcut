@@ -94,6 +94,7 @@ struct Source {
     gpu: Option<crate::hw::GpuDecoder>,
     ahead: Option<VideoReader>,
     best: Option<Best>,
+    queued: VecDeque<frame::Video>,
 }
 
 #[derive(Clone)]
@@ -195,6 +196,7 @@ impl Source {
             gpu: ahead_gpu,
             ahead: None,
             best: None,
+            queued: VecDeque::new(),
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -249,11 +251,13 @@ impl Source {
             gpu: ahead_gpu,
             ahead: None,
             best: None,
+            queued: VecDeque::new(),
         })
     }
 
     fn seek(&mut self, target: f64) -> Result<()> {
         self.reader.seek((target / self.tick).floor() as i64)?;
+        self.queued.clear();
         self.target = target;
         self.current = None;
         self.light = None;
@@ -279,7 +283,11 @@ impl Source {
             .as_ref()
             .is_none_or(|(_, t)| *t < target - 1e-6)
         {
-            match self.reader.next_frame()? {
+            let next = match self.queued.pop_front() {
+                Some(f) => Some(f),
+                None => self.reader.next_frame()?,
+            };
+            match next {
                 Some(f) => {
                     let t = f.pts().unwrap_or(0) as f64 * self.tick;
                     self.dynamic = frame::Video::empty();
@@ -601,6 +609,34 @@ impl Source {
         Ok(frames)
     }
 
+    fn chunk_frames(&mut self, first: i64, reading: Reading) -> Result<Vec<frame::Video>> {
+        let current = self.current.as_ref().map(|(f, _)| f.pts());
+        if current.map(|pts| self.frame_index(pts)) != Some(Some(first))
+            || self.reader.reading() != reading
+        {
+            return self.read_chunk(first, reading);
+        }
+        let end = first + crate::upscale::FRAMES as i64;
+        let mut frames = vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?];
+        let mut i = 0;
+        loop {
+            if i == self.queued.len() {
+                match self.reader.next_frame()? {
+                    Some(f) => self.queued.push_back(f),
+                    None => break,
+                }
+            }
+            let f = &self.queued[i];
+            i += 1;
+            match self.frame_index(f.pts()) {
+                Some(k) if k >= end => break,
+                Some(k) if k < first => continue,
+                _ => frames.push(frame_ref(f)?),
+            }
+        }
+        Ok(frames)
+    }
+
     fn ai_picture(
         &mut self,
         target: (u32, u32),
@@ -672,7 +708,7 @@ impl Source {
         }
         let clock = Instant::now();
         let frames = match key {
-            (first, true) => self.read_chunk(first, reading)?,
+            (first, true) => self.chunk_frames(first, reading)?,
             (_, false) => vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?],
         };
         let wanted = if key.1 {
