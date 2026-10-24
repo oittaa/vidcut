@@ -1,6 +1,8 @@
 use std::path::Path;
+use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
-use vidcut_core::model::{Media, Project, Upscaler};
+use vidcut_core::model::{Media, Project, SuperScale, Upscaler};
 use vidcut_core::render::RenderPlan;
 
 use vidcut_core::catalog::{self, Measure};
@@ -33,6 +35,144 @@ pub fn unfit(m: &Media, upscaler: Upscaler) -> Option<&'static str> {
     let hdr = m.video_as_read()?.hdr.is_some();
     let verdict = catalog::check(model, &[(Measure::HdrPictures, f64::from(u8::from(hdr)))]);
     verdict.refusals.first().map(|_| "HDR pictures")
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Work {
+    pub upscaler: Upscaler,
+    pub from: (u32, u32),
+    pub made: (u32, u32),
+    pub frames: (i64, i64),
+    pub started: Instant,
+    pub took: Option<Duration>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Report {
+    pub making: Option<Work>,
+    pub made: Option<Work>,
+    pub devices: Vec<(Upscaler, String)>,
+}
+
+static REPORT: Mutex<Report> = Mutex::new(Report {
+    making: None,
+    made: None,
+    devices: Vec::new(),
+});
+
+fn report_lock() -> MutexGuard<'static, Report> {
+    REPORT.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+pub fn report() -> Report {
+    report_lock().clone()
+}
+
+pub(crate) struct Making {
+    done: bool,
+}
+
+impl Making {
+    pub(crate) fn finished(mut self, frames: (i64, i64)) {
+        if let Some(w) = report_lock().making.as_mut() {
+            w.frames = frames;
+        }
+        made(true);
+        self.done = true;
+    }
+
+    pub(crate) fn handed(mut self) {
+        self.done = true;
+    }
+}
+
+impl Drop for Making {
+    fn drop(&mut self) {
+        if !self.done {
+            made(false);
+        }
+    }
+}
+
+pub(crate) fn making(
+    upscaler: Upscaler,
+    from: (u32, u32),
+    made: (u32, u32),
+    frames: (i64, i64),
+) -> Making {
+    report_lock().making = Some(Work {
+        upscaler,
+        from,
+        made,
+        frames,
+        started: Instant::now(),
+        took: None,
+    });
+    Making { done: false }
+}
+
+pub(crate) fn made(done: bool) {
+    let mut r = report_lock();
+    if let Some(mut w) = r.making.take()
+        && done
+    {
+        w.took = Some(w.started.elapsed());
+        r.made = Some(w);
+    }
+}
+
+static USERS: Mutex<[usize; 2]> = Mutex::new([0, 0]);
+
+fn users() -> MutexGuard<'static, [usize; 2]> {
+    USERS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn slot(upscaler: Upscaler) -> Option<usize> {
+    match upscaler {
+        Upscaler::AiFast => Some(0),
+        Upscaler::AiBest => Some(1),
+        Upscaler::Classic => None,
+    }
+}
+
+pub(crate) struct User(Upscaler);
+
+impl User {
+    pub(crate) fn of(s: SuperScale) -> Option<Self> {
+        let i = slot(s.upscaler).filter(|_| s.ai())?;
+        users()[i] += 1;
+        Some(Self(s.upscaler))
+    }
+}
+
+impl Drop for User {
+    fn drop(&mut self) {
+        let Some(i) = slot(self.0) else {
+            return;
+        };
+        let last = {
+            let mut u = users();
+            u[i] = u[i].saturating_sub(1);
+            u[i] == 0
+        };
+        if last {
+            match self.0 {
+                Upscaler::AiFast => crate::upscale::release(),
+                Upscaler::AiBest => crate::flashvsr::release(),
+                Upscaler::Classic => {}
+            }
+        }
+    }
+}
+
+pub(crate) fn in_use(upscaler: Upscaler) -> bool {
+    slot(upscaler).is_some_and(|i| users()[i] > 0)
+}
+
+pub(crate) fn runs_on(upscaler: Upscaler, device: String) {
+    let mut r = report_lock();
+    r.devices.retain(|(u, _)| *u != upscaler);
+    r.devices.push((upscaler, device));
 }
 
 pub fn name(upscaler: Upscaler) -> &'static str {

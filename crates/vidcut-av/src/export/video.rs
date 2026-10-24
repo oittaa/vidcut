@@ -88,7 +88,8 @@ struct Source {
     decoder: Option<crate::hw::Kind>,
     reversed: Vec<Reversed>,
     left: Option<Instant>,
-    sharp: Option<Sharpness>,
+    scale: SuperScale,
+    ai: Option<crate::ai::User>,
     told: bool,
     upright: bool,
     gpu: Option<crate::hw::GpuDecoder>,
@@ -190,7 +191,8 @@ impl Source {
             decoder,
             reversed: Vec::new(),
             left: None,
-            sharp,
+            scale: super_scale,
+            ai: crate::ai::User::of(super_scale),
             told: false,
             upright: false,
             gpu: ahead_gpu,
@@ -245,7 +247,8 @@ impl Source {
             decoder,
             reversed: Vec::new(),
             left: None,
-            sharp: None,
+            scale: SuperScale::default(),
+            ai: None,
             told: false,
             upright: false,
             gpu: ahead_gpu,
@@ -366,10 +369,19 @@ impl Source {
             self.left = Some(now);
             self.reversed.clear();
         }
+        self.best = None;
+        self.ai = None;
+    }
+
+    fn back(&mut self) {
+        self.left = None;
+        if self.ai.is_none() {
+            self.ai = crate::ai::User::of(self.scale);
+        }
     }
 
     fn resume(&mut self, origin: f64, source_frame: i64, target: f64) -> Result<()> {
-        self.left = None;
+        self.back();
         self.reposition(origin, source_frame, target)?;
         if self.advance(target)? {
             self.normalized = None;
@@ -714,6 +726,10 @@ impl Source {
         if let Some(p) = kept_picture(&id, pts)? {
             return Ok(Some(p));
         }
+        let scale = crate::upscale::SCALE;
+        let full = (size.0 * scale, size.1 * scale);
+        let last = key.0 + i64::from(key.1) * (crate::upscale::FRAMES as i64 - 1);
+        let work = crate::ai::making(Upscaler::AiFast, size, full, (key.0, last));
         let clock = Instant::now();
         let frames = match key {
             (first, true) => self.chunk_frames(first, reading)?,
@@ -737,22 +753,27 @@ impl Source {
             .collect::<Result<Vec<_>>>()?;
         let read = clock.elapsed();
         let times: Vec<Option<i64>> = frames.iter().map(|f| f.pts()).collect();
-        let scale = crate::upscale::SCALE;
-        let full = (size.0 * scale, size.1 * scale);
         let keep = move |big: Result<Vec<Vec<u8>>>| match big {
-            Ok(big) => keep_chunk(Chunk {
-                bytes: big.iter().map(Vec::len).sum(),
-                pictures: big
-                    .iter()
-                    .zip(&times)
-                    .map(|(out, &t)| big_picture(out, full, t))
-                    .collect(),
-                id,
-            }),
-            Err(e) => crate::debug!("upscale", "chunk {key:?}: {e}"),
+            Ok(big) => {
+                keep_chunk(Chunk {
+                    bytes: big.iter().map(Vec::len).sum(),
+                    pictures: big
+                        .iter()
+                        .zip(&times)
+                        .map(|(out, &t)| big_picture(out, full, t))
+                        .collect(),
+                    id,
+                });
+                crate::ai::made(true);
+            }
+            Err(e) => {
+                crate::ai::made(false);
+                crate::debug!("upscale", "chunk {key:?}: {e}");
+            }
         };
         let first =
             crate::upscale::upscale(&rgbs, (size.0 as usize, size.1 as usize), wanted, keep)?;
+        work.handed();
         crate::debug!(
             "upscale",
             "chunk {key:?} of {} frames at {size:?}: read and made RGB in {:.0} ms, frame {wanted} upscaled in {:.0} ms",
@@ -764,6 +785,19 @@ impl Source {
     }
 
     fn best_picture(
+        &mut self,
+        shown: (u32, u32),
+        size: (u32, u32),
+        reading: Reading,
+    ) -> Result<frame::Video> {
+        let made = self.best_picture_in(shown, size, reading);
+        if made.is_err() {
+            self.best = None;
+        }
+        made
+    }
+
+    fn best_picture_in(
         &mut self,
         shown: (u32, u32),
         size: (u32, u32),
@@ -830,13 +864,26 @@ impl Source {
             }
         }
         let want = index.unwrap_or(0);
+        let mut waiting: Option<crate::ai::Making> = None;
         loop {
             let best = self.best.as_mut().expect("made");
             while best.pictures.front().is_some_and(|(i, _)| *i < want) {
                 best.pictures.pop_front();
             }
             if let Some((_, p)) = best.pictures.iter().find(|(i, _)| *i == want) {
+                if let Some(w) = waiting.take() {
+                    let last = best.pictures.back().map_or(want, |(i, _)| *i);
+                    w.finished((want, last));
+                }
                 return frame_ref(p);
+            }
+            if waiting.is_none() {
+                waiting = Some(crate::ai::making(
+                    Upscaler::AiBest,
+                    shown,
+                    size,
+                    (want, want),
+                ));
             }
             if best.ended {
                 return Err(Error::Invalid(format!(
@@ -1932,7 +1979,6 @@ impl VideoFrames {
                 reading.push(None);
                 continue;
             };
-            let sharp = sharpness(*super_scale);
             let pictures = Pictures::of(image.as_ref());
             let still = pictures == Pictures::Still;
             let from = if still { 0 } else { *source_frame };
@@ -1942,7 +1988,7 @@ impl VideoFrames {
                 .filter(|&s| {
                     !taken[s]
                         && self.open[s].reader.input() == &input
-                        && self.open[s].sharp == sharp
+                        && self.open[s].scale == *super_scale
                 })
                 .collect();
             let reads_on = free
@@ -1960,10 +2006,14 @@ impl VideoFrames {
                     s
                 }
                 None => {
-                    let opened = match self.ahead.reclaim(|k| k.0 == input) {
-                        Some(source) => {
-                            let mut source = source?;
-                            source.left = None;
+                    let reclaimed = self
+                        .ahead
+                        .reclaim(|k| k.0 == input)
+                        .transpose()?
+                        .filter(|s| s.scale == *super_scale);
+                    let opened = match reclaimed {
+                        Some(mut source) => {
+                            source.back();
                             source.reader.set_color_space(*color_space);
                             source.reposition(*origin, from, target)?;
                             source
@@ -1998,7 +2048,7 @@ impl VideoFrames {
         let now = Instant::now();
         for (source, taken) in self.open.iter_mut().zip(taken) {
             if taken {
-                source.left = None;
+                source.back();
             } else {
                 source.leave(now);
             }
@@ -2073,10 +2123,11 @@ impl VideoFrames {
                 continue;
             };
             let (color_space, super_scale) = (*color_space, *super_scale);
-            let sharp = sharpness(super_scale);
             let input = input_of(path, image.as_ref());
             let free = |s: &usize| {
-                !used[*s] && self.open[*s].reader.input() == &input && self.open[*s].sharp == sharp
+                !used[*s]
+                    && self.open[*s].reader.input() == &input
+                    && self.open[*s].scale == super_scale
             };
             let read = (0..self.open.len()).find(|s| free(s) && self.open[*s].left.is_none());
             let left = (0..self.open.len()).find(free);
