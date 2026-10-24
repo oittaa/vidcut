@@ -119,6 +119,10 @@ Motions:
 - `Shown::scales` gives the Super Scale of each layer (`Plan::scales_at`).
   - With `viewer.super_scale` on, the shader enlarges such a layer with a sharper kernel (`sharp`). Its Sharpness selects the kernel.
   - It does this only where the viewer enlarges the picture.
+- With AI, `VideoFrames` runs `ai_picture` for the viewer too, as an export does. The viewer then gets the large upright picture of the AI upscaler.
+  - Whether the picture is enlarged depends on its placement and on the timeline size, as in an export.
+  - Thus the key of its kept frames holds its Super Scale, its placement and the timeline size (`source_key`).
+- With `viewer.super_scale` off, the live core plans the viewer without Super Scale (`preview_plan`).
 - While pictures are dragged, `Player::preview_pictures` at once puts each dragged picture in place of the picture of its clip.
 - The live core then plans the timeline again with the dragged pictures (`Msg::PreviewPictures`), `RELOAD_EVERY` apart at most.
 - This is necessary because a picture that stops filling the frame needs the tracks below it decoded.

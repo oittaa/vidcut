@@ -34,6 +34,7 @@ pub mod testdata;
 pub mod thumbs;
 pub mod transcribe;
 pub(crate) mod turns;
+pub mod upscale;
 pub mod waveform;
 
 pub use error::{Error, Result};

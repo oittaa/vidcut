@@ -162,6 +162,18 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
 - **The CPU:** `Normalizer::upscaling` uses `spline` or `lanczos` in place of `bicubic`.
 - **Placed pictures:** `layer_size` lets a layer grow to the factor times its source size (`ScaleFactor`). Auto lets it grow to four times.
 - A `Source` is used again only for a piece with the same Super Scale.
+- **AI** (`upscale`):
+  - Before an export starts, `upscale::check` refuses media that AI cannot take (`upscale::unfit`). It also refuses AI without the weights or without a GPU that can run it.
+  - In an export, `ai_picture` turns the source picture into RGB at its shown size, upright.
+  - `upscale::upscale` runs Real-ESRGAN with WGSL compute shaders on wgpu. It gives a picture four times as large.
+    - A pack shader puts the picture into 16-bit floats.
+    - A convolution shader follows for each layer. It reads its block of pixels and its weights into workgroup memory. Each thread makes 4 pixels of 16 channels, with 32-bit sums.
+    - A shuffle shader then puts the channels into the large picture, adds the input and makes 8-bit RGB.
+    - A large picture goes through in tiles. Each tile also reads the margin that the 34 layers reach. Thus the tiles join without seams.
+  - The usual fitting then makes that picture the size it shows at.
+  - The frames go through memory, also from a GPU decoder.
+  - `upscale` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines, weights and buffers stay for the next picture.
+  - `Note::Upscaled` names each file that AI enlarged in the export's report.
 - The other GPUs fit pictures as before ([todo](../todo/super-scale.md)).
 
 Why: the result of Super Scale is the upscaler's own. It is not meant to match the CPU.

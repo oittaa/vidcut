@@ -19,8 +19,8 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, ColorSpace, Marker, Project, ScaleFactor, Sharpness, Speed, Track, TrackClip,
-    TrackKind,
+    Clip, ClipAudio, ColorSpace, Marker, NoiseReduction, Project, ScaleFactor, Sharpness, Speed,
+    Track, TrackClip, TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -1747,12 +1747,21 @@ pub fn set_media_color_space(p: &mut Project, ids: &[String], space: ColorSpace)
     Ok(())
 }
 
-pub fn set_media_super_scale(
-    p: &mut Project,
-    ids: &[String],
-    factor: Option<ScaleFactor>,
-    sharpness: Option<Sharpness>,
-) -> Result<()> {
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SuperScaleSet {
+    pub factor: Option<ScaleFactor>,
+    pub sharpness: Option<Sharpness>,
+    pub upscaler: Option<Upscaler>,
+    pub noise_reduction: Option<NoiseReduction>,
+}
+
+impl SuperScaleSet {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+pub fn set_media_super_scale(p: &mut Project, ids: &[String], set: SuperScaleSet) -> Result<()> {
     for id in ids {
         let m = p
             .media
@@ -1762,12 +1771,11 @@ pub fn set_media_super_scale(
         if m.info.video.is_none() {
             return Err(Error::invalid(format!("{id} has no pictures")));
         }
-        if let Some(factor) = factor {
-            m.super_scale.factor = factor;
-        }
-        if let Some(sharpness) = sharpness {
-            m.super_scale.sharpness = sharpness;
-        }
+        let s = &mut m.super_scale;
+        s.factor = set.factor.unwrap_or(s.factor);
+        s.sharpness = set.sharpness.unwrap_or(s.sharpness);
+        s.upscaler = set.upscaler.unwrap_or(s.upscaler);
+        s.noise_reduction = set.noise_reduction.unwrap_or(s.noise_reduction);
     }
     Ok(())
 }

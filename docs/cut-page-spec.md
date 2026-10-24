@@ -167,12 +167,18 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - Super Scale enlarges the pictures of a media item with a better upscaler before they are fitted.
   - It is a setting of the media item. Thus it applies to every clip of that item (p. 433).
   - Right-click the media in the pool, or use the Super Scale section of the Inspector.
-  - Super Scale is Off, Auto, 2x, 3x or 4x. Sharpness is Low, Medium or High, and selects the upscaler.
+  - Super Scale is Off, Auto, 2x, 3x or 4x.
+  - Its Upscaler is AI, the default, or Classic.
+    - AI is a neural network on the GPU. Its Noise Reduction is Low, Medium or High. Medium is the default.
+    - Classic has a Sharpness of Low, Medium or High, which selects the upscaler.
+  - The first time that AI is turned on, vidcut asks to download its weights (10 MB).
+  - AI takes SDR pictures up to 4K. For other media, an export refuses AI, and the Inspector shows a warning.
   - The factor is the most that a placed picture is made larger than its source, before it is placed. Auto is as much as the picture needs, up to 4x.
   - A picture that fills the frame takes the better upscaler for all of its enlargement. The factor does not change it.
   - Super Scale works only where a picture is enlarged. A picture that is made smaller is scaled as before.
   - View > Show Super Scale shows it in the viewer (`viewer.super_scale`). It is off by default, as it costs playback speed.
-  - `media.set` sets `super_scale` and `sharpness`.
+  - With AI, the viewer then shows the result of the AI upscaler, as the export makes it.
+  - `media.set` sets `super_scale`, `upscaler`, `noise_reduction` and `sharpness`. With `download`, it downloads the weights first.
 - **Relinking media** (pp. 668–669):
   - An item whose file is missing has the mark MISSING.
   - Its clips are red on the timeline (pp. 509, 530), and the viewer shows Media Offline.

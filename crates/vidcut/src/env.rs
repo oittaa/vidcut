@@ -285,6 +285,10 @@ impl Env for AvEnv {
         vidcut_av::isolate::get_ready(&paths::models_dir(), download).map_err(av_error)
     }
 
+    fn ai_upscaler(&self, download: bool) -> Result<()> {
+        vidcut_av::upscale::get_ready(&paths::models_dir(), download).map_err(av_error)
+    }
+
     fn voice_activity(
         &self,
         media: &Media,

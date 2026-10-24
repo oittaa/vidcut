@@ -223,6 +223,7 @@ struct Starting {
     from: From,
     picking: Option<Picked>,
     ask: Option<Ask>,
+    weights: bool,
 }
 
 enum Otio {
@@ -760,6 +761,7 @@ impl Workspace {
                 from: From::Quick,
                 picking: Some(picking),
                 ask: None,
+                weights: false,
             });
         }
         if open {
@@ -780,8 +782,23 @@ impl Workspace {
                 Some(path) => {
                     self.folders.remember(Kind::Exports, &path);
                     s.params["output"] = json!(path);
-                    s.ask = Some(Ask::send(&self.live, ctx, "export.start", s.params.clone()));
+                    self.send_start(ctx, &mut s);
                 }
+            }
+        }
+        if s.weights {
+            let needs = vidcut_av::upscale::needed(&crate::paths::models_dir());
+            let answer = if needs.is_empty() {
+                Some(false)
+            } else {
+                super::speech::ask_download(ctx, "export-download", &needs, "Download")
+            };
+            if let Some(download) = answer {
+                s.weights = false;
+                if download {
+                    s.params["download"] = json!(true);
+                }
+                s.ask = Some(Ask::send(&self.live, ctx, "export.start", s.params.clone()));
             }
         }
         if let Some(ask) = &s.ask
@@ -808,6 +825,20 @@ impl Workspace {
             return;
         }
         self.export.starting = Some(s);
+    }
+
+    fn send_start(&self, ctx: &egui::Context, s: &mut Starting) {
+        let ai = self.project().is_some_and(|p| {
+            vidcut_core::otio::used_media(p, None)
+                .iter()
+                .filter_map(|id| p.media(id))
+                .any(|m| m.super_scale.ai())
+        });
+        if ai && !vidcut_av::upscale::needed(&crate::paths::models_dir()).is_empty() {
+            s.weights = true;
+        } else {
+            s.ask = Some(Ask::send(&self.live, ctx, "export.start", s.params.clone()));
+        }
     }
 
     fn dialog_window(&mut self, ctx: &egui::Context) {
@@ -1056,12 +1087,15 @@ impl Workspace {
             d.error = None;
             self.folders
                 .remember(Kind::Exports, Path::new(d.output.trim()));
-            self.export.starting = Some(Starting {
-                ask: Some(Ask::send(&self.live, ctx, "export.start", params.clone())),
+            let mut s = Starting {
+                ask: None,
                 params,
                 from: From::Dialog,
                 picking: None,
-            });
+                weights: false,
+            };
+            self.send_start(ctx, &mut s);
+            self.export.starting = Some(s);
         }
         if open {
             self.export.dialog = Some(d);
@@ -2075,6 +2109,16 @@ fn detail_rows(j: &JobInfo, rate: Option<f64>) -> Vec<(&'static str, String)> {
             );
             rows.push(("", format!("{name}: {}", s.decoding)));
         }
+    }
+    for (i, u) in d.upscaled.iter().enumerate() {
+        let name = u.path.file_name().map_or_else(
+            || u.path.display().to_string(),
+            |n| n.to_string_lossy().into(),
+        );
+        rows.push((
+            if i == 0 { "Super Scale" } else { "" },
+            format!("{name}: {}", u.how),
+        ));
     }
     if d.gpu_frames > 0 || d.gpu_decoded > 0 {
         rows.push((

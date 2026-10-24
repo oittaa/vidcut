@@ -26,6 +26,9 @@ tar.workspace = true
 ureq.workspace = true
 tract-onnx.workspace = true
 rustfft.workspace = true
+wgpu.workspace = true
+pollster.workspace = true
+zip.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true

@@ -4,7 +4,7 @@ use std::time::{Instant, SystemTime};
 use serde::Serialize;
 use serde_json::{Value, json};
 use vidcut_av::export::{
-    AudioNote, Note, Progress, SourceNote, SpeechNote, Stage, Tried, VideoNote,
+    AudioNote, Note, Progress, SourceNote, SpeechNote, Stage, Tried, UpscaleNote, VideoNote,
 };
 use vidcut_core::Error;
 use vidcut_core::editor::Copied;
@@ -70,6 +70,8 @@ pub struct JobDetails {
     pub tried: Vec<Tried>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<SourceNote>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub upscaled: Vec<UpscaleNote>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub downloading: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,6 +99,10 @@ impl JobDetails {
             Note::Source(s) => match self.sources.iter_mut().find(|o| o.path == s.path) {
                 Some(o) => *o = s,
                 None => self.sources.push(s),
+            },
+            Note::Upscaled(u) => match self.upscaled.iter_mut().find(|o| o.path == u.path) {
+                Some(o) => *o = u,
+                None => self.upscaled.push(u),
             },
             Note::Downloading { name } => self.downloading = Some(name),
             Note::Speech(s) => self.speech = Some(s),

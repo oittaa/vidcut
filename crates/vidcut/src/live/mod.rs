@@ -1116,6 +1116,8 @@ impl Live {
                     crate::preferences::load().is_ok_and(|p| p.viewer.super_scale);
                 if self.show_super_scale != show_super_scale {
                     self.show_super_scale = show_super_scale;
+                    self.schedule_timeline();
+                    self.refresh_source();
                     changed = true;
                 }
                 self.follow_budget();
@@ -2916,6 +2918,17 @@ impl Live {
                     None => Step::Now(self.edit(envelope, job.origin)),
                 }
             }
+            Request::MediaSet { download: true, .. }
+                if !envelope.dry_run
+                    && !vidcut_av::upscale::needed(&paths::models_dir()).is_empty() =>
+            {
+                let fetch = || {
+                    vidcut_av::upscale::get_ready(&paths::models_dir(), true).map_err(|e| {
+                        crate::export::av_error(&e, vidcut_core::ErrorCode::Media, String::new())
+                    })
+                };
+                Step::Measure(Box::new(fetch), Box::new(envelope))
+            }
             Request::ClipSet {
                 voice_isolation: Some(amount),
                 download: true,
@@ -3522,6 +3535,15 @@ impl Live {
     }
 
     fn preview_plan(&self, mut plan: RenderPlan) -> RenderPlan {
+        if !self.show_super_scale {
+            for piece in &mut plan.video {
+                for layer in piece.layers_mut() {
+                    if let render::VideoPiece::Source { super_scale, .. } = layer {
+                        *super_scale = Default::default();
+                    }
+                }
+            }
+        }
         if let Some(open) = &self.project {
             vidcut_core::preview::apply_proxies(
                 &mut plan,

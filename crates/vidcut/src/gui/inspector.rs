@@ -9,8 +9,8 @@ use egui_phosphor::regular::{
 use serde_json::{Value, json};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Clip, Crop, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project, ScaleFactor, Sharpness,
-    TrackKind, ZoomBox,
+    Clip, Crop, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project, ScaleFactor, TrackKind,
+    Upscaler, ZoomBox,
 };
 use vidcut_core::ops::picture::has_picture;
 use vidcut_core::place::upright_fit;
@@ -599,24 +599,6 @@ fn param_name(key: Key) -> Option<&'static str> {
         Key::Volume => Some("volume"),
         Key::Picture(f) => f.channel().map(PictureValue::name),
         _ => None,
-    }
-}
-
-const FACTORS: [ScaleFactor; 5] = [
-    ScaleFactor::None,
-    ScaleFactor::Auto,
-    ScaleFactor::X2,
-    ScaleFactor::X3,
-    ScaleFactor::X4,
-];
-
-fn factor_label(factor: ScaleFactor) -> &'static str {
-    match factor {
-        ScaleFactor::None => "Off",
-        ScaleFactor::Auto => "Auto",
-        ScaleFactor::X2 => "2x",
-        ScaleFactor::X3 => "3x",
-        ScaleFactor::X4 => "4x",
     }
 }
 
@@ -1574,10 +1556,11 @@ impl Workspace {
     }
 
     fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
-        let mut media: Vec<&str> = chosen
+        use super::super_scale::{FACTORS, NOISE, SHARPNESS, UPSCALERS, label_of, unfit};
+        let mut media: Vec<String> = chosen
             .iter()
             .filter_map(|c| p.clip(&c.id))
-            .map(|c| c.media.as_str())
+            .map(|c| c.media.clone())
             .collect();
         media.sort_unstable();
         media.dedup();
@@ -1599,43 +1582,66 @@ impl Workspace {
         let cleared = group(ui, "Super Scale", header, |ui| {
             label(ui, "Super Scale", !now.is_off());
             egui::ComboBox::from_id_salt("inspector-super-scale")
-                .selected_text(factor_label(now.factor))
+                .selected_text(label_of(&FACTORS, now.factor))
                 .show_ui(ui, |ui| {
-                    for factor in FACTORS {
-                        if ui
-                            .selectable_label(now.factor == factor, factor_label(factor))
-                            .clicked()
-                        {
+                    for (factor, text) in FACTORS {
+                        if ui.selectable_label(now.factor == factor, text).clicked() {
                             put = Some(json!({ "super_scale": factor }));
                         }
                     }
                 });
             ui.end_row();
-            label(ui, "Sharpness", !now.is_off());
-            ui.add_enabled_ui(!now.is_off(), |ui| {
-                dialog::switch(ui, |ui| {
-                    for (sharpness, text) in [
-                        (Sharpness::Low, "Low"),
-                        (Sharpness::Medium, "Medium"),
-                        (Sharpness::High, "High"),
-                    ] {
-                        if ui
-                            .selectable_label(now.sharpness == sharpness, text)
-                            .clicked()
-                        {
-                            put = Some(json!({ "sharpness": sharpness }));
-                        }
+            let on = !now.is_off();
+            let ai = now.upscaler == Upscaler::Ai;
+            let row = |ui: &mut egui::Ui,
+                       name: &str,
+                       enabled: bool,
+                       pick: &mut dyn FnMut(&mut egui::Ui)| {
+                label(ui, name, enabled);
+                ui.add_enabled_ui(enabled, |ui| dialog::switch(ui, |ui| pick(ui)));
+                ui.end_row();
+            };
+            row(ui, "Upscaler", on, &mut |ui| {
+                for (upscaler, text) in UPSCALERS {
+                    if ui
+                        .selectable_label(now.upscaler == upscaler, text)
+                        .clicked()
+                    {
+                        put = Some(json!({ "upscaler": upscaler }));
                     }
-                });
+                }
             });
-            ui.end_row();
+            if let Some(text) = unfit(now, media.iter().filter_map(|id| p.media(id))) {
+                ui.label("");
+                dialog::warn(ui, text);
+                ui.end_row();
+            }
+            row(ui, "Noise Reduction", on && ai, &mut |ui| {
+                for (noise, text) in NOISE {
+                    if ui
+                        .selectable_label(now.noise_reduction == noise, text)
+                        .clicked()
+                    {
+                        put = Some(json!({ "noise_reduction": noise }));
+                    }
+                }
+            });
+            row(ui, "Sharpness", on && !ai, &mut |ui| {
+                for (sharpness, text) in SHARPNESS {
+                    if ui
+                        .selectable_label(now.sharpness == sharpness, text)
+                        .clicked()
+                    {
+                        put = Some(json!({ "sharpness": sharpness }));
+                    }
+                }
+            });
         });
         if cleared {
             put = Some(json!({ "super_scale": ScaleFactor::None }));
         }
-        if let Some(mut params) = put {
-            params["media"] = json!(media);
-            self.send("media.set", params);
+        if let Some(params) = put {
+            self.set_super_scale(&media, params);
         }
     }
 

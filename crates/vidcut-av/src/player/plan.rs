@@ -245,15 +245,24 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             origin,
             image,
             color_space,
+            super_scale,
+            placed,
             ..
-        } => format!(
-            "{}|{:x}|{image:?}|{}|{}",
-            path.display(),
-            origin.to_bits(),
-            plan.fps,
-            color_space.key()
-        )
-        .into(),
+        } => {
+            let ai = if super_scale.ai() {
+                format!("|{super_scale:?}|{}x{}|{placed:?}", plan.width, plan.height)
+            } else {
+                String::new()
+            };
+            format!(
+                "{}|{:x}|{image:?}|{}|{}{ai}",
+                path.display(),
+                origin.to_bits(),
+                plan.fps,
+                color_space.key()
+            )
+            .into()
+        }
         VideoPiece::Black { .. } | VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => {
             format!("black|{}x{}", plan.width, plan.height).into()
         }
