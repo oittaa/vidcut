@@ -288,29 +288,45 @@ impl Gpu {
         pass.dispatch_workgroups(x, groups.div_ceil(x), 1);
     }
 
-    pub(super) fn read(&self, src: &wgpu::Buffer, offset: u64, size: u64) -> Result<Vec<u8>> {
-        let staging = compute::buffer(
+    pub(super) fn staging(&self, size: u64) -> wgpu::Buffer {
+        compute::buffer(
             &self.device,
             "flashvsr-read",
             size as usize,
             wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        );
-        let mut enc = self.device.create_command_encoder(&Default::default());
-        enc.copy_buffer_to_buffer(src, offset, &staging, 0, size);
-        self.flush();
-        self.queue.submit([enc.finish()]);
+        )
+    }
+
+    pub(super) fn fetch(
+        &self,
+        staging: &wgpu::Buffer,
+        size: u64,
+        done: Option<wgpu::SubmissionIndex>,
+    ) -> Result<Vec<u8>> {
         let slice = staging.slice(..size);
         let (tx, rx) = mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });
         self.device
-            .poll(wgpu::PollType::wait_indefinitely())
+            .poll(wgpu::PollType::Wait {
+                submission_index: done,
+                timeout: None,
+            })
             .map_err(gpu_error)?;
         rx.recv().map_err(gpu_error)?.map_err(gpu_error)?;
         let out = slice.get_mapped_range().map_err(gpu_error)?.to_vec();
         staging.unmap();
         Ok(out)
+    }
+
+    pub(super) fn read(&self, src: &wgpu::Buffer, offset: u64, size: u64) -> Result<Vec<u8>> {
+        let staging = self.staging(size);
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        enc.copy_buffer_to_buffer(src, offset, &staging, 0, size);
+        self.flush();
+        self.queue.submit([enc.finish()]);
+        self.fetch(&staging, size, None)
     }
 
     pub(super) fn wait(&self) -> Result<()> {

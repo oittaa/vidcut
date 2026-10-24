@@ -221,6 +221,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
       - Four threads share a query row. Each keeps the row's query in registers and does 8 keys and 32 output values. The partial sums keep the same groups, so the results do not depend on the layout.
     - The KV cache of each block is a ring of windows (`Cache`).
     - `run::plan` keeps the caches on the GPU while all of the work fits in three quarters of the GPU's memory. The caches of the other blocks stay in main memory between chunks (`Keys::Host`). Each comes back to the GPU just before its block runs, and its new windows go back after it.
+      - The new windows go to a mapped buffer in the first submission of the block. The block reads them at its end, while the GPU runs its feed-forward part.
     - The results are the same in both places.
     - Without a size for the GPU's memory, all caches stay on the GPU.
     - A size that does not fit even with every cache in main memory is refused. So is a size whose caches need more than half of main memory.

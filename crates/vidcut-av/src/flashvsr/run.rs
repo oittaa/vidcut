@@ -108,6 +108,13 @@ struct Cache {
     range: u32,
 }
 
+struct Staged {
+    k: wgpu::Buffer,
+    v: wgpu::Buffer,
+    fresh: Vec<u64>,
+    done: Option<wgpu::SubmissionIndex>,
+}
+
 struct Mems {
     a: Vec<wgpu::Buffer>,
     b: Vec<wgpu::Buffer>,
@@ -168,11 +175,10 @@ impl<'a> Enc<'a> {
             .copy_buffer_to_buffer(src, from, dst, to, size);
     }
 
-    fn submit(&mut self) {
-        if let Some(enc) = self.enc.take() {
-            self.gpu.flush();
-            self.gpu.queue.submit([enc.finish()]);
-        }
+    fn submit(&mut self) -> Option<wgpu::SubmissionIndex> {
+        let enc = self.enc.take()?;
+        self.gpu.flush();
+        Some(self.gpu.queue.submit([enc.finish()]))
     }
 }
 
@@ -317,6 +323,13 @@ fn keep_of(layer: usize) -> u32 {
     } else {
         LOCAL_KEEP
     }
+}
+
+fn kept(cache: &Cache) -> Vec<i64> {
+    let mut order: Vec<i64> = cache.ring.iter().map(|s| i64::from(*s)).collect();
+    order.push(-1);
+    order.push(-2);
+    order[order.len().saturating_sub(cache.keep as usize)..].to_vec()
 }
 
 fn window(g: &Geometry) -> u64 {
@@ -921,7 +934,11 @@ impl Stream {
                 (&work.probs, &state, &work.list, &work.counts),
             );
         });
-        e.submit();
+        let mut staged = self.stage(gpu, i, work, &mut e);
+        let done = e.submit();
+        if let Some(s) = staged.as_mut() {
+            s.done = done;
+        }
         let (kc, vc) = match &cache.keys {
             Keys::Gpu { k, v } => (k, v),
             Keys::Host { k, v } => {
@@ -1055,22 +1072,61 @@ impl Stream {
                 );
             });
         }
-        self.keep(gpu, i, work, &mut e)?;
+        e.submit();
+        self.keep(gpu, i, work, staged, &mut e)?;
         e.submit();
         Ok(())
     }
 
-    fn keep(&mut self, gpu: &Gpu, i: usize, work: &Work, e: &mut Enc) -> Result<()> {
+    fn stage(&self, gpu: &Gpu, i: usize, work: &Work, e: &mut Enc) -> Option<Staged> {
+        let cache = &self.caches[i];
+        if !matches!(cache.keys, Keys::Host { .. }) {
+            return None;
+        }
+        let window = window(&self.g);
+        let fresh: Vec<u64> = kept(cache)
+            .into_iter()
+            .filter(|w| *w < 0)
+            .map(|w| (-w - 1) as u64)
+            .collect();
+        let size = window * fresh.len() as u64;
+        let (k, v) = (gpu.staging(size), gpu.staging(size));
+        for (n, j) in fresh.iter().enumerate() {
+            e.copy(&work.k, j * window, &k, n as u64 * window, window);
+            e.copy(&work.v, j * window, &v, n as u64 * window, window);
+        }
+        Some(Staged {
+            k,
+            v,
+            fresh,
+            done: None,
+        })
+    }
+
+    fn keep(
+        &mut self,
+        gpu: &Gpu,
+        i: usize,
+        work: &Work,
+        staged: Option<Staged>,
+        e: &mut Enc,
+    ) -> Result<()> {
         let g = self.g;
+        let window = window(&g);
+        let fetched = match staged {
+            Some(s) => {
+                let size = window * s.fresh.len() as u64;
+                let k = gpu.fetch(&s.k, size, s.done.clone())?;
+                let v = gpu.fetch(&s.v, size, s.done)?;
+                Some((s.fresh, k, v))
+            }
+            None => None,
+        };
         let cache = &mut self.caches[i];
-        let mut order: Vec<i64> = cache.ring.iter().map(|s| i64::from(*s)).collect();
-        order.push(-1);
-        order.push(-2);
-        let kept: Vec<i64> = order[order.len().saturating_sub(cache.keep as usize)..].to_vec();
+        let kept = kept(cache);
         let mut free: Vec<u32> = (0..cache.keep)
             .filter(|s| !kept.contains(&i64::from(*s)))
             .collect();
-        let window = window(&g);
         let pooled = u64::from(g.s) * 12 * 128 * 4;
         let mut ring = Vec::new();
         for w in kept {
@@ -1087,8 +1143,11 @@ impl Stream {
                     e.copy(&work.v, j * window, v, to * window, window);
                 }
                 Keys::Host { k, v } => {
-                    k[slot as usize] = gpu.read(&work.k, j * window, window)?;
-                    v[slot as usize] = gpu.read(&work.v, j * window, window)?;
+                    let (fresh, kb, vb) = fetched.as_ref().expect("the staged windows");
+                    let n = fresh.iter().position(|f| *f == j).expect("a staged window");
+                    let part = n * window as usize..(n + 1) * window as usize;
+                    k[slot as usize] = kb[part.clone()].to_vec();
+                    v[slot as usize] = vb[part].to_vec();
                 }
             }
             e.copy(&work.kp, j * pooled, &cache.pooled, to * pooled, pooled);
