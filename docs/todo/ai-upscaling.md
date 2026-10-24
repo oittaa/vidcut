@@ -82,7 +82,13 @@ The research of October 2026 checked five newer models against their papers, cod
   - Apache 2.0 for the code, the weights and its base model, Wan2.1.
   - It is a one-step diffusion model of 1.75 B parameters. It works on the frames in order, so an export gets no seams between chunks.
   - It needs about 51 times the work per pixel of `realesr-general-x4v3` (calculated). Its block-sparse attention is hard to write as shaders.
-  - Its files are 6.4 GB, about 3.5 GB in 16-bit floats. FlashVSR+ is a follow-up from the same lab, with no venue yet.
+  - Its files are 6.4 GB, about 3.5 GB in 16-bit floats.
+- **FlashVSR+** ([repo](https://github.com/OpenImagingLab/FlashVSR_Plus), [paper](https://arxiv.org/abs/2610.17552)), from the same lab, October 2026, no venue yet:
+  - Apache 2.0 for the code and the weights. It has the same 1.3 B backbone, with new weights in a Turbo and a Base version.
+  - Turbo keeps the global attention in only 5 of its 30 layers. Its files are about 7.0 GB.
+  - Its paper reports better scores than FlashVSR: on YouHQ40, a PSNR of 23.64 against 22.53.
+  - On an RTX 4090, Turbo took 16 s for 89 frames at 1080p, 32 s at 2K and 90 s at 4K. These times are read from a figure.
+  - 4K without tiles fits in 24 GB only when the attention cache moves to the CPU memory.
 - **SeedVR2-3B**, ICLR 2026:
   - Apache 2.0 for the code and the weights. Its optional color fix bans commercial use, but it is a short filter that vidcut can write itself.
   - It is a one-step diffusion transformer of 3.4 B parameters. It needs about 255 times the work of `realesr-general-x4v3` (calculated).
@@ -135,7 +141,7 @@ AI Super Scale is built for exports and for the viewer ([X91](../deviations.md#x
 3. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
 4. A mix with the classic upscaler, as an extra.
 5. A decision of the owner on the SPyNet license of RealBasicVSR. Then, with the owner's OK, a side-by-side test against Real-ESRGAN on the same clip.
-6. A side-by-side test on the owner's clips: FlashVSR and SeedVR2-3B against `realesr-general-x4v3`. It needs the owner's OK and a measurement plan. The winner can become the slow tier.
+6. A side-by-side test on the owner's clips: FlashVSR+ Turbo, FlashVSR and SeedVR2-3B against `realesr-general-x4v3`. It needs the owner's OK and a measurement plan. The winner can become the slow tier.
 
 The weights are on Real-ESRGAN's release v0.2.5.0:
 
