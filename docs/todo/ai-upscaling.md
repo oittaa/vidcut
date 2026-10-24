@@ -40,6 +40,20 @@ AI Best against the official code in bf16 with its Triton kernel, at 1920×1024 
 - Thus vidcut is as far from the bf16 frames as the bf16 frames are from 32-bit floats.
 - A 32-bit run of the official code does not fit at this size: its dense attention masks need about 28 GB.
 
+AI Best speed and memory on the owner's RTX 4080 SUPER (16 GB), on 2026-10-24:
+
+- Each vidcut run is a CLI export: `project create --fps F --width W --height H`, `media add`, `edit append m1 --range 0f..Nf`, `media set m1 --super-scale 4x --upscaler ai_best`, `export start out.mkv`.
+- The memory is the peak of the whole card, from `nvidia-smi` every 0.5 s, less the memory in use before.
+
+| Clip | vidcut | Official code, bf16, Triton |
+|---|---|---|
+| 480×256 to 1920×1024, 89 frames | 86.8 s (78.5 s for the export after the model loads); 11,017 MiB | 54.4 s; 11,047 MiB |
+| 1920×1080 to 3840×2176, 30 frames | 311.9 s (303.5 s for the export); 14,748 MiB; 16.6 GiB of main memory | not run |
+
+- The official time includes loading the model and compiling its Triton kernel. The official memory comes from `nvidia-smi` every 200 ms.
+- At 4K, 30 frames take 3 chunks, so the DiT runs on 48 frames.
+- At 4K, `run::plan` planned about 12.1 GB, but the card's peak was 14.7 GB above idle. The plan does not count everything yet.
+
 ## Decisions
 
 - The weights download at their first use. vidcut does not ship them.
@@ -57,8 +71,8 @@ AI Best against the official code in bf16 with its Triton kernel, at 1920×1024 
 These parts are still to do:
 
 1. AI Best (FlashVSR+ Turbo). Its engine and its place in Super Scale are in the code.
-   1. A run at 3840×2176, where most KV caches stay in main memory.
-   2. Speed: measure, then the tensor cores through wgpu's cooperative matrices, on Vulkan and Metal.
+   1. The memory plan: find the GPU memory that it does not count. At 4K the peak is 2.6 GB over the plan, near the size of the card.
+   2. Speed: find where the time goes, then use the tensor cores through wgpu's cooperative matrices, on Vulkan and Metal.
 2. A test of the chunk edges: each chunk starts from zero. A carried forward state or overlapping chunks may hide a change every 15 frames.
 3. Speed. PyTorch in 16-bit floats is faster on small pictures. The gain of each step is not known until it is measured.
    1. Measure where the time goes, with GPU timestamps: the network, the copies, the decoding and the encoding.

@@ -338,19 +338,23 @@ fn chunk_work(g: &Geometry) -> u64 {
     let (t, tf, p8) = (u64::from(g.t), u64::from(g.tf), u64::from(g.p8()));
     let slab = u64::from(SLAB.min(g.t));
     let rows = 12 * u64::from(g.qbs);
-    let dit = t * DIM as u64 * (4 + 5 * 2)
+    let x = t * DIM as u64 * 4;
+    let lq = x + 2 * tf * 2048 * 4 + tf * 3072 * (4 + 2);
+    let blocks = x
+        + t * DIM as u64 * 4 * 2
         + slab * (DIM + FFN) as u64 * 2
         + rows * 128 * 4 * 2
-        + rows * stride() * 4 * 2
-        + 2 * tf * 2048 * 4
-        + tf * 3072 * (4 + 2);
+        + rows * stride() * 4 * 2;
     let wm = u64::from(g.wm);
-    let dec = p8 * (784 + 4 * 512 + 4 * 4 * 256 + 4 * 512 + 16 * 3 * 128 + 16 * 256) * 2
-        + u64::from(BAND + 4) * wm * 128 * 2
+    let bands = u64::from(BAND + 4) * wm * 128 * 2
         + u64::from(BAND + 2) * wm * 128 * 2
         + u64::from(BAND) * wm * 3 * 4
         + u64::from(g.w * g.h) * 4;
-    dit.max(dec) + 2 * 16 * 4 * p8 * 4
+    let first = p8 * (784 + 4 * 512 + 4 * 256) * 2;
+    let second = p8 * 4 * (3 * 256 + 512) * 2;
+    let third = p8 * 4 * 512 * 2 + p8 * 16 * 4 * 128 * 2;
+    let decode = bands + first.max(second).max(third);
+    lq.max(blocks).max(decode) + 2 * 16 * 4 * p8 * 4
 }
 
 fn gigabytes(b: u64) -> String {
@@ -602,7 +606,7 @@ impl Stream {
         let noise = gpu.upload(&bytes(&noise_v));
         let latents = gpu.buffer((16 * 4 * p8 * 4) as usize);
         {
-            let work = Work::new(gpu, &g);
+            let x = gpu.buffer(g.t as usize * DIM * 4);
             let table = gpu.upload(&bytes(&rope(&g, k)));
             let mut e = Enc::new(gpu);
             e.pass(|pass| {
@@ -620,13 +624,18 @@ impl Stream {
                         bias: &model.patch.b,
                         a: &noise,
                         a2: None,
-                        out: &work.x,
+                        out: &x,
                         aux: None,
                     },
                 );
             });
-            self.project(gpu, model, &work, &mut e);
-            e.submit();
+            {
+                let lq = LqWork::new(gpu, &g);
+                self.project(gpu, model, (&x, &lq), &mut e);
+                e.submit();
+            }
+            gpu.wait()?;
+            let work = Work::new(gpu, &g, x);
             self.dump_tensor(gpu, "x_in", &work.x, g.t, true)?;
             for (i, block) in model.blocks.iter().enumerate() {
                 self.block(gpu, model, &work, &table, i, block)?;
@@ -710,7 +719,13 @@ impl Stream {
         )
     }
 
-    fn project(&mut self, gpu: &Gpu, model: &Model, work: &Work, e: &mut Enc) {
+    fn project(
+        &mut self,
+        gpu: &Gpu,
+        model: &Model,
+        (x, work): (&wgpu::Buffer, &LqWork),
+        e: &mut Enc,
+    ) {
         let g = self.g;
         let lq = &model.lq;
         let k = self.chunk;
@@ -801,7 +816,7 @@ impl Stream {
                     pass,
                     &lq.linear,
                     p,
-                    (&work.c2h, &work.x),
+                    (&work.c2h, x),
                     (Store::Cond, None),
                     &[(12, g.wt), (13, g.nh), (14, g.nw), (15, j)],
                 );
@@ -930,7 +945,7 @@ impl Stream {
             vn: &work.v,
             list: &work.list,
             counts: &work.counts,
-            out: &work.a,
+            out: &work.h,
             qbs: g.qbs,
             s: g.s,
             stride,
@@ -949,7 +964,7 @@ impl Stream {
                 pass,
                 &b.o,
                 t,
-                (&work.a, &work.x),
+                (&work.h, &work.x),
                 (Store::Gated, Some(&b.gate_msa)),
                 &[],
             );
@@ -984,7 +999,7 @@ impl Stream {
             vn: &b.ctx_v,
             list: &work.list,
             counts: &work.counts,
-            out: &work.a,
+            out: &work.h,
             qbs: g.qbs,
             s: g.s,
             stride,
@@ -1001,7 +1016,7 @@ impl Stream {
                 pass,
                 &b.co,
                 t,
-                (&work.a, &work.x),
+                (&work.h, &work.x),
                 (Store::Gated, Some(&model.ones)),
                 &[],
             );
@@ -1091,141 +1106,149 @@ impl Stream {
         let d = &model.dec;
         let (w8, h8) = (g.w8, g.h8);
         let p8 = g.p8();
-        let din = gpu.buffer((p8 * 784 * 2) as usize);
-        let a = [0, 1, 2].map(|_| gpu.buffer((p8 * 512 * 2) as usize));
-        let g1 = gpu.buffer((p8 * 512 * 2) as usize);
-        let b = [0, 1, 2].map(|_| gpu.buffer((p8 * 4 * 256 * 2) as usize));
-        let g2 = gpu.buffer((p8 * 4 * 512 * 2) as usize);
-        let c = [0, 1, 2].map(|_| gpu.buffer((p8 * 16 * 128 * 2) as usize));
-        let g3 = gpu.buffer((p8 * 16 * 256 * 2) as usize);
+        let half = |count: u32, n: u32| gpu.buffer((count * n * 2) as usize);
         let t1 = gpu.buffer(((BAND + 4) * g.wm * 128 * 2) as usize);
         let t2 = gpu.buffer(((BAND + 2) * g.wm * 128 * 2) as usize);
         let o = gpu.buffer((BAND * g.wm * 3 * 4) as usize);
         let picture = gpu.buffer((g.w * g.h * 4) as usize);
         let mut frames = Vec::new();
-        let [mut ax, at1, at2] = a;
-        let [mut bx, bt1, bt2] = b;
-        let [mut cx, ct1, ct2] = c;
         for j in 0..4u32 {
             let latent = self.chunk * 4 + u64::from(j);
             let slots = [0, 1, 2, 3].map(|i| self.slot((latent * 4 + i).saturating_sub(3)));
             let mut e = Enc::new(gpu);
-            e.pass(|pass| {
-                kernels::dec_input(
-                    gpu,
-                    pass,
-                    &DecInput {
-                        frames: &self.frames,
-                        latents,
-                        out: &din,
-                        w8,
-                        h8,
-                        wm: g.wm,
-                        plane: g.plane(),
-                        f: j,
-                        slots,
-                    },
-                );
-                let flat = |src, cin| Plane {
-                    w: w8,
-                    h: h8,
-                    y0: 0,
-                    rows: h8,
-                    src,
-                    cin,
-                    stride: cin / 2,
-                    offset: 0,
-                    two: None,
-                    up: false,
-                    sy0: 0,
-                };
-                plane(
-                    gpu,
-                    pass,
-                    &d.first,
-                    &flat(&din, 784),
-                    &at1,
-                    Store::Half(Act::Relu),
-                    None,
-                );
-                plane(
-                    gpu,
-                    pass,
-                    &d.deepen1,
-                    &flat(&at1, 512),
-                    &ax,
-                    Store::Half(Act::Relu),
-                    None,
-                );
-            });
-            for (i, mb) in d.stage1.iter().enumerate() {
+            let mut bx = half(p8 * 4, 256);
+            {
+                let din = half(p8, 784);
+                let (mut ax, at1, at2, g1) =
+                    (half(p8, 512), half(p8, 512), half(p8, 512), half(p8, 512));
                 e.pass(|pass| {
-                    mem_block(
+                    kernels::dec_input(
                         gpu,
                         pass,
-                        mb,
-                        (w8, h8, 512),
-                        (&mut ax, &mut self.mems.a[i], &at1, &at2),
-                    )
-                });
-            }
-            e.pass(|pass| {
-                rows(
-                    gpu,
-                    pass,
-                    &d.grow1,
-                    p8,
-                    (&ax, &g1),
-                    (Store::Half(Act::None), None),
-                    &[],
-                );
-                let up = Plane {
-                    w: w8 * 2,
-                    h: h8 * 2,
-                    y0: 0,
-                    rows: h8 * 2,
-                    src: &g1,
-                    cin: 512,
-                    stride: 256,
-                    offset: 0,
-                    two: None,
-                    up: true,
-                    sy0: 0,
-                };
-                plane(
-                    gpu,
-                    pass,
-                    &d.narrow2,
-                    &up,
-                    &bx,
-                    Store::Half(Act::None),
-                    None,
-                );
-            });
-            for (i, mb) in d.stage2.iter().enumerate() {
-                e.pass(|pass| {
-                    mem_block(
+                        &DecInput {
+                            frames: &self.frames,
+                            latents,
+                            out: &din,
+                            w8,
+                            h8,
+                            wm: g.wm,
+                            plane: g.plane(),
+                            f: j,
+                            slots,
+                        },
+                    );
+                    let flat = |src, cin| Plane {
+                        w: w8,
+                        h: h8,
+                        y0: 0,
+                        rows: h8,
+                        src,
+                        cin,
+                        stride: cin / 2,
+                        offset: 0,
+                        two: None,
+                        up: false,
+                        sy0: 0,
+                    };
+                    plane(
                         gpu,
                         pass,
-                        mb,
-                        (w8 * 2, h8 * 2, 256),
-                        (&mut bx, &mut self.mems.b[i], &bt1, &bt2),
+                        &d.first,
+                        &flat(&din, 784),
+                        &at1,
+                        Store::Half(Act::Relu),
+                        None,
+                    );
+                    plane(
+                        gpu,
+                        pass,
+                        &d.deepen1,
+                        &flat(&at1, 512),
+                        &ax,
+                        Store::Half(Act::Relu),
+                        None,
+                    );
+                });
+                for (i, mb) in d.stage1.iter().enumerate() {
+                    e.pass(|pass| {
+                        mem_block(
+                            gpu,
+                            pass,
+                            mb,
+                            (w8, h8, 512),
+                            (&mut ax, &mut self.mems.a[i], &at1, &at2),
+                        )
+                    });
+                }
+                e.pass(|pass| {
+                    rows(
+                        gpu,
+                        pass,
+                        &d.grow1,
+                        p8,
+                        (&ax, &g1),
+                        (Store::Half(Act::None), None),
+                        &[],
+                    );
+                    let up = Plane {
+                        w: w8 * 2,
+                        h: h8 * 2,
+                        y0: 0,
+                        rows: h8 * 2,
+                        src: &g1,
+                        cin: 512,
+                        stride: 256,
+                        offset: 0,
+                        two: None,
+                        up: true,
+                        sy0: 0,
+                    };
+                    plane(
+                        gpu,
+                        pass,
+                        &d.narrow2,
+                        &up,
+                        &bx,
+                        Store::Half(Act::None),
+                        None,
+                    );
+                });
+                e.submit();
+            }
+            gpu.wait()?;
+            let g2 = half(p8 * 4, 512);
+            {
+                let (bt1, bt2) = (half(p8 * 4, 256), half(p8 * 4, 256));
+                for (i, mb) in d.stage2.iter().enumerate() {
+                    e.pass(|pass| {
+                        mem_block(
+                            gpu,
+                            pass,
+                            mb,
+                            (w8 * 2, h8 * 2, 256),
+                            (&mut bx, &mut self.mems.b[i], &bt1, &bt2),
+                        )
+                    });
+                }
+                e.pass(|pass| {
+                    rows(
+                        gpu,
+                        pass,
+                        &d.grow2,
+                        p8 * 4,
+                        (&bx, &g2),
+                        (Store::Half(Act::None), None),
+                        &[],
                     )
                 });
+                e.submit();
             }
-            e.pass(|pass| {
-                rows(
-                    gpu,
-                    pass,
-                    &d.grow2,
-                    p8 * 4,
-                    (&bx, &g2),
-                    (Store::Half(Act::None), None),
-                    &[],
-                )
-            });
-            e.submit();
-            for half in 0..2u32 {
+            drop(bx);
+            gpu.wait()?;
+            for part in 0..2u32 {
+                let (mut cx, ct1, ct2) =
+                    (half(p8 * 16, 128), half(p8 * 16, 128), half(p8 * 16, 128));
+                let g3 = half(p8 * 16, 128);
                 e.pass(|pass| {
                     let up = Plane {
                         w: w8 * 4,
@@ -1235,7 +1258,7 @@ impl Stream {
                         src: &g2,
                         cin: 256,
                         stride: 256,
-                        offset: half * 128,
+                        offset: part * 128,
                         two: None,
                         up: true,
                         sy0: 0,
@@ -1261,24 +1284,24 @@ impl Stream {
                         )
                     });
                 }
-                e.pass(|pass| {
-                    rows(
-                        gpu,
-                        pass,
-                        &d.grow3,
-                        p8 * 16,
-                        (&cx, &g3),
-                        (Store::Half(Act::None), None),
-                        &[],
-                    )
-                });
                 e.submit();
                 for sub in 0..2u32 {
-                    let index = latent as i64 * 4 - 3 + i64::from(half * 2 + sub);
+                    let index = latent as i64 * 4 - 3 + i64::from(part * 2 + sub);
                     if index < 0 {
                         continue;
                     }
-                    self.last(gpu, model, &g3, sub, (&t1, &t2, &o, &picture), &mut e);
+                    e.pass(|pass| {
+                        rows(
+                            gpu,
+                            pass,
+                            &d.grow3[sub as usize],
+                            p8 * 16,
+                            (&cx, &g3),
+                            (Store::Half(Act::None), None),
+                            &[],
+                        )
+                    });
+                    self.last(gpu, model, &g3, (&t1, &t2, &o, &picture), &mut e);
                     let raw = gpu.read(&picture, 0, u64::from(g.w * g.h * 4))?;
                     let rgb: Vec<u8> = raw
                         .as_chunks::<4>()
@@ -1295,6 +1318,7 @@ impl Stream {
                     }
                     frames.push(rgb);
                 }
+                gpu.wait()?;
             }
         }
         Ok(frames)
@@ -1305,7 +1329,6 @@ impl Stream {
         gpu: &Gpu,
         model: &Model,
         g3: &wgpu::Buffer,
-        sub: u32,
         (t1, t2, o, picture): (&wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer),
         e: &mut Enc,
     ) {
@@ -1324,8 +1347,8 @@ impl Stream {
                     rows: a1 - a0,
                     src: g3,
                     cin: 128,
-                    stride: 128,
-                    offset: sub * 64,
+                    stride: 64,
+                    offset: 0,
                     two: None,
                     up: true,
                     sy0: 0,
@@ -1451,7 +1474,6 @@ struct Work {
     q: wgpu::Buffer,
     k: wgpu::Buffer,
     v: wgpu::Buffer,
-    a: wgpu::Buffer,
     h2: wgpu::Buffer,
     u: wgpu::Buffer,
     qp: wgpu::Buffer,
@@ -1460,26 +1482,38 @@ struct Work {
     list: wgpu::Buffer,
     counts: wgpu::Buffer,
     hist: wgpu::Buffer,
+}
+
+struct LqWork {
     c1: wgpu::Buffer,
     c2: wgpu::Buffer,
     c2h: wgpu::Buffer,
 }
 
-impl Work {
+impl LqWork {
     fn new(gpu: &Gpu, g: &Geometry) -> Self {
+        let p = g.tf as usize;
+        Self {
+            c1: gpu.buffer(2 * p * 2048 * 4),
+            c2: gpu.buffer(p * 3072 * 4),
+            c2h: gpu.buffer(p * 3072 * 2),
+        }
+    }
+}
+
+impl Work {
+    fn new(gpu: &Gpu, g: &Geometry, x: wgpu::Buffer) -> Self {
         let t = g.t as usize;
         let half = |n: usize| gpu.buffer(n * 2);
         let slab = SLAB.min(g.t) as usize;
         let stride = (GLOBAL_RANGE * GLOBAL_RANGE * (GLOBAL_KEEP + 2)) as usize;
         let rows = 12 * g.qbs as usize;
-        let p = g.tf as usize;
         Self {
-            x: gpu.buffer(t * DIM * 4),
+            x,
             h: half(t * DIM),
             q: half(t * DIM),
             k: half(t * DIM),
             v: half(t * DIM),
-            a: half(t * DIM),
             h2: half(slab * DIM),
             u: half(slab * FFN),
             qp: gpu.buffer(rows * 128 * 4),
@@ -1488,9 +1522,6 @@ impl Work {
             list: gpu.buffer(rows * stride * 4),
             counts: gpu.buffer(rows * 4),
             hist: gpu.buffer(12 * 256 * 4),
-            c1: gpu.buffer(2 * p * 2048 * 4),
-            c2: gpu.buffer(p * 3072 * 4),
-            c2h: half(p * 3072),
         }
     }
 }

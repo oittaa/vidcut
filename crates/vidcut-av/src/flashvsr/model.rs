@@ -62,7 +62,7 @@ pub(super) struct Decoder {
     pub(super) grow2: Linear,
     pub(super) narrow3: Linear,
     pub(super) stage3: Vec<MemBlock>,
-    pub(super) grow3: Linear,
+    pub(super) grow3: [Linear; 2],
     pub(super) last1: Linear,
     pub(super) deepen2: Linear,
     pub(super) last2: Linear,
@@ -228,6 +228,15 @@ fn conv(
     Ok(linear(gpu, &w, b.as_deref(), n, cin * size * size))
 }
 
+fn halves_of(t: &Torch, gpu: &Gpu, i: &str, cin: usize) -> Result<[Linear; 2]> {
+    let w = t.floats(&format!("decoder.{i}.weight"), &[2 * cin, cin, 1, 1])?;
+    let (first, second) = w.split_at(cin * cin);
+    Ok([
+        linear(gpu, first, None, cin, cin),
+        linear(gpu, second, None, cin, cin),
+    ])
+}
+
 fn mem_block(t: &Torch, gpu: &Gpu, i: usize, n: usize) -> Result<MemBlock> {
     Ok(MemBlock {
         a: conv(t, gpu, &format!("{i}.conv.0"), n, 2 * n, 3, true)?,
@@ -253,7 +262,7 @@ fn decoder(gpu: &Gpu, path: &Path) -> Result<Decoder> {
         grow2: conv(&t, gpu, "15.conv", 512, 256, 1, false)?,
         narrow3: conv(&t, gpu, "16", 128, 256, 3, false)?,
         stage3: stage(17, 128)?,
-        grow3: conv(&t, gpu, "21.conv", 256, 128, 1, false)?,
+        grow3: halves_of(&t, gpu, "21.conv", 128)?,
         last1: conv(&t, gpu, "22", 128, 128, 3, false)?,
         deepen2: conv(&t, gpu, "24", 128, 128, 3, false)?,
         last2: conv(&t, gpu, "26", 3, 128, 3, true)?,
