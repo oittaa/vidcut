@@ -242,7 +242,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - The tiles wait in workgroup memory as pairs of 16-bit floats, as they come from the buffers (`a_word`). The patch input holds 32-bit floats, so its tile stays 32-bit.
     - The weights are 16-bit floats on the GPU. The files hold 32-bit floats; they are rounded at load, on all cores (`compute::halves`).
     - The residual stream of the DiT stays in 32-bit floats. The other values between the steps are 16-bit floats, with 32-bit sums.
-    - Where the GPU has 16-bit float shaders (`SHADER_F16`), the matrix multiply and the attention read the 16-bit pairs with a bit cast (`Gpu::half`).
+    - Where the GPU has 16-bit float shaders (`SHADER_F16`), the matrix multiply and the attention unpack the 16-bit pairs with `unpack2x16float` into 16-bit floats (`Gpu::half`). naga cannot bit cast a 32-bit word to two 16-bit floats.
       - There, the matrix multiply sums each step of 16 products in 16-bit floats, and adds that sum to its 32-bit sum. Thus the pictures are a little different on such a GPU.
   - Each dispatch takes its parameters from a slot of 256 bytes in one uniform buffer, at a dynamic offset. `Gpu::flush` writes the new slots once, before each submission.
     - When the buffer is full, a new buffer takes its place. Thus the work in flight keeps its slots.
