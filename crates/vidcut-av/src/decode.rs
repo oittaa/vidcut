@@ -1124,6 +1124,10 @@ impl VideoReader {
         self.color_space
     }
 
+    pub fn reading(&self) -> Reading {
+        self.reading
+    }
+
     pub fn next_frame(&mut self) -> Result<Option<frame::Video>> {
         loop {
             let Some(mut frame) = self.next_progressive()? else {
