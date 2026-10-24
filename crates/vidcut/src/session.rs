@@ -480,7 +480,7 @@ pub fn export_media(
     }
     vidcut_av::ai::check(
         p,
-        prepared.outputs.iter().flat_map(|o| &o.plan.video),
+        prepared.outputs.iter().map(|o| &o.plan),
         &crate::paths::models_dir(),
         params.download,
     )

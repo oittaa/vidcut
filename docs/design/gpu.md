@@ -181,6 +181,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - `Note::Upscaled` names each file that an AI upscaler enlarged in the export's report (`ai::name`).
 - **AI Best** (`flashvsr`):
   - Before an export starts, `flashvsr::check` refuses media that AI Best cannot take (`flashvsr::unfit`). It also refuses AI Best without the weights or without a GPU that can run it. It loads the model then.
+  - It also refuses a size that does not fit (`run::plan`). It takes the size from the media and the output size (`flashvsr::enlarged`). A zoomed picture can be larger; then `flashvsr::Stream::open` refuses it when the export reaches it.
   - `Source::best_picture` gives the picture at the size that it shows at, but not more than 4 times the shown source size (`flashvsr::SCALE`).
     - It keeps one `flashvsr::Stream` for the source. It reads the frames in order with the second `VideoReader`, from the first frame that is asked for.
     - A frame before the kept pictures, or more than 48 frames after the last frame read (`BEST_JUMP`), starts a new stream there.
@@ -195,9 +196,13 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - Pooled scores choose the blocks when the candidate blocks are more than the top-k count. A softmax per query block comes first.
     - Then a radix select finds the threshold on the bits of the 32-bit values (`hist.wgsl`, `pick.wgsl`). It keeps the official rule: the value at place k+1, and strictly greater.
     - `attend.wgsl` is a flash attention over the chosen key blocks, with an online softmax in 32-bit floats. Cross-attention to the fixed prompt uses it too.
-    - The KV cache of each block is a ring of windows on the GPU (`Cache`).
+    - The KV cache of each block is a ring of windows (`Cache`).
+    - `run::plan` keeps the caches on the GPU while all of the work fits in three quarters of the GPU's memory. The caches of the other blocks stay in main memory between chunks (`Keys::Host`). Each comes back to the GPU just before its block runs, and its new windows go back after it.
+    - The results are the same in both places.
+    - Without a size for the GPU's memory, all caches stay on the GPU.
+    - A size that does not fit even with every cache in main memory is refused. So is a size whose caches need more than half of main memory.
     - The TC decoder gives 4 frames for each latent frame. Its memory blocks keep the features of the previous frame. Its full-size stage runs in bands of 64 rows.
-  - One matrix multiply shader (`gemm::run`) runs every linear layer and convolution. Its loaders gather the convolution taps, and its stores join bias, activation and residual adds.
+  - One matrix multiply shader (`gemm::run`) runs every linear layer and convolution. It splits its work into dispatches of at most 150 G multiply-adds. Its loaders gather the convolution taps, and its stores join bias, activation and residual adds.
     - The weights are 16-bit floats on the GPU. The files hold 32-bit floats; they are rounded at load.
     - The residual stream of the DiT stays in 32-bit floats. The other values between the steps are 16-bit floats, with 32-bit sums.
   - `flashvsr` has a wgpu device of its own. Its pipelines and weights stay. The work buffers of a chunk are freed after it.

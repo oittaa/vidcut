@@ -11,7 +11,8 @@ use crate::error::{Error, Result};
 const RING: u64 = 20;
 const SLAB: u32 = 16384;
 const BAND: u32 = 64;
-const QUERY_GROUP: u32 = 32;
+const ATTEND: u32 = 19200;
+const CROSS: u32 = 128;
 const GLOBAL_RANGE: u32 = 11;
 const LOCAL_RANGE: u32 = 3;
 const GLOBAL_KEEP: u32 = 3;
@@ -94,9 +95,13 @@ impl Geometry {
     }
 }
 
+enum Keys {
+    Gpu { k: wgpu::Buffer, v: wgpu::Buffer },
+    Host { k: Vec<Vec<u8>>, v: Vec<Vec<u8>> },
+}
+
 struct Cache {
-    k: wgpu::Buffer,
-    v: wgpu::Buffer,
+    keys: Keys,
     pooled: wgpu::Buffer,
     ring: Vec<u32>,
     keep: u32,
@@ -128,6 +133,7 @@ pub(super) struct Stream {
     map1: [u32; 6],
     map2: [u32; 4],
     mems: Mems,
+    loaner: Option<(wgpu::Buffer, wgpu::Buffer)>,
     fed: u64,
     chunk: u64,
     dump: Option<PathBuf>,
@@ -300,8 +306,116 @@ fn rope(g: &Geometry, chunk: u64) -> Vec<f32> {
     t
 }
 
+fn keep_of(layer: usize) -> u32 {
+    if super::GLOBAL.contains(&layer) {
+        GLOBAL_KEEP
+    } else {
+        LOCAL_KEEP
+    }
+}
+
+fn window(g: &Geometry) -> u64 {
+    u64::from(g.s) * 128 * DIM as u64 * 2
+}
+
+fn stride() -> u64 {
+    u64::from(GLOBAL_RANGE * GLOBAL_RANGE * (GLOBAL_KEEP + 2))
+}
+
+fn persistent(g: &Geometry) -> u64 {
+    let (tf, p8) = (u64::from(g.tf), u64::from(g.p8()));
+    let pooled: u64 = (0..super::LAYERS)
+        .map(|i| u64::from(keep_of(i) * g.s) * 12 * 128 * 4)
+        .sum();
+    RING * u64::from(g.plane()) * 4
+        + 6 * tf * 768 * 2
+        + 4 * tf * 2048 * 2
+        + 3 * (p8 * 512 + 4 * p8 * 256 + 16 * p8 * 128) * 2
+        + pooled
+}
+
+fn chunk_work(g: &Geometry) -> u64 {
+    let (t, tf, p8) = (u64::from(g.t), u64::from(g.tf), u64::from(g.p8()));
+    let slab = u64::from(SLAB.min(g.t));
+    let rows = 12 * u64::from(g.qbs);
+    let dit = t * DIM as u64 * (4 + 5 * 2)
+        + slab * (DIM + FFN) as u64 * 2
+        + rows * 128 * 4 * 2
+        + rows * stride() * 4 * 2
+        + 2 * tf * 2048 * 4
+        + tf * 3072 * (4 + 2);
+    let wm = u64::from(g.wm);
+    let dec = p8 * (784 + 4 * 512 + 4 * 4 * 256 + 4 * 512 + 16 * 3 * 128 + 16 * 256) * 2
+        + u64::from(BAND + 4) * wm * 128 * 2
+        + u64::from(BAND + 2) * wm * 128 * 2
+        + u64::from(BAND) * wm * 3 * 4
+        + u64::from(g.w * g.h) * 4;
+    dit.max(dec) + 2 * 16 * 4 * p8 * 4
+}
+
+fn gigabytes(b: u64) -> String {
+    format!("{:.1}", b as f64 / 1e9)
+}
+
+pub(super) fn plan(gpu: &Gpu, g: &Geometry, model: u64) -> Result<Vec<bool>> {
+    let kv: Vec<u64> = (0..super::LAYERS)
+        .map(|i| 2 * u64::from(keep_of(i)) * window(g))
+        .collect();
+    let Some(have) = gpu.memory else {
+        return Ok(vec![true; kv.len()]);
+    };
+    let budget = have / 4 * 3;
+    let fixed = model + persistent(g) + chunk_work(g);
+    if fixed + kv.iter().sum::<u64>() <= budget {
+        return Ok(vec![true; kv.len()]);
+    }
+    let biggest = kv.iter().copied().max().unwrap_or(0);
+    if fixed + biggest > budget {
+        return Err(Error::Invalid(format!(
+            "the AI Best upscaler needs about {} GB of GPU memory at {}x{}, and this GPU has {} GB",
+            gigabytes(fixed + biggest),
+            g.wm,
+            g.hm,
+            gigabytes(have)
+        )));
+    }
+    let mut used = fixed + biggest;
+    let resident: Vec<bool> = kv
+        .iter()
+        .map(|b| {
+            let fits = used + b <= budget;
+            if fits {
+                used += b;
+            }
+            fits
+        })
+        .collect();
+    let host: u64 = kv
+        .iter()
+        .zip(&resident)
+        .filter(|(_, r)| !**r)
+        .map(|(b, _)| b)
+        .sum();
+    let ram = crate::player::system_memory().map_or(0, |b| b as u64);
+    if host > ram / 2 {
+        return Err(Error::Invalid(format!(
+            "the AI Best upscaler needs about {} GB of main memory at {}x{} for what does not fit on the GPU, and this computer has {} GB",
+            gigabytes(host),
+            g.wm,
+            g.hm,
+            gigabytes(ram)
+        )));
+    }
+    Ok(resident)
+}
+
 impl Stream {
-    pub(super) fn new(gpu: &Gpu, g: Geometry, dump: Option<PathBuf>) -> Result<Self> {
+    pub(super) fn new(
+        gpu: &Gpu,
+        g: Geometry,
+        resident: &[bool],
+        dump: Option<PathBuf>,
+    ) -> Result<Self> {
         let (hb, hc, hk) = resize::coefficients(g.sw, g.w);
         let (vb, vc, vk) = resize::coefficients(g.sh, g.h);
         let tables = Tables {
@@ -312,21 +426,40 @@ impl Stream {
             vc: gpu.upload(&ints(&vc)),
             vk,
         };
+        let size = window(&g) as usize;
         let caches = (0..super::LAYERS)
             .map(|i| {
-                let global = super::GLOBAL.contains(&i);
-                let keep = if global { GLOBAL_KEEP } else { LOCAL_KEEP };
-                let tokens = u64::from(keep * g.s * 128);
+                let keep = keep_of(i);
+                let keys = if resident[i] {
+                    Keys::Gpu {
+                        k: gpu.buffer(keep as usize * size),
+                        v: gpu.buffer(keep as usize * size),
+                    }
+                } else {
+                    Keys::Host {
+                        k: vec![Vec::new(); keep as usize],
+                        v: vec![Vec::new(); keep as usize],
+                    }
+                };
                 Cache {
-                    k: gpu.buffer((tokens * DIM as u64 * 2) as usize),
-                    v: gpu.buffer((tokens * DIM as u64 * 2) as usize),
+                    keys,
                     pooled: gpu.buffer((keep * g.s * 12 * 128 * 4) as usize),
                     ring: Vec::new(),
                     keep,
-                    range: if global { GLOBAL_RANGE } else { LOCAL_RANGE },
+                    range: if super::GLOBAL.contains(&i) {
+                        GLOBAL_RANGE
+                    } else {
+                        LOCAL_RANGE
+                    },
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
+        let loaner = caches
+            .iter()
+            .filter(|c| matches!(c.keys, Keys::Host { .. }))
+            .map(|c| c.keep as usize * size)
+            .max()
+            .map(|b| (gpu.buffer(b), gpu.buffer(b)));
         let p8 = g.p8() as usize;
         let mem = |p: usize, n: usize| (0..3).map(|_| gpu.buffer(p * n * 2)).collect();
         Ok(Self {
@@ -343,6 +476,7 @@ impl Stream {
                 b: mem(p8 * 4, 256),
                 c: mem(p8 * 16, 128),
             },
+            loaner,
             fed: 0,
             chunk: 0,
             dump,
@@ -536,6 +670,7 @@ impl Stream {
                 &floats(&raw),
             )?;
         }
+        gpu.wait()?;
         let frames = self.decode(gpu, model, &latents)?;
         self.chunk += 1;
         Ok(frames)
@@ -774,10 +909,23 @@ impl Stream {
             );
         });
         e.submit();
+        let (kc, vc) = match &cache.keys {
+            Keys::Gpu { k, v } => (k, v),
+            Keys::Host { k, v } => {
+                let (lk, lv) = self.loaner.as_ref().expect("a loaner for the host caches");
+                let size = window(&g);
+                for slot in &cache.ring {
+                    let at = u64::from(*slot) * size;
+                    gpu.queue.write_buffer(lk, at, &k[*slot as usize]);
+                    gpu.queue.write_buffer(lv, at, &v[*slot as usize]);
+                }
+                (lk, lv)
+            }
+        };
         let attend = Attend {
             q: &work.q,
-            kc: &cache.k,
-            vc: &cache.v,
+            kc,
+            vc,
             kn: &work.k,
             vn: &work.v,
             list: &work.list,
@@ -789,8 +937,9 @@ impl Stream {
             dense: 0,
             src,
         };
-        for first in (0..g.qbs).step_by(QUERY_GROUP as usize) {
-            let count = QUERY_GROUP.min(g.qbs - first);
+        let group = (ATTEND / stride).clamp(1, g.qbs);
+        for first in (0..g.qbs).step_by(group as usize) {
+            let count = group.min(g.qbs - first);
             e.pass(|pass| kernels::attend(gpu, pass, &attend, first, count));
             e.submit();
         }
@@ -842,8 +991,8 @@ impl Stream {
             dense: 4,
             src,
         };
-        for first in (0..g.qbs).step_by(QUERY_GROUP as usize * 4) {
-            let count = (QUERY_GROUP * 4).min(g.qbs - first);
+        for first in (0..g.qbs).step_by(CROSS as usize) {
+            let count = CROSS.min(g.qbs - first);
             e.pass(|pass| kernels::attend(gpu, pass, &cross, first, count));
         }
         e.pass(|pass| {
@@ -894,12 +1043,12 @@ impl Stream {
             });
             e.submit();
         }
-        self.keep(gpu, i, work, &mut e);
+        self.keep(gpu, i, work, &mut e)?;
         e.submit();
         Ok(())
     }
 
-    fn keep(&mut self, _gpu: &Gpu, i: usize, work: &Work, e: &mut Enc) {
+    fn keep(&mut self, gpu: &Gpu, i: usize, work: &Work, e: &mut Enc) -> Result<()> {
         let g = self.g;
         let cache = &mut self.caches[i];
         let mut order: Vec<i64> = cache.ring.iter().map(|s| i64::from(*s)).collect();
@@ -909,7 +1058,7 @@ impl Stream {
         let mut free: Vec<u32> = (0..cache.keep)
             .filter(|s| !kept.contains(&i64::from(*s)))
             .collect();
-        let window = u64::from(g.s) * 128 * DIM as u64 * 2;
+        let window = window(&g);
         let pooled = u64::from(g.s) * 12 * 128 * 4;
         let mut ring = Vec::new();
         for w in kept {
@@ -920,12 +1069,21 @@ impl Stream {
             let j = (-w - 1) as u64;
             let slot = free.remove(0);
             let to = u64::from(slot);
-            e.copy(&work.k, j * window, &cache.k, to * window, window);
-            e.copy(&work.v, j * window, &cache.v, to * window, window);
+            match &mut cache.keys {
+                Keys::Gpu { k, v } => {
+                    e.copy(&work.k, j * window, k, to * window, window);
+                    e.copy(&work.v, j * window, v, to * window, window);
+                }
+                Keys::Host { k, v } => {
+                    k[slot as usize] = gpu.read(&work.k, j * window, window)?;
+                    v[slot as usize] = gpu.read(&work.v, j * window, window)?;
+                }
+            }
             e.copy(&work.kp, j * pooled, &cache.pooled, to * pooled, pooled);
             ring.push(slot);
         }
         cache.ring = ring;
+        Ok(())
     }
 
     fn decode(&mut self, gpu: &Gpu, model: &Model, latents: &wgpu::Buffer) -> Result<Vec<Vec<u8>>> {

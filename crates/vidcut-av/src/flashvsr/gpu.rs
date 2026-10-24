@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError, mpsc};
 
 use wgpu::util::DeviceExt;
@@ -17,6 +18,8 @@ pub(super) fn gpu_error(e: impl std::fmt::Display) -> crate::error::Error {
 pub(super) struct Gpu {
     pub(super) device: wgpu::Device,
     pub(super) queue: wgpu::Queue,
+    pub(super) memory: Option<u64>,
+    uploaded: AtomicU64,
     pipes: Mutex<HashMap<String, wgpu::ComputePipeline>>,
 }
 
@@ -34,6 +37,13 @@ impl Gpu {
         }))
         .map_err(|e| format!("no GPU for the AI Best upscaler: {e}"))?;
         let limits = adapter.limits();
+        let info = adapter.get_info();
+        let id = format!("{:04x}:{:04x}", info.vendor, info.device);
+        let memory = crate::gpus::list()
+            .iter()
+            .find(|g| g.id.starts_with(&id))
+            .and_then(|g| g.memory_mb)
+            .map(|mb| mb << 20);
         let name = adapter.get_info().name;
         if limits.max_compute_workgroup_storage_size < SHARED
             || limits.max_compute_invocations_per_workgroup < 256
@@ -52,6 +62,8 @@ impl Gpu {
         Ok(Self {
             device,
             queue,
+            memory,
+            uploaded: AtomicU64::new(0),
             pipes: Mutex::new(HashMap::new()),
         })
     }
@@ -68,7 +80,13 @@ impl Gpu {
         compute::buffer(&self.device, "flashvsr", size, storage())
     }
 
+    pub(super) fn uploaded(&self) -> u64 {
+        self.uploaded.load(Ordering::Relaxed)
+    }
+
     pub(super) fn upload(&self, data: &[u8]) -> wgpu::Buffer {
+        self.uploaded
+            .fetch_add(data.len() as u64, Ordering::Relaxed);
         self.device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("flashvsr"),

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use vidcut_core::model::{Media, Project, Upscaler};
-use vidcut_core::render::VideoPiece;
+use vidcut_core::render::RenderPlan;
 
 use crate::error::Result;
 use crate::models::Need;
@@ -40,11 +40,11 @@ pub fn name(upscaler: Upscaler) -> &'static str {
 
 pub fn check<'a>(
     p: &Project,
-    pieces: impl IntoIterator<Item = &'a VideoPiece>,
+    plans: impl IntoIterator<Item = &'a RenderPlan>,
     dir: &Path,
     download: bool,
 ) -> Result<()> {
-    let pieces: Vec<&VideoPiece> = pieces.into_iter().collect();
-    crate::upscale::check(p, pieces.iter().copied(), dir, download)?;
-    crate::flashvsr::check(p, pieces.iter().copied(), dir, download)
+    let plans: Vec<&RenderPlan> = plans.into_iter().collect();
+    crate::upscale::check(p, plans.iter().flat_map(|plan| &plan.video), dir, download)?;
+    crate::flashvsr::check(p, plans.iter().copied(), dir, download)
 }

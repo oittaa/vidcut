@@ -1797,10 +1797,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - It reads the frames of a clip in order, from the first frame that is asked for. Each output frame uses the frames before it and the 4 frames after it.
     - It makes the picture at the size that it shows at, but not more than 4 times the source.
     - The weights (7.0 GB) download at their first use. vidcut does not ship them.
-    - It takes SDR pictures.
+    - It takes SDR pictures. Its memory grows with the size of the picture that it makes; parts of it go to main memory when the GPU's memory is not enough.
   - Both AI upscalers:
     - Before an export starts, vidcut refuses media that the upscaler cannot take. The error names each file and the reason.
     - It also refuses an AI upscaler without its weights, or without a GPU that can run the network.
+    - It refuses AI Best for a size that does not fit in the GPU's memory and main memory.
     - The Inspector and the pool show a warning under Upscaler for media that the AI upscaler cannot take.
     - The export's report names the files that an AI upscaler enlarged, and the upscaler.
   - Classic has a Sharpness of Low, Medium or High.

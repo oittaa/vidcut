@@ -26,6 +26,13 @@ The tests ran on the owner's RTX 4080 SUPER (16 GB) on 2026-10-24. NanoVSR 5.4M 
 - PyTorch's time includes loading the model and reading and writing the video. Its memory is what PyTorch reserved. 23.0 GB does not fit on the card, so the driver used main memory.
 - vidcut's pictures are within 2 of 255 levels of PyTorch's 32-bit pictures. The PSNR between them is 68 dB.
 
+AI Best against the official PyTorch code, on 2026-10-24: 33 frames of a 128×64 copy of the 480×256 clip, enlarged 4 times to 512×256.
+
+- vidcut's bicubic input is bit-identical to PIL's in all 33 frames.
+- Against the official code in 32-bit floats, the frames are at 59.5 dB PSNR on average, and 52.1 dB at the least.
+- The official code in 16-bit floats is at 56.5 dB from its own 32-bit frames. It has the same low point, at frames 13 to 16.
+- The largest value that vidcut keeps as a 16-bit float is 174 in this clip.
+
 ## Decisions
 
 - The weights download at their first use. vidcut does not ship them.
@@ -42,12 +49,10 @@ The tests ran on the owner's RTX 4080 SUPER (16 GB) on 2026-10-24. NanoVSR 5.4M 
 
 These parts are still to do:
 
-1. AI Best (FlashVSR+ Turbo). Its engine and its place in Super Scale are in the code, but it has not run on a GPU yet.
-   1. The check against the official PyTorch output, with `VIDCUT_FLASHVSR_DUMP` ([tools](../tools.md)): in 32-bit floats at 512×256, and in bf16 with the Triton kernel at 1920×1024.
-   2. The KV cache in main memory between chunks, for the layers that do not fit on the GPU. At 3840×2176 the cache is 16 GB in 16-bit floats.
-   3. A memory check before an export starts, from the sizes of the export.
-   4. Smaller dispatches for the long matrix multiplies and attention passes, so that no single dispatch runs for seconds.
-   5. Speed: measure, then the tensor cores through wgpu's cooperative matrices, on Vulkan and Metal.
+1. AI Best (FlashVSR+ Turbo). Its engine and its place in Super Scale are in the code.
+   1. The check against the official PyTorch output in bf16 with the Triton kernel, at 1920×1024, with `VIDCUT_FLASHVSR_DUMP` ([tools](../tools.md)).
+   2. A run at 3840×2176, where most KV caches stay in main memory.
+   3. Speed: measure, then the tensor cores through wgpu's cooperative matrices, on Vulkan and Metal.
 2. A test of the chunk edges: each chunk starts from zero. A carried forward state or overlapping chunks may hide a change every 15 frames.
 3. Speed. PyTorch in 16-bit floats is faster on small pictures. The gain of each step is not known until it is measured.
    1. Measure where the time goes, with GPU timestamps: the network, the copies, the decoding and the encoding.

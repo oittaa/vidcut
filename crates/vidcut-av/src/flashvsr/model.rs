@@ -77,6 +77,7 @@ pub(super) struct Model {
     pub(super) lq: Lq,
     pub(super) dec: Decoder,
     pub(super) ones: wgpu::Buffer,
+    pub(super) bytes: u64,
 }
 
 fn conv_order(w: &[f32], n: usize, cin: usize, taps: usize) -> Vec<f32> {
@@ -292,6 +293,7 @@ pub(super) struct Paths<'a> {
 }
 
 pub(super) fn load(gpu: &Gpu, paths: &Paths) -> Result<Model> {
+    let before = gpu.uploaded();
     let mut st = Safetensors::open(paths.dit)?;
     let (t_emb, t_mod) = times(&mut st)?;
     let pw = st.floats("patch_embedding.weight", &[DIM, 16, 1, 2, 2])?;
@@ -324,6 +326,7 @@ pub(super) fn load(gpu: &Gpu, paths: &Paths) -> Result<Model> {
         lq,
         dec,
         ones,
+        bytes: gpu.uploaded() - before + 2 * (LAYERS * PROMPT * DIM * 2) as u64,
     })
 }
 

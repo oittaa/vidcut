@@ -1,6 +1,7 @@
 use super::gpu::Gpu;
 
 pub(super) const TILE: u32 = 128;
+const DISPATCH: u64 = 150_000_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Act {
@@ -395,7 +396,7 @@ fn main_source() -> String {
         r#"
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>, @builtin(local_invocation_index) li: u32) {{
-    let idx = wg.x + wg.y * nwg.x;
+    let idx = par(10u) + wg.x + wg.y * nwg.x;
     if (idx >= ((shape.m + 127u) / 128u) * shape.tn) {{
         return;
     }}
@@ -438,16 +439,23 @@ pub(super) fn run(gpu: &Gpu, pass: &mut wgpu::ComputePass, g: &Gemm) {
     let key = format!("gemm {:?} {:?}", g.load, g.store);
     let pipe = gpu.pipe(&key, || source(g.load, g.store));
     let tn = g.n.div_ceil(TILE);
-    let mut values = vec![g.m, g.n, g.k, tn];
-    values.extend_from_slice(&g.params);
-    let shape = gpu.uniform(&values);
-    let mut buffers: Vec<&wgpu::Buffer> = vec![&shape, g.weights, g.bias, g.a];
-    if let Some(a2) = g.a2 {
-        buffers.push(a2);
+    let tiles = g.m.div_ceil(TILE) * tn;
+    let per_tile = u64::from(TILE * TILE) * u64::from(g.k);
+    let most = (DISPATCH / per_tile).clamp(1, u64::from(tiles.max(1))) as u32;
+    for first in (0..tiles).step_by(most as usize) {
+        let mut params = g.params;
+        params[10] = first;
+        let mut values = vec![g.m, g.n, g.k, tn];
+        values.extend_from_slice(&params);
+        let shape = gpu.uniform(&values);
+        let mut buffers: Vec<&wgpu::Buffer> = vec![&shape, g.weights, g.bias, g.a];
+        if let Some(a2) = g.a2 {
+            buffers.push(a2);
+        }
+        buffers.push(g.out);
+        if let Some(aux) = g.aux {
+            buffers.push(aux);
+        }
+        gpu.dispatch(pass, &pipe, &buffers, most.min(tiles - first));
     }
-    buffers.push(g.out);
-    if let Some(aux) = g.aux {
-        buffers.push(aux);
-    }
-    gpu.dispatch(pass, &pipe, &buffers, g.m.div_ceil(TILE) * tn);
 }

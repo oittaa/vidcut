@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
 use vidcut_core::model::{Media, Project, Upscaler};
-use vidcut_core::render::VideoPiece;
+use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use crate::error::{Error, Result};
 use crate::models::{self, Fetch, File, Need};
@@ -120,25 +120,65 @@ pub fn unfit(m: &Media) -> Option<&'static str> {
     m.video_as_read()?.hdr.map(|_| "HDR pictures")
 }
 
+pub fn enlarged(m: &Media, (ow, oh): (u32, u32)) -> Option<((u32, u32), (u32, u32))> {
+    let v = m.video_as_read()?;
+    let across = if v.sar[0] > 0 && v.sar[1] > 0 {
+        f64::from(v.sar[0]) / f64::from(v.sar[1])
+    } else {
+        1.0
+    };
+    let (dw, dh) = (f64::from(v.width) * across, f64::from(v.height));
+    let (dw, dh) = if v.rotation % 180 == 90 {
+        (dh, dw)
+    } else {
+        (dw, dh)
+    };
+    let even = |x: f64| ((x / 2.0).round() as u32 * 2).max(2);
+    let shown = (even(dw), even(dh));
+    let s = (f64::from(ow) / f64::from(shown.0))
+        .min(f64::from(oh) / f64::from(shown.1))
+        .min(f64::from(SCALE));
+    (s > 1.0).then(|| {
+        (
+            shown,
+            (
+                even(f64::from(shown.0) * s).max(shown.0),
+                even(f64::from(shown.1) * s).max(shown.1),
+            ),
+        )
+    })
+}
+
 pub fn check<'a>(
     p: &Project,
-    pieces: impl IntoIterator<Item = &'a VideoPiece>,
+    plans: impl IntoIterator<Item = &'a RenderPlan>,
     dir: &Path,
     download: bool,
 ) -> Result<()> {
     let mut media: Vec<&str> = Vec::new();
-    for piece in pieces {
-        for (layer, _) in piece.layers() {
-            if let VideoPiece::Source {
+    let mut sizes: Vec<((u32, u32), (u32, u32))> = Vec::new();
+    for plan in plans {
+        for (layer, _) in plan.video.iter().flat_map(|piece| piece.layers()) {
+            let VideoPiece::Source {
                 media: id,
                 super_scale,
                 ..
             } = layer
-                && super_scale.ai()
-                && super_scale.upscaler == Upscaler::AiBest
-                && !media.contains(&id.as_str())
-            {
+            else {
+                continue;
+            };
+            if !super_scale.ai() || super_scale.upscaler != Upscaler::AiBest {
+                continue;
+            }
+            if !media.contains(&id.as_str()) {
                 media.push(id);
+            }
+            if let Some(size) = p
+                .media(id)
+                .and_then(|m| enlarged(m, (plan.width, plan.height)))
+                && !sizes.contains(&size)
+            {
+                sizes.push(size);
             }
         }
     }
@@ -158,7 +198,12 @@ pub fn check<'a>(
         )));
     }
     get_ready(dir, download)?;
-    with_engine(|_, _| Ok(()))
+    with_engine(|gpu, model| {
+        for (source, size) in &sizes {
+            run::plan(gpu, &run::Geometry::new(*source, *size), model.bytes)?;
+        }
+        Ok(())
+    })
 }
 
 struct Engine {
@@ -223,7 +268,10 @@ impl Stream {
         if let Some(dir) = &dump {
             std::fs::create_dir_all(dir)?;
         }
-        let inner = with_engine(|gpu, _| run::Stream::new(gpu, geometry, dump))?;
+        let inner = with_engine(|gpu, model| {
+            let resident = run::plan(gpu, &geometry, model.bytes)?;
+            run::Stream::new(gpu, geometry, &resident, dump)
+        })?;
         Ok(Self { inner })
     }
 
