@@ -167,11 +167,13 @@ impl Gpu {
     }
 
     pub(super) fn half(&self, body: &str) -> String {
-        format!("fn h2(w: u32) -> vec2<f32> {{
+        format!(
+            "fn h2(w: u32) -> vec2<f32> {{
     return unpack2x16float(w);
 }}
 
-{body}")
+{body}"
+        )
     }
 
     pub(super) fn scratch(&self, first: u64, second: u64) -> (wgpu::Buffer, wgpu::Buffer) {
