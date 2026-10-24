@@ -166,6 +166,7 @@ impl<'a> Enc<'a> {
 
     fn submit(&mut self) {
         if let Some(enc) = self.enc.take() {
+            self.gpu.flush();
             self.gpu.queue.submit([enc.finish()]);
         }
     }

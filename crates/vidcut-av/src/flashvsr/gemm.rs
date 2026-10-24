@@ -487,7 +487,7 @@ pub(super) fn run(gpu: &Gpu, pass: &mut wgpu::ComputePass, g: &Gemm) {
         let mut values = vec![g.m, g.n, g.k, tn];
         values.extend_from_slice(&params);
         let shape = gpu.uniform(&values);
-        let mut buffers: Vec<&wgpu::Buffer> = vec![&shape, g.weights, g.bias, g.a];
+        let mut buffers: Vec<&wgpu::Buffer> = vec![g.weights, g.bias, g.a];
         if let Some(a2) = g.a2 {
             buffers.push(a2);
         }
@@ -495,6 +495,6 @@ pub(super) fn run(gpu: &Gpu, pass: &mut wgpu::ComputePass, g: &Gemm) {
         if let Some(aux) = g.aux {
             buffers.push(aux);
         }
-        gpu.dispatch(pass, &pipe, &buffers, most.min(tiles - first));
+        gpu.dispatch(pass, &pipe, shape, &buffers, most.min(tiles - first));
     }
 }

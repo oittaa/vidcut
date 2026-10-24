@@ -411,6 +411,7 @@ fn context(
             super::kernels::rms(gpu, &mut pass, &b.ctx_k, norm, zeros, PROMPT as u32, None);
         }
     }
+    gpu.flush();
     gpu.queue.submit([enc.finish()]);
     gpu.wait()?;
     Ok(())

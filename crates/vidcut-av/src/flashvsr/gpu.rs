@@ -10,9 +10,23 @@ use crate::error::Result;
 pub(super) const WHAT: &str = "the AI Best upscaler";
 pub(super) const SHARED: u32 = 32 * 1024;
 const MOST: u32 = 65535;
+const SLOT: u64 = 256;
+const SLOTS: usize = 16384;
 
 pub(super) fn gpu_error(e: impl std::fmt::Display) -> crate::error::Error {
     compute::gpu_error(WHAT, e)
+}
+
+pub(super) struct Param {
+    buffer: wgpu::Buffer,
+    at: u64,
+}
+
+struct Ring {
+    buffer: wgpu::Buffer,
+    mirror: Vec<u8>,
+    next: usize,
+    dirty: usize,
 }
 
 pub(super) struct Gpu {
@@ -21,11 +35,21 @@ pub(super) struct Gpu {
     pub(super) memory: Option<u64>,
     uploaded: AtomicU64,
     pipes: Mutex<HashMap<String, wgpu::ComputePipeline>>,
+    ring: Mutex<Ring>,
 }
 
 pub(super) fn storage() -> wgpu::BufferUsages {
     use wgpu::BufferUsages as U;
     U::STORAGE | U::COPY_DST | U::COPY_SRC
+}
+
+fn slots(device: &wgpu::Device) -> wgpu::Buffer {
+    compute::buffer(
+        device,
+        "flashvsr-params",
+        SLOTS * SLOT as usize,
+        wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    )
 }
 
 impl Gpu {
@@ -59,12 +83,19 @@ impl Gpu {
             ..Default::default()
         }))
         .map_err(|e| format!("the GPU did not open for the AI Best upscaler: {e}"))?;
+        let buffer = slots(&device);
         Ok(Self {
             device,
             queue,
             memory,
             uploaded: AtomicU64::new(0),
             pipes: Mutex::new(HashMap::new()),
+            ring: Mutex::new(Ring {
+                buffer,
+                mirror: vec![0; SLOTS * SLOT as usize],
+                next: 0,
+                dirty: 0,
+            }),
         })
     }
 
@@ -95,28 +126,80 @@ impl Gpu {
             })
     }
 
-    pub(super) fn uniform(&self, values: &[u32]) -> wgpu::Buffer {
-        let mut padded = values.to_vec();
-        padded.resize(values.len().next_multiple_of(4).max(4), 0);
-        self.device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("flashvsr-uniform"),
-                contents: &compute::words(&padded),
-                usage: wgpu::BufferUsages::UNIFORM,
-            })
+    fn write_dirty(&self, ring: &mut Ring) {
+        let (from, to) = (ring.dirty * SLOT as usize, ring.next * SLOT as usize);
+        if to > from {
+            self.queue
+                .write_buffer(&ring.buffer, from as u64, &ring.mirror[from..to]);
+        }
+        ring.dirty = ring.next;
+    }
+
+    pub(super) fn uniform(&self, values: &[u32]) -> Param {
+        let mut ring = self.ring.lock().unwrap_or_else(PoisonError::into_inner);
+        if ring.next == SLOTS {
+            self.write_dirty(&mut ring);
+            ring.buffer = slots(&self.device);
+            ring.next = 0;
+            ring.dirty = 0;
+        }
+        let at = ring.next * SLOT as usize;
+        let data = compute::words(values);
+        ring.mirror[at..at + data.len()].copy_from_slice(&data);
+        ring.next += 1;
+        Param {
+            buffer: ring.buffer.clone(),
+            at: at as u64,
+        }
+    }
+
+    pub(super) fn flush(&self) {
+        let mut ring = self.ring.lock().unwrap_or_else(PoisonError::into_inner);
+        self.write_dirty(&mut ring);
+    }
+
+    pub(super) fn bind(
+        &self,
+        pipe: &wgpu::ComputePipeline,
+        param: Param,
+        buffers: &[&wgpu::Buffer],
+    ) -> wgpu::BindGroup {
+        let mut entries = vec![wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: &param.buffer,
+                offset: param.at,
+                size: wgpu::BufferSize::new(SLOT),
+            }),
+        }];
+        entries.extend(
+            buffers
+                .iter()
+                .enumerate()
+                .map(|(i, b)| wgpu::BindGroupEntry {
+                    binding: i as u32 + 1,
+                    resource: b.as_entire_binding(),
+                }),
+        );
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &pipe.get_bind_group_layout(0),
+            entries: &entries,
+        })
     }
 
     pub(super) fn dispatch(
         &self,
         pass: &mut wgpu::ComputePass,
         pipe: &wgpu::ComputePipeline,
+        param: Param,
         buffers: &[&wgpu::Buffer],
         groups: u32,
     ) {
         if groups == 0 {
             return;
         }
-        let bind = compute::group(&self.device, pipe, buffers);
+        let bind = self.bind(pipe, param, buffers);
         pass.set_pipeline(pipe);
         pass.set_bind_group(0, &bind, &[]);
         let x = groups.min(MOST);
@@ -132,6 +215,7 @@ impl Gpu {
         );
         let mut enc = self.device.create_command_encoder(&Default::default());
         enc.copy_buffer_to_buffer(src, offset, &staging, 0, size);
+        self.flush();
         self.queue.submit([enc.finish()]);
         let slice = staging.slice(..size);
         let (tx, rx) = mpsc::channel();

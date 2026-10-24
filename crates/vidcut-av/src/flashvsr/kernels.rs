@@ -18,7 +18,7 @@ pub(super) struct Norm<'a> {
 pub(super) fn layer_norm(gpu: &Gpu, pass: &mut wgpu::ComputePass, n: &Norm) {
     let pipe = gpu.pipe("layernorm", || include_str!("layernorm.wgsl").into());
     let p = gpu.uniform(&[n.rows, n.first, EPS.to_bits(), 0]);
-    gpu.dispatch(pass, &pipe, &[&p, n.x, n.mul, n.add, n.out], n.rows);
+    gpu.dispatch(pass, &pipe, p, &[n.x, n.mul, n.add, n.out], n.rows);
 }
 
 pub(super) fn rms(
@@ -33,7 +33,7 @@ pub(super) fn rms(
     let pipe = gpu.pipe("rmsnorm", || include_str!("rmsnorm.wgsl").into());
     let (on, nh, nw) = rope.map_or((0, 0, 0), |(nh, nw)| (1, nh, nw));
     let p = gpu.uniform(&[count, on, nh, nw, EPS.to_bits(), 0, 0, 0]);
-    gpu.dispatch(pass, &pipe, &[&p, x, weight, table], count);
+    gpu.dispatch(pass, &pipe, p, &[x, weight, table], count);
 }
 
 pub(super) fn chan_norm(
@@ -46,7 +46,7 @@ pub(super) fn chan_norm(
 ) {
     let pipe = gpu.pipe("channorm", || include_str!("channorm.wgsl").into());
     let p = gpu.uniform(&[count, c, base, 0]);
-    gpu.dispatch(pass, &pipe, &[&p, x, weight, out], count);
+    gpu.dispatch(pass, &pipe, p, &[x, weight, out], count);
 }
 
 pub(super) struct Unshuffle<'a> {
@@ -66,7 +66,8 @@ pub(super) fn unshuffle(gpu: &Gpu, pass: &mut wgpu::ComputePass, u: &Unshuffle) 
     gpu.dispatch(
         pass,
         &pipe,
-        &[&p, u.frames, u.out],
+        p,
+        &[u.frames, u.out],
         threads(u.count * 384, 256),
     );
 }
@@ -92,7 +93,8 @@ pub(super) fn dec_input(gpu: &Gpu, pass: &mut wgpu::ComputePass, d: &DecInput) {
     gpu.dispatch(
         pass,
         &pipe,
-        &[&p, d.frames, d.latents, d.out],
+        p,
+        &[d.frames, d.latents, d.out],
         threads(d.w8 * d.h8 * 392, 256),
     );
 }
@@ -106,7 +108,7 @@ pub(super) fn pool(
 ) {
     let pipe = gpu.pipe("pool", || include_str!("pool.wgsl").into());
     let p = gpu.uniform(&[blocks, 0, 0, 0]);
-    gpu.dispatch(pass, &pipe, &[&p, src, out], blocks * 12);
+    gpu.dispatch(pass, &pipe, p, &[src, out], blocks * 12);
 }
 
 #[derive(Clone, Copy)]
@@ -130,7 +132,7 @@ pub(super) fn scores(
     let mut v = vec![g.qbs, g.s, g.nw, g.nh, g.range, g.stride, 0, 0];
     v.extend_from_slice(&g.src);
     let p = gpu.uniform(&v);
-    gpu.dispatch(pass, &pipe, &[&p, qp, kc, kn, out], g.qbs * 12);
+    gpu.dispatch(pass, &pipe, p, &[qp, kc, kn, out], g.qbs * 12);
 }
 
 pub(super) fn hist(
@@ -143,7 +145,7 @@ pub(super) fn hist(
     let pipe = gpu.pipe("hist", || include_str!("hist.wgsl").into());
     let groups = per_head.div_ceil(256 * 16).max(1);
     let p = gpu.uniform(&[per_head, shift, groups, 0]);
-    gpu.dispatch(pass, &pipe, &[&p, probs, state, hist], groups * 12);
+    gpu.dispatch(pass, &pipe, p, &[probs, state, hist], groups * 12);
 }
 
 pub(super) fn pick(
@@ -154,7 +156,7 @@ pub(super) fn pick(
 ) {
     let pipe = gpu.pipe("pick", || include_str!("pick.wgsl").into());
     let p = gpu.uniform(&[shift, 0, 0, 0]);
-    gpu.dispatch(pass, &pipe, &[&p, state, hist], 12);
+    gpu.dispatch(pass, &pipe, p, &[state, hist], 12);
 }
 
 pub(super) fn select(
@@ -169,7 +171,8 @@ pub(super) fn select(
     gpu.dispatch(
         pass,
         &pipe,
-        &[&p, probs, state, list, counts],
+        p,
+        &[probs, state, list, counts],
         threads(g.qbs * 12, 64),
     );
 }
@@ -198,7 +201,8 @@ pub(super) fn attend(gpu: &Gpu, pass: &mut wgpu::ComputePass, a: &Attend, first:
     gpu.dispatch(
         pass,
         &pipe,
-        &[&p, a.q, a.kc, a.vc, a.kn, a.vn, a.list, a.counts, a.out],
+        p,
+        &[a.q, a.kc, a.vc, a.kn, a.vn, a.list, a.counts, a.out],
         count * 24,
     );
 }
@@ -214,7 +218,7 @@ pub(super) struct Resize<'a> {
 pub(super) fn resize(gpu: &Gpu, pass: &mut wgpu::ComputePass, r: &Resize, (x, y): (u32, u32)) {
     let pipe = gpu.pipe("resize", || include_str!("resize.wgsl").into());
     let p = gpu.uniform(&r.values);
-    let bind = crate::compute::group(&gpu.device, &pipe, &[&p, r.src, r.bounds, r.coef, r.out]);
+    let bind = gpu.bind(&pipe, p, &[r.src, r.bounds, r.coef, r.out]);
     pass.set_pipeline(&pipe);
     pass.set_bind_group(0, &bind, &[]);
     pass.dispatch_workgroups(x.div_ceil(16), y.div_ceil(16), 1);
@@ -236,7 +240,7 @@ pub(super) struct Last<'a> {
 pub(super) fn last(gpu: &Gpu, pass: &mut wgpu::ComputePass, l: &Last) {
     let pipe = gpu.pipe("last", || include_str!("last.wgsl").into());
     let p = gpu.uniform(&[l.wm, l.hm, l.r0, l.rows, l.sy0, l.w, 0, 0]);
-    let bind = crate::compute::group(&gpu.device, &pipe, &[&p, l.src, l.weights, l.bias, l.out]);
+    let bind = gpu.bind(&pipe, p, &[l.src, l.weights, l.bias, l.out]);
     pass.set_pipeline(&pipe);
     pass.set_bind_group(0, &bind, &[]);
     pass.dispatch_workgroups(l.w.div_ceil(16), l.rows.div_ceil(16), 1);
