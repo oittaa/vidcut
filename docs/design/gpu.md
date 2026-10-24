@@ -167,6 +167,15 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - `ai::Making` clears a report when the work fails or stops.
   - Each AI upscaler reports the GPU that runs it when it starts.
   - The Super Scale group of the stats panel shows the report (`SuperScaleStats`).
+  - When the clip under the playhead uses no AI upscaler, State names the AI upscaler that is still at work.
+- **GPU memory of the AI upscalers** (`ai::User`):
+  - Each reader (`Source`) that uses an AI upscaler holds an `ai::User` of it.
+  - A reader gives its `ai::User` back when the viewer or the export stops using it. This occurs at the end of its clip, at a change of Super Scale and when it closes.
+  - It then drops its AI Best stream too.
+  - When the last `ai::User` of an upscaler goes, that upscaler frees its GPU memory. `upscale::release` frees the buffers of AI Fast. `flashvsr::release` frees the model of AI Best.
+  - If the upscaler is at work at that time, it frees the memory when that work ends.
+  - Thus the two AI upscalers do not hold their memory at the same time when the user switches from one to the other.
+  - AI Best looks at the stop flag of its thread before each block (`cancel::stop`). Thus a picture that the viewer no longer needs stops within one block.
 - **AI Fast** (`upscale`):
   - Before an export starts, `upscale::check` refuses media that AI Fast cannot take (`upscale::unfit`). It also refuses AI Fast without the weights or without a GPU that can run it.
   - In an export, `Source::ai_picture` finds the chunk of 15 frames that holds the source picture (`upscale::FRAMES`).

@@ -89,6 +89,7 @@ struct Source {
     reversed: Vec<Reversed>,
     left: Option<Instant>,
     scale: SuperScale,
+    ai: Option<crate::ai::User>,
     told: bool,
     upright: bool,
     gpu: Option<crate::hw::GpuDecoder>,
@@ -191,6 +192,7 @@ impl Source {
             reversed: Vec::new(),
             left: None,
             scale: super_scale,
+            ai: crate::ai::User::of(super_scale),
             told: false,
             upright: false,
             gpu: ahead_gpu,
@@ -246,6 +248,7 @@ impl Source {
             reversed: Vec::new(),
             left: None,
             scale: SuperScale::default(),
+            ai: None,
             told: false,
             upright: false,
             gpu: ahead_gpu,
@@ -366,10 +369,19 @@ impl Source {
             self.left = Some(now);
             self.reversed.clear();
         }
+        self.best = None;
+        self.ai = None;
+    }
+
+    fn back(&mut self) {
+        self.left = None;
+        if self.ai.is_none() {
+            self.ai = crate::ai::User::of(self.scale);
+        }
     }
 
     fn resume(&mut self, origin: f64, source_frame: i64, target: f64) -> Result<()> {
-        self.left = None;
+        self.back();
         self.reposition(origin, source_frame, target)?;
         if self.advance(target)? {
             self.normalized = None;
@@ -773,6 +785,19 @@ impl Source {
     }
 
     fn best_picture(
+        &mut self,
+        shown: (u32, u32),
+        size: (u32, u32),
+        reading: Reading,
+    ) -> Result<frame::Video> {
+        let made = self.best_picture_in(shown, size, reading);
+        if made.is_err() {
+            self.best = None;
+        }
+        made
+    }
+
+    fn best_picture_in(
         &mut self,
         shown: (u32, u32),
         size: (u32, u32),
@@ -1988,7 +2013,7 @@ impl VideoFrames {
                         .filter(|s| s.scale == *super_scale);
                     let opened = match reclaimed {
                         Some(mut source) => {
-                            source.left = None;
+                            source.back();
                             source.reader.set_color_space(*color_space);
                             source.reposition(*origin, from, target)?;
                             source
@@ -2023,7 +2048,7 @@ impl VideoFrames {
         let now = Instant::now();
         for (source, taken) in self.open.iter_mut().zip(taken) {
             if taken {
-                source.left = None;
+                source.back();
             } else {
                 source.leave(now);
             }

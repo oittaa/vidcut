@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use super::gemm::{self, Act, Gemm, Load, Store};
 use super::gpu::{Gpu, floats};
@@ -147,6 +148,8 @@ pub(super) struct Stream {
     fed: u64,
     chunk: u64,
     dump: Option<PathBuf>,
+    host_wait: Duration,
+    host_bytes: u64,
 }
 
 struct Enc<'a> {
@@ -611,6 +614,8 @@ impl Stream {
             loaner,
             fed: 0,
             chunk: 0,
+            host_wait: Duration::ZERO,
+            host_bytes: 0,
             dump,
         })
     }
@@ -723,6 +728,10 @@ impl Stream {
     fn run_chunk(&mut self, gpu: &Gpu, model: &Model) -> Result<Vec<Vec<u8>>> {
         let g = self.g;
         let k = self.chunk;
+        let started = Instant::now();
+        self.host_wait = Duration::ZERO;
+        self.host_bytes = 0;
+        let projected: Instant;
         let p8 = g.p8();
         let noise_v = noise(k, (16 * 4 * p8) as usize);
         let noise = gpu.upload(&bytes(&noise_v));
@@ -756,10 +765,12 @@ impl Stream {
                 self.project(gpu, model, (&x, &lq), &mut e);
                 e.submit();
                 gpu.wait()?;
+                projected = Instant::now();
             }
             let work = Work::new(gpu, &g, x);
             self.dump_tensor(gpu, "x_in", &work.x, g.t, true)?;
             for (i, block) in model.blocks.iter().enumerate() {
+                crate::cancel::stop()?;
                 self.block(gpu, model, &work, &table, i, block)?;
                 if matches!(i, 0 | 6 | 29) {
                     self.dump_tensor(gpu, &format!("x_block{i}"), &work.x, g.t, true)?;
@@ -802,7 +813,27 @@ impl Stream {
                 &floats(&raw),
             )?;
         }
+        let blocked = Instant::now();
         let frames = self.decode(gpu, model, &latents)?;
+        let host = self
+            .caches
+            .iter()
+            .filter(|c| matches!(c.keys, Keys::Host { .. }))
+            .count();
+        let ms = |d: Duration| d.as_secs_f64() * 1e3;
+        crate::debug!(
+            "flashvsr",
+            "chunk {k} at {}x{}: input projection {:.0} ms, {} blocks {:.0} ms, decoder {:.0} ms; {host} of {} caches in main memory: {:.2} GB copied there and back, {:.0} ms waiting for the copies back",
+            g.w,
+            g.h,
+            ms(projected - started),
+            super::LAYERS,
+            ms(blocked - projected),
+            ms(blocked.elapsed()),
+            self.caches.len(),
+            self.host_bytes as f64 / 1e9,
+            ms(self.host_wait)
+        );
         self.chunk += 1;
         Ok(frames)
     }
@@ -1059,6 +1090,7 @@ impl Stream {
                     let at = u64::from(*slot) * size;
                     gpu.queue.write_buffer(lk, at, &k[*slot as usize]);
                     gpu.queue.write_buffer(lv, at, &v[*slot as usize]);
+                    self.host_bytes += 2 * size;
                 }
                 (lk, lv)
             }
@@ -1227,8 +1259,11 @@ impl Stream {
         let fetched = match staged {
             Some(s) => {
                 let size = window * s.fresh.len() as u64;
+                let waited = Instant::now();
                 let k = gpu.fetch(&s.k, size, s.done.clone())?;
                 let v = gpu.fetch(&s.v, size, s.done)?;
+                self.host_wait += waited.elapsed();
+                self.host_bytes += 2 * size;
                 Some((s.fresh, k, v))
             }
             None => None,

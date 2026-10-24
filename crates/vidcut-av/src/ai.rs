@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use vidcut_core::model::{Media, Project, Upscaler};
+use vidcut_core::model::{Media, Project, SuperScale, Upscaler};
 use vidcut_core::render::RenderPlan;
 
 use vidcut_core::catalog::{self, Measure};
@@ -119,6 +119,54 @@ pub(crate) fn made(done: bool) {
         w.took = Some(w.started.elapsed());
         r.made = Some(w);
     }
+}
+
+static USERS: Mutex<[usize; 2]> = Mutex::new([0, 0]);
+
+fn users() -> MutexGuard<'static, [usize; 2]> {
+    USERS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn slot(upscaler: Upscaler) -> Option<usize> {
+    match upscaler {
+        Upscaler::AiFast => Some(0),
+        Upscaler::AiBest => Some(1),
+        Upscaler::Classic => None,
+    }
+}
+
+pub(crate) struct User(Upscaler);
+
+impl User {
+    pub(crate) fn of(s: SuperScale) -> Option<Self> {
+        let i = slot(s.upscaler).filter(|_| s.ai())?;
+        users()[i] += 1;
+        Some(Self(s.upscaler))
+    }
+}
+
+impl Drop for User {
+    fn drop(&mut self) {
+        let Some(i) = slot(self.0) else {
+            return;
+        };
+        let last = {
+            let mut u = users();
+            u[i] = u[i].saturating_sub(1);
+            u[i] == 0
+        };
+        if last {
+            match self.0 {
+                Upscaler::AiFast => crate::upscale::release(),
+                Upscaler::AiBest => crate::flashvsr::release(),
+                Upscaler::Classic => {}
+            }
+        }
+    }
+}
+
+pub(crate) fn in_use(upscaler: Upscaler) -> bool {
+    slot(upscaler).is_some_and(|i| users()[i] > 0)
 }
 
 pub(crate) fn runs_on(upscaler: Upscaler, device: String) {

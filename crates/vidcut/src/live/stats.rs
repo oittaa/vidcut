@@ -321,14 +321,20 @@ impl SuperScaleStats {
                 .as_ref()
                 .or(made.as_ref())
                 .map(|w| format!("{} → {}", size(w.from), size(w.made))),
-            state: s.ai().then(|| match &making {
-                Some(w) => format!(
+            state: match (&making, &report.making) {
+                (Some(w), _) => Some(format!(
                     "Making {} · {} so far",
                     frames(w.frames).to_lowercase(),
                     secs(w.started.elapsed())
-                ),
-                None => "Idle".into(),
-            }),
+                )),
+                (None, Some(w)) => Some(format!(
+                    "{} still making {} · {} so far",
+                    ai::name(w.upscaler),
+                    frames(w.frames).to_lowercase(),
+                    secs(w.started.elapsed())
+                )),
+                (None, None) => s.ai().then(|| "Idle".into()),
+            },
             last: made.map(|w| {
                 format!(
                     "{} in {}",
