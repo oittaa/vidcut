@@ -56,7 +56,7 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
 }
 
 pub fn unfit(m: &Media) -> Option<&'static str> {
-    m.video_as_read()?.hdr.map(|_| "HDR pictures")
+    crate::ai::unfit(m, Upscaler::AiBest)
 }
 
 pub fn enlarged(m: &Media, (ow, oh): (u32, u32)) -> Option<((u32, u32), (u32, u32))> {

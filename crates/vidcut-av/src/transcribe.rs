@@ -799,19 +799,20 @@ fn gigabytes(mb: f64) -> String {
 }
 
 fn gpu_gb(f: &File) -> Option<f64> {
-    catalog::holding(f)?.most(Measure::GpuGb)
+    catalog::holding(f)?.value(Measure::GpuGb)
 }
 
 pub fn short_of_memory(f: &File) -> Option<String> {
-    let need = gpu_gb(f)?;
+    let model = catalog::holding(f)?;
     let have = crate::gpus::in_use()?.memory_mb?;
-    ((have as f64) < need * 1024.0).then(|| {
-        format!(
-            "{} needs about {need} GB of GPU memory; this GPU has {} GB",
-            f.title,
-            gigabytes(have as f64)
-        )
-    })
+    let verdict = catalog::check(model, &[(Measure::GpuGb, have as f64 / 1024.0)]);
+    let short = verdict.warnings.first()?;
+    Some(format!(
+        "{} needs about {} GB of GPU memory; this GPU has {} GB",
+        f.title,
+        short.limit.value,
+        gigabytes(have as f64)
+    ))
 }
 
 fn timing_of(kind: tc::TimestampKind) -> Timing {

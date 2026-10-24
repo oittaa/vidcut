@@ -42,7 +42,7 @@ pub enum Source {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Limit {
     pub measure: Measure,
-    pub most: f64,
+    pub value: f64,
     pub kind: Kind,
     pub source: Source,
     pub checked: Option<&'static str>,
@@ -70,19 +70,77 @@ pub struct Model {
     pub price: Option<Price>,
 }
 
-impl Model {
-    pub fn most(&self, measure: Measure) -> Option<f64> {
-        self.limits
-            .iter()
-            .find(|l| l.measure == measure)
-            .map(|l| l.most)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Most,
+    Least,
+    Reached,
+}
+
+impl Measure {
+    pub const fn direction(self) -> Direction {
+        match self {
+            Self::GpuGb => Direction::Least,
+            Self::Speakers => Direction::Reached,
+            _ => Direction::Most,
+        }
     }
 }
 
-const fn limit(measure: Measure, most: f64, kind: Kind, source: Source) -> Limit {
+impl Model {
+    pub fn value(&self, measure: Measure) -> Option<f64> {
+        self.limit(measure).map(|l| l.value)
+    }
+
+    pub fn limit(&self, measure: Measure) -> Option<Limit> {
+        self.limits.iter().find(|l| l.measure == measure).copied()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Outside {
+    pub model: &'static Model,
+    pub limit: Limit,
+    pub found: f64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Verdict {
+    pub refusals: Vec<Outside>,
+    pub warnings: Vec<Outside>,
+}
+
+pub fn check(model: &'static Model, found: &[(Measure, f64)]) -> Verdict {
+    let mut verdict = Verdict::default();
+    for &(measure, found) in found {
+        let Some(limit) = model.limit(measure) else {
+            continue;
+        };
+        let outside = match measure.direction() {
+            Direction::Most => found > limit.value,
+            Direction::Least => found < limit.value,
+            Direction::Reached => found >= limit.value,
+        };
+        if !outside {
+            continue;
+        }
+        let o = Outside {
+            model,
+            limit,
+            found,
+        };
+        match limit.kind {
+            Kind::Hard => verdict.refusals.push(o),
+            Kind::Cap | Kind::Soft => verdict.warnings.push(o),
+        }
+    }
+    verdict
+}
+
+const fn limit(measure: Measure, value: f64, kind: Kind, source: Source) -> Limit {
     Limit {
         measure,
-        most,
+        value,
         kind,
         source,
         checked: None,
@@ -91,14 +149,14 @@ const fn limit(measure: Measure, most: f64, kind: Kind, source: Source) -> Limit
 
 const fn checked(
     measure: Measure,
-    most: f64,
+    value: f64,
     kind: Kind,
     doc: &'static str,
     on: &'static str,
 ) -> Limit {
     Limit {
         measure,
-        most,
+        value,
         kind,
         source: Source::Doc(doc),
         checked: Some(on),

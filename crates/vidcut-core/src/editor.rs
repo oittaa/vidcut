@@ -1691,7 +1691,12 @@ fn channels_of(asked: &transcript::Asked, m: &Media, stream: u32) -> u16 {
             .audio
             .iter()
             .find(|a| a.index == stream)
-            .map_or(1, |a| a.channels.clamp(1, 8)),
+            .map_or(1, |a| {
+                let most = crate::catalog::XAI
+                    .value(crate::catalog::Measure::Channels)
+                    .map_or(u16::MAX, |n| n as u16);
+                a.channels.clamp(1, most)
+            }),
         false => 1,
     }
 }

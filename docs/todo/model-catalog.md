@@ -1,23 +1,13 @@
-# Model catalog: one check and a models command
+# Model catalog: a models command and the sources
 
-**When:** next, after the catalog file is on master.
+**When:** next.
 
-`crates/vidcut-core/src/catalog.rs` holds each model and speech service that vidcut uses: its files, languages, limits and price. Two steps are still to do.
+`crates/vidcut-core/src/catalog.rs` holds each model and speech service that vidcut uses: its files, languages, limits and price. `catalog::check` tests the limits. These steps are still to do.
 
-## 1. One check of the limits
+## 1. Limits that the check does not read yet
 
-- One function in the catalog takes a job and gives its refusals and its warnings.
-- The CLI, the GUI and MCP call it before the work starts. No other code tests a limit.
-- What vidcut does for each kind of limit:
-  - `Kind::Hard`: vidcut refuses before the work starts, and tells why.
-  - `Kind::Cap`: the work runs, but the result has this maximum. vidcut tells the user before the start.
-  - `Kind::Soft`: the work runs. vidcut warns where the user sets the value and in the report.
-- The owner's decisions:
-  - A speech model that does not load on the GPU is soft. vidcut warns and uses the CPU.
-  - Gemini with more than 8 speakers is soft.
-- The check does not read these limits of the catalog yet:
-  - xAI's 100 words to listen for, 50 characters each, and its 8 channels. Now xAI itself refuses them.
-  - The HDR limit of the two AI upscalers. Now `upscale::unfit` and `flashvsr::unfit` test it.
+- Sortformer's warning uses the most that transcribe.cpp reports at load, not the catalog. The check command of step 2 compares the two.
+- For multichannel xAI, a file with more than 8 channels is heard with 8 (`channels_of`). The owner decides if vidcut refuses it instead.
 
 ## 2. A models command and the update procedure
 

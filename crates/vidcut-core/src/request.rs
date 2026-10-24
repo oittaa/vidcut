@@ -2684,12 +2684,12 @@ impl SpeechModel {
     }
 
     pub fn longest_secs(self) -> Option<f64> {
-        crate::catalog::speech(self).most(crate::catalog::Measure::AudioSecs)
+        crate::catalog::speech(self).value(crate::catalog::Measure::AudioSecs)
     }
 
     pub fn max_speakers(self) -> Option<u32> {
         crate::catalog::speech(self)
-            .most(crate::catalog::Measure::Speakers)
+            .value(crate::catalog::Measure::Speakers)
             .map(|n| n as u32)
     }
 
@@ -2728,7 +2728,7 @@ pub enum SpeakerModel {
 impl SpeakerModel {
     pub fn max_speakers(self) -> Option<u32> {
         crate::catalog::speakers(self)
-            .and_then(|m| m.most(crate::catalog::Measure::Speakers))
+            .and_then(|m| m.value(crate::catalog::Measure::Speakers))
             .map(|n| n as u32)
     }
 
