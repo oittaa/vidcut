@@ -55,16 +55,36 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The Timeline menu opens that tab.
   - `gui.show keyframes` opens that tab.
   - The tab shows the first selected clip.
-  - Each keyed value has a track, in a group for its section.
-  - Volume is a track. Position is one track. Zoom is one track.
-  - A drag on a keyframe moves it in time.
-  - A drag on a curve point also changes the value.
-  - A drag on a group track moves that group's keyframes at that time.
-  - Each value has a curve. A drag on an In or Out handle changes that handle.
-  - A handle value moves the key's own value.
-  - On Position and Zoom, Y keeps the handle frames and uses a value offset of 0.
-  - One click selects one keyframe. Shift or Ctrl adds to the selection.
-  - A right-click on a keyframe sets its ease (X87).
+  - **Tracks** (pp. 1255–1256):
+    - Each value that can have keyframes has a track, in a group for its section.
+    - Volume is a track. Position is one track. Zoom is one track.
+    - The ⋯ menu has Display All Parameters and Display Parameters with Keyframes. All is the default.
+    - A click on the name of a group opens or closes it. The ⋯ menu also has Expand All Parameters and Collapse All Parameters.
+  - **Track controls** (p. 1257):
+    - The curve button shows the curve of the value under its track.
+    - The Keyframe button adds a keyframe at the playhead. On a keyframe, it removes that keyframe, as the Inspector's button does.
+    - The arrows beside it go to the previous and the next keyframe in the clip.
+    - Reset Keyframes removes all keyframes of the track.
+  - **Time** (p. 1258):
+    - The time ruler shows timecode. A click or a drag on it moves the playhead.
+    - The tracks start at the range of the clip. Fit Clip goes back to that range.
+    - Detail Zoom zooms in four times, around the playhead.
+    - The zoom slider sets the zoom, around the middle of the range.
+    - Ctrl and the mouse wheel zoom at the pointer. Shift and the mouse wheel move the range.
+    - A scroll bar under the tracks shows the part of the clip in the range. A drag on it moves the range.
+    - A click on the scroll bar outside that part moves the range to the click.
+    - An arrow at the edge of a track marks its keyframes outside the range, for example after a trim.
+  - **Edits:**
+    - A drag on a keyframe moves it in time. A drag on a curve point also changes the value.
+    - A drag on a group track moves that group's keyframes at that time.
+    - A drag on an In or Out handle changes that handle. A handle value moves the key's own value.
+    - On Position and Zoom, Y keeps the handle frames and uses a value offset of 0.
+    - One click selects one keyframe. Shift or Ctrl adds to the selection. A click on an empty part clears it.
+    - Delete removes the selected keyframes (p. 1258).
+    - A right-click on a keyframe sets its ease (X87).
+    - A double-click on an empty part of a track adds a keyframe there ([X90](deviations.md#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
+    - The bar under the tracks shows the value, time and ease of the selected keyframe (X90).
+    - A keyframe that the Keyframe button or a double-click adds is selected. Thus the bar shows it at once.
   - Later: the Sync Bin, Transitions and Effects tabs.
   - vidcut's bar also has Import, Export and Jobs (deviation X3), and Help (X23).
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
