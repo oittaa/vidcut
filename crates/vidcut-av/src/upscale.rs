@@ -1380,7 +1380,13 @@ impl Engine {
                 &words(&[w as u32, h as u32, w as u32, 0, 0, 0, 0, 0]),
             );
             for (i, rgb) in frames.iter().enumerate() {
-                self.queue.write_buffer(&f.rgb[i], 0, rgb);
+                let whole = rgb.len() & !3;
+                self.queue.write_buffer(&f.rgb[i], 0, &rgb[..whole]);
+                if whole < rgb.len() {
+                    let mut tail = [0u8; 4];
+                    tail[..rgb.len() - whole].copy_from_slice(&rgb[whole..]);
+                    self.queue.write_buffer(&f.rgb[i], whole as u64, &tail);
+                }
             }
             let net = self.net.as_ref().expect("loaded");
             let n = frames.len();
