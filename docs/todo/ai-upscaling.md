@@ -42,12 +42,29 @@ Super Scale uses classic upscalers ([X91](../deviations.md#x91-super-scale-uses-
   - DirectML has Microsoft's own license and is in sustained engineering. Its package is 193 MB.
   - The CUDA builds need more than 1 GB of CUDA libraries. The owner does not want such a download.
 - **FFmpeg's `dnn_processing`:** FFmpeg 8.0 and 8.1 have no ONNX back end. FFmpeg 9.0 has one, but it copies the frames through memory.
+  - Its ONNX back end takes one 4-D input with a batch of 1 (`dnn_backend_onnx.c`). Thus it runs one frame at a time, and no video model.
+  - Its GPU devices are CUDA and DirectML. There is none for the Mac, or for AMD and Intel on Linux.
+  - The BtbN build of FFmpeg 9.0.1 for Windows has no `dnn_processing` filter. Ubuntu 26.04 has FFmpeg 8.0.
+  - Thus a feature only on FFmpeg 9.0 would reach few users.
+
+## Video models in exports only
+
+The owner wants the video models where they give better pictures. They can run in exports only:
+
+- The viewer shows Super Scale nowhere, and a proxy can play in its place. Thus a slow model does not hurt playback.
+- An export reads each clip in order. Thus it can give the model the frames before and after each frame.
+- At a cut, the frames past the cut usually are in the file. The export can read them.
+- RealBasicVSR was trained on REDS, which is CC BY 4.0. Thus its license is clearer than that of Real-ESRGAN.
+- Its weights are 210 MB. They download at the first use.
+- RealBasicVSR flickers less than Real-ESRGAN in a published measurement. Another paper finds such models blurrier. Thus a side-by-side test decides.
+- Their deformable convolution limits the engines. burn lists `DeformConv` as supported. No ONNX conversion of BasicVSR++ is in wide use.
 
 ## Plan
 
 1. A test: run `realesr-general-x4v3` with burn on wgpu, on the owner's RTX 4080. Measure the frames per second at 720p in and 1080p out.
 2. If burn is too slow, the same test with ncnn on Vulkan.
-3. Decide about the weights' license with the owner.
-4. Then Super Scale gets an AI choice beside the classic upscaler.
+3. A second test: convert RealBasicVSR for burn, and compare it with Real-ESRGAN on the same clip.
+4. Decide about the weights' licenses with the owner.
+5. Then Super Scale gets AI choices beside the classic upscaler: a model for each frame, and a video model for exports.
 
 Sources: the research of October 2026, with the links in this file and in the pull request that adds it.
