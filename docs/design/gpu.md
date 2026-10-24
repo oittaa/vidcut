@@ -178,7 +178,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - The 3×3 convolutions with 96 input channels use Winograd F(2×2, 3×3) (`wino_shader`). These are the 60 blocks and the first two convolutions of the 4× stage.
       - Each 2×2 block of output then needs 16 products for each pair of channels, in place of 36.
       - At load, `winograd` transforms the weights. They are kept as 16-bit floats.
-      - Each workgroup transforms its block of input in workgroup memory. The transformed values are 16-bit floats.
+      - Each workgroup transforms its block of input in workgroup memory. The transformed values are 16-bit floats, two in each 32-bit word (`pack2x16float`). naga cannot reinterpret two `f16` values as one 32-bit word.
       - Where the GPU has 16-bit floats in shaders (`f16` in WGSL), the products and their sums are 16-bit floats. Else the sums are 32-bit floats.
       - At the end, the threads exchange their sums through workgroup memory. Each output pixel then comes from 9 of the 16 sums of its block. Each thread makes one pixel.
     - The first convolution and the 1×1 join use a direct convolution shader (`conv_shader`). It reads its block of pixels and its weights into workgroup memory, with 32-bit sums.

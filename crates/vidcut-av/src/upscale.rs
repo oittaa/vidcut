@@ -523,7 +523,7 @@ fn winograd(c: &Conv) -> Vec<f32> {
 
 fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool, half: bool) -> String {
     let (acc, zero, lane) = if half {
-        ("vec4<f16>", "0.0h", "bitcast<vec2<f16>>")
+        ("vec4<f16>", "0.0h", "h2")
     } else {
         ("vec4<f32>", "0.0", "unh")
     };
@@ -628,11 +628,15 @@ fn fetch(i: u32) -> array<vec2<f32>, 4> {
         "enable f16;
 
 fn unh(x: u32) -> vec2<f32> {
-    return vec2<f32>(bitcast<vec2<f16>>(x));
+    return unpack2x16float(x);
 }
 
 fn pah(v: vec2<f32>) -> u32 {
-    return bitcast<u32>(vec2<f16>(v));
+    return pack2x16float(v);
+}
+
+fn h2(x: u32) -> vec2<f16> {
+    return vec2<f16>(unpack2x16float(x));
 }"
     } else {
         "fn unh(x: u32) -> vec2<f32> {
