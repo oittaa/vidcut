@@ -238,7 +238,10 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - The decoder's last convolution (128 to 3 channels) has a shader of its own (`last.wgsl`), which also writes the picture. It sums in the order of the matrix multiply, so the pictures are the same.
   - One matrix multiply shader (`gemm::run`) runs every linear layer and every other convolution. It splits its work into dispatches of at most 150 G multiply-adds. Its loaders gather the convolution taps, and its stores join bias, activation and residual adds.
     - Each thread finds the place of its rows once, before the loop over k (`a_row`). It then steps the tap and the channel as k grows.
-    - The tiles wait in workgroup memory as pairs of 16-bit floats, as they come from the buffers (`a_word`). The patch input holds 32-bit floats, so its tile stays 32-bit.
+    - The tiles wait in workgroup memory as 32-bit floats. The 16-bit pairs of the buffers are unpacked once, when a tile is loaded (`a_word`, `b_word`).
+      - Tiles of 16-bit pairs take half the workgroup memory, but they unpack each value again in the inner loop.
+      - With 32-bit tiles, a 4K export of 30 frames takes 290-293 s in place of 300 s. A 1920×1024 export of 89 frames takes 88-94 s in place of 83 s.
+      - AI Best is mostly for 4K output, so the 32-bit tiles are kept.
     - The weights are 16-bit floats on the GPU. The files hold 32-bit floats; they are rounded at load, on all cores (`compute::halves`).
     - The residual stream of the DiT stays in 32-bit floats. The other values between the steps are 16-bit floats, with 32-bit sums.
   - Each dispatch takes its parameters from a slot of 256 bytes in one uniform buffer, at a dynamic offset. `Gpu::flush` writes the new slots once, before each submission.
