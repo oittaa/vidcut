@@ -1339,13 +1339,16 @@ impl Engine {
             self.queue
                 .write_buffer(&f.size, 0, &words(&[w as u32, h as u32]));
             for (i, rgb) in frames.iter().enumerate() {
-                let rgba: Vec<u32> = rgb
-                    .as_chunks::<3>()
+                let mut rgba = vec![255u8; rgb.len() / 3 * 4];
+                for (to, from) in rgba
+                    .as_chunks_mut::<4>()
                     .0
-                    .iter()
-                    .map(|p| u32::from_le_bytes([p[0], p[1], p[2], 255]))
-                    .collect();
-                self.queue.write_buffer(&f.rgba[i], 0, &words(&rgba));
+                    .iter_mut()
+                    .zip(rgb.as_chunks::<3>().0)
+                {
+                    to[..3].copy_from_slice(from);
+                }
+                self.queue.write_buffer(&f.rgba[i], 0, &rgba);
             }
             let net = self.net.as_ref().expect("loaded");
             let n = frames.len();
