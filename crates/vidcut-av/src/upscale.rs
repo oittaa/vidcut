@@ -1013,6 +1013,7 @@ impl Engine {
     fn run(&mut self, frames: &[Vec<u8>], (w, h): (usize, usize)) -> Result<Vec<Vec<u8>>> {
         let device = self.device.clone();
         checked(&device, || {
+            let clock = std::time::Instant::now();
             self.load()?;
             self.make_frame((w, h), frames.len());
             self.make_tiles();
@@ -1040,6 +1041,11 @@ impl Engine {
                 }
             }
             self.queue.submit([enc.finish()]);
+            self.device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .map_err(gpu_error)?;
+            let forward = clock.elapsed();
+            let (mut back, mut tiles) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
             let mut outs = vec![Vec::new(); frames.len()];
             for i in (0..frames.len()).rev() {
                 let prev = if i + 1 == frames.len() {
@@ -1066,8 +1072,23 @@ impl Engine {
                     );
                 }
                 self.queue.submit([enc.finish()]);
+                let t = std::time::Instant::now();
+                self.device
+                    .poll(wgpu::PollType::wait_indefinitely())
+                    .map_err(gpu_error)?;
+                back += t.elapsed();
+                let t = std::time::Instant::now();
                 outs[i] = self.enlarge(i)?;
+                tiles += t.elapsed();
             }
+            crate::debug!(
+                "upscale",
+                "{} frames at {w}x{h}: load and forward chain {:.0} ms, backward chains and joins {:.0} ms, 4x tiles {:.0} ms",
+                frames.len(),
+                forward.as_secs_f64() * 1e3,
+                back.as_secs_f64() * 1e3,
+                tiles.as_secs_f64() * 1e3
+            );
             Ok(outs)
         })
     }

@@ -561,6 +561,7 @@ impl Source {
             .is_none_or(|c| c.key != key || c.size != size)
         {
             self.chunk = None;
+            let clock = Instant::now();
             let frames = match key {
                 (first, true) => self.read_chunk(first, reading)?,
                 (_, false) => vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?],
@@ -569,7 +570,15 @@ impl Source {
                 .iter()
                 .map(|f| shown_rgb(f, rotation, size, reading))
                 .collect::<Result<Vec<_>>>()?;
+            let read = clock.elapsed();
             let big = crate::upscale::upscale(&rgbs, (size.0 as usize, size.1 as usize))?;
+            crate::debug!(
+                "upscale",
+                "chunk {key:?} of {} frames at {size:?}: read and made RGB in {:.0} ms, upscaled in {:.0} ms",
+                rgbs.len(),
+                read.as_secs_f64() * 1e3,
+                (clock.elapsed() - read).as_secs_f64() * 1e3
+            );
             let pictures = big
                 .iter()
                 .zip(&frames)
