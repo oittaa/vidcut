@@ -195,8 +195,8 @@ cpal = "0.18"
 # is built: crates/transcribe-cpp-sys (patched in below) calls the prebuilt
 # library transcribe.cpp publishes for each system, which vidcut downloads
 # on first use, on Vulkan (Windows, Linux) or Metal (macOS).
-transcribe-cpp = { version = "=0.4.0", default-features = false }
-transcribe-cpp-sys = { path = "crates/transcribe-cpp-sys", version = "=0.4.0" }
+transcribe-cpp = { version = "=0.4.1", default-features = false }
+transcribe-cpp-sys = { path = "crates/transcribe-cpp-sys", version = "=0.4.1" }
 # Unpacking that library's .tar.gz on first use, with zlib-rs as zip does.
 # MIT or Apache-2.0.
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
