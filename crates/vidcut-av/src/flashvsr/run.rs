@@ -405,7 +405,7 @@ impl Stream {
             );
         });
         e.submit();
-        if let Some(dir) = self.dump.as_ref().filter(|_| self.fed < 40) {
+        if let Some(dir) = self.dump.as_ref() {
             let raw = gpu.read(&self.frames, u64::from(base) * 4, u64::from(g.plane()) * 4)?;
             let rgb: Vec<u8> = raw
                 .as_chunks::<4>()
@@ -526,7 +526,7 @@ impl Stream {
             });
             e.submit();
         }
-        if let Some(dir) = self.dump.as_ref().filter(|_| k < 2) {
+        if let Some(dir) = self.dump.as_ref() {
             let shape = [16, 4, g.h8 as usize, g.w8 as usize];
             dump::write(&dir.join(format!("chunk{k}_noise.npy")), &shape, &noise_v)?;
             let raw = gpu.read(&latents, 0, u64::from(16 * 4 * p8 * 4))?;
@@ -1128,7 +1128,7 @@ impl Stream {
                         .iter()
                         .flat_map(|p| [p[0], p[1], p[2]])
                         .collect();
-                    if let Some(dir) = self.dump.as_ref().filter(|_| index < 32) {
+                    if let Some(dir) = self.dump.as_ref() {
                         dump::write_bytes(
                             &dir.join(format!("frame{index:03}.npy")),
                             &[g.h as usize, g.w as usize, 3],

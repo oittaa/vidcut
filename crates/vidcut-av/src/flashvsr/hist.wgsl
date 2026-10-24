@@ -4,7 +4,7 @@ struct P { per_head: u32, shift: u32, groups: u32, pad: u32 }
 @group(0) @binding(2) var<storage, read> state: array<vec4<u32>>;
 @group(0) @binding(3) var<storage, read_write> hist: array<atomic<u32>>;
 
-var<workgroup> local: array<atomic<u32>, 256>;
+var<workgroup> bins: array<atomic<u32>, 256>;
 
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>, @builtin(local_invocation_index) li: u32) {
@@ -14,7 +14,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3
     }
     let h = g / p.groups;
     let part = g % p.groups;
-    atomicStore(&local[li], 0u);
+    atomicStore(&bins[li], 0u);
     workgroupBarrier();
     let st = state[h];
     let prefix = st.x;
@@ -30,12 +30,12 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3
         if (v >= 0.0) {
             let bits = bitcast<u32>(v);
             if ((bits & keep) == (prefix & keep)) {
-                atomicAdd(&local[(bits >> p.shift) & 255u], 1u);
+                atomicAdd(&bins[(bits >> p.shift) & 255u], 1u);
             }
         }
     }
     workgroupBarrier();
-    let n = atomicLoad(&local[li]);
+    let n = atomicLoad(&bins[li]);
     if (n > 0u) {
         atomicAdd(&hist[h * 256u + li], n);
     }
