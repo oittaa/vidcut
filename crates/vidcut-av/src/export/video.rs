@@ -88,7 +88,7 @@ struct Source {
     decoder: Option<crate::hw::Kind>,
     reversed: Vec<Reversed>,
     left: Option<Instant>,
-    sharp: Option<Sharpness>,
+    scale: SuperScale,
     told: bool,
     upright: bool,
     gpu: Option<crate::hw::GpuDecoder>,
@@ -190,7 +190,7 @@ impl Source {
             decoder,
             reversed: Vec::new(),
             left: None,
-            sharp,
+            scale: super_scale,
             told: false,
             upright: false,
             gpu: ahead_gpu,
@@ -245,7 +245,7 @@ impl Source {
             decoder,
             reversed: Vec::new(),
             left: None,
-            sharp: None,
+            scale: SuperScale::default(),
             told: false,
             upright: false,
             gpu: ahead_gpu,
@@ -1954,7 +1954,6 @@ impl VideoFrames {
                 reading.push(None);
                 continue;
             };
-            let sharp = sharpness(*super_scale);
             let pictures = Pictures::of(image.as_ref());
             let still = pictures == Pictures::Still;
             let from = if still { 0 } else { *source_frame };
@@ -1964,7 +1963,7 @@ impl VideoFrames {
                 .filter(|&s| {
                     !taken[s]
                         && self.open[s].reader.input() == &input
-                        && self.open[s].sharp == sharp
+                        && self.open[s].scale == *super_scale
                 })
                 .collect();
             let reads_on = free
@@ -1982,9 +1981,13 @@ impl VideoFrames {
                     s
                 }
                 None => {
-                    let opened = match self.ahead.reclaim(|k| k.0 == input) {
-                        Some(source) => {
-                            let mut source = source?;
+                    let reclaimed = self
+                        .ahead
+                        .reclaim(|k| k.0 == input)
+                        .transpose()?
+                        .filter(|s| s.scale == *super_scale);
+                    let opened = match reclaimed {
+                        Some(mut source) => {
                             source.left = None;
                             source.reader.set_color_space(*color_space);
                             source.reposition(*origin, from, target)?;
@@ -2095,10 +2098,11 @@ impl VideoFrames {
                 continue;
             };
             let (color_space, super_scale) = (*color_space, *super_scale);
-            let sharp = sharpness(super_scale);
             let input = input_of(path, image.as_ref());
             let free = |s: &usize| {
-                !used[*s] && self.open[*s].reader.input() == &input && self.open[*s].sharp == sharp
+                !used[*s]
+                    && self.open[*s].reader.input() == &input
+                    && self.open[*s].scale == super_scale
             };
             let read = (0..self.open.len()).find(|s| free(s) && self.open[*s].left.is_none());
             let left = (0..self.open.len()).find(free);
