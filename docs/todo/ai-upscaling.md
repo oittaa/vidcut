@@ -74,6 +74,26 @@ The owner wants the video models where they give better pictures. They can run i
 - In published tests, RealBasicVSR flickers less than the large Real-ESRGAN model. One paper finds such models blurrier, and its flicker measure rewards blur.
 - No published test compares RealBasicVSR with `realesr-general-x4v3`. Thus a side-by-side test decides.
 
+## Diffusion models for video
+
+The research of October 2026 checked five newer models against their papers, code and license files:
+
+- **FlashVSR** ([page](https://zhuang2002.github.io/FlashVSR/)), CVPR 2026:
+  - Apache 2.0 for the code, the weights and its base model, Wan2.1.
+  - It is a one-step diffusion model of 1.75 B parameters. It works on the frames in order, so an export gets no seams between chunks.
+  - It needs about 51 times the work per pixel of `realesr-general-x4v3` (calculated). Its block-sparse attention is hard to write as shaders.
+  - Its files are 6.4 GB, about 3.5 GB in 16-bit floats. FlashVSR+ is a follow-up from the same lab, with no venue yet.
+- **SeedVR2-3B**, ICLR 2026:
+  - Apache 2.0 for the code and the weights. Its optional color fix bans commercial use, but it is a short filter that vidcut can write itself.
+  - It is a one-step diffusion transformer of 3.4 B parameters. It needs about 255 times the work of `realesr-general-x4v3` (calculated).
+  - Its files are 14.6 GB in 32-bit floats. The 7B model does not fit in 16 GB.
+- **DOVE** and **SparkVSR:** their weights come under the CogVideoX License. It limits commercial use, and it can be revoked.
+- **NanoVSR**, ECCV 2026: MIT, and light, at 0.68 times the work of `realesr-general-x4v3`. But it was trained only on clean downscaled video, and its model card warns against compressed sources.
+- **Quality:**
+  - No paper compares these models with `realesr-general-x4v3`.
+  - In third-party tests, FlashVSR has the best detail on old films. DOVE and SeedVR2 stay closer to the original on phone footage.
+- The official code of the four diffusion models needs CUDA. vidcut would run them with its own shaders.
+
 ## Test results
 
 The tests ran on the owner's RTX 4080 SUPER on 2026-10-24, in programs outside vidcut.
@@ -115,6 +135,7 @@ AI Super Scale is built for exports and for the viewer ([X91](../deviations.md#x
 3. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
 4. A mix with the classic upscaler, as an extra.
 5. A decision of the owner on the SPyNet license of RealBasicVSR. Then, with the owner's OK, a side-by-side test against Real-ESRGAN on the same clip.
+6. A side-by-side test on the owner's clips: FlashVSR and SeedVR2-3B against `realesr-general-x4v3`. It needs the owner's OK and a measurement plan. The winner can become the slow tier.
 
 The weights are on Real-ESRGAN's release v0.2.5.0:
 
