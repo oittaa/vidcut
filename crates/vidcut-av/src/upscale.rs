@@ -982,6 +982,7 @@ struct Job {
 }
 
 struct Tiles {
+    size: (usize, usize),
     jobs: Vec<Job>,
     feat: wgpu::Buffer,
     s1: wgpu::Buffer,
@@ -1236,6 +1237,7 @@ impl Engine {
         let shown = w * h * (SCALE * SCALE) as usize * 3;
         let d = &self.device;
         self.tiles = Some(Tiles {
+            size: (w, h),
             jobs,
             feat: buffer(d, p1 * FEATURES * 2, U::STORAGE),
             s1: buffer(d, p2 * FEATURES * 2, U::STORAGE),
@@ -1334,7 +1336,9 @@ impl Engine {
             let clock = Instant::now();
             self.load()?;
             self.make_frame((w, h), frames.len());
-            self.make_tiles();
+            if self.tiles.as_ref().is_none_or(|t| t.size != (w, h)) {
+                self.make_tiles();
+            }
             let f = self.frame.as_ref().expect("frame made");
             self.queue
                 .write_buffer(&f.size, 0, &words(&[w as u32, h as u32]));
@@ -1405,8 +1409,6 @@ impl Engine {
         };
         let device = self.device.clone();
         let done = checked(&device, || self.others(wanted, size, &mut outs)).map(|()| outs);
-        self.frame = None;
-        self.tiles = None;
         rest(done);
     }
 
