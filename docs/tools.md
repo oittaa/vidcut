@@ -115,6 +115,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 **Debugging:**
 
 - `VIDCUT_DEBUG=1` prints to stderr what vidcut decodes and draws, and why.
+  - The `[upscale]` lines give the time of each step of each AI Fast chunk.
+  - The `[flashvsr]` lines give the time of each step of each AI Best chunk: the input projection, the blocks and the decoder. They also give how many caches are in main memory, how many GB go there and back, and how long AI Best waits for them.
 - A GUI that has not ended 10 s after its window closed tells the stage and the wait state of each thread.
   - Then it aborts under `VIDCUT_DEBUG`. Without `VIDCUT_DEBUG`, it exits with 1.
   - `VIDCUT_DEBUG=1 gdb -q -batch -ex run -ex "thread apply all bt 15" --args target/debug/vidcut -p PROJECT` shows the stack of each thread at the hang.

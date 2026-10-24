@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Read;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::Instant;
 
@@ -1023,6 +1024,7 @@ impl Engine {
                 adapter.get_info().name
             ));
         }
+        crate::ai::runs_on(Upscaler::AiFast, adapter.get_info().name);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("vidcut-upscale"),
             required_limits: limits,
@@ -1408,6 +1410,12 @@ impl Engine {
         })
     }
 
+    fn free(&mut self) {
+        self.frame = None;
+        self.tiles = None;
+        self.groups.get_mut().clear();
+    }
+
     fn finish(&mut self) {
         let Some(Pending {
             wanted,
@@ -1517,6 +1525,22 @@ impl Engine {
 
 static ENGINE: Mutex<Option<std::result::Result<Engine, String>>> = Mutex::new(None);
 
+static FREE_LATER: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn release() {
+    let Ok(mut engine) = ENGINE.try_lock() else {
+        FREE_LATER.store(true, Ordering::Relaxed);
+        return;
+    };
+    if let Some(Ok(e)) = engine.as_mut() {
+        if e.pending.is_some() {
+            FREE_LATER.store(true, Ordering::Relaxed);
+        } else {
+            e.free();
+        }
+    }
+}
+
 fn with_engine<T>(run: impl FnOnce(&mut Engine) -> Result<T>) -> Result<T> {
     let mut engine = ENGINE.lock().unwrap_or_else(PoisonError::into_inner);
     match engine.get_or_insert_with(Engine::start) {
@@ -1560,5 +1584,8 @@ pub(crate) fn settle() {
     let mut engine = ENGINE.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(Ok(e)) = engine.as_mut() {
         e.finish();
+        if FREE_LATER.swap(false, Ordering::Relaxed) && !crate::ai::in_use(Upscaler::AiFast) {
+            e.free();
+        }
     }
 }

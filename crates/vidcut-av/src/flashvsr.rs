@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use vidcut_core::model::{Media, Project, Upscaler};
@@ -176,11 +177,20 @@ fn with_engine<T>(run: impl FnOnce(&gpu::Gpu, &model::Model) -> Result<T>) -> Re
         e.model = Some(loaded);
     }
     let model = e.model.as_ref().expect("loaded");
-    crate::compute::checked(&e.gpu.device, gpu::WHAT, || run(&e.gpu, model))
+    let out = crate::compute::checked(&e.gpu.device, gpu::WHAT, || run(&e.gpu, model));
+    if FREE_LATER.swap(false, Ordering::Relaxed) && !crate::ai::in_use(Upscaler::AiBest) {
+        e.model = None;
+    }
+    out
 }
 
+static FREE_LATER: AtomicBool = AtomicBool::new(false);
+
 pub fn release() {
-    let mut engine = ENGINE.lock().unwrap_or_else(PoisonError::into_inner);
+    let Ok(mut engine) = ENGINE.try_lock() else {
+        FREE_LATER.store(true, Ordering::Relaxed);
+        return;
+    };
     if let Some(Ok(e)) = engine.as_mut() {
         e.model = None;
     }

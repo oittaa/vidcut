@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
+use vidcut_av::ai;
 use vidcut_av::color::Matrix;
 use vidcut_av::player::{self as engine, Layout, PlaysOn};
-use vidcut_core::model::Hdr;
+use vidcut_core::model::{Hdr, ScaleFactor, Sharpness, SuperScale, Upscaler};
 
 pub type Group = (&'static str, Vec<(&'static str, String)>);
 
@@ -9,6 +10,7 @@ pub type Group = (&'static str, Vec<(&'static str, String)>);
 pub struct PlayerStats {
     pub decoding: Option<DecodingStats>,
     pub picture: Option<PictureStats>,
+    pub super_scale: Option<SuperScaleStats>,
     pub viewer: Option<ViewerStats>,
     pub playback: PlaybackStats,
     pub kept: KeptStats,
@@ -37,6 +39,16 @@ pub struct PictureStats {
     pub range: String,
     pub hdr: Option<String>,
     pub memory: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SuperScaleStats {
+    pub upscaler: String,
+    pub factor: String,
+    pub runs_on: Option<String>,
+    pub sizes: Option<String>,
+    pub state: Option<String>,
+    pub last: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -166,9 +178,14 @@ impl PlayerStats {
             PlaysOn::Chosen(id) => id.clone(),
             PlaysOn::Missing(id) => format!("System default ({id} isn't connected)"),
         };
+        let super_scale = s
+            .super_scales
+            .first()
+            .map(|&ss| SuperScaleStats::of(ss, &ai::report()));
         Self {
             decoding,
             picture,
+            super_scale,
             viewer,
             playback: PlaybackStats {
                 frames: s.frames,
@@ -207,6 +224,9 @@ impl PlayerStats {
         }
         if let Some(p) = &self.picture {
             groups.push(("Picture", p.rows()));
+        }
+        if let Some(s) = &self.super_scale {
+            groups.push(("Super Scale", s.rows()));
         }
         if let Some(v) = &self.viewer {
             groups.push(("Viewer", v.rows()));
@@ -260,6 +280,86 @@ impl PictureStats {
             rows.push(("HDR", hdr.clone()));
         }
         rows.push(("Held in", self.memory.clone()));
+        rows
+    }
+}
+
+impl SuperScaleStats {
+    fn of(s: SuperScale, report: &ai::Report) -> Self {
+        let factor = match s.factor {
+            ScaleFactor::Auto => "Auto".to_string(),
+            f => f.times().map_or_else(String::new, |n| format!("{n}x")),
+        };
+        let upscaler = match s.upscaler {
+            Upscaler::Classic => format!(
+                "Classic, sharpness {}",
+                match s.sharpness {
+                    Sharpness::Low => "low",
+                    Sharpness::Medium => "medium",
+                    Sharpness::High => "high",
+                }
+            ),
+            u => ai::name(u).to_string(),
+        };
+        let mine = |w: &Option<ai::Work>| w.clone().filter(|w| w.upscaler == s.upscaler);
+        let (making, made) = (mine(&report.making), mine(&report.made));
+        let size = |(w, h): (u32, u32)| format!("{w}×{h}");
+        let frames = |(a, b): (i64, i64)| match a == b {
+            true => format!("Source frame {a}"),
+            false => format!("Source frames {a}–{b}"),
+        };
+        let secs = |d: std::time::Duration| format!("{:.1} s", d.as_secs_f64());
+        Self {
+            upscaler,
+            factor,
+            runs_on: report
+                .devices
+                .iter()
+                .find(|(u, _)| *u == s.upscaler)
+                .map(|(_, d)| d.clone()),
+            sizes: making
+                .as_ref()
+                .or(made.as_ref())
+                .map(|w| format!("{} → {}", size(w.from), size(w.made))),
+            state: match (&making, &report.making) {
+                (Some(w), _) => Some(format!(
+                    "Making {} · {} so far",
+                    frames(w.frames).to_lowercase(),
+                    secs(w.started.elapsed())
+                )),
+                (None, Some(w)) => Some(format!(
+                    "{} still making {} · {} so far",
+                    ai::name(w.upscaler),
+                    frames(w.frames).to_lowercase(),
+                    secs(w.started.elapsed())
+                )),
+                (None, None) => s.ai().then(|| "Idle".into()),
+            },
+            last: made.map(|w| {
+                format!(
+                    "{} in {}",
+                    frames(w.frames),
+                    secs(w.took.unwrap_or_default())
+                )
+            }),
+        }
+    }
+
+    fn rows(&self) -> Vec<(&'static str, String)> {
+        let mut rows = vec![
+            ("Upscaler", self.upscaler.clone()),
+            ("Factor", self.factor.clone()),
+        ];
+        for (label, fact) in [
+            ("Runs on", &self.runs_on),
+            ("Sizes", &self.sizes),
+            ("State", &self.state),
+            ("Last made", &self.last),
+        ] {
+            if let Some(f) = fact {
+                rows.push((label, f.clone()));
+            }
+        }
         rows
     }
 }
