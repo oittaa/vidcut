@@ -166,8 +166,9 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - Before an export starts, `upscale::check` refuses media that AI Fast cannot take (`upscale::unfit`). It also refuses AI Fast without the weights or without a GPU that can run it.
   - In an export, `Source::ai_picture` finds the chunk of 15 frames that holds the source picture (`upscale::FRAMES`).
     - The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
-    - `Source::read_chunk` reads the chunk with a second `VideoReader` on the same file. It uses the same GPU decoder.
-    - Each frame becomes RGB at its shown size, upright.
+    - When the source is at the first frame of a chunk, `Source::chunk_frames` decodes the other frames of the chunk once. The source then takes them from its queue, and does not decode them again.
+    - Else `Source::read_chunk` reads the chunk with a second `VideoReader` on the same file. It uses the same GPU decoder.
+    - Each frame becomes RGB at its shown size, upright. The GPU takes these 3 bytes for each pixel as they are.
     - `upscale::upscale` returns the asked picture first. A thread (`vidcut-upscale-rest`) then makes the other 14 pictures.
     - The 15 pictures go into a shared cache of chunks (`Chunk`), the newest kept within a share of the computer's memory.
     - Before it computes a chunk, `Source::ai_picture` waits for a chunk that is still being made (`upscale::settle`). Then it looks in the cache again.
@@ -177,8 +178,9 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - The 3×3 convolutions with 96 input channels use Winograd F(2×2, 3×3) (`wino_shader`). These are the 60 blocks and the first two convolutions of the 4× stage.
       - Each 2×2 block of output then needs 16 products for each pair of channels, in place of 36.
       - At load, `winograd` transforms the weights. They are kept as 16-bit floats.
-      - Each workgroup transforms its block of input in workgroup memory. The transformed values are 16-bit floats, and the sums are 32-bit floats.
-      - At the end, the threads exchange their sums through workgroup memory. Each 2×2 block of output then comes from its 16 sums.
+      - Each workgroup transforms its block of input in workgroup memory. The transformed values are 16-bit floats, two in each 32-bit word (`pack2x16float`). naga cannot reinterpret two `f16` values as one 32-bit word.
+      - Where the GPU has 16-bit floats in shaders (`f16` in WGSL), the products and their sums are 16-bit floats. Else the sums are 32-bit floats.
+      - At the end, the threads exchange their sums through workgroup memory. Each output pixel then comes from 9 of the 16 sums of its block. Each thread makes one pixel.
     - The first convolution and the 1×1 join use a direct convolution shader (`conv_shader`). It reads its block of pixels and its weights into workgroup memory, with 32-bit sums.
     - A forward chain of 30 blocks runs from the first frame to the last, and a backward chain from the last to the first. The forward results of all frames are kept.
     - The first block of each chain adds the features of the frame to the previous result as it reads them.
@@ -187,7 +189,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
       - Each frame gets the same chains and the same order of math. Thus its picture does not depend on which frame was asked.
       - The backward results above the asked frame go into the buffers of the forward results that are not made yet. Thus the order needs no more GPU memory.
     - Why: the viewer shows the asked frame after about half the work of a chunk.
-    - Two convolutions then make the picture four times as large, in tiles. They write their output in the order of the pixel shuffle.
+    - Two convolutions then make the picture four times as large, in tiles. They write their output in the order of the pixel shuffle. The first one reads its tile from the joined frame, at the place of the tile.
     - One shader (`last_shader`) runs the last convolution, adds a bilinear copy of the input and makes RGB. Its weights are in a uniform buffer.
     - The chains, the join and all tiles of a frame go to the GPU in one submission. The frame comes back in one read.
     - While the GPU runs a frame, the CPU reads the result of the frame before it. Thus the GPU does not wait for the CPU between frames.
@@ -196,7 +198,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - Why Winograd: the 3×3 convolutions do most of the work. Winograd needs fewer products, and fewer reads of workgroup memory for each product.
   - The usual fitting then makes that picture the size it shows at.
   - The frames go through memory, also from a GPU decoder.
-  - `upscale` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines and weights stay. The buffers of a chunk are freed after it.
+  - `upscale` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines and weights stay. Its buffers stay for the next chunk of the same size. They go when the size changes or the process ends. Its bind groups stay with the buffers, and each pass takes them from a cache.
   - `Note::Upscaled` names each file that an AI upscaler enlarged in the export's report (`ai::name`).
 - **AI Best** (`flashvsr`):
   - Before an export starts, `flashvsr::check` refuses media that AI Best cannot take (`flashvsr::unfit`). It also refuses AI Best without the weights or without a GPU that can run it. It loads the model then.
