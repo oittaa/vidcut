@@ -19,7 +19,7 @@ A clip that plays slower than its source, or at another frame rate than the time
   - It needs only simple shader types: 3×3 convolutions, a transposed convolution, bilinear resize and a backward warp.
   - The warp needs 32-bit floats.
   - It does not find scene cuts. Thus vidcut needs its own check, so that no frames morph across a cut.
-  - No speed figure for 4.25 was found. Version 4.6 did 148 fps at 1080p on an RTX 4090 with TensorRT.
+  - No speed figure for 4.25 was found.
 - **Other models:**
   - IFRNet has MIT code. The license of its weights is not stated.
   - FILM (Apache-2.0) makes only the middle frame, and it is slow. EMA-VFI (Apache-2.0) uses attention.

@@ -4,24 +4,32 @@
 
 The exports of Super Scale have an AI upscaler: Real-ESRGAN on shaders of vidcut's own ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). This file holds what is known about the open models and about the ways to run them, and what is still to do.
 
-## The models
+## The model in vidcut
 
-- **Real-ESRGAN** ([repo](https://github.com/xinntao/Real-ESRGAN)):
-  - The code is BSD-3-Clause. The weights have no license of their own. OpenModelDB lists them as BSD-3-Clause.
-  - It was trained on DIV2K, Flickr2K and OST. DIV2K is "for academic research purpose only". It is not known if this binds the weights.
-  - `realesr-general-x4v3` (4.9 MB) is for real footage. `realesr-animevideov3` (2.5 MB) is for animation. `RealESRGAN_x4plus` is 67 MB.
-  - Speed, from the sources: `realesr-animevideov3` did 10 fps at 1080p on a V100 in PyTorch. A compact model did 17 fps with 1080p input on an RTX 4090 with TensorRT.
-  - It works on one frame at a time. Thus a seek or a cut needs no other frames. But a GAN model on each frame alone can flicker.
-  - Official ONNX and ncnn conversions exist. Real-ESRGAN-ncnn-vulkan is MIT.
-- **SwinIR, HAT, DAT:**
-  - The code is Apache-2.0. The weights have no license of their own.
-  - They are slow: HAT took 725 ms for a 512×512 output on an RTX 4090. SwinIR took 0.54 s for a 256×256 input on an RTX 2080 Ti.
-  - SwinIR-L was trained on FFHQ, which is CC BY-NC-SA. DAT has no official model for real footage.
-  - In FP16, HAT, DAT and SwinIR can give NaN or black pictures on DirectML and CUDA ([rust_upscaler](https://github.com/kirinonakar/rust_upscaler)).
-- **BasicVSR++, RealBasicVSR:**
-  - The code is Apache-2.0. These are video models: each frame needs frames before and after it.
-  - Thus a seek or a cut needs many frames around it. Their deformable convolution does not run on DirectML or natively on TensorRT.
-  - No widely used ONNX or ncnn conversion was found.
+- **Model:** Real-ESRGAN `realesr-general-x4v3`, mixed with `realesr-general-wdn-x4v3`. Both are in release v0.2.5.0 of 2022-04-24 ([release](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0)).
+- **License:** the code is BSD-3-Clause. The weights have no license of their own. OpenModelDB lists them as BSD-3-Clause.
+- **Training data:** DIV2K, Flickr2K and OST. DIV2K is "for academic research purpose only". It is not known if this binds the weights.
+- It works on one frame at a time. Thus a seek or a cut needs no other frames. But a model that sees one frame alone can flicker.
+
+## Other models
+
+Each row is one version of a model. The numbers in this file for a model are of that version only.
+
+| Model and version | Paper | Code license | Weights license |
+|---|---|---|---|
+| RealBasicVSR, official weights | [2111.12704](https://arxiv.org/abs/2111.12704), 2021-11-24 | Apache-2.0 | None stated. They hold SPyNet, which is non-commercial |
+| BasicVSR++, official weights | [2104.13371](https://arxiv.org/abs/2104.13371), 2021-04-27 | Apache-2.0 | None stated. They hold SPyNet |
+| FlashVSR+ Turbo | [2610.17552](https://arxiv.org/abs/2610.17552), 2026-10-13 | Apache-2.0 | Apache-2.0 |
+| SeedVR2-3B | [2506.05301](https://arxiv.org/abs/2506.05301), 2025-06-05, ICLR 2026 | Apache-2.0 | Apache-2.0 |
+| DOVE | [2505.16239](https://arxiv.org/abs/2505.16239), 2025-05-22, NeurIPS 2025 | Apache-2.0 | None stated. Its base, CogVideoX, has the CogVideoX License |
+| SparkVSR | [2603.16864](https://arxiv.org/abs/2603.16864), 2026-03-17 | Apache-2.0 | The CogVideoX License |
+| NanoVSR 644k | [2607.10495](https://arxiv.org/abs/2607.10495), 2026-07-11, ECCV 2026 | MIT | MIT |
+
+- The paper dates, the code licenses and the licenses on the weights' model cards were checked on arXiv, GitHub and Hugging Face on 2026-10-24.
+- The model card of SparkVSR says Apache-2.0, but the LICENSE file beside its weights is the CogVideoX License.
+- The CogVideoX License allows academic research. Commercial use needs a registration, and the license can be revoked.
+- The other facts come from the research notes of October 2026. They are not checked again.
+- No paper compares any of these models with `realesr-general-x4v3`.
 
 ## The ways to run them
 
@@ -58,51 +66,38 @@ The owner wants the video models where they give better pictures. They can run i
 - The viewer shows Super Scale only with View > Show Super Scale, and a proxy can play in its place. Thus a slow model does not hurt playback.
 - An export reads each clip in order. Thus it can give the model the frames before and after each frame.
 - At a cut, the frames past the cut usually are in the file. The export can read them.
-- RealBasicVSR and BasicVSR++ look both ways in time. Each output frame depends on every frame of its chunk.
-  - Thus the export works in chunks, and each chunk reads extra frames on each side. The number of extra frames needs a test.
-  - The models were not trained on cuts. Thus a chunk starts again at a scene cut inside a clip.
-- **RealBasicVSR** ([repo](https://github.com/ckkelvinchan/RealBasicVSR)):
+
+## Notes on each model
+
+- **RealBasicVSR, official weights:**
+  - It looks both ways in time. Each output frame depends on every frame of its chunk.
+  - Thus the export works in chunks, with extra frames on each side. A chunk starts again at a scene cut.
   - It has 6.3 M parameters. For each pixel, it needs about 5.4 times the work of `realesr-general-x4v3` (calculated from the code).
   - At the rate of the shaders now, that is about 430 ms for a 1280×534 frame. This is an estimate, not a measurement.
-  - It needs new shader types: 7×7 convolutions, pooling, bilinear resize and a warp by optical flow. The warp needs 32-bit coordinates.
-  - Its features for a chunk of 15 frames at 720p need about 2.2 GB in 16-bit floats.
-  - Its code is Apache-2.0. It was trained on REDS, which is CC BY 4.0.
+  - It needs new shader types: 7×7 convolutions, pooling, bilinear resize and a warp by optical flow.
+  - Its official weight file, `RealBasicVSR.pth`, is 210 MB.
   - Its optical flow network, SPyNet, has a license for non-commercial research only. RealBasicVSR keeps SPyNet's weights frozen, so its weights hold them.
-  - Thus its license is not clear for vidcut's users. Another flow network would need a new training.
-  - Its weight files are 148 MB to 210 MB. The network itself is 25 MB in 32-bit floats.
-- **BasicVSR++** needs a deformable convolution and five times the feature memory. Its official weights are for synthetic downscaling only, not for real footage. It also holds SPyNet.
-- In published tests, RealBasicVSR flickers less than the large Real-ESRGAN model. One paper finds such models blurrier, and its flicker measure rewards blur.
-- No published test compares RealBasicVSR with `realesr-general-x4v3`. Thus a side-by-side test decides.
-
-## Diffusion models for video
-
-The research of October 2026 checked five newer models against their papers, code and license files:
-
-- **FlashVSR** ([page](https://zhuang2002.github.io/FlashVSR/)), CVPR 2026:
-  - Apache 2.0 for the code, the weights and its base model, Wan2.1.
-  - It is a one-step diffusion model of 1.75 B parameters. It works on the frames in order, so an export gets no seams between chunks.
-  - It needs about 51 times the work per pixel of `realesr-general-x4v3` (calculated). Its block-sparse attention is hard to write as shaders.
-  - Its files are 6.4 GB, about 3.5 GB in 16-bit floats.
-- **FlashVSR+** ([repo](https://github.com/OpenImagingLab/FlashVSR_Plus), [paper](https://arxiv.org/abs/2610.17552)), from the same lab, October 2026, no venue yet:
-  - Apache 2.0 for the code and the weights. It has the same 1.3 B backbone, with new weights in a Turbo and a Base version.
-  - Turbo keeps the global attention in only 5 of its 30 layers. Its files are about 7.0 GB.
-  - Its paper reports better scores than FlashVSR: on YouHQ40, a PSNR of 23.64 against 22.53.
-  - On an RTX 4090, Turbo took 16 s for 89 frames at 1080p, 32 s at 2K and 90 s at 4K. These times are read from a figure.
+- **BasicVSR++, official weights:** they are for synthetic downscaling only, not for real footage. The model needs a deformable convolution.
+- **FlashVSR+ Turbo** ([repo](https://github.com/OpenImagingLab/FlashVSR_Plus)):
+  - It is a one-step diffusion model with a backbone of 1.3 B parameters, from Wan2.1, which is Apache-2.0.
+  - It keeps the global attention in only 5 of its 30 layers. The other 25 layers use local attention.
+  - It works on the frames in order. It keeps a cache of the attention of the earlier frames.
+  - Its files are about 7.0 GB in 32-bit floats.
+  - On an RTX 4090, it took 16 s for 89 frames at 1080p, 32 s at 2K and 90 s at 4K. These times are read from a figure.
   - 4K without tiles fits in 24 GB only when the attention cache moves to the CPU memory.
-- **SeedVR2-3B**, ICLR 2026:
-  - Apache 2.0 for the code and the weights. Its optional color fix bans commercial use, but it is a short filter that vidcut can write itself.
+  - Its work per pixel is not calculated yet.
+- **SeedVR2-3B** ([repo](https://github.com/ByteDance-Seed/SeedVR)):
   - It is a one-step diffusion transformer of 3.4 B parameters. It needs about 255 times the work of `realesr-general-x4v3` (calculated).
-  - Its files are 14.6 GB in 32-bit floats. The 7B model does not fit in 16 GB.
-- **DOVE** and **SparkVSR:** their weights come under the CogVideoX License. It limits commercial use, and it can be revoked.
-- **NanoVSR**, ECCV 2026: MIT, and light, at 0.68 times the work of `realesr-general-x4v3`. But it was trained only on clean downscaled video, and its model card warns against compressed sources.
-- **Quality:**
-  - No paper compares these models with `realesr-general-x4v3`.
-  - In third-party tests, FlashVSR has the best detail on old films. DOVE and SeedVR2 stay closer to the original on phone footage.
-- The official code of the four diffusion models needs CUDA. vidcut would run them with its own shaders.
+  - Its files are 14.6 GB in 32-bit floats.
+  - Its optional color fix comes from another project, which bans commercial use. It is a short filter that vidcut can write itself.
+- **NanoVSR 644k** ([repo](https://github.com/filippawlicki/nanovsr)):
+  - It needs 0.68 times the work of `realesr-general-x4v3` (calculated).
+  - It was trained only on clean downscaled video. Its model card warns against compressed sources.
+- The official code of FlashVSR+, SeedVR2, DOVE and SparkVSR needs CUDA. vidcut would run them with its own shaders.
 
 ## Test results
 
-The tests ran on the owner's RTX 4080 SUPER on 2026-10-24, in programs outside vidcut.
+The tests ran on the owner's RTX 4080 SUPER on 2026-10-24, in programs outside vidcut. They are the only measurements in this file.
 
 - The input was one 1280×534 frame of "Tears of Steel". The output was 5120×2136.
 
@@ -111,12 +106,10 @@ The tests ran on the owner's RTX 4080 SUPER on 2026-10-24, in programs outside v
 | burn 0.22.1, Vulkan | `realesr-general-x4v3` | 32-bit | 1.08–1.14 s |
 | burn 0.22.1, Vulkan | `realesr-general-x4v3` | 16-bit | 39 ms (25 fps) |
 | burn 0.22.1, Vulkan | `realesr-general-x4v3`, 640×267 input | 16-bit | 8.5 ms |
-| burn 0.22.1, Vulkan | `realesr-animevideov3` | 16-bit | 21 ms (47 fps) |
 | burn 0.22.1, without Vulkan | `realesr-general-x4v3` | 16-bit | 1027 ms |
 | Own WGSL shaders | `realesr-general-x4v3` | 16-bit values, 32-bit sums | 80 ms (12.5 fps) |
 
 - The 16-bit pictures of burn are at most 2 of 255 levels from the 32-bit ones.
-- burn's pictures of `realesr-animevideov3` match those of the official Real-ESRGAN-ncnn-vulkan tool. Only 0.04% of the pixels are more than 4 levels apart.
 - The pictures of the own shaders are at most 3 of 255 levels from those of burn.
 - The speed of the own shaders inside vidcut is not measured yet. vidcut adds the tiles and the copies through memory.
 - The pictures are much sharper than a classic upscaler. The model removes compression blocks. It also makes skin smooth, as if painted.
@@ -141,7 +134,7 @@ AI Super Scale is built for exports and for the viewer ([X91](../deviations.md#x
 3. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
 4. A mix with the classic upscaler, as an extra.
 5. A decision of the owner on the SPyNet license of RealBasicVSR. Then, with the owner's OK, a side-by-side test against Real-ESRGAN on the same clip.
-6. A side-by-side test on the owner's clips: FlashVSR+ Turbo, FlashVSR and SeedVR2-3B against `realesr-general-x4v3`. It needs the owner's OK and a measurement plan. The winner can become the slow tier.
+6. A side-by-side test on the owner's clips: FlashVSR+ Turbo and SeedVR2-3B against `realesr-general-x4v3`. It needs the owner's OK and a measurement plan. The winner can become the slow tier.
 
 The weights are on Real-ESRGAN's release v0.2.5.0:
 
