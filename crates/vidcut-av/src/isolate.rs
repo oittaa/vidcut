@@ -10,18 +10,9 @@ use vidcut_core::render::AudioPiece;
 
 use crate::error::{Error, Result};
 use crate::export::audio::Resampler;
-use crate::models::{self, Fetch, File, Need};
+use crate::models::{self, Fetch, Need};
 
-pub const DPDFNET: File = File {
-    name: "onnx/dpdfnet2_48khz_hr.onnx",
-    title: "DPDFNet voice isolation",
-    repo: "Ceva-IP/DPDFNet",
-    revision: "dd6818d00f50c836fed43a6243ebe49116de5964",
-    bytes: 10_493_337,
-    sha256: "7f0575a5cec0ba4ffd8f8bd657e06d007e4ccdd955d76faab922b9d3291dc14b",
-    gpu_gb: 0,
-    languages: &[],
-};
+pub use vidcut_core::catalog::DPDFNET_ONNX as DPDFNET;
 
 pub const RATE: u32 = 48_000;
 

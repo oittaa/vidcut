@@ -15,91 +15,20 @@ use crate::export::audio::AudioMix;
 use crate::export::{CANCELLED, DECLICK_MS, Note, Progress, SpeechNote, Stage};
 use crate::models::{Fetch, File, Need, fetch, listed, network, present, size};
 
-pub const QWEN3_ASR: File = File {
-    name: "Qwen3-ASR-1.7B-Q8_0.gguf",
-    title: SpeechModel::Qwen3Asr.title(),
-    repo: "handy-computer/Qwen3-ASR-1.7B-gguf",
-    revision: "0e0a596e3959c3f3f2ab7d443a5b6f0f4a4bba6f",
-    bytes: 2_185_030_624,
-    sha256: "9a0d81792dfea2d5f278b8a63deb3ea6e02139ce42c2301f32ea19c4f77526b7",
-    gpu_gb: 8,
-    languages: &[
-        "zh", "en", "yue", "ar", "de", "fr", "es", "pt", "id", "it", "ko", "ru", "th", "vi", "ja",
-        "tr", "hi", "ms", "nl", "sv", "da", "fi", "pl", "cs", "fil", "fa", "el", "ro", "hu", "mk",
-    ],
-};
-
-pub const WHISPER_LARGE_V3: File = File {
-    name: "whisper-large-v3-Q8_0.gguf",
-    title: SpeechModel::WhisperLargeV3.title(),
-    repo: "handy-computer/whisper-large-v3-gguf",
-    revision: "274ad1d1cf680b7ee53cc70f78461394cd3a344b",
-    bytes: 1_668_741_440,
-    sha256: "2fa1a5f179f8a511a53e2108db270aa4af3ce08cd976af4180e2854666bb4ba3",
-    gpu_gb: 4,
-    languages: &[
-        "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca", "cs", "cy",
-        "da", "de", "el", "en", "es", "et", "eu", "fa", "fi", "fo", "fr", "gl", "gu", "haw", "ha",
-        "he", "hi", "hr", "ht", "hu", "hy", "id", "is", "it", "ja", "jw", "ka", "kk", "km", "kn",
-        "ko", "la", "lb", "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt",
-        "my", "ne", "nl", "nn", "no", "oc", "pa", "pl", "ps", "pt", "ro", "ru", "sa", "sd", "si",
-        "sk", "sl", "sn", "so", "sq", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tk", "tl",
-        "tr", "tt", "uk", "ur", "uz", "vi", "yi", "yo", "yue", "zh",
-    ],
-};
-
-pub const PARAKEET_ULTRA: File = File {
-    name: "parakeet-ultra-Q8_0.gguf",
-    title: SpeechModel::ParakeetUltra.title(),
-    repo: "handy-computer/parakeet-ultra-gguf",
-    revision: "a1539be1b849ea7463b88343e5277b373d0c4ea9",
-    bytes: 740_363_168,
-    sha256: "007a59761e9258779f189df396b50d12b83bb5b79e66df4b955c230d2f2a0a59",
-    gpu_gb: 2,
-    languages: &[
-        "en", "de", "fr", "es", "it", "pt", "ru", "uk", "hr", "sl", "lv", "lt", "et", "fi", "sv",
-        "da", "nl", "pl", "cs", "sk", "hu", "ro", "bg", "el", "mt",
-    ],
-};
-
-pub const SILERO_VAD: File = File {
-    name: "silero-vad-v6.2-F32.gguf",
-    title: "Silero VAD v6.2",
-    repo: "handy-computer/silero-vad-v6.2-gguf",
-    revision: "a9b2d61c20ae4ddf3644edb34969e8185a485448",
-    bytes: 1_241_056,
-    sha256: "0d871a800c420fdd5d1b17a3aea4296d1c39608f0ff4a9295eb76457eb1c88e6",
-    gpu_gb: 0,
-    languages: &[],
-};
-
-pub const SORTFORMER: File = File {
-    name: "diar_streaming_sortformer_4spk-v2.1-Q8_0.gguf",
-    title: "Sortformer speaker detection",
-    repo: "handy-computer/diar_streaming_sortformer_4spk-v2.1-gguf",
-    revision: "60ebab3ef7cae9869be0abcde13360347e96ba03",
-    bytes: 139_310_336,
-    sha256: "a5dacdc650790266c7a362e54e6bf51952015487edaa606c4e11632bc32442a9",
-    gpu_gb: 0,
-    languages: &[],
-};
-
-pub const MOSS: File = File {
-    name: "MOSS-Transcribe-Diarize-Q8_0.gguf",
-    title: "MOSS speaker detection",
-    repo: "handy-computer/moss-transcribe-diarize-gguf",
-    revision: "8c603aa6da33a068e39bbd109786f85786a21834",
-    bytes: 986_900_160,
-    sha256: "2f9039f1f06c7795de78f45ec1abea2712e881eb0f5c7ff8a080e66e1a3ce015",
-    gpu_gb: 0,
-    languages: &["en", "zh"],
+use vidcut_core::catalog::{self, Measure};
+pub use vidcut_core::catalog::{
+    MOSS_GGUF as MOSS, PARAKEET_ULTRA_GGUF as PARAKEET_ULTRA, QWEN3_ASR_GGUF as QWEN3_ASR, RUNTIME,
+    Runtime, SILERO_VAD_GGUF as SILERO_VAD, SORTFORMER_GGUF as SORTFORMER,
+    WHISPER_LARGE_V3_GGUF as WHISPER_LARGE_V3,
 };
 
 pub fn speaker_file(language: Option<&str>, choice: SpeakerModel) -> &'static File {
     match choice {
         SpeakerModel::Moss => &MOSS,
         SpeakerModel::Sortformer => &SORTFORMER,
-        SpeakerModel::Auto if language.is_some_and(|l| MOSS.languages.contains(&l)) => &MOSS,
+        SpeakerModel::Auto if language.is_some_and(|l| catalog::MOSS.languages.contains(&l)) => {
+            &MOSS
+        }
         SpeakerModel::Auto => &SORTFORMER,
     }
 }
@@ -156,90 +85,6 @@ impl Telling {
         });
     }
 }
-
-const TRANSCRIBE: &str = "0.4.1";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Runtime {
-    pub lane: &'static str,
-    pub bytes: u64,
-    pub sha256: &'static str,
-    pub library: &'static str,
-}
-
-impl Runtime {
-    fn archive(&self) -> String {
-        format!("transcribe-native-{TRANSCRIBE}-{}.tar.gz", self.lane)
-    }
-
-    fn url(&self) -> String {
-        format!(
-            "https://github.com/handy-computer/transcribe.cpp/releases/download/v{TRANSCRIBE}/{}",
-            self.archive()
-        )
-    }
-
-    fn home(&self, dir: &Path) -> PathBuf {
-        dir.join(format!("transcribe-{TRANSCRIBE}"))
-    }
-
-    fn present(&self, dir: &Path) -> bool {
-        self.home(dir).join(self.library).is_file()
-    }
-}
-
-#[cfg(all(windows, target_arch = "x86_64"))]
-pub const RUNTIME: Option<Runtime> = Some(Runtime {
-    lane: "windows-x86_64-cpu-vulkan",
-    bytes: 18_052_295,
-    sha256: "272eb97795048ccb557c85bb9dd44c9e530e1c928443114c39816a8a5f76269d",
-    library: "transcribe.dll",
-});
-
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub const RUNTIME: Option<Runtime> = Some(Runtime {
-    lane: "macos-arm64-metal",
-    bytes: 2_491_746,
-    sha256: "7369e36dc2a5fc5d52eee5766fa03ad22d3f533c8688bf1deccf3ffdc202ea24",
-    library: "libtranscribe.dylib",
-});
-
-#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-pub const RUNTIME: Option<Runtime> = Some(Runtime {
-    lane: "macos-x86_64-cpu",
-    bytes: 1_619_231,
-    sha256: "513a3976a2f0ebc0666c9670551e96c226e39ed14090a51f2efa0874f41258d8",
-    library: "libtranscribe.dylib",
-});
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-pub const RUNTIME: Option<Runtime> = Some(Runtime {
-    lane: "linux-x86_64-cpu-vulkan",
-    bytes: 22_561_707,
-    sha256: "4b58e80c63d7f2b531b4e844b94c0703593f48a5be6afd829389cdda14a13edf",
-    library: "libtranscribe.so",
-});
-
-#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-pub const RUNTIME: Option<Runtime> = Some(Runtime {
-    lane: "linux-aarch64-cpu-vulkan",
-    bytes: 18_137_415,
-    sha256: "3671d8a07e256642d6bb38cc05ad8bbe88c76f814aeb704d1f8b57c61010db02",
-    library: "libtranscribe.so",
-});
-
-#[cfg(not(any(
-    all(windows, target_arch = "x86_64"),
-    all(
-        target_os = "macos",
-        any(target_arch = "aarch64", target_arch = "x86_64")
-    ),
-    all(
-        target_os = "linux",
-        any(target_arch = "x86_64", target_arch = "aarch64")
-    )
-)))]
-pub const RUNTIME: Option<Runtime> = None;
 
 fn needed_for(dir: &Path, files: &[&File], vad: bool) -> Vec<Need> {
     let mut out = Vec::new();
@@ -310,11 +155,11 @@ pub fn run_id() -> String {
 
 const PAD: f64 = 0.2;
 const TELLING_TICK: Duration = Duration::from_millis(250);
-const UNTIMED: f64 = 10.0;
-const SHORTEST: f64 = 30.0;
-const LONGEST: f64 = 300.0;
-const QWEN3_BASE_MB: f64 = 3300.0;
-const QWEN3_MB_PER_SECOND: f64 = 21.0;
+const UNTIMED: f64 = catalog::PIECES.untimed_secs;
+const SHORTEST: f64 = catalog::PIECES.shortest_secs;
+const LONGEST: f64 = catalog::PIECES.longest_secs;
+const QWEN3_BASE_MB: f64 = catalog::PIECES.qwen3_base_mb;
+const QWEN3_MB_PER_SECOND: f64 = catalog::PIECES.qwen3_mb_per_second;
 
 pub fn longest_piece(
     arch: &str,
@@ -381,7 +226,10 @@ fn get_ready(dir: &Path, files: &[&File], vad: bool, download: bool) -> Result<(
     };
     let needs = needed_for(dir, files, vad);
     if !needs.is_empty() && !download {
-        let own = match files.iter().any(|f| !present(dir, f) && f.gpu_gb > 0) {
+        let own = match files
+            .iter()
+            .any(|f| !present(dir, f) && gpu_gb(f).is_some())
+        {
             true => ", or name a model file of your own with model_file",
             false => "",
         };
@@ -950,13 +798,17 @@ fn gigabytes(mb: f64) -> String {
     gb.trim_end_matches(".0").to_string()
 }
 
+fn gpu_gb(f: &File) -> Option<f64> {
+    catalog::holding(f)?.most(Measure::GpuGb)
+}
+
 pub fn short_of_memory(f: &File) -> Option<String> {
+    let need = gpu_gb(f)?;
     let have = crate::gpus::in_use()?.memory_mb?;
-    (have < f.gpu_gb * 1024).then(|| {
+    ((have as f64) < need * 1024.0).then(|| {
         format!(
-            "{} needs about {} GB of GPU memory; this GPU has {} GB",
+            "{} needs about {need} GB of GPU memory; this GPU has {} GB",
             f.title,
-            f.gpu_gb,
             gigabytes(have as f64)
         )
     })

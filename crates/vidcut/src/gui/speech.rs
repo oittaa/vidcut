@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use eframe::egui;
 use serde_json::json;
-use vidcut_av::{models, speech_api, transcribe};
+use vidcut_av::{models, transcribe};
 use vidcut_core::looks::{Look, LookKind, Styled};
 use vidcut_core::model::Project;
 use vidcut_core::request::{FindSpeech, GoogleOptions, SpeakerModel, SpeechModel, XaiOptions};
@@ -136,11 +136,7 @@ fn hearing(s: &Settings, params: &mut serde_json::Value, send: bool) {
 }
 
 fn languages(model: SpeechModel) -> Vec<&'static str> {
-    match model {
-        SpeechModel::Xai => speech_api::XAI_LANGUAGES.to_vec(),
-        SpeechModel::Google => speech_api::GOOGLE_LANGUAGES.to_vec(),
-        m => transcribe::file_of(m).map_or(Vec::new(), |f| f.languages.to_vec()),
-    }
+    vidcut_core::catalog::speech(model).languages.to_vec()
 }
 
 fn wanted(s: &Settings) -> Vec<&'static models::File> {

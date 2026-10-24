@@ -38,7 +38,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 - It writes crates/transcribe-cpp-sys/src/transcribe_sys.rs from the bindings that the transcribe-cpp-sys crate ships (its bindings/rust/sys/src/transcribe_sys.rs).
 - In the file that it writes, each function calls the library that vidcut loads at run time.
-- For a new transcribe.cpp, run it on the bindings of that version. Then put the sizes and SHA-256 of its prebuilt libraries in `transcribe::RUNTIME`.
+- For a new transcribe.cpp, run it on the bindings of that version. Then put its version and the sizes and SHA-256 of its prebuilt libraries in the catalog (`catalog::TRANSCRIBE_CPP`, `catalog::RUNTIMES`).
 
 **Speech recognition speed:** `python3 scripts/stt-speed.py [--audio FILE] [--seconds S] [--devices KINDS] [MODEL[@PIECE]...]`.
 

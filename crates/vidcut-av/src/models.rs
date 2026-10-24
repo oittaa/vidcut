@@ -11,26 +11,7 @@ use crate::error::{Error, Result};
 use crate::export::{CANCELLED, Progress, Stage};
 use crate::ffmpeg::ffi;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct File {
-    pub name: &'static str,
-    pub title: &'static str,
-    pub repo: &'static str,
-    pub revision: &'static str,
-    pub bytes: u64,
-    pub sha256: &'static str,
-    pub gpu_gb: u64,
-    pub languages: &'static [&'static str],
-}
-
-impl File {
-    pub fn url(&self) -> String {
-        format!(
-            "https://huggingface.co/{}/resolve/{}/{}",
-            self.repo, self.revision, self.name
-        )
-    }
-}
+pub use vidcut_core::catalog::File;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Need {
@@ -141,7 +122,7 @@ pub(crate) struct Fetch {
 impl Fetch {
     pub(crate) fn of(f: &File) -> Self {
         Self {
-            url: f.url(),
+            url: f.url.to_string(),
             name: f.name.to_string(),
             title: f.title.to_string(),
             bytes: f.bytes,

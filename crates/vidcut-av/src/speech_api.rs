@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use vidcut_core::catalog;
 use vidcut_core::render::RenderPlan;
 use vidcut_core::request::{FindSpeech, SpeechModel};
 use vidcut_core::transcript::{Asked, RATE, Said, Speech, Timing, Word};
@@ -15,106 +16,9 @@ use crate::export::{CANCELLED, Progress, Stage};
 use crate::ffmpeg::{self, codec, encoder, format, frame};
 use crate::transcribe::{self, Options};
 
-const XAI_URL: &str = "https://api.x.ai/v1/stt";
-const XAI_MODEL: &str = "grok-voice-transcribe-2.0";
-const XAI_LIMIT: u64 = 500_000_000;
-const GOOGLE: &str = "https://generativelanguage.googleapis.com";
-const GOOGLE_MODEL: &str = "gemini-3.5-transcribe";
 const PAD: f64 = 0.2;
 const GAP: f64 = 0.5;
 const WAIT: Duration = Duration::from_secs(60 * 60);
-
-pub const GOOGLE_LANGUAGES: [&str; 83] = [
-    "en-US",
-    "es-US",
-    "pt-BR",
-    "cmn-Hans-CN",
-    "yue-Hant-HK",
-    "bn-BD",
-    "pa-IN",
-    "af-ZA",
-    "am-ET",
-    "ar-EG",
-    "hy-AM",
-    "as-IN",
-    "az-AZ",
-    "be-BY",
-    "bn-IN",
-    "bs-BA",
-    "bg-BG",
-    "rup-BG",
-    "my-MM",
-    "ca-ES",
-    "ceb",
-    "km-KH",
-    "hr-HR",
-    "cs-CZ",
-    "da-DK",
-    "nl-NL",
-    "en-GB",
-    "en-IN",
-    "et-EE",
-    "fa-IR",
-    "fil-PH",
-    "fi-FI",
-    "fr-FR",
-    "gl-ES",
-    "ka-GE",
-    "de-DE",
-    "el-GR",
-    "gu-IN",
-    "ha-NG",
-    "he-IL",
-    "hi-IN",
-    "hu-HU",
-    "is-IS",
-    "id-ID",
-    "it-IT",
-    "ja-JP",
-    "jv-ID",
-    "kea-CV",
-    "kn-IN",
-    "kk-KZ",
-    "ko-KR",
-    "ky-KG",
-    "lv-LV",
-    "ln-CD",
-    "lt-LT",
-    "mk-MK",
-    "ms-MY",
-    "ml-IN",
-    "mt-MT",
-    "mr-IN",
-    "mn-MN",
-    "ne-NP",
-    "nb-NO",
-    "or-IN",
-    "pl-PL",
-    "pt-PT",
-    "pa-Guru-IN",
-    "ro-RO",
-    "ru-RU",
-    "sr-RS",
-    "sd-Arab-IN",
-    "sk-SK",
-    "sl-SI",
-    "es-419",
-    "sw-KE",
-    "sv-SE",
-    "tg-TJ",
-    "te-IN",
-    "th-TH",
-    "tr-TR",
-    "uk-UA",
-    "uz-UZ",
-    "vi-VN",
-];
-
-pub const XAI_LANGUAGES: [&str; 38] = [
-    "ar", "bs", "bg", "yue", "ca", "zh", "hr", "cs", "da", "nl", "en", "fil", "fi", "fr", "de",
-    "el", "hi", "hu", "id", "it", "ja", "ko", "mk", "ms", "nb", "fa", "pl", "pt", "ro", "ru", "sk",
-    "es", "sv", "th", "tr", "uk", "ur", "vi",
-];
 
 fn primary(code: &str) -> &str {
     match code.split('-').next().unwrap_or(code) {
@@ -199,7 +103,7 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             .language_codes
             .iter()
             .chain(asked.language.iter())
-            .find(|code| !GOOGLE_LANGUAGES.contains(&code.as_str()));
+            .find(|code| !catalog::GOOGLE_LANGUAGES.contains(&code.as_str()));
         if let Some(code) = unlisted {
             return Err(Error::Invalid(format!(
                 "Gemini takes only the language codes Google lists, such as fi-FI or es-US: \
@@ -297,7 +201,7 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
                     write_flac(audio, channels as u16, &path).and_then(|()| match asked.model {
                         SpeechModel::Xai => {
                             let bytes = std::fs::metadata(&path)?.len();
-                            if bytes > XAI_LIMIT {
+                            if bytes > catalog::XAI_REQUEST_BYTES {
                                 return Err(Error::Invalid(format!(
                                     "{} of audio is {:.0} MB of FLAC, over xAI's 500 MB: hear \
                                      less, or the In–Out range",
@@ -600,7 +504,12 @@ where
 
 fn xai_fields(asked: &Asked) -> Vec<(&'static str, String)> {
     let o = asked.xai.clone().unwrap_or_default();
-    let mut fields = vec![("model", o.model.clone().unwrap_or_else(|| XAI_MODEL.into()))];
+    let mut fields = vec![(
+        "model",
+        o.model
+            .clone()
+            .unwrap_or_else(|| catalog::XAI_SERVICE.model.into()),
+    )];
     if let Some(l) = &asked.language {
         fields.push(("language", l.clone()));
     }
@@ -674,7 +583,7 @@ fn xai(key: &str, path: &Path, asked: &Asked, started: Instant) -> Result<String
             .chain(std::io::Cursor::new(tail.into_bytes()));
         answer(
             agent()
-                .post(XAI_URL)
+                .post(catalog::XAI_SERVICE.url)
                 .header("Authorization", &auth)
                 .header(
                     "Content-Type",
@@ -736,7 +645,10 @@ fn google(key: &str, path: &Path, asked: &Asked, started: Instant) -> Result<Str
     let bytes = std::fs::metadata(path)?.len();
     let start = answer(
         agent()
-            .post(&format!("{GOOGLE}/upload/v1beta/files"))
+            .post(&format!(
+                "{}/upload/v1beta/files",
+                catalog::GOOGLE_SERVICE.url
+            ))
             .header("x-goog-api-key", key)
             .header("X-Goog-Upload-Protocol", "resumable")
             .header("X-Goog-Upload-Command", "start")
@@ -787,7 +699,7 @@ fn google_file_url(name: &str) -> Result<String> {
             "Google's file name {name:?} is not a files id"
         )));
     };
-    Ok(format!("{GOOGLE}/v1beta/files/{id}"))
+    Ok(format!("{}/v1beta/files/{id}", catalog::GOOGLE_SERVICE.url))
 }
 
 fn google_transcribe(
@@ -836,7 +748,10 @@ fn google_transcribe(
         move || {
             answer(
                 agent()
-                    .post(&format!("{GOOGLE}/v1beta/interactions"))
+                    .post(&format!(
+                        "{}/v1beta/interactions",
+                        catalog::GOOGLE_SERVICE.url
+                    ))
                     .header("x-goog-api-key", &key)
                     .header("Content-Type", "application/json")
                     .send(body),
@@ -865,7 +780,7 @@ fn google_request(asked: &Asked, uri: &str) -> Value {
         config["language_codes"] = json!(codes);
     }
     json!({
-        "model": o.model.unwrap_or_else(|| GOOGLE_MODEL.into()),
+        "model": o.model.unwrap_or_else(|| catalog::GOOGLE_SERVICE.model.into()),
         "input": [{ "type": "audio", "uri": uri, "mime_type": "audio/flac" }],
         "generation_config": { "transcription_config": config },
     })

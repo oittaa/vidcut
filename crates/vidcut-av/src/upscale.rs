@@ -9,23 +9,11 @@ use wgpu::util::DeviceExt;
 
 use crate::compute::{self, bytes, group, halves, words};
 use crate::error::{Error, Result};
-use crate::models::{self, Fetch, File, Need};
+use crate::models::{self, Fetch, Need};
+use vidcut_core::catalog::{self, NANOVSR_WEIGHTS as WEIGHTS};
 
-const RELEASE: &str = "https://github.com/filippawlicki/nanovsr/releases/download/v1.0";
-
-pub const WEIGHTS: File = File {
-    name: "nanovsr/nanovsr_5.4m.pth",
-    title: "NanoVSR 5.4M upscaler",
-    repo: "filippawlicki/nanovsr",
-    revision: "v1.0",
-    bytes: 24_624_333,
-    sha256: "42a53e1dc9b928947ea9cea85d7dd6f7bd82b325e92374dc1946d2cbcadf31bc",
-    gpu_gb: 0,
-    languages: &[],
-};
-
-pub const SCALE: u32 = 4;
-pub const FRAMES: usize = 15;
+pub const SCALE: u32 = catalog::NANOVSR_SCALE;
+pub const FRAMES: usize = catalog::NANOVSR_FRAMES;
 const FEATURES: usize = 96;
 const BLOCKS: usize = 30;
 const PADDED: usize = 8;
@@ -36,17 +24,6 @@ const MARGIN: usize = 4;
 const BLOCK: usize = 16;
 const OUT_BLOCK: usize = 64;
 const SHARED: u32 = ((8 * 18 * 18 + 8 * 9 * OUT_BLOCK) * 4) as u32;
-
-fn fetch_of(f: &File) -> Fetch {
-    let file = f.name.rsplit('/').next().unwrap_or(f.name);
-    Fetch {
-        url: format!("{RELEASE}/{file}"),
-        name: f.name.to_string(),
-        title: f.title.to_string(),
-        bytes: f.bytes,
-        sha256: f.sha256,
-    }
-}
 
 pub fn needed(dir: &Path) -> Vec<Need> {
     [WEIGHTS]
@@ -72,7 +49,7 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
         )));
     }
     models::network();
-    models::fetch(&fetch_of(&WEIGHTS), dir)?;
+    models::fetch(&Fetch::of(&WEIGHTS), dir)?;
     Ok(())
 }
 

@@ -2658,8 +2658,8 @@ pub enum SpeechModel {
     /// `send`.
     #[serde(rename = "xai")]
     Xai,
-    /// Google's `gemini-3.5-transcribe`, on Google's servers: 85 languages
-    /// and more, times per word, about $0.30 per hour of audio (October
+    /// Google's `gemini-3.5-transcribe`, on Google's servers: 83 languages,
+    /// times per word, about $0.30 per hour of audio (October
     /// 2026), 30 minutes of speech at most with word times, which vidcut
     /// always asks for: more is refused before anything is sent. It tells up
     /// to 8 speakers apart, 3 or more experimentally. It needs a Gemini key
@@ -2678,25 +2678,19 @@ impl SpeechModel {
     }
 
     pub fn dollars_per_hour(self) -> f64 {
-        match self {
-            Self::Xai => 0.10,
-            Self::Google => 0.30,
-            _ => 0.0,
-        }
+        crate::catalog::speech(self)
+            .price
+            .map_or(0.0, |p| p.dollars_per_hour)
     }
 
     pub fn longest_secs(self) -> Option<f64> {
-        match self {
-            Self::Google => Some(30.0 * 60.0),
-            _ => None,
-        }
+        crate::catalog::speech(self).most(crate::catalog::Measure::AudioSecs)
     }
 
     pub fn max_speakers(self) -> Option<u32> {
-        match self {
-            Self::Google => Some(8),
-            _ => None,
-        }
+        crate::catalog::speech(self)
+            .most(crate::catalog::Measure::Speakers)
+            .map(|n| n as u32)
     }
 
     pub const fn title(self) -> &'static str {
@@ -2733,10 +2727,9 @@ pub enum SpeakerModel {
 
 impl SpeakerModel {
     pub fn max_speakers(self) -> Option<u32> {
-        match self {
-            Self::Sortformer => Some(4),
-            _ => None,
-        }
+        crate::catalog::speakers(self)
+            .and_then(|m| m.most(crate::catalog::Measure::Speakers))
+            .map(|n| n as u32)
     }
 
     pub fn name(self) -> &'static str {
