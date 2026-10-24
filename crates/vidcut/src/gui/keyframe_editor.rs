@@ -182,7 +182,7 @@ pub struct Editor {
     view: Option<(f64, f64)>,
     held: Option<Held>,
     fresh: Option<(KeyParam, i64, Instant)>,
-    grab: Option<f64>,
+    grab: Option<(f64, (f64, f64))>,
 }
 
 impl Editor {
@@ -982,7 +982,6 @@ impl Workspace {
         let mut open = None;
         let editor = &mut self.key_editor;
         ui.horizontal(|ui| {
-            ui.label(RichText::new(name).strong());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.menu_button(DOTS_THREE, |ui| {
                     ui.radio_value(&mut editor.keyed_only, false, "Display All Parameters");
@@ -1028,6 +1027,9 @@ impl Workspace {
                 {
                     detail = true;
                 }
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    ui.add(egui::Label::new(RichText::new(name).strong()).truncate());
+                });
             });
         });
         if fit {
@@ -1097,7 +1099,11 @@ impl Workspace {
             hi = hi.max(t);
         }
         let span = plot.hi - plot.lo;
-        let map = TimeMap::of(lo.min(plot.lo), hi.max(plot.hi), rect);
+        let total = self
+            .key_editor
+            .grab
+            .map_or((lo.min(plot.lo), hi.max(plot.hi)), |(_, t)| t);
+        let map = TimeMap::of(total.0, total.1, rect);
         let painter = ui.painter_at(rect);
         let colors = theme::colors();
         let round = rect.height() / 2.0;
@@ -1114,21 +1120,20 @@ impl Workspace {
         let Some(pos) = resp.interact_pointer_pos() else {
             return;
         };
-        let grab = *self.key_editor.grab.get_or_insert_with(|| {
+        let (grab, total) = *self.key_editor.grab.get_or_insert_with(|| {
             let from = ui
                 .input(|i| i.pointer.press_origin())
                 .map_or(pos.x, |o| o.x);
             let t = map.time(from);
-            if (plot.lo..=plot.hi).contains(&t) {
+            let grab = if (plot.lo..=plot.hi).contains(&t) {
                 t - plot.lo
             } else {
                 span / 2.0
-            }
+            };
+            (grab, total)
         });
-        if hi - lo > span {
-            let start = (map.time(pos.x) - grab).clamp(lo, hi - span);
-            self.key_editor.view = Some((start, start + span));
-        }
+        let start = (map.time(pos.x) - grab).clamp(total.0, (total.1 - span).max(total.0));
+        self.key_editor.view = Some((start, start + span));
     }
 
     fn zoom_view(&mut self, ui: &egui::Ui, area: Rect, clip: &Clip, plot: Plot) {
