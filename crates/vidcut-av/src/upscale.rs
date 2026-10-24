@@ -2,48 +2,38 @@ use std::io::Read;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError, mpsc};
 
-use vidcut_core::model::{Media, NoiseReduction, Project};
+use vidcut_core::model::{Media, Project};
 use vidcut_core::render::VideoPiece;
 use wgpu::util::DeviceExt;
 
 use crate::error::{Error, Result};
 use crate::models::{self, Fetch, File, Need};
 
-const RELEASE: &str = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0";
+const RELEASE: &str = "https://github.com/filippawlicki/nanovsr/releases/download/v1.0";
 
-pub const GENERAL: File = File {
-    name: "real-esrgan/realesr-general-x4v3.pth",
-    title: "Real-ESRGAN upscaler",
-    repo: "xinntao/Real-ESRGAN",
-    revision: "v0.2.5.0",
-    bytes: 4_885_111,
-    sha256: "8dc7edb9ac80ccdc30c3a5dca6616509367f05fbc184ad95b731f05bece96292",
-    gpu_gb: 0,
-    languages: &[],
-};
-
-pub const GENTLE: File = File {
-    name: "real-esrgan/realesr-general-wdn-x4v3.pth",
-    title: "Real-ESRGAN upscaler, light denoise",
-    repo: "xinntao/Real-ESRGAN",
-    revision: "v0.2.5.0",
-    bytes: 4_885_111,
-    sha256: "1641f8c4464b9f097c9fdda5589273713f67cf59f3d909e0bd688f0cee269dca",
+pub const WEIGHTS: File = File {
+    name: "nanovsr/nanovsr_5.4m.pth",
+    title: "NanoVSR 5.4M upscaler",
+    repo: "filippawlicki/nanovsr",
+    revision: "v1.0",
+    bytes: 24_624_333,
+    sha256: "42a53e1dc9b928947ea9cea85d7dd6f7bd82b325e92374dc1946d2cbcadf31bc",
     gpu_gb: 0,
     languages: &[],
 };
 
 pub const SCALE: u32 = 4;
-pub const LARGEST: u64 = 4096 * 2304;
-const FEATURES: usize = 64;
-const MIDDLE: usize = 32;
-const LAYERS: usize = MIDDLE + 2;
+pub const FRAMES: usize = 15;
+const FEATURES: usize = 96;
+const BLOCKS: usize = 30;
 const PADDED: usize = 8;
-const OUT: usize = 3 * (SCALE * SCALE) as usize;
-const REACH: usize = LAYERS;
-const TILE: usize = 640;
+const EPS: f32 = 1e-5;
+const LEAK: f32 = 0.1;
+const TILE: usize = 256;
+const MARGIN: usize = 4;
 const BLOCK: usize = 16;
-const SHARED: u32 = ((8 * 18 * 18 + 8 * 9 * FEATURES) * 4) as u32;
+const OUT_BLOCK: usize = 64;
+const SHARED: u32 = ((8 * 18 * 18 + 8 * 9 * OUT_BLOCK) * 4) as u32;
 
 fn fetch_of(f: &File) -> Fetch {
     let file = f.name.rsplit('/').next().unwrap_or(f.name);
@@ -57,7 +47,7 @@ fn fetch_of(f: &File) -> Fetch {
 }
 
 pub fn needed(dir: &Path) -> Vec<Need> {
-    [GENERAL, GENTLE]
+    [WEIGHTS]
         .iter()
         .filter(|f| !models::present(dir, f))
         .map(|f| Need {
@@ -68,11 +58,7 @@ pub fn needed(dir: &Path) -> Vec<Need> {
 }
 
 pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
-    let missing: Vec<File> = [GENERAL, GENTLE]
-        .into_iter()
-        .filter(|f| !models::present(dir, f))
-        .collect();
-    if missing.is_empty() {
+    if models::present(dir, &WEIGHTS) {
         return Ok(());
     }
     if !download {
@@ -84,23 +70,12 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
         )));
     }
     models::network();
-    for f in &missing {
-        models::fetch(&fetch_of(f), dir)?;
-    }
+    models::fetch(&fetch_of(&WEIGHTS), dir)?;
     Ok(())
 }
 
 pub fn unfit(m: &Media) -> Option<&'static str> {
-    let v = m.video_as_read()?;
-    if v.hdr.is_some() {
-        return Some("HDR pictures");
-    }
-    let across = match v.sar {
-        [n, d] if n > 0 && d > 0 => f64::from(n) / f64::from(d),
-        _ => 1.0,
-    };
-    let shown = f64::from(v.width) * across * f64::from(v.height);
-    (shown > LARGEST as f64).then_some("pictures larger than 4K")
+    m.video_as_read()?.hdr.map(|_| "HDR pictures")
 }
 
 pub fn check<'a>(
@@ -143,101 +118,193 @@ pub fn check<'a>(
     with_engine(|_| Ok(()))
 }
 
-struct Weights {
+struct Conv {
     cin: usize,
     cout: usize,
     weights: Vec<f32>,
     bias: Vec<f32>,
-    alpha: Option<Vec<f32>>,
 }
 
-fn tensors(path: &Path) -> Result<Vec<Vec<f32>>> {
-    let file = std::fs::File::open(path)?;
-    let mut zip = zip::ZipArchive::new(file)
-        .map_err(|e| Error::Invalid(format!("{}: {e}", path.display())))?;
-    let mut out = Vec::new();
-    while let Ok(mut entry) = zip.by_name(&format!("archive/data/{}", out.len())) {
-        let mut bytes = Vec::new();
-        entry.read_to_end(&mut bytes)?;
-        out.push(
-            bytes
+struct Net {
+    extract: Conv,
+    forward: Vec<Conv>,
+    backward: Vec<Conv>,
+    fusion: Vec<f32>,
+    fusion_bias: Vec<f32>,
+    up1: Conv,
+    up1_alpha: f32,
+    up2: Conv,
+    up2_alpha: f32,
+    last: Conv,
+}
+
+struct Tensors {
+    path: std::path::PathBuf,
+    it: std::vec::IntoIter<Vec<u8>>,
+}
+
+impl Tensors {
+    fn open(path: &Path) -> Result<Self> {
+        let bad = |e: String| Error::Invalid(format!("{}: {e}", path.display()));
+        let file = std::fs::File::open(path)?;
+        let mut zip = zip::ZipArchive::new(file).map_err(|e| bad(e.to_string()))?;
+        let prefix = zip
+            .file_names()
+            .filter_map(|n| n.ok())
+            .find_map(|n| n.strip_suffix("data.pkl").map(str::to_string))
+            .ok_or_else(|| bad("no data.pkl".into()))?;
+        let mut all = Vec::new();
+        while let Ok(mut entry) = zip.by_name(&format!("{prefix}data/{}", all.len())) {
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes)?;
+            all.push(bytes);
+        }
+        Ok(Self {
+            path: path.to_path_buf(),
+            it: all.into_iter(),
+        })
+    }
+
+    fn bad(&self) -> Error {
+        Error::Invalid(format!(
+            "{}: not the weights of NanoVSR 5.4M",
+            self.path.display()
+        ))
+    }
+
+    fn floats(&mut self, n: usize) -> Result<Vec<f32>> {
+        match self.it.next() {
+            Some(b) if b.len() == n * 4 => Ok(b
                 .as_chunks::<4>()
                 .0
                 .iter()
-                .map(|b| f32::from_le_bytes(*b))
-                .collect(),
-        );
+                .map(|v| f32::from_le_bytes(*v))
+                .collect()),
+            _ => Err(self.bad()),
+        }
     }
-    Ok(out)
-}
 
-fn read(path: &Path) -> Result<Vec<Weights>> {
-    let bad = || {
-        Error::Invalid(format!(
-            "{}: not the weights of Real-ESRGAN's compact network",
-            path.display()
-        ))
-    };
-    let mut it = tensors(path)?.into_iter();
-    let mut out = Vec::new();
-    for l in 0..LAYERS {
-        let last = l == LAYERS - 1;
-        let cin = if l == 0 { 3 } else { FEATURES };
-        let cout = if last { OUT } else { FEATURES };
-        let w = it
-            .next()
-            .filter(|w| w.len() == cout * cin * 9)
-            .ok_or_else(bad)?;
-        let bias = it.next().filter(|b| b.len() == cout).ok_or_else(bad)?;
-        let alpha = if last {
-            None
-        } else {
-            Some(it.next().filter(|a| a.len() == FEATURES).ok_or_else(bad)?)
-        };
-        let padded = if l == 0 { PADDED } else { cin };
-        let mut weights = vec![0f32; padded * 9 * cout];
+    fn count(&mut self) -> Result<()> {
+        match self.it.next() {
+            Some(b) if b.len() == 8 => Ok(()),
+            _ => Err(self.bad()),
+        }
+    }
+
+    fn norm(&mut self, c: usize) -> Result<(Vec<f32>, Vec<f32>)> {
+        let gamma = self.floats(c)?;
+        let beta = self.floats(c)?;
+        let mean = self.floats(c)?;
+        let var = self.floats(c)?;
+        self.count()?;
+        let scale: Vec<f32> = gamma
+            .iter()
+            .zip(&var)
+            .map(|(g, v)| g / (v + EPS).sqrt())
+            .collect();
+        let shift = beta
+            .iter()
+            .zip(&mean)
+            .zip(&scale)
+            .map(|((b, m), s)| b - m * s)
+            .collect();
+        Ok((scale, shift))
+    }
+
+    fn block(&mut self, cin: usize, cout: usize) -> Result<Conv> {
+        let identity = (cin == cout).then(|| self.norm(cin)).transpose()?;
+        let dense = self.floats(cout * cin * 9)?;
+        let (s3, b3) = self.norm(cout)?;
+        let one = self.floats(cout * cin)?;
+        let (s1, b1) = self.norm(cout)?;
+        let mut weights = vec![0f32; cout * cin * 9];
+        let mut bias = vec![0f32; cout];
         for co in 0..cout {
             for ci in 0..cin {
                 for k in 0..9 {
-                    weights[(ci * 9 + k) * cout + co] = w[(co * cin + ci) * 9 + k];
+                    weights[(co * cin + ci) * 9 + k] = dense[(co * cin + ci) * 9 + k] * s3[co];
                 }
+                weights[(co * cin + ci) * 9 + 4] += one[co * cin + ci] * s1[co];
+            }
+            bias[co] = b3[co] + b1[co];
+            if let Some((si, bi)) = &identity {
+                weights[(co * cin + co) * 9 + 4] += si[co];
+                bias[co] += bi[co];
             }
         }
-        out.push(Weights {
-            cin: padded,
+        Ok(Conv {
+            cin,
             cout,
             weights,
             bias,
-            alpha,
-        });
-    }
-    if it.next().is_some() {
-        return Err(bad());
-    }
-    Ok(out)
-}
-
-fn mix(a: Vec<Weights>, b: &[Weights], s: f32) -> Vec<Weights> {
-    let m = |x: &mut [f32], y: &[f32]| {
-        for (p, q) in x.iter_mut().zip(y) {
-            *p = *p * s + q * (1.0 - s);
-        }
-    };
-    a.into_iter()
-        .zip(b)
-        .map(|(mut x, y)| {
-            m(&mut x.weights, &y.weights);
-            m(&mut x.bias, &y.bias);
-            if let (Some(p), Some(q)) = (&mut x.alpha, &y.alpha) {
-                m(p, q);
-            }
-            x
         })
-        .collect()
+    }
+
+    fn conv(&mut self, cin: usize, cout: usize, size: usize) -> Result<Conv> {
+        let weights = self.floats(cout * cin * size * size)?;
+        let bias = self.floats(cout)?;
+        Ok(Conv {
+            cin,
+            cout,
+            weights,
+            bias,
+        })
+    }
+
+    fn alpha(&mut self) -> Result<f32> {
+        Ok(self.floats(1)?[0])
+    }
 }
 
-fn conv_shader(cin: usize, cout: usize, prelu: bool) -> String {
-    let groups = cout / 16;
+fn read(path: &Path) -> Result<Net> {
+    let mut t = Tensors::open(path)?;
+    let extract = t.block(3, FEATURES)?;
+    let forward = (0..BLOCKS)
+        .map(|_| t.block(FEATURES, FEATURES))
+        .collect::<Result<Vec<_>>>()?;
+    let backward = (0..BLOCKS)
+        .map(|_| t.block(FEATURES, FEATURES))
+        .collect::<Result<Vec<_>>>()?;
+    let fusion = t.conv(2 * FEATURES, FEATURES, 1)?;
+    let up1 = t.conv(FEATURES, 4 * FEATURES, 3)?;
+    let up1_alpha = t.alpha()?;
+    let up2 = t.conv(FEATURES, 4 * 32, 3)?;
+    let up2_alpha = t.alpha()?;
+    let last = t.conv(32, 3, 3)?;
+    if t.it.next().is_some() {
+        return Err(t.bad());
+    }
+    Ok(Net {
+        extract,
+        forward,
+        backward,
+        fusion: fusion.weights,
+        fusion_bias: fusion.bias,
+        up1,
+        up1_alpha,
+        up2,
+        up2_alpha,
+        last,
+    })
+}
+
+fn laid_out(c: &Conv) -> (usize, usize, Vec<f32>, Vec<f32>) {
+    let cin = c.cin.next_multiple_of(PADDED);
+    let cout = c.cout.next_multiple_of(BLOCK);
+    let mut weights = vec![0f32; cin * 9 * cout];
+    for co in 0..c.cout {
+        for ci in 0..c.cin {
+            for k in 0..9 {
+                weights[(ci * 9 + k) * cout + co] = c.weights[(co * c.cin + ci) * 9 + k];
+            }
+        }
+    }
+    let mut bias = c.bias.clone();
+    bias.resize(cout, 0.0);
+    (cin, cout, weights, bias)
+}
+
+fn conv_shader(cin: usize, cout: usize, act: bool) -> String {
     let mut body = String::new();
     for ky in 0..3 {
         body += &format!(
@@ -248,7 +315,7 @@ fn conv_shader(cin: usize, cout: usize, prelu: bool) -> String {
         }
         for kx in 0..3 {
             body += &format!(
-                "            {{\n            let wb = (ci * 9u + {k}u) * (COUT / 4u) + g * 4u;\n",
+                "            {{\n            let wb = (ci * 9u + {k}u) * 16u + g * 4u;\n",
                 k = ky * 3 + kx
             );
             for q in 0..4 {
@@ -275,13 +342,13 @@ fn conv_shader(cin: usize, cout: usize, prelu: bool) -> String {
     let mut write = String::new();
     for j in 0..4 {
         write += &format!(
-            "    if (x0 + px + {j}u < size.w && y0 + py < size.h) {{\n        let o = ((y0 + py) * size.w + x0 + px + {j}u) * (COUT / 2u) + g * 8u;\n"
+            "    if (x0 + px + {j}u < size.w && y0 + py < size.h) {{\n        let o = ((y0 + py) * size.w + x0 + px + {j}u) * (COUT / 2u) + (base + g * 16u) / 2u;\n"
         );
         for q in 0..4 {
             write += &format!(
-                "        {{\n        let co = g * 16u + {q}u * 4u;\n        var v = a{j}{q} + vec4<f32>(bias[co], bias[co + 1u], bias[co + 2u], bias[co + 3u]);\n"
+                "        {{\n        let co = base + g * 16u + {q}u * 4u;\n        var v = a{j}{q} + vec4<f32>(bias[co], bias[co + 1u], bias[co + 2u], bias[co + 3u]);\n"
             );
-            if prelu {
+            if act {
                 write += "        let al = vec4<f32>(alpha[co], alpha[co + 1u], alpha[co + 2u], alpha[co + 3u]);\n        v = select(v * al, v, v >= vec4<f32>(0.0));\n";
             }
             write += &format!(
@@ -296,7 +363,6 @@ fn conv_shader(cin: usize, cout: usize, prelu: bool) -> String {
         r#"
 const CIN: u32 = {cin}u;
 const COUT: u32 = {cout}u;
-const GROUPS: u32 = {groups}u;
 const TILE: u32 = 16u;
 const HALO: u32 = 18u;
 const CHUNK: u32 = 8u;
@@ -310,7 +376,7 @@ struct Size {{ w: u32, h: u32 }}
 @group(0) @binding(5) var<storage, read_write> dst: array<u32>;
 
 var<workgroup> tile: array<f32, 2592>;
-var<workgroup> wts: array<vec4<f32>, {wcount}>;
+var<workgroup> wts: array<vec4<f32>, 1152>;
 
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) li: u32) {{
@@ -320,6 +386,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
     let py = p / 4u;
     let x0 = wg.x * TILE;
     let y0 = wg.y * TILE;
+    let base = wg.z * 64u;
+    let groups = min(4u, (COUT - base) / 16u);
+    let quads = groups * 4u;
 {decl}
     for (var c0 = 0u; c0 < CIN; c0 += CHUNK) {{
         for (var i = li; i < HALO * HALO * (CHUNK / 2u); i += 256u) {{
@@ -334,11 +403,15 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
             tile[(pair * 2u) * HALO * HALO + pos] = v.x;
             tile[(pair * 2u + 1u) * HALO * HALO + pos] = v.y;
         }}
-        for (var i = li; i < CHUNK * 9u * COUT / 4u; i += 256u) {{
-            wts[i] = weights[c0 * 9u * COUT / 4u + i];
+        for (var i = li; i < CHUNK * 9u * 16u; i += 256u) {{
+            let ck = i / 16u;
+            let q = i % 16u;
+            if (q < quads) {{
+                wts[i] = weights[(c0 * 9u + ck) * (COUT / 4u) + base / 4u + q];
+            }}
         }}
         workgroupBarrier();
-        if (g < GROUPS) {{
+        if (g < groups) {{
             for (var ci = 0u; ci < CHUNK; ci++) {{
 {body}
             }}
@@ -346,13 +419,12 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
         workgroupBarrier();
     }}
     _ = alpha[0];
-    if (g >= GROUPS) {{
+    if (g >= groups) {{
         return;
     }}
 {write}
 }}
-"#,
-        wcount = 8 * 9 * cout / 4,
+"#
     )
 }
 
@@ -376,12 +448,119 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 }
 "#;
 
-const SHUFFLE: &str = r#"
+const ADD: &str = r#"
+struct Count { n: u32, pad: u32 }
+@group(0) @binding(0) var<uniform> count: Count;
+@group(0) @binding(1) var<storage, read> a: array<u32>;
+@group(0) @binding(2) var<storage, read> b: array<u32>;
+@group(0) @binding(3) var<storage, read_write> dst: array<u32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) n: vec3<u32>) {
+    let i = id.y * n.x * 256u + id.x;
+    if (i >= count.n) {
+        return;
+    }
+    dst[i] = pack2x16float(unpack2x16float(a[i]) + unpack2x16float(b[i]));
+}
+"#;
+
+const FUSE: &str = r#"
+const F: u32 = 96u;
 struct Size { w: u32, h: u32 }
 @group(0) @binding(0) var<uniform> size: Size;
-@group(0) @binding(1) var<storage, read> conv: array<u32>;
+@group(0) @binding(1) var<storage, read> fwd: array<u32>;
+@group(0) @binding(2) var<storage, read> bwd: array<u32>;
+@group(0) @binding(3) var<storage, read> weights: array<f32>;
+@group(0) @binding(4) var<storage, read> bias: array<f32>;
+@group(0) @binding(5) var<storage, read_write> dst: array<u32>;
+
+@compute @workgroup_size(16, 16)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    if (id.x >= size.w || id.y >= size.h) {
+        return;
+    }
+    let p = (id.y * size.w + id.x) * (F / 2u);
+    var acc: array<f32, 96>;
+    for (var co = 0u; co < F; co++) {
+        acc[co] = bias[co];
+    }
+    for (var c = 0u; c < F / 2u; c++) {
+        let a = unpack2x16float(fwd[p + c]);
+        let b = unpack2x16float(bwd[p + c]);
+        for (var co = 0u; co < F; co++) {
+            let row = co * 2u * F;
+            acc[co] += weights[row + c * 2u] * a.x + weights[row + c * 2u + 1u] * a.y
+                + weights[row + F + c * 2u] * b.x + weights[row + F + c * 2u + 1u] * b.y;
+        }
+    }
+    for (var c = 0u; c < F / 2u; c++) {
+        dst[p + c] = pack2x16float(vec2<f32>(acc[c * 2u], acc[c * 2u + 1u]));
+    }
+}
+"#;
+
+fn shuffle_shader(cin: usize) -> String {
+    format!(
+        r#"
+const CIN: u32 = {cin}u;
+const COUT: u32 = {cout}u;
+struct Size {{ w: u32, h: u32 }}
+@group(0) @binding(0) var<uniform> size: Size;
+@group(0) @binding(1) var<storage, read> src: array<u32>;
+@group(0) @binding(2) var<storage, read_write> dst: array<u32>;
+
+fn at(p: u32, c: u32) -> f32 {{
+    let v = unpack2x16float(src[p * (CIN / 2u) + c / 2u]);
+    return select(v.x, v.y, c % 2u == 1u);
+}}
+
+@compute @workgroup_size(16, 16)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {{
+    let ow = size.w * 2u;
+    if (id.x >= ow || id.y >= size.h * 2u) {{
+        return;
+    }}
+    let p = (id.y / 2u) * size.w + id.x / 2u;
+    let sub = (id.y % 2u) * 2u + id.x % 2u;
+    let o = (id.y * ow + id.x) * (COUT / 2u);
+    for (var c = 0u; c < COUT; c += 2u) {{
+        dst[o + c / 2u] = pack2x16float(vec2<f32>(at(p, c * 4u + sub), at(p, (c + 1u) * 4u + sub)));
+    }}
+}}
+"#,
+        cout = cin / 4
+    )
+}
+
+const CROP: &str = r#"
+struct Crop { src_w: u32, x0: u32, y0: u32, w: u32, h: u32, words: u32, pad0: u32, pad1: u32 }
+@group(0) @binding(0) var<uniform> crop: Crop;
+@group(0) @binding(1) var<storage, read> src: array<u32>;
+@group(0) @binding(2) var<storage, read_write> dst: array<u32>;
+
+@compute @workgroup_size(16, 16)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    if (id.x >= crop.w * crop.words || id.y >= crop.h) {
+        return;
+    }
+    let x = id.x / crop.words;
+    let k = id.x % crop.words;
+    let s = ((crop.y0 + id.y) * crop.src_w + crop.x0 + x) * crop.words + k;
+    dst[(id.y * crop.w + x) * crop.words + k] = src[s];
+}
+"#;
+
+const FINISH: &str = r#"
+struct Size { w: u32, h: u32 }
+@group(0) @binding(0) var<uniform> size: Size;
+@group(0) @binding(1) var<storage, read> last: array<u32>;
 @group(0) @binding(2) var<storage, read> rgba: array<u32>;
 @group(0) @binding(3) var<storage, read_write> out: array<u32>;
+
+fn px(x: u32, y: u32) -> vec3<f32> {
+    return unpack4x8unorm(rgba[y * size.w + x]).xyz;
+}
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -389,35 +568,40 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     if (id.x >= ow || id.y >= size.h * 4u) {
         return;
     }
-    let p = (id.y / 4u) * size.w + id.x / 4u;
-    let sub = (id.y % 4u) * 4u + id.x % 4u;
-    var base = unpack4x8unorm(rgba[p]);
-    var rgb = vec3<f32>(0.0);
-    for (var c = 0u; c < 3u; c++) {
-        let ch = c * 16u + sub;
-        let pair = unpack2x16float(conv[p * 24u + ch / 2u]);
-        rgb[c] = select(pair.x, pair.y, ch % 2u == 1u) + base[c];
-    }
-    out[id.y * ow + id.x] = pack4x8unorm(vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0));
+    let sx = max((f32(id.x) + 0.5) / 4.0 - 0.5, 0.0);
+    let sy = max((f32(id.y) + 0.5) / 4.0 - 0.5, 0.0);
+    let x0 = min(u32(sx), size.w - 1u);
+    let y0 = min(u32(sy), size.h - 1u);
+    let x1 = min(x0 + 1u, size.w - 1u);
+    let y1 = min(y0 + 1u, size.h - 1u);
+    let fx = sx - f32(x0);
+    let fy = sy - f32(y0);
+    let base = mix(mix(px(x0, y0), px(x1, y0), fx), mix(px(x0, y1), px(x1, y1), fx), fy);
+    let o = (id.y * ow + id.x) * 8u;
+    let rg = unpack2x16float(last[o]);
+    let ba = unpack2x16float(last[o + 1u]);
+    let rgb = clamp(vec3<f32>(rg.x, rg.y, ba.x) + base, vec3<f32>(0.0), vec3<f32>(1.0));
+    out[id.y * ow + id.x] = pack4x8unorm(vec4<f32>(rgb, 1.0));
 }
 "#;
 
 struct Layer {
     pipeline: usize,
+    cout: usize,
     weights: wgpu::Buffer,
     bias: wgpu::Buffer,
     alpha: Option<wgpu::Buffer>,
 }
 
-struct Room {
-    pixels: usize,
-    size: wgpu::Buffer,
-    rgba: wgpu::Buffer,
-    input: wgpu::Buffer,
-    ping: wgpu::Buffer,
-    pong: wgpu::Buffer,
-    out: wgpu::Buffer,
-    read: wgpu::Buffer,
+struct Gpu {
+    extract: Layer,
+    forward: Vec<Layer>,
+    backward: Vec<Layer>,
+    fusion: wgpu::Buffer,
+    fusion_bias: wgpu::Buffer,
+    up1: Layer,
+    up2: Layer,
+    last: Layer,
 }
 
 struct Span {
@@ -433,13 +617,17 @@ fn spans(n: usize) -> Vec<Span> {
             let core = (k * each, ((k + 1) * each).min(n));
             Span {
                 core,
-                read: (core.0.saturating_sub(REACH), (core.1 + REACH).min(n)),
+                read: (core.0.saturating_sub(MARGIN), (core.1 + MARGIN).min(n)),
             }
         })
         .collect()
 }
 
 fn bytes(v: &[f32]) -> Vec<u8> {
+    v.iter().flat_map(|f| f.to_le_bytes()).collect()
+}
+
+fn words(v: &[u32]) -> Vec<u8> {
     v.iter().flat_map(|f| f.to_le_bytes()).collect()
 }
 
@@ -467,15 +655,107 @@ fn checked<T>(device: &wgpu::Device, run: impl FnOnce() -> Result<T>) -> Result<
     }
 }
 
+struct Pipelines {
+    convs: Vec<((usize, usize, bool), wgpu::ComputePipeline)>,
+    pack: wgpu::ComputePipeline,
+    add: wgpu::ComputePipeline,
+    fuse: wgpu::ComputePipeline,
+    shuffle1: wgpu::ComputePipeline,
+    shuffle2: wgpu::ComputePipeline,
+    crop: wgpu::ComputePipeline,
+    finish: wgpu::ComputePipeline,
+}
+
+struct Frame {
+    w: usize,
+    h: usize,
+    count: usize,
+    size: wgpu::Buffer,
+    pixels: wgpu::Buffer,
+    rgba: Vec<wgpu::Buffer>,
+    input: wgpu::Buffer,
+    feats: wgpu::Buffer,
+    xa: wgpu::Buffer,
+    xb: wgpu::Buffer,
+    zero: wgpu::Buffer,
+    states: Vec<wgpu::Buffer>,
+    back: [wgpu::Buffer; 2],
+    fused: wgpu::Buffer,
+}
+
+struct Tiles {
+    size1: wgpu::Buffer,
+    size2: wgpu::Buffer,
+    size4: wgpu::Buffer,
+    crop_feat: wgpu::Buffer,
+    crop_rgba: wgpu::Buffer,
+    feat: wgpu::Buffer,
+    rgba: wgpu::Buffer,
+    up1: wgpu::Buffer,
+    s1: wgpu::Buffer,
+    up2: wgpu::Buffer,
+    s2: wgpu::Buffer,
+    last: wgpu::Buffer,
+    out: wgpu::Buffer,
+    read: wgpu::Buffer,
+}
+
 struct Engine {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    convs: Vec<((usize, usize, bool), wgpu::ComputePipeline)>,
-    pack: wgpu::ComputePipeline,
-    shuffle: wgpu::ComputePipeline,
+    pipelines: Pipelines,
     none: wgpu::Buffer,
-    nets: Vec<(NoiseReduction, Vec<Layer>)>,
-    room: Option<Room>,
+    net: Option<Gpu>,
+    frame: Option<Frame>,
+    tiles: Option<Tiles>,
+}
+
+fn pipeline(device: &wgpu::Device, source: String) -> wgpu::ComputePipeline {
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("upscale"),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    });
+    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("upscale"),
+        layout: None,
+        module: &module,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    })
+}
+
+fn buffer(device: &wgpu::Device, size: usize, usage: wgpu::BufferUsages) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("upscale"),
+        size: size.max(4) as u64,
+        usage,
+        mapped_at_creation: false,
+    })
+}
+
+fn group(
+    device: &wgpu::Device,
+    pipeline: &wgpu::ComputePipeline,
+    buffers: &[&wgpu::Buffer],
+) -> wgpu::BindGroup {
+    let entries: Vec<wgpu::BindGroupEntry> = buffers
+        .iter()
+        .enumerate()
+        .map(|(i, b)| wgpu::BindGroupEntry {
+            binding: i as u32,
+            resource: b.as_entire_binding(),
+        })
+        .collect();
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &entries,
+    })
+}
+
+fn blocks(n: usize) -> u32 {
+    n.div_ceil(BLOCK) as u32
 }
 
 impl Engine {
@@ -502,45 +782,42 @@ impl Engine {
         }))
         .map_err(|e| format!("the GPU did not open for the AI upscaler: {e}"))?;
         let made = checked(&device, || {
-            let pipeline = |source: String| {
-                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("upscale"),
-                    source: wgpu::ShaderSource::Wgsl(source.into()),
-                });
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("upscale"),
-                    layout: None,
-                    module: &module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            };
-            let convs: Vec<_> = [
+            let convs = [
                 (PADDED, FEATURES, true),
                 (FEATURES, FEATURES, true),
-                (FEATURES, OUT, false),
+                (FEATURES, 4 * FEATURES, true),
+                (FEATURES, 4 * 32, true),
+                (32, BLOCK, false),
             ]
             .into_iter()
-            .map(|key| (key, pipeline(conv_shader(key.0, key.1, key.2))))
+            .map(|key| (key, pipeline(&device, conv_shader(key.0, key.1, key.2))))
             .collect();
+            let pipelines = Pipelines {
+                convs,
+                pack: pipeline(&device, PACK.into()),
+                add: pipeline(&device, ADD.into()),
+                fuse: pipeline(&device, FUSE.into()),
+                shuffle1: pipeline(&device, shuffle_shader(4 * FEATURES)),
+                shuffle2: pipeline(&device, shuffle_shader(4 * 32)),
+                crop: pipeline(&device, CROP.into()),
+                finish: pipeline(&device, FINISH.into()),
+            };
             let none = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("upscale-none"),
                 contents: &[0; 4],
                 usage: wgpu::BufferUsages::STORAGE,
             });
-            Ok((convs, pipeline(PACK.into()), pipeline(SHUFFLE.into()), none))
+            Ok((pipelines, none))
         });
-        let (convs, pack, shuffle, none) = made.map_err(|e| e.to_string())?;
+        let (pipelines, none) = made.map_err(|e| e.to_string())?;
         Ok(Self {
             device,
             queue,
-            convs,
-            pack,
-            shuffle,
+            pipelines,
             none,
-            nets: Vec::new(),
-            room: None,
+            net: None,
+            frame: None,
+            tiles: None,
         })
     }
 
@@ -553,181 +830,329 @@ impl Engine {
             })
     }
 
-    fn net(&mut self, noise: NoiseReduction) -> Result<usize> {
-        if let Some(i) = self.nets.iter().position(|(n, _)| *n == noise) {
-            return Ok(i);
+    fn layer(&self, c: &Conv, alpha: Option<f32>) -> Layer {
+        let (cin, cout, weights, bias) = laid_out(c);
+        let pipeline = self
+            .pipelines
+            .convs
+            .iter()
+            .position(|(key, _)| *key == (cin, cout, alpha.is_some()))
+            .expect("a pipeline for each layer");
+        Layer {
+            pipeline,
+            cout,
+            weights: self.storage(&bytes(&weights)),
+            bias: self.storage(&bytes(&bias)),
+            alpha: alpha.map(|a| self.storage(&bytes(&vec![a; cout]))),
+        }
+    }
+
+    fn load(&mut self) -> Result<()> {
+        if self.net.is_some() {
+            return Ok(());
         }
         let dir = vidcut_core::dirs::models();
         get_ready(&dir, false)?;
-        let general = read(&dir.join(GENERAL.name))?;
-        let gentle = read(&dir.join(GENTLE.name))?;
-        let layers = mix(general, &gentle, noise.strength())
-            .iter()
-            .map(|w| Layer {
-                pipeline: self
-                    .convs
-                    .iter()
-                    .position(|(key, _)| *key == (w.cin, w.cout, w.alpha.is_some()))
-                    .expect("a pipeline for each layer"),
-                weights: self.storage(&bytes(&w.weights)),
-                bias: self.storage(&bytes(&w.bias)),
-                alpha: w.alpha.as_ref().map(|a| self.storage(&bytes(a))),
-            })
-            .collect();
-        self.nets.push((noise, layers));
-        Ok(self.nets.len() - 1)
+        let net = read(&dir.join(WEIGHTS.name))?;
+        let gpu = Gpu {
+            extract: self.layer(&net.extract, Some(LEAK)),
+            forward: net
+                .forward
+                .iter()
+                .map(|c| self.layer(c, Some(LEAK)))
+                .collect(),
+            backward: net
+                .backward
+                .iter()
+                .map(|c| self.layer(c, Some(LEAK)))
+                .collect(),
+            fusion: self.storage(&bytes(&net.fusion)),
+            fusion_bias: self.storage(&bytes(&net.fusion_bias)),
+            up1: self.layer(&net.up1, Some(net.up1_alpha)),
+            up2: self.layer(&net.up2, Some(net.up2_alpha)),
+            last: self.layer(&net.last, None),
+        };
+        self.net = Some(gpu);
+        Ok(())
     }
 
-    fn make_room(&mut self, pixels: usize) {
-        if self.room.as_ref().is_some_and(|r| r.pixels >= pixels) {
+    fn make_frame(&mut self, (w, h): (usize, usize), count: usize) {
+        if self
+            .frame
+            .as_ref()
+            .is_some_and(|f| f.w == w && f.h == h && f.count >= count)
+        {
             return;
         }
-        let buffer = |size: usize, usage| {
-            self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("upscale"),
-                size: size as u64,
-                usage,
-                mapped_at_creation: false,
-            })
-        };
+        self.frame = None;
         use wgpu::BufferUsages as U;
-        let shown = pixels * (SCALE * SCALE) as usize * 4;
-        self.room = Some(Room {
-            pixels,
-            size: buffer(8, U::UNIFORM | U::COPY_DST),
-            rgba: buffer(pixels * 4, U::STORAGE | U::COPY_DST),
-            input: buffer(pixels * PADDED * 2, U::STORAGE),
-            ping: buffer(pixels * FEATURES * 2, U::STORAGE),
-            pong: buffer(pixels * FEATURES * 2, U::STORAGE),
-            out: buffer(shown, U::STORAGE | U::COPY_SRC),
-            read: buffer(shown, U::MAP_READ | U::COPY_DST),
+        let px = w * h;
+        let feat = px * FEATURES * 2;
+        let d = &self.device;
+        self.frame = Some(Frame {
+            w,
+            h,
+            count,
+            size: buffer(d, 8, U::UNIFORM | U::COPY_DST),
+            pixels: buffer(d, 8, U::UNIFORM | U::COPY_DST),
+            rgba: (0..count)
+                .map(|_| buffer(d, px * 4, U::STORAGE | U::COPY_DST))
+                .collect(),
+            input: buffer(d, px * PADDED * 2, U::STORAGE),
+            feats: buffer(d, feat, U::STORAGE),
+            xa: buffer(d, feat, U::STORAGE),
+            xb: buffer(d, feat, U::STORAGE),
+            zero: buffer(d, feat, U::STORAGE),
+            states: (0..count).map(|_| buffer(d, feat, U::STORAGE)).collect(),
+            back: [buffer(d, feat, U::STORAGE), buffer(d, feat, U::STORAGE)],
+            fused: buffer(d, feat, U::STORAGE),
         });
     }
 
-    fn binds(&self, net: usize) -> (wgpu::BindGroup, Vec<wgpu::BindGroup>, wgpu::BindGroup) {
-        let room = self.room.as_ref().expect("room made");
-        let group = |pipeline: &wgpu::ComputePipeline, buffers: &[&wgpu::Buffer]| {
-            let entries: Vec<wgpu::BindGroupEntry> = buffers
-                .iter()
-                .enumerate()
-                .map(|(i, b)| wgpu::BindGroupEntry {
-                    binding: i as u32,
-                    resource: b.as_entire_binding(),
-                })
-                .collect();
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &pipeline.get_bind_group_layout(0),
-                entries: &entries,
-            })
-        };
-        let pack = group(&self.pack, &[&room.size, &room.rgba, &room.input]);
-        let convs = self.nets[net]
-            .1
-            .iter()
-            .enumerate()
-            .map(|(l, layer)| {
-                let src = match l {
-                    0 => &room.input,
-                    l if l % 2 == 1 => &room.ping,
-                    _ => &room.pong,
-                };
-                let dst = if l % 2 == 0 { &room.ping } else { &room.pong };
-                group(
-                    &self.convs[layer.pipeline].1,
-                    &[
-                        &room.size,
-                        src,
-                        &layer.weights,
-                        &layer.bias,
-                        layer.alpha.as_ref().unwrap_or(&self.none),
-                        dst,
-                    ],
-                )
-            })
-            .collect();
-        let last = if LAYERS % 2 == 1 {
-            &room.ping
-        } else {
-            &room.pong
-        };
-        let shuffle = group(&self.shuffle, &[&room.size, last, &room.rgba, &room.out]);
-        (pack, convs, shuffle)
+    fn make_tiles(&mut self) {
+        if self.tiles.is_some() {
+            return;
+        }
+        use wgpu::BufferUsages as U;
+        let side = TILE + 2 * MARGIN;
+        let (p1, p2, p4) = (side * side, side * side * 4, side * side * 16);
+        let d = &self.device;
+        self.tiles = Some(Tiles {
+            size1: buffer(d, 8, U::UNIFORM | U::COPY_DST),
+            size2: buffer(d, 8, U::UNIFORM | U::COPY_DST),
+            size4: buffer(d, 8, U::UNIFORM | U::COPY_DST),
+            crop_feat: buffer(d, 32, U::UNIFORM | U::COPY_DST),
+            crop_rgba: buffer(d, 32, U::UNIFORM | U::COPY_DST),
+            feat: buffer(d, p1 * FEATURES * 2, U::STORAGE),
+            rgba: buffer(d, p1 * 4, U::STORAGE),
+            up1: buffer(d, p1 * 4 * FEATURES * 2, U::STORAGE),
+            s1: buffer(d, p2 * FEATURES * 2, U::STORAGE),
+            up2: buffer(d, p2 * 4 * 32 * 2, U::STORAGE),
+            s2: buffer(d, p4 * 32 * 2, U::STORAGE),
+            last: buffer(d, p4 * BLOCK * 2, U::STORAGE),
+            out: buffer(d, p4 * 4, U::STORAGE | U::COPY_SRC),
+            read: buffer(d, p4 * 4, U::MAP_READ | U::COPY_DST),
+        });
     }
 
-    fn run(
-        &mut self,
-        rgb: &[u8],
+    fn conv(
+        &self,
+        pass: &mut wgpu::ComputePass,
+        layer: &Layer,
+        (size, src, dst): (&wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer),
         (w, h): (usize, usize),
-        noise: NoiseReduction,
-    ) -> Result<Vec<u8>> {
+    ) {
+        let pipeline = &self.pipelines.convs[layer.pipeline].1;
+        let bind = group(
+            &self.device,
+            pipeline,
+            &[
+                size,
+                src,
+                &layer.weights,
+                &layer.bias,
+                layer.alpha.as_ref().unwrap_or(&self.none),
+                dst,
+            ],
+        );
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.dispatch_workgroups(blocks(w), blocks(h), layer.cout.div_ceil(OUT_BLOCK) as u32);
+    }
+
+    fn simple(
+        &self,
+        pass: &mut wgpu::ComputePass,
+        pipeline: &wgpu::ComputePipeline,
+        buffers: &[&wgpu::Buffer],
+        (x, y): (u32, u32),
+    ) {
+        let bind = group(&self.device, pipeline, buffers);
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.dispatch_workgroups(x, y, 1);
+    }
+
+    fn chain(
+        &self,
+        pass: &mut wgpu::ComputePass,
+        layers: &[Layer],
+        (i, prev, dst): (usize, &wgpu::Buffer, &wgpu::Buffer),
+    ) {
+        let f = self.frame.as_ref().expect("frame made");
+        let (w, h) = (f.w, f.h);
+        let net = self.net.as_ref().expect("loaded");
+        self.simple(
+            pass,
+            &self.pipelines.pack,
+            &[&f.size, &f.rgba[i], &f.input],
+            (blocks(w), blocks(h)),
+        );
+        self.conv(pass, &net.extract, (&f.size, &f.input, &f.feats), (w, h));
+        let n = (w * h * FEATURES / 2) as u32;
+        let groups = n.div_ceil(256);
+        let (gx, gy) = (groups.min(65535), groups.div_ceil(65535));
+        self.simple(
+            pass,
+            &self.pipelines.add,
+            &[&f.pixels, &f.feats, prev, &f.xa],
+            (gx, gy),
+        );
+        let last = layers.len() - 1;
+        for (k, layer) in layers.iter().enumerate() {
+            let (src, out) = if k % 2 == 0 {
+                (&f.xa, &f.xb)
+            } else {
+                (&f.xb, &f.xa)
+            };
+            let out = if k == last { dst } else { out };
+            self.conv(pass, layer, (&f.size, src, out), (w, h));
+        }
+    }
+
+    fn run(&mut self, frames: &[Vec<u8>], (w, h): (usize, usize)) -> Result<Vec<Vec<u8>>> {
         let device = self.device.clone();
         checked(&device, || {
-            let net = self.net(noise)?;
-            let (cols, rows) = (spans(w), spans(h));
-            let widest = cols.iter().map(|s| s.read.1 - s.read.0).max().unwrap_or(0);
-            let tallest = rows.iter().map(|s| s.read.1 - s.read.0).max().unwrap_or(0);
-            self.make_room(widest * tallest);
-            let binds = self.binds(net);
-            let scale = SCALE as usize;
-            let mut out = vec![0u8; w * scale * h * scale * 3];
-            for row in &rows {
-                for col in &cols {
-                    self.tile(rgb, w, (col, row), (net, &binds), &mut out)?;
+            self.load()?;
+            self.make_frame((w, h), frames.len());
+            self.make_tiles();
+            let f = self.frame.as_ref().expect("frame made");
+            let n = (w * h * FEATURES / 2) as u32;
+            self.queue
+                .write_buffer(&f.size, 0, &words(&[w as u32, h as u32]));
+            self.queue.write_buffer(&f.pixels, 0, &words(&[n, 0]));
+            for (i, rgb) in frames.iter().enumerate() {
+                let rgba: Vec<u32> = rgb
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
+                    .map(|p| u32::from_le_bytes([p[0], p[1], p[2], 255]))
+                    .collect();
+                self.queue.write_buffer(&f.rgba[i], 0, &words(&rgba));
+            }
+            let net = self.net.as_ref().expect("loaded");
+            let mut enc = self.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = enc.begin_compute_pass(&Default::default());
+                for i in 0..frames.len() {
+                    let prev = if i == 0 { &f.zero } else { &f.states[i - 1] };
+                    self.chain(&mut pass, &net.forward, (i, prev, &f.states[i]));
                 }
             }
-            Ok(out)
+            self.queue.submit([enc.finish()]);
+            let mut outs = vec![Vec::new(); frames.len()];
+            for i in (0..frames.len()).rev() {
+                let prev = if i + 1 == frames.len() {
+                    &f.zero
+                } else {
+                    &f.back[(i + 1) % 2]
+                };
+                let mut enc = self.device.create_command_encoder(&Default::default());
+                {
+                    let mut pass = enc.begin_compute_pass(&Default::default());
+                    self.chain(&mut pass, &net.backward, (i, prev, &f.back[i % 2]));
+                    self.simple(
+                        &mut pass,
+                        &self.pipelines.fuse,
+                        &[
+                            &f.size,
+                            &f.states[i],
+                            &f.back[i % 2],
+                            &net.fusion,
+                            &net.fusion_bias,
+                            &f.fused,
+                        ],
+                        (blocks(w), blocks(h)),
+                    );
+                }
+                self.queue.submit([enc.finish()]);
+                outs[i] = self.enlarge(i)?;
+            }
+            Ok(outs)
         })
     }
 
-    fn tile(
-        &self,
-        rgb: &[u8],
-        w: usize,
-        (col, row): (&Span, &Span),
-        (net, (pack, convs, shuffle)): (
-            usize,
-            &(wgpu::BindGroup, Vec<wgpu::BindGroup>, wgpu::BindGroup),
-        ),
-        out: &mut [u8],
-    ) -> Result<()> {
-        let room = self.room.as_ref().expect("room made");
-        let (tw, th) = (col.read.1 - col.read.0, row.read.1 - row.read.0);
-        let mut rgba = Vec::with_capacity(tw * th * 4);
-        for y in row.read.0..row.read.1 {
-            let line = &rgb[(y * w + col.read.0) * 3..(y * w + col.read.1) * 3];
-            for px in line.as_chunks::<3>().0 {
-                rgba.extend_from_slice(&[px[0], px[1], px[2], 255]);
+    fn enlarge(&self, i: usize) -> Result<Vec<u8>> {
+        let f = self.frame.as_ref().expect("frame made");
+        let (w, h) = (f.w, f.h);
+        let scale = SCALE as usize;
+        let mut out = vec![0u8; w * scale * h * scale * 3];
+        for row in spans(h) {
+            for col in spans(w) {
+                self.tile(i, (&col, &row), &mut out)?;
             }
         }
-        let size: Vec<u8> = [tw as u32, th as u32]
-            .iter()
-            .flat_map(|v| v.to_le_bytes())
-            .collect();
-        self.queue.write_buffer(&room.size, 0, &size);
-        self.queue.write_buffer(&room.rgba, 0, &rgba);
-        let scale = SCALE as usize;
-        let (ow, oh) = (tw * scale, th * scale);
-        let shown = (ow * oh * 4) as u64;
-        let blocks = |n: usize| n.div_ceil(BLOCK) as u32;
+        Ok(out)
+    }
+
+    fn tile(&self, i: usize, (col, row): (&Span, &Span), out: &mut [u8]) -> Result<()> {
+        let f = self.frame.as_ref().expect("frame made");
+        let t = self.tiles.as_ref().expect("tiles made");
+        let net = self.net.as_ref().expect("loaded");
+        let (tw, th) = (col.read.1 - col.read.0, row.read.1 - row.read.0);
+        let (x0, y0) = (col.read.0 as u32, row.read.0 as u32);
+        let q = &self.queue;
+        q.write_buffer(&t.size1, 0, &words(&[tw as u32, th as u32]));
+        q.write_buffer(&t.size2, 0, &words(&[tw as u32 * 2, th as u32 * 2]));
+        q.write_buffer(&t.size4, 0, &words(&[tw as u32 * 4, th as u32 * 4]));
+        let feat_words = (FEATURES / 2) as u32;
+        let crop =
+            |words_per: u32| words(&[f.w as u32, x0, y0, tw as u32, th as u32, words_per, 0, 0]);
+        q.write_buffer(&t.crop_feat, 0, &crop(feat_words));
+        q.write_buffer(&t.crop_rgba, 0, &crop(1));
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = enc.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&self.pack);
-            pass.set_bind_group(0, pack, &[]);
-            pass.dispatch_workgroups(blocks(tw), blocks(th), 1);
-            for (layer, bind) in self.nets[net].1.iter().zip(convs) {
-                pass.set_pipeline(&self.convs[layer.pipeline].1);
-                pass.set_bind_group(0, bind, &[]);
-                pass.dispatch_workgroups(blocks(tw), blocks(th), 1);
-            }
-            pass.set_pipeline(&self.shuffle);
-            pass.set_bind_group(0, shuffle, &[]);
-            pass.dispatch_workgroups(blocks(ow), blocks(oh), 1);
+            self.simple(
+                &mut pass,
+                &self.pipelines.crop,
+                &[&t.crop_feat, &f.fused, &t.feat],
+                (blocks(tw * FEATURES / 2), blocks(th)),
+            );
+            self.simple(
+                &mut pass,
+                &self.pipelines.crop,
+                &[&t.crop_rgba, &f.rgba[i], &t.rgba],
+                (blocks(tw), blocks(th)),
+            );
+            self.conv(&mut pass, &net.up1, (&t.size1, &t.feat, &t.up1), (tw, th));
+            self.simple(
+                &mut pass,
+                &self.pipelines.shuffle1,
+                &[&t.size1, &t.up1, &t.s1],
+                (blocks(tw * 2), blocks(th * 2)),
+            );
+            self.conv(
+                &mut pass,
+                &net.up2,
+                (&t.size2, &t.s1, &t.up2),
+                (tw * 2, th * 2),
+            );
+            self.simple(
+                &mut pass,
+                &self.pipelines.shuffle2,
+                &[&t.size2, &t.up2, &t.s2],
+                (blocks(tw * 4), blocks(th * 4)),
+            );
+            self.conv(
+                &mut pass,
+                &net.last,
+                (&t.size4, &t.s2, &t.last),
+                (tw * 4, th * 4),
+            );
+            self.simple(
+                &mut pass,
+                &self.pipelines.finish,
+                &[&t.size1, &t.last, &t.rgba, &t.out],
+                (blocks(tw * 4), blocks(th * 4)),
+            );
         }
-        enc.copy_buffer_to_buffer(&room.out, 0, &room.read, 0, shown);
+        let scale = SCALE as usize;
+        let (ow, oh) = (tw * scale, th * scale);
+        let shown = (ow * oh * 4) as u64;
+        enc.copy_buffer_to_buffer(&t.out, 0, &t.read, 0, shown);
         self.queue.submit([enc.finish()]);
-        let slice = room.read.slice(..shown);
+        let slice = t.read.slice(..shown);
         let (tx, rx) = mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
@@ -738,11 +1163,11 @@ impl Engine {
         rx.recv().map_err(gpu_error)?.map_err(gpu_error)?;
         {
             let data = slice.get_mapped_range().map_err(gpu_error)?;
-            let into = w * scale * 3;
+            let into = f.w * scale * 3;
+            let first = (col.core.0 - col.read.0) * scale;
+            let count = (col.core.1 - col.core.0) * scale;
             for y in (row.core.0 - row.read.0) * scale..(row.core.1 - row.read.0) * scale {
                 let to = (row.read.0 * scale + y) * into + col.core.0 * scale * 3;
-                let first = (col.core.0 - col.read.0) * scale;
-                let count = (col.core.1 - col.core.0) * scale;
                 let from = &data[(y * ow + first) * 4..(y * ow + first + count) * 4];
                 for (d, s) in out[to..to + count * 3]
                     .as_chunks_mut::<3>()
@@ -754,7 +1179,7 @@ impl Engine {
                 }
             }
         }
-        room.read.unmap();
+        t.read.unmap();
         Ok(())
     }
 }
@@ -769,6 +1194,11 @@ fn with_engine<T>(run: impl FnOnce(&mut Engine) -> Result<T>) -> Result<T> {
     }
 }
 
-pub(crate) fn upscale(rgb: &[u8], size: (usize, usize), noise: NoiseReduction) -> Result<Vec<u8>> {
-    with_engine(|e| e.run(rgb, size, noise))
+pub(crate) fn upscale(frames: &[Vec<u8>], size: (usize, usize)) -> Result<Vec<Vec<u8>>> {
+    with_engine(|e| {
+        let out = e.run(frames, size);
+        e.frame = None;
+        e.tiles = None;
+        out
+    })
 }

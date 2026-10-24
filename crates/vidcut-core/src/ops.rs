@@ -19,8 +19,8 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, ColorSpace, Marker, NoiseReduction, Project, ScaleFactor, Sharpness, Speed,
-    Track, TrackClip, TrackKind, Upscaler,
+    Clip, ClipAudio, ColorSpace, Marker, Project, ScaleFactor, Sharpness, Speed, Track, TrackClip,
+    TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -1752,7 +1752,6 @@ pub struct SuperScaleSet {
     pub factor: Option<ScaleFactor>,
     pub sharpness: Option<Sharpness>,
     pub upscaler: Option<Upscaler>,
-    pub noise_reduction: Option<NoiseReduction>,
 }
 
 impl SuperScaleSet {
@@ -1775,7 +1774,6 @@ pub fn set_media_super_scale(p: &mut Project, ids: &[String], set: SuperScaleSet
         s.factor = set.factor.unwrap_or(s.factor);
         s.sharpness = set.sharpness.unwrap_or(s.sharpness);
         s.upscaler = set.upscaler.unwrap_or(s.upscaler);
-        s.noise_reduction = set.noise_reduction.unwrap_or(s.noise_reduction);
     }
     Ok(())
 }

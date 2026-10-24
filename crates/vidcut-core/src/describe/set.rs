@@ -706,9 +706,6 @@ impl Words<'_> {
         s.put("upscaler", "Upscaler", &upscaler, |m| {
             json!(m.super_scale.upscaler)
         });
-        s.put("noise_reduction", "Noise Reduction", &word, |m| {
-            json!(m.super_scale.noise_reduction)
-        });
         s.f.text()
     }
 
