@@ -373,10 +373,10 @@ fn emit(m: u32, n: u32, val: vec4<f32>) {{
 
 const UNPACK16: &str = r#"
 fn unpack16(w: vec4<u32>) -> array<vec4<f16>, 2> {
-    let x = bitcast<vec2<f16>>(w.x);
-    let y = bitcast<vec2<f16>>(w.y);
-    let z = bitcast<vec2<f16>>(w.z);
-    let v = bitcast<vec2<f16>>(w.w);
+    let x = vec2<f16>(unpack2x16float(w.x));
+    let y = vec2<f16>(unpack2x16float(w.y));
+    let z = vec2<f16>(unpack2x16float(w.z));
+    let v = vec2<f16>(unpack2x16float(w.w));
     return array<vec4<f16>, 2>(vec4<f16>(x.x, y.x, z.x, v.x), vec4<f16>(x.y, y.y, z.y, v.y));
 }
 "#;

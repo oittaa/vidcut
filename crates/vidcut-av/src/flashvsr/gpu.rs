@@ -176,7 +176,7 @@ impl Gpu {
 
     pub(super) fn half(&self, body: &str) -> String {
         let h2 = if self.f16 {
-            "enable f16;\n\nfn h2(w: u32) -> vec2<f32> {\n    return vec2<f32>(bitcast<vec2<f16>>(w));\n}\n"
+            "enable f16;\n\nfn h2(w: u32) -> vec2<f32> {\n    return vec2<f32>(vec2<f16>(unpack2x16float(w)));\n}\n"
         } else {
             "fn h2(w: u32) -> vec2<f32> {\n    return unpack2x16float(w);\n}\n"
         };
