@@ -3,6 +3,8 @@ use std::path::Path;
 use vidcut_core::model::{Media, Project, Upscaler};
 use vidcut_core::render::RenderPlan;
 
+use vidcut_core::catalog::{self, Measure};
+
 use crate::error::Result;
 use crate::models::Need;
 
@@ -23,11 +25,14 @@ pub fn get_ready(dir: &Path, upscaler: Upscaler, download: bool) -> Result<()> {
 }
 
 pub fn unfit(m: &Media, upscaler: Upscaler) -> Option<&'static str> {
-    match upscaler {
-        Upscaler::AiFast => crate::upscale::unfit(m),
-        Upscaler::AiBest => crate::flashvsr::unfit(m),
-        Upscaler::Classic => None,
-    }
+    let model = match upscaler {
+        Upscaler::AiFast => &catalog::NANOVSR,
+        Upscaler::AiBest => &catalog::FLASHVSR,
+        Upscaler::Classic => return None,
+    };
+    let hdr = m.video_as_read()?.hdr.is_some();
+    let verdict = catalog::check(model, &[(Measure::HdrPictures, f64::from(u8::from(hdr)))]);
+    verdict.refusals.first().map(|_| "HDR pictures")
 }
 
 pub fn name(upscaler: Upscaler) -> &'static str {

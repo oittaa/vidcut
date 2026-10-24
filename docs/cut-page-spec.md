@@ -1814,6 +1814,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Its Automatic also names that model.
   - A kept transcript is used again only when the selected model told its speakers.
   - A Gemini request takes 30 minutes of speech at most (`SpeechModel::longest_secs`). More is refused before anything is sent.
+  - The answer warns when Gemini tells 8 speakers apart, its most.
+  - xAI takes 100 words to listen for at most, of 50 characters each. More is refused before anything is sent.
   - A word gets the speaker heard over most of it.
   - A person is `Speaker N` until named.
   - These belong to the project (`speakers.*`): names, colors, speakers joined across files, and words given to another person.

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use vidcut_core::catalog;
+use vidcut_core::catalog::{self, Measure};
 use vidcut_core::render::RenderPlan;
 use vidcut_core::request::{FindSpeech, SpeechModel};
 use vidcut_core::transcript::{Asked, RATE, Said, Speech, Timing, Word};
@@ -111,6 +111,31 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
             )));
         }
     }
+    if asked.model == SpeechModel::Xai {
+        let terms = asked.xai.as_ref().map_or(&[][..], |x| &x.keyterm[..]);
+        let longest = terms.iter().map(|t| t.chars().count()).max().unwrap_or(0);
+        let verdict = catalog::check(
+            &catalog::XAI,
+            &[
+                (Measure::Terms, terms.len() as f64),
+                (Measure::TermChars, longest as f64),
+            ],
+        );
+        if let Some(o) = verdict.refusals.first() {
+            return Err(Error::Invalid(match o.limit.measure {
+                Measure::Terms => format!(
+                    "{} words to listen for are over the {:.0} that xAI takes",
+                    terms.len(),
+                    o.limit.value
+                ),
+                _ => format!(
+                    "a word to listen for has {longest} characters, over the {:.0} that xAI \
+                     takes",
+                    o.limit.value
+                ),
+            }));
+        }
+    }
     let started = Instant::now();
     let service = match asked.model {
         SpeechModel::Google => "google",
@@ -162,14 +187,16 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
         }
     }
     let length = (joined.len() / channels) as i64;
-    if let Some(longest) = asked.model.longest_secs()
-        && secs(length) > longest
-    {
+    let verdict = catalog::check(
+        catalog::speech(asked.model),
+        &[(Measure::AudioSecs, secs(length))],
+    );
+    if let Some(o) = verdict.refusals.first() {
         return Err(Error::Invalid(format!(
             "{} of speech is over the {:.0} minutes {} takes: hear less, or a shorter In–Out \
              range",
             clock(secs(length)),
-            longest / 60.0,
+            o.limit.value / 60.0,
             asked.model.title()
         )));
     }
@@ -201,12 +228,17 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
                     write_flac(audio, channels as u16, &path).and_then(|()| match asked.model {
                         SpeechModel::Xai => {
                             let bytes = std::fs::metadata(&path)?.len();
-                            if bytes > catalog::XAI_REQUEST_BYTES {
+                            let verdict = catalog::check(
+                                &catalog::XAI,
+                                &[(Measure::RequestBytes, bytes as f64)],
+                            );
+                            if let Some(o) = verdict.refusals.first() {
                                 return Err(Error::Invalid(format!(
-                                    "{} of audio is {:.0} MB of FLAC, over xAI's 500 MB: hear \
+                                    "{} of audio is {:.0} MB of FLAC, over xAI's {:.0} MB: hear \
                                      less, or the In–Out range",
                                     clock(secs(b - a)),
-                                    bytes as f64 / 1e6
+                                    bytes as f64 / 1e6,
+                                    o.limit.value / 1e6
                                 )));
                             }
                             xai(&key, &path, asked, started)
@@ -252,6 +284,30 @@ pub fn transcribe(plans: &[&RenderPlan], asked: &Asked, options: &Options) -> Re
                 false => None,
             },
         });
+    }
+    if service_speakers {
+        let mut heard: Vec<u32> = per_file
+            .iter()
+            .flatten()
+            .filter_map(|w| w.speaker)
+            .collect();
+        heard.sort_unstable();
+        heard.dedup();
+        let verdict = catalog::check(
+            catalog::speech(asked.model),
+            &[(Measure::Speakers, heard.len() as f64)],
+        );
+        if let Some(o) = verdict.warnings.first() {
+            let full = format!(
+                "{:.0} speakers, the most {} tells apart: more people may share their numbers; \
+                 Same Person As, Separate and Assign To fix them",
+                o.limit.value,
+                asked.model.title()
+            );
+            for w in &mut warnings {
+                w.push(full.clone());
+            }
+        }
     }
     let notes: Vec<String> = kept_note(company, reused, requests.len())
         .into_iter()

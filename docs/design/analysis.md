@@ -228,6 +228,18 @@ flowchart TD
   - The editor refuses without `send` (`upload_check`). It gives the duration, the size (`transcript::upload_mb`) and the cost (`transcript::cost`).
 - **Limits and where they come from:**
   - The numbers to which vidcut holds a model are in its `catalog::Model`, with the other facts of the model. Each number comes from the documentation of the maker, or is marked as not recorded.
+  - `catalog::check` compares the values of a job with the limits of its model. A hard limit gives a refusal. A cap or a soft limit gives a warning.
+  - The direction of a limit is in `Measure::direction`:
+    - `Direction::Most`: the value must not be above the limit.
+    - `Direction::Least`: the value must not be below the limit, as the GPU memory of a speech model.
+    - `Direction::Reached`: a count of the result, as the speakers. At the limit, more people can share one number.
+  - These call it:
+    - `speech_api::transcribe`: the length of a Gemini request, the size of an xAI request and xAI's words to listen for.
+    - `speech_api::transcribe` also tests the speakers that a service tells apart.
+    - `ai::unfit`: the HDR pictures of the AI upscalers.
+    - `transcribe::short_of_memory`: the GPU memory of a speech model.
+  - For multichannel xAI, a file is heard with at most the channels in the catalog (`channels_of`).
+  - Sortformer's warning uses the most that transcribe.cpp reports when the model loads (`full`).
   - Gemini 3.5 Transcribe takes 30 minutes of audio with word times or diarization. vidcut always asks for word times.
   - It tells up to 8 speakers apart. Speaker counts of 3 or more are experimental.
   - `SpeechModel::longest_secs` and `SpeechModel::max_speakers` read them from `catalog::GOOGLE`. The source is the model page of Google, https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe.
