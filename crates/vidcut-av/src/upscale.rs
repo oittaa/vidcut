@@ -521,7 +521,7 @@ fn winograd(c: &Conv) -> Vec<f32> {
     u
 }
 
-fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool) -> String {
+fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool, half: bool) -> String {
     let mut decl = String::new();
     for k in 0..8 {
         for h in 0..2 {
@@ -531,7 +531,7 @@ fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool) -> String {
     let mut body = String::new();
     for ci in 0..8 {
         body += &format!(
-            "        {{\n        let vq = sm[({ci}u * 16u + tv) * 4u + a];\n        let uq = sm[512u + ({ci}u * 16u + t) * 4u + b];\n        let v0 = vec4<f32>(unpack2x16float(vq.x), unpack2x16float(vq.y));\n        let v1 = vec4<f32>(unpack2x16float(vq.z), unpack2x16float(vq.w));\n        let u0 = vec4<f32>(unpack2x16float(uq.x), unpack2x16float(uq.y));\n        let u1 = vec4<f32>(unpack2x16float(uq.z), unpack2x16float(uq.w));\n"
+            "        {{\n        let vq = sm[({ci}u * 16u + tv) * 4u + a];\n        let uq = sm[512u + ({ci}u * 16u + t) * 4u + b];\n        let v0 = vec4<f32>(unh(vq.x), unh(vq.y));\n        let v1 = vec4<f32>(unh(vq.z), unh(vq.w));\n        let u0 = vec4<f32>(unh(uq.x), unh(uq.y));\n        let u1 = vec4<f32>(unh(uq.z), unh(uq.w));\n"
         );
         for k in 0..8 {
             let v = format!("v{}.{}", k / 4, ["x", "y", "z", "w"][k % 4]);
@@ -545,7 +545,7 @@ fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool) -> String {
     for k in 0..8 {
         let (from, c) = (["va", "vb"][k / 4], ["x", "y", "z", "w"][k % 4]);
         store += &format!(
-            "            {{\n            let t = th * 8u + {k}u;\n            sm[(tc * 16u + (t ^ (t >> 3u))) * 4u + tp / 4u][tp % 4u] = pack2x16float(vec2<f32>({from}0.{c}, {from}1.{c}));\n            }}\n"
+            "            {{\n            let t = th * 8u + {k}u;\n            sm[(tc * 16u + (t ^ (t >> 3u))) * 4u + tp / 4u][tp % 4u] = pah(vec2<f32>({from}0.{c}, {from}1.{c}));\n            }}\n"
         );
     }
     let mut epilogue = String::new();
@@ -611,16 +611,36 @@ fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool) -> String {
 fn fetch(i: u32) -> array<vec2<f32>, 4> {
     let q = src[i];
     let r = src2[i];
-    return array<vec2<f32>, 4>(unpack2x16float(q.x) + unpack2x16float(r.x), unpack2x16float(q.y) + unpack2x16float(r.y), unpack2x16float(q.z) + unpack2x16float(r.z), unpack2x16float(q.w) + unpack2x16float(r.w));
+    return array<vec2<f32>, 4>(unh(q.x) + unh(r.x), unh(q.y) + unh(r.y), unh(q.z) + unh(r.z), unh(q.w) + unh(r.w));
 }"
     } else {
         "fn fetch(i: u32) -> array<vec2<f32>, 4> {
     let q = src[i];
-    return array<vec2<f32>, 4>(unpack2x16float(q.x), unpack2x16float(q.y), unpack2x16float(q.z), unpack2x16float(q.w));
+    return array<vec2<f32>, 4>(unh(q.x), unh(q.y), unh(q.z), unh(q.w));
+}"
+    };
+    let halves = if half {
+        "enable f16;
+
+fn unh(x: u32) -> vec2<f32> {
+    return vec2<f32>(bitcast<vec2<f16>>(x));
+}
+
+fn pah(v: vec2<f32>) -> u32 {
+    return bitcast<u32>(vec2<f16>(v));
+}"
+    } else {
+        "fn unh(x: u32) -> vec2<f32> {
+    return unpack2x16float(x);
+}
+
+fn pah(v: vec2<f32>) -> u32 {
+    return pack2x16float(v);
 }"
     };
     format!(
-        r#"
+        r#"{halves}
+
 const CIN: u32 = {FEATURES}u;
 const COUT: u32 = {cout}u;
 const CK: u32 = 8u;
@@ -647,8 +667,8 @@ fn put(px: u32, py: u32, co: u32, y: vec4<f32>) {{
     if (px < size.w && py < size.h) {{
         let v = act4(y, co);
         let o = (py * size.w + px) * (COUT / 2u) + co / 2u;
-        dst[o] = pack2x16float(v.xy);
-        dst[o + 1u] = pack2x16float(v.zw);
+        dst[o] = pah(v.xy);
+        dst[o + 1u] = pah(v.zw);
     }}
 }}
 
@@ -658,10 +678,10 @@ fn place(px: u32, py: u32, co: u32, y0: vec4<f32>, y1: vec4<f32>) {{
         let b = act4(y1, co + 4u);
         let ow = size.w * 2u;
         let o = (py * 2u * ow + px * 2u) * (COUT / 8u) + co / 8u;
-        dst[o] = pack2x16float(vec2<f32>(a.x, b.x));
-        dst[o + COUT / 8u] = pack2x16float(vec2<f32>(a.y, b.y));
-        dst[o + ow * (COUT / 8u)] = pack2x16float(vec2<f32>(a.z, b.z));
-        dst[o + (ow + 1u) * (COUT / 8u)] = pack2x16float(vec2<f32>(a.w, b.w));
+        dst[o] = pah(vec2<f32>(a.x, b.x));
+        dst[o + COUT / 8u] = pah(vec2<f32>(a.y, b.y));
+        dst[o + ow * (COUT / 8u)] = pah(vec2<f32>(a.z, b.z));
+        dst[o + (ow + 1u) * (COUT / 8u)] = pah(vec2<f32>(a.w, b.w));
     }}
 }}
 
@@ -1032,9 +1052,12 @@ impl Engine {
                 adapter.get_info().name
             ));
         }
+        let half_feature = adapter.features() & wgpu::Features::SHADER_F16;
+        let half = !half_feature.is_empty();
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("vidcut-upscale"),
             required_limits: limits,
+            required_features: half_feature,
             ..Default::default()
         }))
         .map_err(|e| format!("the GPU did not open for the AI Fast upscaler: {e}"))?;
@@ -1050,7 +1073,7 @@ impl Engine {
             .into_iter()
             .map(|shape| {
                 let source = if shape.wino {
-                    wino_shader(shape.cout, shape.act, shape.sum, shape.shuffle)
+                    wino_shader(shape.cout, shape.act, shape.sum, shape.shuffle, half)
                 } else {
                     conv_shader(shape)
                 };
