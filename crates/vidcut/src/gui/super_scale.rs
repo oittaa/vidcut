@@ -13,8 +13,8 @@ pub(super) const FACTORS: [(ScaleFactor, &str); 5] = [
 ];
 
 pub(super) const UPSCALERS: [(Upscaler, &str); 3] = [
-    (Upscaler::AiFast, "AI Fast"),
     (Upscaler::AiBest, "AI Best"),
+    (Upscaler::AiFast, "AI Fast"),
     (Upscaler::Classic, "Classic"),
 ];
 

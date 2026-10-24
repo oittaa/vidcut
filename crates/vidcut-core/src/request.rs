@@ -294,8 +294,8 @@ pub enum Request {
         /// The detail of the classic upscaler: `low`, `medium` or `high`.
         #[serde(default)]
         sharpness: Option<crate::model::Sharpness>,
-        /// The upscaler of Super Scale: `ai_fast` (the default), `ai_best`
-        /// or `classic`. An export refuses `ai_fast` and `ai_best` for HDR
+        /// The upscaler of Super Scale: `ai_best` (the default), `ai_fast`
+        /// or `classic`. An export refuses `ai_best` and `ai_fast` for HDR
         /// media.
         #[serde(default)]
         upscaler: Option<crate::model::Upscaler>,
