@@ -149,6 +149,7 @@ The schema describes the parameters, not the results. This list gives the result
     - `color` and `metadata`: what was chosen, and `why`.
     - `tried`: the video encoders that did not open, and why.
     - `sources`: each file, and how it was decoded.
+  - `upscaled[]`: each file that the AI upscaler of Super Scale enlarged (`path`), and `how`.
   - `notes[]`: `code`, `message`.
 - `export plan`:
   - `settings`, `video_encoder` and `notes`.
@@ -161,7 +162,7 @@ The schema describes the parameters, not the results. This list gives the result
   - `progress` (0–1), `result` and `error`.
   - `details`, while the job runs:
     - `video`: `encoder`, `device`, `pixel`, `bits`, `passes`, `gpu_frames_in`.
-    - `audio`, `color`, `metadata`, `tried` and `sources`.
+    - `audio`, `color`, `metadata`, `tried`, `sources` and `upscaled`.
     - `downloading`: the file that is being downloaded.
     - `speech`: the `model` and `find` of a transcription. Also `device`, `language` and `speakers_by`, when each is known.
     - `gpu_frames`, `gpu_decoded` and `copied`.

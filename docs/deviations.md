@@ -1788,7 +1788,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - Super Scale is Off, Auto, 2x, 3x or 4x. Its Upscaler is AI or Classic. There is no Enhanced mode.
   - AI is the default. It is Real-ESRGAN's compact model `realesr-general-x4v3`. vidcut runs it with its own compute shaders on the GPU, through wgpu.
-    - Noise Reduction Low, Medium and High mix in the light-denoise model at a denoise strength of 0.2, 0.5 and 1.0.
+    - Noise Reduction sets Real-ESRGAN's denoise strength: 0.2 (Low), 0.5 (Medium) or 1.0 (High).
+    - The strength is the share of `realesr-general-x4v3`, which removes the most noise. The rest is `realesr-general-wdn-x4v3`, which keeps noise.
+    - Thus High uses `realesr-general-x4v3` alone, and Low is 80% `realesr-general-wdn-x4v3`.
     - The weights download at their first use. vidcut does not ship them.
     - AI takes SDR pictures up to 4K. A large picture goes through the network in tiles.
     - Before an export starts, it refuses media that AI cannot take. The error names each file and the reason.

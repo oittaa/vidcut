@@ -526,18 +526,34 @@ pub fn export_media(
             },
         }),
     )?;
-    let reports = export::run(
-        &prepared,
-        &available,
-        decoder.as_ref(),
-        hooks.cancel,
-        &mut |i, path, pr| (hooks.progress)(i, count, path, pr),
-    )?;
+    let upscaled = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let reports = {
+        let (kept, before) = (upscaled.clone(), vidcut_av::progress::notes());
+        let _noting = vidcut_av::progress::Noting::set(Arc::new(move |note| {
+            if let vidcut_av::export::Note::Upscaled(u) = &note
+                && let Ok(mut kept) = kept.lock()
+            {
+                kept.push(u.clone());
+            }
+            if let Some(before) = &before {
+                before(note);
+            }
+        }));
+        export::run(
+            &prepared,
+            &available,
+            decoder.as_ref(),
+            hooks.cancel,
+            &mut |i, path, pr| (hooks.progress)(i, count, path, pr),
+        )?
+    };
     export::write_subtitles(&subtitles)?;
     let mut notes = export::notes(&prepared, &available);
     notes.extend(export::subtitle_notes(&subtitles));
+    let upscaled = upscaled.lock().map(|u| u.clone()).unwrap_or_default();
     let mut r = answer(json!({
         "outputs": reports,
+        "upscaled": upscaled,
         "notes": notes,
         "subtitles": export::subtitle_files(&subtitles),
     }));

@@ -271,8 +271,8 @@ pub enum Request {
         #[serde(default)]
         back: bool,
     },
-    /// Set the Clip Color of media items, which their clips show unless
-    /// they have their own.
+    /// Set the Clip Color, the Input Color Space and the Super Scale of media
+    /// items. Their clips show the Clip Color unless they have their own.
     #[serde(rename = "media.set")]
     MediaSet {
         media: OneOrMany<String>,
