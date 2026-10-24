@@ -88,3 +88,28 @@ pub(crate) fn bytes(v: &[f32]) -> Vec<u8> {
 pub(crate) fn words(v: &[u32]) -> Vec<u8> {
     v.iter().flat_map(|f| f.to_le_bytes()).collect()
 }
+
+pub(crate) fn half(v: f32) -> u16 {
+    let b = v.to_bits();
+    let sign = ((b >> 16) & 0x8000) as u16;
+    let exp = ((b >> 23) & 0xff) as i32 - 112;
+    let man = b & 0x7f_ffff;
+    let (bits, rest, shift) = if exp >= 31 {
+        return sign | 0x7c00;
+    } else if exp > 0 {
+        (((exp as u32) << 10) | (man >> 13), man & 0x1fff, 13)
+    } else if exp > -11 {
+        let m = man | 0x80_0000;
+        let shift = (14 - exp) as u32;
+        (m >> shift, m & ((1 << shift) - 1), shift)
+    } else {
+        return sign;
+    };
+    let middle = 1 << (shift - 1);
+    let up = rest > middle || (rest == middle && bits & 1 == 1);
+    sign | (bits + u32::from(up)) as u16
+}
+
+pub(crate) fn halves(v: &[f32]) -> Vec<u8> {
+    v.iter().flat_map(|f| half(*f).to_le_bytes()).collect()
+}

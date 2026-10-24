@@ -4,40 +4,6 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 
-pub(super) fn half(v: f32) -> u16 {
-    let b = v.to_bits();
-    let sign = ((b >> 16) & 0x8000) as u16;
-    let exp = ((b >> 23) & 0xff) as i32;
-    let man = b & 0x7f_ffff;
-    if exp == 0xff {
-        return sign | 0x7c00 | if man != 0 { 0x200 } else { 0 };
-    }
-    let e = exp - 112;
-    if e >= 0x1f {
-        return sign | 0x7c00;
-    }
-    if e <= 0 {
-        if e < -10 {
-            return sign;
-        }
-        let m = man | 0x80_0000;
-        let shift = (14 - e) as u32;
-        let kept = m >> shift;
-        let rest = m & ((1 << shift) - 1);
-        let mid = 1 << (shift - 1);
-        let up = rest > mid || (rest == mid && kept & 1 == 1);
-        return sign | (kept + u32::from(up)) as u16;
-    }
-    let kept = man >> 13;
-    let rest = man & 0x1fff;
-    let up = rest > 0x1000 || (rest == 0x1000 && kept & 1 == 1);
-    sign | ((((e as u32) << 10) | kept) + u32::from(up)) as u16
-}
-
-pub(super) fn halves(v: &[f32]) -> Vec<u8> {
-    v.iter().flat_map(|f| half(*f).to_le_bytes()).collect()
-}
-
 fn bad(path: &Path, what: impl std::fmt::Display) -> Error {
     Error::Invalid(format!(
         "{}: not the weights of FlashVSR+ Turbo ({what})",

@@ -2,9 +2,9 @@ use std::path::Path;
 
 use super::gemm::{self, Act, Gemm, Load, Store};
 use super::gpu::Gpu;
-use super::weights::{Safetensors, Torch, halves};
+use super::weights::{Safetensors, Torch};
 use super::{DIM, FFN, LAYERS};
-use crate::compute::bytes;
+use crate::compute::{bytes, halves};
 use crate::error::Result;
 
 pub(super) struct Linear {

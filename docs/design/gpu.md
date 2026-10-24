@@ -167,14 +167,33 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - In an export, `Source::ai_picture` finds the chunk of 15 frames that holds the source picture (`upscale::FRAMES`).
     - The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
     - `Source::read_chunk` reads the chunk with a second `VideoReader` on the same file. It uses the same GPU decoder.
-    - Each frame becomes RGB at its shown size, upright. The 15 pictures that come out are kept in a `Chunk` until the next chunk.
+    - Each frame becomes RGB at its shown size, upright.
+    - `upscale::upscale` returns the asked picture first. A thread (`vidcut-upscale-rest`) then makes the other 14 pictures.
+    - The 15 pictures go into a shared cache of chunks (`Chunk`), the newest kept within a share of the computer's memory.
+    - Before it computes a chunk, `Source::ai_picture` waits for a chunk that is still being made (`upscale::settle`). Then it looks in the cache again.
+    - Thus a chunk is computed once, also when another reader, a replay or another clip of the same file needs it.
   - `upscale::upscale` runs NanoVSR 5.4M with WGSL compute shaders on wgpu. It gives each picture four times as large.
     - At load, the batch norms of each block fold into one 3×3 convolution, as in the model's own deploy mode.
-    - A convolution shader runs each layer. It reads its block of pixels and its weights into workgroup memory. Each thread makes 4 pixels of 16 channels, with 32-bit sums.
+    - The 3×3 convolutions with 96 input channels use Winograd F(2×2, 3×3) (`wino_shader`). These are the 60 blocks and the first two convolutions of the 4× stage.
+      - Each 2×2 block of output then needs 16 products for each pair of channels, in place of 36.
+      - At load, `winograd` transforms the weights. They are kept as 16-bit floats.
+      - Each workgroup transforms its block of input in workgroup memory. The transformed values are 16-bit floats, and the sums are 32-bit floats.
+      - At the end, the threads exchange their sums through workgroup memory. Each 2×2 block of output then comes from its 16 sums.
+    - The first convolution and the 1×1 join use a direct convolution shader (`conv_shader`). It reads its block of pixels and its weights into workgroup memory, with 32-bit sums.
     - A forward chain of 30 blocks runs from the first frame to the last, and a backward chain from the last to the first. The forward results of all frames are kept.
+    - The first block of each chain adds the features of the frame to the previous result as it reads them.
     - As the backward chain reaches a frame, a 1×1 convolution joins the two results.
-    - Two convolutions with pixel shuffles and a last convolution then make the large picture, in tiles. A bilinear copy of the input is added.
+    - For the asked frame, the forward chain runs up to it and the backward chain runs down to it. The other frames then complete both chains.
+      - Each frame gets the same chains and the same order of math. Thus its picture does not depend on which frame was asked.
+      - The backward results above the asked frame go into the buffers of the forward results that are not made yet. Thus the order needs no more GPU memory.
+    - Why: the viewer shows the asked frame after about half the work of a chunk.
+    - Two convolutions then make the picture four times as large, in tiles. They write their output in the order of the pixel shuffle.
+    - One shader (`last_shader`) runs the last convolution, adds a bilinear copy of the input and makes RGB. Its weights are in a uniform buffer.
+    - The chains, the join and all tiles of a frame go to the GPU in one submission. The frame comes back in one read.
+    - While the GPU runs a frame, the CPU reads the result of the frame before it. Thus the GPU does not wait for the CPU between frames.
+    - Why: in an export, other GPU work can fill such waits. In a 1080p test, some frames then took 30 times as long.
     - The values between the layers are 16-bit floats. The output is within 2 of 255 levels of the model's PyTorch output.
+    - Why Winograd: the 3×3 convolutions do most of the work. Winograd needs fewer products, and fewer reads of workgroup memory for each product.
   - The usual fitting then makes that picture the size it shows at.
   - The frames go through memory, also from a GPU decoder.
   - `upscale` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines and weights stay. The buffers of a chunk are freed after it.

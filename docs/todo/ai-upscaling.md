@@ -17,11 +17,11 @@ The tests ran on the owner's RTX 4080 SUPER (16 GB) on 2026-10-24. NanoVSR 5.4M 
 
 | Clip | vidcut | PyTorch, 32-bit | PyTorch, 16-bit |
 |---|---|---|---|
-| 480×256, 89 frames | 8.0 s, 1.6 GB | 8.9 s, 4.0 GB | 4.6 s, 2.4 GB |
-| 1280×534, 30 frames | 14.5 s, 3.9 GB | 158.7 s, 23.0 GB | 12.6 s, 12.9 GB |
-| 1920×1080, 30 frames | 40.3 s, 10.1 GB | not done in 5 minutes | not done in 5 minutes |
+| 480×256, 89 frames | 4.3 s, 1.4 GB | 8.9 s, 4.0 GB | 4.6 s, 2.4 GB |
+| 1280×534, 30 frames | 7.1 s, 3.9 GB | 158.7 s, 23.0 GB | 12.6 s, 12.9 GB |
+| 1920×1080, 30 frames | 20.2 s, 10.1 GB | not done in 5 minutes | not done in 5 minutes |
 
-- vidcut's time is the whole export: decoding, the network, the fitting and the encoding.
+- vidcut's time is the time that the export reports. It is the whole export: decoding, the network, the fitting and the encoding.
 - vidcut's memory is the peak of the whole card less the 1.0 GB that it used before.
 - PyTorch's time includes loading the model and reading and writing the video. Its memory is what PyTorch reserved. 23.0 GB does not fit on the card, so the driver used main memory.
 - vidcut's pictures are within 2 of 255 levels of PyTorch's 32-bit pictures. The PSNR between them is 68 dB.
@@ -75,18 +75,15 @@ These parts are still to do:
    1. The memory plan: find the GPU memory that it does not count. At 4K the peak is 2.6 GB over the plan, near the size of the card.
    2. Speed: find where the time goes, then use the tensor cores through wgpu's cooperative matrices, on Vulkan and Metal.
 2. A test of the chunk edges: each chunk starts from zero. A carried forward state or overlapping chunks may hide a change every 15 frames.
-3. Speed. PyTorch in 16-bit floats is faster on small pictures. The gain of each step is not known until it is measured.
+3. Speed. The gain of each step is not known until it is measured.
    1. Measure where the time goes, with GPU timestamps: the network, the copies, the decoding and the encoding.
    2. Use the tensor cores. PyTorch's convolutions use them through cuDNN; vidcut's shaders do not. wgpu's cooperative matrices take only 8×8 32-bit floats now.
-   3. Winograd convolutions: 16 multiplications for each 2×2 block of output of a 3×3 convolution, in place of 36.
+   3. More sums in each thread of the Winograd shader. Reads of workgroup memory limit its main loop.
    4. 16-bit arithmetic in the shaders (`shader-f16`), on GPUs that run it faster than 32-bit.
-   5. Join the add of the features into the first convolution of each chain. This saves a pass over the whole frame for each frame and direction.
-   6. The 1×1 join reads its weights from storage memory for each pixel. It can use workgroup memory, as the 3×3 convolutions do.
-   7. Run all tiles of a frame in one submission. Each tile now waits for its own copy back to memory.
-   8. Make the bind groups once for each chunk, not for each pass.
-   9. Decode each frame once. The chunk reader decodes the frames a second time.
-   10. Keep the frames on the GPU, from the decoder through the shaders to the encoder. They go through memory now. The viewer and the export both need it.
-   11. Let the CPU decode and encode while the GPU runs the network.
+   5. Make the bind groups once for each chunk, not for each pass.
+   6. Decode each frame once. The chunk reader decodes the frames a second time.
+   7. Keep the frames on the GPU, from the decoder through the shaders to the encoder. They go through memory now. The viewer and the export both need it.
+   8. Let the CPU decode and encode while the GPU runs the network.
 4. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
 
 The weights are on NanoVSR's release v1.0:
