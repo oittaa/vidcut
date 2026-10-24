@@ -92,7 +92,6 @@ struct Source {
     upright: bool,
     gpu: Option<crate::hw::GpuDecoder>,
     ahead: Option<VideoReader>,
-    chunk: Option<Chunk>,
 }
 
 #[derive(Clone)]
@@ -193,7 +192,6 @@ impl Source {
             upright: false,
             gpu: ahead_gpu,
             ahead: None,
-            chunk: None,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -247,7 +245,6 @@ impl Source {
             upright: false,
             gpu: ahead_gpu,
             ahead: None,
-            chunk: None,
         })
     }
 
@@ -429,10 +426,58 @@ pub(crate) fn placing_of(
 
 const PLACED_MOST: f64 = 16384.0;
 
-struct Chunk {
-    key: (i64, bool),
+#[derive(Clone, PartialEq)]
+struct ChunkId {
+    input: Input,
+    space: ColorSpace,
+    reading: Reading,
+    rotation: u16,
     size: (u32, u32),
+    key: (i64, bool),
+}
+
+struct Chunk {
+    id: ChunkId,
+    bytes: usize,
     pictures: Vec<frame::Video>,
+}
+
+static CHUNKS: std::sync::Mutex<Vec<Chunk>> = std::sync::Mutex::new(Vec::new());
+
+fn chunks() -> std::sync::MutexGuard<'static, Vec<Chunk>> {
+    CHUNKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn picture_of(chunk: &Chunk, pts: Option<i64>) -> Option<&frame::Video> {
+    if chunk.id.key.1 {
+        chunk.pictures.iter().find(|p| p.pts() == pts)
+    } else {
+        chunk.pictures.first()
+    }
+}
+
+fn kept_picture(id: &ChunkId, pts: Option<i64>) -> Result<Option<frame::Video>> {
+    let mut all = chunks();
+    let Some(i) = all.iter().position(|c| c.id == *id) else {
+        return Ok(None);
+    };
+    let chunk = all.remove(i);
+    let found = picture_of(&chunk, pts).map(frame_ref).transpose();
+    all.push(chunk);
+    found
+}
+
+fn keep_chunk(chunk: Chunk) {
+    let budget = crate::player::system_memory()
+        .map_or(1 << 30, |m| m / 8)
+        .max(1 << 30);
+    let mut all = chunks();
+    all.push(chunk);
+    while all.len() > 1 && all.iter().map(|c| c.bytes).sum::<usize>() > budget {
+        all.remove(0);
+    }
 }
 
 fn shown_rgb(
@@ -555,12 +600,18 @@ impl Source {
             Some(i) => (i - i.rem_euclid(crate::upscale::FRAMES as i64), true),
             None => (pts.unwrap_or(0), false),
         };
-        if self
-            .chunk
-            .as_ref()
-            .is_none_or(|c| c.key != key || c.size != size)
+        let id = ChunkId {
+            input: self.reader.input().clone(),
+            space: self.reader.color_space(),
+            reading,
+            rotation,
+            size,
+            key,
+        };
+        if let Some(p) = kept_picture(&id, pts)? {
+            return Ok(Some(p));
+        }
         {
-            self.chunk = None;
             let clock = Instant::now();
             let frames = match key {
                 (first, true) => self.read_chunk(first, reading)?,
@@ -579,30 +630,26 @@ impl Source {
                 read.as_secs_f64() * 1e3,
                 (clock.elapsed() - read).as_secs_f64() * 1e3
             );
-            let pictures = big
+            let pictures: Vec<frame::Video> = big
                 .iter()
                 .zip(&frames)
                 .map(|(out, f)| big_picture(out, size, f.pts()))
                 .collect();
-            self.chunk = Some(Chunk {
-                key,
-                size,
+            let chunk = Chunk {
+                bytes: big.iter().map(Vec::len).sum(),
+                id,
                 pictures,
-            });
-        }
-        let chunk = self.chunk.as_ref().expect("made");
-        let found = if key.1 {
-            chunk.pictures.iter().find(|p| p.pts() == pts)
-        } else {
-            chunk.pictures.first()
-        };
-        match found {
-            Some(p) => Ok(Some(frame_ref(p)?)),
-            None => Err(Error::Invalid(format!(
-                "{}: the AI upscaler's chunk has no frame at {}",
-                self.reader.path().display(),
-                pts.unwrap_or(0)
-            ))),
+            };
+            let found = picture_of(&chunk, pts).map(frame_ref).transpose()?;
+            keep_chunk(chunk);
+            match found {
+                Some(p) => Ok(Some(p)),
+                None => Err(Error::Invalid(format!(
+                    "{}: the AI upscaler's chunk has no frame at {}",
+                    self.reader.path().display(),
+                    pts.unwrap_or(0)
+                ))),
+            }
         }
     }
 }

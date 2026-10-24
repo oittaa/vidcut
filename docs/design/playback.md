@@ -121,6 +121,7 @@ Motions:
   - It does this only where the viewer enlarges the picture.
 - With AI, `VideoFrames` runs `Source::ai_picture` for the viewer too, as an export does. The viewer then gets the large upright picture of the AI upscaler.
   - A seek must decode and enlarge the whole chunk of 15 frames first.
+  - While playing, the player skips the frames it cannot make in time. The chunks that it made stay in the shared cache. Thus a replay takes their frames from memory.
   - Whether the picture is enlarged depends on its placement and on the timeline size, as in an export.
   - Thus the key of its kept frames holds its Super Scale, its placement and the timeline size (`source_key`).
 - With `viewer.super_scale` off, the live core plans the viewer without Super Scale (`preview_plan`).

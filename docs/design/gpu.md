@@ -167,7 +167,9 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - In an export, `Source::ai_picture` finds the chunk of 15 frames that holds the source picture (`upscale::FRAMES`).
     - The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
     - `Source::read_chunk` reads the chunk with a second `VideoReader` on the same file. It uses the same GPU decoder.
-    - Each frame becomes RGB at its shown size, upright. The 15 pictures that come out are kept in a `Chunk` until the next chunk.
+    - Each frame becomes RGB at its shown size, upright.
+    - The 15 pictures that come out go into a shared cache of chunks (`Chunk`), the newest kept within a share of the computer's memory.
+    - Thus a chunk is computed once, also when another reader, a replay or another clip of the same file needs it.
   - `upscale::upscale` runs NanoVSR 5.4M with WGSL compute shaders on wgpu. It gives each picture four times as large.
     - At load, the batch norms of each block fold into one 3×3 convolution, as in the model's own deploy mode.
     - A convolution shader runs each layer. It reads its block of pixels and its weights into workgroup memory. Each thread makes 4 pixels of 16 channels, with 32-bit sums.
