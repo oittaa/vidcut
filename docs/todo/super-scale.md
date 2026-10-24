@@ -17,3 +17,7 @@ Super Scale enlarges pictures with a better upscaler ([X91](../deviations.md#x91
 - **Placed pictures on NVENC:** they are made on the CPU. libplacebo could make them on the GPU.
 - **The viewer:** it shows pictures without Super Scale. A paused frame could show it.
 - **Noise Reduction and the Enhanced modes** of Resolve (p. 433).
+- **Measure** (with a plan that the owner accepts first):
+  - The time of an export with a zoomed clip, made on the CPU and on the GPU.
+  - Dropped frames in the viewer. It draws zoomed clips on the GPU, and mixes wipes on the CPU.
+- **AI models:** [ai-upscaling.md](ai-upscaling.md).
