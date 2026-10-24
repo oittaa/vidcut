@@ -43,9 +43,19 @@ These parts are still to do:
 
 1. FlashVSR+ Turbo as the slow model. It needs a transformer engine on wgpu: matrix multiplies, attention and a cache of earlier frames.
 2. A test of the chunk edges: each chunk starts from zero. A carried forward state or overlapping chunks may hide a change every 15 frames.
-3. Speed: the 1×1 join and the copies of the tiles are simple shaders now.
-4. Frames from the GPU decoders straight into the shaders, with no copy through memory. The viewer and the export both need it.
-5. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
+3. Speed. PyTorch in 16-bit floats is faster on small pictures. The gain of each step is not known until it is measured.
+   1. Measure where the time goes, with GPU timestamps: the network, the copies, the decoding and the encoding.
+   2. Use the tensor cores. PyTorch's convolutions use them through cuDNN; vidcut's shaders do not. wgpu's cooperative matrices take only 8×8 32-bit floats now.
+   3. Winograd convolutions: 16 multiplications for each 2×2 block of output of a 3×3 convolution, in place of 36.
+   4. 16-bit arithmetic in the shaders (`shader-f16`), on GPUs that run it faster than 32-bit.
+   5. Join the add of the features into the first convolution of each chain. This saves a pass over the whole frame for each frame and direction.
+   6. The 1×1 join reads its weights from storage memory for each pixel. It can use workgroup memory, as the 3×3 convolutions do.
+   7. Run all tiles of a frame in one submission. Each tile now waits for its own copy back to memory.
+   8. Make the bind groups once for each chunk, not for each pass.
+   9. Decode each frame once. The chunk reader decodes the frames a second time.
+   10. Keep the frames on the GPU, from the decoder through the shaders to the encoder. They go through memory now. The viewer and the export both need it.
+   11. Let the CPU decode and encode while the GPU runs the network.
+4. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
 
 The weights are on NanoVSR's release v1.0:
 
