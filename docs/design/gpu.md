@@ -168,7 +168,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
     - When the source is at the first frame of a chunk, `Source::chunk_frames` decodes the other frames of the chunk once. The source then takes them from its queue, and does not decode them again.
     - Else `Source::read_chunk` reads the chunk with a second `VideoReader` on the same file. It uses the same GPU decoder.
-    - Each frame becomes RGB at its shown size, upright.
+    - Each frame becomes RGB at its shown size, upright. The GPU takes these 3 bytes for each pixel as they are.
     - `upscale::upscale` returns the asked picture first. A thread (`vidcut-upscale-rest`) then makes the other 14 pictures.
     - The 15 pictures go into a shared cache of chunks (`Chunk`), the newest kept within a share of the computer's memory.
     - Before it computes a chunk, `Source::ai_picture` waits for a chunk that is still being made (`upscale::settle`). Then it looks in the cache again.

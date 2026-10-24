@@ -803,8 +803,17 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
 const PACK: &str = r#"
 struct Size { w: u32, h: u32 }
 @group(0) @binding(0) var<uniform> size: Size;
-@group(0) @binding(1) var<storage, read> rgba: array<u32>;
+@group(0) @binding(1) var<storage, read> rgb: array<u32>;
 @group(0) @binding(2) var<storage, read_write> dst: array<u32>;
+
+fn byte(at: u32) -> u32 {
+    return (rgb[at / 4u] >> (8u * (at % 4u))) & 255u;
+}
+
+fn texel(p: u32) -> u32 {
+    let at = p * 3u;
+    return byte(at) | (byte(at + 1u) << 8u) | (byte(at + 2u) << 16u) | (255u << 24u);
+}
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -812,7 +821,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let p = id.y * size.w + id.x;
-    let v = unpack4x8unorm(rgba[p]);
+    let v = unpack4x8unorm(texel(p));
     dst[p * 4u] = pack2x16float(v.xy);
     dst[p * 4u + 1u] = pack2x16float(vec2<f32>(v.z, 0.0));
     dst[p * 4u + 2u] = 0u;
@@ -855,11 +864,16 @@ struct Last {{ w: array<vec4<f32>, 288>, b: vec4<f32> }}
 @group(0) @binding(0) var<uniform> place: Place;
 @group(0) @binding(1) var<storage, read> src: array<vec4<u32>>;
 @group(0) @binding(2) var<uniform> wts: Last;
-@group(0) @binding(3) var<storage, read> rgba: array<u32>;
+@group(0) @binding(3) var<storage, read> pixels: array<u32>;
 @group(0) @binding(4) var<storage, read_write> out: array<u32>;
 
+fn byte(at: u32) -> u32 {{
+    return (pixels[at / 4u] >> (8u * (at % 4u))) & 255u;
+}}
+
 fn px(x: u32, y: u32) -> vec3<f32> {{
-    return unpack4x8unorm(rgba[y * place.fw + x]).xyz;
+    let at = (y * place.fw + x) * 3u;
+    return unpack4x8unorm(byte(at) | (byte(at + 1u) << 8u) | (byte(at + 2u) << 16u) | (255u << 24u)).xyz;
 }}
 
 fn base(gx: u32, gy: u32) -> vec3<f32> {{
@@ -978,7 +992,7 @@ struct Frame {
     h: usize,
     count: usize,
     size: wgpu::Buffer,
-    rgba: Vec<wgpu::Buffer>,
+    rgb: Vec<wgpu::Buffer>,
     input: wgpu::Buffer,
     feats: wgpu::Buffer,
     xa: wgpu::Buffer,
@@ -1211,8 +1225,8 @@ impl Engine {
             h,
             count,
             size: buffer(d, 32, U::UNIFORM | U::COPY_DST),
-            rgba: (0..count)
-                .map(|_| buffer(d, px * 4, U::STORAGE | U::COPY_DST))
+            rgb: (0..count)
+                .map(|_| buffer(d, px * 3, U::STORAGE | U::COPY_DST))
                 .collect(),
             input: buffer(d, px * PADDED * 2, U::STORAGE),
             feats: buffer(d, feat, U::STORAGE),
@@ -1360,7 +1374,7 @@ impl Engine {
         self.simple(
             pass,
             &self.pipelines.pack,
-            &[&f.size, &f.rgba[i], &f.input],
+            &[&f.size, &f.rgb[i], &f.input],
             (blocks(w), blocks(h)),
         );
         self.conv(pass, &net.extract, (&f.size, &[&f.input], &f.feats), (w, h));
@@ -1398,16 +1412,7 @@ impl Engine {
                 &words(&[w as u32, h as u32, w as u32, 0, 0, 0, 0, 0]),
             );
             for (i, rgb) in frames.iter().enumerate() {
-                let mut rgba = vec![255u8; rgb.len() / 3 * 4];
-                for (to, from) in rgba
-                    .as_chunks_mut::<4>()
-                    .0
-                    .iter_mut()
-                    .zip(rgb.as_chunks::<3>().0)
-                {
-                    to[..3].copy_from_slice(from);
-                }
-                self.queue.write_buffer(&f.rgba[i], 0, &rgba);
+                self.queue.write_buffer(&f.rgb[i], 0, rgb);
             }
             let net = self.net.as_ref().expect("loaded");
             let n = frames.len();
@@ -1533,7 +1538,7 @@ impl Engine {
             self.simple(
                 pass,
                 &self.pipelines.last,
-                &[&job.place, &t.s2, &net.last, &f.rgba[i], &t.out],
+                &[&job.place, &t.s2, &net.last, &f.rgb[i], &t.out],
                 (blocks(job.cw), blocks(job.ch * 4)),
             );
         }
