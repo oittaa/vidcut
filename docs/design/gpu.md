@@ -221,6 +221,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - Without a size for the GPU's memory, all caches stay on the GPU.
     - A size that does not fit even with every cache in main memory is refused. So is a size whose caches need more than half of main memory.
     - The TC decoder gives 4 frames for each latent frame. Its memory blocks keep the features of the previous frame. Its full-size stage runs in bands of 64 rows.
+    - The decoder's last convolution (128 to 3 channels) has a shader of its own (`last.wgsl`), which also writes the picture. It sums in the order of the matrix multiply, so the pictures are the same.
   - One matrix multiply shader (`gemm::run`) runs every linear layer and convolution. It splits its work into dispatches of at most 150 G multiply-adds. Its loaders gather the convolution taps, and its stores join bias, activation and residual adds.
     - The weights are 16-bit floats on the GPU. The files hold 32-bit floats; they are rounded at load.
     - The residual stream of the DiT stays in 32-bit floats. The other values between the steps are 16-bit floats, with 32-bit sums.

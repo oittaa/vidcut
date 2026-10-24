@@ -220,16 +220,24 @@ pub(super) fn resize(gpu: &Gpu, pass: &mut wgpu::ComputePass, r: &Resize, (x, y)
     pass.dispatch_workgroups(x.div_ceil(16), y.div_ceil(16), 1);
 }
 
-pub(super) fn output(
-    gpu: &Gpu,
-    pass: &mut wgpu::ComputePass,
-    (src, out): (&wgpu::Buffer, &wgpu::Buffer),
-    (w, rows, y0, wm): (u32, u32, u32, u32),
-) {
-    let pipe = gpu.pipe("output", || include_str!("output.wgsl").into());
-    let p = gpu.uniform(&[w, rows, y0, wm, 0, 0, 0, 0]);
-    let bind = crate::compute::group(&gpu.device, &pipe, &[&p, src, out]);
+pub(super) struct Last<'a> {
+    pub(super) src: &'a wgpu::Buffer,
+    pub(super) weights: &'a wgpu::Buffer,
+    pub(super) bias: &'a wgpu::Buffer,
+    pub(super) out: &'a wgpu::Buffer,
+    pub(super) wm: u32,
+    pub(super) hm: u32,
+    pub(super) r0: u32,
+    pub(super) rows: u32,
+    pub(super) sy0: u32,
+    pub(super) w: u32,
+}
+
+pub(super) fn last(gpu: &Gpu, pass: &mut wgpu::ComputePass, l: &Last) {
+    let pipe = gpu.pipe("last", || include_str!("last.wgsl").into());
+    let p = gpu.uniform(&[l.wm, l.hm, l.r0, l.rows, l.sy0, l.w, 0, 0]);
+    let bind = crate::compute::group(&gpu.device, &pipe, &[&p, l.src, l.weights, l.bias, l.out]);
     pass.set_pipeline(&pipe);
     pass.set_bind_group(0, &bind, &[]);
-    pass.dispatch_workgroups(w.div_ceil(16), rows.div_ceil(16), 1);
+    pass.dispatch_workgroups(l.w.div_ceil(16), l.rows.div_ceil(16), 1);
 }

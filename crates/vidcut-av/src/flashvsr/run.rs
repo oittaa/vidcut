@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use super::gemm::{self, Act, Gemm, Load, Store};
 use super::gpu::{Gpu, floats};
-use super::kernels::{self, Attend, DecInput, Grid, Norm, Resize, Unshuffle};
+use super::kernels::{self, Attend, DecInput, Grid, Last, Norm, Resize, Unshuffle};
 use super::model::{Block, Linear, MemBlock, Model};
 use super::{DIM, FFN, dump, resize};
 use crate::compute::{bytes, words};
@@ -348,7 +348,6 @@ fn chunk_work(g: &Geometry) -> u64 {
     let wm = u64::from(g.wm);
     let bands = u64::from(BAND + 4) * wm * 128 * 2
         + u64::from(BAND + 2) * wm * 128 * 2
-        + u64::from(BAND) * wm * 3 * 4
         + u64::from(g.w * g.h) * 4;
     let first = p8 * (784 + 4 * 512 + 4 * 256) * 2;
     let second = p8 * 4 * (3 * 256 + 512) * 2;
@@ -1109,7 +1108,6 @@ impl Stream {
         let half = |count: u32, n: u32| gpu.buffer((count * n * 2) as usize);
         let t1 = gpu.buffer(((BAND + 4) * g.wm * 128 * 2) as usize);
         let t2 = gpu.buffer(((BAND + 2) * g.wm * 128 * 2) as usize);
-        let o = gpu.buffer((BAND * g.wm * 3 * 4) as usize);
         let picture = gpu.buffer((g.w * g.h * 4) as usize);
         let mut frames = Vec::new();
         for j in 0..4u32 {
@@ -1301,7 +1299,7 @@ impl Stream {
                             &[],
                         )
                     });
-                    self.last(gpu, model, &g3, (&t1, &t2, &o, &picture), &mut e);
+                    self.last(gpu, model, &g3, (&t1, &t2, &picture), &mut e);
                     let raw = gpu.read(&picture, 0, u64::from(g.w * g.h * 4))?;
                     let rgb: Vec<u8> = raw
                         .as_chunks::<4>()
@@ -1329,7 +1327,7 @@ impl Stream {
         gpu: &Gpu,
         model: &Model,
         g3: &wgpu::Buffer,
-        (t1, t2, o, picture): (&wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer),
+        (t1, t2, picture): (&wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer),
         e: &mut Enc,
     ) {
         let g = self.g;
@@ -1384,22 +1382,22 @@ impl Stream {
                     Store::Half(Act::Relu),
                     None,
                 );
-                let third = Plane {
-                    w,
-                    h,
-                    y0: r0,
-                    rows: r1 - r0,
-                    src: t2,
-                    cin: 128,
-                    stride: 64,
-                    offset: 0,
-                    two: None,
-                    up: false,
-                    sy0: b0,
-                };
-                plane(gpu, pass, &d.last2, &third, o, Store::Full, None);
-                let shown = r1.min(g.h) - r0;
-                kernels::output(gpu, pass, (o, picture), (g.w, shown, r0, w));
+                kernels::last(
+                    gpu,
+                    pass,
+                    &Last {
+                        src: t2,
+                        weights: &d.last2.w,
+                        bias: &d.last2.b,
+                        out: picture,
+                        wm: w,
+                        hm: h,
+                        r0,
+                        rows: r1.min(g.h) - r0,
+                        sy0: b0,
+                        w: g.w,
+                    },
+                );
             });
             e.submit();
         }
