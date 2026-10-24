@@ -80,6 +80,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - A right-click on a keyframe sets its ease (X87).
     - A double-click on an empty part of a track adds a keyframe there ([X90](deviations.md#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
     - The bar under the tracks shows the value, time and ease of the selected keyframe (X90).
+    - A keyframe that the Keyframe button or a double-click adds is selected. Thus the bar shows it at once.
   - Later: the Sync Bin, Transitions and Effects tabs.
   - vidcut's bar also has Import, Export and Jobs (deviation X3), and Help (X23).
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).

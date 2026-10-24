@@ -177,6 +177,7 @@ pub struct Editor {
     curves: Vec<KeyParam>,
     view: Option<(f64, f64)>,
     held: Option<Held>,
+    fresh: Option<(KeyParam, i64, Instant)>,
 }
 
 impl Editor {
@@ -838,8 +839,10 @@ impl Workspace {
             self.key_editor.menu_curve = false;
             self.key_editor.view = None;
             self.key_editor.held = None;
+            self.key_editor.fresh = None;
         }
         let lanes = lanes_of(&clip, self.key_editor.keyed_only);
+        self.select_fresh(&clip, &lanes);
         let rev = p.rev;
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.key_editor.drag = None;
@@ -893,6 +896,26 @@ impl Workspace {
         self.key_bar(ui, &p, &clip, &lanes, &frame);
         self.zoom_view(ui, area, &clip, plot);
         self.finish_drag(ui, &clip, &lanes, rev);
+    }
+
+    fn select_fresh(&mut self, clip: &Clip, lanes: &[Lane]) {
+        let Some((param, at, since)) = self.key_editor.fresh else {
+            return;
+        };
+        let found = lanes
+            .iter()
+            .filter(|l| l.param == param)
+            .flat_map(|l| &l.keys)
+            .find(|k| clip.key_time(k.frame).round() as i64 == at);
+        if let Some(k) = found {
+            self.key_editor.selected = vec![Mark {
+                param,
+                frame: k.frame,
+            }];
+            self.key_editor.fresh = None;
+        } else if since.elapsed() >= Duration::from_secs(2) {
+            self.key_editor.fresh = None;
+        }
     }
 
     pub(super) fn delete_editor_keys(&mut self) -> bool {
@@ -1310,6 +1333,9 @@ impl Workspace {
                     method,
                     json!({ "clips": [clip.id], "param": lane.param, "at": play }),
                 );
+                if !on_key {
+                    self.key_editor.fresh = Some((lane.param, play, Instant::now()));
+                }
             }
             Some(RowAct::Reset) => {
                 self.send(
@@ -1383,6 +1409,7 @@ impl Workspace {
                     "keyframes.add",
                     json!({ "clips": [clip.id], "param": param, "at": t }),
                 );
+                self.key_editor.fresh = Some((param, t, Instant::now()));
                 self.seek(PlayerId::Timeline, t, false);
             }
         } else if resp.clicked()

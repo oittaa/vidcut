@@ -1763,6 +1763,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - the ease
     - Delete
   - A new value in the bar goes to `keyframes.set`. A drag on the value sends it when the drag stops.
+  - A new keyframe is selected. Thus the bar shows its value at once.
   - With two or more keyframes selected, the bar shows their number and Delete.
   - The curve of a value shows under its track.
   - Fit Clip shows the range of the clip. Ctrl and the mouse wheel zoom at the pointer.
