@@ -179,7 +179,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
       - Each 2×2 block of output then needs 16 products for each pair of channels, in place of 36.
       - At load, `winograd` transforms the weights. They are kept as 16-bit floats.
       - Each workgroup transforms its block of input in workgroup memory. The transformed values are 16-bit floats, and the sums are 32-bit floats.
-      - At the end, the threads exchange their sums through workgroup memory. Each 2×2 block of output then comes from its 16 sums.
+      - At the end, the threads exchange their sums through workgroup memory. Each output pixel then comes from 9 of the 16 sums of its block. Each thread makes one pixel.
     - The first convolution and the 1×1 join use a direct convolution shader (`conv_shader`). It reads its block of pixels and its weights into workgroup memory, with 32-bit sums.
     - A forward chain of 30 blocks runs from the first frame to the last, and a backward chain from the last to the first. The forward results of all frames are kept.
     - The first block of each chain adds the features of the frame to the previous result as it reads them.

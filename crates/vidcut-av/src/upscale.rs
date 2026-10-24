@@ -558,40 +558,44 @@ fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool) -> String {
                 );
             }
         }
-        epilogue += "    workgroupBarrier();\n    if (li < 64u) {\n";
+        let nine = |n: &str| {
+            (0..9)
+                .map(|i| format!("{n}{r}_{i}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
         if shuffle {
-            for (n, q) in [("a", 0), ("b", 1)] {
-                for j in 0..12 {
+            epilogue += "    workgroupBarrier();\n    if (li < 128u) {\n";
+            for (n, quad) in [("a", 0), ("b", 1)] {
+                for i in 0..3 {
+                    for k in 0..3 {
+                        epilogue += &format!(
+                            "        let {n}{r}_{} = bitcast<vec4<f32>>(sm[(((p + {i}u) * 4u + sq + {k}u) * 8u + ej) * 8u + ((2u * qp + {quad}u) ^ ((ej / 2u) & 1u))]);\n",
+                            i * 3 + k
+                        );
+                    }
+                }
+            }
+            epilogue += &format!(
+                "        place(x0 + ({}u + ej % 2u) * 2u + sq, y0 + (ej / 2u) * 2u + p, base + qp * 8u, spixel(array<vec4<f32>, 9>({}), p, sq), spixel(array<vec4<f32>, 9>({}), p, sq));\n",
+                r * 2,
+                nine("a"),
+                nine("b")
+            );
+        } else {
+            epilogue += "    workgroupBarrier();\n    {\n";
+            for i in 0..3 {
+                for k in 0..3 {
                     epilogue += &format!(
-                        "        let n{r}{n}_{j} = bitcast<vec4<f32>>(sm[((4u * p + {j}u) * 8u + ej) * 8u + ((2u * qp + {q}u) ^ ((ej / 2u) & 1u))]);\n"
+                        "        let m{r}_{} = bitcast<vec4<f32>>(sm[(((pp + {i}u) * 4u + qq + {k}u) * 8u + ej) * 8u + (cq ^ ((ej / 2u) & 1u))]);\n",
+                        i * 3 + k
                     );
                 }
             }
-            let list = |n: &str| {
-                (0..12)
-                    .map(|j| format!("n{r}{n}_{j}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
             epilogue += &format!(
-                "        shuffled(array<vec4<f32>, 12>({}), array<vec4<f32>, 12>({}), p, base + qp * 8u, x0 + ({}u + ej % 2u) * 2u, y0 + (ej / 2u) * 2u);\n",
-                list("a"),
-                list("b"),
-                r * 2
-            );
-        } else {
-            for t in 0..16 {
-                epilogue += &format!(
-                    "        let m{r}_{t} = bitcast<vec4<f32>>(sm[({t}u * 8u + ej) * 8u + (cq ^ ((ej / 2u) & 1u))]);\n"
-                );
-            }
-            let list = (0..16)
-                .map(|t| format!("m{r}_{t}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            epilogue += &format!(
-                "        emit(array<vec4<f32>, 16>({list}), base + cq * 4u, x0 + ({}u + ej % 2u) * 2u, y0 + (ej / 2u) * 2u);\n",
-                r * 2
+                "        put(x0 + ({}u + ej % 2u) * 2u + qq, y0 + (ej / 2u) * 2u + pp, base + cq * 4u, pixel(array<vec4<f32>, 9>({}), pp, qq));\n",
+                r * 2,
+                nine("m")
             );
         }
         epilogue += "    }\n    workgroupBarrier();\n";
@@ -661,25 +665,23 @@ fn place(px: u32, py: u32, co: u32, y0: vec4<f32>, y1: vec4<f32>) {{
     }}
 }}
 
-fn rows4(n: array<vec4<f32>, 12>, s: f32) -> array<vec4<f32>, 4> {{
-    return array<vec4<f32>, 4>(n[0] + s * (n[4] + n[8]), n[1] + s * (n[5] + n[9]), n[2] + s * (n[6] + n[10]), n[3] + s * (n[7] + n[11]));
+fn down(a: vec4<f32>, b: vec4<f32>, d: vec4<f32>, p: u32) -> vec4<f32> {{
+    return select(a + b + d, a - b - d, p == 1u);
 }}
 
-fn shuffled(n0: array<vec4<f32>, 12>, n1: array<vec4<f32>, 12>, p: u32, co: u32, px: u32, py: u32) {{
+fn pixel(m: array<vec4<f32>, 9>, p: u32, q: u32) -> vec4<f32> {{
+    let u0 = down(m[0], m[3], m[6], p);
+    let u1 = down(m[1], m[4], m[7], p);
+    let u2 = down(m[2], m[5], m[8], p);
+    return down(u0, u1, u2, q);
+}}
+
+fn spixel(m: array<vec4<f32>, 9>, p: u32, q: u32) -> vec4<f32> {{
     let s = select(1.0, -1.0, p == 1u);
-    let r0 = rows4(n0, s);
-    let r1 = rows4(n1, s);
-    place(px, py + p, co, r0[0] + r0[1] + r0[2], r1[0] + r1[1] + r1[2]);
-    place(px + 1u, py + p, co, r0[1] - r0[2] - r0[3], r1[1] - r1[2] - r1[3]);
-}}
-
-fn emit(m: array<vec4<f32>, 16>, co: u32, px: u32, py: u32) {{
-    let t0 = array<vec4<f32>, 4>(m[0] + m[4] + m[8], m[1] + m[5] + m[9], m[2] + m[6] + m[10], m[3] + m[7] + m[11]);
-    let t1 = array<vec4<f32>, 4>(m[4] - m[8] - m[12], m[5] - m[9] - m[13], m[6] - m[10] - m[14], m[7] - m[11] - m[15]);
-    put(px, py, co, t0[0] + t0[1] + t0[2]);
-    put(px + 1u, py, co, t0[1] - t0[2] - t0[3]);
-    put(px, py + 1u, co, t1[0] + t1[1] + t1[2]);
-    put(px + 1u, py + 1u, co, t1[1] - t1[2] - t1[3]);
+    let u0 = m[0] + s * (m[3] + m[6]);
+    let u1 = m[1] + s * (m[4] + m[7]);
+    let u2 = m[2] + s * (m[5] + m[8]);
+    return down(u0, u1, u2, q);
 }}
 
 fn spread(w: vec4<f32>) -> vec4<f32> {{
@@ -755,10 +757,14 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
 {body}
     }}
     workgroupBarrier();
-    let ej = li / 8u;
-    let cq = li % 8u;
-    let qp = (li / 2u) % 4u;
-    let p = li % 2u;
+    let jb = li % 64u;
+    let ej = jb / 8u;
+    let cq = jb % 8u;
+    let qp = (jb / 2u) % 4u;
+    let p = jb % 2u;
+    let sq = li / 64u;
+    let pp = li / 128u;
+    let qq = (li / 64u) % 2u;
 {epilogue}
 }}
 "#
