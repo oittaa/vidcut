@@ -17,20 +17,17 @@ const PLAIN: &str = "Plain";
 const MODELS: [(SpeechModel, &str); 5] = [
     (
         SpeechModel::ParakeetUltra,
-        "25 European languages · times each word",
+        "European languages · times each word",
     ),
-    (
-        SpeechModel::WhisperLargeV3,
-        "100 languages · times each phrase",
-    ),
-    (SpeechModel::Qwen3Asr, "30 languages · estimated times"),
+    (SpeechModel::WhisperLargeV3, "languages · times each phrase"),
+    (SpeechModel::Qwen3Asr, "languages · estimated times"),
     (
         SpeechModel::Xai,
-        "38 languages · times each word · on xAI's servers",
+        "languages · times each word · on xAI's servers",
     ),
     (
         SpeechModel::Google,
-        "85 languages · times each word · on Google's servers",
+        "languages · times each word · on Google's servers",
     ),
 ];
 
@@ -280,7 +277,10 @@ fn model_choice(ui: &mut egui::Ui, s: &mut Settings, d: &Ready, words_only: bool
                     egui::TextFormat::simple(body.clone(), c.text),
                 );
                 job.append(
-                    &format!("\n{note} · {state}"),
+                    &format!(
+                        "\n{} {note} · {state}",
+                        vidcut_core::catalog::speech(*model).languages.len()
+                    ),
                     0.0,
                     egui::TextFormat::simple(small.clone(), c.text_dim),
                 );
