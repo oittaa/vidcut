@@ -276,6 +276,15 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 print_color(&o["color"]);
                 print_metadata(&o["metadata"]);
             }
+            for u in r.result["upscaled"].as_array().into_iter().flatten() {
+                let path = std::path::Path::new(u["path"].as_str().unwrap_or_default());
+                let name = path.file_name().unwrap_or(path.as_os_str());
+                println!(
+                    "  Super Scale: {}: {}",
+                    name.to_string_lossy(),
+                    u["how"].as_str().unwrap_or_default()
+                );
+            }
             print_notes(&r.result["notes"]);
         }
         "export.plan"
