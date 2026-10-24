@@ -1116,6 +1116,8 @@ impl Live {
                     crate::preferences::load().is_ok_and(|p| p.viewer.super_scale);
                 if self.show_super_scale != show_super_scale {
                     self.show_super_scale = show_super_scale;
+                    self.schedule_timeline();
+                    self.refresh_source();
                     changed = true;
                 }
                 self.follow_budget();
@@ -3533,6 +3535,15 @@ impl Live {
     }
 
     fn preview_plan(&self, mut plan: RenderPlan) -> RenderPlan {
+        if !self.show_super_scale {
+            for piece in &mut plan.video {
+                for layer in piece.layers_mut() {
+                    if let render::VideoPiece::Source { super_scale, .. } = layer {
+                        *super_scale = Default::default();
+                    }
+                }
+            }
+        }
         if let Some(open) = &self.project {
             vidcut_core::preview::apply_proxies(
                 &mut plan,

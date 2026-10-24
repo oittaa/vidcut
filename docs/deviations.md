@@ -1804,13 +1804,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Pictures that the CPU makes, also placed pictures: swscale. Low is `spline`, Medium `lanczos` and High `lanczos` with four lobes.
     - The other GPUs fit the picture as before. They have no Super Scale yet ([todo](todo/super-scale.md)).
   - The viewer shows Super Scale only with View > Show Super Scale, which is off by default.
-  - The viewer then enlarges with its own kernels: Catmull-Rom (Low), Lanczos with 3 lobes (Medium) and with 4 lobes (High).
-  - The viewer has no AI upscaler yet. With AI, it uses the kernel of Sharpness ([todo](todo/ai-upscaling.md)).
+  - With AI, the viewer runs the AI upscaler of the export on each picture that the export enlarges. Playback is then slower.
+  - With Classic, the viewer enlarges with its own kernels: Catmull-Rom (Low), Lanczos with 3 lobes (Medium) and with 4 lobes (High).
 - **Why:**
   - Real-ESRGAN adds detail that a classic upscaler cannot. Its denoise strength keeps skin from looking painted. In a test, 0.5 looked best.
   - The network has only 34 layers of 3×3 convolutions. Shaders of its own run it on the GPU of every maker through wgpu, with no new library.
   - The shaders keep the values between the layers as 16-bit floats, and add in 32-bit floats. This halves the memory traffic. It needs no GPU feature.
   - A different upscaler would change the result without the user's choice. Thus an export refuses, and the user selects Classic or Off.
+  - The switch is there to check what the export makes. Thus with AI, the viewer shows the AI result, not a classic preview of it.
   - The classic upscalers of the GPU are free and run on every computer. They do not need a separate download.
   - These upscalers can go to any size in one step. Thus all of the enlargement gets the better upscaler, not only the factor.
   - By default, the viewer stays in real time. The switch lets the user check the result in the viewer.

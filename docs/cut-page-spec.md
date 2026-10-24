@@ -177,6 +177,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - A picture that fills the frame takes the better upscaler for all of its enlargement. The factor does not change it.
   - Super Scale works only where a picture is enlarged. A picture that is made smaller is scaled as before.
   - View > Show Super Scale shows it in the viewer (`viewer.super_scale`). It is off by default, as it costs playback speed.
+  - With AI, the viewer then shows the result of the AI upscaler, as the export makes it.
   - `media.set` sets `super_scale`, `upscaler`, `noise_reduction` and `sharpness`. With `download`, it downloads the weights first.
 - **Relinking media** (pp. 668–669):
   - An item whose file is missing has the mark MISSING.

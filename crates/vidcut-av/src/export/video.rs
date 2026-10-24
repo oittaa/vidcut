@@ -89,6 +89,7 @@ struct Source {
     left: Option<Instant>,
     sharp: Option<Sharpness>,
     told: bool,
+    upright: bool,
 }
 
 #[derive(Clone)]
@@ -185,6 +186,7 @@ impl Source {
             left: None,
             sharp,
             told: false,
+            upright: false,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -234,6 +236,7 @@ impl Source {
             left: None,
             sharp: None,
             told: false,
+            upright: false,
         })
     }
 
@@ -1227,7 +1230,7 @@ impl VideoFrames {
                 made.push(Layer {
                     frame: Some(frame),
                     weight,
-                    rotation,
+                    rotation: if self.open[s].upright { 0 } else { rotation },
                     decoder,
                     decoding: Some(decoding),
                     made_on_gpu: self.open[s].fitting.route == Some(Route::Gpu),
@@ -1843,12 +1846,16 @@ impl VideoFrames {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
             let reading = src.pictures.reading(self.maker.reading());
-            let target = wanted.unwrap_or((w, h));
-            let big = if !decoded && super_scale.ai() {
+            let big = if super_scale.ai() {
+                let aim = if placed.is_empty() {
+                    (w, h)
+                } else {
+                    layer_size((w, h), frame, rotation, placed, super_scale.factor)
+                };
                 ai_picture(
                     frame,
                     rotation,
-                    target,
+                    aim,
                     super_scale.noise_reduction,
                     (src.reader.path(), reading),
                 )?
@@ -1874,6 +1881,7 @@ impl VideoFrames {
                 )?,
             };
             src.normalized = Some(made.ok_or_else(no_picture)?);
+            src.upright = big.is_some();
             if big.is_some() && !src.told {
                 crate::progress::note(super::Note::Upscaled(super::UpscaleNote {
                     path: src.reader.path().to_path_buf(),

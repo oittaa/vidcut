@@ -102,17 +102,19 @@ The tests ran on the owner's RTX 4080 SUPER on 2026-10-24, in programs outside v
 - The weights download at their first use. vidcut does not ship them. The owner accepts their license on that basis.
 - Super Scale gets Noise Reduction, as Resolve has (p. 433). Low, Medium and High give a denoise strength of 0.2, 0.5 and 1.0. Medium is the default.
 - A mix with the classic upscaler can come later, as an extra.
+- Users have different needs. Some wait a long time for the best pictures, and others want good pictures fast.
+  - Thus Super Scale can offer more than one AI model: a fast default, and slower models with better pictures.
+  - Speed alone does not rule out a model. A slow model must give clearly better pictures.
 
 ## Plan
 
-AI Super Scale is built for exports ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). These parts are still to do:
+AI Super Scale is built for exports and for the viewer ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). These parts are still to do:
 
 1. Winograd convolutions in the shaders. They need 16 multiplications for each 2×2 block of output, in place of 36. burn's tensor cores were 2 times faster than the shaders are now.
-2. The AI upscaler in the viewer, with View > Show Super Scale. With AI, the viewer uses the kernel of Sharpness now.
-3. Frames from the GPU decoders straight into the shaders, with no copy through memory.
-4. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
-5. A mix with the classic upscaler, as an extra.
-6. A decision of the owner on the SPyNet license of RealBasicVSR. Then, with the owner's OK, a side-by-side test against Real-ESRGAN on the same clip.
+2. Frames from the GPU decoders straight into the shaders, with no copy through memory. The viewer and the export both need it.
+3. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
+4. A mix with the classic upscaler, as an extra.
+5. A decision of the owner on the SPyNet license of RealBasicVSR. Then, with the owner's OK, a side-by-side test against Real-ESRGAN on the same clip.
 
 The weights are on Real-ESRGAN's release v0.2.5.0:
 
