@@ -354,9 +354,9 @@ fn chunk_work(g: &Geometry) -> u64 {
     let bands = u64::from(BAND + 4) * wm * 128 * 2
         + u64::from(BAND + 2) * wm * 128 * 2
         + u64::from(g.w * g.h) * 3;
-    let first = p8 * (784 + 4 * 512 + 4 * 256) * 2;
-    let second = p8 * 4 * (3 * 256 + 512) * 2;
-    let third = p8 * 4 * 512 * 2 + p8 * 16 * 4 * 128 * 2;
+    let first = p8 * (784 + 3 * 512 + 4 * 256) * 2;
+    let second = p8 * 4 * (2 * 256 + 512) * 2;
+    let third = p8 * 4 * 512 * 2 + p8 * 16 * 2 * 128 * 2;
     let decode = bands + first.max(second).max(third);
     lq.max(blocks).max(decode) + 2 * 16 * 4 * p8 * 4
 }
@@ -1117,8 +1117,7 @@ impl Stream {
             let mut bx = half(p8 * 4, 256);
             {
                 let din = half(p8, 784);
-                let (mut ax, at1, at2, g1) =
-                    (half(p8, 512), half(p8, 512), half(p8, 512), half(p8, 512));
+                let (mut ax, mut at1, g1) = (half(p8, 512), half(p8, 512), half(p8, 512));
                 e.pass(|pass| {
                     kernels::dec_input(
                         gpu,
@@ -1174,7 +1173,7 @@ impl Stream {
                             pass,
                             mb,
                             (w8, h8, 512),
-                            (&mut ax, &mut self.mems.a[i], &at1, &at2),
+                            (&mut ax, &mut self.mems.a[i], &mut at1),
                         )
                     });
                 }
@@ -1216,7 +1215,7 @@ impl Stream {
             gpu.wait()?;
             let g2 = half(p8 * 4, 512);
             {
-                let (bt1, bt2) = (half(p8 * 4, 256), half(p8 * 4, 256));
+                let mut bt1 = half(p8 * 4, 256);
                 for (i, mb) in d.stage2.iter().enumerate() {
                     e.pass(|pass| {
                         mem_block(
@@ -1224,7 +1223,7 @@ impl Stream {
                             pass,
                             mb,
                             (w8 * 2, h8 * 2, 256),
-                            (&mut bx, &mut self.mems.b[i], &bt1, &bt2),
+                            (&mut bx, &mut self.mems.b[i], &mut bt1),
                         )
                     });
                 }
@@ -1243,10 +1242,8 @@ impl Stream {
             }
             drop(bx);
             gpu.wait()?;
+            let (mut cx, mut ct1) = (half(p8 * 16, 128), half(p8 * 16, 128));
             for part in 0..2u32 {
-                let (mut cx, ct1, ct2) =
-                    (half(p8 * 16, 128), half(p8 * 16, 128), half(p8 * 16, 128));
-                let g3 = half(p8 * 16, 128);
                 e.pass(|pass| {
                     let up = Plane {
                         w: w8 * 4,
@@ -1278,7 +1275,7 @@ impl Stream {
                             pass,
                             mb,
                             (w8 * 4, h8 * 4, 128),
-                            (&mut cx, &mut self.mems.c[i], &ct1, &ct2),
+                            (&mut cx, &mut self.mems.c[i], &mut ct1),
                         )
                     });
                 }
@@ -1294,12 +1291,12 @@ impl Stream {
                             pass,
                             &d.grow3[sub as usize],
                             p8 * 16,
-                            (&cx, &g3),
+                            (&cx, &ct1),
                             (Store::Half(Act::None), None),
                             &[],
                         )
                     });
-                    self.last(gpu, model, &g3, (&t1, &t2, &picture), &mut e);
+                    self.last(gpu, model, &ct1, (&t1, &t2, &picture), &mut e);
                     let mut rgb = gpu.read(&picture, 0, shown.next_multiple_of(4) as u64)?;
                     rgb.truncate(shown);
                     if let Some(dir) = self.dump.as_ref() {
@@ -1425,12 +1422,7 @@ fn mem_block(
     pass: &mut wgpu::ComputePass,
     mb: &MemBlock,
     (w, h, n): (u32, u32, u32),
-    (x, past, t1, t2): (
-        &mut wgpu::Buffer,
-        &mut wgpu::Buffer,
-        &wgpu::Buffer,
-        &wgpu::Buffer,
-    ),
+    (x, past, t1): (&mut wgpu::Buffer, &mut wgpu::Buffer, &mut wgpu::Buffer),
 ) {
     plane(
         gpu,
@@ -1446,7 +1438,7 @@ fn mem_block(
         pass,
         &mb.b,
         &whole((w, h, n), t1, None),
-        t2,
+        past,
         Store::Half(Act::Relu),
         None,
     );
@@ -1454,12 +1446,13 @@ fn mem_block(
         gpu,
         pass,
         &mb.c,
-        &whole((w, h, n), t2, None),
-        past,
+        &whole((w, h, n), past, None),
+        t1,
         Store::Skip,
         Some(x),
     );
     std::mem::swap(x, past);
+    std::mem::swap(x, t1);
 }
 
 struct Work {
