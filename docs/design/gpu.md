@@ -202,7 +202,10 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - Before an export starts, `flashvsr::check` refuses media that AI Best cannot take (`flashvsr::unfit`). It also refuses AI Best without the weights or without a GPU that can run it. It loads the model then.
   - It also refuses a size that does not fit (`run::plan`). It takes the size from the media and the output size (`flashvsr::enlarged`). A zoomed picture can be larger; then `flashvsr::Stream::open` refuses it when the export reaches it.
   - `Source::best_picture` gives the picture at the size that it shows at, but not more than 4 times the shown source size (`flashvsr::SCALE`).
-    - It keeps one `flashvsr::Stream` for the source. It reads the frames in order with the second `VideoReader`, from the first frame that is asked for.
+    - It keeps one `flashvsr::Stream` for the source. It reads the frames in order from the source's own reader, from the first frame that is asked for. Thus each frame is decoded once.
+      - It keeps a copy in main memory of each frame that it reads ahead. The source then takes its next frames from that queue (`Source::advance`). The copies leave the GPU decoder's surfaces free.
+      - When the source reads past the stream, the stream gets those frames later (`Source::miss`).
+      - When the stream needs another reading of the frames than the source, it reads them with the second `VideoReader`.
     - A frame before the kept pictures, or more than 48 frames after the last frame read (`BEST_JUMP`), starts a new stream there.
     - At the end of the file, the stream repeats the last frame, as the official code does.
   - The stream works in chunks of 16 frames (`run::Stream`). The first chunk reads 17 frames and gives 13. Each later chunk reads 16 and gives 16. Thus the output is 4 frames behind the input.
