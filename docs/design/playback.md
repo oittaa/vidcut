@@ -116,6 +116,9 @@ Motions:
 - `Player::present` hands the `Placed` pictures of each layer with the frame, in `Shown` (`Plan::placed_at`). Thus a move or zoom of a placed picture keeps the frames decoded.
 - For a Dynamic Zoom, `Plan::placed_at` moves the `Run` of each `Placed` picture to the frame. Thus the box of that frame places the picture.
 - `Shown::crosses` marks the side of a dissolve that mixes with the side before it (`Over::cross`).
+- `Shown::scales` gives the Super Scale of each layer (`Plan::scales_at`).
+  - With `viewer.super_scale` on, the shader enlarges such a layer with a sharper kernel (`sharp`). Its Sharpness selects the kernel.
+  - It does this only where the viewer enlarges the picture.
 - While pictures are dragged, `Player::preview_pictures` at once puts each dragged picture in place of the picture of its clip.
 - The live core then plans the timeline again with the dragged pictures (`Msg::PreviewPictures`), `RELOAD_EVERY` apart at most.
 - This is necessary because a picture that stops filling the frame needs the tracks below it decoded.

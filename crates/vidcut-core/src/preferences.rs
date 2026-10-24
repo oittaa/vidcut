@@ -30,6 +30,10 @@ pub struct Preferences {
 #[serde(default, deny_unknown_fields)]
 pub struct ViewerPrefs {
     pub guides: Guides,
+    /// The viewer shows Super Scale: where it enlarges a picture of a media
+    /// item with Super Scale, it uses a sharper upscaler. Off by default, as
+    /// it costs playback speed.
+    pub super_scale: bool,
 }
 
 /// Framing and safe-area overlay choices for the viewer.
@@ -266,6 +270,8 @@ impl Guides {
 pub struct ViewerPrefsPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guides: Option<GuidesPatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub super_scale: Option<bool>,
 }
 
 /// The paid speech services, xAI and Google. A key comes from the
@@ -749,6 +755,9 @@ impl Preferences {
         }
         if let Some(g) = patch.viewer.as_ref().and_then(|v| v.guides.as_ref()) {
             p.viewer.guides = p.viewer.guides.patched(g);
+        }
+        if let Some(on) = patch.viewer.as_ref().and_then(|v| v.super_scale) {
+            p.viewer.super_scale = on;
         }
         p.check()?;
         Ok(p)

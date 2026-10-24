@@ -31,6 +31,7 @@ struct State {
     tasks: Vec<Task>,
     engine: Option<Engine>,
     want: [i32; 2],
+    super_scale: bool,
     target: Option<Target>,
     has_frame: bool,
     stats: ViewerStats,
@@ -172,11 +173,13 @@ impl Viewer {
         &mut self,
         render: &RenderState,
         want: [i32; 2],
+        super_scale: bool,
     ) -> (Option<egui::TextureId>, bool) {
         let (target, has_frame) = {
             let mut s = self.shared.lock();
-            let changed = s.want != want;
+            let changed = s.want != want || s.super_scale != super_scale;
             s.want = want;
+            s.super_scale = super_scale;
             if changed {
                 s.woken = true;
                 self.shared.wake.notify_all();
@@ -247,12 +250,22 @@ impl Drop for Viewer {
     }
 }
 
+fn kernel(sharp: Option<vidcut_core::model::Sharpness>) -> u32 {
+    use vidcut_core::model::Sharpness;
+    match sharp {
+        None => 0,
+        Some(Sharpness::Low) => 1,
+        Some(Sharpness::Medium) => 2,
+        Some(Sharpness::High) => 3,
+    }
+}
+
 fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
     let mut screen = Screen::new();
     let mut generation = 0u64;
     let mut next: Option<Instant> = None;
     loop {
-        let (tasks, engine, want) = {
+        let (tasks, engine, want, super_scale) = {
             let mut s = shared.lock();
             while !s.woken && !s.stop {
                 let wait = next.map_or(IDLE, |n| n.saturating_duration_since(Instant::now()));
@@ -269,7 +282,12 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
                 return;
             }
             s.woken = false;
-            (std::mem::take(&mut s.tasks), s.engine.clone(), s.want)
+            (
+                std::mem::take(&mut s.tasks),
+                s.engine.clone(),
+                s.want,
+                s.super_scale,
+            )
         };
         let now = Instant::now();
         let shown = engine.as_ref().and_then(|e| e.present(now));
@@ -277,6 +295,11 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
         let counting = engine
             .as_ref()
             .map(|e| vidcut_av::copies::Guard::set(e.copies()));
+        let kernels: Vec<u32> = shown
+            .as_ref()
+            .filter(|_| super_scale)
+            .map(|s| s.scales.iter().map(|&k| kernel(k)).collect())
+            .unwrap_or_default();
         let drawn = screen.draw(
             gpu,
             shown.as_ref().map(|s| &s.picture),
@@ -284,6 +307,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             (
                 shown.as_ref().map_or(&[][..], |s| &s.placed),
                 shown.as_ref().map_or(&[][..], |s| &s.crosses),
+                &kernels,
             ),
             w.max(2) as u32,
             h.max(2) as u32,

@@ -373,6 +373,7 @@ pub struct Shown {
     pub titles: Vec<TitleOver>,
     pub placed: Vec<Vec<vidcut_core::render::Placed>>,
     pub crosses: Vec<bool>,
+    pub scales: Vec<Option<vidcut_core::model::Sharpness>>,
 }
 
 pub struct TitlePicture {

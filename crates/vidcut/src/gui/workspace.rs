@@ -885,6 +885,14 @@ impl Workspace {
             });
             ui.menu_button("View", |ui| {
                 ui.menu_button("Safe Area", |ui| self.safe_area_menu(ui));
+                let mut on = self.snap.show_super_scale;
+                if ui.checkbox(&mut on, "Show Super Scale").clicked() {
+                    self.send(
+                        "preferences.set",
+                        json!({ "viewer": { "super_scale": on } }),
+                    );
+                    ui.close();
+                }
             });
             ui.separator();
             self.bar_buttons(ui);
