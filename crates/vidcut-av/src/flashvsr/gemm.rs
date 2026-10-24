@@ -371,20 +371,36 @@ fn emit(m: u32, n: u32, val: vec4<f32>) {{
     )
 }
 
-fn fmas() -> String {
+const UNPACK16: &str = r#"
+fn unpack16(w: vec4<u32>) -> array<vec4<f16>, 2> {
+    let x = bitcast<vec2<f16>>(w.x);
+    let y = bitcast<vec2<f16>>(w.y);
+    let z = bitcast<vec2<f16>>(w.z);
+    let v = bitcast<vec2<f16>>(w.w);
+    return array<vec4<f16>, 2>(vec4<f16>(x.x, y.x, z.x, v.x), vec4<f16>(x.y, y.y, z.y, v.y));
+}
+"#;
+
+fn fmas(f16: bool) -> String {
+    let (acc, ty) = if f16 { ("h", "f16") } else { ("c", "f32") };
     let mut s = String::new();
     for i in 0..8 {
         let (vec, comp) = if i < 4 { ("a0", i) } else { ("a1", i - 4) };
         let c = ["x", "y", "z", "w"][comp];
         s += &format!(
-            "        c{i}0 = fma(vec4<f32>({vec}.{c}), b0, c{i}0);\n        c{i}1 = fma(vec4<f32>({vec}.{c}), b1, c{i}1);\n"
+            "        {acc}{i}0 = fma(vec4<{ty}>({vec}.{c}), b0, {acc}{i}0);\n        {acc}{i}1 = fma(vec4<{ty}>({vec}.{c}), b1, {acc}{i}1);\n"
         );
     }
     s
 }
 
-fn main_source(load: Load) -> String {
+fn main_source(load: Load, f16: bool) -> String {
     let full = matches!(load, Load::Patch);
+    let (unpack, ty) = if f16 {
+        ("unpack16", "f16")
+    } else {
+        ("unpack_pairs", "f32")
+    };
     let mut decl = String::new();
     for i in 0..8 {
         decl += &format!("    var c{i}0 = vec4<f32>(0.0);\n    var c{i}1 = vec4<f32>(0.0);\n");
@@ -431,18 +447,18 @@ fn main_source(load: Load) -> String {
     for kp in 0..8 {
         let (p0, p1) = (kp * 32, kp * 32 + 16);
         inner += &format!(
-            "        {{\n        let pb0 = unpack_pairs(sb[{p0}u + tx]);\n        let pb1 = unpack_pairs(sb[{p1}u + tx]);\n"
+            "        {{\n        let pb0 = {unpack}(sb[{p0}u + tx]);\n        let pb1 = {unpack}(sb[{p1}u + tx]);\n"
         );
         if !full {
             inner += &format!(
-                "        let pa0 = unpack_pairs(sa[{p0}u + ty]);\n        let pa1 = unpack_pairs(sa[{p1}u + ty]);\n"
+                "        let pa0 = {unpack}(sa[{p0}u + ty]);\n        let pa1 = {unpack}(sa[{p1}u + ty]);\n"
             );
         }
         for h in 0..2 {
             let kk = kp * 2 + h;
             if full {
                 inner += &format!(
-                    "        {{\n        let a0 = sa[{a0}u + ty];\n        let a1 = sa[{a1}u + ty];\n",
+                    "        {{\n        let a0 = vec4<{ty}>(sa[{a0}u + ty]);\n        let a1 = vec4<{ty}>(sa[{a1}u + ty]);\n",
                     a0 = kk * 32,
                     a1 = kk * 32 + 16
                 );
@@ -452,10 +468,19 @@ fn main_source(load: Load) -> String {
                 );
             }
             inner += &format!("        let b0 = pb0[{h}];\n        let b1 = pb1[{h}];\n");
-            inner += &fmas();
+            inner += &fmas(f16);
             inner += "        }\n";
         }
         inner += "        }\n";
+    }
+    let (mut start, mut end) = (String::new(), String::new());
+    if f16 {
+        for i in 0..8 {
+            for j in 0..2 {
+                start += &format!("        var h{i}{j} = vec4<f16>();\n");
+                end += &format!("        c{i}{j} += vec4<f32>(h{i}{j});\n");
+            }
+        }
     }
     let shared = if full {
         "var<workgroup> sa: array<vec4<f32>, 512>;"
@@ -497,7 +522,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3
 {fill}
 {step}
         workgroupBarrier();
-{inner}
+{start}{inner}{end}
         workgroupBarrier();
     }}
 {out}
@@ -506,15 +531,18 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3
     )
 }
 
-fn source(load: Load, store: Store) -> String {
+fn source(load: Load, store: Store, f16: bool) -> String {
     let mut s = String::from(HEADER);
+    if f16 {
+        s += UNPACK16;
+    }
     s += &bindings(load, store);
     if matches!(load, Load::Plane { .. }) {
         s += PLANE_HEAD;
     }
     s += loader(load);
     s += &storer(store);
-    s += &main_source(load);
+    s += &main_source(load, f16);
     s
 }
 
@@ -523,8 +551,8 @@ pub(super) fn run(gpu: &Gpu, pass: &mut wgpu::ComputePass, g: &Gemm) {
         g.k.is_multiple_of(16),
         "a matrix multiply needs K in steps of 16"
     );
-    let key = format!("gemm {:?} {:?}", g.load, g.store);
-    let pipe = gpu.pipe(&key, || gpu.half(&source(g.load, g.store)));
+    let key = format!("gemm {:?} {:?} {}", g.load, g.store, gpu.f16);
+    let pipe = gpu.pipe(&key, || gpu.half(&source(g.load, g.store, gpu.f16)));
     let tn = g.n.div_ceil(TILE);
     let tiles = g.m.div_ceil(TILE) * tn;
     let per_tile = u64::from(TILE * TILE) * u64::from(g.k);
