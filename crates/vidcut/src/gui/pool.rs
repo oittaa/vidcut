@@ -1586,6 +1586,40 @@ impl Workspace {
                     }
                 }
             });
+            ui.menu_button("Super Scale", |ui| {
+                use vidcut_core::model::{ScaleFactor, Sharpness};
+                let now = m.super_scale;
+                for (factor, label) in [
+                    (ScaleFactor::None, "Off"),
+                    (ScaleFactor::Auto, "Auto"),
+                    (ScaleFactor::X2, "2x"),
+                    (ScaleFactor::X3, "3x"),
+                    (ScaleFactor::X4, "4x"),
+                ] {
+                    if ui.radio(now.factor == factor, label).clicked() {
+                        self.send("media.set", json!({ "media": ids, "super_scale": factor }));
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                ui.add_enabled_ui(!now.is_off(), |ui| {
+                    ui.menu_button("Sharpness", |ui| {
+                        for (sharpness, label) in [
+                            (Sharpness::Low, "Low"),
+                            (Sharpness::Medium, "Medium"),
+                            (Sharpness::High, "High"),
+                        ] {
+                            if ui.radio(now.sharpness == sharpness, label).clicked() {
+                                self.send(
+                                    "media.set",
+                                    json!({ "media": ids, "sharpness": sharpness }),
+                                );
+                                ui.close();
+                            }
+                        }
+                    });
+                });
+            });
         }
         if let Some(p) = self.project_shared() {
             ui.menu_button("Move to Bin", |ui| {

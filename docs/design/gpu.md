@@ -152,6 +152,20 @@ Frames that come down:
 - `encoders.testing` names the process that tests. When a process dies during a test, it leaves this file. Then the next test skips the encoders of Vulkan.
 - Jobs take the encoders of the GPU in use (`Availability::in_use`).
 
+## Super Scale
+
+Super Scale (`SuperScale`) changes the upscaler of a picture that an export enlarges. It does not change a picture that is made smaller.
+
+- **NVENC:** `CudaPictures` sends the picture through libplacebo (`Layout::Placed`), with the upscaler of its `Sharpness`.
+  - libplacebo then scales in linear light, with sigmoid upscaling. Without Super Scale, it scales in the code values, as the CPU does.
+  - A picture with a color shader still scales in the code values.
+- **The CPU:** `Normalizer::upscaling` uses `spline` or `lanczos` in place of `bicubic`.
+- **Placed pictures:** `layer_size` lets a layer grow to the factor times its source size (`ScaleFactor`). Auto lets it grow to four times.
+- A `Source` is used again only for a piece with the same Super Scale.
+- The other GPUs fit pictures as before ([todo](../todo/super-scale.md)).
+
+Why: the result of Super Scale is the upscaler's own. It is not meant to match the CPU.
+
 ## Deinterlacing and HDR
 
 Deinterlacing:

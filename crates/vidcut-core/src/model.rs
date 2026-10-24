@@ -312,6 +312,10 @@ pub struct Media {
     /// says in their place, for a file whose tags are wrong.
     #[serde(default, skip_serializing_if = "ColorSpace::is_tagged")]
     pub color_space: ColorSpace,
+    /// Super Scale: its pictures are enlarged with the best upscaler that
+    /// the GPU has, before they are fitted. Absent while it is off.
+    #[serde(default, skip_serializing_if = "SuperScale::is_off")]
+    pub super_scale: SuperScale,
     /// Source frames the Transcription window leaves out of its edits
     /// (`media.leave_out`), each `[start, end)`, in order and apart.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -363,6 +367,58 @@ pub fn uncovered(a: i64, b: i64, spans: &[(i64, i64)]) -> Vec<(i64, i64)> {
         out.push((at, b));
     }
     out
+}
+
+/// How Super Scale enlarges a media item's pictures.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub struct SuperScale {
+    pub factor: ScaleFactor,
+    pub sharpness: Sharpness,
+}
+
+impl SuperScale {
+    pub fn is_off(&self) -> bool {
+        self.factor == ScaleFactor::None
+    }
+}
+
+/// How much Super Scale enlarges the pictures of a media item.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub enum ScaleFactor {
+    /// Off: the usual upscaler.
+    #[default]
+    #[serde(rename = "none")]
+    None,
+    /// As much as the picture needs, up to 4x.
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "2x")]
+    X2,
+    #[serde(rename = "3x")]
+    X3,
+    #[serde(rename = "4x")]
+    X4,
+}
+
+impl ScaleFactor {
+    pub fn times(self) -> Option<u32> {
+        match self {
+            Self::None | Self::Auto => None,
+            Self::X2 => Some(2),
+            Self::X3 => Some(3),
+            Self::X4 => Some(4),
+        }
+    }
+}
+
+/// How much detail Super Scale gives the enlarged pictures.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Sharpness {
+    Low,
+    #[default]
+    Medium,
+    High,
 }
 
 /// How a media item's pictures' colors are read.

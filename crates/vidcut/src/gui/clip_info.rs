@@ -304,6 +304,16 @@ fn sections(app: &Workspace, m: &Media, read: Option<&MediaDetails>) -> Vec<Sect
                 format!("{:?}, in place of its tags", m.color_space),
             ));
         }
+        if !m.super_scale.is_off() {
+            rows.push((
+                "Super Scale".into(),
+                format!(
+                    "{}, {:?} Sharpness",
+                    json!(m.super_scale.factor).as_str().unwrap_or_default(),
+                    m.super_scale.sharpness
+                ),
+            ));
+        }
         out.push(("Video".into(), rows));
     }
     for s in read.map(|d| d.streams.as_slice()).unwrap_or_default() {

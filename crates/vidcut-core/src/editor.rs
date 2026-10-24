@@ -2570,9 +2570,17 @@ fn mutate(
             media,
             color,
             color_space,
+            super_scale,
+            sharpness,
         } => {
-            if color.is_none() && color_space.is_none() {
-                return Err(Error::usage("give color, color_space or both"));
+            if color.is_none()
+                && color_space.is_none()
+                && super_scale.is_none()
+                && sharpness.is_none()
+            {
+                return Err(Error::usage(
+                    "give color, color_space, super_scale or sharpness",
+                ));
             }
             if let Some(color) = color {
                 let color = (!color.is_empty()).then(|| color.clone());
@@ -2580,6 +2588,9 @@ fn mutate(
             }
             if let Some(space) = color_space {
                 ops::set_media_color_space(p, &media.to_vec(), *space)?;
+            }
+            if super_scale.is_some() || sharpness.is_some() {
+                ops::set_media_super_scale(p, &media.to_vec(), *super_scale, *sharpness)?;
             }
             Value::Null
         }
@@ -4144,6 +4155,7 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         marks: Default::default(),
         bin: String::new(),
         color_space: Default::default(),
+        super_scale: Default::default(),
         left_out: Vec::new(),
         sequence: probed.sequence,
         proxy: None,
@@ -7336,6 +7348,9 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
     }
     if !m.color_space.is_tagged() {
         v["color_space"] = json!(m.color_space);
+    }
+    if !m.super_scale.is_off() {
+        v["super_scale"] = json!(m.super_scale);
     }
     if m.is_still() {
         v["still"] = json!(true);

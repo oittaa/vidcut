@@ -19,7 +19,8 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, ColorSpace, Marker, Project, Speed, Track, TrackClip, TrackKind,
+    Clip, ClipAudio, ColorSpace, Marker, Project, ScaleFactor, Sharpness, Speed, Track, TrackClip,
+    TrackKind,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -1742,6 +1743,31 @@ pub fn set_media_color_space(p: &mut Project, ids: &[String], space: ColorSpace)
             return Err(Error::invalid(format!("{id} has no pictures")));
         }
         m.color_space = space;
+    }
+    Ok(())
+}
+
+pub fn set_media_super_scale(
+    p: &mut Project,
+    ids: &[String],
+    factor: Option<ScaleFactor>,
+    sharpness: Option<Sharpness>,
+) -> Result<()> {
+    for id in ids {
+        let m = p
+            .media
+            .iter_mut()
+            .find(|m| m.id == *id)
+            .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+        if m.info.video.is_none() {
+            return Err(Error::invalid(format!("{id} has no pictures")));
+        }
+        if let Some(factor) = factor {
+            m.super_scale.factor = factor;
+        }
+        if let Some(sharpness) = sharpness {
+            m.super_scale.sharpness = sharpness;
+        }
     }
     Ok(())
 }

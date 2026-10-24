@@ -283,6 +283,7 @@ mod tests {
             frames,
             image: None,
             color_space: Default::default(),
+            super_scale: Default::default(),
             placed: Vec::new(),
         }
     }

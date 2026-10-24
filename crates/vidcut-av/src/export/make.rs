@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use vidcut_core::export::EncoderChoice;
-use vidcut_core::model::Hdr;
+use vidcut_core::model::{Hdr, Sharpness};
 
 use super::normalize::{Normalizer, Relayout, down, shown_size};
 use crate::decode::Reading;
@@ -74,6 +74,7 @@ impl Fitting {
         target: Option<Hdr>,
         at_once: bool,
         place: Place,
+        sharp: Option<Sharpness>,
     ) -> Self {
         let dest = Dest::Encoder { place };
         let planned = reader
@@ -85,7 +86,7 @@ impl Fitting {
                 plan(&Facts::of(first, &ops, out, dest), dest) == Route::Gpu
             });
         let scaler = planned.and_then(|(d, _)| {
-            crate::cuda::CudaPictures::new(d, reader, out, format, target, at_once, place)
+            crate::cuda::CudaPictures::new(d, reader, out, format, target, (at_once, place), sharp)
                 .inspect_err(|e| {
                     crate::debug!(
                         "decoding",
@@ -138,6 +139,7 @@ struct Stage {
     unkept: bool,
     fitter: Option<crate::hw::Fitter>,
     reading: Option<Reading>,
+    sharp: Option<Sharpness>,
 }
 
 impl Default for Stage {
@@ -152,6 +154,7 @@ impl Default for Stage {
             unkept: false,
             fitter: None,
             reading: None,
+            sharp: None,
         }
     }
 }
@@ -191,6 +194,17 @@ impl Maker {
             self.stages.resize_with(layer + 1, Stage::default);
         }
         self.stages[layer].size = size;
+    }
+
+    pub(crate) fn sharpen_layer(&mut self, layer: usize, sharp: Option<Sharpness>) {
+        if self.stages.len() <= layer {
+            self.stages.resize_with(layer + 1, Stage::default);
+        }
+        let stage = &mut self.stages[layer];
+        if stage.sharp != sharp {
+            stage.sharp = sharp;
+            stage.normalizer = None;
+        }
     }
 
     pub(crate) fn set_mixing(&mut self, mixing: bool) {
@@ -382,14 +396,14 @@ impl Maker {
                     .is_none_or(|n| !n.matches(frame, rotation));
             if rebuild {
                 stage.made_at = Some((out_w, out_h));
-                stage.normalizer = Some(Normalizer::new(
+                stage.normalizer = Some(Normalizer::upscaling(
                     frame,
                     rotation,
-                    out_w,
-                    out_h,
+                    (out_w, out_h),
                     out_fmt,
                     self.target,
                     reading,
+                    stage.sharp,
                 )?);
             }
             break stage.normalizer.as_mut().expect("built").run(frame)?;

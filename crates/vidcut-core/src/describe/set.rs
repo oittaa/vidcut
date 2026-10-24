@@ -690,6 +690,12 @@ impl Words<'_> {
         s.put("color_space", "Color Space", &color_space, |m| {
             json!(m.color_space)
         });
+        s.put("super_scale", "Super Scale", &word, |m| {
+            json!(m.super_scale.factor)
+        });
+        s.put("sharpness", "Sharpness", &word, |m| {
+            json!(m.super_scale.sharpness)
+        });
         s.f.text()
     }
 

@@ -1,7 +1,9 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use vidcut_core::model::{ColorSpace, Hdr, SubtitleStyle, Title};
+use vidcut_core::model::{
+    ColorSpace, Hdr, ScaleFactor, Sharpness, SubtitleStyle, SuperScale, Title,
+};
 use vidcut_core::place::Placing;
 use vidcut_core::render::{Image, Placed, Ramp, ShownTitle, VideoPiece, WHOLE, Wipe};
 use vidcut_core::time::Rational;
@@ -85,6 +87,7 @@ struct Source {
     decoder: Option<crate::hw::Kind>,
     reversed: Vec<Reversed>,
     left: Option<Instant>,
+    sharp: Option<Sharpness>,
 }
 
 #[derive(Clone)]
@@ -142,9 +145,10 @@ impl Source {
         decoder: Option<&crate::hw::GpuDecoder>,
         reading: Reading,
         measure: bool,
-        color_space: ColorSpace,
+        (color_space, super_scale): (ColorSpace, SuperScale),
     ) -> Result<Source> {
         let video = pictures == Pictures::Video;
+        let sharp = sharpness(super_scale);
         let nvdec = gpu.filter(|_| video);
         let nvdec = nvdec.and_then(|g| g.device.with_own_stream().ok());
         let nvdec = nvdec.map(crate::hw::GpuDecoder::nvdec).transpose()?;
@@ -155,7 +159,9 @@ impl Source {
         )?;
         reader.set_color_space(color_space);
         let fitting = match gpu {
-            Some(g) => Fitting::on_gpu(&reader, g.out, g.format, g.target, true, Place::Cuda),
+            Some(g) => {
+                Fitting::on_gpu(&reader, g.out, g.format, g.target, true, Place::Cuda, sharp)
+            }
             None => Fitting::none(),
         };
         let decoder = reader.gpu();
@@ -176,6 +182,7 @@ impl Source {
             decoder,
             reversed: Vec::new(),
             left: None,
+            sharp,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -222,6 +229,7 @@ impl Source {
             decoder,
             reversed: Vec::new(),
             left: None,
+            sharp: None,
         })
     }
 
@@ -403,7 +411,24 @@ pub(crate) fn placing_of(
 
 const PLACED_MOST: f64 = 16384.0;
 
-fn layer_size(out: (u32, u32), f: &frame::Video, rotation: u16, placed: &[Placed]) -> (u32, u32) {
+fn sharpness(super_scale: SuperScale) -> Option<Sharpness> {
+    (!super_scale.is_off()).then_some(super_scale.sharpness)
+}
+
+fn reach(factor: ScaleFactor) -> f64 {
+    match factor {
+        ScaleFactor::Auto => 4.0,
+        f => f64::from(f.times().unwrap_or(1)),
+    }
+}
+
+fn layer_size(
+    out: (u32, u32),
+    f: &frame::Video,
+    rotation: u16,
+    placed: &[Placed],
+    factor: ScaleFactor,
+) -> (u32, u32) {
     let (fw, fh) = upright_fit(f, rotation, out);
     let sar = f.aspect_ratio();
     let across = if sar.numerator() > 0 && sar.denominator() > 0 {
@@ -418,7 +443,7 @@ fn layer_size(out: (u32, u32), f: &frame::Video, rotation: u16, placed: &[Placed
     let most = PLACED_MOST / ow.max(oh);
     let least = 2.0 / ow.min(oh);
     let scale = vidcut_core::place::detail(placed)
-        .min(native.max(1.0))
+        .min((native * reach(factor)).max(1.0))
         .clamp(least, most.max(least));
     let even = |v: f64| ((v * scale / 2.0).round() as u32 * 2).max(2);
     let mut size = (even(ow), even(oh));
@@ -1402,19 +1427,25 @@ impl VideoFrames {
                 image,
                 pace,
                 color_space,
+                super_scale,
                 ..
             } = layer
             else {
                 reading.push(None);
                 continue;
             };
+            let sharp = sharpness(*super_scale);
             let pictures = Pictures::of(image.as_ref());
             let still = pictures == Pictures::Still;
             let from = if still { 0 } else { *source_frame };
             let input = input_of(path, image.as_ref());
             let target = self.target(*origin, from);
             let free: Vec<usize> = (0..self.open.len())
-                .filter(|&s| !taken[s] && self.open[s].reader.input() == &input)
+                .filter(|&s| {
+                    !taken[s]
+                        && self.open[s].reader.input() == &input
+                        && self.open[s].sharp == sharp
+                })
                 .collect();
             let reads_on = free
                 .iter()
@@ -1451,7 +1482,7 @@ impl VideoFrames {
                                 self.decoder.as_ref(),
                                 self.maker.reading(),
                                 self.measures(&input),
-                                *color_space,
+                                (*color_space, *super_scale),
                             )?,
                         },
                     };
@@ -1537,14 +1568,18 @@ impl VideoFrames {
                 source_frame,
                 image,
                 color_space,
+                super_scale,
                 ..
             } = layer
             else {
                 continue;
             };
-            let color_space = *color_space;
+            let (color_space, super_scale) = (*color_space, *super_scale);
+            let sharp = sharpness(super_scale);
             let input = input_of(path, image.as_ref());
-            let free = |s: &usize| !used[*s] && self.open[*s].reader.input() == &input;
+            let free = |s: &usize| {
+                !used[*s] && self.open[*s].reader.input() == &input && self.open[*s].sharp == sharp
+            };
             let read = (0..self.open.len()).find(|s| free(s) && self.open[*s].left.is_none());
             let left = (0..self.open.len()).find(free);
             if let Some(s) = read {
@@ -1584,7 +1619,7 @@ impl VideoFrames {
                     decoder.as_ref(),
                     reading,
                     measure,
-                    color_space,
+                    (color_space, super_scale),
                 )
             });
             return;
@@ -1694,9 +1729,13 @@ impl VideoFrames {
         layer: &VideoPiece,
     ) -> Result<frame::Video> {
         let fps = self.fps;
-        let placed = match layer {
-            VideoPiece::Source { placed, .. } => placed.as_slice(),
-            _ => &[],
+        let (placed, super_scale) = match layer {
+            VideoPiece::Source {
+                placed,
+                super_scale,
+                ..
+            } => (placed.as_slice(), *super_scale),
+            _ => (&[][..], SuperScale::default()),
         };
         let decoded = matches!(self.maker.output(), Output::Decoded { .. });
         let up = (!self.maker.mixing() || self.gpu_mixes()) && placed.is_empty();
@@ -1704,10 +1743,17 @@ impl VideoFrames {
         let changed = src.advance(target(fps, src.origin, pos))?;
         let (w, h, _) = self.maker.out();
         let wanted = match (&src.current, placed.is_empty() || decoded) {
-            (Some((f, _)), false) => Some(layer_size((w, h), f, src.reader.rotation(), placed)),
+            (Some((f, _)), false) => Some(layer_size(
+                (w, h),
+                f,
+                src.reader.rotation(),
+                placed,
+                super_scale.factor,
+            )),
             _ => None,
         };
         self.maker.size_layer(i, wanted);
+        self.maker.sharpen_layer(i, sharpness(super_scale));
         let stale = !decoded
             && src
                 .normalized

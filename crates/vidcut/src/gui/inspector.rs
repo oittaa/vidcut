@@ -9,7 +9,8 @@ use egui_phosphor::regular::{
 use serde_json::{Value, json};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Clip, Crop, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project, TrackKind, ZoomBox,
+    Clip, Crop, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project, ScaleFactor, Sharpness,
+    TrackKind, ZoomBox,
 };
 use vidcut_core::ops::picture::has_picture;
 use vidcut_core::place::upright_fit;
@@ -598,6 +599,24 @@ fn param_name(key: Key) -> Option<&'static str> {
         Key::Volume => Some("volume"),
         Key::Picture(f) => f.channel().map(PictureValue::name),
         _ => None,
+    }
+}
+
+const FACTORS: [ScaleFactor; 5] = [
+    ScaleFactor::None,
+    ScaleFactor::Auto,
+    ScaleFactor::X2,
+    ScaleFactor::X3,
+    ScaleFactor::X4,
+];
+
+fn factor_label(factor: ScaleFactor) -> &'static str {
+    match factor {
+        ScaleFactor::None => "Off",
+        ScaleFactor::Auto => "Auto",
+        ScaleFactor::X2 => "2x",
+        ScaleFactor::X3 => "3x",
+        ScaleFactor::X4 => "4x",
     }
 }
 
@@ -1554,6 +1573,72 @@ impl Workspace {
         }
     }
 
+    fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
+        let mut media: Vec<&str> = chosen
+            .iter()
+            .filter_map(|c| p.clip(&c.id))
+            .map(|c| c.media.as_str())
+            .collect();
+        media.sort_unstable();
+        media.dedup();
+        let Some(now) = media
+            .first()
+            .and_then(|id| p.media(id))
+            .map(|m| m.super_scale)
+        else {
+            return;
+        };
+        let mut put = None;
+        let header = |ui: &mut egui::Ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_enabled(!now.is_off(), egui::Button::new("Reset"))
+                    .clicked()
+            })
+            .inner
+        };
+        let cleared = group(ui, "Super Scale", header, |ui| {
+            label(ui, "Super Scale", !now.is_off());
+            egui::ComboBox::from_id_salt("inspector-super-scale")
+                .selected_text(factor_label(now.factor))
+                .show_ui(ui, |ui| {
+                    for factor in FACTORS {
+                        if ui
+                            .selectable_label(now.factor == factor, factor_label(factor))
+                            .clicked()
+                        {
+                            put = Some(json!({ "super_scale": factor }));
+                        }
+                    }
+                });
+            ui.end_row();
+            label(ui, "Sharpness", !now.is_off());
+            ui.add_enabled_ui(!now.is_off(), |ui| {
+                dialog::switch(ui, |ui| {
+                    for (sharpness, text) in [
+                        (Sharpness::Low, "Low"),
+                        (Sharpness::Medium, "Medium"),
+                        (Sharpness::High, "High"),
+                    ] {
+                        if ui
+                            .selectable_label(now.sharpness == sharpness, text)
+                            .clicked()
+                        {
+                            put = Some(json!({ "sharpness": sharpness }));
+                        }
+                    }
+                });
+            });
+            ui.end_row();
+        });
+        if cleared {
+            put = Some(json!({ "super_scale": ScaleFactor::None }));
+        }
+        if let Some(mut params) = put {
+            params["media"] = json!(media);
+            self.send("media.set", params);
+        }
+    }
+
     fn audio_section(
         &mut self,
         ui: &mut egui::Ui,
@@ -1861,6 +1946,7 @@ impl Workspace {
                     transform(ui, i, &p, at, &chosen, &mut acts);
                     crop(ui, i, &p, at, &chosen, &mut acts);
                     dynamic_zoom(ui, i, &p, at, &chosen, boxes, &mut acts);
+                    self.super_scale_section(ui, &p, &chosen);
                 }
                 if !paced.is_empty() {
                     let at = (&self.inspector, &*p, dropped);
