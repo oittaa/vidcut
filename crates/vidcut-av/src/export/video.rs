@@ -779,7 +779,8 @@ impl Source {
             });
             match index {
                 Some(i) if own => {
-                    let mut known = vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?];
+                    let mut known =
+                        vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?];
                     for f in &self.queued {
                         known.push(frame_ref(f)?);
                     }

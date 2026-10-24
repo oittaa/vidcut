@@ -404,7 +404,9 @@ fn main_source(load: Load) -> String {
 "#
             )
         } else {
-            format!("            sa[pair * 32u + r / 4u][r % 4u] = a_word(ar{j}, k0 / 2u + pair, tap, ci);\n")
+            format!(
+                "            sa[pair * 32u + r / 4u][r % 4u] = a_word(ar{j}, k0 / 2u + pair, tap, ci);\n"
+            )
         };
         fill += &format!(
             r#"
@@ -445,7 +447,9 @@ fn main_source(load: Load) -> String {
                     a1 = kk * 32 + 16
                 );
             } else {
-                inner += &format!("        {{\n        let a0 = pa0[{h}];\n        let a1 = pa1[{h}];\n");
+                inner += &format!(
+                    "        {{\n        let a0 = pa0[{h}];\n        let a1 = pa1[{h}];\n"
+                );
             }
             inner += &format!("        let b0 = pb0[{h}];\n        let b1 = pb1[{h}];\n");
             inner += &fmas();
