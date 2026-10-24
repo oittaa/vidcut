@@ -522,21 +522,26 @@ fn winograd(c: &Conv) -> Vec<f32> {
 }
 
 fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool, half: bool) -> String {
+    let (acc, zero, lane) = if half {
+        ("vec4<f16>", "0.0h", "bitcast<vec2<f16>>")
+    } else {
+        ("vec4<f32>", "0.0", "unh")
+    };
     let mut decl = String::new();
     for k in 0..8 {
         for h in 0..2 {
-            decl += &format!("    var a{k}{h} = vec4<f32>(0.0);\n");
+            decl += &format!("    var a{k}{h} = {acc}({zero});\n");
         }
     }
     let mut body = String::new();
     for ci in 0..8 {
         body += &format!(
-            "        {{\n        let vq = sm[({ci}u * 16u + tv) * 4u + a];\n        let uq = sm[512u + ({ci}u * 16u + t) * 4u + b];\n        let v0 = vec4<f32>(unh(vq.x), unh(vq.y));\n        let v1 = vec4<f32>(unh(vq.z), unh(vq.w));\n        let u0 = vec4<f32>(unh(uq.x), unh(uq.y));\n        let u1 = vec4<f32>(unh(uq.z), unh(uq.w));\n"
+            "        {{\n        let vq = sm[({ci}u * 16u + tv) * 4u + a];\n        let uq = sm[512u + ({ci}u * 16u + t) * 4u + b];\n        let v0 = {acc}({lane}(vq.x), {lane}(vq.y));\n        let v1 = {acc}({lane}(vq.z), {lane}(vq.w));\n        let u0 = {acc}({lane}(uq.x), {lane}(uq.y));\n        let u1 = {acc}({lane}(uq.z), {lane}(uq.w));\n"
         );
         for k in 0..8 {
             let v = format!("v{}.{}", k / 4, ["x", "y", "z", "w"][k % 4]);
             for h in 0..2 {
-                body += &format!("        a{k}{h} = fma(vec4<f32>({v}), u{h}, a{k}{h});\n");
+                body += &format!("        a{k}{h} = fma({acc}({v}), u{h}, a{k}{h});\n");
             }
         }
         body += "        }\n";
@@ -553,7 +558,7 @@ fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool, half: bool) -> 
         for kk in 0..2 {
             for h in 0..2 {
                 epilogue += &format!(
-                    "    sm[(t * 8u + a * 2u + {kk}u) * 8u + ((b * 2u + {h}u) ^ (a & 1u))] = bitcast<vec4<u32>>(a{k}{h});\n",
+                    "    sm[(t * 8u + a * 2u + {kk}u) * 8u + ((b * 2u + {h}u) ^ (a & 1u))] = bitcast<vec4<u32>>(vec4<f32>(a{k}{h}));\n",
                     k = 2 * r + kk
                 );
             }
