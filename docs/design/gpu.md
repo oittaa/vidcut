@@ -162,8 +162,8 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
 - **The CPU:** `Normalizer::upscaling` uses `spline` or `lanczos` in place of `bicubic`.
 - **Placed pictures:** `layer_size` lets a layer grow to the factor times its source size (`ScaleFactor`). Auto lets it grow to four times.
 - A `Source` is used again only for a piece with the same Super Scale.
-- **AI** (`upscale`):
-  - Before an export starts, `upscale::check` refuses media that AI cannot take (`upscale::unfit`). It also refuses AI without the weights or without a GPU that can run it.
+- **AI Fast** (`upscale`):
+  - Before an export starts, `upscale::check` refuses media that AI Fast cannot take (`upscale::unfit`). It also refuses AI Fast without the weights or without a GPU that can run it.
   - In an export, `Source::ai_picture` finds the chunk of 15 frames that holds the source picture (`upscale::FRAMES`).
     - The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
     - `Source::read_chunk` reads the chunk with a second `VideoReader` on the same file. It uses the same GPU decoder.
@@ -197,7 +197,34 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - The usual fitting then makes that picture the size it shows at.
   - The frames go through memory, also from a GPU decoder.
   - `upscale` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines and weights stay. The buffers of a chunk are freed after it.
-  - `Note::Upscaled` names each file that AI enlarged in the export's report.
+  - `Note::Upscaled` names each file that an AI upscaler enlarged in the export's report (`ai::name`).
+- **AI Best** (`flashvsr`):
+  - Before an export starts, `flashvsr::check` refuses media that AI Best cannot take (`flashvsr::unfit`). It also refuses AI Best without the weights or without a GPU that can run it. It loads the model then.
+  - It also refuses a size that does not fit (`run::plan`). It takes the size from the media and the output size (`flashvsr::enlarged`). A zoomed picture can be larger; then `flashvsr::Stream::open` refuses it when the export reaches it.
+  - `Source::best_picture` gives the picture at the size that it shows at, but not more than 4 times the shown source size (`flashvsr::SCALE`).
+    - It keeps one `flashvsr::Stream` for the source. It reads the frames in order with the second `VideoReader`, from the first frame that is asked for.
+    - A frame before the kept pictures, or more than 48 frames after the last frame read (`BEST_JUMP`), starts a new stream there.
+    - At the end of the file, the stream repeats the last frame, as the official code does.
+  - The stream works in chunks of 16 frames (`run::Stream`). The first chunk reads 17 frames and gives 13. Each later chunk reads 16 and gives 16. Thus the output is 4 frames behind the input.
+    - Each frame first gets PIL's bicubic enlargement, with PIL's fixed-point weights (`resize::coefficients`). The edges are repeated up to a multiple of 128.
+    - The LQ projection (16× pixel unshuffle, two causal 3-D convolutions, a linear layer) makes one token frame from each 4 frames. Its convolutions keep the last 2 frames of each clip.
+    - The 30 DiT blocks run one step at the fixed time 1000. The adaLN values for that time are computed once, at load.
+    - A block is 128 tokens, and a window is 2 latent frames.
+    - Blocks 0, 6, 12, 18 and 24 attend to 11×11 blocks in the current chunk and in the last 3 windows.
+    - The other blocks attend to 3×3 blocks in the current chunk and in the last window.
+    - Pooled scores choose the blocks when the candidate blocks are more than the top-k count. A softmax per query block comes first.
+    - Then a radix select finds the threshold on the bits of the 32-bit values (`hist.wgsl`, `pick.wgsl`). It keeps the official rule: the value at place k+1, and strictly greater.
+    - `attend.wgsl` is a flash attention over the chosen key blocks, with an online softmax in 32-bit floats. Cross-attention to the fixed prompt uses it too.
+    - The KV cache of each block is a ring of windows (`Cache`).
+    - `run::plan` keeps the caches on the GPU while all of the work fits in three quarters of the GPU's memory. The caches of the other blocks stay in main memory between chunks (`Keys::Host`). Each comes back to the GPU just before its block runs, and its new windows go back after it.
+    - The results are the same in both places.
+    - Without a size for the GPU's memory, all caches stay on the GPU.
+    - A size that does not fit even with every cache in main memory is refused. So is a size whose caches need more than half of main memory.
+    - The TC decoder gives 4 frames for each latent frame. Its memory blocks keep the features of the previous frame. Its full-size stage runs in bands of 64 rows.
+  - One matrix multiply shader (`gemm::run`) runs every linear layer and convolution. It splits its work into dispatches of at most 150 G multiply-adds. Its loaders gather the convolution taps, and its stores join bias, activation and residual adds.
+    - The weights are 16-bit floats on the GPU. The files hold 32-bit floats; they are rounded at load.
+    - The residual stream of the DiT stays in 32-bit floats. The other values between the steps are 16-bit floats, with 32-bit sums.
+  - `flashvsr` has a wgpu device of its own. Its pipelines and weights stay. The work buffers of a chunk are freed after it.
 - The other GPUs fit pictures as before ([todo](../todo/super-scale.md)).
 
 Why: the result of Super Scale is the upscaler's own. It is not meant to match the CPU.

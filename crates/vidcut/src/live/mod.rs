@@ -1602,6 +1602,26 @@ impl Live {
         }
     }
 
+    fn ai_missing(
+        &self,
+        media: &[String],
+        factor: Option<vidcut_core::model::ScaleFactor>,
+        upscaler: Option<vidcut_core::model::Upscaler>,
+    ) -> Vec<vidcut_core::model::Upscaler> {
+        let Some(open) = self.project.as_ref() else {
+            return Vec::new();
+        };
+        let set = vidcut_core::ops::SuperScaleSet {
+            factor,
+            sharpness: None,
+            upscaler,
+        };
+        vidcut_core::ops::ai_upscalers(open.project(), media, &set)
+            .into_iter()
+            .filter(|u| !vidcut_av::ai::needed(&paths::models_dir(), *u).is_empty())
+            .collect()
+    }
+
     fn duck_measure(&self, envelope: &Envelope) -> Option<Measure> {
         use vidcut_core::model::DuckDetect;
         let p = self.project.as_ref()?.project();
@@ -2918,14 +2938,29 @@ impl Live {
                     None => Step::Now(self.edit(envelope, job.origin)),
                 }
             }
-            Request::MediaSet { download: true, .. }
-                if !envelope.dry_run
-                    && !vidcut_av::upscale::needed(&paths::models_dir()).is_empty() =>
+            Request::MediaSet {
+                media,
+                super_scale,
+                upscaler,
+                download: true,
+                ..
+            } if !envelope.dry_run
+                && !self
+                    .ai_missing(&media.to_vec(), super_scale, upscaler)
+                    .is_empty() =>
             {
-                let fetch = || {
-                    vidcut_av::upscale::get_ready(&paths::models_dir(), true).map_err(|e| {
-                        crate::export::av_error(&e, vidcut_core::ErrorCode::Media, String::new())
-                    })
+                let wanted = self.ai_missing(&media.to_vec(), super_scale, upscaler);
+                let fetch = move || {
+                    for u in wanted {
+                        vidcut_av::ai::get_ready(&paths::models_dir(), u, true).map_err(|e| {
+                            crate::export::av_error(
+                                &e,
+                                vidcut_core::ErrorCode::Media,
+                                String::new(),
+                            )
+                        })?;
+                    }
+                    Ok(())
                 };
                 Step::Measure(Box::new(fetch), Box::new(envelope))
             }

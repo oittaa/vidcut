@@ -122,3 +122,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `VIDCUT_HWDEC` selects the GPU decoder of the player: `nvdec[:CUDA index]`, `vaapi[:render node]`, `d3d11va[:adapter index]`, `videotoolbox` or `none`.
 - `WGPU_BACKEND` (`vulkan`, `metal`, `dx12`) and `WGPU_POWER_PREF` (`low`, `high`) select the backend and the adapter of wgpu.
 - `WGPU_VALIDATION=0` turns off the validation layers in debug builds.
+- `VIDCUT_FLASHVSR_DUMP=DIR` makes the AI Best upscaler write its stages as `.npy` files into `DIR`. A check against the official PyTorch code reads them.
+  - `inputNNN.npy`: each enlarged input frame, at the model size, 8-bit RGB.
+  - `chunkK_noise.npy` and `chunkK_latents.npy`, for each chunk: the noise and the latents after the one step, `[16, 4, H/8, W/8]`.
+  - `chunkK_x_in.npy` and `chunkK_x_blockN.npy` (N is 0, 6 and 29), for the first two chunks: the hidden state before block 0 and after block N, `[tokens, 1536]`. The tokens are in the order of the official code.
+  - `frameNNN.npy`: each output frame, 8-bit RGB.

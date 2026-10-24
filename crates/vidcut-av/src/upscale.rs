@@ -3,10 +3,11 @@ use std::path::Path;
 use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::Instant;
 
-use vidcut_core::model::{Media, Project};
+use vidcut_core::model::{Media, Project, Upscaler};
 use vidcut_core::render::VideoPiece;
 use wgpu::util::DeviceExt;
 
+use crate::compute::{self, bytes, group, halves, words};
 use crate::error::{Error, Result};
 use crate::models::{self, Fetch, File, Need};
 
@@ -94,6 +95,7 @@ pub fn check<'a>(
                 ..
             } = layer
                 && super_scale.ai()
+                && super_scale.upscaler == Upscaler::AiFast
                 && !media.contains(&id.as_str())
             {
                 media.push(id);
@@ -110,7 +112,7 @@ pub fn check<'a>(
         .collect();
     if !refused.is_empty() {
         return Err(Error::Invalid(format!(
-            "the AI upscaler of Super Scale can't take {}: set their Upscaler to Classic, \
+            "the AI Fast upscaler of Super Scale can't take {}: set their Upscaler to Classic, \
              or their Super Scale to Off",
             refused.join(", ")
         )));
@@ -935,61 +937,14 @@ fn spans(n: usize) -> Vec<Span> {
         .collect()
 }
 
-fn half(v: f32) -> u16 {
-    let b = v.to_bits();
-    let sign = ((b >> 16) & 0x8000) as u16;
-    let exp = ((b >> 23) & 0xff) as i32 - 112;
-    let man = b & 0x7f_ffff;
-    let (bits, rest, shift) = if exp >= 31 {
-        return sign | 0x7c00;
-    } else if exp > 0 {
-        (((exp as u32) << 10) | (man >> 13), man & 0x1fff, 13)
-    } else if exp > -11 {
-        let m = man | 0x80_0000;
-        let shift = (14 - exp) as u32;
-        (m >> shift, m & ((1 << shift) - 1), shift)
-    } else {
-        return sign;
-    };
-    let middle = 1 << (shift - 1);
-    let up = rest > middle || (rest == middle && bits & 1 == 1);
-    sign | (bits + u32::from(up)) as u16
-}
-
-fn halves(v: &[f32]) -> Vec<u8> {
-    v.iter().flat_map(|f| half(*f).to_le_bytes()).collect()
-}
-
-fn bytes(v: &[f32]) -> Vec<u8> {
-    v.iter().flat_map(|f| f.to_le_bytes()).collect()
-}
-
-fn words(v: &[u32]) -> Vec<u8> {
-    v.iter().flat_map(|f| f.to_le_bytes()).collect()
-}
+const WHAT: &str = "the AI Fast upscaler";
 
 fn gpu_error(e: impl std::fmt::Display) -> Error {
-    Error::Invalid(format!("the AI upscaler on the GPU: {e}"))
+    compute::gpu_error(WHAT, e)
 }
 
 fn checked<T>(device: &wgpu::Device, run: impl FnOnce() -> Result<T>) -> Result<T> {
-    let scopes = [
-        wgpu::ErrorFilter::OutOfMemory,
-        wgpu::ErrorFilter::Validation,
-        wgpu::ErrorFilter::Internal,
-    ]
-    .map(|f| device.push_error_scope(f));
-    let out = run();
-    let mut first = None;
-    for scope in scopes.into_iter().rev() {
-        if let Some(e) = pollster::block_on(scope.pop()) {
-            first.get_or_insert(e);
-        }
-    }
-    match first {
-        Some(e) => Err(gpu_error(e)),
-        None => out,
-    }
+    compute::checked(device, WHAT, run)
 }
 
 struct Pipelines {
@@ -1057,47 +1012,11 @@ struct Pending {
 }
 
 fn pipeline(device: &wgpu::Device, source: String) -> wgpu::ComputePipeline {
-    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("upscale"),
-        source: wgpu::ShaderSource::Wgsl(source.into()),
-    });
-    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("upscale"),
-        layout: None,
-        module: &module,
-        entry_point: Some("main"),
-        compilation_options: Default::default(),
-        cache: None,
-    })
+    compute::pipeline(device, "upscale", source)
 }
 
 fn buffer(device: &wgpu::Device, size: usize, usage: wgpu::BufferUsages) -> wgpu::Buffer {
-    device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("upscale"),
-        size: size.max(4) as u64,
-        usage,
-        mapped_at_creation: false,
-    })
-}
-
-fn group(
-    device: &wgpu::Device,
-    pipeline: &wgpu::ComputePipeline,
-    buffers: &[&wgpu::Buffer],
-) -> wgpu::BindGroup {
-    let entries: Vec<wgpu::BindGroupEntry> = buffers
-        .iter()
-        .enumerate()
-        .map(|(i, b)| wgpu::BindGroupEntry {
-            binding: i as u32,
-            resource: b.as_entire_binding(),
-        })
-        .collect();
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &pipeline.get_bind_group_layout(0),
-        entries: &entries,
-    })
+    compute::buffer(device, "upscale", size, usage)
 }
 
 fn blocks(n: usize) -> u32 {
@@ -1111,13 +1030,13 @@ impl Engine {
             power_preference: wgpu::PowerPreference::HighPerformance,
             ..Default::default()
         }))
-        .map_err(|e| format!("no GPU for the AI upscaler: {e}"))?;
+        .map_err(|e| format!("no GPU for the AI Fast upscaler: {e}"))?;
         let limits = adapter.limits();
         if limits.max_compute_workgroup_storage_size < SHARED
             || limits.max_compute_invocations_per_workgroup < 256
         {
             return Err(format!(
-                "{} has too little workgroup memory for the AI upscaler",
+                "{} has too little workgroup memory for the AI Fast upscaler",
                 adapter.get_info().name
             ));
         }
@@ -1126,7 +1045,7 @@ impl Engine {
             required_limits: limits,
             ..Default::default()
         }))
-        .map_err(|e| format!("the GPU did not open for the AI upscaler: {e}"))?;
+        .map_err(|e| format!("the GPU did not open for the AI Fast upscaler: {e}"))?;
         let made = checked(&device, || {
             let convs = [
                 Shape::new(PADDED, FEATURES, 3, true, false, false),

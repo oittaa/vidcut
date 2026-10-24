@@ -1,5 +1,6 @@
 pub use ffmpeg_next as ffmpeg;
 
+pub mod ai;
 pub mod analysis;
 pub mod barcode;
 pub mod beep;
@@ -7,6 +8,7 @@ pub(crate) mod buffers;
 pub mod burn;
 pub mod cancel;
 pub mod color;
+pub(crate) mod compute;
 pub mod copies;
 pub mod cuda;
 pub mod decode;
@@ -15,6 +17,7 @@ pub mod error;
 pub mod export;
 pub mod first;
 pub mod fixture;
+pub mod flashvsr;
 pub mod gpus;
 pub mod hdr;
 pub mod hw;

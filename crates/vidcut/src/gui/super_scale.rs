@@ -12,8 +12,11 @@ pub(super) const FACTORS: [(ScaleFactor, &str); 5] = [
     (ScaleFactor::X4, "4x"),
 ];
 
-pub(super) const UPSCALERS: [(Upscaler, &str); 2] =
-    [(Upscaler::Ai, "AI"), (Upscaler::Classic, "Classic")];
+pub(super) const UPSCALERS: [(Upscaler, &str); 3] = [
+    (Upscaler::AiFast, "AI Fast"),
+    (Upscaler::AiBest, "AI Best"),
+    (Upscaler::Classic, "Classic"),
+];
 
 pub(super) const SHARPNESS: [(Sharpness, &str); 3] = [
     (Sharpness::Low, "Low"),
@@ -30,7 +33,8 @@ pub(super) fn label_of<T: PartialEq + Copy>(list: &[(T, &'static str)], value: T
 pub(super) fn described(s: SuperScale) -> String {
     let factor = label_of(&FACTORS, s.factor);
     match s.upscaler {
-        Upscaler::Ai => format!("{factor}, AI"),
+        Upscaler::AiFast => format!("{factor}, AI Fast"),
+        Upscaler::AiBest => format!("{factor}, AI Best"),
         Upscaler::Classic => format!(
             "{factor}, Classic, Sharpness {}",
             label_of(&SHARPNESS, s.sharpness)
@@ -47,8 +51,8 @@ pub(super) fn unfit<'a>(
     }
     media
         .into_iter()
-        .find_map(vidcut_av::upscale::unfit)
-        .map(|why| format!("AI can't take {why}"))
+        .find_map(|m| vidcut_av::ai::unfit(m, s.upscaler))
+        .map(|why| format!("{} can't take {why}", label_of(&UPSCALERS, s.upscaler)))
 }
 
 fn field<T: serde::de::DeserializeOwned>(params: &Value, key: &str) -> Option<T> {
@@ -57,21 +61,33 @@ fn field<T: serde::de::DeserializeOwned>(params: &Value, key: &str) -> Option<T>
         .and_then(|v| serde_json::from_value(v.clone()).ok())
 }
 
+pub(super) fn needed(upscalers: &[Upscaler]) -> Vec<vidcut_av::models::Need> {
+    let dir = crate::paths::models_dir();
+    upscalers
+        .iter()
+        .flat_map(|u| vidcut_av::ai::needed(&dir, *u))
+        .collect()
+}
+
 impl Workspace {
+    fn ai_after(&self, params: &Value) -> Vec<Upscaler> {
+        let media: Vec<String> = field(params, "media").unwrap_or_default();
+        let set = vidcut_core::ops::SuperScaleSet {
+            factor: field(params, "super_scale"),
+            sharpness: None,
+            upscaler: field(params, "upscaler"),
+        };
+        self.project_shared()
+            .map(|p| vidcut_core::ops::ai_upscalers(&p, &media, &set))
+            .unwrap_or_default()
+    }
+
     pub(super) fn set_super_scale(&mut self, media: &[String], mut params: Value) {
         params["media"] = json!(media);
-        let ai_on = self.project_shared().is_some_and(|p| {
-            media.iter().filter_map(|id| p.media(id)).any(|m| {
-                let mut s = m.super_scale;
-                s.factor = field(&params, "super_scale").unwrap_or(s.factor);
-                s.upscaler = field(&params, "upscaler").unwrap_or(s.upscaler);
-                s.ai()
-            })
-        });
-        if ai_on && !vidcut_av::upscale::needed(&crate::paths::models_dir()).is_empty() {
-            self.super_scale_asking = Some(params);
-        } else {
+        if needed(&self.ai_after(&params)).is_empty() {
             self.send("media.set", params);
+        } else {
+            self.super_scale_asking = Some(params);
         }
     }
 
@@ -79,7 +95,7 @@ impl Workspace {
         let Some(mut params) = self.super_scale_asking.clone() else {
             return;
         };
-        let needs = vidcut_av::upscale::needed(&crate::paths::models_dir());
+        let needs = needed(&self.ai_after(&params));
         if needs.is_empty() {
             self.super_scale_asking = None;
             self.send("media.set", params);

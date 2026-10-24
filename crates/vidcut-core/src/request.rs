@@ -294,13 +294,14 @@ pub enum Request {
         /// The detail of the classic upscaler: `low`, `medium` or `high`.
         #[serde(default)]
         sharpness: Option<crate::model::Sharpness>,
-        /// The upscaler of Super Scale: `ai` (the default) or `classic`. An
-        /// export refuses `ai` for HDR media.
+        /// The upscaler of Super Scale: `ai_fast` (the default), `ai_best`
+        /// or `classic`. An export refuses `ai_fast` and `ai_best` for HDR
+        /// media.
         #[serde(default)]
         upscaler: Option<crate::model::Upscaler>,
         /// Download the AI upscaler's weights if this computer doesn't have
         /// them yet, each checked against its SHA-256. Without them, an
-        /// export with the AI upscaler is an error that says what would be
+        /// export with that AI upscaler is an error that says what would be
         /// downloaded.
         #[serde(default)]
         download: bool,
@@ -2563,7 +2564,7 @@ pub struct ExportParams {
     /// The subtitle files' format. Default: SRT.
     #[serde(default)]
     pub subtitle_format: Option<SubtitleFormat>,
-    /// Download Voice Isolation's model and the AI upscaler's weights if
+    /// Download Voice Isolation's model and the AI upscalers' weights if
     /// the export needs them and this computer doesn't have them yet, each
     /// checked against its SHA-256. Without them, the export is an error
     /// that says what would be downloaded.

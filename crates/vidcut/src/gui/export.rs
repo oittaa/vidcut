@@ -787,7 +787,7 @@ impl Workspace {
             }
         }
         if s.weights {
-            let needs = vidcut_av::upscale::needed(&crate::paths::models_dir());
+            let needs = super::super_scale::needed(&self.ai_upscalers());
             let answer = if needs.is_empty() {
                 Some(false)
             } else {
@@ -827,14 +827,23 @@ impl Workspace {
         self.export.starting = Some(s);
     }
 
-    fn send_start(&self, ctx: &egui::Context, s: &mut Starting) {
-        let ai = self.project().is_some_and(|p| {
-            vidcut_core::otio::used_media(p, None)
+    fn ai_upscalers(&self) -> Vec<vidcut_core::model::Upscaler> {
+        let mut out = Vec::new();
+        if let Some(p) = self.project() {
+            for m in vidcut_core::otio::used_media(p, None)
                 .iter()
                 .filter_map(|id| p.media(id))
-                .any(|m| m.super_scale.ai())
-        });
-        if ai && !vidcut_av::upscale::needed(&crate::paths::models_dir()).is_empty() {
+            {
+                if m.super_scale.ai() && !out.contains(&m.super_scale.upscaler) {
+                    out.push(m.super_scale.upscaler);
+                }
+            }
+        }
+        out
+    }
+
+    fn send_start(&self, ctx: &egui::Context, s: &mut Starting) {
+        if !super::super_scale::needed(&self.ai_upscalers()).is_empty() {
             s.weights = true;
         } else {
             s.ask = Some(Ask::send(&self.live, ctx, "export.start", s.params.clone()));

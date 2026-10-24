@@ -286,7 +286,8 @@ fn ease(v: &Value) -> String {
 
 fn upscaler(v: &Value) -> String {
     match v.as_str() {
-        Some("ai") => "AI".into(),
+        Some("ai_fast") => "AI Fast".into(),
+        Some("ai_best") => "AI Best".into(),
         _ => word(v),
     }
 }

@@ -140,7 +140,7 @@ Media fields:
   - `VideoReader` retags each decoded frame with it (`color::retag`). This drops the HDR side data.
   - A proxy is made from the pictures as read in that space. Thus its own tags are right, and it is read by them.
 - `super_scale` (`SuperScale`, spec §3) enlarges the pictures with a better upscaler, before they are fitted.
-  - `upscaler` (`Upscaler`) is AI or Classic.
+  - `upscaler` (`Upscaler`) is AI Fast, AI Best or Classic.
   - Render pieces carry it. [gpu](gpu.md#super-scale) tells which upscaler each path uses.
   - Proxies do not use it. The viewer uses it only with `viewer.super_scale` ([playback](playback.md)).
 - `left_out` holds the source frames that the Delete of the Transcription window left out (`media.leave_out`).
