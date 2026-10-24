@@ -3,22 +3,31 @@ struct P { shift: u32, pad0: u32, pad1: u32, pad2: u32 }
 @group(0) @binding(1) var<storage, read_write> state: array<vec4<u32>>;
 @group(0) @binding(2) var<storage, read_write> hist: array<u32>;
 
-@compute @workgroup_size(1)
-fn main(@builtin(workgroup_id) wg: vec3<u32>) {
+var<workgroup> above: array<u32, 257>;
+var<workgroup> goal: vec4<u32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) li: u32) {
     let h = wg.x;
-    var st = state[h];
-    var seen = 0u;
-    for (var b = 255i; b >= 0i; b--) {
-        let n = hist[h * 256u + u32(b)];
-        if (seen + n >= st.y) {
-            st.x = st.x | (u32(b) << p.shift);
-            st.y = st.y - seen;
-            break;
-        }
-        seen += n;
+    let b = 255u - li;
+    above[li + 1u] = hist[h * 256u + b];
+    hist[h * 256u + b] = 0u;
+    if (li == 0u) {
+        above[0] = 0u;
+        goal = state[h];
     }
-    state[h] = st;
-    for (var b = 0u; b < 256u; b++) {
-        hist[h * 256u + b] = 0u;
+    workgroupBarrier();
+    for (var d = 1u; d < 256u; d = d * 2u) {
+        var v = above[li + 1u];
+        if (li >= d) {
+            v += above[li + 1u - d];
+        }
+        workgroupBarrier();
+        above[li + 1u] = v;
+        workgroupBarrier();
+    }
+    let st = goal;
+    if (above[li + 1u] >= st.y && (li == 0u || above[li] < st.y)) {
+        state[h] = vec4<u32>(st.x | (b << p.shift), st.y - above[li], st.z, st.w);
     }
 }
