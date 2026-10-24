@@ -7,11 +7,17 @@ use super::{DIM, FFN, LAYERS};
 use crate::compute::{bytes, halves};
 use crate::error::Result;
 
+pub(super) struct Wino {
+    pub(super) u: Vec<wgpu::Buffer>,
+    pub(super) zero: wgpu::Buffer,
+}
+
 pub(super) struct Linear {
     pub(super) w: wgpu::Buffer,
     pub(super) b: wgpu::Buffer,
     pub(super) n: u32,
     pub(super) k: u32,
+    pub(super) wino: Option<Wino>,
 }
 
 pub(super) struct Block {
@@ -99,6 +105,47 @@ fn linear(gpu: &Gpu, w: &[f32], b: Option<&[f32]>, n: usize, k: usize) -> Linear
         b: gpu.upload(&bytes(&bias)),
         n: n as u32,
         k: k as u32,
+        wino: None,
+    }
+}
+
+fn wino(gpu: &Gpu, w: &[f32], b: Option<&[f32]>, n: usize, cin: usize) -> Linear {
+    let mut u = vec![vec![0f32; n * cin]; 16];
+    for co in 0..n {
+        for ci in 0..cin {
+            let g = |y: usize, x: usize| f64::from(w[((co * cin + ci) * 3 + y) * 3 + x]);
+            let cols = [0, 1, 2].map(|x| {
+                [
+                    g(0, x),
+                    (g(0, x) + g(1, x) + g(2, x)) / 2.0,
+                    (g(0, x) - g(1, x) + g(2, x)) / 2.0,
+                    g(2, x),
+                ]
+            });
+            for r in 0..4 {
+                let h = [cols[0][r], cols[1][r], cols[2][r]];
+                let v = [
+                    h[0],
+                    (h[0] + h[1] + h[2]) / 2.0,
+                    (h[0] - h[1] + h[2]) / 2.0,
+                    h[2],
+                ];
+                for (c, v) in v.iter().enumerate() {
+                    u[r * 4 + c][co * cin + ci] = *v as f32;
+                }
+            }
+        }
+    }
+    let bias = b.map_or_else(|| vec![0f32; n], <[f32]>::to_vec);
+    Linear {
+        w: gpu.buffer(0),
+        b: gpu.upload(&bytes(&bias)),
+        n: n as u32,
+        k: (cin * 9) as u32,
+        wino: Some(Wino {
+            u: u.iter().map(|x| gpu.upload(&halves(x))).collect(),
+            zero: gpu.upload(&bytes(&vec![0f32; n])),
+        }),
     }
 }
 
@@ -221,10 +268,13 @@ fn conv(
     bias: bool,
 ) -> Result<Linear> {
     let w = t.floats(&format!("decoder.{i}.weight"), &[n, cin, size, size])?;
-    let w = conv_order(&w, n, cin, size * size);
     let b = bias
         .then(|| t.floats(&format!("decoder.{i}.bias"), &[n]))
         .transpose()?;
+    if size == 3 && n > 3 {
+        return Ok(wino(gpu, &w, b.as_deref(), n, cin));
+    }
+    let w = conv_order(&w, n, cin, size * size);
     Ok(linear(gpu, &w, b.as_deref(), n, cin * size * size))
 }
 
@@ -321,8 +371,10 @@ pub(super) fn load(gpu: &Gpu, paths: &Paths) -> Result<Model> {
         (0..DIM).map(|c| 1.0 + f64::from(hm[DIM + c]) + t_emb[c]),
     ));
     let ones = gpu.upload(&bytes(&vec![1f32; FFN]));
+    let kept = gpu.uploaded() - before;
     let zeros = gpu.upload(&bytes(&vec![0f32; FFN]));
     context(gpu, &mut st, paths.prompt, &mut blocks, &zeros)?;
+    let after = gpu.uploaded();
     drop(st);
     let lq = lq(gpu, paths.lq)?;
     let dec = decoder(gpu, paths.decoder)?;
@@ -335,7 +387,7 @@ pub(super) fn load(gpu: &Gpu, paths: &Paths) -> Result<Model> {
         lq,
         dec,
         ones,
-        bytes: gpu.uploaded() - before + 2 * (LAYERS * PROMPT * DIM * 2) as u64,
+        bytes: kept + (gpu.uploaded() - after) + 2 * (LAYERS * PROMPT * DIM * 2) as u64,
     })
 }
 
@@ -409,6 +461,7 @@ fn context(
             super::kernels::rms(gpu, &mut pass, &b.ctx_k, norm, zeros, PROMPT as u32, None);
         }
     }
+    gpu.flush();
     gpu.queue.submit([enc.finish()]);
     gpu.wait()?;
     Ok(())

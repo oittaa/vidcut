@@ -94,6 +94,7 @@ struct Source {
     gpu: Option<crate::hw::GpuDecoder>,
     ahead: Option<VideoReader>,
     best: Option<Best>,
+    queued: VecDeque<frame::Video>,
 }
 
 #[derive(Clone)]
@@ -195,6 +196,7 @@ impl Source {
             gpu: ahead_gpu,
             ahead: None,
             best: None,
+            queued: VecDeque::new(),
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -249,11 +251,13 @@ impl Source {
             gpu: ahead_gpu,
             ahead: None,
             best: None,
+            queued: VecDeque::new(),
         })
     }
 
     fn seek(&mut self, target: f64) -> Result<()> {
         self.reader.seek((target / self.tick).floor() as i64)?;
+        self.queued.clear();
         self.target = target;
         self.current = None;
         self.light = None;
@@ -279,8 +283,13 @@ impl Source {
             .as_ref()
             .is_none_or(|(_, t)| *t < target - 1e-6)
         {
-            match self.reader.next_frame()? {
+            let next = match self.queued.pop_front() {
+                Some(f) => Some(f),
+                None => self.reader.next_frame()?,
+            };
+            match next {
                 Some(f) => {
+                    self.miss(&f)?;
                     let t = f.pts().unwrap_or(0) as f64 * self.tick;
                     self.dynamic = frame::Video::empty();
                     let all = crate::hdr::Dynamic {
@@ -457,6 +466,9 @@ struct Best {
     next: i64,
     pictures: VecDeque<(i64, frame::Video)>,
     ended: bool,
+    own: bool,
+    missed: Vec<frame::Video>,
+    lost: bool,
 }
 
 impl Best {
@@ -511,17 +523,21 @@ fn keep_chunk(chunk: Chunk) {
     }
 }
 
+fn in_memory(frame: &frame::Video) -> Result<frame::Video> {
+    if crate::hw::on_gpu(frame) {
+        crate::hw::download(frame)
+    } else {
+        frame_ref(frame)
+    }
+}
+
 fn shown_rgb(
     frame: &frame::Video,
     rotation: u16,
     (dw, dh): (u32, u32),
     reading: Reading,
 ) -> Result<Vec<u8>> {
-    let mem = if crate::hw::on_gpu(frame) {
-        crate::hw::download(frame)?
-    } else {
-        frame_ref(frame)?
-    };
+    let mem = in_memory(frame)?;
     let mut to_rgb = super::normalize::Normalizer::new(
         &mem,
         rotation,
@@ -601,6 +617,34 @@ impl Source {
         Ok(frames)
     }
 
+    fn chunk_frames(&mut self, first: i64, reading: Reading) -> Result<Vec<frame::Video>> {
+        let current = self.current.as_ref().map(|(f, _)| f.pts());
+        if current.map(|pts| self.frame_index(pts)) != Some(Some(first))
+            || self.reader.reading() != reading
+        {
+            return self.read_chunk(first, reading);
+        }
+        let end = first + crate::upscale::FRAMES as i64;
+        let mut frames = vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?];
+        let mut i = 0;
+        loop {
+            if i == self.queued.len() {
+                match self.reader.next_frame()? {
+                    Some(f) => self.queued.push_back(f),
+                    None => break,
+                }
+            }
+            let f = &self.queued[i];
+            i += 1;
+            match self.frame_index(f.pts()) {
+                Some(k) if k >= end => break,
+                Some(k) if k < first => continue,
+                _ => frames.push(frame_ref(f)?),
+            }
+        }
+        Ok(frames)
+    }
+
     fn ai_picture(
         &mut self,
         target: (u32, u32),
@@ -672,7 +716,7 @@ impl Source {
         }
         let clock = Instant::now();
         let frames = match key {
-            (first, true) => self.read_chunk(first, reading)?,
+            (first, true) => self.chunk_frames(first, reading)?,
             (_, false) => vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?],
         };
         let wanted = if key.1 {
@@ -732,6 +776,7 @@ impl Source {
         let fresh = self.best.as_ref().is_none_or(|b| {
             b.shown != shown
                 || b.size != size
+                || b.lost
                 || match index {
                     Some(i) => {
                         b.key.is_some()
@@ -746,6 +791,7 @@ impl Source {
         if fresh {
             self.best = None;
             let stream = crate::flashvsr::Stream::open(shown, size)?;
+            let own = index.is_some() && self.reader.reading() == reading;
             self.best = Some(Best {
                 stream,
                 shown,
@@ -755,8 +801,21 @@ impl Source {
                 next: index.unwrap_or(0),
                 pictures: VecDeque::new(),
                 ended: false,
+                own,
+                missed: Vec::new(),
+                lost: false,
             });
             match index {
+                Some(i) if own => {
+                    let mut known =
+                        vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?];
+                    for f in &self.queued {
+                        known.push(frame_ref(f)?);
+                    }
+                    for f in &known {
+                        self.feed(f, i, reading)?;
+                    }
+                }
                 Some(i) => self.seek_ahead(i, reading)?,
                 None => {
                     let (frame, _) = self.current.as_ref().expect("have a frame");
@@ -786,20 +845,27 @@ impl Source {
                     pts.unwrap_or(0)
                 )));
             }
-            let next = self.ahead.as_mut().expect("opened").next_frame()?;
-            match next {
-                Some(f) => {
-                    let at = self.frame_index(f.pts());
-                    let best = self.best.as_mut().expect("made");
-                    let Some(i) = at.filter(|i| *i >= best.next) else {
-                        continue;
-                    };
-                    let rgb = shown_rgb(&f, rotation, shown, reading)?;
-                    let outs = best.stream.push(&rgb)?;
-                    best.fed.push_back((i, f.pts()));
-                    best.next = i + 1;
-                    best.took(outs, want);
+            if !best.missed.is_empty() {
+                let missed = std::mem::take(&mut best.missed);
+                for f in &missed {
+                    self.feed(f, want, reading)?;
                 }
+                continue;
+            }
+            let next = if best.own {
+                match self.reader.next_frame()? {
+                    Some(f) => {
+                        let kept = in_memory(&f)?;
+                        self.queued.push_back(frame_ref(&kept)?);
+                        Some(kept)
+                    }
+                    None => None,
+                }
+            } else {
+                self.ahead.as_mut().expect("opened").next_frame()?
+            };
+            match next {
+                Some(f) => self.feed(&f, want, reading)?,
                 None => {
                     let best = self.best.as_mut().expect("made");
                     let outs = best.stream.finish()?;
@@ -808,6 +874,38 @@ impl Source {
                 }
             }
         }
+    }
+
+    fn feed(&mut self, f: &frame::Video, want: i64, reading: Reading) -> Result<()> {
+        let at = self.frame_index(f.pts());
+        let rotation = self.reader.rotation();
+        let best = self.best.as_mut().expect("made");
+        let Some(i) = at.filter(|i| *i >= best.next) else {
+            return Ok(());
+        };
+        let rgb = shown_rgb(f, rotation, best.shown, reading)?;
+        let outs = best.stream.push(&rgb)?;
+        best.fed.push_back((i, f.pts()));
+        best.next = i + 1;
+        best.took(outs, want);
+        Ok(())
+    }
+
+    fn miss(&mut self, f: &frame::Video) -> Result<()> {
+        let at = self.frame_index(f.pts());
+        let Some(best) = self.best.as_mut().filter(|b| b.own && !b.lost) else {
+            return Ok(());
+        };
+        if at.is_none_or(|i| i < best.next) {
+            return Ok(());
+        }
+        if best.missed.len() as i64 >= BEST_JUMP {
+            best.missed.clear();
+            best.lost = true;
+            return Ok(());
+        }
+        best.missed.push(in_memory(f)?);
+        Ok(())
     }
 }
 

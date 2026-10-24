@@ -72,28 +72,37 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3
     }
     workgroupBarrier();
     let base = row * p.stride;
+    var vals = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
+    var ok = 0u;
     var top = -3.0e38;
-    for (var slot = li; slot < p.stride; slot += 256u) {
-        let kb = key_block(qb, slot);
-        if (kb >= 0) {
-            let v = logit(h, u32(kb));
-            dst[base + slot] = v;
-            top = max(top, v);
+    for (var i = 0u; i < 4u; i++) {
+        let slot = li + i * 256u;
+        if (slot < p.stride) {
+            let kb = key_block(qb, slot);
+            if (kb >= 0) {
+                let v = logit(h, u32(kb));
+                vals[i] = v;
+                ok = ok | (1u << i);
+                top = max(top, v);
+            }
         }
     }
     let m = reduce(li, top, true);
     var sum = 0.0;
-    for (var slot = li; slot < p.stride; slot += 256u) {
-        if (key_block(qb, slot) >= 0) {
-            sum += exp(dst[base + slot] - m);
+    for (var i = 0u; i < 4u; i++) {
+        if ((ok & (1u << i)) != 0u) {
+            sum += exp(vals[i] - m);
         }
     }
     let lse = m + log(reduce(li, sum, false));
-    for (var slot = li; slot < p.stride; slot += 256u) {
-        if (key_block(qb, slot) >= 0) {
-            dst[base + slot] = exp(dst[base + slot] - lse);
-        } else {
-            dst[base + slot] = -1.0;
+    for (var i = 0u; i < 4u; i++) {
+        let slot = li + i * 256u;
+        if (slot < p.stride) {
+            if ((ok & (1u << i)) != 0u) {
+                dst[base + slot] = exp(vals[i] - lse);
+            } else {
+                dst[base + slot] = -1.0;
+            }
         }
     }
 }

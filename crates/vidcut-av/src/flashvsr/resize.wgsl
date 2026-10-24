@@ -9,6 +9,10 @@ fn channel(pixel: u32, c: u32) -> i32 {
     return i32((pixel >> (8u * c)) & 255u);
 }
 
+fn byte(at: u32) -> i32 {
+    return i32((src[at / 4u] >> (8u * (at % 4u))) & 255u);
+}
+
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     if (p.vertical == 0u) {
@@ -20,8 +24,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         var acc = vec3<i32>(1i << 21u);
         for (var i = 0i; i < count; i++) {
             let k = coef[id.x * p.ksize + u32(i)];
-            let pixel = src[id.y * p.w_in + u32(xmin + i)];
-            acc += vec3<i32>(channel(pixel, 0u), channel(pixel, 1u), channel(pixel, 2u)) * k;
+            let at = (id.y * p.w_in + u32(xmin + i)) * 3u;
+            acc += vec3<i32>(byte(at), byte(at + 1u), byte(at + 2u)) * k;
         }
         let v = vec3<u32>(clamp(acc >> vec3<u32>(22u), vec3<i32>(0), vec3<i32>(255)));
         dst[id.y * p.w_out + id.x] = v.x | (v.y << 8u) | (v.z << 16u) | (255u << 24u);

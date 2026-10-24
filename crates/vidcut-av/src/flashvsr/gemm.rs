@@ -59,18 +59,29 @@ struct Shape { m: u32, n: u32, k: u32, tn: u32, p: array<vec4<u32>, 4> }
 @group(0) @binding(1) var<storage, read> wts: array<u32>;
 @group(0) @binding(2) var<storage, read> bias: array<f32>;
 
-var<workgroup> sa: array<vec4<f32>, 512>;
-var<workgroup> sb: array<vec4<f32>, 512>;
+var<workgroup> sb: array<vec4<u32>, 256>;
 
 fn par(i: u32) -> u32 {
     return shape.p[i / 4u][i % 4u];
 }
 
-fn b_pair(n: u32, k2: u32) -> vec2<f32> {
-    if (n >= shape.n) {
-        return vec2<f32>(0.0);
+fn b_row(n: u32) -> vec2<u32> {
+    return vec2<u32>(select(0u, 1u, n < shape.n), n * (shape.k / 2u));
+}
+
+fn b_word(r: vec2<u32>, k2: u32) -> u32 {
+    if (r.x == 0u) {
+        return 0u;
     }
-    return unpack2x16float(wts[n * (shape.k / 2u) + k2]);
+    return wts[r.y + k2];
+}
+
+fn unpack_pairs(w: vec4<u32>) -> array<vec4<f32>, 2> {
+    let x = unpack2x16float(w.x);
+    let y = unpack2x16float(w.y);
+    let z = unpack2x16float(w.z);
+    let v = unpack2x16float(w.w);
+    return array<vec4<f32>, 2>(vec4<f32>(x.x, y.x, z.x, v.x), vec4<f32>(x.y, y.y, z.y, v.y));
 }
 
 fn bias4(n: u32) -> vec4<f32> {
@@ -123,19 +134,23 @@ fn loader(load: Load) -> &'static str {
     match load {
         Load::Rows => {
             r#"
-fn a_pair(m: u32, k2: u32) -> vec2<f32> {
-    if (m >= shape.m) {
-        return vec2<f32>(0.0);
+fn a_row(m: u32) -> vec4<u32> {
+    return vec4<u32>(select(0u, 1u, m < shape.m), (par(1u) + m) * par(0u), 0u, 0u);
+}
+
+fn a_word(r: vec4<u32>, k2: u32, tap: u32, ci: u32) -> u32 {
+    if (r.x == 0u) {
+        return 0u;
     }
-    return unpack2x16float(src[m * par(0u) + k2]);
+    return src[r.y + k2];
 }
 "#
         }
         Load::Patch => {
             r#"
-fn a_pair(m: u32, k2: u32) -> vec2<f32> {
+fn a_row(m: u32) -> vec4<u32> {
     if (m >= shape.m) {
-        return vec2<f32>(0.0);
+        return vec4<u32>(0u);
     }
     let w8 = par(0u);
     let h8 = par(1u);
@@ -148,39 +163,50 @@ fn a_pair(m: u32, k2: u32) -> vec2<f32> {
     let sb = b % s;
     let ht = (sb / nw) * 8u + (l / 8u) % 8u;
     let wt = (sb % nw) * 8u + l % 8u;
+    return vec4<u32>(1u, f * (h8 * w8) + ht * 2u * w8 + wt * 2u, 0u, 0u);
+}
+
+fn a_get(r: vec4<u32>, k2: u32, tap: u32, ci: u32) -> vec2<f32> {
+    if (r.x == 0u) {
+        return vec2<f32>(0.0);
+    }
+    let w8 = par(0u);
+    let plane = par(1u) * w8;
     let k = k2 * 2u;
-    let tap = k / 16u;
+    let t = k / 16u;
     let c = k % 16u;
-    let y = ht * 2u + tap / 2u;
-    let x = wt * 2u + tap % 2u;
-    let plane = h8 * w8;
-    let i = (c * 4u + f) * plane + y * w8 + x;
+    let i = c * 4u * plane + r.y + (t / 2u) * w8 + t % 2u;
     return vec2<f32>(src[i], src[i + 4u * plane]);
 }
 "#
         }
         Load::Causal => {
             r#"
-fn a_pair(m: u32, k2: u32) -> vec2<f32> {
+fn a_row(m: u32) -> vec4<u32> {
     if (m >= shape.m) {
-        return vec2<f32>(0.0);
+        return vec4<u32>(0u);
+    }
+    let pp = par(0u);
+    let wt = par(1u);
+    let p = m % pp;
+    return vec4<u32>(1u, m / pp, p / wt, p % wt);
+}
+
+fn a_word(r: vec4<u32>, k2: u32, tap: u32, ci: u32) -> u32 {
+    if (r.x == 0u) {
+        return 0u;
     }
     let pp = par(0u);
     let wt = par(1u);
     let ht = par(2u);
     let cin = par(3u);
-    let o = m / pp;
-    let p = m % pp;
-    let k = k2 * 2u;
-    let tap = k / cin;
-    let ci = k % cin;
     let kt = tap / 9u;
     let ky = (tap / 3u) % 3u;
     let kx = tap % 3u;
-    let y = u32(clamp(i32(p / wt) + i32(ky) - 1, 0, i32(ht) - 1));
-    let x = u32(clamp(i32(p % wt) + i32(kx) - 1, 0, i32(wt) - 1));
-    let frame = par(4u + o * 2u + kt);
-    return unpack2x16float(src[((frame * pp + y * wt + x) * cin + ci) / 2u]);
+    let y = u32(clamp(i32(r.z) + i32(ky) - 1, 0, i32(ht) - 1));
+    let x = u32(clamp(i32(r.w) + i32(kx) - 1, 0, i32(wt) - 1));
+    let frame = par(4u + r.y * 2u + kt);
+    return src[((frame * pp + y * wt + x) * cin + ci) / 2u];
 }
 "#
         }
@@ -195,19 +221,21 @@ fn a_pair(m: u32, k2: u32) -> vec2<f32> {
 }
 
 const PLANE_HEAD: &str = r#"
-fn plane_at(m: u32, k2: u32) -> vec4<u32> {
+fn a_row(m: u32) -> vec4<u32> {
+    if (m >= shape.m) {
+        return vec4<u32>(0u);
+    }
+    let w = par(0u);
+    return vec4<u32>(1u, par(2u) + m / w, m % w, 0u);
+}
+
+fn plane_at(r: vec4<u32>, tap: u32) -> vec2<u32> {
     let w = par(0u);
     let h = par(1u);
-    let y = par(2u) + m / w;
-    let x = m % w;
-    let k = k2 * 2u;
-    let ctot = par(9u);
-    let tap = k / ctot;
-    let ci = k % ctot;
-    let yy = i32(y) + i32(tap / 3u) - 1;
-    let xx = i32(x) + i32(tap % 3u) - 1;
+    let yy = i32(r.y) + i32(tap / 3u) - 1;
+    let xx = i32(r.z) + i32(tap % 3u) - 1;
     if (yy < 0 || xx < 0 || yy >= i32(h) || xx >= i32(w)) {
-        return vec4<u32>(0u, 0u, 0u, 0u);
+        return vec2<u32>(0u, 0u);
     }
     var sy = u32(yy);
     var sx = u32(xx);
@@ -217,36 +245,36 @@ fn plane_at(m: u32, k2: u32) -> vec4<u32> {
         sx = sx / 2u;
         sw = w / 2u;
     }
-    return vec4<u32>(1u, (sy - par(8u)) * sw + sx, ci, 0u);
+    return vec2<u32>(1u, (sy - par(8u)) * sw + sx);
 }
 "#;
 
 const PLANE_ONE: &str = r#"
-fn a_pair(m: u32, k2: u32) -> vec2<f32> {
-    if (m >= shape.m) {
-        return vec2<f32>(0.0);
+fn a_word(r: vec4<u32>, k2: u32, tap: u32, ci: u32) -> u32 {
+    if (r.x == 0u) {
+        return 0u;
     }
-    let at = plane_at(m, k2);
+    let at = plane_at(r, tap);
     if (at.x == 0u) {
-        return vec2<f32>(0.0);
+        return 0u;
     }
-    return unpack2x16float(src[at.y * par(4u) + par(5u) + at.z / 2u]);
+    return src[at.y * par(4u) + par(5u) + ci / 2u];
 }
 "#;
 
 const PLANE_TWO: &str = r#"
-fn a_pair(m: u32, k2: u32) -> vec2<f32> {
-    if (m >= shape.m) {
-        return vec2<f32>(0.0);
+fn a_word(r: vec4<u32>, k2: u32, tap: u32, ci: u32) -> u32 {
+    if (r.x == 0u) {
+        return 0u;
     }
-    let at = plane_at(m, k2);
+    let at = plane_at(r, tap);
     if (at.x == 0u) {
-        return vec2<f32>(0.0);
+        return 0u;
     }
-    if (at.z < par(3u)) {
-        return unpack2x16float(src[at.y * par(4u) + par(5u) + at.z / 2u]);
+    if (ci < par(3u)) {
+        return src[at.y * par(4u) + par(5u) + ci / 2u];
     }
-    return unpack2x16float(src2[at.y * par(6u) + (at.z - par(3u)) / 2u]);
+    return src2[at.y * par(6u) + (ci - par(3u)) / 2u];
 }
 "#;
 
@@ -325,7 +353,7 @@ fn storer(store: Store) -> String {
 "#
         .into(),
     };
-    let offset = if matches!(store, Store::Gated) {
+    let offset = if matches!(store, Store::Gated | Store::Full) {
         "par(11u) + m"
     } else {
         "m"
@@ -343,44 +371,97 @@ fn emit(m: u32, n: u32, val: vec4<f32>) {{
     )
 }
 
-fn main_source() -> String {
+fn fmas() -> String {
+    let mut s = String::new();
+    for i in 0..8 {
+        let (vec, comp) = if i < 4 { ("a0", i) } else { ("a1", i - 4) };
+        let c = ["x", "y", "z", "w"][comp];
+        s += &format!(
+            "        c{i}0 = fma(vec4<f32>({vec}.{c}), b0, c{i}0);\n        c{i}1 = fma(vec4<f32>({vec}.{c}), b1, c{i}1);\n"
+        );
+    }
+    s
+}
+
+fn main_source(load: Load) -> String {
+    let full = matches!(load, Load::Patch);
     let mut decl = String::new();
     for i in 0..8 {
         decl += &format!("    var c{i}0 = vec4<f32>(0.0);\n    var c{i}1 = vec4<f32>(0.0);\n");
     }
+    let mut rows = String::new();
     let mut fill = String::new();
     for j in 0..4 {
+        rows += &format!(
+            "    let ar{j} = a_row(m0 + lr + {r}u);\n    let br{j} = b_row(n0 + lr + {r}u);\n",
+            r = 32 * j
+        );
+        let a = if full {
+            format!(
+                r#"            let a = a_get(ar{j}, k0 / 2u + pair, tap, ci);
+            sa[(pair * 2u) * 32u + r / 4u][r % 4u] = a.x;
+            sa[(pair * 2u + 1u) * 32u + r / 4u][r % 4u] = a.y;
+"#
+            )
+        } else {
+            format!(
+                "            sa[pair * 32u + r / 4u][r % 4u] = a_word(ar{j}, k0 / 2u + pair, tap, ci);\n"
+            )
+        };
         fill += &format!(
             r#"
         {{
             let r = lr + {r}u;
-            let a = a_pair(m0 + r, k0 / 2u + pair);
-            sa[(pair * 2u) * 32u + r / 4u][r % 4u] = a.x;
-            sa[(pair * 2u + 1u) * 32u + r / 4u][r % 4u] = a.y;
-            let b = b_pair(n0 + r, k0 / 2u + pair);
-            sb[(pair * 2u) * 32u + r / 4u][r % 4u] = b.x;
-            sb[(pair * 2u + 1u) * 32u + r / 4u][r % 4u] = b.y;
+{a}            sb[pair * 32u + r / 4u][r % 4u] = b_word(br{j}, k0 / 2u + pair);
         }}
 "#,
             r = 32 * j
         );
     }
+    let step = match load {
+        Load::Plane { .. } => {
+            "        ci += 16u;\n        if (ci >= par(9u)) {\n            ci -= par(9u);\n            tap += 1u;\n        }\n"
+        }
+        Load::Causal => {
+            "        ci += 16u;\n        if (ci >= par(3u)) {\n            ci -= par(3u);\n            tap += 1u;\n        }\n"
+        }
+        Load::Rows | Load::Patch => "",
+    };
     let mut inner = String::new();
-    for kk in 0..16 {
+    for kp in 0..8 {
+        let (p0, p1) = (kp * 32, kp * 32 + 16);
         inner += &format!(
-            "        {{\n        let a0 = sa[{a0}u + ty];\n        let a1 = sa[{a1}u + ty];\n        let b0 = sb[{a0}u + tx];\n        let b1 = sb[{a1}u + tx];\n",
-            a0 = kk * 32,
-            a1 = kk * 32 + 16
+            "        {{\n        let pb0 = unpack_pairs(sb[{p0}u + tx]);\n        let pb1 = unpack_pairs(sb[{p1}u + tx]);\n"
         );
-        for i in 0..8 {
-            let (vec, comp) = if i < 4 { ("a0", i) } else { ("a1", i - 4) };
-            let c = ["x", "y", "z", "w"][comp];
+        if !full {
             inner += &format!(
-                "        c{i}0 = fma(vec4<f32>({vec}.{c}), b0, c{i}0);\n        c{i}1 = fma(vec4<f32>({vec}.{c}), b1, c{i}1);\n"
+                "        let pa0 = unpack_pairs(sa[{p0}u + ty]);\n        let pa1 = unpack_pairs(sa[{p1}u + ty]);\n"
             );
+        }
+        for h in 0..2 {
+            let kk = kp * 2 + h;
+            if full {
+                inner += &format!(
+                    "        {{\n        let a0 = sa[{a0}u + ty];\n        let a1 = sa[{a1}u + ty];\n",
+                    a0 = kk * 32,
+                    a1 = kk * 32 + 16
+                );
+            } else {
+                inner += &format!(
+                    "        {{\n        let a0 = pa0[{h}];\n        let a1 = pa1[{h}];\n"
+                );
+            }
+            inner += &format!("        let b0 = pb0[{h}];\n        let b1 = pb1[{h}];\n");
+            inner += &fmas();
+            inner += "        }\n";
         }
         inner += "        }\n";
     }
+    let shared = if full {
+        "var<workgroup> sa: array<vec4<f32>, 512>;"
+    } else {
+        "var<workgroup> sa: array<vec4<u32>, 256>;"
+    };
     let mut out = String::new();
     for i in 0..8 {
         let row = if i < 4 {
@@ -394,6 +475,8 @@ fn main_source() -> String {
     }
     format!(
         r#"
+{shared}
+
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>, @builtin(local_invocation_index) li: u32) {{
     let idx = par(10u) + wg.x + wg.y * nwg.x;
@@ -407,8 +490,12 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3
     let pair = li % 8u;
     let lr = li / 8u;
 {decl}
+{rows}
+    var tap = 0u;
+    var ci = pair * 2u;
     for (var k0 = 0u; k0 < shape.k; k0 += 16u) {{
 {fill}
+{step}
         workgroupBarrier();
 {inner}
         workgroupBarrier();
@@ -427,7 +514,7 @@ fn source(load: Load, store: Store) -> String {
     }
     s += loader(load);
     s += &storer(store);
-    s += &main_source();
+    s += &main_source(load);
     s
 }
 
@@ -448,7 +535,7 @@ pub(super) fn run(gpu: &Gpu, pass: &mut wgpu::ComputePass, g: &Gemm) {
         let mut values = vec![g.m, g.n, g.k, tn];
         values.extend_from_slice(&params);
         let shape = gpu.uniform(&values);
-        let mut buffers: Vec<&wgpu::Buffer> = vec![&shape, g.weights, g.bias, g.a];
+        let mut buffers: Vec<&wgpu::Buffer> = vec![g.weights, g.bias, g.a];
         if let Some(a2) = g.a2 {
             buffers.push(a2);
         }
@@ -456,6 +543,6 @@ pub(super) fn run(gpu: &Gpu, pass: &mut wgpu::ComputePass, g: &Gemm) {
         if let Some(aux) = g.aux {
             buffers.push(aux);
         }
-        gpu.dispatch(pass, &pipe, &buffers, most.min(tiles - first));
+        gpu.dispatch(pass, &pipe, shape, &buffers, most.min(tiles - first));
     }
 }

@@ -2,8 +2,10 @@ use std::path::PathBuf;
 
 use super::gemm::{self, Act, Gemm, Load, Store};
 use super::gpu::{Gpu, floats};
-use super::kernels::{self, Attend, DecInput, Grid, Norm, Resize, Unshuffle};
-use super::model::{Block, Linear, MemBlock, Model};
+use super::kernels::{
+    self, Attend, DecInput, Grid, Last, Norm, Resize, Unshuffle, WinoIn, WinoOut,
+};
+use super::model::{Block, Linear, MemBlock, Model, Wino};
 use super::{DIM, FFN, dump, resize};
 use crate::compute::{bytes, words};
 use crate::error::{Error, Result};
@@ -11,6 +13,7 @@ use crate::error::{Error, Result};
 const RING: u64 = 20;
 const SLAB: u32 = 16384;
 const BAND: u32 = 64;
+const WINO_ROWS: u32 = 16;
 const ATTEND: u32 = 19200;
 const CROSS: u32 = 128;
 const GLOBAL_RANGE: u32 = 11;
@@ -108,6 +111,13 @@ struct Cache {
     range: u32,
 }
 
+struct Staged {
+    k: wgpu::Buffer,
+    v: wgpu::Buffer,
+    fresh: Vec<u64>,
+    done: Option<wgpu::SubmissionIndex>,
+}
+
 struct Mems {
     a: Vec<wgpu::Buffer>,
     b: Vec<wgpu::Buffer>,
@@ -159,15 +169,19 @@ impl<'a> Enc<'a> {
         f(&mut pass)
     }
 
+    fn clear(&mut self, buffer: &wgpu::Buffer) {
+        self.encoder().clear_buffer(buffer, 0, None);
+    }
+
     fn copy(&mut self, src: &wgpu::Buffer, from: u64, dst: &wgpu::Buffer, to: u64, size: u64) {
         self.encoder()
             .copy_buffer_to_buffer(src, from, dst, to, size);
     }
 
-    fn submit(&mut self) {
-        if let Some(enc) = self.enc.take() {
-            self.gpu.queue.submit([enc.finish()]);
-        }
+    fn submit(&mut self) -> Option<wgpu::SubmissionIndex> {
+        let enc = self.enc.take()?;
+        self.gpu.flush();
+        Some(self.gpu.queue.submit([enc.finish()]))
     }
 }
 
@@ -233,6 +247,10 @@ fn plane(
     store: Store,
     aux: Option<&wgpu::Buffer>,
 ) {
+    if let Some(u) = &l.wino {
+        winograd(gpu, pass, (l, u), p, out, (store, aux));
+        return;
+    }
     let ctot = l.k / 9;
     gemm::run(
         gpu,
@@ -265,6 +283,95 @@ fn plane(
             aux,
         },
     );
+}
+
+fn winograd(
+    gpu: &Gpu,
+    pass: &mut wgpu::ComputePass,
+    (l, u): (&Linear, &Wino),
+    p: &Plane,
+    out: &wgpu::Buffer,
+    (store, aux): (Store, Option<&wgpu::Buffer>),
+) {
+    let (ctot, cout) = (l.k / 9, l.n);
+    let (act, skip) = match store {
+        Store::Half(Act::None) => (0, 0),
+        Store::Half(Act::Relu) => (1, 0),
+        Store::Skip => (0, 1),
+        _ => panic!("Winograd takes a half store with ReLU or none, or a skip"),
+    };
+    let tw = p.w.div_ceil(2);
+    let th = p.rows.div_ceil(2);
+    for tr0 in (0..th).step_by(WINO_ROWS as usize) {
+        let tiles = WINO_ROWS.min(th - tr0) * tw;
+        let (v, m) = gpu.scratch(
+            16 * u64::from(tiles) * u64::from(ctot) * 2,
+            16 * u64::from(tiles) * u64::from(cout) * 4,
+        );
+        kernels::wino_in(
+            gpu,
+            pass,
+            &WinoIn {
+                src: p.src,
+                src2: p.two.unwrap_or(p.src),
+                out: &v,
+                values: [
+                    p.w,
+                    p.h,
+                    p.y0,
+                    p.rows,
+                    p.cin,
+                    p.stride,
+                    p.offset,
+                    p.cin / 2,
+                    u32::from(p.up),
+                    p.sy0,
+                    ctot,
+                    tw,
+                    tr0,
+                    tiles,
+                    0,
+                    0,
+                ],
+            },
+            tiles * (ctot / 2),
+        );
+        for (xi, w) in u.u.iter().enumerate() {
+            let at = xi as u32 * tiles;
+            let mut values = params(&[ctot / 2, at]);
+            values[11] = at;
+            gemm::run(
+                gpu,
+                pass,
+                &Gemm {
+                    m: tiles,
+                    n: cout,
+                    k: ctot,
+                    load: Load::Rows,
+                    store: Store::Full,
+                    params: values,
+                    weights: w,
+                    bias: &u.zero,
+                    a: &v,
+                    a2: None,
+                    out: &m,
+                    aux: None,
+                },
+            );
+        }
+        kernels::wino_out(
+            gpu,
+            pass,
+            &WinoOut {
+                m: &m,
+                bias: &l.b,
+                aux: aux.unwrap_or(&l.b),
+                out,
+                values: [p.w, p.rows, cout, tw, tr0, tiles, act, skip],
+            },
+            tiles * (cout / 4),
+        );
+    }
 }
 
 fn noise(chunk: u64, count: usize) -> Vec<f32> {
@@ -314,6 +421,13 @@ fn keep_of(layer: usize) -> u32 {
     }
 }
 
+fn kept(cache: &Cache) -> Vec<i64> {
+    let mut order: Vec<i64> = cache.ring.iter().map(|s| i64::from(*s)).collect();
+    order.push(-1);
+    order.push(-2);
+    order[order.len().saturating_sub(cache.keep as usize)..].to_vec()
+}
+
 fn window(g: &Geometry) -> u64 {
     u64::from(g.s) * 128 * DIM as u64 * 2
 }
@@ -348,13 +462,27 @@ fn chunk_work(g: &Geometry) -> u64 {
     let wm = u64::from(g.wm);
     let bands = u64::from(BAND + 4) * wm * 128 * 2
         + u64::from(BAND + 2) * wm * 128 * 2
-        + u64::from(BAND) * wm * 3 * 4
-        + u64::from(g.w * g.h) * 4;
-    let first = p8 * (784 + 4 * 512 + 4 * 256) * 2;
-    let second = p8 * 4 * (3 * 256 + 512) * 2;
-    let third = p8 * 4 * 512 * 2 + p8 * 16 * 4 * 128 * 2;
-    let decode = bands + first.max(second).max(third);
+        + u64::from(g.w * g.h) * 3;
+    let first = p8 * (784 + 3 * 512 + 4 * 256) * 2;
+    let second = p8 * 4 * (2 * 256 + 512) * 2;
+    let third = p8 * 4 * 512 * 2 + p8 * 16 * 2 * 128 * 2;
+    let decode = bands + first.max(second).max(third) + wino_scratch(g);
     lq.max(blocks).max(decode) + 2 * 16 * 4 * p8 * 4
+}
+
+fn wino_scratch(g: &Geometry) -> u64 {
+    let w = u64::from(g.wm);
+    [
+        (w / 8, 1024, 512),
+        (w / 8, 784, 512),
+        (w / 4, 512, 256),
+        (w / 2, 256, 128),
+        (w, 128, 128),
+    ]
+    .iter()
+    .map(|(width, cin, cout)| 16 * u64::from(WINO_ROWS) * width.div_ceil(2) * (cin * 2 + cout * 4))
+    .max()
+    .unwrap_or(0)
 }
 
 fn gigabytes(b: u64) -> String {
@@ -505,13 +633,7 @@ impl Stream {
                 g.sh
             )));
         }
-        let rgba: Vec<u32> = rgb
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .map(|p| u32::from_le_bytes([p[0], p[1], p[2], 255]))
-            .collect();
-        let src = gpu.upload(&words(&rgba));
+        let src = gpu.upload(rgb);
         let temp = gpu.buffer((g.sh * g.w * 4) as usize);
         let mut e = Enc::new(gpu);
         let t = &self.tables;
@@ -633,8 +755,8 @@ impl Stream {
                 let lq = LqWork::new(gpu, &g);
                 self.project(gpu, model, (&x, &lq), &mut e);
                 e.submit();
+                gpu.wait()?;
             }
-            gpu.wait()?;
             let work = Work::new(gpu, &g, x);
             self.dump_tensor(gpu, "x_in", &work.x, g.t, true)?;
             for (i, block) in model.blocks.iter().enumerate() {
@@ -668,6 +790,7 @@ impl Stream {
                 );
             });
             e.submit();
+            gpu.wait()?;
         }
         if let Some(dir) = self.dump.as_ref() {
             let shape = [16, 4, g.h8 as usize, g.w8 as usize];
@@ -679,7 +802,6 @@ impl Stream {
                 &floats(&raw),
             )?;
         }
-        gpu.wait()?;
         let frames = self.decode(gpu, model, &latents)?;
         self.chunk += 1;
         Ok(frames)
@@ -923,7 +1045,11 @@ impl Stream {
                 (&work.probs, &state, &work.list, &work.counts),
             );
         });
-        e.submit();
+        let mut staged = self.stage(gpu, i, work, &mut e);
+        let done = e.submit();
+        if let Some(s) = staged.as_mut() {
+            s.done = done;
+        }
         let (kc, vc) = match &cache.keys {
             Keys::Gpu { k, v } => (k, v),
             Keys::Host { k, v } => {
@@ -1056,24 +1182,62 @@ impl Stream {
                     &[(11, first)],
                 );
             });
-            e.submit();
         }
-        self.keep(gpu, i, work, &mut e)?;
+        e.submit();
+        self.keep(gpu, i, work, staged, &mut e)?;
         e.submit();
         Ok(())
     }
 
-    fn keep(&mut self, gpu: &Gpu, i: usize, work: &Work, e: &mut Enc) -> Result<()> {
+    fn stage(&self, gpu: &Gpu, i: usize, work: &Work, e: &mut Enc) -> Option<Staged> {
+        let cache = &self.caches[i];
+        if !matches!(cache.keys, Keys::Host { .. }) {
+            return None;
+        }
+        let window = window(&self.g);
+        let fresh: Vec<u64> = kept(cache)
+            .into_iter()
+            .filter(|w| *w < 0)
+            .map(|w| (-w - 1) as u64)
+            .collect();
+        let size = window * fresh.len() as u64;
+        let (k, v) = (gpu.staging(size), gpu.staging(size));
+        for (n, j) in fresh.iter().enumerate() {
+            e.copy(&work.k, j * window, &k, n as u64 * window, window);
+            e.copy(&work.v, j * window, &v, n as u64 * window, window);
+        }
+        Some(Staged {
+            k,
+            v,
+            fresh,
+            done: None,
+        })
+    }
+
+    fn keep(
+        &mut self,
+        gpu: &Gpu,
+        i: usize,
+        work: &Work,
+        staged: Option<Staged>,
+        e: &mut Enc,
+    ) -> Result<()> {
         let g = self.g;
+        let window = window(&g);
+        let fetched = match staged {
+            Some(s) => {
+                let size = window * s.fresh.len() as u64;
+                let k = gpu.fetch(&s.k, size, s.done.clone())?;
+                let v = gpu.fetch(&s.v, size, s.done)?;
+                Some((s.fresh, k, v))
+            }
+            None => None,
+        };
         let cache = &mut self.caches[i];
-        let mut order: Vec<i64> = cache.ring.iter().map(|s| i64::from(*s)).collect();
-        order.push(-1);
-        order.push(-2);
-        let kept: Vec<i64> = order[order.len().saturating_sub(cache.keep as usize)..].to_vec();
+        let kept = kept(cache);
         let mut free: Vec<u32> = (0..cache.keep)
             .filter(|s| !kept.contains(&i64::from(*s)))
             .collect();
-        let window = window(&g);
         let pooled = u64::from(g.s) * 12 * 128 * 4;
         let mut ring = Vec::new();
         for w in kept {
@@ -1090,8 +1254,11 @@ impl Stream {
                     e.copy(&work.v, j * window, v, to * window, window);
                 }
                 Keys::Host { k, v } => {
-                    k[slot as usize] = gpu.read(&work.k, j * window, window)?;
-                    v[slot as usize] = gpu.read(&work.v, j * window, window)?;
+                    let (fresh, kb, vb) = fetched.as_ref().expect("the staged windows");
+                    let n = fresh.iter().position(|f| *f == j).expect("a staged window");
+                    let part = n * window as usize..(n + 1) * window as usize;
+                    k[slot as usize] = kb[part.clone()].to_vec();
+                    v[slot as usize] = vb[part].to_vec();
                 }
             }
             e.copy(&work.kp, j * pooled, &cache.pooled, to * pooled, pooled);
@@ -1109,8 +1276,8 @@ impl Stream {
         let half = |count: u32, n: u32| gpu.buffer((count * n * 2) as usize);
         let t1 = gpu.buffer(((BAND + 4) * g.wm * 128 * 2) as usize);
         let t2 = gpu.buffer(((BAND + 2) * g.wm * 128 * 2) as usize);
-        let o = gpu.buffer((BAND * g.wm * 3 * 4) as usize);
-        let picture = gpu.buffer((g.w * g.h * 4) as usize);
+        let shown = (g.w * g.h * 3) as usize;
+        let picture = gpu.buffer(shown);
         let mut frames = Vec::new();
         for j in 0..4u32 {
             let latent = self.chunk * 4 + u64::from(j);
@@ -1119,8 +1286,7 @@ impl Stream {
             let mut bx = half(p8 * 4, 256);
             {
                 let din = half(p8, 784);
-                let (mut ax, at1, at2, g1) =
-                    (half(p8, 512), half(p8, 512), half(p8, 512), half(p8, 512));
+                let (mut ax, mut at1, g1) = (half(p8, 512), half(p8, 512), half(p8, 512));
                 e.pass(|pass| {
                     kernels::dec_input(
                         gpu,
@@ -1176,7 +1342,7 @@ impl Stream {
                             pass,
                             mb,
                             (w8, h8, 512),
-                            (&mut ax, &mut self.mems.a[i], &at1, &at2),
+                            (&mut ax, &mut self.mems.a[i], &mut at1),
                         )
                     });
                 }
@@ -1218,7 +1384,7 @@ impl Stream {
             gpu.wait()?;
             let g2 = half(p8 * 4, 512);
             {
-                let (bt1, bt2) = (half(p8 * 4, 256), half(p8 * 4, 256));
+                let mut bt1 = half(p8 * 4, 256);
                 for (i, mb) in d.stage2.iter().enumerate() {
                     e.pass(|pass| {
                         mem_block(
@@ -1226,7 +1392,7 @@ impl Stream {
                             pass,
                             mb,
                             (w8 * 2, h8 * 2, 256),
-                            (&mut bx, &mut self.mems.b[i], &bt1, &bt2),
+                            (&mut bx, &mut self.mems.b[i], &mut bt1),
                         )
                     });
                 }
@@ -1245,10 +1411,8 @@ impl Stream {
             }
             drop(bx);
             gpu.wait()?;
+            let (mut cx, mut ct1) = (half(p8 * 16, 128), half(p8 * 16, 128));
             for part in 0..2u32 {
-                let (mut cx, ct1, ct2) =
-                    (half(p8 * 16, 128), half(p8 * 16, 128), half(p8 * 16, 128));
-                let g3 = half(p8 * 16, 128);
                 e.pass(|pass| {
                     let up = Plane {
                         w: w8 * 4,
@@ -1280,7 +1444,7 @@ impl Stream {
                             pass,
                             mb,
                             (w8 * 4, h8 * 4, 128),
-                            (&mut cx, &mut self.mems.c[i], &ct1, &ct2),
+                            (&mut cx, &mut self.mems.c[i], &mut ct1),
                         )
                     });
                 }
@@ -1296,19 +1460,14 @@ impl Stream {
                             pass,
                             &d.grow3[sub as usize],
                             p8 * 16,
-                            (&cx, &g3),
+                            (&cx, &ct1),
                             (Store::Half(Act::None), None),
                             &[],
                         )
                     });
-                    self.last(gpu, model, &g3, (&t1, &t2, &o, &picture), &mut e);
-                    let raw = gpu.read(&picture, 0, u64::from(g.w * g.h * 4))?;
-                    let rgb: Vec<u8> = raw
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .flat_map(|p| [p[0], p[1], p[2]])
-                        .collect();
+                    self.last(gpu, model, &ct1, (&t1, &t2, &picture), &mut e);
+                    let mut rgb = gpu.read(&picture, 0, shown.next_multiple_of(4) as u64)?;
+                    rgb.truncate(shown);
                     if let Some(dir) = self.dump.as_ref() {
                         dump::write_bytes(
                             &dir.join(format!("frame{index:03}.npy")),
@@ -1321,6 +1480,7 @@ impl Stream {
                 gpu.wait()?;
             }
         }
+        gpu.free_scratch();
         Ok(frames)
     }
 
@@ -1329,12 +1489,13 @@ impl Stream {
         gpu: &Gpu,
         model: &Model,
         g3: &wgpu::Buffer,
-        (t1, t2, o, picture): (&wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer),
+        (t1, t2, picture): (&wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer),
         e: &mut Enc,
     ) {
         let g = self.g;
         let d = &model.dec;
         let (w, h) = (g.wm, g.hm);
+        e.clear(picture);
         for r0 in (0..g.h).step_by(BAND as usize) {
             let r1 = (r0 + BAND).min(h);
             let (a0, a1) = (r0.saturating_sub(2), (r1 + 2).min(h));
@@ -1384,25 +1545,25 @@ impl Stream {
                     Store::Half(Act::Relu),
                     None,
                 );
-                let third = Plane {
-                    w,
-                    h,
-                    y0: r0,
-                    rows: r1 - r0,
-                    src: t2,
-                    cin: 128,
-                    stride: 64,
-                    offset: 0,
-                    two: None,
-                    up: false,
-                    sy0: b0,
-                };
-                plane(gpu, pass, &d.last2, &third, o, Store::Full, None);
-                let shown = r1.min(g.h) - r0;
-                kernels::output(gpu, pass, (o, picture), (g.w, shown, r0, w));
+                kernels::last(
+                    gpu,
+                    pass,
+                    &Last {
+                        src: t2,
+                        weights: &d.last2.w,
+                        bias: &d.last2.b,
+                        out: picture,
+                        wm: w,
+                        hm: h,
+                        r0,
+                        rows: r1.min(g.h) - r0,
+                        sy0: b0,
+                        w: g.w,
+                    },
+                );
             });
-            e.submit();
         }
+        e.submit();
     }
 }
 
@@ -1431,12 +1592,7 @@ fn mem_block(
     pass: &mut wgpu::ComputePass,
     mb: &MemBlock,
     (w, h, n): (u32, u32, u32),
-    (x, past, t1, t2): (
-        &mut wgpu::Buffer,
-        &mut wgpu::Buffer,
-        &wgpu::Buffer,
-        &wgpu::Buffer,
-    ),
+    (x, past, t1): (&mut wgpu::Buffer, &mut wgpu::Buffer, &mut wgpu::Buffer),
 ) {
     plane(
         gpu,
@@ -1452,7 +1608,7 @@ fn mem_block(
         pass,
         &mb.b,
         &whole((w, h, n), t1, None),
-        t2,
+        past,
         Store::Half(Act::Relu),
         None,
     );
@@ -1460,12 +1616,13 @@ fn mem_block(
         gpu,
         pass,
         &mb.c,
-        &whole((w, h, n), t2, None),
-        past,
+        &whole((w, h, n), past, None),
+        t1,
         Store::Skip,
         Some(x),
     );
     std::mem::swap(x, past);
+    std::mem::swap(x, t1);
 }
 
 struct Work {
