@@ -22,6 +22,8 @@ pub(super) struct Param {
     at: u64,
 }
 
+type Key = (wgpu::ComputePipeline, wgpu::Buffer, Vec<wgpu::Buffer>);
+
 struct Ring {
     buffer: wgpu::Buffer,
     mirror: Vec<u8>,
@@ -36,11 +38,65 @@ pub(super) struct Gpu {
     uploaded: AtomicU64,
     pipes: Mutex<HashMap<String, wgpu::ComputePipeline>>,
     ring: Mutex<Ring>,
+    groups: Mutex<HashMap<Key, wgpu::BindGroup>>,
 }
 
 pub(super) fn storage() -> wgpu::BufferUsages {
     use wgpu::BufferUsages as U;
     U::STORAGE | U::COPY_DST | U::COPY_SRC
+}
+
+fn layout(device: &wgpu::Device, source: &str) -> wgpu::PipelineLayout {
+    let entries: Vec<wgpu::BindGroupLayoutEntry> = source
+        .lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix("@group(0) @binding(")?;
+            let (n, decl) = rest.split_once(')')?;
+            let uniform = decl.contains("var<uniform>");
+            let ty = if uniform {
+                wgpu::BufferBindingType::Uniform
+            } else {
+                wgpu::BufferBindingType::Storage {
+                    read_only: !decl.contains("read_write"),
+                }
+            };
+            Some(wgpu::BindGroupLayoutEntry {
+                binding: n.parse().ok()?,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty,
+                    has_dynamic_offset: uniform,
+                    min_binding_size: None,
+                },
+                count: None,
+            })
+        })
+        .collect();
+    let group = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("flashvsr"),
+        entries: &entries,
+    });
+    device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("flashvsr"),
+        bind_group_layouts: &[Some(&group)],
+        immediate_size: 0,
+    })
+}
+
+fn pipeline(device: &wgpu::Device, source: String) -> wgpu::ComputePipeline {
+    let layout = layout(device, &source);
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("flashvsr"),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    });
+    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("flashvsr"),
+        layout: Some(&layout),
+        module: &module,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    })
 }
 
 fn slots(device: &wgpu::Device) -> wgpu::Buffer {
@@ -96,6 +152,7 @@ impl Gpu {
                 next: 0,
                 dirty: 0,
             }),
+            groups: Mutex::new(HashMap::new()),
         })
     }
 
@@ -103,7 +160,7 @@ impl Gpu {
         let mut pipes = self.pipes.lock().unwrap_or_else(PoisonError::into_inner);
         pipes
             .entry(key.to_string())
-            .or_insert_with(|| compute::pipeline(&self.device, "flashvsr", make()))
+            .or_insert_with(|| pipeline(&self.device, make()))
             .clone()
     }
 
@@ -156,19 +213,46 @@ impl Gpu {
     pub(super) fn flush(&self) {
         let mut ring = self.ring.lock().unwrap_or_else(PoisonError::into_inner);
         self.write_dirty(&mut ring);
+        self.groups
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
     }
 
-    pub(super) fn bind(
+    pub(super) fn set(
         &self,
+        pass: &mut wgpu::ComputePass,
         pipe: &wgpu::ComputePipeline,
         param: Param,
+        buffers: &[&wgpu::Buffer],
+    ) {
+        let key = (
+            pipe.clone(),
+            param.buffer.clone(),
+            buffers.iter().map(|b| (*b).clone()).collect(),
+        );
+        let bind = self
+            .groups
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(key)
+            .or_insert_with(|| self.group(pipe, &param, buffers))
+            .clone();
+        pass.set_pipeline(pipe);
+        pass.set_bind_group(0, &bind, &[param.at as u32]);
+    }
+
+    fn group(
+        &self,
+        pipe: &wgpu::ComputePipeline,
+        param: &Param,
         buffers: &[&wgpu::Buffer],
     ) -> wgpu::BindGroup {
         let mut entries = vec![wgpu::BindGroupEntry {
             binding: 0,
             resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                 buffer: &param.buffer,
-                offset: param.at,
+                offset: 0,
                 size: wgpu::BufferSize::new(SLOT),
             }),
         }];
@@ -199,9 +283,7 @@ impl Gpu {
         if groups == 0 {
             return;
         }
-        let bind = self.bind(pipe, param, buffers);
-        pass.set_pipeline(pipe);
-        pass.set_bind_group(0, &bind, &[]);
+        self.set(pass, pipe, param, buffers);
         let x = groups.min(MOST);
         pass.dispatch_workgroups(x, groups.div_ceil(x), 1);
     }

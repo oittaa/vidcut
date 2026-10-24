@@ -230,9 +230,12 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - One matrix multiply shader (`gemm::run`) runs every linear layer and convolution. It splits its work into dispatches of at most 150 G multiply-adds. Its loaders gather the convolution taps, and its stores join bias, activation and residual adds.
     - Each thread finds the place of its rows once, before the loop over k (`a_row`). It then steps the tap and the channel as k grows.
     - The tiles wait in workgroup memory as pairs of 16-bit floats, as they come from the buffers (`a_word`). The patch input holds 32-bit floats, so its tile stays 32-bit.
-  - Each dispatch takes its parameters from a slot of 256 bytes in one uniform buffer. `Gpu::flush` writes the new slots once, before each submission.
     - The weights are 16-bit floats on the GPU. The files hold 32-bit floats; they are rounded at load, on all cores (`compute::halves`).
     - The residual stream of the DiT stays in 32-bit floats. The other values between the steps are 16-bit floats, with 32-bit sums.
+  - Each dispatch takes its parameters from a slot of 256 bytes in one uniform buffer, at a dynamic offset. `Gpu::flush` writes the new slots once, before each submission.
+    - When the buffer is full, a new buffer takes its place. Thus the work in flight keeps its slots.
+    - Each pipeline has a layout from the bindings of its shader. `Gpu::set` keeps the bind groups until the submission, so dispatches with the same buffers share one.
+    - The full-size stage of the decoder sends all of its bands in one submission. The feed-forward part of a DiT block does the same with its slabs.
   - `flashvsr` has a wgpu device of its own. Its pipelines and weights stay. The work buffers of a chunk are freed after it.
 - The other GPUs fit pictures as before ([todo](../todo/super-scale.md)).
 

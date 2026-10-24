@@ -1054,7 +1054,6 @@ impl Stream {
                     &[(11, first)],
                 );
             });
-            e.submit();
         }
         self.keep(gpu, i, work, &mut e)?;
         e.submit();
@@ -1392,8 +1391,8 @@ impl Stream {
                     },
                 );
             });
-            e.submit();
         }
+        e.submit();
     }
 }
 

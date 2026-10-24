@@ -222,9 +222,7 @@ pub(super) struct Resize<'a> {
 pub(super) fn resize(gpu: &Gpu, pass: &mut wgpu::ComputePass, r: &Resize, (x, y): (u32, u32)) {
     let pipe = gpu.pipe("resize", || include_str!("resize.wgsl").into());
     let p = gpu.uniform(&r.values);
-    let bind = gpu.bind(&pipe, p, &[r.src, r.bounds, r.coef, r.out]);
-    pass.set_pipeline(&pipe);
-    pass.set_bind_group(0, &bind, &[]);
+    gpu.set(pass, &pipe, p, &[r.src, r.bounds, r.coef, r.out]);
     pass.dispatch_workgroups(x.div_ceil(16), y.div_ceil(16), 1);
 }
 
@@ -244,8 +242,6 @@ pub(super) struct Last<'a> {
 pub(super) fn last(gpu: &Gpu, pass: &mut wgpu::ComputePass, l: &Last) {
     let pipe = gpu.pipe("last", || include_str!("last.wgsl").into());
     let p = gpu.uniform(&[l.wm, l.hm, l.r0, l.rows, l.sy0, l.w, 0, 0]);
-    let bind = gpu.bind(&pipe, p, &[l.src, l.weights, l.bias, l.out]);
-    pass.set_pipeline(&pipe);
-    pass.set_bind_group(0, &bind, &[]);
+    gpu.set(pass, &pipe, p, &[l.src, l.weights, l.bias, l.out]);
     pass.dispatch_workgroups(l.w.div_ceil(16), l.rows.div_ceil(16), 1);
 }
