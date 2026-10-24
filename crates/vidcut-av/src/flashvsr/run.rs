@@ -159,6 +159,10 @@ impl<'a> Enc<'a> {
         f(&mut pass)
     }
 
+    fn clear(&mut self, buffer: &wgpu::Buffer) {
+        self.encoder().clear_buffer(buffer, 0, None);
+    }
+
     fn copy(&mut self, src: &wgpu::Buffer, from: u64, dst: &wgpu::Buffer, to: u64, size: u64) {
         self.encoder()
             .copy_buffer_to_buffer(src, from, dst, to, size);
@@ -349,7 +353,7 @@ fn chunk_work(g: &Geometry) -> u64 {
     let wm = u64::from(g.wm);
     let bands = u64::from(BAND + 4) * wm * 128 * 2
         + u64::from(BAND + 2) * wm * 128 * 2
-        + u64::from(g.w * g.h) * 4;
+        + u64::from(g.w * g.h) * 3;
     let first = p8 * (784 + 4 * 512 + 4 * 256) * 2;
     let second = p8 * 4 * (3 * 256 + 512) * 2;
     let third = p8 * 4 * 512 * 2 + p8 * 16 * 4 * 128 * 2;
@@ -505,13 +509,7 @@ impl Stream {
                 g.sh
             )));
         }
-        let rgba: Vec<u32> = rgb
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .map(|p| u32::from_le_bytes([p[0], p[1], p[2], 255]))
-            .collect();
-        let src = gpu.upload(&words(&rgba));
+        let src = gpu.upload(rgb);
         let temp = gpu.buffer((g.sh * g.w * 4) as usize);
         let mut e = Enc::new(gpu);
         let t = &self.tables;
@@ -1109,7 +1107,8 @@ impl Stream {
         let half = |count: u32, n: u32| gpu.buffer((count * n * 2) as usize);
         let t1 = gpu.buffer(((BAND + 4) * g.wm * 128 * 2) as usize);
         let t2 = gpu.buffer(((BAND + 2) * g.wm * 128 * 2) as usize);
-        let picture = gpu.buffer((g.w * g.h * 4) as usize);
+        let shown = (g.w * g.h * 3) as usize;
+        let picture = gpu.buffer(shown);
         let mut frames = Vec::new();
         for j in 0..4u32 {
             let latent = self.chunk * 4 + u64::from(j);
@@ -1301,13 +1300,8 @@ impl Stream {
                         )
                     });
                     self.last(gpu, model, &g3, (&t1, &t2, &picture), &mut e);
-                    let raw = gpu.read(&picture, 0, u64::from(g.w * g.h * 4))?;
-                    let rgb: Vec<u8> = raw
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .flat_map(|p| [p[0], p[1], p[2]])
-                        .collect();
+                    let mut rgb = gpu.read(&picture, 0, shown.next_multiple_of(4) as u64)?;
+                    rgb.truncate(shown);
                     if let Some(dir) = self.dump.as_ref() {
                         dump::write_bytes(
                             &dir.join(format!("frame{index:03}.npy")),
@@ -1334,6 +1328,7 @@ impl Stream {
         let g = self.g;
         let d = &model.dec;
         let (w, h) = (g.wm, g.hm);
+        e.clear(picture);
         for r0 in (0..g.h).step_by(BAND as usize) {
             let r1 = (r0 + BAND).min(h);
             let (a0, a1) = (r0.saturating_sub(2), (r1 + 2).min(h));

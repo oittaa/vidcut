@@ -207,6 +207,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - At the end of the file, the stream repeats the last frame, as the official code does.
   - The stream works in chunks of 16 frames (`run::Stream`). The first chunk reads 17 frames and gives 13. Each later chunk reads 16 and gives 16. Thus the output is 4 frames behind the input.
     - Each frame first gets PIL's bicubic enlargement, with PIL's fixed-point weights (`resize::coefficients`). The edges are repeated up to a multiple of 128.
+    - The frames go to the GPU and come back as packed RGB24, 3 bytes for each pixel, with no conversion on the CPU.
     - The LQ projection (16× pixel unshuffle, two causal 3-D convolutions, a linear layer) makes one token frame from each 4 frames. Its convolutions keep the last 2 frames of each clip.
     - The 30 DiT blocks run one step at the fixed time 1000. The adaLN values for that time are computed once, at load.
     - A block is 128 tokens, and a window is 2 latent frames.

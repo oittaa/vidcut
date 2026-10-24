@@ -3,7 +3,7 @@ struct P { wm: u32, hm: u32, r0: u32, rows: u32, sy0: u32, w: u32, pad0: u32, pa
 @group(0) @binding(1) var<storage, read> src: array<u32>;
 @group(0) @binding(2) var<storage, read> wts: array<u32>;
 @group(0) @binding(3) var<storage, read> bias: array<f32>;
-@group(0) @binding(4) var<storage, read_write> dst: array<u32>;
+@group(0) @binding(4) var<storage, read_write> dst: array<atomic<u32>>;
 
 const K: u32 = 1152u;
 
@@ -16,6 +16,10 @@ fn weight(n: u32, k: u32) -> f32 {
 
 fn level(v: f32) -> u32 {
     return u32(round(clamp(v, 0.0, 1.0) * 255.0));
+}
+
+fn put(at: u32, v: u32) {
+    atomicOr(&dst[at / 4u], v << (8u * (at % 4u)));
 }
 
 @compute @workgroup_size(16, 16)
@@ -51,8 +55,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocation_
             a2 = fma(v.y, w1.z, a2);
         }
     }
-    let r = level(a0 + bias[0]);
-    let g = level(a1 + bias[1]);
-    let b = level(a2 + bias[2]);
-    dst[y * p.w + x] = r | (g << 8u) | (b << 16u) | (255u << 24u);
+    let at = (y * p.w + x) * 3u;
+    put(at, level(a0 + bias[0]));
+    put(at + 1u, level(a1 + bias[1]));
+    put(at + 2u, level(a2 + bias[2]));
 }
