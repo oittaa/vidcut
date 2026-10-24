@@ -217,6 +217,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
       - `scores.wgsl` keeps the scores of each thread in registers through the softmax. A row takes at most 1024 key blocks.
     - Then a radix select finds the threshold on the bits of the 32-bit values (`hist.wgsl`, `pick.wgsl`). It keeps the official rule: the value at place k+1, and strictly greater.
     - `attend.wgsl` is a flash attention over the chosen key blocks, with an online softmax in 32-bit floats. Cross-attention to the fixed prompt uses it too.
+      - Four threads share a query row. Each keeps the row's query in registers and does 8 keys and 32 output values. The partial sums keep the same groups, so the results do not depend on the layout.
     - The KV cache of each block is a ring of windows (`Cache`).
     - `run::plan` keeps the caches on the GPU while all of the work fits in three quarters of the GPU's memory. The caches of the other blocks stay in main memory between chunks (`Keys::Host`). Each comes back to the GPU just before its block runs, and its new windows go back after it.
     - The results are the same in both places.
