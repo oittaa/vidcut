@@ -221,7 +221,13 @@ pub(super) struct WinoIn<'a> {
 pub(super) fn wino_in(gpu: &Gpu, pass: &mut wgpu::ComputePass, w: &WinoIn, threads: u32) {
     let pipe = gpu.pipe("winoin", || gpu.half(include_str!("winoin.wgsl")));
     let p = gpu.uniform(&w.values);
-    gpu.dispatch(pass, &pipe, p, &[w.src, w.src2, w.out], threads.div_ceil(256));
+    gpu.dispatch(
+        pass,
+        &pipe,
+        p,
+        &[w.src, w.src2, w.out],
+        threads.div_ceil(256),
+    );
 }
 
 pub(super) struct WinoOut<'a> {

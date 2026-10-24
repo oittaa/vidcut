@@ -480,9 +480,7 @@ fn wino_scratch(g: &Geometry) -> u64 {
         (w, 128, 128),
     ]
     .iter()
-    .map(|(width, cin, cout)| {
-        16 * u64::from(WINO_ROWS) * width.div_ceil(2) * (cin * 2 + cout * 4)
-    })
+    .map(|(width, cin, cout)| 16 * u64::from(WINO_ROWS) * width.div_ceil(2) * (cin * 2 + cout * 4))
     .max()
     .unwrap_or(0)
 }
