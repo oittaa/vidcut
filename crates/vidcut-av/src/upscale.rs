@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Read;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, PoisonError, mpsc};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::time::Instant;
 
 use vidcut_core::model::{Media, Project, Upscaler};
@@ -989,6 +989,7 @@ type Rest = Box<dyn FnOnce(Result<Vec<Vec<u8>>>) + Send>;
 type Groups = HashMap<u64, Vec<(wgpu::ComputePipeline, Vec<wgpu::Buffer>, wgpu::BindGroup)>>;
 
 struct Pending {
+    serial: u64,
     wanted: usize,
     size: (usize, usize),
     outs: Vec<Vec<u8>>,
@@ -1008,7 +1009,7 @@ fn blocks(n: usize) -> u32 {
 }
 
 impl Engine {
-    fn start() -> std::result::Result<Self, String> {
+    fn open() -> std::result::Result<Self, String> {
         let instance = wgpu::Instance::default();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -1410,14 +1411,9 @@ impl Engine {
         })
     }
 
-    fn free(&mut self) {
-        self.frame = None;
-        self.tiles = None;
-        self.groups.get_mut().clear();
-    }
-
     fn finish(&mut self) {
         let Some(Pending {
+            serial,
             wanted,
             size,
             mut outs,
@@ -1427,11 +1423,17 @@ impl Engine {
             return;
         };
         let device = self.device.clone();
-        let done = checked(&device, || self.others(wanted, size, &mut outs)).map(|()| outs);
+        let done = checked(&device, || self.others(serial, wanted, size, &mut outs)).map(|()| outs);
         rest(done);
     }
 
-    fn others(&self, wanted: usize, (w, h): (usize, usize), outs: &mut [Vec<u8>]) -> Result<()> {
+    fn others(
+        &self,
+        serial: u64,
+        wanted: usize,
+        (w, h): (usize, usize),
+        outs: &mut [Vec<u8>],
+    ) -> Result<()> {
         let clock = Instant::now();
         let f = self.frame.as_ref().expect("frame made");
         let t = self.tiles.as_ref().expect("tiles made");
@@ -1442,6 +1444,9 @@ impl Engine {
         let earlier = (0..wanted).rev().map(|i| (i, false));
         let mut waiting = None;
         for (k, (i, forward)) in later.chain(earlier).enumerate() {
+            if DROPPED.load(Ordering::Relaxed) == serial {
+                return Err(Error::Invalid(crate::export::CANCELLED.into()));
+            }
             let mut enc = self.device.create_command_encoder(&Default::default());
             {
                 let mut pass = enc.begin_compute_pass(&Default::default());
@@ -1523,36 +1528,115 @@ impl Engine {
     }
 }
 
-static ENGINE: Mutex<Option<std::result::Result<Engine, String>>> = Mutex::new(None);
+static ENGINE: crate::ai::Slot<Engine> = crate::ai::Slot::new();
 
-static FREE_LATER: AtomicBool = AtomicBool::new(false);
+impl crate::ai::Network for Engine {
+    const UPSCALER: Upscaler = Upscaler::AiFast;
+
+    fn start() -> std::result::Result<Self, String> {
+        Engine::open()
+    }
+
+    fn free(&mut self) {
+        self.frame = None;
+        self.tiles = None;
+        self.groups.get_mut().clear();
+    }
+
+    fn busy(&self) -> bool {
+        self.pending.is_some()
+    }
+}
 
 pub(crate) fn release() {
-    let Ok(mut engine) = ENGINE.try_lock() else {
-        FREE_LATER.store(true, Ordering::Relaxed);
-        return;
-    };
-    if let Some(Ok(e)) = engine.as_mut() {
-        if e.pending.is_some() {
-            FREE_LATER.store(true, Ordering::Relaxed);
-        } else {
-            e.free();
+    ENGINE.release();
+}
+
+fn with_engine<T>(run: impl FnOnce(&mut Engine) -> Result<T>) -> Result<T> {
+    ENGINE.with(run)
+}
+
+static SERIALS: AtomicU64 = AtomicU64::new(1);
+
+static DROPPED: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) struct Run {
+    serial: u64,
+    size: (usize, usize),
+    want: i64,
+    frames: Vec<(i64, Option<i64>, Vec<u8>)>,
+    sink: Option<crate::ai::Sink>,
+}
+
+impl Run {
+    pub(crate) fn new(size: (u32, u32), want: i64, sink: crate::ai::Sink) -> Self {
+        Self {
+            serial: SERIALS.fetch_add(1, Ordering::Relaxed),
+            size: (size.0 as usize, size.1 as usize),
+            want,
+            frames: Vec::new(),
+            sink: Some(sink),
+        }
+    }
+
+    fn run(&mut self) -> Result<Vec<crate::ai::Out>> {
+        let frames = std::mem::take(&mut self.frames);
+        let Some(wanted) = frames.iter().position(|f| f.0 == self.want) else {
+            return Err(Error::Invalid(format!(
+                "the AI Fast upscaler's chunk has no source frame {}",
+                self.want
+            )));
+        };
+        let meta: Vec<(i64, Option<i64>)> = frames.iter().map(|f| (f.0, f.1)).collect();
+        let rgbs: Vec<Vec<u8>> = frames.into_iter().map(|f| f.2).collect();
+        let (index, pts) = meta[wanted];
+        let sink = self.sink.take();
+        let rest = move |big: Result<Vec<Vec<u8>>>| {
+            if let Some(sink) = sink {
+                sink(big.map(|outs| {
+                    meta.iter()
+                        .zip(outs)
+                        .map(|(&(index, pts), rgb)| crate::ai::Out { index, pts, rgb })
+                        .collect()
+                }));
+            }
+        };
+        let rgb = upscale(&rgbs, self.size, (self.serial, wanted), rest)?;
+        Ok(vec![crate::ai::Out { index, pts, rgb }])
+    }
+}
+
+impl Drop for Run {
+    fn drop(&mut self) {
+        if self.sink.is_none() {
+            DROPPED.store(self.serial, Ordering::Relaxed);
         }
     }
 }
 
-fn with_engine<T>(run: impl FnOnce(&mut Engine) -> Result<T>) -> Result<T> {
-    let mut engine = ENGINE.lock().unwrap_or_else(PoisonError::into_inner);
-    match engine.get_or_insert_with(Engine::start) {
-        Ok(e) => run(e),
-        Err(why) => Err(Error::Invalid(why.clone())),
+impl crate::ai::Run for Run {
+    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<crate::ai::Out>> {
+        self.frames.push((index, pts, rgb));
+        if self.frames.len() == FRAMES {
+            self.run()
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    fn finish(&mut self) -> Result<Vec<crate::ai::Out>> {
+        if self.frames.is_empty() {
+            Ok(Vec::new())
+        } else {
+            self.run()
+        }
     }
 }
 
 pub(crate) fn upscale(
     frames: &[Vec<u8>],
     size: (usize, usize),
-    wanted: usize,
+    (serial, wanted): (u64, usize),
     rest: impl FnOnce(Result<Vec<Vec<u8>>>) + Send + 'static,
 ) -> Result<Vec<u8>> {
     let first = with_engine(|e| {
@@ -1567,6 +1651,7 @@ pub(crate) fn upscale(
         let mut outs = vec![Vec::new(); frames.len()];
         outs[wanted].clone_from(&first);
         e.pending = Some(Pending {
+            serial,
             wanted,
             size,
             outs,
@@ -1581,11 +1666,5 @@ pub(crate) fn upscale(
 }
 
 pub(crate) fn settle() {
-    let mut engine = ENGINE.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(Ok(e)) = engine.as_mut() {
-        e.finish();
-        if FREE_LATER.swap(false, Ordering::Relaxed) && !crate::ai::in_use(Upscaler::AiFast) {
-            e.free();
-        }
-    }
+    ENGINE.started(Engine::finish);
 }

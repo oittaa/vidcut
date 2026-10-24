@@ -18,13 +18,18 @@ pub(crate) fn checked<T>(
     ]
     .map(|f| device.push_error_scope(f));
     let out = run();
-    let mut first = None;
-    for scope in scopes.into_iter().rev() {
-        if let Some(e) = pollster::block_on(scope.pop()) {
-            first.get_or_insert(e);
-        }
+    let found: Vec<wgpu::Error> = scopes
+        .into_iter()
+        .rev()
+        .filter_map(|scope| pollster::block_on(scope.pop()))
+        .collect();
+    if found
+        .iter()
+        .any(|e| matches!(e, wgpu::Error::OutOfMemory { .. }))
+    {
+        return Err(gpu_error(what, "not enough GPU memory"));
     }
-    match first {
+    match found.into_iter().next() {
         Some(e) => Err(gpu_error(what, e)),
         None => out,
     }

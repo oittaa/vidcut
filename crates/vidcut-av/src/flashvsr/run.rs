@@ -1315,6 +1315,7 @@ impl Stream {
         let picture = gpu.buffer(shown);
         let mut frames = Vec::new();
         for j in 0..4u32 {
+            crate::cancel::stop()?;
             let latent = self.chunk * 4 + u64::from(j);
             let slots = [0, 1, 2, 3].map(|i| self.slot((latent * 4 + i).saturating_sub(3)));
             let mut e = Enc::new(gpu);
@@ -1448,6 +1449,7 @@ impl Stream {
             gpu.wait()?;
             let (mut cx, mut ct1) = (half(p8 * 16, 128), half(p8 * 16, 128));
             for part in 0..2u32 {
+                crate::cancel::stop()?;
                 e.pass(|pass| {
                     let up = Plane {
                         w: w8 * 4,

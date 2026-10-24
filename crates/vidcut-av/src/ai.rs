@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -7,7 +8,7 @@ use vidcut_core::render::RenderPlan;
 
 use vidcut_core::catalog::{self, Measure};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::models::Need;
 
 pub fn needed(dir: &Path, upscaler: Upscaler) -> Vec<Need> {
@@ -78,10 +79,6 @@ impl Making {
             w.frames = frames;
         }
         made(true);
-        self.done = true;
-    }
-
-    pub(crate) fn handed(mut self) {
         self.done = true;
     }
 }
@@ -173,6 +170,141 @@ pub(crate) fn runs_on(upscaler: Upscaler, device: String) {
     let mut r = report_lock();
     r.devices.retain(|(u, _)| *u != upscaler);
     r.devices.push((upscaler, device));
+}
+
+pub(crate) trait Network: Send {
+    const UPSCALER: Upscaler;
+
+    fn start() -> std::result::Result<Self, String>
+    where
+        Self: Sized;
+
+    fn free(&mut self);
+
+    fn busy(&self) -> bool {
+        false
+    }
+}
+
+pub(crate) struct Slot<N> {
+    engine: Mutex<Option<std::result::Result<N, String>>>,
+    later: AtomicBool,
+}
+
+impl<N: Network> Slot<N> {
+    pub(crate) const fn new() -> Self {
+        Self {
+            engine: Mutex::new(None),
+            later: AtomicBool::new(false),
+        }
+    }
+
+    pub(crate) fn with<T>(&self, run: impl FnOnce(&mut N) -> Result<T>) -> Result<T> {
+        let mut engine = self.engine.lock().unwrap_or_else(PoisonError::into_inner);
+        let n = match engine.get_or_insert_with(N::start) {
+            Ok(n) => n,
+            Err(why) => return Err(Error::Invalid(why.clone())),
+        };
+        let out = run(n);
+        self.tidy(n);
+        out
+    }
+
+    pub(crate) fn started(&self, run: impl FnOnce(&mut N)) {
+        let mut engine = self.engine.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(Ok(n)) = engine.as_mut() {
+            run(n);
+            self.tidy(n);
+        }
+    }
+
+    pub(crate) fn release(&self) {
+        self.later.store(true, Ordering::Relaxed);
+        if let Ok(mut engine) = self.engine.try_lock()
+            && let Some(Ok(n)) = engine.as_mut()
+        {
+            self.tidy(n);
+        }
+    }
+
+    fn tidy(&self, n: &mut N) {
+        if n.busy() || !self.later.swap(false, Ordering::Relaxed) {
+            return;
+        }
+        if !in_use(N::UPSCALER) {
+            n.free();
+        }
+    }
+}
+
+pub(crate) struct Out {
+    pub(crate) index: i64,
+    pub(crate) pts: Option<i64>,
+    pub(crate) rgb: Vec<u8>,
+}
+
+pub(crate) type Sink = Box<dyn FnOnce(Result<Vec<Out>>) + Send>;
+
+pub(crate) trait Run: Send {
+    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<Out>>;
+
+    fn finish(&mut self) -> Result<Vec<Out>>;
+}
+
+pub(crate) fn first_frame(upscaler: Upscaler, want: i64) -> i64 {
+    match upscaler {
+        Upscaler::AiFast | Upscaler::Classic => {
+            want - want.rem_euclid(crate::upscale::FRAMES as i64)
+        }
+        Upscaler::AiBest => want,
+    }
+}
+
+pub(crate) fn last_frame(upscaler: Upscaler, first: i64) -> Option<i64> {
+    match upscaler {
+        Upscaler::AiFast | Upscaler::Classic => Some(first + crate::upscale::FRAMES as i64 - 1),
+        Upscaler::AiBest => None,
+    }
+}
+
+pub(crate) fn made_size(upscaler: Upscaler, size: (u32, u32), shown: (u32, u32)) -> (u32, u32) {
+    match upscaler {
+        Upscaler::AiFast | Upscaler::Classic => {
+            let scale = crate::upscale::SCALE;
+            (size.0 * scale, size.1 * scale)
+        }
+        Upscaler::AiBest => {
+            let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
+            let s = (f64::from(shown.0) / f64::from(size.0))
+                .min(f64::from(shown.1) / f64::from(size.1))
+                .min(f64::from(crate::flashvsr::SCALE));
+            (
+                even(f64::from(size.0) * s).max(size.0),
+                even(f64::from(size.1) * s).max(size.1),
+            )
+        }
+    }
+}
+
+pub(crate) fn open(
+    upscaler: Upscaler,
+    size: (u32, u32),
+    made: (u32, u32),
+    want: i64,
+    sink: Sink,
+) -> Result<Box<dyn Run>> {
+    match upscaler {
+        Upscaler::AiFast | Upscaler::Classic => {
+            Ok(Box::new(crate::upscale::Run::new(size, want, sink)))
+        }
+        Upscaler::AiBest => Ok(Box::new(crate::flashvsr::Run::open(size, made)?)),
+    }
+}
+
+pub(crate) fn settle(upscaler: Upscaler) {
+    if upscaler == Upscaler::AiFast {
+        crate::upscale::settle();
+    }
 }
 
 pub fn name(upscaler: Upscaler) -> &'static str {
