@@ -7,6 +7,7 @@ pub(crate) mod buffers;
 pub mod burn;
 pub mod cancel;
 pub mod color;
+pub(crate) mod compute;
 pub mod copies;
 pub mod cuda;
 pub mod decode;

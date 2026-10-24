@@ -6,6 +6,7 @@ use vidcut_core::model::{Media, Project};
 use vidcut_core::render::VideoPiece;
 use wgpu::util::DeviceExt;
 
+use crate::compute::{self, bytes, group, words};
 use crate::error::{Error, Result};
 use crate::models::{self, Fetch, File, Need};
 
@@ -623,36 +624,14 @@ fn spans(n: usize) -> Vec<Span> {
         .collect()
 }
 
-fn bytes(v: &[f32]) -> Vec<u8> {
-    v.iter().flat_map(|f| f.to_le_bytes()).collect()
-}
-
-fn words(v: &[u32]) -> Vec<u8> {
-    v.iter().flat_map(|f| f.to_le_bytes()).collect()
-}
+const WHAT: &str = "the AI upscaler";
 
 fn gpu_error(e: impl std::fmt::Display) -> Error {
-    Error::Invalid(format!("the AI upscaler on the GPU: {e}"))
+    compute::gpu_error(WHAT, e)
 }
 
 fn checked<T>(device: &wgpu::Device, run: impl FnOnce() -> Result<T>) -> Result<T> {
-    let scopes = [
-        wgpu::ErrorFilter::OutOfMemory,
-        wgpu::ErrorFilter::Validation,
-        wgpu::ErrorFilter::Internal,
-    ]
-    .map(|f| device.push_error_scope(f));
-    let out = run();
-    let mut first = None;
-    for scope in scopes.into_iter().rev() {
-        if let Some(e) = pollster::block_on(scope.pop()) {
-            first.get_or_insert(e);
-        }
-    }
-    match first {
-        Some(e) => Err(gpu_error(e)),
-        None => out,
-    }
+    compute::checked(device, WHAT, run)
 }
 
 struct Pipelines {
@@ -711,47 +690,11 @@ struct Engine {
 }
 
 fn pipeline(device: &wgpu::Device, source: String) -> wgpu::ComputePipeline {
-    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("upscale"),
-        source: wgpu::ShaderSource::Wgsl(source.into()),
-    });
-    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("upscale"),
-        layout: None,
-        module: &module,
-        entry_point: Some("main"),
-        compilation_options: Default::default(),
-        cache: None,
-    })
+    compute::pipeline(device, "upscale", source)
 }
 
 fn buffer(device: &wgpu::Device, size: usize, usage: wgpu::BufferUsages) -> wgpu::Buffer {
-    device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("upscale"),
-        size: size.max(4) as u64,
-        usage,
-        mapped_at_creation: false,
-    })
-}
-
-fn group(
-    device: &wgpu::Device,
-    pipeline: &wgpu::ComputePipeline,
-    buffers: &[&wgpu::Buffer],
-) -> wgpu::BindGroup {
-    let entries: Vec<wgpu::BindGroupEntry> = buffers
-        .iter()
-        .enumerate()
-        .map(|(i, b)| wgpu::BindGroupEntry {
-            binding: i as u32,
-            resource: b.as_entire_binding(),
-        })
-        .collect();
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &pipeline.get_bind_group_layout(0),
-        entries: &entries,
-    })
+    compute::buffer(device, "upscale", size, usage)
 }
 
 fn blocks(n: usize) -> u32 {
