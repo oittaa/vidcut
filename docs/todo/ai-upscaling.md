@@ -48,7 +48,7 @@ AI Best speed and memory on the owner's RTX 4080 SUPER (16 GB), on 2026-10-24:
 | Clip | vidcut | Official code, bf16, Triton |
 |---|---|---|
 | 480×256 to 1920×1024, 89 frames | 86.8 s (78.5 s for the export after the model loads); 11,017 MiB | 54.4 s; 11,047 MiB |
-| 1920×1080 to 3840×2176, 30 frames | 311.9 s (303.5 s for the export); 14,748 MiB; 16.6 GiB of main memory | not done after 5 minutes, when a time limit stopped it; 14,936 MiB |
+| 1920×1080 to 3840×2176, 30 frames | 311.9 s (303.5 s for the export); 14,748 MiB; 16.6 GiB of main memory | not done after 15 minutes, when a time limit stopped it; 15,407 MiB |
 
 - The official time includes loading the model and compiling its Triton kernel. The official memory comes from `nvidia-smi` every 200 ms.
 - At 4K the official code kept the KV caches of its 5 global blocks in main memory.
