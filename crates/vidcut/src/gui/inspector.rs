@@ -1592,7 +1592,7 @@ impl Workspace {
                 });
             ui.end_row();
             let on = !now.is_off();
-            let ai = now.upscaler == Upscaler::Ai;
+            let ai = now.upscaler != Upscaler::Classic;
             let row = |ui: &mut egui::Ui,
                        name: &str,
                        enabled: bool,

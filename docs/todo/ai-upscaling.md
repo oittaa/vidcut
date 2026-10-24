@@ -35,13 +35,19 @@ The tests ran on the owner's RTX 4080 SUPER (16 GB) on 2026-10-24. NanoVSR 5.4M 
 - Users have different needs. Some wait a long time for the best pictures, and others want good pictures fast.
   - Thus Super Scale can offer more than one AI model: a fast default, and slower models with better pictures.
   - Speed alone does not rule out a model. A slow model must give clearly better pictures.
-  - FlashVSR+ Turbo ([repo](https://github.com/OpenImagingLab/FlashVSR_Plus)) is the choice for the slow model.
+  - FlashVSR+ Turbo ([repo](https://github.com/OpenImagingLab/FlashVSR_Plus)) is the slow model, AI Best. NanoVSR 5.4M is the fast one, AI Fast.
+  - AI Best runs in the viewer too, as AI Fast does, however slow it is.
 
 ## Plan
 
 These parts are still to do:
 
-1. FlashVSR+ Turbo as the slow model. It needs a transformer engine on wgpu: matrix multiplies, attention and a cache of earlier frames.
+1. AI Best (FlashVSR+ Turbo). Its engine and its place in Super Scale are in the code, but it has not run on a GPU yet.
+   1. The check against the official PyTorch output, with `VIDCUT_FLASHVSR_DUMP` ([tools](../tools.md)): in 32-bit floats at 512×256, and in bf16 with the Triton kernel at 1920×1024.
+   2. The KV cache in main memory between chunks, for the layers that do not fit on the GPU. At 3840×2176 the cache is 16 GB in 16-bit floats.
+   3. A memory check before an export starts, from the sizes of the export.
+   4. Smaller dispatches for the long matrix multiplies and attention passes, so that no single dispatch runs for seconds.
+   5. Speed: measure, then the tensor cores through wgpu's cooperative matrices, on Vulkan and Metal.
 2. A test of the chunk edges: each chunk starts from zero. A carried forward state or overlapping chunks may hide a change every 15 frames.
 3. Speed. PyTorch in 16-bit floats is faster on small pictures. The gain of each step is not known until it is measured.
    1. Measure where the time goes, with GPU timestamps: the network, the copies, the decoding and the encoding.
@@ -62,3 +68,12 @@ The weights are on NanoVSR's release v1.0:
 | File | Bytes | SHA-256 |
 |---|---|---|
 | `nanovsr_5.4m.pth` | 24624333 | `42a53e1dc9b928947ea9cea85d7dd6f7bd82b325e92374dc1946d2cbcadf31bc` |
+
+The weights of AI Best are on Hugging Face (`ruchangyao/FlashVSR_plus`, revision `46b79520946ac67dec94d1566490690953c7debc`) and in the code repo (`OpenImagingLab/FlashVSR_Plus`, commit `b548a2cc2c929d3d4676f2973abe27876ec4dee7`):
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `turbo/dit.safetensors` | 5676070392 | `7862b92178176fa3aebc34c6c071daca6b56ab1dddb8e7ff9a01c47f5226ec8b` |
+| `turbo/lq_proj_in.safetensors` | 1151384272 | `e77b378ae12342eefbb58f924256f362a151b93ce73dd32808fcdaca9c051496` |
+| `TCDecoder.ckpt` | 189018333 | `e224bdcf2f52745cbf4d393ff5374c2ba09e90285d5d19062d2bf63b915b6161` |
+| `prompt_tensor/posi_prompt.pth` | 4195504 | `4601107a11e4e11a936a6b79df579e54dbc99872132bf542151f0ffd65b4b1ef` |

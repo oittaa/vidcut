@@ -1,7 +1,8 @@
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
-use vidcut_core::model::Media;
+use vidcut_core::model::{Media, Project, Upscaler};
+use vidcut_core::render::VideoPiece;
 
 use crate::error::{Error, Result};
 use crate::models::{self, Fetch, File, Need};
@@ -117,6 +118,47 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
 
 pub fn unfit(m: &Media) -> Option<&'static str> {
     m.video_as_read()?.hdr.map(|_| "HDR pictures")
+}
+
+pub fn check<'a>(
+    p: &Project,
+    pieces: impl IntoIterator<Item = &'a VideoPiece>,
+    dir: &Path,
+    download: bool,
+) -> Result<()> {
+    let mut media: Vec<&str> = Vec::new();
+    for piece in pieces {
+        for (layer, _) in piece.layers() {
+            if let VideoPiece::Source {
+                media: id,
+                super_scale,
+                ..
+            } = layer
+                && super_scale.ai()
+                && super_scale.upscaler == Upscaler::AiBest
+                && !media.contains(&id.as_str())
+            {
+                media.push(id);
+            }
+        }
+    }
+    if media.is_empty() {
+        return Ok(());
+    }
+    let refused: Vec<String> = media
+        .iter()
+        .filter_map(|id| p.media(id))
+        .filter_map(|m| unfit(m).map(|why| format!("{} ({why})", m.name)))
+        .collect();
+    if !refused.is_empty() {
+        return Err(Error::Invalid(format!(
+            "the AI Best upscaler of Super Scale can't take {}: set their Upscaler to Classic, \
+             or their Super Scale to Off",
+            refused.join(", ")
+        )));
+    }
+    get_ready(dir, download)?;
+    with_engine(|_, _| Ok(()))
 }
 
 struct Engine {

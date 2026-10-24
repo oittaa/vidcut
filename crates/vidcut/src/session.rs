@@ -478,7 +478,7 @@ pub fn export_media(
         vidcut_av::isolate::get_ready(&crate::paths::models_dir(), params.download)
             .map_err(|e| export::av_error(&e, ErrorCode::Export, String::new()))?;
     }
-    vidcut_av::upscale::check(
+    vidcut_av::ai::check(
         p,
         prepared.outputs.iter().flat_map(|o| &o.plan.video),
         &crate::paths::models_dir(),

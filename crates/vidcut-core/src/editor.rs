@@ -154,9 +154,9 @@ pub trait Env {
         Err(Error::usage("voice isolation runs in the vidcut program"))
     }
 
-    fn ai_upscaler(&self, download: bool) -> Result<()> {
-        let _ = download;
-        Err(Error::usage("the AI upscaler runs in the vidcut program"))
+    fn ai_upscaler(&self, upscaler: crate::model::Upscaler, download: bool) -> Result<()> {
+        let _ = (upscaler, download);
+        Err(Error::usage("the AI upscalers run in the vidcut program"))
     }
 
     fn media_details(&self, media: &Media) -> Result<crate::model::MediaDetails> {
@@ -2599,7 +2599,9 @@ fn mutate(
                 ops::set_media_color_space(p, &media.to_vec(), *space)?;
             }
             if *download && !dry_run {
-                env.ai_upscaler(true)?;
+                for upscaler in ops::ai_upscalers(p, &media.to_vec(), &set) {
+                    env.ai_upscaler(upscaler, true)?;
+                }
             }
             if !set.is_empty() {
                 ops::set_media_super_scale(p, &media.to_vec(), set)?;

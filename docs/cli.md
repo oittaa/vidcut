@@ -149,7 +149,7 @@ The schema describes the parameters, not the results. This list gives the result
     - `color` and `metadata`: what was chosen, and `why`.
     - `tried`: the video encoders that did not open, and why.
     - `sources`: each file, and how it was decoded.
-  - `upscaled[]`: each file that the AI upscaler of Super Scale enlarged (`path`), and `how`.
+  - `upscaled[]`: each file that an AI upscaler of Super Scale enlarged (`path`), and `how`: the upscaler and its model.
   - `notes[]`: `code`, `message`.
 - `export plan`:
   - `settings`, `video_encoder` and `notes`.

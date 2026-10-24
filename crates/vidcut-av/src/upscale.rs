@@ -2,7 +2,7 @@ use std::io::Read;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError, mpsc};
 
-use vidcut_core::model::{Media, Project};
+use vidcut_core::model::{Media, Project, Upscaler};
 use vidcut_core::render::VideoPiece;
 use wgpu::util::DeviceExt;
 
@@ -94,6 +94,7 @@ pub fn check<'a>(
                 ..
             } = layer
                 && super_scale.ai()
+                && super_scale.upscaler == Upscaler::AiFast
                 && !media.contains(&id.as_str())
             {
                 media.push(id);
@@ -110,7 +111,7 @@ pub fn check<'a>(
         .collect();
     if !refused.is_empty() {
         return Err(Error::Invalid(format!(
-            "the AI upscaler of Super Scale can't take {}: set their Upscaler to Classic, \
+            "the AI Fast upscaler of Super Scale can't take {}: set their Upscaler to Classic, \
              or their Super Scale to Off",
             refused.join(", ")
         )));
@@ -624,7 +625,7 @@ fn spans(n: usize) -> Vec<Span> {
         .collect()
 }
 
-const WHAT: &str = "the AI upscaler";
+const WHAT: &str = "the AI Fast upscaler";
 
 fn gpu_error(e: impl std::fmt::Display) -> Error {
     compute::gpu_error(WHAT, e)
@@ -708,13 +709,13 @@ impl Engine {
             power_preference: wgpu::PowerPreference::HighPerformance,
             ..Default::default()
         }))
-        .map_err(|e| format!("no GPU for the AI upscaler: {e}"))?;
+        .map_err(|e| format!("no GPU for the AI Fast upscaler: {e}"))?;
         let limits = adapter.limits();
         if limits.max_compute_workgroup_storage_size < SHARED
             || limits.max_compute_invocations_per_workgroup < 256
         {
             return Err(format!(
-                "{} has too little workgroup memory for the AI upscaler",
+                "{} has too little workgroup memory for the AI Fast upscaler",
                 adapter.get_info().name
             ));
         }
@@ -723,7 +724,7 @@ impl Engine {
             required_limits: limits,
             ..Default::default()
         }))
-        .map_err(|e| format!("the GPU did not open for the AI upscaler: {e}"))?;
+        .map_err(|e| format!("the GPU did not open for the AI Fast upscaler: {e}"))?;
         let made = checked(&device, || {
             let convs = [
                 (PADDED, FEATURES, true),

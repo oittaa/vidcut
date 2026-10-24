@@ -1,5 +1,6 @@
 pub use ffmpeg_next as ffmpeg;
 
+pub mod ai;
 pub mod analysis;
 pub mod barcode;
 pub mod beep;

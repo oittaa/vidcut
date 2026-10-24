@@ -1786,16 +1786,23 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The project setting also has Auto (p. 149).
   - It makes a clip of a higher resolution, which often stops playback in real time (p. 288). The usual sizing then fits that clip.
 - **vidcut:**
-  - Super Scale is Off, Auto, 2x, 3x or 4x. Its Upscaler is AI or Classic. There is no Enhanced mode.
-  - AI is the default. It is the video model NanoVSR 5.4M. vidcut runs it with its own compute shaders on the GPU, through wgpu.
+  - Super Scale is Off, Auto, 2x, 3x or 4x. Its Upscaler is AI Fast, AI Best or Classic. There is no Enhanced mode.
+  - AI Fast is the default. It is the video model NanoVSR 5.4M. vidcut runs it with its own compute shaders on the GPU, through wgpu.
     - It has no Noise Reduction and no other setting.
     - It reads the frames of a file in chunks of 15. Each output frame uses the frames before and after it in its chunk.
-    - The weights download at their first use. vidcut does not ship them.
-    - AI takes SDR pictures of any size. Its memory grows with the size of the source picture.
-    - Before an export starts, it refuses media that AI cannot take. The error names each file and the reason.
-    - It also refuses AI without the weights, or without a GPU that can run the network.
-    - The Inspector and the pool show a warning under Upscaler for media that AI cannot take.
-    - The export's report names the files that AI enlarged.
+    - The weights (25 MB) download at their first use. vidcut does not ship them.
+    - AI Fast takes SDR pictures of any size. Its memory grows with the size of the source picture.
+  - AI Best is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders too.
+    - It is slow, and it adds more detail. It has no setting.
+    - It reads the frames of a clip in order, from the first frame that is asked for. Each output frame uses the frames before it and the 4 frames after it.
+    - It makes the picture at the size that it shows at, but not more than 4 times the source.
+    - The weights (7.0 GB) download at their first use. vidcut does not ship them.
+    - It takes SDR pictures.
+  - Both AI upscalers:
+    - Before an export starts, vidcut refuses media that the upscaler cannot take. The error names each file and the reason.
+    - It also refuses an AI upscaler without its weights, or without a GPU that can run the network.
+    - The Inspector and the pool show a warning under Upscaler for media that the AI upscaler cannot take.
+    - The export's report names the files that an AI upscaler enlarged, and the upscaler.
   - Classic has a Sharpness of Low, Medium or High.
   - The factor limits only how large a placed picture is made. A picture that fills the frame takes the better upscaler for all of its enlargement.
   - Auto is as much as the picture needs, up to 4x.
@@ -1805,14 +1812,16 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Pictures that the CPU makes, also placed pictures: swscale. Low is `spline`, Medium `lanczos` and High `lanczos` with four lobes.
     - The other GPUs fit the picture as before. They have no Super Scale yet ([todo](todo/super-scale.md)).
   - The viewer shows Super Scale only with View > Show Super Scale, which is off by default.
-  - With AI, the viewer runs the AI upscaler of the export on each picture that the export enlarges. Playback is then slower.
+  - With AI Fast or AI Best, the viewer runs the AI upscaler of the export on each picture that the export enlarges. Playback is then slower. With AI Best, a picture can take seconds.
   - With Classic, the viewer enlarges with its own kernels: Catmull-Rom (Low), Lanczos with 3 lobes (Medium) and with 4 lobes (High).
 - **Why:**
   - A video model adds detail that a classic upscaler cannot. In side-by-side tests, the owner ranked NanoVSR 5.4M above Real-ESRGAN's compact model.
+  - Some users wait a long time for the best pictures, and others want good pictures fast. Thus there is a fast AI upscaler and a slow one.
+  - FlashVSR+ Turbo is one step of a diffusion model, with Apache 2.0 code and weights. It streams over the frames, so a clip has no chunk edges.
   - The network has only 3×3 and 1×1 convolutions. Shaders of its own run it on the GPU of every maker through wgpu, with no new library.
   - The shaders keep the values between the layers as 16-bit floats, and add in 32-bit floats. This halves the memory traffic. It needs no GPU feature.
-  - A different upscaler would change the result without the user's choice. Thus an export refuses, and the user selects Classic or Off.
-  - The switch is there to check what the export makes. Thus with AI, the viewer shows the AI result, not a classic preview of it.
+  - A different upscaler would change the result without the user's choice. Thus an export refuses, and the user selects another upscaler or Off.
+  - The switch is there to check what the export makes. Thus with an AI upscaler, the viewer shows its result, not a preview of it, however slow it is.
   - The classic upscalers of the GPU are free and run on every computer. They do not need a separate download.
   - These upscalers can go to any size in one step. Thus all of the enlargement gets the better upscaler, not only the factor.
   - By default, the viewer stays in real time. The switch lets the user check the result in the viewer.

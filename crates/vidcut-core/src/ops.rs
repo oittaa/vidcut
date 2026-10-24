@@ -1760,6 +1760,19 @@ impl SuperScaleSet {
     }
 }
 
+pub fn ai_upscalers(p: &Project, ids: &[String], set: &SuperScaleSet) -> Vec<Upscaler> {
+    let mut out = Vec::new();
+    for m in ids.iter().filter_map(|id| p.media(id)) {
+        let mut s = m.super_scale;
+        s.factor = set.factor.unwrap_or(s.factor);
+        s.upscaler = set.upscaler.unwrap_or(s.upscaler);
+        if s.ai() && !out.contains(&s.upscaler) {
+            out.push(s.upscaler);
+        }
+    }
+    out
+}
+
 pub fn set_media_super_scale(p: &mut Project, ids: &[String], set: SuperScaleSet) -> Result<()> {
     for id in ids {
         let m = p

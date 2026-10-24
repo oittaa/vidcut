@@ -1,8 +1,9 @@
+use std::collections::VecDeque;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vidcut_core::model::{
-    ColorSpace, Hdr, ScaleFactor, Sharpness, SubtitleStyle, SuperScale, Title,
+    ColorSpace, Hdr, ScaleFactor, Sharpness, SubtitleStyle, SuperScale, Title, Upscaler,
 };
 use vidcut_core::place::Placing;
 use vidcut_core::render::{Image, Placed, Ramp, ShownTitle, VideoPiece, WHOLE, Wipe};
@@ -93,6 +94,7 @@ struct Source {
     gpu: Option<crate::hw::GpuDecoder>,
     ahead: Option<VideoReader>,
     chunk: Option<Chunk>,
+    best: Option<Best>,
 }
 
 #[derive(Clone)]
@@ -194,6 +196,7 @@ impl Source {
             gpu: ahead_gpu,
             ahead: None,
             chunk: None,
+            best: None,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -248,6 +251,7 @@ impl Source {
             gpu: ahead_gpu,
             ahead: None,
             chunk: None,
+            best: None,
         })
     }
 
@@ -435,6 +439,33 @@ struct Chunk {
     pictures: Vec<frame::Video>,
 }
 
+const BEST_JUMP: i64 = 48;
+
+struct Best {
+    stream: crate::flashvsr::Stream,
+    shown: (u32, u32),
+    size: (u32, u32),
+    key: Option<i64>,
+    fed: VecDeque<(i64, Option<i64>)>,
+    next: i64,
+    pictures: VecDeque<(i64, frame::Video)>,
+    ended: bool,
+}
+
+impl Best {
+    fn took(&mut self, outs: Vec<Vec<u8>>, from: i64) {
+        for out in outs {
+            let Some((index, pts)) = self.fed.pop_front() else {
+                break;
+            };
+            if index >= from {
+                self.pictures
+                    .push_back((index, big_picture(&out, self.size, pts)));
+            }
+        }
+    }
+}
+
 fn shown_rgb(
     frame: &frame::Video,
     rotation: u16,
@@ -466,9 +497,8 @@ fn shown_rgb(
 }
 
 fn big_picture(out: &[u8], (w, h): (u32, u32), pts: Option<i64>) -> frame::Video {
-    let scale = crate::upscale::SCALE;
-    let mut big = frame::Video::new(format::Pixel::RGB24, w * scale, h * scale);
-    let (row, into) = ((w * scale) as usize * 3, big.stride(0));
+    let mut big = frame::Video::new(format::Pixel::RGB24, w, h);
+    let (row, into) = (w as usize * 3, big.stride(0));
     for (y, line) in out.chunks_exact(row).enumerate() {
         big.data_mut(0)[y * into..y * into + row].copy_from_slice(line);
     }
@@ -493,7 +523,7 @@ impl Source {
         Some((((pts? - first) as f64 * self.tick) * fps).round() as i64)
     }
 
-    fn read_chunk(&mut self, first: i64, reading: Reading) -> Result<Vec<frame::Video>> {
+    fn seek_ahead(&mut self, first: i64, reading: Reading) -> Result<()> {
         let rate = self.reader.frame_rate().expect("a frame rate");
         let fps = f64::from(rate.numerator()) / f64::from(rate.denominator());
         let start =
@@ -509,7 +539,11 @@ impl Source {
         self.ahead
             .as_mut()
             .expect("opened")
-            .seek((start.max(0.0) / tick).floor() as i64)?;
+            .seek((start.max(0.0) / tick).floor() as i64)
+    }
+
+    fn read_chunk(&mut self, first: i64, reading: Reading) -> Result<Vec<frame::Video>> {
+        self.seek_ahead(first, reading)?;
         let end = first + crate::upscale::FRAMES as i64;
         let mut frames = Vec::new();
         while let Some(f) = self.ahead.as_mut().expect("opened").next_frame()? {
@@ -522,7 +556,12 @@ impl Source {
         Ok(frames)
     }
 
-    fn ai_picture(&mut self, target: (u32, u32), reading: Reading) -> Result<Option<frame::Video>> {
+    fn ai_picture(
+        &mut self,
+        target: (u32, u32),
+        reading: Reading,
+        upscaler: Upscaler,
+    ) -> Result<Option<frame::Video>> {
         let rotation = self.reader.rotation();
         let (frame, _) = self.current.as_ref().expect("have a frame");
         let sar = frame.aspect_ratio();
@@ -533,8 +572,9 @@ impl Source {
         }
         if crate::color::Source::of(frame).hdr.is_some() {
             return Err(Error::Invalid(format!(
-                "{}: the AI upscaler takes SDR pictures, and this one is HDR",
-                self.reader.path().display()
+                "{}: {} takes SDR pictures, and this one is HDR",
+                self.reader.path().display(),
+                crate::ai::name(upscaler)
             )));
         }
         let across = if sar.0 > 0 && sar.1 > 0 {
@@ -550,6 +590,21 @@ impl Source {
         };
         let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
         let size = (even(dw), even(dh));
+        if upscaler == Upscaler::AiBest {
+            let up = if rotation % 180 == 90 {
+                (shown.1, shown.0)
+            } else {
+                shown
+            };
+            let s = (f64::from(up.0) / f64::from(size.0))
+                .min(f64::from(up.1) / f64::from(size.1))
+                .min(f64::from(crate::flashvsr::SCALE));
+            let big = (
+                even(f64::from(size.0) * s).max(size.0),
+                even(f64::from(size.1) * s).max(size.1),
+            );
+            return self.best_picture(size, big, reading).map(Some);
+        }
         let pts = frame.pts();
         let key = match self.frame_index(pts) {
             Some(i) => (i - i.rem_euclid(crate::upscale::FRAMES as i64), true),
@@ -570,10 +625,11 @@ impl Source {
                 .map(|f| shown_rgb(f, rotation, size, reading))
                 .collect::<Result<Vec<_>>>()?;
             let big = crate::upscale::upscale(&rgbs, (size.0 as usize, size.1 as usize))?;
+            let scale = crate::upscale::SCALE;
             let pictures = big
                 .iter()
                 .zip(&frames)
-                .map(|(out, f)| big_picture(out, size, f.pts()))
+                .map(|(out, f)| big_picture(out, (size.0 * scale, size.1 * scale), f.pts()))
                 .collect();
             self.chunk = Some(Chunk {
                 key,
@@ -594,6 +650,97 @@ impl Source {
                 self.reader.path().display(),
                 pts.unwrap_or(0)
             ))),
+        }
+    }
+
+    fn best_picture(
+        &mut self,
+        shown: (u32, u32),
+        size: (u32, u32),
+        reading: Reading,
+    ) -> Result<frame::Video> {
+        let rotation = self.reader.rotation();
+        let (frame, _) = self.current.as_ref().expect("have a frame");
+        let pts = frame.pts();
+        let index = self.frame_index(pts);
+        let fresh = self.best.as_ref().is_none_or(|b| {
+            b.shown != shown
+                || b.size != size
+                || match index {
+                    Some(i) => {
+                        b.key.is_some()
+                            || i > b.next + BEST_JUMP
+                            || b.pictures
+                                .front()
+                                .map_or(i < b.next, |(first, _)| i < *first)
+                    }
+                    None => b.key != pts,
+                }
+        });
+        if fresh {
+            self.best = None;
+            let stream = crate::flashvsr::Stream::open(shown, size)?;
+            self.best = Some(Best {
+                stream,
+                shown,
+                size,
+                key: if index.is_some() { None } else { pts },
+                fed: VecDeque::new(),
+                next: index.unwrap_or(0),
+                pictures: VecDeque::new(),
+                ended: false,
+            });
+            match index {
+                Some(i) => self.seek_ahead(i, reading)?,
+                None => {
+                    let (frame, _) = self.current.as_ref().expect("have a frame");
+                    let rgb = shown_rgb(frame, rotation, shown, reading)?;
+                    let best = self.best.as_mut().expect("made");
+                    let mut outs = best.stream.push(&rgb)?;
+                    best.fed.push_back((0, pts));
+                    outs.extend(best.stream.finish()?);
+                    best.took(outs, 0);
+                    best.ended = true;
+                }
+            }
+        }
+        let want = index.unwrap_or(0);
+        loop {
+            let best = self.best.as_mut().expect("made");
+            while best.pictures.front().is_some_and(|(i, _)| *i < want) {
+                best.pictures.pop_front();
+            }
+            if let Some((_, p)) = best.pictures.iter().find(|(i, _)| *i == want) {
+                return frame_ref(p);
+            }
+            if best.ended {
+                return Err(Error::Invalid(format!(
+                    "{}: the AI Best upscaler has no frame at {}",
+                    self.reader.path().display(),
+                    pts.unwrap_or(0)
+                )));
+            }
+            let next = self.ahead.as_mut().expect("opened").next_frame()?;
+            match next {
+                Some(f) => {
+                    let at = self.frame_index(f.pts());
+                    let best = self.best.as_mut().expect("made");
+                    let Some(i) = at.filter(|i| *i >= best.next) else {
+                        continue;
+                    };
+                    let rgb = shown_rgb(&f, rotation, shown, reading)?;
+                    let outs = best.stream.push(&rgb)?;
+                    best.fed.push_back((i, f.pts()));
+                    best.next = i + 1;
+                    best.took(outs, want);
+                }
+                None => {
+                    let best = self.best.as_mut().expect("made");
+                    let outs = best.stream.finish()?;
+                    best.took(outs, want);
+                    best.ended = true;
+                }
+            }
         }
     }
 }
@@ -1956,7 +2103,7 @@ impl VideoFrames {
                     }
                     _ => (w, h),
                 };
-                src.ai_picture(aim, reading)?
+                src.ai_picture(aim, reading, super_scale.upscaler)?
             } else {
                 None
             };
@@ -1984,7 +2131,7 @@ impl VideoFrames {
             if big.is_some() && !src.told {
                 crate::progress::note(super::Note::Upscaled(super::UpscaleNote {
                     path: src.reader.path().to_path_buf(),
-                    how: "AI (NanoVSR 5.4M)".into(),
+                    how: crate::ai::name(super_scale.upscaler).into(),
                 }));
                 src.told = true;
             }
