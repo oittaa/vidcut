@@ -618,7 +618,7 @@ const CIN: u32 = {FEATURES}u;
 const COUT: u32 = {cout}u;
 const CK: u32 = 8u;
 
-struct Size {{ w: u32, h: u32 }}
+struct Size {{ w: u32, h: u32, sw: u32, ox: u32, oy: u32, p0: u32, p1: u32, p2: u32 }}
 @group(0) @binding(0) var<uniform> size: Size;
 @group(0) @binding(1) var<storage, read> src: array<vec4<u32>>;
 @group(0) @binding(2) var<storage, read> weights: array<vec4<u32>>;
@@ -701,7 +701,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
     let rin = li < 180u && rx >= 0 && ry >= 0 && rx < i32(size.w) && ry < i32(size.h);
     var rsrc = 0u;
     if (rin) {{
-        rsrc = (u32(ry) * size.w + u32(rx)) * (CIN / 8u);
+        rsrc = ((u32(ry) + size.oy) * size.sw + u32(rx) + size.ox) * (CIN / 8u);
     }}
     let rk = (li / 18u) * 12u + (li % 18u) / 2u;
     let re = li & 1u;
@@ -779,24 +779,6 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     dst[p * 4u + 1u] = pack2x16float(vec2<f32>(v.z, 0.0));
     dst[p * 4u + 2u] = 0u;
     dst[p * 4u + 3u] = 0u;
-}
-"#;
-
-const CROP: &str = r#"
-struct Crop { src_w: u32, x0: u32, y0: u32, w: u32, h: u32, words: u32, pad0: u32, pad1: u32 }
-@group(0) @binding(0) var<uniform> crop: Crop;
-@group(0) @binding(1) var<storage, read> src: array<u32>;
-@group(0) @binding(2) var<storage, read_write> dst: array<u32>;
-
-@compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-    if (id.x >= crop.w * crop.words || id.y >= crop.h) {
-        return;
-    }
-    let x = id.x / crop.words;
-    let k = id.x % crop.words;
-    let s = ((crop.y0 + id.y) * crop.src_w + crop.x0 + x) * crop.words + k;
-    dst[(id.y * crop.w + x) * crop.words + k] = src[s];
 }
 "#;
 
@@ -950,7 +932,6 @@ fn checked<T>(device: &wgpu::Device, run: impl FnOnce() -> Result<T>) -> Result<
 struct Pipelines {
     convs: Vec<(Shape, wgpu::ComputePipeline)>,
     pack: wgpu::ComputePipeline,
-    crop: wgpu::ComputePipeline,
     last: wgpu::ComputePipeline,
 }
 
@@ -977,14 +958,12 @@ struct Job {
     ch: usize,
     size1: wgpu::Buffer,
     size2: wgpu::Buffer,
-    crop: wgpu::Buffer,
     place: wgpu::Buffer,
 }
 
 struct Tiles {
     size: (usize, usize),
     jobs: Vec<Job>,
-    feat: wgpu::Buffer,
     s1: wgpu::Buffer,
     s2: wgpu::Buffer,
     out: wgpu::Buffer,
@@ -1069,7 +1048,6 @@ impl Engine {
             let pipelines = Pipelines {
                 convs,
                 pack: pipeline(&device, PACK.into()),
-                crop: pipeline(&device, CROP.into()),
                 last: pipeline(&device, last_shader()),
             };
             let none = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1186,7 +1164,7 @@ impl Engine {
             w,
             h,
             count,
-            size: buffer(d, 8, U::UNIFORM | U::COPY_DST),
+            size: buffer(d, 32, U::UNIFORM | U::COPY_DST),
             rgba: (0..count)
                 .map(|_| buffer(d, px * 4, U::STORAGE | U::COPY_DST))
                 .collect(),
@@ -1225,21 +1203,19 @@ impl Engine {
                     th,
                     cw,
                     ch,
-                    size1: uniform(&[tw, th]),
-                    size2: uniform(&[tw * 2, th * 2]),
-                    crop: uniform(&[w, rx, ry, tw, th, FEATURES / 2, 0, 0]),
+                    size1: uniform(&[tw, th, w, rx, ry, 0, 0, 0]),
+                    size2: uniform(&[tw * 2, th * 2, tw * 2, 0, 0, 0, 0, 0]),
                     place: uniform(&[w, h, rx, ry, tw, th, col.core.0, row.core.0, cw, ch, 0, 0]),
                 });
             }
         }
         let side = TILE + 2 * MARGIN;
-        let (p1, p2, p4) = (side * side, side * side * 4, side * side * 16);
+        let (p2, p4) = (side * side * 4, side * side * 16);
         let shown = w * h * (SCALE * SCALE) as usize * 3;
         let d = &self.device;
         self.tiles = Some(Tiles {
             size: (w, h),
             jobs,
-            feat: buffer(d, p1 * FEATURES * 2, U::STORAGE),
             s1: buffer(d, p2 * FEATURES * 2, U::STORAGE),
             s2: buffer(d, p4 * 32 * 2, U::STORAGE),
             out: buffer(d, shown, U::STORAGE | U::COPY_SRC),
@@ -1340,8 +1316,11 @@ impl Engine {
                 self.make_tiles();
             }
             let f = self.frame.as_ref().expect("frame made");
-            self.queue
-                .write_buffer(&f.size, 0, &words(&[w as u32, h as u32]));
+            self.queue.write_buffer(
+                &f.size,
+                0,
+                &words(&[w as u32, h as u32, w as u32, 0, 0, 0, 0, 0]),
+            );
             for (i, rgb) in frames.iter().enumerate() {
                 let mut rgba = vec![255u8; rgb.len() / 3 * 4];
                 for (to, from) in rgba
@@ -1468,13 +1447,7 @@ impl Engine {
         let net = self.net.as_ref().expect("loaded");
         for job in &t.jobs {
             let (tw, th) = (job.tw, job.th);
-            self.simple(
-                pass,
-                &self.pipelines.crop,
-                &[&job.crop, &f.fused, &t.feat],
-                (blocks(tw * FEATURES / 2), blocks(th)),
-            );
-            self.conv(pass, &net.up1, (&job.size1, &[&t.feat], &t.s1), (tw, th));
+            self.conv(pass, &net.up1, (&job.size1, &[&f.fused], &t.s1), (tw, th));
             self.conv(
                 pass,
                 &net.up2,

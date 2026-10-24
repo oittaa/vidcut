@@ -188,7 +188,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
       - Each frame gets the same chains and the same order of math. Thus its picture does not depend on which frame was asked.
       - The backward results above the asked frame go into the buffers of the forward results that are not made yet. Thus the order needs no more GPU memory.
     - Why: the viewer shows the asked frame after about half the work of a chunk.
-    - Two convolutions then make the picture four times as large, in tiles. They write their output in the order of the pixel shuffle.
+    - Two convolutions then make the picture four times as large, in tiles. They write their output in the order of the pixel shuffle. The first one reads its tile from the joined frame, at the place of the tile.
     - One shader (`last_shader`) runs the last convolution, adds a bilinear copy of the input and makes RGB. Its weights are in a uniform buffer.
     - The chains, the join and all tiles of a frame go to the GPU in one submission. The frame comes back in one read.
     - While the GPU runs a frame, the CPU reads the result of the frame before it. Thus the GPU does not wait for the CPU between frames.
