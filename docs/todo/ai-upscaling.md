@@ -58,10 +58,21 @@ The owner wants the video models where they give better pictures. They can run i
 - The viewer shows Super Scale only with View > Show Super Scale, and a proxy can play in its place. Thus a slow model does not hurt playback.
 - An export reads each clip in order. Thus it can give the model the frames before and after each frame.
 - At a cut, the frames past the cut usually are in the file. The export can read them.
-- RealBasicVSR was trained on REDS, which is CC BY 4.0. Thus its license is clearer than that of Real-ESRGAN.
-- Its weights are 210 MB. They download at the first use.
-- RealBasicVSR flickers less than Real-ESRGAN in a published measurement. Another paper finds such models blurrier. Thus a side-by-side test decides.
-- Their deformable convolution limits the engines. No ONNX conversion of BasicVSR++ is in wide use.
+- RealBasicVSR and BasicVSR++ look both ways in time. Each output frame depends on every frame of its chunk.
+  - Thus the export works in chunks, and each chunk reads extra frames on each side. The number of extra frames needs a test.
+  - The models were not trained on cuts. Thus a chunk starts again at a scene cut inside a clip.
+- **RealBasicVSR** ([repo](https://github.com/ckkelvinchan/RealBasicVSR)):
+  - It has 6.3 M parameters. For each pixel, it needs about 5.4 times the work of `realesr-general-x4v3` (calculated from the code).
+  - At the rate of the shaders now, that is about 430 ms for a 1280×534 frame. This is an estimate, not a measurement.
+  - It needs new shader types: 7×7 convolutions, pooling, bilinear resize and a warp by optical flow. The warp needs 32-bit coordinates.
+  - Its features for a chunk of 15 frames at 720p need about 2.2 GB in 16-bit floats.
+  - Its code is Apache-2.0. It was trained on REDS, which is CC BY 4.0.
+  - Its optical flow network, SPyNet, has a license for non-commercial research only. RealBasicVSR keeps SPyNet's weights frozen, so its weights hold them.
+  - Thus its license is not clear for vidcut's users. Another flow network would need a new training.
+  - Its weight files are 148 MB to 210 MB. The network itself is 25 MB in 32-bit floats.
+- **BasicVSR++** needs a deformable convolution and five times the feature memory. Its official weights are for synthetic downscaling only, not for real footage. It also holds SPyNet.
+- In published tests, RealBasicVSR flickers less than the large Real-ESRGAN model. One paper finds such models blurrier, and its flicker measure rewards blur.
+- No published test compares RealBasicVSR with `realesr-general-x4v3`. Thus a side-by-side test decides.
 
 ## Test results
 
@@ -101,7 +112,7 @@ AI Super Scale is built for exports ([X91](../deviations.md#x91-super-scale-uses
 3. Frames from the GPU decoders straight into the shaders, with no copy through memory.
 4. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
 5. A mix with the classic upscaler, as an extra.
-6. A test of the video models: RealBasicVSR as shaders of vidcut's own, compared with Real-ESRGAN on the same clip.
+6. A decision of the owner on the SPyNet license of RealBasicVSR. Then, with the owner's OK, a side-by-side test against Real-ESRGAN on the same clip.
 
 The weights are on Real-ESRGAN's release v0.2.5.0:
 
