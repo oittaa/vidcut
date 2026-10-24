@@ -847,7 +847,8 @@ impl Source {
             }
             if let Some((_, p)) = best.pictures.iter().find(|(i, _)| *i == want) {
                 if let Some(w) = waiting.take() {
-                    w.finished();
+                    let last = best.pictures.back().map_or(want, |(i, _)| *i);
+                    w.finished((want, last));
                 }
                 return frame_ref(p);
             }

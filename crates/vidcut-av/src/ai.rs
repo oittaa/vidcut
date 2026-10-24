@@ -73,7 +73,10 @@ pub(crate) struct Making {
 }
 
 impl Making {
-    pub(crate) fn finished(mut self) {
+    pub(crate) fn finished(mut self, frames: (i64, i64)) {
+        if let Some(w) = report_lock().making.as_mut() {
+            w.frames = frames;
+        }
         made(true);
         self.done = true;
     }
