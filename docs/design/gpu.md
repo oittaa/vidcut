@@ -178,8 +178,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - The 3×3 convolutions with 96 input channels use Winograd F(2×2, 3×3) (`wino_shader`). These are the 60 blocks and the first two convolutions of the 4× stage.
       - Each 2×2 block of output then needs 16 products for each pair of channels, in place of 36.
       - At load, `winograd` transforms the weights. They are kept as 16-bit floats.
-      - Each workgroup transforms its block of input in workgroup memory. The transformed values are 16-bit floats, two in each 32-bit word (`pack2x16float`). naga cannot reinterpret two `f16` values as one 32-bit word.
-      - Where the GPU has 16-bit floats in shaders (`f16` in WGSL), the products and their sums are 16-bit floats. Else the sums are 32-bit floats.
+      - Each workgroup transforms its block of input in workgroup memory. The transformed values are 16-bit floats, and the sums are 32-bit floats.
       - At the end, the threads exchange their sums through workgroup memory. Each output pixel then comes from 9 of the 16 sums of its block. Each thread makes one pixel.
     - The first convolution and the 1×1 join use a direct convolution shader (`conv_shader`). It reads its block of pixels and its weights into workgroup memory, with 32-bit sums.
     - A forward chain of 30 blocks runs from the first frame to the last, and a backward chain from the last to the first. The forward results of all frames are kept.
@@ -242,8 +241,6 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - The tiles wait in workgroup memory as pairs of 16-bit floats, as they come from the buffers (`a_word`). The patch input holds 32-bit floats, so its tile stays 32-bit.
     - The weights are 16-bit floats on the GPU. The files hold 32-bit floats; they are rounded at load, on all cores (`compute::halves`).
     - The residual stream of the DiT stays in 32-bit floats. The other values between the steps are 16-bit floats, with 32-bit sums.
-    - Where the GPU has 16-bit float shaders (`SHADER_F16`), the matrix multiply and the attention unpack the 16-bit pairs with `unpack2x16float` into 16-bit floats (`Gpu::half`). naga cannot bit cast a 32-bit word to two 16-bit floats.
-      - There, the matrix multiply sums each step of 16 products in 16-bit floats, and adds that sum to its 32-bit sum. Thus the pictures are a little different on such a GPU.
   - Each dispatch takes its parameters from a slot of 256 bytes in one uniform buffer, at a dynamic offset. `Gpu::flush` writes the new slots once, before each submission.
     - When the buffer is full, a new buffer takes its place. Thus the work in flight keeps its slots.
     - Each pipeline has a layout from the bindings of its shader. `Gpu::set` keeps the bind groups until the submission, so dispatches with the same buffers share one.

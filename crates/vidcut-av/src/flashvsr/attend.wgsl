@@ -16,8 +16,8 @@ var<workgroup> blocks: u32;
 
 fn half8(v: vec4<u32>) -> array<vec4<f32>, 2> {
     return array<vec4<f32>, 2>(
-        vec4<f32>(h2(v.x), h2(v.y)),
-        vec4<f32>(h2(v.z), h2(v.w)),
+        vec4<f32>(unpack2x16float(v.x), unpack2x16float(v.y)),
+        vec4<f32>(unpack2x16float(v.z), unpack2x16float(v.w)),
     );
 }
 
@@ -151,7 +151,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nwg: vec3
             }
             workgroupBarrier();
             for (var kk = 0u; kk < 16u; kk++) {
-                let w2 = h2(ps[r * 16u + kk]);
+                let w2 = unpack2x16float(ps[r * 16u + kk]);
                 for (var e = 0u; e < 2u; e++) {
                     let row = (kk * 2u + e) * 16u + kq * 4u;
                     let va = half8(ks[row]);

@@ -198,7 +198,7 @@ pub(super) struct Attend<'a> {
 }
 
 pub(super) fn attend(gpu: &Gpu, pass: &mut wgpu::ComputePass, a: &Attend, first: u32, count: u32) {
-    let pipe = gpu.pipe("attend", || gpu.half(include_str!("attend.wgsl")));
+    let pipe = gpu.pipe("attend", || include_str!("attend.wgsl").into());
     let mut v = vec![a.qbs, first, count, a.s, a.stride, a.dense, 0, 0];
     v.extend_from_slice(&a.src);
     let p = gpu.uniform(&v);
