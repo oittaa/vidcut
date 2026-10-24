@@ -1,23 +1,39 @@
 use std::time::{Duration, Instant};
 
 use eframe::egui::{
-    self, Align, Color32, Layout, Pos2, Rect, RichText, Sense, Shape, Stroke, pos2, vec2,
+    self, Align, Align2, Color32, Layout, Pos2, Rect, RichText, Sense, Shape, Stroke, TextStyle,
+    pos2, vec2,
+};
+use egui_phosphor::regular::{
+    ARROW_COUNTER_CLOCKWISE, ARROWS_OUT_LINE_HORIZONTAL, CARET_DOWN, CARET_LEFT, CARET_RIGHT,
+    DIAMOND, DOTS_THREE, WAVE_SINE,
 };
 use serde_json::{Value, json};
-use vidcut_core::keyframes::{ease_of, eases, handle_point, value_mapped, value_paired};
-use vidcut_core::model::{Clip, Ease, Handle, Keyframe, Picture};
+use vidcut_core::keyframes::{
+    PictureValue, ease_of, eases, handle_point, value_mapped, value_paired,
+};
+use vidcut_core::model::{Clip, Ease, Handle, Keyframe, Picture, Project};
+use vidcut_core::ops::picture::has_picture;
 use vidcut_core::request::KeyParam;
 use vidcut_core::validate::GAIN;
 
+use super::inspector::{Shape as Frame, shape};
 use super::placing::ease_label;
 use super::theme;
+use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
+use crate::live::PlayerId;
 
-const LABEL: f32 = 96.0;
+const LABEL: f32 = 172.0;
+const RULER_H: f32 = 20.0;
 const GROUP_H: f32 = 22.0;
 const TRACK_H: f32 = 26.0;
-const CURVE_H: f32 = 84.0;
+const CURVE_H: f32 = 110.0;
+const BAR_H: f32 = 68.0;
 const HIT: f32 = 8.0;
+const TICK_GAP: f32 = 96.0;
+const FIELD_W: f32 = 72.0;
+const GROUPS: [Group; 3] = [Group::Transform, Group::Crop, Group::Audio];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Group {
@@ -132,6 +148,22 @@ struct ValueMap {
     height: f32,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct Held {
+    mark: Mark,
+    y: bool,
+    value: f64,
+    from: f64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RowAct {
+    Curve,
+    Step(i64),
+    Toggle,
+    Reset,
+}
+
 #[derive(Default)]
 pub struct Editor {
     clip: Option<String>,
@@ -140,6 +172,11 @@ pub struct Editor {
     pending: Option<Pending>,
     menu: Option<Mark>,
     menu_curve: bool,
+    keyed_only: bool,
+    closed: Vec<Group>,
+    curves: Vec<KeyParam>,
+    view: Option<(f64, f64)>,
+    held: Option<Held>,
 }
 
 impl Editor {
@@ -199,6 +236,75 @@ fn quantize(param: KeyParam, d: f64) -> f64 {
     };
     let k = 10f64.powi(places);
     (d * k).round() / k
+}
+
+fn least_span(param: KeyParam) -> f64 {
+    match param {
+        KeyParam::Volume => 6.0,
+        KeyParam::Zoom => 0.1,
+        KeyParam::Rotation => 10.0,
+        _ => 0.05,
+    }
+}
+
+fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
+    let ([w, h], [fw, fh]) = (f.frame, f.fitted);
+    match param {
+        KeyParam::Position if y => (0.5 - v) * h,
+        KeyParam::Position => (v - 0.5) * w,
+        KeyParam::Zoom => v * 100.0,
+        KeyParam::CropLeft | KeyParam::CropRight => v * fw,
+        KeyParam::CropTop | KeyParam::CropBottom => v * fh,
+        KeyParam::Volume | KeyParam::Rotation => v,
+    }
+}
+
+fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
+    let ([w, h], [fw, fh]) = (f.frame, f.fitted);
+    match param {
+        KeyParam::Position if y => 0.5 - v / h,
+        KeyParam::Position => v / w + 0.5,
+        KeyParam::Zoom => v / 100.0,
+        KeyParam::CropLeft | KeyParam::CropRight => v / fw,
+        KeyParam::CropTop | KeyParam::CropBottom => v / fh,
+        KeyParam::Volume | KeyParam::Rotation => v,
+    }
+}
+
+fn unit(param: KeyParam) -> &'static str {
+    match param {
+        KeyParam::Volume => " dB",
+        KeyParam::Zoom => "%",
+        KeyParam::Rotation => "°",
+        _ => "",
+    }
+}
+
+fn places(param: KeyParam) -> usize {
+    match param {
+        KeyParam::Volume | KeyParam::Zoom => 1,
+        KeyParam::Rotation => 2,
+        _ => 0,
+    }
+}
+
+fn value_text(param: KeyParam, v: f64, f: &Frame) -> String {
+    let n = places(param);
+    format!("{:.n$}{}", shown_value(param, v, false, f), unit(param))
+}
+
+fn tick_step(ppf: f32, fps: f64) -> i64 {
+    let need = f64::from(TICK_GAP / ppf.max(1e-3));
+    let fps = fps.max(1.0);
+    [1.0, 2.0, 5.0, 10.0]
+        .into_iter()
+        .chain(
+            [1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 300.0, 600.0, 3600.0]
+                .into_iter()
+                .map(|s| (s * fps).round()),
+        )
+        .find(|&s| s >= need)
+        .unwrap_or(3600.0 * fps) as i64
 }
 
 fn place_value(param: KeyParam, v: f64) -> f64 {
@@ -466,19 +572,20 @@ impl TimeMap {
         self.left + u * self.width
     }
 
+    fn time(&self, x: f32) -> f64 {
+        self.lo + f64::from((x - self.left) / self.width) * (self.hi - self.lo)
+    }
+
     fn ppf(&self) -> f32 {
         self.width / (self.hi - self.lo) as f32
     }
 }
 
 impl ValueMap {
-    fn of(lo: f64, hi: f64, rect: Rect) -> Self {
-        let (lo, hi) = if hi - lo < 1e-6 {
-            (lo - 1.0, hi + 1.0)
-        } else {
-            let pad = (hi - lo) * 0.15;
-            (lo - pad, hi + pad)
-        };
+    fn of(lo: f64, hi: f64, least: f64, rect: Rect) -> Self {
+        let mid = (lo + hi) / 2.0;
+        let half = ((hi - lo).max(least) / 2.0) * 1.15;
+        let (lo, hi) = (mid - half, mid + half);
         Self {
             lo,
             hi,
@@ -523,32 +630,28 @@ fn value_ends(rows: &[Shown]) -> (f64, f64) {
     }
 }
 
-fn span_of(clip: &Clip, lanes: &[Lane]) -> (f64, f64) {
-    let mut lo = clip.start as f64;
-    let mut hi = clip.end() as f64;
-    for lane in lanes {
-        for k in &lane.keys {
-            let t = clip.key_time(k.frame);
-            lo = lo.min(t);
-            hi = hi.max(t);
-        }
-    }
-    if hi <= lo {
-        hi = lo + 1.0;
-    }
-    (lo, hi)
+fn clip_span(clip: &Clip) -> (f64, f64) {
+    let lo = clip.start as f64;
+    (lo, (clip.end() as f64).max(lo + 1.0))
 }
 
-fn lanes_of(clip: &Clip) -> Vec<Lane> {
+fn clip_band(map: TimeMap, clip: &Clip, rect: Rect) -> Rect {
+    let a = map.x(clip.start as f64).max(rect.left());
+    let b = map.x(clip.end() as f64).min(rect.right());
+    Rect::from_x_y_ranges(a..=b.max(a), rect.y_range())
+}
+
+fn lanes_of(clip: &Clip, keyed_only: bool) -> Vec<Lane> {
     let mut out = Vec::new();
-    if let Some(picture) = &clip.picture {
-        for v in vidcut_core::keyframes::PictureValue::ALL {
-            if picture.has_keys(v) {
-                out.push(lane_from(picture, v));
+    if has_picture(clip) {
+        let picture = clip.picture.clone().unwrap_or_default();
+        for v in PictureValue::ALL {
+            if !keyed_only || picture.has_keys(v) {
+                out.push(lane_from(&picture, v));
             }
         }
     }
-    if let Some(audio) = clip.audio.as_ref().filter(|a| a.is_keyed()) {
+    if let Some(audio) = clip.audio.as_ref().filter(|a| !keyed_only || a.is_keyed()) {
         out.push(Lane {
             param: KeyParam::Volume,
             keys: audio.gain_keys.clone(),
@@ -558,19 +661,19 @@ fn lanes_of(clip: &Clip) -> Vec<Lane> {
     out
 }
 
-fn lane_from(picture: &Picture, v: vidcut_core::keyframes::PictureValue) -> Lane {
+fn lane_from(picture: &Picture, v: PictureValue) -> Lane {
     let param = match v {
-        vidcut_core::keyframes::PictureValue::Position => KeyParam::Position,
-        vidcut_core::keyframes::PictureValue::Zoom => KeyParam::Zoom,
-        vidcut_core::keyframes::PictureValue::Rotation => KeyParam::Rotation,
-        vidcut_core::keyframes::PictureValue::CropLeft => KeyParam::CropLeft,
-        vidcut_core::keyframes::PictureValue::CropRight => KeyParam::CropRight,
-        vidcut_core::keyframes::PictureValue::CropTop => KeyParam::CropTop,
-        vidcut_core::keyframes::PictureValue::CropBottom => KeyParam::CropBottom,
+        PictureValue::Position => KeyParam::Position,
+        PictureValue::Zoom => KeyParam::Zoom,
+        PictureValue::Rotation => KeyParam::Rotation,
+        PictureValue::CropLeft => KeyParam::CropLeft,
+        PictureValue::CropRight => KeyParam::CropRight,
+        PictureValue::CropTop => KeyParam::CropTop,
+        PictureValue::CropBottom => KeyParam::CropBottom,
     };
     let extra = match v {
-        vidcut_core::keyframes::PictureValue::Position => picture.position_y.clone(),
-        vidcut_core::keyframes::PictureValue::Zoom => picture.zoom_y.clone(),
+        PictureValue::Position => picture.position_y.clone(),
+        PictureValue::Zoom => picture.zoom_y.clone(),
         _ => Vec::new(),
     };
     Lane {
@@ -673,6 +776,27 @@ fn dot(painter: &egui::Painter, at: Pos2, r: f32, color: Color32) {
     painter.circle_filled(at, r, color);
 }
 
+fn edge_arrows(painter: &egui::Painter, rect: Rect, times: &[f64], map: TimeMap) {
+    let y = rect.center().y;
+    let color = theme::colors().text_dim;
+    if times.iter().any(|&t| t < map.lo) {
+        let x = rect.left() + 2.0;
+        painter.add(Shape::convex_polygon(
+            vec![pos2(x, y), pos2(x + 6.0, y - 4.0), pos2(x + 6.0, y + 4.0)],
+            color,
+            Stroke::NONE,
+        ));
+    }
+    if times.iter().any(|&t| t > map.hi) {
+        let x = rect.right() - 2.0;
+        painter.add(Shape::convex_polygon(
+            vec![pos2(x, y), pos2(x - 6.0, y + 4.0), pos2(x - 6.0, y - 4.0)],
+            color,
+            Stroke::NONE,
+        ));
+    }
+}
+
 fn playhead(painter: &egui::Painter, map: TimeMap, rect: Rect, at: i64) {
     let t = at as f64;
     if (map.lo..=map.hi).contains(&t) {
@@ -712,37 +836,38 @@ impl Workspace {
             self.key_editor.pending = None;
             self.key_editor.menu = None;
             self.key_editor.menu_curve = false;
+            self.key_editor.view = None;
+            self.key_editor.held = None;
         }
-        let lanes = lanes_of(&clip);
+        let lanes = lanes_of(&clip, self.key_editor.keyed_only);
         let rev = p.rev;
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.key_editor.drag = None;
         }
         self.expire_pending(&clip, rev);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Keyframe Editor").strong());
-            if let Some(name) = clip.name.as_deref().filter(|s| !s.is_empty()) {
-                ui.label(dim(name.to_string()));
-            }
-        });
+        self.key_header(ui, &p, &clip);
         if lanes.is_empty() {
             ui.label(dim("No Keyframes"));
             return;
         }
         let shift = self.shown_shift(ui, &clip, &lanes);
-        let (lo, hi) = span_of(&clip, &lanes);
+        let (lo, hi) = self.key_editor.view.unwrap_or_else(|| clip_span(&clip));
         let play = self.snap.timeline.position;
+        let frame = shape(&p, &clip);
+        let area = ui.available_rect_before_wrap();
+        let width = (area.width() - LABEL - ui.spacing().item_spacing.x).max(48.0);
+        let plot = Plot {
+            lo,
+            hi,
+            width,
+            play,
+        };
+        self.ruler(ui, &p, &clip, plot);
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
+            .max_height((ui.available_height() - BAR_H).max(TRACK_H))
             .show(ui, |ui| {
-                let width = (ui.available_width() - LABEL - ui.spacing().item_spacing.x).max(48.0);
-                let plot = Plot {
-                    lo,
-                    hi,
-                    width,
-                    play,
-                };
-                for group in [Group::Transform, Group::Crop, Group::Audio] {
+                for group in GROUPS {
                     let members: Vec<&Lane> = lanes
                         .iter()
                         .filter(|l| group_of(l.param) == group)
@@ -751,16 +876,163 @@ impl Workspace {
                         continue;
                     }
                     self.group_row(ui, &clip, &members, plot, shift.as_ref());
+                    if self.key_editor.closed.contains(&group) {
+                        continue;
+                    }
                     for lane in &members {
                         let rows = shown_lane(&clip, lane, shift.as_ref());
                         self.track_row(ui, &clip, lane, &rows, plot);
-                        self.curve_row(ui, &clip, lane, &rows, plot);
+                        if !lane.keys.is_empty() && self.key_editor.curves.contains(&lane.param) {
+                            self.curve_row(ui, &clip, lane, &rows, plot, &frame);
+                        }
                     }
                 }
             });
         let live = live_marks(&clip, &lanes, shift.as_ref());
         self.key_editor.selected.retain(|m| live.contains(m));
+        self.key_bar(ui, &p, &clip, &lanes, &frame);
+        self.zoom_view(ui, area, &clip, plot);
         self.finish_drag(ui, &clip, &lanes, rev);
+    }
+
+    pub(super) fn delete_editor_keys(&mut self) -> bool {
+        if self.left != LeftTab::Keyframes || self.key_editor.selected.is_empty() {
+            return false;
+        }
+        let Some(id) = self.key_editor.clip.clone() else {
+            return false;
+        };
+        let marks = std::mem::take(&mut self.key_editor.selected);
+        let parts = unique_params(&marks)
+            .into_iter()
+            .map(|param| {
+                let frames = frames_of(&marks, param);
+                json!({ "clips": [id], "param": param, "frames": frames })
+            })
+            .collect::<Vec<_>>();
+        match parts.as_slice() {
+            [] => return false,
+            [one] => self.send("keyframes.remove", one.clone()),
+            _ => {
+                let commands: Vec<Value> = parts
+                    .into_iter()
+                    .map(|params| json!({ "method": "keyframes.remove", "params": params }))
+                    .collect();
+                self.send("apply", json!({ "commands": commands }));
+            }
+        }
+        true
+    }
+
+    fn key_header(&mut self, ui: &mut egui::Ui, p: &Project, clip: &Clip) {
+        let name = clip
+            .name
+            .clone()
+            .filter(|s| !s.is_empty())
+            .or_else(|| p.media(&clip.media).map(|m| m.name.clone()))
+            .unwrap_or_default();
+        let mut fit = false;
+        let mut open = None;
+        let editor = &mut self.key_editor;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(name).strong());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.menu_button(DOTS_THREE, |ui| {
+                    ui.radio_value(&mut editor.keyed_only, false, "Display All Parameters");
+                    ui.radio_value(
+                        &mut editor.keyed_only,
+                        true,
+                        "Display Parameters with Keyframes",
+                    );
+                    ui.separator();
+                    if ui.button("Expand All Parameters").clicked() {
+                        open = Some(true);
+                        ui.close();
+                    }
+                    if ui.button("Collapse All Parameters").clicked() {
+                        open = Some(false);
+                        ui.close();
+                    }
+                });
+                if ui
+                    .button(ARROWS_OUT_LINE_HORIZONTAL)
+                    .on_hover_text("Fit Clip")
+                    .clicked()
+                {
+                    fit = true;
+                }
+            });
+        });
+        if fit {
+            editor.view = None;
+        }
+        match open {
+            Some(true) => editor.closed.clear(),
+            Some(false) => editor.closed = GROUPS.to_vec(),
+            None => {}
+        }
+    }
+
+    fn ruler(&mut self, ui: &mut egui::Ui, p: &Project, clip: &Clip, plot: Plot) {
+        let now = p.settings.timecode(plot.play);
+        let (rect, resp) = row(ui, RULER_H, plot.width, |ui| {
+            ui.label(RichText::new(now).small().color(theme::colors().text_dim));
+        });
+        let map = TimeMap::of(plot.lo, plot.hi, rect);
+        let painter = ui.painter_at(rect);
+        let colors = theme::colors();
+        painter.rect_filled(rect, 2.0, colors.panel_dark);
+        painter.rect_filled(clip_band(map, clip, rect), 0.0, colors.track);
+        let step = tick_step(map.ppf(), p.settings.fps.as_f64()).max(1);
+        let font = TextStyle::Small.resolve(ui.style());
+        let mut t = (map.lo / step as f64).ceil() as i64 * step;
+        while (t as f64) <= map.hi {
+            let x = map.x(t as f64);
+            painter.line_segment(
+                [pos2(x, rect.bottom() - 5.0), pos2(x, rect.bottom())],
+                Stroke::new(1.0, colors.text_dim),
+            );
+            painter.text(
+                pos2(x + 2.0, rect.top() + 1.0),
+                Align2::LEFT_TOP,
+                p.settings.timecode(t),
+                font.clone(),
+                colors.text_dim,
+            );
+            t += step;
+        }
+        playhead(&painter, map, rect, plot.play);
+        if let Some(pos) = resp.interact_pointer_pos() {
+            let frame = map.time(pos.x).round() as i64;
+            let done = resp.clicked() || resp.drag_stopped();
+            if done || frame != plot.play {
+                self.seek(PlayerId::Timeline, frame, !done);
+            }
+        }
+    }
+
+    fn zoom_view(&mut self, ui: &egui::Ui, area: Rect, clip: &Clip, plot: Plot) {
+        let left = area.left() + LABEL + ui.spacing().item_spacing.x;
+        let (hover, zoom, pan) = ui.input(|i| {
+            (
+                i.pointer.hover_pos(),
+                i.zoom_delta(),
+                i.smooth_scroll_delta.x,
+            )
+        });
+        let Some(pos) = hover.filter(|h| area.contains(*h) && h.x >= left) else {
+            return;
+        };
+        if zoom == 1.0 && pan == 0.0 {
+            return;
+        }
+        let span = plot.hi - plot.lo;
+        let at = plot.lo + f64::from((pos.x - left) / plot.width) * span;
+        let longest = ((clip.end() - clip.start) as f64 * 20.0).max(100.0);
+        let next = (span / f64::from(zoom)).clamp(4.0, longest);
+        let k = next / span;
+        let by = -f64::from(pan) / f64::from(plot.width) * next;
+        self.key_editor.view = Some((at - (at - plot.lo) * k + by, at + (plot.hi - at) * k + by));
     }
 
     fn finish_drag(&mut self, ui: &egui::Ui, clip: &Clip, lanes: &[Lane], rev: u64) {
@@ -869,28 +1141,42 @@ impl Workspace {
         plot: Plot,
         shift: Option<&Shift>,
     ) {
+        let group = group_of(members[0].param);
+        let open = !self.key_editor.closed.contains(&group);
+        let mut flip = false;
+        let (rect, resp) = row(ui, GROUP_H, plot.width, |ui| {
+            let icon = if open { CARET_DOWN } else { CARET_RIGHT };
+            let text = RichText::new(format!("{icon} {}", group_name(group))).small();
+            if ui.add(egui::Button::new(text).frame(false)).clicked() {
+                flip = true;
+            }
+        });
+        if flip {
+            if open {
+                self.key_editor.closed.push(group);
+            } else {
+                self.key_editor.closed.retain(|g| *g != group);
+            }
+        }
         let items = lane_items(clip, members);
         let mut times: Vec<i64> = items.iter().map(|(_, _, t)| *t).collect();
         times.sort_unstable();
         times.dedup();
-        let (rect, resp) = labeled(
-            ui,
-            group_name(group_of(members[0].param)),
-            GROUP_H,
-            plot.width,
-        );
         let map = TimeMap::of(plot.lo, plot.hi, rect);
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 2.0, theme::colors().panel_dark);
         playhead(&painter, map, rect, plot.play);
         let mut spots = Vec::new();
+        let mut shown = Vec::new();
         for t in times {
             let marks = group_at(&items, t);
-            let shown = shown_group_time(clip, &marks, shift);
-            let at = pos2(map.x(shown), rect.center().y);
+            let at_time = shown_group_time(clip, &marks, shift);
+            let at = pos2(map.x(at_time), rect.center().y);
+            shown.push(at_time);
             spots.push((at, marks));
             diamond(&painter, at, 5.0, theme::colors().text);
         }
+        edge_arrows(&painter, rect, &shown, map);
         self.poke_group(&resp, clip, map, &spots);
     }
 
@@ -930,14 +1216,119 @@ impl Workspace {
         rows: &[Shown],
         plot: Plot,
     ) {
-        let (rect, resp) = labeled(ui, lane_name(lane.param), TRACK_H, plot.width);
+        let play = plot.play;
+        let inside = |t: i64| clip.start <= t && t < clip.end();
+        let times: Vec<i64> = lane
+            .keys
+            .iter()
+            .map(|k| clip.key_time(k.frame).round() as i64)
+            .collect();
+        let on_key = times.contains(&play);
+        let prev = times.iter().any(|&t| inside(t) && t < play);
+        let next = times.iter().any(|&t| inside(t) && t > play);
+        let curve = self.key_editor.curves.contains(&lane.param);
+        let keyed = !lane.keys.is_empty();
+        let mut act = None;
+        let (rect, resp) = row(ui, TRACK_H, plot.width, |ui| {
+            let c = ui
+                .add_enabled(
+                    keyed,
+                    egui::Button::selectable(curve && keyed, WAVE_SINE).frame(false),
+                )
+                .on_hover_text("Curve");
+            if c.clicked() {
+                act = Some(RowAct::Curve);
+            }
+            ui.label(RichText::new(lane_name(lane.param)).small());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .add_enabled(
+                        keyed,
+                        egui::Button::new(ARROW_COUNTER_CLOCKWISE).frame(false),
+                    )
+                    .on_hover_text("Reset Keyframes")
+                    .clicked()
+                {
+                    act = Some(RowAct::Reset);
+                }
+                if ui
+                    .add_enabled(next, egui::Button::new(CARET_RIGHT).frame(false))
+                    .clicked()
+                {
+                    act = Some(RowAct::Step(1));
+                }
+                if ui
+                    .add_enabled(
+                        inside(play),
+                        egui::Button::selectable(on_key, DIAMOND).frame(false),
+                    )
+                    .clicked()
+                {
+                    act = Some(RowAct::Toggle);
+                }
+                if ui
+                    .add_enabled(prev, egui::Button::new(CARET_LEFT).frame(false))
+                    .clicked()
+                {
+                    act = Some(RowAct::Step(-1));
+                }
+            });
+        });
+        match act {
+            Some(RowAct::Curve) => {
+                if curve {
+                    self.key_editor.curves.retain(|c| *c != lane.param);
+                } else {
+                    self.key_editor.curves.push(lane.param);
+                }
+            }
+            Some(RowAct::Step(dir)) => {
+                let to = if dir < 0 {
+                    times
+                        .iter()
+                        .copied()
+                        .filter(|&t| inside(t) && t < play)
+                        .max()
+                } else {
+                    times
+                        .iter()
+                        .copied()
+                        .filter(|&t| inside(t) && t > play)
+                        .min()
+                };
+                if let Some(t) = to {
+                    self.seek(PlayerId::Timeline, t, false);
+                }
+            }
+            Some(RowAct::Toggle) => {
+                let method = if on_key {
+                    "keyframes.remove"
+                } else {
+                    "keyframes.add"
+                };
+                self.send(
+                    method,
+                    json!({ "clips": [clip.id], "param": lane.param, "at": play }),
+                );
+            }
+            Some(RowAct::Reset) => {
+                self.send(
+                    "keyframes.remove",
+                    json!({ "clips": [clip.id], "param": lane.param }),
+                );
+            }
+            None => {}
+        }
         let map = TimeMap::of(plot.lo, plot.hi, rect);
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 2.0, theme::colors().track);
+        painter.rect_filled(rect, 2.0, theme::colors().panel_dark);
+        painter.rect_filled(clip_band(map, clip, rect), 0.0, theme::colors().track);
         playhead(&painter, map, rect, plot.play);
         let mut spots = Vec::new();
+        let mut shown = Vec::new();
         for row in rows {
-            let at = pos2(map.x(clip.key_time(row.key.frame)), rect.center().y);
+            let t = clip.key_time(row.key.frame);
+            let at = pos2(map.x(t), rect.center().y);
             let on = self
                 .key_editor
                 .selected
@@ -950,7 +1341,9 @@ impl Workspace {
             };
             diamond(&painter, at, if on { 6.0 } else { 4.5 }, color);
             spots.push((at, row.from));
+            shown.push(t);
         }
+        edge_arrows(&painter, rect, &shown, map);
         self.open_menu(&resp, lane.param, &spots, false);
         self.poke_keys(
             Press {
@@ -964,7 +1357,39 @@ impl Workspace {
             None,
             Axis::None,
         );
-        self.ease_menu(&resp, clip, lane, false);
+        self.empty_press(ui, &resp, clip, lane.param, map, &spots);
+        self.show_menu(&resp, &clip.id, lane, false);
+    }
+
+    fn empty_press(
+        &mut self,
+        ui: &egui::Ui,
+        resp: &egui::Response,
+        clip: &Clip,
+        param: KeyParam,
+        map: TimeMap,
+        spots: &[(Pos2, i64)],
+    ) {
+        let Some(pos) = resp.interact_pointer_pos() else {
+            return;
+        };
+        if closest(spots, pos, |(at, _)| *at).is_some() {
+            return;
+        }
+        if resp.double_clicked() {
+            let t = map.time(pos.x).round() as i64;
+            if clip.start <= t && t < clip.end() {
+                self.send(
+                    "keyframes.add",
+                    json!({ "clips": [clip.id], "param": param, "at": t }),
+                );
+                self.seek(PlayerId::Timeline, t, false);
+            }
+        } else if resp.clicked()
+            && !ui.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl)
+        {
+            self.key_editor.selected.clear();
+        }
     }
 
     fn curve_row(
@@ -974,13 +1399,30 @@ impl Workspace {
         lane: &Lane,
         rows: &[Shown],
         plot: Plot,
+        frame: &Frame,
     ) {
-        let (rect, resp) = labeled(ui, "", CURVE_H, plot.width);
+        let (rect, resp) = row(ui, CURVE_H, plot.width, |_| {});
         let map = TimeMap::of(plot.lo, plot.hi, rect);
         let (vlo, vhi) = value_ends(rows);
-        let values = ValueMap::of(vlo, vhi, rect);
+        let values = ValueMap::of(vlo, vhi, least_span(lane.param), rect);
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 2.0, theme::colors().panel_dark);
+        let colors = theme::colors();
+        painter.rect_filled(rect, 2.0, colors.panel_dark);
+        if lane.param != KeyParam::Position {
+            let font = TextStyle::Small.resolve(ui.style());
+            for (v, y, align) in [
+                (values.hi, rect.top() + 1.0, Align2::LEFT_TOP),
+                (values.lo, rect.bottom() - 1.0, Align2::LEFT_BOTTOM),
+            ] {
+                painter.text(
+                    pos2(rect.left() + 3.0, y),
+                    align,
+                    value_text(lane.param, v, frame),
+                    font.clone(),
+                    colors.text_dim,
+                );
+            }
+        }
         let keys: Vec<Keyframe> = rows.iter().map(|r| r.key).collect();
         let paint = CurvePaint {
             painter: &painter,
@@ -988,12 +1430,12 @@ impl Workspace {
             map,
             values,
         };
-        sample_curve(&paint, 1.5, theme::colors().text, |source| {
+        sample_curve(&paint, 1.5, colors.text, |source| {
             value_mapped(&keys, source, |i| keys[i].value)
         });
         if rows.first().is_some_and(|r| r.paired) {
             let ys: Vec<f64> = rows.iter().map(|r| r.y).collect();
-            sample_curve(&paint, 1.0, theme::colors().text_dim, |source| {
+            sample_curve(&paint, 1.0, colors.text_dim, |source| {
                 value_paired(&keys, source, |i| ys[i])
             });
         }
@@ -1025,11 +1467,11 @@ impl Workspace {
                     continue;
                 };
                 let hat = pos2(map.x(clip.time_of(source)), values.y(curve));
-                painter.line_segment([at, hat], Stroke::new(1.0, theme::colors().text_dim));
+                painter.line_segment([at, hat], Stroke::new(1.0, colors.text_dim));
                 painter.rect_filled(
                     Rect::from_center_size(hat, vec2(7.0, 7.0)),
                     1.0,
-                    theme::colors().accent,
+                    colors.accent,
                 );
                 handles.push((hat, row.from, out, handle, other.frame));
             }
@@ -1037,11 +1479,7 @@ impl Workspace {
                 &painter,
                 at,
                 if on { 5.0 } else { 3.5 },
-                if on {
-                    theme::colors().accent
-                } else {
-                    theme::colors().text
-                },
+                if on { colors.accent } else { colors.text },
             );
             spots.push((at, row.from, Axis::X));
             if row.paired {
@@ -1050,11 +1488,7 @@ impl Workspace {
                     &painter,
                     yat,
                     3.0,
-                    if on {
-                        theme::colors().accent
-                    } else {
-                        theme::colors().text_dim
-                    },
+                    if on { colors.accent } else { colors.text_dim },
                 );
                 spots.push((yat, row.from, Axis::Y));
             }
@@ -1072,8 +1506,175 @@ impl Workspace {
             &handles,
         );
         let flat: Vec<(Pos2, i64)> = spots.iter().map(|(at, frame, _)| (*at, *frame)).collect();
+        let all: Vec<(Pos2, i64)> = flat
+            .iter()
+            .copied()
+            .chain(handles.iter().map(|(at, frame, ..)| (*at, *frame)))
+            .collect();
+        self.empty_press(ui, &resp, clip, lane.param, map, &all);
         self.open_menu(&resp, lane.param, &flat, true);
         self.show_menu(&resp, &clip.id, lane, true);
+    }
+
+    fn key_bar(&mut self, ui: &mut egui::Ui, p: &Project, clip: &Clip, lanes: &[Lane], f: &Frame) {
+        ui.separator();
+        let marks = self.key_editor.selected.clone();
+        let mut gone = false;
+        match marks.as_slice() {
+            [] => {}
+            [one] => gone = self.one_key(ui, p, clip, lanes, *one, f),
+            many => {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{} Keyframes", many.len()));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        gone = ui.button("Delete").clicked();
+                    });
+                });
+            }
+        }
+        if gone {
+            self.delete_editor_keys();
+        }
+    }
+
+    fn one_key(
+        &mut self,
+        ui: &mut egui::Ui,
+        p: &Project,
+        clip: &Clip,
+        lanes: &[Lane],
+        mark: Mark,
+        f: &Frame,
+    ) -> bool {
+        let Some(lane) = lanes.iter().find(|l| l.param == mark.param) else {
+            return false;
+        };
+        let Some(i) = lane.keys.iter().position(|k| k.frame == mark.frame) else {
+            return false;
+        };
+        let key = lane.keys[i];
+        let y = (lane.extra.len() == lane.keys.len()).then(|| lane.extra[i]);
+        let paired = matches!(mark.param, KeyParam::Position | KeyParam::Zoom) && y.is_some();
+        let at = p.settings.timecode(clip.key_time(key.frame).round() as i64);
+        let mut gone = false;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(lane_name(mark.param)).strong());
+            ui.label(dim(at));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                gone = ui.button("Delete").clicked();
+            });
+        });
+        let mut value = None;
+        let mut ease = None;
+        ui.horizontal(|ui| {
+            let axes: &[bool] = if paired { &[false, true] } else { &[false] };
+            for &on_y in axes {
+                let raw = if on_y { y.unwrap_or(0.0) } else { key.value };
+                let prefix = match (paired, on_y) {
+                    (false, _) => "",
+                    (true, false) => "X ",
+                    (true, true) => "Y ",
+                };
+                if let Some(v) = self.value_field(ui, mark, on_y, raw, prefix, f) {
+                    value = Some(if paired {
+                        let (vx, vy) = if on_y {
+                            (key.value, v)
+                        } else {
+                            (v, y.unwrap_or(0.0))
+                        };
+                        json!([vx, vy])
+                    } else {
+                        json!(v)
+                    });
+                }
+            }
+            let current = ease_of(&lane.keys, i);
+            egui::ComboBox::from_id_salt(("key-ease", lane_name(mark.param), mark.frame))
+                .selected_text(current.map_or("Custom", ease_label))
+                .show_ui(ui, |ui| {
+                    for e in eases(&lane.keys, i) {
+                        if ui
+                            .selectable_label(current == Some(e), ease_label(e))
+                            .clicked()
+                        {
+                            ease = Some(e);
+                        }
+                    }
+                });
+        });
+        if let Some(value) = value {
+            self.send(
+                "keyframes.set",
+                json!({ "clips": [clip.id], "param": mark.param, "frames": [mark.frame], "value": value }),
+            );
+        }
+        if let Some(e) = ease {
+            self.send("keyframes.set", ease_body(&clip.id, mark, e));
+        }
+        gone
+    }
+
+    fn value_field(
+        &mut self,
+        ui: &mut egui::Ui,
+        mark: Mark,
+        on_y: bool,
+        raw: f64,
+        prefix: &str,
+        f: &Frame,
+    ) -> Option<f64> {
+        let param = mark.param;
+        let shown = shown_value(param, raw, on_y, f);
+        let held = self
+            .key_editor
+            .held
+            .filter(|h| h.mark == mark && h.y == on_y);
+        let mut v = held.map_or(shown, |h| h.value);
+        let speed = match param {
+            KeyParam::Volume => 0.1,
+            KeyParam::Zoom | KeyParam::Rotation => 0.5,
+            _ => 1.0,
+        };
+        let r = ui
+            .push_id(("key-value", lane_name(param), on_y), |ui| {
+                ui.add(
+                    egui::DragValue::new(&mut v)
+                        .update_while_editing(false)
+                        .speed(speed)
+                        .max_decimals(places(param).max(1))
+                        .prefix(prefix)
+                        .suffix(unit(param))
+                        .min_size(vec2(FIELD_W, ui.spacing().interact_size.y)),
+                )
+            })
+            .inner;
+        if r.drag_started() {
+            self.key_editor.held = Some(Held {
+                mark,
+                y: on_y,
+                value: shown,
+                from: shown,
+            });
+        }
+        if r.dragged()
+            && r.changed()
+            && let Some(h) = self.key_editor.held.as_mut()
+        {
+            h.value = v;
+        }
+        let out = if r.drag_stopped() {
+            self.key_editor
+                .held
+                .take()
+                .filter(|h| h.value != h.from)
+                .map(|h| h.value)
+        } else if r.changed() && !r.dragged() {
+            self.key_editor.held = None;
+            Some(v)
+        } else {
+            None
+        };
+        out.map(|v| stored_value(param, v, on_y, f))
     }
 
     fn poke_keys(
@@ -1207,10 +1808,6 @@ impl Workspace {
         );
     }
 
-    fn ease_menu(&mut self, resp: &egui::Response, clip: &Clip, lane: &Lane, curve: bool) {
-        self.show_menu(resp, &clip.id, lane, curve);
-    }
-
     fn open_menu(
         &mut self,
         resp: &egui::Response,
@@ -1267,12 +1864,16 @@ impl Workspace {
     }
 }
 
-fn labeled(ui: &mut egui::Ui, name: &str, h: f32, plot_w: f32) -> (Rect, egui::Response) {
+fn row(
+    ui: &mut egui::Ui,
+    h: f32,
+    plot_w: f32,
+    label: impl FnOnce(&mut egui::Ui),
+) -> (Rect, egui::Response) {
     ui.horizontal(|ui| {
         ui.allocate_ui_with_layout(vec2(LABEL, h), Layout::left_to_right(Align::Center), |ui| {
-            if !name.is_empty() {
-                ui.label(RichText::new(name).small());
-            }
+            ui.set_min_size(vec2(LABEL, h));
+            label(ui);
         });
         ui.allocate_exact_size(vec2(plot_w, h), Sense::click_and_drag())
     })

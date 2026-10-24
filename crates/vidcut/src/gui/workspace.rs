@@ -1326,7 +1326,7 @@ impl Workspace {
             if self.pool_focus {
                 let selected = self.snap.selection.media.clone();
                 self.removing = (!selected.is_empty()).then_some(selected);
-            } else if !self.delete_keys() {
+            } else if !self.delete_editor_keys() && !self.delete_keys() {
                 self.delete_key(m.alt);
             }
         }

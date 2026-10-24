@@ -1749,6 +1749,29 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The same four eases already play on the volume line.
   - One tab row holds the Keyframes tab, as it holds the Inspector.
 
+## X90. The Keyframes tab edits a keyframe in place
+
+- **Resolve:**
+  - The Keyframe Editor adds a keyframe with the Keyframe button or Ctrl+[, at the playhead (p. 1257).
+  - Its track controls have no value field (p. 1257). The Curve Editor is a separate view (p. 1255).
+  - Full Extend Zoom shows the whole clip. Detail Zoom and a zoom slider set other ranges (p. 1258).
+- **vidcut:**
+  - A double-click on an empty part of a track adds a keyframe there. The playhead moves to it.
+  - A bar under the tracks shows the selected keyframe:
+    - the name of the value and the time
+    - the value, in the units of the Inspector
+    - the ease
+    - Delete
+  - A new value in the bar goes to `keyframes.set`. A drag on the value sends it when the drag stops.
+  - With two or more keyframes selected, the bar shows their number and Delete.
+  - The curve of a value shows under its track.
+  - Fit Clip shows the range of the clip. Ctrl and the mouse wheel zoom at the pointer.
+- **Why:**
+  - The user sees and sets the exact value of a keyframe without a change to the Inspector.
+  - A double-click adds a keyframe where the user points, without a move of the playhead first.
+  - The curve stays in line with the keyframes that it joins.
+  - The mouse wheel zooms at the point of interest, which a slider cannot do.
+
 ## X89. A wipe reveals from one edge
 
 - **Resolve:**

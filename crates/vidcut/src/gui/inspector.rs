@@ -105,9 +105,9 @@ impl Direction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Shape {
-    frame: [f64; 2],
-    fitted: [f64; 2],
+pub(super) struct Shape {
+    pub(super) frame: [f64; 2],
+    pub(super) fitted: [f64; 2],
 }
 
 impl Field {
@@ -410,7 +410,7 @@ fn rate(p: &Project, c: &Clip) -> f64 {
         .as_f64()
 }
 
-fn shape(p: &Project, c: &Clip) -> Shape {
+pub(super) fn shape(p: &Project, c: &Clip) -> Shape {
     let (w, h) = (p.settings.width.max(1), p.settings.height.max(1));
     let frame = [f64::from(w), f64::from(h)];
     let fitted = p

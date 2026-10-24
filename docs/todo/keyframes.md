@@ -8,8 +8,8 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - A clip has volume keyframes on its volume line ([spec §9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
   - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` holds the volume keyframes.
   - Stage 2 is built. Transform and Crop values have keyframes on `Picture` ([§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), D75).
-  - Stage 3 is built. The Keyframes tab shows the keyed values of the first selected clip.
-  - Each value has a track and a curve. A drag moves a keyframe, a group or a handle.
+  - Stage 3 is built. The Keyframes tab shows each value of the first selected clip that can have keyframes.
+  - Each value has a track. Its curve shows when the user turns it on. A drag moves a keyframe, a group or a handle.
   - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. Rotation is its own value. Each crop side is its own value.
   - The flips have no keyframes. Dynamic Zoom stays the two end boxes and has no Keyframe button.
   - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
@@ -111,6 +111,8 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 **Better than Resolve** (proposals for the stages):
 
 - The ease menu is on each keyframe: on the Keyframe button and in the Keyframe Editor.
+- A bar shows the value, time and ease of the selected keyframe ([X90](../deviations.md#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
+- A double-click on a track adds a keyframe there (X90).
 
 ## Scope
 
@@ -118,15 +120,25 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 
 **Stage 3 is built.** The Keyframes tab sits beside the Inspector. The Timeline menu opens it. The spec is [§2](../cut-page-spec.md#2-layout-pp-636637) and [X87](../deviations.md#x87-the-keyframes-tab-has-an-ease-menu).
 
-- One track for each keyed value, in a group for its section.
+- One track for each value that can have keyframes, in a group for its section. The ⋯ menu can hide the values without keyframes.
+- Each track has the curve button, the Keyframe button with its arrows, and Reset Keyframes.
 - A drag on a keyframe moves it in time. A drag on a curve point also changes the value.
 - A drag on a group track moves that group's keyframes at that time.
 - Volume is a track in the Audio group.
-- Each value has a curve. A drag on an In or Out handle changes that handle.
-- One click selects one keyframe. Shift or Ctrl adds to the selection.
+- The curve of a value shows under its track. A drag on an In or Out handle changes that handle.
+- One click selects one keyframe. Shift or Ctrl adds to the selection. Delete removes the selection.
 - A right-click sets that keyframe's ease, with the volume Bezier ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
-- `keyframes.set` and `keyframes.move` do these edits.
-- Not in this stage: Step, Loop, Ping Pong, Reverse, the Shape Box, the keyframe tray and motion paths.
+- A bar shows the value, time and ease of the selected keyframe (X90).
+- The time ruler moves the playhead. Ctrl and the mouse wheel zoom. Fit Clip shows the clip.
+- `keyframes.add`, `keyframes.remove`, `keyframes.set` and `keyframes.move` do these edits.
+- **To do:**
+  - selection: a box around keyframes, a nudge by one frame, cut, copy and paste (pp. 1257–1258)
+  - the keyframe tray on the timeline (p. 1259)
+  - the motion path in the viewer (pp. 1252–1254)
+  - Step, Loop, Ping Pong, Reverse and the Shape Box (pp. 1261–1267)
+  - keyframes of several selected clips at once (p. 1268)
+  - the Lock and Track Color controls, Detail Zoom and the zoom slider (pp. 1257–1258)
+  - the ruler in frames, Snap Keyframes to Grid, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
 
 **After stage 3:** keyframes of speed, opacity, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
 
