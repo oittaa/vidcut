@@ -307,11 +307,7 @@ fn sections(app: &Workspace, m: &Media, read: Option<&MediaDetails>) -> Vec<Sect
         if !m.super_scale.is_off() {
             rows.push((
                 "Super Scale".into(),
-                format!(
-                    "{}, {:?} Sharpness",
-                    json!(m.super_scale.factor).as_str().unwrap_or_default(),
-                    m.super_scale.sharpness
-                ),
+                super::super_scale::described(m.super_scale),
             ));
         }
         out.push(("Video".into(), rows));

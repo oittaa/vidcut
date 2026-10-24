@@ -73,6 +73,7 @@ pub enum Note {
     },
     Tried(Tried),
     Source(SourceNote),
+    Upscaled(UpscaleNote),
     Downloading {
         name: String,
     },
@@ -118,6 +119,12 @@ pub struct Tried {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoder: Option<String>,
     pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct UpscaleNote {
+    pub path: PathBuf,
+    pub how: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

@@ -374,11 +374,51 @@ pub fn uncovered(a: i64, b: i64, spans: &[(i64, i64)]) -> Vec<(i64, i64)> {
 pub struct SuperScale {
     pub factor: ScaleFactor,
     pub sharpness: Sharpness,
+    pub upscaler: Upscaler,
+    pub noise_reduction: NoiseReduction,
 }
 
 impl SuperScale {
     pub fn is_off(&self) -> bool {
         self.factor == ScaleFactor::None
+    }
+
+    pub fn ai(&self) -> bool {
+        !self.is_off() && self.upscaler == Upscaler::Ai
+    }
+}
+
+/// The upscaler of Super Scale.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Upscaler {
+    /// A neural network (Real-ESRGAN) on the GPU, for SDR pictures up to 4K.
+    /// Its weights download at their first use. An export refuses media
+    /// that it cannot take.
+    #[default]
+    Ai,
+    /// The classic upscalers: libplacebo on the GPU, swscale on the CPU.
+    Classic,
+}
+
+/// How much noise the AI upscaler takes out: its denoise strength of 0.2,
+/// 0.5 or 1.0.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NoiseReduction {
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+
+impl NoiseReduction {
+    pub fn strength(self) -> f32 {
+        match self {
+            Self::Low => 0.2,
+            Self::Medium => 0.5,
+            Self::High => 1.0,
+        }
     }
 }
 

@@ -146,9 +146,9 @@ eframe = { version = "0.37", default-features = false, features = [
 # eframe's egui, with the emoji fonts the viewer's transport, the pool and the
 # mixer draw their symbols from.
 egui = { version = "0.37", default-features = false, features = ["monochrome_emoji_fonts"] }
-# The GPU the GUI draws with (eframe's renderer) and the viewer's pictures
-# are converted on: Vulkan on Linux and Windows, Metal on macOS, DX12 on
-# Windows. No OpenGL backend.
+# The GPU the GUI draws with (eframe's renderer), the viewer's pictures are
+# converted on and the AI upscaler of Super Scale runs on: Vulkan on Linux and
+# Windows, Metal on macOS, DX12 on Windows. No OpenGL backend.
 wgpu = { version = "30", default-features = false, features = [
     "std",
     "wgsl",
@@ -156,7 +156,7 @@ wgpu = { version = "30", default-features = false, features = [
     "metal",
     "dx12",
 ] }
-# Waits for wgpu's adapter and device without a window (tests).
+# Waits for wgpu's adapter and device without a window (tests, the AI upscaler).
 pollster = "1"
 # Checks the viewer's WGSL in unit tests, without a GPU (wgpu's own parser).
 naga = { version = "30", features = ["wgsl-in"] }
@@ -172,7 +172,8 @@ rfd = "0.17"
 # Shell quoting for the commands the GUI shows ("the same export from a shell").
 shlex = "2.0"
 # OpenTimelineIO bundles (.otioz) are zip files: stored media, a deflated
-# timeline. Pure Rust (zlib-rs), MIT.
+# timeline. So are the PyTorch weights of the AI upscaler. Pure Rust (zlib-rs),
+# MIT.
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # Reads TTML subtitle files (DFXP, IMSC1). MIT or Apache-2.0.
 roxmltree = "0.21"

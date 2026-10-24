@@ -34,6 +34,7 @@ mod shared;
 mod shuttle;
 mod speech;
 mod subtitles;
+mod super_scale;
 mod theme;
 mod tiles;
 mod timeline;

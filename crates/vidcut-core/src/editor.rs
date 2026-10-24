@@ -154,6 +154,11 @@ pub trait Env {
         Err(Error::usage("voice isolation runs in the vidcut program"))
     }
 
+    fn ai_upscaler(&self, download: bool) -> Result<()> {
+        let _ = download;
+        Err(Error::usage("the AI upscaler runs in the vidcut program"))
+    }
+
     fn media_details(&self, media: &Media) -> Result<crate::model::MediaDetails> {
         let _ = media;
         Err(Error::usage("files are read by the vidcut program"))
@@ -2572,14 +2577,20 @@ fn mutate(
             color_space,
             super_scale,
             sharpness,
+            upscaler,
+            noise_reduction,
+            download,
         } => {
-            if color.is_none()
-                && color_space.is_none()
-                && super_scale.is_none()
-                && sharpness.is_none()
-            {
+            let set = ops::SuperScaleSet {
+                factor: *super_scale,
+                sharpness: *sharpness,
+                upscaler: *upscaler,
+                noise_reduction: *noise_reduction,
+            };
+            if color.is_none() && color_space.is_none() && set.is_empty() {
                 return Err(Error::usage(
-                    "give color, color_space, super_scale or sharpness",
+                    "give color, color_space, or a Super Scale field: super_scale, sharpness, \
+                     upscaler or noise_reduction",
                 ));
             }
             if let Some(color) = color {
@@ -2589,8 +2600,11 @@ fn mutate(
             if let Some(space) = color_space {
                 ops::set_media_color_space(p, &media.to_vec(), *space)?;
             }
-            if super_scale.is_some() || sharpness.is_some() {
-                ops::set_media_super_scale(p, &media.to_vec(), *super_scale, *sharpness)?;
+            if *download && !dry_run {
+                env.ai_upscaler(true)?;
+            }
+            if !set.is_empty() {
+                ops::set_media_super_scale(p, &media.to_vec(), set)?;
             }
             Value::Null
         }

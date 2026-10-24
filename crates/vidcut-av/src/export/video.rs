@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vidcut_core::model::{
-    ColorSpace, Hdr, ScaleFactor, Sharpness, SubtitleStyle, SuperScale, Title,
+    ColorSpace, Hdr, NoiseReduction, ScaleFactor, Sharpness, SubtitleStyle, SuperScale, Title,
 };
 use vidcut_core::place::Placing;
 use vidcut_core::render::{Image, Placed, Ramp, ShownTitle, VideoPiece, WHOLE, Wipe};
@@ -88,6 +88,7 @@ struct Source {
     reversed: Vec<Reversed>,
     left: Option<Instant>,
     sharp: Option<Sharpness>,
+    told: bool,
 }
 
 #[derive(Clone)]
@@ -183,6 +184,7 @@ impl Source {
             reversed: Vec::new(),
             left: None,
             sharp,
+            told: false,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -191,6 +193,7 @@ impl Source {
             source.advance(target)?;
         }
         if source.fitting.scaler.is_some()
+            && !super_scale.ai()
             && let Some((frame, _)) = source.current.as_ref()
             && crate::hw::on_gpu(frame)
         {
@@ -230,6 +233,7 @@ impl Source {
             reversed: Vec::new(),
             left: None,
             sharp: None,
+            told: false,
         })
     }
 
@@ -410,6 +414,82 @@ pub(crate) fn placing_of(
 }
 
 const PLACED_MOST: f64 = 16384.0;
+
+fn ai_picture(
+    frame: &frame::Video,
+    rotation: u16,
+    target: (u32, u32),
+    noise: NoiseReduction,
+    (path, reading): (&Path, Reading),
+) -> Result<Option<frame::Video>> {
+    let sar = frame.aspect_ratio();
+    let sar = (sar.numerator(), sar.denominator());
+    let shown = super::normalize::shown_size(frame, rotation, target);
+    if !super::normalize::enlarges((frame.width(), frame.height()), sar, 0, shown) {
+        return Ok(None);
+    }
+    if crate::color::Source::of(frame).hdr.is_some() {
+        return Err(Error::Invalid(format!(
+            "{}: the AI upscaler takes SDR pictures, and this one is HDR",
+            path.display()
+        )));
+    }
+    let across = if sar.0 > 0 && sar.1 > 0 {
+        f64::from(sar.0) / f64::from(sar.1)
+    } else {
+        1.0
+    };
+    let (dw, dh) = (f64::from(frame.width()) * across, f64::from(frame.height()));
+    let (dw, dh) = if rotation % 180 == 90 {
+        (dh, dw)
+    } else {
+        (dw, dh)
+    };
+    let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
+    let (dw, dh) = (even(dw), even(dh));
+    if u64::from(dw) * u64::from(dh) > crate::upscale::LARGEST {
+        return Err(Error::Invalid(format!(
+            "{}: the AI upscaler takes pictures up to 4K, and this one is {dw}x{dh}",
+            path.display()
+        )));
+    }
+    let mem = if crate::hw::on_gpu(frame) {
+        crate::hw::download(frame)?
+    } else {
+        frame_ref(frame)?
+    };
+    let mut to_rgb = super::normalize::Normalizer::new(
+        &mem,
+        rotation,
+        dw,
+        dh,
+        format::Pixel::RGB24,
+        None,
+        reading,
+    )?;
+    let rgb = to_rgb.run(&mem)?;
+    let (w, h) = (rgb.width() as usize, rgb.height() as usize);
+    let stride = rgb.stride(0);
+    let mut packed = Vec::with_capacity(w * h * 3);
+    for y in 0..h {
+        packed.extend_from_slice(&rgb.data(0)[y * stride..y * stride + w * 3]);
+    }
+    let out = crate::upscale::upscale(&packed, (w, h), noise)?;
+    let scale = crate::upscale::SCALE;
+    let mut big = frame::Video::new(format::Pixel::RGB24, w as u32 * scale, h as u32 * scale);
+    let (row, into) = (w * scale as usize * 3, big.stride(0));
+    for (y, line) in out.chunks_exact(row).enumerate() {
+        big.data_mut(0)[y * into..y * into + row].copy_from_slice(line);
+    }
+    big.set_color_range(ffmpeg::util::color::Range::JPEG);
+    big.set_color_space(ffmpeg::util::color::Space::RGB);
+    big.set_color_primaries(ffmpeg::util::color::Primaries::BT709);
+    big.set_color_transfer_characteristic(ffmpeg::util::color::TransferCharacteristic::BT709);
+    // SAFETY: a plain field of its own frame.
+    unsafe { (*big.as_mut_ptr()).sample_aspect_ratio = ffmpeg::ffi::AVRational { num: 1, den: 1 } };
+    big.set_pts(frame.pts());
+    Ok(Some(big))
+}
 
 fn sharpness(super_scale: SuperScale) -> Option<Sharpness> {
     (!super_scale.is_off()).then_some(super_scale.sharpness)
@@ -1763,15 +1843,47 @@ impl VideoFrames {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
             let reading = src.pictures.reading(self.maker.reading());
-            let made = self.maker.make_layer(
-                i,
-                &mut src.fitting,
-                frame,
-                rotation,
-                src.reader.path(),
-                reading,
-            )?;
+            let target = wanted.unwrap_or((w, h));
+            let big = if !decoded && super_scale.ai() {
+                ai_picture(
+                    frame,
+                    rotation,
+                    target,
+                    super_scale.noise_reduction,
+                    (src.reader.path(), reading),
+                )?
+            } else {
+                None
+            };
+            let made = match &big {
+                Some(big) => self.maker.make_layer(
+                    i,
+                    &mut src.fitting,
+                    big,
+                    0,
+                    src.reader.path(),
+                    reading,
+                )?,
+                None => self.maker.make_layer(
+                    i,
+                    &mut src.fitting,
+                    frame,
+                    rotation,
+                    src.reader.path(),
+                    reading,
+                )?,
+            };
             src.normalized = Some(made.ok_or_else(no_picture)?);
+            if big.is_some() && !src.told {
+                crate::progress::note(super::Note::Upscaled(super::UpscaleNote {
+                    path: src.reader.path().to_path_buf(),
+                    how: format!(
+                        "AI (Real-ESRGAN), Noise Reduction {:?}",
+                        super_scale.noise_reduction
+                    ),
+                }));
+                src.told = true;
+            }
         }
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
         let mut out = match self.maker.output() {

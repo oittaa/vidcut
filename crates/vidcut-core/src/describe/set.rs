@@ -284,6 +284,13 @@ fn ease(v: &Value) -> String {
     }
 }
 
+fn upscaler(v: &Value) -> String {
+    match v.as_str() {
+        Some("ai") => "AI".into(),
+        _ => word(v),
+    }
+}
+
 fn color_space(v: &Value) -> String {
     match v.as_str() {
         Some("bt709") => "BT.709".into(),
@@ -695,6 +702,12 @@ impl Words<'_> {
         });
         s.put("sharpness", "Sharpness", &word, |m| {
             json!(m.super_scale.sharpness)
+        });
+        s.put("upscaler", "Upscaler", &upscaler, |m| {
+            json!(m.super_scale.upscaler)
+        });
+        s.put("noise_reduction", "Noise Reduction", &word, |m| {
+            json!(m.super_scale.noise_reduction)
         });
         s.f.text()
     }

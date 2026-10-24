@@ -1,8 +1,8 @@
 # AI upscaling for Super Scale
 
-**When:** after Super Scale has its other GPUs ([super-scale.md](super-scale.md)). First a test of speed, with the owner's OK for the plan.
+**When:** next.
 
-Super Scale uses classic upscalers ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). They make edges smooth, but they add no detail. A neural network can add detail. This file holds what is known about the open models and about the ways to run them.
+The exports of Super Scale have an AI upscaler: Real-ESRGAN on shaders of vidcut's own ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). This file holds what is known about the open models and about the ways to run them, and what is still to do.
 
 ## The models
 
@@ -30,10 +30,14 @@ Super Scale uses classic upscalers ([X91](../deviations.md#x91-super-scale-uses-
   - The `models` module downloads a model at its first use and checks it. An upscaler's weights can come the same way.
   - Transcription runs transcribe.cpp on ggml, on Vulkan or Metal, from a prebuilt library that vidcut downloads.
   - stable-diffusion.cpp is said to run ESRGAN on ggml. This is not checked yet.
+- **Shaders of vidcut's own** on wgpu: vidcut uses these.
+  - They need no new library. They run on every GPU maker that wgpu has.
+  - Each network needs its own shaders. A small convolution network such as Real-ESRGAN's compact model needs few.
 - **burn** on wgpu ([repo](https://github.com/tracel-ai/burn)):
-  - MIT or Apache-2.0. It runs on every GPU maker, and it can share the wgpu device of the viewer.
-  - `burn-onnx` turns the ONNX file into Rust code at build time. Thus each network is built into vidcut, and the weights load at run time.
-  - No speed figures were found.
+  - MIT or Apache-2.0. It runs on every GPU maker.
+  - It loads the official `.pth` files with `PytorchStore`. It needs no ONNX file and no Python.
+  - It makes vidcut.exe 57 MB larger, because it brings its own kernel library (CubeCL).
+  - Its fast path uses the tensor cores through Vulkan only (SPIR-V with cooperative matrices). Without it, it is 26 times slower.
 - **ncnn** on Vulkan ([repo](https://github.com/Tencent/ncnn)):
   - BSD-3-Clause, 11.5 to 16.6 MB. It runs Real-ESRGAN on every GPU maker. A Mac needs MoltenVK.
   - Its Rust binding was last published in 2021. It cannot take vidcut's Vulkan device, so frames are copied or imported.
@@ -51,20 +55,59 @@ Super Scale uses classic upscalers ([X91](../deviations.md#x91-super-scale-uses-
 
 The owner wants the video models where they give better pictures. They can run in exports only:
 
-- The viewer shows Super Scale nowhere, and a proxy can play in its place. Thus a slow model does not hurt playback.
+- The viewer shows Super Scale only with View > Show Super Scale, and a proxy can play in its place. Thus a slow model does not hurt playback.
 - An export reads each clip in order. Thus it can give the model the frames before and after each frame.
 - At a cut, the frames past the cut usually are in the file. The export can read them.
 - RealBasicVSR was trained on REDS, which is CC BY 4.0. Thus its license is clearer than that of Real-ESRGAN.
 - Its weights are 210 MB. They download at the first use.
 - RealBasicVSR flickers less than Real-ESRGAN in a published measurement. Another paper finds such models blurrier. Thus a side-by-side test decides.
-- Their deformable convolution limits the engines. burn lists `DeformConv` as supported. No ONNX conversion of BasicVSR++ is in wide use.
+- Their deformable convolution limits the engines. No ONNX conversion of BasicVSR++ is in wide use.
+
+## Test results
+
+The tests ran on the owner's RTX 4080 SUPER on 2026-10-24, in programs outside vidcut.
+
+- The input was one 1280×534 frame of "Tears of Steel". The output was 5120×2136.
+
+| Engine | Model | Precision | Time for each frame |
+|---|---|---|---|
+| burn 0.22.1, Vulkan | `realesr-general-x4v3` | 32-bit | 1.08–1.14 s |
+| burn 0.22.1, Vulkan | `realesr-general-x4v3` | 16-bit | 39 ms (25 fps) |
+| burn 0.22.1, Vulkan | `realesr-general-x4v3`, 640×267 input | 16-bit | 8.5 ms |
+| burn 0.22.1, Vulkan | `realesr-animevideov3` | 16-bit | 21 ms (47 fps) |
+| burn 0.22.1, without Vulkan | `realesr-general-x4v3` | 16-bit | 1027 ms |
+| Own WGSL shaders | `realesr-general-x4v3` | 16-bit values, 32-bit sums | 80 ms (12.5 fps) |
+
+- The 16-bit pictures of burn are at most 2 of 255 levels from the 32-bit ones.
+- burn's pictures of `realesr-animevideov3` match those of the official Real-ESRGAN-ncnn-vulkan tool. Only 0.04% of the pixels are more than 4 levels apart.
+- The pictures of the own shaders are at most 3 of 255 levels from those of burn.
+- The speed of the own shaders inside vidcut is not measured yet. vidcut adds the tiles and the copies through memory.
+- The pictures are much sharper than a classic upscaler. The model removes compression blocks. It also makes skin smooth, as if painted.
+- The official denoise strength fixes most of this. It mixes the weights of `realesr-general-x4v3` (times the strength) and `realesr-general-wdn-x4v3` (times one less the strength) once, at load. The speed is the same.
+- At a strength of 0.5, the edges stay sharp and the skin keeps its lines. The owner and Claude both found 0.5 the best.
+
+## Decisions
+
+- The weights download at their first use. vidcut does not ship them. The owner accepts their license on that basis.
+- Super Scale gets Noise Reduction, as Resolve has (p. 433). Low, Medium and High give a denoise strength of 0.2, 0.5 and 1.0. Medium is the default.
+- A mix with the classic upscaler can come later, as an extra.
 
 ## Plan
 
-1. A test: run `realesr-general-x4v3` with burn on wgpu, on the owner's RTX 4080. Measure the frames per second at 720p in and 1080p out.
-2. If burn is too slow, the same test with ncnn on Vulkan.
-3. A second test: convert RealBasicVSR for burn, and compare it with Real-ESRGAN on the same clip.
-4. Decide about the weights' licenses with the owner.
-5. Then Super Scale gets AI choices beside the classic upscaler: a model for each frame, and a video model for exports.
+AI Super Scale is built for exports ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). These parts are still to do:
+
+1. Winograd convolutions in the shaders. They need 16 multiplications for each 2×2 block of output, in place of 36. burn's tensor cores were 2 times faster than the shaders are now.
+2. The AI upscaler in the viewer, with View > Show Super Scale. With AI, the viewer uses the kernel of Sharpness now.
+3. Frames from the GPU decoders straight into the shaders, with no copy through memory.
+4. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
+5. A mix with the classic upscaler, as an extra.
+6. A test of the video models: RealBasicVSR as shaders of vidcut's own, compared with Real-ESRGAN on the same clip.
+
+The weights are on Real-ESRGAN's release v0.2.5.0:
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `realesr-general-x4v3.pth` | 4885111 | `8dc7edb9ac80ccdc30c3a5dca6616509367f05fbc184ad95b731f05bece96292` |
+| `realesr-general-wdn-x4v3.pth` | 4885111 | `1641f8c4464b9f097c9fdda5589273713f67cf59f3d909e0bd688f0cee269dca` |
 
 Sources: the research of October 2026, with the links in this file and in the pull request that adds it.

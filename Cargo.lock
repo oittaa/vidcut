@@ -5176,6 +5176,7 @@ dependencies = [
  "flate2",
  "libc",
  "libloading 0.9.0",
+ "pollster 1.0.1",
  "rustfft",
  "serde",
  "serde_json",
@@ -5188,9 +5189,11 @@ dependencies = [
  "transcribe-cpp-sys",
  "ureq",
  "vidcut-core",
+ "wgpu",
  "windows",
  "windows-sys 0.61.2",
  "zeno",
+ "zip",
 ]
 
 [[package]]

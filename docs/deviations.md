@@ -1786,18 +1786,32 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The project setting also has Auto (p. 149).
   - It makes a clip of a higher resolution, which often stops playback in real time (p. 288). The usual sizing then fits that clip.
 - **vidcut:**
-  - Super Scale is Off, Auto, 2x, 3x or 4x, with a Sharpness of Low, Medium or High. There is no Noise Reduction and no Enhanced mode.
+  - Super Scale is Off, Auto, 2x, 3x or 4x. Its Upscaler is AI or Classic. There is no Enhanced mode.
+  - AI is the default. It is Real-ESRGAN's compact model `realesr-general-x4v3`. vidcut runs it with its own compute shaders on the GPU, through wgpu.
+    - Noise Reduction Low, Medium and High mix in the light-denoise model at a denoise strength of 0.2, 0.5 and 1.0.
+    - The weights download at their first use. vidcut does not ship them.
+    - AI takes SDR pictures up to 4K. A large picture goes through the network in tiles.
+    - Before an export starts, it refuses media that AI cannot take. The error names each file and the reason.
+    - It also refuses AI without the weights, or without a GPU that can run the network.
+    - The Inspector and the pool show a warning under Upscaler for media that AI cannot take.
+    - The export's report names the files that AI enlarged.
+  - Classic has a Sharpness of Low, Medium or High.
   - The factor limits only how large a placed picture is made. A picture that fills the frame takes the better upscaler for all of its enlargement.
   - Auto is as much as the picture needs, up to 4x.
   - The Inspector of the Cut page has a Super Scale section for the media of the selected clips.
-  - An export enlarges a picture with the upscaler that its path has:
+  - With Classic, an export enlarges a picture with the upscaler that its path has:
     - Pictures that NVIDIA's GPU fits for NVENC: libplacebo, in linear light. Low is `ewa_lanczos`, Medium `ewa_lanczossharp` and High `ewa_lanczos4sharpest`.
     - Pictures that the CPU makes, also placed pictures: swscale. Low is `spline`, Medium `lanczos` and High `lanczos` with four lobes.
     - The other GPUs fit the picture as before. They have no Super Scale yet ([todo](todo/super-scale.md)).
   - The viewer shows Super Scale only with View > Show Super Scale, which is off by default.
   - The viewer then enlarges with its own kernels: Catmull-Rom (Low), Lanczos with 3 lobes (Medium) and with 4 lobes (High).
+  - The viewer has no AI upscaler yet. With AI, it uses the kernel of Sharpness ([todo](todo/ai-upscaling.md)).
 - **Why:**
-  - The upscalers of the GPU are free and run on every computer. They do not need a separate download.
+  - Real-ESRGAN adds detail that a classic upscaler cannot. Its denoise strength keeps skin from looking painted. In a test, 0.5 looked best.
+  - The network has only 34 layers of 3×3 convolutions. Shaders of its own run it on the GPU of every maker through wgpu, with no new library.
+  - The shaders keep the values between the layers as 16-bit floats, and add in 32-bit floats. This halves the memory traffic. It needs no GPU feature.
+  - A different upscaler would change the result without the user's choice. Thus an export refuses, and the user selects Classic or Off.
+  - The classic upscalers of the GPU are free and run on every computer. They do not need a separate download.
   - These upscalers can go to any size in one step. Thus all of the enlargement gets the better upscaler, not only the factor.
   - By default, the viewer stays in real time. The switch lets the user check the result in the viewer.
 

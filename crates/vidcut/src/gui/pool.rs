@@ -1586,40 +1586,54 @@ impl Workspace {
                     }
                 }
             });
+            let mut put = None;
             ui.menu_button("Super Scale", |ui| {
-                use vidcut_core::model::{ScaleFactor, Sharpness};
+                use super::super_scale::{FACTORS, NOISE, SHARPNESS, UPSCALERS};
+                use vidcut_core::model::Upscaler;
                 let now = m.super_scale;
-                for (factor, label) in [
-                    (ScaleFactor::None, "Off"),
-                    (ScaleFactor::Auto, "Auto"),
-                    (ScaleFactor::X2, "2x"),
-                    (ScaleFactor::X3, "3x"),
-                    (ScaleFactor::X4, "4x"),
-                ] {
+                for (factor, label) in FACTORS {
                     if ui.radio(now.factor == factor, label).clicked() {
-                        self.send("media.set", json!({ "media": ids, "super_scale": factor }));
-                        ui.close();
+                        put = Some(json!({ "super_scale": factor }));
                     }
                 }
                 ui.separator();
                 ui.add_enabled_ui(!now.is_off(), |ui| {
-                    ui.menu_button("Sharpness", |ui| {
-                        for (sharpness, label) in [
-                            (Sharpness::Low, "Low"),
-                            (Sharpness::Medium, "Medium"),
-                            (Sharpness::High, "High"),
-                        ] {
-                            if ui.radio(now.sharpness == sharpness, label).clicked() {
-                                self.send(
-                                    "media.set",
-                                    json!({ "media": ids, "sharpness": sharpness }),
-                                );
-                                ui.close();
+                    ui.menu_button("Upscaler", |ui| {
+                        for (upscaler, label) in UPSCALERS {
+                            if ui.radio(now.upscaler == upscaler, label).clicked() {
+                                put = Some(json!({ "upscaler": upscaler }));
                             }
                         }
                     });
+                    if let Some(text) = super::super_scale::unfit(now, [m]) {
+                        super::dialog::warn(ui, text);
+                    }
+                    ui.add_enabled_ui(now.upscaler == Upscaler::Ai, |ui| {
+                        ui.menu_button("Noise Reduction", |ui| {
+                            for (noise, label) in NOISE {
+                                if ui.radio(now.noise_reduction == noise, label).clicked() {
+                                    put = Some(json!({ "noise_reduction": noise }));
+                                }
+                            }
+                        });
+                    });
+                    ui.add_enabled_ui(now.upscaler == Upscaler::Classic, |ui| {
+                        ui.menu_button("Sharpness", |ui| {
+                            for (sharpness, label) in SHARPNESS {
+                                if ui.radio(now.sharpness == sharpness, label).clicked() {
+                                    put = Some(json!({ "sharpness": sharpness }));
+                                }
+                            }
+                        });
+                    });
                 });
+                if put.is_some() {
+                    ui.close();
+                }
             });
+            if let Some(params) = put {
+                self.set_super_scale(&ids, params);
+            }
         }
         if let Some(p) = self.project_shared() {
             ui.menu_button("Move to Bin", |ui| {

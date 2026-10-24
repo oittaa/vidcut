@@ -2916,6 +2916,17 @@ impl Live {
                     None => Step::Now(self.edit(envelope, job.origin)),
                 }
             }
+            Request::MediaSet { download: true, .. }
+                if !envelope.dry_run
+                    && !vidcut_av::upscale::needed(&paths::models_dir()).is_empty() =>
+            {
+                let fetch = || {
+                    vidcut_av::upscale::get_ready(&paths::models_dir(), true).map_err(|e| {
+                        crate::export::av_error(&e, vidcut_core::ErrorCode::Media, String::new())
+                    })
+                };
+                Step::Measure(Box::new(fetch), Box::new(envelope))
+            }
             Request::ClipSet {
                 voice_isolation: Some(amount),
                 download: true,
