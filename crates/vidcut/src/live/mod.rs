@@ -535,6 +535,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         guides: crate::preferences::load()
             .map(|p| p.viewer.guides)
             .unwrap_or_default(),
+        show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
         budget,
@@ -618,6 +619,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         guides: crate::preferences::load()
             .map(|p| p.viewer.guides)
             .unwrap_or_default(),
+        show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
         audio_noticed: None,
         playing: false,
         waits: Vec::new(),
@@ -889,6 +891,7 @@ struct Live {
     timecode_display: TimecodeDisplay,
     timer1_origin: Timer1Origin,
     guides: vidcut_core::preferences::Guides,
+    show_super_scale: bool,
     audio_noticed: Option<String>,
     playing: bool,
     waits: Vec<Wait>,
@@ -1107,6 +1110,12 @@ impl Live {
                     .unwrap_or_default();
                 if self.guides != guides {
                     self.guides = guides;
+                    changed = true;
+                }
+                let show_super_scale =
+                    crate::preferences::load().is_ok_and(|p| p.viewer.super_scale);
+                if self.show_super_scale != show_super_scale {
+                    self.show_super_scale = show_super_scale;
                     changed = true;
                 }
                 self.follow_budget();
@@ -1400,6 +1409,7 @@ impl Live {
             timecode_display: self.timecode_display,
             timer1_origin: self.timer1_origin,
             guides: self.guides,
+            show_super_scale: self.show_super_scale,
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
             budget: self.player.budget(),

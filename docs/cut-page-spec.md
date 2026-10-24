@@ -171,6 +171,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The factor is the most that a placed picture is made larger than its source, before it is placed. Auto is as much as the picture needs, up to 4x.
   - A picture that fills the frame takes the better upscaler for all of its enlargement. The factor does not change it.
   - Super Scale works only where a picture is enlarged. A picture that is made smaller is scaled as before.
+  - View > Show Super Scale shows it in the viewer (`viewer.super_scale`). It is off by default, as it costs playback speed.
   - `media.set` sets `super_scale` and `sharpness`.
 - **Relinking media** (pp. 668–669):
   - An item whose file is missing has the mark MISSING.

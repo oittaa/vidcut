@@ -1794,11 +1794,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Pictures that NVIDIA's GPU fits for NVENC: libplacebo, in linear light. Low is `ewa_lanczos`, Medium `ewa_lanczossharp` and High `ewa_lanczos4sharpest`.
     - Pictures that the CPU makes, also placed pictures: swscale. Low is `spline`, Medium `lanczos` and High `lanczos` with four lobes.
     - The other GPUs fit the picture as before. They have no Super Scale yet ([todo](todo/super-scale.md)).
-  - The viewer shows the picture without Super Scale.
+  - The viewer shows Super Scale only with View > Show Super Scale, which is off by default.
+  - The viewer then enlarges with its own kernels: Catmull-Rom (Low), Lanczos with 3 lobes (Medium) and with 4 lobes (High).
 - **Why:**
   - The upscalers of the GPU are free and run on every computer. They do not need a separate download.
   - These upscalers can go to any size in one step. Thus all of the enlargement gets the better upscaler, not only the factor.
-  - The viewer stays in real time.
+  - By default, the viewer stays in real time. The switch lets the user check the result in the viewer.
 
 ## X89. A wipe reveals from one edge
 

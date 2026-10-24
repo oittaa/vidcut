@@ -15,7 +15,6 @@ Super Scale enlarges pictures with a better upscaler ([X91](../deviations.md#x91
 - **The other GPUs** (VA-API, Direct3D 11 on Intel, Vulkan): they fit pictures as before. A picture with Super Scale could come down to the CPU, or use libplacebo where Vulkan works.
 - **The export's report:** it does not yet say which upscaler each file used.
 - **Placed pictures on NVENC:** they are made on the CPU. libplacebo could make them on the GPU.
-- **The viewer:** it shows pictures without Super Scale. A paused frame could show it.
 - **Noise Reduction and the Enhanced modes** of Resolve (p. 433).
 - **Measure** (with a plan that the owner accepts first):
   - The time of an export with a zoomed clip, made on the CPU and on the GPU.

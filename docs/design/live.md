@@ -358,7 +358,7 @@ The bar and the Jobs button:
     - `gui.show transform`, `crop` or `dynamic_zoom`
   - Framing and safe-area guides (`Guides`, `GuideOverlay`) draw in egui over the picture after the texture and before the handles (`paint_guides`).
   - `Guides::overlay` builds the boxes. `Screen::draw` does not, so an export leaves them out ([deviation X80](../deviations.md#x80-safe-area-guides-skip-the-trim-editor-and-dynamic-trim)).
-  - `viewer.guides` and `preferences.set` change `ViewerPrefs` (`Preferences.viewer`). The snapshot carries `guides`.
+  - `viewer.guides` and `preferences.set` change `ViewerPrefs` (`Preferences.viewer`). The snapshot carries `guides` and `show_super_scale`.
   - `viewer.guides` on a running GUI copies `guides` onto the snapshot at once.
   - `Workspace::safe_area_control` and View > Safe Area send `viewer.guides`.
   - `Workspace::picture_controls` draws the handles of the tool on the selected clip at the playhead. It boxes them through the same `place::Placing` as the picture ([deviation X65](../deviations.md#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)).

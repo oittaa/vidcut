@@ -164,6 +164,23 @@ impl Plan {
             .collect()
     }
 
+    pub(crate) fn scales_at(&self, t: i64) -> Vec<Option<vidcut_core::model::Sharpness>> {
+        let (i, _) = self.locate(t);
+        let Some(piece) = self.plan.video.get(i) else {
+            return Vec::new();
+        };
+        piece
+            .layers()
+            .into_iter()
+            .map(|(l, _)| match l {
+                VideoPiece::Source { super_scale, .. } => {
+                    (!super_scale.is_off()).then_some(super_scale.sharpness)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     pub(crate) fn crosses_at(&self, t: i64) -> Vec<bool> {
         let (i, _) = self.locate(t);
         self.plan

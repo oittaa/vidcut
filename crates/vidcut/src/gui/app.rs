@@ -265,7 +265,9 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let gate = self.gate.clone();
         let _open = gate.opened();
-        let (texture, has_frame) = self.viewer.sync(&self.render, self.ws.want);
+        let (texture, has_frame) =
+            self.viewer
+                .sync(&self.render, self.ws.want, self.ws.snap.show_super_scale);
         self.ws.picture = Picture { texture, has_frame };
         self.ws.levels = self.viewer.levels();
         let ctx = ui.ctx().clone();

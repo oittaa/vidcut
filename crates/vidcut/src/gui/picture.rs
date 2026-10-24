@@ -419,6 +419,7 @@ pub struct Screen {
     target: Option<Target>,
     mixing: Option<Mixing>,
     drawn_crosses: Vec<bool>,
+    drawn_kernels: Vec<u32>,
     drawn: Option<Option<Arc<Picture>>>,
     drawn_titles: Vec<TitleOver>,
     drawn_placed: Vec<Vec<Placed>>,
@@ -750,7 +751,7 @@ impl Screen {
         gpu: &Gpu,
         picture: Option<&Arc<Picture>>,
         titles: &[TitleOver],
-        (placed, crosses): (&[Vec<Placed>], &[bool]),
+        (placed, crosses, kernels): (&[Vec<Placed>], &[bool], &[u32]),
         width: u32,
         height: u32,
     ) -> Drawn {
@@ -758,10 +759,10 @@ impl Screen {
         let size = (width.clamp(2, max), height.clamp(2, max));
         let flat = self.flat_wipe(picture, placed, crosses, size);
         let picture = flat.as_ref().or(picture);
-        let (placed, crosses) = if flat.is_some() {
-            (&[][..], &[][..])
+        let (placed, crosses, kernels) = if flat.is_some() {
+            (&[][..], &[][..], &[][..])
         } else {
-            (placed, crosses)
+            (placed, crosses, kernels)
         };
         let mut drawn = Drawn::Picture;
         if self.target.as_ref().is_none_or(|t| t.size != size) {
@@ -774,7 +775,8 @@ impl Screen {
                 _ => false,
             } && same_titles(&self.drawn_titles, titles)
                 && self.drawn_placed == placed
-                && self.drawn_crosses == crosses;
+                && self.drawn_crosses == crosses
+                && self.drawn_kernels == kernels;
             if same {
                 return Drawn::Same;
             }
@@ -820,7 +822,9 @@ impl Screen {
                     let fitted = [x, y, w, h].map(f64::from);
                     (Placing::new(p, frame, fitted), level.unwrap_or(1.0))
                 });
-                let bind = slot.prepare(gpu, picture, size, placing.as_ref(), &mut encoder);
+                let kernel = kernels.get(i).copied().unwrap_or(0);
+                let bind =
+                    slot.prepare(gpu, picture, size, (placing.as_ref(), kernel), &mut encoder);
                 (bind, level, placing.is_some())
             })
             .collect();
@@ -924,6 +928,7 @@ impl Screen {
         self.drawn_titles = titles.to_vec();
         self.drawn_placed = placed.to_vec();
         self.drawn_crosses = crosses.to_vec();
+        self.drawn_kernels = kernels.to_vec();
         drawn
     }
 }
@@ -934,7 +939,7 @@ impl Slot {
         gpu: &Gpu,
         picture: &Arc<Picture>,
         size: (u32, u32),
-        placing: Option<&(Placing, f64)>,
+        (placing, kernel): (Option<&(Placing, f64)>, u32),
         encoder: &mut wgpu::CommandEncoder,
     ) -> wgpu::BindGroup {
         self.filled = None;
@@ -956,7 +961,7 @@ impl Slot {
         gpu.queue.write_buffer(
             params,
             0,
-            &params_of(picture, size, gpu.wide, cover, placing),
+            &params_of(picture, size, gpu.wide, cover, (placing, kernel)),
         );
         let planes = self.planes.as_ref().expect("uploaded");
         let view = |t: &wgpu::Texture| t.create_view(&Default::default());
@@ -2113,7 +2118,7 @@ fn params_of(
     size: (u32, u32),
     wide: bool,
     cover: (f64, f64),
-    placing: Option<&(Placing, f64)>,
+    (placing, kernel): (Option<&(Placing, f64)>, u32),
 ) -> Vec<u8> {
     let colors = shader_colors(picture.colors());
     let (x, y, w, h) = picture.placement(size.0, size.1);
@@ -2159,7 +2164,7 @@ fn params_of(
     }
     let uv = u32::from(interleaved(layout));
     let (across, down) = per_chroma(layout);
-    for v in [hdr, turns, uv, 0, across, down, 0, 0] {
+    for v in [hdr, turns, uv, kernel, across, down, 0, 0] {
         out.extend_from_slice(&v.to_le_bytes());
     }
     let levels = innermost(placing.map(|(p, _)| p));
