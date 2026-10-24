@@ -211,6 +211,39 @@ pub(super) fn attend(gpu: &Gpu, pass: &mut wgpu::ComputePass, a: &Attend, first:
     );
 }
 
+pub(super) struct WinoIn<'a> {
+    pub(super) src: &'a wgpu::Buffer,
+    pub(super) src2: &'a wgpu::Buffer,
+    pub(super) out: &'a wgpu::Buffer,
+    pub(super) values: [u32; 16],
+}
+
+pub(super) fn wino_in(gpu: &Gpu, pass: &mut wgpu::ComputePass, w: &WinoIn, threads: u32) {
+    let pipe = gpu.pipe("winoin", || gpu.half(include_str!("winoin.wgsl")));
+    let p = gpu.uniform(&w.values);
+    gpu.dispatch(pass, &pipe, p, &[w.src, w.src2, w.out], threads.div_ceil(256));
+}
+
+pub(super) struct WinoOut<'a> {
+    pub(super) m: &'a wgpu::Buffer,
+    pub(super) bias: &'a wgpu::Buffer,
+    pub(super) aux: &'a wgpu::Buffer,
+    pub(super) out: &'a wgpu::Buffer,
+    pub(super) values: [u32; 8],
+}
+
+pub(super) fn wino_out(gpu: &Gpu, pass: &mut wgpu::ComputePass, w: &WinoOut, threads: u32) {
+    let pipe = gpu.pipe("winoout", || gpu.half(include_str!("winoout.wgsl")));
+    let p = gpu.uniform(&w.values);
+    gpu.dispatch(
+        pass,
+        &pipe,
+        p,
+        &[w.m, w.bias, w.aux, w.out],
+        threads.div_ceil(256),
+    );
+}
+
 pub(super) struct Resize<'a> {
     pub(super) src: &'a wgpu::Buffer,
     pub(super) bounds: &'a wgpu::Buffer,

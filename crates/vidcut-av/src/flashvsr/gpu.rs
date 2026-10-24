@@ -40,6 +40,7 @@ pub(super) struct Gpu {
     pipes: Mutex<HashMap<String, wgpu::ComputePipeline>>,
     ring: Mutex<Ring>,
     groups: Mutex<HashMap<Key, wgpu::BindGroup>>,
+    scratch: Mutex<Option<(wgpu::Buffer, wgpu::Buffer)>>,
 }
 
 pub(super) fn storage() -> wgpu::BufferUsages {
@@ -161,6 +162,7 @@ impl Gpu {
                 dirty: 0,
             }),
             groups: Mutex::new(HashMap::new()),
+            scratch: Mutex::new(None),
         })
     }
 
@@ -179,6 +181,24 @@ impl Gpu {
             "fn h2(w: u32) -> vec2<f32> {\n    return unpack2x16float(w);\n}\n"
         };
         format!("{h2}\n{body}")
+    }
+
+    pub(super) fn scratch(&self, first: u64, second: u64) -> (wgpu::Buffer, wgpu::Buffer) {
+        let mut s = self.scratch.lock().unwrap_or_else(PoisonError::into_inner);
+        let fits = s
+            .as_ref()
+            .is_some_and(|(a, b)| a.size() >= first && b.size() >= second);
+        if !fits {
+            let (a, b) = s.take().map_or((first, second), |(a, b)| {
+                (a.size().max(first), b.size().max(second))
+            });
+            *s = Some((self.buffer(a as usize), self.buffer(b as usize)));
+        }
+        s.clone().expect("made")
+    }
+
+    pub(super) fn free_scratch(&self) {
+        *self.scratch.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 
     pub(super) fn buffer(&self, size: usize) -> wgpu::Buffer {

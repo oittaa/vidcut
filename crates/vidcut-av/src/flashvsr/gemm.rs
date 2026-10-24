@@ -135,7 +135,7 @@ fn loader(load: Load) -> &'static str {
         Load::Rows => {
             r#"
 fn a_row(m: u32) -> vec4<u32> {
-    return vec4<u32>(select(0u, 1u, m < shape.m), m * par(0u), 0u, 0u);
+    return vec4<u32>(select(0u, 1u, m < shape.m), (par(1u) + m) * par(0u), 0u, 0u);
 }
 
 fn a_word(r: vec4<u32>, k2: u32, tap: u32, ci: u32) -> u32 {
@@ -353,7 +353,7 @@ fn storer(store: Store) -> String {
 "#
         .into(),
     };
-    let offset = if matches!(store, Store::Gated) {
+    let offset = if matches!(store, Store::Gated | Store::Full) {
         "par(11u) + m"
     } else {
         "m"

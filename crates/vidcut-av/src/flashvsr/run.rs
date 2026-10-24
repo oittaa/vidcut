@@ -2,8 +2,10 @@ use std::path::PathBuf;
 
 use super::gemm::{self, Act, Gemm, Load, Store};
 use super::gpu::{Gpu, floats};
-use super::kernels::{self, Attend, DecInput, Grid, Last, Norm, Resize, Unshuffle};
-use super::model::{Block, Linear, MemBlock, Model};
+use super::kernels::{
+    self, Attend, DecInput, Grid, Last, Norm, Resize, Unshuffle, WinoIn, WinoOut,
+};
+use super::model::{Block, Linear, MemBlock, Model, Wino};
 use super::{DIM, FFN, dump, resize};
 use crate::compute::{bytes, words};
 use crate::error::{Error, Result};
@@ -11,6 +13,7 @@ use crate::error::{Error, Result};
 const RING: u64 = 20;
 const SLAB: u32 = 16384;
 const BAND: u32 = 64;
+const WINO_ROWS: u32 = 16;
 const ATTEND: u32 = 19200;
 const CROSS: u32 = 128;
 const GLOBAL_RANGE: u32 = 11;
@@ -244,6 +247,10 @@ fn plane(
     store: Store,
     aux: Option<&wgpu::Buffer>,
 ) {
+    if let Some(u) = &l.wino {
+        winograd(gpu, pass, (l, u), p, out, (store, aux));
+        return;
+    }
     let ctot = l.k / 9;
     gemm::run(
         gpu,
@@ -276,6 +283,95 @@ fn plane(
             aux,
         },
     );
+}
+
+fn winograd(
+    gpu: &Gpu,
+    pass: &mut wgpu::ComputePass,
+    (l, u): (&Linear, &Wino),
+    p: &Plane,
+    out: &wgpu::Buffer,
+    (store, aux): (Store, Option<&wgpu::Buffer>),
+) {
+    let (ctot, cout) = (l.k / 9, l.n);
+    let (act, skip) = match store {
+        Store::Half(Act::None) => (0, 0),
+        Store::Half(Act::Relu) => (1, 0),
+        Store::Skip => (0, 1),
+        _ => panic!("Winograd takes a half store with ReLU or none, or a skip"),
+    };
+    let tw = p.w.div_ceil(2);
+    let th = p.rows.div_ceil(2);
+    for tr0 in (0..th).step_by(WINO_ROWS as usize) {
+        let tiles = WINO_ROWS.min(th - tr0) * tw;
+        let (v, m) = gpu.scratch(
+            16 * u64::from(tiles) * u64::from(ctot) * 2,
+            16 * u64::from(tiles) * u64::from(cout) * 4,
+        );
+        kernels::wino_in(
+            gpu,
+            pass,
+            &WinoIn {
+                src: p.src,
+                src2: p.two.unwrap_or(p.src),
+                out: &v,
+                values: [
+                    p.w,
+                    p.h,
+                    p.y0,
+                    p.rows,
+                    p.cin,
+                    p.stride,
+                    p.offset,
+                    p.cin / 2,
+                    u32::from(p.up),
+                    p.sy0,
+                    ctot,
+                    tw,
+                    tr0,
+                    tiles,
+                    0,
+                    0,
+                ],
+            },
+            tiles * (ctot / 2),
+        );
+        for (xi, w) in u.u.iter().enumerate() {
+            let at = xi as u32 * tiles;
+            let mut values = params(&[ctot / 2, at]);
+            values[11] = at;
+            gemm::run(
+                gpu,
+                pass,
+                &Gemm {
+                    m: tiles,
+                    n: cout,
+                    k: ctot,
+                    load: Load::Rows,
+                    store: Store::Full,
+                    params: values,
+                    weights: w,
+                    bias: &u.zero,
+                    a: &v,
+                    a2: None,
+                    out: &m,
+                    aux: None,
+                },
+            );
+        }
+        kernels::wino_out(
+            gpu,
+            pass,
+            &WinoOut {
+                m: &m,
+                bias: &l.b,
+                aux: aux.unwrap_or(&l.b),
+                out,
+                values: [p.w, p.rows, cout, tw, tr0, tiles, act, skip],
+            },
+            tiles * (cout / 4),
+        );
+    }
 }
 
 fn noise(chunk: u64, count: usize) -> Vec<f32> {
@@ -370,8 +466,25 @@ fn chunk_work(g: &Geometry) -> u64 {
     let first = p8 * (784 + 3 * 512 + 4 * 256) * 2;
     let second = p8 * 4 * (2 * 256 + 512) * 2;
     let third = p8 * 4 * 512 * 2 + p8 * 16 * 2 * 128 * 2;
-    let decode = bands + first.max(second).max(third);
+    let decode = bands + first.max(second).max(third) + wino_scratch(g);
     lq.max(blocks).max(decode) + 2 * 16 * 4 * p8 * 4
+}
+
+fn wino_scratch(g: &Geometry) -> u64 {
+    let w = u64::from(g.wm);
+    [
+        (w / 8, 1024, 512),
+        (w / 8, 784, 512),
+        (w / 4, 512, 256),
+        (w / 2, 256, 128),
+        (w, 128, 128),
+    ]
+    .iter()
+    .map(|(width, cin, cout)| {
+        16 * u64::from(WINO_ROWS) * width.div_ceil(2) * (cin * 2 + cout * 4)
+    })
+    .max()
+    .unwrap_or(0)
 }
 
 fn gigabytes(b: u64) -> String {
@@ -1369,6 +1482,7 @@ impl Stream {
                 gpu.wait()?;
             }
         }
+        gpu.free_scratch();
         Ok(frames)
     }
 
