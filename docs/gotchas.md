@@ -374,7 +374,7 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
 
 ## transcribe.cpp and its models
 
-- **Qwen3-ASR gives no times** (transcribe.cpp 0.4.0).
+- **Qwen3-ASR gives no times** (transcribe.cpp 0.4.1).
   - One segment spans each run.
   - Spread over the speech of a long run, its text drifts from the words.
   - Against Parakeet Ultra's word times on `nasa-speech-1979`, 90% of the cue starts are within:

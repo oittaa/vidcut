@@ -157,7 +157,7 @@ impl Telling {
     }
 }
 
-const TRANSCRIBE: &str = "0.4.0";
+const TRANSCRIBE: &str = "0.4.1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Runtime {
@@ -191,40 +191,40 @@ impl Runtime {
 #[cfg(all(windows, target_arch = "x86_64"))]
 pub const RUNTIME: Option<Runtime> = Some(Runtime {
     lane: "windows-x86_64-cpu-vulkan",
-    bytes: 18_036_555,
-    sha256: "9d5bd89f720d7979323e73f5220fe50fad5e38a7b0c2525225d453bd09adf2b0",
+    bytes: 18_052_295,
+    sha256: "272eb97795048ccb557c85bb9dd44c9e530e1c928443114c39816a8a5f76269d",
     library: "transcribe.dll",
 });
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub const RUNTIME: Option<Runtime> = Some(Runtime {
     lane: "macos-arm64-metal",
-    bytes: 2_475_842,
-    sha256: "eeae15ef08cfbfdd059238765a1a0f790dd39e2f0fdb05bfbb601e183286f6d7",
+    bytes: 2_491_746,
+    sha256: "7369e36dc2a5fc5d52eee5766fa03ad22d3f533c8688bf1deccf3ffdc202ea24",
     library: "libtranscribe.dylib",
 });
 
 #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
 pub const RUNTIME: Option<Runtime> = Some(Runtime {
     lane: "macos-x86_64-cpu",
-    bytes: 1_600_612,
-    sha256: "e4da34c9cebd8b31ca2c1049296430ff7af1a851db436e23e08d3d66e09b7d0f",
+    bytes: 1_619_231,
+    sha256: "513a3976a2f0ebc0666c9670551e96c226e39ed14090a51f2efa0874f41258d8",
     library: "libtranscribe.dylib",
 });
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub const RUNTIME: Option<Runtime> = Some(Runtime {
     lane: "linux-x86_64-cpu-vulkan",
-    bytes: 22_546_161,
-    sha256: "f229adb9018bb7e33042137f92942022a5d76bfc5e16efd7a11cc9b115e86ea2",
+    bytes: 22_561_707,
+    sha256: "4b58e80c63d7f2b531b4e844b94c0703593f48a5be6afd829389cdda14a13edf",
     library: "libtranscribe.so",
 });
 
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 pub const RUNTIME: Option<Runtime> = Some(Runtime {
     lane: "linux-aarch64-cpu-vulkan",
-    bytes: 18_122_209,
-    sha256: "af7ee108923b74d3e727309ce4992714a25872ea77c6247da8be9a0ed54275dd",
+    bytes: 18_137_415,
+    sha256: "3671d8a07e256642d6bb38cc05ad8bbe88c76f814aeb704d1f8b57c61010db02",
     library: "libtranscribe.so",
 });
 
@@ -753,6 +753,7 @@ fn vad_model(vad: &Path) -> Result<tc::Model> {
         &tc::ModelOptions {
             backend: tc::Backend::Cpu,
             device: None,
+            no_mmap: false,
         },
     )
     .map_err(tc_error)
@@ -910,6 +911,7 @@ fn load(path: &Path, gpu: bool, warnings: &mut Vec<String>) -> Result<Loaded> {
                     &tc::ModelOptions {
                         backend,
                         device: Some(device),
+                        no_mmap: false,
                     },
                 ) {
                     Ok(model) => {
@@ -931,6 +933,7 @@ fn load(path: &Path, gpu: bool, warnings: &mut Vec<String>) -> Result<Loaded> {
         &tc::ModelOptions {
             backend: tc::Backend::Cpu,
             device: None,
+            no_mmap: false,
         },
     )
     .map_err(tc_error)?;

@@ -1,4 +1,4 @@
-pub const PUBLIC_HEADER_HASH: &str = "98540564cd329b85";
+pub const PUBLIC_HEADER_HASH: &str = "f99ad4169374b8f3";
 
 pub const TRANSCRIBE_BACKEND_MASK_CPU: u32 = 1;
 pub const TRANSCRIBE_BACKEND_MASK_METAL: u32 = 2;
@@ -411,11 +411,12 @@ pub struct transcribe_model_load_params {
     pub struct_size: u64,
     pub backend: transcribe_backend_request,
     pub device: transcribe_device_t,
+    pub no_mmap: bool,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of transcribe_model_load_params"]
-        [::std::mem::size_of::<transcribe_model_load_params>() - 24usize];
+        [::std::mem::size_of::<transcribe_model_load_params>() - 32usize];
     ["Alignment of transcribe_model_load_params"]
         [::std::mem::align_of::<transcribe_model_load_params>() - 8usize];
     ["Offset of field: transcribe_model_load_params::struct_size"]
@@ -424,6 +425,8 @@ const _: () = {
         [::std::mem::offset_of!(transcribe_model_load_params, backend) - 8usize];
     ["Offset of field: transcribe_model_load_params::device"]
         [::std::mem::offset_of!(transcribe_model_load_params, device) - 16usize];
+    ["Offset of field: transcribe_model_load_params::no_mmap"]
+        [::std::mem::offset_of!(transcribe_model_load_params, no_mmap) - 24usize];
 };
 pub unsafe fn transcribe_model_load_params_init(params: *mut transcribe_model_load_params) {
     unsafe {
