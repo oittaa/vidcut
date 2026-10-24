@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Read;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError, mpsc};
@@ -980,9 +983,12 @@ struct Engine {
     frame: Option<Frame>,
     tiles: Option<Tiles>,
     pending: Option<Pending>,
+    groups: RefCell<Groups>,
 }
 
 type Rest = Box<dyn FnOnce(Result<Vec<Vec<u8>>>) + Send>;
+
+type Groups = HashMap<u64, Vec<(wgpu::ComputePipeline, Vec<wgpu::Buffer>, wgpu::BindGroup)>>;
 
 struct Pending {
     wanted: usize,
@@ -1067,6 +1073,7 @@ impl Engine {
             frame: None,
             tiles: None,
             pending: None,
+            groups: RefCell::default(),
         })
     }
 
@@ -1156,6 +1163,7 @@ impl Engine {
             return;
         }
         self.frame = None;
+        self.groups.get_mut().clear();
         use wgpu::BufferUsages as U;
         let px = w * h;
         let feat = px * FEATURES * 2;
@@ -1180,6 +1188,7 @@ impl Engine {
     }
 
     fn make_tiles(&mut self) {
+        self.groups.get_mut().clear();
         let f = self.frame.as_ref().expect("frame made");
         let (w, h) = (f.w, f.h);
         use wgpu::BufferUsages as U;
@@ -1244,7 +1253,7 @@ impl Engine {
             dst,
         ];
         buffers.extend(&src[1..]);
-        let bind = group(&self.device, pipeline, &buffers);
+        let bind = self.bound(pipeline, &buffers);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind, &[]);
         let (x, y, z) = if shape.wino {
@@ -1259,6 +1268,35 @@ impl Engine {
         pass.dispatch_workgroups(x as u32, y as u32, z as u32);
     }
 
+    fn bound(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        buffers: &[&wgpu::Buffer],
+    ) -> wgpu::BindGroup {
+        let mut hasher = DefaultHasher::new();
+        pipeline.hash(&mut hasher);
+        for b in buffers {
+            b.hash(&mut hasher);
+        }
+        let mut groups = self.groups.borrow_mut();
+        let same = groups.entry(hasher.finish()).or_default();
+        let found = same.iter().find(|(p, bs, _)| {
+            p == pipeline
+                && bs.len() == buffers.len()
+                && bs.iter().zip(buffers).all(|(a, b)| a == *b)
+        });
+        if let Some((_, _, bind)) = found {
+            return bind.clone();
+        }
+        let bind = group(&self.device, pipeline, buffers);
+        same.push((
+            pipeline.clone(),
+            buffers.iter().map(|b| (*b).clone()).collect(),
+            bind.clone(),
+        ));
+        bind
+    }
+
     fn simple(
         &self,
         pass: &mut wgpu::ComputePass,
@@ -1266,7 +1304,7 @@ impl Engine {
         buffers: &[&wgpu::Buffer],
         (x, y): (u32, u32),
     ) {
-        let bind = group(&self.device, pipeline, buffers);
+        let bind = self.bound(pipeline, buffers);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind, &[]);
         pass.dispatch_workgroups(x, y, 1);
@@ -1505,6 +1543,7 @@ pub(crate) fn upscale(
         let Ok(first) = first else {
             e.frame = None;
             e.tiles = None;
+            e.groups.get_mut().clear();
             return first;
         };
         let mut outs = vec![Vec::new(); frames.len()];

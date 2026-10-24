@@ -197,7 +197,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - Why Winograd: the 3×3 convolutions do most of the work. Winograd needs fewer products, and fewer reads of workgroup memory for each product.
   - The usual fitting then makes that picture the size it shows at.
   - The frames go through memory, also from a GPU decoder.
-  - `upscale` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines and weights stay. Its buffers stay for the next chunk of the same size. They go when the size changes or the process ends.
+  - `upscale` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines and weights stay. Its buffers stay for the next chunk of the same size. They go when the size changes or the process ends. Its bind groups stay with the buffers, and each pass takes them from a cache.
   - `Note::Upscaled` names each file that an AI upscaler enlarged in the export's report (`ai::name`).
 - **AI Best** (`flashvsr`):
   - Before an export starts, `flashvsr::check` refuses media that AI Best cannot take (`flashvsr::unfit`). It also refuses AI Best without the weights or without a GPU that can run it. It loads the model then.
