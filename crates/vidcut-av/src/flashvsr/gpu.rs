@@ -134,6 +134,7 @@ impl Gpu {
                 "{name} has too little workgroup memory for the AI Best upscaler"
             ));
         }
+        crate::ai::runs_on(vidcut_core::model::Upscaler::AiBest, name.clone());
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("vidcut-flashvsr"),
             required_limits: limits,

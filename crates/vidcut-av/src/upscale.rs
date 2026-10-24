@@ -1023,6 +1023,7 @@ impl Engine {
                 adapter.get_info().name
             ));
         }
+        crate::ai::runs_on(Upscaler::AiFast, adapter.get_info().name);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("vidcut-upscale"),
             required_limits: limits,

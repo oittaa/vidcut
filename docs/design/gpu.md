@@ -162,6 +162,11 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
 - **The CPU:** `Normalizer::upscaling` uses `spline` or `lanczos` in place of `bicubic`.
 - **Placed pictures:** `layer_size` lets a layer grow to the factor times its source size (`ScaleFactor`). Auto lets it grow to four times.
 - A `Source` is used again only for a piece with the same Super Scale.
+- **The work report** (`ai::report`):
+  - `Source::ai_picture` and `Source::best_picture` report what the AI upscaler makes now and its last finished work (`ai::Work`).
+  - `ai::Making` clears a report when the work fails or stops.
+  - Each AI upscaler reports the GPU that runs it when it starts.
+  - The Super Scale group of the stats panel shows the report (`SuperScaleStats`).
 - **AI Fast** (`upscale`):
   - Before an export starts, `upscale::check` refuses media that AI Fast cannot take (`upscale::unfit`). It also refuses AI Fast without the weights or without a GPU that can run it.
   - In an export, `Source::ai_picture` finds the chunk of 15 frames that holds the source picture (`upscale::FRAMES`).
