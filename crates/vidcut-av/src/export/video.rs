@@ -611,46 +611,55 @@ impl Source {
         if let Some(p) = kept_picture(&id, pts)? {
             return Ok(Some(p));
         }
-        {
-            let clock = Instant::now();
-            let frames = match key {
-                (first, true) => self.read_chunk(first, reading)?,
-                (_, false) => vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?],
-            };
-            let rgbs = frames
-                .iter()
-                .map(|f| shown_rgb(f, rotation, size, reading))
-                .collect::<Result<Vec<_>>>()?;
-            let read = clock.elapsed();
-            let big = crate::upscale::upscale(&rgbs, (size.0 as usize, size.1 as usize))?;
-            crate::debug!(
-                "upscale",
-                "chunk {key:?} of {} frames at {size:?}: read and made RGB in {:.0} ms, upscaled in {:.0} ms",
-                rgbs.len(),
-                read.as_secs_f64() * 1e3,
-                (clock.elapsed() - read).as_secs_f64() * 1e3
-            );
-            let pictures: Vec<frame::Video> = big
-                .iter()
-                .zip(&frames)
-                .map(|(out, f)| big_picture(out, size, f.pts()))
-                .collect();
-            let chunk = Chunk {
-                bytes: big.iter().map(Vec::len).sum(),
-                id,
-                pictures,
-            };
-            let found = picture_of(&chunk, pts).map(frame_ref).transpose()?;
-            keep_chunk(chunk);
-            match found {
-                Some(p) => Ok(Some(p)),
-                None => Err(Error::Invalid(format!(
-                    "{}: the AI upscaler's chunk has no frame at {}",
-                    self.reader.path().display(),
-                    pts.unwrap_or(0)
-                ))),
-            }
+        crate::upscale::settle();
+        if let Some(p) = kept_picture(&id, pts)? {
+            return Ok(Some(p));
         }
+        let clock = Instant::now();
+        let frames = match key {
+            (first, true) => self.read_chunk(first, reading)?,
+            (_, false) => vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?],
+        };
+        let wanted = if key.1 {
+            frames.iter().position(|f| f.pts() == pts)
+        } else {
+            Some(0)
+        };
+        let Some(wanted) = wanted else {
+            return Err(Error::Invalid(format!(
+                "{}: the AI upscaler's chunk has no frame at {}",
+                self.reader.path().display(),
+                pts.unwrap_or(0)
+            )));
+        };
+        let rgbs = frames
+            .iter()
+            .map(|f| shown_rgb(f, rotation, size, reading))
+            .collect::<Result<Vec<_>>>()?;
+        let read = clock.elapsed();
+        let times: Vec<Option<i64>> = frames.iter().map(|f| f.pts()).collect();
+        let keep = move |big: Result<Vec<Vec<u8>>>| match big {
+            Ok(big) => keep_chunk(Chunk {
+                bytes: big.iter().map(Vec::len).sum(),
+                pictures: big
+                    .iter()
+                    .zip(&times)
+                    .map(|(out, &t)| big_picture(out, size, t))
+                    .collect(),
+                id,
+            }),
+            Err(e) => crate::debug!("upscale", "chunk {key:?}: {e}"),
+        };
+        let first =
+            crate::upscale::upscale(&rgbs, (size.0 as usize, size.1 as usize), wanted, keep)?;
+        crate::debug!(
+            "upscale",
+            "chunk {key:?} of {} frames at {size:?}: read and made RGB in {:.0} ms, frame {wanted} upscaled in {:.0} ms",
+            rgbs.len(),
+            read.as_secs_f64() * 1e3,
+            (clock.elapsed() - read).as_secs_f64() * 1e3
+        );
+        Ok(Some(big_picture(&first, size, pts)))
     }
 }
 

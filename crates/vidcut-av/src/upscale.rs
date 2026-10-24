@@ -1044,6 +1044,16 @@ struct Engine {
     net: Option<Gpu>,
     frame: Option<Frame>,
     tiles: Option<Tiles>,
+    pending: Option<Pending>,
+}
+
+type Rest = Box<dyn FnOnce(Result<Vec<Vec<u8>>>) + Send>;
+
+struct Pending {
+    wanted: usize,
+    size: (usize, usize),
+    outs: Vec<Vec<u8>>,
+    rest: Rest,
 }
 
 fn pipeline(device: &wgpu::Device, source: String) -> wgpu::ComputePipeline {
@@ -1158,6 +1168,7 @@ impl Engine {
             net: None,
             frame: None,
             tiles: None,
+            pending: None,
         })
     }
 
@@ -1393,7 +1404,12 @@ impl Engine {
         }
     }
 
-    fn run(&mut self, frames: &[Vec<u8>], (w, h): (usize, usize)) -> Result<Vec<Vec<u8>>> {
+    fn wanted_first(
+        &mut self,
+        frames: &[Vec<u8>],
+        (w, h): (usize, usize),
+        wanted: usize,
+    ) -> Result<Vec<u8>> {
         let device = self.device.clone();
         checked(&device, || {
             let clock = Instant::now();
@@ -1413,58 +1429,113 @@ impl Engine {
                 self.queue.write_buffer(&f.rgba[i], 0, &words(&rgba));
             }
             let net = self.net.as_ref().expect("loaded");
+            let n = frames.len();
             let mut enc = self.device.create_command_encoder(&Default::default());
             {
                 let mut pass = enc.begin_compute_pass(&Default::default());
-                for i in 0..frames.len() {
+                for i in 0..=wanted {
                     let prev = if i == 0 { &f.zero } else { &f.states[i - 1] };
                     self.chain(&mut pass, &net.forward, (i, prev, &f.states[i]));
                 }
-            }
-            self.queue.submit([enc.finish()]);
-            self.device
-                .poll(wgpu::PollType::wait_indefinitely())
-                .map_err(gpu_error)?;
-            let forward = clock.elapsed();
-            let mut outs = vec![Vec::new(); frames.len()];
-            let mut waiting = None;
-            for i in (0..frames.len()).rev() {
-                let prev = if i + 1 == frames.len() {
-                    &f.zero
-                } else {
-                    &f.back[(i + 1) % 2]
-                };
-                let mut enc = self.device.create_command_encoder(&Default::default());
-                {
-                    let mut pass = enc.begin_compute_pass(&Default::default());
-                    self.chain(&mut pass, &net.backward, (i, prev, &f.back[i % 2]));
-                    self.conv(
-                        &mut pass,
-                        &net.fusion,
-                        (&f.size, &[&f.states[i], &f.back[i % 2]], &f.fused),
-                        (w, h),
-                    );
-                    self.enlarge(&mut pass, i);
+                for i in (wanted..n).rev() {
+                    let prev = if i + 1 == n {
+                        &f.zero
+                    } else {
+                        &f.states[i + 1]
+                    };
+                    let dst = if i == wanted {
+                        &f.back[0]
+                    } else {
+                        &f.states[i]
+                    };
+                    self.chain(&mut pass, &net.backward, (i, prev, dst));
                 }
-                let t = self.tiles.as_ref().expect("tiles made");
-                enc.copy_buffer_to_buffer(&t.out, 0, &t.read[i % 2], 0, t.shown);
-                let done = self.queue.submit([enc.finish()]);
-                if let Some((j, done)) = waiting.replace((i, done)) {
-                    outs[j] = self.take(j % 2, done)?;
-                }
+                self.conv(
+                    &mut pass,
+                    &net.fusion,
+                    (&f.size, &[&f.states[wanted], &f.back[0]], &f.fused),
+                    (w, h),
+                );
+                self.enlarge(&mut pass, wanted);
             }
-            if let Some((j, done)) = waiting {
-                outs[j] = self.take(j % 2, done)?;
-            }
+            let t = self.tiles.as_ref().expect("tiles made");
+            enc.copy_buffer_to_buffer(&t.out, 0, &t.read[0], 0, t.shown);
+            let done = self.queue.submit([enc.finish()]);
+            let first = self.take(0, done)?;
             crate::debug!(
                 "upscale",
-                "{} frames at {w}x{h}: load and forward chain {:.0} ms, backward chains, joins and 4x tiles {:.0} ms",
-                frames.len(),
-                forward.as_secs_f64() * 1e3,
-                (clock.elapsed() - forward).as_secs_f64() * 1e3
+                "{n} frames at {w}x{h}: frame {wanted} in {:.0} ms",
+                clock.elapsed().as_secs_f64() * 1e3
             );
-            Ok(outs)
+            Ok(first)
         })
+    }
+
+    fn finish(&mut self) {
+        let Some(Pending {
+            wanted,
+            size,
+            mut outs,
+            rest,
+        }) = self.pending.take()
+        else {
+            return;
+        };
+        let device = self.device.clone();
+        let done = checked(&device, || self.others(wanted, size, &mut outs)).map(|()| outs);
+        self.frame = None;
+        self.tiles = None;
+        rest(done);
+    }
+
+    fn others(&self, wanted: usize, (w, h): (usize, usize), outs: &mut [Vec<u8>]) -> Result<()> {
+        let clock = Instant::now();
+        let f = self.frame.as_ref().expect("frame made");
+        let t = self.tiles.as_ref().expect("tiles made");
+        let net = self.net.as_ref().expect("loaded");
+        let n = outs.len();
+        let ahead = [&f.states[wanted], &f.back[1]];
+        let later = (wanted + 1..n).map(|i| (i, true));
+        let earlier = (0..wanted).rev().map(|i| (i, false));
+        let mut waiting = None;
+        for (k, (i, forward)) in later.chain(earlier).enumerate() {
+            let mut enc = self.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = enc.begin_compute_pass(&Default::default());
+                let (fwd, bwd) = if forward {
+                    let j = i - wanted;
+                    let (prev, dst) = (ahead[(j + 1) % 2], ahead[j % 2]);
+                    self.chain(&mut pass, &net.forward, (i, prev, dst));
+                    (dst, &f.states[i])
+                } else {
+                    let j = wanted - i;
+                    let (prev, dst) = (&f.back[(j + 1) % 2], &f.back[j % 2]);
+                    self.chain(&mut pass, &net.backward, (i, prev, dst));
+                    (&f.states[i], dst)
+                };
+                self.conv(
+                    &mut pass,
+                    &net.fusion,
+                    (&f.size, &[fwd, bwd], &f.fused),
+                    (w, h),
+                );
+                self.enlarge(&mut pass, i);
+            }
+            enc.copy_buffer_to_buffer(&t.out, 0, &t.read[k % 2], 0, t.shown);
+            let done = self.queue.submit([enc.finish()]);
+            if let Some((j, slot, done)) = waiting.replace((i, k % 2, done)) {
+                outs[j] = self.take(slot, done)?;
+            }
+        }
+        if let Some((j, slot, done)) = waiting {
+            outs[j] = self.take(slot, done)?;
+        }
+        crate::debug!(
+            "upscale",
+            "{n} frames at {w}x{h}: the other frames in {:.0} ms",
+            clock.elapsed().as_secs_f64() * 1e3
+        );
+        Ok(())
     }
 
     fn enlarge(&self, pass: &mut wgpu::ComputePass, i: usize) {
@@ -1525,11 +1596,39 @@ fn with_engine<T>(run: impl FnOnce(&mut Engine) -> Result<T>) -> Result<T> {
     }
 }
 
-pub(crate) fn upscale(frames: &[Vec<u8>], size: (usize, usize)) -> Result<Vec<Vec<u8>>> {
-    with_engine(|e| {
-        let out = e.run(frames, size);
-        e.frame = None;
-        e.tiles = None;
-        out
-    })
+pub(crate) fn upscale(
+    frames: &[Vec<u8>],
+    size: (usize, usize),
+    wanted: usize,
+    rest: impl FnOnce(Result<Vec<Vec<u8>>>) + Send + 'static,
+) -> Result<Vec<u8>> {
+    let first = with_engine(|e| {
+        e.finish();
+        let first = e.wanted_first(frames, size, wanted);
+        let Ok(first) = first else {
+            e.frame = None;
+            e.tiles = None;
+            return first;
+        };
+        let mut outs = vec![Vec::new(); frames.len()];
+        outs[wanted].clone_from(&first);
+        e.pending = Some(Pending {
+            wanted,
+            size,
+            outs,
+            rest: Box::new(rest),
+        });
+        Ok(first)
+    })?;
+    let _ = std::thread::Builder::new()
+        .name("vidcut-upscale-rest".into())
+        .spawn(settle);
+    Ok(first)
+}
+
+pub(crate) fn settle() {
+    let mut engine = ENGINE.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(Ok(e)) = engine.as_mut() {
+        e.finish();
+    }
 }
