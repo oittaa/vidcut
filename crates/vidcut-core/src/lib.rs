@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod catalog;
 pub mod change;
 pub mod describe;
 pub mod dirs;

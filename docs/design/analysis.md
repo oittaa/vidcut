@@ -114,8 +114,14 @@ flowchart TD
   cues --> track["ops::subtitles::add_cue<br>the highest subtitle track"]
 ```
 
+- **The catalog** (`catalog`)
+  - One file holds each model and speech service that vidcut uses: crates/vidcut-core/src/catalog.rs.
+  - A `catalog::Model` has its files, the languages that the metadata of the model lists, its limits and, for a paid service, its price.
+  - A `catalog::File` is pinned by its URL with the revision, its size and its SHA-256.
+  - A `catalog::Limit` has its number, its kind (`Kind::Hard`, `Kind::Cap` or `Kind::Soft`), its source (`catalog::Source`) and the date of its last check.
+  - The library of transcribe.cpp is pinned there too (`catalog::RUNTIMES`).
+  - The steps still to do are in [model-catalog.md](../todo/model-catalog.md).
 - **Model files**
-  - They are pinned in `models::File`: the Hugging Face repository, revision, size, SHA-256, and the languages that the metadata of the model lists.
   - They are in the `models` folder of the cache dir (`paths::models_dir`). `vidcut reset` empties it.
   - `transcribe::needed` says which of these are not there: the library of transcribe.cpp, Silero VAD and the speech model.
   - Without `download`, the request fails with DEPENDENCY, and says what it would fetch.
@@ -133,7 +139,7 @@ flowchart TD
 - **The GUI's dialog** (`Workspace::speech_window`)
   - It asks `transcribe::needed` and `transcribe::short_of_memory` before it sends the request. Thus it can ask before a download, and warn before the run.
   - The run is a job, as for the CLI.
-- **transcribe.cpp's library is downloaded, not built** (`transcribe::RUNTIME`)
+- **transcribe.cpp's library is downloaded, not built** (`catalog::RUNTIME`)
   - It is the prebuilt bundle that transcribe.cpp publishes for this system: Windows and Linux on Vulkan, macOS on Metal.
   - It is pinned by size and SHA-256, and unpacked into the `models` folder (`transcribe::unpack`).
   - crates/transcribe-cpp-sys stands in for the crate of that name. The workspace patches it in.
@@ -211,7 +217,7 @@ flowchart TD
   - It writes FLAC with the encoder of FFmpeg (`write_flac`), and uploads it with `ureq` on a `vidcut-upload` thread.
   - In the meantime, the job's thread reports `Stage::Uploading` and `Stage::Waiting`, and stops the upload on a cancel.
   - xAI takes all of the audio in one multipart request (`xai_fields`, 500 MB at most).
-  - Gemini takes only the language codes in the list that Google publishes (`GOOGLE_LANGUAGES`, https://ai.google.dev/gemini-api/docs/transcribe, Supported languages).
+  - Gemini takes only the language codes in the list that Google publishes for its API (`catalog::GOOGLE_LANGUAGES`, https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe, Supported languages).
   - Any other language code is refused before anything is heard.
   - Gemini goes through its Files API and Interactions in one request. The request is refused past `SpeechModel::longest_secs`.
   - The upload is used when Google reports it `ACTIVE`.
@@ -221,11 +227,11 @@ flowchart TD
   - With `speakers`, they send every heard file again. Thus the files share speaker numbers.
   - The editor refuses without `send` (`upload_check`). It gives the duration, the size (`transcript::upload_mb`) and the cost (`transcript::cost`).
 - **Limits and where they come from:**
-  - The numbers to which vidcut holds a model are with the other facts of the model. Each number comes from the documentation of the maker.
+  - The numbers to which vidcut holds a model are in its `catalog::Model`, with the other facts of the model. Each number comes from the documentation of the maker, or is marked as not recorded.
   - Gemini 3.5 Transcribe takes 30 minutes of audio with word times or diarization. vidcut always asks for word times.
   - It tells up to 8 speakers apart. Speaker counts of 3 or more are experimental.
-  - These are `SpeechModel::longest_secs` and `SpeechModel::max_speakers`. The source is the transcription guide of Google, https://ai.google.dev/gemini-api/docs/transcribe, Limitations.
-  - Sortformer tells up to 4 speakers apart (`SpeakerModel::max_speakers`).
+  - `SpeechModel::longest_secs` and `SpeechModel::max_speakers` read them from `catalog::GOOGLE`. The source is the model page of Google, https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe.
+  - Sortformer tells up to 4 speakers apart (`SpeakerModel::max_speakers`, from `catalog::SORTFORMER`).
   - NVIDIA's diar_streaming_sortformer_4spk-v2.1 has one output per speaker, 4 in all (https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1).
   - transcribe.cpp reports the same number when the model loads.
 - **Kept replies:**

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use eframe::egui;
 use serde_json::json;
-use vidcut_av::{models, speech_api, transcribe};
+use vidcut_av::{models, transcribe};
 use vidcut_core::looks::{Look, LookKind, Styled};
 use vidcut_core::model::Project;
 use vidcut_core::request::{FindSpeech, GoogleOptions, SpeakerModel, SpeechModel, XaiOptions};
@@ -17,20 +17,17 @@ const PLAIN: &str = "Plain";
 const MODELS: [(SpeechModel, &str); 5] = [
     (
         SpeechModel::ParakeetUltra,
-        "25 European languages · times each word",
+        "European languages · times each word",
     ),
-    (
-        SpeechModel::WhisperLargeV3,
-        "100 languages · times each phrase",
-    ),
-    (SpeechModel::Qwen3Asr, "30 languages · estimated times"),
+    (SpeechModel::WhisperLargeV3, "languages · times each phrase"),
+    (SpeechModel::Qwen3Asr, "languages · estimated times"),
     (
         SpeechModel::Xai,
-        "38 languages · times each word · on xAI's servers",
+        "languages · times each word · on xAI's servers",
     ),
     (
         SpeechModel::Google,
-        "85 languages · times each word · on Google's servers",
+        "languages · times each word · on Google's servers",
     ),
 ];
 
@@ -136,11 +133,7 @@ fn hearing(s: &Settings, params: &mut serde_json::Value, send: bool) {
 }
 
 fn languages(model: SpeechModel) -> Vec<&'static str> {
-    match model {
-        SpeechModel::Xai => speech_api::XAI_LANGUAGES.to_vec(),
-        SpeechModel::Google => speech_api::GOOGLE_LANGUAGES.to_vec(),
-        m => transcribe::file_of(m).map_or(Vec::new(), |f| f.languages.to_vec()),
-    }
+    vidcut_core::catalog::speech(model).languages.to_vec()
 }
 
 fn wanted(s: &Settings) -> Vec<&'static models::File> {
@@ -284,7 +277,10 @@ fn model_choice(ui: &mut egui::Ui, s: &mut Settings, d: &Ready, words_only: bool
                     egui::TextFormat::simple(body.clone(), c.text),
                 );
                 job.append(
-                    &format!("\n{note} · {state}"),
+                    &format!(
+                        "\n{} {note} · {state}",
+                        vidcut_core::catalog::speech(*model).languages.len()
+                    ),
                     0.0,
                     egui::TextFormat::simple(small.clone(), c.text_dim),
                 );

@@ -5,7 +5,8 @@ use vidcut_core::model::{Media, Project, Upscaler};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use crate::error::{Error, Result};
-use crate::models::{self, Fetch, File, Need};
+use crate::models::{self, Fetch, Need};
+use vidcut_core::catalog::{self, FLASHVSR_FILES as FILES};
 
 mod dump;
 mod gemm;
@@ -21,69 +22,7 @@ const FFN: usize = 8960;
 const LAYERS: usize = 30;
 const GLOBAL: [usize; 5] = [0, 6, 12, 18, 24];
 
-pub const SCALE: u32 = 4;
-
-const HUB: &str = "https://huggingface.co/ruchangyao/FlashVSR_plus/resolve/46b79520946ac67dec94d1566490690953c7debc";
-const CODE: &str = "https://raw.githubusercontent.com/OpenImagingLab/FlashVSR_Plus/b548a2cc2c929d3d4676f2973abe27876ec4dee7";
-
-pub const FILES: [File; 4] = [
-    File {
-        name: "flashvsr-plus/turbo/dit.safetensors",
-        title: "FlashVSR+ Turbo transformer",
-        repo: "ruchangyao/FlashVSR_plus",
-        revision: "46b79520946ac67dec94d1566490690953c7debc",
-        bytes: 5_676_070_392,
-        sha256: "7862b92178176fa3aebc34c6c071daca6b56ab1dddb8e7ff9a01c47f5226ec8b",
-        gpu_gb: 0,
-        languages: &[],
-    },
-    File {
-        name: "flashvsr-plus/turbo/lq_proj_in.safetensors",
-        title: "FlashVSR+ Turbo input projection",
-        repo: "ruchangyao/FlashVSR_plus",
-        revision: "46b79520946ac67dec94d1566490690953c7debc",
-        bytes: 1_151_384_272,
-        sha256: "e77b378ae12342eefbb58f924256f362a151b93ce73dd32808fcdaca9c051496",
-        gpu_gb: 0,
-        languages: &[],
-    },
-    File {
-        name: "flashvsr-plus/TCDecoder.ckpt",
-        title: "FlashVSR+ decoder",
-        repo: "ruchangyao/FlashVSR_plus",
-        revision: "46b79520946ac67dec94d1566490690953c7debc",
-        bytes: 189_018_333,
-        sha256: "e224bdcf2f52745cbf4d393ff5374c2ba09e90285d5d19062d2bf63b915b6161",
-        gpu_gb: 0,
-        languages: &[],
-    },
-    File {
-        name: "flashvsr-plus/prompt_tensor/posi_prompt.pth",
-        title: "FlashVSR+ prompt",
-        repo: "OpenImagingLab/FlashVSR_Plus",
-        revision: "b548a2cc2c929d3d4676f2973abe27876ec4dee7",
-        bytes: 4_195_504,
-        sha256: "4601107a11e4e11a936a6b79df579e54dbc99872132bf542151f0ffd65b4b1ef",
-        gpu_gb: 0,
-        languages: &[],
-    },
-];
-
-fn fetch_of(f: &File) -> Fetch {
-    let path = f.name.trim_start_matches("flashvsr-plus/");
-    let base = if f.repo == "OpenImagingLab/FlashVSR_Plus" {
-        CODE
-    } else {
-        HUB
-    };
-    Fetch {
-        url: format!("{base}/{path}"),
-        name: f.name.to_string(),
-        title: f.title.to_string(),
-        bytes: f.bytes,
-        sha256: f.sha256,
-    }
-}
+pub const SCALE: u32 = catalog::FLASHVSR_SCALE;
 
 pub fn needed(dir: &Path) -> Vec<Need> {
     FILES
@@ -111,7 +50,7 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
     }
     models::network();
     for f in FILES.iter().filter(|f| !models::present(dir, f)) {
-        models::fetch(&fetch_of(f), dir)?;
+        models::fetch(&Fetch::of(f), dir)?;
     }
     Ok(())
 }
