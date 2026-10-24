@@ -631,8 +631,8 @@ impl Stream {
                 let lq = LqWork::new(gpu, &g);
                 self.project(gpu, model, (&x, &lq), &mut e);
                 e.submit();
+                gpu.wait()?;
             }
-            gpu.wait()?;
             let work = Work::new(gpu, &g, x);
             self.dump_tensor(gpu, "x_in", &work.x, g.t, true)?;
             for (i, block) in model.blocks.iter().enumerate() {
@@ -666,6 +666,7 @@ impl Stream {
                 );
             });
             e.submit();
+            gpu.wait()?;
         }
         if let Some(dir) = self.dump.as_ref() {
             let shape = [16, 4, g.h8 as usize, g.w8 as usize];
@@ -677,7 +678,6 @@ impl Stream {
                 &floats(&raw),
             )?;
         }
-        gpu.wait()?;
         let frames = self.decode(gpu, model, &latents)?;
         self.chunk += 1;
         Ok(frames)
