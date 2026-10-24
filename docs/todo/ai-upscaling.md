@@ -32,6 +32,13 @@ AI Best against the official PyTorch code, on 2026-10-24: 33 frames of a 128×64
 - Against the official code in 32-bit floats, the frames are at 59.5 dB PSNR on average, and 52.1 dB at the least.
 - The official code in 16-bit floats is at 56.5 dB from its own 32-bit frames. It has the same low point, at frames 13 to 16.
 - The largest value that vidcut keeps as a 16-bit float is 174 in this clip.
+- The official code in bf16 is at 43.6 dB from its own 32-bit frames, with either attention kernel. Its latents are 2.6 to 2.8% from the 32-bit latents.
+
+AI Best against the official code in bf16 with its Triton kernel, at 1920×1024 (the 89 frames of the 480×256 clip, 4 times):
+
+- The frames are at 45.4 dB PSNR on average, and 42.7 dB at the least. The latents are 2.6 to 2.9% from the official ones.
+- Thus vidcut is as far from the bf16 frames as the bf16 frames are from 32-bit floats.
+- A 32-bit run of the official code does not fit at this size: its dense attention masks need about 28 GB.
 
 ## Decisions
 
@@ -50,9 +57,8 @@ AI Best against the official PyTorch code, on 2026-10-24: 33 frames of a 128×64
 These parts are still to do:
 
 1. AI Best (FlashVSR+ Turbo). Its engine and its place in Super Scale are in the code.
-   1. The check against the official PyTorch output in bf16 with the Triton kernel, at 1920×1024, with `VIDCUT_FLASHVSR_DUMP` ([tools](../tools.md)).
-   2. A run at 3840×2176, where most KV caches stay in main memory.
-   3. Speed: measure, then the tensor cores through wgpu's cooperative matrices, on Vulkan and Metal.
+   1. A run at 3840×2176, where most KV caches stay in main memory.
+   2. Speed: measure, then the tensor cores through wgpu's cooperative matrices, on Vulkan and Metal.
 2. A test of the chunk edges: each chunk starts from zero. A carried forward state or overlapping chunks may hide a change every 15 frames.
 3. Speed. PyTorch in 16-bit floats is faster on small pictures. The gain of each step is not known until it is measured.
    1. Measure where the time goes, with GPU timestamps: the network, the copies, the decoding and the encoding.
