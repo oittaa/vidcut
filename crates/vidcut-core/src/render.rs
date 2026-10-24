@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ColorSpace, DuckDetect, Keyframe, Media, Picture, Project, Title, TrackKind,
+    Clip, ColorSpace, DuckDetect, Keyframe, Media, Picture, Project, SuperScale, Title, TrackKind,
     WipeDirection,
 };
 use crate::otio::transitions;
@@ -136,6 +136,9 @@ pub enum VideoPiece {
         /// How its pictures' colors are read: the media's `color_space`.
         #[serde(default, skip_serializing_if = "ColorSpace::is_tagged")]
         color_space: ColorSpace,
+        /// How its pictures are enlarged: the media's `super_scale`.
+        #[serde(default, skip_serializing_if = "SuperScale::is_off")]
+        super_scale: SuperScale,
         /// Where its picture goes over the frame: its clip's picture, then
         /// that of each compound clip it plays inside, outward. Empty, it
         /// covers the whole frame, its bars black.
@@ -624,6 +627,7 @@ impl VideoPiece {
                 image,
                 pace,
                 color_space,
+                super_scale,
                 placed,
                 ..
             } => {
@@ -637,6 +641,7 @@ impl VideoPiece {
                     image: image.clone(),
                     pace: if still { *pace } else { pace.after(k) },
                     color_space: *color_space,
+                    super_scale: *super_scale,
                     placed: placed.iter().map(|p| p.after(k)).collect(),
                 }
             }
@@ -1202,6 +1207,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
                 image: image_of(m),
                 pace: c.pace().after(x - c.start),
                 color_space: m.color_space,
+                super_scale: m.super_scale,
                 placed: placed_of(c, nest, over, x),
             })
         };
@@ -1575,6 +1581,7 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
             frames: 1,
             image: p.media_image(media),
             color_space: m.color_space,
+            super_scale: m.super_scale,
             placed: Vec::new(),
         },
         None => VideoPiece::Black { frames: 1 },
@@ -1615,6 +1622,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     frames,
                     image: image_of(m),
                     color_space: m.color_space,
+                    super_scale: m.super_scale,
                     placed: Vec::new(),
                 },
             );

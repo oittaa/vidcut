@@ -1398,6 +1398,7 @@ mod tests {
             proxy: None,
             color: None,
             color_space: Default::default(),
+            super_scale: Default::default(),
             left_out: Vec::new(),
             fingerprint: None,
             subtitles: None,

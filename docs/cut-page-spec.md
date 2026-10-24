@@ -163,6 +163,15 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - For a file with wrong tags, right-click the media in the pool. Select BT.709, BT.601, BT.2100 PQ or BT.2100 HLG to read it that way.
   - As Tagged uses the tags again.
   - The viewer, the thumbnails and the exports follow this setting (D35).
+- **Super Scale** (pp. 288, 432–433; deviation [X91](deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)):
+  - Super Scale enlarges the pictures of a media item with a better upscaler before they are fitted.
+  - It is a setting of the media item. Thus it applies to every clip of that item (p. 433).
+  - Right-click the media in the pool, or use the Super Scale section of the Inspector.
+  - Super Scale is Off, Auto, 2x, 3x or 4x. Sharpness is Low, Medium or High.
+  - Auto takes the smallest factor that reaches the size the picture shows at.
+  - The factor is the most that a placed picture is enlarged with Super Scale, over the size of its source.
+  - Super Scale works only where a picture is enlarged. A picture that is made smaller is scaled as before.
+  - `media.set` sets `super_scale` and `sharpness`.
 - **Relinking media** (pp. 668–669):
   - An item whose file is missing has the mark MISSING.
   - Its clips are red on the timeline (pp. 509, 530), and the viewer shows Media Offline.

@@ -285,6 +285,15 @@ pub enum Request {
         /// follow it.
         #[serde(default)]
         color_space: Option<crate::model::ColorSpace>,
+        /// Super Scale: `none` (off), `auto`, `2x`, `3x` or `4x`. Before its
+        /// pictures are fitted, they are enlarged with the best upscaler that
+        /// the GPU has. `auto` takes the smallest factor that reaches the size
+        /// a picture shows at.
+        #[serde(default)]
+        super_scale: Option<crate::model::ScaleFactor>,
+        /// The detail of Super Scale: `low`, `medium` or `high`.
+        #[serde(default)]
+        sharpness: Option<crate::model::Sharpness>,
     },
     /// Set a media item's source In and/or Out (I/O in a source viewer or over
     /// a pool thumbnail). Source time, `out` exclusive. Edits without a `range`

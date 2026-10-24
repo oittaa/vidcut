@@ -1,4 +1,4 @@
-use vidcut_core::model::Hdr;
+use vidcut_core::model::{Hdr, Sharpness};
 pub(crate) use vidcut_core::place::fit;
 
 use super::video::frame_ref;
@@ -72,6 +72,34 @@ pub(crate) fn down(
     Ok(small)
 }
 
+pub(crate) fn enlarges(
+    (w, h): (u32, u32),
+    (n, d): (i32, i32),
+    rotation: u16,
+    (fw, fh): (u32, u32),
+) -> bool {
+    let across = if n > 0 && d > 0 {
+        f64::from(n) / f64::from(d)
+    } else {
+        1.0
+    };
+    let (sw, sh) = (f64::from(w) * across, f64::from(h));
+    let (sw, sh) = if rotation % 180 == 90 {
+        (sh, sw)
+    } else {
+        (sw, sh)
+    };
+    f64::from(fw) > sw + 0.5 || f64::from(fh) > sh + 0.5
+}
+
+fn kernel(sharp: Sharpness) -> (&'static str, &'static str) {
+    match sharp {
+        Sharpness::Low => ("spline", ""),
+        Sharpness::Medium => ("lanczos", ""),
+        Sharpness::High => ("lanczos", ":param0=4"),
+    }
+}
+
 impl Normalizer {
     pub(crate) fn new(
         src: &frame::Video,
@@ -89,7 +117,28 @@ impl Normalizer {
             (out_w, out_h),
             out_fmt,
             target,
-            zscale,
+            (zscale, None),
+            reading,
+        )
+    }
+
+    pub(crate) fn upscaling(
+        src: &frame::Video,
+        rotation: u16,
+        out: (u32, u32),
+        out_fmt: format::Pixel,
+        target: Option<Hdr>,
+        reading: Reading,
+        sharp: Option<Sharpness>,
+    ) -> Result<Self> {
+        let zscale = crate::parts::has_filter("zscale");
+        Self::with(
+            src,
+            rotation,
+            out,
+            out_fmt,
+            target,
+            (zscale, sharp),
             reading,
         )
     }
@@ -100,7 +149,7 @@ impl Normalizer {
         (out_w, out_h): (u32, u32),
         out_fmt: format::Pixel,
         target: Option<Hdr>,
-        zscale: bool,
+        (zscale, sharp): (bool, Option<Sharpness>),
         reading: Reading,
     ) -> Result<Self> {
         let (w, h, fmt) = (src.width(), src.height(), src.format());
@@ -152,10 +201,16 @@ impl Normalizer {
             Some(_) => String::new(),
             None => format!(",format={}", fmt_name(out_fmt)),
         };
+        let (flags, taps) = match sharp.filter(|_| enlarges((w, h), sar, rotation, (sw, sh))) {
+            Some(sharp) => {
+                let (name, taps) = kernel(sharp);
+                (conv.flags.replacen("bicubic", name, 1), taps)
+            }
+            None => (conv.flags.to_string(), ""),
+        };
         let spec = format!(
-            "{}scale={sw}:{sh}:flags={}{},pad={out_w}:{out_h}:{}:{}:color=black,setsar=1{}{last}",
+            "{}scale={sw}:{sh}:flags={flags}{taps}{},pad={out_w}:{out_h}:{}:{}:color=black,setsar=1{}{last}",
             upright(rotation),
-            conv.flags,
             conv.scale,
             (out_w - sw) / 2,
             (out_h - sh) / 2,
