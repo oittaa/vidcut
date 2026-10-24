@@ -68,7 +68,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - **Time** (p. 1258):
     - The time ruler shows timecode. A click or a drag on it moves the playhead.
     - The tracks start at the range of the clip. Fit Clip goes back to that range.
+    - Detail Zoom zooms in four times, around the playhead.
+    - The zoom slider sets the zoom, around the middle of the range.
     - Ctrl and the mouse wheel zoom at the pointer. Shift and the mouse wheel move the range.
+    - A scroll bar under the tracks shows the part of the clip in the range. A drag on it moves the range.
+    - A click on the scroll bar outside that part moves the range to the click.
     - An arrow at the edge of a track marks its keyframes outside the range, for example after a trim.
   - **Edits:**
     - A drag on a keyframe moves it in time. A drag on a curve point also changes the value.

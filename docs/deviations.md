@@ -1754,7 +1754,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - The Keyframe Editor adds a keyframe with the Keyframe button or Ctrl+[, at the playhead (p. 1257).
   - Its track controls have no value field (p. 1257). The Curve Editor is a separate view (p. 1255).
-  - Full Extend Zoom shows the whole clip. Detail Zoom and a zoom slider set other ranges (p. 1258).
+  - Full Extend Zoom shows the whole clip. Detail Zoom zooms in around the playhead. A zoom slider sets the zoom (p. 1258).
 - **vidcut:**
   - A double-click on an empty part of a track adds a keyframe there. The playhead moves to it.
   - A bar under the tracks shows the selected keyframe:
@@ -1766,12 +1766,16 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A new keyframe is selected. Thus the bar shows its value at once.
   - With two or more keyframes selected, the bar shows their number and Delete.
   - The curve of a value shows under its track.
-  - Fit Clip shows the range of the clip. Ctrl and the mouse wheel zoom at the pointer.
+  - Fit Clip is the name of Full Extend Zoom. Detail Zoom and the zoom slider are as in Resolve.
+  - Ctrl and the mouse wheel zoom at the pointer. Shift and the mouse wheel move the range.
+  - A scroll bar under the tracks shows and moves the range.
 - **Why:**
   - The user sees and sets the exact value of a keyframe without a change to the Inspector.
   - A double-click adds a keyframe where the user points, without a move of the playhead first.
   - The curve stays in line with the keyframes that it joins.
+  - "Fit Clip" tells what the button does.
   - The mouse wheel zooms at the point of interest, which a slider cannot do.
+  - The scroll bar shows which part of the clip is in view, and moves to another part without a new zoom.
 
 ## X89. A wipe reveals from one edge
 

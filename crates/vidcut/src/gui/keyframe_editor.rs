@@ -6,7 +6,7 @@ use eframe::egui::{
 };
 use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, ARROWS_OUT_LINE_HORIZONTAL, CARET_DOWN, CARET_LEFT, CARET_RIGHT,
-    DIAMOND, DOTS_THREE, WAVE_SINE,
+    DIAMOND, DOTS_THREE, MAGNIFYING_GLASS_PLUS, WAVE_SINE,
 };
 use serde_json::{Value, json};
 use vidcut_core::keyframes::{
@@ -30,6 +30,10 @@ const GROUP_H: f32 = 22.0;
 const TRACK_H: f32 = 26.0;
 const CURVE_H: f32 = 110.0;
 const BAR_H: f32 = 68.0;
+const SCROLL_H: f32 = 12.0;
+const ZOOM_W: f32 = 72.0;
+const LEAST_FRAMES: f64 = 4.0;
+const DETAIL: f64 = 4.0;
 const HIT: f32 = 8.0;
 const TICK_GAP: f32 = 96.0;
 const FIELD_W: f32 = 72.0;
@@ -178,6 +182,7 @@ pub struct Editor {
     view: Option<(f64, f64)>,
     held: Option<Held>,
     fresh: Option<(KeyParam, i64, Instant)>,
+    grab: Option<f64>,
 }
 
 impl Editor {
@@ -840,6 +845,7 @@ impl Workspace {
             self.key_editor.view = None;
             self.key_editor.held = None;
             self.key_editor.fresh = None;
+            self.key_editor.grab = None;
         }
         let lanes = lanes_of(&clip, self.key_editor.keyed_only);
         self.select_fresh(&clip, &lanes);
@@ -848,14 +854,15 @@ impl Workspace {
             self.key_editor.drag = None;
         }
         self.expire_pending(&clip, rev);
-        self.key_header(ui, &p, &clip);
+        let play = self.snap.timeline.position;
+        let view = self.key_editor.view.unwrap_or_else(|| clip_span(&clip));
+        self.key_header(ui, &p, &clip, view, play);
         if lanes.is_empty() {
             ui.label(dim("No Keyframes"));
             return;
         }
         let shift = self.shown_shift(ui, &clip, &lanes);
         let (lo, hi) = self.key_editor.view.unwrap_or_else(|| clip_span(&clip));
-        let play = self.snap.timeline.position;
         let frame = shape(&p, &clip);
         let area = ui.available_rect_before_wrap();
         let width = (area.width() - LABEL - ui.spacing().item_spacing.x).max(48.0);
@@ -868,7 +875,10 @@ impl Workspace {
         self.ruler(ui, &p, &clip, plot);
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
-            .max_height((ui.available_height() - BAR_H).max(TRACK_H))
+            .max_height(
+                (ui.available_height() - BAR_H - SCROLL_H - ui.spacing().item_spacing.y)
+                    .max(TRACK_H),
+            )
             .show(ui, |ui| {
                 for group in GROUPS {
                     let members: Vec<&Lane> = lanes
@@ -893,6 +903,7 @@ impl Workspace {
             });
         let live = live_marks(&clip, &lanes, shift.as_ref());
         self.key_editor.selected.retain(|m| live.contains(m));
+        self.key_scroll(ui, &clip, &lanes, plot);
         self.key_bar(ui, &p, &clip, &lanes, &frame);
         self.zoom_view(ui, area, &clip, plot);
         self.finish_drag(ui, &clip, &lanes, rev);
@@ -947,14 +958,27 @@ impl Workspace {
         true
     }
 
-    fn key_header(&mut self, ui: &mut egui::Ui, p: &Project, clip: &Clip) {
+    fn key_header(
+        &mut self,
+        ui: &mut egui::Ui,
+        p: &Project,
+        clip: &Clip,
+        view: (f64, f64),
+        play: i64,
+    ) {
         let name = clip
             .name
             .clone()
             .filter(|s| !s.is_empty())
             .or_else(|| p.media(&clip.media).map(|m| m.name.clone()))
             .unwrap_or_default();
+        let (whole_lo, whole_hi) = clip_span(clip);
+        let length = whole_hi - whole_lo;
+        let most = (length / LEAST_FRAMES).max(1.0);
+        let mut level = (length / (view.1 - view.0)).clamp(1.0, most);
+        let mut zoom_to = None;
         let mut fit = false;
+        let mut detail = false;
         let mut open = None;
         let editor = &mut self.key_editor;
         ui.horizontal(|ui| {
@@ -977,6 +1001,19 @@ impl Workspace {
                         ui.close();
                     }
                 });
+                if most > 1.0 {
+                    ui.spacing_mut().slider_width = ZOOM_W;
+                    let r = ui
+                        .add(
+                            egui::Slider::new(&mut level, 1.0..=most)
+                                .logarithmic(true)
+                                .show_value(false),
+                        )
+                        .on_hover_text("Zoom");
+                    if r.changed() {
+                        zoom_to = Some(level);
+                    }
+                }
                 if ui
                     .button(ARROWS_OUT_LINE_HORIZONTAL)
                     .on_hover_text("Fit Clip")
@@ -984,10 +1021,27 @@ impl Workspace {
                 {
                     fit = true;
                 }
+                if ui
+                    .button(MAGNIFYING_GLASS_PLUS)
+                    .on_hover_text("Detail Zoom")
+                    .clicked()
+                {
+                    detail = true;
+                }
             });
         });
         if fit {
             editor.view = None;
+        }
+        if detail {
+            let half = ((view.1 - view.0) / DETAIL).max(LEAST_FRAMES) / 2.0;
+            let at = play as f64;
+            editor.view = Some((at - half, at + half));
+        }
+        if let Some(level) = zoom_to {
+            let mid = (view.0 + view.1) / 2.0;
+            let half = length / level / 2.0;
+            editor.view = Some((mid - half, mid + half));
         }
         match open {
             Some(true) => editor.closed.clear(),
@@ -1034,6 +1088,49 @@ impl Workspace {
         }
     }
 
+    fn key_scroll(&mut self, ui: &mut egui::Ui, clip: &Clip, lanes: &[Lane], plot: Plot) {
+        let (rect, resp) = row(ui, SCROLL_H, plot.width, |_| {});
+        let (mut lo, mut hi) = clip_span(clip);
+        for k in lanes.iter().flat_map(|l| &l.keys) {
+            let t = clip.key_time(k.frame);
+            lo = lo.min(t);
+            hi = hi.max(t);
+        }
+        let span = plot.hi - plot.lo;
+        let map = TimeMap::of(lo.min(plot.lo), hi.max(plot.hi), rect);
+        let painter = ui.painter_at(rect);
+        let colors = theme::colors();
+        let round = rect.height() / 2.0;
+        painter.rect_filled(rect, round, colors.panel_dark);
+        let a = map.x(plot.lo);
+        let b = map.x(plot.hi).max(a + SCROLL_H);
+        let thumb = Rect::from_x_y_ranges(a..=b, rect.y_range()).shrink(1.0);
+        painter.rect_filled(thumb, round, colors.text_dim);
+        playhead(&painter, map, rect, plot.play);
+        if !resp.is_pointer_button_down_on() {
+            self.key_editor.grab = None;
+            return;
+        }
+        let Some(pos) = resp.interact_pointer_pos() else {
+            return;
+        };
+        let grab = *self.key_editor.grab.get_or_insert_with(|| {
+            let from = ui
+                .input(|i| i.pointer.press_origin())
+                .map_or(pos.x, |o| o.x);
+            let t = map.time(from);
+            if (plot.lo..=plot.hi).contains(&t) {
+                t - plot.lo
+            } else {
+                span / 2.0
+            }
+        });
+        if hi - lo > span {
+            let start = (map.time(pos.x) - grab).clamp(lo, hi - span);
+            self.key_editor.view = Some((start, start + span));
+        }
+    }
+
     fn zoom_view(&mut self, ui: &egui::Ui, area: Rect, clip: &Clip, plot: Plot) {
         let left = area.left() + LABEL + ui.spacing().item_spacing.x;
         let (hover, zoom, pan) = ui.input(|i| {
@@ -1052,7 +1149,7 @@ impl Workspace {
         let span = plot.hi - plot.lo;
         let at = plot.lo + f64::from((pos.x - left) / plot.width) * span;
         let longest = ((clip.end() - clip.start) as f64 * 20.0).max(100.0);
-        let next = (span / f64::from(zoom)).clamp(4.0, longest);
+        let next = (span / f64::from(zoom)).clamp(LEAST_FRAMES, longest);
         let k = next / span;
         let by = -f64::from(pan) / f64::from(plot.width) * next;
         self.key_editor.view = Some((at - (at - plot.lo) * k + by, at + (plot.hi - at) * k + by));

@@ -129,7 +129,8 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - One click selects one keyframe. Shift or Ctrl adds to the selection. Delete removes the selection.
 - A right-click sets that keyframe's ease, with the volume Bezier ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
 - A bar shows the value, time and ease of the selected keyframe (X90).
-- The time ruler moves the playhead. Ctrl and the mouse wheel zoom. Fit Clip shows the clip.
+- The time ruler moves the playhead. Fit Clip, Detail Zoom, the zoom slider and Ctrl with the mouse wheel zoom.
+- A scroll bar under the tracks moves the range.
 - `keyframes.add`, `keyframes.remove`, `keyframes.set` and `keyframes.move` do these edits.
 - **To do:**
   - selection: a box around keyframes, a nudge by one frame, cut, copy and paste (pp. 1257–1258)
@@ -137,7 +138,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - the motion path in the viewer (pp. 1252–1254)
   - Step, Loop, Ping Pong, Reverse and the Shape Box (pp. 1261–1267)
   - keyframes of several selected clips at once (p. 1268)
-  - the Lock and Track Color controls, Detail Zoom and the zoom slider (pp. 1257–1258)
+  - the Lock and Track Color controls (p. 1257)
   - the ruler in frames, Snap Keyframes to Grid, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
 
 **After stage 3:** keyframes of speed, opacity, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
