@@ -2578,19 +2578,17 @@ fn mutate(
             super_scale,
             sharpness,
             upscaler,
-            noise_reduction,
             download,
         } => {
             let set = ops::SuperScaleSet {
                 factor: *super_scale,
                 sharpness: *sharpness,
                 upscaler: *upscaler,
-                noise_reduction: *noise_reduction,
             };
             if color.is_none() && color_space.is_none() && set.is_empty() {
                 return Err(Error::usage(
-                    "give color, color_space, or a Super Scale field: super_scale, sharpness, \
-                     upscaler or noise_reduction",
+                    "give color, color_space, or a Super Scale field: super_scale, sharpness or \
+                     upscaler",
                 ));
             }
             if let Some(color) = color {

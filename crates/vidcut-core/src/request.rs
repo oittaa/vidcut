@@ -295,13 +295,9 @@ pub enum Request {
         #[serde(default)]
         sharpness: Option<crate::model::Sharpness>,
         /// The upscaler of Super Scale: `ai` (the default) or `classic`. An
-        /// export refuses `ai` for HDR media and for media larger than 4K.
+        /// export refuses `ai` for HDR media.
         #[serde(default)]
         upscaler: Option<crate::model::Upscaler>,
-        /// How much noise the AI upscaler takes out: `low`, `medium` or
-        /// `high`.
-        #[serde(default)]
-        noise_reduction: Option<crate::model::NoiseReduction>,
         /// Download the AI upscaler's weights if this computer doesn't have
         /// them yet, each checked against its SHA-256. Without them, an
         /// export with the AI upscaler is an error that says what would be

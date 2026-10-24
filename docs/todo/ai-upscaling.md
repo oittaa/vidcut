@@ -2,59 +2,53 @@
 
 **When:** next.
 
-Super Scale has an AI upscaler: Real-ESRGAN on shaders of vidcut's own ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). This file holds its measurements, the decisions and what is still to do.
+Super Scale has an AI upscaler: NanoVSR 5.4M on shaders of vidcut's own ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). This file holds its measurements, the decisions and what is still to do.
 
 ## The model in vidcut
 
-- **Model:** Real-ESRGAN `realesr-general-x4v3`, mixed with `realesr-general-wdn-x4v3`. Both are in release v0.2.5.0 of 2022-04-24 ([release](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0)).
-- **License:** the code is BSD-3-Clause. The weights have no license of their own. OpenModelDB lists them as BSD-3-Clause.
-- **Training data:** DIV2K, Flickr2K and OST. DIV2K is "for academic research purpose only". It is not known if this binds the weights.
-- It works on one frame at a time. Thus a seek or a cut needs no other frames. But a model that sees one frame alone can flicker.
+- **Model:** NanoVSR 5.4M, release v1.0 of 2026-07-11 ([repo](https://github.com/filippawlicki/nanovsr), [paper](https://arxiv.org/abs/2607.10495)).
+- **License:** MIT for the code and the weights.
+- **Training data:** REDS and Vimeo-90K, downscaled without noise or compression. Its model card warns that it may not suit heavily compressed sources.
+- It looks both ways in time. Thus it reads the frames in chunks of 15, as the official code does.
 
 ## Measurements
 
-The tests ran on the owner's RTX 4080 SUPER on 2026-10-24, in programs outside vidcut. They are the only measurements in this file.
+The tests ran on the owner's RTX 4080 SUPER (16 GB) on 2026-10-24. NanoVSR 5.4M enlarged each clip 4 times.
 
-- The input was one 1280×534 frame of "Tears of Steel". The output was 5120×2136.
-
-| Engine | Model | Precision | Time for each frame |
+| Clip | vidcut | PyTorch, 32-bit | PyTorch, 16-bit |
 |---|---|---|---|
-| burn 0.22.1, Vulkan | `realesr-general-x4v3` | 32-bit | 1.08–1.14 s |
-| burn 0.22.1, Vulkan | `realesr-general-x4v3` | 16-bit | 39 ms (25 fps) |
-| burn 0.22.1, Vulkan | `realesr-general-x4v3`, 640×267 input | 16-bit | 8.5 ms |
-| burn 0.22.1, without Vulkan | `realesr-general-x4v3` | 16-bit | 1027 ms |
-| Own WGSL shaders | `realesr-general-x4v3` | 16-bit values, 32-bit sums | 80 ms (12.5 fps) |
+| 480×256, 89 frames | 8.0 s, 1.6 GB | 8.9 s, 4.0 GB | 4.6 s, 2.4 GB |
+| 1280×534, 30 frames | 14.5 s, 3.9 GB | 158.7 s, 23.0 GB | 12.6 s, 12.9 GB |
+| 1920×1080, 30 frames | 40.3 s, 10.1 GB | not done in 5 minutes | not done in 5 minutes |
 
-- The 16-bit pictures of burn are at most 2 of 255 levels from the 32-bit ones.
-- The pictures of the own shaders are at most 3 of 255 levels from those of burn.
-- The speed of the own shaders inside vidcut is not measured yet. vidcut adds the tiles and the copies through memory.
-- The pictures are much sharper than a classic upscaler. The model removes compression blocks. It also makes skin smooth, as if painted.
-- The official denoise strength fixes most of this. It mixes the weights of `realesr-general-x4v3` (times the strength) and `realesr-general-wdn-x4v3` (times one less the strength) once, at load. The speed is the same.
-- At a strength of 0.5, the edges stay sharp and the skin keeps its lines. The owner and Claude both found 0.5 the best.
+- vidcut's time is the whole export: decoding, the network, the fitting and the encoding.
+- vidcut's memory is the peak of the whole card less the 1.0 GB that it used before.
+- PyTorch's time includes loading the model and reading and writing the video. Its memory is what PyTorch reserved. 23.0 GB does not fit on the card, so the driver used main memory.
+- vidcut's pictures are within 2 of 255 levels of PyTorch's 32-bit pictures. The PSNR between them is 68 dB.
 
 ## Decisions
 
-- The weights download at their first use. vidcut does not ship them. The owner accepts their license on that basis.
-- Super Scale gets Noise Reduction, as Resolve has (p. 433). Low, Medium and High give a denoise strength of 0.2, 0.5 and 1.0. Medium is the default.
-- A mix with the classic upscaler can come later, as an extra.
+- The weights download at their first use. vidcut does not ship them.
+- The AI model is NanoVSR 5.4M. In side-by-side tests, the owner ranked it above Real-ESRGAN's compact model.
+- AI has no Noise Reduction. NanoVSR has no such control.
+- AI has no size limit. Its memory grows with the size of the source picture.
 - Users have different needs. Some wait a long time for the best pictures, and others want good pictures fast.
   - Thus Super Scale can offer more than one AI model: a fast default, and slower models with better pictures.
   - Speed alone does not rule out a model. A slow model must give clearly better pictures.
+  - FlashVSR+ Turbo ([repo](https://github.com/OpenImagingLab/FlashVSR_Plus)) is the choice for the slow model.
 
 ## Plan
 
-AI Super Scale is built for exports and for the viewer ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). These parts are still to do:
+These parts are still to do:
 
-1. Winograd convolutions in the shaders. They need 16 multiplications for each 2×2 block of output, in place of 36. burn's tensor cores were 2 times faster than the shaders are now.
-2. Frames from the GPU decoders straight into the shaders, with no copy through memory. The viewer and the export both need it.
-3. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
-4. A mix with the classic upscaler, as an extra.
-5. A decision of the owner on the SPyNet license of RealBasicVSR. Then, with the owner's OK, a side-by-side test against Real-ESRGAN on the same clip.
-6. A side-by-side test on the owner's clips: FlashVSR+ Turbo and SeedVR2-3B against `realesr-general-x4v3`. It needs the owner's OK and a measurement plan. The winner can become the slow tier.
+1. FlashVSR+ Turbo as the slow model. It needs a transformer engine on wgpu: matrix multiplies, attention and a cache of earlier frames.
+2. A test of the chunk edges: each chunk starts from zero. A carried forward state or overlapping chunks may hide a change every 15 frames.
+3. Speed: the 1×1 join and the copies of the tiles are simple shaders now.
+4. Frames from the GPU decoders straight into the shaders, with no copy through memory. The viewer and the export both need it.
+5. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
 
-The weights are on Real-ESRGAN's release v0.2.5.0:
+The weights are on NanoVSR's release v1.0:
 
 | File | Bytes | SHA-256 |
 |---|---|---|
-| `realesr-general-x4v3.pth` | 4885111 | `8dc7edb9ac80ccdc30c3a5dca6616509367f05fbc184ad95b731f05bece96292` |
-| `realesr-general-wdn-x4v3.pth` | 4885111 | `1641f8c4464b9f097c9fdda5589273713f67cf59f3d909e0bd688f0cee269dca` |
+| `nanovsr_5.4m.pth` | 24624333 | `42a53e1dc9b928947ea9cea85d7dd6f7bd82b325e92374dc1946d2cbcadf31bc` |

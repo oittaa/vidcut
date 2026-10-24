@@ -375,7 +375,6 @@ pub struct SuperScale {
     pub factor: ScaleFactor,
     pub sharpness: Sharpness,
     pub upscaler: Upscaler,
-    pub noise_reduction: NoiseReduction,
 }
 
 impl SuperScale {
@@ -392,34 +391,13 @@ impl SuperScale {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Upscaler {
-    /// A neural network (Real-ESRGAN) on the GPU, for SDR pictures up to 4K.
-    /// Its weights download at their first use. An export refuses media
-    /// that it cannot take.
+    /// A neural network (NanoVSR 5.4M) on the GPU, for SDR pictures. It reads
+    /// 15 frames at a time. Its weights download at their first use. An
+    /// export refuses media that it cannot take.
     #[default]
     Ai,
     /// The classic upscalers: libplacebo on the GPU, swscale on the CPU.
     Classic,
-}
-
-/// How much noise the AI upscaler takes out: its denoise strength of 0.2,
-/// 0.5 or 1.0.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum NoiseReduction {
-    Low,
-    #[default]
-    Medium,
-    High,
-}
-
-impl NoiseReduction {
-    pub fn strength(self) -> f32 {
-        match self {
-            Self::Low => 0.2,
-            Self::Medium => 0.5,
-            Self::High => 1.0,
-        }
-    }
 }
 
 /// How much Super Scale enlarges the pictures of a media item.

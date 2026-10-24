@@ -1,6 +1,6 @@
 use eframe::egui;
 use serde_json::{Value, json};
-use vidcut_core::model::{NoiseReduction, ScaleFactor, Sharpness, SuperScale, Upscaler};
+use vidcut_core::model::{ScaleFactor, Sharpness, SuperScale, Upscaler};
 
 use super::workspace::Workspace;
 
@@ -14,12 +14,6 @@ pub(super) const FACTORS: [(ScaleFactor, &str); 5] = [
 
 pub(super) const UPSCALERS: [(Upscaler, &str); 2] =
     [(Upscaler::Ai, "AI"), (Upscaler::Classic, "Classic")];
-
-pub(super) const NOISE: [(NoiseReduction, &str); 3] = [
-    (NoiseReduction::Low, "Low"),
-    (NoiseReduction::Medium, "Medium"),
-    (NoiseReduction::High, "High"),
-];
 
 pub(super) const SHARPNESS: [(Sharpness, &str); 3] = [
     (Sharpness::Low, "Low"),
@@ -36,10 +30,7 @@ pub(super) fn label_of<T: PartialEq + Copy>(list: &[(T, &'static str)], value: T
 pub(super) fn described(s: SuperScale) -> String {
     let factor = label_of(&FACTORS, s.factor);
     match s.upscaler {
-        Upscaler::Ai => format!(
-            "{factor}, AI, Noise Reduction {}",
-            label_of(&NOISE, s.noise_reduction)
-        ),
+        Upscaler::Ai => format!("{factor}, AI"),
         Upscaler::Classic => format!(
             "{factor}, Classic, Sharpness {}",
             label_of(&SHARPNESS, s.sharpness)

@@ -164,15 +164,20 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
 - A `Source` is used again only for a piece with the same Super Scale.
 - **AI** (`upscale`):
   - Before an export starts, `upscale::check` refuses media that AI cannot take (`upscale::unfit`). It also refuses AI without the weights or without a GPU that can run it.
-  - In an export, `ai_picture` turns the source picture into RGB at its shown size, upright.
-  - `upscale::upscale` runs Real-ESRGAN with WGSL compute shaders on wgpu. It gives a picture four times as large.
-    - A pack shader puts the picture into 16-bit floats.
-    - A convolution shader follows for each layer. It reads its block of pixels and its weights into workgroup memory. Each thread makes 4 pixels of 16 channels, with 32-bit sums.
-    - A shuffle shader then puts the channels into the large picture, adds the input and makes 8-bit RGB.
-    - A large picture goes through in tiles. Each tile also reads the margin that the 34 layers reach. Thus the tiles join without seams.
+  - In an export, `Source::ai_picture` finds the chunk of 15 frames that holds the source picture (`upscale::FRAMES`).
+    - The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
+    - `Source::read_chunk` reads the chunk with a second `VideoReader` on the same file. It uses the same GPU decoder.
+    - Each frame becomes RGB at its shown size, upright. The 15 pictures that come out are kept in a `Chunk` until the next chunk.
+  - `upscale::upscale` runs NanoVSR 5.4M with WGSL compute shaders on wgpu. It gives each picture four times as large.
+    - At load, the batch norms of each block fold into one 3×3 convolution, as in the model's own deploy mode.
+    - A convolution shader runs each layer. It reads its block of pixels and its weights into workgroup memory. Each thread makes 4 pixels of 16 channels, with 32-bit sums.
+    - A forward chain of 30 blocks runs from the first frame to the last, and a backward chain from the last to the first. The forward results of all frames are kept.
+    - As the backward chain reaches a frame, a 1×1 convolution joins the two results.
+    - Two convolutions with pixel shuffles and a last convolution then make the large picture, in tiles. A bilinear copy of the input is added.
+    - The values between the layers are 16-bit floats. The output is within 2 of 255 levels of the model's PyTorch output.
   - The usual fitting then makes that picture the size it shows at.
   - The frames go through memory, also from a GPU decoder.
-  - `upscale` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines, weights and buffers stay for the next picture.
+  - `upscale` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines and weights stay. The buffers of a chunk are freed after it.
   - `Note::Upscaled` names each file that AI enlarged in the export's report.
 - The other GPUs fit pictures as before ([todo](../todo/super-scale.md)).
 

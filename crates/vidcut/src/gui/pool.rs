@@ -1588,7 +1588,7 @@ impl Workspace {
             });
             let mut put = None;
             ui.menu_button("Super Scale", |ui| {
-                use super::super_scale::{FACTORS, NOISE, SHARPNESS, UPSCALERS};
+                use super::super_scale::{FACTORS, SHARPNESS, UPSCALERS};
                 use vidcut_core::model::Upscaler;
                 let now = m.super_scale;
                 for (factor, label) in FACTORS {
@@ -1608,15 +1608,6 @@ impl Workspace {
                     if let Some(text) = super::super_scale::unfit(now, [m]) {
                         super::dialog::warn(ui, text);
                     }
-                    ui.add_enabled_ui(now.upscaler == Upscaler::Ai, |ui| {
-                        ui.menu_button("Noise Reduction", |ui| {
-                            for (noise, label) in NOISE {
-                                if ui.radio(now.noise_reduction == noise, label).clicked() {
-                                    put = Some(json!({ "noise_reduction": noise }));
-                                }
-                            }
-                        });
-                    });
                     ui.add_enabled_ui(now.upscaler == Upscaler::Classic, |ui| {
                         ui.menu_button("Sharpness", |ui| {
                             for (sharpness, label) in SHARPNESS {

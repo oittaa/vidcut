@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vidcut_core::model::{
-    ColorSpace, Hdr, NoiseReduction, ScaleFactor, Sharpness, SubtitleStyle, SuperScale, Title,
+    ColorSpace, Hdr, ScaleFactor, Sharpness, SubtitleStyle, SuperScale, Title,
 };
 use vidcut_core::place::Placing;
 use vidcut_core::render::{Image, Placed, Ramp, ShownTitle, VideoPiece, WHOLE, Wipe};
@@ -90,6 +90,9 @@ struct Source {
     sharp: Option<Sharpness>,
     told: bool,
     upright: bool,
+    gpu: Option<crate::hw::GpuDecoder>,
+    ahead: Option<VideoReader>,
+    chunk: Option<Chunk>,
 }
 
 #[derive(Clone)]
@@ -160,6 +163,7 @@ impl Source {
             pictures.reading(reading),
         )?;
         reader.set_color_space(color_space);
+        let ahead_gpu = decoder.filter(|_| video).cloned();
         let fitting = match gpu {
             Some(g) => {
                 Fitting::on_gpu(&reader, g.out, g.format, g.target, true, Place::Cuda, sharp)
@@ -187,6 +191,9 @@ impl Source {
             sharp,
             told: false,
             upright: false,
+            gpu: ahead_gpu,
+            ahead: None,
+            chunk: None,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -216,6 +223,7 @@ impl Source {
     ) -> Result<Source> {
         let mut reader = VideoReader::open_as(input, decoder, pictures.reading(reading))?;
         reader.set_color_space(color_space);
+        let ahead_gpu = decoder.cloned();
         let decoder = reader.gpu();
         let tb = reader.time_base();
         Ok(Source {
@@ -237,6 +245,9 @@ impl Source {
             sharp: None,
             told: false,
             upright: false,
+            gpu: ahead_gpu,
+            ahead: None,
+            chunk: None,
         })
     }
 
@@ -418,44 +429,18 @@ pub(crate) fn placing_of(
 
 const PLACED_MOST: f64 = 16384.0;
 
-fn ai_picture(
+struct Chunk {
+    key: (i64, bool),
+    size: (u32, u32),
+    pictures: Vec<frame::Video>,
+}
+
+fn shown_rgb(
     frame: &frame::Video,
     rotation: u16,
-    target: (u32, u32),
-    noise: NoiseReduction,
-    (path, reading): (&Path, Reading),
-) -> Result<Option<frame::Video>> {
-    let sar = frame.aspect_ratio();
-    let sar = (sar.numerator(), sar.denominator());
-    let shown = super::normalize::shown_size(frame, rotation, target);
-    if !super::normalize::enlarges((frame.width(), frame.height()), sar, 0, shown) {
-        return Ok(None);
-    }
-    if crate::color::Source::of(frame).hdr.is_some() {
-        return Err(Error::Invalid(format!(
-            "{}: the AI upscaler takes SDR pictures, and this one is HDR",
-            path.display()
-        )));
-    }
-    let across = if sar.0 > 0 && sar.1 > 0 {
-        f64::from(sar.0) / f64::from(sar.1)
-    } else {
-        1.0
-    };
-    let (dw, dh) = (f64::from(frame.width()) * across, f64::from(frame.height()));
-    let (dw, dh) = if rotation % 180 == 90 {
-        (dh, dw)
-    } else {
-        (dw, dh)
-    };
-    let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
-    let (dw, dh) = (even(dw), even(dh));
-    if u64::from(dw) * u64::from(dh) > crate::upscale::LARGEST {
-        return Err(Error::Invalid(format!(
-            "{}: the AI upscaler takes pictures up to 4K, and this one is {dw}x{dh}",
-            path.display()
-        )));
-    }
+    (dw, dh): (u32, u32),
+    reading: Reading,
+) -> Result<Vec<u8>> {
     let mem = if crate::hw::on_gpu(frame) {
         crate::hw::download(frame)?
     } else {
@@ -477,10 +462,13 @@ fn ai_picture(
     for y in 0..h {
         packed.extend_from_slice(&rgb.data(0)[y * stride..y * stride + w * 3]);
     }
-    let out = crate::upscale::upscale(&packed, (w, h), noise)?;
+    Ok(packed)
+}
+
+fn big_picture(out: &[u8], (w, h): (u32, u32), pts: Option<i64>) -> frame::Video {
     let scale = crate::upscale::SCALE;
-    let mut big = frame::Video::new(format::Pixel::RGB24, w as u32 * scale, h as u32 * scale);
-    let (row, into) = (w * scale as usize * 3, big.stride(0));
+    let mut big = frame::Video::new(format::Pixel::RGB24, w * scale, h * scale);
+    let (row, into) = ((w * scale) as usize * 3, big.stride(0));
     for (y, line) in out.chunks_exact(row).enumerate() {
         big.data_mut(0)[y * into..y * into + row].copy_from_slice(line);
     }
@@ -490,8 +478,124 @@ fn ai_picture(
     big.set_color_transfer_characteristic(ffmpeg::util::color::TransferCharacteristic::BT709);
     // SAFETY: a plain field of its own frame.
     unsafe { (*big.as_mut_ptr()).sample_aspect_ratio = ffmpeg::ffi::AVRational { num: 1, den: 1 } };
-    big.set_pts(frame.pts());
-    Ok(Some(big))
+    big.set_pts(pts);
+    big
+}
+
+impl Source {
+    fn frame_index(&self, pts: Option<i64>) -> Option<i64> {
+        if self.pictures == Pictures::Still {
+            return None;
+        }
+        let rate = self.reader.frame_rate()?;
+        let first = self.reader.first_pts()?;
+        let fps = f64::from(rate.numerator()) / f64::from(rate.denominator());
+        Some((((pts? - first) as f64 * self.tick) * fps).round() as i64)
+    }
+
+    fn read_chunk(&mut self, first: i64, reading: Reading) -> Result<Vec<frame::Video>> {
+        let rate = self.reader.frame_rate().expect("a frame rate");
+        let fps = f64::from(rate.numerator()) / f64::from(rate.denominator());
+        let start =
+            self.reader.first_pts().unwrap_or(0) as f64 * self.tick + (first as f64 - 0.5) / fps;
+        let input = self.reader.input().clone();
+        let space = self.reader.color_space();
+        if self.ahead.is_none() {
+            let mut r = VideoReader::open_as(&input, self.gpu.as_ref(), reading)?;
+            r.set_color_space(space);
+            self.ahead = Some(r);
+        }
+        let tick = self.tick;
+        self.ahead
+            .as_mut()
+            .expect("opened")
+            .seek((start.max(0.0) / tick).floor() as i64)?;
+        let end = first + crate::upscale::FRAMES as i64;
+        let mut frames = Vec::new();
+        while let Some(f) = self.ahead.as_mut().expect("opened").next_frame()? {
+            match self.frame_index(f.pts()) {
+                Some(i) if i < first => continue,
+                Some(i) if i >= end => break,
+                _ => frames.push(f),
+            }
+        }
+        Ok(frames)
+    }
+
+    fn ai_picture(&mut self, target: (u32, u32), reading: Reading) -> Result<Option<frame::Video>> {
+        let rotation = self.reader.rotation();
+        let (frame, _) = self.current.as_ref().expect("have a frame");
+        let sar = frame.aspect_ratio();
+        let sar = (sar.numerator(), sar.denominator());
+        let shown = super::normalize::shown_size(frame, rotation, target);
+        if !super::normalize::enlarges((frame.width(), frame.height()), sar, 0, shown) {
+            return Ok(None);
+        }
+        if crate::color::Source::of(frame).hdr.is_some() {
+            return Err(Error::Invalid(format!(
+                "{}: the AI upscaler takes SDR pictures, and this one is HDR",
+                self.reader.path().display()
+            )));
+        }
+        let across = if sar.0 > 0 && sar.1 > 0 {
+            f64::from(sar.0) / f64::from(sar.1)
+        } else {
+            1.0
+        };
+        let (dw, dh) = (f64::from(frame.width()) * across, f64::from(frame.height()));
+        let (dw, dh) = if rotation % 180 == 90 {
+            (dh, dw)
+        } else {
+            (dw, dh)
+        };
+        let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
+        let size = (even(dw), even(dh));
+        let pts = frame.pts();
+        let key = match self.frame_index(pts) {
+            Some(i) => (i - i.rem_euclid(crate::upscale::FRAMES as i64), true),
+            None => (pts.unwrap_or(0), false),
+        };
+        if self
+            .chunk
+            .as_ref()
+            .is_none_or(|c| c.key != key || c.size != size)
+        {
+            self.chunk = None;
+            let frames = match key {
+                (first, true) => self.read_chunk(first, reading)?,
+                (_, false) => vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?],
+            };
+            let rgbs = frames
+                .iter()
+                .map(|f| shown_rgb(f, rotation, size, reading))
+                .collect::<Result<Vec<_>>>()?;
+            let big = crate::upscale::upscale(&rgbs, (size.0 as usize, size.1 as usize))?;
+            let pictures = big
+                .iter()
+                .zip(&frames)
+                .map(|(out, f)| big_picture(out, size, f.pts()))
+                .collect();
+            self.chunk = Some(Chunk {
+                key,
+                size,
+                pictures,
+            });
+        }
+        let chunk = self.chunk.as_ref().expect("made");
+        let found = if key.1 {
+            chunk.pictures.iter().find(|p| p.pts() == pts)
+        } else {
+            chunk.pictures.first()
+        };
+        match found {
+            Some(p) => Ok(Some(frame_ref(p)?)),
+            None => Err(Error::Invalid(format!(
+                "{}: the AI upscaler's chunk has no frame at {}",
+                self.reader.path().display(),
+                pts.unwrap_or(0)
+            ))),
+        }
+    }
 }
 
 fn sharpness(super_scale: SuperScale) -> Option<Sharpness> {
@@ -1843,25 +1947,20 @@ impl VideoFrames {
                 .as_ref()
                 .is_some_and(|n| (n.width(), n.height()) != wanted.unwrap_or((w, h)));
         if changed || stale || src.normalized.is_none() {
-            let (frame, _) = src.current.as_ref().expect("have a frame");
             let rotation = src.reader.rotation();
             let reading = src.pictures.reading(self.maker.reading());
             let big = if super_scale.ai() {
-                let aim = if placed.is_empty() {
-                    (w, h)
-                } else {
-                    layer_size((w, h), frame, rotation, placed, super_scale.factor)
+                let aim = match (placed.is_empty(), &src.current) {
+                    (false, Some((frame, _))) => {
+                        layer_size((w, h), frame, rotation, placed, super_scale.factor)
+                    }
+                    _ => (w, h),
                 };
-                ai_picture(
-                    frame,
-                    rotation,
-                    aim,
-                    super_scale.noise_reduction,
-                    (src.reader.path(), reading),
-                )?
+                src.ai_picture(aim, reading)?
             } else {
                 None
             };
+            let (frame, _) = src.current.as_ref().expect("have a frame");
             let made = match &big {
                 Some(big) => self.maker.make_layer(
                     i,
@@ -1885,10 +1984,7 @@ impl VideoFrames {
             if big.is_some() && !src.told {
                 crate::progress::note(super::Note::Upscaled(super::UpscaleNote {
                     path: src.reader.path().to_path_buf(),
-                    how: format!(
-                        "AI (Real-ESRGAN), Noise Reduction {:?}",
-                        super_scale.noise_reduction
-                    ),
+                    how: "AI (NanoVSR 5.4M)".into(),
                 }));
                 src.told = true;
             }

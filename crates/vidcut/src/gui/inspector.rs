@@ -1556,7 +1556,7 @@ impl Workspace {
     }
 
     fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
-        use super::super_scale::{FACTORS, NOISE, SHARPNESS, UPSCALERS, label_of, unfit};
+        use super::super_scale::{FACTORS, SHARPNESS, UPSCALERS, label_of, unfit};
         let mut media: Vec<String> = chosen
             .iter()
             .filter_map(|c| p.clip(&c.id))
@@ -1616,16 +1616,6 @@ impl Workspace {
                 dialog::warn(ui, text);
                 ui.end_row();
             }
-            row(ui, "Noise Reduction", on && ai, &mut |ui| {
-                for (noise, text) in NOISE {
-                    if ui
-                        .selectable_label(now.noise_reduction == noise, text)
-                        .clicked()
-                    {
-                        put = Some(json!({ "noise_reduction": noise }));
-                    }
-                }
-            });
             row(ui, "Sharpness", on && !ai, &mut |ui| {
                 for (sharpness, text) in SHARPNESS {
                     if ui

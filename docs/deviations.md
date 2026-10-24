@@ -1787,12 +1787,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It makes a clip of a higher resolution, which often stops playback in real time (p. 288). The usual sizing then fits that clip.
 - **vidcut:**
   - Super Scale is Off, Auto, 2x, 3x or 4x. Its Upscaler is AI or Classic. There is no Enhanced mode.
-  - AI is the default. It is Real-ESRGAN's compact model `realesr-general-x4v3`. vidcut runs it with its own compute shaders on the GPU, through wgpu.
-    - Noise Reduction sets Real-ESRGAN's denoise strength: 0.2 (Low), 0.5 (Medium) or 1.0 (High).
-    - The strength is the share of `realesr-general-x4v3`, which removes the most noise. The rest is `realesr-general-wdn-x4v3`, which keeps noise.
-    - Thus High uses `realesr-general-x4v3` alone, and Low is 80% `realesr-general-wdn-x4v3`.
+  - AI is the default. It is the video model NanoVSR 5.4M. vidcut runs it with its own compute shaders on the GPU, through wgpu.
+    - It has no Noise Reduction and no other setting.
+    - It reads the frames of a file in chunks of 15. Each output frame uses the frames before and after it in its chunk.
     - The weights download at their first use. vidcut does not ship them.
-    - AI takes SDR pictures up to 4K. A large picture goes through the network in tiles.
+    - AI takes SDR pictures of any size. Its memory grows with the size of the source picture.
     - Before an export starts, it refuses media that AI cannot take. The error names each file and the reason.
     - It also refuses AI without the weights, or without a GPU that can run the network.
     - The Inspector and the pool show a warning under Upscaler for media that AI cannot take.
@@ -1809,8 +1808,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - With AI, the viewer runs the AI upscaler of the export on each picture that the export enlarges. Playback is then slower.
   - With Classic, the viewer enlarges with its own kernels: Catmull-Rom (Low), Lanczos with 3 lobes (Medium) and with 4 lobes (High).
 - **Why:**
-  - Real-ESRGAN adds detail that a classic upscaler cannot. Its denoise strength keeps skin from looking painted. In a test, 0.5 looked best.
-  - The network has only 34 layers of 3×3 convolutions. Shaders of its own run it on the GPU of every maker through wgpu, with no new library.
+  - A video model adds detail that a classic upscaler cannot. In side-by-side tests, the owner ranked NanoVSR 5.4M above Real-ESRGAN's compact model.
+  - The network has only 3×3 and 1×1 convolutions. Shaders of its own run it on the GPU of every maker through wgpu, with no new library.
   - The shaders keep the values between the layers as 16-bit floats, and add in 32-bit floats. This halves the memory traffic. It needs no GPU feature.
   - A different upscaler would change the result without the user's choice. Thus an export refuses, and the user selects Classic or Off.
   - The switch is there to check what the export makes. Thus with AI, the viewer shows the AI result, not a classic preview of it.
