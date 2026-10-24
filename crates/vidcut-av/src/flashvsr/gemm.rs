@@ -77,10 +77,10 @@ fn b_word(r: vec2<u32>, k2: u32) -> u32 {
 }
 
 fn unpack_pairs(w: vec4<u32>) -> array<vec4<f32>, 2> {
-    let x = unpack2x16float(w.x);
-    let y = unpack2x16float(w.y);
-    let z = unpack2x16float(w.z);
-    let v = unpack2x16float(w.w);
+    let x = h2(w.x);
+    let y = h2(w.y);
+    let z = h2(w.z);
+    let v = h2(w.w);
     return array<vec4<f32>, 2>(vec4<f32>(x.x, y.x, z.x, v.x), vec4<f32>(x.y, y.y, z.y, v.y));
 }
 
@@ -292,7 +292,7 @@ fn storer(store: Store) -> String {
         ),
         Store::Skip => r#"
     let o = (row * shape.n + n) / 2u;
-    let s = vec4<f32>(unpack2x16float(aux[o]), unpack2x16float(aux[o + 1u]));
+    let s = vec4<f32>(h2(aux[o]), h2(aux[o + 1u]));
     let w = max(val + bias4(n) + s, vec4<f32>(0.0));
     dst[o] = pack2x16float(w.xy);
     dst[o + 1u] = pack2x16float(w.zw);
@@ -520,7 +520,7 @@ pub(super) fn run(gpu: &Gpu, pass: &mut wgpu::ComputePass, g: &Gemm) {
         "a matrix multiply needs K in steps of 16"
     );
     let key = format!("gemm {:?} {:?}", g.load, g.store);
-    let pipe = gpu.pipe(&key, || source(g.load, g.store));
+    let pipe = gpu.pipe(&key, || gpu.half(&source(g.load, g.store)));
     let tn = g.n.div_ceil(TILE);
     let tiles = g.m.div_ceil(TILE) * tn;
     let per_tile = u64::from(TILE * TILE) * u64::from(g.k);

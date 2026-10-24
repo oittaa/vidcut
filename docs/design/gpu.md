@@ -236,6 +236,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - The tiles wait in workgroup memory as pairs of 16-bit floats, as they come from the buffers (`a_word`). The patch input holds 32-bit floats, so its tile stays 32-bit.
     - The weights are 16-bit floats on the GPU. The files hold 32-bit floats; they are rounded at load, on all cores (`compute::halves`).
     - The residual stream of the DiT stays in 32-bit floats. The other values between the steps are 16-bit floats, with 32-bit sums.
+    - Where the GPU has 16-bit float shaders (`SHADER_F16`), the matrix multiply and the attention read the 16-bit pairs with a bit cast (`Gpu::half`). The math stays 32-bit.
   - Each dispatch takes its parameters from a slot of 256 bytes in one uniform buffer, at a dynamic offset. `Gpu::flush` writes the new slots once, before each submission.
     - When the buffer is full, a new buffer takes its place. Thus the work in flight keeps its slots.
     - Each pipeline has a layout from the bindings of its shader. `Gpu::set` keeps the bind groups until the submission, so dispatches with the same buffers share one.

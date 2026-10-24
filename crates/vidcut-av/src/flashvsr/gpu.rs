@@ -35,6 +35,7 @@ pub(super) struct Gpu {
     pub(super) device: wgpu::Device,
     pub(super) queue: wgpu::Queue,
     pub(super) memory: Option<u64>,
+    pub(super) f16: bool,
     uploaded: AtomicU64,
     pipes: Mutex<HashMap<String, wgpu::ComputePipeline>>,
     ring: Mutex<Ring>,
@@ -133,8 +134,14 @@ impl Gpu {
                 "{name} has too little workgroup memory for the AI Best upscaler"
             ));
         }
+        let f16 = adapter.features().contains(wgpu::Features::SHADER_F16);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("vidcut-flashvsr"),
+            required_features: if f16 {
+                wgpu::Features::SHADER_F16
+            } else {
+                wgpu::Features::empty()
+            },
             required_limits: limits,
             ..Default::default()
         }))
@@ -144,6 +151,7 @@ impl Gpu {
             device,
             queue,
             memory,
+            f16,
             uploaded: AtomicU64::new(0),
             pipes: Mutex::new(HashMap::new()),
             ring: Mutex::new(Ring {
@@ -162,6 +170,15 @@ impl Gpu {
             .entry(key.to_string())
             .or_insert_with(|| pipeline(&self.device, make()))
             .clone()
+    }
+
+    pub(super) fn half(&self, body: &str) -> String {
+        let h2 = if self.f16 {
+            "enable f16;\n\nfn h2(w: u32) -> vec2<f32> {\n    return vec2<f32>(bitcast<vec2<f16>>(w));\n}\n"
+        } else {
+            "fn h2(w: u32) -> vec2<f32> {\n    return unpack2x16float(w);\n}\n"
+        };
+        format!("{h2}\n{body}")
     }
 
     pub(super) fn buffer(&self, size: usize) -> wgpu::Buffer {
