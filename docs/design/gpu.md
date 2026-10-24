@@ -214,6 +214,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - Blocks 0, 6, 12, 18 and 24 attend to 11×11 blocks in the current chunk and in the last 3 windows.
     - The other blocks attend to 3×3 blocks in the current chunk and in the last window.
     - Pooled scores choose the blocks when the candidate blocks are more than the top-k count. A softmax per query block comes first.
+      - `scores.wgsl` keeps the scores of each thread in registers through the softmax. A row takes at most 1024 key blocks.
     - Then a radix select finds the threshold on the bits of the 32-bit values (`hist.wgsl`, `pick.wgsl`). It keeps the official rule: the value at place k+1, and strictly greater.
     - `attend.wgsl` is a flash attention over the chosen key blocks, with an online softmax in 32-bit floats. Cross-attention to the fixed prompt uses it too.
     - The KV cache of each block is a ring of windows (`Cache`).

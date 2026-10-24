@@ -128,6 +128,10 @@ pub(super) fn scores(
     g: &Grid,
     (qp, kc, kn, out): (&wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer, &wgpu::Buffer),
 ) {
+    assert!(
+        g.stride <= 1024,
+        "the block scores take at most 1024 key blocks"
+    );
     let pipe = gpu.pipe("scores", || include_str!("scores.wgsl").into());
     let mut v = vec![g.qbs, g.s, g.nw, g.nh, g.range, g.stride, 0, 0];
     v.extend_from_slice(&g.src);
