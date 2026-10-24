@@ -321,8 +321,10 @@ pub(super) fn load(gpu: &Gpu, paths: &Paths) -> Result<Model> {
         (0..DIM).map(|c| 1.0 + f64::from(hm[DIM + c]) + t_emb[c]),
     ));
     let ones = gpu.upload(&bytes(&vec![1f32; FFN]));
+    let kept = gpu.uploaded() - before;
     let zeros = gpu.upload(&bytes(&vec![0f32; FFN]));
     context(gpu, &mut st, paths.prompt, &mut blocks, &zeros)?;
+    let after = gpu.uploaded();
     drop(st);
     let lq = lq(gpu, paths.lq)?;
     let dec = decoder(gpu, paths.decoder)?;
@@ -335,7 +337,7 @@ pub(super) fn load(gpu: &Gpu, paths: &Paths) -> Result<Model> {
         lq,
         dec,
         ones,
-        bytes: gpu.uploaded() - before + 2 * (LAYERS * PROMPT * DIM * 2) as u64,
+        bytes: kept + (gpu.uploaded() - after) + 2 * (LAYERS * PROMPT * DIM * 2) as u64,
     })
 }
 
