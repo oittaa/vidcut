@@ -389,8 +389,7 @@ pub enum ScaleFactor {
     #[default]
     #[serde(rename = "none")]
     None,
-    /// The smallest of 2x, 3x and 4x that reaches the size the picture
-    /// shows at.
+    /// As much as the picture needs, up to 4x.
     #[serde(rename = "auto")]
     Auto,
     #[serde(rename = "2x")]

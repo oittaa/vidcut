@@ -1784,9 +1784,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It is a setting of a media clip, in Clip Attributes and in the Inspector of the Media page (pp. 288, 432–433).
   - It has 2x, 3x and 4x, each also as Enhanced. Sharpness and Noise Reduction are Low, Medium or High. Enhanced makes them variable (p. 433).
   - The project setting also has Auto (p. 149).
-  - It makes a clip of a higher resolution, which often stops playback in real time (p. 288).
+  - It makes a clip of a higher resolution, which often stops playback in real time (p. 288). The usual sizing then fits that clip.
 - **vidcut:**
   - Super Scale is Off, Auto, 2x, 3x or 4x, with a Sharpness of Low, Medium or High. There is no Noise Reduction and no Enhanced mode.
+  - The factor limits only how large a placed picture is made. A picture that fills the frame takes the better upscaler for all of its enlargement.
+  - Auto is as much as the picture needs, up to 4x.
   - The Inspector of the Cut page has a Super Scale section for the media of the selected clips.
   - An export enlarges a picture with the upscaler that its path has:
     - Pictures that NVIDIA's GPU fits for NVENC: libplacebo, in linear light. Low is `ewa_lanczos`, Medium `ewa_lanczossharp` and High `ewa_lanczos4sharpest`.
@@ -1795,6 +1797,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The viewer shows the picture without Super Scale.
 - **Why:**
   - The upscalers of the GPU are free and run on every computer. They do not need a separate download.
+  - These upscalers can go to any size in one step. Thus all of the enlargement gets the better upscaler, not only the factor.
   - The viewer stays in real time.
 
 ## X89. A wipe reveals from one edge

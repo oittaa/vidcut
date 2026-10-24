@@ -285,10 +285,10 @@ pub enum Request {
         /// follow it.
         #[serde(default)]
         color_space: Option<crate::model::ColorSpace>,
-        /// Super Scale: `none` (off), `auto`, `2x`, `3x` or `4x`. Before its
-        /// pictures are fitted, they are enlarged with the best upscaler that
-        /// the GPU has. `auto` takes the smallest factor that reaches the size
-        /// a picture shows at.
+        /// Super Scale: `none` (off), `auto`, `2x`, `3x` or `4x`. Where its
+        /// pictures are enlarged, they get the best upscaler that the GPU
+        /// has. The factor is the most that a zoomed picture is made larger
+        /// than its source; `auto` is as much as it needs, up to 4x.
         #[serde(default)]
         super_scale: Option<crate::model::ScaleFactor>,
         /// The detail of Super Scale: `low`, `medium` or `high`.
