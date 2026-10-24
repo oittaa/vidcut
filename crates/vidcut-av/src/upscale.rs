@@ -1,6 +1,7 @@
 use std::io::Read;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError, mpsc};
+use std::time::Instant;
 
 use vidcut_core::model::{Media, Project};
 use vidcut_core::render::VideoPiece;
@@ -33,7 +34,7 @@ const TILE: usize = 256;
 const MARGIN: usize = 4;
 const BLOCK: usize = 16;
 const OUT_BLOCK: usize = 64;
-const SHARED: u32 = 1024 * 16 + 960 * 8;
+const SHARED: u32 = ((8 * 18 * 18 + 8 * 9 * OUT_BLOCK) * 4) as u32;
 
 fn fetch_of(f: &File) -> Fetch {
     let file = f.name.rsplit('/').next().unwrap_or(f.name);
@@ -294,6 +295,24 @@ struct Shape {
     act: bool,
     join: bool,
     wino: bool,
+    sum: bool,
+    shuffle: bool,
+}
+
+impl Shape {
+    fn new(cin: usize, cout: usize, size: usize, act: bool, join: bool, sum: bool) -> Self {
+        let wino = size == 3 && cin == FEATURES;
+        Self {
+            cin,
+            cout,
+            size,
+            act,
+            join,
+            wino,
+            sum,
+            shuffle: wino && cout != cin,
+        }
+    }
 }
 
 fn laid_out(c: &Conv, size: usize) -> (usize, usize, Vec<f32>, Vec<f32>) {
@@ -497,7 +516,7 @@ fn winograd(c: &Conv) -> Vec<f32> {
     u
 }
 
-fn wino_shader(cout: usize, act: bool) -> String {
+fn wino_shader(cout: usize, act: bool, sum: bool, shuffle: bool) -> String {
     let mut decl = String::new();
     for k in 0..8 {
         for h in 0..2 {
@@ -535,24 +554,61 @@ fn wino_shader(cout: usize, act: bool) -> String {
             }
         }
         epilogue += "    workgroupBarrier();\n    if (li < 64u) {\n";
-        for t in 0..16 {
+        if shuffle {
+            for (n, q) in [("a", 0), ("b", 1)] {
+                for j in 0..12 {
+                    epilogue += &format!(
+                        "        let n{r}{n}_{j} = bitcast<vec4<f32>>(sm[((4u * p + {j}u) * 8u + ej) * 8u + ((2u * qp + {q}u) ^ ((ej / 2u) & 1u))]);\n"
+                    );
+                }
+            }
+            let list = |n: &str| {
+                (0..12)
+                    .map(|j| format!("n{r}{n}_{j}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
             epilogue += &format!(
-                "        let m{r}_{t} = bitcast<vec4<f32>>(sm[({t}u * 8u + ej) * 8u + (cq ^ ((ej / 2u) & 1u))]);\n"
+                "        shuffled(array<vec4<f32>, 12>({}), array<vec4<f32>, 12>({}), p, base + qp * 8u, x0 + ({}u + ej % 2u) * 2u, y0 + (ej / 2u) * 2u);\n",
+                list("a"),
+                list("b"),
+                r * 2
+            );
+        } else {
+            for t in 0..16 {
+                epilogue += &format!(
+                    "        let m{r}_{t} = bitcast<vec4<f32>>(sm[({t}u * 8u + ej) * 8u + (cq ^ ((ej / 2u) & 1u))]);\n"
+                );
+            }
+            let list = (0..16)
+                .map(|t| format!("m{r}_{t}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            epilogue += &format!(
+                "        emit(array<vec4<f32>, 16>({list}), base + cq * 4u, x0 + ({}u + ej % 2u) * 2u, y0 + (ej / 2u) * 2u);\n",
+                r * 2
             );
         }
-        epilogue += "        emit(array<vec4<f32>, 16>(";
-        for t in 0..16 {
-            epilogue += &format!("m{r}_{t}, ");
-        }
-        epilogue += &format!(
-            "), base + cq * 4u, x0 + ({}u + ej % 2u) * 2u, y0 + (ej / 2u) * 2u);\n    }}\n    workgroupBarrier();\n",
-            r * 2
-        );
+        epilogue += "    }\n    workgroupBarrier();\n";
     }
     let activate = if act {
         "v = select(v * vec4<f32>(alpha[co], alpha[co + 1u], alpha[co + 2u], alpha[co + 3u]), v, v >= vec4<f32>(0.0));"
     } else {
         "_ = alpha[0];"
+    };
+    let fetch = if sum {
+        "@group(0) @binding(6) var<storage, read> src2: array<vec4<u32>>;
+
+fn fetch(i: u32) -> array<vec2<f32>, 4> {
+    let q = src[i];
+    let r = src2[i];
+    return array<vec2<f32>, 4>(unpack2x16float(q.x) + unpack2x16float(r.x), unpack2x16float(q.y) + unpack2x16float(r.y), unpack2x16float(q.z) + unpack2x16float(r.z), unpack2x16float(q.w) + unpack2x16float(r.w));
+}"
+    } else {
+        "fn fetch(i: u32) -> array<vec2<f32>, 4> {
+    let q = src[i];
+    return array<vec2<f32>, 4>(unpack2x16float(q.x), unpack2x16float(q.y), unpack2x16float(q.z), unpack2x16float(q.w));
+}"
     };
     format!(
         r#"
@@ -567,18 +623,49 @@ struct Size {{ w: u32, h: u32 }}
 @group(0) @binding(3) var<storage, read> bias: array<f32>;
 @group(0) @binding(4) var<storage, read> alpha: array<f32>;
 @group(0) @binding(5) var<storage, read_write> dst: array<u32>;
+{fetch}
 
 var<workgroup> sm: array<vec4<u32>, 1024>;
 var<workgroup> raw: array<vec2<f32>, 960>;
 
+fn act4(y: vec4<f32>, co: u32) -> vec4<f32> {{
+    var v = y + vec4<f32>(bias[co], bias[co + 1u], bias[co + 2u], bias[co + 3u]);
+    {activate}
+    return v;
+}}
+
 fn put(px: u32, py: u32, co: u32, y: vec4<f32>) {{
     if (px < size.w && py < size.h) {{
-        var v = y + vec4<f32>(bias[co], bias[co + 1u], bias[co + 2u], bias[co + 3u]);
-        {activate}
+        let v = act4(y, co);
         let o = (py * size.w + px) * (COUT / 2u) + co / 2u;
         dst[o] = pack2x16float(v.xy);
         dst[o + 1u] = pack2x16float(v.zw);
     }}
+}}
+
+fn place(px: u32, py: u32, co: u32, y0: vec4<f32>, y1: vec4<f32>) {{
+    if (px < size.w && py < size.h) {{
+        let a = act4(y0, co);
+        let b = act4(y1, co + 4u);
+        let ow = size.w * 2u;
+        let o = (py * 2u * ow + px * 2u) * (COUT / 8u) + co / 8u;
+        dst[o] = pack2x16float(vec2<f32>(a.x, b.x));
+        dst[o + COUT / 8u] = pack2x16float(vec2<f32>(a.y, b.y));
+        dst[o + ow * (COUT / 8u)] = pack2x16float(vec2<f32>(a.z, b.z));
+        dst[o + (ow + 1u) * (COUT / 8u)] = pack2x16float(vec2<f32>(a.w, b.w));
+    }}
+}}
+
+fn rows4(n: array<vec4<f32>, 12>, s: f32) -> array<vec4<f32>, 4> {{
+    return array<vec4<f32>, 4>(n[0] + s * (n[4] + n[8]), n[1] + s * (n[5] + n[9]), n[2] + s * (n[6] + n[10]), n[3] + s * (n[7] + n[11]));
+}}
+
+fn shuffled(n0: array<vec4<f32>, 12>, n1: array<vec4<f32>, 12>, p: u32, co: u32, px: u32, py: u32) {{
+    let s = select(1.0, -1.0, p == 1u);
+    let r0 = rows4(n0, s);
+    let r1 = rows4(n1, s);
+    place(px, py + p, co, r0[0] + r0[1] + r0[2], r1[0] + r1[1] + r1[2]);
+    place(px + 1u, py + p, co, r0[1] - r0[2] - r0[3], r1[1] - r1[2] - r1[3]);
 }}
 
 fn emit(m: array<vec4<f32>, 16>, co: u32, px: u32, py: u32) {{
@@ -604,9 +691,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
     let tv = t ^ (t >> 3u);
     let a = (li / 4u) % 4u;
     let b = li % 4u;
-    let x0 = wg.x * 16u;
-    let y0 = wg.y * 8u;
-    let base = wg.z * 32u;
+    let x0 = wg.y * 16u;
+    let y0 = wg.z * 8u;
+    let base = wg.x * 32u;
     let rx = i32(x0 + li % 18u) - 1;
     let ry = i32(y0 + li / 18u) - 1;
     let rin = li < 180u && rx >= 0 && ry >= 0 && rx < i32(size.w) && ry < i32(size.h);
@@ -625,22 +712,18 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
 {decl}
     for (var c0 = 0u; c0 < CIN; c0 += CK) {{
         if (li < 180u) {{
-            var rq = vec4<u32>(0u);
+            var pix = array<vec2<f32>, 4>();
             if (rin) {{
-                rq = src[rsrc + c0 / 8u];
+                pix = fetch(rsrc + c0 / 8u);
             }}
-            let p0 = unpack2x16float(rq.x);
-            let p1 = unpack2x16float(rq.y);
-            let p2 = unpack2x16float(rq.z);
-            let p3 = unpack2x16float(rq.w);
-            raw[rk][re] = p0.x;
-            raw[120u + rk][re] = p0.y;
-            raw[240u + rk][re] = p1.x;
-            raw[360u + rk][re] = p1.y;
-            raw[480u + rk][re] = p2.x;
-            raw[600u + rk][re] = p2.y;
-            raw[720u + rk][re] = p3.x;
-            raw[840u + rk][re] = p3.y;
+            raw[rk][re] = pix[0].x;
+            raw[120u + rk][re] = pix[0].y;
+            raw[240u + rk][re] = pix[1].x;
+            raw[360u + rk][re] = pix[1].y;
+            raw[480u + rk][re] = pix[2].x;
+            raw[600u + rk][re] = pix[2].y;
+            raw[720u + rk][re] = pix[3].x;
+            raw[840u + rk][re] = pix[3].y;
         }}
         workgroupBarrier();
         {{
@@ -669,6 +752,8 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
     workgroupBarrier();
     let ej = li / 8u;
     let cq = li % 8u;
+    let qp = (li / 2u) % 4u;
+    let p = li % 2u;
 {epilogue}
 }}
 "#
@@ -694,56 +779,6 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     dst[p * 4u + 3u] = 0u;
 }
 "#;
-
-const ADD: &str = r#"
-struct Count { n: u32, pad: u32 }
-@group(0) @binding(0) var<uniform> count: Count;
-@group(0) @binding(1) var<storage, read> a: array<u32>;
-@group(0) @binding(2) var<storage, read> b: array<u32>;
-@group(0) @binding(3) var<storage, read_write> dst: array<u32>;
-
-@compute @workgroup_size(256)
-fn main(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) n: vec3<u32>) {
-    let i = id.y * n.x * 256u + id.x;
-    if (i >= count.n) {
-        return;
-    }
-    dst[i] = pack2x16float(unpack2x16float(a[i]) + unpack2x16float(b[i]));
-}
-"#;
-
-fn shuffle_shader(cin: usize) -> String {
-    format!(
-        r#"
-const CIN: u32 = {cin}u;
-const COUT: u32 = {cout}u;
-struct Size {{ w: u32, h: u32 }}
-@group(0) @binding(0) var<uniform> size: Size;
-@group(0) @binding(1) var<storage, read> src: array<u32>;
-@group(0) @binding(2) var<storage, read_write> dst: array<u32>;
-
-fn at(p: u32, c: u32) -> f32 {{
-    let v = unpack2x16float(src[p * (CIN / 2u) + c / 2u]);
-    return select(v.x, v.y, c % 2u == 1u);
-}}
-
-@compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) id: vec3<u32>) {{
-    let ow = size.w * 2u;
-    if (id.x >= ow || id.y >= size.h * 2u) {{
-        return;
-    }}
-    let p = (id.y / 2u) * size.w + id.x / 2u;
-    let sub = (id.y % 2u) * 2u + id.x % 2u;
-    let o = (id.y * ow + id.x) * (COUT / 2u);
-    for (var c = 0u; c < COUT; c += 2u) {{
-        dst[o + c / 2u] = pack2x16float(vec2<f32>(at(p, c * 4u + sub), at(p, (c + 1u) * 4u + sub)));
-    }}
-}}
-"#,
-        cout = cin / 4
-    )
-}
 
 const CROP: &str = r#"
 struct Crop { src_w: u32, x0: u32, y0: u32, w: u32, h: u32, words: u32, pad0: u32, pad1: u32 }
@@ -960,9 +995,6 @@ fn checked<T>(device: &wgpu::Device, run: impl FnOnce() -> Result<T>) -> Result<
 struct Pipelines {
     convs: Vec<(Shape, wgpu::ComputePipeline)>,
     pack: wgpu::ComputePipeline,
-    add: wgpu::ComputePipeline,
-    shuffle1: wgpu::ComputePipeline,
-    shuffle2: wgpu::ComputePipeline,
     crop: wgpu::ComputePipeline,
     last: wgpu::ComputePipeline,
 }
@@ -972,7 +1004,6 @@ struct Frame {
     h: usize,
     count: usize,
     size: wgpu::Buffer,
-    pixels: wgpu::Buffer,
     rgba: Vec<wgpu::Buffer>,
     input: wgpu::Buffer,
     feats: wgpu::Buffer,
@@ -998,12 +1029,11 @@ struct Job {
 struct Tiles {
     jobs: Vec<Job>,
     feat: wgpu::Buffer,
-    up1: wgpu::Buffer,
     s1: wgpu::Buffer,
-    up2: wgpu::Buffer,
     s2: wgpu::Buffer,
     out: wgpu::Buffer,
-    read: wgpu::Buffer,
+    read: [wgpu::Buffer; 2],
+    shown: u64,
 }
 
 struct Engine {
@@ -1089,24 +1119,17 @@ impl Engine {
         .map_err(|e| format!("the GPU did not open for the AI upscaler: {e}"))?;
         let made = checked(&device, || {
             let convs = [
-                (PADDED, FEATURES, 3, true, false),
-                (FEATURES, FEATURES, 3, true, false),
-                (2 * FEATURES, FEATURES, 1, false, true),
-                (FEATURES, 4 * FEATURES, 3, true, false),
-                (FEATURES, 4 * 32, 3, true, false),
+                Shape::new(PADDED, FEATURES, 3, true, false, false),
+                Shape::new(FEATURES, FEATURES, 3, true, false, false),
+                Shape::new(FEATURES, FEATURES, 3, true, false, true),
+                Shape::new(2 * FEATURES, FEATURES, 1, false, true, false),
+                Shape::new(FEATURES, 4 * FEATURES, 3, true, false, false),
+                Shape::new(FEATURES, 4 * 32, 3, true, false, false),
             ]
             .into_iter()
-            .map(|(cin, cout, size, act, join)| {
-                let shape = Shape {
-                    cin,
-                    cout,
-                    size,
-                    act,
-                    join,
-                    wino: size == 3 && cin == FEATURES,
-                };
+            .map(|shape| {
                 let source = if shape.wino {
-                    wino_shader(cout, act)
+                    wino_shader(shape.cout, shape.act, shape.sum, shape.shuffle)
                 } else {
                     conv_shader(shape)
                 };
@@ -1116,9 +1139,6 @@ impl Engine {
             let pipelines = Pipelines {
                 convs,
                 pack: pipeline(&device, PACK.into()),
-                add: pipeline(&device, ADD.into()),
-                shuffle1: pipeline(&device, shuffle_shader(4 * FEATURES)),
-                shuffle2: pipeline(&device, shuffle_shader(4 * 32)),
                 crop: pipeline(&device, CROP.into()),
                 last: pipeline(&device, last_shader()),
             };
@@ -1150,7 +1170,7 @@ impl Engine {
             })
     }
 
-    fn layer(&self, c: &Conv, alpha: Option<f32>) -> Layer {
+    fn layer(&self, c: &Conv, alpha: Option<f32>, sum: bool) -> Layer {
         let size = if c.weights.len() == c.cin * c.cout {
             1
         } else {
@@ -1162,14 +1182,7 @@ impl Engine {
         } else {
             laid_out(c, size)
         };
-        let shape = Shape {
-            cin,
-            cout,
-            size,
-            act: alpha.is_some(),
-            join: c.cin == 2 * FEATURES,
-            wino,
-        };
+        let shape = Shape::new(cin, cout, size, alpha.is_some(), c.cin == 2 * FEATURES, sum);
         let pipeline = self
             .pipelines
             .convs
@@ -1197,20 +1210,22 @@ impl Engine {
         get_ready(&dir, false)?;
         let net = read(&dir.join(WEIGHTS.name))?;
         let gpu = Gpu {
-            extract: self.layer(&net.extract, Some(LEAK)),
+            extract: self.layer(&net.extract, Some(LEAK), false),
             forward: net
                 .forward
                 .iter()
-                .map(|c| self.layer(c, Some(LEAK)))
+                .enumerate()
+                .map(|(k, c)| self.layer(c, Some(LEAK), k == 0))
                 .collect(),
             backward: net
                 .backward
                 .iter()
-                .map(|c| self.layer(c, Some(LEAK)))
+                .enumerate()
+                .map(|(k, c)| self.layer(c, Some(LEAK), k == 0))
                 .collect(),
-            fusion: self.layer(&net.fusion, None),
-            up1: self.layer(&net.up1, Some(net.up1_alpha)),
-            up2: self.layer(&net.up2, Some(net.up2_alpha)),
+            fusion: self.layer(&net.fusion, None, false),
+            up1: self.layer(&net.up1, Some(net.up1_alpha), false),
+            up2: self.layer(&net.up2, Some(net.up2_alpha), false),
             last: self
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1241,7 +1256,6 @@ impl Engine {
             h,
             count,
             size: buffer(d, 8, U::UNIFORM | U::COPY_DST),
-            pixels: buffer(d, 8, U::UNIFORM | U::COPY_DST),
             rgba: (0..count)
                 .map(|_| buffer(d, px * 4, U::STORAGE | U::COPY_DST))
                 .collect(),
@@ -1294,12 +1308,14 @@ impl Engine {
         self.tiles = Some(Tiles {
             jobs,
             feat: buffer(d, p1 * FEATURES * 2, U::STORAGE),
-            up1: buffer(d, p1 * 4 * FEATURES * 2, U::STORAGE),
             s1: buffer(d, p2 * FEATURES * 2, U::STORAGE),
-            up2: buffer(d, p2 * 4 * 32 * 2, U::STORAGE),
             s2: buffer(d, p4 * 32 * 2, U::STORAGE),
             out: buffer(d, shown, U::STORAGE | U::COPY_SRC),
-            read: buffer(d, shown, U::MAP_READ | U::COPY_DST),
+            read: [
+                buffer(d, shown, U::MAP_READ | U::COPY_DST),
+                buffer(d, shown, U::MAP_READ | U::COPY_DST),
+            ],
+            shown: shown as u64,
         });
     }
 
@@ -1323,16 +1339,16 @@ impl Engine {
         let bind = group(&self.device, pipeline, &buffers);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind, &[]);
-        let (bw, bh, bc) = if shape.wino {
-            (BLOCK, BLOCK / 2, 32)
+        let (x, y, z) = if shape.wino {
+            (layer.cout / 32, w.div_ceil(BLOCK), h.div_ceil(BLOCK / 2))
         } else {
-            (BLOCK, BLOCK, OUT_BLOCK)
+            (
+                w.div_ceil(BLOCK),
+                h.div_ceil(BLOCK),
+                layer.cout.div_ceil(OUT_BLOCK),
+            )
         };
-        pass.dispatch_workgroups(
-            w.div_ceil(bw) as u32,
-            h.div_ceil(bh) as u32,
-            layer.cout.div_ceil(bc) as u32,
-        );
+        pass.dispatch_workgroups(x as u32, y as u32, z as u32);
     }
 
     fn simple(
@@ -1364,15 +1380,6 @@ impl Engine {
             (blocks(w), blocks(h)),
         );
         self.conv(pass, &net.extract, (&f.size, &[&f.input], &f.feats), (w, h));
-        let n = (w * h * FEATURES / 2) as u32;
-        let groups = n.div_ceil(256);
-        let (gx, gy) = (groups.min(65535), groups.div_ceil(65535));
-        self.simple(
-            pass,
-            &self.pipelines.add,
-            &[&f.pixels, &f.feats, prev, &f.xa],
-            (gx, gy),
-        );
         let last = layers.len() - 1;
         for (k, layer) in layers.iter().enumerate() {
             let (src, out) = if k % 2 == 0 {
@@ -1381,22 +1388,21 @@ impl Engine {
                 (&f.xb, &f.xa)
             };
             let out = if k == last { dst } else { out };
-            self.conv(pass, layer, (&f.size, &[src], out), (w, h));
+            let srcs: &[&wgpu::Buffer] = if k == 0 { &[&f.feats, prev] } else { &[src] };
+            self.conv(pass, layer, (&f.size, srcs, out), (w, h));
         }
     }
 
     fn run(&mut self, frames: &[Vec<u8>], (w, h): (usize, usize)) -> Result<Vec<Vec<u8>>> {
         let device = self.device.clone();
         checked(&device, || {
-            let clock = std::time::Instant::now();
+            let clock = Instant::now();
             self.load()?;
             self.make_frame((w, h), frames.len());
             self.make_tiles();
             let f = self.frame.as_ref().expect("frame made");
-            let n = (w * h * FEATURES / 2) as u32;
             self.queue
                 .write_buffer(&f.size, 0, &words(&[w as u32, h as u32]));
-            self.queue.write_buffer(&f.pixels, 0, &words(&[n, 0]));
             for (i, rgb) in frames.iter().enumerate() {
                 let rgba: Vec<u32> = rgb
                     .as_chunks::<3>()
@@ -1420,8 +1426,8 @@ impl Engine {
                 .poll(wgpu::PollType::wait_indefinitely())
                 .map_err(gpu_error)?;
             let forward = clock.elapsed();
-            let (mut back, mut tiles) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
             let mut outs = vec![Vec::new(); frames.len()];
+            let mut waiting = None;
             for i in (0..frames.len()).rev() {
                 let prev = if i + 1 == frames.len() {
                     &f.zero
@@ -1438,91 +1444,73 @@ impl Engine {
                         (&f.size, &[&f.states[i], &f.back[i % 2]], &f.fused),
                         (w, h),
                     );
+                    self.enlarge(&mut pass, i);
                 }
-                self.queue.submit([enc.finish()]);
-                let t = std::time::Instant::now();
-                self.device
-                    .poll(wgpu::PollType::wait_indefinitely())
-                    .map_err(gpu_error)?;
-                back += t.elapsed();
-                let t = std::time::Instant::now();
-                outs[i] = self.enlarge(i)?;
-                tiles += t.elapsed();
+                let t = self.tiles.as_ref().expect("tiles made");
+                enc.copy_buffer_to_buffer(&t.out, 0, &t.read[i % 2], 0, t.shown);
+                let done = self.queue.submit([enc.finish()]);
+                if let Some((j, done)) = waiting.replace((i, done)) {
+                    outs[j] = self.take(j % 2, done)?;
+                }
+            }
+            if let Some((j, done)) = waiting {
+                outs[j] = self.take(j % 2, done)?;
             }
             crate::debug!(
                 "upscale",
-                "{} frames at {w}x{h}: load and forward chain {:.0} ms, backward chains and joins {:.0} ms, 4x tiles {:.0} ms",
+                "{} frames at {w}x{h}: load and forward chain {:.0} ms, backward chains, joins and 4x tiles {:.0} ms",
                 frames.len(),
                 forward.as_secs_f64() * 1e3,
-                back.as_secs_f64() * 1e3,
-                tiles.as_secs_f64() * 1e3
+                (clock.elapsed() - forward).as_secs_f64() * 1e3
             );
             Ok(outs)
         })
     }
 
-    fn enlarge(&self, i: usize) -> Result<Vec<u8>> {
+    fn enlarge(&self, pass: &mut wgpu::ComputePass, i: usize) {
         let f = self.frame.as_ref().expect("frame made");
         let t = self.tiles.as_ref().expect("tiles made");
         let net = self.net.as_ref().expect("loaded");
-        let mut enc = self.device.create_command_encoder(&Default::default());
-        {
-            let mut pass = enc.begin_compute_pass(&Default::default());
-            for job in &t.jobs {
-                let (tw, th) = (job.tw, job.th);
-                self.simple(
-                    &mut pass,
-                    &self.pipelines.crop,
-                    &[&job.crop, &f.fused, &t.feat],
-                    (blocks(tw * FEATURES / 2), blocks(th)),
-                );
-                self.conv(
-                    &mut pass,
-                    &net.up1,
-                    (&job.size1, &[&t.feat], &t.up1),
-                    (tw, th),
-                );
-                self.simple(
-                    &mut pass,
-                    &self.pipelines.shuffle1,
-                    &[&job.size1, &t.up1, &t.s1],
-                    (blocks(tw * 2), blocks(th * 2)),
-                );
-                self.conv(
-                    &mut pass,
-                    &net.up2,
-                    (&job.size2, &[&t.s1], &t.up2),
-                    (tw * 2, th * 2),
-                );
-                self.simple(
-                    &mut pass,
-                    &self.pipelines.shuffle2,
-                    &[&job.size2, &t.up2, &t.s2],
-                    (blocks(tw * 4), blocks(th * 4)),
-                );
-                self.simple(
-                    &mut pass,
-                    &self.pipelines.last,
-                    &[&job.place, &t.s2, &net.last, &f.rgba[i], &t.out],
-                    (blocks(job.cw), blocks(job.ch * 4)),
-                );
-            }
+        for job in &t.jobs {
+            let (tw, th) = (job.tw, job.th);
+            self.simple(
+                pass,
+                &self.pipelines.crop,
+                &[&job.crop, &f.fused, &t.feat],
+                (blocks(tw * FEATURES / 2), blocks(th)),
+            );
+            self.conv(pass, &net.up1, (&job.size1, &[&t.feat], &t.s1), (tw, th));
+            self.conv(
+                pass,
+                &net.up2,
+                (&job.size2, &[&t.s1], &t.s2),
+                (tw * 2, th * 2),
+            );
+            self.simple(
+                pass,
+                &self.pipelines.last,
+                &[&job.place, &t.s2, &net.last, &f.rgba[i], &t.out],
+                (blocks(job.cw), blocks(job.ch * 4)),
+            );
         }
-        let scale = SCALE as usize;
-        let shown = (f.w * scale * f.h * scale * 3) as u64;
-        enc.copy_buffer_to_buffer(&t.out, 0, &t.read, 0, shown);
-        self.queue.submit([enc.finish()]);
-        let slice = t.read.slice(..shown);
+    }
+
+    fn take(&self, slot: usize, done: wgpu::SubmissionIndex) -> Result<Vec<u8>> {
+        let t = self.tiles.as_ref().expect("tiles made");
+        let slice = t.read[slot].slice(..t.shown);
         let (tx, rx) = mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });
         self.device
-            .poll(wgpu::PollType::wait_indefinitely())
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(done),
+                timeout: None,
+            })
             .map_err(gpu_error)?;
         rx.recv().map_err(gpu_error)?.map_err(gpu_error)?;
         let out = slice.get_mapped_range().map_err(gpu_error)?.to_vec();
-        t.read.unmap();
+        t.read[slot].unmap();
         Ok(out)
     }
 }
