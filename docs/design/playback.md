@@ -109,9 +109,6 @@ Motions:
 - Thus the small dedicated share of an integrated GPU does not make the budget small.
 - Apple silicon has one shared budget.
 - The least recently used pictures go first, whichever engine decoded them.
-- The cache keeps its use order in `vidcut_core::lru::Lru` lists: one for all pictures and one for each kind of memory.
-- Each step takes the same time for any count of pictures: a look-up, an insert, a removal and the search for the oldest picture.
-- An index of the pictures of each GPU pool (`Picture::pools`) and of the small pictures of each engine lets them go with no search.
 - The prepared picture of each engine never goes (`Store::hold`).
 - An `Id` names what a picture shows. Thus an engine can show a picture that another engine decoded.
 - A small picture of the two-up names the engine that made it (`Id::small`). Only that engine shows it. The picture goes when that engine changes its size or ends.
