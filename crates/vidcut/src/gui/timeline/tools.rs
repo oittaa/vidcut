@@ -6,7 +6,7 @@ use vidcut_core::model::Project;
 use vidcut_core::ops::{self, Edge};
 use vidcut_core::request::Detect;
 
-use super::{EditSel, Side, TrackRef, audio_edit_outgoing};
+use super::{EditSel, Side, TrackRef};
 use crate::gui::export::Ask;
 use crate::gui::shuttle::{Jkl, first_press};
 use crate::gui::timeline::geometry::{Rows, Scale};
@@ -354,8 +354,17 @@ impl Dynamic {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DynamicTarget {
-    Edit(EditSel),
+    Edits(Vec<EditSel>),
     Clips(Vec<String>),
+}
+
+impl DynamicTarget {
+    pub fn lead(&self) -> Option<EditSel> {
+        match self {
+            Self::Edits(all) => all.last().copied(),
+            Self::Clips(_) => None,
+        }
+    }
 }
 
 const LANDING: std::time::Duration = std::time::Duration::from_secs(1);
@@ -414,8 +423,8 @@ pub fn heard(
     };
     let dir = if speed > 0.0 { 1 } else { -1 };
     let now = trimmed(pending)?;
-    let (id, out) = match target {
-        DynamicTarget::Edit(e) if e.side == Side::Audio => {
+    let (id, out) = match (target, target.lead()) {
+        (_, Some(e)) if e.side == Side::Audio => {
             let by = match dir {
                 1 => pending,
                 _ => furthest(pending, dir, |b| trimmed(b).is_some()),
@@ -427,7 +436,7 @@ pub fn heard(
                 skips: None,
             });
         }
-        DynamicTarget::Edit(e) => {
+        (_, Some(e)) => {
             let t = p.track(&e.track.id())?;
             let out = t.clips.iter().find(|c| c.end() == e.at);
             let inc = t.clips.iter().find(|c| c.start == e.at);
@@ -437,7 +446,8 @@ pub fn heard(
                 _ => return None,
             }
         }
-        DynamicTarget::Clips(ids) => {
+        (DynamicTarget::Edits(_), None) => return None,
+        (DynamicTarget::Clips(ids), None) => {
             let c = first_clip(&now, ids)?;
             if mode == DynamicMode::Slip {
                 return slip_heard(&now, c, end_edge, speed);
@@ -539,44 +549,19 @@ pub fn dynamic_preview(
     by: i64,
 ) -> vidcut_core::Result<i64> {
     match target {
-        DynamicTarget::Edit(e) => {
-            if e.side == Side::Audio {
-                let id = p
-                    .track(&e.track.id())
-                    .and_then(|t| audio_edit_outgoing(t, e.at))
-                    .ok_or_else(|| vidcut_core::Error::not_found("no audio edit"))?;
-                ops::audio_roll(p, &id, ops::Edge::Tail, by)?;
-                return Ok(e.at + by);
+        DynamicTarget::Edits(all) => {
+            let lead = *all
+                .last()
+                .ok_or_else(|| vidcut_core::Error::not_found("no edit"))?;
+            let trims = super::edits::Plan::new(p, all, lead)?.each(by);
+            for (_, c, b) in &trims {
+                c.apply(p, *b)?;
             }
-            let t = p
-                .track(&e.track.id())
-                .ok_or_else(|| vidcut_core::Error::not_found(format!("no {}", e.track.id())))?;
-            let out = t
-                .clips
+            Ok(trims
                 .iter()
-                .find(|c| c.end() == e.at)
-                .map(|c| c.id.clone());
-            let inc = t
-                .clips
-                .iter()
-                .find(|c| c.start == e.at)
-                .map(|c| c.id.clone());
-            let at = match (e.side, out, inc) {
-                (Side::Both, Some(o), Some(_)) => {
-                    ops::roll(p, &o, ops::Edge::Tail, by)?;
-                    e.at + by
-                }
-                (Side::Out | Side::Both, Some(o), _) => {
-                    ops::trim(p, &o, ops::Edge::Tail, by, None)?;
-                    e.at + by
-                }
-                (Side::In | Side::Both, _, Some(i)) => {
-                    ops::trim(p, &i, ops::Edge::Head, by, None)?;
-                    p.clip(&i).map_or(e.at, |c| c.start)
-                }
-                _ => return Err(vidcut_core::Error::not_found("no clip at the edit")),
-            };
-            Ok(at)
+                .find(|(e, ..)| *e == lead)
+                .and_then(|(_, c, _)| c.at(p))
+                .unwrap_or(lead.at))
         }
         DynamicTarget::Clips(ids) => {
             for id in ids {
@@ -1070,20 +1055,19 @@ impl Workspace {
     }
 
     pub(crate) fn dynamic_target(&self) -> Option<DynamicTarget> {
-        match self.timeline.edit {
-            Some(e) => Some(DynamicTarget::Edit(e)),
-            None if !self.snap.selection.clips.is_empty() => {
-                Some(DynamicTarget::Clips(self.snap.selection.clips.clone()))
-            }
-            None => None,
+        let edits = self.timeline.selected_edits();
+        if !edits.is_empty() {
+            return Some(DynamicTarget::Edits(edits));
         }
+        let clips = &self.snap.selection.clips;
+        (!clips.is_empty()).then(|| DynamicTarget::Clips(clips.clone()))
     }
 
     pub(crate) fn toggle_dynamic(&mut self) {
         if self.timeline.dynamic.is_some() {
             self.dynamic_stop();
             self.timeline.dynamic = None;
-            self.timeline.edit = None;
+            self.timeline.set_edit(None);
             return;
         }
         if self.dynamic_target().is_none()
@@ -1091,11 +1075,11 @@ impl Workspace {
             && p.end() > 0
         {
             let at = ops::nearest_edit(p, self.snap.timeline.position);
-            self.timeline.edit = Some(EditSel {
+            self.timeline.set_edit(Some(EditSel {
                 at,
                 side: Side::Both,
                 track: TrackRef::MAIN,
-            });
+            }));
         }
         self.timeline.dynamic = Some(Dynamic::default());
         self.show_timeline();
@@ -1135,7 +1119,7 @@ impl Workspace {
             self.toggle_dynamic();
         }
         if let Some(side) = r.side
-            && self.timeline.edit.is_some()
+            && self.timeline.lead_edit().is_some()
         {
             let _ = self.set_edit_side(side.into());
         }
@@ -1167,7 +1151,7 @@ impl Workspace {
         }
         let mut trimmed = p.clone();
         let mode = self.timeline.options.dynamic_mode;
-        let at = dynamic_preview(&mut trimmed, &DynamicTarget::Edit(e), mode, by).ok()?;
+        let at = dynamic_preview(&mut trimmed, &DynamicTarget::Edits(vec![e]), mode, by).ok()?;
         Some((trimmed, at))
     }
 
@@ -1202,7 +1186,7 @@ impl Workspace {
 
     fn dynamic_head(&mut self) -> Option<i64> {
         match self.dynamic_target()? {
-            DynamicTarget::Edit(e) => Some(e.at),
+            DynamicTarget::Edits(all) => all.last().map(|e| e.at),
             DynamicTarget::Clips(ids) => {
                 let end = self.dynamic_end_edge();
                 let p = self.shown_project()?;
@@ -1297,7 +1281,7 @@ impl Workspace {
             self.trim_sent(q);
         }
         match self.dynamic_target() {
-            Some(DynamicTarget::Edit(e)) => self.nudge_edit(e.side, by),
+            Some(DynamicTarget::Edits(_)) => self.nudge_edits(by),
             Some(DynamicTarget::Clips(ids)) => {
                 let (method, by) = match self.timeline.options.dynamic_mode {
                     DynamicMode::Slip => ("edit.slip", -by),

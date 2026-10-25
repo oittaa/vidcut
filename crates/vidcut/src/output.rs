@@ -992,6 +992,7 @@ fn live(method: &str, r: &Response) -> Option<()> {
                 ids("media"),
                 edit_point(&v["edit"])
             );
+            println!("edits {}", edit_points(&v["edits"]));
         }
         "edit.copy" => println!(
             "copied {} clip(s); paste with `vidcut edit paste` (GUI) or --clips",
@@ -1010,6 +1011,7 @@ fn live(method: &str, r: &Response) -> Option<()> {
                 .filter_map(Value::as_str)
                 .collect();
             println!("edit {}", edit_point(&v["edit"]));
+            println!("edits {}", edit_points(&v["edits"]));
             println!("target {}", v["target"].as_str().unwrap_or("-"));
             println!(
                 "timeline zoom {} px/frame, fixed playhead {}, snap {}, trim to audio {}, safe edit {}",
@@ -1083,6 +1085,14 @@ fn edit_point(e: &Value) -> String {
         e["track"].as_str().unwrap_or_default(),
         e["side"].as_str().unwrap_or_default()
     )
+}
+
+fn edit_points(v: &Value) -> String {
+    let all: Vec<String> = v.as_array().into_iter().flatten().map(edit_point).collect();
+    match all.is_empty() {
+        true => "-".into(),
+        false => all.join(", "),
+    }
 }
 
 fn speakers_by(v: &Value) -> String {

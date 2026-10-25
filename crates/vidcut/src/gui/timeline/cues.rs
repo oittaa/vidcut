@@ -341,7 +341,7 @@ impl Workspace {
             .map(|h| h.cue().to_string());
         if let Some(id) = &cue {
             self.timeline.transition = None;
-            self.timeline.edit = None;
+            self.timeline.set_edit(None);
             if !self.snap.selection.cues.contains(id) {
                 self.send("selection.set", json!({ "cues": [id], "clips": [] }));
             }
@@ -392,7 +392,7 @@ impl Workspace {
         }
         self.show_timeline();
         self.timeline.transition = None;
-        self.timeline.edit = None;
+        self.timeline.set_edit(None);
         match under {
             Some(id) => self.click_cue(&id, mods, p),
             None => {
