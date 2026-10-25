@@ -47,6 +47,10 @@ pub fn timeline_colors(p: &Project) -> Option<Hdr> {
 
 pub fn auto_colors(p: &Project) -> Option<Hdr> {
     let (plan, _) = plan_lanes(p, 0, p.end()).ok()?;
+    colors_in(p, &plan)
+}
+
+fn colors_in(p: &Project, plan: &RenderPlan) -> Option<Hdr> {
     let pool = p.pool();
     let share = crate::export::color::picture_share(&plan.video, |piece| {
         let hdr = match piece {
@@ -1176,7 +1180,10 @@ pub struct LaneTrack {
 
 pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>)> {
     let (mut plan, lanes) = plan_lanes(p, a, b)?;
-    plan.colors = timeline_colors(p);
+    plan.colors = match p.settings.timeline_colors {
+        TimelineColors::Auto if (a, b) == (0, p.end()) => colors_in(p, &plan),
+        _ => timeline_colors(p),
+    };
     Ok((plan, lanes))
 }
 

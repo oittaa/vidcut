@@ -57,7 +57,8 @@ Colors:
 - Where the settings leave them open, `export::choose_colors` picks the dynamic range and bit depth of each output (spec D44).
   - The dynamic range follows the timeline color space of the plan (`RenderPlan::colors`).
   - The bit depth follows the pictures that the output shows.
-- `render::timeline_colors` resolves the timeline color space when the plan is made. For Auto, `render::auto_colors` plans the whole timeline.
+- `render::timeline_colors` resolves the timeline color space when the plan is made.
+  - For Auto, a plan of the whole timeline counts its own pictures. A plan of a part calls `render::auto_colors`, which plans the whole timeline.
 - Then it picks the HDR metadata (spec D46). It uses the rules in `vidcut_core::export`.
 - With an SDR timeline, `export::choose_metadata` counts every picture as SDR.
 - A depth that is set, or fixed by the codec or profile, wins.
