@@ -435,6 +435,9 @@ const LOWER_SUBTITLE_MINIMIZED: f32 = 22.0;
 const LOWER_RULER: f32 = 30.0;
 const HEADER: f32 = 150.0;
 const BOX_CONTROL: f32 = 18.0;
+const SWATCH: f32 = 20.0;
+const SWATCH_GAP: f32 = 4.0;
+const RING: f32 = 3.0;
 
 mod icon {
     pub use egui_phosphor::regular::{
@@ -460,21 +463,24 @@ fn header_button(ui: &mut egui::Ui, at: Rect, icon: &str, name: &str, lit: bool)
     r
 }
 
+fn marker_field() -> f32 {
+    let n = ops::MARKER_COLORS.len() as f32;
+    n * SWATCH + (n - 1.0) * SWATCH_GAP
+}
+
 fn marker_colors(ui: &mut egui::Ui, color: &mut String) {
-    ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-    for row in ops::MARKER_COLORS.chunks(8) {
-        ui.horizontal(|ui| {
-            for name in row {
-                if color_button(ui, name, color == name).clicked() {
-                    *color = name.to_string();
-                }
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = SWATCH_GAP;
+        for name in ops::MARKER_COLORS {
+            if color_button(ui, name, color == name).clicked() {
+                *color = name.to_string();
             }
-        });
-    }
+        }
+    });
 }
 
 fn color_button(ui: &mut egui::Ui, name: &str, on: bool) -> egui::Response {
-    let (rect, r) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+    let (rect, r) = ui.allocate_exact_size(egui::Vec2::splat(SWATCH), Sense::click());
     let title = theme::color_title(name);
     r.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, true, on, &title));
     let c = theme::colors();
@@ -489,7 +495,7 @@ fn color_button(ui: &mut egui::Ui, name: &str, on: bool) -> egui::Response {
     };
     if let Some(ring) = ring {
         painter.rect_stroke(
-            rect.expand(3.0),
+            rect.expand(RING),
             egui::CornerRadius::same(5),
             ring,
             egui::StrokeKind::Inside,
@@ -3039,16 +3045,18 @@ impl Workspace {
         };
         let mut open = true;
         let mut done = false;
-        super::dialog::window(ctx, "Marker", &mut open, |ui| {
+        let field = marker_field();
+        let width = super::dialog::form_width(field + RING);
+        super::dialog::window_of(ctx, "Marker", &mut open, width, |ui| {
             super::dialog::form(ui, "marker-form", |ui| {
                 super::dialog::row(ui, "Name", |ui| {
-                    ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(260.0));
+                    ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(field));
                 });
                 super::dialog::tall_row(ui, "Notes", |ui| {
                     ui.add(
                         egui::TextEdit::multiline(&mut d.note)
                             .desired_rows(3)
-                            .desired_width(260.0),
+                            .desired_width(field),
                     );
                 });
                 super::dialog::tall_row(ui, "Color", |ui| marker_colors(ui, &mut d.color));
