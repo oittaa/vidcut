@@ -239,6 +239,12 @@ impl Tensors {
     }
 }
 
+pub fn inspect(dir: &Path, download: bool) -> Result<()> {
+    get_ready(dir, download)?;
+    models::verify(dir, &[WEIGHTS])?;
+    read(&dir.join(WEIGHTS.name)).map(drop)
+}
+
 fn read(path: &Path) -> Result<Net> {
     let mut t = Tensors::open(path)?;
     let extract = t.block(3, FEATURES)?;

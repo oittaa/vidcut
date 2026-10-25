@@ -129,3 +129,15 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `chunkK_noise.npy` and `chunkK_latents.npy`, for each chunk: the noise and the latents after the one step, `[16, 4, H/8, W/8]`.
   - `chunkK_x_in.npy` and `chunkK_x_blockN.npy` (N is 0, 6 and 29), for the first two chunks: the hidden state before block 0 and after block N, `[tokens, 1536]`. The tokens are in the order of the official code.
   - `frameNNN.npy`: each output frame, 8-bit RGB.
+- `vidcut models list` prints the catalog of models and speech services. `--json` gives all of it.
+- `vidcut models check MODEL` checks the SHA-256 of each file of a model, then loads it.
+  - For a transcribe.cpp model, it compares what the model reports with the catalog.
+  - It compares the languages, the kind of times, the longest audio and the most speakers.
+  - A difference is an error that names the field.
+  - `--download` gets the files that this computer doesn't have first.
+- To change a model or a service in the catalog (`crates/vidcut-core/src/catalog.rs`):
+  1. Change only the entry of the model.
+  2. Take the sizes and the SHA-256 from the release data of GitHub or Hugging Face.
+  3. Take each limit from the documentation of its maker, and set the date of the check. Without such a source, the limit is not recorded (`Source::Unrecorded`).
+  4. Run `vidcut models check MODEL --download`, then the commit gate.
+  5. The pull request lists each changed field: the old value, the new value and the source.

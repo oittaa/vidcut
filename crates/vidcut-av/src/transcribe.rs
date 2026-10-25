@@ -269,6 +269,29 @@ fn get_ready(dir: &Path, files: &[&File], vad: bool, download: bool) -> Result<(
     start(dir, &runtime)
 }
 
+pub fn inspect(dir: &Path, file: &File, download: bool) -> Result<catalog::Found> {
+    get_ready(dir, &[file], false, download)?;
+    crate::models::verify(dir, &[*file])?;
+    let path = dir.join(file.name);
+    let model = match file == &SILERO_VAD {
+        true => vad_model(&path)?,
+        false => load(&path, false, &mut Vec::new())?.model,
+    };
+    let roles = model.roles();
+    let mut found = catalog::Found::default();
+    if roles.contains(tc::Role::Asr) {
+        let caps = model.capabilities().map_err(tc_error)?;
+        found.languages = caps.languages.clone();
+        found.times = Some(timing_of(caps.max_timestamp_kind));
+        found.audio_secs = (caps.max_audio_ms > 0).then(|| caps.max_audio_ms as f64 / 1000.0);
+    }
+    if roles.contains(tc::Role::Diarize) {
+        let info = model.diarize_info().map_err(tc_error)?;
+        found.speakers = Some(f64::from(info.max_speakers));
+    }
+    Ok(found)
+}
+
 fn unpack(archive: &Path, runtime: &Runtime, dir: &Path) -> Result<()> {
     let home = runtime.home(dir);
     let _held = vidcut_core::temp::lock(&home)?;
@@ -487,7 +510,9 @@ pub(crate) fn speakers_of(
     report(&path, Stage::Speakers, 0, total, started);
     let loaded = load(&path, gpu, warnings)?;
     crate::cancel::stop()?;
-    let most = loaded.model.diarize_info().map_err(tc_error)?.max_speakers;
+    let most = catalog::SORTFORMER
+        .value(Measure::Speakers)
+        .map_or(0, |n| n as i32);
     let mut session = loaded.model.diarize_session().map_err(tc_error)?;
     let turns: Vec<Turn> = telling(&path, total, started, |token| {
         session.set_cancel_token(token);

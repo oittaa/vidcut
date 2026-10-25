@@ -44,6 +44,12 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn inspect(dir: &Path, download: bool) -> Result<()> {
+    get_ready(dir, download)?;
+    models::verify(dir, &[DPDFNET])?;
+    Model::load(&dir.join(DPDFNET.name)).map(drop)
+}
+
 pub fn wanted(lanes: &[Vec<AudioPiece>]) -> bool {
     lanes.iter().flatten().any(|p| {
         matches!(

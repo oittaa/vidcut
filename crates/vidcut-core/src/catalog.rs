@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
+use serde_json::{Value, json};
+
 use crate::request::{SpeakerModel, SpeechModel};
+use crate::transcript::Timing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct File {
@@ -62,6 +65,8 @@ pub struct Price {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Model {
+    pub id: &'static str,
+    pub times: Option<Timing>,
     pub title: &'static str,
     pub files: &'static [File],
     pub service: Option<Service>,
@@ -85,6 +90,65 @@ impl Measure {
             _ => Direction::Most,
         }
     }
+
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::AudioSecs => "audio_secs",
+            Self::RequestBytes => "request_bytes",
+            Self::Speakers => "speakers",
+            Self::Channels => "channels",
+            Self::Terms => "terms",
+            Self::TermChars => "term_chars",
+            Self::GpuGb => "gpu_gb",
+            Self::Scale => "scale",
+            Self::ChunkFrames => "chunk_frames",
+            Self::HdrPictures => "hdr_pictures",
+        }
+    }
+}
+
+impl Kind {
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Hard => "hard",
+            Self::Cap => "cap",
+            Self::Soft => "soft",
+        }
+    }
+}
+
+impl File {
+    pub fn present(&self, dir: &Path) -> bool {
+        std::fs::metadata(dir.join(self.name)).is_ok_and(|m| m.len() == self.bytes)
+    }
+
+    pub fn json(&self, dir: &Path) -> Value {
+        json!({
+            "name": self.name,
+            "title": self.title,
+            "url": self.url,
+            "bytes": self.bytes,
+            "sha256": self.sha256,
+            "present": self.present(dir),
+        })
+    }
+}
+
+impl Limit {
+    pub fn json(&self) -> Value {
+        let source = match self.source {
+            Source::Doc(url) => json!({ "doc": url }),
+            Source::Vidcut => json!("vidcut"),
+            Source::Unrecorded => json!("not recorded"),
+        };
+        json!({
+            "measure": self.measure.key(),
+            "value": self.value,
+            "kind": self.kind.key(),
+            "source": source,
+            "checked": self.checked,
+        })
+    }
 }
 
 impl Model {
@@ -94,6 +158,117 @@ impl Model {
 
     pub fn limit(&self, measure: Measure) -> Option<Limit> {
         self.limits.iter().find(|l| l.measure == measure).copied()
+    }
+
+    pub fn json(&self, dir: &Path) -> Value {
+        json!({
+            "id": self.id,
+            "title": self.title,
+            "times": self.times,
+            "files": self.files.iter().map(|f| f.json(dir)).collect::<Vec<_>>(),
+            "service": self.service.map(|s| json!({ "url": s.url, "model": s.model })),
+            "languages": self.languages,
+            "limits": self.limits.iter().map(Limit::json).collect::<Vec<_>>(),
+            "price": self.price.map(|p| json!({
+                "dollars_per_hour": p.dollars_per_hour,
+                "checked": p.checked,
+            })),
+        })
+    }
+}
+
+pub fn find(id: &str) -> Option<&'static Model> {
+    ALL.iter().copied().find(|m| m.id == id)
+}
+
+pub fn ids() -> Vec<&'static str> {
+    ALL.iter().map(|m| m.id).collect()
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Found {
+    pub languages: Vec<String>,
+    pub times: Option<Timing>,
+    pub audio_secs: Option<f64>,
+    pub speakers: Option<f64>,
+}
+
+pub fn differences(model: &Model, found: &Found) -> Vec<String> {
+    let mut out = Vec::new();
+    if !found.languages.is_empty() && !model.languages.is_empty() {
+        let missing: Vec<&str> = found
+            .languages
+            .iter()
+            .filter(|l| !model.languages.iter().any(|k| k.eq_ignore_ascii_case(l)))
+            .map(String::as_str)
+            .collect();
+        let extra: Vec<&str> = model
+            .languages
+            .iter()
+            .filter(|k| !found.languages.iter().any(|l| k.eq_ignore_ascii_case(l)))
+            .copied()
+            .collect();
+        if !missing.is_empty() {
+            out.push(format!(
+                "languages: the model also knows {}",
+                missing.join(", ")
+            ));
+        }
+        if !extra.is_empty() {
+            out.push(format!(
+                "languages: the model doesn't know {}",
+                extra.join(", ")
+            ));
+        }
+    }
+    if let (Some(want), Some(have)) = (model.times, found.times)
+        && want != have
+    {
+        out.push(format!(
+            "times: the catalog has {}, the model gives {}",
+            timing_name(want),
+            timing_name(have)
+        ));
+    }
+    for (measure, have) in [
+        (Measure::AudioSecs, found.audio_secs),
+        (Measure::Speakers, found.speakers),
+    ] {
+        let Some(have) = have else { continue };
+        match model.value(measure) {
+            Some(want) if want == have => {}
+            Some(want) => out.push(format!(
+                "{}: the catalog has {want}, the model reports {have}",
+                measure.key()
+            )),
+            None => out.push(format!(
+                "{}: the model reports {have}, the catalog has none",
+                measure.key()
+            )),
+        }
+    }
+    out
+}
+
+fn timing_name(t: Timing) -> &'static str {
+    match t {
+        Timing::Words => "word times",
+        Timing::Phrases => "phrase times",
+        Timing::Pauses => "no times",
+    }
+}
+
+pub fn runtime_json(dir: &Path) -> Value {
+    match RUNTIME {
+        Some(r) => json!({
+            "title": "transcribe.cpp's library",
+            "version": TRANSCRIBE_CPP,
+            "url": r.url(),
+            "bytes": r.bytes,
+            "sha256": r.sha256,
+            "present": r.present(dir),
+        }),
+        None => Value::Null,
     }
 }
 
@@ -165,6 +340,10 @@ const fn checked(
 
 const GEMINI_DOC: &str = "https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe";
 
+const XAI_DOC: &str = "https://docs.x.ai/developers/model-capabilities/audio/speech-to-text";
+
+const NANOVSR_DOC: &str = "https://github.com/filippawlicki/nanovsr";
+
 pub const PARAKEET_ULTRA_GGUF: File = File {
     name: "parakeet-ultra-Q8_0.gguf",
     title: SpeechModel::ParakeetUltra.title(),
@@ -214,6 +393,8 @@ pub const MOSS_GGUF: File = File {
 };
 
 pub static PARAKEET_ULTRA: Model = Model {
+    id: "parakeet-ultra",
+    times: Some(Timing::Words),
     title: SpeechModel::ParakeetUltra.title(),
     files: &[PARAKEET_ULTRA_GGUF],
     service: None,
@@ -226,6 +407,8 @@ pub static PARAKEET_ULTRA: Model = Model {
 };
 
 pub static QWEN3_ASR: Model = Model {
+    id: "qwen3-asr",
+    times: Some(Timing::Pauses),
     title: SpeechModel::Qwen3Asr.title(),
     files: &[QWEN3_ASR_GGUF],
     service: None,
@@ -238,6 +421,8 @@ pub static QWEN3_ASR: Model = Model {
 };
 
 pub static WHISPER_LARGE_V3: Model = Model {
+    id: "whisper-large-v3",
+    times: Some(Timing::Phrases),
     title: SpeechModel::WhisperLargeV3.title(),
     files: &[WHISPER_LARGE_V3_GGUF],
     service: None,
@@ -255,6 +440,8 @@ pub static WHISPER_LARGE_V3: Model = Model {
 };
 
 pub static SILERO_VAD: Model = Model {
+    id: "silero-vad",
+    times: None,
     title: "Silero VAD v6.2",
     files: &[SILERO_VAD_GGUF],
     service: None,
@@ -264,6 +451,8 @@ pub static SILERO_VAD: Model = Model {
 };
 
 pub static SORTFORMER: Model = Model {
+    id: "sortformer",
+    times: None,
     title: "Sortformer speaker detection",
     files: &[SORTFORMER_GGUF],
     service: None,
@@ -278,6 +467,8 @@ pub static SORTFORMER: Model = Model {
 };
 
 pub static MOSS: Model = Model {
+    id: "moss",
+    times: None,
     title: "MOSS speaker detection",
     files: &[MOSS_GGUF],
     service: None,
@@ -391,28 +582,33 @@ pub const GOOGLE_SERVICE: Service = Service {
 };
 
 pub static XAI: Model = Model {
+    id: "xai",
+    times: Some(Timing::Words),
     title: SpeechModel::Xai.title(),
     files: &[],
     service: Some(XAI_SERVICE),
     languages: &XAI_LANGUAGES,
     limits: &[
-        limit(
+        checked(
             Measure::RequestBytes,
             XAI_REQUEST_BYTES as f64,
             Kind::Hard,
-            Source::Unrecorded,
+            XAI_DOC,
+            "2026-10-25",
         ),
-        limit(Measure::Terms, 100.0, Kind::Hard, Source::Unrecorded),
-        limit(Measure::TermChars, 50.0, Kind::Hard, Source::Unrecorded),
-        limit(Measure::Channels, 8.0, Kind::Hard, Source::Unrecorded),
+        checked(Measure::Terms, 100.0, Kind::Hard, XAI_DOC, "2026-10-25"),
+        checked(Measure::TermChars, 50.0, Kind::Hard, XAI_DOC, "2026-10-25"),
+        checked(Measure::Channels, 8.0, Kind::Hard, XAI_DOC, "2026-10-25"),
     ],
     price: Some(Price {
         dollars_per_hour: 0.10,
-        checked: "2026-10",
+        checked: "2026-10-25",
     }),
 };
 
 pub static GOOGLE: Model = Model {
+    id: "google",
+    times: Some(Timing::Words),
     title: SpeechModel::Google.title(),
     files: &[],
     service: Some(GOOGLE_SERVICE),
@@ -442,6 +638,8 @@ pub const DPDFNET_ONNX: File = File {
 };
 
 pub static DPDFNET: Model = Model {
+    id: "dpdfnet",
+    times: None,
     title: "DPDFNet voice isolation",
     files: &[DPDFNET_ONNX],
     service: None,
@@ -462,16 +660,19 @@ pub const NANOVSR_WEIGHTS: File = File {
 };
 
 pub static NANOVSR: Model = Model {
+    id: "nanovsr",
+    times: None,
     title: "NanoVSR 5.4M",
     files: &[NANOVSR_WEIGHTS],
     service: None,
     languages: &[],
     limits: &[
-        limit(
+        checked(
             Measure::Scale,
             NANOVSR_SCALE as f64,
             Kind::Hard,
-            Source::Unrecorded,
+            NANOVSR_DOC,
+            "2026-10-25",
         ),
         limit(
             Measure::ChunkFrames,
@@ -518,6 +719,8 @@ pub const FLASHVSR_FILES: [File; 4] = [
 ];
 
 pub static FLASHVSR: Model = Model {
+    id: "flashvsr",
+    times: None,
     title: "FlashVSR+ Turbo",
     files: &FLASHVSR_FILES,
     service: None,
@@ -527,7 +730,7 @@ pub static FLASHVSR: Model = Model {
             Measure::Scale,
             FLASHVSR_SCALE as f64,
             Kind::Hard,
-            Source::Unrecorded,
+            Source::Vidcut,
         ),
         limit(Measure::HdrPictures, 0.0, Kind::Hard, Source::Vidcut),
     ],
