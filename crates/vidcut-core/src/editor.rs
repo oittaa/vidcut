@@ -3334,13 +3334,22 @@ fn mutate(
             ops::keyframes::remove(p, &ids, *param, &pick)?;
             Value::Null
         }
-        Request::EditCut { clips } => {
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let copied = ops::copy_clips(p, &ids)?;
-            ops::delete(p, &ids, false)?;
-            json!({ "clips": copied })
-        }
-        Request::EditPaste { clips, at } => {
+        Request::EditCut { clips, range } => match (clips, range) {
+            (Some(clips), None) => {
+                let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+                let copied = ops::copy_clips(p, &ids)?;
+                ops::delete(p, &ids, false)?;
+                json!({ "clips": copied })
+            }
+            (None, Some(range)) => {
+                let (a, b) = ctx(p, playhead).range(range)?;
+                let copied = ops::copy_range(p, a, b)?;
+                ops::delete_range(p, a, b, true)?;
+                json!({ "clips": copied })
+            }
+            _ => return Err(Error::usage("give `clips` or `range`")),
+        },
+        Request::EditPaste { clips, at, insert } => {
             let clips = clips.as_ref().ok_or_else(|| {
                 Error::usage("edit.paste needs `clips` (the GUI pastes its clipboard)")
             })?;
@@ -3348,7 +3357,11 @@ fn mutate(
                 Some(t) => resolve(p, t, playhead)?,
                 None => need(playhead, "at")?,
             };
-            json!({ "clips": ops::paste(p, clips, at)? })
+            let ids = match *insert {
+                true => ops::paste_insert(p, clips, at)?,
+                false => ops::paste(p, clips, at)?,
+            };
+            json!({ "clips": ids })
         }
         Request::MarksSet {
             mark_in,
@@ -6700,10 +6713,17 @@ pub fn query(
             "undo": history.undo.iter().rev().collect::<Vec<_>>(),
             "redo": history.redo.iter().rev().collect::<Vec<_>>(),
         }),
-        Request::EditCopy { clips } => {
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            json!({ "clips": ops::copy_clips(p, &ids)? })
-        }
+        Request::EditCopy { clips, range } => match (clips, range) {
+            (Some(clips), None) => {
+                let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+                json!({ "clips": ops::copy_clips(p, &ids)? })
+            }
+            (None, Some(range)) => {
+                let (a, b) = ctx(p, playhead).range(range)?;
+                json!({ "clips": ops::copy_range(p, a, b)? })
+            }
+            _ => return Err(Error::usage("give `clips` or `range`")),
+        },
         live if live.is_live() => {
             return Err(Error::no_instance(format!(
                 "{} controls a running vidcut GUI; open the project with `vidcut -p FILE` \

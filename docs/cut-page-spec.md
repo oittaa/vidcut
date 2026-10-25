@@ -705,23 +705,28 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The Transcription window has:
     - a click on a word, a drag over words, X, Delete and Undelete
     - Remove Silent Portions and Delete Filler Words
-    - Place on Top, Insert and Append, and Add Marker on the timeline
+    - Place on Top, Insert and Append on a source clip
+    - Cut, Paste and Add Marker on the timeline
     - search: First, Previous, Next, Last and a count of the matches
     - Edit, Copy and Follow
     - the Transcript menu and the differences between transcripts (X50)
   - On a source clip, Delete leaves the words out of every edit of the media (`media.leave_out`). This includes the edits of the viewer, of the pool and of scripts.
   - On the timeline, Delete ripple deletes the words (`edit.ripple_delete_words`), with ripple on or off (D63).
+  - On the timeline, Cut takes the selected words out of every unlocked track and leaves a gap (`edit.cut` with `range`).
+  - Copy on the timeline also keeps the selected words for Paste (`edit.copy` with `range`).
+  - Paste puts them in at the first selected word, else at the playhead. The later clips move to make room (`edit.paste` with `insert`).
+  - On the timeline, each gap between clips shows as (...), whatever its length. Thus Delete can close it.
   - Remove Silent Portions deletes every pause. Each cut is at the quiet points around the pause.
   - Delete Filler Words deletes the filler words of a language in one step.
     - The language is the one that the speech model reported, or the one selected beside the button.
     - Edit… beside the button changes the words of a language for the project or for all projects.
   - Edit corrects the selected words (`media.words.set`). The undo history keeps the change.
   - Follow keeps the word under the playhead in view during playback.
-  - While the pointer is over the window, Delete, X, Ctrl+A, Ctrl+C and Esc act on the window.
+  - While the pointer is over the window, Delete, X, Ctrl+A, Ctrl+C and Esc act on the window. On the timeline, Ctrl+X and Ctrl+V do too.
   - With speakers, a paragraph starts at each person, under the name of the person.
   - The speaker commands are Rename, Same Person As and Separate.
   - Assign To gives the selected words to another person.
-  - `analyze.words`, `media.leave_out`, `media.words.set` and `edit.ripple_delete_words` do the same by request.
+  - `analyze.words`, `media.leave_out`, `media.words.set`, `edit.ripple_delete_words`, `edit.cut`, `edit.copy` and `edit.paste` do the same by request.
   - Details: D63, D73; deviations X50, X61.
 
 ### 8.14 Titles (pp. 762–764, 1176–1178)

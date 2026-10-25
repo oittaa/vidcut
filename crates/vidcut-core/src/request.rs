@@ -997,19 +997,38 @@ pub enum Request {
     },
     /// Copy clips (Ctrl+C): returns them with their tracks as `clips`,
     /// ready for `edit.paste`. The GUI also keeps them on its clipboard.
+    /// With `range` instead of `clips`: the parts of the clips on the
+    /// unlocked tracks in that range (Copy in the Transcription window).
     #[serde(rename = "edit.copy")]
-    EditCopy { clips: OneOrMany<ClipRef> },
-    /// Cut clips (Ctrl+X): copy, then delete with ripple on Track 1.
+    EditCopy {
+        #[serde(default)]
+        clips: Option<OneOrMany<ClipRef>>,
+        #[serde(default)]
+        range: Option<RangeSpec>,
+    },
+    /// Cut clips (Ctrl+X): copy, then delete with ripple on Track 1. With
+    /// `range` instead of `clips`: copy the parts in that range, then take
+    /// them out of every unlocked track and leave a gap (Cut in the
+    /// Transcription window).
     #[serde(rename = "edit.cut")]
-    EditCut { clips: OneOrMany<ClipRef> },
+    EditCut {
+        #[serde(default)]
+        clips: Option<OneOrMany<ClipRef>>,
+        #[serde(default)]
+        range: Option<RangeSpec>,
+    },
     /// Paste clips (Ctrl+V) at `at`, each over its own track, keeping their
-    /// spacing. Defaults: the GUI's clipboard and playhead.
+    /// spacing. Defaults: the GUI's clipboard and playhead. With `insert`,
+    /// the clips at and after `at` on every unlocked track move later to
+    /// make room, so nothing is covered (Paste in the Transcription window).
     #[serde(rename = "edit.paste")]
     EditPaste {
         #[serde(default)]
         clips: Option<Vec<TrackClip>>,
         #[serde(default)]
         at: Option<TimeSpec>,
+        #[serde(default)]
+        insert: bool,
     },
 
     /// The tracks, with their header and mixer settings and how many clips

@@ -134,6 +134,8 @@ pub(super) enum Pressed {
     Sentence,
     All,
     Copy,
+    Cut,
+    Paste,
     Clear,
     Pick(usize),
 }
@@ -171,6 +173,8 @@ enum Act {
     Undelete,
     Edit(&'static str),
     Copy,
+    Cut,
+    Paste,
     Marker,
     RemoveSilences,
     Fillers,
@@ -270,6 +274,10 @@ impl TranscriptionUi {
     pub(super) fn take_keys(&mut self, ctx: &egui::Context) {
         let keys = &mut self.keys;
         let picking = self.picking.is_some();
+        let timeline = self
+            .shown
+            .as_ref()
+            .is_some_and(|(a, _)| a.shown == Shown::Timeline);
         ctx.input_mut(|i| {
             i.events.retain(|e| {
                 let pressed = match e {
@@ -309,6 +317,8 @@ impl TranscriptionUi {
                         ..
                     } if modifiers.command_only() => Some(Pressed::Copy),
                     egui::Event::Copy => Some(Pressed::Copy),
+                    egui::Event::Cut if timeline => Some(Pressed::Cut),
+                    egui::Event::Paste(_) if timeline => Some(Pressed::Paste),
                     egui::Event::Key {
                         key: Key::Escape,
                         pressed: true,
@@ -428,7 +438,27 @@ fn differences(entry: &Value, at: impl Fn(u64) -> Option<usize>) -> Vec<Differen
         .collect()
 }
 
-fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Read {
+fn holes(p: &Project) -> Vec<(i64, i64)> {
+    let mut spans: Vec<(i64, i64)> = p
+        .tracks
+        .iter()
+        .flat_map(|t| t.clips.iter().map(|c| (c.start, c.end())))
+        .collect();
+    spans.sort_unstable();
+    let mut out = Vec::new();
+    let mut reach: Option<i64> = None;
+    for (a, b) in spans {
+        if let Some(r) = reach
+            && a > r
+        {
+            out.push((r, a));
+        }
+        reach = Some(reach.map_or(b, |r| r.max(b)));
+    }
+    out
+}
+
+fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>, holes: &[(i64, i64)]) -> Read {
     let entries: Vec<&Value> = answer.as_array().into_iter().flatten().collect();
     let mut words: Vec<(usize, u64, Item)> = entries
         .iter()
@@ -447,10 +477,13 @@ fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Read {
     let mut at: HashMap<(usize, u64), usize> = HashMap::with_capacity(words.len());
     let mut last = bounds.map(|(a, _)| a);
     for (e, k, w) in words {
-        if let Some(end) = last
-            && w.start - end >= pause
-        {
-            items.push(silence(end, w.start));
+        if let Some(end) = last {
+            let hole = holes.iter().find(|&&(a, b)| a < w.start && b > end);
+            match hole {
+                _ if w.start - end >= pause => items.push(silence(end, w.start)),
+                Some(&(a, b)) => items.push(silence(a.max(end), b.min(w.start))),
+                None => {}
+            }
         }
         last = Some(last.map_or(w.end, |end| end.max(w.end)));
         at.insert((e, k), items.len());
@@ -802,9 +835,9 @@ impl Workspace {
         if let Some((asked, ask)) = &t.asking
             && let Some(answer) = ask.take()
         {
-            let bounds = match &asked.shown {
-                Shown::Media(m) => p.media(m).map(|m| (0, p.media_frames(m))),
-                Shown::Timeline => None,
+            let (bounds, gaps) = match &asked.shown {
+                Shown::Media(m) => (p.media(m).map(|m| (0, p.media_frames(m))), Vec::new()),
+                Shown::Timeline => (None, holes(&p)),
             };
             if let Ok(r) = &answer {
                 t.detected = r
@@ -815,7 +848,7 @@ impl Workspace {
                     .find_map(|e| e["filler_language"].as_str().map(String::from));
             }
             let read = answer
-                .map(|r| Arc::new(parse(&r.result, pause, bounds)))
+                .map(|r| Arc::new(parse(&r.result, pause, bounds, &gaps)))
                 .map_err(|e| e.message);
             let keep = match (&t.shown, &read) {
                 (Some((a, Ok(old))), Ok(new)) if a.shown == asked.shown => {
@@ -875,6 +908,8 @@ impl Workspace {
                 match key {
                     Pressed::Delete if t.selection.is_some() => acts.push(Act::Delete),
                     Pressed::Copy if t.selection.is_some() => acts.push(Act::Copy),
+                    Pressed::Cut if t.selection.is_some() => acts.push(Act::Cut),
+                    Pressed::Paste => acts.push(Act::Paste),
                     Pressed::All if !items.is_empty() => t.selection = Some((0, items.len() - 1)),
                     Pressed::Clear if t.picking.is_some() => t.picking = None,
                     Pressed::Clear => t.selection = None,
@@ -1338,6 +1373,13 @@ impl Workspace {
                 };
                 match shown {
                     Some(Shown::Timeline) => {
+                        if button(ui, "Cut") {
+                            acts.push(Act::Cut);
+                        }
+                        let pasted = self.snap.clipboard > 0;
+                        if ui.add_enabled(pasted, egui::Button::new("Paste")).clicked() {
+                            acts.push(Act::Paste);
+                        }
                         if button(ui, "Delete") {
                             acts.push(Act::Delete);
                         }
@@ -1619,10 +1661,33 @@ impl Workspace {
                     json!({ "in": format!("{a}f"), "out": format!("{b}f") }),
                 ),
             },
-            Act::Copy => {
-                if let Some((a, b, _, _)) = selected {
-                    ctx.copy_text(text_of(&items[a..=b]));
+            Act::Copy | Act::Cut => {
+                let Some((first, last, a, b)) = selected else {
+                    return;
+                };
+                ctx.copy_text(text_of(&items[first..=last]));
+                if media.is_some() {
+                    return;
                 }
+                let range = json!({ "range": format!("{a}f..{b}f") });
+                match act {
+                    Act::Cut => {
+                        self.send("edit.cut", range);
+                        t.selection = None;
+                        t.anchor = None;
+                    }
+                    _ => self.send("edit.copy", range),
+                }
+            }
+            Act::Paste => {
+                if media.is_some() {
+                    return;
+                }
+                let at = selected.map_or(self.snap.timeline.position, |(_, _, a, _)| a);
+                self.send(
+                    "edit.paste",
+                    json!({ "at": format!("{at}f"), "insert": true }),
+                );
             }
             Act::Delete | Act::Undelete => {
                 let Some((first, last, a, b)) = selected else {

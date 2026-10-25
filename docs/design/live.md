@@ -436,6 +436,7 @@ The bar and the Jobs button:
   - It asks the core for `analyze.words` through an `Ask`. It asks for the media of the source clip, or for the timeline's clips whose media are transcribed.
   - It asks again when the `rev` of the project or the `transcribed` set changes. `media.transcripts.remove` gives the set again, so that the window asks again.
   - Each paragraph between pauses is one galley. The word under the pointer is found from its cursor.
+  - On the timeline, each gap between clips is a pause too, whatever its length (`holes`).
   - While playing, only the paragraphs whose word under the playhead changed are laid out again.
   - Its cuts on the timeline ask for `quiet` edges.
   - Delete clears the In and Out that it set over the words that it deletes (`clear_marks`), in the same step.
@@ -446,7 +447,10 @@ The bar and the Jobs button:
   - The differences come with the words. A word of a difference has a dotted line under it, laid out with its paragraph.
   - The choices of a difference show in an `egui::Area` under its first word.
   - While the pointer is over the window, `TranscriptionUi::take_keys` takes Delete, X, Ctrl+A, Ctrl+C and Esc before the timeline's shortcuts. It takes 1 to 9 while choices show.
+  - On the timeline, it also takes Ctrl+X and Ctrl+V. Then they act on the words, not on the selected clips.
   - What it changes goes as requests: `media.marks.set` or `marks.set`, `media.leave_out`, `edit.ripple_delete_words`, `markers.add`, `media.words.set`, `media.transcripts.main` and `media.transcripts.remove`.
+  - Cut and Copy on the timeline send `edit.cut` and `edit.copy` with the range of the words. The live core keeps the clips that come back as its clipboard.
+  - Paste sends `edit.paste` with `insert` (`ops::paste_insert`). It opens a hole on every unlocked track, then pastes into it.
   - Place on Top, Insert and Append send one edit of the selection, as the viewer's buttons do (`Workspace::edit_from`). The core leaves out the frames that Delete left out.
   - Insert (`edit.insert`) goes in at the timeline In, else at the playhead.
 - **Rows that do not fit.**

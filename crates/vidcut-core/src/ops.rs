@@ -2141,6 +2141,59 @@ pub fn copy_clips(p: &Project, ids: &[String]) -> Result<Vec<TrackClip>> {
     Ok(clips)
 }
 
+pub fn copy_range(p: &Project, a: i64, b: i64) -> Result<Vec<TrackClip>> {
+    if a >= b {
+        return Err(Error::usage(format!("empty range {a}..{b}")));
+    }
+    let mut q = p.clone();
+    let mut out = Vec::new();
+    for ti in 0..q.tracks.len() {
+        if q.tracks[ti].locked {
+            continue;
+        }
+        split_at(&mut q, ti, a);
+        split_at(&mut q, ti, b);
+        let t = &q.tracks[ti];
+        out.extend(
+            t.clips
+                .iter()
+                .filter(|c| a <= c.start && c.end() <= b)
+                .map(|c| TrackClip {
+                    track: t.id.clone(),
+                    clip: c.clone(),
+                }),
+        );
+    }
+    if out.is_empty() {
+        return Err(Error::invalid(format!("no clips in {a}..{b}")));
+    }
+    out.sort_by_key(|c| c.clip.start);
+    Ok(out)
+}
+
+pub fn paste_insert(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String>> {
+    let first = clips.iter().map(|c| c.clip.start).min();
+    let end = clips.iter().map(|c| c.clip.end()).max();
+    let (Some(first), Some(end)) = (first, end) else {
+        return Err(Error::usage("nothing to paste"));
+    };
+    if at < 0 {
+        return Err(Error::invalid("paste position before 0"));
+    }
+    unlocked(p, main_index(p))?;
+    let len = end - first;
+    for ti in 0..p.tracks.len() {
+        if p.tracks[ti].locked {
+            continue;
+        }
+        split_at(p, ti, at);
+        shift_from(p, ti, at, len);
+        fix_audio(p, ti);
+    }
+    subtitles::remap(p, |x| Some(if x >= at { x + len } else { x }));
+    paste(p, clips, at)
+}
+
 pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String>> {
     if clips.is_empty() {
         return Err(Error::usage("nothing to paste"));
