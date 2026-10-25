@@ -7,15 +7,15 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
 - **Now:**
   - A clip has volume keyframes on its volume line ([spec §9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
   - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` holds the volume keyframes.
-  - Stage 2 is built. Transform and Crop values have keyframes on `Picture` ([§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), D75).
+  - Stage 2 is built. Transform, Crop and Composite values have keyframes on `Picture` ([§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), D75).
   - Stage 3 is built. The Keyframes tab shows each value of the first selected clip that can have keyframes.
   - Each value has a track. Its curve shows when the user turns it on. A drag moves a keyframe, a group or a handle.
-  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. Rotation is its own value. Each crop side is its own value.
+  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. Rotation is its own value. Each crop side, the crop softness and the opacity are values of their own.
   - The flips have no keyframes. Dynamic Zoom stays the two end boxes and has no Keyframe button.
   - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
   - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
 - **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
-- **To do:** keyframes of speed, opacity, Pitch, Yaw, the anchor point and titles.
+- **To do:** keyframes of speed, Pitch, Yaw, the anchor point and titles.
 
 ## What Resolve has
 
@@ -141,7 +141,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - the Lock and Track Color controls (p. 1257)
   - the ruler in frames, Snap Keyframes to Grid, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
 
-**After stage 3:** keyframes of speed, opacity, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
+**After stage 3:** keyframes of speed, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
 
 ## Model
 
@@ -231,4 +231,4 @@ Rule 3: each GUI action has a request.
 - **Compound clips:** what does `edit.decompose` do with the keyframes of a compound clip for a clip inside that is frozen or plays backward?
 - **Dynamic Zoom:** can its boxes have times other than the ends of the clip?
 - **Keyframes alone:** copy and paste of selected keyframes (p. 1113). vidcut has none yet.
-- **Later stages:** do keyframes of speed (p. 737), opacity, the anchor point, or titles come in after stage 3?
+- **Later stages:** do keyframes of speed (p. 737), the anchor point, or titles come in after stage 3?

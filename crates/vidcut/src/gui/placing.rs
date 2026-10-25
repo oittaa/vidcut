@@ -291,6 +291,7 @@ impl Shown {
                     .max_by(|a, b| a.of(&z).size.total_cmp(&b.of(&z).size))
                     .map(Hold::ZoomMove)
             }
+            PictureTool::Composite => None,
         }
     }
 
@@ -1076,6 +1077,7 @@ impl Workspace {
                 }
             }
             PictureTool::DynamicZoom => paint_boxes(&painter, s),
+            PictureTool::Composite => {}
         }
         if let Some(h) = &self.timeline.picture_grab.held {
             let guide = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 140));
@@ -1151,6 +1153,8 @@ pub(super) fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
         ("crop_right", a.crop.right, b.crop.right),
         ("crop_top", a.crop.top, b.crop.top),
         ("crop_bottom", a.crop.bottom, b.crop.bottom),
+        ("crop_softness", a.softness(), b.softness()),
+        ("opacity", a.opaque(), b.opaque()),
     ] {
         if x != y {
             params[key] = json!(y);

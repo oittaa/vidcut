@@ -37,12 +37,18 @@ const DETAIL: f64 = 4.0;
 const HIT: f32 = 8.0;
 const TICK_GAP: f32 = 96.0;
 const FIELD_W: f32 = 72.0;
-const GROUPS: [Group; 3] = [Group::Transform, Group::Crop, Group::Audio];
+const GROUPS: [Group; 4] = [
+    Group::Transform,
+    Group::Crop,
+    Group::Composite,
+    Group::Audio,
+];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Group {
     Transform,
     Crop,
+    Composite,
     Audio,
 }
 
@@ -195,9 +201,12 @@ fn group_of(param: KeyParam) -> Group {
     match param {
         KeyParam::Position | KeyParam::Zoom | KeyParam::Rotation => Group::Transform,
         KeyParam::Volume => Group::Audio,
-        KeyParam::CropLeft | KeyParam::CropRight | KeyParam::CropTop | KeyParam::CropBottom => {
-            Group::Crop
-        }
+        KeyParam::CropLeft
+        | KeyParam::CropRight
+        | KeyParam::CropTop
+        | KeyParam::CropBottom
+        | KeyParam::CropSoftness => Group::Crop,
+        KeyParam::Opacity => Group::Composite,
     }
 }
 
@@ -205,6 +214,7 @@ fn group_name(group: Group) -> &'static str {
     match group {
         Group::Transform => "Transform",
         Group::Crop => "Crop",
+        Group::Composite => "Composite",
         Group::Audio => "Audio",
     }
 }
@@ -219,6 +229,8 @@ fn lane_name(param: KeyParam) -> &'static str {
         KeyParam::CropRight => "Crop Right",
         KeyParam::CropTop => "Crop Top",
         KeyParam::CropBottom => "Crop Bottom",
+        KeyParam::CropSoftness => "Crop Softness",
+        KeyParam::Opacity => "Opacity",
     }
 }
 
@@ -231,13 +243,15 @@ fn limits(param: KeyParam) -> (f64, f64) {
         KeyParam::CropLeft | KeyParam::CropRight | KeyParam::CropTop | KeyParam::CropBottom => {
             (0.0, 0.9999)
         }
+        KeyParam::CropSoftness => (-100.0, 100.0),
+        KeyParam::Opacity => (0.0, 1.0),
     }
 }
 
 fn quantize(param: KeyParam, d: f64) -> f64 {
     let places = match param {
         KeyParam::Volume => 1,
-        KeyParam::Rotation => 2,
+        KeyParam::Rotation | KeyParam::CropSoftness => 2,
         _ => 6,
     };
     let k = 10f64.powi(places);
@@ -248,7 +262,7 @@ fn least_span(param: KeyParam) -> f64 {
     match param {
         KeyParam::Volume => 6.0,
         KeyParam::Zoom => 0.1,
-        KeyParam::Rotation => 10.0,
+        KeyParam::Rotation | KeyParam::CropSoftness => 10.0,
         _ => 0.05,
     }
 }
@@ -258,10 +272,10 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
     match param {
         KeyParam::Position if y => (0.5 - v) * h,
         KeyParam::Position => (v - 0.5) * w,
-        KeyParam::Zoom => v * 100.0,
+        KeyParam::Zoom | KeyParam::Opacity => v * 100.0,
         KeyParam::CropLeft | KeyParam::CropRight => v * fw,
         KeyParam::CropTop | KeyParam::CropBottom => v * fh,
-        KeyParam::Volume | KeyParam::Rotation => v,
+        KeyParam::Volume | KeyParam::Rotation | KeyParam::CropSoftness => v,
     }
 }
 
@@ -270,17 +284,17 @@ fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
     match param {
         KeyParam::Position if y => 0.5 - v / h,
         KeyParam::Position => v / w + 0.5,
-        KeyParam::Zoom => v / 100.0,
+        KeyParam::Zoom | KeyParam::Opacity => v / 100.0,
         KeyParam::CropLeft | KeyParam::CropRight => v / fw,
         KeyParam::CropTop | KeyParam::CropBottom => v / fh,
-        KeyParam::Volume | KeyParam::Rotation => v,
+        KeyParam::Volume | KeyParam::Rotation | KeyParam::CropSoftness => v,
     }
 }
 
 fn unit(param: KeyParam) -> &'static str {
     match param {
         KeyParam::Volume => " dB",
-        KeyParam::Zoom => "%",
+        KeyParam::Zoom | KeyParam::Opacity => "%",
         KeyParam::Rotation => "°",
         _ => "",
     }
@@ -288,8 +302,8 @@ fn unit(param: KeyParam) -> &'static str {
 
 fn places(param: KeyParam) -> usize {
     match param {
-        KeyParam::Volume | KeyParam::Zoom => 1,
-        KeyParam::Rotation => 2,
+        KeyParam::Volume | KeyParam::Zoom | KeyParam::Opacity => 1,
+        KeyParam::Rotation | KeyParam::CropSoftness => 2,
         _ => 0,
     }
 }
@@ -676,6 +690,8 @@ fn lane_from(picture: &Picture, v: PictureValue) -> Lane {
         PictureValue::CropRight => KeyParam::CropRight,
         PictureValue::CropTop => KeyParam::CropTop,
         PictureValue::CropBottom => KeyParam::CropBottom,
+        PictureValue::CropSoftness => KeyParam::CropSoftness,
+        PictureValue::Opacity => KeyParam::Opacity,
     };
     let extra = match v {
         PictureValue::Position => picture.position_y.clone(),

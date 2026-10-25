@@ -567,6 +567,12 @@ impl Words<'_> {
         s.put("crop_bottom", "Crop Bottom", &percent, |q| {
             json!(q.crop.bottom)
         });
+        s.usual("crop_softness", "Crop Softness", &number, json!(0.0), |q| {
+            json!(q.crop_softness)
+        });
+        s.usual("opacity", "Opacity", &percent, json!(1.0), |q| {
+            json!(q.opacity)
+        });
         if let Some(zoom) = p.get("dynamic_zoom") {
             let on = json!(!zoom.is_null());
             s.add("Dynamic Zoom", &on, &raw, Value::Null, |q| {

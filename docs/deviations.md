@@ -141,7 +141,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Other transitions play as cuts, and generators play as gaps. Other effects do not play.
   - The keyframes of the clip volume effect play as volume keyframes ([D81](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Text and lower-third titles of Resolve come in as titles of vidcut. The titles of vidcut go out in the shape that Resolve uses ([D67](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - The Transform, Cropping and Retime and Scaling of Resolve come in as the picture of a clip. The picture of a clip goes out as these effects ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The Transform, Cropping, Dynamic Zoom, Composite and Retime and Scaling of Resolve come in as the picture of a clip. The picture of a clip goes out as these effects ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - A Composite with a mode other than Normal stays a clip effect that does not play.
   - Resolve Studio 21.1.1 imports `.otio` and `.otioz` files. It imports an `.otiod` folder by its `content.otio`.
   - It keeps tracks and their names, J/L cuts, clip gain, markers, stills, image sequences and the timecode of sources.
   - It also keeps clip effects and their keyframes, transitions, generators, speeds, and compound clips with their picture and sound linked.
@@ -1531,6 +1532,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Pitch and Yaw go from −1.5 to 1.5. They have no unit (D93).
     - Positive pitch puts the top farther away. Positive yaw puts the left closer.
     - Crop is in pixels of the picture as it is fitted into the frame, before the zoom, as in Resolve.
+    - Softness goes from −100 to 100, and Opacity is in percent, as in Resolve.
     - The zoom of a Dynamic Zoom box is in percent. At 200%, the picture shows at twice its size. At 50%, it shows at half its size.
     - The X and Y of a box are where the middle of the picture is at the start or at the end.
     - They are in pixels of the fitted picture from the middle of the clip, with Y up.
@@ -1544,7 +1546,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A picture value goes to all the selected clips that can have a picture. An Audio value goes to all the selected clips with sound.
   - A Speed value goes to all the selected clips that can change speed. Duration gives each clip the speed that fills it.
   - A value changes only that value on each clip. A Reset also acts on all of these clips.
-  - Not in the Inspector: Softness and Composite ([todo](todo/inspector.md)).
+  - Not in the Inspector: the composite modes ([todo](todo/inspector.md)).
 - **Why:**
   - The Titles tab of the Cut page is in the place of the Media Pool. The Inspector goes beside it. Thus the viewer and the timeline keep their size.
   - Resolve also sets titles, subtitles and subtitle tracks in the Inspector (pp. 764, 1233, 1237).

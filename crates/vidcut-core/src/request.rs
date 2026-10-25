@@ -1240,7 +1240,8 @@ pub enum Request {
         #[serde(default)]
         at: Option<TimeSpec>,
         /// The value at the keyframe. A number for volume (dB, from -60
-        /// to 24), rotation (degrees) and a crop side (a fraction). For
+        /// to 24), rotation (degrees), a crop side (a fraction), crop
+        /// softness (from -100 to 100) and opacity (from 0 to 1). For
         /// position and zoom, two numbers, x then y, or one number for
         /// both axes of zoom.
         #[serde(default)]
@@ -1877,12 +1878,13 @@ pub enum Request {
     /// `dynamic_zoom` (null when it has none), every value given, usual ones too.
     #[serde(rename = "picture.get")]
     PictureGet { clip: ClipRef },
-    /// Move, zoom, turn, pitch, yaw, flip or crop clips' pictures, or give
-    /// them a Dynamic Zoom: footage, stills, image sequences and compound
-    /// clips; a title has its own place (`titles.set`). Each field given
-    /// replaces its own. At its usual values a picture is fitted into the
-    /// frame; the tracks below show wherever it doesn't cover the frame: in
-    /// its bars, around it and where it is cropped.
+    /// Move, zoom, turn, pitch, yaw, flip, crop or fade clips' pictures, or
+    /// give them a Dynamic Zoom: footage, stills, image sequences and
+    /// compound clips; a title has its own place (`titles.set`). Each field
+    /// given replaces its own. At its usual values a picture is fitted into
+    /// the frame; the tracks below show wherever it doesn't cover the frame:
+    /// in its bars, around it, where it is cropped and through its soft
+    /// edges and its opacity.
     #[serde(rename = "picture.set")]
     PictureSet {
         clips: OneOrMany<ClipRef>,
@@ -1936,6 +1938,15 @@ pub enum Request {
         /// What is cut off its bottom, as a fraction of its height.
         #[serde(default)]
         crop_bottom: Option<f64>,
+        /// How soft the edges of the crop are, from -100 to 100; 0 for
+        /// hard edges. Above 0, each cropped edge fades out over what it
+        /// cuts off. Below 0, all four edges fade in over the picture.
+        #[serde(default)]
+        crop_softness: Option<f64>,
+        /// How much of it shows over the tracks below, from 0 (none) to 1
+        /// (all of it).
+        #[serde(default)]
+        opacity: Option<f64>,
         /// Where a change of a value that has keyframes goes, as a
         /// keyframe: the playhead by default (decision D75). A value with
         /// no keyframes ignores it.
@@ -1951,8 +1962,9 @@ pub enum Request {
         dynamic_zoom: Option<Option<DynamicZoomSet>>,
     },
     /// Put clips' pictures back at their usual values: the `transform`
-    /// (position, zoom, rotation, anchor, pitch, yaw and flips), the `crop`,
-    /// the `dynamic_zoom`, or all of them when no `tool` is given.
+    /// (position, zoom, rotation, anchor, pitch, yaw and flips), the `crop`
+    /// (its sides and softness), the `dynamic_zoom`, the `composite` (the
+    /// opacity), or all of them when no `tool` is given.
     #[serde(rename = "picture.clear")]
     PictureClear {
         clips: OneOrMany<ClipRef>,
@@ -2976,6 +2988,10 @@ pub enum KeyParam {
     CropTop,
     /// Crop Bottom, as a fraction of the height.
     CropBottom,
+    /// Crop Softness, from -100 to 100.
+    CropSoftness,
+    /// Opacity, from 0 to 1.
+    Opacity,
 }
 
 /// A keyframe value: one number, or x and y for position and zoom.

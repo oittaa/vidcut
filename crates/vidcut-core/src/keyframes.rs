@@ -359,10 +359,12 @@ pub enum PictureValue {
     CropRight,
     CropTop,
     CropBottom,
+    CropSoftness,
+    Opacity,
 }
 
 impl PictureValue {
-    pub const ALL: [PictureValue; 7] = [
+    pub const ALL: [PictureValue; 9] = [
         PictureValue::Position,
         PictureValue::Zoom,
         PictureValue::Rotation,
@@ -370,6 +372,8 @@ impl PictureValue {
         PictureValue::CropRight,
         PictureValue::CropTop,
         PictureValue::CropBottom,
+        PictureValue::CropSoftness,
+        PictureValue::Opacity,
     ];
 
     pub fn name(self) -> &'static str {
@@ -381,6 +385,8 @@ impl PictureValue {
             PictureValue::CropRight => "crop_right",
             PictureValue::CropTop => "crop_top",
             PictureValue::CropBottom => "crop_bottom",
+            PictureValue::CropSoftness => "crop_softness",
+            PictureValue::Opacity => "opacity",
         }
     }
 
@@ -404,7 +410,7 @@ fn one_at(keys: &[Keyframe], frame: f64) -> Option<f64> {
     (!keys.is_empty()).then(|| value_at(keys, frame)).flatten()
 }
 
-fn parts(p: &Picture) -> [(&Vec<Keyframe>, Option<&Vec<f64>>); 7] {
+fn parts(p: &Picture) -> [(&Vec<Keyframe>, Option<&Vec<f64>>); 9] {
     [
         (&p.position_keys, Some(&p.position_y)),
         (&p.zoom_keys, Some(&p.zoom_y)),
@@ -413,6 +419,8 @@ fn parts(p: &Picture) -> [(&Vec<Keyframe>, Option<&Vec<f64>>); 7] {
         (&p.crop_right_keys, None),
         (&p.crop_top_keys, None),
         (&p.crop_bottom_keys, None),
+        (&p.crop_softness_keys, None),
+        (&p.opacity_keys, None),
     ]
 }
 
@@ -425,6 +433,8 @@ fn parts_mut(p: &mut Picture, v: PictureValue) -> (&mut Vec<Keyframe>, Option<&m
         PictureValue::CropRight => (&mut p.crop_right_keys, None),
         PictureValue::CropTop => (&mut p.crop_top_keys, None),
         PictureValue::CropBottom => (&mut p.crop_bottom_keys, None),
+        PictureValue::CropSoftness => (&mut p.crop_softness_keys, None),
+        PictureValue::Opacity => (&mut p.opacity_keys, None),
     }
 }
 
@@ -445,6 +455,8 @@ fn plain_of(p: &Picture, v: PictureValue) -> [f64; 2] {
         PictureValue::CropRight => [p.crop.right, 0.0],
         PictureValue::CropTop => [p.crop.top, 0.0],
         PictureValue::CropBottom => [p.crop.bottom, 0.0],
+        PictureValue::CropSoftness => [p.softness(), 0.0],
+        PictureValue::Opacity => [p.opaque(), 0.0],
     }
 }
 
@@ -457,6 +469,8 @@ fn write_plain(p: &mut Picture, v: PictureValue, value: [f64; 2]) {
         PictureValue::CropRight => p.crop.right = value[0],
         PictureValue::CropTop => p.crop.top = value[0],
         PictureValue::CropBottom => p.crop.bottom = value[0],
+        PictureValue::CropSoftness => p.crop_softness = Some(value[0]).filter(|s| *s != 0.0),
+        PictureValue::Opacity => p.opacity = Some(value[0]).filter(|o| *o != 1.0),
     }
 }
 
@@ -563,6 +577,7 @@ impl Picture {
             PictureValue::CropRight,
             PictureValue::CropTop,
             PictureValue::CropBottom,
+            PictureValue::CropSoftness,
         ] {
             self.clear_channel(v);
         }
@@ -907,6 +922,8 @@ fn value_problem(v: PictureValue, value: [f64; 2], p: &Picture, frame: i64) -> O
                 || at.left + at.right >= 1.0
                 || at.top + at.bottom >= 1.0
         }
+        PictureValue::CropSoftness => !(value[0].is_finite() && value[0].abs() <= 100.0),
+        PictureValue::Opacity => !(value[0].is_finite() && (0.0..=1.0).contains(&value[0])),
     };
     bad.then(|| match v {
         PictureValue::Position => {
@@ -914,6 +931,8 @@ fn value_problem(v: PictureValue, value: [f64; 2], p: &Picture, frame: i64) -> O
         }
         PictureValue::Zoom => "a picture's zoom is from 1/100 to 100".into(),
         PictureValue::Rotation => "a picture's rotation is degrees, from -3600 to 3600".into(),
+        PictureValue::CropSoftness => "a picture's crop softness is from -100 to 100".into(),
+        PictureValue::Opacity => "a picture's opacity is from 0 to 1".into(),
         _ => "a picture's crop is a fraction of it on each side, from 0, leaving some of it".into(),
     })
 }

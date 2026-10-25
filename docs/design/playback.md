@@ -249,6 +249,7 @@ The audio device:
   - It scales in YUV and converts to RGB with the export's math (`shader_colors`). In an SDR timeline, it tone-maps HDR.
   - The layers of a dissolve are more draws in the pass.
   - The draw of a placed layer maps each pixel back through its `place::Placing` levels to the decoded picture. It taps the picture as finely as it is shrunk.
+  - Each level also gives its soft crop edges and its opacity, as in the export ([export](export.md#placed-pictures)).
   - The draw of a placed layer also covers its edges in part, and lays the layer over the layers below, premultiplied.
   - The two sides of a dissolve with a placed picture are added into a picture of their own (`Mixing`). That picture is then laid over the frame.
   - Each title is one more draw after the layers under it (`fs_title`).

@@ -423,6 +423,7 @@ The pictures:
 - `place::Placing` maps each pixel of the frame back to the picture.
 - `place::Placing` leaves out the level of a clip in a compound clip when the clip fills the frame at its usual values. Thus the edges of the compound clip are covered once.
 - `export::place::over` lays the picture over the frame below, in its own code values. It taps each component over the footprint of the pixel, and covers the edges in part, as the viewer's shader does.
+- The coverage of a pixel is the product over the levels of `place::Placing::at`. Each level gives its smoothed edges, its soft crop edges and its opacity.
 - For NVENC, the frame below stays on the GPU.
   - `cuda::burn::Overlay::of` makes the colors and coverage of the placed picture in memory.
   - `cuda::burn` mixes them in, as for a title.
@@ -442,11 +443,21 @@ A picture value with keyframes is sampled on that same `Placing` (D75):
 
 - `Placed` holds the source frame of the piece and its `Pace`.
 - `Placed::after` moves that source frame with the piece, as it moves the `Run`.
-- `Picture::sampled` reads position, zoom, rotation and each crop side at that source frame.
+- `Picture::sampled` reads position, zoom, rotation, each crop side, the crop softness and the opacity at that source frame.
 - The key's own value follows the volume Bezier curve (`value_at`).
 - Position Y and zoom Y keep the handle frames and use a value offset of 0.
 - `place::detail` uses the largest zoom key in the piece, as it uses the closer Dynamic Zoom box.
 - The viewer and the export both take this `Placing`. There is no second draw path.
+
+Soft crop edges and opacity (D75):
+
+- `place::Level` holds the crop (`shown`), the hard edges that it draws (`edge`), its soft edges (`place::Soft`) and its `opacity`.
+- `place::Soft` holds the rectangle inside which nothing fades, and the length of the fade on each axis, in fractions of the picture.
+- The fade is the crop softness × the width of the fitted picture / 400, rounded down to whole pixels.
+- With a softness above 0, `edge` is the crop grown by the fade and cut at the picture's edge. Below 0, `edge` is the crop.
+- `Soft::alpha` takes a smooth maximum of the distances outside that rectangle on each axis. Then it fades over the fade length with a smoothstep.
+- `place::Placing::bounds` and `place::Placing::share` use `edge`. The handles in the viewer use `shown`.
+- The shader of the viewer (`picture.wgsl`) packs the same values for each level and does the same sums.
 
 ## Proxies
 

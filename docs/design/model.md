@@ -355,20 +355,22 @@ Writing:
   - its `anchor`, the point that the zoom and the turn work about (`Picture::pivot`)
   - its `pitch` and its `yaw`, from −1.5 to 1.5, left out at 0 (`Picture::pitch`, `Picture::yaw`)
   - its flips
-  - a `Crop` of each side
+  - a `Crop` of each side, and the softness of its edges (`crop_softness`, from −100 to 100)
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
+  - its `opacity`, from 0 to 1 (`Picture::opaque`)
 - Each value is left out at its usual value. Thus a picture that `Picture::is_usual` accepts is only fitted into the frame.
-- Position, zoom, rotation and each crop side can hold `Keyframe`s beside the plain value (D75).
+- Position, zoom, rotation, each crop side, the crop softness and the opacity can hold `Keyframe`s beside the plain value (D75).
 - `position_keys` holds X. `position_y` holds Y, one number for each keyframe. Zoom does the same.
 - A handle `value` moves X. Y keeps the handle `frames` and a value offset of 0 (`value_paired`).
 - `Picture::is_usual` is false while any of these values has keyframes.
 - `ops::picture` holds the edits:
   - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share. It leaves usual values out.
   - `ops::picture::has_picture` says which clips take a picture: not titles, generators or sound.
-  - `ops::picture::clear` puts back the transform, the crop or the Dynamic Zoom (`PictureTool`), or all of them.
+  - `ops::picture::clear` puts back the transform, the crop, the Dynamic Zoom or the opacity (`PictureTool`), or all of them.
+  - `ops::picture::cleared` is the reset of one `PictureTool`. The Inspector uses it too.
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
 - `place::Placing` turns the picture of a clip, with the pictures of the compound clips that it plays inside, into maps.
-  - Each map goes from a pixel of the frame back to a picture (`place::Level`: the map and the part shown).
+  - Each map goes from a pixel of the frame back to a picture (`place::Level`: the map, the part shown, its soft edges and its opacity).
   - Each map zooms and turns the picture about its anchor point. `place::anchored` gives the pixel where the anchor point lands.
   - Pitch and yaw lean the picture about its middle, in its own axes, before the zoom and the turn ([spec D93](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - Thus the lean is a map of the picture itself. Each level undoes the move, the turn and the zoom first, then the lean.

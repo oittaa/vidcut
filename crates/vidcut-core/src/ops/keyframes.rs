@@ -414,6 +414,8 @@ fn picture_param(param: KeyParam) -> Option<PictureValue> {
         KeyParam::CropRight => Some(PictureValue::CropRight),
         KeyParam::CropTop => Some(PictureValue::CropTop),
         KeyParam::CropBottom => Some(PictureValue::CropBottom),
+        KeyParam::CropSoftness => Some(PictureValue::CropSoftness),
+        KeyParam::Opacity => Some(PictureValue::Opacity),
     }
 }
 
@@ -448,6 +450,8 @@ fn finite(v: PictureValue, value: [f64; 2]) -> Result<[f64; 2]> {
             .iter()
             .all(|n| n.is_finite() && (0.01..=100.0).contains(n)),
         PictureValue::Rotation => value[0].is_finite() && value[0].abs() <= 3600.0,
+        PictureValue::CropSoftness => value[0].is_finite() && value[0].abs() <= 100.0,
+        PictureValue::Opacity => value[0].is_finite() && (0.0..=1.0).contains(&value[0]),
         _ => value[0].is_finite() && (0.0..1.0).contains(&value[0]),
     };
     if ok {
@@ -459,6 +463,8 @@ fn finite(v: PictureValue, value: [f64; 2]) -> Result<[f64; 2]> {
             }
             PictureValue::Zoom => "a picture's zoom is from 1/100 to 100",
             PictureValue::Rotation => "a picture's rotation is degrees, from -3600 to 3600",
+            PictureValue::CropSoftness => "a picture's crop softness is from -100 to 100",
+            PictureValue::Opacity => "a picture's opacity is from 0 to 1",
             _ => "a picture's crop is a fraction of it on each side, from 0, leaving some of it",
         }))
     }

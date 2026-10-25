@@ -940,12 +940,14 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 println!("  flipped {}", flips.join(" and "));
             }
             println!(
-                "  crop left {}  right {}  top {}  bottom {}",
+                "  crop left {}  right {}  top {}  bottom {}  softness {}",
                 side("left"),
                 side("right"),
                 side("top"),
-                side("bottom")
+                side("bottom"),
+                side("softness")
             );
+            println!("  opacity {}", v["opacity"].as_f64().unwrap_or_default());
             let z = &v["dynamic_zoom"];
             if z.is_object() {
                 let end = |k: &str| {

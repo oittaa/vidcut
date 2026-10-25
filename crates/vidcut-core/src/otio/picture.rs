@@ -8,7 +8,8 @@ const TRANSFORM: &str = "Transform";
 const CROPPING: &str = "Cropping";
 const SCALING: &str = "Retime and Scaling";
 const ZOOMING: &str = "Dynamic Zoom";
-const NAMES: [&str; 4] = [TRANSFORM, CROPPING, SCALING, ZOOMING];
+const COMPOSITE: &str = "Composite";
+const NAMES: [&str; 5] = [TRANSFORM, CROPPING, SCALING, ZOOMING, COMPOSITE];
 
 const ZOOM_X: &str = "transformationZoomX";
 const ZOOM_Y: &str = "transformationZoomY";
@@ -22,6 +23,10 @@ const ANCHOR: &str = "transformationAnchorPoint";
 const FLIP_X: &str = "transformationFlipX";
 const FLIP_Y: &str = "transformationFlipY";
 const CROPS: [&str; 4] = ["cropLeft", "cropRight", "cropTop", "cropBottom"];
+const SOFTNESS: &str = "cropSoftness";
+const CROPPED: [&str; 5] = [CROPS[0], CROPS[1], CROPS[2], CROPS[3], SOFTNESS];
+const OPACITY: &str = "opacity";
+const MODE: &str = "composite mode";
 const SCALE: &str = "scale";
 const EASE: &str = "dynamicZoomEase";
 const CENTER: &str = "dynamicZoomCenter";
@@ -33,6 +38,8 @@ const TURNS: f64 = 3600.0;
 const LEAN: f64 = 1.5;
 const LATER: i64 = 1000;
 const SIZES: (f64, f64) = (0.01, 100.0);
+const SOFT: f64 = 100.0;
+const PERCENT: f64 = 100.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shape {
@@ -78,7 +85,17 @@ impl Shape {
 
 fn kind(e: &Value) -> Option<&'static str> {
     let name = e["metadata"][EDITOR]["Effect Name"].as_str()?;
-    NAMES.into_iter().find(|n| *n == name)
+    let found = NAMES.into_iter().find(|n| *n == name)?;
+    (found != COMPOSITE || normal(e)).then_some(found)
+}
+
+fn normal(e: &Value) -> bool {
+    e["metadata"][EDITOR]["Parameters"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|p| p["Parameter ID"] == MODE)
+        .all(|p| p["Parameter Value"].as_f64() == Some(0.0) && !keyframed(p))
 }
 
 pub fn is_placing(e: &Value) -> bool {
@@ -90,8 +107,9 @@ fn known(name: &str) -> &'static [&'static str] {
         TRANSFORM => &[
             ZOOM_X, ZOOM_Y, ZOOM_LINK, PAN, TILT, ROTATION, PITCH, YAW, ANCHOR, FLIP_X, FLIP_Y,
         ],
-        CROPPING => &CROPS,
+        CROPPING => &CROPPED,
         ZOOMING => &[EASE, CENTER, SIZE],
+        COMPOSITE => &[OPACITY, MODE],
         _ => &[SCALE],
     }
 }
@@ -103,7 +121,8 @@ fn animated(name: &str, id: &str) -> bool {
 fn playable(name: &str, id: &str) -> bool {
     match name {
         TRANSFORM => matches!(id, ZOOM_X | ZOOM_Y | PAN | TILT | ROTATION),
-        CROPPING => CROPS.contains(&id),
+        CROPPING => CROPPED.contains(&id),
+        COMPOSITE => id == OPACITY,
         _ => false,
     }
 }
@@ -230,8 +249,10 @@ struct Placement {
     anchor: [f64; 2],
     flips: [bool; 2],
     crop: [f64; 4],
+    softness: f64,
     scale: u8,
     dynamic: Option<DynamicZoom>,
+    opacity: f64,
 }
 
 fn placement(effects: &[Value]) -> Option<Placement> {
@@ -282,8 +303,10 @@ fn placement(effects: &[Value]) -> Option<Placement> {
         anchor,
         flips: [switch(FLIP_X)?, switch(FLIP_Y)?],
         crop,
+        softness: number(SOFTNESS, 0.0)?,
         scale,
         dynamic,
+        opacity: number(OPACITY, PERCENT)? / PERCENT,
     })
 }
 
@@ -304,6 +327,8 @@ impl Placement {
         let [left, right, top, bottom] = self.crop.map(rounded);
         let pitch = rounded(self.pitch);
         let yaw = rounded(self.yaw);
+        let softness = rounded(self.softness);
+        let opacity = rounded(self.opacity);
         Picture {
             position: Some([rounded(0.5 + d[0] / w), rounded(0.5 + d[1] / h)]),
             zoom: Some([rounded(pw / fw * zx), rounded(ph / fh * zy)]),
@@ -319,7 +344,9 @@ impl Placement {
                 top,
                 bottom,
             },
+            crop_softness: (softness != 0.0).then_some(softness),
             dynamic_zoom: self.dynamic,
+            opacity: (opacity != 1.0).then_some(opacity),
             ..Picture::default()
         }
     }
@@ -387,6 +414,22 @@ impl Placement {
             .map(|k| Keyframe {
                 value: rounded(k.value),
                 ..*k
+            })
+            .collect();
+        picture.crop_softness_keys = keys(SOFTNESS)?
+            .into_iter()
+            .map(|k| Keyframe {
+                value: rounded(k.value),
+                ..k
+            })
+            .collect();
+        picture.opacity_keys = keys(OPACITY)?
+            .into_iter()
+            .map(|k| Keyframe {
+                value: rounded(k.value / PERCENT),
+                in_handle: scale_handle(k.in_handle, 1.0 / PERCENT),
+                out_handle: scale_handle(k.out_handle, 1.0 / PERCENT),
+                ..k
             })
             .collect();
         Some(picture)
@@ -741,7 +784,7 @@ pub(crate) fn effects(
         &p.crop_top_keys,
         &p.crop_bottom_keys,
     ];
-    let cropping: Vec<Value> = CROPS
+    let mut cropping: Vec<Value> = CROPS
         .into_iter()
         .zip(p.crop.sides())
         .zip(crop_keys)
@@ -751,13 +794,44 @@ pub(crate) fn effects(
             double_frames(id, value, 0.0, (0.0, 1.0), frames)
         })
         .collect();
+    let soft_keys = file_curve(&p.crop_softness_keys, None, source, timing, |n| n, 1.0);
+    let softness = p
+        .crop_softness_keys
+        .first()
+        .map_or(p.softness(), |k| k.value);
+    cropping.extend(double_frames(
+        SOFTNESS,
+        softness,
+        0.0,
+        (-SOFT, SOFT),
+        soft_keys,
+    ));
     let scaling = vec![keyed(SCALE, json!(FIT), json!(0), "UInt")];
     let dynamic = p.dynamic_zoom.map_or_else(Vec::new, |z| zooming(&z, g));
+    let opacity_keys = file_curve(
+        &p.opacity_keys,
+        None,
+        source,
+        timing,
+        |n| rounded(n * PERCENT),
+        PERCENT,
+    );
+    let opacity = p.opacity_keys.first().map_or(p.opaque(), |k| k.value);
+    let composite: Vec<Value> = double_frames(
+        OPACITY,
+        rounded(opacity * PERCENT),
+        PERCENT,
+        (0.0, PERCENT),
+        opacity_keys,
+    )
+    .into_iter()
+    .collect();
     [
         (TRANSFORM, 2, transform),
         (CROPPING, 3, cropping),
         (SCALING, 22, scaling),
         (ZOOMING, 59, dynamic),
+        (COMPOSITE, 1, composite),
     ]
     .into_iter()
     .filter(|(_, _, list)| !list.is_empty())

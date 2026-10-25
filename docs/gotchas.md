@@ -277,7 +277,7 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - The outline of a title does not show in Resolve.
 - **Resolve drops metadata it doesn't know**, which includes the `vidcut` key of the clip.
   - Thus a title comes back from Resolve by its parameters alone.
-  - A placed clip comes back by its Transform, Cropping and Retime and Scaling alone.
+  - A placed clip comes back by its Transform, Cropping, Dynamic Zoom, Composite and Retime and Scaling alone.
 - **Resolve's file holds no frame size:**
   - The metadata of its timeline is only `Resolve OTIO Meta Version`.
   - The Transform of a clip (a `Resolve Effect` of type 2), Cropping (3) and Retime and Scaling (22) hold fractions.
@@ -336,6 +336,16 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
     - With Yaw 0.3, a crop of 384 source pixels on the left put the edge at x = 609.
     - The lean of the source puts it at 607. A crop of the frame would put it at 672.
   - `place::level` flips and crops in the same order.
+- **Resolve's opacity is a parameter of Composite, a `Resolve Effect` of type 1.**
+  - `opacity` (Double) goes from 0 to 100. Its default is 100.
+  - `composite mode` (UInt) is 0 for Normal. Resolve leaves it out at Normal.
+  - `otio::picture` reads a Composite at Normal as the `opacity` of the picture. A Composite with another mode stays a clip effect.
+  - A title's opacity is in a Composite of the same form (`otio::titles`).
+- **Resolve's Crop Softness is `cropSoftness` (Double) in Cropping,** from −100 to 100.
+  - Its keyframes have the form of the keyframes of the crop sides.
+  - The renders that fix the fade are in [spec D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions).
+  - At some whole products, Resolve's fade is one pixel shorter. Softness 5 on a 1920-pixel picture gives 23 pixels, not 24.
+  - vidcut rounds down |Softness| × width / 400. Thus it can be one pixel longer than Resolve's fade.
 - **Resolve's Pan and Tilt go from −4 to 4.**
   - vidcut writes a picture moved further at 4, and names its clip in the notes of the export.
 - **Resolve's Dynamic Zoom is a `Resolve Effect` of type 59.**

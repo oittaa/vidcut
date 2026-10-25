@@ -5,6 +5,61 @@ use crate::render::Placed;
 pub struct Level {
     pub back: [f64; 8],
     pub shown: [f64; 4],
+    pub edge: [f64; 4],
+    pub soft: Soft,
+    pub opacity: f64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Soft {
+    pub inner: [f64; 4],
+    pub reach: [f64; 2],
+}
+
+impl Soft {
+    const KNEE: f64 = 0.5;
+    const WIDTH: f64 = 7.0 / 8.0;
+
+    fn of([u0, v0, u1, v1]: [f64; 4], softness: f64, [fw, fh]: [f64; 2]) -> ([f64; 4], Self) {
+        let ramp = (softness.abs() * fw / 400.0).floor();
+        if ramp <= 0.0 || fw <= 0.0 || fh <= 0.0 {
+            return ([u0, v0, u1, v1], Self::default());
+        }
+        let (du, dv) = (1.0 / fw, 1.0 / fh);
+        let reach = [ramp * du, ramp * dv];
+        let inset = if softness > 0.0 { 0.5 } else { ramp - 0.5 };
+        let inner = [
+            u0 + inset * du,
+            v0 + inset * dv,
+            u1 - inset * du,
+            v1 - inset * dv,
+        ];
+        if softness < 0.0 {
+            return ([u0, v0, u1, v1], Self { inner, reach });
+        }
+        let (ou, ov) = ((ramp + 1.0) * du, (ramp + 1.0) * dv);
+        let shown = [
+            (u0 - ou).max(0.0),
+            (v0 - ov).max(0.0),
+            (u1 + ou).min(1.0),
+            (v1 + ov).min(1.0),
+        ];
+        (shown, Self { inner, reach })
+    }
+
+    pub fn alpha(&self, [u, v]: [f64; 2]) -> f64 {
+        let [ru, rv] = self.reach;
+        if ru <= 0.0 || rv <= 0.0 {
+            return 1.0;
+        }
+        let [u0, v0, u1, v1] = self.inner;
+        let a = (u0 - u).max(u - u1).max(0.0) / ru;
+        let b = (v0 - v).max(v - v1).max(0.0) / rv;
+        let h = (Self::KNEE - (a - b).abs()).max(0.0) / Self::KNEE;
+        let m = a.max(b) + h * h * Self::KNEE / 4.0;
+        let t = ((1.0 - m) / Self::WIDTH).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +96,8 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4]) -> Level {
     let (a, b) = (k * sx * cos / (zx * fw), -k * sx * sin / (zx * fw));
     let (c, d) = (k * sy * sin / (zy * fh), k * sy * cos / (zy * fh));
     let c0 = p.crop;
+    let crop = [c0.left, c0.top, 1.0 - c0.right, 1.0 - c0.bottom];
+    let (edge, soft) = Soft::of(crop, p.softness(), [fw, fh]);
     let affine = [
         a,
         b,
@@ -53,7 +110,10 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4]) -> Level {
     ];
     Level {
         back: leaned(affine, [u0, v0], [k * sx, k * sy], p.pitch(), p.yaw()),
-        shown: [c0.left, c0.top, 1.0 - c0.right, 1.0 - c0.bottom],
+        shown: crop,
+        edge,
+        soft,
+        opacity: p.opaque(),
     }
 }
 
@@ -168,10 +228,7 @@ impl Placing {
                 Some(outer) => then(&outer.back, &own.back, frame),
                 None => own.back,
             };
-            levels.push(Level {
-                back,
-                shown: own.shown,
-            });
+            levels.push(Level { back, ..own });
         }
         Self { levels }
     }
@@ -201,10 +258,11 @@ impl Placing {
                 (a - u * g).hypot(b - u * h) / w.abs(),
                 (c - v * g).hypot(d - v * h) / w.abs(),
             );
-            let [u0, v0, u1, v1] = l.shown;
+            let [u0, v0, u1, v1] = l.edge;
             for edge in [(u - u0) / du, (u1 - u) / du, (v - v0) / dv, (v1 - v) / dv] {
                 cover *= (edge + 0.5).clamp(0.0, 1.0);
             }
+            cover *= l.soft.alpha([u, v]) * l.opacity;
             if cover <= 0.0 {
                 return None;
             }
@@ -224,7 +282,7 @@ impl Placing {
         let Some(l) = self.levels.last() else {
             return 0.0;
         };
-        let [u0, v0, u1, v1] = l.shown;
+        let [u0, v0, u1, v1] = l.edge;
         let [a, b, _, c, d, _, g, k] = l.back;
         let corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|p| ahead(&l.back, p));
         let quad = if g == 0.0 && k == 0.0 {
@@ -241,7 +299,7 @@ impl Placing {
     pub fn bounds(&self, (w, h): (f64, f64)) -> Option<[u32; 4]> {
         let mut out = [0.0, 0.0, w, h];
         for l in &self.levels {
-            let [u0, v0, u1, v1] = l.shown;
+            let [u0, v0, u1, v1] = l.edge;
             let corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&l.back, c));
             if corners
                 .iter()
