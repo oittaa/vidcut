@@ -176,6 +176,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - Each picture has a key (`PictureId`): the file, the color space, the reading, the rotation, the upscaler, the made size and the frame.
   - A picture comes from a run of the upscaler (`Session`). The run starts at the first frame that the upscaler needs (`ai::first_frame`).
   - A run holds the pictures that it made and that the reader did not take yet. A picture leaves the run when the reader takes it.
+  - When the reader asks for a frame, the run drops the pictures before that frame. Thus frames that an export skips do not stay in memory.
   - The run also keeps the last picture that it gave. The reader asks for it again when the size of its layer changes.
   - The held pictures go when the run goes. Thus an AI picture stays in main memory only while its run needs it.
   - The viewer keeps the pictures that it shows with its other kept pictures ([playback](playback.md)).

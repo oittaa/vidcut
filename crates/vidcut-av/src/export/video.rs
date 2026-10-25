@@ -539,6 +539,9 @@ impl Session {
                 .waiting
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Key::Frame(k) = id.key {
+                waiting.retain(|(key, _)| !matches!(key, Key::Frame(i) if *i < k));
+            }
             let at = waiting.iter().position(|(key, _)| *key == id.key);
             at.map(|i| waiting.remove(i).1)
         };
