@@ -578,15 +578,15 @@ pub fn print(method: &str, r: &Response, json: bool) {
                         "{:17}   {} {} ({}; {source}{checked})",
                         "",
                         l["measure"].as_str().unwrap_or_default(),
-                        l["value"],
+                        number(l["value"].as_f64().unwrap_or(0.0)),
                         l["kind"].as_str().unwrap_or_default()
                     );
                 }
                 if let Some(p) = m["price"].as_object() {
                     println!(
-                        "{:17}   ${}/hour (checked {})",
+                        "{:17}   ${:.2}/hour (checked {})",
                         "",
-                        p["dollars_per_hour"],
+                        p["dollars_per_hour"].as_f64().unwrap_or(0.0),
                         p["checked"].as_str().unwrap_or_default()
                     );
                 }
@@ -621,10 +621,10 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 said.push(format!("times: {t}"));
             }
             if let Some(s) = rep["audio_secs"].as_f64() {
-                said.push(format!("longest audio {s} s"));
+                said.push(format!("longest audio {} s", number(s)));
             }
             if let Some(s) = rep["speakers"].as_f64() {
-                said.push(format!("{s} speakers at most"));
+                said.push(format!("{} speakers at most", number(s)));
             }
             println!(
                 "{}: {}",
@@ -1493,6 +1493,13 @@ fn flatten(prefix: &str, v: &Value, out: &mut Vec<String>) {
             }
         }
         v => out.push(format!("{prefix} = {v}")),
+    }
+}
+
+fn number(v: f64) -> String {
+    match v.fract() == 0.0 && v.abs() < 1e15 {
+        true => format!("{}", v as i64),
+        false => v.to_string(),
     }
 }
 
