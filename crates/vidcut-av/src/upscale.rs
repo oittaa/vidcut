@@ -982,6 +982,8 @@ struct Engine {
     tiles: Option<Tiles>,
     pending: Option<Pending>,
     groups: RefCell<Groups>,
+    listed: Option<crate::gpus::Gpu>,
+    lent: Option<crate::player::Lent>,
 }
 
 type Rest = Box<dyn FnOnce(Result<Vec<Vec<u8>>>) + Send>;
@@ -1025,7 +1027,9 @@ impl Engine {
                 adapter.get_info().name
             ));
         }
-        crate::ai::runs_on(Upscaler::AiFast, adapter.get_info().name);
+        let info = adapter.get_info();
+        let listed = crate::gpus::of(info.vendor, info.device);
+        crate::ai::runs_on(Upscaler::AiFast, info.name);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("vidcut-upscale"),
             required_limits: limits,
@@ -1074,7 +1078,23 @@ impl Engine {
             tiles: None,
             pending: None,
             groups: RefCell::default(),
+            listed,
+            lent: None,
         })
+    }
+
+    fn lend(&mut self, (w, h): (usize, usize), count: usize) {
+        self.lent = None;
+        let px = w * h;
+        let side = TILE + 2 * MARGIN;
+        let tiles = side * side * 4 * FEATURES * 2
+            + side * side * 16 * 32 * 2
+            + 3 * px * (SCALE * SCALE) as usize * 3;
+        let need = count * px * 3 + px * PADDED * 2 + (7 + count) * px * FEATURES * 2 + tiles;
+        self.lent = self.listed.as_ref().and_then(|on| {
+            let room = crate::player::room_on(on)?;
+            crate::player::lend_on(on, need as u64, room)
+        });
     }
 
     fn storage(&self, data: &[u8]) -> wgpu::Buffer {
@@ -1349,6 +1369,16 @@ impl Engine {
         checked(&device, || {
             let clock = Instant::now();
             self.load()?;
+            let fits = self
+                .frame
+                .as_ref()
+                .is_some_and(|f| f.w == w && f.h == h && f.count >= frames.len())
+                && self.tiles.as_ref().is_some_and(|t| t.size == (w, h));
+            if !fits {
+                self.frame = None;
+                self.tiles = None;
+                self.lend((w, h), frames.len());
+            }
             self.make_frame((w, h), frames.len());
             if self.tiles.as_ref().is_none_or(|t| t.size != (w, h)) {
                 self.make_tiles();
@@ -1541,6 +1571,7 @@ impl crate::ai::Network for Engine {
         self.frame = None;
         self.tiles = None;
         self.groups.get_mut().clear();
+        self.lent = None;
     }
 
     fn busy(&self) -> bool {
@@ -1646,6 +1677,7 @@ pub(crate) fn upscale(
             e.frame = None;
             e.tiles = None;
             e.groups.get_mut().clear();
+            e.lent = None;
             return first;
         };
         let mut outs = vec![Vec::new(); frames.len()];

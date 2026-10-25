@@ -72,6 +72,11 @@ pub fn list() -> &'static [Gpu] {
     LIST.get_or_init(listed)
 }
 
+pub(crate) fn of(vendor: u32, device: u32) -> Option<Gpu> {
+    let model = id(vendor, device, None);
+    list().iter().find(|g| g.id.starts_with(&model)).cloned()
+}
+
 pub fn automatic() -> Option<Gpu> {
     let gpus = list();
     gpus.iter()
@@ -198,6 +203,44 @@ pub(crate) fn adapter_luid(index: u32) -> Option<[u8; 8]> {
 }
 
 #[cfg(windows)]
+pub(crate) fn spare(gpu: &Gpu) -> Option<u64> {
+    use ::windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory1, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO,
+        IDXGIAdapter3, IDXGIFactory1,
+    };
+    use ::windows::core::Interface;
+    let index = gpu.adapter?;
+    let mut info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
+    // SAFETY: DXGI's factory and the adapter at that index, queried into a struct of its own type.
+    unsafe {
+        let factory = CreateDXGIFactory1::<IDXGIFactory1>().ok()?;
+        let adapter = factory
+            .EnumAdapters1(index)
+            .ok()?
+            .cast::<IDXGIAdapter3>()
+            .ok()?;
+        adapter
+            .QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut info)
+            .ok()?;
+    }
+    Some(info.Budget.saturating_sub(info.CurrentUsage))
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn spare(gpu: &Gpu) -> Option<u64> {
+    let slot = gpu.slot?;
+    vulkan_memory()
+        .into_iter()
+        .find(|(at, _, _)| *at == slot)
+        .and_then(|(_, _, spare)| spare)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn spare(_gpu: &Gpu) -> Option<u64> {
+    None
+}
+
+#[cfg(windows)]
 fn windows_slot(luid: ::windows::Win32::Foundation::LUID) -> Option<Slot> {
     use ::windows::Wdk::Graphics::Direct3D::{
         D3DKMT_ADAPTERADDRESS, D3DKMT_CLOSEADAPTER, D3DKMT_OPENADAPTERFROMLUID,
@@ -259,8 +302,8 @@ fn listed() -> Vec<Gpu> {
             .or_else(|| names.get(&(vendor, device)).cloned())
             .unwrap_or_else(|| format!("{} GPU {vendor:04x}:{device:04x}", maker(vendor)));
         let memory_mb = slot
-            .and_then(|s| memory.iter().find(|(at, _)| *at == s))
-            .map(|(_, bytes)| bytes >> 20)
+            .and_then(|s| memory.iter().find(|(at, _, _)| *at == s))
+            .map(|(_, bytes, _)| bytes >> 20)
             .filter(|&mb| mb > 0);
         gpus.push(Gpu {
             id: id(vendor, device, slot),
@@ -280,7 +323,7 @@ fn listed() -> Vec<Gpu> {
 }
 
 #[cfg(target_os = "linux")]
-fn vulkan_memory() -> Vec<(Slot, u64)> {
+fn vulkan_memory() -> Vec<(Slot, u64, Option<u64>)> {
     use ash::vk;
     // SAFETY: Vulkan's loader and calls as vulkan.h declares them; the library stays loaded.
     unsafe {
@@ -301,29 +344,46 @@ fn vulkan_memory() -> Vec<(Slot, u64)> {
         };
         let mut sized = Vec::new();
         for physical in instance.enumerate_physical_devices().unwrap_or_default() {
-            let has_bus = instance
+            let extensions = instance
                 .enumerate_device_extension_properties(physical)
-                .unwrap_or_default()
-                .iter()
-                .any(|e| e.extension_name_as_c_str() == Ok(ash::ext::pci_bus_info::NAME));
-            if !has_bus {
+                .unwrap_or_default();
+            let has = |name: &std::ffi::CStr| {
+                extensions
+                    .iter()
+                    .any(|e| e.extension_name_as_c_str() == Ok(name))
+            };
+            if !has(ash::ext::pci_bus_info::NAME) {
                 continue;
             }
+            let budgeted = has(ash::ext::memory_budget::NAME);
             let mut bus = vk::PhysicalDevicePCIBusInfoPropertiesEXT::default();
             let mut props = vk::PhysicalDeviceProperties2::default().push_next(&mut bus);
             instance.get_physical_device_properties2(physical, &mut props);
             if props.properties.device_type == vk::PhysicalDeviceType::INTEGRATED_GPU {
                 continue;
             }
-            let largest = instance
-                .get_physical_device_memory_properties(physical)
+            let mut budget = vk::PhysicalDeviceMemoryBudgetPropertiesEXT::default();
+            let mut memory = vk::PhysicalDeviceMemoryProperties2::default();
+            if budgeted {
+                memory = memory.push_next(&mut budget);
+            }
+            instance.get_physical_device_memory_properties2(physical, &mut memory);
+            let largest = memory
+                .memory_properties
                 .memory_heaps_as_slice()
                 .iter()
-                .filter(|h| h.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
-                .map(|h| h.size)
-                .max();
-            if let Some(bytes) = largest {
-                sized.push(((bus.pci_bus, bus.pci_device, bus.pci_function), bytes));
+                .enumerate()
+                .filter(|(_, h)| h.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
+                .max_by_key(|(_, h)| h.size)
+                .map(|(i, h)| (i, h.size));
+            if let Some((heap, bytes)) = largest {
+                let spare = budgeted
+                    .then(|| budget.heap_budget[heap].saturating_sub(budget.heap_usage[heap]));
+                sized.push((
+                    (bus.pci_bus, bus.pci_device, bus.pci_function),
+                    bytes,
+                    spare,
+                ));
             }
         }
         instance.destroy_instance(None);

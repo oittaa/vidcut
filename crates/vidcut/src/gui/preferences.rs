@@ -710,6 +710,18 @@ fn memory(
                     }
                     _ => format!("{} GB", about_gb(video_auto)),
                 };
+                let video_set = match player["video_memory_mb"].as_u64() {
+                    Some(0) | None => video_auto,
+                    Some(mb) => mb,
+                };
+                let video_about = if gpu_decodes {
+                    state["player_video_memory_lent_mb"]
+                        .as_u64()
+                        .filter(|&mb| mb < video_set)
+                        .map(|mb| format!("{} GB now, while AI Super Scale works", about_gb(mb)))
+                } else {
+                    Some("Not used while the CPU decodes".to_string())
+                };
                 for (key, name, text, auto, about) in [
                     (
                         "memory_mb",
@@ -723,7 +735,7 @@ fn memory(
                         "Pictures on the GPU",
                         &mut ui_state.video_memory,
                         video,
-                        (!gpu_decodes).then_some("Not used while the CPU decodes"),
+                        video_about,
                     ),
                 ] {
                     let saved = player[key].as_u64().unwrap_or(0);

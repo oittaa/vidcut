@@ -167,10 +167,6 @@ impl Picture {
         pools
     }
 
-    pub(crate) fn holds(&self, pool: usize) -> bool {
-        self.pooled == Some(pool) || self.over.iter().any(|o| o.picture.holds(pool))
-    }
-
     pub(crate) fn holds_a_pool(&self) -> bool {
         self.pooled.is_some() || self.over.iter().any(|o| o.picture.holds_a_pool())
     }
