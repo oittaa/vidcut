@@ -1,3 +1,4 @@
+use vidcut_core::model::Hdr;
 use vidcut_core::render::VideoPiece;
 use vidcut_core::time::Rational;
 
@@ -7,9 +8,11 @@ use crate::thumbs::Image;
 
 use super::video::VideoFrames;
 
+type Opened = (Rational, u32, u32, Option<Hdr>, VideoFrames);
+
 #[derive(Default)]
 pub struct FrameReader {
-    frames: Option<(Rational, u32, u32, VideoFrames)>,
+    frames: Option<Opened>,
     decoder: Option<crate::hw::GpuDecoder>,
 }
 
@@ -29,16 +32,16 @@ impl FrameReader {
         &mut self,
         piece: &VideoPiece,
         fps: Rational,
-        width: u32,
-        height: u32,
+        (width, height): (u32, u32),
+        colors: Option<Hdr>,
     ) -> Result<Image> {
         crate::cancel::stop()?;
         crate::init();
-        let same =
-            matches!(&self.frames, Some((f, w, h, _)) if (*f, *w, *h) == (fps, width, height));
+        let same = matches!(&self.frames, Some((f, w, h, c, _))
+            if (*f, *w, *h, *c) == (fps, width, height, colors));
         if !same {
-            let frames = frames(fps, (width, height), RGBA, self.decoder.as_ref());
-            self.frames = Some((fps, width, height, frames));
+            let frames = frames(fps, (width, height), RGBA, colors, self.decoder.as_ref())?;
+            self.frames = Some((fps, width, height, colors, frames));
         }
         let (.., frames) = self.frames.as_mut().expect("set above");
         frames.read_piece(&piece.part(0, 1));
@@ -55,13 +58,16 @@ pub(crate) fn frames(
     fps: Rational,
     (width, height): (u32, u32),
     pixel: format::Pixel,
+    colors: Option<Hdr>,
     decoder: Option<&crate::hw::GpuDecoder>,
-) -> VideoFrames {
-    let frames = VideoFrames::new(&[], fps, width, height, pixel, None).single_frames();
-    match decoder {
+) -> Result<VideoFrames> {
+    let frames = VideoFrames::new(&[], fps, width, height, pixel, None)
+        .single_frames()
+        .with_timeline(colors)?;
+    Ok(match decoder {
         Some(d) => frames.decode_on(d.clone()),
         None => frames,
-    }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

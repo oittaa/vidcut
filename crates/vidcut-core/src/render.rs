@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ColorSpace, DuckDetect, Keyframe, Media, Picture, Project, SuperScale, Title, TrackKind,
-    WipeDirection,
+    Clip, ColorSpace, DuckDetect, Hdr, Keyframe, Media, Picture, Project, SuperScale,
+    TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -30,6 +30,42 @@ pub struct RenderPlan {
     pub range: (i64, i64),
     /// A name for the output (per-clip exports: the clip's name).
     pub name: String,
+    /// The timeline color space, resolved: its HDR transfer, or none for
+    /// SDR. Every mix happens in it (decision D50).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors: Option<Hdr>,
+}
+
+pub fn timeline_colors(p: &Project) -> Option<Hdr> {
+    match p.settings.timeline_colors {
+        TimelineColors::Sdr => None,
+        TimelineColors::Pq => Some(Hdr::Pq),
+        TimelineColors::Hlg => Some(Hdr::Hlg),
+        TimelineColors::Auto => auto_colors(p),
+    }
+}
+
+pub fn auto_colors(p: &Project) -> Option<Hdr> {
+    let (plan, _) = plan_lanes(p, 0, p.end()).ok()?;
+    colors_in(p, &plan)
+}
+
+fn colors_in(p: &Project, plan: &RenderPlan) -> Option<Hdr> {
+    let pool = p.pool();
+    let share = crate::export::color::picture_share(&plan.video, |piece| {
+        let hdr = match piece {
+            VideoPiece::Source {
+                media, color_space, ..
+            } if color_space.is_tagged() => pool
+                .get(media.as_str())
+                .and_then(|m| m.info.video.as_ref())
+                .and_then(|v| v.hdr),
+            VideoPiece::Source { color_space, .. } => color_space.hdr(),
+            _ => None,
+        };
+        crate::export::color::PictureKind { hdr, depth: 0 }
+    });
+    share.mostly_hdr().then(|| share.transfer())
 }
 
 /// A ducked track's lanes, and the sounds that dip them.
@@ -1143,6 +1179,15 @@ pub struct LaneTrack {
 }
 
 pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>)> {
+    let (mut plan, lanes) = plan_lanes(p, a, b)?;
+    plan.colors = match p.settings.timeline_colors {
+        TimelineColors::Auto if (a, b) == (0, p.end()) => colors_in(p, &plan),
+        _ => timeline_colors(p),
+    };
+    Ok((plan, lanes))
+}
+
+fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>)> {
     if a < 0 || b <= a {
         return Err(Error::invalid(format!("nothing to render in {a}..{b}")));
     }
@@ -1456,6 +1501,7 @@ pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<Lan
         ducking,
         range: (a, b),
         name: "timeline".into(),
+        colors: None,
     };
     Ok((plan, lanes))
 }
@@ -1511,6 +1557,7 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
         }
     }
     let mut plan = flatten(&alone, c.start, c.end())?;
+    plan.colors = timeline_colors(p);
     plan.name = c
         .name
         .clone()
@@ -1672,6 +1719,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
         ducking: Vec::new(),
         range: (0, t),
         name: "tape".into(),
+        colors: None,
     };
     Ok((plan, entries))
 }

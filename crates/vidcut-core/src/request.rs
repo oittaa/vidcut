@@ -3289,6 +3289,10 @@ pub struct ProjectSet {
     /// Play fresh proxies in the preview. Export still reads the originals.
     #[serde(default)]
     pub use_proxies: Option<bool>,
+    /// The timeline color space: every mix happens in it, and each export
+    /// converts to its own colors (decision D50).
+    #[serde(default)]
+    pub timeline_colors: Option<crate::model::TimelineColors>,
     /// Filler words of this project, per language code (`{"en": ["um",
     /// "uh"]}`): a list replaces the preferences' or built-in one for that
     /// language, `null` goes back to them.

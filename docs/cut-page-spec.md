@@ -1243,19 +1243,20 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The enlarged track is three times its height, and at least 180 px.
   - In a short timeline, the other tracks shrink first, to a line each.
   - It is a view, like the zoom. It is not in the project or in the undo history.
-- **D44. An export's dynamic range and bit depth follow its footage** (§10; deviation X14).
-  - With no color management, `video.hdr` `auto` (the default) decides from the pictures that an export shows, by duration.
+- **D44. An export's dynamic range follows the timeline, and its bit depth follows its footage** (§10; deviation X14).
+  - `video.hdr` `auto` (the default) follows the timeline color space (D50).
   - The export is HDR when both of these are true:
-    - More than half of the pictures are HDR.
+    - The timeline color space is HDR.
     - The codec carries HDR (HEVC, AV1, VP9) with a 10-bit encoder on this computer.
-  - HDR output is HLG if every HDR frame is HLG, else PQ.
+  - An HDR export uses the transfer of the timeline: PQ or HLG.
   - Otherwise the export is SDR, and HDR is tone-mapped (D35).
   - An unset depth is 10 for HDR.
   - It is also 10 for SDR when both of these are true:
     - Most of the picture has 10 bits or more.
     - The 10 bits of the codec play widely (not H.264).
   - The plan tells why.
-  - When HDR is tone-mapped and the user did not ask for it, the Export dialog tells so, with an Export HDR button.
+  - When an HDR timeline is tone-mapped and the user did not ask for it, the Export dialog tells so, with an Export HDR button.
+  - An HDR export of an SDR timeline has only SDR pictures. Thus its HDR metadata is the metadata of SDR pictures (D46).
 - **D45. Passes** (§10; Resolve's multi-pass option is on the Deliver page).
   - Two passes bring an export closer to a target bitrate, and spread its bits better.
   - At constant quality, they gain nothing worth the time.
@@ -1301,9 +1302,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The first part keeps its id.
 - **D50. Dissolves** (§8.11; deviations X9, X24, X27).
   - The manual says only that one picture fades as the next comes in.
-  - These rules match Resolve's renders.
+  - These rules match Resolve's renders without color management. Deviation X14 tells how they differ with it.
   - Frame i of an n-frame dissolve shows the incoming picture at (i + ½)/n, and the outgoing picture at the rest.
-  - The mix is in the output's code values, not in linear light.
+  - The mix is in the code values of the timeline color space, not in linear light.
+  - The timeline color space is a setting of the project: Auto, SDR (BT.709), HDR PQ or HDR HLG.
+  - Auto is HDR when more than half of the timeline's pictures are HDR, by duration. It is HLG when every HDR picture is HLG, else PQ.
+  - Each picture is converted into the timeline color space first, with the conversions of D35.
+  - Dissolves, wipes, placed pictures, titles and subtitles mix there.
+  - Then each export, the viewer and each render of a timeline frame convert the mixed frame to their own colors.
+  - Pictures of a single media file do not use the timeline color space: `frame.render` of a media, the tiles and the source tape. They show the file directly.
+  - An SDR picture in an HDR timeline goes through two conversions in an SDR export. The tone map lowers its white to about 96% of the code range.
   - At a gap, the mix is with what is under the track.
   - A Cross Fade gives the incoming sound √x (+3 dB), x (0 dB) or x^1.5 (−3 dB) at x of the way.
   - The outgoing sound gets the same of 1 − x.

@@ -123,6 +123,15 @@ pub fn shader_colors(colors: Colors) -> ShaderColors {
     }
 }
 
+pub fn to_bt2020(colors: Colors) -> [[f64; 3]; 3] {
+    let from = match (colors.hdr, colors.matrix) {
+        (Some(_), _) | (None, Matrix::Bt2020) => Primaries::Bt2020,
+        (None, Matrix::Bt709) => Primaries::Bt709,
+        (None, Matrix::Bt601) => Primaries::Smpte170m,
+    };
+    gamut(from, Primaries::Bt2020)
+}
+
 pub fn colors_of(f: &frame::Video) -> Colors {
     let s = Source::of(f);
     Colors {
@@ -225,6 +234,18 @@ impl Tags {
             primaries,
             transfer,
         }
+    }
+}
+
+pub(crate) fn tag_frame(f: &mut frame::Video, hdr: Option<Hdr>) {
+    let tags = Tags::output(hdr);
+    // SAFETY: plain fields of a frame the caller owns.
+    unsafe {
+        let f = &mut *f.as_mut_ptr();
+        f.colorspace = tags.matrix;
+        f.color_range = tags.range;
+        f.color_primaries = tags.primaries;
+        f.color_trc = tags.transfer;
     }
 }
 

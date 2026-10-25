@@ -34,6 +34,10 @@ impl PictureShare {
         n * 2 > self.frames
     }
 
+    pub fn mostly_hdr(&self) -> bool {
+        self.most(self.hdr())
+    }
+
     fn percent(&self, n: i64) -> String {
         if self.frames == 0 {
             return "0%".into();
@@ -129,51 +133,46 @@ fn fixed_depth(v: &VideoSettings) -> Option<(u8, &'static str)> {
     }
 }
 
-pub fn choose(v: &VideoSettings, share: &PictureShare, can: Abilities) -> ColorChoice {
+pub fn choose(
+    v: &VideoSettings,
+    share: &PictureShare,
+    can: Abilities,
+    timeline: Option<Hdr>,
+) -> ColorChoice {
     let asked_depth = v
         .bit_depth
         .map(|d| (d, "asked for"))
         .or_else(|| fixed_depth(v));
     let codec = codec_name(v.codec);
-    let hdr_part = |s: &PictureShare| match (s.pq > 0, s.hlg > 0) {
-        (true, true) => format!("{} of the picture is HDR", s.percent(s.hdr())),
-        (true, false) => format!("{} of the picture is HDR (PQ)", s.percent(s.pq)),
-        _ => format!("{} of the picture is HDR (HLG)", s.percent(s.hlg)),
-    };
-    let (hdr, hdr_why): (Option<Hdr>, String) = match v.hdr {
-        HdrMode::Pq => (Some(Hdr::Pq), "HDR (PQ): asked for".into()),
-        HdrMode::Hlg => (Some(Hdr::Hlg), "HDR (HLG): asked for".into()),
-        HdrMode::Sdr => (None, "SDR: asked for".into()),
-        HdrMode::Auto if share.hdr() == 0 => (None, "SDR: no HDR picture".into()),
-        HdrMode::Auto if !share.most(share.hdr()) => {
-            (None, format!("SDR: only {}, half or less", hdr_part(share)))
-        }
-        HdrMode::Auto if !carries_hdr(v.codec) => (
+    let timeline_part = |t: Hdr| format!("the timeline is HDR ({})", transfer_name(t));
+    let (hdr, hdr_why): (Option<Hdr>, String) = match (v.hdr, timeline) {
+        (HdrMode::Pq, _) => (Some(Hdr::Pq), "HDR (PQ): asked for".into()),
+        (HdrMode::Hlg, _) => (Some(Hdr::Hlg), "HDR (HLG): asked for".into()),
+        (HdrMode::Sdr, _) => (None, "SDR: asked for".into()),
+        (HdrMode::Auto, None) => (None, "SDR: the timeline is SDR".into()),
+        (HdrMode::Auto, Some(t)) if !carries_hdr(v.codec) => (
             None,
-            format!("SDR: {} but {codec} can't carry HDR", hdr_part(share)),
+            format!("SDR: {} but {codec} can't carry HDR", timeline_part(t)),
         ),
-        HdrMode::Auto if asked_depth.is_some_and(|(d, _)| d == 8) => (
+        (HdrMode::Auto, Some(t)) if asked_depth.is_some_and(|(d, _)| d == 8) => (
             None,
             format!(
                 "SDR: {} but 8 bits are set ({})",
-                hdr_part(share),
+                timeline_part(t),
                 asked_depth.map_or("", |(_, w)| w)
             ),
         ),
-        HdrMode::Auto if !can.ten_bit => (
+        (HdrMode::Auto, Some(t)) if !can.ten_bit => (
             None,
             format!(
                 "SDR: {} but no 10-bit {codec} encoder works here",
-                hdr_part(share)
+                timeline_part(t)
             ),
         ),
-        HdrMode::Auto => {
-            let t = share.transfer();
-            (
-                Some(t),
-                format!("HDR ({}): {}", transfer_name(t), hdr_part(share)),
-            )
-        }
+        (HdrMode::Auto, Some(t)) => (
+            Some(t),
+            format!("HDR ({}): as the timeline", transfer_name(t)),
+        ),
     };
     let deep = || {
         format!(
@@ -210,7 +209,11 @@ pub fn choose(v: &VideoSettings, share: &PictureShare, can: Abilities) -> ColorC
         },
         picture: *share,
         why: vec![hdr_why, depth_why],
-        tone_mapped: if hdr.is_none() { share.hdr() } else { 0 },
+        tone_mapped: if hdr.is_none() && timeline.is_some() {
+            share.hdr()
+        } else {
+            0
+        },
     }
 }
 
@@ -370,21 +373,21 @@ mod tests {
             ten_bit_first: false,
             first: Some("hevc_vaapi"),
         };
-        let c = choose(&v, &share(&[("deep", 100)]), first_only_8);
+        let c = choose(&v, &share(&[("deep", 100)]), first_only_8, None);
         assert_eq!(c.bit_depth, 8);
         assert!(
             c.why[1].contains("hevc_vaapi can't write 10"),
             "{:?}",
             c.why
         );
-        let c = choose(&v, &share(&[("pq", 100)]), first_only_8);
+        let c = choose(&v, &share(&[("pq", 100)]), first_only_8, Some(Hdr::Pq));
         assert_eq!((c.hdr, c.bit_depth), (HdrMode::Pq, 10));
         let none = Abilities {
             ten_bit: false,
             ten_bit_first: false,
             first: None,
         };
-        let c = choose(&v, &share(&[("pq", 100)]), none);
+        let c = choose(&v, &share(&[("pq", 100)]), none, Some(Hdr::Pq));
         assert_eq!((c.hdr, c.bit_depth), (HdrMode::Sdr, 8));
         assert!(c.why[0].contains("no 10-bit HEVC encoder"), "{:?}", c.why);
     }

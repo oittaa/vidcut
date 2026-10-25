@@ -295,8 +295,9 @@ HDR:
 
 - libplacebo (`CudaPictures`) converts HDR to SDR, or into PQ or HLG, for NVENC and the ProRes encoder of Vulkan.
 - It uses the math of the CPU in a shader (`color::gpu_color`).
+- For NVENC, it also converts mixed frames from the timeline color space to the output's colors ([export](export.md#timeline-colors)).
 - The other GPUs fit pictures only where their colors stay (`color::kept`). Thus a conversion comes down to `Normalizer`.
-- The viewer's shader converts and tone-maps each picture with the math of the export (`color::shader_colors`).
+- The viewer's shader converts each picture into the timeline color space with the math of the export (`color::shader_colors`). It tone-maps HDR for the screen.
 
 ## Why
 

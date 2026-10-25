@@ -98,9 +98,9 @@ fn sharp(u: vec2<f32>) -> vec3<f32> {
     return sum / total;
 }
 
-fn to_linear(c_in: vec3<f32>) -> vec3<f32> {
+fn decode(c_in: vec3<f32>, transfer: u32, scale: f32) -> vec3<f32> {
     var c = max(c_in, vec3<f32>(0.0));
-    if p.flags.x == 1u {
+    if transfer == 1u {
         let e = pow(c, vec3<f32>(1.0 / 78.84375));
         let num = max(e - vec3<f32>(0.8359375), vec3<f32>(0.0));
         let den = max(vec3<f32>(18.8515625) - 18.6875 * e, vec3<f32>(1.17549435e-38));
@@ -110,7 +110,29 @@ fn to_linear(c_in: vec3<f32>) -> vec3<f32> {
         c = select(high, c * c / 3.0, c <= vec3<f32>(0.5));
         c = pow(c, vec3<f32>(1.2));
     }
-    return c * p.matrix.w;
+    return c * scale;
+}
+
+fn to_linear(c: vec3<f32>) -> vec3<f32> {
+    return decode(c, p.flags.x, p.matrix.w);
+}
+
+fn encode(c_in: vec3<f32>, transfer: u32) -> vec3<f32> {
+    let c = max(c_in, vec3<f32>(0.0));
+    if transfer == 1u {
+        let y = pow(c * (203.0 / 10000.0), vec3<f32>(0.1593017578125));
+        return pow((vec3<f32>(0.8359375) + 18.8515625 * y) / (vec3<f32>(1.0) + 18.6875 * y), vec3<f32>(78.84375));
+    }
+    let l = pow(c * (203.0 / 1000.0), vec3<f32>(1.0 / 1.2));
+    let high = 0.17883277 * log(max(12.0 * l - vec3<f32>(0.28466892), vec3<f32>(1e-30))) + vec3<f32>(0.55991073);
+    return select(high, sqrt(3.0 * l), l <= vec3<f32>(1.0 / 12.0));
+}
+
+fn tone_mapped(c_in: vec3<f32>, tone: vec4<f32>) -> vec3<f32> {
+    let sig = max(max(max(c_in.r, c_in.g), c_in.b), 1e-6);
+    let mapped = select(tone.y * (sig + tone.z) / (sig + tone.w), sig, sig <= tone.x);
+    let c = c_in * (mapped / sig);
+    return pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4));
 }
 
 fn rgb(s: vec3<f32>) -> vec3<f32> {
@@ -124,14 +146,19 @@ fn rgb(s: vec3<f32>) -> vec3<f32> {
     let b = y + (2.0 - 2.0 * kb) * cb;
     let g = (y - kr * r - kb * b) / kg;
     var c = vec3<f32>(r, g, b);
+    if p.per.z != 0u {
+        if p.flags.x != 0u {
+            c = to_linear(c);
+        } else {
+            c = pow(max(c, vec3<f32>(0.0)), vec3<f32>(2.4));
+        }
+        c = vec3<f32>(dot(p.gamut0.xyz, c), dot(p.gamut1.xyz, c), dot(p.gamut2.xyz, c));
+        return clamp(encode(c, p.per.z), vec3<f32>(0.0), vec3<f32>(1.0));
+    }
     if p.flags.x != 0u {
         c = to_linear(c);
         c = vec3<f32>(dot(p.gamut0.xyz, c), dot(p.gamut1.xyz, c), dot(p.gamut2.xyz, c));
-        let sig = max(max(max(c.r, c.g), c.b), 1e-6);
-        let knee = p.tone.x;
-        let mapped = select(p.tone.y * (sig + p.tone.z) / (sig + p.tone.w), sig, sig <= knee);
-        c = c * (mapped / sig);
-        c = pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4));
+        c = tone_mapped(c, p.tone);
     }
     return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
 }
@@ -265,5 +292,36 @@ fn fs_title(in: Out) -> @location(0) vec4<f32> {
             sum += textureSampleLevel(letters, bilinear, q, 0.0) * (e.x * e.y);
         }
     }
-    return sum / f32(taps.x * taps.y) * (cover * m.w);
+    var shown = sum / f32(taps.x * taps.y);
+    let transfer = u32(lettering.tilt.z + 0.5);
+    if transfer != 0u && shown.a > 0.0 {
+        let s = clamp(shown.rgb / shown.a, vec3<f32>(0.0), vec3<f32>(1.0));
+        let lin = select(pow((s + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4)), s / 12.92, s <= vec3<f32>(0.04045));
+        let wide = vec3<f32>(
+            dot(vec3<f32>(0.6274, 0.3293, 0.0433), lin),
+            dot(vec3<f32>(0.0691, 0.9195, 0.0114), lin),
+            dot(vec3<f32>(0.0164, 0.0880, 0.8956), lin),
+        );
+        shown = vec4<f32>(clamp(encode(wide, transfer), vec3<f32>(0.0), vec3<f32>(1.0)) * shown.a, shown.a);
+    }
+    return shown * (cover * m.w);
+}
+
+struct Screen {
+    tone: vec4<f32>,
+    gamut0: vec4<f32>,
+    gamut1: vec4<f32>,
+    gamut2: vec4<f32>,
+    mode: vec4<f32>,
+};
+
+@group(0) @binding(8) var<uniform> screen: Screen;
+@group(0) @binding(9) var timeline: texture_2d<f32>;
+
+@fragment
+fn fs_screen(in: Out) -> @location(0) vec4<f32> {
+    let code = textureLoad(timeline, vec2<i32>(in.position.xy), 0).rgb;
+    var c = decode(code, u32(screen.mode.x + 0.5), screen.mode.y);
+    c = vec3<f32>(dot(screen.gamut0.xyz, c), dot(screen.gamut1.xyz, c), dot(screen.gamut2.xyz, c));
+    return vec4<f32>(clamp(tone_mapped(c, screen.tone), vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }

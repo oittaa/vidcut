@@ -54,8 +54,15 @@ GPU preferences:
 
 Colors:
 
-- Where the settings leave them open, `export::choose_colors` picks the dynamic range and bit depth of each output from the pictures that it shows (spec D44).
+- Where the settings leave them open, `export::choose_colors` picks the dynamic range and bit depth of each output (spec D44).
+  - The dynamic range follows the timeline color space of the plan (`RenderPlan::colors`).
+  - The bit depth follows the pictures that the output shows.
+- `render::timeline_colors` resolves the timeline color space when the plan is made.
+  - For Auto, vidcut must know how much of the timeline's picture is HDR. To find out, it counts the pictures of a plan of the whole timeline.
+  - The viewer's plan covers the whole timeline. Thus vidcut counts the pictures in that plan.
+  - An export of a range has a plan of only a part. Then `render::auto_colors` makes a second plan, of the whole timeline, for the count.
 - Then it picks the HDR metadata (spec D46). It uses the rules in `vidcut_core::export`.
+- With an SDR timeline, `export::choose_metadata` counts every picture as SDR.
 - A depth that is set, or fixed by the codec or profile, wins.
 - SDR takes 10 bits only from the encoder that an 8-bit export would start with. It does not move to a slower encoder for 10 bits.
 - DNxHR HQ in 10 bits becomes HQX (`ColorChoice::apply`).
@@ -192,6 +199,26 @@ Pictures:
   - With GPU decoding on: CUDA frames for NVENC, and the decoder's device for VAAPI, AMF and VideoToolbox on its GPU.
   - Else: memory.
 - A dissolve mixes by the same sums on the GPU for NVENC (`cuda::mix`) as on the CPU (`export::mix`).
+
+## Timeline colors
+
+Every mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). When an output has other colors, `VideoFrames::with_timeline` sets up two stages:
+
+1. `Maker` fits each picture to the timeline colors. Then `VideoFrames` mixes, draws the titles and burns in the subtitles in these colors.
+2. `Finish` converts each finished frame to the colors and format of the encoder.
+
+- In memory, the timeline's frames are 12-bit 4:4:4 (`MIXING`). `Normalizer` makes the conversion.
+- For NVENC, the timeline's frames are P010 in a pool of their own. libplacebo makes the conversion on the GPU (`CudaPictures::converting`).
+- When the GPU's conversion fails, the frame is copied to memory. `Normalizer` converts it there, and it is copied back to the GPU.
+- The other GPUs can fit a picture only when its colors do not change. Thus, for the timeline colors, their frames are copied to memory, and go to the encoder from there.
+- `color::tag_frame` gives the timeline's frames and the black frame their color tags. `burn::blend` and `Normalizer` read these tags.
+- The conversion keeps the HDR10+ and Dolby Vision metadata of the frame, as a mix does.
+- When the output has the timeline's colors, there is no second stage.
+
+Picture renders:
+
+- `frame.render` of a timeline frame and the storyboards use the same stages (`renderer::frames`, `FrameReader::rgba`).
+- `frame.render` of a media and the tiles do not use the timeline color space. They convert each picture of the file directly to RGB.
 
 ## Sound
 

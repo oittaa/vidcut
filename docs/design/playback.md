@@ -111,9 +111,9 @@ Motions:
 
 - The engine does not mix dissolves.
 - A `VideoPiece::Mix` frame is one `Picture` with an `Over` (picture and weight) on top for each layer. Each layer is as decoded.
-- The viewer blends the layers as it draws. It first converts each layer to its RGB.
-- An export mixes the layers in its own code values ([export](export.md)).
-- Thus, during a dissolve, the picture of an HDR export is not the same as the viewer's picture ([todo](../todo/hdr-dissolve-preview.md)).
+- The viewer blends the layers as it draws, in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). An export mixes in the same colors ([export](export.md#timeline-colors)).
+- `Shown::colors` carries the timeline color space of the plan (`RenderPlan::colors`) to the viewer.
+- A wipe is mixed on the CPU (`Picture::at_wipe`), in the timeline color space too.
 
 **Placed pictures**
 
@@ -230,9 +230,14 @@ The audio device:
 - `Viewer::start` spawns `vidcut-viewer`.
 - The thread wakes when the session notifies or asks, when the size changes, or when `next_change` comes due.
 - Each turn calls `Player::present`, then `Screen::draw` into an RGBA target. The target has the size of the viewer's picture in physical pixels.
-- One render pass of `crates/vidcut/src/gui/picture.wgsl` does all the drawing:
+- With an SDR timeline, one render pass of `crates/vidcut/src/gui/picture.wgsl` does all the drawing into the target.
+- With an HDR timeline, the passes draw into a picture of 16-bit floats (`Wide`) in the PQ or HLG code values of the timeline:
+  - Each layer is converted to linear light, then to BT.2020 colors, then to the PQ or HLG curve of the timeline. Titles and subtitles are converted the same way from sRGB.
+  - Then one more draw (`fs_screen`) converts that picture to the target: to BT.709, tone-mapped with the export's math.
+  - Thus the layers, titles and subtitles mix in the timeline's code values, as in an export.
+- The drawing:
   - It fits the picture as the export does, and turns it upright.
-  - It scales in YUV and converts to RGB with the export's math (`shader_colors`). It tone-maps HDR.
+  - It scales in YUV and converts to RGB with the export's math (`shader_colors`). In an SDR timeline, it tone-maps HDR.
   - The layers of a dissolve are more draws in the pass.
   - The draw of a placed layer maps each pixel back through its `place::Placing` levels to the decoded picture. It taps the picture as finely as it is shrunk.
   - The draw of a placed layer also covers its edges in part, and lays the layer over the layers below, premultiplied.

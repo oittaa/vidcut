@@ -112,6 +112,9 @@ pub struct Settings {
     /// place of the preferences' or the built-in one (`project.set`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub fillers: BTreeMap<String, Vec<String>>,
+    /// The timeline color space (decision D50); left out when `auto`.
+    #[serde(default, skip_serializing_if = "TimelineColors::is_auto")]
+    pub timeline_colors: TimelineColors,
 }
 
 impl Default for Settings {
@@ -129,6 +132,7 @@ impl Default for Settings {
             still_secs: 5.0,
             use_proxies: false,
             fillers: BTreeMap::new(),
+            timeline_colors: TimelineColors::Auto,
         }
     }
 }
@@ -482,6 +486,30 @@ impl ColorSpace {
             Self::Hlg => Some(Hdr::Hlg),
             _ => None,
         }
+    }
+}
+
+/// The timeline color space. Every dissolve, wipe, placed picture, title
+/// and subtitle mixes in it, and each export converts the mixed frame to
+/// its own colors (decision D50).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TimelineColors {
+    /// HDR when more than half of the timeline's pictures are HDR: HLG when
+    /// every HDR picture is HLG, else PQ. Otherwise SDR.
+    #[default]
+    Auto,
+    /// SDR in BT.709: HDR pictures are tone-mapped.
+    Sdr,
+    /// HDR in BT.2100 PQ.
+    Pq,
+    /// HDR in BT.2100 HLG.
+    Hlg,
+}
+
+impl TimelineColors {
+    pub fn is_auto(&self) -> bool {
+        *self == Self::Auto
     }
 }
 

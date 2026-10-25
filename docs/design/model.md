@@ -18,7 +18,7 @@ classDiagram
     sample_rate, channels
     start_tc, drop_frame
     auto_format, use_proxies
-    fillers
+    fillers, timeline_colors
   }
   class Media {
     id

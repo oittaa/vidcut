@@ -219,6 +219,10 @@ impl Maker {
         &self.output
     }
 
+    pub(crate) fn into_output(self) -> Output {
+        self.output
+    }
+
     pub(crate) fn out(&self) -> (u32, u32, format::Pixel) {
         self.out
     }

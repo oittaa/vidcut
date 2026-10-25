@@ -492,10 +492,11 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
             }
             let reader = reader.get_or_insert_with(|| reader_for(&decoding));
             let beside = vidcut_av::first::Beside::ask();
-            let made = job
-                .pieces
-                .iter()
-                .find_map(|piece| reader.rgba(piece, job.fps, job.width, job.key.height).ok());
+            let made = job.pieces.iter().find_map(|piece| {
+                reader
+                    .rgba(piece, job.fps, (job.width, job.key.height), None)
+                    .ok()
+            });
             drop(beside);
             used = Instant::now();
             let made = made?;

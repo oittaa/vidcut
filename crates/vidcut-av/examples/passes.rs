@@ -65,6 +65,7 @@ fn main() {
         ducking: vec![],
         range: (0, frames),
         name: "passes".into(),
+        colors: None,
     };
     let mut settings: ExportSettings = builtin_presets()
         .into_iter()
