@@ -391,16 +391,16 @@ impl SuperScale {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Upscaler {
-    /// A neural network (NanoVSR 5.4M) on the GPU, for SDR pictures. It reads
-    /// 15 frames at a time. Its weights (25 MB) download at their first use.
-    /// An export refuses media that it cannot take.
-    #[default]
-    AiFast,
     /// A diffusion network (FlashVSR+ Turbo) on the GPU, for SDR pictures:
     /// slow, with more detail. It reads the frames of a clip in order from
     /// its first frame. Its weights (7.0 GB) download at their first use. An
     /// export refuses media that it cannot take.
+    #[default]
     AiBest,
+    /// A neural network (NanoVSR 5.4M) on the GPU, for SDR pictures. It reads
+    /// 15 frames at a time. Its weights (25 MB) download at their first use.
+    /// An export refuses media that it cannot take.
+    AiFast,
     /// The classic upscalers: libplacebo on the GPU, swscale on the CPU.
     Classic,
 }

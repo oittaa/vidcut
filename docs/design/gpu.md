@@ -163,30 +163,48 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
 - **Placed pictures:** `layer_size` lets a layer grow to the factor times its source size (`ScaleFactor`). Auto lets it grow to four times.
 - A `Source` is used again only for a piece with the same Super Scale.
 - **The work report** (`ai::report`):
-  - `Source::ai_picture` and `Source::best_picture` report what the AI upscaler makes now and its last finished work (`ai::Work`).
+  - `Source::ai_picture` reports what the AI upscaler makes now and its last finished work (`ai::Work`).
   - `ai::Making` clears a report when the work fails or stops.
   - Each AI upscaler reports the GPU that runs it when it starts.
   - The Super Scale group of the stats panel shows the report (`SuperScaleStats`).
-  - When the clip under the playhead uses no AI upscaler, State names the AI upscaler that is still at work.
+  - When the clip under the playhead uses another upscaler, State names the AI upscaler that is at work.
+  - When the clip under the playhead has no Super Scale, the group shows while an AI upscaler is at work. Its Factor is then Off.
+- **One path for the AI upscalers:** AI Fast and AI Best use the same code in the reader. Only the parameters of the upscalers are different.
+  - `Source::ai_picture` finds the shown source size and the size that the upscaler makes (`ai::made_size`).
+    - AI Fast makes 4 times the source size.
+    - AI Best makes the shown size, but not more than 4 times the source size (`flashvsr::SCALE`).
+  - Each picture has a key (`PictureId`): the file, the color space, the reading, the rotation, the upscaler, the made size and the frame.
+  - A picture comes from a run of the upscaler (`Session`). The run starts at the first frame that the upscaler needs (`ai::first_frame`).
+  - A run holds the pictures that it made and that the reader did not take yet. A picture leaves the run when the reader takes it.
+  - When the reader asks for a frame, the run drops the pictures before that frame. Thus frames that an export skips do not stay in memory.
+  - The run also keeps the last picture that it gave. The reader asks for it again when the size of its layer changes.
+  - The held pictures go when the run goes. Thus an AI picture stays in main memory only while its run needs it.
+  - The viewer keeps the pictures that it shows with its other kept pictures ([playback](playback.md)).
+  - A run takes the frames in order and gives the pictures (`ai::Run`). `ai::open` opens the run of the upscaler.
+    - When the reader is at the first frame of the run, the run takes the frames that the reader decodes. The reader then takes them from its queue.
+    - It keeps these frames in main memory. The copies leave the GPU decoder's surfaces free.
+    - Thus each frame is decoded once.
+    - Else the run reads the frames with a second `VideoReader` on the same file (`Source::seek_ahead`). It uses the same GPU decoder. This also occurs when the run needs another reading of the frames than the reader.
+    - When the reader reads past the run, the run gets those frames later (`Source::miss`).
+    - Each frame becomes RGB at its shown size, upright. The GPU takes these 3 bytes for each pixel as they are.
+  - A run ends at its last frame (`ai::last_frame`) or at the end of the file.
+  - The reader drops its run for a frame that the run does not give. This is a frame before the run, after its last frame, or more than 48 frames after the last frame read (`RUN_JUMP`).
+  - A new run then starts at that frame.
+  - A GPU error from too little memory gives the message "not enough GPU memory" (`compute::checked`).
 - **GPU memory of the AI upscalers** (`ai::User`):
   - Each reader (`Source`) that uses an AI upscaler holds an `ai::User` of it.
   - A reader gives its `ai::User` back when the viewer or the export stops using it. This occurs at the end of its clip, at a change of Super Scale and when it closes.
-  - It then drops its AI Best stream too.
-  - When the last `ai::User` of an upscaler goes, that upscaler frees its GPU memory. `upscale::release` frees the buffers of AI Fast. `flashvsr::release` frees the model of AI Best.
-  - If the upscaler is at work at that time, it frees the memory when that work ends.
+  - It then drops its run too.
+  - Each AI upscaler keeps its GPU work in an `ai::Slot`. The slot starts the upscaler for its first picture (`ai::Network`).
+  - When the last `ai::User` of an upscaler goes, its slot frees the GPU memory of that upscaler (`ai::Slot::release`). AI Fast frees its buffers. AI Best frees its model.
+  - If the upscaler is at work at that time, the slot frees the memory when that work ends.
   - Thus the two AI upscalers do not hold their memory at the same time when the user switches from one to the other.
-  - AI Best looks at the stop flag of its thread before each block (`cancel::stop`). Thus a picture that the viewer no longer needs stops within one block.
 - **AI Fast** (`upscale`):
   - Before an export starts, `upscale::check` refuses media that AI Fast cannot take (`upscale::unfit`). It also refuses AI Fast without the weights or without a GPU that can run it.
-  - In an export, `Source::ai_picture` finds the chunk of 15 frames that holds the source picture (`upscale::FRAMES`).
-    - The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
-    - When the source is at the first frame of a chunk, `Source::chunk_frames` decodes the other frames of the chunk once. The source then takes them from its queue, and does not decode them again.
-    - Else `Source::read_chunk` reads the chunk with a second `VideoReader` on the same file. It uses the same GPU decoder.
-    - Each frame becomes RGB at its shown size, upright. The GPU takes these 3 bytes for each pixel as they are.
-    - `upscale::upscale` returns the asked picture first. A thread (`vidcut-upscale-rest`) then makes the other 14 pictures.
-    - The 15 pictures go into a shared cache of chunks (`Chunk`), the newest kept within a share of the computer's memory.
-    - Before it computes a chunk, `Source::ai_picture` waits for a chunk that is still being made (`upscale::settle`). Then it looks in the cache again.
-    - Thus a chunk is computed once, also when another reader, a replay or another clip of the same file needs it.
+  - A run is a chunk of 15 frames (`upscale::FRAMES`). The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
+  - `upscale::upscale` returns the asked picture first. A thread (`vidcut-upscale-rest`) then makes the other 14 pictures, and puts them into the run.
+  - When the run of the reader can give the asked picture, `Source::ai_picture` first waits for the rest of the chunk (`ai::settle`). Then it looks in the run again.
+  - When a reader drops its run, that thread stops before its next picture. Thus a jump does not wait for the rest of the old chunk.
   - `upscale::upscale` runs NanoVSR 5.4M with WGSL compute shaders on wgpu. It gives each picture four times as large.
     - At load, the batch norms of each block fold into one 3×3 convolution, as in the model's own deploy mode.
     - The 3×3 convolutions with 96 input channels use Winograd F(2×2, 3×3) (`wino_shader`). These are the 60 blocks and the first two convolutions of the 4× stage.
@@ -211,18 +229,16 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - Why Winograd: the 3×3 convolutions do most of the work. Winograd needs fewer products, and fewer reads of workgroup memory for each product.
   - The usual fitting then makes that picture the size it shows at.
   - The frames go through memory, also from a GPU decoder.
-  - `upscale` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines and weights stay. Its buffers stay for the next chunk of the same size. They go when the size changes or the process ends. Its bind groups stay with the buffers, and each pass takes them from a cache.
+  - `upscale` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines and weights stay.
+    - Its buffers stay for the next chunk of the same size. They go when the size changes, when the last `ai::User` of AI Fast goes, or when the process ends.
+    - Its bind groups stay with the buffers, and each pass takes them from a cache.
   - `Note::Upscaled` names each file that an AI upscaler enlarged in the export's report (`ai::name`).
 - **AI Best** (`flashvsr`):
   - Before an export starts, `flashvsr::check` refuses media that AI Best cannot take (`flashvsr::unfit`). It also refuses AI Best without the weights or without a GPU that can run it. It loads the model then.
   - It also refuses a size that does not fit (`run::plan`). It takes the size from the media and the output size (`flashvsr::enlarged`). A zoomed picture can be larger; then `flashvsr::Stream::open` refuses it when the export reaches it.
-  - `Source::best_picture` gives the picture at the size that it shows at, but not more than 4 times the shown source size (`flashvsr::SCALE`).
-    - It keeps one `flashvsr::Stream` for the source. It reads the frames in order from the source's own reader, from the first frame that is asked for. Thus each frame is decoded once.
-      - It keeps a copy in main memory of each frame that it reads ahead. The source then takes its next frames from that queue (`Source::advance`). The copies leave the GPU decoder's surfaces free.
-      - When the source reads past the stream, the stream gets those frames later (`Source::miss`).
-      - When the stream needs another reading of the frames than the source, it reads them with the second `VideoReader`.
-    - A frame before the kept pictures, or more than 48 frames after the last frame read (`BEST_JUMP`), starts a new stream there.
-    - At the end of the file, the stream repeats the last frame, as the official code does.
+  - A run is a `flashvsr::Stream`. It starts at the asked frame, and has no last frame.
+  - At the end of the file, the stream repeats the last frame, as the official code does.
+  - AI Best looks at the stop flag of its thread (`cancel::stop`) before each block and before each step of its decoder. Thus a picture that the viewer no longer needs stops soon.
   - The stream works in chunks of 16 frames (`run::Stream`). The first chunk reads 17 frames and gives 13. Each later chunk reads 16 and gives 16. Thus the output is 4 frames behind the input.
     - Each frame first gets PIL's bicubic enlargement, with PIL's fixed-point weights (`resize::coefficients`). The edges are repeated up to a multiple of 128.
     - The frames go to the GPU and come back as packed RGB24, 3 bytes for each pixel, with no conversion on the CPU.

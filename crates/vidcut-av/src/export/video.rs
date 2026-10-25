@@ -94,7 +94,7 @@ struct Source {
     upright: bool,
     gpu: Option<crate::hw::GpuDecoder>,
     ahead: Option<VideoReader>,
-    best: Option<Best>,
+    run: Option<Session>,
     queued: VecDeque<frame::Video>,
 }
 
@@ -197,7 +197,7 @@ impl Source {
             upright: false,
             gpu: ahead_gpu,
             ahead: None,
-            best: None,
+            run: None,
             queued: VecDeque::new(),
         };
         if pictures == Pictures::Still {
@@ -253,7 +253,7 @@ impl Source {
             upright: false,
             gpu: ahead_gpu,
             ahead: None,
-            best: None,
+            run: None,
             queued: VecDeque::new(),
         })
     }
@@ -369,7 +369,7 @@ impl Source {
             self.left = Some(now);
             self.reversed.clear();
         }
-        self.best = None;
+        self.run = None;
         self.ai = None;
     }
 
@@ -451,87 +451,124 @@ pub(crate) fn placing_of(
 
 const PLACED_MOST: f64 = 16384.0;
 
+#[derive(Clone, Copy, PartialEq)]
+enum Key {
+    Frame(i64),
+    Still(Option<i64>),
+}
+
 #[derive(Clone, PartialEq)]
-struct ChunkId {
+struct PictureId {
     input: Input,
     space: ColorSpace,
     reading: Reading,
     rotation: u16,
-    size: (u32, u32),
-    key: (i64, bool),
+    upscaler: Upscaler,
+    made: (u32, u32),
+    key: Key,
 }
 
-struct Chunk {
-    id: ChunkId,
-    bytes: usize,
-    pictures: Vec<frame::Video>,
-}
+type Waiting = std::sync::Arc<std::sync::Mutex<Vec<(Key, frame::Video)>>>;
 
-const BEST_JUMP: i64 = 48;
+const RUN_JUMP: i64 = 48;
 
-struct Best {
-    stream: crate::flashvsr::Stream,
-    shown: (u32, u32),
+struct Session {
+    run: Box<dyn crate::ai::Run>,
+    id: PictureId,
     size: (u32, u32),
-    key: Option<i64>,
-    fed: VecDeque<(i64, Option<i64>)>,
+    first: i64,
+    last: Option<i64>,
     next: i64,
-    pictures: VecDeque<(i64, frame::Video)>,
-    ended: bool,
+    out_next: i64,
     own: bool,
     missed: Vec<frame::Video>,
     lost: bool,
+    ended: bool,
+    waiting: Waiting,
+    given: Option<(Key, frame::Video)>,
 }
 
-impl Best {
-    fn took(&mut self, outs: Vec<Vec<u8>>, from: i64) {
-        for out in outs {
-            let Some((index, pts)) = self.fed.pop_front() else {
-                break;
-            };
-            if index >= from {
-                self.pictures
-                    .push_back((index, big_picture(&out, self.size, pts)));
+impl Session {
+    fn same(&self, id: &PictureId) -> bool {
+        let same = PictureId {
+            key: id.key,
+            ..self.id.clone()
+        };
+        same == *id
+    }
+
+    fn covers(&self, id: &PictureId, size: (u32, u32)) -> bool {
+        if !self.same(id) || self.size != size || self.lost {
+            return false;
+        }
+        match (id.key, self.id.key) {
+            (Key::Still(a), Key::Still(b)) => a == b,
+            (Key::Frame(i), Key::Frame(_)) => {
+                i >= self.first && i <= self.next + RUN_JUMP && self.last.is_none_or(|l| i <= l)
             }
+            _ => false,
         }
     }
-}
 
-static CHUNKS: std::sync::Mutex<Vec<Chunk>> = std::sync::Mutex::new(Vec::new());
+    fn serves(&self, id: &PictureId, size: (u32, u32)) -> bool {
+        let ahead = match id.key {
+            Key::Frame(i) => i >= self.out_next,
+            Key::Still(_) => true,
+        };
+        ahead && !self.ended && self.covers(id, size)
+    }
 
-fn chunks() -> std::sync::MutexGuard<'static, Vec<Chunk>> {
-    CHUNKS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
+    fn keep(&mut self, outs: Vec<crate::ai::Out>) {
+        if let Some(o) = outs.iter().map(|o| o.index).max() {
+            self.out_next = self.out_next.max(o + 1);
+        }
+        hold(&self.waiting, &self.id, outs);
+    }
 
-fn picture_of(chunk: &Chunk, pts: Option<i64>) -> Option<&frame::Video> {
-    if chunk.id.key.1 {
-        chunk.pictures.iter().find(|p| p.pts() == pts)
-    } else {
-        chunk.pictures.first()
+    fn take(&mut self, id: &PictureId) -> Result<Option<frame::Video>> {
+        if !self.same(id) {
+            return Ok(None);
+        }
+        if let Some((key, p)) = &self.given
+            && *key == id.key
+        {
+            return frame_ref(p).map(Some);
+        }
+        let found = {
+            let mut waiting = self
+                .waiting
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Key::Frame(k) = id.key {
+                waiting.retain(|(key, _)| !matches!(key, Key::Frame(i) if *i < k));
+            }
+            let at = waiting.iter().position(|(key, _)| *key == id.key);
+            at.map(|i| waiting.remove(i).1)
+        };
+        let Some(p) = found else {
+            return Ok(None);
+        };
+        let out = frame_ref(&p)?;
+        self.given = Some((id.key, p));
+        Ok(Some(out))
     }
 }
 
-fn kept_picture(id: &ChunkId, pts: Option<i64>) -> Result<Option<frame::Video>> {
-    let mut all = chunks();
-    let Some(i) = all.iter().position(|c| c.id == *id) else {
-        return Ok(None);
-    };
-    let chunk = all.remove(i);
-    let found = picture_of(&chunk, pts).map(frame_ref).transpose();
-    all.push(chunk);
-    found
-}
-
-fn keep_chunk(chunk: Chunk) {
-    let budget = crate::player::system_memory()
-        .map_or(1 << 30, |m| m / 8)
-        .max(1 << 30);
-    let mut all = chunks();
-    all.push(chunk);
-    while all.len() > 1 && all.iter().map(|c| c.bytes).sum::<usize>() > budget {
-        all.remove(0);
+fn hold(
+    waiting: &std::sync::Mutex<Vec<(Key, frame::Video)>>,
+    base: &PictureId,
+    outs: Vec<crate::ai::Out>,
+) {
+    let mut waiting = waiting
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for o in outs {
+        let key = match base.key {
+            Key::Still(pts) => Key::Still(pts),
+            Key::Frame(_) => Key::Frame(o.index),
+        };
+        waiting.retain(|(k, _)| *k != key);
+        waiting.push((key, big_picture(&o.rgb, base.made, o.pts)));
     }
 }
 
@@ -615,48 +652,6 @@ impl Source {
             .seek((start.max(0.0) / tick).floor() as i64)
     }
 
-    fn read_chunk(&mut self, first: i64, reading: Reading) -> Result<Vec<frame::Video>> {
-        self.seek_ahead(first, reading)?;
-        let end = first + crate::upscale::FRAMES as i64;
-        let mut frames = Vec::new();
-        while let Some(f) = self.ahead.as_mut().expect("opened").next_frame()? {
-            match self.frame_index(f.pts()) {
-                Some(i) if i < first => continue,
-                Some(i) if i >= end => break,
-                _ => frames.push(f),
-            }
-        }
-        Ok(frames)
-    }
-
-    fn chunk_frames(&mut self, first: i64, reading: Reading) -> Result<Vec<frame::Video>> {
-        let current = self.current.as_ref().map(|(f, _)| f.pts());
-        if current.map(|pts| self.frame_index(pts)) != Some(Some(first))
-            || self.reader.reading() != reading
-        {
-            return self.read_chunk(first, reading);
-        }
-        let end = first + crate::upscale::FRAMES as i64;
-        let mut frames = vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?];
-        let mut i = 0;
-        loop {
-            if i == self.queued.len() {
-                match self.reader.next_frame()? {
-                    Some(f) => self.queued.push_back(f),
-                    None => break,
-                }
-            }
-            let f = &self.queued[i];
-            i += 1;
-            match self.frame_index(f.pts()) {
-                Some(k) if k >= end => break,
-                Some(k) if k < first => continue,
-                _ => frames.push(frame_ref(f)?),
-            }
-        }
-        Ok(frames)
-    }
-
     fn ai_picture(
         &mut self,
         target: (u32, u32),
@@ -691,215 +686,98 @@ impl Source {
         };
         let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
         let size = (even(dw), even(dh));
-        if upscaler == Upscaler::AiBest {
-            let up = if rotation % 180 == 90 {
-                (shown.1, shown.0)
-            } else {
-                shown
-            };
-            let s = (f64::from(up.0) / f64::from(size.0))
-                .min(f64::from(up.1) / f64::from(size.1))
-                .min(f64::from(crate::flashvsr::SCALE));
-            let big = (
-                even(f64::from(size.0) * s).max(size.0),
-                even(f64::from(size.1) * s).max(size.1),
-            );
-            return self.best_picture(size, big, reading).map(Some);
-        }
-        let pts = frame.pts();
-        let key = match self.frame_index(pts) {
-            Some(i) => (i - i.rem_euclid(crate::upscale::FRAMES as i64), true),
-            None => (pts.unwrap_or(0), false),
+        let up = if rotation % 180 == 90 {
+            (shown.1, shown.0)
+        } else {
+            shown
         };
-        let id = ChunkId {
+        let pts = frame.pts();
+        let id = PictureId {
             input: self.reader.input().clone(),
             space: self.reader.color_space(),
             reading,
             rotation,
-            size,
-            key,
+            upscaler,
+            made: crate::ai::made_size(upscaler, size, up),
+            key: match self.frame_index(pts) {
+                Some(i) => Key::Frame(i),
+                None => Key::Still(pts),
+            },
         };
-        if let Some(p) = kept_picture(&id, pts)? {
+        if let Some(p) = self.taken(&id)? {
             return Ok(Some(p));
         }
-        crate::upscale::settle();
-        if let Some(p) = kept_picture(&id, pts)? {
-            return Ok(Some(p));
+        if self.run.as_ref().is_some_and(|r| !r.covers(&id, size)) {
+            self.run = None;
         }
-        let scale = crate::upscale::SCALE;
-        let full = (size.0 * scale, size.1 * scale);
-        let last = key.0 + i64::from(key.1) * (crate::upscale::FRAMES as i64 - 1);
-        let work = crate::ai::making(Upscaler::AiFast, size, full, (key.0, last));
-        let clock = Instant::now();
-        let frames = match key {
-            (first, true) => self.chunk_frames(first, reading)?,
-            (_, false) => vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?],
-        };
-        let wanted = if key.1 {
-            frames.iter().position(|f| f.pts() == pts)
-        } else {
-            Some(0)
-        };
-        let Some(wanted) = wanted else {
-            return Err(Error::Invalid(format!(
-                "{}: the AI upscaler's chunk has no frame at {}",
-                self.reader.path().display(),
-                pts.unwrap_or(0)
-            )));
-        };
-        let rgbs = frames
-            .iter()
-            .map(|f| shown_rgb(f, rotation, size, reading))
-            .collect::<Result<Vec<_>>>()?;
-        let read = clock.elapsed();
-        let times: Vec<Option<i64>> = frames.iter().map(|f| f.pts()).collect();
-        let keep = move |big: Result<Vec<Vec<u8>>>| match big {
-            Ok(big) => {
-                keep_chunk(Chunk {
-                    bytes: big.iter().map(Vec::len).sum(),
-                    pictures: big
-                        .iter()
-                        .zip(&times)
-                        .map(|(out, &t)| big_picture(out, full, t))
-                        .collect(),
-                    id,
-                });
-                crate::ai::made(true);
+        if self.run.is_some() {
+            crate::ai::settle(upscaler);
+            if let Some(p) = self.taken(&id)? {
+                return Ok(Some(p));
             }
-            Err(e) => {
-                crate::ai::made(false);
-                crate::debug!("upscale", "chunk {key:?}: {e}");
-            }
-        };
-        let first =
-            crate::upscale::upscale(&rgbs, (size.0 as usize, size.1 as usize), wanted, keep)?;
-        work.handed();
-        crate::debug!(
-            "upscale",
-            "chunk {key:?} of {} frames at {size:?}: read and made RGB in {:.0} ms, frame {wanted} upscaled in {:.0} ms",
-            rgbs.len(),
-            read.as_secs_f64() * 1e3,
-            (clock.elapsed() - read).as_secs_f64() * 1e3
-        );
-        Ok(Some(big_picture(&first, full, pts)))
-    }
-
-    fn best_picture(
-        &mut self,
-        shown: (u32, u32),
-        size: (u32, u32),
-        reading: Reading,
-    ) -> Result<frame::Video> {
-        let made = self.best_picture_in(shown, size, reading);
+        }
+        let made = self.ai_run(&id, size, reading);
         if made.is_err() {
-            self.best = None;
+            self.run = None;
         }
-        made
+        made.map(Some)
     }
 
-    fn best_picture_in(
+    fn taken(&mut self, id: &PictureId) -> Result<Option<frame::Video>> {
+        match self.run.as_mut() {
+            Some(run) => run.take(id),
+            None => Ok(None),
+        }
+    }
+
+    fn ai_run(
         &mut self,
-        shown: (u32, u32),
+        id: &PictureId,
         size: (u32, u32),
         reading: Reading,
     ) -> Result<frame::Video> {
-        let rotation = self.reader.rotation();
-        let (frame, _) = self.current.as_ref().expect("have a frame");
-        let pts = frame.pts();
-        let index = self.frame_index(pts);
-        let fresh = self.best.as_ref().is_none_or(|b| {
-            b.shown != shown
-                || b.size != size
-                || b.lost
-                || match index {
-                    Some(i) => {
-                        b.key.is_some()
-                            || i > b.next + BEST_JUMP
-                            || b.pictures
-                                .front()
-                                .map_or(i < b.next, |(first, _)| i < *first)
-                    }
-                    None => b.key != pts,
-                }
-        });
-        if fresh {
-            self.best = None;
-            let stream = crate::flashvsr::Stream::open(shown, size)?;
-            let own = index.is_some() && self.reader.reading() == reading;
-            self.best = Some(Best {
-                stream,
-                shown,
-                size,
-                key: if index.is_some() { None } else { pts },
-                fed: VecDeque::new(),
-                next: index.unwrap_or(0),
-                pictures: VecDeque::new(),
-                ended: false,
-                own,
-                missed: Vec::new(),
-                lost: false,
-            });
-            match index {
-                Some(i) if own => {
-                    let mut known =
-                        vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?];
-                    for f in &self.queued {
-                        known.push(frame_ref(f)?);
-                    }
-                    for f in &known {
-                        self.feed(f, i, reading)?;
-                    }
-                }
-                Some(i) => self.seek_ahead(i, reading)?,
-                None => {
-                    let (frame, _) = self.current.as_ref().expect("have a frame");
-                    let rgb = shown_rgb(frame, rotation, shown, reading)?;
-                    let best = self.best.as_mut().expect("made");
-                    let mut outs = best.stream.push(&rgb)?;
-                    best.fed.push_back((0, pts));
-                    outs.extend(best.stream.finish()?);
-                    best.took(outs, 0);
-                    best.ended = true;
-                }
-            }
+        let want = match id.key {
+            Key::Frame(i) => i,
+            Key::Still(_) => 0,
+        };
+        if !self.run.as_ref().is_some_and(|r| r.serves(id, size)) {
+            self.run = None;
+            self.open_run(id, size, want, reading)?;
         }
-        let want = index.unwrap_or(0);
-        let mut waiting: Option<crate::ai::Making> = None;
+        let clock = Instant::now();
+        let work = crate::ai::making(id.upscaler, size, id.made, (want, want));
         loop {
-            let best = self.best.as_mut().expect("made");
-            while best.pictures.front().is_some_and(|(i, _)| *i < want) {
-                best.pictures.pop_front();
+            crate::cancel::stop()?;
+            if let Some(p) = self.taken(id)? {
+                let last = self
+                    .run
+                    .as_ref()
+                    .map_or(want, |r| (r.out_next - 1).max(want));
+                work.finished((want, last));
+                crate::debug!(
+                    "ai",
+                    "{}: source frame {want} in {:.0} ms",
+                    crate::ai::name(id.upscaler),
+                    clock.elapsed().as_secs_f64() * 1e3
+                );
+                return Ok(p);
             }
-            if let Some((_, p)) = best.pictures.iter().find(|(i, _)| *i == want) {
-                if let Some(w) = waiting.take() {
-                    let last = best.pictures.back().map_or(want, |(i, _)| *i);
-                    w.finished((want, last));
-                }
-                return frame_ref(p);
-            }
-            if waiting.is_none() {
-                waiting = Some(crate::ai::making(
-                    Upscaler::AiBest,
-                    shown,
-                    size,
-                    (want, want),
-                ));
-            }
-            if best.ended {
+            let run = self.run.as_mut().expect("opened");
+            if run.ended {
                 return Err(Error::Invalid(format!(
-                    "{}: the AI Best upscaler has no frame at {}",
+                    "{}: {} has no source frame {want}",
                     self.reader.path().display(),
-                    pts.unwrap_or(0)
+                    crate::ai::name(id.upscaler)
                 )));
             }
-            if !best.missed.is_empty() {
-                let missed = std::mem::take(&mut best.missed);
+            if !run.missed.is_empty() {
+                let missed = std::mem::take(&mut run.missed);
                 for f in &missed {
-                    self.feed(f, want, reading)?;
+                    self.feed(f, reading)?;
                 }
                 continue;
             }
-            let next = if best.own {
+            let next = if run.own {
                 match self.reader.next_frame()? {
                     Some(f) => {
                         let kept = in_memory(&f)?;
@@ -912,46 +790,127 @@ impl Source {
                 self.ahead.as_mut().expect("opened").next_frame()?
             };
             match next {
-                Some(f) => self.feed(&f, want, reading)?,
-                None => {
-                    let best = self.best.as_mut().expect("made");
-                    let outs = best.stream.finish()?;
-                    best.took(outs, want);
-                    best.ended = true;
-                }
+                Some(f) => self.feed(&f, reading)?,
+                None => self.end_run()?,
             }
         }
     }
 
-    fn feed(&mut self, f: &frame::Video, want: i64, reading: Reading) -> Result<()> {
-        let at = self.frame_index(f.pts());
+    fn open_run(
+        &mut self,
+        id: &PictureId,
+        size: (u32, u32),
+        want: i64,
+        reading: Reading,
+    ) -> Result<()> {
+        let first = crate::ai::first_frame(id.upscaler, want);
+        let base = id.clone();
+        let waiting = Waiting::default();
+        let later = std::sync::Arc::downgrade(&waiting);
+        let sink: crate::ai::Sink = Box::new(move |outs| match outs {
+            Ok(outs) => {
+                if let Some(waiting) = later.upgrade() {
+                    hold(&waiting, &base, outs);
+                }
+            }
+            Err(e) => crate::debug!("ai", "{}: {e}", crate::ai::name(base.upscaler)),
+        });
+        let run = crate::ai::open(id.upscaler, size, id.made, want, sink)?;
+        let current = self.current.as_ref().map(|(f, _)| f.pts());
+        let at = current.and_then(|pts| self.frame_index(pts));
+        let still = matches!(id.key, Key::Still(_));
+        let own = !still && at == Some(first) && self.reader.reading() == reading;
+        self.run = Some(Session {
+            run,
+            id: id.clone(),
+            size,
+            first,
+            last: crate::ai::last_frame(id.upscaler, first),
+            next: first,
+            out_next: first,
+            own,
+            missed: Vec::new(),
+            lost: false,
+            ended: false,
+            waiting,
+            given: None,
+        });
+        if still {
+            let (frame, _) = self.current.as_ref().expect("have a frame");
+            let f = frame_ref(frame)?;
+            self.feed(&f, reading)?;
+            return self.end_run();
+        }
+        if own {
+            let mut known = vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?];
+            for f in &self.queued {
+                known.push(frame_ref(f)?);
+            }
+            for f in &known {
+                self.feed(f, reading)?;
+            }
+            Ok(())
+        } else {
+            self.seek_ahead(first, reading)
+        }
+    }
+
+    fn feed(&mut self, f: &frame::Video, reading: Reading) -> Result<()> {
         let rotation = self.reader.rotation();
-        let best = self.best.as_mut().expect("made");
-        let Some(i) = at.filter(|i| *i >= best.next) else {
+        let still = self
+            .run
+            .as_ref()
+            .is_some_and(|r| matches!(r.id.key, Key::Still(_)));
+        let at = if still {
+            Some(0)
+        } else {
+            self.frame_index(f.pts())
+        };
+        let run = self.run.as_mut().expect("opened");
+        let Some(i) = at.filter(|i| *i >= run.next) else {
             return Ok(());
         };
-        let rgb = shown_rgb(f, rotation, best.shown, reading)?;
-        let outs = best.stream.push(&rgb)?;
-        best.fed.push_back((i, f.pts()));
-        best.next = i + 1;
-        best.took(outs, want);
+        if run.ended {
+            return Ok(());
+        }
+        if run.last.is_some_and(|l| i > l) {
+            return self.end_run();
+        }
+        let rgb = shown_rgb(f, rotation, run.size, reading)?;
+        let outs = run.run.push(i, f.pts(), rgb)?;
+        run.next = i + 1;
+        run.keep(outs);
+        if run.last == Some(i) {
+            return self.end_run();
+        }
+        Ok(())
+    }
+
+    fn end_run(&mut self) -> Result<()> {
+        let run = self.run.as_mut().expect("opened");
+        if run.ended {
+            return Ok(());
+        }
+        run.ended = true;
+        let outs = run.run.finish()?;
+        run.keep(outs);
         Ok(())
     }
 
     fn miss(&mut self, f: &frame::Video) -> Result<()> {
         let at = self.frame_index(f.pts());
-        let Some(best) = self.best.as_mut().filter(|b| b.own && !b.lost) else {
+        let Some(run) = self.run.as_mut().filter(|r| r.own && !r.lost && !r.ended) else {
             return Ok(());
         };
-        if at.is_none_or(|i| i < best.next) {
+        if at.is_none_or(|i| i < run.next) {
             return Ok(());
         }
-        if best.missed.len() as i64 >= BEST_JUMP {
-            best.missed.clear();
-            best.lost = true;
+        if run.missed.len() as i64 >= RUN_JUMP {
+            run.missed.clear();
+            run.lost = true;
             return Ok(());
         }
-        best.missed.push(in_memory(f)?);
+        run.missed.push(in_memory(f)?);
         Ok(())
     }
 }

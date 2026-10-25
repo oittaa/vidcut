@@ -13,6 +13,36 @@ pub(crate) struct Id {
 
 type Layer = (Arc<str>, i64, u32);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Fill {
+    pub(crate) ahead: bool,
+    pub(crate) behind: bool,
+}
+
+impl Fill {
+    const ALL: Self = Self {
+        ahead: true,
+        behind: true,
+    };
+
+    fn of(piece: &VideoPiece) -> Self {
+        match piece {
+            VideoPiece::Source { super_scale, .. } if super_scale.ai() => Self {
+                behind: false,
+                ..Self::ALL
+            },
+            _ => Self::ALL,
+        }
+    }
+
+    fn and(self, other: Self) -> Self {
+        Self {
+            ahead: self.ahead && other.ahead,
+            behind: self.behind && other.behind,
+        }
+    }
+}
+
 #[cfg(test)]
 impl Id {
     pub(crate) fn at(source: &str, pos: i64) -> Self {
@@ -196,6 +226,16 @@ impl Plan {
                 _ => None,
             })
             .collect()
+    }
+
+    pub(crate) fn fill_at(&self, t: i64) -> Fill {
+        let (i, _) = self.locate(t);
+        self.plan.video.get(i).map_or(Fill::ALL, |piece| {
+            piece
+                .layers()
+                .into_iter()
+                .fold(Fill::ALL, |f, (l, _)| f.and(Fill::of(l)))
+        })
     }
 
     pub(crate) fn crosses_at(&self, t: i64) -> Vec<bool> {

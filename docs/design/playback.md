@@ -91,6 +91,12 @@ Motions:
   2. pictures ahead in the direction of play
   3. when playing backward, whole windows from a keyframe
   4. when idle, the prepared frame and a window behind the playhead
+- Each piece of the plan says which frames the player may decode before they are asked for (`player::plan::Fill`).
+  - By default, the player fills frames ahead of the playhead and behind it.
+  - A piece with an AI upscaler fills no frames behind the playhead. An AI picture takes much GPU time. A frame before the current run starts a new run of the upscaler ([gpu](gpu.md)).
+  - Where layers overlap, a fill is allowed only when each layer allows it (`Plan::fill_at`).
+  - The viewer's frame, play backward and steps back still decode the frames that they need.
+  - The prepared frame is made also with an AI upscaler. Thus the next clip can show its first frame at once.
 - While it plays, or while its viewer waits, the decoding thread holds a `first::Claim`. Thus jobs yield.
 
 **Kept pictures**
@@ -121,7 +127,7 @@ Motions:
   - It does this only where the viewer enlarges the picture.
 - With AI Fast or AI Best, `VideoFrames` runs `Source::ai_picture` for the viewer too, as an export does. The viewer then gets the large upright picture of the AI upscaler.
   - With AI Fast, a seek must decode the whole chunk of 15 frames first. The AI upscaler then makes the asked frame first. The rest of the chunk follows.
-  - While playing, the player skips the frames it cannot make in time. The AI Fast chunks that it made stay in the shared cache. Thus a replay takes their frames from memory.
+  - While playing, the player skips the frames it cannot make in time. The frames that it made stay in its kept pictures, as other frames do. A replay computes again the frames that it skipped, and the frames that left its kept pictures.
   - With AI Best, a seek starts a new stream at the asked frame. Its first picture comes after the stream's first chunk of 17 frames.
   - Whether the picture is enlarged depends on its placement and on the timeline size, as in an export.
   - Thus the key of its kept frames holds its Super Scale, its placement and the timeline size (`source_key`).

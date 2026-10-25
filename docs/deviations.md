@@ -1789,18 +1789,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The project setting also has Auto (p. 149).
   - It makes a clip of a higher resolution, which often stops playback in real time (p. 288). The usual sizing then fits that clip.
 - **vidcut:**
-  - Super Scale is Off, Auto, 2x, 3x or 4x. Its Upscaler is AI Fast, AI Best or Classic. There is no Enhanced mode.
-  - AI Fast is the default. It is the video model NanoVSR 5.4M. vidcut runs it with its own compute shaders on the GPU, through wgpu.
-    - It has no Noise Reduction and no other setting.
-    - It reads the frames of a file in chunks of 15. Each output frame uses the frames before and after it in its chunk.
-    - The weights (25 MB) download at their first use. vidcut does not ship them.
-    - AI Fast takes SDR pictures of any size. Its memory grows with the size of the source picture.
-  - AI Best is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders too.
+  - Super Scale is Off, Auto, 2x, 3x or 4x. Its Upscaler is AI Best, AI Fast or Classic. There is no Enhanced mode.
+  - AI Best is the default. It is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders on the GPU, through wgpu.
     - It is slow, and it adds more detail. It has no setting.
     - It reads the frames of a clip in order, from the first frame that is asked for. Each output frame uses the frames before it and the 4 frames after it.
     - It makes the picture at the size that it shows at, but not more than 4 times the source.
     - The weights (7.0 GB) download at their first use. vidcut does not ship them.
     - It takes SDR pictures. Its memory grows with the size of the picture that it makes; parts of it go to main memory when the GPU's memory is not enough.
+  - AI Fast is the video model NanoVSR 5.4M. vidcut runs it with its own compute shaders too.
+    - It has no Noise Reduction and no other setting.
+    - It reads the frames of a file in chunks of 15. Each output frame uses the frames before and after it in its chunk.
+    - The weights (25 MB) download at their first use. vidcut does not ship them.
+    - AI Fast takes SDR pictures of any size. Its memory grows with the size of the source picture.
   - Both AI upscalers:
     - Before an export starts, vidcut refuses media that the upscaler cannot take. The error names each file and the reason.
     - It also refuses an AI upscaler without its weights, or without a GPU that can run the network.
@@ -1821,6 +1821,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - A video model adds detail that a classic upscaler cannot. In side-by-side tests, the owner ranked NanoVSR 5.4M above Real-ESRGAN's compact model.
   - Some users wait a long time for the best pictures, and others want good pictures fast. Thus there is a fast AI upscaler and a slow one.
+  - AI Best is the default and the first choice, because Super Scale is mostly for the best pictures. AI Fast is the choice for speed.
   - FlashVSR+ Turbo is one step of a diffusion model, with Apache 2.0 code and weights. It streams over the frames, so a clip has no chunk edges.
   - The network has only 3×3 and 1×1 convolutions. Shaders of its own run it on the GPU of every maker through wgpu, with no new library.
   - The shaders keep the values between the layers as 16-bit floats, and add in 32-bit floats. This halves the memory traffic. It needs no GPU feature.

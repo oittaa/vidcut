@@ -43,7 +43,7 @@ pub struct PictureStats {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuperScaleStats {
-    pub upscaler: String,
+    pub upscaler: Option<String>,
     pub factor: String,
     pub runs_on: Option<String>,
     pub sizes: Option<String>,
@@ -178,10 +178,7 @@ impl PlayerStats {
             PlaysOn::Chosen(id) => id.clone(),
             PlaysOn::Missing(id) => format!("System default ({id} isn't connected)"),
         };
-        let super_scale = s
-            .super_scales
-            .first()
-            .map(|&ss| SuperScaleStats::of(ss, &ai::report()));
+        let super_scale = SuperScaleStats::of(s.super_scales.first().copied(), &ai::report());
         Self {
             decoding,
             picture,
@@ -285,12 +282,16 @@ impl PictureStats {
 }
 
 impl SuperScaleStats {
-    fn of(s: SuperScale, report: &ai::Report) -> Self {
-        let factor = match s.factor {
-            ScaleFactor::Auto => "Auto".to_string(),
-            f => f.times().map_or_else(String::new, |n| format!("{n}x")),
+    fn of(s: Option<SuperScale>, report: &ai::Report) -> Option<Self> {
+        if s.is_none() && report.making.is_none() {
+            return None;
+        }
+        let factor = match s.map(|s| s.factor) {
+            None | Some(ScaleFactor::None) => "Off".to_string(),
+            Some(ScaleFactor::Auto) => "Auto".to_string(),
+            Some(f) => f.times().map_or_else(String::new, |n| format!("{n}x")),
         };
-        let upscaler = match s.upscaler {
+        let upscaler = s.map(|s| match s.upscaler {
             Upscaler::Classic => format!(
                 "Classic, sharpness {}",
                 match s.sharpness {
@@ -300,26 +301,33 @@ impl SuperScaleStats {
                 }
             ),
             u => ai::name(u).to_string(),
+        });
+        let mine = |w: &Option<ai::Work>| {
+            w.clone()
+                .filter(|w| s.map(|s| s.upscaler) == Some(w.upscaler))
         };
-        let mine = |w: &Option<ai::Work>| w.clone().filter(|w| w.upscaler == s.upscaler);
         let (making, made) = (mine(&report.making), mine(&report.made));
+        let working = s.map_or(report.making.as_ref().map(|w| w.upscaler), |s| {
+            Some(s.upscaler)
+        });
         let size = |(w, h): (u32, u32)| format!("{w}×{h}");
         let frames = |(a, b): (i64, i64)| match a == b {
             true => format!("Source frame {a}"),
             false => format!("Source frames {a}–{b}"),
         };
         let secs = |d: std::time::Duration| format!("{:.1} s", d.as_secs_f64());
-        Self {
+        Some(Self {
             upscaler,
             factor,
             runs_on: report
                 .devices
                 .iter()
-                .find(|(u, _)| *u == s.upscaler)
+                .find(|(u, _)| Some(*u) == working)
                 .map(|(_, d)| d.clone()),
             sizes: making
                 .as_ref()
                 .or(made.as_ref())
+                .or(report.making.as_ref().filter(|_| s.is_none()))
                 .map(|w| format!("{} → {}", size(w.from), size(w.made))),
             state: match (&making, &report.making) {
                 (Some(w), _) => Some(format!(
@@ -333,7 +341,7 @@ impl SuperScaleStats {
                     frames(w.frames).to_lowercase(),
                     secs(w.started.elapsed())
                 )),
-                (None, None) => s.ai().then(|| "Idle".into()),
+                (None, None) => s.is_some_and(|s| s.ai()).then(|| "Idle".into()),
             },
             last: made.map(|w| {
                 format!(
@@ -342,14 +350,15 @@ impl SuperScaleStats {
                     secs(w.took.unwrap_or_default())
                 )
             }),
-        }
+        })
     }
 
     fn rows(&self) -> Vec<(&'static str, String)> {
-        let mut rows = vec![
-            ("Upscaler", self.upscaler.clone()),
-            ("Factor", self.factor.clone()),
-        ];
+        let mut rows = Vec::new();
+        if let Some(u) = &self.upscaler {
+            rows.push(("Upscaler", u.clone()));
+        }
+        rows.push(("Factor", self.factor.clone()));
         for (label, fact) in [
             ("Runs on", &self.runs_on),
             ("Sizes", &self.sizes),

@@ -1,6 +1,4 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, PoisonError};
 
 use vidcut_core::model::{Media, Project, Upscaler};
 use vidcut_core::render::{RenderPlan, VideoPiece};
@@ -151,49 +149,45 @@ struct Engine {
     model: Option<model::Model>,
 }
 
-static ENGINE: Mutex<Option<std::result::Result<Engine, String>>> = Mutex::new(None);
+static ENGINE: crate::ai::Slot<Engine> = crate::ai::Slot::new();
 
-fn with_engine<T>(run: impl FnOnce(&gpu::Gpu, &model::Model) -> Result<T>) -> Result<T> {
-    let mut engine = ENGINE.lock().unwrap_or_else(PoisonError::into_inner);
-    let e = match engine
-        .get_or_insert_with(|| gpu::Gpu::start().map(|gpu| Engine { gpu, model: None }))
-    {
-        Ok(e) => e,
-        Err(why) => return Err(Error::Invalid(why.clone())),
-    };
-    if e.model.is_none() {
-        let dir = vidcut_core::dirs::models();
-        get_ready(&dir, false)?;
-        let path = |i: usize| dir.join(FILES[i].name);
-        let (dit, lq, decoder, prompt) = (path(0), path(1), path(2), path(3));
-        let paths = model::Paths {
-            dit: &dit,
-            lq: &lq,
-            decoder: &decoder,
-            prompt: &prompt,
-        };
-        let gpu = &e.gpu;
-        let loaded = crate::compute::checked(&gpu.device, gpu::WHAT, || model::load(gpu, &paths))?;
-        e.model = Some(loaded);
+impl crate::ai::Network for Engine {
+    const UPSCALER: Upscaler = Upscaler::AiBest;
+
+    fn start() -> std::result::Result<Self, String> {
+        gpu::Gpu::start().map(|gpu| Engine { gpu, model: None })
     }
-    let model = e.model.as_ref().expect("loaded");
-    let out = crate::compute::checked(&e.gpu.device, gpu::WHAT, || run(&e.gpu, model));
-    if FREE_LATER.swap(false, Ordering::Relaxed) && !crate::ai::in_use(Upscaler::AiBest) {
-        e.model = None;
+
+    fn free(&mut self) {
+        self.model = None;
     }
-    out
 }
 
-static FREE_LATER: AtomicBool = AtomicBool::new(false);
+fn with_engine<T>(run: impl FnOnce(&gpu::Gpu, &model::Model) -> Result<T>) -> Result<T> {
+    ENGINE.with(|e| {
+        if e.model.is_none() {
+            let dir = vidcut_core::dirs::models();
+            get_ready(&dir, false)?;
+            let path = |i: usize| dir.join(FILES[i].name);
+            let (dit, lq, decoder, prompt) = (path(0), path(1), path(2), path(3));
+            let paths = model::Paths {
+                dit: &dit,
+                lq: &lq,
+                decoder: &decoder,
+                prompt: &prompt,
+            };
+            let gpu = &e.gpu;
+            let loaded =
+                crate::compute::checked(&gpu.device, gpu::WHAT, || model::load(gpu, &paths))?;
+            e.model = Some(loaded);
+        }
+        let model = e.model.as_ref().expect("loaded");
+        crate::compute::checked(&e.gpu.device, gpu::WHAT, || run(&e.gpu, model))
+    })
+}
 
 pub fn release() {
-    let Ok(mut engine) = ENGINE.try_lock() else {
-        FREE_LATER.store(true, Ordering::Relaxed);
-        return;
-    };
-    if let Some(Ok(e)) = engine.as_mut() {
-        e.model = None;
-    }
+    ENGINE.release();
 }
 
 pub fn model_size((w, h): (u32, u32)) -> (u32, u32) {
@@ -202,6 +196,42 @@ pub fn model_size((w, h): (u32, u32)) -> (u32, u32) {
 
 pub struct Stream {
     inner: run::Stream,
+}
+
+pub(crate) struct Run {
+    stream: Stream,
+    fed: std::collections::VecDeque<(i64, Option<i64>)>,
+}
+
+impl Run {
+    pub(crate) fn open(size: (u32, u32), made: (u32, u32)) -> Result<Self> {
+        Ok(Self {
+            stream: Stream::open(size, made)?,
+            fed: std::collections::VecDeque::new(),
+        })
+    }
+
+    fn outs(&mut self, rgbs: Vec<Vec<u8>>) -> Vec<crate::ai::Out> {
+        rgbs.into_iter()
+            .filter_map(|rgb| {
+                let (index, pts) = self.fed.pop_front()?;
+                Some(crate::ai::Out { index, pts, rgb })
+            })
+            .collect()
+    }
+}
+
+impl crate::ai::Run for Run {
+    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<crate::ai::Out>> {
+        let outs = self.stream.push(&rgb)?;
+        self.fed.push_back((index, pts));
+        Ok(self.outs(outs))
+    }
+
+    fn finish(&mut self) -> Result<Vec<crate::ai::Out>> {
+        let outs = self.stream.finish()?;
+        Ok(self.outs(outs))
+    }
 }
 
 impl Stream {
