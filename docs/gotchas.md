@@ -343,6 +343,8 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - The codes from 27 to 31 are Foreground, Alpha, Inverted Alpha, Lum and Inverted Lum.
   - `otio::picture` reads a Composite with a code from 0 to 26 as the composite mode and the `opacity` of the picture.
   - A Composite with a code above 26, or with keyframes on its mode, stays a clip effect.
+  - A clip writes one Composite (`otio::picture::joined`). Such a kept Composite gives its mode to the Composite of the picture, unless the picture has a mode.
+  - Thus a mask mode from the file stays when vidcut changes only the opacity.
   - A title's opacity is in a Composite of the same form (`otio::titles`).
 - **The manual's words for some composite modes do not match Resolve's renders.**
   - Subtract takes the top layer from the bottom layer. The manual says the reverse.
