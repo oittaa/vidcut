@@ -80,6 +80,7 @@ pub enum GuiChange {
         near: i64,
         track: String,
         side: TrimSide,
+        add: bool,
     },
     EditSide(TrimSide),
     Deselect,
@@ -117,6 +118,7 @@ pub struct TimelineState {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct GuiState {
     pub edit: Option<EditPoint>,
+    pub edits: Vec<EditPoint>,
     pub target: String,
     pub timeline: TimelineState,
     pub windows: Vec<GuiPanel>,
@@ -2667,8 +2669,8 @@ impl Live {
                 Step::Now(Ok(answer(json!(self.pool))))
             }
             Request::SelectionGet {} => {
-                let edit = self.renderer.gui_state().and_then(|s| s.edit);
-                Step::Now(Ok(answer(selection_json(&self.selection, edit))))
+                let state = self.renderer.gui_state();
+                Step::Now(Ok(answer(selection_json(&self.selection, state.as_ref()))))
             }
             Request::SelectionSet {
                 clips,
@@ -2677,6 +2679,7 @@ impl Live {
                 edit,
                 track,
                 side,
+                add,
                 clear,
             } => {
                 let mut changes = Vec::new();
@@ -2707,11 +2710,17 @@ impl Live {
                             near,
                             track,
                             side: side.unwrap_or_default(),
+                            add,
                         });
                     }
                     (None, Some(_)) => {
                         return Step::Now(Err(Error::usage(
                             "track goes with edit: it names the track of the edit to select",
+                        )));
+                    }
+                    (None, None) if add => {
+                        return Step::Now(Err(Error::usage(
+                            "add goes with edit: it names the edit to add or take out",
                         )));
                     }
                     (None, None) => changes.extend(side.map(GuiChange::EditSide)),
@@ -2728,11 +2737,11 @@ impl Live {
                     return Step::Now(Err(e));
                 }
                 if changes.is_empty() {
-                    let edit = self.renderer.gui_state().and_then(|s| s.edit);
-                    return Step::Now(Ok(answer(selection_json(&self.selection, edit))));
+                    let state = self.renderer.gui_state();
+                    return Step::Now(Ok(answer(selection_json(&self.selection, state.as_ref()))));
                 }
                 let selection = self.selection.clone();
-                self.gui_change(changes, move |s| selection_json(&selection, s.edit))
+                self.gui_change(changes, move |s| selection_json(&selection, Some(&s)))
             }
             Request::GuiScreenshot { out, target } => match target {
                 ScreenshotTarget::Viewer => {
@@ -4229,9 +4238,10 @@ fn to_make(
     }))
 }
 
-fn selection_json(selection: &Selection, edit: Option<EditPoint>) -> Value {
+fn selection_json(selection: &Selection, gui: Option<&GuiState>) -> Value {
     let mut v = json!(selection);
-    v["edit"] = json!(edit);
+    v["edit"] = json!(gui.and_then(|s| s.edit.as_ref()));
+    v["edits"] = json!(gui.map_or(&[][..], |s| &s.edits));
     v
 }
 

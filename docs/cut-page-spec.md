@@ -427,11 +427,27 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Edit points:**
   - The pointer at the center of an edit selects both sides (a roll).
   - The pointer just left or right of the edit selects one side (a resize).
-  - Ctrl+click adds edits.
+  - Ctrl+click on an edit adds it to the selection. Ctrl+click on a selected edit takes it out.
   - V selects the edit nearest the playhead. U cycles through both, incoming and outgoing.
-  - In both timelines, the selected edit is a solid line on the cut. A glow is on its selected side, or on both sides.
+  - In both timelines, each selected edit is a solid line on the cut. A glow is on its selected side, or on both sides.
   - The glow pulses about once a second.
   - The glow is green where that side has media to trim into, and red where it has none.
+- **Several selected edits** (Resolve Studio 21.1.1; Edit page, pp. 1079–1080):
+  - The Trim Editor shows the edit clicked last.
+  - When Ctrl+click takes that edit out, the Trim Editor closes. The other edits stay selected.
+  - `,` and `.` trim every selected edit in one step. Each roll and each side moves by the full amount.
+  - Two Out sides on Track 1 each get the full amount. The later clips move by the sum.
+  - A drag on a selected edit trims every selected edit. Each roll moves by the full drag.
+  - Ripple trims on one track share the drag. The frames go to the edits one at a time, from left to right (p. 1079).
+  - After the drag, no edit is selected.
+  - A drag on an edit that is not selected trims only that edit. After it, no edit is selected.
+  - A roll and a side cannot move together (p. 1079). With both kinds selected, a trim does nothing.
+  - U changes the side of every selected edit (p. 1080).
+  - Dynamic Trim (J, K, L) trims every selected edit by the same amount (p. 1080).
+  - Out sides and In sides move in opposite directions (p. 1080).
+  - vidcut: the side of the edit clicked last, or of the edit dragged, follows the key or the pointer.
+  - vidcut: the handles and buttons of the Trim Editor trim only the edit that it shows.
+  - Not checked: which side follows the key in Resolve, and what the Trim Editor trims with several edits.
 
 ### 8.2 Moving clips (pp. 720–723)
 - **Onto another Track 1 clip, released quickly:** the clip replaces that clip and ripples.
@@ -981,7 +997,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | V / U | Select nearest edit / cycle edit side |
-| , / . (Shift: 1 s)† | Trim the selected edit a frame |
+| , / . (Shift: 1 s)† | Trim the selected edits a frame |
 | D | Disable / enable clip video |
 | Alt+D | Ducking of the selected clip's track on or off (X69) |
 | Ctrl+D | Change clip or dissolve duration |

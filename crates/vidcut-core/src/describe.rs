@@ -366,7 +366,12 @@ pub fn describe_at(
         ),
         "pool.set" => format!("Media Pool: {}", compact(params)),
         "selection.set" if !params["edit"].is_null() => format!(
-            "Select {} nearest {} on {}",
+            "{} {} nearest {} on {}",
+            if params["add"] == true {
+                "Add or take out"
+            } else {
+                "Select"
+            },
             edit_side(&params["side"]),
             d.time("edit"),
             params["track"].as_str().unwrap_or("V1")
