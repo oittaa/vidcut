@@ -40,6 +40,7 @@ pub struct Assets<'a> {
     pub pool: &'a HashMap<&'a str, &'a Media>,
     pub titles: &'a HashMap<String, egui::TextureId>,
     pub keys: &'a [(String, i64)],
+    pub audio_trim: &'a [String],
 }
 
 pub type Placed = HashMap<String, Vec<(i64, usize)>>;
@@ -286,6 +287,11 @@ fn clip(
     fps: Rational,
 ) {
     let rect = tr.rect;
+    let sound_only = c.audio.is_some() && assets.audio_trim.contains(&c.id);
+    let tr = &TrackRect {
+        rect,
+        audio_top: if sound_only { rect.top() } else { tr.audio_top },
+    };
     let (x0, x1) = (
         scale.xf(c.start),
         scale.xf(c.end()).max(scale.xf(c.start) + 1.0),
@@ -375,7 +381,7 @@ fn clip(
         };
         let ap = track_painter.with_clip_rect(rect.intersect(audio.expand(1.0)));
         ap.rect_filled(parted(audio), corners, color);
-        if look.waveforms && !muted && !offline && audio.height() >= 8.0 {
+        if (look.waveforms || sound_only) && !muted && !offline && audio.height() >= 8.0 {
             waveform(&ap, audio, scale, p, c, assets, fps);
         }
         volume_line(&ap, audio, scale, c, assets.keys);

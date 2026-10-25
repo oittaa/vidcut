@@ -286,7 +286,7 @@ The bar and the Jobs button:
 - **View state.**
   - The view state is:
     - the selected edit point, and whether its dissolve is selected (`TimelineView::transition`)
-    - the target track, the zoom and the Timeline Options (in `timeline.json`, Minimize Subtitle Track too)
+    - the target track, the zoom and the Timeline Options (in `timeline.json`, Minimize Subtitle Track and Extend Beyond Clip Length too)
     - the open windows
   - Requests reach the view state through `Renderer::gui`.
   - The Trim Editor shows the selected edit while the player is stopped (`Workspace::trim_editor_edit`).

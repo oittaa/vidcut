@@ -139,6 +139,7 @@ impl TrackRef {
 pub struct Options {
     pub fixed_playhead: bool,
     pub snapping: bool,
+    pub trim_to_audio: bool,
     pub safe_edit: bool,
     pub names: bool,
     pub durations: bool,
@@ -151,6 +152,7 @@ pub struct Options {
     pub jump_frames: i64,
     pub dynamic_mode: tools::DynamicMode,
     pub minimize_subtitles: bool,
+    pub extend_beyond: bool,
 }
 
 impl Default for Options {
@@ -158,6 +160,7 @@ impl Default for Options {
         Self {
             fixed_playhead: true,
             snapping: true,
+            trim_to_audio: false,
             safe_edit: false,
             names: true,
             durations: true,
@@ -170,6 +173,7 @@ impl Default for Options {
             jump_frames: 10,
             dynamic_mode: tools::DynamicMode::Slip,
             minimize_subtitles: false,
+            extend_beyond: false,
         }
     }
 }
@@ -436,6 +440,27 @@ impl Workspace {
         }
     }
 
+    fn audio_trim(&self, p: &Project) -> Vec<String> {
+        if !self.timeline.options.trim_to_audio {
+            return Vec::new();
+        }
+        match self.timeline.drag.as_ref().map(|d| &d.drag.gesture) {
+            Some(Gesture::Trim { clip, .. }) => vec![clip.clone()],
+            Some(Gesture::Slip { clips }) => clips.clone(),
+            Some(Gesture::Roll { outgoing, .. }) => {
+                let incoming = p.find_clip(outgoing).and_then(|(ti, ci)| {
+                    let t = &p.tracks[ti];
+                    let end = t.clips[ci].end();
+                    t.clips.iter().find(|c| c.start == end)
+                });
+                std::iter::once(outgoing.clone())
+                    .chain(incoming.map(|c| c.id.clone()))
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     fn is_target(&self, track: &str) -> bool {
         self.target.as_deref() == Some(track) || (self.target.is_none() && track == MAIN)
     }
@@ -637,6 +662,7 @@ impl Workspace {
         let transcribed = self.snap.transcribed.clone();
         let title_thumbs = self.title_thumbs.prepare(ui.ctx(), drawn).clone();
         let chosen_keys = self.timeline.keys.clone();
+        let audio_trim = self.audio_trim(drawn);
         let assets = Assets {
             thumbs: &thumbs,
             waveforms: &waveforms,
@@ -646,6 +672,11 @@ impl Workspace {
             pool: &pool,
             titles: &title_thumbs,
             keys: &chosen_keys,
+            audio_trim: &audio_trim,
+        };
+        let overview = Assets {
+            audio_trim: &[],
+            ..assets
         };
         let look = self.look();
         let smart = (end > 0).then(|| ops::nearest_edit(drawn, playhead));
@@ -710,7 +741,7 @@ impl Workspace {
                     drawn,
                     t,
                     &selected,
-                    &assets,
+                    &overview,
                     compact,
                     placed_on(t),
                 );
@@ -1271,6 +1302,7 @@ impl Workspace {
         let before = *o;
         ui.checkbox(&mut o.snapping, "Snap (N)");
         ui.checkbox(&mut o.fixed_playhead, "Fixed Playhead");
+        ui.checkbox(&mut o.trim_to_audio, "Trim to Audio");
         ui.checkbox(&mut o.safe_edit, "Trim with Safe Edit");
         ui.separator();
         ui.checkbox(&mut o.names, "Display Clip Names");
@@ -2973,11 +3005,12 @@ impl Workspace {
         let clips = self.snap.selection.clips.clone();
         let mut open = !clips.is_empty();
         let mut done = false;
+        let mut extend = self.timeline.options.extend_beyond;
         super::dialog::window(ctx, "Change Clip Duration", &mut open, |ui| {
-            let set = |d: Value| {
+            let set = |d: Value, extend: bool| {
                 self.send(
                     "edit.change_duration",
-                    json!({ "clips": clips, "duration": d }),
+                    json!({ "clips": clips, "duration": d, "extend": extend }),
                 );
             };
             let typed = crate::gui::viewer::timecode_input(&text, self.dropped());
@@ -2996,14 +3029,17 @@ impl Workspace {
                 super::dialog::row(ui, "Or", |ui| {
                     for s in [1, 5, 15] {
                         if ui.button(format!("{s} s")).clicked() {
-                            set(json!(format!("{s}s")));
+                            set(json!(format!("{s}s")), extend);
                             done = true;
                         }
                     }
                     if ui.button("To the End").clicked() {
-                        set(json!("end"));
+                        set(json!("end"), extend);
                         done = true;
                     }
+                });
+                super::dialog::row(ui, "", |ui| {
+                    ui.checkbox(&mut extend, "Extend Beyond Clip Length");
                 });
             });
             super::dialog::footer(ui, |ui| {
@@ -3011,7 +3047,7 @@ impl Workspace {
                 if (change || enter)
                     && let Some(spec) = &typed
                 {
-                    set(json!(spec));
+                    set(json!(spec), extend);
                     done = true;
                 }
                 if ui.button("Cancel").clicked() {
@@ -3022,6 +3058,10 @@ impl Workspace {
                 }
             });
         });
+        if extend != self.timeline.options.extend_beyond {
+            self.timeline.options.extend_beyond = extend;
+            self.timeline.options.save();
+        }
         if open && !done {
             self.timeline.duration_dialog = Some(text);
         }
@@ -3361,6 +3401,7 @@ impl Workspace {
         o.ppf = set.zoom.unwrap_or(o.ppf);
         o.fixed_playhead = set.fixed_playhead.unwrap_or(o.fixed_playhead);
         o.snapping = set.snap.unwrap_or(o.snapping);
+        o.trim_to_audio = set.trim_to_audio.unwrap_or(o.trim_to_audio);
         o.safe_edit = set.safe_edit.unwrap_or(o.safe_edit);
         o.names = set.names.unwrap_or(o.names);
         o.durations = set.durations.unwrap_or(o.durations);
@@ -3383,6 +3424,7 @@ impl Workspace {
             zoom: o.ppf,
             fixed_playhead: o.fixed_playhead,
             snap: o.snapping,
+            trim_to_audio: o.trim_to_audio,
             safe_edit: o.safe_edit,
             names: o.names,
             durations: o.durations,

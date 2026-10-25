@@ -1012,10 +1012,11 @@ fn live(method: &str, r: &Response) -> Option<()> {
             println!("edit {}", edit_point(&v["edit"]));
             println!("target {}", v["target"].as_str().unwrap_or("-"));
             println!(
-                "timeline zoom {} px/frame, fixed playhead {}, snap {}, safe edit {}",
+                "timeline zoom {} px/frame, fixed playhead {}, snap {}, trim to audio {}, safe edit {}",
                 t["zoom"],
                 on("fixed_playhead"),
                 on("snap"),
+                on("trim_to_audio"),
                 on("safe_edit")
             );
             println!(
