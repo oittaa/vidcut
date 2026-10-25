@@ -475,7 +475,13 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Safe Edit** (option, p. 732):
   - A trim stops at the neighbor clip, with a small timer on the cursor.
   - Continue the drag to overwrite the neighbor.
-- **Trim to Audio** (option, p. 645): the audio view expands during a trim.
+- **Trim to Audio** (option, p. 718; Resolve Studio 21.1.1):
+  - It is off at first.
+  - During an edge trim, a roll or a slip, the clips that change show only their sound.
+  - The sound is a waveform the full height of the track, about the middle of the track.
+  - A roll changes both clips. A slip changes each slipped clip.
+  - The track height does not change. The view goes back at the end of the drag.
+  - The audio-only roll (§8.7) and Dynamic Trim do not change the view.
 - **Trim Editor** (pp. 729–730; D52):
   - It shows while an edit is selected and the player is stopped.
   - The Viewer shows the last frame of the outgoing clip beside the first frame of the incoming clip.
@@ -496,10 +502,15 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Change Clip Speed** (R†): a speed, reversed or not, or a freeze frame, for each selected clip (D48).
   - The Speed Change controls of the Inspector set the same (pp. 736–737).
   - vidcut: the Speed section of the Inspector tab (X70).
-- **Change Clip Duration** (Ctrl+D, p. 693):
+- **Change Clip Duration** (Ctrl+D, p. 693; Resolve Studio 21.1.1):
   - It takes frames or a timecode, or 1, 5 or 15 seconds, for each selected clip.
   - End runs to the end of the media.
-  - Extend Beyond Clip Length pads with black.
+  - A duration longer than the media stops at the end of the media. No error shows.
+  - On Track 1 it ripples, also with Ripple On off.
+  - **Extend Beyond Clip Length** (checkbox):
+    - It is off at first. The dialog keeps its state, also after Cancel.
+    - On Track 1, the rest of the duration becomes a gap after the clip. The later clips move by the full amount.
+    - On other tracks, the clip runs to the end of its media and overwrites the start of the next clip. No gap is added.
 - **Dynamic Trim** (W, pp. 730–732):
   - W toggles the mode, and shows the timeline.
   - The playhead turns yellow.

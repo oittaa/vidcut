@@ -101,6 +101,7 @@ pub struct TimelineState {
     pub zoom: f64,
     pub fixed_playhead: bool,
     pub snap: bool,
+    pub trim_to_audio: bool,
     pub safe_edit: bool,
     pub names: bool,
     pub durations: bool,

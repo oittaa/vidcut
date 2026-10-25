@@ -972,13 +972,18 @@ pub enum Request {
         ripple: Option<bool>,
     },
     /// Change Clip Duration (Ctrl+D). `end` runs each clip to the end of its
-    /// media.
+    /// media, and a longer duration stops there. It ripples as a trim with
+    /// Ripple On does, whatever Ripple On is, unless `ripple` is false.
     #[serde(rename = "edit.change_duration")]
     EditChangeDuration {
         clips: OneOrMany<ClipRef>,
         duration: TimeSpec,
         #[serde(default)]
         ripple: Option<bool>,
+        /// Extend Beyond Clip Length: the rest of a duration longer than the
+        /// media becomes a gap after the clip, where the edit ripples.
+        #[serde(default)]
+        extend: bool,
     },
     /// Change Clip Speed (R; decision D48): each clip plays at `speed`
     /// (2.0 twice as fast, 0.5 half, -1.0 backward, 0 a freeze frame). With
@@ -3115,6 +3120,11 @@ pub struct TimelineOptions {
     /// Snap (N).
     #[serde(default)]
     pub snap: Option<bool>,
+    /// Trim to Audio: during a drag that trims, rolls or slips, the clips
+    /// that change show only their sound, as a waveform the full height of
+    /// the track.
+    #[serde(default)]
+    pub trim_to_audio: Option<bool>,
     /// Trim with Safe Edit: a trim stops at the neighboring clip.
     #[serde(default)]
     pub safe_edit: Option<bool>,
