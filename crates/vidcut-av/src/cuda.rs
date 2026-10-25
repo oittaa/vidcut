@@ -682,7 +682,50 @@ impl CudaPictures {
         let first = reader
             .peek()
             .ok_or_else(|| Error::Invalid("no frames".into()))?;
-        let (time_base, rotation) = (reader.time_base(), reader.rotation());
+        let timing = (reader.time_base(), reader.rotation());
+        Self::from_first(
+            device,
+            first,
+            timing,
+            (width, height),
+            format,
+            target,
+            (at_once, on),
+            sharp,
+        )
+    }
+
+    pub(crate) fn converting(
+        device: &CudaDevice,
+        first: &frame::Video,
+        format: format::Pixel,
+        target: Option<Hdr>,
+    ) -> Result<Self> {
+        let size = (first.width(), first.height());
+        let timing = (ffmpeg::Rational(1, 1_000_000), 0);
+        Self::from_first(
+            device,
+            first,
+            timing,
+            size,
+            format,
+            target,
+            (true, Place::Cuda),
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_first(
+        device: &CudaDevice,
+        first: &frame::Video,
+        (time_base, rotation): (ffmpeg::Rational, u16),
+        (width, height): (u32, u32),
+        format: format::Pixel,
+        target: Option<Hdr>,
+        (at_once, on): (bool, Place),
+        sharp: Option<Sharpness>,
+    ) -> Result<Self> {
         let vulkans = first.format() == format::Pixel::VULKAN;
         if !vulkans && first.format() != format::Pixel::CUDA {
             return Err(Error::Invalid("not frames in GPU memory".into()));

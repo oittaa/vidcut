@@ -289,13 +289,17 @@ pub fn probed_files(
 pub fn choose_metadata(
     plan: &RenderPlan,
     settings: &ExportSettings,
-    meta: impl FnMut(&VideoPiece) -> PieceMeta,
+    mut meta: impl FnMut(&VideoPiece) -> PieceMeta,
 ) -> Option<MetadataChoice> {
     let v = settings.video.as_ref()?;
+    let sdr = plan.colors.is_none();
     Some(metadata::choose(
         v,
         &plan.video,
-        meta,
+        |piece| match sdr {
+            true => PieceMeta::default(),
+            false => meta(piece),
+        },
         encode::writes_dolby_vision(v),
     ))
 }
@@ -332,7 +336,12 @@ pub fn choose_color(
 ) -> Option<ColorChoice> {
     let v = settings.video.as_ref()?;
     let share = color::picture_share(&plan.video, kind);
-    Some(color::choose(v, &share, encode::abilities(v, available)))
+    Some(color::choose(
+        v,
+        &share,
+        encode::abilities(v, available),
+        plan.colors,
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -527,6 +536,7 @@ fn first_run(
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Option<String>> {
     let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr)
+        .with_timeline(plan.colors)?
         .with_dynamic(enc.dynamic)
         .with_burn(burn.0, burn.1);
     if let Some(d) = decoder {
@@ -975,6 +985,7 @@ fn encode(
             let burned = burn();
             let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, pixel, enc.hdr)
                 .output(output)
+                .with_timeline(plan.colors)?
                 .with_dynamic(enc.dynamic)
                 .with_light(light)
                 .with_burn(burned.0, burned.1);

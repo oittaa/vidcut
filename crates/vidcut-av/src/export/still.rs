@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use vidcut_core::model::Hdr;
 use vidcut_core::render::VideoPiece;
 use vidcut_core::time::Rational;
 
@@ -9,14 +10,14 @@ use crate::ffmpeg::{self, codec, encoder, format};
 pub fn png(
     piece: &VideoPiece,
     fps: Rational,
-    width: u32,
-    height: u32,
+    (width, height): (u32, u32),
+    colors: Option<Hdr>,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<Vec<u8>> {
     crate::cancel::stop()?;
     crate::init();
     let pixel = format::Pixel::RGB24;
-    let mut frames = super::renderer::frames(fps, (width, height), pixel, decoder);
+    let mut frames = super::renderer::frames(fps, (width, height), pixel, colors, decoder)?;
     frames.read_piece(piece);
     let mut frame = frames
         .next_frame()?
@@ -44,10 +45,10 @@ pub fn png(
 pub fn rgba(
     piece: &VideoPiece,
     fps: Rational,
-    width: u32,
-    height: u32,
+    size: (u32, u32),
+    colors: Option<Hdr>,
 ) -> Result<crate::thumbs::Image> {
-    super::renderer::FrameReader::default().rgba(piece, fps, width, height)
+    super::renderer::FrameReader::default().rgba(piece, fps, size, colors)
 }
 
 pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
@@ -88,12 +89,12 @@ pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
 pub fn write_png(
     piece: &VideoPiece,
     fps: Rational,
-    width: u32,
-    height: u32,
+    size: (u32, u32),
+    colors: Option<Hdr>,
     path: &Path,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<()> {
-    let bytes = png(piece, fps, width, height, decoder)?;
+    let bytes = png(piece, fps, size, colors, decoder)?;
     vidcut_core::temp::write(path, &bytes)?;
     Ok(())
 }

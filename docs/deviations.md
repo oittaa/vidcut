@@ -228,21 +228,26 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - `bwdif` is the better of the CPU deinterlacers of FFmpeg.
   - Thus the Inspector needs no Deinterlace Quality for each clip ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
 
-## X14. Color is set per export, not managed
+## X14. The timeline color space has no grading
 
 - **Resolve:**
-  - Color management gives the timeline a color space.
-  - Media come in through input transforms and tone mapping.
-  - The user selects the output space for delivery (pp. 230–239).
+  - Color management converts each clip from its Input Color Space to the Timeline Color Space. Then it converts the result to the Output Color Space (pp. 226–232).
+  - Its presets have SDR and HDR color spaces in Rec.709, P3, Rec.2020 and DaVinci Wide Gamut (pp. 230–231).
+  - A new project has no color management (DaVinci YRGB). Then a dissolve is a straight line in the code values of the files.
+  - With color management, every mix occurs before the output transform. The timeline color space changes the mix.
+  - In a Rec.2100 ST2084 timeline, a dissolve is not a straight line in the PQ code values. Its working space is not known (measured in 21.1.1).
 - **vidcut:**
-  - There is no timeline color space and no grading.
-  - Each export selects SDR, PQ or HLG from the footage that it shows, unless the request tells otherwise ([D44](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - It converts each clip to that output from the tags of the clip. Where the tags are wrong, it uses the Input Color Space of the media ([D35](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - The viewer uses the same math.
+  - The Timeline Color Space is Auto, SDR, HDR PQ or HDR HLG ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Each clip goes into it from the tags of the clip. Where the tags are wrong, it uses the Input Color Space of the media ([D35](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Every mix is a straight line in the code values of the timeline, as Resolve mixes without color management.
+  - Each export converts the mixed frame to the colors that it selects ([D44](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). The viewer uses the same math.
+  - There is no grading.
 - **Why:**
   - vidcut cuts. Grading belongs in other tools.
-  - Mixed phone, camera and screen footage comes out correctly without color settings.
+  - Auto gives mixed phone, camera and screen footage its colors without settings.
   - The HDR video of a phone stays HDR.
+  - The working space of Resolve's color management is not known. A straight line in the code values is what Resolve does without color management.
+  - The other color spaces of Resolve come later ([todo](todo/timeline-color-spaces-more.md)).
 
 ## X15. The Smart Indicator holds still
 

@@ -170,6 +170,7 @@ fn plan(p: &Project, piece: &VideoPiece) -> Option<(RenderPlan, i64)> {
                 ducking: Vec::new(),
                 range: (0, 1),
                 name: "black".into(),
+                colors: None,
             },
             0,
         ),
@@ -209,7 +210,7 @@ impl Screens {
             &self.gpu,
             Some(picture),
             &[],
-            (&[], &[], &[]),
+            (&[], &[], &[], None),
             size[0],
             size[1],
         );

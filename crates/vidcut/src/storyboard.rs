@@ -39,6 +39,7 @@ pub fn render(
         return Err(Error::invalid("the storyboard's range is empty"));
     }
     let plan = render::flatten(p, a, b)?;
+    let colors = plan.colors;
     let at = |piece: &VideoPiece, k: i64| piece.part(k, 1);
     let mut cells = Vec::new();
     match every {
@@ -95,7 +96,7 @@ pub fn render(
         columns * w + (columns + 1) * PAD,
         rows * (h + LABEL) + (rows + 1) * PAD,
     );
-    let pictures = pictures(&cells, p, w, h)?;
+    let pictures = pictures(&cells, p, (w, h), colors)?;
     let mut canvas: Vec<u8> = BACKGROUND.repeat(cw * ch);
     let mut out_cells = Vec::new();
     for (i, (cell, rgba)) in cells.iter().zip(&pictures).enumerate() {
@@ -131,7 +132,12 @@ pub fn render(
     }))
 }
 
-fn pictures(cells: &[Cell], p: &Project, w: usize, h: usize) -> Result<Vec<Vec<u8>>> {
+fn pictures(
+    cells: &[Cell],
+    p: &Project,
+    (w, h): (usize, usize),
+    colors: Option<vidcut_core::model::Hdr>,
+) -> Result<Vec<Vec<u8>>> {
     let fps = p.settings.fps;
     let decoding = crate::preferences::gpu_decoding();
     let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(6));
@@ -154,7 +160,7 @@ fn pictures(cells: &[Cell], p: &Project, w: usize, h: usize) -> Result<Vec<Vec<u
                     part.iter()
                         .map(|c| {
                             reader
-                                .rgba(&c.piece, fps, w as u32, h as u32)
+                                .rgba(&c.piece, fps, (w as u32, h as u32), colors)
                                 .map(|image| image.rgba)
                                 .map_err(from_av)
                         })

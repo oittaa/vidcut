@@ -5811,6 +5811,9 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
     if let Some(on) = set.use_proxies {
         p.settings.use_proxies = on;
     }
+    if let Some(colors) = set.timeline_colors {
+        p.settings.timeline_colors = colors;
+    }
     if let Some(fillers) = &set.fillers {
         crate::preferences::set_fillers(&mut p.settings.fillers, fillers)?;
     }

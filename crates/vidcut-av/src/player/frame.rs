@@ -197,13 +197,14 @@ impl Picture {
         height: u32,
         placed: &[Vec<vidcut_core::render::Placed>],
         crosses: &[bool],
+        colors: Option<vidcut_core::model::Hdr>,
     ) -> Result<Option<Self>> {
         if self.over.iter().all(|o| o.wipe.is_none()) {
             return Ok(None);
         }
         let width = width.max(2) & !1;
         let height = height.max(2) & !1;
-        let mut mixed = fitted(self, width, height)?;
+        let mut mixed = fitted(self, width, height, colors)?;
         let mut below: Option<frame::Video> = None;
         let mut i = 0;
         while i < self.over.len() {
@@ -215,9 +216,9 @@ impl Picture {
             if let Some(mask) = o.wipe {
                 let covered = |under: &frame::Video| -> Result<frame::Video> {
                     if mine.is_empty() {
-                        fitted(&o.picture, under.width(), under.height())
+                        fitted(&o.picture, under.width(), under.height(), colors)
                     } else {
-                        placed_on(under, &o.picture, mine, vidcut_core::render::WHOLE)
+                        placed_on(under, &o.picture, mine, vidcut_core::render::WHOLE, colors)
                     }
                 };
                 if hold {
@@ -240,10 +241,10 @@ impl Picture {
             let weight = o.weight;
             let laid = |under: &frame::Video| -> Result<frame::Video> {
                 if mine.is_empty() {
-                    let top = fitted(&o.picture, under.width(), under.height())?;
+                    let top = fitted(&o.picture, under.width(), under.height(), colors)?;
                     crate::export::mix::mix(under, &top, weight)
                 } else {
-                    placed_on(under, &o.picture, mine, weight)
+                    placed_on(under, &o.picture, mine, weight, colors)
                 }
             };
             if crossing && let Some(b) = &below {
@@ -254,6 +255,7 @@ impl Picture {
             }
             i += 1;
         }
+        crate::color::tag_frame(&mut mixed, colors);
         Ok(Some(Self::new(mixed, 0, None, None)))
     }
 }
@@ -263,8 +265,9 @@ fn placed_on(
     picture: &Picture,
     placed: &[vidcut_core::render::Placed],
     weight: u32,
+    colors: Option<vidcut_core::model::Hdr>,
 ) -> Result<frame::Video> {
-    let shown = source_frame(picture)?;
+    let shown = source_frame(picture, colors)?;
     let (placing, at) = crate::export::video::placing_of(
         picture.frame(),
         picture.rotation(),
@@ -283,7 +286,10 @@ fn placed_on(
     )
 }
 
-fn source_frame(picture: &Picture) -> Result<frame::Video> {
+fn source_frame(
+    picture: &Picture,
+    colors: Option<vidcut_core::model::Hdr>,
+) -> Result<frame::Video> {
     let frame = match picture.gpu() {
         None => crate::export::video::frame_ref(picture.frame())?,
         Some(_) => crate::hw::download(picture.frame())?,
@@ -292,7 +298,11 @@ fn source_frame(picture: &Picture) -> Result<frame::Video> {
     let sar = frame.aspect_ratio();
     let (n, d) = (sar.numerator(), sar.denominator());
     let square = n <= 0 || d <= 0 || n == d;
-    if frame.format() == format::Pixel::YUV420P && rotation.is_multiple_of(360) && square {
+    if colors.is_none()
+        && frame.format() == format::Pixel::YUV420P
+        && rotation.is_multiple_of(360)
+        && square
+    {
         return Ok(frame);
     }
     let (w, h) = if rotation % 180 == 90 {
@@ -305,19 +315,32 @@ fn source_frame(picture: &Picture) -> Result<frame::Video> {
         rotation,
         w,
         h,
-        format::Pixel::YUV420P,
-        None,
+        wipe_pixel(colors),
+        colors,
         crate::decode::Reading::Stream,
     )?;
     normalizer.run(&frame)
 }
 
-fn fitted(picture: &Picture, width: u32, height: u32) -> Result<frame::Video> {
+fn wipe_pixel(colors: Option<vidcut_core::model::Hdr>) -> format::Pixel {
+    match colors {
+        Some(_) => format::Pixel::YUV420P10LE,
+        None => format::Pixel::YUV420P,
+    }
+}
+
+fn fitted(
+    picture: &Picture,
+    width: u32,
+    height: u32,
+    colors: Option<vidcut_core::model::Hdr>,
+) -> Result<frame::Video> {
     let frame = match picture.gpu() {
         None => crate::export::video::frame_ref(picture.frame())?,
         Some(_) => crate::hw::download(picture.frame())?,
     };
-    if frame.format() == format::Pixel::YUV420P
+    if colors.is_none()
+        && frame.format() == format::Pixel::YUV420P
         && frame.width() == width
         && frame.height() == height
         && picture.rotation().is_multiple_of(360)
@@ -329,8 +352,8 @@ fn fitted(picture: &Picture, width: u32, height: u32) -> Result<frame::Video> {
         picture.rotation(),
         width,
         height,
-        format::Pixel::YUV420P,
-        None,
+        wipe_pixel(colors),
+        colors,
         crate::decode::Reading::Stream,
     )?;
     normalizer.run(&frame)
@@ -374,6 +397,7 @@ pub struct Shown {
     pub placed: Vec<Vec<vidcut_core::render::Placed>>,
     pub crosses: Vec<bool>,
     pub scales: Vec<Option<vidcut_core::model::Sharpness>>,
+    pub colors: Option<vidcut_core::model::Hdr>,
 }
 
 pub struct TitlePicture {
@@ -518,7 +542,7 @@ mod tests {
             }],
         ];
         let out = picture
-            .at_wipe(16, 8, &placed, &[false, false, true])
+            .at_wipe(16, 8, &placed, &[false, false, true], None)
             .unwrap()
             .unwrap();
         assert_eq!(luma_rect(out.frame(), 200), [0, 2, 8, 6]);
@@ -535,7 +559,7 @@ mod tests {
                 falling: false,
             }),
         }]);
-        let out = picture.at_wipe(16, 8, &[], &[]).unwrap().unwrap();
+        let out = picture.at_wipe(16, 8, &[], &[], None).unwrap().unwrap();
         assert_eq!(luma_rect(out.frame(), 200), [0, 0, 8, 8]);
         assert_eq!(luma_rect(out.frame(), 16), [8, 0, 16, 8]);
     }

@@ -183,7 +183,7 @@ fn filmstrip(project: &Project, n: i64, gpu: bool, stop: &AtomicBool, done: &Ato
         };
         if let Some(piece) = plan.video.first() {
             let _beside = vidcut_av::first::Beside::ask();
-            let _ = reader.rgba(piece, plan.fps, 160, 90);
+            let _ = reader.rgba(piece, plan.fps, (160, 90), plan.colors);
             done.fetch_add(1, Ordering::SeqCst);
         }
         at += 120;

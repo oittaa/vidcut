@@ -946,6 +946,7 @@ impl Player {
         let placed = plan.placed_at(pos, &placing);
         let crosses = plan.crosses_at(pos);
         let scales = plan.scales_at(pos);
+        let colors = plan.plan.colors;
         let (mut titles, titled) = self.shared.titles.shown(&plan, pos, &placing);
         let (cues, cued) = self.shared.subtitles.shown(&plan, pos);
         titles.extend(cues);
@@ -967,6 +968,7 @@ impl Player {
                     placed,
                     crosses,
                     scales,
+                    colors,
                 };
                 p.shown = Some(shown.clone());
                 p.shown_landing = landed.0;
@@ -988,6 +990,7 @@ impl Player {
                         placed: placed.clone(),
                         crosses: crosses.clone(),
                         scales: scales.clone(),
+                        colors,
                     });
                 }
                 p.shown.clone().map(|s| Shown {
@@ -997,6 +1000,7 @@ impl Player {
                     placed,
                     crosses,
                     scales,
+                    colors,
                     ..s
                 })
             }
@@ -1289,6 +1293,7 @@ mod tests {
             ducking: Vec::new(),
             range: (0, 1),
             name: "copies".into(),
+            colors: None,
         };
         let config = Config {
             audio_scrubbing: false,

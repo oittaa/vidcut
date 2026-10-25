@@ -785,6 +785,16 @@ impl Words<'_> {
         s.put("ripple_on", "Ripple", &raw, |x| json!(x.ripple_on));
         s.put("drop_frame", "Drop Frame", &raw, |x| json!(x.drop_frame));
         s.put("use_proxies", "Proxies", &raw, |x| json!(x.use_proxies));
+        let colors = |v: &Value| match v.as_str() {
+            Some("auto") => "Auto".to_string(),
+            Some("sdr") => "SDR".to_string(),
+            Some("pq") => "HDR PQ".to_string(),
+            Some("hlg") => "HDR HLG".to_string(),
+            _ => raw(v),
+        };
+        s.put("timeline_colors", "Timeline Color Space", &colors, |x| {
+            json!(x.timeline_colors)
+        });
         let spec = |key: &str| serde_json::from_value::<TimeSpec>(p[key].clone()).ok();
         if !p["start_tc"].is_null() {
             let new = first.zip(spec("start_tc")).and_then(|(x, t)| {

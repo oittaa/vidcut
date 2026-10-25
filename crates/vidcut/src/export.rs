@@ -1369,7 +1369,7 @@ pub fn frame(
     playhead: Option<i64>,
 ) -> Result<Value> {
     let fps = p.settings.fps;
-    let (piece, (w, h), frame) = match media {
+    let (piece, (w, h), frame, colors) = match media {
         None => {
             let t = p.time_context(playhead).resolve(at)?;
             if t < 0 || t >= p.end().max(1) {
@@ -1383,6 +1383,7 @@ pub fn frame(
                 plan.video[0].clone(),
                 (p.settings.width, p.settings.height),
                 t,
+                plan.colors,
             )
         }
         Some(id) => {
@@ -1410,7 +1411,7 @@ pub fn frame(
                     "frame {t} is outside {id} (0..{frames})"
                 )));
             }
-            (render::media_frame(p, id, t)?, v.display_size(), t)
+            (render::media_frame(p, id, t)?, v.display_size(), t, None)
         }
     };
     let (w, h) = match width {
@@ -1421,7 +1422,8 @@ pub fn frame(
         None => (w, h),
     };
     let decoder = crate::preferences::gpu_decoding().own_decoder();
-    vidcut_av::export::still::write_png(&piece, fps, w.max(2), h.max(2), out, decoder.as_ref())
+    let size = (w.max(2), h.max(2));
+    vidcut_av::export::still::write_png(&piece, fps, size, colors, out, decoder.as_ref())
         .map_err(from_av)?;
     Ok(json!({ "path": out, "frame": frame, "width": w, "height": h }))
 }

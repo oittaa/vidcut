@@ -61,7 +61,9 @@ fn main() {
                 placed: Vec::new(),
             };
             let t = Instant::now();
-            reader.rgba(&piece, fps, width, height).expect("tile");
+            reader
+                .rgba(&piece, fps, (width, height), None)
+                .expect("tile");
             first.get_or_insert(t.elapsed());
             n += 1;
         }

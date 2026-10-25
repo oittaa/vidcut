@@ -1,8 +1,8 @@
 # More timeline and output color spaces
 
-**When:** after [timeline-colors.md](timeline-colors.md).
+**When:** not decided.
 
-The timeline color space of timeline-colors.md has SDR (BT.709), HDR PQ and HDR HLG. Exports write only these colors now.
+The timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) has SDR (BT.709), HDR PQ and HDR HLG. Exports write only these colors now.
 
 ## What Resolve has
 

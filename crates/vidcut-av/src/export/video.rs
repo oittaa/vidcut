@@ -1011,6 +1011,86 @@ pub struct VideoFrames {
     sources: Vec<super::SourceNote>,
     burn: Option<Burner>,
     titles: Titles,
+    finish: Option<Finish>,
+}
+
+const MIXING: format::Pixel = format::Pixel::YUV444P12LE;
+
+struct Finish {
+    target: Option<Hdr>,
+    pixel: format::Pixel,
+    output: Output,
+    normalizer: Option<super::normalize::Normalizer>,
+    gpu: Option<crate::cuda::CudaPictures>,
+    gpu_failed: bool,
+}
+
+impl Finish {
+    fn run(&mut self, f: &frame::Video, reading: Reading) -> Result<frame::Video> {
+        let on_cuda = Place::of(f) == Place::Cuda;
+        if let (true, Output::Cuda { device, frames }) = (on_cuda, &self.output) {
+            if !self.gpu_failed {
+                match converted_on_gpu(&mut self.gpu, device, f, self.pixel, self.target) {
+                    Ok(out) => return Ok(out),
+                    Err(e) => {
+                        crate::debug!(
+                            "decoding",
+                            "the GPU won't convert the timeline's colors, the CPU converts them: {e}"
+                        );
+                        self.gpu_failed = true;
+                    }
+                }
+            }
+            let m = crate::hw::download(f)?;
+            let out =
+                converted_in_memory(&mut self.normalizer, &m, self.pixel, self.target, reading)?;
+            return frames.upload(&out);
+        }
+        let m = match Place::of(f) {
+            Place::Memory => frame_ref(f)?,
+            _ => crate::hw::download(f)?,
+        };
+        converted_in_memory(&mut self.normalizer, &m, self.pixel, self.target, reading)
+    }
+}
+
+fn converted_on_gpu(
+    gpu: &mut Option<crate::cuda::CudaPictures>,
+    device: &crate::cuda::CudaDevice,
+    f: &frame::Video,
+    pixel: format::Pixel,
+    target: Option<Hdr>,
+) -> Result<frame::Video> {
+    if gpu.is_none() {
+        *gpu = Some(crate::cuda::CudaPictures::converting(
+            device, f, pixel, target,
+        )?);
+    }
+    let g = gpu.as_mut().expect("made above");
+    g.push(Some(&frame_ref(f)?))?;
+    g.pull()?
+        .ok_or_else(|| Error::Invalid("the GPU held back a converted frame".into()))
+}
+
+fn converted_in_memory(
+    normalizer: &mut Option<super::normalize::Normalizer>,
+    f: &frame::Video,
+    pixel: format::Pixel,
+    target: Option<Hdr>,
+    reading: Reading,
+) -> Result<frame::Video> {
+    if normalizer.as_ref().is_none_or(|n| !n.matches(f, 0)) {
+        *normalizer = Some(super::normalize::Normalizer::new(
+            f,
+            0,
+            f.width(),
+            f.height(),
+            pixel,
+            target,
+            reading,
+        )?);
+    }
+    normalizer.as_mut().expect("made above").run(f)
 }
 
 struct Burner {
@@ -1316,7 +1396,54 @@ impl VideoFrames {
             sources: Vec::new(),
             burn: None,
             titles: Titles::default(),
+            finish: None,
         }
+    }
+
+    pub fn with_timeline(mut self, timeline: Option<Hdr>) -> Result<Self> {
+        let target = self.maker.target();
+        if timeline == target
+            || matches!(self.maker.output(), Output::Decoded { .. } | Output::Vulkan)
+        {
+            return Ok(self);
+        }
+        let (w, h, pixel) = self.maker.out();
+        let reading = self.maker.reading();
+        let (mixing, output) = match self.maker.output() {
+            Output::Cuda { device, .. } => {
+                let p010 = format::Pixel::P010LE;
+                let frames = crate::cuda::CudaFrames::new(device, p010, w, h)?;
+                let device = device.clone();
+                (p010, Output::Cuda { device, frames })
+            }
+            _ => (MIXING, Output::Fitted),
+        };
+        let maker = Maker::new((w, h, mixing), timeline, output, reading);
+        let encoder = std::mem::replace(&mut self.maker, maker).into_output();
+        self.finish = Some(Finish {
+            target,
+            pixel,
+            output: encoder,
+            normalizer: None,
+            gpu: None,
+            gpu_failed: false,
+        });
+        self.black = None;
+        Ok(self)
+    }
+
+    fn finished(&mut self, mut f: frame::Video) -> Result<frame::Video> {
+        let timeline = self.maker.target();
+        let reading = self.maker.reading();
+        let Some(finish) = self.finish.as_mut() else {
+            return Ok(f);
+        };
+        crate::color::tag_frame(&mut f, timeline);
+        let mut out = finish.run(&f, reading)?;
+        crate::hdr::strip(&mut out);
+        crate::hdr::copy_dynamic(&f, &mut out, self.dynamic)?;
+        out.set_pts(f.pts());
+        Ok(out)
     }
 
     pub fn with_burn(mut self, cues: Vec<super::subtitles::Cue>, style: SubtitleStyle) -> Self {
@@ -1462,10 +1589,11 @@ impl VideoFrames {
             .unwrap_or_default();
         let f = self.compose(layers, &titles)?;
         self.titles.shown();
-        match self.burn.as_mut() {
-            Some(b) => b.burn(f, self.maker.output()).map(Some),
-            None => Ok(Some(f)),
-        }
+        let f = match self.burn.as_mut() {
+            Some(b) => b.burn(f, self.maker.output())?,
+            None => f,
+        };
+        self.finished(f).map(Some)
     }
 
     fn compose(
@@ -1629,11 +1757,14 @@ impl VideoFrames {
                         src.reader.decoding().clone(),
                     )
                 };
-                let frame = if backward {
+                let mut frame = if backward {
                     self.reversed_frame(i, s, layer, k)?
                 } else {
                     self.source_frame(i, s, layer, k)?
                 };
+                if self.finish.is_some() && Place::of(&frame) == Place::Memory {
+                    crate::color::tag_frame(&mut frame, self.maker.target());
+                }
                 let decoded = matches!(self.maker.output(), Output::Decoded { .. });
                 let placing = match (&self.open[s].current, placed.is_empty() || decoded) {
                     (Some((f, _)), false) => {
@@ -1907,6 +2038,7 @@ impl VideoFrames {
             let (w, h, pix) = self.maker.out();
             let mut f = frame::Video::new(pix, w, h);
             fill_black(&mut f)?;
+            crate::color::tag_frame(&mut f, self.maker.target());
             self.black = Some(f);
         }
         Ok(self.black.as_ref().expect("just set"))

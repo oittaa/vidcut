@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_core::Project;
-use vidcut_core::model::Settings;
+use vidcut_core::model::{Hdr, Settings, TimelineColors};
 use vidcut_core::time::{Rational, STANDARD_RATES, TimeSpec};
 
 use super::export::{Ask, Picked, near_center};
@@ -32,6 +32,8 @@ pub(super) struct Format {
     rate: String,
     drop_frame: bool,
     start: String,
+    colors: TimelineColors,
+    auto: Option<Hdr>,
 }
 
 impl Default for Format {
@@ -42,7 +44,24 @@ impl Default for Format {
             rate: "30".into(),
             drop_frame: false,
             start: "00:00:00:00".into(),
+            colors: TimelineColors::Auto,
+            auto: None,
         }
+    }
+}
+
+const COLORS: [TimelineColors; 4] = [
+    TimelineColors::Auto,
+    TimelineColors::Sdr,
+    TimelineColors::Pq,
+    TimelineColors::Hlg,
+];
+
+fn colors_name(hdr: Option<Hdr>) -> &'static str {
+    match hdr {
+        None => "SDR",
+        Some(Hdr::Pq) => "HDR PQ",
+        Some(Hdr::Hlg) => "HDR HLG",
     }
 }
 
@@ -54,7 +73,43 @@ impl Format {
             rate: rate_text(p.settings.fps),
             drop_frame: p.settings.drop_frame,
             start: p.settings.timecode(0),
+            colors: p.settings.timeline_colors,
+            auto: vidcut_core::render::auto_colors(p),
         }
+    }
+
+    fn colors_text(&self, colors: TimelineColors) -> String {
+        match colors {
+            TimelineColors::Auto => format!("Auto ({})", colors_name(self.auto)),
+            TimelineColors::Sdr => colors_name(None).into(),
+            TimelineColors::Pq => colors_name(Some(Hdr::Pq)).into(),
+            TimelineColors::Hlg => colors_name(Some(Hdr::Hlg)).into(),
+        }
+    }
+
+    fn edit_colors(&mut self, ui: &mut egui::Ui) {
+        egui::Grid::new(ui.scope_id().with("colors"))
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                let label = ui.label("Timeline Color Space");
+                egui::ComboBox::from_id_salt("timeline colors")
+                    .selected_text(self.colors_text(self.colors))
+                    .width(170.0)
+                    .show_ui(ui, |ui| {
+                        for c in COLORS {
+                            if ui
+                                .selectable_label(self.colors == c, self.colors_text(c))
+                                .clicked()
+                            {
+                                self.colors = c;
+                            }
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id);
+                ui.end_row();
+            });
     }
 
     fn fps(&self) -> Option<Rational> {
@@ -537,6 +592,7 @@ impl Workspace {
             .show(ctx, |ui| {
                 format.edit(ui, empty);
                 format.edit_start(ui);
+                format.edit_colors(ui);
                 if !empty {
                     ui.label(
                         RichText::new(
@@ -582,6 +638,9 @@ fn changes(now: &Format, was: &Format) -> Value {
     }
     if let Some(start) = now.start().filter(|&s| Some(s) != was.start()) {
         set.insert("start_tc".into(), json!(start));
+    }
+    if now.colors != was.colors {
+        set.insert("timeline_colors".into(), json!(now.colors));
     }
     Value::Object(set)
 }
