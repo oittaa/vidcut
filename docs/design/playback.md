@@ -232,7 +232,7 @@ The audio device:
 - Each turn calls `Player::present`, then `Screen::draw` into an RGBA target. The target has the size of the viewer's picture in physical pixels.
 - With an SDR timeline, one render pass of `crates/vidcut/src/gui/picture.wgsl` does all the drawing into the target.
 - With an HDR timeline, the passes draw into a picture of 16-bit floats (`Wide`) in the PQ or HLG code values of the timeline:
-  - Each layer goes to linear light, to BT.2020, and then to the transfer of the timeline. Each title and subtitle goes there from sRGB.
+  - Each layer is converted to linear light, then to BT.2020 colors, then to the PQ or HLG curve of the timeline. Titles and subtitles are converted the same way from sRGB.
   - Then one more draw (`fs_screen`) converts that picture to the target: to BT.709, tone-mapped with the export's math.
   - Thus the layers, titles and subtitles mix in the timeline's code values, as in an export.
 - The drawing:

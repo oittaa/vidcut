@@ -244,7 +244,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - There is no grading.
 - **Why:**
   - vidcut cuts. Grading belongs in other tools.
-  - Auto gives mixed phone, camera and screen footage its colors without settings.
+  - With Auto, mixed phone, camera and screen footage comes out correctly without color settings.
   - The HDR video of a phone stays HDR.
   - The working space of Resolve's color management is not known. A straight line in the code values is what Resolve does without color management.
   - The other color spaces of Resolve come later ([todo](todo/timeline-color-spaces-more.md)).

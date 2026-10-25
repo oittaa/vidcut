@@ -58,7 +58,9 @@ Colors:
   - The dynamic range follows the timeline color space of the plan (`RenderPlan::colors`).
   - The bit depth follows the pictures that the output shows.
 - `render::timeline_colors` resolves the timeline color space when the plan is made.
-  - For Auto, a plan of the whole timeline counts its own pictures. A plan of a part calls `render::auto_colors`, which plans the whole timeline.
+  - For Auto, vidcut must know how much of the timeline's picture is HDR. To find out, it counts the pictures of a plan of the whole timeline.
+  - The viewer's plan covers the whole timeline. Thus vidcut counts the pictures in that plan.
+  - An export of a range has a plan of only a part. Then `render::auto_colors` makes a second plan, of the whole timeline, for the count.
 - Then it picks the HDR metadata (spec D46). It uses the rules in `vidcut_core::export`.
 - With an SDR timeline, `export::choose_metadata` counts every picture as SDR.
 - A depth that is set, or fixed by the codec or profile, wins.
@@ -207,8 +209,8 @@ Every mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-
 
 - In memory, the timeline's frames are 12-bit 4:4:4 (`MIXING`). `Normalizer` makes the conversion.
 - For NVENC, the timeline's frames are P010 in a pool of their own. libplacebo makes the conversion on the GPU (`CudaPictures::converting`).
-- When the GPU's conversion fails, the frame comes down, `Normalizer` converts it, and it goes back up.
-- The other GPUs fit pictures only where their colors stay. Thus their frames come down for the timeline colors, and go to the encoder from memory.
+- When the GPU's conversion fails, the frame is copied to memory. `Normalizer` converts it there, and it is copied back to the GPU.
+- The other GPUs can fit a picture only when its colors do not change. Thus, for the timeline colors, their frames are copied to memory, and go to the encoder from there.
 - `color::tag_frame` gives the timeline's frames and the black frame their color tags. `burn::blend` and `Normalizer` read these tags.
 - The conversion keeps the HDR10+ and Dolby Vision metadata of the frame, as a mix does.
 - When the output has the timeline's colors, there is no second stage.
@@ -216,7 +218,7 @@ Every mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-
 Picture renders:
 
 - `frame.render` of a timeline frame and the storyboards use the same stages (`renderer::frames`, `FrameReader::rgba`).
-- `frame.render` of a media and the tiles go straight to their colors.
+- `frame.render` of a media and the tiles do not use the timeline color space. They convert each picture of the file directly to RGB.
 
 ## Sound
 
