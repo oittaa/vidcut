@@ -364,6 +364,35 @@ fn apply_video_budget() {
     }
 }
 
+pub(crate) use store::Lent;
+
+fn cache_on(gpu: &crate::gpus::Gpu) -> bool {
+    crate::gpus::in_use().is_some_and(|g| g.id == gpu.id)
+}
+
+pub(crate) fn room_on(gpu: &crate::gpus::Gpu) -> Option<u64> {
+    let spare = crate::gpus::spare(gpu).map(|b| b as usize);
+    let card = gpu.memory_mb.map(|mb| (mb as usize) << 20);
+    store::room(spare, card, cache_on(gpu)).map(|b| b as u64)
+}
+
+pub(crate) fn lend_on(gpu: &crate::gpus::Gpu, need: u64, room: u64) -> Option<Lent> {
+    if !cache_on(gpu) {
+        return None;
+    }
+    crate::debug!(
+        "ai",
+        "{} MB of the GPU lent for AI work, {} MB left for the kept pictures",
+        need >> 20,
+        room.saturating_sub(need) >> 20
+    );
+    Some(store::lend(need as usize, room as usize))
+}
+
+pub fn video_lent() -> Option<usize> {
+    store::lent_cap()
+}
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }

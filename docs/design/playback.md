@@ -108,6 +108,7 @@ Motions:
 - By default, the video budget is half the memory of the GPU that decodes (`Gpu::memory_mb`, [gpu](gpu.md)). It is at least 1 GB (`Budget::gpu_video`).
 - Thus the small dedicated share of an integrated GPU does not make the budget small.
 - Apple silicon has one shared budget.
+- While an AI upscaler holds GPU memory, the video budget is smaller (`store::Lent`, [gpu](gpu.md)).
 - The least recently used pictures go first, whichever engine decoded them.
 - The prepared picture of each engine never goes (`Store::hold`).
 - An `Id` names what a picture shows. Thus an engine can show a picture that another engine decoded.

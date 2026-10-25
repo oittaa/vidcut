@@ -52,6 +52,53 @@ struct Inner {
     held: HashMap<u64, Id>,
     owners: usize,
     coming_down: Vec<(Id, Arc<Picture>)>,
+    lent: HashMap<u64, Loan>,
+    loans: u64,
+}
+
+struct Loan {
+    need: usize,
+    cap: usize,
+}
+
+pub(crate) struct Lent(u64);
+
+impl Drop for Lent {
+    fn drop(&mut self) {
+        GLOBAL.lock().lent.remove(&self.0);
+    }
+}
+
+pub(crate) fn room(spare: Option<usize>, card: Option<usize>, cache: bool) -> Option<usize> {
+    let inner = GLOBAL.lock();
+    let kept = if cache {
+        inner.bytes[Kind::Video.index()]
+    } else {
+        0
+    };
+    match spare {
+        Some(spare) => Some(spare + kept),
+        None => {
+            let lent: usize = inner.lent.values().map(|l| l.need).sum();
+            card.map(|c| c.saturating_sub(super::GB + lent))
+        }
+    }
+}
+
+pub(crate) fn lend(need: usize, room: usize) -> Lent {
+    let mut inner = GLOBAL.lock();
+    inner.loans += 1;
+    let id = inner.loans;
+    let cap = room.saturating_sub(need);
+    inner.lent.insert(id, Loan { need, cap });
+    let down = inner.evict(Kind::Video, None);
+    drop(inner);
+    GLOBAL.bring_down(down, None);
+    Lent(id)
+}
+
+pub(crate) fn lent_cap() -> Option<usize> {
+    GLOBAL.lock().lent.values().map(|l| l.cap).min()
 }
 
 static GLOBAL: LazyLock<Store> = LazyLock::new(|| Store::new(super::GB, super::GB));
@@ -137,6 +184,8 @@ impl Store {
                 held: HashMap::new(),
                 owners: 0,
                 coming_down: Vec::new(),
+                lent: HashMap::new(),
+                loans: 0,
             }),
             landed: Condvar::new(),
             down: Picture::copied_down,
@@ -149,7 +198,7 @@ impl Store {
 
     pub(crate) fn budget(&self, kind: Kind) -> usize {
         let inner = self.lock();
-        inner.budget[inner.pool(kind).index()]
+        inner.limit(inner.pool(kind))
     }
 
     pub(crate) fn shared(&self) -> bool {
@@ -353,6 +402,14 @@ impl Inner {
         if self.shared { Kind::Memory } else { kind }
     }
 
+    fn limit(&self, pool: Kind) -> usize {
+        let budget = self.budget[pool.index()];
+        if pool != self.pool(Kind::Video) {
+            return budget;
+        }
+        self.lent.values().map(|l| l.cap).fold(budget, usize::min)
+    }
+
     fn counted(&self, pool: Kind) -> usize {
         let leaving = self.leaving();
         [Kind::Memory, Kind::Video]
@@ -393,7 +450,7 @@ impl Inner {
             .and_then(|k| self.pictures.get(k))
             .map_or_else(Vec::new, |(p, _)| p.pools());
         let mut down = Vec::new();
-        while self.counted(pool) > self.budget[pool.index()] {
+        while self.counted(pool) > self.limit(pool) {
             let oldest = self
                 .pictures
                 .iter()
