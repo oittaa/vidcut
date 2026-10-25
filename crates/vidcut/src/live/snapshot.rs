@@ -196,7 +196,6 @@ pub struct Snapshot {
     pub show_super_scale: bool,
     pub preview_error: Option<String>,
     pub theme: Arc<crate::themes::Theme>,
-    pub budget: vidcut_av::player::Budget,
     pub history_preview: Option<Arc<HistoryPreview>>,
     pub flash: Option<Arc<Flash>>,
 }

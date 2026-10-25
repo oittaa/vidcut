@@ -741,7 +741,7 @@ impl Decoder {
                     seek_keeps = Some(t - self.chunk() + 1);
                 }
                 let id = if small.is_some() {
-                    plan.id(i).small()
+                    self.shared.store.small(&plan.id(i))
                 } else {
                     plan.id(i)
                 };

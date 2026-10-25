@@ -8,7 +8,7 @@ pub(crate) struct Id {
     source: Arc<str>,
     pos: i64,
     over: Option<Arc<[Layer]>>,
-    small: bool,
+    small: Option<u64>,
 }
 
 type Layer = (Arc<str>, i64, u32);
@@ -54,20 +54,20 @@ impl Id {
             source: source.into(),
             pos,
             over: None,
-            small: false,
+            small: None,
         }
     }
 }
 
 impl Id {
-    pub(crate) fn small(&self) -> Self {
+    pub(crate) fn small(&self, owner: u64) -> Self {
         Self {
-            small: true,
+            small: Some(owner),
             ..self.clone()
         }
     }
 
-    pub(crate) fn is_small(&self) -> bool {
+    pub(crate) fn small_owner(&self) -> Option<u64> {
         self.small
     }
 }
@@ -138,7 +138,7 @@ impl Plan {
                 source: "".into(),
                 pos: 0,
                 over: None,
-                small: false,
+                small: None,
             };
         };
         let pos = |l: &VideoPiece| match l {
@@ -158,7 +158,7 @@ impl Plan {
             source: keys[0].clone(),
             pos: pos(layers[0].0),
             over: (!over.is_empty()).then(|| over.into()),
-            small: false,
+            small: None,
         }
     }
 

@@ -136,9 +136,9 @@ pub fn check<'a>(
         )));
     }
     get_ready(dir, download)?;
-    with_engine(|gpu, model| {
+    with_engine(|gpu, _| {
         for (source, size) in &sizes {
-            run::plan(gpu, &run::Geometry::new(*source, *size), model.bytes)?;
+            run::plan(gpu, &run::Geometry::new(*source, *size))?;
         }
         Ok(())
     })
@@ -147,6 +147,7 @@ pub fn check<'a>(
 struct Engine {
     gpu: gpu::Gpu,
     model: Option<model::Model>,
+    lent: Option<crate::player::Lent>,
 }
 
 static ENGINE: crate::ai::Slot<Engine> = crate::ai::Slot::new();
@@ -155,11 +156,16 @@ impl crate::ai::Network for Engine {
     const UPSCALER: Upscaler = Upscaler::AiBest;
 
     fn start() -> std::result::Result<Self, String> {
-        gpu::Gpu::start().map(|gpu| Engine { gpu, model: None })
+        gpu::Gpu::start().map(|gpu| Engine {
+            gpu,
+            model: None,
+            lent: None,
+        })
     }
 
     fn free(&mut self) {
         self.model = None;
+        self.lent = None;
     }
 }
 
@@ -177,8 +183,13 @@ fn with_engine<T>(run: impl FnOnce(&gpu::Gpu, &model::Model) -> Result<T>) -> Re
                 prompt: &prompt,
             };
             let gpu = &e.gpu;
+            let listed = gpu.listed.as_ref();
+            let room = listed.and_then(crate::player::room_on);
             let loaded =
                 crate::compute::checked(&gpu.device, gpu::WHAT, || model::load(gpu, &paths))?;
+            e.lent = listed
+                .zip(room)
+                .and_then(|(on, room)| crate::player::lend_on(on, loaded.bytes, room));
             e.model = Some(loaded);
         }
         let model = e.model.as_ref().expect("loaded");
@@ -196,6 +207,7 @@ pub fn model_size((w, h): (u32, u32)) -> (u32, u32) {
 
 pub struct Stream {
     inner: run::Stream,
+    _lent: Option<crate::player::Lent>,
 }
 
 pub(crate) struct Run {
@@ -247,11 +259,16 @@ impl Stream {
         if let Some(dir) = &dump {
             std::fs::create_dir_all(dir)?;
         }
-        let inner = with_engine(|gpu, model| {
-            let resident = run::plan(gpu, &geometry, model.bytes)?;
-            run::Stream::new(gpu, geometry, &resident, dump)
+        let (inner, lent) = with_engine(|gpu, _| {
+            let plan = run::plan(gpu, &geometry)?;
+            let lent = gpu
+                .listed
+                .as_ref()
+                .zip(plan.room)
+                .and_then(|(on, room)| crate::player::lend_on(on, plan.need, room));
+            Ok((run::Stream::new(gpu, geometry, &plan.resident, dump)?, lent))
         })?;
-        Ok(Self { inner })
+        Ok(Self { inner, _lent: lent })
     }
 
     pub fn push(&mut self, rgb: &[u8]) -> Result<Vec<Vec<u8>>> {
