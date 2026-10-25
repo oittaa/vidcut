@@ -70,6 +70,19 @@ pub(super) fn row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui:
     r
 }
 
+pub(super) fn tall_row<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    ui.scope(|ui| {
+        ui.horizontal(|ui| ui.label(RichText::new(label).color(theme::colors().text_dim)))
+    });
+    let r = ui.scope(add).inner;
+    ui.end_row();
+    r
+}
+
 pub(super) fn switch<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     egui::Frame::new()
         .stroke(egui::Stroke::new(1.0, theme::colors().line))

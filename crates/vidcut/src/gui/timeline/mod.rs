@@ -396,6 +396,44 @@ fn header_button(ui: &mut egui::Ui, at: Rect, icon: &str, name: &str, lit: bool)
     r
 }
 
+fn marker_colors(ui: &mut egui::Ui, color: &mut String) {
+    ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+    for row in ops::MARKER_COLORS.chunks(8) {
+        ui.horizontal(|ui| {
+            for name in row {
+                if color_button(ui, name, color == name).clicked() {
+                    *color = name.to_string();
+                }
+            }
+        });
+    }
+}
+
+fn color_button(ui: &mut egui::Ui, name: &str, on: bool) -> egui::Response {
+    let (rect, r) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+    let title = theme::color_title(name);
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, true, on, &title));
+    let c = theme::colors();
+    let painter = ui.painter();
+    painter.rect_filled(rect, egui::CornerRadius::same(3), paint::marker_color(name));
+    let ring = if on {
+        Some(egui::Stroke::new(2.0, c.text))
+    } else if r.hovered() {
+        Some(egui::Stroke::new(1.0, c.text_dim))
+    } else {
+        None
+    };
+    if let Some(ring) = ring {
+        painter.rect_stroke(
+            rect.expand(3.0),
+            egui::CornerRadius::same(5),
+            ring,
+            egui::StrokeKind::Inside,
+        );
+    }
+    r.on_hover_text(title)
+}
+
 fn word_toggle(ui: &mut egui::Ui, word: &str, name: &str, on: bool) -> egui::Response {
     let r = ui.add(egui::Button::selectable(on, RichText::new(word).small()));
     r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, name));
@@ -1281,13 +1319,22 @@ impl Workspace {
                 ui.close();
             }
         });
-        if icon_toggle(ui, icon::SPLIT, "Split", false).clicked() {
+        if icon_toggle(ui, icon::SPLIT, "Split", false)
+            .on_hover_text("Split")
+            .clicked()
+        {
             self.split_at_playhead();
         }
-        if icon_toggle(ui, icon::MARKER, "Marker", false).clicked() {
+        if icon_toggle(ui, icon::MARKER, "Marker", false)
+            .on_hover_text("Add Marker")
+            .clicked()
+        {
             self.send("markers.add", json!({ "at": self.snap.timeline.position }));
         }
-        if icon_toggle(ui, icon::SNAP, "Snap", self.snapping()).clicked() {
+        if icon_toggle(ui, icon::SNAP, "Snap", self.snapping())
+            .on_hover_text("Snap")
+            .clicked()
+        {
             self.timeline.options.snapping = !self.timeline.options.snapping;
             self.timeline.options.save();
         }
@@ -1598,7 +1645,10 @@ impl Workspace {
                 icon::ENLARGE
             };
             let name = format!("Enlarge {}", t.id);
-            if header_button(&mut child, parts.enlarge, glyph, &name, enlarged).clicked() {
+            if header_button(&mut child, parts.enlarge, glyph, &name, enlarged)
+                .on_hover_text("Enlarge Track")
+                .clicked()
+            {
                 self.timeline.enlarged = (!enlarged).then(|| t.id.clone());
             }
             let lock = if t.locked {
@@ -1614,12 +1664,14 @@ impl Workspace {
             let mut buttons = vec![
                 (
                     "Lock",
+                    "Lock Track",
                     t.locked,
                     lock,
                     json!({ "track": t.id, "locked": !t.locked }),
                 ),
                 (
                     "Audio",
+                    "Mute",
                     t.muted,
                     sound,
                     json!({ "track": t.id, "muted": !t.muted }),
@@ -1632,11 +1684,14 @@ impl Workspace {
                     icon::VIDEO_OFF
                 };
                 let change = json!({ "track": t.id, "video_enabled": !t.video_enabled });
-                buttons.push(("Video", !t.video_enabled, picture, change));
+                buttons.push(("Video", "Disable Video", !t.video_enabled, picture, change));
             }
-            for ((what, lit, glyph, change), at) in buttons.into_iter().zip(parts.toggles) {
+            for ((what, tip, lit, glyph, change), at) in buttons.into_iter().zip(parts.toggles) {
                 let name = format!("{what} {}", t.id);
-                if header_button(&mut child, at, glyph, &name, lit).clicked() {
+                if header_button(&mut child, at, glyph, &name, lit)
+                    .on_hover_text(tip)
+                    .clicked()
+                {
                     self.send("track.set", change);
                 }
             }
@@ -2959,22 +3014,14 @@ impl Workspace {
                 super::dialog::row(ui, "Name", |ui| {
                     ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(260.0));
                 });
-                super::dialog::row(ui, "Notes", |ui| {
+                super::dialog::tall_row(ui, "Notes", |ui| {
                     ui.add(
                         egui::TextEdit::multiline(&mut d.note)
                             .desired_rows(3)
                             .desired_width(260.0),
                     );
                 });
-                super::dialog::row(ui, "Color", |ui| {
-                    egui::ComboBox::from_id_salt("marker-color")
-                        .selected_text(&d.color)
-                        .show_ui(ui, |ui| {
-                            for c in ops::MARKER_COLORS {
-                                ui.selectable_value(&mut d.color, c.to_string(), *c);
-                            }
-                        });
-                });
+                super::dialog::tall_row(ui, "Color", |ui| marker_colors(ui, &mut d.color));
             });
             super::dialog::footer(ui, |ui| {
                 if super::dialog::main_button(ui, "Done", true) {

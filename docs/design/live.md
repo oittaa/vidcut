@@ -474,6 +474,9 @@ The bar and the Jobs button:
 - **Dialogs.**
   - `dialog::window` gives a window its width and spacing.
   - `dialog::form` and `dialog::row` give its labeled rows.
+  - `dialog::tall_row` gives a row that is taller than one line, for example a box of notes.
+    - It puts the label and the content at the top of the row.
+    - Thus the content does not cover the next row.
   - `dialog::switch` gives a choice of two or three.
   - `dialog::advanced` gives the settings that are rarely needed.
   - `dialog::footer` gives Cancel and the one main button (`dialog::main_button`, in the selection color of the theme).
