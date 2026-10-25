@@ -339,6 +339,7 @@ impl Decoder {
                 let (min, max) = self.windows(2);
                 let behind = (plan.clamp(focus - min + 1)..focus)
                     .rev()
+                    .filter(|&t| plan.fill_at(t).behind)
                     .find(|&t| missing(t));
                 match behind {
                     Some(t) => {
@@ -455,7 +456,7 @@ impl Decoder {
                         },
                 ))
                 .find(|&t| missing(t))
-                .filter(|&t| self.next == Some(t))
+                .filter(|&t| self.next == Some(t) && plan.fill_at(t).ahead)
                 .map(|t| (t, Reach::Forward)),
         };
         if let Some((t, reach)) = wanted {
@@ -468,6 +469,7 @@ impl Decoder {
         let (min, max) = self.windows(2);
         let behind = (plan.clamp(focus - min + 1)..focus)
             .rev()
+            .filter(|&t| plan.fill_at(t).behind)
             .find(|&t| missing(t));
         if !self.back && self.prepare(snap)? {
             return Ok(true);

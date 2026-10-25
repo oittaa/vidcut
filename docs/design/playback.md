@@ -91,6 +91,12 @@ Motions:
   2. pictures ahead in the direction of play
   3. when playing backward, whole windows from a keyframe
   4. when idle, the prepared frame and a window behind the playhead
+- Each piece of the plan says which frames the player may decode before they are asked for (`player::plan::Fill`).
+  - By default, the player fills frames ahead of the playhead and behind it.
+  - A piece with an AI upscaler fills no frames behind the playhead. An AI picture takes much GPU time. A frame before the current run starts a new run of the upscaler ([gpu](gpu.md)).
+  - Where layers overlap, a fill is allowed only when each layer allows it (`Plan::fill_at`).
+  - The viewer's frame, play backward and steps back still decode the frames that they need.
+  - The prepared frame is made also with an AI upscaler. Thus the next clip can show its first frame at once.
 - While it plays, or while its viewer waits, the decoding thread holds a `first::Claim`. Thus jobs yield.
 
 **Kept pictures**
