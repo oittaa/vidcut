@@ -1,6 +1,8 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard};
 use std::time::Instant;
+
+use vidcut_core::lru::Lru;
 
 use super::frame::Picture;
 use super::plan::Id;
@@ -43,27 +45,162 @@ pub(crate) struct Store {
     down: fn(&Picture) -> Result<Picture>,
 }
 
+type Order = Lru<Id, (), { usize::MAX }>;
+
 struct Inner {
-    pictures: HashMap<Id, (Arc<Picture>, u64)>,
-    clock: u64,
+    pictures: Lru<Id, Arc<Picture>, { usize::MAX }>,
+    kinds: [Order; 2],
+    pools: HashMap<usize, HashSet<Id>>,
+    small: HashMap<u64, HashSet<Id>>,
     bytes: [usize; 2],
     budget: [usize; 2],
     shared: bool,
-    held: Option<Id>,
+    held: HashMap<u64, Id>,
+    owners: usize,
     coming_down: Vec<(Id, Arc<Picture>)>,
+    lent: HashMap<u64, Loan>,
+    loans: u64,
+    cap: Option<usize>,
+    lent_need: usize,
+}
+
+struct Loan {
+    need: usize,
+    cap: usize,
+}
+
+pub(crate) struct Lent(u64);
+
+impl Drop for Lent {
+    fn drop(&mut self) {
+        let mut inner = GLOBAL.lock();
+        if let Some(loan) = inner.lent.remove(&self.0) {
+            inner.lent_need -= loan.need;
+            inner.cap = inner.lent.values().map(|l| l.cap).min();
+        }
+    }
+}
+
+pub(crate) fn room(spare: Option<usize>, card: Option<usize>, cache: bool) -> Option<usize> {
+    let inner = GLOBAL.lock();
+    let kept = if cache {
+        inner.bytes[Kind::Video.index()]
+    } else {
+        0
+    };
+    match spare {
+        Some(spare) => Some(spare + kept),
+        None => card.map(|c| c.saturating_sub(super::GB + inner.lent_need)),
+    }
+}
+
+pub(crate) fn lend(need: usize, room: usize) -> Lent {
+    let mut inner = GLOBAL.lock();
+    inner.loans += 1;
+    let id = inner.loans;
+    let cap = room.saturating_sub(need);
+    inner.lent.insert(id, Loan { need, cap });
+    inner.lent_need += need;
+    inner.cap = Some(inner.cap.map_or(cap, |c| c.min(cap)));
+    let down = inner.evict(Kind::Video, None);
+    drop(inner);
+    GLOBAL.bring_down(down, None);
+    Lent(id)
+}
+
+pub(crate) fn lent_cap() -> Option<usize> {
+    GLOBAL.lock().cap
+}
+
+static GLOBAL: LazyLock<Store> = LazyLock::new(|| Store::new(super::GB, super::GB));
+
+pub(crate) fn global() -> &'static Store {
+    &GLOBAL
+}
+
+pub(crate) struct Share {
+    owner: u64,
+    part: usize,
+}
+
+impl Share {
+    pub(crate) fn join(owner: u64, part: usize) -> Self {
+        GLOBAL.lock().owners += 1;
+        Self {
+            owner,
+            part: part.max(1),
+        }
+    }
+
+    pub(crate) fn budget(&self, kind: Kind) -> usize {
+        GLOBAL.budget(kind) / self.part
+    }
+
+    pub(crate) fn get(&self, id: &Id) -> Option<Arc<Picture>> {
+        GLOBAL.get(id, self.owner)
+    }
+
+    pub(crate) fn contains(&self, id: &Id) -> bool {
+        GLOBAL.contains(id, self.owner)
+    }
+
+    pub(crate) fn kept_run(&self, ids: impl IntoIterator<Item = Id>) -> usize {
+        GLOBAL.kept_run(ids, self.owner)
+    }
+
+    pub(crate) fn touch(&self, ids: impl IntoIterator<Item = Id>) {
+        GLOBAL.touch(ids, self.owner);
+    }
+
+    pub(crate) fn hold(&self, id: Option<Id>) {
+        GLOBAL.hold(self.owner, id);
+    }
+
+    pub(crate) fn wait(&self, id: &Id, deadline: Instant) -> Option<Arc<Picture>> {
+        GLOBAL.wait(id, deadline, self.owner)
+    }
+
+    pub(crate) fn forget_small(&self) {
+        GLOBAL.forget_small(self.owner);
+    }
+
+    pub(crate) fn small(&self, id: &Id) -> Id {
+        id.small(self.owner)
+    }
+}
+
+impl std::ops::Deref for Share {
+    type Target = Store;
+
+    fn deref(&self) -> &Store {
+        &GLOBAL
+    }
+}
+
+impl Drop for Share {
+    fn drop(&mut self) {
+        GLOBAL.leave(self.owner);
+    }
 }
 
 impl Store {
     pub(crate) fn new(memory: usize, video: usize) -> Self {
         Self {
             inner: Mutex::new(Inner {
-                pictures: HashMap::new(),
-                clock: 0,
+                pictures: Lru::new(),
+                kinds: [Lru::new(), Lru::new()],
+                pools: HashMap::new(),
+                small: HashMap::new(),
                 bytes: [0; 2],
                 budget: [memory, video],
                 shared: false,
-                held: None,
+                held: HashMap::new(),
+                owners: 0,
                 coming_down: Vec::new(),
+                lent: HashMap::new(),
+                loans: 0,
+                cap: None,
+                lent_need: 0,
             }),
             landed: Condvar::new(),
             down: Picture::copied_down,
@@ -76,7 +213,7 @@ impl Store {
 
     pub(crate) fn budget(&self, kind: Kind) -> usize {
         let inner = self.lock();
-        inner.budget[inner.pool(kind).index()]
+        inner.limit(inner.pool(kind))
     }
 
     pub(crate) fn shared(&self) -> bool {
@@ -100,68 +237,62 @@ impl Store {
         self.bring_down(down, None);
     }
 
-    pub(crate) fn get(&self, id: &Id) -> Option<Arc<Picture>> {
+    pub(crate) fn get(&self, id: &Id, owner: u64) -> Option<Arc<Picture>> {
         let mut inner = self.lock();
-        inner.clock += 1;
-        let now = inner.clock;
-        let key = inner.key(id)?;
-        inner.pictures.get_mut(&key).map(|(picture, used)| {
-            *used = now;
-            picture.clone()
-        })
+        let key = inner.key(id, owner)?;
+        inner.touch(&key)
     }
 
-    pub(crate) fn contains(&self, id: &Id) -> bool {
-        self.lock().key(id).is_some()
+    pub(crate) fn contains(&self, id: &Id, owner: u64) -> bool {
+        self.lock().key(id, owner).is_some()
     }
 
-    pub(crate) fn kept_run(&self, ids: impl IntoIterator<Item = Id>) -> usize {
+    pub(crate) fn kept_run(&self, ids: impl IntoIterator<Item = Id>, owner: u64) -> usize {
         let inner = self.lock();
         ids.into_iter()
-            .take_while(|id| inner.key(id).is_some())
+            .take_while(|id| inner.key(id, owner).is_some())
             .count()
     }
 
-    pub(crate) fn forget_small(&self) {
-        let mut inner = self.lock();
-        let small: Vec<Id> = inner
-            .pictures
-            .keys()
-            .filter(|id| id.is_small())
-            .cloned()
-            .collect();
-        for id in small {
-            if let Some((old, _)) = inner.pictures.remove(&id) {
-                inner.uncharge(&old);
-            }
-        }
+    pub(crate) fn forget_small(&self, owner: u64) {
+        let gone = self.lock().forget_small(owner);
+        drop(gone);
     }
 
-    pub(crate) fn touch(&self, ids: impl IntoIterator<Item = Id>) {
+    pub(crate) fn touch(&self, ids: impl IntoIterator<Item = Id>, owner: u64) {
         let mut inner = self.lock();
         for id in ids {
-            inner.clock += 1;
-            let now = inner.clock;
-            if let Some(key) = inner.key(&id)
-                && let Some((_, used)) = inner.pictures.get_mut(&key)
-            {
-                *used = now;
+            if let Some(key) = inner.key(&id, owner) {
+                inner.touch(&key);
             }
         }
     }
 
-    pub(crate) fn hold(&self, id: Option<Id>) {
-        self.lock().held = id;
+    pub(crate) fn hold(&self, owner: u64, id: Option<Id>) {
+        let mut inner = self.lock();
+        match id {
+            Some(id) => inner.held.insert(owner, id),
+            None => inner.held.remove(&owner),
+        };
+    }
+
+    fn leave(&self, owner: u64) {
+        let mut inner = self.lock();
+        inner.held.remove(&owner);
+        inner.owners = inner.owners.saturating_sub(1);
+        let gone = if inner.owners == 0 {
+            inner.empty()
+        } else {
+            inner.forget_small(owner)
+        };
+        drop(inner);
+        drop(gone);
     }
 
     pub(crate) fn put(&self, id: Id, picture: Arc<Picture>) {
         let mut inner = self.lock();
-        inner.clock += 1;
-        let (charged, now) = (charges(&picture), inner.clock);
-        if let Some((old, _)) = inner.pictures.insert(id.clone(), (picture, now)) {
-            inner.uncharge(&old);
-        }
-        inner.charge(charged);
+        let charged = charges(&picture);
+        inner.insert(id.clone(), picture);
         let mut down = Vec::new();
         for kind in [Kind::Memory, Kind::Video] {
             if charged[kind.index()] > 0 {
@@ -181,10 +312,7 @@ impl Store {
                 .coming_down
                 .retain(|(i, p)| !(*i == id && Arc::ptr_eq(p, &picture)));
             if let (true, Ok(copy)) = (inner.is_kept(&id, &picture), copied) {
-                let used = inner.pictures[&id].1;
-                inner.uncharge(&picture);
-                inner.charge(charges(&copy));
-                inner.pictures.insert(id, (Arc::new(copy), used));
+                inner.insert(id, Arc::new(copy));
             }
             for kind in [Kind::Memory, Kind::Video] {
                 down.extend(inner.evict(kind, keep));
@@ -192,10 +320,10 @@ impl Store {
         }
     }
 
-    pub(crate) fn wait(&self, id: &Id, deadline: Instant) -> Option<Arc<Picture>> {
+    pub(crate) fn wait(&self, id: &Id, deadline: Instant, owner: u64) -> Option<Arc<Picture>> {
         let mut inner = self.lock();
         loop {
-            if let Some((picture, _)) = inner.key(id).and_then(|k| inner.pictures.get(&k)) {
+            if let Some(picture) = inner.key(id, owner).and_then(|k| inner.pictures.peek(&k)) {
                 return Some(picture.clone());
             }
             let left = deadline.checked_duration_since(Instant::now())?;
@@ -208,9 +336,8 @@ impl Store {
     }
 
     pub(crate) fn clear(&self) {
-        let mut inner = self.lock();
-        inner.pictures.clear();
-        inner.bytes = [0; 2];
+        let gone = self.lock().empty();
+        drop(gone);
     }
 
     pub(crate) fn bytes(&self, kind: Kind) -> usize {
@@ -228,10 +355,78 @@ impl Store {
 }
 
 impl Inner {
-    fn key(&self, id: &Id) -> Option<Id> {
-        [id.clone(), id.small()]
+    fn key(&self, id: &Id, owner: u64) -> Option<Id> {
+        [id.clone(), id.small(owner)]
             .into_iter()
-            .find(|k| self.pictures.contains_key(k))
+            .find(|k| self.pictures.contains(k))
+    }
+
+    fn insert(&mut self, id: Id, picture: Arc<Picture>) {
+        self.remove(&id);
+        let charged = charges(&picture);
+        self.charge(charged);
+        for kind in [Kind::Memory, Kind::Video] {
+            if charged[kind.index()] > 0 {
+                self.kinds[kind.index()].insert(id.clone(), ());
+            }
+        }
+        for pool in picture.pools() {
+            self.pools.entry(pool).or_default().insert(id.clone());
+        }
+        if let Some(owner) = id.small_owner() {
+            self.small.entry(owner).or_default().insert(id.clone());
+        }
+        self.pictures.insert(id, picture);
+    }
+
+    fn remove(&mut self, id: &Id) -> Option<Arc<Picture>> {
+        let (_, picture) = self.pictures.remove(id)?;
+        self.uncharge(&picture);
+        for order in &mut self.kinds {
+            order.remove(id);
+        }
+        for pool in picture.pools() {
+            if let Some(ids) = self.pools.get_mut(&pool) {
+                ids.remove(id);
+                if ids.is_empty() {
+                    self.pools.remove(&pool);
+                }
+            }
+        }
+        if let Some(owner) = id.small_owner()
+            && let Some(ids) = self.small.get_mut(&owner)
+        {
+            ids.remove(id);
+            if ids.is_empty() {
+                self.small.remove(&owner);
+            }
+        }
+        Some(picture)
+    }
+
+    fn touch(&mut self, id: &Id) -> Option<Arc<Picture>> {
+        for order in &mut self.kinds {
+            order.get(id);
+        }
+        self.pictures.get(id).cloned()
+    }
+
+    fn empty(&mut self) -> Vec<Arc<Picture>> {
+        self.kinds = [Lru::new(), Lru::new()];
+        self.pools.clear();
+        self.small.clear();
+        self.bytes = [0; 2];
+        let all = std::mem::take(&mut self.pictures);
+        all.iter().map(|(_, p)| p.clone()).collect()
+    }
+
+    fn is_held(&self, id: &Id) -> bool {
+        self.held.values().any(|h| h == id)
+    }
+
+    fn forget_small(&mut self, owner: u64) -> Vec<Arc<Picture>> {
+        let ids = self.small.remove(&owner).unwrap_or_default();
+        ids.iter().filter_map(|id| self.remove(id)).collect()
     }
 
     fn uncharge(&mut self, old: &Picture) {
@@ -249,6 +444,14 @@ impl Inner {
 
     fn pool(&self, kind: Kind) -> Kind {
         if self.shared { Kind::Memory } else { kind }
+    }
+
+    fn limit(&self, pool: Kind) -> usize {
+        let budget = self.budget[pool.index()];
+        if pool != self.pool(Kind::Video) {
+            return budget;
+        }
+        self.cap.map_or(budget, |c| budget.min(c))
     }
 
     fn counted(&self, pool: Kind) -> usize {
@@ -274,44 +477,40 @@ impl Inner {
 
     fn is_kept(&self, id: &Id, picture: &Arc<Picture>) -> bool {
         self.pictures
-            .get(id)
-            .is_some_and(|(p, _)| Arc::ptr_eq(p, picture))
+            .peek(id)
+            .is_some_and(|p| Arc::ptr_eq(p, picture))
     }
 
-    fn charges_in(&self, picture: &Picture, pool: Kind) -> bool {
-        let charged = charges(picture);
-        [Kind::Memory, Kind::Video]
-            .into_iter()
-            .any(|k| self.pool(k) == pool && charged[k.index()] > 0)
+    fn oldest(&self, pool: Kind, keep: Option<&Id>) -> Option<Id> {
+        let free = |id: &&Id| Some(*id) != keep && !self.is_held(id);
+        let found = if self.shared {
+            self.pictures.iter().map(|(id, _)| id).find(free)
+        } else {
+            self.kinds[pool.index()].iter().map(|(id, _)| id).find(free)
+        };
+        found.cloned()
     }
 
     fn evict(&mut self, kind: Kind, keep: Option<&Id>) -> Vec<(Id, Arc<Picture>)> {
         let pool = self.pool(kind);
         let room_for = keep
-            .and_then(|k| self.pictures.get(k))
-            .map_or_else(Vec::new, |(p, _)| p.pools());
+            .and_then(|k| self.pictures.peek(k))
+            .map_or_else(Vec::new, |p| p.pools());
         let mut down = Vec::new();
-        while self.counted(pool) > self.budget[pool.index()] {
-            let held = self.held.as_ref();
-            let oldest = self
-                .pictures
-                .iter()
-                .filter(|(k, (p, _))| {
-                    self.charges_in(p, pool) && Some(*k) != keep && Some(*k) != held
-                })
-                .min_by_key(|(_, (_, used))| *used)
-                .map(|(k, (p, _))| (k.clone(), p.pools()));
-            let Some((oldest, pools)) = oldest else {
+        while self.counted(pool) > self.limit(pool) {
+            let Some(oldest) = self.oldest(pool, keep) else {
                 break;
             };
-            let others: Vec<usize> = pools
+            let others: Vec<usize> = self
+                .pictures
+                .peek(&oldest)
+                .map(|p| p.pools())
+                .unwrap_or_default()
                 .into_iter()
                 .filter(|p| !room_for.contains(p))
                 .collect();
-            if others.is_empty()
-                && let Some((old, _)) = self.pictures.remove(&oldest)
-            {
-                self.uncharge(&old);
+            if others.is_empty() {
+                self.remove(&oldest);
             }
             for other in others {
                 down.extend(self.let_pool_go(other, keep));
@@ -322,20 +521,22 @@ impl Inner {
 
     fn let_pool_go(&mut self, pool: usize, keep: Option<&Id>) -> Option<(Id, Arc<Picture>)> {
         let ids: Vec<Id> = self
-            .pictures
-            .iter()
-            .filter(|(k, (p, _))| p.holds(pool) && Some(*k) != keep)
-            .map(|(k, _)| k.clone())
+            .pools
+            .get(&pool)
+            .into_iter()
+            .flatten()
+            .filter(|id| Some(*id) != keep)
+            .cloned()
             .collect();
         let mut down = None;
         for id in ids {
-            if self.held.as_ref() != Some(&id) {
-                if let Some((old, _)) = self.pictures.remove(&id) {
-                    self.uncharge(&old);
-                }
+            if !self.is_held(&id) {
+                self.remove(&id);
                 continue;
             }
-            let picture = self.pictures[&id].0.clone();
+            let Some(picture) = self.pictures.peek(&id).cloned() else {
+                continue;
+            };
             let on_its_way = self
                 .coming_down
                 .iter()
@@ -394,7 +595,7 @@ mod tests {
     }
 
     fn kept(store: &Store) -> [bool; 4] {
-        [0, 1, 2, 3].map(|pos| store.contains(&Id::at("clip", pos)))
+        [0, 1, 2, 3].map(|pos| store.contains(&Id::at("clip", pos), 0))
     }
 
     #[test]
@@ -418,7 +619,7 @@ mod tests {
     #[test]
     fn the_picture_held_stays_when_its_pool_goes() {
         let store = Store::new(0, 18);
-        store.hold(Some(Id::at("clip", 0)));
+        store.hold(0, Some(Id::at("clip", 0)));
         for (pos, pool) in [(0, 1), (1, 1), (2, 1), (3, 2)] {
             store.put(Id::at("clip", pos), of_pool(pool));
         }
@@ -428,7 +629,7 @@ mod tests {
     #[test]
     fn the_picture_held_comes_down_to_memory_and_counts_there_when_its_pool_goes() {
         let store = coming_down_to_memory(18, 18);
-        store.hold(Some(Id::at("clip", 0)));
+        store.hold(0, Some(Id::at("clip", 0)));
         for (pos, pool) in [(0, 1), (1, 1), (2, 1), (3, 2)] {
             store.put(Id::at("clip", pos), of_pool(pool));
         }
@@ -440,7 +641,7 @@ mod tests {
     fn memory_makes_room_for_the_picture_held_come_down() {
         let store = coming_down_to_memory(6, 12);
         store.put(Id::at("clip", 0), picture(false));
-        store.hold(Some(Id::at("clip", 1)));
+        store.hold(0, Some(Id::at("clip", 1)));
         for (pos, pool) in [(1, 1), (2, 1), (3, 2)] {
             store.put(Id::at("clip", pos), of_pool(pool));
         }
@@ -468,7 +669,7 @@ mod tests {
         for (pos, gpu) in [(0, false), (1, true), (2, false), (3, true)] {
             store.put(Id::at("clip", pos), picture(gpu));
         }
-        let kept = [0, 1, 2, 3].map(|pos| store.contains(&Id::at("clip", pos)));
+        let kept = [0, 1, 2, 3].map(|pos| store.contains(&Id::at("clip", pos), 0));
         assert_eq!(kept, [false, true, true, true]);
     }
 }

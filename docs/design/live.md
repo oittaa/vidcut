@@ -193,7 +193,7 @@ Transcriptions:
 - A transcription hears the timeline on a copy. A re-timing also measures its speech there.
 - Then the edit adds the cues with `AvEnv::heard_only`. It takes what the job heard, and does not transcribe on the core's thread ([analysis](analysis.md#transcription)).
 - If the sound of the timeline changed in the meantime, the edit fails with CONFLICT.
-- While a job that hears speech is queued or runs (`HEARS`), the viewer keeps at most 1 GB of pictures on the GPU (`Live::follow_budget`). It brings the rest down to memory.
+- While a job that hears speech is queued or runs (`HEARS`), the kept pictures take at most 1 GB on the GPU (`Live::follow_budget`). It brings the rest down to memory.
 - Thus a model such as MOSS has the memory of the GPU.
 - The budget of the preference comes back when the last such job ends.
 

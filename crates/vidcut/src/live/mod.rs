@@ -478,11 +478,11 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         Some(p) => (Some(p.audio), p.budget, p.gpu_pictures),
         None => (None, vidcut_av::player::Budget::both(0), Vec::new()),
     };
+    vidcut_av::player::set_budget(budget);
     let player = {
         let (tx, notify) = (tx.clone(), config.notify.clone());
         Player::new(
             audio,
-            budget,
             gpu_pictures,
             config.renderer.clone(),
             Arc::new(move || {
@@ -538,7 +538,6 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
-        budget,
         history_preview: None,
         flash: None,
     };
@@ -1414,7 +1413,6 @@ impl Live {
             show_super_scale: self.show_super_scale,
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
-            budget: self.player.budget(),
             history_preview: self.history_preview.clone(),
             flash: self.flash.clone(),
         };
@@ -1864,7 +1862,7 @@ impl Live {
         if self.hearing > 0 && !vidcut_av::player::SHARED_MEMORY {
             budget.video = Some(budget.video.map_or(HEARING_VIDEO, |v| v.min(HEARING_VIDEO)));
         }
-        self.player.set_budget(budget);
+        vidcut_av::player::set_budget(budget);
     }
 
     fn start_encode(
