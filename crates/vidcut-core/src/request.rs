@@ -310,7 +310,8 @@ pub enum Request {
     /// Each word whose middle is in that time goes. With `from`, the words
     /// that this kept transcript heard there take their place
     /// (`analyze.words` gives the `differences`). With `text`, these typed
-    /// words do. `back` puts the main transcript's words there again.
+    /// words do. `back`, or `from` the main transcript, removes each change
+    /// that touches that time, so the main transcript's words come back.
     #[serde(rename = "media.words.set")]
     MediaWordsSet {
         media: String,

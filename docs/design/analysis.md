@@ -202,7 +202,9 @@ flowchart TD
   - Without a main transcript, the newest one is the main transcript (`transcripts::main`).
   - `transcripts::chosen` puts the changes over the words of the main transcript. A change replaces each word whose middle is in its time.
   - `transcripts::read` gives these words. Subtitles, cutting by words and `analyze.words` read them.
-  - `media.words.set` puts a change (`transcripts::put`). A change that covers part of an older change cuts the older change.
+  - `media.words.set` puts a change (`transcripts::put`).
+    - A new change cuts the older changes that it covers in part. A cut part with no words joins the new change.
+    - Going back to the main transcript removes each change that the time touches. Thus no part of an old change stays.
   - Words taken from a transcript are the words matched to the old words (`transcripts::taken`).
     - They keep their times when these are between the words around the change.
     - Else they are fitted into the time of the change. Thus the words stay in order.

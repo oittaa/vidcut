@@ -170,8 +170,13 @@ pub fn changed(base: &[Word], changes: &[WordsChange]) -> Vec<Word> {
 }
 
 pub fn put(choice: &mut ChosenWords, start: f64, end: f64, new: Option<WordsChange>) {
+    let Some(mut new) = new else {
+        choice.changes.retain(|c| c.end <= start || c.start >= end);
+        return;
+    };
     let mut kept = Vec::new();
     for c in std::mem::take(&mut choice.changes) {
+        let (start, end) = (new.start, new.end);
         if c.end <= start || c.start >= end {
             kept.push(c);
             continue;
@@ -188,13 +193,19 @@ pub fn put(choice: &mut ChosenWords, start: f64, end: f64, new: Option<WordsChan
             from: c.from.clone(),
         };
         if c.start < start {
-            kept.push(part(c.start, start));
+            match part(c.start, start) {
+                p if p.words.is_empty() => new.start = c.start,
+                p => kept.push(p),
+            }
         }
         if c.end > end {
-            kept.push(part(end, c.end));
+            match part(end, c.end) {
+                p if p.words.is_empty() => new.end = c.end,
+                p => kept.push(p),
+            }
         }
     }
-    kept.extend(new);
+    kept.push(new);
     kept.retain(|c| c.end > c.start);
     kept.sort_by(|a, b| a.start.total_cmp(&b.start));
     choice.changes = kept;
