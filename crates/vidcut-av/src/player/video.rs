@@ -393,9 +393,9 @@ impl Decoder {
             }
             self.busy(Some(Busy::Focus));
             let started = Instant::now();
-            let reads_on = self.reads_on(focus);
+            let seeks = !self.reads_on(focus) && plan.fill_at(focus).lead;
             let target = match dir {
-                Direction::Forward(speed) if !reads_on && snap.heard => {
+                Direction::Forward(speed) if seeks && snap.heard => {
                     let lead = self.seek_cost.as_secs_f64() * plan.fps().as_f64() * speed;
                     after(&plan, snap.looping, focus, lead.ceil() as i64)
                 }
@@ -422,7 +422,7 @@ impl Decoder {
             if dir == Direction::Back {
                 self.back_windows.push((first, target));
             }
-            if !reads_on {
+            if seeks && plan.fill_at(target).lead {
                 let took = started.elapsed();
                 self.seek_cost = (self.seek_cost * 3 + took) / 4;
             }

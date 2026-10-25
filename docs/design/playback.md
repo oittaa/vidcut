@@ -94,6 +94,8 @@ Motions:
 - Each piece of the plan says which frames the player may decode before they are asked for (`player::plan::Fill`).
   - By default, the player fills frames ahead of the playhead and behind it.
   - A piece with an AI upscaler fills no frames behind the playhead. An AI picture takes much GPU time. A frame before the current run starts a new run of the upscaler ([gpu](gpu.md)).
+  - A play that does not find the frame at the playhead decodes a frame ahead of the clock. The lead is the mean time of the recent seeks (`seek_cost`).
+  - A piece with an AI upscaler gives no lead, and its frames do not change `seek_cost`. An AI picture takes much longer than a seek. Thus after an AI clip, a jump in another clip does not land seconds ahead of the clock.
   - Where layers overlap, a fill is allowed only when each layer allows it (`Plan::fill_at`).
   - The viewer's frame, play backward and steps back still decode the frames that they need.
   - The prepared frame is made also with an AI upscaler. Thus the next clip can show its first frame at once.
