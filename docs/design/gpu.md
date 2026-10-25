@@ -174,9 +174,11 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - AI Fast makes 4 times the source size.
     - AI Best makes the shown size, but not more than 4 times the source size (`flashvsr::SCALE`).
   - Each picture has a key (`PictureId`): the file, the color space, the reading, the rotation, the upscaler, the made size and the frame.
-  - The pictures go into one shared cache (`KEPT`). It keeps the newest pictures within a share of the computer's memory.
-  - Thus a picture is computed once, also when another reader, a replay or another clip of the same file needs it.
-  - A picture that is not in the cache comes from a run of the upscaler (`Session`). The run starts at the first frame that the upscaler needs (`ai::first_frame`).
+  - A picture comes from a run of the upscaler (`Session`). The run starts at the first frame that the upscaler needs (`ai::first_frame`).
+  - A run holds the pictures that it made and that the reader did not take yet. A picture leaves the run when the reader takes it.
+  - The run also keeps the last picture that it gave. The reader asks for it again when the size of its layer changes.
+  - The held pictures go when the run goes. Thus an AI picture stays in main memory only while its run needs it.
+  - The viewer keeps the pictures that it shows with its other kept pictures ([playback](playback.md)).
   - A run takes the frames in order and gives the pictures (`ai::Run`). `ai::open` opens the run of the upscaler.
     - When the reader is at the first frame of the run, the run takes the frames that the reader decodes. The reader then takes them from its queue.
     - It keeps these frames in main memory. The copies leave the GPU decoder's surfaces free.
@@ -199,8 +201,8 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
 - **AI Fast** (`upscale`):
   - Before an export starts, `upscale::check` refuses media that AI Fast cannot take (`upscale::unfit`). It also refuses AI Fast without the weights or without a GPU that can run it.
   - A run is a chunk of 15 frames (`upscale::FRAMES`). The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
-  - `upscale::upscale` returns the asked picture first. A thread (`vidcut-upscale-rest`) then makes the other 14 pictures, and puts them into the cache.
-  - Before it starts a run, `Source::ai_picture` waits for a chunk that is still being made (`ai::settle`). Then it looks in the cache again.
+  - `upscale::upscale` returns the asked picture first. A thread (`vidcut-upscale-rest`) then makes the other 14 pictures, and puts them into the run.
+  - When the run of the reader can give the asked picture, `Source::ai_picture` first waits for the rest of the chunk (`ai::settle`). Then it looks in the run again.
   - When a reader drops its run, that thread stops before its next picture. Thus a jump does not wait for the rest of the old chunk.
   - `upscale::upscale` runs NanoVSR 5.4M with WGSL compute shaders on wgpu. It gives each picture four times as large.
     - At load, the batch norms of each block fold into one 3×3 convolution, as in the model's own deploy mode.

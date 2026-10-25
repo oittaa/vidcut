@@ -468,11 +468,7 @@ struct PictureId {
     key: Key,
 }
 
-struct Kept {
-    id: PictureId,
-    bytes: usize,
-    picture: frame::Video,
-}
+type Waiting = std::sync::Arc<std::sync::Mutex<Vec<(Key, frame::Video)>>>;
 
 const RUN_JUMP: i64 = 48;
 
@@ -488,15 +484,21 @@ struct Session {
     missed: Vec<frame::Video>,
     lost: bool,
     ended: bool,
+    waiting: Waiting,
+    given: Option<(Key, frame::Video)>,
 }
 
 impl Session {
-    fn covers(&self, id: &PictureId, size: (u32, u32)) -> bool {
+    fn same(&self, id: &PictureId) -> bool {
         let same = PictureId {
             key: id.key,
             ..self.id.clone()
         };
-        if same != *id || self.size != size || self.lost {
+        same == *id
+    }
+
+    fn covers(&self, id: &PictureId, size: (u32, u32)) -> bool {
+        if !self.same(id) || self.size != size || self.lost {
             return false;
         }
         match (id.key, self.id.key) {
@@ -520,51 +522,50 @@ impl Session {
         if let Some(o) = outs.iter().map(|o| o.index).max() {
             self.out_next = self.out_next.max(o + 1);
         }
-        keep_outs(&self.id, outs);
+        hold(&self.waiting, &self.id, outs);
+    }
+
+    fn take(&mut self, id: &PictureId) -> Result<Option<frame::Video>> {
+        if !self.same(id) {
+            return Ok(None);
+        }
+        if let Some((key, p)) = &self.given
+            && *key == id.key
+        {
+            return frame_ref(p).map(Some);
+        }
+        let found = {
+            let mut waiting = self
+                .waiting
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let at = waiting.iter().position(|(key, _)| *key == id.key);
+            at.map(|i| waiting.remove(i).1)
+        };
+        let Some(p) = found else {
+            return Ok(None);
+        };
+        let out = frame_ref(&p)?;
+        self.given = Some((id.key, p));
+        Ok(Some(out))
     }
 }
 
-static KEPT: std::sync::Mutex<Vec<Kept>> = std::sync::Mutex::new(Vec::new());
-
-fn kept() -> std::sync::MutexGuard<'static, Vec<Kept>> {
-    KEPT.lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-fn kept_picture(id: &PictureId) -> Result<Option<frame::Video>> {
-    let mut all = kept();
-    let Some(i) = all.iter().position(|k| k.id == *id) else {
-        return Ok(None);
-    };
-    let k = all.remove(i);
-    let found = frame_ref(&k.picture);
-    all.push(k);
-    found.map(Some)
-}
-
-fn keep_outs(base: &PictureId, outs: Vec<crate::ai::Out>) {
-    let budget = crate::player::system_memory()
-        .map_or(1 << 30, |m| m / 8)
-        .max(1 << 30);
-    let mut all = kept();
+fn hold(
+    waiting: &std::sync::Mutex<Vec<(Key, frame::Video)>>,
+    base: &PictureId,
+    outs: Vec<crate::ai::Out>,
+) {
+    let mut waiting = waiting
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     for o in outs {
         let key = match base.key {
             Key::Still(pts) => Key::Still(pts),
             Key::Frame(_) => Key::Frame(o.index),
         };
-        let id = PictureId {
-            key,
-            ..base.clone()
-        };
-        all.retain(|k| k.id != id);
-        all.push(Kept {
-            bytes: o.rgb.len(),
-            picture: big_picture(&o.rgb, base.made, o.pts),
-            id,
-        });
-    }
-    while all.len() > 1 && all.iter().map(|k| k.bytes).sum::<usize>() > budget {
-        all.remove(0);
+        waiting.retain(|(k, _)| *k != key);
+        waiting.push((key, big_picture(&o.rgb, base.made, o.pts)));
     }
 }
 
@@ -700,21 +701,30 @@ impl Source {
                 None => Key::Still(pts),
             },
         };
-        if let Some(p) = kept_picture(&id)? {
+        if let Some(p) = self.taken(&id)? {
             return Ok(Some(p));
         }
         if self.run.as_ref().is_some_and(|r| !r.covers(&id, size)) {
             self.run = None;
         }
-        crate::ai::settle(upscaler);
-        if let Some(p) = kept_picture(&id)? {
-            return Ok(Some(p));
+        if self.run.is_some() {
+            crate::ai::settle(upscaler);
+            if let Some(p) = self.taken(&id)? {
+                return Ok(Some(p));
+            }
         }
         let made = self.ai_run(&id, size, reading);
         if made.is_err() {
             self.run = None;
         }
         made.map(Some)
+    }
+
+    fn taken(&mut self, id: &PictureId) -> Result<Option<frame::Video>> {
+        match self.run.as_mut() {
+            Some(run) => run.take(id),
+            None => Ok(None),
+        }
     }
 
     fn ai_run(
@@ -735,7 +745,7 @@ impl Source {
         let work = crate::ai::making(id.upscaler, size, id.made, (want, want));
         loop {
             crate::cancel::stop()?;
-            if let Some(p) = kept_picture(id)? {
+            if let Some(p) = self.taken(id)? {
                 let last = self
                     .run
                     .as_ref()
@@ -792,8 +802,14 @@ impl Source {
     ) -> Result<()> {
         let first = crate::ai::first_frame(id.upscaler, want);
         let base = id.clone();
+        let waiting = Waiting::default();
+        let later = std::sync::Arc::downgrade(&waiting);
         let sink: crate::ai::Sink = Box::new(move |outs| match outs {
-            Ok(outs) => keep_outs(&base, outs),
+            Ok(outs) => {
+                if let Some(waiting) = later.upgrade() {
+                    hold(&waiting, &base, outs);
+                }
+            }
             Err(e) => crate::debug!("ai", "{}: {e}", crate::ai::name(base.upscaler)),
         });
         let run = crate::ai::open(id.upscaler, size, id.made, want, sink)?;
@@ -813,6 +829,8 @@ impl Source {
             missed: Vec::new(),
             lost: false,
             ended: false,
+            waiting,
+            given: None,
         });
         if still {
             let (frame, _) = self.current.as_ref().expect("have a frame");
