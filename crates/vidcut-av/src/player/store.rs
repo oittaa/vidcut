@@ -56,7 +56,6 @@ struct Inner {
     budget: [usize; 2],
     shared: bool,
     held: HashMap<u64, Id>,
-    holders: HashMap<Id, usize>,
     owners: usize,
     coming_down: Vec<(Id, Arc<Picture>)>,
 }
@@ -144,7 +143,6 @@ impl Store {
                 budget: [memory, video],
                 shared: false,
                 held: HashMap::new(),
-                holders: HashMap::new(),
                 owners: 0,
                 coming_down: Vec::new(),
             }),
@@ -215,12 +213,16 @@ impl Store {
     }
 
     pub(crate) fn hold(&self, owner: u64, id: Option<Id>) {
-        self.lock().hold(owner, id);
+        let mut inner = self.lock();
+        match id {
+            Some(id) => inner.held.insert(owner, id),
+            None => inner.held.remove(&owner),
+        };
     }
 
     fn leave(&self, owner: u64) {
         let mut inner = self.lock();
-        inner.hold(owner, None);
+        inner.held.remove(&owner);
         inner.owners = inner.owners.saturating_sub(1);
         let gone = if inner.owners == 0 {
             inner.empty()
@@ -362,26 +364,8 @@ impl Inner {
         all.iter().map(|(_, p)| p.clone()).collect()
     }
 
-    fn hold(&mut self, owner: u64, id: Option<Id>) {
-        let old = match id {
-            Some(id) => {
-                *self.holders.entry(id.clone()).or_default() += 1;
-                self.held.insert(owner, id)
-            }
-            None => self.held.remove(&owner),
-        };
-        if let Some(old) = old
-            && let Some(n) = self.holders.get_mut(&old)
-        {
-            *n -= 1;
-            if *n == 0 {
-                self.holders.remove(&old);
-            }
-        }
-    }
-
     fn is_held(&self, id: &Id) -> bool {
-        self.holders.contains_key(id)
+        self.held.values().any(|h| h == id)
     }
 
     fn forget_small(&mut self, owner: u64) -> Vec<Arc<Picture>> {
