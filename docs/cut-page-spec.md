@@ -724,6 +724,11 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Remove Silent Portions deletes all (...).
   - Place on Top, Insert and Append edit the selection into the timeline. Create Subclip and Add Marker use it.
   - In Timeline Transcription mode, Cut, Paste and Delete on the text do the same to the timeline, from the transcripts of its clips.
+  - The manual does not say how Ripple On changes these. Resolve 21.1.1, as tested:
+    - Cut leaves a gap, with Ripple On on or off.
+    - With Ripple On, Paste inserts and Delete closes the gap at the word edges.
+    - With Ripple On off, Paste overwrites and Delete leaves a gap.
+    - Paste over selected words takes only as many frames as the words.
 - **vidcut:**
   - Transcribe Audio, in the right-click menu of a pool item (`media.transcribe`), keeps its words.
   - Transcribed media show a speech mark, in the pool and on their clips with sound.
@@ -732,24 +737,33 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The Transcription window has:
     - a click on a word, a drag over words, X, Delete and Undelete
     - Remove Silent Portions and Delete Filler Words
-    - Place on Top, Insert and Append, and Add Marker on the timeline
+    - Place on Top, Insert and Append on a source clip
+    - Cut, Paste and Add Marker on the timeline
     - search: First, Previous, Next, Last and a count of the matches
     - Edit, Copy and Follow
     - the Transcript menu and the differences between transcripts (X50)
   - On a source clip, Delete leaves the words out of every edit of the media (`media.leave_out`). This includes the edits of the viewer, of the pool and of scripts.
-  - On the timeline, Delete ripple deletes the words (`edit.ripple_delete_words`), with ripple on or off (D63).
+  - On the timeline, Delete takes the words out of every unlocked track (`edit.ripple_delete_words`, D63).
+    - With Ripple On, the gap closes. With it off, a gap is left (`lift`).
+    - The edges move to the quiet points around the words (`quiet`, X92).
+  - On the timeline, Cut takes the selected words out of every unlocked track and leaves a gap (`edit.cut` with `range`).
+  - Copy on the timeline also keeps the selected words for Paste (`edit.copy` with `range`).
+  - Paste puts them in at the first selected word, else at the playhead (`edit.paste`).
+    - With Ripple On, the later clips move to make room (`insert`). With it off, Paste covers what is there.
+    - With words selected, only as many frames as the words are pasted (`duration`).
+  - On the timeline, each gap between clips shows as (...), whatever its length. Thus Delete can close it.
   - Remove Silent Portions deletes every pause. Each cut is at the quiet points around the pause.
   - Delete Filler Words deletes the filler words of a language in one step.
     - The language is the one that the speech model reported, or the one selected beside the button.
     - Edit… beside the button changes the words of a language for the project or for all projects.
   - Edit corrects the selected words (`media.words.set`). The undo history keeps the change.
   - Follow keeps the word under the playhead in view during playback.
-  - While the pointer is over the window, Delete, X, Ctrl+A, Ctrl+C and Esc act on the window.
+  - While the pointer is over the window, Delete, X, Ctrl+A, Ctrl+C and Esc act on the window. On the timeline, Ctrl+X and Ctrl+V do too.
   - With speakers, a paragraph starts at each person, under the name of the person.
   - The speaker commands are Rename, Same Person As and Separate.
   - Assign To gives the selected words to another person.
-  - `analyze.words`, `media.leave_out`, `media.words.set` and `edit.ripple_delete_words` do the same by request.
-  - Details: D63, D73; deviations X50, X61.
+  - `analyze.words`, `media.leave_out`, `media.words.set`, `edit.ripple_delete_words`, `edit.cut`, `edit.copy` and `edit.paste` do the same by request.
+  - Details: D63, D73; deviations X50, X61, X92.
 
 ### 8.14 Titles (pp. 762–764, 1176–1178)
 
@@ -1568,7 +1582,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Parakeet Ultra times words.
     - Whisper large-v3 times phrases, and Qwen3-ASR gives no times. Thus they are refused.
     - The estimates used for their cues are never returned as word times.
-  - `edit.ripple_delete_words` takes the named spans out of every unlocked track, and closes the gap, with ripple on or off.
+  - `edit.ripple_delete_words` takes the named spans out of every unlocked track, and closes the gap, with ripple on or off. With `lift`, a gap is left.
   - Spans that touch are one cut.
   - Times go to the nearest frame. A word shorter than a frame still takes one frame.
   - A cut at the word edges of the model can take the start of the next word, where no pause separates them.

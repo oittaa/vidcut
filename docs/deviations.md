@@ -1847,3 +1847,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The spec gives no wipe geometry.
   - One edge covers the four directions.
   - The same fraction keeps the wipe on the dissolve's clock.
+
+## X92. Deleting words on the timeline cuts at quiet points
+
+- **Resolve:**
+  - Delete of words in Timeline Transcription mode cuts exactly at the word times of the transcript.
+  - The manual does not say this (pp. 1006–1008). Resolve 21.1.1 was tested.
+- **vidcut:**
+  - Delete, Remove Silent Portions and Delete Filler Words on the timeline move each edge to the quietest frame nearby (`quiet`, D63).
+  - An edge moves outward only into the pause beside the words, up to about a tenth of a second.
+  - An edge moves inward no further than a third into a deleted word.
+  - Without a transcript, the edges stay.
+- **Why:**
+  - The word times of a speech model are approximate.
+  - A cut at those times can take the start of the next word, or leave part of a breath or a click.
+  - A cut at a quiet point sounds cleaner.

@@ -928,7 +928,8 @@ pub enum Request {
     /// `start` and `end` from `analyze.words` (its other fields are
     /// ignored). Touching or overlapping spans are one cut. The spans come
     /// out of every unlocked track and the rest closes up, whether or not
-    /// ripple is on. A dry run says what would go and changes nothing.
+    /// ripple is on; with `lift`, a gap is left instead. A dry run says what
+    /// would go and changes nothing.
     #[serde(rename = "edit.ripple_delete_words")]
     EditRippleDeleteWords {
         words: Vec<SpokenWord>,
@@ -945,6 +946,10 @@ pub enum Request {
         /// Transcription window does when they mark the words it deletes.
         #[serde(default)]
         clear_marks: bool,
+        /// Clear the spans and leave the gap, as Delete in the Transcription
+        /// window does with ripple off.
+        #[serde(default)]
+        lift: bool,
     },
     /// Detect Scene Cuts: split `clips` where their shots change.
     #[serde(rename = "edit.detect_scene_cuts")]
@@ -1002,19 +1007,42 @@ pub enum Request {
     },
     /// Copy clips (Ctrl+C): returns them with their tracks as `clips`,
     /// ready for `edit.paste`. The GUI also keeps them on its clipboard.
+    /// With `range` instead of `clips`: the parts of the clips on the
+    /// unlocked tracks in that range (Copy in the Transcription window).
     #[serde(rename = "edit.copy")]
-    EditCopy { clips: OneOrMany<ClipRef> },
-    /// Cut clips (Ctrl+X): copy, then delete with ripple on Track 1.
+    EditCopy {
+        #[serde(default)]
+        clips: Option<OneOrMany<ClipRef>>,
+        #[serde(default)]
+        range: Option<RangeSpec>,
+    },
+    /// Cut clips (Ctrl+X): copy, then delete with ripple on Track 1. With
+    /// `range` instead of `clips`: copy the parts in that range, then take
+    /// them out of every unlocked track and leave a gap (Cut in the
+    /// Transcription window).
     #[serde(rename = "edit.cut")]
-    EditCut { clips: OneOrMany<ClipRef> },
+    EditCut {
+        #[serde(default)]
+        clips: Option<OneOrMany<ClipRef>>,
+        #[serde(default)]
+        range: Option<RangeSpec>,
+    },
     /// Paste clips (Ctrl+V) at `at`, each over its own track, keeping their
-    /// spacing. Defaults: the GUI's clipboard and playhead.
+    /// spacing. Defaults: the GUI's clipboard and playhead. With `insert`,
+    /// the clips at and after `at` on every unlocked track move later to
+    /// make room, so nothing is covered (Paste in the Transcription window).
     #[serde(rename = "edit.paste")]
     EditPaste {
         #[serde(default)]
         clips: Option<Vec<TrackClip>>,
         #[serde(default)]
         at: Option<TimeSpec>,
+        #[serde(default)]
+        insert: bool,
+        /// Paste only this much of the clips, from their start (Paste over
+        /// selected words in the Transcription window).
+        #[serde(default)]
+        duration: Option<TimeSpec>,
     },
 
     /// The tracks, with their header and mixer settings and how many clips
