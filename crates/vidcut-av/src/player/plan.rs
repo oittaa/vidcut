@@ -67,8 +67,8 @@ impl Id {
         }
     }
 
-    pub(crate) fn made_small_by(&self, owner: u64) -> bool {
-        self.small == Some(owner)
+    pub(crate) fn small_owner(&self) -> Option<u64> {
+        self.small
     }
 }
 
