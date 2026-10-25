@@ -329,6 +329,14 @@ fn fs_mode(in: Out) -> @location(0) vec4<f32> {
 }
 
 @fragment
+fn fs_paired(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let top = textureLoad(letters, px, 0);
+    let b = textureLoad(below, px, 0).rgb;
+    return vec4<f32>(top.rgb + b * (1.0 - top.a), 1.0);
+}
+
+@fragment
 fn fs(in: Out) -> @location(0) vec4<f32> {
     let px = in.position.xy;
     if p.placed.x > 0.5 {

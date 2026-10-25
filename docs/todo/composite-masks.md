@@ -19,4 +19,3 @@ vidcut has the composite modes from Normal to Darker Color (spec D75). These par
   - Thus a stack of layers with modes can give other values than Resolve.
   - To do: mix the layers of a frame with a mode in floats.
 - **NVENC:** a frame with a composite mode is mixed on the CPU. A CUDA kernel can mix it on the GPU ([gpu-placement.md](gpu-placement.md)).
-- **A dissolve in the viewer:** the mix of a dissolve goes over the frame premultiplied. In an SDR timeline, the target cuts a mix below 0 before it goes over. The edges of a picture with Subtract can then differ from the export.

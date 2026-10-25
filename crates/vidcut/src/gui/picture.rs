@@ -26,6 +26,8 @@ pub struct Gpu {
     lettering: wgpu::RenderPipeline,
     lettering_wide: wgpu::RenderPipeline,
     lettering_layout: wgpu::BindGroupLayout,
+    paired: wgpu::RenderPipeline,
+    paired_wide: wgpu::RenderPipeline,
     screen: wgpu::RenderPipeline,
     screen_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -270,6 +272,13 @@ impl Gpu {
         };
         let lettering = lettering_in(TARGET);
         let lettering_wide = lettering_in(MIXING);
+        let paired_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("vidcut dissolve"),
+            bind_group_layouts: &[Some(&lettering_layout), Some(&below_layout)],
+            immediate_size: 0,
+        });
+        let paired = made(&paired_layout, "fs_paired", None, TARGET);
+        let paired_wide = made(&paired_layout, "fs_paired", None, MIXING);
         let screen_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut screen"),
             entries: &[
@@ -340,6 +349,8 @@ impl Gpu {
             lettering,
             lettering_wide,
             lettering_layout,
+            paired,
+            paired_wide,
             screen,
             screen_layout,
             sampler,
@@ -1121,9 +1132,9 @@ impl Screen {
         let canvas = wide.map_or(&target.view, |w| &w.view);
         let canvas_texture = wide.map_or(&target.texture, |w| &w.texture);
         let blends = |i: usize| binds.get(i).is_some_and(|b| b.3);
-        let (drawing, lettering) = match wide {
-            Some(_) => (&gpu.wide_drawing, &gpu.lettering_wide),
-            None => (&gpu.screen_drawing, &gpu.lettering),
+        let (drawing, lettering, paired) = match wide {
+            Some(_) => (&gpu.wide_drawing, &gpu.lettering_wide, &gpu.paired_wide),
+            None => (&gpu.screen_drawing, &gpu.lettering, &gpu.paired),
         };
         let mut clear = Some(wgpu::Color::BLACK);
         if n == 0 {
@@ -1173,7 +1184,13 @@ impl Screen {
                     }
                 }
                 let mut pass = begin(&mut encoder, canvas, clear.take());
-                pass.set_pipeline(lettering);
+                if blends(i) || blends(i + 1) {
+                    let below = self.below.as_ref().expect("made for a composite mode");
+                    pass.set_pipeline(paired);
+                    pass.set_bind_group(1, &below.bind, &[]);
+                } else {
+                    pass.set_pipeline(lettering);
+                }
                 pass.set_bind_group(0, &mixing.bind, &[]);
                 pass.draw(0..3, 0..1);
                 letter(&mut pass, lettering, &self.letters, titles, i + 1, n);
