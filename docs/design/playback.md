@@ -254,6 +254,7 @@ The audio device:
   - A layer with a composite mode needs the layers below it. Before its draw, the pass ends and the canvas is copied (`Below`).
   - Then `fs_mode` mixes the layer with that copy by the sums of `blend::mixed`, and writes the result.
   - In a dissolve, `fs_mode` adds the mix into `Mixing`, premultiplied.
+  - Then `fs_paired` lays `Mixing` over the copy of the canvas, and writes the result. Thus a mix below 0 is not cut before it goes over.
   - The two sides of a dissolve with a placed picture are added into a picture of their own (`Mixing`). That picture is then laid over the frame.
   - Each title is one more draw after the layers under it (`fs_title`).
   - Its `Lettering` holds one affine map from each pixel back to the drawing (`place::lettered`). The map also goes through the pictures of its compound clips (`Placing::inner`).
