@@ -2716,22 +2716,6 @@ fn mutate(
             let left_out = ops::leave_out(p, media, &spans, *back)?;
             json!({ "left_out": left_out })
         }
-        Request::MediaTranscriptsList { media, stream } => {
-            let m = pool_item(p, media)?;
-            let streams: Vec<u32> = match stream {
-                Some(s) => vec![*s],
-                None => (0..m.info.audio.len() as u32).collect(),
-            };
-            let mut list = Vec::new();
-            for s in streams {
-                let kept = env.transcripts(m, s)?;
-                let main = transcripts::main(&kept, transcripts::choice(m, s))
-                    .map(|k| k.key.clone())
-                    .unwrap_or_default();
-                list.extend(kept_json(s, &kept, &main));
-            }
-            json!({ "media": media, "transcripts": list })
-        }
         Request::MediaTranscriptsMain {
             media,
             stream,
@@ -2746,21 +2730,6 @@ fn mutate(
             transcripts::forget_empty(m);
             let main = transcripts::main(&kept, transcripts::choice(m, *stream));
             json!({ "media": media, "stream": stream, "transcript": main.map(|k| &k.key) })
-        }
-        Request::MediaTranscriptsRemove {
-            media,
-            stream,
-            transcripts: keys,
-        } => {
-            let m = pool_item(p, media)?;
-            let kept = env.transcripts(m, *stream)?;
-            for key in keys {
-                known_transcript(&kept, media, key)?;
-            }
-            for key in keys {
-                env.remove_transcript(m, *stream, key)?;
-            }
-            json!({ "media": media, "stream": stream, "removed": keys })
         }
         Request::MediaWordsSet {
             media,
@@ -2787,10 +2756,11 @@ fn mutate(
                 (Some(key), None, false) => {
                     let k = known_transcript(&kept, media, key)?;
                     let theirs = transcript::spoken(&k.speech).map_err(Error::invalid)?;
+                    let words = transcript::spoken(&chosen.speech).map_err(Error::invalid)?;
                     Some(WordsChange {
                         start,
                         end,
-                        words: transcripts::taken(&theirs, start, end),
+                        words: transcripts::taken(&words, &theirs, start, end),
                         from: Some(key.clone()),
                     })
                 }
@@ -6898,6 +6868,39 @@ pub fn query(
                     }))
                     .collect::<Vec<_>>(),
             })
+        }
+        Request::MediaTranscriptsList { media, stream } => {
+            let m = pool_item(p, media)?;
+            let streams: Vec<u32> = match stream {
+                Some(s) => vec![*s],
+                None => (0..m.info.audio.len() as u32).collect(),
+            };
+            let mut list = Vec::new();
+            for s in streams {
+                let kept = env.transcripts(m, s)?;
+                let main = transcripts::main(&kept, transcripts::choice(m, s))
+                    .map(|k| k.key.clone())
+                    .unwrap_or_default();
+                list.extend(kept_json(s, &kept, &main));
+            }
+            json!({ "media": media, "transcripts": list })
+        }
+        Request::MediaTranscriptsRemove {
+            media,
+            stream,
+            transcripts: keys,
+        } => {
+            let m = pool_item(p, media)?;
+            let kept = env.transcripts(m, *stream)?;
+            for key in keys {
+                known_transcript(&kept, media, key)?;
+            }
+            if !dry_run {
+                for key in keys {
+                    env.remove_transcript(m, *stream, key)?;
+                }
+            }
+            json!({ "media": media, "stream": stream, "removed": keys })
         }
         other => {
             return Err(Error::internal(format!(

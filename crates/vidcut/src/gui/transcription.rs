@@ -93,6 +93,7 @@ struct Difference {
 struct Read {
     items: Vec<Item>,
     differences: Vec<Difference>,
+    media: Option<String>,
     stream: u32,
     transcripts: Vec<Transcript>,
 }
@@ -478,9 +479,12 @@ fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Read {
         }
     }
     let first = entries.first();
+    let file = |e: &Value| (e["media"].clone(), e["stream"].clone());
+    let one = first.filter(|f| entries.iter().all(|e| file(e) == file(f)));
     Read {
         items,
         differences: found,
+        media: one.and_then(|e| e["media"].as_str()).map(String::from),
         stream: first.and_then(|e| e["stream"].as_u64()).unwrap_or(0) as u32,
         transcripts: first
             .and_then(|e| e["transcripts"].as_array())
@@ -954,7 +958,7 @@ impl Workspace {
                 let transcripts = read
                     .as_deref()
                     .map_or(&[][..], |r| r.transcripts.as_slice());
-                if matches!(shown, Some(Shown::Media(_))) && !transcripts.is_empty() {
+                if read.as_ref().is_some_and(|r| r.media.is_some()) && !transcripts.is_empty() {
                     super::dialog::row(ui, "Transcript", |ui| {
                         let main = transcripts.iter().find(|x| x.main).or(transcripts.first());
                         egui::ComboBox::from_id_salt("transcription-main")
@@ -1275,7 +1279,11 @@ impl Workspace {
                         egui::Frame::popup(ui.style()).show(ui, |ui| {
                             for (k, pick) in d.picks.iter().enumerate() {
                                 ui.horizontal(|ui| {
-                                    let label = format!("{}  {}", k + 1, pick.text);
+                                    let text = match pick.text.is_empty() {
+                                        true => "(no words)",
+                                        false => pick.text.as_str(),
+                                    };
+                                    let label = format!("{}  {text}", k + 1);
                                     if ui.selectable_label(pick.text == now, label).clicked() {
                                         acts.push(Act::Pick(n, k));
                                     }
@@ -1544,7 +1552,7 @@ impl Workspace {
                 }),
             ),
             Act::Main(key) => {
-                if let Some(m) = media {
+                if let Some(m) = &read.media {
                     self.send(
                         "media.transcripts.main",
                         json!({ "media": m, "stream": read.stream, "transcript": key }),
@@ -1552,7 +1560,7 @@ impl Workspace {
                 }
             }
             Act::Remove(key) => {
-                if let Some(m) = media {
+                if let Some(m) = &read.media {
                     self.send(
                         "media.transcripts.remove",
                         json!({ "media": m, "stream": read.stream, "transcripts": [key] }),

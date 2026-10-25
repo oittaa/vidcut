@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use crate::editor::Env;
@@ -200,14 +200,40 @@ pub fn put(choice: &mut ChosenWords, start: f64, end: f64, new: Option<WordsChan
     choice.changes = kept;
 }
 
-pub fn taken(words: &[Word], start: f64, end: f64) -> Vec<ChangedWord> {
-    words
+pub fn taken(words: &[Word], theirs: &[Word], start: f64, end: f64) -> Vec<ChangedWord> {
+    let inside: Vec<usize> = (0..words.len())
+        .filter(|&i| covers(start, end, middle(&words[i])))
+        .collect();
+    let (Some(&first), Some(&last)) = (inside.first(), inside.last()) else {
+        return Vec::new();
+    };
+    let picked: Vec<&Word> = counterpart(&align(words, theirs), first, last)
+        .into_iter()
+        .map(|j| &theirs[j])
+        .collect();
+    let (Some(a), Some(b)) = (picked.first(), picked.last()) else {
+        return Vec::new();
+    };
+    let after = first.checked_sub(1).map_or(f64::MIN, |i| words[i].end);
+    let before = words.get(last + 1).map_or(f64::MAX, |w| w.start);
+    let fits =
+        a.start >= after && b.end <= before && picked.iter().all(|w| covers(start, end, middle(w)));
+    let (mut lo, mut hi) = (start.max(after), end.min(before));
+    if hi <= lo {
+        (lo, hi) = (start, end);
+    }
+    let length = b.end - a.start;
+    let at = |t: f64| match (fits, length > 0.0) {
+        (true, _) => t,
+        (false, true) => lo + (t - a.start) / length * (hi - lo),
+        (false, false) => lo,
+    };
+    picked
         .iter()
-        .filter(|w| covers(start, end, middle(w)))
         .map(|w| ChangedWord {
             text: w.text.clone(),
-            start: w.start,
-            end: w.end,
+            start: at(w.start),
+            end: at(w.end),
             joined: w.joined,
         })
         .collect()
@@ -264,145 +290,162 @@ pub struct Alternative {
     pub words: Vec<Word>,
 }
 
-fn linked(a: &Word, b: &Word) -> bool {
-    let overlap = a.end.min(b.end) - a.start.max(b.start);
-    let shorter = (a.end - a.start).min(b.end - b.start);
-    overlap > 0.0 && overlap * 3.0 >= shorter
+const LOOK: usize = 12;
+
+const NEAR: f64 = 10.0;
+
+#[derive(Debug, Clone, PartialEq)]
+enum Piece {
+    Same(usize, usize),
+    Apart(Range<usize>, Range<usize>),
 }
 
-fn root(parent: &mut [usize], mut x: usize) -> usize {
-    while parent[x] != x {
-        parent[x] = parent[parent[x]];
-        x = parent[x];
-    }
-    x
-}
-
-type Group = (Vec<usize>, Vec<usize>);
-
-fn groups(a: &[Word], b: &[Word]) -> Vec<Group> {
-    let n = a.len();
-    let mut parent: Vec<usize> = (0..n + b.len()).collect();
-    let mut low = 0;
-    for (i, w) in a.iter().enumerate() {
-        while low < b.len() && b[low].end <= w.start {
-            low += 1;
-        }
-        let mut j = low;
-        while j < b.len() && b[j].start < w.end {
-            if linked(w, &b[j]) {
-                let (x, y) = (root(&mut parent, i), root(&mut parent, n + j));
-                parent[x] = y;
+fn align(a: &[Word], b: &[Word]) -> Vec<Piece> {
+    let bare =
+        |w: &[Word]| -> Vec<String> { w.iter().map(|x| transcript::bare(&x.text)).collect() };
+    let (x, y) = (bare(a), bare(b));
+    let same = |i: usize, j: usize| x[i] == y[j] && (middle(&a[i]) - middle(&b[j])).abs() <= NEAR;
+    let anchored = |i: usize, j: usize| {
+        same(i, j) && (i + 1 == a.len() || j + 1 == b.len() || same(i + 1, j + 1))
+    };
+    let resync = |i: usize, j: usize| {
+        (1..=LOOK).find_map(|d| {
+            (0..=d)
+                .filter(|&k| i + k < a.len() && j + d - k < b.len() && anchored(i + k, j + d - k))
+                .min_by_key(|&k| (2 * k).abs_diff(d))
+                .map(|k| (k, d - k))
+        })
+    };
+    let mut out = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    let (mut from_i, mut from_j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        if same(i, j) {
+            if from_i < i || from_j < j {
+                out.push(Piece::Apart(from_i..i, from_j..j));
             }
-            j += 1;
+            out.push(Piece::Same(i, j));
+            (i, j) = (i + 1, j + 1);
+            (from_i, from_j) = (i, j);
+            continue;
+        }
+        match resync(i, j) {
+            Some((k, l)) => (i, j) = (i + k, j + l),
+            None if a[i].start <= b[j].start => i += 1,
+            None => j += 1,
         }
     }
-    let mut by_root: HashMap<usize, (Group, f64)> = HashMap::new();
-    for (i, w) in a.iter().enumerate() {
-        let r = root(&mut parent, i);
-        let entry = by_root
-            .entry(r)
-            .or_insert(((Vec::new(), Vec::new()), w.start));
-        entry.0.0.push(i);
-        entry.1 = entry.1.min(w.start);
+    if from_i < a.len() || from_j < b.len() {
+        out.push(Piece::Apart(from_i..a.len(), from_j..b.len()));
     }
-    for (j, w) in b.iter().enumerate() {
-        let r = root(&mut parent, n + j);
-        let entry = by_root
-            .entry(r)
-            .or_insert(((Vec::new(), Vec::new()), w.start));
-        entry.0.1.push(j);
-        entry.1 = entry.1.min(w.start);
-    }
-    let mut out: Vec<(Group, f64)> = by_root.into_values().collect();
-    out.sort_by(|x, y| x.1.total_cmp(&y.1));
-    out.into_iter().map(|(g, _)| g).collect()
+    out
 }
 
-fn bare_text<'a>(words: impl Iterator<Item = &'a Word>) -> String {
-    words.map(|w| transcript::bare(&w.text)).collect()
+fn counterpart(pieces: &[Piece], first: usize, last: usize) -> Vec<usize> {
+    let inside = |i: usize| first <= i && i <= last;
+    let mut out = Vec::new();
+    let mut before: Option<usize> = None;
+    for piece in pieces {
+        match piece {
+            Piece::Same(i, j) => {
+                if inside(*i) {
+                    out.push(*j);
+                }
+                before = Some(*i);
+            }
+            Piece::Apart(is, js) if is.is_empty() => {
+                if inside(before.unwrap_or(0)) {
+                    out.extend(js.clone());
+                }
+            }
+            Piece::Apart(is, js) => {
+                if is.clone().any(inside) {
+                    out.extend(js.clone());
+                }
+                before = Some(is.end - 1);
+            }
+        }
+    }
+    out
 }
 
-pub fn differences(words: &[Word], others: &[&Kept]) -> Vec<Difference> {
+fn bare_text(words: &[Word]) -> String {
+    words.iter().map(|w| transcript::bare(&w.text)).collect()
+}
+
+fn bounds(words: &[Word], first: usize, last: usize) -> (f64, f64) {
+    let start = match first {
+        0 => words[0].start.min(middle(&words[0])),
+        f => (middle(&words[f - 1]) + middle(&words[f])) / 2.0,
+    };
+    let end = match words.get(last + 1) {
+        Some(next) => (middle(&words[last]) + middle(next)) / 2.0,
+        None => words[last].end.max(middle(&words[last])) + 1e-6,
+    };
+    (start, end)
+}
+
+pub fn differences(words: &[Word], kept: &[&Kept]) -> Vec<Difference> {
     if words.is_empty() {
         return Vec::new();
     }
-    let heard: Vec<(&Kept, Vec<Word>)> = others
+    let heard: Vec<(&Kept, Vec<Word>, Vec<Piece>)> = kept
         .iter()
-        .filter_map(|k| Some((*k, transcript::spoken(&k.speech).ok()?)))
+        .filter_map(|k| {
+            let theirs = transcript::spoken(&k.speech).ok()?;
+            let pieces = align(words, &theirs);
+            Some((*k, theirs, pieces))
+        })
         .collect();
-    let mut raw: Vec<(usize, usize, f64, f64)> = Vec::new();
-    for (_, other) in &heard {
-        for (mine, theirs) in groups(words, other) {
-            let same = bare_text(mine.iter().map(|&i| &words[i]))
-                == bare_text(theirs.iter().map(|&j| &other[j]));
-            if same {
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    for (_, theirs, pieces) in &heard {
+        for piece in pieces {
+            let Piece::Apart(is, js) = piece else {
+                continue;
+            };
+            if bare_text(&words[is.clone()]) == bare_text(&theirs[js.clone()]) {
                 continue;
             }
-            let (f, l) = match (mine.first(), mine.last()) {
-                (Some(&f), Some(&l)) => (f, l),
-                _ => {
-                    let at = theirs.first().map_or(0.0, |&j| other[j].start);
-                    let before = words.iter().rposition(|w| w.start <= at).unwrap_or(0);
-                    (before, before)
+            spans.push(match is.is_empty() {
+                true => {
+                    let at = is.start.saturating_sub(1).min(words.len() - 1);
+                    (at, at)
                 }
-            };
-            let times = (f..=l)
-                .map(|i| &words[i])
-                .chain(theirs.iter().map(|&j| &other[j]));
-            let (s, e) = times.fold((f64::MAX, f64::MIN), |(s, e), w| {
-                (s.min(w.start), e.max(w.end))
+                false => (is.start, is.end - 1),
             });
-            raw.push((f, l, s, e));
         }
     }
-    raw.sort_by_key(|x| (x.0, x.1));
-    let mut merged: Vec<(usize, usize, f64, f64)> = Vec::new();
-    for (f, l, s, e) in raw {
+    spans.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (f, l) in spans {
         match merged.last_mut() {
-            Some(last) if f <= last.1 => {
-                last.1 = last.1.max(l);
-                last.2 = last.2.min(s);
-                last.3 = last.3.max(e);
-            }
-            _ => merged.push((f, l, s, e)),
+            Some(last) if f <= last.1 => last.1 = last.1.max(l),
+            _ => merged.push((f, l)),
         }
     }
     let mut out = Vec::new();
-    for (f, l, mut start, mut end) in merged {
-        if f > 0 {
-            start = start.max(middle(&words[f - 1]) + 1e-6);
-        }
-        if let Some(next) = words.get(l + 1) {
-            end = end.min(middle(next));
-        }
-        let mine = bare_text(words[f..=l].iter());
+    for (first, last) in merged {
+        let mine = bare_text(&words[first..=last]);
         let mut options: Vec<Alternative> = Vec::new();
-        for (k, other) in &heard {
-            let theirs: Vec<Word> = other
-                .iter()
-                .filter(|w| covers(start, end, middle(w)))
-                .cloned()
+        for (k, theirs, pieces) in &heard {
+            let heard: Vec<Word> = counterpart(pieces, first, last)
+                .into_iter()
+                .map(|j| theirs[j].clone())
                 .collect();
-            let text = bare_text(theirs.iter());
-            if text == mine {
-                continue;
-            }
-            match options
-                .iter_mut()
-                .find(|o| bare_text(o.words.iter()) == text)
-            {
+            let text = bare_text(&heard);
+            match options.iter_mut().find(|o| bare_text(&o.words) == text) {
                 Some(o) => o.keys.push(k.key.clone()),
                 None => options.push(Alternative {
                     keys: vec![k.key.clone()],
-                    words: theirs,
+                    words: heard,
                 }),
             }
         }
-        if !options.is_empty() {
+        if options.iter().any(|o| bare_text(&o.words) != mine) {
+            let (start, end) = bounds(words, first, last);
             out.push(Difference {
-                first: f,
-                last: l,
+                first,
+                last,
                 start,
                 end,
                 options,

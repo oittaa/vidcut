@@ -203,12 +203,17 @@ flowchart TD
   - `transcripts::chosen` puts the changes over the words of the main transcript. A change replaces each word whose middle is in its time.
   - `transcripts::read` gives these words. Subtitles, cutting by words and `analyze.words` read them.
   - `media.words.set` puts a change (`transcripts::put`). A change that covers part of an older change cuts the older change.
-  - Words taken from a transcript keep their times (`transcripts::taken`).
+  - Words taken from a transcript are the words matched to the old words (`transcripts::taken`).
+    - They keep their times when these are between the words around the change.
+    - Else they are fitted into the time of the change. Thus the words stay in order.
   - Typed words keep the times of the old words when the count is the same. Else they share the time by their length (`transcripts::typed`).
-  - `transcripts::differences` compares these words with each transcript:
-    - Words that overlap by a third of the shorter word are in one group.
-    - A group differs when its text differs without capitals and the punctuation around each word.
-    - Differences that share words become one. Each choice gives its text and the transcripts that heard it.
+  - `transcripts::differences` compares these words with each transcript, word by word (`align`):
+    - Two words match when their text is the same without capitals and the punctuation around them.
+    - The times only keep the match near: two matched words are at most 10 seconds apart.
+    - Transcripts can time the same words differently. Thus the times do not decide the match.
+    - After words that do not match, the next match must be two words in a row, at most 12 words ahead.
+    - Words that do not match make a difference. Differences that share words become one.
+    - Each choice gives its text and the transcripts that heard it. The transcript in use is one of the choices.
   - `analyze.words` gives the transcripts and the differences of each media (`transcripts`, `differences`).
 - **Speakers:**
   - `speakers` gives each word a speaker (`Word::speaker`).
