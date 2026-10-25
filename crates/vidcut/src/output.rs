@@ -548,6 +548,93 @@ pub fn print(method: &str, r: &Response, json: bool) {
             );
             println!("({})", r.result["path"].as_str().unwrap_or_default());
         }
+        "models.list" => {
+            for m in r.result["models"].as_array().into_iter().flatten() {
+                let files = m["files"].as_array().map_or(&[][..], Vec::as_slice);
+                let bytes: u64 = files.iter().filter_map(|f| f["bytes"].as_u64()).sum();
+                let state = match (files.is_empty(), files.iter().all(|f| f["present"] == true)) {
+                    (true, _) => "on its company's servers".to_string(),
+                    (false, true) => format!("{}, here", size(bytes)),
+                    (false, false) => format!("{}, not downloaded", size(bytes)),
+                };
+                println!(
+                    "{:<17} {}: {state}",
+                    m["id"].as_str().unwrap_or_default(),
+                    m["title"].as_str().unwrap_or_default()
+                );
+                let languages = m["languages"].as_array().map_or(0, Vec::len);
+                if languages > 0 {
+                    println!("{:17}   {languages} languages", "");
+                }
+                for l in m["limits"].as_array().into_iter().flatten() {
+                    let source = match &l["source"] {
+                        Value::Object(o) => o["doc"].as_str().unwrap_or_default().to_string(),
+                        s => s.as_str().unwrap_or_default().to_string(),
+                    };
+                    let checked = l["checked"]
+                        .as_str()
+                        .map_or(String::new(), |c| format!(", checked {c}"));
+                    println!(
+                        "{:17}   {} {} ({}; {source}{checked})",
+                        "",
+                        l["measure"].as_str().unwrap_or_default(),
+                        number(l["value"].as_f64().unwrap_or(0.0)),
+                        l["kind"].as_str().unwrap_or_default()
+                    );
+                }
+                if let Some(p) = m["price"].as_object() {
+                    println!(
+                        "{:17}   ${:.2}/hour (checked {})",
+                        "",
+                        p["dollars_per_hour"].as_f64().unwrap_or(0.0),
+                        p["checked"].as_str().unwrap_or_default()
+                    );
+                }
+            }
+            let rt = &r.result["runtime"];
+            if rt.is_object() {
+                let here = if rt["present"] == true {
+                    "here"
+                } else {
+                    "not downloaded"
+                };
+                println!(
+                    "{} {}: {}, {here}",
+                    rt["title"].as_str().unwrap_or_default(),
+                    rt["version"].as_str().unwrap_or_default(),
+                    size(rt["bytes"].as_u64().unwrap_or(0))
+                );
+            }
+            println!("({})", r.result["folder"].as_str().unwrap_or_default());
+        }
+        "models.check" => {
+            let rep = &r.result["reported"];
+            let mut said = vec!["SHA-256 matches".to_string()];
+            match r.result["loaded"].as_str() {
+                Some(by) => said.push(format!("loaded with {by}")),
+                None => said.push("not loaded: vidcut has no load check for it".into()),
+            }
+            if let Some(n) = rep["languages"].as_array().map(Vec::len).filter(|n| *n > 0) {
+                said.push(format!("{n} languages"));
+            }
+            match rep["times"].as_str() {
+                Some("words") => said.push("word times".into()),
+                Some("phrases") => said.push("phrase times".into()),
+                Some(_) => said.push("no times".into()),
+                None => {}
+            }
+            if let Some(s) = rep["audio_secs"].as_f64() {
+                said.push(format!("longest audio {} s", number(s)));
+            }
+            if let Some(s) = rep["speakers"].as_f64() {
+                said.push(format!("{} speakers at most", number(s)));
+            }
+            println!(
+                "{}: {}",
+                r.result["model"].as_str().unwrap_or_default(),
+                said.join("; ")
+            );
+        }
         "decoders.list" => {
             let rows: Vec<[String; 3]> = r.result["decoders"]
                 .as_array()
@@ -1411,6 +1498,13 @@ fn flatten(prefix: &str, v: &Value, out: &mut Vec<String>) {
             }
         }
         v => out.push(format!("{prefix} = {v}")),
+    }
+}
+
+fn number(v: f64) -> String {
+    match v.fract() == 0.0 && v.abs() < 1e15 {
+        true => format!("{}", v as i64),
+        false => v.to_string(),
     }
 }
 

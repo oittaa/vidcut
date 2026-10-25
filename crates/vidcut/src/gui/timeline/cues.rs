@@ -699,6 +699,7 @@ impl Workspace {
         let buttons = [
             (
                 "Lock",
+                "Lock Track",
                 t.locked,
                 lock,
                 json!({ "track": t.id, "locked": !t.locked }),
@@ -706,15 +707,19 @@ impl Workspace {
             ),
             (
                 "Show",
+                "Hide Track",
                 !t.shown,
                 shown,
                 json!({ "track": t.id, "shown": !t.shown }),
                 parts.toggles[2],
             ),
         ];
-        for (what, lit, glyph, change, at) in buttons {
+        for (what, tip, lit, glyph, change, at) in buttons {
             let name = format!("{what} {}", t.id);
-            if header_button(&mut child, at, glyph, &name, lit).clicked() {
+            if header_button(&mut child, at, glyph, &name, lit)
+                .on_hover_text(tip)
+                .clicked()
+            {
                 self.send("track.set", change);
             }
         }

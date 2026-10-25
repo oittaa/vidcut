@@ -184,10 +184,10 @@ pub enum Request {
         #[serde(default)]
         sound_db: Option<f64>,
         /// Give each word its speaker. On this computer, in English and
-        /// Chinese MOSS-Transcribe-Diarize tells them apart, else up to 4 in
-        /// each file (NVIDIA's Sortformer); with `xai`, one numbering across
-        /// every file heard; with `google`, the same up to 30 minutes of
-        /// speech, past that this computer's. The project names them
+        /// Chinese MOSS-Transcribe-Diarize tells them apart, else NVIDIA's
+        /// Sortformer, in each file; with `xai`, one numbering across every
+        /// file heard; with `google`, the same as far as its limit
+        /// (`models.list`), past that this computer's. The project names them
         /// (`speakers.set`).
         #[serde(default)]
         speakers: bool,
@@ -600,10 +600,10 @@ pub enum Request {
         #[serde(default)]
         sound_db: Option<f64>,
         /// Give each word its speaker. On this computer, in English and
-        /// Chinese MOSS-Transcribe-Diarize tells them apart, else up to 4 in
-        /// each file (NVIDIA's Sortformer); with `xai`, one numbering across
-        /// every file heard; with `google`, the same up to 30 minutes of
-        /// speech, past that this computer's. The project names them
+        /// Chinese MOSS-Transcribe-Diarize tells them apart, else NVIDIA's
+        /// Sortformer, in each file; with `xai`, one numbering across every
+        /// file heard; with `google`, the same as far as its limit
+        /// (`models.list`), past that this computer's. The project names them
         /// (`speakers.set`).
         #[serde(default)]
         speakers: bool,
@@ -1636,10 +1636,10 @@ pub enum Request {
         #[serde(default)]
         sound_db: Option<f64>,
         /// Give each word its speaker. On this computer, in English and
-        /// Chinese MOSS-Transcribe-Diarize tells them apart, else up to 4 in
-        /// each file (NVIDIA's Sortformer); with `xai`, one numbering across
-        /// every file heard; with `google`, the same up to 30 minutes of
-        /// speech, past that this computer's. The project names them
+        /// Chinese MOSS-Transcribe-Diarize tells them apart, else NVIDIA's
+        /// Sortformer, in each file; with `xai`, one numbering across every
+        /// file heard; with `google`, the same as far as its limit
+        /// (`models.list`), past that this computer's. The project names them
         /// (`speakers.set`).
         #[serde(default)]
         speakers: bool,
@@ -2084,6 +2084,24 @@ pub enum Request {
     /// made once and kept, decoded through on each.
     #[serde(rename = "decoders.list")]
     DecodersList {},
+    /// The AI models and speech services that vidcut uses, and
+    /// transcribe.cpp's library: each one's files (where they come from,
+    /// size, SHA-256, and whether this computer has them), languages, kind
+    /// of times, limits with their sources, and price.
+    #[serde(rename = "models.list")]
+    ModelsList {},
+    /// Check one model (an `id` from `models.list`): the size and SHA-256 of
+    /// each file, then load it and compare what it reports (languages, kind
+    /// of times, longest audio, most speakers) with the catalog. A
+    /// difference is an error that names the field. `download` fetches the
+    /// files this computer doesn't have first. For `flashvsr`, the check
+    /// puts its weights on the GPU, then frees them.
+    #[serde(rename = "models.check")]
+    ModelsCheck {
+        model: String,
+        #[serde(default)]
+        download: bool,
+    },
     /// Application preferences (`~/.config/vidcut/preferences.toml`, on
     /// Windows in `%APPDATA%\vidcut`, on macOS in `~/Library/Application
     /// Support/vidcut`) and what the disk cache holds, with its limit.
@@ -2739,43 +2757,39 @@ pub struct SpokenWord {
     pub end: TimeSpec,
 }
 
-/// A speech recognition model, a GGUF file transcribe.cpp runs.
+/// A speech recognition model: a GGUF file transcribe.cpp runs, or a paid
+/// service. `models.list` gives each one's size, languages, limits and
+/// price.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub enum SpeechModel {
-    /// Parakeet Ultra by Moondream (CC BY 4.0), 740 MB, the default: 25
-    /// European languages, times per word. It wants a GPU with 2 GB.
+    /// Parakeet Ultra by Moondream (CC BY 4.0), the default: European
+    /// languages, times per word.
     #[default]
     #[serde(rename = "parakeet-ultra")]
     ParakeetUltra,
-    /// Qwen3-ASR 1.7B (Apache-2.0), 2.2 GB: 30 languages. It gives no times
-    /// until transcribe.cpp runs its aligner, so its text is spread over the
-    /// speech in pieces of 10 s at the most, and its cues' times are
-    /// estimates. It wants a GPU with 8 GB.
+    /// Qwen3-ASR 1.7B (Apache-2.0). It gives no times until transcribe.cpp
+    /// runs its aligner, so its text is spread over the speech in pieces of
+    /// 10 s at the most, and its cues' times are estimates.
     #[serde(rename = "qwen3-asr")]
     Qwen3Asr,
-    /// Whisper large-v3 (Apache-2.0), 1.7 GB: 100 languages, times per
-    /// phrase. It wants a GPU with 4 GB.
+    /// Whisper large-v3 (Apache-2.0): times per phrase.
     #[serde(rename = "whisper-large-v3")]
     WhisperLargeV3,
-    /// xAI's `grok-voice-transcribe-2.0`, on xAI's servers: 38 languages,
-    /// times per word, $0.10 per hour of audio (October 2026). Everything
-    /// heard goes in one request, 500 MB at most. It needs an xAI key and
+    /// xAI's `grok-voice-transcribe-2.0`, on xAI's servers: times per word.
+    /// Everything heard goes in one request. It needs an xAI key and
     /// `send`.
     #[serde(rename = "xai")]
     Xai,
-    /// Google's `gemini-3.5-transcribe`, on Google's servers: 83 languages,
-    /// times per word, about $0.30 per hour of audio (October
-    /// 2026), 30 minutes of speech at most with word times, which vidcut
-    /// always asks for: more is refused before anything is sent. It tells up
-    /// to 8 speakers apart, 3 or more experimentally. It needs a Gemini key
-    /// and `send`.
+    /// Google's `gemini-3.5-transcribe`, on Google's servers: times per
+    /// word, which vidcut always asks for. More speech than its limit is
+    /// refused before anything is sent. It needs a Gemini key and `send`.
     #[serde(rename = "google")]
     Google,
 }
 
 impl SpeechModel {
     pub fn times_words(self) -> bool {
-        matches!(self, Self::ParakeetUltra | Self::Xai | Self::Google)
+        crate::catalog::speech(self).times == Some(crate::transcript::Timing::Words)
     }
 
     pub fn paid(self) -> bool {
@@ -2824,9 +2838,9 @@ pub enum SpeakerModel {
     /// MOSS-Transcribe-Diarize in English and Chinese, else Sortformer.
     #[default]
     Auto,
-    /// MOSS-Transcribe-Diarize, 987 MB: English and Chinese, many speakers.
+    /// MOSS-Transcribe-Diarize: English and Chinese, many speakers.
     Moss,
-    /// NVIDIA's Sortformer, 139 MB: any language, up to 4 speakers.
+    /// NVIDIA's Sortformer: any language, fewer speakers (`models.list`).
     Sortformer,
 }
 
@@ -2886,7 +2900,8 @@ pub struct XaiOptions {
     /// hears everything sent. Default: xAI's, 0.5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vad_threshold: Option<f64>,
-    /// Each channel of the sound on its own, up to 8, the words merged by
+    /// Each channel of the sound on its own, up to xAI's limit
+    /// (`models.list`), the words merged by
     /// time; with `speakers`, a word's speaker is its channel.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub multichannel: bool,
@@ -3755,6 +3770,8 @@ impl Request {
                 | Self::LooksDelete { .. }
                 | Self::EncodersList { .. }
                 | Self::DecodersList {}
+                | Self::ModelsList {}
+                | Self::ModelsCheck { .. }
                 | Self::PreferencesGet {}
                 | Self::PreferencesSet(_)
                 | Self::PreferencesReset {}
@@ -3803,6 +3820,8 @@ impl Request {
                     | Self::Schema { .. }
                     | Self::Doctor {}
                     | Self::Reset { .. }
+                    | Self::ModelsList {}
+                    | Self::ModelsCheck { .. }
                     | Self::ExportPlan(_)
                     | Self::ExportStart(_)
                     | Self::FrameRender { .. }

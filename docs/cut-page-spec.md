@@ -553,6 +553,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 
 ### 8.9 Markers (pp. 718–719)
 - M adds a marker at the playhead, or edits the marker there.
+- A double-click on a marker opens the marker dialog. The dialog has a button for each marker color (p. 1016).
 - Shift+Up/Down jumps between markers.
 - You can drag markers.
 - Alt+M deletes the marker at the playhead. Delete removes the selected markers.

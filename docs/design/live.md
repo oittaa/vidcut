@@ -483,6 +483,12 @@ The bar and the Jobs button:
 - **Dialogs.**
   - `dialog::window` gives a window its width and spacing.
   - `dialog::form` and `dialog::row` give its labeled rows.
+  - `dialog::tall_row` gives a row that is taller than one line, for example a box of notes.
+    - It puts the label and the content at the top of the row.
+    - Thus the content does not cover the next row.
+    - Its content is in a top-down layout. The cells of `egui::Grid` are in a left-to-right layout.
+  - `dialog::form_width` gives the width of a window whose fields have one given width.
+    - The Marker window uses it. Its Name box, Notes box and row of colors have the same width.
   - `dialog::switch` gives a choice of two or three.
   - `dialog::advanced` gives the settings that are rarely needed.
   - `dialog::footer` gives Cancel and the one main button (`dialog::main_button`, in the selection color of the theme).

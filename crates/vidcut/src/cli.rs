@@ -27,6 +27,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("media.transcripts.main", &["media", "transcript"]),
     ("media.transcripts.remove", &["media", "transcripts"]),
     ("media.words.set", &["media"]),
+    ("models.check", &["model"]),
     ("proxy.generate", &["media"]),
     ("proxy.remove", &["media"]),
     ("bins.add", &["path"]),
@@ -161,6 +162,10 @@ const GROUPS: &[(&str, &str)] = &[
     ),
     ("mixer", "The Mixer"),
     (
+        "models",
+        "The AI models and speech services: their files, limits and prices",
+    ),
+    (
         "picture",
         "A clip's picture over the frame: moved, zoomed, turned, flipped, cropped, faded",
     ),
@@ -234,6 +239,10 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "media.add_folder",
         "vidcut media add-folder ~/footage/shoot\n  vidcut media add-folder renders --bin VFX --sequence --fps 24",
+    ),
+    (
+        "models.check",
+        "vidcut models check parakeet-ultra\n  vidcut models check sortformer --download",
     ),
     (
         "media.marks.set",
