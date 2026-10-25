@@ -729,7 +729,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - On a source clip, Delete leaves the words out of every edit of the media (`media.leave_out`). This includes the edits of the viewer, of the pool and of scripts.
   - On the timeline, Delete takes the words out of every unlocked track (`edit.ripple_delete_words`, D63).
     - With Ripple On, the gap closes. With it off, a gap is left (`lift`).
-    - The edges move to the quiet points around the words (`quiet`).
+    - The edges move to the quiet points around the words (`quiet`, X92).
   - On the timeline, Cut takes the selected words out of every unlocked track and leaves a gap (`edit.cut` with `range`).
   - Copy on the timeline also keeps the selected words for Paste (`edit.copy` with `range`).
   - Paste puts them in at the first selected word, else at the playhead (`edit.paste`).
@@ -747,7 +747,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The speaker commands are Rename, Same Person As and Separate.
   - Assign To gives the selected words to another person.
   - `analyze.words`, `media.leave_out`, `media.words.set`, `edit.ripple_delete_words`, `edit.cut`, `edit.copy` and `edit.paste` do the same by request.
-  - Details: D63, D73; deviations X50, X61.
+  - Details: D63, D73; deviations X50, X61, X92.
 
 ### 8.14 Titles (pp. 762–764, 1176–1178)
 
