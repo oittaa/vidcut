@@ -5,6 +5,7 @@ use super::theme;
 
 pub(super) const WIDTH: f32 = 420.0;
 const LABEL: f32 = 100.0;
+const GAP: f32 = 12.0;
 
 pub(super) fn window<R>(
     ctx: &egui::Context,
@@ -59,13 +60,31 @@ pub(super) fn form(ui: &mut egui::Ui, id: &str, add: impl FnOnce(&mut egui::Ui))
     egui::Grid::new(id)
         .num_columns(2)
         .min_col_width(LABEL)
-        .spacing([12.0, 8.0])
+        .spacing([GAP, 8.0])
         .show(ui, add);
+}
+
+pub(super) fn form_width(field: f32) -> f32 {
+    LABEL + GAP + field
 }
 
 pub(super) fn row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     ui.label(RichText::new(label).color(theme::colors().text_dim));
     let r = ui.horizontal(add).inner;
+    ui.end_row();
+    r
+}
+
+pub(super) fn tall_row<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    ui.scope(|ui| {
+        ui.horizontal(|ui| ui.label(RichText::new(label).color(theme::colors().text_dim)))
+    });
+    let top_down = egui::UiBuilder::new().layout(egui::Layout::top_down(egui::Align::Min));
+    let r = ui.scope_builder(top_down, add).inner;
     ui.end_row();
     r
 }
