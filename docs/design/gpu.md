@@ -269,6 +269,11 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - The KV cache of each block is a ring of windows (`Cache`).
     - `run::plan` keeps the caches on the GPU while all of the work fits in the room of AI work (`player::room_on`). The caches of the other blocks stay in main memory between chunks (`Keys::Host`). Each comes back to the GPU just before its block runs, and its new windows go back after it.
       - The new windows go to a mapped buffer in the first submission of the block. The block reads them at its end, while the GPU runs its feed-forward part.
+      - A cache comes back through `queue.write_buffer`. wgpu first copies the data into upload buffers. With resizable BAR, these buffers are in GPU memory.
+      - Thus the plan counts the upload buffers of one cache, in addition to the GPU buffers that the cache comes back into.
+      - A block with a cache in main memory first waits for the upload of the block before it. Thus the upload buffers of only one cache are in use at a time.
+    - Before each chunk, `Stream::fit` measures the room again. When the work of the chunk and its uploads do not fit, more caches go to main memory, from the last block back.
+      - Why: other work takes GPU memory after the plan. An example is the encoder, which opens after the first frames.
     - The results are the same in both places.
     - The device of AI Best uses the `MemoryUsage` hint of wgpu. Its memory blocks are small, so the free parts of the blocks stay small.
       - Why: the plan can fill the room. With larger blocks, the free parts of the blocks went past the room by gigabytes at 4K output.

@@ -145,6 +145,7 @@ pub(super) struct Stream {
     map2: [u32; 4],
     mems: Mems,
     loaner: Option<(wgpu::Buffer, wgpu::Buffer)>,
+    upload: Option<wgpu::SubmissionIndex>,
     fed: u64,
     chunk: u64,
     dump: Option<PathBuf>,
@@ -498,6 +499,20 @@ pub(super) struct Plan {
     pub(super) room: Option<u64>,
 }
 
+fn in_ram(host: u64, g: &Geometry) -> Result<()> {
+    let ram = crate::player::system_memory().map_or(0, |b| b as u64);
+    if host > ram / 2 {
+        return Err(Error::Invalid(format!(
+            "the AI Best upscaler needs about {} GB of main memory at {}x{} for what does not fit on the GPU, and this computer has {} GB",
+            gigabytes(host),
+            g.wm,
+            g.hm,
+            gigabytes(ram)
+        )));
+    }
+    Ok(())
+}
+
 pub(super) fn plan(gpu: &Gpu, g: &Geometry) -> Result<Plan> {
     let kv: Vec<u64> = (0..super::LAYERS)
         .map(|i| 2 * u64::from(keep_of(i)) * window(g))
@@ -517,17 +532,17 @@ pub(super) fn plan(gpu: &Gpu, g: &Geometry) -> Result<Plan> {
             ..all
         });
     }
-    let biggest = kv.iter().copied().max().unwrap_or(0);
-    if fixed + biggest > room {
+    let host_path = 2 * kv.iter().copied().max().unwrap_or(0);
+    if fixed + host_path > room {
         return Err(Error::Invalid(format!(
             "the AI Best upscaler needs about {} GB of GPU memory at {}x{}, and {} GB of this GPU is free",
-            gigabytes(fixed + biggest),
+            gigabytes(fixed + host_path),
             g.wm,
             g.hm,
             gigabytes(room)
         )));
     }
-    let mut used = fixed + biggest;
+    let mut used = fixed + host_path;
     let resident: Vec<bool> = kv
         .iter()
         .map(|b| {
@@ -544,16 +559,7 @@ pub(super) fn plan(gpu: &Gpu, g: &Geometry) -> Result<Plan> {
         .filter(|(_, r)| !**r)
         .map(|(b, _)| b)
         .sum();
-    let ram = crate::player::system_memory().map_or(0, |b| b as u64);
-    if host > ram / 2 {
-        return Err(Error::Invalid(format!(
-            "the AI Best upscaler needs about {} GB of main memory at {}x{} for what does not fit on the GPU, and this computer has {} GB",
-            gigabytes(host),
-            g.wm,
-            g.hm,
-            gigabytes(ram)
-        )));
-    }
+    in_ram(host, g)?;
     Ok(Plan {
         resident,
         need: used,
@@ -629,12 +635,69 @@ impl Stream {
                 c: mem(p8 * 16, 128),
             },
             loaner,
+            upload: None,
             fed: 0,
             chunk: 0,
             host_wait: Duration::ZERO,
             host_bytes: 0,
             dump,
         })
+    }
+
+    fn fit(&mut self, gpu: &Gpu) -> Result<()> {
+        let g = self.g;
+        gpu.wait()?;
+        while let Some(room) = gpu.listed.as_ref().and_then(crate::player::room_on) {
+            let upload = self.loaner.as_ref().map_or(0, |(k, v)| k.size() + v.size());
+            let need = chunk_work(&g) + upload;
+            if need <= room {
+                break;
+            }
+            let Some(i) = self
+                .caches
+                .iter()
+                .rposition(|c| matches!(c.keys, Keys::Gpu { .. }))
+            else {
+                break;
+            };
+            let host: u64 = (0..self.caches.len())
+                .filter(|j| *j == i || matches!(self.caches[*j].keys, Keys::Host { .. }))
+                .map(|j| 2 * u64::from(self.caches[j].keep) * window(&g))
+                .sum();
+            in_ram(host, &g)?;
+            crate::debug!(
+                "flashvsr",
+                "chunk {}: {} MB of the GPU free and {} MB needed; cache {i} goes to main memory",
+                self.chunk,
+                room >> 20,
+                need >> 20
+            );
+            self.move_to_host(gpu, i)?;
+        }
+        Ok(())
+    }
+
+    fn move_to_host(&mut self, gpu: &Gpu, i: usize) -> Result<()> {
+        let size = window(&self.g);
+        let cache = &mut self.caches[i];
+        let Keys::Gpu { k, v } = &cache.keys else {
+            return Ok(());
+        };
+        let mut hk = vec![Vec::new(); cache.keep as usize];
+        let mut hv = vec![Vec::new(); cache.keep as usize];
+        for slot in &cache.ring {
+            let at = u64::from(*slot) * size;
+            hk[*slot as usize] = gpu.read(k, at, size)?;
+            hv[*slot as usize] = gpu.read(v, at, size)?;
+        }
+        cache.keys = Keys::Host { k: hk, v: hv };
+        let bytes = cache.keep as u64 * size;
+        if self.loaner.as_ref().is_none_or(|(k, _)| k.size() < bytes) {
+            self.loaner = None;
+            gpu.wait()?;
+            self.loaner = Some((gpu.buffer(bytes as usize), gpu.buffer(bytes as usize)));
+        }
+        gpu.wait()
     }
 
     fn slot(&self, frame: u64) -> u32 {
@@ -743,6 +806,7 @@ impl Stream {
     }
 
     fn run_chunk(&mut self, gpu: &Gpu, model: &Model) -> Result<Vec<Vec<u8>>> {
+        self.fit(gpu)?;
         let g = self.g;
         let k = self.chunk;
         let started = Instant::now();
@@ -1101,6 +1165,9 @@ impl Stream {
         let (kc, vc) = match &cache.keys {
             Keys::Gpu { k, v } => (k, v),
             Keys::Host { k, v } => {
+                if let Some(done) = self.upload.take() {
+                    gpu.wait_for(done)?;
+                }
                 let (lk, lv) = self.loaner.as_ref().expect("a loaner for the host caches");
                 let size = window(&g);
                 for slot in &cache.ring {
@@ -1127,11 +1194,15 @@ impl Stream {
             dense: 0,
             src,
         };
+        let host = matches!(cache.keys, Keys::Host { .. });
         let group = (ATTEND / stride).clamp(1, g.qbs);
         for first in (0..g.qbs).step_by(group as usize) {
             let count = group.min(g.qbs - first);
             e.pass(|pass| kernels::attend(gpu, pass, &attend, first, count));
-            e.submit();
+            let done = e.submit();
+            if host && self.upload.is_none() {
+                self.upload = done;
+            }
         }
         e.pass(|pass| {
             rows(

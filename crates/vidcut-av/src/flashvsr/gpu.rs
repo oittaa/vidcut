@@ -356,6 +356,16 @@ impl Gpu {
         self.fetch(&staging, size, None)
     }
 
+    pub(super) fn wait_for(&self, done: wgpu::SubmissionIndex) -> Result<()> {
+        self.device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(done),
+                timeout: None,
+            })
+            .map_err(gpu_error)?;
+        Ok(())
+    }
+
     pub(super) fn wait(&self) -> Result<()> {
         self.device
             .poll(wgpu::PollType::wait_indefinitely())
