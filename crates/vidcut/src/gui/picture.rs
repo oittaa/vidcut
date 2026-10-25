@@ -525,14 +525,14 @@ struct Target {
 
 struct Wide {
     size: (u32, u32),
-    hdr: Hdr,
+    hdr: Option<Hdr>,
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     bind: wgpu::BindGroup,
 }
 
 impl Wide {
-    fn new(gpu: &Gpu, size: (u32, u32), hdr: Hdr) -> Self {
+    fn new(gpu: &Gpu, size: (u32, u32), hdr: Option<Hdr>) -> Self {
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("vidcut timeline"),
             size: wgpu::Extent3d {
@@ -553,7 +553,7 @@ impl Wide {
         let colors = shader_colors(vidcut_av::color::Colors {
             matrix: vidcut_av::color::Matrix::Bt2020,
             full_range: false,
-            hdr: Some(hdr),
+            hdr,
         });
         let g = colors.gamut;
         let floats: [[f64; 4]; 5] = [
@@ -561,7 +561,7 @@ impl Wide {
             [g[0][0], g[0][1], g[0][2], 0.0],
             [g[1][0], g[1][1], g[1][2], 0.0],
             [g[2][0], g[2][1], g[2][2], 0.0],
-            [transfer_of(Some(hdr)), colors.linear_scale, 0.0, 0.0],
+            [transfer_of(hdr), colors.linear_scale, 0.0, 0.0],
         ];
         let bytes: Vec<u8> = floats
             .iter()
@@ -1025,18 +1025,6 @@ impl Screen {
                 return Drawn::Same;
             }
         }
-        match colors {
-            Some(hdr)
-                if self
-                    .wide
-                    .as_ref()
-                    .is_none_or(|w| w.size != size || w.hdr != hdr) =>
-            {
-                self.wide = Some(Wide::new(gpu, size, hdr));
-            }
-            Some(_) => {}
-            None => self.wide = None,
-        }
         let limit = gpu.device.limits().max_texture_dimension_2d;
         let fits = |p: &Arc<Picture>| p.width() <= limit && p.height() <= limit;
         let picture = picture.filter(|p| fits(p));
@@ -1118,8 +1106,19 @@ impl Screen {
         if (0..n).any(pair_at) && self.mixing.as_ref().is_none_or(|m| m.size != size) {
             self.mixing = Some(Mixing::new(gpu, size));
         }
-        let format = if colors.is_some() { MIXING } else { TARGET };
-        if binds.iter().any(|b| b.3)
+        let blending = binds.iter().any(|b| b.3);
+        let floats = colors.is_some() || blending;
+        if !floats {
+            self.wide = None;
+        } else if self
+            .wide
+            .as_ref()
+            .is_none_or(|w| w.size != size || w.hdr != colors)
+        {
+            self.wide = Some(Wide::new(gpu, size, colors));
+        }
+        let format = if floats { MIXING } else { TARGET };
+        if blending
             && self
                 .below
                 .as_ref()
@@ -1128,7 +1127,7 @@ impl Screen {
             self.below = Some(Below::new(gpu, size, format));
         }
         let target = self.target.as_ref().expect("made above");
-        let wide = self.wide.as_ref().filter(|_| colors.is_some());
+        let wide = self.wide.as_ref();
         let canvas = wide.map_or(&target.view, |w| &w.view);
         let canvas_texture = wide.map_or(&target.texture, |w| &w.texture);
         let blends = |i: usize| binds.get(i).is_some_and(|b| b.3);
