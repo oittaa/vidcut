@@ -346,7 +346,7 @@ pub fn fillers(language: &str) -> &'static [&'static str] {
     }
 }
 
-fn bare(text: &str) -> String {
+pub(crate) fn bare(text: &str) -> String {
     text.trim_matches(|c: char| !c.is_alphanumeric())
         .to_lowercase()
 }

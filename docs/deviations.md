@@ -954,36 +954,26 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Alignment by where speech is, not by what is said, works for translations and any language.
   - Where the words match, they check the result. They also fix what one offset cannot fix.
 
-## X50. Text-based editing from transcripts kept with the file
+## X50. Several transcripts of a file
 
 - **Resolve:**
-  - Resolve Studio transcribes each Media Pool clip, or a timeline. It edits from the Transcription window, also on the Cut page.
-  - When the user deletes text, its range is left out of every edit.
-  - Timeline Transcription mode cuts the timeline from the transcripts of its clips (pp. 994–1009).
+  - Resolve Studio keeps one transcription for each clip (pp. 995–996).
+  - A new transcription replaces it. Clear Transcription removes it (p. 996).
 - **vidcut:**
-  - Transcribe Audio (`media.transcribe`) keeps the words of a media file with the measurements that vidcut keeps of the file. It does not keep them in the project.
-  - The Transcription window follows the viewer. It shows the words of the source clip, or the words of the timeline from its clips.
-  - On a source clip, Delete leaves words out (`media.leave_out`).
-  - Then the Place on Top, Insert and Append buttons of the window edit only the rest.
-  - The edits of the viewer and of the pool still take all of the clip.
-  - On the timeline, Delete ripple deletes the words (`edit.ripple_delete_words`), with ripple on or off ([D63](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - Remove Silent Portions ripple deletes every pause. Each cut is at the quiet points around the pause.
-  - Delete Filler Words removes the filler words of the transcript's language in one step.
-  - This language is the one that the speech model reported, or the one selected beside the button.
-  - Edit… beside the button changes the words of a language for the project or for all projects. The Preferences window does this for all projects too.
-  - Follow keeps the word under the playhead in view during playback.
-  - While the pointer is over the window, Delete, X, Ctrl+A, Ctrl+C and Esc act on the window.
-  - `analyze.words` reads the words for media or clips, or hears the mix of the timeline over a range.
-  - The window cannot correct a word. It has no Create Subclip, and it puts no marker on a source clip.
-  - Speakers are in [X61](#x61-speakers-are-numbered-per-file-or-per-run-and-joined-by-hand).
-  - vidcut refuses a model without word times.
+  - Transcribe Audio (`media.transcribe`) keeps the transcript with the measurements that vidcut keeps of the file. It does not keep it in the project.
+  - A file has one transcript for each model and group of settings. The settings are how speech is found, the sound level, the language and the speaker model.
+  - A transcription with the same model and settings replaces the transcript that they made.
+  - The project takes its words from the newest transcript. The Transcript menu of the Transcription window selects another one (`media.transcripts.main`).
+  - Remove, beside the menu, removes a transcript from the list (`media.transcripts.remove`). The replies of the paid services stay in their own cache.
+  - Where the transcripts do not agree, the words have a dotted line under them.
+  - A click on these words shows what each transcript heard. A click on a choice, or its number key, takes those words with their times.
+  - First, Previous, Next and Last go to the differences.
+  - The project keeps the words that it took (`media.words.set`). They stay when their transcript is removed.
+  - `media.transcripts.list` lists the transcripts of a file.
 - **Why:**
-  - A script or an agent cuts by the words that it gets.
-  - A cut that leaves the hole is not a cut of those words.
+  - Each model hears some words better than the other models do. With several transcripts, you take the best words of each.
+  - You can compare models and settings on your own media. Then you remove the transcripts that you do not need.
   - When the words are kept with the file, they serve every project that uses the file. The project file also stays small.
-  - If vidcut left words out of every edit, it would change what every edit function does.
-  - The buttons of the window cover assembly from a transcript.
-  - Estimates from a model that did not time the words would cut the wrong frames.
 
 ## X51. A subtitle track's style goes in when the user leaves a field
 

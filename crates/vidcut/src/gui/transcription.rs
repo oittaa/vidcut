@@ -1,13 +1,14 @@
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
 use eframe::egui::{
-    self, Color32, FontId, Galley, Key, Rect, RichText, Sense, Stroke, Vec2,
-    text::{LayoutJob, TextFormat},
+    self, Color32, FontId, Galley, Key, Pos2, Rect, RichText, Sense, Shape, Stroke, Vec2, pos2,
+    text::{CCursor, LayoutJob, TextFormat},
 };
 use serde_json::{Value, json};
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{Project, uncovered};
+use vidcut_core::model::Project;
 use vidcut_core::request::ViewerMode;
 
 use super::export::Ask;
@@ -36,13 +37,17 @@ struct Asked {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+struct Heard {
+    media: String,
+    stream: u32,
+    file: (f64, f64),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct Who {
     person: String,
     name: String,
-    media: String,
-    stream: u32,
     speaker: u32,
-    file: (f64, f64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,10 +59,55 @@ struct Item {
     joined: bool,
     silence: bool,
     filler: bool,
+    heard: Option<Heard>,
     who: Option<Who>,
+    differs: Option<usize>,
 }
 
-type Words = Result<Arc<Vec<Item>>, String>;
+#[derive(Debug, Clone, PartialEq)]
+struct Transcript {
+    key: String,
+    label: String,
+    main: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Pick {
+    from: String,
+    text: String,
+    names: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Difference {
+    media: String,
+    stream: u32,
+    first: usize,
+    last: usize,
+    start: f64,
+    end: f64,
+    picks: Vec<Pick>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+struct Read {
+    items: Vec<Item>,
+    differences: Vec<Difference>,
+    stream: u32,
+    transcripts: Vec<Transcript>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Typing {
+    media: String,
+    stream: u32,
+    start: f64,
+    end: f64,
+    text: String,
+    focus: bool,
+}
+
+type Words = Result<Arc<Read>, String>;
 
 #[derive(Debug, Clone, PartialEq)]
 struct Look {
@@ -73,6 +123,7 @@ struct Paragraph {
     items: Range<usize>,
     galley: Arc<Galley>,
     chars: Vec<(usize, usize, usize)>,
+    dotted: Vec<[Pos2; 2]>,
     playhead: Option<usize>,
 }
 
@@ -83,7 +134,15 @@ pub(super) enum Pressed {
     All,
     Copy,
     Clear,
+    Pick(usize),
 }
+
+const JUMPS: [(&str, Jump); 4] = [
+    ("First", Jump::First),
+    ("Previous", Jump::Previous),
+    ("Next", Jump::Next),
+    ("Last", Jump::Last),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Jump {
@@ -116,8 +175,12 @@ enum Act {
     Fillers,
     Transcribe(Vec<String>),
     Name(String, String),
-    Link(Who, String),
-    Assign(Who, f64, String),
+    Link(Heard, u32, String),
+    Assign(Heard, f64, String),
+    Main(String),
+    Remove(String),
+    Pick(usize, usize),
+    Retype,
 }
 
 const FOOTER: f32 = 64.0;
@@ -181,14 +244,43 @@ pub(super) struct TranscriptionUi {
     saving: Option<(Scope, Ask)>,
     edit_error: Option<String>,
     naming: String,
+    difference: Option<usize>,
+    picking: Option<usize>,
+    typing: Option<Typing>,
+}
+
+fn digit(key: Key) -> Option<usize> {
+    [
+        Key::Num1,
+        Key::Num2,
+        Key::Num3,
+        Key::Num4,
+        Key::Num5,
+        Key::Num6,
+        Key::Num7,
+        Key::Num8,
+        Key::Num9,
+    ]
+    .iter()
+    .position(|k| *k == key)
 }
 
 impl TranscriptionUi {
     pub(super) fn take_keys(&mut self, ctx: &egui::Context) {
         let keys = &mut self.keys;
+        let picking = self.picking.is_some();
         ctx.input_mut(|i| {
             i.events.retain(|e| {
                 let pressed = match e {
+                    egui::Event::Key {
+                        key,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                        ..
+                    } if picking && !modifiers.any() && digit(*key).is_some() => {
+                        digit(*key).map(Pressed::Pick)
+                    }
                     egui::Event::Key {
                         key: Key::Delete | Key::Backspace,
                         pressed: true,
@@ -244,45 +336,35 @@ impl TranscriptionUi {
     }
 }
 
-fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Vec<Item> {
-    let mut words: Vec<Item> = answer
-        .as_array()
-        .into_iter()
-        .flatten()
-        .flat_map(|e| {
-            e["words"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(move |w| (e, w))
-        })
-        .filter_map(|(e, w)| {
-            let who = w["person"].as_str().map(|person| Who {
-                person: person.to_string(),
-                name: w["name"].as_str().unwrap_or(person).to_string(),
-                media: e["media"].as_str().unwrap_or_default().to_string(),
-                stream: e["stream"].as_u64().unwrap_or(0) as u32,
-                speaker: w["speaker"].as_u64().unwrap_or(0) as u32,
-                file: (
-                    w["file_time"][0].as_f64().unwrap_or(0.0),
-                    w["file_time"][1].as_f64().unwrap_or(0.0),
-                ),
-            });
-            let text = w["text"].as_str()?;
-            Some(Item {
-                start: w["start"].as_i64()?,
-                end: w["end"].as_i64()?,
-                text: text.to_string(),
-                lower: text.to_lowercase(),
-                joined: w["joined"].as_bool().unwrap_or(false),
-                silence: false,
-                filler: w["filler"].as_bool().unwrap_or(false),
-                who,
-            })
-        })
-        .collect();
-    words.sort_by_key(|w| (w.start, w.end));
-    let silence = |start: i64, end: i64| Item {
+fn word(entry: &Value, w: &Value) -> Option<Item> {
+    let text = w["text"].as_str()?;
+    Some(Item {
+        start: w["start"].as_i64()?,
+        end: w["end"].as_i64()?,
+        text: text.to_string(),
+        lower: text.to_lowercase(),
+        joined: w["joined"].as_bool().unwrap_or(false),
+        silence: false,
+        filler: w["filler"].as_bool().unwrap_or(false),
+        heard: Some(Heard {
+            media: entry["media"].as_str().unwrap_or_default().to_string(),
+            stream: entry["stream"].as_u64().unwrap_or(0) as u32,
+            file: (
+                w["file_time"][0].as_f64().unwrap_or(0.0),
+                w["file_time"][1].as_f64().unwrap_or(0.0),
+            ),
+        }),
+        who: w["person"].as_str().map(|person| Who {
+            person: person.to_string(),
+            name: w["name"].as_str().unwrap_or(person).to_string(),
+            speaker: w["speaker"].as_u64().unwrap_or(0) as u32,
+        }),
+        differs: None,
+    })
+}
+
+fn silence(start: i64, end: i64) -> Item {
+    Item {
         start,
         end,
         text: "(...)".into(),
@@ -290,25 +372,129 @@ fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Vec<Item> {
         joined: false,
         silence: true,
         filler: false,
+        heard: None,
         who: None,
+        differs: None,
+    }
+}
+
+fn differences(entry: &Value, at: impl Fn(u64) -> Option<usize>) -> Vec<Difference> {
+    let main = entry["transcript"].as_str().unwrap_or_default();
+    let labels: HashMap<&str, &str> = entry["transcripts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|t| Some((t["key"].as_str()?, t["label"].as_str()?)))
+        .collect();
+    let pick = |o: &Value| {
+        let keys: Vec<&str> = o["transcripts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        let from = match keys.contains(&main) {
+            true => main,
+            false => keys.first().copied().unwrap_or_default(),
+        };
+        let names: Vec<&str> = keys
+            .iter()
+            .map(|k| labels.get(k).copied().unwrap_or(k))
+            .collect();
+        Pick {
+            from: from.to_string(),
+            text: o["text"].as_str().unwrap_or_default().to_string(),
+            names: names.join(", "),
+        }
     };
-    let mut out: Vec<Item> = Vec::with_capacity(words.len() * 2);
+    entry["differences"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|d| {
+            let first = at(d["words"][0].as_u64()?)?;
+            let last = at(d["words"][1].as_u64()?)?;
+            Some(Difference {
+                media: entry["media"].as_str().unwrap_or_default().to_string(),
+                stream: entry["stream"].as_u64().unwrap_or(0) as u32,
+                first: first.min(last),
+                last: first.max(last),
+                start: d["start"].as_f64()?,
+                end: d["end"].as_f64()?,
+                picks: d["options"].as_array()?.iter().map(pick).collect(),
+            })
+        })
+        .collect()
+}
+
+fn parse(answer: &Value, pause: i64, bounds: Option<(i64, i64)>) -> Read {
+    let entries: Vec<&Value> = answer.as_array().into_iter().flatten().collect();
+    let mut words: Vec<(usize, u64, Item)> = entries
+        .iter()
+        .enumerate()
+        .flat_map(|(e, entry)| {
+            entry["words"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .zip(0..)
+                .filter_map(move |(w, k)| Some((e, k, word(entry, w)?)))
+        })
+        .collect();
+    words.sort_by_key(|(_, _, w)| (w.start, w.end));
+    let mut items: Vec<Item> = Vec::with_capacity(words.len() * 2);
+    let mut at: HashMap<(usize, u64), usize> = HashMap::with_capacity(words.len());
     let mut last = bounds.map(|(a, _)| a);
-    for w in words {
+    for (e, k, w) in words {
         if let Some(end) = last
             && w.start - end >= pause
         {
-            out.push(silence(end, w.start));
+            items.push(silence(end, w.start));
         }
         last = Some(last.map_or(w.end, |end| end.max(w.end)));
-        out.push(w);
+        at.insert((e, k), items.len());
+        items.push(w);
     }
     if let (Some((_, b)), Some(end)) = (bounds, last)
         && b - end >= pause
     {
-        out.push(silence(end, b));
+        items.push(silence(end, b));
     }
-    out
+    let mut found: Vec<Difference> = entries
+        .iter()
+        .enumerate()
+        .flat_map(|(e, entry)| differences(entry, |k| at.get(&(e, k)).copied()))
+        .collect();
+    found.sort_by_key(|d| (d.first, d.last));
+    for (n, d) in found.iter().enumerate() {
+        for item in &mut items[d.first..=d.last] {
+            let same = item
+                .heard
+                .as_ref()
+                .is_some_and(|h| h.media == d.media && h.stream == d.stream);
+            if same && item.differs.is_none() {
+                item.differs = Some(n);
+            }
+        }
+    }
+    let first = entries.first();
+    Read {
+        items,
+        differences: found,
+        stream: first.and_then(|e| e["stream"].as_u64()).unwrap_or(0) as u32,
+        transcripts: first
+            .and_then(|e| e["transcripts"].as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|t| {
+                Some(Transcript {
+                    key: t["key"].as_str()?.to_string(),
+                    label: t["label"].as_str()?.to_string(),
+                    main: t["main"].as_bool().unwrap_or(false),
+                })
+            })
+            .collect(),
+    }
 }
 
 fn person(item: &Item) -> Option<&str> {
@@ -426,12 +612,37 @@ fn layout(
         chars.push((count, count + n, i));
         count += n;
     }
+    let galley = ui.painter().layout_job(job);
+    let dotted = chars
+        .iter()
+        .filter(|(_, _, i)| items[*i].differs.is_some())
+        .filter_map(|&(a, b, _)| {
+            let mut from = CCursor::new(a);
+            from.prefer_next_row = true;
+            let (left, right) = (
+                galley.pos_from_cursor(from),
+                galley.pos_from_cursor(CCursor::new(b)),
+            );
+            ((left.bottom() - right.bottom()).abs() < 1.0).then(|| {
+                let y = left.bottom() - 1.0;
+                [pos2(left.left(), y), pos2(right.left(), y)]
+            })
+        })
+        .collect();
     Paragraph {
         items: range,
-        galley: ui.painter().layout_job(job),
+        galley,
         chars,
+        dotted,
         playhead,
     }
+}
+
+fn word_spot(p: &Paragraph, i: usize) -> Option<Pos2> {
+    let (a, _, _) = p.chars.iter().find(|(_, _, k)| *k == i)?;
+    let mut at = CCursor::new(*a);
+    at.prefer_next_row = true;
+    Some(p.galley.pos_from_cursor(at).left_bottom())
 }
 
 fn hit(p: &Paragraph, at: Vec2) -> usize {
@@ -452,6 +663,7 @@ fn at_frame(items: &[Item], frame: i64) -> Option<usize> {
 fn speaker_menu(
     ui: &mut egui::Ui,
     w: &Who,
+    heard: &Heard,
     everyone: &[(String, String)],
     naming: &mut String,
     acts: &mut Vec<Act>,
@@ -480,15 +692,15 @@ fn speaker_menu(
             ui.menu_button("Same Person As", |ui| {
                 for (person, name) in others {
                     if ui.button(name).clicked() {
-                        acts.push(Act::Link(w.clone(), person.clone()));
+                        acts.push(Act::Link(heard.clone(), w.speaker, person.clone()));
                         ui.close();
                     }
                 }
             });
         }
         if ui.button("Separate").clicked() {
-            let voice = vidcut_core::speakers::voice(&w.media, w.stream, w.speaker);
-            acts.push(Act::Link(w.clone(), voice));
+            let voice = vidcut_core::speakers::voice(&heard.media, heard.stream, w.speaker);
+            acts.push(Act::Link(heard.clone(), w.speaker, voice));
             ui.close();
         }
     });
@@ -598,12 +810,12 @@ impl Workspace {
                     .flatten()
                     .find_map(|e| e["filler_language"].as_str().map(String::from));
             }
-            let items = answer
+            let read = answer
                 .map(|r| Arc::new(parse(&r.result, pause, bounds)))
                 .map_err(|e| e.message);
-            let keep = match (&t.shown, &items) {
+            let keep = match (&t.shown, &read) {
                 (Some((a, Ok(old))), Ok(new)) if a.shown == asked.shown => {
-                    asked.shown != Shown::Timeline || old == new
+                    asked.shown != Shown::Timeline || old.items == new.items
                 }
                 _ => false,
             };
@@ -611,8 +823,11 @@ impl Workspace {
                 t.selection = None;
                 t.anchor = None;
                 t.found = None;
+                t.difference = None;
+                t.typing = None;
             }
-            t.shown = Some((asked.clone(), items));
+            t.picking = None;
+            t.shown = Some((asked.clone(), read));
             t.version += 1;
             t.asking = None;
         }
@@ -628,9 +843,14 @@ impl Workspace {
             .shown
             .as_ref()
             .filter(|(a, _)| Some(&a.shown) == shown.as_ref());
-        let items = showing.and_then(|(_, r)| r.as_ref().ok().cloned());
+        let read = showing
+            .and_then(|(_, r)| r.as_ref().ok().cloned())
+            .filter(|_| have_words);
         let error = showing.and_then(|(_, r)| r.as_ref().err().cloned());
-        let items = items.filter(|_| have_words);
+        let items = read.as_deref().map(|r| r.items.as_slice());
+        let found = read
+            .as_deref()
+            .map_or(&[][..], |r| r.differences.as_slice());
         let playhead = match &shown {
             Some(Shown::Timeline) => Some(self.snap.timeline.position),
             Some(Shown::Media(_)) => self.snap.source_at().map(|(_, f)| f),
@@ -652,7 +872,15 @@ impl Workspace {
                     Pressed::Delete if t.selection.is_some() => acts.push(Act::Delete),
                     Pressed::Copy if t.selection.is_some() => acts.push(Act::Copy),
                     Pressed::All if !items.is_empty() => t.selection = Some((0, items.len() - 1)),
+                    Pressed::Clear if t.picking.is_some() => t.picking = None,
                     Pressed::Clear => t.selection = None,
+                    Pressed::Pick(k) => {
+                        if let Some(n) = t.picking
+                            && found.get(n).is_some_and(|d| k < d.picks.len())
+                        {
+                            acts.push(Act::Pick(n, k));
+                        }
+                    }
                     Pressed::Sentence => {
                         let at = t
                             .anchor
@@ -677,6 +905,8 @@ impl Workspace {
         let mut open = t.open;
         let mut over = false;
         let mut go = None;
+        let mut go_difference = None;
+        let mut opened = false;
         let needle = t.search.trim().to_lowercase();
         let hits = match &items {
             Some(items) if !needle.is_empty() => t.searches.hits(t.version, &needle, items),
@@ -701,12 +931,7 @@ impl Workspace {
                     ui.label("");
                     ui.horizontal_wrapped(|ui| {
                         let any = !hits.is_empty();
-                        for (label, to) in [
-                            ("First", Jump::First),
-                            ("Previous", Jump::Previous),
-                            ("Next", Jump::Next),
-                            ("Last", Jump::Last),
-                        ] {
+                        for (label, to) in JUMPS {
                             if ui.add_enabled(any, egui::Button::new(label)).clicked() {
                                 go = Some(to);
                             }
@@ -725,6 +950,59 @@ impl Workspace {
                         }
                     });
                     ui.end_row();
+                }
+                let transcripts = read
+                    .as_deref()
+                    .map_or(&[][..], |r| r.transcripts.as_slice());
+                if matches!(shown, Some(Shown::Media(_))) && !transcripts.is_empty() {
+                    super::dialog::row(ui, "Transcript", |ui| {
+                        let main = transcripts.iter().find(|x| x.main).or(transcripts.first());
+                        egui::ComboBox::from_id_salt("transcription-main")
+                            .selected_text(main.map_or("", |m| m.label.as_str()))
+                            .show_ui(ui, |ui| {
+                                for x in transcripts {
+                                    if ui.selectable_label(x.main, &x.label).clicked() && !x.main {
+                                        acts.push(Act::Main(x.key.clone()));
+                                    }
+                                }
+                            });
+                        let others: Vec<&Transcript> =
+                            transcripts.iter().filter(|x| !x.main).collect();
+                        if !others.is_empty() {
+                            ui.menu_button("Remove", |ui| {
+                                for x in others {
+                                    if ui.button(&x.label).clicked() {
+                                        acts.push(Act::Remove(x.key.clone()));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+                if !found.is_empty() || transcripts.len() > 1 {
+                    super::dialog::row(ui, "Differences", |ui| {
+                        for (label, to) in JUMPS {
+                            if ui
+                                .add_enabled(!found.is_empty(), egui::Button::new(label))
+                                .clicked()
+                            {
+                                go_difference = Some(to);
+                            }
+                        }
+                        match t.difference.filter(|d| *d < found.len()) {
+                            Some(d) => {
+                                ui.label(format!("{} of {}", d + 1, found.len()));
+                            }
+                            None if found.len() == 1 => {
+                                ui.label("1 difference");
+                            }
+                            None if !found.is_empty() => {
+                                ui.label(format!("{} differences", found.len()));
+                            }
+                            None => super::dialog::why(ui, "the transcripts agree"),
+                        }
+                    });
                 }
                 super::dialog::row(ui, "Playhead", |ui| {
                     let mut follow = !t.hold;
@@ -821,6 +1099,7 @@ impl Workspace {
             let height = (ui.available_height() - t.footer.max(FOOTER)).max(80.0);
             let mut placed: Vec<(usize, Rect)> = Vec::new();
             let mut visible = Rect::NOTHING;
+            let mut spot: Option<Pos2> = None;
             match &items {
                 None if shown.is_none() => {
                     ui.label(dim(
@@ -831,7 +1110,7 @@ impl Workspace {
                     ui.label(dim("Reading the words…"));
                 }
                 None => {}
-                Some(items) if items.is_empty() => {
+                Some([]) => {
                     ui.label(dim("No words were heard"));
                 }
                 Some(items) => {
@@ -882,10 +1161,11 @@ impl Workspace {
                                         .as_ref()
                                         .filter(|w| speaking != Some(w.person.as_str()));
                                     ui.horizontal(|ui| {
-                                        if let Some(w) = new {
+                                        if let (Some(w), Some(heard)) = (new, &first.heard) {
                                             speaker_menu(
                                                 ui,
                                                 w,
+                                                heard,
                                                 &everyone,
                                                 &mut t.naming,
                                                 &mut acts,
@@ -910,6 +1190,20 @@ impl Workspace {
                                     para.galley.clone(),
                                     theme::colors().text,
                                 );
+                                for [a, b] in &para.dotted {
+                                    let line = [rect.min + a.to_vec2(), rect.min + b.to_vec2()];
+                                    ui.painter().extend(Shape::dotted_line(
+                                        &line,
+                                        theme::colors().accent,
+                                        3.0,
+                                        0.9,
+                                    ));
+                                }
+                                if let Some(d) = t.picking.and_then(|n| found.get(n))
+                                    && para.items.contains(&d.first)
+                                {
+                                    spot = word_spot(para, d.first).map(|p| rect.min + p.to_vec2());
+                                }
                                 if let Some((i, center)) = t.scroll_to
                                     && para.items.contains(&i)
                                 {
@@ -960,7 +1254,54 @@ impl Workspace {
                             false => acts.push(Act::Seek(items[a].end)),
                             true => acts.push(Act::Marks(start, end)),
                         }
+                        t.picking = items[a].differs.filter(|_| !t.moved);
+                        if t.picking.is_some() {
+                            t.difference = t.picking;
+                            opened = true;
+                        }
                     }
+                }
+            }
+            if let Some(n) = t.picking
+                && let (Some(d), Some(items), Some(at)) = (found.get(n), items, spot)
+                && visible.contains(at)
+            {
+                let now = text_of(&items[d.first..=d.last]);
+                let mut typing = false;
+                let area = egui::Area::new(egui::Id::unique("transcription-picks"))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(at + Vec2::new(0.0, 2.0))
+                    .show(ui.ctx(), |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            for (k, pick) in d.picks.iter().enumerate() {
+                                ui.horizontal(|ui| {
+                                    let label = format!("{}  {}", k + 1, pick.text);
+                                    if ui.selectable_label(pick.text == now, label).clicked() {
+                                        acts.push(Act::Pick(n, k));
+                                    }
+                                    ui.label(
+                                        RichText::new(&pick.names)
+                                            .small()
+                                            .color(theme::colors().text_dim),
+                                    );
+                                });
+                            }
+                            ui.separator();
+                            typing = ui.button("Edit…").clicked();
+                        });
+                    });
+                if typing {
+                    t.typing = Some(Typing {
+                        media: d.media.clone(),
+                        stream: d.stream,
+                        start: d.start,
+                        end: d.end,
+                        text: now,
+                        focus: true,
+                    });
+                    t.picking = None;
+                } else if area.response.clicked_elsewhere() && !opened {
+                    t.picking = None;
                 }
             }
             let footer_top = ui.cursor().top();
@@ -1022,28 +1363,66 @@ impl Workspace {
                 if !any {
                     super::dialog::why(ui, "select words first");
                 }
-                let one_file = selected
-                    .zip(items.as_ref())
-                    .and_then(|((a, b, _, _), items)| {
-                        let mut whos = items[a..=b].iter().filter_map(|i| i.who.as_ref());
-                        let first = whos.next()?.clone();
-                        let last = items[a..=b].iter().rev().find_map(|i| i.who.as_ref())?;
-                        let same = items[a..=b]
-                            .iter()
-                            .filter_map(|i| i.who.as_ref())
-                            .all(|w| w.media == first.media && w.stream == first.stream);
-                        same.then_some((first, last.file.1))
-                    });
-                if let (Some((first, end)), Some(items)) = (one_file, &items) {
-                    ui.menu_button("Assign To", |ui| {
-                        for (person, name) in people(items) {
-                            if ui.button(name).clicked() {
-                                acts.push(Act::Assign(first.clone(), end, person));
-                            }
+                let one_file = selected.zip(items).and_then(|((a, b, _, _), items)| {
+                    let mut heard = items[a..=b].iter().filter_map(|i| i.heard.as_ref());
+                    let first = heard.next()?;
+                    let mut end = first.file.1;
+                    for h in heard {
+                        if (&h.media, h.stream) != (&first.media, first.stream) {
+                            return None;
                         }
-                    });
+                        end = end.max(h.file.1);
+                    }
+                    let spoken = items[a..=b].iter().any(|i| i.who.is_some());
+                    Some((first.clone(), end, text_of(&items[a..=b]), spoken))
+                });
+                if let Some((first, end, text, spoken)) = one_file {
+                    if ui.button("Edit").clicked() {
+                        t.typing = Some(Typing {
+                            media: first.media.clone(),
+                            stream: first.stream,
+                            start: first.file.0,
+                            end,
+                            text,
+                            focus: true,
+                        });
+                        t.picking = None;
+                    }
+                    if let (true, Some(items)) = (spoken, items) {
+                        ui.menu_button("Assign To", |ui| {
+                            for (person, name) in people(items) {
+                                if ui.button(name).clicked() {
+                                    acts.push(Act::Assign(first.clone(), end, person));
+                                }
+                            }
+                        });
+                    }
                 }
             });
+            let mut cancel = false;
+            if let Some(typing) = &mut t.typing {
+                ui.horizontal(|ui| {
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut typing.text)
+                            .desired_width((ui.available_width() - 150.0).max(120.0)),
+                    );
+                    if typing.focus {
+                        field.request_focus();
+                        typing.focus = false;
+                    }
+                    let enter = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                    let ready = !typing.text.trim().is_empty();
+                    cancel = ui.button("Cancel").clicked();
+                    if ui.add_enabled(ready, egui::Button::new("Change")).clicked()
+                        || (enter && ready)
+                    {
+                        acts.push(Act::Retype);
+                    }
+                });
+            }
+            if cancel {
+                t.typing = None;
+            }
             t.footer = (ui.cursor().top() - footer_top).ceil();
             over = ui.ui_contains_pointer();
         });
@@ -1057,13 +1436,27 @@ impl Workspace {
             t.scroll_to = Some((i, true));
             acts.push(Act::Seek(items[i].start));
         }
+        if let (Some(to), Some(items)) = (go_difference, items)
+            && !found.is_empty()
+        {
+            let firsts: Vec<usize> = found.iter().map(|d| d.first).collect();
+            let i = jump(&firsts, t.anchor, to);
+            if let Some(n) = found.iter().position(|d| d.first == i) {
+                t.difference = Some(n);
+                t.picking = Some(n);
+                t.selection = Some((found[n].first, found[n].last));
+                t.anchor = Some(i);
+                t.scroll_to = Some((i, true));
+                acts.push(Act::Seek(items[i].start));
+            }
+        }
         t.open = open;
         t.over = over;
         self.filler_words_window(ctx, t, &p.settings.fillers, &preferred);
-        if let Some(items) = items {
+        if let Some(read) = &read {
             for act in acts {
                 let m = media.as_ref().map(|m| m.id.as_str());
-                self.transcription_act(ctx, act, t, &items, m, &left_out);
+                self.transcription_act(ctx, act, t, read, m, &left_out);
             }
         } else {
             for act in acts {
@@ -1119,10 +1512,11 @@ impl Workspace {
         ctx: &egui::Context,
         act: Act,
         t: &mut TranscriptionUi,
-        items: &[Item],
+        read: &Read,
         media: Option<&str>,
         left_out: &[(i64, i64)],
     ) {
+        let items = read.items.as_slice();
         let span = |a: i64, b: i64| json!({ "start": format!("{a}f"), "end": format!("{b}f") });
         let selected = t.selected(items);
         match act {
@@ -1130,25 +1524,73 @@ impl Workspace {
             Act::Name(person, name) => {
                 self.send("speakers.set", json!({ "person": person, "name": name }));
             }
-            Act::Link(w, person) => self.send(
+            Act::Link(h, speaker, person) => self.send(
                 "speakers.link",
                 json!({
-                    "media": w.media,
-                    "stream": w.stream,
-                    "speaker": w.speaker,
+                    "media": h.media,
+                    "stream": h.stream,
+                    "speaker": speaker,
                     "person": person,
                 }),
             ),
-            Act::Assign(w, end, person) => self.send(
+            Act::Assign(h, end, person) => self.send(
                 "speakers.assign",
                 json!({
-                    "media": w.media,
-                    "stream": w.stream,
-                    "start": w.file.0,
+                    "media": h.media,
+                    "stream": h.stream,
+                    "start": h.file.0,
                     "end": end,
                     "person": person,
                 }),
             ),
+            Act::Main(key) => {
+                if let Some(m) = media {
+                    self.send(
+                        "media.transcripts.main",
+                        json!({ "media": m, "stream": read.stream, "transcript": key }),
+                    );
+                }
+            }
+            Act::Remove(key) => {
+                if let Some(m) = media {
+                    self.send(
+                        "media.transcripts.remove",
+                        json!({ "media": m, "stream": read.stream, "transcripts": [key] }),
+                    );
+                }
+            }
+            Act::Pick(n, k) => {
+                let Some(d) = read.differences.get(n) else {
+                    return;
+                };
+                let Some(pick) = d.picks.get(k) else { return };
+                self.send(
+                    "media.words.set",
+                    json!({
+                        "media": d.media,
+                        "stream": d.stream,
+                        "start": d.start,
+                        "end": d.end,
+                        "from": pick.from,
+                    }),
+                );
+                t.picking = None;
+            }
+            Act::Retype => {
+                let Some(typing) = t.typing.take() else {
+                    return;
+                };
+                self.send(
+                    "media.words.set",
+                    json!({
+                        "media": typing.media,
+                        "stream": typing.stream,
+                        "start": typing.start,
+                        "end": typing.end,
+                        "text": typing.text.trim(),
+                    }),
+                );
+            }
             Act::Seek(frame) => match media {
                 Some(_) => {
                     let offset = self
@@ -1248,53 +1690,10 @@ impl Workspace {
                 let (Some(m), Some((_, _, a, b))) = (media, selected) else {
                     return;
                 };
-                let parts = uncovered(a, b, left_out);
-                if parts.is_empty() {
-                    self.say("Every word selected is left out");
-                    return;
-                }
-                self.edit_parts(method, m, &parts);
+                let source = json!({ "media": m, "range": format!("{a}f..{b}f") });
+                self.edit_from(method, vec![source]);
             }
         }
-    }
-
-    fn edit_parts(&mut self, method: &str, media: &str, parts: &[(i64, i64)]) {
-        let p = self.project_shared();
-        let playhead = self.snap.timeline.position;
-        let mut at = match method {
-            "edit.insert" => p.as_ref().and_then(|p| p.marks.mark_in).unwrap_or(playhead),
-            _ => playhead,
-        };
-        let target = self
-            .target
-            .clone()
-            .filter(|_| !matches!(method, "edit.append" | "edit.place_on_top"))
-            .filter(|t| p.as_ref().is_some_and(|p| p.track(t).is_some()));
-        let commands: Vec<Value> = parts
-            .iter()
-            .map(|&(a, b)| {
-                let mut params = json!({ "media": media, "range": format!("{a}f..{b}f") });
-                if self.video_only {
-                    params["video_only"] = json!(true);
-                }
-                if self.audio_only {
-                    params["audio_only"] = json!(true);
-                }
-                if let Some(t) = &target {
-                    params["track"] = json!(t);
-                }
-                if method != "edit.append" {
-                    params["at"] = json!(format!("{at}f"));
-                }
-                if method == "edit.place_on_top" {
-                    params["use_marks"] = json!(false);
-                }
-                at += b - a;
-                json!({ "method": method, "params": params })
-            })
-            .collect();
-        let label = format!("{} part(s) of the transcript", commands.len());
-        self.send("apply", json!({ "commands": commands, "label": label }));
     }
 }
 
@@ -1313,7 +1712,9 @@ mod tests {
                 joined: false,
                 silence: false,
                 filler: false,
+                heard: None,
                 who: None,
+                differs: None,
             })
             .collect()
     }

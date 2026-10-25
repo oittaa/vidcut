@@ -16,6 +16,7 @@ use crate::history::HistoryFile;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marks, Media,
     MediaInfo, Picture, Project, Proxy, Title, Track, TrackKind, Transition, VideoInfo,
+    WordsChange,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -28,6 +29,7 @@ use crate::retime;
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
 use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode};
 use crate::transcript::{self, Speech};
+use crate::transcripts;
 use crate::validate;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,9 +166,14 @@ pub trait Env {
         Err(Error::usage("files are read by the vidcut program"))
     }
 
-    fn transcript(&self, media: &Media, stream: u32) -> Result<Option<Arc<Speech>>> {
+    fn transcripts(&self, media: &Media, stream: u32) -> Result<Vec<crate::transcripts::Kept>> {
         let _ = (media, stream);
-        Ok(None)
+        Ok(Vec::new())
+    }
+
+    fn remove_transcript(&self, media: &Media, stream: u32, key: &str) -> Result<()> {
+        let _ = (media, stream, key);
+        Err(Error::usage("transcripts are kept by the vidcut program"))
     }
 
     fn transcribe_media(
@@ -1808,10 +1815,9 @@ fn clip_speech(
     }
     let mut kept: Vec<Option<Arc<Speech>>> = files
         .iter()
-        .map(|(m, s)| {
-            Ok(env
-                .transcript(m, *s)?
-                .filter(|t| use_kept == Reuse::Any || asked.made(t)))
+        .map(|(m, s)| match use_kept {
+            Reuse::Any => Ok(transcripts::read(env, m, *s)?.map(|c| c.speech)),
+            _ => transcripts::made(env, m, *s, asked),
         })
         .collect::<Result<_>>()?;
     if use_kept == Reuse::Any
@@ -2030,8 +2036,8 @@ fn quiet_edges(p: &Project, env: &dyn Env, spans: &[(i64, i64)]) -> Result<Vec<(
                 .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
             let (_, origin) = p.media_origin(&c.media)?;
             let span = Span::of_clip(c, origin, fps);
-            if let Some(speech) = env.transcript(m, a.stream)?
-                && let Ok(timed) = transcript::spoken(&speech)
+            if let Some(chosen) = transcripts::read(env, m, a.stream)?
+                && let Ok(timed) = transcript::spoken(&chosen.speech)
             {
                 known.extend(
                     analysis::words_in(&span, &timed)
@@ -2109,6 +2115,73 @@ fn transcript_json(stream: u32, s: &Speech) -> Value {
         v["speakers_by"] = json!(by);
     }
     v
+}
+
+fn pool_item<'a>(p: &'a Project, media: &str) -> Result<&'a Media> {
+    p.media(media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))
+}
+
+fn pool_item_mut<'a>(p: &'a mut Project, media: &str) -> Result<&'a mut Media> {
+    p.media
+        .iter_mut()
+        .find(|m| m.id == media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))
+}
+
+fn known_transcript<'a>(
+    kept: &'a [transcripts::Kept],
+    media: &str,
+    key: &str,
+) -> Result<&'a transcripts::Kept> {
+    kept.iter().find(|k| k.key == key).ok_or_else(|| {
+        Error::not_found(format!(
+            "{media} has no transcript {key}: media.transcripts.list lists them"
+        ))
+    })
+}
+
+fn kept_json(stream: u32, kept: &[transcripts::Kept], main: &str) -> Vec<Value> {
+    kept.iter()
+        .map(|k| {
+            let mut v = transcript_json(stream, &k.speech);
+            v["key"] = json!(k.key);
+            v["label"] = json!(transcripts::label(&k.speech));
+            v["made"] = json!(k.made);
+            v["main"] = json!(k.key == main);
+            v
+        })
+        .collect()
+}
+
+fn differences_json(
+    words: &[transcript::Word],
+    kept: &[transcripts::Kept],
+    placed: &[(usize, i64, i64)],
+) -> Vec<Value> {
+    let at: HashMap<usize, usize> = placed
+        .iter()
+        .enumerate()
+        .map(|(k, &(i, _, _))| (i, k))
+        .collect();
+    let others: Vec<&transcripts::Kept> = kept.iter().collect();
+    transcripts::differences(words, &others)
+        .into_iter()
+        .filter_map(|d| {
+            let (first, last) = (at.get(&d.first)?, at.get(&d.last)?);
+            let options: Vec<Value> = d
+                .options
+                .iter()
+                .map(|o| json!({ "transcripts": o.keys, "text": transcripts::text(&o.words) }))
+                .collect();
+            Some(json!({
+                "words": [first, last],
+                "start": d.start,
+                "end": d.end,
+                "options": options,
+            }))
+        })
+        .collect()
 }
 
 fn ctx(p: &Project, playhead: Option<i64>) -> TimeContext {
@@ -2217,20 +2290,36 @@ pub fn media_context(p: &Project, media: &Media, playhead: Option<i64>) -> TimeC
 }
 
 fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
-    if params.tape {
+    let sources = if params.tape {
         if !params.media.is_empty() || params.range.is_some() {
             return Err(Error::usage(
                 "a tape-span edit takes the marked range; leave out media and range",
             ));
         }
-        return tape_sources(p, params);
-    }
-    if params.media.is_empty() {
-        return Err(Error::usage(
-            "media is required (or pass tape: true to edit the Source Tape span)",
+        tape_sources(p, params)?
+    } else {
+        if params.media.is_empty() {
+            return Err(Error::usage(
+                "media is required (or pass tape: true to edit the Source Tape span)",
+            ));
+        }
+        vec![source(p, params)?]
+    };
+    let kept: Vec<Source> = sources
+        .into_iter()
+        .flat_map(|s| {
+            let left_out = p.media(&s.media).map_or(&[][..], |m| m.left_out.as_slice());
+            crate::model::uncovered(s.range.0, s.range.1, left_out)
+                .into_iter()
+                .map(move |range| Source { range, ..s.clone() })
+        })
+        .collect();
+    if kept.is_empty() {
+        return Err(Error::invalid(
+            "every frame of the range is left out (media.leave_out)",
         ));
     }
-    Ok(vec![source(p, params)?])
+    Ok(kept)
 }
 
 fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
@@ -2626,6 +2715,114 @@ fn mutate(
             }
             let left_out = ops::leave_out(p, media, &spans, *back)?;
             json!({ "left_out": left_out })
+        }
+        Request::MediaTranscriptsList { media, stream } => {
+            let m = pool_item(p, media)?;
+            let streams: Vec<u32> = match stream {
+                Some(s) => vec![*s],
+                None => (0..m.info.audio.len() as u32).collect(),
+            };
+            let mut list = Vec::new();
+            for s in streams {
+                let kept = env.transcripts(m, s)?;
+                let main = transcripts::main(&kept, transcripts::choice(m, s))
+                    .map(|k| k.key.clone())
+                    .unwrap_or_default();
+                list.extend(kept_json(s, &kept, &main));
+            }
+            json!({ "media": media, "transcripts": list })
+        }
+        Request::MediaTranscriptsMain {
+            media,
+            stream,
+            transcript,
+        } => {
+            let kept = env.transcripts(pool_item(p, media)?, *stream)?;
+            if let Some(key) = transcript {
+                known_transcript(&kept, media, key)?;
+            }
+            let m = pool_item_mut(p, media)?;
+            transcripts::choice_mut(m, *stream).main = transcript.clone();
+            transcripts::forget_empty(m);
+            let main = transcripts::main(&kept, transcripts::choice(m, *stream));
+            json!({ "media": media, "stream": stream, "transcript": main.map(|k| &k.key) })
+        }
+        Request::MediaTranscriptsRemove {
+            media,
+            stream,
+            transcripts: keys,
+        } => {
+            let m = pool_item(p, media)?;
+            let kept = env.transcripts(m, *stream)?;
+            for key in keys {
+                known_transcript(&kept, media, key)?;
+            }
+            for key in keys {
+                env.remove_transcript(m, *stream, key)?;
+            }
+            json!({ "media": media, "stream": stream, "removed": keys })
+        }
+        Request::MediaWordsSet {
+            media,
+            stream,
+            start,
+            end,
+            from,
+            text,
+            back,
+        } => {
+            if !(start.is_finite() && end.is_finite() && end > start) {
+                return Err(Error::usage(
+                    "end must be after start, in seconds of the sound",
+                ));
+            }
+            let (start, end) = (*start, *end);
+            let m = pool_item(p, media)?;
+            let kept = env.transcripts(m, *stream)?;
+            let chosen = transcripts::chosen(&kept, transcripts::choice(m, *stream))
+                .ok_or_else(|| Error::invalid(format!("{media} has no transcript")))?;
+            let new = match (from, text, *back) {
+                (None, None, true) => None,
+                (Some(key), None, false) if *key == chosen.key => None,
+                (Some(key), None, false) => {
+                    let k = known_transcript(&kept, media, key)?;
+                    let theirs = transcript::spoken(&k.speech).map_err(Error::invalid)?;
+                    Some(WordsChange {
+                        start,
+                        end,
+                        words: transcripts::taken(&theirs, start, end),
+                        from: Some(key.clone()),
+                    })
+                }
+                (None, Some(typed), false) => {
+                    if typed.trim().is_empty() {
+                        return Err(Error::usage(
+                            "text is empty: to leave words out, use media.leave_out",
+                        ));
+                    }
+                    let words = transcript::spoken(&chosen.speech).map_err(Error::invalid)?;
+                    let replaced: Vec<transcript::Word> = words
+                        .into_iter()
+                        .filter(|w| {
+                            let middle = (w.start + w.end) / 2.0;
+                            start <= middle && middle < end
+                        })
+                        .collect();
+                    Some(WordsChange {
+                        start,
+                        end,
+                        words: transcripts::typed(typed, &replaced, start, end),
+                        from: None,
+                    })
+                }
+                _ => return Err(Error::usage("give one of from, text or back")),
+            };
+            let m = pool_item_mut(p, media)?;
+            let choice = transcripts::choice_mut(m, *stream);
+            transcripts::put(choice, start, end, new);
+            let changes = choice.changes.len();
+            transcripts::forget_empty(m);
+            json!({ "media": media, "stream": stream, "changes": changes })
         }
         Request::EditAppend(src) => {
             let sources = resolve_sources(p, src)?;
@@ -4029,9 +4226,10 @@ fn mutate(
             let mut voices = Vec::new();
             for m in &p.media {
                 for a in &m.info.audio {
-                    let Some(speech) = env.transcript(m, a.index)? else {
+                    let Some(chosen) = transcripts::read(env, m, a.index)? else {
                         continue;
                     };
+                    let speech = &chosen.speech;
                     let Some(run) = &speech.speakers else {
                         continue;
                     };
@@ -4176,6 +4374,7 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         color_space: Default::default(),
         super_scale: Default::default(),
         left_out: Vec::new(),
+        words: Vec::new(),
         sequence: probed.sequence,
         proxy: None,
         color: None,
@@ -6259,10 +6458,9 @@ pub fn query(
             }
             let mut heard: Vec<Option<Arc<Speech>>> = files
                 .iter()
-                .map(|m| {
-                    Ok(env
-                        .transcript(m, *stream)?
-                        .filter(|s| !*again && asked.made(s)))
+                .map(|m| match *again {
+                    true => Ok(None),
+                    false => transcripts::made(env, m, *stream, &asked),
                 })
                 .collect::<Result<_>>()?;
             if asked.model.paid() && asked.speakers && heard.iter().any(Option::is_none) {
@@ -6342,7 +6540,7 @@ pub fn query(
                         Target::Media(m) => match stream {
                             Some(s) => *s,
                             None => (0..m.info.audio.len() as u32)
-                                .find(|s| env.transcript(m, *s).ok().flatten().is_some())
+                                .find(|s| env.transcripts(m, *s).is_ok_and(|k| !k.is_empty()))
                                 .unwrap_or(0),
                         },
                         Target::Clip(c) => c
@@ -6351,18 +6549,22 @@ pub fn query(
                             .map(|a| a.stream)
                             .ok_or_else(|| Error::invalid(format!("{} has no sound", c.id)))?,
                     };
-                    let speech = env.transcript(m, stream)?.ok_or_else(|| {
-                        Error::invalid(format!(
-                            "{} has no transcript: transcribe it first (media.transcribe)",
-                            m.id
-                        ))
-                    })?;
-                    let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
-                    let tongue = filler_language(language, &speech);
+                    let kept = env.transcripts(m, stream)?;
+                    let chosen = transcripts::chosen(&kept, transcripts::choice(m, stream))
+                        .ok_or_else(|| {
+                            Error::invalid(format!(
+                                "{} has no transcript: transcribe it first (media.transcribe)",
+                                m.id
+                            ))
+                        })?;
+                    let speech = &chosen.speech;
+                    let timed = transcript::spoken(speech).map_err(Error::invalid)?;
+                    let tongue = filler_language(language, speech);
                     let (fillers, fillers_from) = filler_words(p, env, tongue.as_deref());
-                    let words: Vec<Value> = analysis::words_in(&target.span(p)?, &timed)
-                        .into_iter()
-                        .map(|(i, a, b)| {
+                    let placed = analysis::words_in(&target.span(p)?, &timed);
+                    let words: Vec<Value> = placed
+                        .iter()
+                        .map(|&(i, a, b)| {
                             let w = &timed[i];
                             let mut v = word_json(w, a, b, &fillers);
                             v["file_time"] = json!([w.start, w.end]);
@@ -6388,6 +6590,9 @@ pub fn query(
                             "filler_language": tongue,
                             "filler_words": fillers,
                             "fillers_from": fillers_from,
+                            "transcript": chosen.key,
+                            "transcripts": kept_json(stream, &kept, &chosen.key),
+                            "differences": differences_json(&timed, &kept, &placed),
                         }),
                     ));
                 }
@@ -6649,9 +6854,10 @@ pub fn query(
             let mut people: Vec<(String, Vec<Value>, usize, usize)> = Vec::new();
             for m in &p.media {
                 for a in &m.info.audio {
-                    let Some(speech) = env.transcript(m, a.index)? else {
+                    let Some(chosen) = transcripts::read(env, m, a.index)? else {
                         continue;
                     };
+                    let speech = &chosen.speech;
                     let Some(run) = &speech.speakers else {
                         continue;
                     };
@@ -7405,14 +7611,20 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
         let frames = tc.frames_at(fps).round() as i64;
         v["timecode"] = json!(format_timecode(frames, fps, 0, tc.drop_frame));
     }
-    let transcripts: Vec<Value> = (0..m.info.audio.len() as u32)
-        .filter_map(|s| {
-            let kept = env.transcript(m, s).ok().flatten()?;
-            Some(transcript_json(s, &kept))
+    let kept: Vec<Value> = (0..m.info.audio.len() as u32)
+        .flat_map(|s| {
+            let kept = env.transcripts(m, s).unwrap_or_default();
+            let main = transcripts::main(&kept, transcripts::choice(m, s))
+                .map(|k| k.key.clone())
+                .unwrap_or_default();
+            kept_json(s, &kept, &main)
         })
         .collect();
-    if !transcripts.is_empty() {
-        v["transcripts"] = json!(transcripts);
+    if !kept.is_empty() {
+        v["transcripts"] = json!(kept);
+    }
+    if !m.words.is_empty() {
+        v["words"] = json!(m.words);
     }
     if !m.left_out.is_empty() {
         v["left_out"] = json!(m.left_out);

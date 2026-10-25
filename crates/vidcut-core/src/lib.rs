@@ -34,6 +34,7 @@ pub mod subtitles;
 pub mod temp;
 pub mod time;
 pub mod transcript;
+pub mod transcripts;
 pub mod validate;
 
 pub use editor::{Editor, Env, History, ProbedMedia};

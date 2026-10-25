@@ -3069,6 +3069,11 @@ impl Live {
                 };
                 Step::Measure(Box::new(unpack_bundle), Box::new(envelope))
             }
+            Request::MediaTranscriptsRemove { .. } => {
+                let result = self.edit(envelope, job.origin);
+                self.refresh_transcribed(true);
+                Step::Now(result)
+            }
             _ => Step::Now(self.edit(envelope, job.origin)),
         }
     }
@@ -3331,13 +3336,7 @@ impl Live {
 
     fn refresh_transcribed(&mut self, job_ended: bool) {
         let Some(open) = &self.project else { return };
-        let now: HashSet<String> = open
-            .project()
-            .media
-            .iter()
-            .filter(|m| crate::env::transcribed(m))
-            .map(|m| m.id.clone())
-            .collect();
+        let now = crate::env::transcribed(&open.project().media);
         if job_ended || *self.transcribed != now {
             self.transcribed = Arc::new(now);
             self.dirty = true;

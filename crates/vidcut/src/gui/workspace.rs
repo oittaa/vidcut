@@ -545,6 +545,10 @@ impl Workspace {
 
     pub(super) fn edit_function(&mut self, method: &str) {
         let sources = self.edit_sources();
+        self.edit_from(method, sources);
+    }
+
+    pub(super) fn edit_from(&mut self, method: &str, sources: Vec<Value>) {
         let playhead = self.snap.timeline.position;
         let with_position = |mut s: Value| {
             match method {

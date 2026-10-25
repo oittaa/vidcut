@@ -259,15 +259,67 @@ pub enum Request {
         #[serde(default)]
         person: Option<String>,
     },
-    /// Leave words of a pool item out of edits, as Delete does in the
-    /// Transcription window on a source clip: their spans (source frames,
+    /// Leave words of a pool item out of every edit of it, as Delete does in
+    /// the Transcription window on a source clip: their spans (source frames,
     /// as `analyze.words` gives them with `media`) are struck through there,
-    /// and its Place on Top, Insert and Append edit only the rest of the
-    /// selection. `back` brings them back (Undelete).
+    /// and an edit of the media takes only the rest of its range. `back`
+    /// brings them back (Undelete).
     #[serde(rename = "media.leave_out")]
     MediaLeaveOut {
         media: String,
         words: Vec<SpokenWord>,
+        #[serde(default)]
+        back: bool,
+    },
+    /// The transcripts kept for a pool item's sound: each with its key, the
+    /// model and settings that made it, when it was made (seconds since
+    /// 1970), and whether this project takes its words (`main`). Without
+    /// `stream`, those of every sound stream.
+    #[serde(rename = "media.transcripts.list")]
+    MediaTranscriptsList {
+        media: String,
+        #[serde(default)]
+        stream: Option<u32>,
+    },
+    /// Take a pool item's words from one of its kept transcripts (a key from
+    /// `media.transcripts.list`). Without `transcript`, the newest one is taken.
+    /// Words changed with `media.words.set` stay.
+    #[serde(rename = "media.transcripts.main")]
+    MediaTranscriptsMain {
+        media: String,
+        #[serde(default)]
+        stream: u32,
+        #[serde(default)]
+        transcript: Option<String>,
+    },
+    /// Remove kept transcripts of a pool item (keys from
+    /// `media.transcripts.list`). The replies of the paid services stay in their
+    /// own cache, so the same request again sends nothing. Words taken from
+    /// them with `media.words.set` stay in the project.
+    #[serde(rename = "media.transcripts.remove")]
+    MediaTranscriptsRemove {
+        media: String,
+        #[serde(default)]
+        stream: u32,
+        transcripts: Vec<String>,
+    },
+    /// Change the words of a pool item's transcript from `start` to `end`, in
+    /// seconds of its sound (`analyze.words` gives each word's `file_time`).
+    /// Each word whose middle is in that time goes. With `from`, the words
+    /// that this kept transcript heard there take their place
+    /// (`analyze.words` gives the `differences`). With `text`, these typed
+    /// words do. `back` puts the main transcript's words there again.
+    #[serde(rename = "media.words.set")]
+    MediaWordsSet {
+        media: String,
+        #[serde(default)]
+        stream: u32,
+        start: f64,
+        end: f64,
+        #[serde(default)]
+        from: Option<String>,
+        #[serde(default)]
+        text: Option<String>,
         #[serde(default)]
         back: bool,
     },
@@ -3670,6 +3722,8 @@ impl Request {
                     | Self::SubtitlesExport { .. }
                     | Self::AnalyzeWords { .. }
                     | Self::MediaTranscribe { .. }
+                    | Self::MediaTranscriptsList { .. }
+                    | Self::MediaTranscriptsRemove { .. }
                     | Self::MediaList {}
                     | Self::MediaGet { .. }
                     | Self::MediaDetails { .. }
