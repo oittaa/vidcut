@@ -545,10 +545,16 @@ impl Workspace {
 
     pub(super) fn edit_function(&mut self, method: &str) {
         let sources = self.edit_sources();
+        self.edit_from(method, sources);
+    }
+
+    pub(super) fn edit_from(&mut self, method: &str, sources: Vec<Value>) {
         let playhead = self.snap.timeline.position;
+        let mark_in = self.project().and_then(|p| p.marks.mark_in);
         let with_position = |mut s: Value| {
             match method {
                 "edit.smart_insert" => s["playhead"] = json!(playhead),
+                "edit.insert" => s["at"] = json!(mark_in.unwrap_or(playhead)),
                 "edit.overwrite" | "edit.ripple_overwrite" | "edit.place_on_top" => {
                     s["at"] = json!(playhead)
                 }

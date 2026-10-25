@@ -158,12 +158,17 @@ fn tree(dir: &Path, paths: &[PathBuf]) -> Folder {
 }
 
 impl Env for FakeEnv {
-    fn transcript(
-        &self,
-        media: &Media,
-        _stream: u32,
-    ) -> Result<Option<Arc<crate::transcript::Speech>>> {
-        Ok(self.transcripts.get(&media.path).cloned())
+    fn transcripts(&self, media: &Media, _stream: u32) -> Result<Vec<crate::transcripts::Kept>> {
+        Ok(self
+            .transcripts
+            .get(&media.path)
+            .map(|s| crate::transcripts::Kept {
+                key: crate::transcripts::key(s),
+                made: 0,
+                speech: s.clone(),
+            })
+            .into_iter()
+            .collect())
     }
 
     fn probe(&self, path: &Path) -> Result<ProbedMedia> {

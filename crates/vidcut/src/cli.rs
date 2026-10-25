@@ -23,6 +23,10 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("media.set", &["media"]),
     ("media.marks.set", &["media"]),
     ("media.marks.clear", &["media"]),
+    ("media.transcripts.list", &["media"]),
+    ("media.transcripts.main", &["media", "transcript"]),
+    ("media.transcripts.remove", &["media", "transcripts"]),
+    ("media.words.set", &["media"]),
     ("proxy.generate", &["media"]),
     ("proxy.remove", &["media"]),
     ("bins.add", &["path"]),
@@ -150,6 +154,11 @@ const GROUPS: &[(&str, &str)] = &[
     ("marks", "Timeline In and Out marks"),
     ("media", "The Media Pool"),
     ("media.marks", "A media item's source In and Out marks"),
+    ("media.transcripts", "A media item's kept transcripts"),
+    (
+        "media.words",
+        "The words a project takes from the transcripts",
+    ),
     ("mixer", "The Mixer"),
     (
         "picture",

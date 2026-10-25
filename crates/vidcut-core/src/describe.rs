@@ -248,6 +248,16 @@ pub fn describe_at(
         }
         "analyze.words" => "Words in the speech".into(),
         "media.transcribe" => format!("Transcribe {}", d.media("media")),
+        "media.transcripts.main" => {
+            format!("Take the words of {} from a transcript", d.media("media"))
+        }
+        "media.words.set" if d.params["text"].is_string() => {
+            format!("Correct words of {}", d.media("media"))
+        }
+        "media.words.set" if d.params["back"].as_bool() == Some(true) => {
+            format!("Bring back words of {}", d.media("media"))
+        }
+        "media.words.set" => format!("Take words of {} from a transcript", d.media("media")),
         "media.leave_out" => format!(
             "{} {} word(s) of {}",
             if d.params["back"].as_bool() == Some(true) {

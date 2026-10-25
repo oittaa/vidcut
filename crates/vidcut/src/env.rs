@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats, VoiceActivity};
 use vidcut_core::disk_cache::{self, Kind};
@@ -13,6 +14,7 @@ use vidcut_core::model::{
 use vidcut_core::render::RenderPlan;
 use vidcut_core::time::Rational;
 use vidcut_core::transcript::{Asked, Speech};
+use vidcut_core::transcripts::Kept;
 use vidcut_core::{Env, Error, ProbedMedia, Result};
 
 use crate::paths;
@@ -88,7 +90,8 @@ type Memo<T> = LazyLock<Mutex<HashMap<(PathBuf, Origin), Arc<T>>>>;
 static LEVELS: Memo<AudioLevels> = LazyLock::new(Default::default);
 static PICTURES: Memo<PictureStats> = LazyLock::new(Default::default);
 static VOICES: Memo<VoiceActivity> = LazyLock::new(Default::default);
-static TRANSCRIPTS: Memo<Speech> = LazyLock::new(Default::default);
+type Transcripts = HashMap<(Origin, u32), Vec<Kept>>;
+static TRANSCRIPTS: LazyLock<Mutex<Transcripts>> = LazyLock::new(Default::default);
 
 static MADE_WITH: LazyLock<Mutex<HashMap<PathBuf, (String, vidcut_core::editor::Copied)>>> =
     LazyLock::new(Default::default);
@@ -144,12 +147,49 @@ pub fn kept_measure(
     }
 }
 
-fn transcript_file(media: &Media, stream: u32) -> (PathBuf, Origin) {
-    analysis_file(media, &format!("words{stream}"))
+fn transcript_file(origin: &Origin, stream: u32, key: &str) -> PathBuf {
+    Kind::Analysis.file(origin, &format!("words{stream}-{key}"))
 }
 
-pub fn transcribed(media: &Media) -> bool {
-    (0..media.info.audio.len() as u32).any(|s| transcript_file(media, s).0.is_file())
+fn kept_transcripts(origin: &Origin, stream: u32) -> Vec<Kept> {
+    let prefix = format!("{}.words{stream}-", origin.name);
+    let Ok(dir) = std::fs::read_dir(Kind::Analysis.dir()) else {
+        return Vec::new();
+    };
+    let mut kept: Vec<(SystemTime, Kept)> = dir
+        .flatten()
+        .filter_map(|e| {
+            let key = e.file_name().to_str()?.strip_prefix(&prefix)?.to_string();
+            let modified = e.metadata().ok()?.modified().ok()?;
+            let bytes = disk_cache::read(&e.path())?;
+            let speech = serde_json::from_slice::<Speech>(origin.check(&bytes)?).ok()?;
+            let made = modified.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64;
+            let speech = Arc::new(speech);
+            Some((modified, Kept { key, made, speech }))
+        })
+        .collect();
+    kept.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.key.cmp(&b.1.key)));
+    kept.into_iter().map(|(_, k)| k).collect()
+}
+
+pub fn transcribed(media: &[Media]) -> HashSet<String> {
+    let Ok(dir) = std::fs::read_dir(Kind::Analysis.dir()) else {
+        return HashSet::new();
+    };
+    let names: HashSet<String> = dir
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let (origin, ext) = name.split_once('.')?;
+            ext.strip_prefix("words")?.split_once('-')?;
+            Some(origin.to_string())
+        })
+        .collect();
+    media
+        .iter()
+        .filter(|m| names.contains(&*paths::media_origin(m).name))
+        .map(|m| m.id.clone())
+        .collect()
 }
 
 fn analysis_file(media: &Media, what: &str) -> (PathBuf, Origin) {
@@ -341,21 +381,30 @@ impl Env for AvEnv {
             .map_err(|e| Error::media(format!("{}: {e}", media.path.display())))
     }
 
-    fn transcript(&self, media: &Media, stream: u32) -> Result<Option<Arc<Speech>>> {
+    fn transcripts(&self, media: &Media, stream: u32) -> Result<Vec<Kept>> {
         let lock = || TRANSCRIPTS.lock().unwrap_or_else(PoisonError::into_inner);
-        let key = transcript_file(media, stream);
-        if let Some(s) = lock().get(&key) {
-            return Ok(Some(s.clone()));
+        let key = (paths::media_origin(media), stream);
+        if let Some(kept) = lock().get(&key) {
+            return Ok(kept.clone());
         }
-        let (file, origin) = &key;
-        let Some(speech) = disk_cache::read(file)
-            .and_then(|b| serde_json::from_slice::<Speech>(origin.check(&b)?).ok())
-        else {
-            return Ok(None);
-        };
-        let speech = Arc::new(speech);
-        lock().insert(key, speech.clone());
-        Ok(Some(speech))
+        let kept = kept_transcripts(&key.0, stream);
+        lock().insert(key, kept.clone());
+        Ok(kept)
+    }
+
+    fn remove_transcript(&self, media: &Media, stream: u32, key: &str) -> Result<()> {
+        let origin = paths::media_origin(media);
+        let file = transcript_file(&origin, stream, key);
+        match std::fs::remove_file(&file) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(Error::media(format!("{}: {e}", file.display()))),
+        }
+        TRANSCRIPTS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&(origin, stream));
+        Ok(())
     }
 
     fn transcribe_media(
@@ -728,14 +777,15 @@ fn no_room(dir: &Path) -> Error {
 
 fn keep_transcript(media: &Media, stream: u32, speech: Arc<Speech>) -> Result<Arc<Speech>> {
     vidcut_core::transcript::spoken(&speech).map_err(Error::invalid)?;
-    let (file, origin) = transcript_file(media, stream);
+    let origin = paths::media_origin(media);
+    let file = transcript_file(&origin, stream, &vidcut_core::transcripts::key(&speech));
     let bytes = serde_json::to_vec(&*speech).map_err(|e| Error::internal(e.to_string()))?;
     disk_cache::write(&file, &origin.stamp(&bytes))
         .map_err(|e| Error::media(format!("{}: {e}", file.display())))?;
     TRANSCRIPTS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .insert((file, origin), speech.clone());
+        .remove(&(origin, stream));
     Ok(speech)
 }
 

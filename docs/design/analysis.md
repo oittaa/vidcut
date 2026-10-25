@@ -185,13 +185,38 @@ flowchart TD
 - **Transcripts of media:**
   - `media.transcribe` hears the sound stream of one pool item on its own, with the stream asked for.
   - It hears the Source Tape's plan of the item (`render::tape`) at 16 kHz, mono.
-  - `Env::transcribe_media` keeps the `Speech` as JSON with the other measurements of the file (`words0`, `words1`, … per stream).
+  - `Env::transcribe_media` keeps the `Speech` as JSON with the other measurements of the file.
+  - A file can have several transcripts: one for each sound stream, model and group of settings.
+  - `transcripts::key` names the transcript. It is a hash of the model, the language, how speech was found, the sound level and the speaker model.
+  - The name of its file ends with the word "words", the stream and the key. A new transcript with the same key replaces it.
   - The transcript is stamped with its origin. Thus a changed file has no transcript.
-  - `Env::transcript` reads it back.
-  - It is used again while the model asked is the model that made it, in the language asked (`Asked::made`). `SpeechModel::title` names the model in both.
+  - `Env::transcripts` lists the transcripts of a stream, newest first (`transcripts::Kept`). The time of the file is the time of the transcript.
+  - `Env::remove_transcript` removes one file. The kept replies of the paid services stay.
+  - A transcript is used again while the model asked is the model that made it, in the language asked (`Asked::made`). `SpeechModel::title` names the model in both.
+  - `transcripts::made` finds such a transcript.
   - Only a transcript with word times is kept (`transcript::spoken`).
   - A model known not to time words (`SpeechModel::times_words`) is refused before anything is heard.
-  - The `transcribed` set of the core, the mark in the pool, comes from which of those files exist (`env::transcribed`).
+  - The `transcribed` set of the core, the mark in the pool, comes from one read of the folder (`env::transcribed`).
+- **The words that a project takes:**
+  - `Media::words` keeps a `ChosenWords` for each stream: the main transcript, and the changes (`WordsChange`).
+  - Without a main transcript, the newest one is the main transcript (`transcripts::main`).
+  - `transcripts::chosen` puts the changes over the words of the main transcript. A change replaces each word whose middle is in its time.
+  - `transcripts::read` gives these words. Subtitles, cutting by words and `analyze.words` read them.
+  - `media.words.set` puts a change (`transcripts::put`).
+    - A new change cuts the older changes that it covers in part. A cut part with no words joins the new change.
+    - Going back to the main transcript removes each change that the time touches. Thus no part of an old change stays.
+  - Words taken from a transcript are the words matched to the old words (`transcripts::taken`).
+    - They keep their times when these are between the words around the change.
+    - Else they are fitted into the time of the change. Thus the words stay in order.
+  - Typed words keep the times of the old words when the count is the same. Else they share the time by their length (`transcripts::typed`).
+  - `transcripts::differences` compares these words with each transcript, word by word (`align`):
+    - Two words match when their text is the same without capitals and the punctuation around them.
+    - The times only keep the match near: two matched words are at most 10 seconds apart.
+    - Transcripts can time the same words differently. Thus the times do not decide the match.
+    - After words that do not match, the next match must be two words in a row, at most 12 words ahead.
+    - Words that do not match make a difference. Differences that share words become one.
+    - Each choice gives its text and the transcripts that heard it. The transcript in use is one of the choices.
+  - `analyze.words` gives the transcripts and the differences of each media (`transcripts`, `differences`).
 - **Speakers:**
   - `speakers` gives each word a speaker (`Word::speaker`).
   - With a local model, `transcribe::speakers_of` takes the speaker turns of the sound of the file from a speaker model.

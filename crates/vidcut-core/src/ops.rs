@@ -417,14 +417,14 @@ pub fn insert_at_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<
 fn marked_start(p: &Project, srcs: &[Source], at: i64) -> (i64, Vec<Source>) {
     let len: i64 = srcs.iter().map(|s| s.range.1 - s.range.0).sum();
     match (p.marks.mark_in, p.marks.mark_out) {
-        (Some(i), Some(o)) => (i, fit_to(srcs, o - i)),
+        (Some(i), Some(o)) => (i, fit_to(p, srcs, o - i)),
         (Some(i), None) => (i, srcs.to_vec()),
         (None, Some(o)) => (o - len, srcs.to_vec()),
         (None, None) => (at, srcs.to_vec()),
     }
 }
 
-fn fit_to(srcs: &[Source], len: i64) -> Vec<Source> {
+fn fit_to(p: &Project, srcs: &[Source], len: i64) -> Vec<Source> {
     let mut out: Vec<Source> = Vec::new();
     let mut left = len;
     for s in srcs {
@@ -436,10 +436,39 @@ fn fit_to(srcs: &[Source], len: i64) -> Vec<Source> {
         left -= s.range.1 - s.range.0;
         out.push(s);
     }
-    if left > 0
-        && let Some(last) = out.last_mut()
-    {
-        last.range.1 += left;
+    let Some(last) = out.last().cloned().filter(|_| left > 0) else {
+        return out;
+    };
+    let left_out = p
+        .media(&last.media)
+        .map_or(&[][..], |m| m.left_out.as_slice());
+    let mut at = last.range.1;
+    let mut more: Vec<(i64, i64)> = Vec::new();
+    for &(a, b) in left_out {
+        if left <= 0 {
+            break;
+        }
+        if b <= at {
+            continue;
+        }
+        if a > at {
+            let take = (a - at).min(left);
+            more.push((at, at + take));
+            left -= take;
+        }
+        at = at.max(b);
+    }
+    if left > 0 {
+        more.push((at, at + left));
+    }
+    for (a, b) in more {
+        match out.last_mut() {
+            Some(s) if s.range.1 == a => s.range.1 = b,
+            _ => out.push(Source {
+                range: (a, b),
+                ..last.clone()
+            }),
+        }
     }
     out
 }

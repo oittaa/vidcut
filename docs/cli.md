@@ -228,7 +228,9 @@ The schema describes the parameters, not the results. This list gives the result
   - `proxy`: `file`, `path` (in the proxy folder of this computer), `width`, `height`, `codec`.
     - `stale`: the proxy was made from another version of the file, or with another `color_space`.
     - `missing`: the file of the proxy is gone.
-  - `transcripts[]`: `stream`, `model`, `language`, `timing`, `words`.
+  - `transcripts[]`: `stream`, `key`, `label`, `model`, `language`, `timing`, `words` (a count), `made` (seconds since 1970), `main`.
+    - `main`: the project takes its words from this transcript.
+  - `words[]`: for each stream, the main transcript that the project selected, and the words that it changed (`media.words.set`).
   - `left_out`: the source spans that the Transcription window leaves out.
   - `subtitles`, for a subtitle file: `format`, `encoding`, `cues`, `language`, `first` (the text of its first cue), `warnings`.
 - `subtitles import`:

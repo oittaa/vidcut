@@ -700,18 +700,28 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **vidcut:**
   - Transcribe Audio, in the right-click menu of a pool item (`media.transcribe`), keeps its words.
   - Transcribed media show a speech mark, in the pool and on their clips with sound.
-  - Its window tells when the file is already transcribed. Then Transcribe Again replaces its words (`again`).
+  - Its window tells when the file already has a transcript made with the same settings. Then Transcribe Again makes that transcript again (`again`).
   - The Transcription window (Transcription in the top bar) shows the words of the source clip, or the words of the timeline from its clips.
   - The Transcription window has:
     - a click on a word, a drag over words, X, Delete and Undelete
     - Remove Silent Portions and Delete Filler Words
     - Place on Top, Insert and Append, and Add Marker on the timeline
     - search: First, Previous, Next, Last and a count of the matches
-    - Copy and Follow
+    - Edit, Copy and Follow
+    - the Transcript menu and the differences between transcripts (X50)
+  - On a source clip, Delete leaves the words out of every edit of the media (`media.leave_out`). This includes the edits of the viewer, of the pool and of scripts.
+  - On the timeline, Delete ripple deletes the words (`edit.ripple_delete_words`), with ripple on or off (D63).
+  - Remove Silent Portions deletes every pause. Each cut is at the quiet points around the pause.
+  - Delete Filler Words deletes the filler words of a language in one step.
+    - The language is the one that the speech model reported, or the one selected beside the button.
+    - Edit… beside the button changes the words of a language for the project or for all projects.
+  - Edit corrects the selected words (`media.words.set`). The undo history keeps the change.
+  - Follow keeps the word under the playhead in view during playback.
+  - While the pointer is over the window, Delete, X, Ctrl+A, Ctrl+C and Esc act on the window.
   - With speakers, a paragraph starts at each person, under the name of the person.
   - The speaker commands are Rename, Same Person As and Separate.
   - Assign To gives the selected words to another person.
-  - `analyze.words`, `media.leave_out` and `edit.ripple_delete_words` do the same by request.
+  - `analyze.words`, `media.leave_out`, `media.words.set` and `edit.ripple_delete_words` do the same by request.
   - Details: D63, D73; deviations X50, X61.
 
 ### 8.14 Titles (pp. 762–764, 1176–1178)
@@ -1524,7 +1534,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - It does not say what a delete of words that touch cuts.
   - `analyze.words` answers with each word, its frames, and whether it joins the word before it without a space (`joined`).
   - The words come from one of these:
-    - the transcript of a media, in source frames
+    - the words that the project takes from the transcripts of a media (X50), in source frames
     - the media of each clip, in timeline frames through the range and speed of the clip (a word whose middle is in the clip)
     - speech heard from the same mix as Create Subtitles from Audio
   - Only a model that times words can give them:

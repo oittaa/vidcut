@@ -320,16 +320,63 @@ pub struct Media {
     /// the GPU has, before they are fitted. Absent while it is off.
     #[serde(default, skip_serializing_if = "SuperScale::is_off")]
     pub super_scale: SuperScale,
-    /// Source frames the Transcription window leaves out of its edits
-    /// (`media.leave_out`), each `[start, end)`, in order and apart.
+    /// Source frames left out of every edit of this media (`media.leave_out`,
+    /// Delete in the Transcription window), each `[start, end)`, in order and
+    /// apart.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub left_out: Vec<(i64, i64)>,
+    /// The words this project takes from the transcripts of each sound
+    /// stream: which transcript, and the words changed in it
+    /// (`media.transcripts.main`, `media.words.set`). Left out while the
+    /// newest transcript is taken as it is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<ChosenWords>,
     /// A subtitle file (SRT, WebVTT, TTML): what was read from it when it
     /// was added or relinked. It has no pictures or sound; its cues are read
     /// again when it is placed on a subtitle track (`subtitles.import` with
     /// `media`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtitles: Option<SubtitleFile>,
+}
+
+/// The words a project takes from the transcripts of one sound stream.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ChosenWords {
+    pub stream: u32,
+    /// The kept transcript that the words come from (a key from
+    /// `media.transcripts.list`). Left out to take the newest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main: Option<String>,
+    /// Stretches whose words come from somewhere else than the main
+    /// transcript, in order and apart.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<WordsChange>,
+}
+
+/// Words that take the place of the main transcript's words from `start` to
+/// `end`: each word whose middle is in that time goes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WordsChange {
+    /// Seconds of the file's sound.
+    pub start: f64,
+    pub end: f64,
+    /// The words put in their place, in seconds of the file's sound.
+    pub words: Vec<ChangedWord>,
+    /// The kept transcript the words were taken from. Left out for words
+    /// that were typed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+}
+
+/// One word of a [`WordsChange`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ChangedWord {
+    pub text: String,
+    pub start: f64,
+    pub end: f64,
+    /// It follows the word before it without a space.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub joined: bool,
 }
 
 /// A subtitle file in the Media Pool.

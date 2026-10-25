@@ -639,7 +639,7 @@ fn asked_of(s: &Settings) -> vidcut_core::transcript::Asked {
 }
 
 fn kept_for(p: &Project, s: &Settings, media: &[String]) -> Vec<String> {
-    use vidcut_core::Env;
+    use vidcut_core::transcripts;
     let env = crate::env::AvEnv::new();
     let asked = asked_of(s);
     media
@@ -647,10 +647,10 @@ fn kept_for(p: &Project, s: &Settings, media: &[String]) -> Vec<String> {
         .filter(|id| {
             p.media(id).is_some_and(|m| {
                 m.info.audio.iter().any(|a| {
-                    env.transcript(m, a.index)
+                    transcripts::made(&env, m, a.index, &asked)
                         .ok()
                         .flatten()
-                        .is_some_and(|t| asked.made(&t))
+                        .is_some()
                 })
             })
         })
@@ -670,16 +670,17 @@ fn to_transcribe(p: &Project, s: &Settings, heard: &[String], span: (i64, i64)) 
 }
 
 fn described(p: &Project, media: &[String]) -> String {
-    use vidcut_core::Env;
+    use vidcut_core::transcripts;
     let env = crate::env::AvEnv::new();
     let mut models: Vec<String> = Vec::new();
     let mut spoken: Vec<String> = Vec::new();
     let mut speakers = true;
     for m in media.iter().filter_map(|id| p.media(id)) {
         for a in &m.info.audio {
-            let Some(t) = env.transcript(m, a.index).ok().flatten() else {
+            let Some(t) = transcripts::read(&env, m, a.index).ok().flatten() else {
                 continue;
             };
+            let t = t.speech;
             if !models.contains(&t.model) {
                 models.push(t.model.clone());
             }
