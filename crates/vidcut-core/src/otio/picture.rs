@@ -109,6 +109,35 @@ pub fn is_placing(e: &Value) -> bool {
     kind(e).is_some()
 }
 
+fn mode_param(e: &Value) -> Option<Value> {
+    e["metadata"][EDITOR]["Parameters"]
+        .as_array()?
+        .iter()
+        .find(|p| p["Parameter ID"] == MODE)
+        .cloned()
+}
+
+pub(crate) fn joined(kept: Vec<Value>, mut made: Vec<Value>) -> Vec<Value> {
+    let composite = |e: &Value| e["metadata"][EDITOR]["Effect Name"] == COMPOSITE;
+    let Some(ours) = made.iter_mut().find(|e| composite(e)) else {
+        return kept.into_iter().chain(made).collect();
+    };
+    let theirs = kept
+        .iter()
+        .filter(|e| composite(e) && e["metadata"][EDITOR]["Enabled"] != false)
+        .find_map(mode_param);
+    if mode_param(ours).is_none()
+        && let Some(mode) = theirs
+        && let Some(params) = ours["metadata"][EDITOR]["Parameters"].as_array_mut()
+    {
+        params.insert(0, mode);
+    }
+    kept.into_iter()
+        .filter(|e| !composite(e))
+        .chain(made)
+        .collect()
+}
+
 fn known(name: &str) -> &'static [&'static str] {
     match name {
         TRANSFORM => &[

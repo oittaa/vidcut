@@ -292,11 +292,11 @@ fn with_picture(
         return effects;
     };
     let timing = effects::Timing { speed: c.speed() };
-    effects
+    let kept = effects
         .into_iter()
         .filter(|e| !picture::is_placing(e))
-        .chain(picture::effects(x, shape, g, source, &timing))
-        .collect()
+        .collect();
+    picture::joined(kept, picture::effects(x, shape, g, source, &timing))
 }
 
 pub fn out_of_reach(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
