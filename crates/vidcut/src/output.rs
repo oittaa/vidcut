@@ -617,8 +617,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
             if let Some(n) = rep["languages"].as_array().map(Vec::len).filter(|n| *n > 0) {
                 said.push(format!("{n} languages"));
             }
-            if let Some(t) = rep["times"].as_str() {
-                said.push(format!("times: {t}"));
+            match rep["times"].as_str() {
+                Some("words") => said.push("word times".into()),
+                Some("phrases") => said.push("phrase times".into()),
+                Some(_) => said.push("no times".into()),
+                None => {}
             }
             if let Some(s) = rep["audio_secs"].as_f64() {
                 said.push(format!("longest audio {} s", number(s)));
