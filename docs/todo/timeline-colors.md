@@ -35,8 +35,11 @@ The scripting API: the project settings and the settings of each timeline (`useC
 Measured in Resolve Studio 21.1.1 on 2026-10-25:
 
 - A new project has the color science DaVinci YRGB, without color management. Its timeline and output color spaces are "Rec.709 (Scene)".
-- The test timeline has two cuts of the PQ barcode fixture `bc5_hevc10_1280x720pq_30-1_g30b2_30f_noaudio_o0.mp4`, with a 10-frame Cross Dissolve on the cut.
+- The test timelines use the PQ barcode fixture `bc5_hevc10_1280x720pq_30-1_g30b2_30f_noaudio_o0.mp4`. Its white is at 205 cd/m².
 - The frames were rendered to 16-bit TIFF.
+
+A 10-frame Cross Dissolve on a cut between two parts of the clip:
+
 - Each number is the level of a pixel that goes from black to white, as a share of white. The numbers are the 10 frames of the dissolve, in order.
 
 | Color science, timeline, output | Frames 1 to 10 |
@@ -47,14 +50,33 @@ Measured in Resolve Studio 21.1.1 on 2026-10-25:
 | Managed, Rec.2100 HLG, Rec.2100 ST2084 | 0.176 0.290 0.383 0.466 0.545 0.619 0.695 0.769 0.851 0.942 |
 | Managed, DaVinci WG/Intermediate, Rec.2100 ST2084 | 0.242 0.355 0.442 0.516 0.586 0.650 0.718 0.783 0.857 0.942 |
 
+Other mixes:
+
+- **Opacity.** The clip, flipped, at 50% Opacity on a track above the clip.
+  - White over black is at 0.499 of white without color management. It is at 0.574 with a managed Rec.2100 ST2084 timeline.
+  - 0.574 is also where the managed dissolve is halfway.
+- **A title.** A Text title over black.
+- **Subtitles.** An SRT cue over black, burned in at the render.
+- White text of a title and of a subtitle is at 100 cd/m² in a Rec.2100 ST2084 timeline. The project setting `graphicsWhiteLevel` is 100.
+  - vidcut puts this white at 203 cd/m² (D35, D61). This is the same as Resolve's "203 nits" option.
+
+The tests also rendered each managed Rec.2100 ST2084 timeline to Rec.709 Gamma 2.4:
+
+- Each pixel between black and white is the PQ level converted: (cd/m² ÷ 100)^(1/2.4), clipped at 1.
+- This is true for the dissolve, the opacity, the edges of the title and the edges of the subtitles.
+
 What the measurements show:
 
-- Without color management, Resolve mixes the code values of the file in a straight line, at the weights of D50. An HDR export of vidcut mixes in the same way now.
-- With color management, the timeline color space changes the mix.
-- The output color space does not change the mix.
-  - The test rendered a Rec.2100 ST2084 timeline to Rec.709 Gamma 2.4 too.
-  - Each mixed level that was checked is the PQ level converted: (cd/m² ÷ 100)^(1/2.4), clipped at 1.
+- Without color management, Resolve mixes the code values in a straight line. A dissolve uses the weights of D50. An HDR export of vidcut mixes in the same way now.
+- With color management, every mix occurs before the output transform: dissolves, opacity, titles and subtitles.
+- The timeline color space changes the mix. The output color space does not change it.
 - With color management, the mix is not a straight line in the code values of a Rec.2100 ST2084 timeline. Its working space is not known.
+
+## Decisions of the owner (2026-10-25)
+
+- vidcut does what Resolve's color management does: every mix occurs in the timeline color space.
+- The Auto of an export (D44) follows the timeline color space. An HDR timeline exports HDR where the codec carries HDR.
+- Resolve's other color spaces come later, in [timeline-color-spaces-more.md](timeline-color-spaces-more.md).
 
 ## The plan
 
@@ -62,26 +84,23 @@ What the measurements show:
    - The choices: Auto, SDR (BT.709), HDR PQ and HDR HLG.
    - Auto is HDR when more than half of the timeline's pictures are HDR. This is the rule of D44 without the codec.
    - HDR is HLG when every HDR picture is HLG, else PQ.
-2. **Every dissolve and wipe in the timeline color space.**
-   - Each picture of the mix goes to the timeline color space first.
-   - The mix is a straight line in the timeline's code values, at the weights of D50. Resolve without color management mixes in the same way.
+2. **Every mix in the timeline color space.**
+   - The mixes: dissolves, wipes, the opacity and edges of placed pictures, titles and subtitles.
+   - Each picture of a mix goes to the timeline color space first.
+   - The mix is a straight line in the timeline's code values. A dissolve uses the weights of D50. Resolve without color management mixes in the same way.
    - The mixed frame then goes to the output.
-3. **Exports.**
+3. **The Auto of an export** (D44) is the timeline color space when the codec carries it with a 10-bit encoder on this computer. Else it is SDR.
+4. **Exports.**
    - When the output has the timeline's colors, nothing changes.
    - When the output is different, only the frames with a mix change. A frame with one picture keeps the direct conversion, which gives the same result.
-   - NVENC: `cuda::mix` mixes on the GPU. Then libplacebo converts the mix on the GPU (AGENTS.md rule 9).
-   - The other GPUs mix on the CPU ([gpu-dissolves.md](gpu-dissolves.md)). There, the CPU also converts the mix.
-4. **The viewer.**
-   - With HDR timeline colors, the layers of a mix go into the float picture of `Mixing` as HDR code values. One draw converts that picture for the screen.
+   - NVENC: `cuda::mix` and `cuda::burn` mix on the GPU. Then libplacebo converts the mixed frame on the GPU (AGENTS.md rule 9).
+   - The other GPUs mix on the CPU ([gpu-dissolves.md](gpu-dissolves.md), [gpu-burn-in.md](gpu-burn-in.md)). There, the CPU also converts the mixed frame.
+5. **The viewer.**
+   - With HDR timeline colors, the layers, titles and subtitles go into the float picture of `Mixing` as HDR code values. One draw converts that picture for the screen.
    - With SDR timeline colors, the viewer draws as it does now.
-5. **Picture renders** (`frame render`, the timeline's tiles and storyboards) go through `export::make::Maker`. Thus they follow the exports.
-6. **Docs.**
+6. **Picture renders** (`frame render`, the timeline's tiles and storyboards) go through `export::make::Maker`. Thus they follow the exports.
+7. **Docs.**
    - X14: the timeline has a color space.
+   - D44: Auto follows the timeline color space.
    - D50: the mix is in the timeline's code values.
    - A new deviation: Resolve's color management mixes in a working space that is not known. vidcut mixes in a straight line in the timeline's code values.
-
-## Open, for the owner
-
-- Does the Auto of an export (D44) follow the timeline color space? Then an HDR timeline exports HDR where the codec carries HDR.
-- Do placed pictures, titles and subtitles also mix in the timeline color space? They mix with the frame below in the output colors now.
-- Which more of Resolve's color spaces does vidcut offer? Examples: P3, SDR Rec.2020, DaVinci Wide Gamut.
