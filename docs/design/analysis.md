@@ -126,7 +126,7 @@ flowchart TD
   - `models.check` checks one model ([tools](../tools.md)):
     - It gets the files ready, and checks the SHA-256 of each (`models::verify`).
     - Then it loads the model (`models::inspect`). transcribe.cpp loads the speech models on the CPU, tract loads DPDFNet, and vidcut reads the weights of NanoVSR.
-    - FlashVSR+ is not loaded: only its files are checked.
+    - It loads FlashVSR+ onto the GPU, as AI Best does, then frees it when nothing else uses it (`flashvsr::inspect`). Only `models.check` does this.
     - `catalog::differences` compares what transcribe.cpp reports with the catalog. A difference is an error.
   - What is still open is in [model-catalog.md](../todo/model-catalog.md).
 - **Model files**
@@ -260,7 +260,8 @@ flowchart TD
   - With `speakers`, they send every heard file again. Thus the files share speaker numbers.
   - The editor refuses without `send` (`upload_check`). It gives the duration, the size (`transcript::upload_mb`) and the cost (`transcript::cost`).
 - **Limits and where they come from:**
-  - The numbers to which vidcut holds a model are in its `catalog::Model`, with the other facts of the model. Each number comes from the documentation of the maker, or is marked as not recorded.
+  - The numbers to which vidcut holds a model are in its `catalog::Model`, with the other facts of the model.
+  - Each number comes from the documentation of the maker, or from the model file as transcribe.cpp reads it (`Source::ModelFile`). Else it is marked as not recorded.
   - `catalog::check` compares the values of a job with the limits of its model. A hard limit gives a refusal. A cap or a soft limit gives a warning.
   - The direction of a limit is in `Measure::direction`:
     - `Direction::Most`: the value must not be above the limit.

@@ -118,11 +118,10 @@ pub fn inspect(
             })
         }
         "flashvsr" => {
-            crate::flashvsr::get_ready(dir, download)?;
-            verify(dir, model.files)?;
+            crate::flashvsr::inspect(dir, download)?;
             Ok(Inspected {
                 found,
-                loaded: None,
+                loaded: Some("vidcut, on the GPU"),
             })
         }
         _ => Err(Error::Invalid(format!(

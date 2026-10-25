@@ -2082,7 +2082,8 @@ pub enum Request {
     /// each file, then load it and compare what it reports (languages, kind
     /// of times, longest audio, most speakers) with the catalog. A
     /// difference is an error that names the field. `download` fetches the
-    /// files this computer doesn't have first.
+    /// files this computer doesn't have first. For `flashvsr`, the check
+    /// puts its weights on the GPU, then frees them.
     #[serde(rename = "models.check")]
     ModelsCheck {
         model: String,

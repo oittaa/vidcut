@@ -138,6 +138,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - To change a model or a service in the catalog (`crates/vidcut-core/src/catalog.rs`):
   1. Change only the entry of the model.
   2. Take the sizes and the SHA-256 from the release data of GitHub or Hugging Face.
-  3. Take each limit from the documentation of its maker, and set the date of the check. Without such a source, the limit is not recorded (`Source::Unrecorded`).
+  3. Take each limit from the documentation of its maker, and set the date of the check.
+     - A limit that transcribe.cpp reads from the model file has `Source::ModelFile`.
+     - Without a source, the limit is not recorded (`Source::Unrecorded`).
   4. Run `vidcut models check MODEL --download`, then the commit gate.
   5. The pull request lists each changed field: the old value, the new value and the source.

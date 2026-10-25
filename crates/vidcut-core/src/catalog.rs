@@ -38,6 +38,7 @@ pub enum Measure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     Doc(&'static str),
+    ModelFile,
     Vidcut,
     Unrecorded,
 }
@@ -138,6 +139,7 @@ impl Limit {
     pub fn json(&self) -> Value {
         let source = match self.source {
             Source::Doc(url) => json!({ "doc": url }),
+            Source::ModelFile => json!("model file"),
             Source::Vidcut => json!("vidcut"),
             Source::Unrecorded => json!("not recorded"),
         };
@@ -416,7 +418,16 @@ pub static QWEN3_ASR: Model = Model {
         "zh", "en", "yue", "ar", "de", "fr", "es", "pt", "id", "it", "ko", "ru", "th", "vi", "ja",
         "tr", "hi", "ms", "nl", "sv", "da", "fi", "pl", "cs", "fil", "fa", "el", "ro", "hu", "mk",
     ],
-    limits: &[limit(Measure::GpuGb, 8.0, Kind::Soft, Source::Unrecorded)],
+    limits: &[
+        limit(Measure::GpuGb, 8.0, Kind::Soft, Source::Unrecorded),
+        Limit {
+            measure: Measure::AudioSecs,
+            value: 5218.56,
+            kind: Kind::Hard,
+            source: Source::ModelFile,
+            checked: Some("2026-10-25"),
+        },
+    ],
     price: None,
 };
 

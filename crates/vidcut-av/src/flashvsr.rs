@@ -144,6 +144,14 @@ pub fn check<'a>(
     })
 }
 
+pub fn inspect(dir: &Path, download: bool) -> Result<u64> {
+    get_ready(dir, download)?;
+    crate::models::verify(dir, &FILES)?;
+    let bytes = with_engine(|_, model| Ok(model.bytes));
+    release();
+    bytes
+}
+
 struct Engine {
     gpu: gpu::Gpu,
     model: Option<model::Model>,
