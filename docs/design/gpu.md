@@ -270,6 +270,9 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - `run::plan` keeps the caches on the GPU while all of the work fits in the room of AI work (`player::room_on`). The caches of the other blocks stay in main memory between chunks (`Keys::Host`). Each comes back to the GPU just before its block runs, and its new windows go back after it.
       - The new windows go to a mapped buffer in the first submission of the block. The block reads them at its end, while the GPU runs its feed-forward part.
     - The results are the same in both places.
+    - The device of AI Best uses the `MemoryUsage` hint of wgpu. Its memory blocks are small, so the free parts of the blocks stay small.
+      - Why: the plan can fill the room. With larger blocks, the free parts of the blocks went past the room by gigabytes at 4K output.
+      - On Windows, the driver then moves GPU memory to main memory. On Linux, the allocation fails.
     - Without a room, all caches stay on the GPU. This occurs when the system gives neither the GPU's free memory nor its size.
     - A size that does not fit even with every cache in main memory is refused. So is a size whose caches need more than half of main memory.
     - The TC decoder gives 4 frames for each latent frame. Its memory blocks keep the features of the previous frame. Its full-size stage runs in bands of 64 rows.

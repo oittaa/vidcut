@@ -133,6 +133,7 @@ impl Gpu {
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("vidcut-flashvsr"),
             required_limits: limits,
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
             ..Default::default()
         }))
         .map_err(|e| format!("the GPU did not open for the AI Best upscaler: {e}"))?;
