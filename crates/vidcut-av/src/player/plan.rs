@@ -17,18 +17,21 @@ type Layer = (Arc<str>, i64, u32);
 pub(crate) struct Fill {
     pub(crate) ahead: bool,
     pub(crate) behind: bool,
+    pub(crate) lead: bool,
 }
 
 impl Fill {
     const ALL: Self = Self {
         ahead: true,
         behind: true,
+        lead: true,
     };
 
     fn of(piece: &VideoPiece) -> Self {
         match piece {
             VideoPiece::Source { super_scale, .. } if super_scale.ai() => Self {
                 behind: false,
+                lead: false,
                 ..Self::ALL
             },
             _ => Self::ALL,
@@ -39,6 +42,7 @@ impl Fill {
         Self {
             ahead: self.ahead && other.ahead,
             behind: self.behind && other.behind,
+            lead: self.lead && other.lead,
         }
     }
 }
