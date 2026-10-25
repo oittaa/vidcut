@@ -22,6 +22,7 @@ It behaves like a Cut page ([spec](docs/cut-page-spec.md)). A script or an AI ag
   - A volume line on each clip, with keyframes and eases. Alt+click adds a keyframe.
 - **Titles:** text titles and lower thirds on the video tracks. You edit them in the Inspector. The viewer and the export draw them the same.
 - **Transform and Crop:** move, zoom, turn, flip and crop a clip's picture over the tracks below, with the viewer's handles (T, Shift+T). Use it for a picture in a picture, or for a punch-in that keeps the source's detail.
+- **Opacity and soft edges:** fade a clip over the tracks below, and soften the edges of its crop. Both take keyframes.
 - **Subtitles:**
   - Subtitle tracks.
   - Create Subtitles from Audio, which also tells who speaks. It runs on this computer's GPU, or with xAI or Google after vidcut asks you.

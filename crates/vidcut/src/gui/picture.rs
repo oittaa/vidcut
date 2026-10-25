@@ -2194,9 +2194,11 @@ fn shader() -> String {
     )
 }
 
-const PARAMS: usize = (11 + 3 * LEVELS) * 16;
+const PER_LEVEL: usize = 5;
 
-const LETTERING: usize = (3 + 3 * LEVELS) * 16;
+const PARAMS: usize = (11 + PER_LEVEL * LEVELS) * 16;
+
+const LETTERING: usize = (3 + PER_LEVEL * LEVELS) * 16;
 
 fn innermost(placing: Option<&Placing>) -> &[Level] {
     placing.map_or(&[][..], |p| {
@@ -2205,13 +2207,15 @@ fn innermost(placing: Option<&Placing>) -> &[Level] {
 }
 
 fn level_floats(levels: &[Level]) -> Vec<f64> {
-    let mut floats = Vec::with_capacity(12 * LEVELS);
+    let mut floats = Vec::with_capacity(4 * PER_LEVEL * LEVELS);
     for l in levels {
         let [a, b, e, c, d, f, g, h] = l.back;
         floats.extend([a, b, e, g, c, d, f, h]);
-        floats.extend(l.shown);
+        floats.extend(l.edge);
+        floats.extend(l.soft.inner);
+        floats.extend([l.soft.reach[0], l.soft.reach[1], l.opacity, 0.0]);
     }
-    floats.resize(12 * LEVELS, 0.0);
+    floats.resize(4 * PER_LEVEL * LEVELS, 0.0);
     floats
 }
 

@@ -10,6 +10,7 @@ const ZOOM: (f64, f64) = (0.01, 100.0);
 const REACH: f64 = 100.0;
 const TURNS: f64 = 3600.0;
 const LEAN: f64 = 1.5;
+const SOFT: f64 = 100.0;
 
 pub fn checked(p: &Picture) -> Result<Option<Picture>> {
     if let Some(at) = p.position
@@ -62,8 +63,20 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
             "a picture's crop is a fraction of it on each side, from 0, leaving some of it",
         ));
     }
+    if let Some(s) = p.crop_softness
+        && !(s.is_finite() && s.abs() <= SOFT)
+    {
+        return Err(Error::invalid(
+            "a picture's crop softness is from -100 to 100",
+        ));
+    }
     if let Some(z) = &p.dynamic_zoom {
         zoom_checked(z)?;
+    }
+    if let Some(o) = p.opacity
+        && !(o.is_finite() && (0.0..=1.0).contains(&o))
+    {
+        return Err(Error::invalid("a picture's opacity is from 0 to 1"));
     }
     if let Some(why) = crate::keyframes::picture_problem(p) {
         return Err(Error::invalid(why));
@@ -75,6 +88,8 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
         anchor: p.anchor.filter(|at| *at != Picture::MIDDLE),
         pitch: p.pitch.filter(|v| *v != 0.0),
         yaw: p.yaw.filter(|v| *v != 0.0),
+        crop_softness: p.crop_softness.filter(|s| *s != 0.0),
+        opacity: p.opacity.filter(|o| *o != 1.0),
         ..p.clone()
     };
     Ok((!out.is_usual()).then_some(out))
@@ -130,7 +145,9 @@ pub struct PictureChange {
     pub flip_horizontal: Option<bool>,
     pub flip_vertical: Option<bool>,
     pub crop: [Option<f64>; 4],
+    pub crop_softness: Option<f64>,
     pub dynamic_zoom: Option<Option<DynamicZoomSet>>,
+    pub opacity: Option<f64>,
 }
 
 impl PictureChange {
@@ -177,17 +194,23 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
             *side = v;
         }
     }
+    if let Some(s) = change.crop_softness {
+        p.crop_softness = Some(s);
+    }
     if let Some(z) = change.dynamic_zoom {
         p.dynamic_zoom = z.map(|z| z.on(p.dynamic_zoom.unwrap_or_default()));
+    }
+    if let Some(o) = change.opacity {
+        p.opacity = Some(o);
     }
     p
 }
 
+const NEEDS: &str = "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop, crop softness, Dynamic Zoom or opacity";
+
 pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i64>) -> Result<()> {
     if change.is_empty() {
-        return Err(Error::usage(
-            "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop or Dynamic Zoom",
-        ));
+        return Err(Error::usage(NEEDS));
     }
     let mut applied = false;
     let mut missed = false;
@@ -256,9 +279,7 @@ pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i
         return Err(if missed {
             Error::invalid("no clip with keyframes on that value shows at the frame")
         } else {
-            Error::usage(
-                "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop or Dynamic Zoom",
-            )
+            Error::usage(NEEDS)
         });
     }
     Ok(())
@@ -271,36 +292,47 @@ pub fn clear(p: &mut Project, ids: &[String], tool: Option<PictureTool>) -> Resu
         let Some(old) = c.picture.take() else {
             continue;
         };
-        let kept = match tool {
-            None => Picture::default(),
-            Some(PictureTool::Transform) => {
-                let mut kept = Picture {
-                    crop: old.crop,
-                    dynamic_zoom: old.dynamic_zoom,
-                    ..Picture::default()
-                };
-                kept.crop_left_keys = old.crop_left_keys;
-                kept.crop_right_keys = old.crop_right_keys;
-                kept.crop_top_keys = old.crop_top_keys;
-                kept.crop_bottom_keys = old.crop_bottom_keys;
-                kept
-            }
-            Some(PictureTool::Crop) => {
-                let mut kept = Picture {
-                    crop: Crop::default(),
-                    ..old
-                };
-                kept.clear_crop_keys();
-                kept
-            }
-            Some(PictureTool::DynamicZoom) => Picture {
-                dynamic_zoom: None,
-                ..old
-            },
-        };
+        let kept = tool.map_or_else(Picture::default, |t| cleared(&old, t));
         c.picture = (!kept.is_usual()).then_some(kept);
     }
     Ok(())
+}
+
+pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
+    let old = old.clone();
+    match tool {
+        PictureTool::Transform => Picture {
+            crop: old.crop,
+            crop_left_keys: old.crop_left_keys,
+            crop_right_keys: old.crop_right_keys,
+            crop_top_keys: old.crop_top_keys,
+            crop_bottom_keys: old.crop_bottom_keys,
+            crop_softness: old.crop_softness,
+            crop_softness_keys: old.crop_softness_keys,
+            dynamic_zoom: old.dynamic_zoom,
+            opacity: old.opacity,
+            opacity_keys: old.opacity_keys,
+            ..Picture::default()
+        },
+        PictureTool::Crop => {
+            let mut kept = Picture {
+                crop: Crop::default(),
+                crop_softness: None,
+                ..old
+            };
+            kept.clear_crop_keys();
+            kept
+        }
+        PictureTool::DynamicZoom => Picture {
+            dynamic_zoom: None,
+            ..old
+        },
+        PictureTool::Composite => Picture {
+            opacity: None,
+            opacity_keys: Vec::new(),
+            ..old
+        },
+    }
 }
 
 pub fn shown(c: &Clip) -> Value {
@@ -318,8 +350,10 @@ pub fn shown(c: &Clip) -> Value {
         "flip_vertical": p.flip_vertical,
         "crop": {
             "left": crop.left, "right": crop.right, "top": crop.top, "bottom": crop.bottom,
+            "softness": p.softness(),
         },
         "dynamic_zoom": p.dynamic_zoom.as_ref().map(zoom_shown),
+        "opacity": p.opaque(),
     })
 }
 

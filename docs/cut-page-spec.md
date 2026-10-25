@@ -21,12 +21,12 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - dissolves: cross dissolves, fades to and from black, audio cross fades (§8.11)
 - clip/track audio levels and waveforms
 - volume keyframes of a clip (§9, D81)
-- keyframes of Transform and Crop (§8.15, D75)
+- keyframes of Transform, Crop and Composite (§8.15, D75)
 - Voice Isolation, free (X64)
 - ducking, the Ducker Track FX (§9)
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
-- a clip's Transform, Crop and Dynamic Zoom (§8.15)
+- a clip's Transform, Crop, Dynamic Zoom and opacity (§8.15)
 - Quick Export, plus our Export dialog
 
 **Later (later):**
@@ -830,6 +830,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A handle on each side crops that side.
   - Crop Left, Right, Top and Bottom are in pixels.
   - The cropped area is transparent, so what is under it shows through.
+  - Softness goes from −100 to 100. It softens the edges of the crop (p. 768).
   - Details: D75.
 - **Dynamic Zoom** (p. 768): a slow push or pull and pan from a start box to an end box.
   - The green box is the start and the red box is the end.
@@ -838,10 +839,14 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Shift keeps a drag on one axis.
   - vidcut: Alt+T shows the boxes, and the Tools row has Dynamic Zoom (X65). The eases are curves of their own (X67).
   - Details: D75.
-- **How they play:** a clip covers the tracks below it only where its picture covers the frame. Details: D75.
+- **Composite** (p. 769):
+  - Opacity goes from 0 to 100. The tracks below show through the rest.
+  - The composite modes mix the clip with the tracks below in other ways. vidcut: later.
+  - Details: D75.
+- **How they play:** a clip covers the tracks below it only where its picture covers the frame. Its opacity and its soft edges let them show through. Details: D75.
 - **Keyframes** (D75):
   - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y.
-  - Rotation is its own value. Each crop side is its own value.
+  - Rotation is its own value. Each crop side, Softness and Opacity are values of their own.
   - The flips, the anchor, Pitch and Yaw have no keyframes.
   - Dynamic Zoom has no Keyframe button. Its two boxes stay at the ends of the clip.
   - A Keyframe button sits between Previous and Next arrows on each keyed value (X70).
@@ -863,6 +868,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
   - vidcut: its Audio section has Volume, Mute and Voice Isolation for the selected clips with sound (X70).
+  - vidcut: its Crop section has Softness, and its Composite section has Opacity.
 - **The units of the Inspector,** measured in Resolve Studio 21.1.1:
   - The timeline was 1920×1080. A 1280×720 chart and a 960×720 chart were fitted into it.
   - OTIO exports on 1080 and 2160 timelines gave the values in the file.
@@ -871,7 +877,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Thus a picture narrower than the frame moves less than its number. On the 4:3 chart in the 16:9 timeline, Position X 200 moves it 150 pixels.
   - Crop is in pixels of the picture as it is fitted in the timeline. Crop Left 100 on the 4:3 chart is a `cropLeft` of 100/1440 in the OTIO file.
   - Zoom is a factor (1.000). Rotation is in degrees.
-- **Later:** crop Softness (p. 768), the modes and opacity of Composite (p. 769).
+- **Later:** the modes of Composite (p. 769).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -1894,6 +1900,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Order:**
     - The picture of a clip is fitted into the frame.
     - Then it is cropped, flipped, leaned by pitch and yaw, zoomed, turned and moved, in that order (D93).
+    - The soft edges of the crop and the opacity then fade it over the tracks below.
     - The crop and the flips work about the middle of the whole picture.
     - The zoom and the turn work about its anchor point (D92). The usual anchor point is the middle.
     - Pitch and yaw work about the middle of the picture, in its own axes (D93).
@@ -1908,6 +1915,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Its edges are smoothed over a pixel.
     - The two sides of a dissolve mix into each other first, and then go over the tracks below.
     - Thus the tracks below do not show through where both sides cover the frame (D50).
+  - **Soft edges and opacity** (measured in Resolve Studio 21.1.1, with 16-bit renders):
+    - Opacity mixes the clip with what is below it: below + (clip − below) × opacity.
+    - The fade of Softness is |Softness| × the width of the fitted picture / 400 pixels, rounded down. The zoom scales it with the picture.
+    - Above 0, each cropped side fades out over what it cuts off. The edge of the picture still cuts it. Thus a side that is not cropped stays hard.
+    - Below 0, all four sides fade in over the picture, cropped or not. The crop still cuts it.
+    - Across the fade, the coverage follows a smoothstep. It is full over the first eighth of the fade.
+    - At a corner, the distances outside the two sides join in a smooth maximum. Thus the corners are round.
+    - Keyframes of Softness and Opacity without handles change in a straight line. After the last keyframe, the value stays.
   - **Units** (vidcut's, X65):
     - `position` is where the middle of the picture goes before the zoom and the turn: `[x, y]` in fractions of the frame from its top left.
     - Each value of `position` is from −100 to 100. `[0.5, 0.5]` leaves the picture in place.
@@ -1918,12 +1933,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Positive pitch puts the top farther away. Positive yaw puts the left closer.
     - The flips mirror the picture left to right and top to bottom.
     - The crop cuts each side by a fraction of the source picture, and leaves some of it.
+    - `crop_softness` is from −100 to 100, as Softness in Resolve. Usual: 0.
+    - `opacity` is from 0 to 1. Usual: 1.
     - Values at their usual place are left out of the project file.
   - **Keyframes:**
-    - Position, zoom, rotation and each crop side can have keyframes.
+    - Position, zoom, rotation, each crop side, the crop softness and the opacity can have keyframes.
     - A keyframe is the volume `Keyframe`: a source frame, a value, an In handle and an Out handle (D81).
     - Position stores X on the keyframe and Y beside it, one Y for each keyframe.
-    - Zoom does the same. Rotation and each crop side store one value.
+    - Zoom does the same. Rotation, each crop side, the crop softness and the opacity store one value.
     - The curve between two keyframes is the volume Bezier curve (X74).
     - A handle value moves the key's own value.
     - Position Y and zoom Y keep the handle frames and use a value offset of 0.
@@ -1940,13 +1957,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Previous and Next move the playhead to the keyframe before or after it, inside the clip.
     - A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out.
     - The Reset of one value removes its keyframes and puts the usual value back.
-    - The Reset of Transform or Crop removes the keyframes of that section.
+    - The Reset of Transform, Crop or Composite removes the keyframes of that section.
     - A clip with any keyframes shows a mark on its timeline bar.
     - Flips, the anchor, Pitch, Yaw and Dynamic Zoom have no keyframes.
     - A speed change keeps each keyframe at its frame of the clip, as volume does (D81).
     - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
+    - Its soft edges and its opacity fade each picture and title inside it ([todo](todo/compound-opacity.md)).
     - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
     - Its tracks play over each other as the tracks of the timeline do.
     - The tracks below it show wherever its tracks leave its frame uncovered.

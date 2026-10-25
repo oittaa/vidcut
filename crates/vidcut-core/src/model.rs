@@ -1521,7 +1521,8 @@ impl Title {
 /// sequence or a compound clip. A field left out is at its usual value; at
 /// all of them the picture is fitted into the frame. The tracks below show
 /// wherever it doesn't cover the frame: in the bars around a picture of
-/// another shape, around it and where it is cropped.
+/// another shape, around it, where it is cropped and through its soft edges
+/// and its opacity.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Picture {
     /// Where the middle of the whole picture goes before the zoom and the
@@ -1602,10 +1603,29 @@ pub struct Picture {
     /// Crop Bottom keyframes, as fractions of the height.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub crop_bottom_keys: Vec<Keyframe>,
+    /// How soft the edges of the crop are, from -100 to 100. Above 0, each
+    /// cropped edge fades out over what it cuts off. Below 0, all four edges
+    /// fade in over the picture, cropped or not. The fade is |softness| / 400
+    /// of the width of the picture fitted into the frame, before the zoom.
+    /// Usual: 0. With `crop_softness_keys`, the softness at a frame is that
+    /// curve.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop_softness: Option<f64>,
+    /// Crop Softness keyframes, from -100 to 100 (decision D75).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crop_softness_keys: Vec<Keyframe>,
     /// A slow push or pull and pan across the clip, from a start box to an
     /// end box. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dynamic_zoom: Option<DynamicZoom>,
+    /// How much of it shows over the tracks below, from 0 (none) to 1 (all
+    /// of it). Usual: 1. With `opacity_keys`, the opacity at a frame is that
+    /// curve.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+    /// Opacity keyframes, from 0 to 1 (decision D75).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub opacity_keys: Vec<Keyframe>,
 }
 
 /// Dynamic Zoom: the part of the picture that fills its place goes from
@@ -1738,7 +1758,8 @@ impl Crop {
 }
 
 /// Which of a picture's tools: `transform` (its position, zoom, rotation,
-/// anchor, pitch, yaw and flips), `crop` or `dynamic_zoom`.
+/// anchor, pitch, yaw and flips), `crop` (its sides and softness),
+/// `dynamic_zoom` or `composite` (its opacity).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PictureTool {
@@ -1746,6 +1767,7 @@ pub enum PictureTool {
     Crop,
     #[serde(rename = "dynamic_zoom")]
     DynamicZoom,
+    Composite,
 }
 
 impl Picture {
@@ -1777,6 +1799,14 @@ impl Picture {
 
     pub fn yaw(&self) -> f64 {
         self.yaw.unwrap_or(0.0)
+    }
+
+    pub fn softness(&self) -> f64 {
+        self.crop_softness.unwrap_or(0.0)
+    }
+
+    pub fn opaque(&self) -> f64 {
+        self.opacity.unwrap_or(1.0)
     }
 }
 

@@ -9,10 +9,10 @@ use egui_phosphor::regular::{
 use serde_json::{Value, json};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Clip, Crop, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project, ScaleFactor, TrackKind,
+    Clip, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project, ScaleFactor, TrackKind,
     Upscaler, ZoomBox,
 };
-use vidcut_core::ops::picture::has_picture;
+use vidcut_core::ops::picture::{cleared, has_picture};
 use vidcut_core::place::upright_fit;
 use vidcut_core::time::TimeSpec;
 use vidcut_core::validate::GAIN;
@@ -32,6 +32,7 @@ const ZOOM: (f64, f64) = (0.01, 100.0);
 const BOX: (f64, f64) = (0.01, 100.0);
 const TURNS: f64 = 3600.0;
 const LEAN: f64 = 1.5;
+const SOFT: f64 = 100.0;
 const LEFT_SHOWING: f64 = 1.0;
 const SAME: f64 = 1e-9;
 const FIELD_WIDTH: f32 = 76.0;
@@ -52,6 +53,8 @@ enum Field {
     Right,
     Top,
     Bottom,
+    Softness,
+    Opacity,
     StartZoom,
     StartX,
     StartY,
@@ -128,6 +131,8 @@ impl Field {
             Field::Right => "Right",
             Field::Top => "Top",
             Field::Bottom => "Bottom",
+            Field::Softness => "Softness",
+            Field::Opacity => "Opacity",
             Field::StartZoom => "Start Zoom",
             Field::StartX => "Start X",
             Field::StartY => "Start Y",
@@ -155,7 +160,12 @@ impl Field {
 
     fn suffix(self) -> &'static str {
         match self {
-            Field::Zoom | Field::ZoomX | Field::ZoomY | Field::StartZoom | Field::EndZoom => "%",
+            Field::Zoom
+            | Field::ZoomX
+            | Field::ZoomY
+            | Field::StartZoom
+            | Field::EndZoom
+            | Field::Opacity => "%",
             Field::Rotation => "°",
             _ => "",
         }
@@ -168,7 +178,9 @@ impl Field {
             | Field::ZoomY
             | Field::Rotation
             | Field::StartZoom
-            | Field::EndZoom => 0.5,
+            | Field::EndZoom
+            | Field::Softness
+            | Field::Opacity => 0.5,
             Field::Pitch | Field::Yaw => 0.01,
             _ => 1.0,
         }
@@ -176,7 +188,7 @@ impl Field {
 
     fn usual(self) -> f64 {
         match self {
-            Field::Zoom | Field::ZoomX | Field::ZoomY | Field::EndZoom => 100.0,
+            Field::Zoom | Field::ZoomX | Field::ZoomY | Field::EndZoom | Field::Opacity => 100.0,
             Field::StartZoom => 100.0 / DynamicZoom::default().start.size,
             _ => 0.0,
         }
@@ -191,6 +203,8 @@ impl Field {
             Field::Right => Some(PictureValue::CropRight),
             Field::Top => Some(PictureValue::CropTop),
             Field::Bottom => Some(PictureValue::CropBottom),
+            Field::Softness => Some(PictureValue::CropSoftness),
+            Field::Opacity => Some(PictureValue::Opacity),
             _ => None,
         }
     }
@@ -217,6 +231,8 @@ impl Field {
             Field::Right => c.right * fw,
             Field::Top => c.top * fh,
             Field::Bottom => c.bottom * fh,
+            Field::Softness => p.softness(),
+            Field::Opacity => p.opaque() * 100.0,
             Field::StartZoom | Field::EndZoom => 100.0 / b.size,
             Field::StartX | Field::EndX => (0.5 - b.center[0]) / b.size * fw,
             Field::StartY | Field::EndY => (b.center[1] - 0.5) / b.size * fh,
@@ -242,6 +258,8 @@ impl Field {
             Field::Right => c.right == 0.0,
             Field::Top => c.top == 0.0,
             Field::Bottom => c.bottom == 0.0,
+            Field::Softness => p.softness() == 0.0,
+            Field::Opacity => p.opaque() == 1.0,
             Field::StartZoom | Field::EndZoom => b.size == usual.size,
             Field::StartX | Field::EndX => b.center[0] == usual.center[0],
             Field::StartY | Field::EndY => b.center[1] == usual.center[1],
@@ -263,6 +281,8 @@ impl Field {
             Field::Right => side(c.left, fw),
             Field::Top => side(c.bottom, fh),
             Field::Bottom => side(c.top, fh),
+            Field::Softness => -SOFT..=SOFT,
+            Field::Opacity => 0.0..=100.0,
             Field::StartZoom | Field::EndZoom => 100.0 / BOX.1..=100.0 / BOX.0,
             Field::StartX | Field::EndX => -REACH * fw / BOX.0..=REACH * fw / BOX.0,
             Field::StartY | Field::EndY => -REACH * fh / BOX.0..=REACH * fh / BOX.0,
@@ -304,6 +324,8 @@ impl Field {
             Field::Right => out.crop.right = v / fw,
             Field::Top => out.crop.top = v / fh,
             Field::Bottom => out.crop.bottom = v / fh,
+            Field::Softness => out.crop_softness = Some(v),
+            Field::Opacity => out.opacity = Some(v / 100.0),
             Field::StartZoom
             | Field::StartX
             | Field::StartY
@@ -432,35 +454,6 @@ fn name(p: &Project, c: &Clip) -> String {
         _ => p
             .media(&c.media)
             .map_or_else(|| c.id.clone(), |m| m.name.clone()),
-    }
-}
-
-fn cleared(p: &Picture, tool: PictureTool) -> Picture {
-    match tool {
-        PictureTool::Transform => {
-            let mut kept = Picture {
-                crop: p.crop,
-                dynamic_zoom: p.dynamic_zoom,
-                ..Picture::default()
-            };
-            kept.crop_left_keys = p.crop_left_keys.clone();
-            kept.crop_right_keys = p.crop_right_keys.clone();
-            kept.crop_top_keys = p.crop_top_keys.clone();
-            kept.crop_bottom_keys = p.crop_bottom_keys.clone();
-            kept
-        }
-        PictureTool::Crop => {
-            let mut kept = Picture {
-                crop: Crop::default(),
-                ..p.clone()
-            };
-            kept.clear_crop_keys();
-            kept
-        }
-        PictureTool::DynamicZoom => Picture {
-            dynamic_zoom: None,
-            ..p.clone()
-        },
     }
 }
 
@@ -889,9 +882,32 @@ fn crop(
 ) {
     let set = chosen.iter().any(|c| uses(&c.shown, PictureTool::Crop));
     section(ui, ("Crop", PictureTool::Crop), set, acts, |ui, acts| {
-        for f in [Field::Left, Field::Right, Field::Top, Field::Bottom] {
+        for f in [
+            Field::Left,
+            Field::Right,
+            Field::Top,
+            Field::Bottom,
+            Field::Softness,
+        ] {
             number(ui, (f, None), i, p, at, chosen, acts);
         }
+    });
+}
+
+fn composite(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    p: &Project,
+    at: i64,
+    chosen: &[Chosen],
+    acts: &mut Vec<Act>,
+) {
+    let set = chosen
+        .iter()
+        .any(|c| uses(&c.shown, PictureTool::Composite));
+    let section_name = ("Composite", PictureTool::Composite);
+    section(ui, section_name, set, acts, |ui, acts| {
+        number(ui, (Field::Opacity, None), i, p, at, chosen, acts);
     });
 }
 
@@ -1942,6 +1958,7 @@ impl Workspace {
                     transform(ui, i, &p, at, &chosen, &mut acts);
                     crop(ui, i, &p, at, &chosen, &mut acts);
                     dynamic_zoom(ui, i, &p, at, &chosen, boxes, &mut acts);
+                    composite(ui, i, &p, at, &chosen, &mut acts);
                     self.super_scale_section(ui, &p, &chosen);
                 }
                 if !paced.is_empty() {

@@ -10,7 +10,7 @@ struct Params {
     flags: vec4<u32>,
     per: vec4<u32>,
     placed: vec4<f32>,
-    levels: array<vec4<f32>, 3u * LEVELS>,
+    levels: array<vec4<f32>, 5u * LEVELS>,
 };
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -178,6 +178,18 @@ fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>) -> vec3<f32> {
     return vec3<f32>(uv, e.x * e.y * e.z * e.w);
 }
 
+fn faded(inner: vec4<f32>, reach: vec4<f32>, uv: vec2<f32>) -> f32 {
+    if reach.x <= 0.0 || reach.y <= 0.0 {
+        return reach.z;
+    }
+    let a = max(max(inner.x - uv.x, uv.x - inner.z), 0.0) / reach.x;
+    let b = max(max(inner.y - uv.y, uv.y - inner.w), 0.0) / reach.y;
+    let h = max(0.5 - abs(a - b), 0.0) / 0.5;
+    let m = max(a, b) + h * h * 0.125;
+    let t = clamp((1.0 - m) * (8.0 / 7.0), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t) * reach.z;
+}
+
 fn placed(px: vec2<f32>) -> vec4<f32> {
     let n = u32(p.placed.x);
     var cover = 1.0;
@@ -185,11 +197,11 @@ fn placed(px: vec2<f32>) -> vec4<f32> {
     var across = vec2<f32>(0.0);
     var down = vec2<f32>(0.0);
     for (var i = 0u; i < n; i++) {
-        let a = p.levels[i * 3u];
-        let b = p.levels[i * 3u + 1u];
-        let c = cut(a, b, p.levels[i * 3u + 2u], px);
+        let a = p.levels[i * 5u];
+        let b = p.levels[i * 5u + 1u];
+        let c = cut(a, b, p.levels[i * 5u + 2u], px);
         uv = c.xy;
-        cover *= c.z;
+        cover *= c.z * faded(p.levels[i * 5u + 3u], p.levels[i * 5u + 4u], c.xy);
         let w = dot(vec3<f32>(px, 1.0), vec3<f32>(a.w, b.w, 1.0));
         if abs(w) >= 1e-6 {
             across = vec2<f32>(a.x - uv.x * a.w, b.x - uv.y * a.w) / w;
@@ -248,7 +260,7 @@ struct Lettering {
     across: vec4<f32>,
     down: vec4<f32>,
     tilt: vec4<f32>,
-    levels: array<vec4<f32>, 3u * LEVELS>,
+    levels: array<vec4<f32>, 5u * LEVELS>,
 };
 
 @group(0) @binding(5) var<uniform> lettering: Lettering;
@@ -274,8 +286,8 @@ fn fs_title(in: Out) -> @location(0) vec4<f32> {
     var cover = 1.0;
     let n = u32(k.w);
     for (var i = 0u; i < n; i++) {
-        let l = lettering.levels[i * 3u];
-        cover *= cut(l, lettering.levels[i * 3u + 1u], lettering.levels[i * 3u + 2u], px).z;
+        let c = cut(lettering.levels[i * 5u], lettering.levels[i * 5u + 1u], lettering.levels[i * 5u + 2u], px);
+        cover *= c.z * faded(lettering.levels[i * 5u + 3u], lettering.levels[i * 5u + 4u], c.xy);
     }
     if cover <= 0.0 {
         discard;

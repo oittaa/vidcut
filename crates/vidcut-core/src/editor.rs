@@ -3683,6 +3683,8 @@ fn mutate(
             crop_right,
             crop_top,
             crop_bottom,
+            crop_softness,
+            opacity,
             at,
             dynamic_zoom,
         } => {
@@ -3711,6 +3713,8 @@ fn mutate(
                 flip_horizontal: *flip_horizontal,
                 flip_vertical: *flip_vertical,
                 crop: [*crop_left, *crop_right, *crop_top, *crop_bottom],
+                crop_softness: *crop_softness,
+                opacity: *opacity,
             };
             ops::picture::set(p, &ids, &change, at)?;
             Value::Null
