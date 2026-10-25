@@ -251,6 +251,9 @@ The audio device:
   - The draw of a placed layer maps each pixel back through its `place::Placing` levels to the decoded picture. It taps the picture as finely as it is shrunk.
   - Each level also gives its soft crop edges and its opacity, as in the export ([export](export.md#placed-pictures)).
   - The draw of a placed layer also covers its edges in part, and lays the layer over the layers below, premultiplied.
+  - A layer with a composite mode needs the layers below it. Before its draw, the pass ends and the canvas is copied (`Below`).
+  - Then `fs_mode` mixes the layer with that copy by the sums of `blend::mixed`, and writes the result.
+  - In a dissolve, `fs_mode` adds the mix into `Mixing`, premultiplied.
   - The two sides of a dissolve with a placed picture are added into a picture of their own (`Mixing`). That picture is then laid over the frame.
   - Each title is one more draw after the layers under it (`fs_title`).
   - Its `Lettering` holds one affine map from each pixel back to the drawing (`place::lettered`). The map also goes through the pictures of its compound clips (`Placing::inner`).

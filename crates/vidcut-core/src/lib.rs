@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod blend;
 pub mod catalog;
 pub mod change;
 pub mod describe;

@@ -1,7 +1,9 @@
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Crop, DynamicZoom, Picture, PictureTool, Project, TrackKind, ZoomBox};
+use crate::model::{
+    Clip, CompositeMode, Crop, DynamicZoom, Picture, PictureTool, Project, TrackKind, ZoomBox,
+};
 use crate::request::DynamicZoomSet;
 
 use super::locate;
@@ -89,6 +91,7 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
         pitch: p.pitch.filter(|v| *v != 0.0),
         yaw: p.yaw.filter(|v| *v != 0.0),
         crop_softness: p.crop_softness.filter(|s| *s != 0.0),
+        composite_mode: p.composite_mode.filter(|m| *m != CompositeMode::Normal),
         opacity: p.opacity.filter(|o| *o != 1.0),
         ..p.clone()
     };
@@ -147,6 +150,7 @@ pub struct PictureChange {
     pub crop: [Option<f64>; 4],
     pub crop_softness: Option<f64>,
     pub dynamic_zoom: Option<Option<DynamicZoomSet>>,
+    pub composite_mode: Option<CompositeMode>,
     pub opacity: Option<f64>,
 }
 
@@ -200,13 +204,16 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
     if let Some(z) = change.dynamic_zoom {
         p.dynamic_zoom = z.map(|z| z.on(p.dynamic_zoom.unwrap_or_default()));
     }
+    if let Some(m) = change.composite_mode {
+        p.composite_mode = Some(m);
+    }
     if let Some(o) = change.opacity {
         p.opacity = Some(o);
     }
     p
 }
 
-const NEEDS: &str = "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop, crop softness, Dynamic Zoom or opacity";
+const NEEDS: &str = "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop, crop softness, Dynamic Zoom, composite mode or opacity";
 
 pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i64>) -> Result<()> {
     if change.is_empty() {
@@ -268,6 +275,10 @@ pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i
             picture.dynamic_zoom = next.dynamic_zoom;
             wrote = true;
         }
+        if next.mode() != old.mode() {
+            picture.composite_mode = next.composite_mode;
+            wrote = true;
+        }
         if !wrote {
             continue;
         }
@@ -310,6 +321,7 @@ pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
             crop_softness: old.crop_softness,
             crop_softness_keys: old.crop_softness_keys,
             dynamic_zoom: old.dynamic_zoom,
+            composite_mode: old.composite_mode,
             opacity: old.opacity,
             opacity_keys: old.opacity_keys,
             ..Picture::default()
@@ -328,6 +340,7 @@ pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
             ..old
         },
         PictureTool::Composite => Picture {
+            composite_mode: None,
             opacity: None,
             opacity_keys: Vec::new(),
             ..old
@@ -353,6 +366,7 @@ pub fn shown(c: &Clip) -> Value {
             "softness": p.softness(),
         },
         "dynamic_zoom": p.dynamic_zoom.as_ref().map(zoom_shown),
+        "composite_mode": p.mode(),
         "opacity": p.opaque(),
     })
 }

@@ -357,6 +357,7 @@ Writing:
   - its flips
   - a `Crop` of each side, and the softness of its edges (`crop_softness`, from −100 to 100)
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
+  - its `composite_mode`, how it mixes with the tracks below (`CompositeMode`, `Picture::mode`)
   - its `opacity`, from 0 to 1 (`Picture::opaque`)
 - Each value is left out at its usual value. Thus a picture that `Picture::is_usual` accepts is only fitted into the frame.
 - Position, zoom, rotation, each crop side, the crop softness and the opacity can hold `Keyframe`s beside the plain value (D75).
@@ -366,7 +367,7 @@ Writing:
 - `ops::picture` holds the edits:
   - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share. It leaves usual values out.
   - `ops::picture::has_picture` says which clips take a picture: not titles, generators or sound.
-  - `ops::picture::clear` puts back the transform, the crop, the Dynamic Zoom or the opacity (`PictureTool`), or all of them.
+  - `ops::picture::clear` puts back the transform, the crop, the Dynamic Zoom or the composite mode and opacity (`PictureTool`), or all of them.
   - `ops::picture::cleared` is the reset of one `PictureTool`. The Inspector uses it too.
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
 - `place::Placing` turns the picture of a clip, with the pictures of the compound clips that it plays inside, into maps.
@@ -377,6 +378,7 @@ Writing:
   - `Level.back` holds `[a, b, e, c, d, f, g, h]`. A pixel `(x, y)` maps to `((a x + b y + e) / (g x + h y + 1), (c x + d y + f) / (g x + h y + 1))`.
   - `g` and `h` are 0 when the map is affine.
   - An export and the viewer both draw by these maps ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
+- `blend::mixed` holds the sums of the composite modes (D75). The shader of the viewer has the same sums.
 
 ## Ducking
 

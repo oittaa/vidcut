@@ -336,11 +336,21 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
     - With Yaw 0.3, a crop of 384 source pixels on the left put the edge at x = 609.
     - The lean of the source puts it at 607. A crop of the frame would put it at 672.
   - `place::level` flips and crops in the same order.
-- **Resolve's opacity is a parameter of Composite, a `Resolve Effect` of type 1.**
+- **Resolve's opacity and composite mode are parameters of Composite, a `Resolve Effect` of type 1.**
   - `opacity` (Double) goes from 0 to 100. Its default is 100.
   - `composite mode` (UInt) is 0 for Normal. Resolve leaves it out at Normal.
-  - `otio::picture` reads a Composite at Normal as the `opacity` of the picture. A Composite with another mode stays a clip effect.
+  - The codes from 1 to 26 are the order of `CompositeMode::ALL`. `CompositeMode::code` and `CompositeMode::of_code` convert them.
+  - The codes from 27 to 31 are Foreground, Alpha, Inverted Alpha, Lum and Inverted Lum.
+  - `otio::picture` reads a Composite with a code from 0 to 26 as the composite mode and the `opacity` of the picture.
+  - A Composite with a code above 26, or with keyframes on its mode, stays a clip effect.
   - A title's opacity is in a Composite of the same form (`otio::titles`).
+- **The manual's words for some composite modes do not match Resolve's renders.**
+  - Subtract takes the top layer from the bottom layer. The manual says the reverse.
+  - Hardlight switches on the top layer, and multiplies at 50% and below. The manual names the bottom layer, and says the reverse.
+  - Vivid Light and Pin Light switch on the top layer. The manual names the bottom layer.
+  - Hard Mix is a threshold of a + b at 1. The manual says that it adds the layers.
+  - Color, Luminosity, Hue and Saturation are not HSL mixes. Spec D75 gives the measured sums.
+  - The renders had values from 0 to 1. Thus the caps of Color Dodge, Color Burn and Divide are not measured for values above 1.
 - **Resolve's Crop Softness is `cropSoftness` (Double) in Cropping,** from −100 to 100.
   - Its keyframes have the form of the keyframes of the crop sides.
   - The renders that fix the fade are in [spec D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions).

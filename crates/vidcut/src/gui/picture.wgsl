@@ -190,7 +190,7 @@ fn faded(inner: vec4<f32>, reach: vec4<f32>, uv: vec2<f32>) -> f32 {
     return t * t * (3.0 - 2.0 * t) * reach.z;
 }
 
-fn placed(px: vec2<f32>) -> vec4<f32> {
+fn shown(px: vec2<f32>) -> vec4<f32> {
     let n = u32(p.placed.x);
     var cover = 1.0;
     var uv = vec2<f32>(0.0);
@@ -215,7 +215,7 @@ fn placed(px: vec2<f32>) -> vec4<f32> {
     let spans = vec2<f32>(length(across * size), length(down * size));
     let a = cover * p.placed.y;
     if p.flags.w > 0u && max(spans.x, spans.y) < 1.0 {
-        return vec4<f32>(rgb(sharp(uv)) * a, a);
+        return vec4<f32>(rgb(sharp(uv)), a);
     }
     let taps = vec2<u32>(clamp(ceil(spans), vec2<f32>(1.0), vec2<f32>(8.0)));
     let half = vec2<f32>(0.5) / size;
@@ -227,7 +227,105 @@ fn placed(px: vec2<f32>) -> vec4<f32> {
             sum += yuv(clamp(q, half, vec2<f32>(1.0) - half));
         }
     }
-    return vec4<f32>(rgb(sum / f32(taps.x * taps.y)) * a, a);
+    return vec4<f32>(rgb(sum / f32(taps.x * taps.y)), a);
+}
+
+fn placed(px: vec2<f32>) -> vec4<f32> {
+    let s = shown(px);
+    return vec4<f32>(s.rgb * s.a, s.a);
+}
+
+const BT709 = vec3<f32>(0.2126, 0.7152, 0.0722);
+const BT601 = vec3<f32>(0.299, 0.587, 0.114);
+
+fn spread(c: vec3<f32>) -> f32 {
+    let d = c - c.gbr;
+    return sqrt(dot(d, d));
+}
+
+fn ycc(c: vec3<f32>) -> vec3<f32> {
+    let y = dot(c, BT601);
+    return vec3<f32>(y, (c.b - y) / (2.0 * (1.0 - BT601.b)), (c.r - y) / (2.0 * (1.0 - BT601.r)));
+}
+
+fn from_ycc(c: vec3<f32>) -> vec3<f32> {
+    return c.x + c.y * vec3<f32>(-0.001336, -0.343456, 1.770592) + c.z * vec3<f32>(1.402406, -0.714457, 0.002013);
+}
+
+fn dodge(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
+    return select(min(b / (1.0 - a), vec3<f32>(1.0)), vec3<f32>(1.0), a >= vec3<f32>(1.0));
+}
+
+fn burn(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
+    return select(1.0 - min((1.0 - b) / a, vec3<f32>(1.0)), vec3<f32>(0.0), a <= vec3<f32>(0.0));
+}
+
+fn hard(by: vec3<f32>, other: vec3<f32>) -> vec3<f32> {
+    return select(1.0 - 2.0 * (1.0 - by) * (1.0 - other), 2.0 * by * other, by <= vec3<f32>(0.5));
+}
+
+fn soft(a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
+    let d = select(sqrt(max(b, vec3<f32>(0.0))), ((16.0 * b - 12.0) * b + 4.0) * b, b <= vec3<f32>(0.25));
+    return select(b + (2.0 * a - 1.0) * (d - b), b - (1.0 - 2.0 * a) * b * (1.0 - b), a <= vec3<f32>(0.5));
+}
+
+fn divide(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
+    let none = select(vec3<f32>(0.0), vec3<f32>(1.0), b > vec3<f32>(0.0));
+    return select(min(b / a, vec3<f32>(1.0)), none, a <= vec3<f32>(0.0));
+}
+
+fn mixed(mode: u32, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
+    switch mode {
+        case 1u, 19u: { return a + b; }
+        case 2u: { return b - a; }
+        case 3u: { return abs(a - b); }
+        case 4u: { return a * b; }
+        case 5u: { return 1.0 - (1.0 - a) * (1.0 - b); }
+        case 6u: { return hard(b, a); }
+        case 7u: { return hard(a, b); }
+        case 8u: { return soft(a, b); }
+        case 9u: { return min(a, b); }
+        case 10u: { return max(a, b); }
+        case 11u: { return dodge(b, a); }
+        case 12u: { return burn(b, a); }
+        case 13u: { return a + b - 2.0 * a * b; }
+        case 14u: {
+            let wide = spread(a);
+            let k = select(0.0, spread(b) / wide, wide > 0.0);
+            return dot(b, BT709) + k * (a - dot(a, BT709));
+        }
+        case 15u: {
+            let wide = spread(b);
+            let k = select(0.0, spread(a) / wide, wide > 0.0);
+            let lb = dot(b, BT709);
+            return lb + k * (b - lb);
+        }
+        case 16u: { return from_ycc(vec3<f32>(ycc(b).x, ycc(a).yz)); }
+        case 17u: { return from_ycc(vec3<f32>(ycc(a).x, ycc(b).yz)); }
+        case 18u: { return divide(b, a); }
+        case 20u: { return a + b - 1.0; }
+        case 21u: { return b + 2.0 * a - 1.0; }
+        case 22u: { return select(dodge(b, 2.0 * a - 1.0), burn(b, 2.0 * a), a <= vec3<f32>(0.5)); }
+        case 23u: { return select(max(b, 2.0 * a - 1.0), min(b, 2.0 * a), a <= vec3<f32>(0.5)); }
+        case 24u: { return select(vec3<f32>(0.0), vec3<f32>(1.0), a + b >= vec3<f32>(1.0)); }
+        case 25u: { return select(b, a, dot(a, vec3<f32>(1.0)) > dot(b, vec3<f32>(1.0))); }
+        case 26u: { return select(b, a, dot(a, vec3<f32>(1.0)) < dot(b, vec3<f32>(1.0))); }
+        default: { return a; }
+    }
+}
+
+@group(1) @binding(0) var below: texture_2d<f32>;
+
+@fragment
+fn fs_mode(in: Out) -> @location(0) vec4<f32> {
+    let px = in.position.xy;
+    let top = shown(px);
+    let b = textureLoad(below, vec2<i32>(px), 0).rgb;
+    let m = mixed(u32(p.placed.z + 0.5), top.rgb, b);
+    if p.placed.w > 0.5 {
+        return vec4<f32>(m * top.a, top.a);
+    }
+    return vec4<f32>(mix(b, m, top.a), 1.0);
 }
 
 @fragment

@@ -947,7 +947,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 side("bottom"),
                 side("softness")
             );
-            println!("  opacity {}", v["opacity"].as_f64().unwrap_or_default());
+            println!(
+                "  composite {}  opacity {}",
+                v["composite_mode"].as_str().unwrap_or("normal"),
+                v["opacity"].as_f64().unwrap_or_default()
+            );
             let z = &v["dynamic_zoom"];
             if z.is_object() {
                 let end = |k: &str| {

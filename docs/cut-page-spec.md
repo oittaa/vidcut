@@ -26,7 +26,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - ducking, the Ducker Track FX (§9)
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
-- a clip's Transform, Crop, Dynamic Zoom and opacity (§8.15)
+- a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
 - Quick Export, plus our Export dialog
 
 **Later (later):**
@@ -842,9 +842,10 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Details: D75.
 - **Composite** (p. 769):
   - Opacity goes from 0 to 100. The tracks below show through the rest.
-  - The composite modes mix the clip with the tracks below in other ways. vidcut: later.
+  - The composite modes mix the clip with the tracks below in other ways (pp. 1199–1203).
+  - vidcut: Foreground and the mask modes come later ([todo](todo/composite-masks.md)).
   - Details: D75.
-- **How they play:** a clip covers the tracks below it only where its picture covers the frame. Its opacity and its soft edges let them show through. Details: D75.
+- **How they play:** a clip covers the tracks below it only where its picture covers the frame. Its composite mode mixes it with them. Its opacity and its soft edges let them show through. Details: D75.
 - **Keyframes** (D75):
   - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y.
   - Rotation is its own value. Each crop side, Softness and Opacity are values of their own.
@@ -869,7 +870,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
   - vidcut: its Audio section has Volume, Mute and Voice Isolation for the selected clips with sound (X70).
-  - vidcut: its Crop section has Softness, and its Composite section has Opacity.
+  - vidcut: its Crop section has Softness, and its Composite section has Composite Mode and Opacity.
 - **The units of the Inspector,** measured in Resolve Studio 21.1.1:
   - The timeline was 1920×1080. A 1280×720 chart and a 960×720 chart were fitted into it.
   - OTIO exports on 1080 and 2160 timelines gave the values in the file.
@@ -878,7 +879,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Thus a picture narrower than the frame moves less than its number. On the 4:3 chart in the 16:9 timeline, Position X 200 moves it 150 pixels.
   - Crop is in pixels of the picture as it is fitted in the timeline. Crop Left 100 on the 4:3 chart is a `cropLeft` of 100/1440 in the OTIO file.
   - Zoom is a factor (1.000). Rotation is in degrees.
-- **Later:** the modes of Composite (p. 769).
+- **Later:** Foreground and the mask modes of Composite (pp. 769, 1202).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -1901,7 +1902,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Order:**
     - The picture of a clip is fitted into the frame.
     - Then it is cropped, flipped, leaned by pitch and yaw, zoomed, turned and moved, in that order (D93).
-    - The soft edges of the crop and the opacity then fade it over the tracks below.
+    - Its composite mode then mixes it with the tracks below.
+    - The soft edges of the crop and the opacity fade that mix over the tracks below.
     - The crop and the flips work about the middle of the whole picture.
     - The zoom and the turn work about its anchor point (D92). The usual anchor point is the middle.
     - Pitch and yaw work about the middle of the picture, in its own axes (D93).
@@ -1924,6 +1926,34 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Across the fade, the coverage follows a smoothstep. It is full over the first eighth of the fade.
     - At a corner, the distances outside the two sides join in a smooth maximum. Thus the corners are round.
     - Keyframes of Softness and Opacity without handles change in a straight line. After the last keyframe, the value stays.
+  - **Composite modes** (measured in Resolve Studio 21.1.1, with 16-bit renders):
+    - A mode works on the R'G'B' code values of the clip (a) and of what is below it (b), from 0 to 1.
+    - Where there are no tracks below, b is black.
+    - The mix of the mode is M. The result is b + (M − b) × the opacity.
+    - vidcut also fades M by the coverage of the edges and the soft edges, as it fades a clip at Normal.
+    - Resolve keeps values above 1 and below 0 between the layers.
+    - Each channel apart:
+      - Add and Linear Dodge: a + b. Subtract: b − a. Difference: |a − b|.
+      - Multiply: a × b. Screen: 1 − (1 − a)(1 − b). Exclusion: a + b − 2ab.
+      - Darken and Lighten: the smaller and the larger of a and b.
+      - Overlay: H(b, a). Hardlight: H(a, b). H(x, y) is 2xy for x ≤ 0.5. Above 0.5, it is 1 − 2(1 − x)(1 − y).
+      - Softlight: the soft light of the W3C, with a as the source.
+      - Color Dodge: b / (1 − a), at most 1. For a ≥ 1, it is 1.
+      - Color Burn: 1 − (1 − b) / a, at least 0. For a ≤ 0, it is 0.
+      - Divide: b / a, at most 1. For a ≤ 0, it is 1 when b > 0, else 0.
+      - Linear Burn: a + b − 1. Linear Light: b + 2a − 1.
+      - Vivid Light: the Color Burn of b by 2a for a ≤ 0.5. Above 0.5, the Color Dodge of b by 2a − 1.
+      - Pin Light: min(b, 2a) for a ≤ 0.5. Above 0.5, max(b, 2a − 1).
+      - Hard Mix: 1 when a + b ≥ 1, else 0.
+    - The whole color:
+      - Lighter Color and Darker Color take the color with the larger or the smaller sum of R, G and B. On a tie, they take b.
+      - The spread of a color is the length of (R − G, G − B, B − R). The luma here is the luma of BT.709.
+      - Hue: the luma of b, plus a minus the luma of a. That difference is scaled by the spread of b over the spread of a.
+      - Saturation: the luma of b, plus b minus its luma. That difference is scaled by the spread of a over the spread of b.
+      - Color: the BT.601 Y of b with the Cb and Cr of a. Luminosity: the Y of a with the Cb and Cr of b.
+      - Resolve goes back from Y, Cb and Cr by a matrix a little off BT.601. vidcut uses the matrix fitted to the renders.
+    - The manual's words do not match the renders for some modes, for example Subtract and Hard Mix (pp. 1200–1202). vidcut follows the renders.
+    - In vidcut, the frames between layers hold the code values of the frame. Thus values above 1 and below 0 are cut there ([todo](todo/composite-masks.md)).
   - **Units** (vidcut's, X65):
     - `position` is where the middle of the picture goes before the zoom and the turn: `[x, y]` in fractions of the frame from its top left.
     - Each value of `position` is from −100 to 100. `[0.5, 0.5]` leaves the picture in place.
@@ -1935,6 +1965,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The flips mirror the picture left to right and top to bottom.
     - The crop cuts each side by a fraction of the source picture, and leaves some of it.
     - `crop_softness` is from −100 to 100, as Softness in Resolve. Usual: 0.
+    - `composite_mode` is `normal` or the name of another mode in snake case, for example `color_dodge`. Usual: `normal`.
     - `opacity` is from 0 to 1. Usual: 1.
     - Values at their usual place are left out of the project file.
   - **Keyframes:**
@@ -1960,12 +1991,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Reset of one value removes its keyframes and puts the usual value back.
     - The Reset of Transform, Crop or Composite removes the keyframes of that section.
     - A clip with any keyframes shows a mark on its timeline bar.
-    - Flips, the anchor, Pitch, Yaw and Dynamic Zoom have no keyframes.
+    - Flips, the anchor, Pitch, Yaw, the composite mode and Dynamic Zoom have no keyframes.
     - A speed change keeps each keyframe at its frame of the clip, as volume does (D81).
     - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
     - Its soft edges and its opacity fade each picture and title inside it ([todo](todo/compound-opacity.md)).
+    - A picture inside it at the Normal mode takes the composite mode of the compound clip.
     - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
     - Its tracks play over each other as the tracks of the timeline do.
     - The tracks below it show wherever its tracks leave its frame uncovered.

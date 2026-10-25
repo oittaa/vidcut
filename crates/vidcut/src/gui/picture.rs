@@ -7,7 +7,7 @@ use vidcut_av::cuda::{CudaDevice, PlaneCopy};
 use vidcut_av::hw::Kind;
 use vidcut_av::player::{Layout, Picture, TitleOver, TitlePicture};
 use vidcut_av::thumbs::Image;
-use vidcut_core::model::Hdr;
+use vidcut_core::model::{CompositeMode, Hdr};
 use vidcut_core::place::{Level, Placing, chain, lettered};
 use vidcut_core::render::Placed;
 
@@ -20,7 +20,9 @@ pub struct Gpu {
     wide_drawing: Drawing,
     adding: wgpu::RenderPipeline,
     adding_scaled: wgpu::RenderPipeline,
+    adding_mode: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
+    below_layout: wgpu::BindGroupLayout,
     lettering: wgpu::RenderPipeline,
     lettering_wide: wgpu::RenderPipeline,
     lettering_layout: wgpu::BindGroupLayout,
@@ -44,6 +46,7 @@ struct Drawing {
     pipeline: wgpu::RenderPipeline,
     blended: wgpu::RenderPipeline,
     placed: wgpu::RenderPipeline,
+    mode: wgpu::RenderPipeline,
 }
 
 const MAX_SHARED: usize = 4;
@@ -104,15 +107,27 @@ impl Gpu {
                 },
             ],
         });
+        let below_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("vidcut below"),
+            entries: &[texture(0)],
+        });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("vidcut picture"),
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipeline_in = |blend, format| {
+        let mode_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("vidcut composite"),
+            bind_group_layouts: &[Some(&layout), Some(&below_layout)],
+            immediate_size: 0,
+        });
+        let made = |layout: &wgpu::PipelineLayout,
+                    entry: &str,
+                    blend: Option<wgpu::BlendState>,
+                    format: wgpu::TextureFormat| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("vidcut picture"),
-                layout: Some(&pipeline_layout),
+                layout: Some(layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
                     entry_point: Some("vs"),
@@ -124,7 +139,7 @@ impl Gpu {
                 multisample: wgpu::MultisampleState::default(),
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: Some("fs"),
+                    entry_point: Some(entry),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
@@ -136,6 +151,7 @@ impl Gpu {
                 cache: None,
             })
         };
+        let pipeline_in = |blend, format| made(&pipeline_layout, "fs", blend, format);
         let over = wgpu::BlendComponent {
             src_factor: wgpu::BlendFactor::Constant,
             dst_factor: wgpu::BlendFactor::OneMinusConstant,
@@ -162,6 +178,7 @@ impl Gpu {
                 }),
                 format,
             ),
+            mode: made(&mode_layout, "fs_mode", None, format),
         };
         let screen_drawing = drawing(TARGET);
         let wide_drawing = drawing(MIXING);
@@ -181,6 +198,15 @@ impl Gpu {
             Some(wgpu::BlendState {
                 color: add(wgpu::BlendFactor::Constant),
                 alpha: add(wgpu::BlendFactor::Constant),
+            }),
+            MIXING,
+        );
+        let adding_mode = made(
+            &mode_layout,
+            "fs_mode",
+            Some(wgpu::BlendState {
+                color: add(wgpu::BlendFactor::One),
+                alpha: add(wgpu::BlendFactor::One),
             }),
             MIXING,
         );
@@ -308,7 +334,9 @@ impl Gpu {
             wide_drawing,
             adding,
             adding_scaled,
+            adding_mode,
             layout,
+            below_layout,
             lettering,
             lettering_wide,
             lettering_layout,
@@ -487,6 +515,7 @@ struct Target {
 struct Wide {
     size: (u32, u32),
     hdr: Hdr,
+    texture: wgpu::Texture,
     view: wgpu::TextureView,
     bind: wgpu::BindGroup,
 }
@@ -504,7 +533,9 @@ impl Wide {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: MIXING,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let view = texture.create_view(&Default::default());
@@ -550,7 +581,49 @@ impl Wide {
         Self {
             size,
             hdr,
+            texture,
             view,
+            bind,
+        }
+    }
+}
+
+struct Below {
+    size: (u32, u32),
+    format: wgpu::TextureFormat,
+    texture: wgpu::Texture,
+    bind: wgpu::BindGroup,
+}
+
+impl Below {
+    fn new(gpu: &Gpu, size: (u32, u32), format: wgpu::TextureFormat) -> Self {
+        let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("vidcut below"),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vidcut below"),
+            layout: &gpu.below_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            }],
+        });
+        Self {
+            size,
+            format,
+            texture,
             bind,
         }
     }
@@ -570,6 +643,7 @@ pub struct Screen {
     wide: Option<Wide>,
     drawn_colors: Option<Hdr>,
     mixing: Option<Mixing>,
+    below: Option<Below>,
     drawn_crosses: Vec<bool>,
     drawn_kernels: Vec<u32>,
     drawn: Option<Option<Arc<Picture>>>,
@@ -983,7 +1057,19 @@ impl Screen {
                 label: Some("vidcut picture"),
             });
         let frame = (f64::from(size.0), f64::from(size.1));
-        let binds: Vec<(wgpu::BindGroup, Option<f64>, bool)> = layers
+        let n = layers.len();
+        let pair_at = |i: usize| i + 1 < n && crosses.get(i + 1).copied().unwrap_or(false);
+        let mut paired = vec![false; n];
+        let mut i = 0;
+        while i < n {
+            if pair_at(i) {
+                paired[i..i + 2].fill(true);
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+        let binds: Vec<(wgpu::BindGroup, Option<f64>, bool, bool)> = layers
             .iter()
             .zip(&mut self.slots)
             .enumerate()
@@ -993,10 +1079,13 @@ impl Screen {
                     let fitted = [x, y, w, h].map(f64::from);
                     (Placing::new(p, frame, fitted), level.unwrap_or(1.0))
                 });
+                let blended = placing
+                    .as_ref()
+                    .is_some_and(|(p, _)| p.mode != CompositeMode::Normal);
                 let kernel = kernels.get(i).copied().unwrap_or(0);
-                let how = (placing.as_ref(), kernel, colors);
+                let how = (placing.as_ref(), kernel, colors, paired[i]);
                 let bind = slot.prepare(gpu, picture, size, how, &mut encoder);
-                (bind, level, placing.is_some())
+                (bind, level, placing.is_some(), blended)
             })
             .collect();
         self.letters
@@ -1015,14 +1104,23 @@ impl Screen {
                 l.place(gpu, size, t, colors);
             }
         }
-        let n = binds.len();
-        let pair_at = |i: usize| i + 1 < n && crosses.get(i + 1).copied().unwrap_or(false);
         if (0..n).any(pair_at) && self.mixing.as_ref().is_none_or(|m| m.size != size) {
             self.mixing = Some(Mixing::new(gpu, size));
+        }
+        let format = if colors.is_some() { MIXING } else { TARGET };
+        if binds.iter().any(|b| b.3)
+            && self
+                .below
+                .as_ref()
+                .is_none_or(|b| b.size != size || b.format != format)
+        {
+            self.below = Some(Below::new(gpu, size, format));
         }
         let target = self.target.as_ref().expect("made above");
         let wide = self.wide.as_ref().filter(|_| colors.is_some());
         let canvas = wide.map_or(&target.view, |w| &w.view);
+        let canvas_texture = wide.map_or(&target.texture, |w| &w.texture);
+        let blends = |i: usize| binds.get(i).is_some_and(|b| b.3);
         let (drawing, lettering) = match wide {
             Some(_) => (&gpu.wide_drawing, &gpu.lettering_wide),
             None => (&gpu.screen_drawing, &gpu.lettering),
@@ -1039,13 +1137,32 @@ impl Screen {
         };
         let mut i = 0;
         while i < n {
+            if blends(i) || (pair_at(i) && blends(i + 1)) {
+                if clear.is_some() {
+                    drop(begin(&mut encoder, canvas, clear.take()));
+                }
+                let below = self.below.as_ref().expect("made for a composite mode");
+                encoder.copy_texture_to_texture(
+                    canvas_texture.as_image_copy(),
+                    below.texture.as_image_copy(),
+                    wgpu::Extent3d {
+                        width: size.0,
+                        height: size.1,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
             if pair_at(i) {
                 let mixing = self.mixing.as_ref().expect("made for a dissolve");
                 {
                     let mut pass =
                         begin(&mut encoder, &mixing.view, Some(wgpu::Color::TRANSPARENT));
-                    for (bind, level, placed) in &binds[i..i + 2] {
-                        if *placed {
+                    for (bind, level, placed, blended) in &binds[i..i + 2] {
+                        if *blended {
+                            let below = self.below.as_ref().expect("made for a composite mode");
+                            pass.set_pipeline(&gpu.adding_mode);
+                            pass.set_bind_group(1, &below.bind, &[]);
+                        } else if *placed {
                             pass.set_pipeline(&gpu.adding);
                         } else {
                             pass.set_pipeline(&gpu.adding_scaled);
@@ -1065,9 +1182,15 @@ impl Screen {
                 continue;
             }
             let mut pass = begin(&mut encoder, canvas, clear.take());
-            while i < n && !pair_at(i) {
-                let (bind, level, placed) = &binds[i];
+            let first = i;
+            while i < n && !pair_at(i) && (i == first || !blends(i)) {
+                let (bind, level, placed, blended) = &binds[i];
                 match level {
+                    _ if *blended => {
+                        let below = self.below.as_ref().expect("made for a composite mode");
+                        pass.set_pipeline(&drawing.mode);
+                        pass.set_bind_group(1, &below.bind, &[]);
+                    }
                     _ if *placed => pass.set_pipeline(&drawing.placed),
                     None => pass.set_pipeline(&drawing.pipeline),
                     Some(l) => {
@@ -1125,7 +1248,7 @@ impl Slot {
         gpu: &Gpu,
         picture: &Arc<Picture>,
         size: (u32, u32),
-        how: (Option<&(Placing, f64)>, u32, Option<Hdr>),
+        how: (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
         encoder: &mut wgpu::CommandEncoder,
     ) -> wgpu::BindGroup {
         self.filled = None;
@@ -2324,7 +2447,7 @@ fn params_of(
     size: (u32, u32),
     wide: bool,
     cover: (f64, f64),
-    (placing, kernel, timeline): (Option<&(Placing, f64)>, u32, Option<Hdr>),
+    (placing, kernel, timeline, paired): (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
 ) -> Vec<u8> {
     let colors = shader_colors(picture.colors());
     let (x, y, w, h) = picture.placement(size.0, size.1);
@@ -2381,8 +2504,8 @@ fn params_of(
     let mut floats = vec![
         levels.len() as f64,
         placing.map_or(0.0, |(_, l)| *l),
-        0.0,
-        0.0,
+        placing.map_or(0.0, |(p, _)| f64::from(p.mode.code())),
+        f64::from(u8::from(paired)),
     ];
     floats.extend(level_floats(levels));
     for v in floats {

@@ -570,6 +570,13 @@ impl Words<'_> {
         s.usual("crop_softness", "Crop Softness", &number, json!(0.0), |q| {
             json!(q.crop_softness)
         });
+        s.usual(
+            "composite_mode",
+            "Composite Mode",
+            &word,
+            json!("normal"),
+            |q| json!(q.composite_mode),
+        );
         s.usual("opacity", "Opacity", &percent, json!(1.0), |q| {
             json!(q.opacity)
         });

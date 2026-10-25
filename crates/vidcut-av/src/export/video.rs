@@ -3,7 +3,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vidcut_core::model::{
-    ColorSpace, Hdr, ScaleFactor, Sharpness, SubtitleStyle, SuperScale, Title, Upscaler,
+    ColorSpace, CompositeMode, Hdr, ScaleFactor, Sharpness, SubtitleStyle, SuperScale, Title,
+    Upscaler,
 };
 use vidcut_core::place::Placing;
 use vidcut_core::render::{Image, Placed, Ramp, ShownTitle, VideoPiece, WHOLE, Wipe};
@@ -1838,8 +1839,13 @@ impl VideoFrames {
         };
         let (w, h, _) = self.maker.out();
         let wiped = layers.iter().any(|l| l.wipe.is_some());
+        let blended = layers.iter().any(|l| {
+            l.placing
+                .as_ref()
+                .is_some_and(|(p, _)| p.mode != CompositeMode::Normal)
+        });
         let on_gpu = match self.maker.output() {
-            Output::Cuda { frames, .. } if self.gpu_mixes() && !wiped => {
+            Output::Cuda { frames, .. } if self.gpu_mixes() && !wiped && !blended => {
                 match cuda_mix(frames, &layers, black.as_ref(), (w, h)) {
                     Ok(mixed) => Some(mixed),
                     Err(e) => {

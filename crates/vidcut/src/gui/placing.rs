@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    Clip, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind, ZoomBox,
+    Clip, CompositeMode, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind, ZoomBox,
 };
 use vidcut_core::ops::picture::{has_picture, zoom_shown};
 use vidcut_core::place::{Level, Placing, anchored, apply, flipped};
@@ -392,6 +392,39 @@ pub(super) fn ease_label(e: Ease) -> &'static str {
         Ease::EaseIn => "Ease In",
         Ease::EaseOut => "Ease Out",
         Ease::EaseInOut => "Ease In and Out",
+    }
+}
+
+pub(super) fn mode_label(m: CompositeMode) -> &'static str {
+    use CompositeMode as M;
+    match m {
+        M::Normal => "Normal",
+        M::Add => "Add",
+        M::Subtract => "Subtract",
+        M::Difference => "Difference",
+        M::Multiply => "Multiply",
+        M::Screen => "Screen",
+        M::Overlay => "Overlay",
+        M::Hardlight => "Hardlight",
+        M::Softlight => "Softlight",
+        M::Darken => "Darken",
+        M::Lighten => "Lighten",
+        M::ColorDodge => "Color Dodge",
+        M::ColorBurn => "Color Burn",
+        M::Exclusion => "Exclusion",
+        M::Hue => "Hue",
+        M::Saturation => "Saturation",
+        M::Color => "Color",
+        M::Luminosity => "Luminosity",
+        M::Divide => "Divide",
+        M::LinearDodge => "Linear Dodge",
+        M::LinearBurn => "Linear Burn",
+        M::LinearLight => "Linear Light",
+        M::VividLight => "Vivid Light",
+        M::PinLight => "Pin Light",
+        M::HardMix => "Hard Mix",
+        M::LighterColor => "Lighter Color",
+        M::DarkerColor => "Darker Color",
     }
 }
 
@@ -1147,6 +1180,9 @@ pub(super) fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
     }
     if a.flip_vertical != b.flip_vertical {
         params["flip_vertical"] = json!(b.flip_vertical);
+    }
+    if a.mode() != b.mode() {
+        params["composite_mode"] = json!(b.mode());
     }
     for (key, x, y) in [
         ("crop_left", a.crop.left, b.crop.left),

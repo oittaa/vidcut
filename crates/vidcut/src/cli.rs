@@ -334,6 +334,7 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut picture set c3 --anchor 0.75,0.5 --rotation 15\n  \
          vidcut picture set V2@10s --crop-left 0.25 --crop-right 0.25 --crop-softness 20\n  \
          vidcut picture set c3 --opacity 0.5\n  \
+         vidcut picture set c3 --composite-mode multiply\n  \
          vidcut picture set c3 --dynamic-zoom '{}'\n  \
          vidcut picture set c3 --dynamic-zoom '{\"end\":{\"center\":[0.3,0.4],\"size\":0.5},\"ease\":\"ease_in_out\"}'\n  \
          vidcut picture set c3 --dynamic-zoom null",

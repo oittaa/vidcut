@@ -9,8 +9,8 @@ use egui_phosphor::regular::{
 use serde_json::{Value, json};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Clip, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project, ScaleFactor, TrackKind,
-    Upscaler, ZoomBox,
+    Clip, CompositeMode, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project, ScaleFactor,
+    TrackKind, Upscaler, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, has_picture};
 use vidcut_core::place::upright_fit;
@@ -19,7 +19,7 @@ use vidcut_core::validate::GAIN;
 
 use super::dialog;
 use super::isolation::{Isolate, heard};
-use super::placing::{changed, ease_label, target};
+use super::placing::{changed, ease_label, mode_label, target};
 use super::theme;
 use super::timeline::SpeedDialog;
 use super::timeline::tools::landing;
@@ -578,6 +578,7 @@ enum Act {
     Zooming(bool),
     Boxes,
     Ease(Ease),
+    Mode(CompositeMode),
     Swap,
     Clear(PictureTool),
     Unkey,
@@ -907,6 +908,24 @@ fn composite(
         .any(|c| uses(&c.shown, PictureTool::Composite));
     let section_name = ("Composite", PictureTool::Composite);
     section(ui, section_name, set, acts, |ui, acts| {
+        let now = chosen[0].shown.mode();
+        let mixed = chosen
+            .iter()
+            .any(|c| c.shown.mode() != CompositeMode::Normal);
+        label(ui, "Composite Mode", mixed);
+        egui::ComboBox::from_id_salt("inspector-mode")
+            .selected_text(mode_label(now))
+            .show_ui(ui, |ui| {
+                for m in CompositeMode::ALL {
+                    if ui.selectable_label(m == now, mode_label(m)).clicked() {
+                        acts.push(Act::Mode(m));
+                    }
+                }
+            });
+        if reset(ui, mixed) {
+            acts.push(Act::Mode(CompositeMode::Normal));
+        }
+        ui.end_row();
         number(ui, (Field::Opacity, None), i, p, at, chosen, acts);
     });
 }
@@ -1822,6 +1841,12 @@ impl Workspace {
                 let z = c.shown.dynamic_zoom?;
                 Some(Picture {
                     dynamic_zoom: Some(DynamicZoom { ease, ..z }),
+                    ..c.shown.clone()
+                })
+            }),
+            Act::Mode(mode) => self.send_pictures(chosen, |c| {
+                Some(Picture {
+                    composite_mode: Some(mode).filter(|m| *m != CompositeMode::Normal),
                     ..c.shown.clone()
                 })
             }),
