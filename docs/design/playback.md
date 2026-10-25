@@ -103,11 +103,17 @@ Motions:
 
 **Kept pictures**
 
-- Kept pictures live in `player::store::Store` under a memory budget and a video-memory budget (`player.memory_mb`, `player.video_memory_mb`).
+- Kept pictures live in one cache for the whole process (`store::global`, a `player::store::Store`). The engine of the viewer and the engines of the two-up share it.
+- The cache has a memory budget and a video-memory budget (`player.memory_mb`, `player.video_memory_mb`). `player::set_budget` sets them.
 - By default, the video budget is half the memory of the GPU that decodes (`Gpu::memory_mb`, [gpu](gpu.md)). It is at least 1 GB (`Budget::gpu_video`).
 - Thus the small dedicated share of an integrated GPU does not make the budget small.
 - Apple silicon has one shared budget.
-- The least recently used pictures go first. The prepared picture never goes.
+- The least recently used pictures go first, whichever engine decoded them.
+- The prepared picture of each engine never goes (`Store::hold`).
+- An `Id` names what a picture shows. Thus an engine can show a picture that another engine decoded.
+- A small picture of the two-up names the engine that made it (`Id::small`). Only that engine shows it. The picture goes when that engine changes its size or ends.
+- Each engine plans its decoding with its part of the budget (`Config::part`).
+- When the last engine ends, the cache empties.
 
 **Dissolves**
 
@@ -305,7 +311,8 @@ Faders:
 ## The two-up
 
 - The Trim Editor and Dynamic Trim show two frames, or four while a slip or slide runs.
-- `Cells` gives each frame its own engine on the media of the clip (`render::tape`, no sound). Each engine has `ManualOutput` and a quarter of the viewer's budget (`Budget::part`).
+- `Cells` gives each frame its own engine on the media of the clip (`render::tape`, no sound). Each engine has `ManualOutput`.
+- The engines keep their pictures in the cache of the viewer. Each plans its decoding with a quarter of the budget.
 - In every UI frame, `Player::follow` gives each engine its frame and the speed of the trim. The engine decodes ahead as if it plays.
 - `Player::shrink_to` keeps the pictures of a run at the size of the cell.
 - The windows behind decode on `vidcut-play-windows`: one at a time across the followed players, and none while any player moves forward.

@@ -35,7 +35,6 @@ pub struct Player {
     output: Option<MakeOutput>,
     renderer: Arc<dyn Renderer>,
     on_picture: Arc<dyn Fn() + Send + Sync>,
-    budget: engine::Budget,
     gpu_pictures: Vec<vidcut_av::hw::Kind>,
     engine: Option<Arc<engine::Player>>,
     plays: Option<PlayerId>,
@@ -62,7 +61,6 @@ pub struct Player {
 impl Player {
     pub fn new(
         output: Option<MakeOutput>,
-        budget: engine::Budget,
         gpu_pictures: Vec<vidcut_av::hw::Kind>,
         renderer: Arc<dyn Renderer>,
         on_picture: Arc<dyn Fn() + Send + Sync>,
@@ -73,7 +71,6 @@ impl Player {
             output,
             renderer,
             on_picture,
-            budget,
             gpu_pictures,
             engine: None,
             plays: None,
@@ -277,7 +274,7 @@ impl Player {
             self.renderer.attach(None);
         }
         let config = || engine::Config {
-            budget: self.budget,
+            part: 1,
             audio_scrubbing: false,
             on_picture: Some(self.on_picture.clone()),
             hardware: self.decoding.on,
@@ -502,17 +499,6 @@ impl Player {
         self.scrubbing = on;
         if let Some(e) = &self.engine {
             e.set_audio_scrubbing(on);
-        }
-    }
-
-    pub fn budget(&self) -> engine::Budget {
-        self.budget
-    }
-
-    pub fn set_budget(&mut self, budget: engine::Budget) {
-        self.budget = budget;
-        if let Some(e) = &self.engine {
-            e.set_budget(budget);
         }
     }
 

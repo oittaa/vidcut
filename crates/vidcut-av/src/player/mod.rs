@@ -29,7 +29,7 @@ use crate::error::{Error, Result};
 use clock::{Heard, Markers};
 use plan::Plan;
 use ring::Ring;
-use store::Store;
+use store::Share;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Budget {
@@ -39,8 +39,6 @@ pub struct Budget {
 
 pub const SHARED_MEMORY: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
 
-pub const DEFAULT_BUDGET: Budget = Budget::both(GB);
-
 const GB: usize = 1 << 30;
 
 impl Budget {
@@ -48,18 +46,6 @@ impl Budget {
         Self {
             memory: bytes,
             video: Some(bytes),
-        }
-    }
-
-    pub fn part(self, parts: usize) -> Self {
-        let gpu = || Self::gpu_video(crate::gpus::in_use().and_then(|g| g.memory_mb));
-        let video = match self.video {
-            None if SHARED_MEMORY => None,
-            v => Some(v.unwrap_or_else(gpu) / parts.max(1)),
-        };
-        Self {
-            memory: self.memory / parts.max(1),
-            video,
         }
     }
 
@@ -104,7 +90,7 @@ pub fn system_memory() -> Option<usize> {
 
 #[derive(Clone)]
 pub struct Config {
-    pub budget: Budget,
+    pub part: usize,
     pub audio_scrubbing: bool,
     pub on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
     pub hardware: bool,
@@ -114,7 +100,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            budget: DEFAULT_BUDGET,
+            part: 1,
             audio_scrubbing: true,
             on_picture: None,
             hardware: false,
@@ -306,7 +292,7 @@ pub(crate) struct Shared {
     pub(crate) id: u64,
     control: Mutex<Control>,
     changed: Condvar,
-    pub(crate) store: Store,
+    pub(crate) store: Share,
     pub(crate) ring: Arc<Ring>,
     pub(crate) heard: Arc<Heard>,
     pub(crate) markers: Markers,
@@ -324,8 +310,6 @@ pub(crate) struct Shared {
     format: (u32, u16),
     pub(crate) gpu_pictures: Vec<crate::hw::Kind>,
     copies: Arc<crate::copies::Copies>,
-    video_auto: AtomicBool,
-    gpu_memory: std::sync::OnceLock<u64>,
     heard_epoch: std::sync::atomic::AtomicU64,
     levels: Mutex<std::collections::VecDeque<Level>>,
     pub(crate) titles: titles::Titles,
@@ -347,6 +331,38 @@ const LEVELS_SECS: f64 = 0.05;
 const PATIENCE: Duration = Duration::from_secs(1);
 
 static PLAYERS: AtomicU64 = AtomicU64::new(0);
+
+static VIDEO_AUTO: AtomicBool = AtomicBool::new(false);
+
+static GPU_MEMORY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+pub fn set_budget(budget: Budget) {
+    let store = store::global();
+    store.set_budget(store::Kind::Memory, budget.memory);
+    VIDEO_AUTO.store(budget.video.is_none(), std::sync::atomic::Ordering::Relaxed);
+    match budget.video {
+        Some(bytes) => {
+            store.set_budget(store::Kind::Video, bytes);
+            store.share(false);
+        }
+        None => apply_video_budget(),
+    }
+}
+
+fn apply_video_budget() {
+    if !VIDEO_AUTO.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let store = store::global();
+    if SHARED_MEMORY {
+        store.share(true);
+    } else {
+        store.set_budget(
+            store::Kind::Video,
+            Budget::gpu_video(GPU_MEMORY.get().copied()),
+        );
+    }
+}
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -597,23 +613,11 @@ impl Shared {
     }
 
     pub(crate) fn gpu_found(&self, gpu: &crate::gpus::Gpu) {
-        if self.gpu_memory.get().is_none()
+        if GPU_MEMORY.get().is_none()
             && let Some(mb) = gpu.memory_mb
         {
-            let _ = self.gpu_memory.set(mb);
-            self.apply_video_budget();
-        }
-    }
-
-    fn apply_video_budget(&self) {
-        if !self.video_auto.load(std::sync::atomic::Ordering::Relaxed) {
-            return;
-        }
-        if SHARED_MEMORY {
-            self.store.share(true);
-        } else {
-            let bytes = Budget::gpu_video(self.gpu_memory.get().copied());
-            self.store.set_budget(store::Kind::Video, bytes);
+            let _ = GPU_MEMORY.set(mb);
+            apply_video_budget();
         }
     }
 
@@ -647,8 +651,9 @@ impl Player {
         let source = AudioSource::new(ring.clone(), heard.clone(), rate, channels);
         let device = source.failure.clone();
         let at = plan.range.0;
+        let id = PLAYERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let shared = Arc::new(Shared {
-            id: PLAYERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
+            id,
             control: Mutex::new(Control {
                 plan: Arc::new(Plan::new(plan)),
                 plan_gen: 0,
@@ -672,7 +677,7 @@ impl Player {
                 error: None,
             }),
             changed: Condvar::new(),
-            store: Store::new(config.budget.memory, config.budget.video.unwrap_or(GB)),
+            store: Share::join(id, config.part),
             ring,
             heard,
             markers: Markers::default(),
@@ -690,15 +695,12 @@ impl Player {
             format: (rate, channels),
             gpu_pictures: config.gpu_pictures,
             copies: Arc::default(),
-            video_auto: AtomicBool::new(config.budget.video.is_none()),
-            gpu_memory: std::sync::OnceLock::new(),
             heard_epoch: std::sync::atomic::AtomicU64::new(0),
             levels: Mutex::new(std::collections::VecDeque::new()),
             titles: titles::Titles::default(),
             subtitles: subtitles::Subtitles::default(),
             placing: Mutex::new(Vec::new()),
         });
-        shared.apply_video_budget();
         output.start(source)?;
         let mut player = Self {
             shared: shared.clone(),
@@ -899,21 +901,6 @@ impl Player {
             return;
         }
         self.shared.change(true, |ctl, _, _| ctl.hardware = on);
-    }
-
-    pub fn set_budget(&self, budget: Budget) {
-        let store = &self.shared.store;
-        store.set_budget(store::Kind::Memory, budget.memory);
-        self.shared
-            .video_auto
-            .store(budget.video.is_none(), std::sync::atomic::Ordering::Relaxed);
-        match budget.video {
-            Some(bytes) => {
-                store.set_budget(store::Kind::Video, bytes);
-                store.share(false);
-            }
-            None => self.shared.apply_video_budget(),
-        }
     }
 
     pub fn set_muted(&self, muted: bool) {
@@ -1249,23 +1236,16 @@ impl Drop for Player {
         if let Some(windows) = lock(&self.shared.windows).take() {
             crate::ending::leave(windows);
         }
-        let (pictures, bytes) = self.shared.store.usage();
-        let at = Instant::now();
-        self.shared.store.clear();
-        let freed = at.elapsed();
         let at = Instant::now();
         lock(&self.output).take();
         crate::debug!(
             "player",
             "player {} ended in {:.0} ms: the decode thread joined in {:.0} ms, the audio thread \
-             in {:.0} ms, {pictures} kept pictures ({} MB) freed in {:.0} ms, the audio output \
-             stopped in {:.0} ms",
+             in {:.0} ms, the audio output stopped in {:.0} ms",
             self.shared.id,
             ms(started.elapsed()),
             ms(joins[0]),
             ms(joins[1]),
-            bytes >> 20,
-            ms(freed),
             ms(at.elapsed())
         );
     }
