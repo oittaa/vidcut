@@ -424,7 +424,14 @@ The pictures:
 - `place::Placing` leaves out the level of a clip in a compound clip when the clip fills the frame at its usual values. Thus the edges of the compound clip are covered once.
 - `export::place::over` lays the picture over the frame below, in its own code values. It taps each component over the footprint of the pixel, and covers the edges in part, as the viewer's shader does.
 - The coverage of a pixel is the product over the levels of `place::Placing::at`. Each level gives its smoothed edges, its soft crop edges and its opacity.
+- A picture with a composite mode (`Placing::mode`) mixes in R'G'B' (D75):
+  - For each sample of the frame, `export::place::over` taps all three components of the picture at that place.
+  - It averages the components of the frame below over the same place. Thus a chroma sample takes the mean of the luma under it.
+  - It converts both to R'G'B' by the matrix and the range of the frame, and mixes them by `blend::mixed`.
+  - It converts the mix back, and lays it over the frame below by the coverage.
+  - `place::Placing` takes the first mode other than Normal, from the picture out through its compound clips.
 - For NVENC, the frame below stays on the GPU.
+  - A frame with a composite mode is mixed on the CPU, as a frame with a wipe is.
   - `cuda::burn::Overlay::of` makes the colors and coverage of the placed picture in memory.
   - `cuda::burn` mixes them in, as for a title.
 - A crossing pair lays each side over what was below the first side, and adds the two. Then it takes that lower part away once.

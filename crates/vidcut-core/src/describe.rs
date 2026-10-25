@@ -236,7 +236,7 @@ pub fn describe_at(
         "picture.clear" => match d.params["tool"].as_str() {
             Some("crop") => format!("Reset the crop of {}", d.clips("clips")),
             Some("dynamic_zoom") => format!("Reset the Dynamic Zoom of {}", d.clips("clips")),
-            Some("composite") => format!("Reset the opacity of {}", d.clips("clips")),
+            Some("composite") => format!("Reset the composite of {}", d.clips("clips")),
             Some(_) => format!("Reset the transform of {}", d.clips("clips")),
             None => format!("Reset the picture of {}", d.clips("clips")),
         },

@@ -142,7 +142,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The keyframes of the clip volume effect play as volume keyframes ([D81](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Text and lower-third titles of Resolve come in as titles of vidcut. The titles of vidcut go out in the shape that Resolve uses ([D67](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Transform, Cropping, Dynamic Zoom, Composite and Retime and Scaling of Resolve come in as the picture of a clip. The picture of a clip goes out as these effects ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - A Composite with a mode other than Normal stays a clip effect that does not play.
+  - A Composite with Foreground or a mask mode stays a clip effect that does not play ([todo](todo/composite-masks.md)).
   - Resolve Studio 21.1.1 imports `.otio` and `.otioz` files. It imports an `.otiod` folder by its `content.otio`.
   - It keeps tracks and their names, J/L cuts, clip gain, markers, stills, image sequences and the timecode of sources.
   - It also keeps clip effects and their keyframes, transitions, generators, speeds, and compound clips with their picture and sound linked.
@@ -1546,7 +1546,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A picture value goes to all the selected clips that can have a picture. An Audio value goes to all the selected clips with sound.
   - A Speed value goes to all the selected clips that can change speed. Duration gives each clip the speed that fills it.
   - A value changes only that value on each clip. A Reset also acts on all of these clips.
-  - Not in the Inspector: the composite modes ([todo](todo/inspector.md)).
 - **Why:**
   - The Titles tab of the Cut page is in the place of the Media Pool. The Inspector goes beside it. Thus the viewer and the timeline keep their size.
   - Resolve also sets titles, subtitles and subtitle tracks in the Inspector (pp. 764, 1233, 1237).

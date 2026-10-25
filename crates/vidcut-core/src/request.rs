@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    DuckDetect, DynamicZoom, Ease, Handle, PictureTool, PictureTransition, Place, SubtitleStyle,
-    TitleAlign, TitleKind, TitleStyle, TrackClip, ZoomBox,
+    CompositeMode, DuckDetect, DynamicZoom, Ease, Handle, PictureTool, PictureTransition, Place,
+    SubtitleStyle, TitleAlign, TitleKind, TitleStyle, TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -1874,12 +1874,13 @@ pub enum Request {
 
     /// Where a clip's picture goes over the frame (`c3`, or `V2@15s`): the
     /// `position` of its middle, its `zoom` across and down, its `rotation`,
-    /// its `anchor`, its `pitch`, its `yaw`, its flips, its `crop` and its
-    /// `dynamic_zoom` (null when it has none), every value given, usual ones too.
+    /// its `anchor`, its `pitch`, its `yaw`, its flips, its `crop`, its
+    /// `dynamic_zoom` (null when it has none), its `composite_mode` and its
+    /// `opacity`, every value given, usual ones too.
     #[serde(rename = "picture.get")]
     PictureGet { clip: ClipRef },
-    /// Move, zoom, turn, pitch, yaw, flip, crop or fade clips' pictures, or
-    /// give them a Dynamic Zoom: footage, stills, image sequences and
+    /// Move, zoom, turn, pitch, yaw, flip, crop, mix or fade clips' pictures,
+    /// or give them a Dynamic Zoom: footage, stills, image sequences and
     /// compound clips; a title has its own place (`titles.set`). Each field
     /// given replaces its own. At its usual values a picture is fitted into
     /// the frame; the tracks below show wherever it doesn't cover the frame:
@@ -1943,6 +1944,9 @@ pub enum Request {
         /// cuts off. Below 0, all four edges fade in over the picture.
         #[serde(default)]
         crop_softness: Option<f64>,
+        /// How it mixes with the tracks below; `normal` for its usual mix.
+        #[serde(default)]
+        composite_mode: Option<CompositeMode>,
         /// How much of it shows over the tracks below, from 0 (none) to 1
         /// (all of it).
         #[serde(default)]
@@ -1964,7 +1968,8 @@ pub enum Request {
     /// Put clips' pictures back at their usual values: the `transform`
     /// (position, zoom, rotation, anchor, pitch, yaw and flips), the `crop`
     /// (its sides and softness), the `dynamic_zoom`, the `composite` (the
-    /// opacity), or all of them when no `tool` is given.
+    /// composite mode and the opacity), or all of them when no `tool` is
+    /// given.
     #[serde(rename = "picture.clear")]
     PictureClear {
         clips: OneOrMany<ClipRef>,

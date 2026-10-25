@@ -1,4 +1,5 @@
-use vidcut_core::model::Title;
+use vidcut_core::blend::mixed;
+use vidcut_core::model::{CompositeMode, Title};
 use vidcut_core::place::{Placing, ahead, apply, chain, lettered};
 use vidcut_core::render::{Placed, WHOLE};
 
@@ -20,6 +21,14 @@ struct Comp {
 impl Comp {
     fn wide(&self) -> bool {
         self.depth + self.shift > 8
+    }
+
+    fn grid(&self) -> (u32, u32) {
+        (self.log2w, self.log2h)
+    }
+
+    fn top(&self) -> f64 {
+        f64::from((1u32 << self.depth) - 1)
     }
 
     fn read(&self, data: &[u8], at: usize) -> f32 {
@@ -142,17 +151,39 @@ pub(crate) fn over(under: &frame::Video, layer: &Layer) -> Result<frame::Video> 
     let Some(area) = layer.placing.bounds((f64::from(size.0), f64::from(size.1))) else {
         return Ok(out);
     };
+    let mode = layer.placing.mode;
+    let colored = if comps.len() >= 3 { 3 } else { 1 };
+    let coding = Coding::of(under, &comps[..colored]);
+    let below: Vec<Below> = comps[..colored]
+        .iter()
+        .map(|c| Below::of(under, *c))
+        .collect();
     for p in 0..out.planes() {
-        let mine: Vec<Shading> = comps
+        let mine: Vec<Mixing> = comps
             .iter()
-            .filter(|c| c.plane == p)
-            .map(|c| Shading::of(*c, layer, size, area))
+            .enumerate()
+            .filter(|(_, c)| c.plane == p)
+            .map(|(i, c)| Mixing {
+                channel: i,
+                own: Shading::of(*c, layer, size, area, c.grid()),
+                tops: match mode != CompositeMode::Normal && i < colored {
+                    true => comps[..colored]
+                        .iter()
+                        .map(|k| Shading::of(*k, layer, size, area, c.grid()))
+                        .collect(),
+                    false => Vec::new(),
+                },
+            })
             .collect();
-        let Some(rows) = mine.first().map(|s| s.rows(out.plane_height(p) as usize)) else {
+        let Some(rows) = mine
+            .first()
+            .map(|m| m.own.rows(out.plane_height(p) as usize))
+        else {
             continue;
         };
         let stride = out.stride(p);
         let mut rest = &mut out.data_mut(p)[rows.start * stride..];
+        let (coding, below) = (&coding, &below);
         std::thread::scope(|scope| {
             for band in bands(rows) {
                 let (chunk, next) = rest.split_at_mut((band.len() * stride).min(rest.len()));
@@ -161,9 +192,14 @@ pub(crate) fn over(under: &frame::Video, layer: &Layer) -> Result<frame::Video> 
                 scope.spawn(move || {
                     for (k, y) in band.enumerate() {
                         let row = &mut chunk[k * stride..][..stride];
-                        for s in mine {
+                        for m in mine {
+                            let s = &m.own;
                             for x in s.columns() {
-                                if let Some((shown, a)) = s.pixel(x, y) {
+                                let shown = match m.tops.is_empty() {
+                                    true => s.pixel(x, y),
+                                    false => m.mixed(mode, coding, below, s.comp.grid(), x, y),
+                                };
+                                if let Some((shown, a)) = shown {
                                     let to = x * s.comp.step + s.comp.offset;
                                     let under = s.comp.read(row, to);
                                     s.comp.write(row, to, under + (shown - under) * a);
@@ -176,6 +212,165 @@ pub(crate) fn over(under: &frame::Video, layer: &Layer) -> Result<frame::Video> 
         });
     }
     Ok(out)
+}
+
+struct Mixing<'a> {
+    channel: usize,
+    own: Shading<'a>,
+    tops: Vec<Shading<'a>>,
+}
+
+impl Mixing<'_> {
+    fn mixed(
+        &self,
+        mode: CompositeMode,
+        coding: &Coding,
+        below: &[Below],
+        grid: (u32, u32),
+        x: usize,
+        y: usize,
+    ) -> Option<(f32, f32)> {
+        let (first, a) = self.tops[0].pixel(x, y)?;
+        let mut top = [f64::from(first); 3];
+        for (k, s) in self.tops.iter().enumerate().skip(1) {
+            top[k] = f64::from(s.pixel(x, y)?.0);
+        }
+        let mut under = [0.0; 3];
+        for (k, b) in below.iter().enumerate() {
+            under[k] = f64::from(b.mean(grid, x, y));
+        }
+        if below.len() == 1 {
+            under = [under[0]; 3];
+        }
+        let out = coding.codes(mixed(mode, coding.colors(top), coding.colors(under)));
+        Some((out[self.channel] as f32, a))
+    }
+}
+
+struct Below<'a> {
+    comp: Comp,
+    data: &'a [u8],
+    stride: usize,
+    size: (usize, usize),
+}
+
+impl<'a> Below<'a> {
+    fn of(f: &'a frame::Video, comp: Comp) -> Self {
+        Self {
+            comp,
+            data: f.data(comp.plane),
+            stride: f.stride(comp.plane),
+            size: (
+                f.width().div_ceil(1 << comp.log2w) as usize,
+                f.height().div_ceil(1 << comp.log2h) as usize,
+            ),
+        }
+    }
+
+    fn mean(&self, (gw, gh): (u32, u32), x: usize, y: usize) -> f32 {
+        let span = |at: usize, g: u32, k: u32, n: usize| {
+            let a = ((at << g) >> k).min(n - 1);
+            a..(((at + 1) << g) >> k).clamp(a + 1, n)
+        };
+        let c = &self.comp;
+        let (xs, ys) = (
+            span(x, gw, c.log2w, self.size.0),
+            span(y, gh, c.log2h, self.size.1),
+        );
+        let count = (xs.len() * ys.len()) as f32;
+        let mut sum = 0.0;
+        for j in ys {
+            for i in xs.clone() {
+                sum += c.read(self.data, j * self.stride + i * c.step + c.offset);
+            }
+        }
+        sum / count
+    }
+}
+
+struct Coding {
+    rgb: bool,
+    gray: bool,
+    full: bool,
+    kr: f64,
+    kb: f64,
+    tops: [f64; 3],
+    unit: f64,
+}
+
+impl Coding {
+    fn of(f: &frame::Video, comps: &[Comp]) -> Self {
+        let light = crate::color::pq_light(f);
+        let tops = std::array::from_fn(|k| comps.get(k).unwrap_or(&comps[0]).top());
+        Self {
+            rgb: light.rgb,
+            gray: comps.len() == 1,
+            full: light.rgb || light.full_range,
+            kr: light.kr,
+            kb: light.kb,
+            tops,
+            unit: f64::from(1u32 << comps[0].depth.saturating_sub(8)),
+        }
+    }
+
+    fn colors(&self, c: [f64; 3]) -> [f64; 3] {
+        if self.rgb {
+            return std::array::from_fn(|k| c[k] / self.tops[k]);
+        }
+        let (y, cb, cr) = match self.full {
+            true => {
+                let mid = (self.tops[0] + 1.0) / 2.0;
+                (
+                    c[0] / self.tops[0],
+                    (c[1] - mid) / self.tops[1],
+                    (c[2] - mid) / self.tops[2],
+                )
+            }
+            false => {
+                let u = self.unit;
+                (
+                    (c[0] - 16.0 * u) / (219.0 * u),
+                    (c[1] - 128.0 * u) / (224.0 * u),
+                    (c[2] - 128.0 * u) / (224.0 * u),
+                )
+            }
+        };
+        if self.gray {
+            return [y; 3];
+        }
+        let (kr, kb) = (self.kr, self.kb);
+        let r = y + 2.0 * (1.0 - kr) * cr;
+        let b = y + 2.0 * (1.0 - kb) * cb;
+        let g = (y - kr * r - kb * b) / (1.0 - kr - kb);
+        [r, g, b]
+    }
+
+    fn codes(&self, [r, g, b]: [f64; 3]) -> [f64; 3] {
+        if self.rgb {
+            return [r * self.tops[0], g * self.tops[1], b * self.tops[2]];
+        }
+        let (kr, kb) = (self.kr, self.kb);
+        let y = kr * r + (1.0 - kr - kb) * g + kb * b;
+        let (cb, cr) = ((b - y) / (2.0 * (1.0 - kb)), (r - y) / (2.0 * (1.0 - kr)));
+        match self.full {
+            true => {
+                let mid = (self.tops[0] + 1.0) / 2.0;
+                [
+                    y * self.tops[0],
+                    cb * self.tops[1] + mid,
+                    cr * self.tops[2] + mid,
+                ]
+            }
+            false => {
+                let u = self.unit;
+                [
+                    16.0 * u + 219.0 * u * y,
+                    128.0 * u + 224.0 * u * cb,
+                    128.0 * u + 224.0 * u * cr,
+                ]
+            }
+        }
+    }
 }
 
 fn texel(s: &Sprite, i: i64, j: i64) -> [f64; 4] {
@@ -328,7 +523,7 @@ pub(crate) fn overlay(
         let mine: Vec<Shading> = comps
             .iter()
             .filter(|c| c.plane == p)
-            .map(|c| Shading::of(*c, layer, size, area))
+            .map(|c| Shading::of(*c, layer, size, area, c.grid()))
             .collect();
         let Some(first) = mine.first() else {
             continue;
@@ -375,6 +570,7 @@ struct Shading<'a> {
     fitted: [f64; 4],
     level: f64,
     scale: (f64, f64),
+    own: (f64, f64),
     grid: (usize, usize),
     span: (usize, usize),
     lines: (usize, usize),
@@ -384,9 +580,16 @@ struct Shading<'a> {
 }
 
 impl<'a> Shading<'a> {
-    fn of(comp: Comp, layer: &Layer<'a>, size: (u32, u32), area: [u32; 4]) -> Self {
+    fn of(
+        comp: Comp,
+        layer: &Layer<'a>,
+        size: (u32, u32),
+        area: [u32; 4],
+        (gw, gh): (u32, u32),
+    ) -> Self {
         let p = comp.plane;
-        let (across, down) = (f64::from(1u32 << comp.log2w), f64::from(1u32 << comp.log2h));
+        let (across, down) = (f64::from(1u32 << gw), f64::from(1u32 << gh));
+        let (sa, sd) = (f64::from(1u32 << comp.log2w), f64::from(1u32 << comp.log2h));
         let picture = layer.picture;
         let grid = (
             picture.width().div_ceil(1 << comp.log2w) as usize,
@@ -395,8 +598,8 @@ impl<'a> Shading<'a> {
         let [fx, fy, fw, fh] = layer.fitted;
         let [dux, duy, dvx, dvy] = layer.placing.step();
         let taps = |a: f64, b: f64| (a.hypot(b).ceil() as usize).clamp(1, 8);
-        let x0 = (area[0] >> comp.log2w) as usize;
-        let x1 = area[2].min(size.0).div_ceil(1 << comp.log2w) as usize;
+        let x0 = (area[0] >> gw) as usize;
+        let x1 = area[2].min(size.0).div_ceil(1 << gw) as usize;
         Self {
             comp,
             data: picture.data(p),
@@ -405,20 +608,21 @@ impl<'a> Shading<'a> {
             fitted: layer.fitted,
             level: f64::from(layer.weight) / f64::from(WHOLE),
             scale: (across, down),
+            own: (sa, sd),
             grid,
             span: (x0, x1),
             lines: (
-                (area[1] >> comp.log2h) as usize,
-                area[3].min(size.1).div_ceil(1 << comp.log2h) as usize,
+                (area[1] >> gh) as usize,
+                area[3].min(size.1).div_ceil(1 << gh) as usize,
             ),
             taps: (
-                taps(dux * fw, dvx * fh * across / down),
-                taps(duy * fw * down / across, dvy * fh),
+                taps(dux * fw * across / sa, dvx * fh * across / sd),
+                taps(duy * fw * down / sa, dvy * fh * down / sd),
             ),
-            lo: (fx / across, fy / down),
+            lo: (fx / sa, fy / sd),
             hi: (
-                ((fx + fw) / across - 1.0).min(grid.0 as f64 - 1.0),
-                ((fy + fh) / down - 1.0).min(grid.1 as f64 - 1.0),
+                ((fx + fw) / sa - 1.0).min(grid.0 as f64 - 1.0),
+                ((fy + fh) / sd - 1.0).min(grid.1 as f64 - 1.0),
             ),
         }
     }
@@ -434,6 +638,7 @@ impl<'a> Shading<'a> {
 
     fn pixel(&self, x: usize, y: usize) -> Option<(f32, f32)> {
         let (across, down) = self.scale;
+        let (sa, sd) = self.own;
         let (cx, cy) = ((x as f64 + 0.5) * across, (y as f64 + 0.5) * down);
         let (_, cover) = self.placing.at(cx, cy)?;
         let [fx, fy, fw, fh] = self.fitted;
@@ -454,8 +659,8 @@ impl<'a> Shading<'a> {
                 }
                 let u = (back[0] * px + back[1] * py + back[2]) / w;
                 let v = (back[3] * px + back[4] * py + back[5]) / w;
-                let sx = ((fx + u * fw) / across - 0.5).clamp(self.lo.0, self.hi.0.max(self.lo.0));
-                let sy = ((fy + v * fh) / down - 0.5).clamp(self.lo.1, self.hi.1.max(self.lo.1));
+                let sx = ((fx + u * fw) / sa - 0.5).clamp(self.lo.0, self.hi.0.max(self.lo.0));
+                let sy = ((fy + v * fh) / sd - 0.5).clamp(self.lo.1, self.hi.1.max(self.lo.1));
                 let (kx, ky) = (sx.floor(), sy.floor());
                 let (ax, ay) = ((sx - kx) as f32, (sy - ky) as f32);
                 let (kx, ky) = (kx as usize, ky as usize);

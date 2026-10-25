@@ -2,7 +2,9 @@ use serde_json::{Map, Value, json};
 
 use super::EDITOR;
 use super::effects::{effect, group, handle_point, handle_value, keyed, plain, ranged, rounded};
-use crate::model::{Crop, DynamicZoom, Ease, Handle, Keyframe, Picture, VideoInfo, ZoomBox};
+use crate::model::{
+    CompositeMode, Crop, DynamicZoom, Ease, Handle, Keyframe, Picture, VideoInfo, ZoomBox,
+};
 
 const TRANSFORM: &str = "Transform";
 const CROPPING: &str = "Cropping";
@@ -86,16 +88,21 @@ impl Shape {
 fn kind(e: &Value) -> Option<&'static str> {
     let name = e["metadata"][EDITOR]["Effect Name"].as_str()?;
     let found = NAMES.into_iter().find(|n| *n == name)?;
-    (found != COMPOSITE || normal(e)).then_some(found)
+    (found != COMPOSITE || mixable(e)).then_some(found)
 }
 
-fn normal(e: &Value) -> bool {
+fn mode_of(v: &Value) -> Option<CompositeMode> {
+    let code = v.as_f64().filter(|c| c.fract() == 0.0 && *c >= 0.0)?;
+    CompositeMode::of_code(code as u32)
+}
+
+fn mixable(e: &Value) -> bool {
     e["metadata"][EDITOR]["Parameters"]
         .as_array()
         .into_iter()
         .flatten()
         .filter(|p| p["Parameter ID"] == MODE)
-        .all(|p| p["Parameter Value"].as_f64() == Some(0.0) && !keyframed(p))
+        .all(|p| mode_of(&p["Parameter Value"]).is_some() && !keyframed(p))
 }
 
 pub fn is_placing(e: &Value) -> bool {
@@ -252,6 +259,7 @@ struct Placement {
     softness: f64,
     scale: u8,
     dynamic: Option<DynamicZoom>,
+    mode: CompositeMode,
     opacity: f64,
 }
 
@@ -306,6 +314,10 @@ fn placement(effects: &[Value]) -> Option<Placement> {
         softness: number(SOFTNESS, 0.0)?,
         scale,
         dynamic,
+        mode: match given(MODE) {
+            None => CompositeMode::Normal,
+            Some(v) => mode_of(v)?,
+        },
         opacity: number(OPACITY, PERCENT)? / PERCENT,
     })
 }
@@ -346,6 +358,7 @@ impl Placement {
             },
             crop_softness: (softness != 0.0).then_some(softness),
             dynamic_zoom: self.dynamic,
+            composite_mode: (self.mode != CompositeMode::Normal).then_some(self.mode),
             opacity: (opacity != 1.0).then_some(opacity),
             ..Picture::default()
         }
@@ -817,15 +830,18 @@ pub(crate) fn effects(
         PERCENT,
     );
     let opacity = p.opacity_keys.first().map_or(p.opaque(), |k| k.value);
-    let composite: Vec<Value> = double_frames(
-        OPACITY,
-        rounded(opacity * PERCENT),
-        PERCENT,
-        (0.0, PERCENT),
-        opacity_keys,
-    )
-    .into_iter()
-    .collect();
+    let mode = (p.mode() != CompositeMode::Normal)
+        .then(|| keyed(MODE, json!(p.mode().code()), json!(0), "UInt"));
+    let composite: Vec<Value> = mode
+        .into_iter()
+        .chain(double_frames(
+            OPACITY,
+            rounded(opacity * PERCENT),
+            PERCENT,
+            (0.0, PERCENT),
+            opacity_keys,
+        ))
+        .collect();
     [
         (TRANSFORM, 2, transform),
         (CROPPING, 3, cropping),

@@ -1,4 +1,4 @@
-use crate::model::{Picture, VideoInfo};
+use crate::model::{CompositeMode, Picture, VideoInfo};
 use crate::render::Placed;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,6 +65,7 @@ impl Soft {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Placing {
     pub levels: Vec<Level>,
+    pub mode: CompositeMode,
 }
 
 pub fn flipped(p: &Picture, [x, y]: [f64; 2]) -> [f64; 2] {
@@ -230,7 +231,12 @@ impl Placing {
             };
             levels.push(Level { back, ..own });
         }
-        Self { levels }
+        let mode = placed
+            .iter()
+            .map(|p| p.picture.mode())
+            .find(|m| *m != CompositeMode::Normal)
+            .unwrap_or_default();
+        Self { levels, mode }
     }
 
     pub fn whole(placed: &[Placed], frame: (f64, f64)) -> Self {

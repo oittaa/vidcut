@@ -1618,9 +1618,12 @@ pub struct Picture {
     /// end box. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dynamic_zoom: Option<DynamicZoom>,
+    /// How it mixes with the tracks below. Usual: `normal`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composite_mode: Option<CompositeMode>,
     /// How much of it shows over the tracks below, from 0 (none) to 1 (all
-    /// of it). Usual: 1. With `opacity_keys`, the opacity at a frame is that
-    /// curve.
+    /// of it): the mix of its composite mode, faded over them. Usual: 1.
+    /// With `opacity_keys`, the opacity at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// Opacity keyframes, from 0 to 1 (decision D75).
@@ -1757,9 +1760,116 @@ impl Crop {
     }
 }
 
+/// How a picture mixes with the tracks below it, on each channel of their
+/// code values from 0 (black) to 1 (white): `a` is the picture, `b` is
+/// what is below it. Results above 1 and below 0 are kept for the opacity.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CompositeMode {
+    /// `a`.
+    #[default]
+    Normal,
+    /// `a + b`.
+    Add,
+    /// `b − a`.
+    Subtract,
+    /// `|a − b|`.
+    Difference,
+    /// `a × b`.
+    Multiply,
+    /// `1 − (1 − a)(1 − b)`.
+    Screen,
+    /// `2ab` where `b` is up to 0.5, else `1 − 2(1 − a)(1 − b)`.
+    Overlay,
+    /// `2ab` where `a` is up to 0.5, else `1 − 2(1 − a)(1 − b)`.
+    Hardlight,
+    /// `b − (1 − 2a)b(1 − b)` where `a` is up to 0.5, else `b + (2a − 1)(d
+    /// − b)`, with `d` = `√b`, or `((16b − 12)b + 4)b` where `b` is up to
+    /// 0.25.
+    Softlight,
+    /// The lower of `a` and `b`.
+    Darken,
+    /// The higher of `a` and `b`.
+    Lighten,
+    /// `b / (1 − a)`, up to 1; 1 where `a` is 1.
+    ColorDodge,
+    /// `1 − (1 − b) / a`, from 0; 0 where `a` is 0.
+    ColorBurn,
+    /// `a + b − 2ab`.
+    Exclusion,
+    /// The hue of `a`, with the colorfulness and the luma (BT.709) of `b`.
+    Hue,
+    /// The colorfulness of `a`, with the hue and the luma (BT.709) of `b`.
+    Saturation,
+    /// The chroma of `a`, with the luma (BT.601) of `b`.
+    Color,
+    /// The luma (BT.601) of `a`, with the chroma of `b`.
+    Luminosity,
+    /// `b / a`, up to 1.
+    Divide,
+    /// `a + b`, as `add`.
+    LinearDodge,
+    /// `a + b − 1`.
+    LinearBurn,
+    /// `b + 2a − 1`.
+    LinearLight,
+    /// `color_burn` by `2a` where `a` is up to 0.5, else `color_dodge` by
+    /// `2a − 1`.
+    VividLight,
+    /// The lower of `b` and `2a` where `a` is up to 0.5, else the higher of
+    /// `b` and `2a − 1`.
+    PinLight,
+    /// 1 where `a + b` is 1 or more, else 0.
+    HardMix,
+    /// `a` where the sum of its channels is more than that of `b`, else `b`.
+    LighterColor,
+    /// `a` where the sum of its channels is less than that of `b`, else `b`.
+    DarkerColor,
+}
+
+impl CompositeMode {
+    pub const ALL: [CompositeMode; 27] = [
+        Self::Normal,
+        Self::Add,
+        Self::Subtract,
+        Self::Difference,
+        Self::Multiply,
+        Self::Screen,
+        Self::Overlay,
+        Self::Hardlight,
+        Self::Softlight,
+        Self::Darken,
+        Self::Lighten,
+        Self::ColorDodge,
+        Self::ColorBurn,
+        Self::Exclusion,
+        Self::Hue,
+        Self::Saturation,
+        Self::Color,
+        Self::Luminosity,
+        Self::Divide,
+        Self::LinearDodge,
+        Self::LinearBurn,
+        Self::LinearLight,
+        Self::VividLight,
+        Self::PinLight,
+        Self::HardMix,
+        Self::LighterColor,
+        Self::DarkerColor,
+    ];
+
+    pub fn code(self) -> u32 {
+        Self::ALL.iter().position(|m| *m == self).unwrap_or(0) as u32
+    }
+
+    pub fn of_code(code: u32) -> Option<Self> {
+        Self::ALL.get(usize::try_from(code).ok()?).copied()
+    }
+}
+
 /// Which of a picture's tools: `transform` (its position, zoom, rotation,
 /// anchor, pitch, yaw and flips), `crop` (its sides and softness),
-/// `dynamic_zoom` or `composite` (its opacity).
+/// `dynamic_zoom` or `composite` (its composite mode and opacity).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PictureTool {
@@ -1807,6 +1917,10 @@ impl Picture {
 
     pub fn opaque(&self) -> f64 {
         self.opacity.unwrap_or(1.0)
+    }
+
+    pub fn mode(&self) -> CompositeMode {
+        self.composite_mode.unwrap_or_default()
     }
 }
 
