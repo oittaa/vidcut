@@ -113,7 +113,7 @@ Motions:
 - A `VideoPiece::Mix` frame is one `Picture` with an `Over` (picture and weight) on top for each layer. Each layer is as decoded.
 - The viewer blends the layers as it draws. It first converts each layer to its RGB.
 - An export mixes the layers in its own code values ([export](export.md)).
-- Thus, during a dissolve, the picture of an HDR export is not the same as the viewer's picture ([todo](../todo/hdr-dissolve-preview.md)).
+- Thus, during a dissolve, the picture of an HDR export is not the same as the viewer's picture ([todo](../todo/timeline-colors.md)).
 
 **Placed pictures**
 
