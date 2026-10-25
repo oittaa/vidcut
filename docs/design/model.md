@@ -146,6 +146,7 @@ Media fields:
 - `left_out` holds the source frames that the Delete of the Transcription window left out (`media.leave_out`).
   - `ops::leave_out` keeps these frames in order and apart.
   - Every edit of the media leaves these frames out. `resolve_sources` cuts each source range around them (`model::uncovered`).
+  - An edit that fills the timeline In–Out can need more frames than the range. Then the frames after the range also skip them (`fit_to`).
 - `words` holds the words that the project takes from the transcripts of each sound stream (`ChosenWords`, [analysis](analysis.md)).
 
 Folders:

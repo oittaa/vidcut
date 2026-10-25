@@ -448,6 +448,7 @@ The bar and the Jobs button:
   - While the pointer is over the window, `TranscriptionUi::take_keys` takes Delete, X, Ctrl+A, Ctrl+C and Esc before the timeline's shortcuts. It takes 1 to 9 while choices show.
   - What it changes goes as requests: `media.marks.set` or `marks.set`, `media.leave_out`, `edit.ripple_delete_words`, `markers.add`, `media.words.set`, `media.transcripts.main` and `media.transcripts.remove`.
   - Place on Top, Insert and Append send one edit of the selection, as the viewer's buttons do (`Workspace::edit_from`). The core leaves out the frames that Delete left out.
+  - Insert (`edit.insert`) goes in at the timeline In, else at the playhead.
 - **Rows that do not fit.**
   - These are each a `Row` that `Workspace::fit_row` lays out:
     - the top bar
