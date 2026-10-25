@@ -140,8 +140,10 @@ pub enum Request {
     /// Transcribe Audio: hear each pool item's own sound (`stream`, counted
     /// from 0) and keep its words, with their times, with the media, for
     /// `analyze.words` with `media` or `clips` and the Transcription window.
-    /// A transcript kept from before is used unless `again`, or another
-    /// model or another `language` made it, when the new one replaces it.
+    /// A file keeps one transcript for each model and its settings
+    /// (`media.transcripts.list`). One made the same way is used again unless
+    /// `again`; another model or other settings add one. The project takes
+    /// the words of the newest unless `media.transcripts.main` picks another.
     /// Only a model that times words is kept: Parakeet Ultra; the others are
     /// refused. It runs as a job. A transcript is kept with vidcut's other
     /// measurements of the file, so a changed file has none.
@@ -205,7 +207,7 @@ pub enum Request {
         /// Gemini's options, for the `google` model.
         #[serde(default)]
         google: Option<GoogleOptions>,
-        /// Hear media that have a transcript again, replacing it.
+        /// Hear media again that have a transcript made the same way, replacing it.
         #[serde(default)]
         again: bool,
     },
