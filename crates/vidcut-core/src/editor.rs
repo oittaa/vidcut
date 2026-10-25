@@ -3164,13 +3164,15 @@ fn mutate(
             clips,
             duration,
             ripple,
+            extend,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let ripple = Some(ripple.unwrap_or(true));
             if matches!(duration, TimeSpec::Keyword(crate::time::Keyword::End)) {
-                ops::extend_to_media_end(p, &ids, *ripple)?;
+                ops::extend_to_media_end(p, &ids, ripple)?;
             } else {
                 let frames = length(p, duration)?;
-                ops::change_duration(p, &ids, frames, *ripple)?;
+                ops::change_duration(p, &ids, frames, ripple, *extend)?;
             }
             Value::Null
         }

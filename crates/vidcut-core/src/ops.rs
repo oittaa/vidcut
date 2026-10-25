@@ -89,6 +89,10 @@ fn main_empty_from(p: &Project, t: i64) -> bool {
     p.tracks[main_index(p)].clips.iter().all(|c| c.end() <= t)
 }
 
+fn ripples(p: &Project, ti: usize, from: i64, ripple: Option<bool>) -> bool {
+    ripple.unwrap_or(p.settings.ripple_on) && (ti == main_index(p) || main_empty_from(p, from))
+}
+
 fn split_at(p: &mut Project, ti: usize, t: i64) -> Option<String> {
     let ci = p.tracks[ti]
         .clips
@@ -1291,7 +1295,7 @@ pub fn trim(p: &mut Project, id: &str, edge: Edge, delta: i64, ripple: Option<bo
     let (ti, ci) = locate(p, id)?;
     let main = ti == main_index(p);
     let c = p.tracks[ti].clips[ci].clone();
-    let ripple = ripple.unwrap_or(p.settings.ripple_on) && (main || main_empty_from(p, c.start));
+    let ripple = ripples(p, ti, c.start, ripple);
     let old_end = c.end();
     let mut new = c.clone();
     match edge {
@@ -1433,6 +1437,7 @@ pub fn change_duration(
     ids: &[String],
     frames: i64,
     ripple: Option<bool>,
+    extend: bool,
 ) -> Result<()> {
     if frames < 1 {
         return Err(Error::invalid("duration must be at least one frame"));
@@ -1442,13 +1447,37 @@ pub fn change_duration(
         let c = p
             .clip(id)
             .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-        targets.push((c.start, id.clone(), c.duration));
+        let room = p
+            .source_range(c)
+            .map_or(i64::MAX / 4, |have| c.room(true, have));
+        targets.push((c.start, id.clone(), c.duration, room));
     }
     targets.sort();
-    for (_, id, duration) in targets.into_iter().rev() {
-        if frames != duration {
-            trim(p, &id, Edge::Tail, frames - duration, ripple)?;
+    for (_, id, duration, room) in targets.into_iter().rev() {
+        let by = (frames - duration).min(room);
+        if by != 0 {
+            trim(p, &id, Edge::Tail, by, ripple)?;
         }
+        let rest = frames - duration - by;
+        if extend && rest > 0 {
+            gap_after(p, &id, rest, ripple)?;
+        }
+    }
+    Ok(())
+}
+
+fn gap_after(p: &mut Project, id: &str, frames: i64, ripple: Option<bool>) -> Result<()> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    let end = c.end();
+    if !ripples(p, ti, c.start, ripple) {
+        return Ok(());
+    }
+    let before = (ti == main_index(p)).then(|| Before::of(p));
+    shift_from(p, ti, end, frames);
+    fix_audio(p, ti);
+    if let Some(before) = before {
+        follow::follow(p, &before, &Edit::default());
     }
     Ok(())
 }
