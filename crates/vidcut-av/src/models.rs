@@ -49,7 +49,86 @@ pub fn size(bytes: u64) -> String {
 }
 
 pub fn present(dir: &Path, f: &File) -> bool {
-    std::fs::metadata(dir.join(f.name)).is_ok_and(|m| m.len() == f.bytes)
+    f.present(dir)
+}
+
+pub fn sha256_of(path: &Path) -> Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buf[..n]);
+    }
+    Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+pub fn verify(dir: &Path, files: &[File]) -> Result<()> {
+    for f in files {
+        let have = sha256_of(&dir.join(f.name))?;
+        if have != f.sha256 {
+            return Err(Error::Invalid(format!(
+                "{}: its SHA-256 is {have}, the catalog has {}",
+                dir.join(f.name).display(),
+                f.sha256
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub struct Inspected {
+    pub found: vidcut_core::catalog::Found,
+    pub loaded: Option<&'static str>,
+}
+
+pub fn inspect(
+    model: &'static vidcut_core::catalog::Model,
+    dir: &Path,
+    download: bool,
+) -> Result<Inspected> {
+    let found = vidcut_core::catalog::Found::default();
+    match model.id {
+        "parakeet-ultra" | "qwen3-asr" | "whisper-large-v3" | "silero-vad" | "sortformer"
+        | "moss" => {
+            let file = model
+                .files
+                .first()
+                .ok_or_else(|| Error::Invalid(format!("{} has no file", model.title)))?;
+            Ok(Inspected {
+                found: crate::transcribe::inspect(dir, file, download)?,
+                loaded: Some("transcribe.cpp"),
+            })
+        }
+        "dpdfnet" => {
+            crate::isolate::inspect(dir, download)?;
+            Ok(Inspected {
+                found,
+                loaded: Some("tract"),
+            })
+        }
+        "nanovsr" => {
+            crate::upscale::inspect(dir, download)?;
+            Ok(Inspected {
+                found,
+                loaded: Some("vidcut"),
+            })
+        }
+        "flashvsr" => {
+            crate::flashvsr::inspect(dir, download)?;
+            Ok(Inspected {
+                found,
+                loaded: Some("vidcut, on the GPU"),
+            })
+        }
+        _ => Err(Error::Invalid(format!(
+            "vidcut has no check for {}",
+            model.title
+        ))),
+    }
 }
 
 unsafe extern "C" fn interrupted(opaque: *mut c_void) -> c_int {

@@ -31,6 +31,56 @@ fn shortcuts() -> Value {
 }
 use crate::export;
 
+fn models_list() -> Value {
+    use vidcut_core::catalog;
+    let dir = crate::paths::models_dir();
+    json!({
+        "folder": dir,
+        "models": catalog::ALL.iter().map(|m| m.json(&dir)).collect::<Vec<_>>(),
+        "runtime": catalog::runtime_json(&dir),
+    })
+}
+
+fn models_check(id: &str, download: bool) -> Result<Value> {
+    use vidcut_core::catalog;
+    let model = catalog::find(id).ok_or_else(|| {
+        Error::not_found(format!(
+            "no model {id:?}; models.list lists {}",
+            catalog::ids().join(", ")
+        ))
+    })?;
+    if model.files.is_empty() {
+        return Err(Error::usage(format!(
+            "{} runs on its company's servers: it has no files to check",
+            model.title
+        )));
+    }
+    let dir = crate::paths::models_dir();
+    let inspected = vidcut_av::models::inspect(model, &dir, download)
+        .map_err(|e| export::av_error(&e, ErrorCode::Media, String::new()))?;
+    let found = &inspected.found;
+    let differences = catalog::differences(model, found);
+    if !differences.is_empty() {
+        return Err(Error::invalid(format!(
+            "{} differs from the catalog: {}",
+            model.id,
+            differences.join("; ")
+        )));
+    }
+    Ok(json!({
+        "model": model.id,
+        "files": model.files.iter().map(|f| f.name).collect::<Vec<_>>(),
+        "sha256": "matches",
+        "loaded": inspected.loaded,
+        "reported": {
+            "languages": found.languages,
+            "times": found.times,
+            "audio_secs": found.audio_secs,
+            "speakers": found.speakers,
+        },
+    }))
+}
+
 fn list_looks(kind: Option<looks::LookKind>) -> Value {
     let (mut found, mut refused) = (Vec::new(), Vec::new());
     for k in kind.map_or(looks::LookKind::ALL.to_vec(), |k| vec![k]) {
@@ -217,6 +267,8 @@ pub fn run_with(
             let clips = vidcut_core::disk_cache::Kind::DecoderTests.dir();
             answer(json!({ "decoders": vidcut_av::hw::decoders(&clips) }))
         }
+        Request::ModelsList {} => answer(models_list()),
+        Request::ModelsCheck { model, download } => answer(models_check(model, *download)?),
         Request::PreferencesGet {} => answer(crate::preferences::get()?),
         Request::KeysList {} => answer(shortcuts()),
         Request::ServicesSetKey { service, key } => answer(crate::services::set_key(
