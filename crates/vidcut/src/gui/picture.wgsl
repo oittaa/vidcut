@@ -439,7 +439,11 @@ struct Screen {
 @fragment
 fn fs_screen(in: Out) -> @location(0) vec4<f32> {
     let code = textureLoad(timeline, vec2<i32>(in.position.xy), 0).rgb;
-    var c = decode(code, u32(screen.mode.x + 0.5), screen.mode.y);
+    let transfer = u32(screen.mode.x + 0.5);
+    if transfer == 0u {
+        return vec4<f32>(clamp(code, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    }
+    var c = decode(code, transfer, screen.mode.y);
     c = vec3<f32>(dot(screen.gamut0.xyz, c), dot(screen.gamut1.xyz, c), dot(screen.gamut2.xyz, c));
     return vec4<f32>(clamp(tone_mapped(c, screen.tone), vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }

@@ -12,6 +12,7 @@ use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
 use super::make::{Fitting, Maker, Output};
+use super::place::Canvas;
 use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, format, frame};
@@ -1871,16 +1872,15 @@ impl VideoFrames {
                         Some(f) => crate::hw::download(f),
                     }
                 };
-                let mut mixed = in_memory(layers[0].frame.as_ref())?;
-                let mut below: Option<frame::Video> = None;
+                let mut mixed = Canvas::of(&in_memory(layers[0].frame.as_ref())?)?;
+                let mut below: Option<Canvas> = None;
                 let mut i = 1;
                 while i < layers.len() {
                     let l = &layers[i];
                     let over = in_memory(l.frame.as_ref())?;
                     if let Some(mask) = l.wipe {
                         let covered =
-                            |under: &frame::Video, over: &frame::Video, l: &Layer| match &l.placing
-                            {
+                            |under: &Canvas, over: &frame::Video, l: &Layer| match &l.placing {
                                 Some((placing, fitted)) => super::place::over(
                                     under,
                                     &super::place::Layer {
@@ -1890,7 +1890,7 @@ impl VideoFrames {
                                         weight: WHOLE,
                                     },
                                 ),
-                                None => frame_ref(over),
+                                None => Canvas::of(over),
                             };
                         let hold = layers
                             .get(i + 1)
@@ -1913,17 +1913,19 @@ impl VideoFrames {
                         continue;
                     }
                     let weight = l.weight.unwrap_or(WHOLE);
-                    let laid = |under: &frame::Video| match &l.placing {
-                        Some((placing, fitted)) => super::place::over(
-                            under,
-                            &super::place::Layer {
-                                picture: &over,
-                                placing,
-                                fitted: *fitted,
-                                weight,
-                            },
-                        ),
-                        None => super::mix::mix(under, &over, weight),
+                    let laid = |under: &Canvas| -> Result<Canvas> {
+                        match &l.placing {
+                            Some((placing, fitted)) => super::place::over(
+                                under,
+                                &super::place::Layer {
+                                    picture: &over,
+                                    placing,
+                                    fitted: *fitted,
+                                    weight,
+                                },
+                            ),
+                            None => super::mix::mix(under, &Canvas::of(&over)?, weight),
+                        }
                     };
                     if l.crossing
                         && let Some(b) = &below
@@ -1935,6 +1937,7 @@ impl VideoFrames {
                     }
                     i += 1;
                 }
+                let mixed = mixed.frame();
                 match self.maker.output() {
                     Output::Cuda { frames, .. } => frames.upload(&mixed)?,
                     _ => mixed,

@@ -4,6 +4,7 @@ use crate::color::{Colors, colors_of};
 use crate::decode::Decoding;
 use crate::error::Result;
 use crate::export::normalize::Normalizer;
+use crate::export::place::Canvas;
 use crate::ffmpeg::{self, format, frame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,8 +201,8 @@ impl Picture {
         }
         let width = width.max(2) & !1;
         let height = height.max(2) & !1;
-        let mut mixed = fitted(self, width, height, colors)?;
-        let mut below: Option<frame::Video> = None;
+        let mut mixed = Canvas::of(&fitted(self, width, height, colors)?)?;
+        let mut below: Option<Canvas> = None;
         let mut i = 0;
         while i < self.over.len() {
             let hold = self.over.get(i + 1).is_some_and(|n| n.wipe.is_some())
@@ -210,9 +211,10 @@ impl Picture {
             let mine = placed.get(i + 1).map(Vec::as_slice).unwrap_or(&[][..]);
             let crossing = crosses.get(i + 1).copied().unwrap_or(false);
             if let Some(mask) = o.wipe {
-                let covered = |under: &frame::Video| -> Result<frame::Video> {
+                let covered = |under: &Canvas| -> Result<Canvas> {
                     if mine.is_empty() {
-                        fitted(&o.picture, under.width(), under.height(), colors)
+                        let (w, h) = under.size();
+                        Canvas::of(&fitted(&o.picture, w, h, colors)?)
                     } else {
                         placed_on(under, &o.picture, mine, vidcut_core::render::WHOLE, colors)
                     }
@@ -235,9 +237,10 @@ impl Picture {
                 continue;
             }
             let weight = o.weight;
-            let laid = |under: &frame::Video| -> Result<frame::Video> {
+            let laid = |under: &Canvas| -> Result<Canvas> {
                 if mine.is_empty() {
-                    let top = fitted(&o.picture, under.width(), under.height(), colors)?;
+                    let (w, h) = under.size();
+                    let top = Canvas::of(&fitted(&o.picture, w, h, colors)?)?;
                     crate::export::mix::mix(under, &top, weight)
                 } else {
                     placed_on(under, &o.picture, mine, weight, colors)
@@ -251,24 +254,25 @@ impl Picture {
             }
             i += 1;
         }
+        let mut mixed = mixed.frame();
         crate::color::tag_frame(&mut mixed, colors);
         Ok(Some(Self::new(mixed, 0, None, None)))
     }
 }
 
 fn placed_on(
-    under: &frame::Video,
+    under: &Canvas,
     picture: &Picture,
     placed: &[vidcut_core::render::Placed],
     weight: u32,
     colors: Option<vidcut_core::model::Hdr>,
-) -> Result<frame::Video> {
+) -> Result<Canvas> {
     let shown = source_frame(picture, colors)?;
     let (placing, at) = crate::export::video::placing_of(
         picture.frame(),
         picture.rotation(),
         (shown.width(), shown.height()),
-        (under.width(), under.height()),
+        under.size(),
         placed,
     );
     crate::export::place::over(

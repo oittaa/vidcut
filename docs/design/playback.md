@@ -244,6 +244,9 @@ The audio device:
   - Each layer is converted to linear light, then to BT.2020 colors, then to the PQ or HLG curve of the timeline. Titles and subtitles are converted the same way from sRGB.
   - Then one more draw (`fs_screen`) converts that picture to the target: to BT.709, tone-mapped with the export's math.
   - Thus the layers, titles and subtitles mix in the timeline's code values, as in an export.
+- With an SDR timeline and a layer with a composite mode, the passes also draw into `Wide`, in the SDR code values:
+  - Thus a color above 1 or below 0 stays between the layers, as in an export.
+  - Then `fs_screen` only cuts each value to the range from 0 to 1.
 - The drawing:
   - It fits the picture as the export does, and turns it upright.
   - It scales in YUV and converts to RGB with the export's math (`shader_colors`). In an SDR timeline, it tone-maps HDR.

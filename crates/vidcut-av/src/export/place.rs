@@ -3,6 +3,7 @@ use vidcut_core::model::{CompositeMode, Title};
 use vidcut_core::place::{Placing, ahead, apply, chain, lettered};
 use vidcut_core::render::{Placed, WHOLE};
 
+use super::video::frame_ref;
 use crate::burn::Sprite;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{ffi, format, frame};
@@ -29,6 +30,13 @@ impl Comp {
 
     fn top(&self) -> f64 {
         f64::from((1u32 << self.depth) - 1)
+    }
+
+    fn size(&self, (w, h): (u32, u32)) -> (usize, usize) {
+        (
+            w.div_ceil(1 << self.log2w) as usize,
+            h.div_ceil(1 << self.log2h) as usize,
+        )
     }
 
     fn read(&self, data: &[u8], at: usize) -> f32 {
@@ -119,6 +127,129 @@ fn copy(under: &frame::Video) -> frame::Video {
     out
 }
 
+pub(crate) struct Canvas {
+    like: frame::Video,
+    comps: Vec<Comp>,
+    values: Vec<Vec<f32>>,
+}
+
+impl Canvas {
+    pub(crate) fn of(f: &frame::Video) -> Result<Self> {
+        let comps = comps(f.format())?;
+        let size = (f.width(), f.height());
+        let values = comps
+            .iter()
+            .map(|c| {
+                let (width, height) = c.size(size);
+                let (data, stride) = (f.data(c.plane), f.stride(c.plane));
+                let mut values = vec![0.0; width * height];
+                banded(&mut values, width, 0..height, |y, row| {
+                    for (x, v) in row.iter_mut().enumerate() {
+                        *v = c.read(data, y * stride + x * c.step + c.offset);
+                    }
+                });
+                values
+            })
+            .collect();
+        Ok(Self {
+            like: frame_ref(f)?,
+            comps,
+            values,
+        })
+    }
+
+    pub(crate) fn size(&self) -> (u32, u32) {
+        (self.like.width(), self.like.height())
+    }
+
+    pub(crate) fn frame(&self) -> frame::Video {
+        let mut out = copy(&self.like);
+        let size = self.size();
+        for (c, values) in self.comps.iter().zip(&self.values) {
+            let (width, height) = c.size(size);
+            let stride = out.stride(c.plane);
+            banded(out.data_mut(c.plane), stride, 0..height, |y, row| {
+                for (x, v) in values[y * width..][..width].iter().enumerate() {
+                    c.write(row, x * c.step + c.offset, *v);
+                }
+            });
+        }
+        out
+    }
+
+    fn holding(&self, values: Vec<Vec<f32>>) -> Result<Self> {
+        Ok(Self {
+            like: frame_ref(&self.like)?,
+            comps: self.comps.clone(),
+            values,
+        })
+    }
+
+    fn matches(&self, other: &Canvas) -> Result<()> {
+        if other.like.format() != self.like.format() || other.size() != self.size() {
+            return Err(Error::Invalid(
+                "pictures of different sizes or formats can't be mixed".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn zipped(&self, other: &Canvas, f: impl Fn(f32, f32) -> f32) -> Result<Self> {
+        self.matches(other)?;
+        self.holding(
+            self.values
+                .iter()
+                .zip(&other.values)
+                .map(|(a, b)| a.iter().zip(b).map(|(a, b)| f(*a, *b)).collect())
+                .collect(),
+        )
+    }
+
+    pub(crate) fn picked(&self, other: &Canvas, takes: impl Fn([u32; 4]) -> bool) -> Result<Self> {
+        self.matches(other)?;
+        let size = self.size();
+        self.holding(
+            self.comps
+                .iter()
+                .zip(self.values.iter().zip(&other.values))
+                .map(|(c, (a, b))| {
+                    let (width, height) = c.size(size);
+                    a.iter()
+                        .zip(b)
+                        .enumerate()
+                        .map(|(i, (a, b))| {
+                            let at = [i % width, i / width, width, height].map(|v| v as u32);
+                            if takes(at) { *b } else { *a }
+                        })
+                        .collect()
+                })
+                .collect(),
+        )
+    }
+}
+
+fn banded<T: Send>(
+    data: &mut [T],
+    width: usize,
+    rows: std::ops::Range<usize>,
+    each: impl Fn(usize, &mut [T]) + Sync,
+) {
+    let start = (rows.start * width).min(data.len());
+    let mut rest = &mut data[start..];
+    std::thread::scope(|scope| {
+        for band in bands(rows) {
+            let (chunk, next) = rest.split_at_mut((band.len() * width).min(rest.len()));
+            rest = next;
+            let each = &each;
+            scope.spawn(move || {
+                for (k, y) in band.enumerate() {
+                    each(y, &mut chunk[k * width..][..width]);
+                }
+            });
+        }
+    });
+}
+
 pub(crate) struct Layer<'a> {
     pub(crate) picture: &'a frame::Video,
     pub(crate) placing: &'a Placing,
@@ -138,76 +269,46 @@ fn bands(rows: std::ops::Range<usize>) -> Vec<std::ops::Range<usize>> {
         .collect()
 }
 
-pub(crate) fn over(under: &frame::Video, layer: &Layer) -> Result<frame::Video> {
-    let pixel = under.format();
-    if layer.picture.format() != pixel {
+pub(crate) fn over(under: &Canvas, layer: &Layer) -> Result<Canvas> {
+    if layer.picture.format() != under.like.format() {
         return Err(Error::Invalid(
             "pictures of different formats can't be placed over each other".into(),
         ));
     }
-    let comps = comps(pixel)?;
-    let mut out = copy(under);
-    let size = (under.width(), under.height());
+    let mut out = under.holding(under.values.clone())?;
+    let size = under.size();
     let Some(area) = layer.placing.bounds((f64::from(size.0), f64::from(size.1))) else {
         return Ok(out);
     };
+    let comps = &under.comps;
     let mode = layer.placing.mode;
     let colored = if comps.len() >= 3 { 3 } else { 1 };
-    let coding = Coding::of(under, &comps[..colored]);
-    let below: Vec<Below> = comps[..colored]
-        .iter()
-        .map(|c| Below::of(under, *c))
-        .collect();
-    for p in 0..out.planes() {
-        let mine: Vec<Mixing> = comps
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.plane == p)
-            .map(|(i, c)| Mixing {
-                channel: i,
-                own: Shading::of(*c, layer, size, area, c.grid()),
-                tops: match mode != CompositeMode::Normal && i < colored {
-                    true => comps[..colored]
-                        .iter()
-                        .map(|k| Shading::of(*k, layer, size, area, c.grid()))
-                        .collect(),
-                    false => Vec::new(),
-                },
-            })
-            .collect();
-        let Some(rows) = mine
-            .first()
-            .map(|m| m.own.rows(out.plane_height(p) as usize))
-        else {
-            continue;
+    let coding = Coding::of(&under.like, &comps[..colored]);
+    let below: Vec<Below> = (0..colored).map(|k| Below::of(under, k)).collect();
+    for (i, (c, values)) in comps.iter().zip(&mut out.values).enumerate() {
+        let m = Mixing {
+            channel: i,
+            own: Shading::of(*c, layer, size, area, c.grid()),
+            tops: match mode != CompositeMode::Normal && i < colored {
+                true => comps[..colored]
+                    .iter()
+                    .map(|k| Shading::of(*k, layer, size, area, c.grid()))
+                    .collect(),
+                false => Vec::new(),
+            },
         };
-        let stride = out.stride(p);
-        let mut rest = &mut out.data_mut(p)[rows.start * stride..];
-        let (coding, below) = (&coding, &below);
-        std::thread::scope(|scope| {
-            for band in bands(rows) {
-                let (chunk, next) = rest.split_at_mut((band.len() * stride).min(rest.len()));
-                rest = next;
-                let mine = &mine;
-                scope.spawn(move || {
-                    for (k, y) in band.enumerate() {
-                        let row = &mut chunk[k * stride..][..stride];
-                        for m in mine {
-                            let s = &m.own;
-                            for x in s.columns() {
-                                let shown = match m.tops.is_empty() {
-                                    true => s.pixel(x, y),
-                                    false => m.mixed(mode, coding, below, s.comp.grid(), x, y),
-                                };
-                                if let Some((shown, a)) = shown {
-                                    let to = x * s.comp.step + s.comp.offset;
-                                    let under = s.comp.read(row, to);
-                                    s.comp.write(row, to, under + (shown - under) * a);
-                                }
-                            }
-                        }
-                    }
-                });
+        let (width, height) = c.size(size);
+        let (m, coding, below) = (&m, &coding, &below);
+        banded(values, width, m.own.rows(height), |y, row| {
+            let s = &m.own;
+            for x in s.columns() {
+                let shown = match m.tops.is_empty() {
+                    true => s.pixel(x, y),
+                    false => m.mixed(mode, coding, below, s.comp.grid(), x, y),
+                };
+                if let Some((shown, a)) = shown {
+                    row[x] += (shown - row[x]) * a;
+                }
             }
         });
     }
@@ -249,21 +350,17 @@ impl Mixing<'_> {
 
 struct Below<'a> {
     comp: Comp,
-    data: &'a [u8],
-    stride: usize,
+    values: &'a [f32],
     size: (usize, usize),
 }
 
 impl<'a> Below<'a> {
-    fn of(f: &'a frame::Video, comp: Comp) -> Self {
+    fn of(c: &'a Canvas, k: usize) -> Self {
+        let comp = c.comps[k];
         Self {
             comp,
-            data: f.data(comp.plane),
-            stride: f.stride(comp.plane),
-            size: (
-                f.width().div_ceil(1 << comp.log2w) as usize,
-                f.height().div_ceil(1 << comp.log2h) as usize,
-            ),
+            values: &c.values[k],
+            size: comp.size(c.size()),
         }
     }
 
@@ -281,7 +378,7 @@ impl<'a> Below<'a> {
         let mut sum = 0.0;
         for j in ys {
             for i in xs.clone() {
-                sum += c.read(self.data, j * self.stride + i * c.step + c.offset);
+                sum += self.values[j * self.size.0 + i];
             }
         }
         sum / count
@@ -591,10 +688,7 @@ impl<'a> Shading<'a> {
         let (across, down) = (f64::from(1u32 << gw), f64::from(1u32 << gh));
         let (sa, sd) = (f64::from(1u32 << comp.log2w), f64::from(1u32 << comp.log2h));
         let picture = layer.picture;
-        let grid = (
-            picture.width().div_ceil(1 << comp.log2w) as usize,
-            picture.height().div_ceil(1 << comp.log2h) as usize,
-        );
+        let grid = comp.size((picture.width(), picture.height()));
         let [fx, fy, fw, fh] = layer.fitted;
         let [dux, duy, dvx, dvy] = layer.placing.step();
         let taps = |a: f64, b: f64| (a.hypot(b).ceil() as usize).clamp(1, 8);

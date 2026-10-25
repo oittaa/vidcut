@@ -199,6 +199,12 @@ Pictures:
   - With GPU decoding on: CUDA frames for NVENC, and the decoder's device for VAAPI, AMF and VideoToolbox on its GPU.
   - Else: memory.
 - A dissolve mixes by the same sums on the GPU for NVENC (`cuda::mix`) as on the CPU (`export::mix`).
+- On the CPU, the layers of a frame mix in a `Canvas`:
+  - It holds each component of the frame as 32-bit floats, in the code values of the frame.
+  - Thus a color above 1 or below 0 stays between the layers ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - After the last layer, `Canvas::frame` rounds the values and cuts them to the range of the code.
+  - The layers under a title become a frame before the title is drawn. Thus a title cuts the values ([todo](../todo/composite-masks.md)).
+  - A wipe in the viewer mixes in a `Canvas` too (`Picture::at_wipe`).
 
 ## Timeline colors
 
@@ -422,7 +428,7 @@ The pictures:
 - `VideoFrames` makes the frames of a placed layer in memory. On a GPU, they come down shrunk.
 - `place::Placing` maps each pixel of the frame back to the picture.
 - `place::Placing` leaves out the level of a clip in a compound clip when the clip fills the frame at its usual values. Thus the edges of the compound clip are covered once.
-- `export::place::over` lays the picture over the frame below, in its own code values. It taps each component over the footprint of the pixel, and covers the edges in part, as the viewer's shader does.
+- `export::place::over` lays the picture over the `Canvas` of the layers below, in its code values. It taps each component over the footprint of the pixel, and covers the edges in part, as the viewer's shader does.
 - The coverage of a pixel is the product over the levels of `place::Placing::at`. Each level gives its smoothed edges, its soft crop edges and its opacity.
 - A picture with a composite mode (`Placing::mode`) mixes in R'G'B' (D75):
   - For each sample of the frame, `export::place::over` taps all three components of the picture at that place.

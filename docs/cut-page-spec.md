@@ -1953,7 +1953,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - Color: the BT.601 Y of b with the Cb and Cr of a. Luminosity: the Y of a with the Cb and Cr of b.
       - Resolve goes back from Y, Cb and Cr by a matrix a little off BT.601. vidcut uses the matrix fitted to the renders.
     - The manual's words do not match the renders for some modes, for example Subtract and Hard Mix (pp. 1200–1202). vidcut follows the renders.
-    - In vidcut, the frames between layers hold the code values of the frame. Thus values above 1 and below 0 are cut there ([todo](todo/composite-masks.md)).
+    - vidcut also keeps these values between the layers. The export keeps them in 32-bit floats, and the viewer in 16-bit floats.
+    - In an export, a title between layers cuts them ([todo](todo/composite-masks.md)).
   - **Units** (vidcut's, X65):
     - `position` is where the middle of the picture goes before the zoom and the turn: `[x, y]` in fractions of the frame from its top left.
     - Each value of `position` is from −100 to 100. `[0.5, 0.5]` leaves the picture in place.
