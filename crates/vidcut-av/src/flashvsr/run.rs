@@ -492,33 +492,46 @@ fn gigabytes(b: u64) -> String {
     format!("{:.1}", b as f64 / 1e9)
 }
 
-pub(super) fn plan(gpu: &Gpu, g: &Geometry, model: u64) -> Result<Vec<bool>> {
+pub(super) struct Plan {
+    pub(super) resident: Vec<bool>,
+    pub(super) need: u64,
+    pub(super) room: Option<u64>,
+}
+
+pub(super) fn plan(gpu: &Gpu, g: &Geometry) -> Result<Plan> {
     let kv: Vec<u64> = (0..super::LAYERS)
         .map(|i| 2 * u64::from(keep_of(i)) * window(g))
         .collect();
-    let Some(have) = gpu.memory else {
-        return Ok(vec![true; kv.len()]);
+    let fixed = persistent(g) + chunk_work(g);
+    let all = Plan {
+        resident: vec![true; kv.len()],
+        need: fixed + kv.iter().sum::<u64>(),
+        room: None,
     };
-    let budget = have / 4 * 3;
-    let fixed = model + persistent(g) + chunk_work(g);
-    if fixed + kv.iter().sum::<u64>() <= budget {
-        return Ok(vec![true; kv.len()]);
+    let Some(room) = gpu.listed.as_ref().and_then(crate::player::room_on) else {
+        return Ok(all);
+    };
+    if all.need <= room {
+        return Ok(Plan {
+            room: Some(room),
+            ..all
+        });
     }
     let biggest = kv.iter().copied().max().unwrap_or(0);
-    if fixed + biggest > budget {
+    if fixed + biggest > room {
         return Err(Error::Invalid(format!(
-            "the AI Best upscaler needs about {} GB of GPU memory at {}x{}, and this GPU has {} GB",
+            "the AI Best upscaler needs about {} GB of GPU memory at {}x{}, and {} GB of this GPU is free",
             gigabytes(fixed + biggest),
             g.wm,
             g.hm,
-            gigabytes(have)
+            gigabytes(room)
         )));
     }
     let mut used = fixed + biggest;
     let resident: Vec<bool> = kv
         .iter()
         .map(|b| {
-            let fits = used + b <= budget;
+            let fits = used + b <= room;
             if fits {
                 used += b;
             }
@@ -541,7 +554,11 @@ pub(super) fn plan(gpu: &Gpu, g: &Geometry, model: u64) -> Result<Vec<bool>> {
             gigabytes(ram)
         )));
     }
-    Ok(resident)
+    Ok(Plan {
+        resident,
+        need: used,
+        room: Some(room),
+    })
 }
 
 impl Stream {

@@ -199,6 +199,19 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - When the last `ai::User` of an upscaler goes, its slot frees the GPU memory of that upscaler (`ai::Slot::release`). AI Fast frees its buffers. AI Best frees its model.
   - If the upscaler is at work at that time, the slot frees the memory when that work ends.
   - Thus the two AI upscalers do not hold their memory at the same time when the user switches from one to the other.
+- **The kept pictures give way to AI work** (`player::lend_on`):
+  - An AI upscaler takes the GPU memory that it needs from the viewer's kept pictures. It can use all of the GPU.
+  - Before it makes its buffers, it gets its room (`player::room_on`). The room is the free memory of the GPU and the GPU memory of the kept pictures.
+  - The free memory comes from the system (`gpus::spare`):
+    - On Windows, it is the DXGI budget of the process less its current use.
+    - On Linux, it is the Vulkan memory budget of the GPU's largest heap less its use.
+  - Without the free memory, the room is the GPU's memory less 1 GB for other programs, and less the memory of the other loans.
+  - Each loan (`store::Lent`) caps the video budget of the kept pictures at its room less its need.
+  - The cap is also true below a video budget that the user sets.
+  - AI Best has a loan for its model and one for each stream. AI Fast has one for its buffers.
+  - Stats for Nerds and Preferences show the smaller budget while a loan holds.
+  - A loan is only for the GPU of the viewer (`gpus::in_use`). An AI upscaler on another GPU takes no pictures.
+  - Why: the AI work and the kept pictures must fit on the GPU together. Otherwise the driver moves GPU memory to main memory, and one picture can take minutes.
 - **AI Fast** (`upscale`):
   - Before an export starts, `upscale::check` refuses media that AI Fast cannot take (`upscale::unfit`). It also refuses AI Fast without the weights or without a GPU that can run it.
   - A run is a chunk of 15 frames (`upscale::FRAMES`). The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
@@ -254,10 +267,10 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - `attend.wgsl` is a flash attention over the chosen key blocks, with an online softmax in 32-bit floats. Cross-attention to the fixed prompt uses it too.
       - Four threads share a query row. Each keeps the row's query in registers and does 8 keys and 32 output values. The partial sums keep the same groups, so the results do not depend on the layout.
     - The KV cache of each block is a ring of windows (`Cache`).
-    - `run::plan` keeps the caches on the GPU while all of the work fits in three quarters of the GPU's memory. The caches of the other blocks stay in main memory between chunks (`Keys::Host`). Each comes back to the GPU just before its block runs, and its new windows go back after it.
+    - `run::plan` keeps the caches on the GPU while all of the work fits in the room of AI work (`player::room_on`). The caches of the other blocks stay in main memory between chunks (`Keys::Host`). Each comes back to the GPU just before its block runs, and its new windows go back after it.
       - The new windows go to a mapped buffer in the first submission of the block. The block reads them at its end, while the GPU runs its feed-forward part.
     - The results are the same in both places.
-    - Without a size for the GPU's memory, all caches stay on the GPU.
+    - Without a room, all caches stay on the GPU. This occurs when the system gives neither the GPU's free memory nor its size.
     - A size that does not fit even with every cache in main memory is refused. So is a size whose caches need more than half of main memory.
     - The TC decoder gives 4 frames for each latent frame. Its memory blocks keep the features of the previous frame. Its full-size stage runs in bands of 64 rows.
       - A memory block works in three buffers: its input, its memory and one work buffer. The third stage makes its buffers once for the 4 frames of a latent frame.

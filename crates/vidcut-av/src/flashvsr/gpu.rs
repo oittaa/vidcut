@@ -34,7 +34,7 @@ struct Ring {
 pub(super) struct Gpu {
     pub(super) device: wgpu::Device,
     pub(super) queue: wgpu::Queue,
-    pub(super) memory: Option<u64>,
+    pub(super) listed: Option<crate::gpus::Gpu>,
     uploaded: AtomicU64,
     pipes: Mutex<HashMap<String, wgpu::ComputePipeline>>,
     ring: Mutex<Ring>,
@@ -119,12 +119,7 @@ impl Gpu {
         .map_err(|e| format!("no GPU for the AI Best upscaler: {e}"))?;
         let limits = adapter.limits();
         let info = adapter.get_info();
-        let id = format!("{:04x}:{:04x}", info.vendor, info.device);
-        let memory = crate::gpus::list()
-            .iter()
-            .find(|g| g.id.starts_with(&id))
-            .and_then(|g| g.memory_mb)
-            .map(|mb| mb << 20);
+        let listed = crate::gpus::of(info.vendor, info.device);
         let name = adapter.get_info().name;
         if limits.max_compute_workgroup_storage_size < SHARED
             || limits.max_compute_invocations_per_workgroup < 256
@@ -145,7 +140,7 @@ impl Gpu {
         Ok(Self {
             device,
             queue,
-            memory,
+            listed,
             uploaded: AtomicU64::new(0),
             pipes: Mutex::new(HashMap::new()),
             ring: Mutex::new(Ring {
