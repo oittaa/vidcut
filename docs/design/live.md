@@ -285,7 +285,8 @@ The bar and the Jobs button:
   - `gui.window` sets the size, position (not on Wayland), maximized, minimized and fullscreen of a running GUI.
 - **View state.**
   - The view state is:
-    - the selected edit point, and whether its dissolve is selected (`TimelineView::transition`)
+    - the selected edit points: the one clicked last (`TimelineView::edit`) and the others (`TimelineView::edits`)
+    - whether the dissolve of the edit clicked last is selected (`TimelineView::transition`)
     - the target track, the zoom and the Timeline Options (in `timeline.json`, Minimize Subtitle Track and Extend Beyond Clip Length too)
     - the open windows
   - Requests reach the view state through `Renderer::gui`.
@@ -293,7 +294,15 @@ The bar and the Jobs button:
   - While one of its handles is dragged, `TimelineView::strip_drag` holds the trim.
   - Then the timeline and the two frames of the editor show the project with the trim applied (`Workspace::strip_drawn`), as for a Dynamic Trim run.
   - The trim is sent on release.
-  - The selected edit pulses (`paint::pulse`). The UI repaints for this only while an edit is selected.
+  - The selected edits pulse (`paint::pulse`). The UI repaints for this only while an edit is selected.
+- **Trims of the selected edits.**
+  - `edits::Cut` is the trim that an edit gets: a roll, an audio roll, or a trim of one side. It gives the request and runs the same `vidcut_core::ops` call on a clone.
+  - `edits::Plan` holds the cuts of the selected edits. It refuses a mix of rolls and sides.
+  - A side of the other kind than that of the edit clicked last gets the opposite amount.
+  - `Plan::each` gives every edit the same amount. The comma and period keys use it (`Workspace::nudge_edits`), and so does Dynamic Trim (`DynamicTarget::Edits`).
+  - `Plan::shared` is for a drag (`Gesture::Edits`). The ripple trims on one track share the amount. The other trims get all of it.
+  - Several trims go as one `apply`. Thus one undo step takes them back.
+  - The timeline draws the trims of a drag (`Preview::trims`). Each glow is drawn where its cut is in the drawn project (`Cut::at`).
 - **Track rows.**
   - `Rows::layout` shrinks the rows of the lower timeline to fit its height, down to a minimum. It lays them out from the bottom.
   - When they still overflow, `TimelineView::rows_lift` lifts them by up to `Rows::overflow`.

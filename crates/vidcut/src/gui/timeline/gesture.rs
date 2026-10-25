@@ -7,6 +7,8 @@ use vidcut_core::model::{Clip, Handle, Keyframe, Marks, Project, Track, TrackKin
 use vidcut_core::ops::{Edge, MAIN};
 use vidcut_core::validate::GAIN;
 
+use super::EditSel;
+use super::edits::{Plan, Trim, applied};
 use super::geometry::{
     Hit, Rows, SNAP_PX, Scale, Snap, clips_in, edit_near, hit_rows, level_at, sound_band,
     volume_gain, volume_level, volume_span, volume_y,
@@ -46,6 +48,11 @@ pub enum Gesture {
     Roll {
         outgoing: String,
         from: i64,
+    },
+    Edits {
+        edits: Vec<EditSel>,
+        lead: EditSel,
+        clips: Vec<String>,
     },
     Slip {
         clips: Vec<String>,
@@ -148,6 +155,7 @@ pub struct Preview {
     pub marks: Option<Marks>,
     pub marker: Option<(String, i64)>,
     pub gains: Option<Gains>,
+    pub trims: Vec<Trim>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -161,6 +169,9 @@ pub struct Gains {
 
 impl Preview {
     pub fn moved(&self, p: &Project) -> Option<Project> {
+        if !self.trims.is_empty() {
+            return applied(p, &self.trims).ok();
+        }
         if self.marks.is_none() && self.marker.is_none() && self.gains.is_none() {
             return None;
         }
@@ -365,6 +376,9 @@ impl Drag {
             }
             Gesture::Roll { outgoing, from } => {
                 roll_preview(ctx, *from + moved(ctx, self.press, pos), outgoing, *from)
+            }
+            Gesture::Edits { edits, lead, .. } => {
+                edits_preview(ctx, lead.at + moved(ctx, self.press, pos), edits, *lead)
             }
             Gesture::Slip { clips } => slip_preview(ctx, pos, self.press, clips),
             Gesture::Fade {
@@ -1174,6 +1188,34 @@ fn roll_preview(ctx: &Ctx, target: i64, outgoing: &str, from: i64) -> Preview {
         delta: Some((delta, None)),
         ghost: Some((a.start, a.end() + delta)),
         row: Some(t.id.clone()),
+        ..Preview::default()
+    }
+}
+
+fn edits_preview(ctx: &Ctx, target: i64, edits: &[EditSel], lead: EditSel) -> Preview {
+    let Ok(plan) = Plan::new(ctx.project, edits, lead) else {
+        return Preview::default();
+    };
+    let (target, snapped) = ctx.snapped(target);
+    let want = target - lead.at;
+    let fits = |by: i64| {
+        by.abs() <= want.abs() && applied(ctx.project, &plan.shared(ctx.project, by)).is_ok()
+    };
+    let by = match want {
+        0 => 0,
+        w if fits(w) => w,
+        w => super::tools::furthest(0, w.signum(), fits),
+    };
+    let trims = match by {
+        0 => Vec::new(),
+        _ => plan.shared(ctx.project, by),
+    };
+    Preview {
+        request: super::edits::request(&trims),
+        snapped,
+        delta: Some((by, None)),
+        row: Some(lead.track.id()),
+        trims,
         ..Preview::default()
     }
 }

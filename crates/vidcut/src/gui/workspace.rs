@@ -271,11 +271,14 @@ impl Workspace {
         use vidcut_core::request::GuiPanel;
         for change in changes {
             match change {
-                live::GuiChange::SelectEdit { near, track, side } => {
-                    self.select_edit(near, &track, side.into())?
-                }
+                live::GuiChange::SelectEdit {
+                    near,
+                    track,
+                    side,
+                    add,
+                } => self.select_edit(near, &track, side.into(), add)?,
                 live::GuiChange::EditSide(side) => self.set_edit_side(side.into())?,
-                live::GuiChange::Deselect => self.timeline.edit = None,
+                live::GuiChange::Deselect => self.timeline.set_edit(None),
                 live::GuiChange::Target(t) => {
                     self.target = (t != vidcut_core::ops::MAIN).then_some(t)
                 }
@@ -356,8 +359,10 @@ impl Workspace {
             ),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
         ];
+        let (edit, edits) = self.selected_edit_points();
         live::GuiState {
-            edit: self.edit_point(),
+            edit,
+            edits,
             target: self
                 .target
                 .clone()
@@ -1215,7 +1220,11 @@ impl Workspace {
         }
         if pressed(Key::ArrowUp) || pressed(Key::ArrowDown) {
             let up = pressed(Key::ArrowUp);
-            let dynamic_track = self.timeline.edit.filter(|_| dynamic).map(|e| e.track);
+            let dynamic_track = self
+                .timeline
+                .lead_edit()
+                .filter(|_| dynamic)
+                .map(|e| e.track);
             let (id, player) = match dynamic_track {
                 Some(_) => (
                     PlayerId::Timeline,
@@ -1241,7 +1250,7 @@ impl Workspace {
                 self.seek(id, f, false);
                 if dynamic && !m.shift {
                     self.dynamic_commit();
-                    let (side, track) = self.timeline.edit.map_or(
+                    let (side, track) = self.timeline.lead_edit().map_or(
                         (
                             crate::gui::timeline::Side::Both,
                             crate::gui::timeline::TrackRef::MAIN,
@@ -1256,7 +1265,8 @@ impl Workspace {
                     } else {
                         f
                     };
-                    self.timeline.edit = Some(crate::gui::timeline::EditSel { at, side, track });
+                    self.timeline
+                        .set_edit(Some(crate::gui::timeline::EditSel { at, side, track }));
                 }
             }
         }
@@ -1640,18 +1650,22 @@ impl Workspace {
         }
         let tracks = self.project().map_or(0, |p| p.tracks.len());
         if tracks < self.timeline.tracks {
-            self.timeline.edit = None;
+            self.timeline.set_edit(None);
             self.timeline.dynamic = None;
         }
         self.timeline.tracks = tracks;
         let rev = self.project().map_or(0, |p| p.rev);
         if rev != self.timeline.rev {
             self.timeline.rev = rev;
-            if let (Some(e), Some(p)) = (self.timeline.edit, self.shown_project())
-                && !crate::gui::timeline::edit_exists(&p, &e)
-            {
-                self.timeline.edit = None;
-                self.timeline.dynamic = None;
+            if let Some(p) = self.shown_project() {
+                let exists =
+                    |e: &crate::gui::timeline::EditSel| crate::gui::timeline::edit_exists(&p, e);
+                let tv = &mut self.timeline;
+                if !tv.selected_edits().iter().all(exists) {
+                    tv.edit = tv.edit.filter(exists);
+                    tv.edits.retain(exists);
+                    tv.dynamic = None;
+                }
             }
         }
         let title = match &self.snap.project {

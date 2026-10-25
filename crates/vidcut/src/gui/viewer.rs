@@ -426,7 +426,7 @@ impl Workspace {
             return;
         };
         if ui.input(|i| i.key_pressed(Key::Escape)) {
-            self.timeline.edit = None;
+            self.timeline.set_edit(None);
             return;
         }
         let band = super::trim_strips::band_height(area);
@@ -488,7 +488,7 @@ impl Workspace {
                     TrimRow::Close => {
                         let r = ui.button("Close");
                         if r.clicked() {
-                            ws.timeline.edit = None;
+                            ws.timeline.set_edit(None);
                         }
                         r
                     }
@@ -510,8 +510,8 @@ impl Workspace {
             return;
         };
         let pictures = Rect::from_min_max(area.min, pos2(area.right(), area.bottom() - 28.0));
-        match &target {
-            DynamicTarget::Edit(e) => self.draw_two_up(
+        match (&target, target.lead()) {
+            (_, Some(e)) => self.draw_two_up(
                 ui,
                 pictures,
                 &p,
@@ -519,7 +519,8 @@ impl Workspace {
                 TwoUpMode::DynamicTrim,
                 &[(at - 1, "Out (outgoing)"), (at, "In (incoming)")],
             ),
-            DynamicTarget::Clips(ids) => {
+            (DynamicTarget::Edits(_), None) => {}
+            (DynamicTarget::Clips(ids), None) => {
                 let Some((track, start, end)) = first_clip(&p, ids).and_then(|c| {
                     let track = crate::gui::timeline::TrackRef::of_clip(&p, &c.id)?;
                     Some((track.id(), c.start, c.end()))

@@ -2367,13 +2367,14 @@ pub enum Request {
         #[serde(default)]
         search: Option<String>,
     },
-    /// The timeline clips, subtitle cues, pool media and edit point selected
-    /// (`edit`).
+    /// The timeline clips, subtitle cues, pool media and edit points selected.
+    /// `edits` lists every selected edit, left to right. `edit` is the one
+    /// clicked last, which the Trim Editor shows.
     #[serde(rename = "selection.get")]
     SelectionGet {},
     /// Select timeline clips, subtitle cues, pool media or an edit point
-    /// (omitted parts stay as they are). `,` and `.`, Ctrl+T and Dynamic
-    /// Trim act on the edit.
+    /// (omitted parts stay as they are). `,` and `.` and Dynamic Trim act
+    /// on every selected edit, Ctrl+T on `edit`.
     #[serde(rename = "selection.set")]
     SelectionSet {
         #[serde(default)]
@@ -2393,11 +2394,15 @@ pub enum Request {
         track: Option<String>,
         /// What of the edit is selected: `both` (a roll, the default),
         /// `out`, `in`, or `audio`, its audio edit (the J/L handle,
-        /// decision D20). Without `edit`, changes the selected edit's, as U
-        /// does.
+        /// decision D20). Without `edit`, changes that of every selected
+        /// edit.
         #[serde(default)]
         side: Option<TrimSide>,
-        /// Deselect the timeline's clips, cues and edit first, as
+        /// Add the edit to the selected edits, or take it out when it is
+        /// selected, as Ctrl+click does. Goes with `edit`.
+        #[serde(default)]
+        add: bool,
+        /// Deselect the timeline's clips, cues and edits first, as
         /// Ctrl+Shift+A does.
         #[serde(default)]
         clear: bool,
@@ -2452,7 +2457,7 @@ pub enum Request {
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
     #[serde(rename = "gui.close")]
     GuiClose { panel: GuiPanel },
-    /// What only the GUI keeps: the edit point selected, the target track,
+    /// What only the GUI keeps: the edit points selected, the target track,
     /// the timeline's zoom and Timeline Options, and the windows open.
     #[serde(rename = "gui.state")]
     GuiState {},
