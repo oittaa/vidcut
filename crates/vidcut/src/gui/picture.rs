@@ -34,7 +34,7 @@ pub struct Gpu {
     #[cfg(windows)]
     p010: bool,
     #[cfg(windows)]
-    d3d11_shared: std::sync::Mutex<Vec<D3d11Shared>>,
+    d3d11_shared: std::sync::Mutex<D3d11Pool>,
     metal: bool,
     cuda: OnceLock<Result<CudaDevice, String>>,
     gate: Option<Arc<super::gate::Gate>>,
@@ -815,8 +815,10 @@ struct D3d11Shared {
     uv: wgpu::TextureView,
     size: (u32, u32),
     busy: Arc<AtomicBool>,
-    shown: std::time::Instant,
 }
+
+#[cfg(windows)]
+type D3d11Pool = vidcut_core::lru::Lru<ash::vk::Image, D3d11Shared, { usize::MAX }>;
 
 #[cfg(windows)]
 type D3d11Formats = (
@@ -1421,11 +1423,11 @@ impl Slot {
         };
         let frame = picture.frame();
         let mut pool = gpu.d3d11_shared.lock().unwrap_or_else(|e| e.into_inner());
-        let (i, new) = d3d11_shared_for(gpu, &mut pool, frame, formats)?;
+        let (image, new) = d3d11_shared_for(gpu, &mut pool, frame, formats)?;
         if new {
             self.imports += 1;
         }
-        let shared = &mut pool[i];
+        let shared = pool.get_mut(&image).ok_or("no shared texture")?;
         shared.texture.fill(frame).map_err(|e| e.to_string())?;
         // SAFETY: this device's image, released to Direct3D 11 in `GENERAL`, which has just written it.
         let (acquired, released) = unsafe {
@@ -1445,7 +1447,6 @@ impl Slot {
                 )?,
             )
         };
-        shared.shown = std::time::Instant::now();
         shared.busy.store(true, Ordering::Release);
         self.acquired = Some(acquired);
         self.released = Some(released);
@@ -1918,34 +1919,36 @@ fn make_target(device: &wgpu::Device, size: (u32, u32)) -> Target {
 #[cfg(windows)]
 fn d3d11_shared_for(
     gpu: &Gpu,
-    pool: &mut Vec<D3d11Shared>,
+    pool: &mut D3d11Pool,
     frame: &vidcut_av::ffmpeg::frame::Video,
     formats: D3d11Formats,
-) -> Result<(usize, bool), String> {
-    let free = |pool: &[D3d11Shared]| {
+) -> Result<(ash::vk::Image, bool), String> {
+    let free = |pool: &D3d11Pool| {
         pool.iter()
-            .position(|s| s.texture.fits(frame) && !s.busy.load(Ordering::Acquire))
+            .find(|(_, s)| s.texture.fits(frame) && !s.busy.load(Ordering::Acquire))
+            .map(|(image, _)| *image)
     };
-    if let Some(i) = free(pool) {
-        return Ok((i, false));
+    if let Some(image) = free(pool) {
+        return Ok((image, false));
     }
-    if pool.iter().filter(|s| s.texture.fits(frame)).count() >= MAX_SHARED {
+    if pool.iter().filter(|(_, s)| s.texture.fits(frame)).count() >= MAX_SHARED {
         let _ = gpu.device.poll(wgpu::PollType::wait_indefinitely());
         return free(pool)
-            .map(|i| (i, false))
+            .map(|image| (image, false))
             .ok_or_else(|| "no shared texture came free".into());
     }
-    if pool.len() >= 2 * MAX_SHARED
-        && let Some(oldest) = pool
+    if pool.len() >= 2 * MAX_SHARED {
+        let oldest = pool
             .iter()
-            .enumerate()
-            .filter(|(_, s)| !s.busy.load(Ordering::Acquire))
-            .min_by_key(|(_, s)| s.shown)
-            .map(|(i, _)| i)
-    {
-        pool.remove(oldest);
+            .find(|(_, s)| !s.busy.load(Ordering::Acquire))
+            .map(|(image, _)| *image);
+        if let Some(oldest) = oldest {
+            pool.remove(&oldest);
+        }
     }
-    pool.push(share_d3d11(gpu, frame, formats)?);
+    let shared = share_d3d11(gpu, frame, formats)?;
+    let image = shared.image;
+    pool.insert(image, shared);
     vidcut_av::debug!(
         "viewer",
         "imported a {}x{} {:?} Direct3D 11 texture ({} in all)",
@@ -1954,7 +1957,7 @@ fn d3d11_shared_for(
         formats.0,
         pool.len()
     );
-    Ok((pool.len() - 1, true))
+    Ok((image, true))
 }
 
 #[cfg(windows)]
@@ -2072,7 +2075,6 @@ fn share_d3d11(
         uv,
         size: (desc.Width, desc.Height),
         busy: Arc::default(),
-        shown: std::time::Instant::now(),
     })
 }
 
