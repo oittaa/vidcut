@@ -450,7 +450,9 @@ The bar and the Jobs button:
   - On the timeline, it also takes Ctrl+X and Ctrl+V. Then they act on the words, not on the selected clips.
   - What it changes goes as requests: `media.marks.set` or `marks.set`, `media.leave_out`, `edit.ripple_delete_words`, `markers.add`, `media.words.set`, `media.transcripts.main` and `media.transcripts.remove`.
   - Cut and Copy on the timeline send `edit.cut` and `edit.copy` with the range of the words. The live core keeps the clips that come back as its clipboard.
-  - Paste sends `edit.paste` with `insert` (`ops::paste_insert`). It opens a hole on every unlocked track, then pastes into it.
+  - Paste sends `edit.paste`. With Ripple On it adds `insert` (`ops::paste_insert`), which opens a hole on every unlocked track, then pastes into it.
+  - With words selected, Paste adds their length as `duration`. `ops::cut_to` shortens the clips to it.
+  - Delete on the timeline sends `lift` when Ripple On is off.
   - Place on Top, Insert and Append send one edit of the selection, as the viewer's buttons do (`Workspace::edit_from`). The core leaves out the frames that Delete left out.
   - Insert (`edit.insert`) goes in at the timeline In, else at the playhead.
 - **Rows that do not fit.**

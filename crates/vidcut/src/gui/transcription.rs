@@ -1683,11 +1683,13 @@ impl Workspace {
                 if media.is_some() {
                     return;
                 }
+                let ripple = self.project().is_some_and(|p| p.settings.ripple_on);
                 let at = selected.map_or(self.snap.timeline.position, |(_, _, a, _)| a);
-                self.send(
-                    "edit.paste",
-                    json!({ "at": format!("{at}f"), "insert": true }),
-                );
+                let mut params = json!({ "at": format!("{at}f"), "insert": ripple });
+                if let Some((_, _, a, b)) = selected {
+                    params["duration"] = json!(format!("{}f", b - a));
+                }
+                self.send("edit.paste", params);
             }
             Act::Delete | Act::Undelete => {
                 let Some((first, last, a, b)) = selected else {
@@ -1706,6 +1708,7 @@ impl Workspace {
                         let marked = self.project().is_some_and(|p| {
                             p.marks.mark_in == Some(a) && p.marks.mark_out == Some(b)
                         });
+                        let ripple = self.project().is_some_and(|p| p.settings.ripple_on);
                         self.send(
                             "edit.ripple_delete_words",
                             json!({
@@ -1716,6 +1719,7 @@ impl Workspace {
                                 }],
                                 "quiet": true,
                                 "clear_marks": marked,
+                                "lift": !ripple,
                             }),
                         );
                         t.selection = None;

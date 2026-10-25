@@ -897,7 +897,7 @@ pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn cut_ranges(p: &mut Project, spans: &[(i64, i64)]) -> Result<Vec<(i64, i64)>> {
+pub fn cut_ranges(p: &mut Project, spans: &[(i64, i64)], lift: bool) -> Result<Vec<(i64, i64)>> {
     if spans.is_empty() {
         return Err(Error::usage("name the words to cut"));
     }
@@ -921,7 +921,7 @@ pub fn cut_ranges(p: &mut Project, spans: &[(i64, i64)]) -> Result<Vec<(i64, i64
     let cut = merged
         .iter()
         .rev()
-        .try_for_each(|&(s, e)| delete_range(p, s, e, false));
+        .try_for_each(|&(s, e)| delete_range(p, s, e, lift));
     p.settings.ripple_on = saved;
     cut?;
     Ok(merged)
@@ -2198,6 +2198,29 @@ pub fn copy_range(p: &Project, a: i64, b: i64) -> Result<Vec<TrackClip>> {
     }
     out.sort_by_key(|c| c.clip.start);
     Ok(out)
+}
+
+pub fn cut_to(clips: &[TrackClip], len: i64) -> Vec<TrackClip> {
+    let Some(first) = clips.iter().map(|c| c.clip.start).min() else {
+        return Vec::new();
+    };
+    let end = first + len;
+    clips
+        .iter()
+        .filter(|c| c.clip.start < end)
+        .cloned()
+        .map(|mut c| {
+            if c.clip.end() > end {
+                c.clip.duration = end - c.clip.start;
+                if let Some(a) = c.clip.audio.as_mut() {
+                    a.tail = 0;
+                    cut(&mut a.effects, false, true);
+                }
+                cut(&mut c.clip.effects, false, true);
+            }
+            c
+        })
+        .collect()
 }
 
 pub fn paste_insert(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String>> {

@@ -3351,7 +3351,12 @@ fn mutate(
             }
             _ => return Err(Error::usage("give `clips` or `range`")),
         },
-        Request::EditPaste { clips, at, insert } => {
+        Request::EditPaste {
+            clips,
+            at,
+            insert,
+            duration,
+        } => {
             let clips = clips.as_ref().ok_or_else(|| {
                 Error::usage("edit.paste needs `clips` (the GUI pastes its clipboard)")
             })?;
@@ -3359,9 +3364,13 @@ fn mutate(
                 Some(t) => resolve(p, t, playhead)?,
                 None => need(playhead, "at")?,
             };
+            let clips = match duration {
+                Some(d) => ops::cut_to(clips, length(p, d)?),
+                None => clips.clone(),
+            };
             let ids = match *insert {
-                true => ops::paste_insert(p, clips, at)?,
-                false => ops::paste(p, clips, at)?,
+                true => ops::paste_insert(p, &clips, at)?,
+                false => ops::paste(p, &clips, at)?,
             };
             json!({ "clips": ids })
         }
@@ -4072,6 +4081,7 @@ fn mutate(
             words,
             quiet,
             clear_marks,
+            lift,
         } => {
             if words.is_empty() {
                 return Err(Error::usage("name the words to cut"));
@@ -4086,7 +4096,7 @@ fn mutate(
                 true => quiet_edges(p, env, &spans)?,
                 false => spans,
             };
-            let removed = ops::cut_ranges(p, &spans)?;
+            let removed = ops::cut_ranges(p, &spans, *lift)?;
             if *clear_marks {
                 p.marks.mark_in = None;
                 p.marks.mark_out = None;

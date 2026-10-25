@@ -928,7 +928,8 @@ pub enum Request {
     /// `start` and `end` from `analyze.words` (its other fields are
     /// ignored). Touching or overlapping spans are one cut. The spans come
     /// out of every unlocked track and the rest closes up, whether or not
-    /// ripple is on. A dry run says what would go and changes nothing.
+    /// ripple is on; with `lift`, a gap is left instead. A dry run says what
+    /// would go and changes nothing.
     #[serde(rename = "edit.ripple_delete_words")]
     EditRippleDeleteWords {
         words: Vec<SpokenWord>,
@@ -945,6 +946,10 @@ pub enum Request {
         /// Transcription window does when they mark the words it deletes.
         #[serde(default)]
         clear_marks: bool,
+        /// Clear the spans and leave the gap, as Delete in the Transcription
+        /// window does with ripple off.
+        #[serde(default)]
+        lift: bool,
     },
     /// Detect Scene Cuts: split `clips` where their shots change.
     #[serde(rename = "edit.detect_scene_cuts")]
@@ -1034,6 +1039,10 @@ pub enum Request {
         at: Option<TimeSpec>,
         #[serde(default)]
         insert: bool,
+        /// Paste only this much of the clips, from their start (Paste over
+        /// selected words in the Transcription window).
+        #[serde(default)]
+        duration: Option<TimeSpec>,
     },
 
     /// The tracks, with their header and mixer settings and how many clips
