@@ -89,8 +89,9 @@ pub(crate) fn room(spare: Option<usize>, card: Option<usize>, cache: bool) -> Op
     } else {
         0
     };
+    let viewer = if inner.owners > 0 { super::GB } else { 0 };
     match spare {
-        Some(spare) => Some(spare + kept),
+        Some(spare) => Some((spare + kept).saturating_sub(viewer)),
         None => card.map(|c| c.saturating_sub(super::GB + inner.lent_need)),
     }
 }
