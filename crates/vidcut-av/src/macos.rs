@@ -590,9 +590,11 @@ mod imp {
                     self.config.destinationPixelBufferAttributes(),
                 )
             };
+            let clock = std::time::Instant::now();
             let source = buffer(self.size, self.format, &from)?;
             write(&source, self.format, self.size, rgb)?;
             let enlarged = buffer(self.made, self.format, &to)?;
+            let wrote = clock.elapsed();
             // SAFETY: a time of plain values.
             let time = unsafe { CMTime::new(index, 1) };
             let source = frame(&source, time)?;
@@ -622,7 +624,15 @@ mod imp {
                     .processWithParameters_error(ProtocolObject::from_ref(&*parameters))
             }
             .map_err(failed)?;
+            let scaled = clock.elapsed();
             let out = read(&enlarged, self.format, self.made)?;
+            crate::debug!(
+                "ai",
+                "macOS: frame {index}: in {:.1} ms, scaled in {:.1} ms, out in {:.1} ms",
+                wrote.as_secs_f64() * 1e3,
+                (scaled - wrote).as_secs_f64() * 1e3,
+                (clock.elapsed() - scaled).as_secs_f64() * 1e3
+            );
             self.last = Some((source, destination));
             Ok(out)
         }
