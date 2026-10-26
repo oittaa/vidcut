@@ -272,7 +272,8 @@ flowchart TD
     - `speech_api::transcribe` also tests the speakers that a service tells apart.
     - `ai::unfit`: the HDR pictures of the AI upscalers.
     - `transcribe::short_of_memory`: the GPU memory of a speech model.
-  - For multichannel xAI, a file is heard with at most the channels in the catalog (`channels_of`).
+    - `channels_of`: the channels of one multichannel xAI file.
+  - `channels_of` refuses a file with more channels than `catalog::XAI` allows.
   - Sortformer's warning uses the most speakers in the catalog (`full`). `models.check` compares it with what transcribe.cpp reports.
   - Gemini 3.5 Transcribe takes 30 minutes of audio with word times or diarization. vidcut always asks for word times.
   - It tells up to 8 speakers apart. Speaker counts of 3 or more are experimental.
