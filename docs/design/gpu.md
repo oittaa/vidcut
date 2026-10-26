@@ -206,6 +206,8 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - On Windows, it is the DXGI budget of the process less its current use.
     - On Linux, it is the Vulkan memory budget of the GPU's largest heap less its use.
   - Without the free memory, the room is the GPU's memory less 1 GB for other programs, and less the memory of the other loans.
+  - While a viewer is open, the room leaves 1 GB of the free memory for it. Its decoders and its pictures on the screen take memory while the AI work runs.
+    - A headless export has no player, so its AI work can use all of the free memory.
   - Each loan (`store::Lent`) caps the video budget of the kept pictures at its room less its need.
   - The cap is also true below a video budget that the user sets.
   - AI Best has a loan for its model and one for each stream. AI Fast has one for its buffers.
