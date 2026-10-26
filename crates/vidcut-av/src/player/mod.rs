@@ -334,6 +334,18 @@ static PLAYERS: AtomicU64 = AtomicU64::new(0);
 
 static VIDEO_AUTO: AtomicBool = AtomicBool::new(false);
 
+static VIEWER_GPU: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn set_viewer_gpu(adapter: String) {
+    *lock(&VIEWER_GPU) = Some(adapter);
+}
+
+pub(crate) fn on_viewers_gpu(gpu: Option<&crate::gpus::Gpu>) -> bool {
+    let viewer = lock(&VIEWER_GPU);
+    gpu.zip(viewer.as_deref())
+        .is_some_and(|(gpu, viewer)| gpu.is_adapter(viewer))
+}
+
 static GPU_MEMORY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
 pub fn set_budget(budget: Budget) {

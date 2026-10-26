@@ -95,6 +95,11 @@ In playback:
 | Direct3D 11 | Windows, not NVIDIA | FFmpeg's D3D11VA decoders; on AMD not open-GOP H.264 | `d3d11::Keeper`: copied into shareable textures | copied on its GPU into a few shared textures (`d3d11::Shared`), each imported once |
 | VideoToolbox | macOS | FFmpeg's VideoToolbox decoders; not open-GOP H.264 | as decoded | IOSurface planes as Metal textures |
 
+- The viewer shows VA-API pictures from GPU memory only when VA-API decodes on the viewer's own GPU (`player::set_viewer_gpu`, `gpus::adapter_id`).
+  - The reader checks this when it opens, so it also holds after a change of the GPU in use.
+  - On another GPU, the reader brings the pictures down to memory, and the viewer uploads them.
+  - Why: the viewer cannot import the pictures of another GPU. It then copies each one down while it draws, and shows few frames.
+
 The facts of a VA-API device:
 
 - vidcut learns these facts of a VA-API device, all in `crates/vidcut-av/src/hw/vaapi.rs`:
