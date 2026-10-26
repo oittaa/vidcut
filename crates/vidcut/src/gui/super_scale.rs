@@ -55,6 +55,10 @@ pub(super) fn described(s: SuperScale) -> String {
     }
 }
 
+pub(super) fn offered(s: SuperScale, factor: ScaleFactor) -> bool {
+    vidcut_av::macos::offers(SuperScale { factor, ..s })
+}
+
 pub(super) fn unfit<'a>(
     s: SuperScale,
     media: impl IntoIterator<Item = &'a vidcut_core::model::Media>,

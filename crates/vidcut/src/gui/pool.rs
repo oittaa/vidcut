@@ -1592,7 +1592,10 @@ impl Workspace {
                 use vidcut_core::model::Upscaler;
                 let now = m.super_scale;
                 for (factor, label) in FACTORS {
-                    if ui.radio(now.factor == factor, label).clicked() {
+                    let pick = ui.add_enabled_ui(super::super_scale::offered(now, factor), |ui| {
+                        ui.radio(now.factor == factor, label)
+                    });
+                    if pick.inner.clicked() {
                         put = Some(json!({ "super_scale": factor }));
                     }
                 }

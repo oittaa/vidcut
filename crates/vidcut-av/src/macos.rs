@@ -1,4 +1,4 @@
-use vidcut_core::model::{Media, Project, Upscaler};
+use vidcut_core::model::{Media, Project, SuperScale, Upscaler};
 use vidcut_core::render::VideoPiece;
 
 use crate::error::{Error, Result};
@@ -33,6 +33,14 @@ pub fn unfit(m: &Media) -> Option<&'static str> {
     (w > MOST.0 || h > MOST.1).then_some("pictures over 1920x1080")
 }
 
+pub fn factors() -> Vec<u32> {
+    imp::factors()
+}
+
+pub fn offers(s: SuperScale) -> bool {
+    s.upscaler != Upscaler::Macos || s.factor.times().is_none_or(|t| factors().contains(&t))
+}
+
 pub fn get_ready(download: bool) -> Result<()> {
     imp::ready(download)
 }
@@ -54,7 +62,7 @@ pub fn check<'a>(
     pieces: impl IntoIterator<Item = &'a VideoPiece>,
     download: bool,
 ) -> Result<()> {
-    let mut media: Vec<&str> = Vec::new();
+    let mut media: Vec<(&str, SuperScale)> = Vec::new();
     for piece in pieces {
         for (layer, _) in piece.layers() {
             if let VideoPiece::Source {
@@ -64,9 +72,9 @@ pub fn check<'a>(
             } = layer
                 && super_scale.ai()
                 && super_scale.upscaler == Upscaler::Macos
-                && !media.contains(&id.as_str())
+                && !media.iter().any(|(m, _)| m == id)
             {
-                media.push(id);
+                media.push((id, *super_scale));
             }
         }
     }
@@ -75,7 +83,7 @@ pub fn check<'a>(
     }
     let refused: Vec<String> = media
         .iter()
-        .filter_map(|id| p.media(id))
+        .filter_map(|(id, _)| p.media(id))
         .filter_map(|m| unfit(m).map(|why| format!("{} ({why})", m.name)))
         .collect();
     if !refused.is_empty() {
@@ -85,7 +93,25 @@ pub fn check<'a>(
             refused.join(", ")
         )));
     }
-    get_ready(download)
+    get_ready(download)?;
+    let wrong: Vec<String> = media
+        .iter()
+        .filter(|(_, s)| !offers(*s))
+        .filter_map(|(id, s)| {
+            p.media(id)
+                .map(|m| format!("{} ({}x)", m.name, s.factor.times().unwrap_or(0)))
+        })
+        .collect();
+    if !wrong.is_empty() {
+        let offered: Vec<String> = factors().iter().map(|f| format!("{f}x")).collect();
+        return Err(Error::Invalid(format!(
+            "the AI upscaler of this Mac offers only {}: set the factor of {} to Auto or to one of \
+             these",
+            offered.join(", "),
+            wrong.join(", ")
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) struct Run {

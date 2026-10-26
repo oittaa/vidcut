@@ -1591,7 +1591,7 @@ impl Workspace {
     }
 
     fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
-        use super::super_scale::{FACTORS, SHARPNESS, UPSCALERS, label_of, unfit};
+        use super::super_scale::{FACTORS, SHARPNESS, UPSCALERS, label_of, offered, unfit};
         let mut media: Vec<String> = chosen
             .iter()
             .filter_map(|c| p.clip(&c.id))
@@ -1620,7 +1620,10 @@ impl Workspace {
                 .selected_text(label_of(&FACTORS, now.factor))
                 .show_ui(ui, |ui| {
                     for (factor, text) in FACTORS {
-                        if ui.selectable_label(now.factor == factor, text).clicked() {
+                        let pick = ui.add_enabled_ui(offered(now, factor), |ui| {
+                            ui.selectable_label(now.factor == factor, text)
+                        });
+                        if pick.inner.clicked() {
                             put = Some(json!({ "super_scale": factor }));
                         }
                     }

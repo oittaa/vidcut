@@ -319,7 +319,7 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
 - **The scaler of macOS** (`macos`), called AI in the app, on macOS 26 and later:
   - It is the super-resolution scaler of VideoToolbox: a `VTFrameProcessor` session with a `VTSuperResolutionScalerConfiguration` for video.
   - vidcut first checks that the class exists and that macOS supports it. Older macOS has no such class.
-  - The factors come from macOS (`supportedScaleFactors`).
+  - The factors come from macOS (`supportedScaleFactors`, `macos::factors`). The Inspector and the pool grey out the others (`macos::offers`), and `macos::check` refuses them.
   - Each run has a session of its own, for its source size and factor.
   - Each frame goes into a CoreVideo pixel buffer, with the attributes that the configuration asks for.
     - The buffer is the first of these that the scaler takes: BGRA; 8-bit 4:2:0 in video range, converted with the BT.709 matrix; 16-bit float RGBA (`RGHA`), the code values over 255.
