@@ -262,6 +262,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         picture: None,
         compound: None,
         speed: None,
+        retime: crate::model::Retime::Nearest,
         color: None,
     })
 }
@@ -1611,6 +1612,7 @@ pub struct ClipProps {
     pub name: Option<Option<String>>,
     pub color: Option<Option<String>>,
     pub voice_isolation: Option<f64>,
+    pub retime: Option<crate::model::Retime>,
 }
 
 pub fn checked_isolation(amount: f64) -> Result<f64> {
@@ -1647,6 +1649,12 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
         }
         if let Some(color) = &props.color {
             c.color = color.clone();
+        }
+        if let Some(r) = props.retime {
+            if !c.video || c.media.is_empty() {
+                return Err(Error::invalid(format!("{id} has no picture of its media")));
+            }
+            c.retime = r;
         }
         if props.muted.is_some() || props.gain_db.is_some() || props.voice_isolation.is_some() {
             let a = c

@@ -1156,6 +1156,11 @@ pub struct Clip {
     /// plays and edits at it (decision D48).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
+    /// How it makes a frame that falls between two of its source frames:
+    /// at a speed change, or where its media's frame rate isn't the
+    /// timeline's. Left out at `nearest`.
+    #[serde(default, skip_serializing_if = "Retime::is_nearest")]
+    pub retime: Retime,
     /// Its own Clip Color (spec §3). Without one it shows its media's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -1217,6 +1222,55 @@ impl JsonSchema for Kept {
     }
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         serde_json::Value::json_schema(generator)
+    }
+}
+
+/// Retime Process: how a clip makes a frame that falls between two of its
+/// source frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Retime {
+    /// The source frame that the frame falls in.
+    #[default]
+    Nearest,
+    /// The two source frames around it, mixed by how near each is.
+    FrameBlend,
+    /// RIFE 4.25 on the GPU makes the frame from the motion between the
+    /// two source frames. Its weights (25 MB) download at their first use.
+    Rife,
+    /// EMA-VFI on the GPU, as RIFE. Its weights (264 MB) download at their
+    /// first use.
+    EmaVfi,
+    /// VFIMamba on the GPU, as RIFE. Its weights (264 MB) download at
+    /// their first use.
+    Vfimamba,
+}
+
+impl Retime {
+    pub const ALL: [Retime; 5] = [
+        Retime::Nearest,
+        Retime::FrameBlend,
+        Retime::Rife,
+        Retime::EmaVfi,
+        Retime::Vfimamba,
+    ];
+
+    pub fn is_nearest(&self) -> bool {
+        *self == Retime::Nearest
+    }
+
+    pub fn ai(&self) -> bool {
+        matches!(self, Retime::Rife | Retime::EmaVfi | Retime::Vfimamba)
+    }
+
+    pub fn title(&self) -> &'static str {
+        match self {
+            Retime::Nearest => "Nearest",
+            Retime::FrameBlend => "Frame Blend",
+            Retime::Rife => "RIFE 4.25",
+            Retime::EmaVfi => "EMA-VFI",
+            Retime::Vfimamba => "VFIMamba",
+        }
     }
 }
 

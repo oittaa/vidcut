@@ -177,6 +177,7 @@ pub fn add(
             picture: None,
             compound: None,
             speed: None,
+            retime: crate::model::Retime::Nearest,
             color: None,
         },
     );
