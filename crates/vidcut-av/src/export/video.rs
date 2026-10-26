@@ -576,7 +576,7 @@ fn hold(
 
 fn in_memory(frame: &frame::Video) -> Result<frame::Video> {
     if crate::hw::on_gpu(frame) {
-        crate::hw::download(frame)
+        crate::hw::to_read(frame)
     } else {
         frame_ref(frame)
     }
@@ -1061,7 +1061,7 @@ impl Finish {
         }
         let m = match Place::of(f) {
             Place::Memory => frame_ref(f)?,
-            _ => crate::hw::download(f)?,
+            _ => crate::hw::to_read(f)?,
         };
         converted_in_memory(&mut self.normalizer, &m, self.pixel, self.target, reading)
     }
@@ -1880,7 +1880,7 @@ impl VideoFrames {
                     match f {
                         None => frame_ref(&black),
                         Some(f) if Place::of(f) == Place::Memory => frame_ref(f),
-                        Some(f) => crate::hw::download(f),
+                        Some(f) => crate::hw::to_read(f),
                     }
                 };
                 let mut mixed = Canvas::of(&in_memory(layers[0].frame.as_ref())?)?;

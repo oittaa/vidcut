@@ -778,7 +778,7 @@ impl Meter {
 
     pub(crate) fn measure(&mut self, f: &frame::Video) -> Result<FrameLight> {
         let f = if crate::hw::on_gpu(f) {
-            crate::hw::download(f)?
+            crate::hw::to_read(f)?
         } else {
             crate::export::video::frame_ref(f)?
         };

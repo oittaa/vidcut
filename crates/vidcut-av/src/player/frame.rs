@@ -292,7 +292,7 @@ fn source_frame(
 ) -> Result<frame::Video> {
     let frame = match picture.gpu() {
         None => crate::export::video::frame_ref(picture.frame())?,
-        Some(_) => crate::hw::download(picture.frame())?,
+        Some(_) => crate::hw::to_read(picture.frame())?,
     };
     let rotation = picture.rotation();
     let sar = frame.aspect_ratio();
@@ -337,7 +337,7 @@ fn fitted(
 ) -> Result<frame::Video> {
     let frame = match picture.gpu() {
         None => crate::export::video::frame_ref(picture.frame())?,
-        Some(_) => crate::hw::download(picture.frame())?,
+        Some(_) => crate::hw::to_read(picture.frame())?,
     };
     if colors.is_none()
         && frame.format() == format::Pixel::YUV420P

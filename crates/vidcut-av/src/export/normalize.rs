@@ -60,7 +60,7 @@ pub(crate) fn down(
     let size = shown_size(src, rotation, out);
     let shrinks = size.0 < src.width() && size.1 < src.height();
     if !shrinks {
-        return crate::hw::download(src);
+        return crate::hw::to_read(src);
     }
     let mut small = crate::hw::Shrinker::down(shrinker, src, size)?;
     if (small.width(), small.height()) == size {
