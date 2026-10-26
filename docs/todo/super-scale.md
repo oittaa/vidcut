@@ -1,15 +1,12 @@
 # Super Scale on more GPUs
 
-**When:** next: the scaler of macOS, then AMD.
+**When:** next: AMD.
 
 Super Scale enlarges pictures with a better upscaler ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). Exports use libplacebo for NVENC and swscale on the CPU. These parts are still to do:
 
 - **AMD on Windows:** FFmpeg's `sr_amf` (AMD's video upscaler, since FFmpeg 8.0).
   - It takes Direct3D 11 frames, which the AMD path decodes. Its output goes to AMF.
   - Its `sharpness` option takes the Sharpness of the media.
-- **The scaler of macOS** (`macos`): on the owner's M4 with macOS 27, it takes only 16-bit float RGBA.
-  - Time each step of a frame: the conversion in, the scaling and the reading back.
-  - The decoded frame is already in an IOSurface buffer. Check whether the conversions and the fit to the output size can run on the GPU.
 - **AI Fast and AI Best on macOS:** they are off. On the owner's M4, AI Fast took 11.5 s for each frame (480p to 1080p).
   - Find where the time goes on Metal. Turn them on again when they are fast enough.
 - **The other GPUs** (VA-API, Direct3D 11 on Intel, Vulkan): they fit pictures as before. A picture with Super Scale could come down to the CPU, or use libplacebo where Vulkan works.
