@@ -174,10 +174,11 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - The Super Scale group of the stats panel shows the report (`SuperScaleStats`).
   - When the clip under the playhead uses another upscaler, State names the AI upscaler that is at work.
   - When the clip under the playhead has no Super Scale, the group shows while an AI upscaler is at work. Its Factor is then Off.
-- **One path for the AI upscalers:** AI Fast and AI Best use the same code in the reader. Only the parameters of the upscalers are different.
+- **One path for the AI upscalers:** AI Fast, AI Best and the scaler of macOS use the same code in the reader. Only the parameters of the upscalers are different.
   - `Source::ai_picture` finds the shown source size and the size that the upscaler makes (`ai::made_size`).
     - AI Fast makes 4 times the source size.
     - AI Best makes the shown size, but not more than 4 times the source size (`flashvsr::SCALE`).
+    - The scaler of macOS makes the smallest factor of macOS that reaches the shown size (`macos::made_size`).
   - Each picture has a key (`PictureId`): the file, the color space, the reading, the rotation, the upscaler, the made size and the frame.
   - A picture comes from a run of the upscaler (`Session`). The run starts at the first frame that the upscaler needs (`ai::first_frame`).
   - A run holds the pictures that it made and that the reader did not take yet. A picture leaves the run when the reader takes it.
@@ -314,6 +315,24 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
 - The other GPUs fit pictures as before ([todo](../todo/super-scale.md)).
 
 Why: the result of Super Scale is the upscaler's own. It is not meant to match the CPU.
+
+- **The scaler of macOS** (`macos`), called AI in the app, on macOS 26 and later:
+  - It is the super-resolution scaler of VideoToolbox: a `VTFrameProcessor` session with a `VTSuperResolutionScalerConfiguration` for video.
+  - vidcut first checks that the class exists and that macOS supports it. Older macOS has no such class.
+  - The factors come from macOS (`supportedScaleFactors`, `macos::factors`). The Inspector and the pool grey out the others (`macos::offers`), and `macos::check` refuses them.
+  - Each run has a session of its own, for its source size and factor.
+  - Each frame goes into a CoreVideo pixel buffer, with the attributes that the configuration asks for.
+    - The buffers come from two pools of the run (`CVPixelBufferPool`), one for the source and one for the output. A pool reuses a buffer when no frame uses it.
+    - The buffer is the first of these that the scaler takes: BGRA; 8-bit 4:2:0 in video range, converted with the BT.709 matrix; 16-bit float RGBA (`RGHA`), the code values over 255.
+    - On the owner's M4 with macOS 27, the scaler takes only 16-bit float RGBA.
+    - The scaler gets the frame before and its output too. The frames go in order (`Sequential`).
+  - The output comes back to RGB in the same way. For 16-bit float, a table of all 65,536 values gives the 8-bit codes.
+  - `macos::check` refuses HDR media and pictures over 1920×1080 (`macos::MOST`), the limit of macOS for video.
+  - A run does not download. It stops with an error when macOS does not have the model of its factor.
+  - `macos::needed` reports the models while macOS lacks the model of a factor that it lists. Thus the GUI asks first, with the size unknown.
+  - With `download`, `macos::get_ready` has macOS download each missing model, and waits. Without it, an export stops with an error.
+  - Elsewhere, the same calls give the error that it needs macOS 26 or later.
+- **AI Fast and AI Best on macOS:** off for now (`ai::off_here`). `ai::check` and `ai::open` refuse them, and the Inspector and the pool do not offer them.
 
 ## Deinterlacing and HDR
 

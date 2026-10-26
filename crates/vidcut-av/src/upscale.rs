@@ -35,7 +35,8 @@ pub fn needed(dir: &Path) -> Vec<Need> {
         .filter(|f| !models::present(dir, f))
         .map(|f| Need {
             title: f.title.into(),
-            bytes: f.bytes,
+            bytes: Some(f.bytes),
+            system: false,
         })
         .collect()
 }

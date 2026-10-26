@@ -878,10 +878,21 @@ impl Source {
         if run.last.is_some_and(|l| i > l) {
             return self.end_run();
         }
+        let clock = Instant::now();
         let rgb = shown_rgb(f, rotation, run.size, reading)?;
+        let converted = clock.elapsed();
         let outs = run.run.push(i, f.pts(), rgb)?;
+        let pushed = clock.elapsed();
         run.next = i + 1;
         run.keep(outs);
+        crate::debug!(
+            "ai",
+            "{}: frame {i}: to RGB in {:.1} ms, upscaler in {:.1} ms, kept in {:.1} ms",
+            crate::ai::name(run.id.upscaler),
+            converted.as_secs_f64() * 1e3,
+            (pushed - converted).as_secs_f64() * 1e3,
+            (clock.elapsed() - pushed).as_secs_f64() * 1e3
+        );
         if run.last == Some(i) {
             return self.end_run();
         }
@@ -2423,6 +2434,7 @@ impl VideoFrames {
                 None
             };
             let (frame, _) = src.current.as_ref().expect("have a frame");
+            let clock = Instant::now();
             let made = match &big {
                 Some(big) => self.maker.make_layer(
                     i,
@@ -2441,6 +2453,14 @@ impl VideoFrames {
                     reading,
                 )?,
             };
+            if big.is_some() {
+                crate::debug!(
+                    "ai",
+                    "{}: fitted in {:.1} ms",
+                    crate::ai::name(super_scale.upscaler),
+                    clock.elapsed().as_secs_f64() * 1e3
+                );
+            }
             src.normalized = Some(made.ok_or_else(no_picture)?);
             src.upright = big.is_some();
             if big.is_some() && !src.told {

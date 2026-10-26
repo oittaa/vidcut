@@ -439,21 +439,37 @@ impl SuperScale {
 }
 
 /// The upscaler of Super Scale.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Upscaler {
+    /// The super-resolution scaler of macOS 26 and later, for SDR pictures
+    /// up to 1920x1080. It enlarges by a factor that macOS offers, and the
+    /// result is fitted. It reads the frames of a clip in order from its
+    /// first frame. macOS downloads its models only with `download`. The
+    /// default on macOS, where the app calls it AI.
+    Macos,
     /// A diffusion network (FlashVSR+ Turbo) on the GPU, for SDR pictures:
     /// slow, with more detail. It reads the frames of a clip in order from
     /// its first frame. Its weights (7.0 GB) download at their first use. An
-    /// export refuses media that it cannot take.
-    #[default]
+    /// export refuses media that it cannot take. The default elsewhere. Off
+    /// on macOS for now.
     AiBest,
     /// A neural network (NanoVSR 5.4M) on the GPU, for SDR pictures. It reads
     /// 15 frames at a time. Its weights (25 MB) download at their first use.
-    /// An export refuses media that it cannot take.
+    /// An export refuses media that it cannot take. Off on macOS for now.
     AiFast,
     /// The classic upscalers: libplacebo on the GPU, swscale on the CPU.
     Classic,
+}
+
+impl Default for Upscaler {
+    fn default() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Macos
+        } else {
+            Self::AiBest
+        }
+    }
 }
 
 /// How much Super Scale enlarges the pictures of a media item.

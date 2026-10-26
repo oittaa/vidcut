@@ -349,15 +349,19 @@ pub enum Request {
         /// The detail of the classic upscaler: `low`, `medium` or `high`.
         #[serde(default)]
         sharpness: Option<crate::model::Sharpness>,
-        /// The upscaler of Super Scale: `ai_best` (the default), `ai_fast`
-        /// or `classic`. An export refuses `ai_best` and `ai_fast` for HDR
-        /// media.
+        /// The upscaler of Super Scale: `macos` (the default on macOS 26 and
+        /// later, called AI there), `ai_best` (the default elsewhere),
+        /// `ai_fast` or `classic`. `ai_best` and `ai_fast` are off on macOS
+        /// for now.
+        /// An export refuses `macos`, `ai_best` and `ai_fast` for HDR
+        /// media, and `macos` for pictures over 1920x1080 or without
+        /// macOS 26.
         #[serde(default)]
         upscaler: Option<crate::model::Upscaler>,
-        /// Download the AI upscaler's weights if this computer doesn't have
-        /// them yet, each checked against its SHA-256. Without them, an
-        /// export with that AI upscaler is an error that says what would be
-        /// downloaded.
+        /// Download the AI upscaler's weights, each checked against its
+        /// SHA-256, or let macOS download its super-resolution models, if
+        /// this computer doesn't have them yet. Without them, an export with
+        /// that upscaler is an error that says what would be downloaded.
         #[serde(default)]
         download: bool,
     },
@@ -2692,10 +2696,11 @@ pub struct ExportParams {
     /// The subtitle files' format. Default: SRT.
     #[serde(default)]
     pub subtitle_format: Option<SubtitleFormat>,
-    /// Download Voice Isolation's model and the AI upscalers' weights if
-    /// the export needs them and this computer doesn't have them yet, each
-    /// checked against its SHA-256. Without them, the export is an error
-    /// that says what would be downloaded.
+    /// Download Voice Isolation's model and the AI upscalers' weights, each
+    /// checked against its SHA-256, and let macOS download its
+    /// super-resolution models, if the export needs them and this computer
+    /// doesn't have them yet. Without them, the export is an error that says
+    /// what would be downloaded.
     #[serde(default)]
     pub download: bool,
 }
