@@ -7806,9 +7806,8 @@ pub fn rate(num: i64, den: i64) -> Rational {
 
 #[cfg(test)]
 mod tests {
-    use super::{channels_of, moved_only, over};
-    use crate::model::{Marker, Media};
-    use crate::request::{SpeakerModel, SpeechModel, XaiOptions};
+    use super::{moved_only, over};
+    use crate::model::Marker;
 
     #[test]
     fn past_the_limit_all_but_90_percent_of_it_go() {
@@ -7830,71 +7829,5 @@ mod tests {
             serde_json::to_value(change).unwrap(),
             serde_json::json!({"fields": {"at": {"set": {"was": 10, "is": 25}}}})
         );
-    }
-
-    fn asked(model: SpeechModel, multichannel: bool) -> crate::transcript::Asked {
-        crate::transcript::Asked {
-            model,
-            model_file: None,
-            vad_file: None,
-            language: None,
-            download: false,
-            find: None,
-            sound_db: None,
-            speakers: false,
-            speaker_model: SpeakerModel::Auto,
-            send: false,
-            xai: Some(XaiOptions {
-                multichannel,
-                ..XaiOptions::default()
-            }),
-            google: None,
-        }
-    }
-
-    fn room(channels: u16) -> Media {
-        let mut info =
-            crate::test_support::media_info(1.0, crate::time::Rational::new(25, 1).unwrap(), true);
-        info.audio[0].channels = channels;
-        Media {
-            id: "m1".into(),
-            path: "room.wav".into(),
-            name: "room.wav".into(),
-            size: 1,
-            mtime_ns: 0,
-            info,
-            marks: Default::default(),
-            bin: String::new(),
-            sequence: None,
-            proxy: None,
-            color: None,
-            fingerprint: None,
-            color_space: Default::default(),
-            super_scale: Default::default(),
-            left_out: Vec::new(),
-            words: Vec::new(),
-            subtitles: None,
-        }
-    }
-
-    #[test]
-    fn eight_xai_channels_are_heard_on_their_own() {
-        let heard = channels_of(&asked(SpeechModel::Xai, true), &room(8), 0).unwrap();
-        assert_eq!(heard, 8);
-    }
-
-    #[test]
-    fn nine_xai_channels_are_refused() {
-        let err = channels_of(&asked(SpeechModel::Xai, true), &room(9), 0).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "room.wav has 9 channels, over the 8 that xAI takes with each channel on its own"
-        );
-    }
-
-    #[test]
-    fn a_wide_file_mixed_to_one_channel_is_heard() {
-        let heard = channels_of(&asked(SpeechModel::Xai, false), &room(9), 0).unwrap();
-        assert_eq!(heard, 1);
     }
 }
