@@ -400,17 +400,27 @@ pub(super) fn ask_download(
     needs: &[models::Need],
     go: &str,
 ) -> Option<bool> {
-    let total: u64 = needs.iter().map(|n| n.bytes).sum();
+    let total: u64 = needs.iter().filter_map(|n| n.bytes).sum();
+    let unknown = needs.iter().any(|n| n.bytes.is_none());
     let mut answer = None;
     let modal = egui::Modal::new(egui::Id::unique(id)).show(ctx, |ui| {
         ui.set_width(dialog::WIDTH);
         ui.spacing_mut().item_spacing.y = 8.0;
-        ui.heading(format!("Download {}?", models::size(total)));
+        ui.heading(if unknown {
+            "Download?".to_string()
+        } else {
+            format!("Download {}?", models::size(total))
+        });
         ui.add(egui::Label::new(models::listed(needs)).wrap());
-        dialog::note(
-            ui,
-            format!("Kept in {}", crate::paths::models_dir().display()),
-        );
+        if needs.iter().any(|n| !n.system) {
+            dialog::note(
+                ui,
+                format!("Kept in {}", crate::paths::models_dir().display()),
+            );
+        }
+        if needs.iter().any(|n| n.system) {
+            dialog::note(ui, "macOS downloads and keeps its own model");
+        }
         dialog::footer(ui, |ui| {
             if dialog::main_button(ui, go, true) {
                 answer = Some(true);

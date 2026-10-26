@@ -22,7 +22,8 @@ pub fn needed(dir: &Path) -> Vec<Need> {
     }
     vec![Need {
         title: DPDFNET.title.into(),
-        bytes: DPDFNET.bytes,
+        bytes: Some(DPDFNET.bytes),
+        system: false,
     }]
 }
 

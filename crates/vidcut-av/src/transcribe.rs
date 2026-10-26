@@ -91,7 +91,8 @@ fn needed_for(dir: &Path, files: &[&File], vad: bool) -> Vec<Need> {
     if let Some(r) = RUNTIME.filter(|r| !r.present(dir)) {
         out.push(Need {
             title: "transcribe.cpp's library".into(),
-            bytes: r.bytes,
+            bytes: Some(r.bytes),
+            system: false,
         });
     }
     let wanted = vad
@@ -101,7 +102,8 @@ fn needed_for(dir: &Path, files: &[&File], vad: bool) -> Vec<Need> {
     for f in wanted.filter(|f| !present(dir, f)) {
         out.push(Need {
             title: f.title.into(),
-            bytes: f.bytes,
+            bytes: Some(f.bytes),
+            system: false,
         });
     }
     out
@@ -233,7 +235,7 @@ fn get_ready(dir: &Path, files: &[&File], vad: bool, download: bool) -> Result<(
             true => ", or name a model file of your own with model_file",
             false => "",
         };
-        let total: u64 = needs.iter().map(|n| n.bytes).sum();
+        let total: u64 = needs.iter().filter_map(|n| n.bytes).sum();
         return Err(Error::Missing(format!(
             "{} {} on this computer yet: pass download (--download) to download {} ({}) into {}, \
              each checked against its SHA-256{own}",

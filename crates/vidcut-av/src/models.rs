@@ -16,13 +16,17 @@ pub use vidcut_core::catalog::File;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Need {
     pub title: String,
-    pub bytes: u64,
+    pub bytes: Option<u64>,
+    pub system: bool,
 }
 
 pub fn listed(needs: &[Need]) -> String {
     let names: Vec<String> = needs
         .iter()
-        .map(|n| format!("{} ({})", n.title, size(n.bytes)))
+        .map(|n| match n.bytes {
+            Some(bytes) => format!("{} ({})", n.title, size(bytes)),
+            None => format!("{} (size unknown)", n.title),
+        })
         .collect();
     match names.as_slice() {
         [] => String::new(),
