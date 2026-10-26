@@ -106,6 +106,25 @@ pub fn chosen() -> Option<Gpu> {
     find(list(), &id).cloned()
 }
 
+pub fn adapter_id(vendor: u32, device: u32, pci_bus_id: &str) -> String {
+    let slot = pci_bus_id.split_once(':').and_then(|(_, rest)| {
+        let (bus, rest) = rest.split_once(':')?;
+        let (dev, func) = rest.split_once('.')?;
+        Some((
+            u32::from_str_radix(bus, 16).ok()?,
+            u32::from_str_radix(dev, 16).ok()?,
+            func.parse().ok()?,
+        ))
+    });
+    id(vendor, device, slot)
+}
+
+impl Gpu {
+    pub(crate) fn is_adapter(&self, adapter: &str) -> bool {
+        self.id == adapter || (!adapter.contains('@') && self.id.starts_with(adapter))
+    }
+}
+
 pub fn in_use() -> Option<Gpu> {
     chosen().or_else(automatic)
 }

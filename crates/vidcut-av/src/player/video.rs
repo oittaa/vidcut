@@ -663,13 +663,17 @@ impl Decoder {
             return frames.output(decoded(Vec::new()));
         };
         self.shared.decodes_on_cpu(None);
-        let shows = self.shared.gpu_pictures.clone();
+        let found = gpu.gpu();
+        let mut shows = self.shared.gpu_pictures.clone();
+        if !super::on_viewers_gpu(found) {
+            shows.retain(|k| *k != crate::hw::Kind::Vaapi);
+        }
         crate::debug!(
             "player",
             "a new reader decodes on {gpu} where it can; the viewer shows {shows:?} pictures \
              from GPU memory, the rest come down to memory"
         );
-        if let Some(found) = gpu.gpu() {
+        if let Some(found) = found {
             self.shared.gpu_found(found);
         }
         frames.output(decoded(shows)).decode_on(gpu.clone())

@@ -88,6 +88,11 @@ impl Viewer {
         let gpu = Gpu::new(&render.device, &render.queue).behind(gate);
         let gpu_pictures = gpu.gpu_pictures();
         let info = render.adapter.get_info();
+        vidcut_av::player::set_viewer_gpu(vidcut_av::gpus::adapter_id(
+            info.vendor,
+            info.device,
+            &info.device_pci_bus_id,
+        ));
         let renderer = format!(
             "wgpu on {:?}, {} ({:?}, driver {} {})",
             info.backend, info.name, info.device_type, info.driver, info.driver_info
