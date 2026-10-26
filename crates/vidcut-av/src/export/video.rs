@@ -2548,7 +2548,11 @@ impl VideoFrames {
             }
             _ => None,
         };
-        let Some(weight) = weight.filter(|w| *w > 1e-6) else {
+        let hdr = src
+            .current
+            .as_ref()
+            .is_some_and(|(f, _)| crate::color::Source::of(f).hdr.is_some());
+        let Some(weight) = weight.filter(|w| *w > 1e-6 && !hdr) else {
             return self.shown(i, s, layer, changed);
         };
         let decoded = matches!(self.maker.output(), Output::Decoded { .. });
