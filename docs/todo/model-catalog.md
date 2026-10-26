@@ -1,10 +1,9 @@
 # Model catalog: what is still open
 
-**When:** when the owner decides, or when a maker publishes the numbers.
+**When:** when a maker publishes the numbers.
 
 `crates/vidcut-core/src/catalog.rs` holds each model and speech service that vidcut uses. `vidcut models list` prints it, and `vidcut models check` checks a model ([tools.md](../tools.md)).
 
-- **xAI and more than 8 channels:** a file with more channels is heard with the first 8 (`channels_of`). The owner decides if vidcut refuses it instead.
 - **GPU memory of the speech models:** Parakeet Ultra, Qwen3-ASR and Whisper large-v3 have `Source::Unrecorded`.
   - On 2026-10-25, no maker gave the GPU memory of the Q8_0 GGUF files that vidcut uses.
   - These were read: the GGUF cards of handy-computer, the docs of transcribe.cpp, and the cards of Moondream, NVIDIA, Qwen and OpenAI.

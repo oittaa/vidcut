@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::model::Media;
 use crate::request::{FindSpeech, GoogleOptions, SpeakerModel, SpeechModel, XaiOptions};
 use crate::time::Rational;
 
@@ -158,6 +159,35 @@ pub fn dollars(v: f64) -> String {
     match v {
         v if v < 0.005 => "less than $0.01".into(),
         v => format!("about ${v:.2}"),
+    }
+}
+
+pub fn channels_of(
+    model: SpeechModel,
+    xai: Option<&XaiOptions>,
+    m: &Media,
+    stream: u32,
+) -> std::result::Result<u16, String> {
+    if model != SpeechModel::Xai || !xai.is_some_and(|x| x.multichannel) {
+        return Ok(1);
+    }
+    let channels = m
+        .info
+        .audio
+        .iter()
+        .find(|a| a.index == stream)
+        .map_or(1, |a| a.channels.max(1));
+    let verdict = crate::catalog::check(
+        &crate::catalog::XAI,
+        &[(crate::catalog::Measure::Channels, f64::from(channels))],
+    );
+    match verdict.refusals.first() {
+        Some(o) => Err(format!(
+            "{} has {channels} channels, over the {:.0} that xAI takes one by one: untick Each \
+             Separately (multichannel)",
+            m.name, o.limit.value
+        )),
+        None => Ok(channels),
     }
 }
 

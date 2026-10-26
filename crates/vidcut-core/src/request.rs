@@ -2910,9 +2910,9 @@ pub struct XaiOptions {
     /// hears everything sent. Default: xAI's, 0.5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vad_threshold: Option<f64>,
-    /// Each channel of the sound on its own, up to xAI's limit
-    /// (`models.list`), the words merged by
-    /// time; with `speakers`, a word's speaker is its channel.
+    /// Each channel on its own. The words are merged by time. With
+    /// `speakers`, a word's speaker is its channel. A file with more
+    /// channels than xAI allows (`models.list`) is refused.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub multichannel: bool,
 }
