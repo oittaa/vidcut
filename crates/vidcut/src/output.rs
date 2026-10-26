@@ -1548,17 +1548,15 @@ fn print_metadata(m: &Value) {
 
 fn print_copies(c: &Value) {
     let n = |key: &str| c[key].as_u64().unwrap_or(0);
-    if n("down") + n("up") == 0 {
-        return;
-    }
     let mb = |key: &str| n(key) as f64 / f64::from(1 << 20);
-    println!(
-        "  frames copied down from the GPU: {} ({:.0} MB), up to it: {} ({:.0} MB)",
-        n("down"),
-        mb("down_bytes"),
-        n("up"),
-        mb("up_bytes")
-    );
+    let down = format!("{} ({:.0} MB)", n("down"), mb("down_bytes"));
+    let up = format!("{} ({:.0} MB)", n("up"), mb("up_bytes"));
+    match (n("down") > 0, n("up") > 0) {
+        (true, true) => println!("  frames copied down from the GPU: {down}, up to it: {up}"),
+        (true, false) => println!("  frames copied down from the GPU: {down}"),
+        (false, true) => println!("  frames copied up to the GPU: {up}"),
+        (false, false) => {}
+    }
 }
 
 fn print_notes(notes: &Value) {
