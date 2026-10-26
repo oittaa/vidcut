@@ -259,6 +259,7 @@ flowchart TD
   - `Env::transcribe_files` lets `clip_speech` and `media.transcribe` send every missing file in one run.
   - With `speakers`, they send every heard file again. Thus the files share speaker numbers.
   - The editor refuses without `send` (`upload_check`). It gives the duration, the size (`transcript::upload_mb`) and the cost (`transcript::cost`).
+  - The size counts each channel that is sent.
 - **Limits and where they come from:**
   - The numbers to which vidcut holds a model are in its `catalog::Model`, with the other facts of the model.
   - Each number comes from the documentation of the maker, or from the model file as transcribe.cpp reads it (`Source::ModelFile`). Else it is marked as not recorded.
@@ -272,8 +273,7 @@ flowchart TD
     - `speech_api::transcribe` also tests the speakers that a service tells apart.
     - `ai::unfit`: the HDR pictures of the AI upscalers.
     - `transcribe::short_of_memory`: the GPU memory of a speech model.
-    - `channels_of`: the channels of one multichannel xAI file.
-  - `channels_of` refuses a file with more channels than `catalog::XAI` allows.
+    - `transcript::channels_of`: the channels of a multichannel xAI file. The editor and the GUI refuse a file with more channels than `catalog::XAI` allows. They refuse it before they ask for `send`.
   - Sortformer's warning uses the most speakers in the catalog (`full`). `models.check` compares it with what transcribe.cpp reports.
   - Gemini 3.5 Transcribe takes 30 minutes of audio with word times or diarization. vidcut always asks for word times.
   - It tells up to 8 speakers apart. Speaker counts of 3 or more are experimental.
