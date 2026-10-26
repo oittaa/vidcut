@@ -1841,6 +1841,10 @@ fn clip_speech(
             kept.iter_mut().for_each(|k| *k = None);
         }
         let missing: Vec<usize> = (0..files.len()).filter(|&i| kept[i].is_none()).collect();
+        let channels = missing
+            .iter()
+            .map(|&i| channels_of(asked, files[i].0, files[i].1))
+            .collect::<Result<Vec<_>>>()?;
         let secs = missing
             .iter()
             .map(|&i| sound_secs(files[i].0, files[i].1))
@@ -1848,10 +1852,8 @@ fn clip_speech(
         upload_check(asked, secs, &file_count(missing.len()))?;
         let plans = missing
             .iter()
-            .map(|&i| {
-                let (m, s) = files[i];
-                media_sound_plan(p, m, s, channels_of(asked, m, s)?)
-            })
+            .zip(&channels)
+            .map(|(&i, &c)| media_sound_plan(p, files[i].0, files[i].1, c))
             .collect::<Result<Vec<_>>>()?;
         let asking: Vec<_> = missing
             .iter()
@@ -6475,18 +6477,16 @@ pub fn query(
             }
             let missing: Vec<usize> = (0..files.len()).filter(|&i| heard[i].is_none()).collect();
             if !missing.is_empty() {
+                let channels = missing
+                    .iter()
+                    .map(|&i| channels_of(&asked, files[i], *stream))
+                    .collect::<Result<Vec<_>>>()?;
                 let secs = missing.iter().map(|&i| sound_secs(files[i], *stream)).sum();
                 upload_check(&asked, secs, &file_count(missing.len()))?;
                 let plans = missing
                     .iter()
-                    .map(|&i| {
-                        media_sound_plan(
-                            p,
-                            files[i],
-                            *stream,
-                            channels_of(&asked, files[i], *stream)?,
-                        )
-                    })
+                    .zip(&channels)
+                    .map(|(&i, &c)| media_sound_plan(p, files[i], *stream, c))
                     .collect::<Result<Vec<_>>>()?;
                 let asking: Vec<_> = missing
                     .iter()
