@@ -4,7 +4,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use vidcut_core::model::{Media, Project, SuperScale, Upscaler};
-use vidcut_core::render::RenderPlan;
+use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use vidcut_core::catalog::{self, Measure};
 
@@ -15,6 +15,7 @@ pub fn needed(dir: &Path, upscaler: Upscaler) -> Vec<Need> {
     match upscaler {
         Upscaler::AiFast => crate::upscale::needed(dir),
         Upscaler::AiBest => crate::flashvsr::needed(dir),
+        Upscaler::Macos => crate::macos::needed(),
         Upscaler::Classic => Vec::new(),
     }
 }
@@ -23,14 +24,23 @@ pub fn get_ready(dir: &Path, upscaler: Upscaler, download: bool) -> Result<()> {
     match upscaler {
         Upscaler::AiFast => crate::upscale::get_ready(dir, download),
         Upscaler::AiBest => crate::flashvsr::get_ready(dir, download),
+        Upscaler::Macos => crate::macos::get_ready(download),
         Upscaler::Classic => Ok(()),
     }
 }
 
+pub fn off_here(upscaler: Upscaler) -> bool {
+    cfg!(target_os = "macos") && matches!(upscaler, Upscaler::AiFast | Upscaler::AiBest)
+}
+
 pub fn unfit(m: &Media, upscaler: Upscaler) -> Option<&'static str> {
+    if off_here(upscaler) {
+        return Some("pictures on macOS for now");
+    }
     let model = match upscaler {
         Upscaler::AiFast => &catalog::NANOVSR,
         Upscaler::AiBest => &catalog::FLASHVSR,
+        Upscaler::Macos => return crate::macos::unfit(m),
         Upscaler::Classic => return None,
     };
     let hdr = m.video_as_read()?.hdr.is_some();
@@ -128,7 +138,7 @@ fn slot(upscaler: Upscaler) -> Option<usize> {
     match upscaler {
         Upscaler::AiFast => Some(0),
         Upscaler::AiBest => Some(1),
-        Upscaler::Classic => None,
+        Upscaler::Macos | Upscaler::Classic => None,
     }
 }
 
@@ -156,7 +166,7 @@ impl Drop for User {
             match self.0 {
                 Upscaler::AiFast => crate::upscale::release(),
                 Upscaler::AiBest => crate::flashvsr::release(),
-                Upscaler::Classic => {}
+                Upscaler::Macos | Upscaler::Classic => {}
             }
         }
     }
@@ -256,14 +266,14 @@ pub(crate) fn first_frame(upscaler: Upscaler, want: i64) -> i64 {
         Upscaler::AiFast | Upscaler::Classic => {
             want - want.rem_euclid(crate::upscale::FRAMES as i64)
         }
-        Upscaler::AiBest => want,
+        Upscaler::AiBest | Upscaler::Macos => want,
     }
 }
 
 pub(crate) fn last_frame(upscaler: Upscaler, first: i64) -> Option<i64> {
     match upscaler {
         Upscaler::AiFast | Upscaler::Classic => Some(first + crate::upscale::FRAMES as i64 - 1),
-        Upscaler::AiBest => None,
+        Upscaler::AiBest | Upscaler::Macos => None,
     }
 }
 
@@ -283,6 +293,7 @@ pub(crate) fn made_size(upscaler: Upscaler, size: (u32, u32), shown: (u32, u32))
                 even(f64::from(size.1) * s).max(size.1),
             )
         }
+        Upscaler::Macos => crate::macos::made_size(size, shown),
     }
 }
 
@@ -293,11 +304,18 @@ pub(crate) fn open(
     want: i64,
     sink: Sink,
 ) -> Result<Box<dyn Run>> {
+    if off_here(upscaler) {
+        return Err(Error::Invalid(format!(
+            "{} is off on macOS for now: set the Upscaler to AI or Classic",
+            name(upscaler)
+        )));
+    }
     match upscaler {
         Upscaler::AiFast | Upscaler::Classic => {
             Ok(Box::new(crate::upscale::Run::new(size, want, sink)))
         }
         Upscaler::AiBest => Ok(Box::new(crate::flashvsr::Run::open(size, made)?)),
+        Upscaler::Macos => Ok(Box::new(crate::macos::Run::open(size, made)?)),
     }
 }
 
@@ -311,6 +329,7 @@ pub fn name(upscaler: Upscaler) -> &'static str {
     match upscaler {
         Upscaler::AiFast => "AI Fast (NanoVSR 5.4M)",
         Upscaler::AiBest => "AI Best (FlashVSR+ Turbo)",
+        Upscaler::Macos => "AI (macOS super resolution)",
         Upscaler::Classic => "Classic",
     }
 }
@@ -322,6 +341,29 @@ pub fn check<'a>(
     download: bool,
 ) -> Result<()> {
     let plans: Vec<&RenderPlan> = plans.into_iter().collect();
+    let mut off: Vec<String> = plans
+        .iter()
+        .flat_map(|plan| &plan.video)
+        .flat_map(|piece| piece.layers())
+        .filter_map(|(layer, _)| match layer {
+            VideoPiece::Source {
+                media, super_scale, ..
+            } if super_scale.ai() && off_here(super_scale.upscaler) => {
+                p.media(media).map(|m| m.name.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    off.sort();
+    off.dedup();
+    if !off.is_empty() {
+        return Err(Error::Invalid(format!(
+            "AI Fast and AI Best are off on macOS for now: set the Upscaler of {} to AI or \
+             Classic",
+            off.join(", ")
+        )));
+    }
     crate::upscale::check(p, plans.iter().flat_map(|plan| &plan.video), dir, download)?;
-    crate::flashvsr::check(p, plans.iter().copied(), dir, download)
+    crate::flashvsr::check(p, plans.iter().copied(), dir, download)?;
+    crate::macos::check(p, plans.iter().flat_map(|plan| &plan.video), download)
 }

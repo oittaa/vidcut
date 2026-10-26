@@ -1599,7 +1599,7 @@ impl Workspace {
                 ui.separator();
                 ui.add_enabled_ui(!now.is_off(), |ui| {
                     ui.menu_button("Upscaler", |ui| {
-                        for (upscaler, label) in UPSCALERS {
+                        for &(upscaler, label) in UPSCALERS {
                             if ui.radio(now.upscaler == upscaler, label).clicked() {
                                 put = Some(json!({ "upscaler": upscaler }));
                             }

@@ -12,7 +12,19 @@ pub(super) const FACTORS: [(ScaleFactor, &str); 5] = [
     (ScaleFactor::X4, "4x"),
 ];
 
-pub(super) const UPSCALERS: [(Upscaler, &str); 3] = [
+const NAMES: [(Upscaler, &str); 4] = [
+    (Upscaler::Macos, "AI"),
+    (Upscaler::AiBest, "AI Best"),
+    (Upscaler::AiFast, "AI Fast"),
+    (Upscaler::Classic, "Classic"),
+];
+
+#[cfg(target_os = "macos")]
+pub(super) const UPSCALERS: &[(Upscaler, &str)] =
+    &[(Upscaler::Macos, "AI"), (Upscaler::Classic, "Classic")];
+
+#[cfg(not(target_os = "macos"))]
+pub(super) const UPSCALERS: &[(Upscaler, &str)] = &[
     (Upscaler::AiBest, "AI Best"),
     (Upscaler::AiFast, "AI Fast"),
     (Upscaler::Classic, "Classic"),
@@ -33,6 +45,7 @@ pub(super) fn label_of<T: PartialEq + Copy>(list: &[(T, &'static str)], value: T
 pub(super) fn described(s: SuperScale) -> String {
     let factor = label_of(&FACTORS, s.factor);
     match s.upscaler {
+        Upscaler::Macos => format!("{factor}, AI"),
         Upscaler::AiFast => format!("{factor}, AI Fast"),
         Upscaler::AiBest => format!("{factor}, AI Best"),
         Upscaler::Classic => format!(
@@ -52,7 +65,7 @@ pub(super) fn unfit<'a>(
     media
         .into_iter()
         .find_map(|m| vidcut_av::ai::unfit(m, s.upscaler))
-        .map(|why| format!("{} can't take {why}", label_of(&UPSCALERS, s.upscaler)))
+        .map(|why| format!("{} can't take {why}", label_of(&NAMES, s.upscaler)))
 }
 
 fn field<T: serde::de::DeserializeOwned>(params: &Value, key: &str) -> Option<T> {

@@ -109,8 +109,52 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 ] }
 objc2-foundation = { version = "0.3", default-features = false, features = [
     "std",
+    "NSArray",
+    "NSDictionary",
+    "NSError",
     "NSString",
     "NSUserDefaults",
+    "NSValue",
+] }
+# macOS's own super-resolution scaler (VideoToolbox's VTFrameProcessor,
+# macOS 26) for Super Scale's macOS upscaler, with the CoreVideo pixel
+# buffers and CoreMedia times that it takes. Zlib, Apache-2.0 or MIT; half
+# for its 16-bit float pictures is MIT or Apache-2.0.
+objc2 = { version = "0.6", default-features = false, features = ["std"] }
+half = { version = "2", default-features = false }
+block2 = { version = "0.6", default-features = false, features = ["std"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "CFBase",
+    "CFDictionary",
+] }
+objc2-core-video = { version = "0.3", default-features = false, features = [
+    "std",
+    "objc2",
+    "CVBase",
+    "CVBuffer",
+    "CVImageBuffer",
+    "CVPixelBuffer",
+    "CVReturn",
+] }
+objc2-core-media = { version = "0.3", default-features = false, features = [
+    "std",
+    "CMBase",
+    "CMTime",
+] }
+objc2-video-toolbox = { version = "0.3", default-features = false, features = [
+    "std",
+    "objc2",
+    "block2",
+    "objc2-core-media",
+    "objc2-core-video",
+    "objc2-foundation",
+    "VTFrameProcessor",
+    "VTFrameProcessorConfiguration",
+    "VTFrameProcessorFrame",
+    "VTFrameProcessorParameters",
+    "VTFrameProcessor_OpticalFlow",
+    "VTFrameProcessor_SuperResolutionScaler",
 ] }
 # Loads CUDA's driver library for the calls FFmpeg doesn't make (memory a
 # display shares). ISC.

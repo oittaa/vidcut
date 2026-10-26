@@ -1786,7 +1786,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It makes a clip of a higher resolution, which often stops playback in real time (p. 288). The usual sizing then fits that clip.
 - **vidcut:**
   - Super Scale is Off, Auto, 2x, 3x or 4x. Its Upscaler is AI Best, AI Fast or Classic. There is no Enhanced mode.
-  - AI Best is the default. It is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders on the GPU, through wgpu.
+  - On macOS, the Upscaler is AI or Classic. AI Fast and AI Best are off there for now: exports and the viewer refuse them.
+  - On macOS, AI is the default. It is the super-resolution scaler of macOS 26 and later (`VTFrameProcessor` of VideoToolbox), `macos` in requests.
+    - It enlarges by a factor that macOS offers. It takes the smallest of these that reaches the shown size, and the result is fitted.
+    - It reads the frames of a clip in order. Each output frame uses the frame and the output before it.
+    - It takes SDR pictures up to 1920×1080, the limit of macOS for video.
+    - macOS downloads its models only when the user agrees, as for the weights of AI Fast and AI Best. vidcut does not ship them.
+    - macOS does not give their size, so the question says that the size is unknown. On the owner's Mac, the weight file of the 4x model is 66 MB.
+  - Elsewhere, AI Best is the default. It is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders on the GPU, through wgpu.
     - It is slow, and it adds more detail. It has no setting.
     - It reads the frames of a clip in order, from the first frame that is asked for. Each output frame uses the frames before it and the 4 frames after it.
     - It makes the picture at the size that it shows at, but not more than 4 times the source.
@@ -1797,7 +1804,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - It reads the frames of a file in chunks of 15. Each output frame uses the frames before and after it in its chunk.
     - The weights (25 MB) download at their first use. vidcut does not ship them.
     - AI Fast takes SDR pictures of any size. Its memory grows with the size of the source picture.
-  - Both AI upscalers:
+  - The AI upscalers:
     - Before an export starts, vidcut refuses media that the upscaler cannot take. The error names each file and the reason.
     - It also refuses an AI upscaler without its weights, or without a GPU that can run the network.
     - It refuses AI Best for a size that does not fit in the GPU's memory and main memory.
@@ -1812,12 +1819,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Pictures that the CPU makes, also placed pictures: swscale. Low is `spline`, Medium `lanczos` and High `lanczos` with four lobes.
     - The other GPUs fit the picture as before. They have no Super Scale yet ([todo](todo/super-scale.md)).
   - The viewer shows Super Scale only with View > Show Super Scale, which is off by default.
-  - With AI Fast or AI Best, the viewer runs the AI upscaler of the export on each picture that the export enlarges. Playback is then slower. With AI Best, a picture can take seconds.
+  - With an AI upscaler, the viewer runs the upscaler of the export on each picture that the export enlarges. Playback is then slower. With AI Best, a picture can take seconds.
   - With Classic, the viewer enlarges with its own kernels: Catmull-Rom (Low), Lanczos with 3 lobes (Medium) and with 4 lobes (High).
 - **Why:**
   - A video model adds detail that a classic upscaler cannot. In side-by-side tests, the owner ranked NanoVSR 5.4M above Real-ESRGAN's compact model.
   - Some users wait a long time for the best pictures, and others want good pictures fast. Thus there is a fast AI upscaler and a slow one.
   - AI Best is the default and the first choice, because Super Scale is mostly for the best pictures. AI Fast is the choice for speed.
+  - On macOS, the scaler of macOS is the default because it is part of the system. vidcut needs no weights for it, and the owner chose it.
+  - AI Fast and AI Best are off on macOS because they are too slow there. On the owner's M4 MacBook Air, AI Fast took 345 s for 30 frames, 854×480 enlarged to 1920×1080.
   - FlashVSR+ Turbo is one step of a diffusion model, with Apache 2.0 code and weights. It streams over the frames, so a clip has no chunk edges.
   - The network has only 3×3 and 1×1 convolutions. Shaders of its own run it on the GPU of every maker through wgpu, with no new library.
   - The shaders keep the values between the layers as 16-bit floats, and add in 32-bit floats. This halves the memory traffic. It needs no GPU feature.

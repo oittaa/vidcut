@@ -1637,7 +1637,7 @@ impl Workspace {
                 ui.end_row();
             };
             row(ui, "Upscaler", on, &mut |ui| {
-                for (upscaler, text) in UPSCALERS {
+                for &(upscaler, text) in UPSCALERS {
                     if ui
                         .selectable_label(now.upscaler == upscaler, text)
                         .clicked()

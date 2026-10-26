@@ -23,6 +23,7 @@ pub mod hdr;
 pub mod hw;
 pub mod isolate;
 pub mod light;
+pub mod macos;
 pub mod models;
 pub mod parts;
 pub mod player;
