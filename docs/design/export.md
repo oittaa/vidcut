@@ -172,6 +172,7 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
 - A shot change between the two frames keeps the nearer frame (`Source::cut`).
   - The test is the scene score of `analysis::picture_stats`, from the three frames at 96×54 luma (`analysis::small_luma`, `analysis::mafd`, `analysis::scene_score`).
   - The limit is `SCENE_SCORE`, the default of Detect Scene Cuts.
+  - A pair without a decoded frame before it has no score, and is not a cut. Detect Scene Cuts scores such a pair by its difference alone, but there a false cut only marks a shot; here it would hold a frame.
 - Both frames become RGB, upright, at the size that the picture shows at (`between_size`). This size is at most the size of the source.
   - `Source::rgb_of` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next.
 - `interpolate::between` makes the frame ([gpu](gpu.md)). The picture then goes through the usual fitting, upright, as an AI picture of Super Scale does.

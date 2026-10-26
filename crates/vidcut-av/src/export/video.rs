@@ -439,16 +439,13 @@ impl Source {
     }
 
     fn cut(&mut self) -> Result<bool> {
-        let (Some((a, _)), Some((b, _))) = (&self.prev, &self.current) else {
+        let (Some((z, _)), Some((a, _)), Some((b, _))) = (&self.prev2, &self.prev, &self.current)
+        else {
             return Ok(false);
         };
-        let (a, b) = (frame_ref(a)?, frame_ref(b)?);
-        let z = self.prev2.as_ref().map(|(z, _)| frame_ref(z)).transpose()?;
-        let (la, lb) = (self.luma_of(&a)?, self.luma_of(&b)?);
-        let before = match z {
-            Some(z) => crate::analysis::mafd(&self.luma_of(&z)?, &la),
-            None => 0.0,
-        };
+        let (z, a, b) = (frame_ref(z)?, frame_ref(a)?, frame_ref(b)?);
+        let (lz, la, lb) = (self.luma_of(&z)?, self.luma_of(&a)?, self.luma_of(&b)?);
+        let before = crate::analysis::mafd(&lz, &la);
         let score = crate::analysis::scene_score(crate::analysis::mafd(&la, &lb), before);
         Ok(f64::from(score) >= vidcut_core::analysis::SCENE_SCORE)
     }
