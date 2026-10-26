@@ -426,7 +426,7 @@ impl Deinterlacer {
         let f = if self.takes(f) {
             f
         } else {
-            down = crate::hw::download(f)?;
+            down = crate::hw::to_read(f)?;
             &down
         };
         if self.graph.is_none() || self.input != (f.width(), f.height(), f.format()) {
@@ -735,7 +735,7 @@ pub(crate) fn open_video(
 
 pub(crate) fn in_memory(f: frame::Video) -> Result<frame::Video> {
     if crate::hw::on_gpu(&f) {
-        crate::hw::download(&f)
+        crate::hw::to_read(&f)
     } else {
         Ok(f)
     }

@@ -227,7 +227,7 @@ impl Measuring {
         let count = (w * h) as usize;
         let down;
         let decoded = if crate::hw::on_gpu(decoded) {
-            down = crate::hw::download(decoded)?;
+            down = crate::hw::to_read(decoded)?;
             &down
         } else {
             decoded

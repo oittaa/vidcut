@@ -119,6 +119,10 @@ In exports:
 | Direct3D 11 | AMF on its adapter | the video processor; colors unchanged, not 8-bit into 10-bit | in memory | other encoders, QSV too; color changes; dissolves |
 | VideoToolbox | its own encoders | `transpose_vt`, `scale_vt`, where colors and layout stay | in memory | padding, layout or color changes; dissolves |
 
+- A VideoToolbox frame that comes down is not copied. `hw::to_read` maps its pixel buffer (`av_hwframe_map`), and the CPU reads it in place.
+  - The map is read-only. A step that writes into the picture copies it first (`av_frame_make_writable`).
+  - The player still copies pictures down where it moves them out of video memory (`Picture::copied_down`).
+
 Dissolves and overlays:
 
 - Where the driver does not take the kernel of `cuda::mix`, the export mixes its dissolves on the CPU for the rest of the export. Its result says why.

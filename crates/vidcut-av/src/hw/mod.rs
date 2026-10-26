@@ -726,6 +726,13 @@ pub fn download(src: &frame::Video) -> Result<frame::Video> {
     Ok(f)
 }
 
+pub fn to_read(src: &frame::Video) -> Result<frame::Video> {
+    match Kind::of_frame(src) {
+        Some(Kind::VideoToolbox) => vt::mapped(src),
+        _ => download(src),
+    }
+}
+
 fn downloaded(src: &frame::Video) -> Result<frame::Video> {
     vaapi::intel_download(src).unwrap_or_else(|| fetched(src))
 }

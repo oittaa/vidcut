@@ -382,7 +382,7 @@ impl Maker {
                 Route::Shrunk | Route::Whole => Some(match self.output {
                     Output::Decoded { .. } => match self.shrink {
                         Some(size) => down(&mut stage.shrinker, frame, rotation, size)?,
-                        None => crate::hw::download(frame)?,
+                        None => crate::hw::to_read(frame)?,
                     },
                     _ => down(&mut stage.shrinker, frame, rotation, (out_w, out_h))?,
                 }),
