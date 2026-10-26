@@ -322,10 +322,11 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - The factors come from macOS (`supportedScaleFactors`, `macos::factors`). The Inspector and the pool grey out the others (`macos::offers`), and `macos::check` refuses them.
   - Each run has a session of its own, for its source size and factor.
   - Each frame goes into a CoreVideo pixel buffer, with the attributes that the configuration asks for.
+    - The buffers come from two pools of the run (`CVPixelBufferPool`), one for the source and one for the output. A pool reuses a buffer when no frame uses it.
     - The buffer is the first of these that the scaler takes: BGRA; 8-bit 4:2:0 in video range, converted with the BT.709 matrix; 16-bit float RGBA (`RGHA`), the code values over 255.
     - On the owner's M4 with macOS 27, the scaler takes only 16-bit float RGBA.
     - The scaler gets the frame before and its output too. The frames go in order (`Sequential`).
-  - The output comes back to RGB in the same way.
+  - The output comes back to RGB in the same way. For 16-bit float, a table of all 65,536 values gives the 8-bit codes.
   - `macos::check` refuses HDR media and pictures over 1920×1080 (`macos::MOST`), the limit of macOS for video.
   - A run does not download. It stops with an error when macOS does not have the model of its factor.
   - `macos::needed` reports the models while macOS lacks the model of a factor that it lists. Thus the GUI asks first, with the size unknown.

@@ -180,14 +180,16 @@ mod imp {
     use objc2_core_foundation::{CFDictionary, CFRetained};
     use objc2_core_media::CMTime;
     use objc2_core_video::{
-        CVPixelBuffer, CVPixelBufferCreate, CVPixelBufferGetBaseAddress,
-        CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRow,
-        CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferIsPlanar, CVPixelBufferLockBaseAddress,
-        CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVPixelFormatType_32BGRA,
-        kCVPixelFormatType_64RGBAHalf, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-        kCVReturnSuccess,
+        CVPixelBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBaseAddressOfPlane,
+        CVPixelBufferGetBytesPerRow, CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferIsPlanar,
+        CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferPool,
+        CVPixelBufferUnlockBaseAddress, kCVPixelBufferHeightKey, kCVPixelBufferPixelFormatTypeKey,
+        kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA, kCVPixelFormatType_64RGBAHalf,
+        kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVReturnSuccess,
     };
-    use objc2_foundation::{NSArray, NSDictionary, NSError, NSNumber, NSString};
+    use objc2_foundation::{
+        NSArray, NSDictionary, NSError, NSMutableDictionary, NSNumber, NSString,
+    };
     use objc2_video_toolbox::{
         VTFrameProcessor, VTFrameProcessorFrame, VTSuperResolutionScalerConfiguration,
         VTSuperResolutionScalerConfigurationInputType,
@@ -346,24 +348,49 @@ mod imp {
             })
     }
 
-    fn buffer(
+    fn pool(
         (w, h): (u32, u32),
         format: u32,
         attributes: &NSDictionary<NSString, AnyObject>,
-    ) -> Result<CFRetained<CVPixelBuffer>> {
-        let attributes = std::ptr::from_ref(attributes).cast::<CFDictionary>();
-        let mut out: *mut CVPixelBuffer = std::ptr::null_mut();
-        // SAFETY: an NSDictionary is a CFDictionary, and `out` is a valid place for the buffer.
-        let status = unsafe {
-            CVPixelBufferCreate(
-                None,
-                w as usize,
-                h as usize,
-                format,
-                Some(&*attributes),
-                NonNull::from(&mut out),
-            )
+    ) -> Result<CFRetained<CVPixelBufferPool>> {
+        let all = NSMutableDictionary::dictionaryWithDictionary(attributes);
+        // SAFETY: constant keys of CoreVideo.
+        let keys = unsafe {
+            [
+                (kCVPixelBufferWidthKey, w),
+                (kCVPixelBufferHeightKey, h),
+                (kCVPixelBufferPixelFormatTypeKey, format),
+            ]
         };
+        for (key, value) in keys {
+            // SAFETY: a CFString is an NSString.
+            let key = unsafe { &*std::ptr::from_ref(key).cast::<NSString>() };
+            all.insert(key, NSNumber::new_u32(value).as_ref());
+        }
+        let attributes =
+            std::ptr::from_ref::<NSDictionary<NSString, AnyObject>>(&all).cast::<CFDictionary>();
+        let mut out: *mut CVPixelBufferPool = std::ptr::null_mut();
+        // SAFETY: an NSDictionary is a CFDictionary, and `out` is a valid place for the pool.
+        let status = unsafe {
+            CVPixelBufferPool::create(None, None, Some(&*attributes), NonNull::from(&mut out))
+        };
+        if status != kCVReturnSuccess {
+            return Err(Error::Invalid(format!(
+                "picture buffers for macOS's super-resolution scaler: CoreVideo error {status}"
+            )));
+        }
+        let out = NonNull::new(out).ok_or_else(|| {
+            Error::Invalid("no picture buffers for macOS's super-resolution scaler".into())
+        })?;
+        // SAFETY: CVPixelBufferPoolCreate gives the pool with one retain, which this takes.
+        Ok(unsafe { CFRetained::from_raw(out) })
+    }
+
+    fn buffer(pool: &CVPixelBufferPool) -> Result<CFRetained<CVPixelBuffer>> {
+        let mut out: *mut CVPixelBuffer = std::ptr::null_mut();
+        // SAFETY: a live pool, and `out` is a valid place for the buffer.
+        let status =
+            unsafe { CVPixelBufferPool::create_pixel_buffer(None, pool, NonNull::from(&mut out)) };
         if status != kCVReturnSuccess {
             return Err(Error::Invalid(format!(
                 "a picture buffer for macOS's super-resolution scaler: CoreVideo error {status}"
@@ -372,7 +399,7 @@ mod imp {
         let out = NonNull::new(out).ok_or_else(|| {
             Error::Invalid("no picture buffer for macOS's super-resolution scaler".into())
         })?;
-        // SAFETY: CVPixelBufferCreate gives the buffer with one retain, which this takes.
+        // SAFETY: CVPixelBufferPoolCreatePixelBuffer gives the buffer with one retain, which this takes.
         Ok(unsafe { CFRetained::from_raw(out) })
     }
 
@@ -490,27 +517,40 @@ mod imp {
         Ok(())
     }
 
+    fn halves() -> &'static [u8] {
+        static CODES: OnceLock<Vec<u8>> = OnceLock::new();
+        CODES.get_or_init(|| {
+            (0..=u16::MAX)
+                .map(|bits| code(255.0 * f16::from_bits(bits).to_f32()))
+                .collect()
+        })
+    }
+
     fn read(buffer: &CVPixelBuffer, format: u32, (w, h): (u32, u32)) -> Result<Vec<u8>> {
         let (w, h) = (w as usize, h as usize);
         let mut locked = Locked::new(buffer)?;
+        if format == RGHA {
+            let codes = halves();
+            let mut out = vec![0; w * h * 3];
+            for (y, line) in out.chunks_exact_mut(w * 3).enumerate() {
+                let row = locked.row(0, y, w * 8);
+                for (to, px) in line
+                    .as_chunks_mut::<3>()
+                    .0
+                    .iter_mut()
+                    .zip(row.as_chunks::<8>().0)
+                {
+                    let c = |i: usize| codes[usize::from(u16::from_le_bytes([px[i], px[i + 1]]))];
+                    *to = [c(0), c(2), c(4)];
+                }
+            }
+            return Ok(out);
+        }
         let mut out = Vec::with_capacity(w * h * 3);
         if format == BGRA {
             for y in 0..h {
                 for px in locked.row(0, y, w * 4).as_chunks::<4>().0 {
                     out.extend_from_slice(&[px[2], px[1], px[0]]);
-                }
-            }
-            return Ok(out);
-        }
-        if format == RGHA {
-            for y in 0..h {
-                for px in locked.row(0, y, w * 8).as_chunks::<8>().0 {
-                    let c = |i: usize| {
-                        code(
-                            255.0 * f16::from_bits(u16::from_le_bytes([px[i], px[i + 1]])).to_f32(),
-                        )
-                    };
-                    out.extend_from_slice(&[c(0), c(2), c(4)]);
                 }
             }
             return Ok(out);
@@ -534,7 +574,8 @@ mod imp {
 
     pub(super) struct Scaler {
         processor: Retained<VTFrameProcessor>,
-        config: Retained<VTSuperResolutionScalerConfiguration>,
+        sources: CFRetained<CVPixelBufferPool>,
+        outputs: CFRetained<CVPixelBufferPool>,
         format: u32,
         size: (u32, u32),
         made: (u32, u32),
@@ -555,6 +596,15 @@ mod imp {
                 return Err(Error::Missing(MISSING.into()));
             }
             let format = format_of(&config)?;
+            // SAFETY: properties of a live configuration.
+            let (from, to) = unsafe {
+                (
+                    config.sourcePixelBufferAttributes(),
+                    config.destinationPixelBufferAttributes(),
+                )
+            };
+            let sources = pool(size, format, &from)?;
+            let outputs = pool(made, format, &to)?;
             // SAFETY: a new processor of the frame processor class.
             let processor = unsafe { VTFrameProcessor::new() };
             // SAFETY: a new processor and a live configuration.
@@ -574,7 +624,8 @@ mod imp {
             );
             Ok(Self {
                 processor,
-                config,
+                sources,
+                outputs,
                 format,
                 size,
                 made,
@@ -583,17 +634,10 @@ mod imp {
         }
 
         pub(super) fn scale(&mut self, index: i64, rgb: &[u8]) -> Result<Vec<u8>> {
-            // SAFETY: properties of a live configuration.
-            let (from, to) = unsafe {
-                (
-                    self.config.sourcePixelBufferAttributes(),
-                    self.config.destinationPixelBufferAttributes(),
-                )
-            };
             let clock = std::time::Instant::now();
-            let source = buffer(self.size, self.format, &from)?;
+            let source = buffer(&self.sources)?;
             write(&source, self.format, self.size, rgb)?;
-            let enlarged = buffer(self.made, self.format, &to)?;
+            let enlarged = buffer(&self.outputs)?;
             let wrote = clock.elapsed();
             // SAFETY: a time of plain values.
             let time = unsafe { CMTime::new(index, 1) };
