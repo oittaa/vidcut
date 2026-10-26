@@ -364,7 +364,7 @@ fn apply_video_budget() {
     }
 }
 
-pub(crate) use store::Lent;
+pub(crate) use store::{Lent, LentMemory};
 
 fn cache_on(gpu: &crate::gpus::Gpu) -> bool {
     crate::gpus::in_use().is_some_and(|g| g.id == gpu.id)
@@ -391,6 +391,15 @@ pub(crate) fn lend_on(gpu: &crate::gpus::Gpu, need: u64, room: u64) -> Option<Le
 
 pub fn video_lent() -> Option<usize> {
     store::lent_cap()
+}
+
+pub(crate) fn lend_memory(bytes: u64) -> LentMemory {
+    crate::debug!("ai", "{} MB of main memory lent for AI work", bytes >> 20);
+    store::lend_memory(bytes as usize)
+}
+
+pub fn memory_lent() -> Option<usize> {
+    store::memory_cap()
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {

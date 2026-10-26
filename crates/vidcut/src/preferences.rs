@@ -371,6 +371,7 @@ fn describe(p: &Preferences) -> Value {
         "player_video_memory_auto_mb": video_memory_auto_mb(p),
         "player_video_memory_shared": vidcut_av::player::SHARED_MEMORY,
         "player_video_memory_lent_mb": vidcut_av::player::video_lent().map(|b| b >> 20),
+        "player_memory_lent_mb": vidcut_av::player::memory_lent().map(|b| b >> 20),
         "system_memory_mb": vidcut_av::player::system_memory().map(|b| b >> 20),
     })
 }

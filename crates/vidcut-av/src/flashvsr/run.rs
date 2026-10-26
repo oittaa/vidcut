@@ -146,6 +146,7 @@ pub(super) struct Stream {
     mems: Mems,
     loaner: Option<(wgpu::Buffer, wgpu::Buffer)>,
     upload: Option<wgpu::SubmissionIndex>,
+    lent: Option<crate::player::LentMemory>,
     fed: u64,
     chunk: u64,
     dump: Option<PathBuf>,
@@ -620,7 +621,7 @@ impl Stream {
             .map(|b| (gpu.buffer(b), gpu.buffer(b)));
         let p8 = g.p8() as usize;
         let mem = |p: usize, n: usize| (0..3).map(|_| gpu.buffer(p * n * 2)).collect();
-        Ok(Self {
+        let mut stream = Self {
             g,
             frames: gpu.buffer((RING * u64::from(g.plane()) * 4) as usize),
             tables,
@@ -636,12 +637,27 @@ impl Stream {
             },
             loaner,
             upload: None,
+            lent: None,
             fed: 0,
             chunk: 0,
             host_wait: Duration::ZERO,
             host_bytes: 0,
             dump,
-        })
+        };
+        stream.lend_memory();
+        Ok(stream)
+    }
+
+    fn lend_memory(&mut self) {
+        let size = window(&self.g);
+        let host: u64 = self
+            .caches
+            .iter()
+            .filter(|c| matches!(c.keys, Keys::Host { .. }))
+            .map(|c| 2 * u64::from(c.keep) * size)
+            .sum();
+        self.lent = None;
+        self.lent = (host > 0).then(|| crate::player::lend_memory(host));
     }
 
     fn fit(&mut self, gpu: &Gpu) -> Result<()> {
@@ -692,6 +708,7 @@ impl Stream {
         }
         cache.keys = Keys::Host { k: hk, v: hv };
         let bytes = cache.keep as u64 * size;
+        self.lend_memory();
         if self.loaner.as_ref().is_none_or(|(k, _)| k.size() < bytes) {
             self.loaner = None;
             gpu.wait()?;

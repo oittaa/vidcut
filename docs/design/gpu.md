@@ -212,6 +212,10 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - Stats for Nerds and Preferences show the smaller budget while a loan holds.
   - A loan is only for the GPU of the viewer (`gpus::in_use`). An AI upscaler on another GPU takes no pictures.
   - Why: the AI work and the kept pictures must fit on the GPU together. Otherwise the driver moves GPU memory to main memory, and one picture can take minutes.
+  - AI Best also borrows main memory for its caches in main memory (`player::lend_memory`).
+    - Each loan (`store::LentMemory`) makes the main-memory budget of the kept pictures smaller by the size of those caches. The oldest pictures go first.
+    - The stream renews its loan when `Stream::fit` moves a cache to main memory. The loan ends with the stream.
+    - Why: the AI caches and the kept pictures must fit in main memory together.
 - **AI Fast** (`upscale`):
   - Before an export starts, `upscale::check` refuses media that AI Fast cannot take (`upscale::unfit`). It also refuses AI Fast without the weights or without a GPU that can run it.
   - A run is a chunk of 15 frames (`upscale::FRAMES`). The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
