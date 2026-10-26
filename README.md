@@ -12,6 +12,7 @@ It behaves like a Cut page ([spec](docs/cut-page-spec.md)). A script or an AI ag
   - A media pool with bins, a source and timeline viewer, and the dual timeline.
   - Smart Insert, Append, Ripple Overwrite, Overwrite and Place On Top.
   - Split, ripple delete, trimming, the Trim Editor, Dynamic Trim and clip speed.
+  - Retime Process for slow motion and other frame rates: Nearest, Frame Blend, or an AI model on this computer's GPU.
   - Dissolves and fades, several video and audio tracks, and a mixer.
   - Snapping, markers and undo.
 - **Export:** Quick Export and an Export dialog, GPU encoding (NVIDIA, AMD, Intel, Apple), background jobs, HDR that follows the footage, and loudness normalization.
@@ -76,6 +77,8 @@ On a Mac, the full test gate and an app bundle are still open ([todo](docs/todo/
   - The library is 18 MB on Windows, 23 MB on Linux and 2.5 MB on a Mac with Apple silicon. Silero VAD is 1.2 MB.
   - vidcut checks each download against its SHA-256.
 - Voice Isolation runs DPDFNet on the CPU. vidcut downloads DPDFNet (10 MB) in the same way, the first time that you turn Voice Isolation on.
+- The AI models of Retime Process run on the GPU, with vidcut's own shaders. They are RIFE 4.25 (25 MB), EMA-VFI (264 MB) and VFIMamba (264 MB).
+  - vidcut downloads the weights of a model in the same way, the first time that you select it.
 - `rust-toolchain.toml` pins the Rust version. rustup gets it on the first build.
 
 ## Build and run

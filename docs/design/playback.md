@@ -141,6 +141,8 @@ Motions:
   - Whether the picture is enlarged depends on its placement and on the timeline size, as in an export.
   - Thus the key of its kept frames holds its Super Scale, its placement and the timeline size (`source_key`).
 - With `viewer.super_scale` off, the live core plans the viewer without Super Scale (`preview_plan`).
+- With a Retime Process other than Nearest, `VideoFrames` makes the frames between the source frames for the viewer too, as an export does ([export](export.md#which-source-frame)).
+  - With EMA-VFI or VFIMamba, a frame can take seconds.
 - While pictures are dragged, `Player::preview_pictures` at once puts each dragged picture in place of the picture of its clip.
 - The live core then plans the timeline again with the dragged pictures (`Msg::PreviewPictures`), `RELOAD_EVERY` apart at most.
 - This is necessary because a picture that stops filling the frame needs the tracks below it decoded.

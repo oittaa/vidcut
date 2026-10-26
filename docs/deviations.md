@@ -1873,3 +1873,34 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The word times of a speech model are approximate.
   - A cut at those times can take the start of the next word, or leave part of a breath or a click.
   - A cut at a quiet point sounds cleaner.
+
+## X93. Retime Process has AI models in the place of Optical Flow
+
+- **Resolve:**
+  - Retime Process is in the Retime and Scaling group of the Inspector (p. 739).
+  - It applies to clips at another speed and to clips at another frame rate than the timeline.
+  - Its values are Project Settings, Nearest, Frame Blend and Optical Flow. The default is Project Settings.
+  - Optical Flow has a Motion Estimation mode (p. 740): Standard Faster or Better, Enhanced Faster or Better, and Speed Warp Faster or Better.
+  - Speed Warp uses the DaVinci Neural Engine. AI Speed Warp Metal is a version of it for macOS only.
+- **vidcut:**
+  - Retime Process is a setting of a clip. The Speed section of the Inspector tab sets it, and `clip.set` sets it as `retime`.
+  - Its values are Nearest, Frame Blend, RIFE 4.25, EMA-VFI and VFIMamba. The default is Nearest. There is no project setting.
+  - Nearest shows the source frame that the frame falls in (D48).
+  - Frame Blend mixes the two source frames around the frame. Each frame has the weight of how near it is.
+  - RIFE 4.25, EMA-VFI and VFIMamba are AI models. Each makes the frame from the motion between the two source frames.
+    - vidcut runs them with compute shaders of its own on the GPU, through wgpu.
+    - Their weights download at their first use: 25 MB, 264 MB and 264 MB. vidcut does not ship them.
+    - The models make a frame at any point between the two source frames.
+  - A frame comes from the exact source time of the frame. Thus a clip at another frame rate gets made frames too, also at 100%.
+  - Between two source frames with a shot change, the frame is the nearer source frame. The test is that of Detect Scene Cuts, at its default score.
+  - The frames are made at the size they show at. This size is at most the size of the source.
+  - Retime Process takes SDR pictures for now. An export refuses HDR media with a process other than Nearest, and the Inspector shows a warning.
+  - A clip played backward shows the nearest frames for now.
+  - With an AI upscaler of Super Scale, a made frame is enlarged as with Classic.
+  - The viewer shows the frames that an export makes. With the slower models, a frame can take seconds.
+- **Why:**
+  - The models run on this computer and need no account. Their code and weights are under MIT (RIFE) and Apache 2.0 (EMA-VFI and VFIMamba).
+  - The models make any point between two frames, not only the middle. A speed of 40% needs points such as 0.4 and 0.8.
+  - The owner compares the three models before vidcut keeps fewer of them. Thus each model is a value of its own for now.
+  - A morph from one shot into the next looks wrong. Thus a shot change keeps the nearer source frame, as Nearest does.
+  - Nearest is the behavior that vidcut had. Thus a clip keeps it until the user selects another process.

@@ -338,6 +338,39 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - Elsewhere, the same calls give the error that it needs macOS 26 or later.
 - **AI Fast and AI Best on macOS:** off for now (`ai::off_here`). `ai::check` and `ai::open` refuse them, and the Inspector and the pool do not offer them.
 
+## Frame interpolation
+
+`interpolate` makes the frames of Retime Process ([export](export.md#which-source-frame), [deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
+
+- `interpolate::between` takes the two frames as RGB, their size and the weight of the later frame. It gives the made frame as RGB.
+- `interpolate` has a wgpu device of its own (`compute::Gpu`), on the GPU that wgpu prefers. Its pipelines (`ops::Kernels`) and the weights of each model stay.
+  - The device goes when the last `interpolate::User` goes. Each `Source` with a process other than Nearest is a user.
+- The last pair stays on the GPU with its features. The next frame of the same pair uses them again. Thus the frames between one pair of a slow clip share the features.
+- Frame Blend mixes the two frames on the same device (`Ops::combine`).
+- The networks run on kernels of vidcut's own (`interpolate::ops`), in 32-bit floats:
+  - `Ops::conv` runs a convolution as a matrix multiply that gathers its taps. It also runs the linear layers, as 1×1 convolutions.
+  - `Ops::deconv` runs a transposed 4×4 convolution with stride 2 as four 2×2 convolutions, one for each output parity. Its output can go through a pixel shuffle.
+  - `Ops::resize` is bilinear, as PyTorch's interpolate without corner alignment.
+  - `Ops::warp` is the backward warp of the models, as PyTorch's grid sample with border padding and corner alignment.
+  - `Ops::norm` is a layer norm over the channels of each pixel.
+  - `Ops::windows`, `Ops::attend` and `Ops::cor` are EMA-VFI's shifted and padded 7×7 windows, its attention between the frames, and its coordinate embedding.
+  - `Ops::scan` is VFIMamba's selective scan. One thread runs one channel of one scan direction over the whole sequence.
+  - A tensor is a `View`: channels last, with a channel offset and a stride. Thus a layer writes into its part of a concatenation, and no copy joins the parts.
+- The weights come from the authors' PyTorch files (`weights::Torch`).
+- **RIFE 4.25** (`rife`):
+  - The frames pad with zeros at the right and the bottom to a multiple of 128, as in the official code.
+  - The encoder runs once for a pair. The five flow blocks run for each frame.
+  - It finds the motion at half size for UHD, as its README says.
+- **EMA-VFI** (`ema`) and **VFIMamba** (`mamba`):
+  - The frames pad with their edges, centered, as in the official padder. The multiple is 32 divided by the scale of the motion.
+  - The motion is found at half size for frames of 1080 lines and at a quarter for UHD (`motion_scale`). The refinement runs at full size. These are the scales of the authors' tests.
+  - The pair also runs turned by 180 degrees, and the two results are averaged, as in the authors' tests.
+  - The backbone runs once for a pair, at each size and each turn. The flow, the refinement and VFIMamba's local blocks run for each frame.
+  - Both turns use the same scratch buffers for the backbone.
+  - VFIMamba follows the forward path of the official code. Its two local blocks run at full size, after the motion is enlarged.
+  - VFIMamba's scans keep the order of the official code. The column scans put their results back in that code's order, which is not the order of the pixels.
+- PyTorch versions of the three networks, written from the official code, give the same frames within 1 of 255 levels, on 1080p frames.
+
 ## Deinterlacing and HDR
 
 Deinterlacing:
@@ -378,6 +411,8 @@ HDR:
 - `crates/vidcut-av/src/cuda/mix.rs`
 - `crates/vidcut-av/src/cuda/burn.rs`
 - `crates/vidcut-av/src/cuda/share.rs`
+- `crates/vidcut-av/src/interpolate.rs`
+- `crates/vidcut-av/src/interpolate/ops.rs`
 - `crates/vidcut-av/src/route.rs`
 - `crates/vidcut-av/src/decode.rs`
 - `crates/vidcut-av/src/color.rs`
