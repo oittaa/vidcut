@@ -1721,10 +1721,12 @@ fn file_count(n: usize) -> String {
     }
 }
 
-fn upload_check(asked: &transcript::Asked, secs: f64, what: &str) -> Result<()> {
+fn upload_check(asked: &transcript::Asked, sent: &[(f64, u16)], what: &str) -> Result<()> {
     if !asked.model.paid() || asked.send {
         return Ok(());
     }
+    let secs = sent.iter().map(|&(s, _)| s).sum();
+    let mb: f64 = sent.iter().map(|&(s, c)| transcript::upload_mb(s, c)).sum();
     Err(Error::new(
         crate::error::ErrorCode::Dependency,
         format!(
@@ -1732,7 +1734,7 @@ fn upload_check(asked: &transcript::Asked, secs: f64, what: &str) -> Result<()> 
              Pass send (--send) to upload it",
             asked.model.company(),
             crate::subtitles::clock(secs, '.'),
-            transcript::upload_mb(secs, 1).ceil(),
+            mb.ceil(),
             transcript::dollars(transcript::cost(asked.model, secs)),
             asked.model.dollars_per_hour()
         ),
@@ -1845,11 +1847,12 @@ fn clip_speech(
             .iter()
             .map(|&i| channels_of(asked, files[i].0, files[i].1))
             .collect::<Result<Vec<_>>>()?;
-        let secs = missing
+        let sent: Vec<(f64, u16)> = missing
             .iter()
-            .map(|&i| sound_secs(files[i].0, files[i].1))
-            .sum();
-        upload_check(asked, secs, &file_count(missing.len()))?;
+            .zip(&channels)
+            .map(|(&i, &c)| (sound_secs(files[i].0, files[i].1), c))
+            .collect();
+        upload_check(asked, &sent, &file_count(missing.len()))?;
         let plans = missing
             .iter()
             .zip(&channels)
@@ -3926,7 +3929,11 @@ fn mutate(
                     (Arc::new(s), json!(media), people)
                 }
                 HearFrom::Mix => {
-                    upload_check(&asked, (b - a) as f64 / p.settings.fps.as_f64(), "The mix")?;
+                    upload_check(
+                        &asked,
+                        &[((b - a) as f64 / p.settings.fps.as_f64(), 1)],
+                        "The mix",
+                    )?;
                     let s = env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?;
                     let people = match &s.speakers {
                         Some(run) => (1..=transcript::speaker_count(&s.said))
@@ -6481,8 +6488,12 @@ pub fn query(
                     .iter()
                     .map(|&i| channels_of(&asked, files[i], *stream))
                     .collect::<Result<Vec<_>>>()?;
-                let secs = missing.iter().map(|&i| sound_secs(files[i], *stream)).sum();
-                upload_check(&asked, secs, &file_count(missing.len()))?;
+                let sent: Vec<(f64, u16)> = missing
+                    .iter()
+                    .zip(&channels)
+                    .map(|(&i, &c)| (sound_secs(files[i], *stream), c))
+                    .collect();
+                upload_check(&asked, &sent, &file_count(missing.len()))?;
                 let plans = missing
                     .iter()
                     .zip(&channels)
@@ -6621,7 +6632,11 @@ pub fn query(
                 xai: xai.clone(),
                 google: google.clone(),
             };
-            upload_check(&asked, (b - a) as f64 / p.settings.fps.as_f64(), "The mix")?;
+            upload_check(
+                &asked,
+                &[((b - a) as f64 / p.settings.fps.as_f64(), 1)],
+                "The mix",
+            )?;
             let speech = env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?;
             let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
             let tongue = filler_language(&None, &speech);
