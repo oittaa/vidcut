@@ -1689,32 +1689,6 @@ fn sound_secs(m: &Media, stream: u32) -> f64 {
     }
 }
 
-fn channels_of(asked: &transcript::Asked, m: &Media, stream: u32) -> Result<u16> {
-    let multichannel =
-        asked.model == SpeechModel::Xai && asked.xai.as_ref().is_some_and(|x| x.multichannel);
-    if !multichannel {
-        return Ok(1);
-    }
-    let channels = m
-        .info
-        .audio
-        .iter()
-        .find(|a| a.index == stream)
-        .map_or(1, |a| a.channels.max(1));
-    let verdict = crate::catalog::check(
-        &crate::catalog::XAI,
-        &[(crate::catalog::Measure::Channels, f64::from(channels))],
-    );
-    if let Some(o) = verdict.refusals.first() {
-        return Err(Error::invalid(format!(
-            "{} has {channels} channels, over the {:.0} that xAI takes one by one: untick Each \
-             Separately (multichannel)",
-            m.name, o.limit.value
-        )));
-    }
-    Ok(channels)
-}
-
 fn file_count(n: usize) -> String {
     match n {
         1 => "1 file".into(),
@@ -1846,7 +1820,10 @@ fn clip_speech(
         let missing: Vec<usize> = (0..files.len()).filter(|&i| kept[i].is_none()).collect();
         let channels = missing
             .iter()
-            .map(|&i| channels_of(asked, files[i].0, files[i].1))
+            .map(|&i| {
+                transcript::channels_of(asked.model, asked.xai.as_ref(), files[i].0, files[i].1)
+                    .map_err(Error::invalid)
+            })
             .collect::<Result<Vec<_>>>()?;
         let sent: Vec<(f64, u16)> = missing
             .iter()
@@ -6487,7 +6464,10 @@ pub fn query(
             if !missing.is_empty() {
                 let channels = missing
                     .iter()
-                    .map(|&i| channels_of(&asked, files[i], *stream))
+                    .map(|&i| {
+                        transcript::channels_of(asked.model, asked.xai.as_ref(), files[i], *stream)
+                            .map_err(Error::invalid)
+                    })
                     .collect::<Result<Vec<_>>>()?;
                 let sent: Vec<(f64, u16)> = missing
                     .iter()

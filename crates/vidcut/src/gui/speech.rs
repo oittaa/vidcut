@@ -1196,7 +1196,15 @@ impl Workspace {
                         }
                     });
                 });
-                if transcribing {
+                let wide = match transcribing {
+                    true => d.media.iter().filter_map(|id| p.media(id)).find_map(|m| {
+                        vidcut_core::transcript::channels_of(s.model, Some(&s.xai), m, 0).err()
+                    }),
+                    false => None,
+                };
+                if let Some(text) = &wide {
+                    dialog::warn(ui, text.as_str());
+                } else if transcribing {
                     match kept {
                         0 => {}
                         _ if again => {
@@ -1256,7 +1264,8 @@ impl Workspace {
                         (false, _) => "Create",
                     };
                     let can = (transcribing || !heard.is_empty())
-                        && (instant || ready.key[index(s.model)]);
+                        && (instant || ready.key[index(s.model)])
+                        && wide.is_none();
                     create = dialog::main_button(ui, label, can);
                     cancel = ui.button("Cancel").clicked();
                 });
