@@ -6,7 +6,7 @@
 - vidcut mixes NVIDIA's frames on the GPU (`cuda/mix.rs`).
 - The CPU draws a wipe that skips the CUDA mix.
 - Each GPU below needs a mix with the sums of `export::mix`.
-- Compare each mix with the CPU's pictures (`tests/dissolves.rs`).
+- Compare each mix with the CPU's pictures.
 
 The GPUs:
 

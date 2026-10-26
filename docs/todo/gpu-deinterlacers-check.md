@@ -8,9 +8,9 @@
 2. Remove its call in `Deinterlacer::takes`.
 3. Remove the gotcha.
 
-Then NVDEC's and Vulkan's interlaced frames deinterlace on the GPU. With the frames in GPU memory, these tests must still find each row within a level of the CPU's row:
+Then NVDEC's and Vulkan's interlaced frames deinterlace on the GPU. Check that each row stays within a level of the CPU's row:
 
-- `tests/interlaced_gpu.rs`.
-- The interlaced ProRes test in `tests/vulkan_prores.rs`.
+- for interlaced footage that NVDEC decodes,
+- for interlaced ProRes that Vulkan decodes.
 
 `hw::GpuGraph` stays. It works around a different FFmpeg bug, which is not reported upstream: FFmpeg's Vulkan filters keep frames without their frames context.
