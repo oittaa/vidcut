@@ -1,4 +1,4 @@
-use super::gpu::Gpu;
+use crate::compute::Gpu;
 
 pub(super) const TILE: u32 = 128;
 const DISPATCH: u64 = 150_000_000_000;

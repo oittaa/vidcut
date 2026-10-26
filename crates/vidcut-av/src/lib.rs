@@ -25,6 +25,7 @@ pub mod isolate;
 pub mod light;
 pub mod macos;
 pub mod models;
+pub(crate) mod npy;
 pub mod parts;
 pub mod player;
 pub mod pool;
@@ -40,6 +41,7 @@ pub mod transcribe;
 pub(crate) mod turns;
 pub mod upscale;
 pub mod waveform;
+pub(crate) mod weights;
 
 pub use error::{Error, Result};
 

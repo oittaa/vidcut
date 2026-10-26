@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 
-fn bad(path: &Path, what: impl std::fmt::Display) -> Error {
+fn bad(path: &Path, title: &str, what: impl std::fmt::Display) -> Error {
     Error::Invalid(format!(
-        "{}: not the weights of FlashVSR+ Turbo ({what})",
+        "{}: not the weights of {title} ({what})",
         path.display()
     ))
 }
@@ -18,26 +18,29 @@ struct Entry {
     end: u64,
 }
 
-pub(super) struct Safetensors {
+pub(crate) struct Safetensors {
     path: PathBuf,
+    title: &'static str,
     file: std::fs::File,
     base: u64,
     tensors: HashMap<String, Entry>,
 }
 
 impl Safetensors {
-    pub(super) fn open(path: &Path) -> Result<Self> {
+    pub(crate) fn open(path: &Path, title: &'static str) -> Result<Self> {
+        let bad = |what: &str| bad(path, title, what);
         let mut file = std::fs::File::open(path)?;
         let mut len = [0u8; 8];
         file.read_exact(&mut len)?;
         let len = u64::from_le_bytes(len);
         if len > 100_000_000 {
-            return Err(bad(path, "header"));
+            return Err(bad("header"));
         }
         let mut header = vec![0u8; len as usize];
         file.read_exact(&mut header)?;
-        let json: serde_json::Value = serde_json::from_slice(&header).map_err(|e| bad(path, e))?;
-        let map = json.as_object().ok_or_else(|| bad(path, "header"))?;
+        let json: serde_json::Value =
+            serde_json::from_slice(&header).map_err(|e| bad(&e.to_string()))?;
+        let map = json.as_object().ok_or_else(|| bad("header"))?;
         let mut tensors = HashMap::new();
         for (name, v) in map {
             if name == "__metadata__" {
@@ -47,16 +50,14 @@ impl Safetensors {
             let shape = v["shape"]
                 .as_array()
                 .map(|a| a.iter().filter_map(|d| d.as_u64()).map(|d| d as usize))
-                .ok_or_else(|| bad(path, name))?
+                .ok_or_else(|| bad(name))?
                 .collect();
-            let offsets = v["data_offsets"]
-                .as_array()
-                .ok_or_else(|| bad(path, name))?;
+            let offsets = v["data_offsets"].as_array().ok_or_else(|| bad(name))?;
             let (Some(start), Some(end)) = (
                 offsets.first().and_then(|o| o.as_u64()),
                 offsets.get(1).and_then(|o| o.as_u64()),
             ) else {
-                return Err(bad(path, name));
+                return Err(bad(name));
             };
             tensors.insert(
                 name.clone(),
@@ -70,20 +71,21 @@ impl Safetensors {
         }
         Ok(Self {
             path: path.to_path_buf(),
+            title,
             file,
             base: 8 + len,
             tensors,
         })
     }
 
-    pub(super) fn floats(&mut self, name: &str, shape: &[usize]) -> Result<Vec<f32>> {
+    pub(crate) fn floats(&mut self, name: &str, shape: &[usize]) -> Result<Vec<f32>> {
         let e = self
             .tensors
             .get(name)
-            .ok_or_else(|| bad(&self.path, name))?;
+            .ok_or_else(|| bad(&self.path, self.title, name))?;
         let count: usize = shape.iter().product();
         if e.dtype != "F32" || e.shape != shape || e.end - e.start != count as u64 * 4 {
-            return Err(bad(&self.path, name));
+            return Err(bad(&self.path, self.title, name));
         }
         self.file.seek(SeekFrom::Start(self.base + e.start))?;
         let mut raw = vec![0u8; count * 4];
@@ -349,34 +351,39 @@ fn unpickle(data: &[u8]) -> std::result::Result<Value, String> {
                 };
                 entries.push((k, v));
             }
+            b'b' => {
+                pop(&mut stack)?;
+            }
             b'.' => return pop(&mut stack),
             other => return Err(format!("pickle opcode {other:#04x}")),
         }
     }
 }
 
-pub(super) struct Torch {
+pub(crate) struct Torch {
     path: PathBuf,
+    title: &'static str,
     tensors: HashMap<String, Tensor>,
     storages: HashMap<String, Vec<u8>>,
 }
 
 impl Torch {
-    pub(super) fn open(path: &Path) -> Result<Self> {
+    pub(crate) fn open(path: &Path, title: &'static str) -> Result<Self> {
+        let bad = |what: &dyn std::fmt::Display| bad(path, title, what);
         let file = std::fs::File::open(path)?;
-        let mut zip = zip::ZipArchive::new(file).map_err(|e| bad(path, e))?;
+        let mut zip = zip::ZipArchive::new(file).map_err(|e| bad(&e))?;
         let pkl = zip
             .file_names()
             .filter_map(|n| n.ok())
             .find(|n| n.ends_with("data.pkl"))
             .map(|n| n.to_string())
-            .ok_or_else(|| bad(path, "no data.pkl"))?;
+            .ok_or_else(|| bad(&"no data.pkl"))?;
         let prefix = pkl.trim_end_matches("data.pkl").to_string();
         let mut data = Vec::new();
         zip.by_name(&pkl)
-            .map_err(|e| bad(path, e))?
+            .map_err(|e| bad(&e))?
             .read_to_end(&mut data)?;
-        let value = unpickle(&data).map_err(|e| bad(path, e))?;
+        let value = unpickle(&data).map_err(|e| bad(&e))?;
         let tensors: HashMap<String, Tensor> = match value {
             Value::Tensor(t) => [(String::new(), t)].into(),
             Value::Dict(entries) => entries
@@ -386,7 +393,7 @@ impl Torch {
                     _ => None,
                 })
                 .collect(),
-            _ => return Err(bad(path, "no tensors")),
+            _ => return Err(bad(&"no tensors")),
         };
         let mut storages = HashMap::new();
         for t in tensors.values() {
@@ -395,22 +402,23 @@ impl Torch {
             }
             let mut bytes = Vec::new();
             zip.by_name(&format!("{prefix}data/{}", t.storage))
-                .map_err(|e| bad(path, e))?
+                .map_err(|e| bad(&e))?
                 .read_to_end(&mut bytes)?;
             storages.insert(t.storage.clone(), bytes);
         }
         Ok(Self {
             path: path.to_path_buf(),
+            title,
             tensors,
             storages,
         })
     }
 
-    pub(super) fn floats(&self, name: &str, shape: &[usize]) -> Result<Vec<f32>> {
+    pub(crate) fn floats(&self, name: &str, shape: &[usize]) -> Result<Vec<f32>> {
         let t = self
             .tensors
             .get(name)
-            .ok_or_else(|| bad(&self.path, name))?;
+            .ok_or_else(|| bad(&self.path, self.title, name))?;
         let mut packed = vec![0usize; shape.len()];
         let mut step = 1;
         for (i, d) in shape.iter().enumerate().rev() {
@@ -418,14 +426,14 @@ impl Torch {
             step *= d;
         }
         if t.shape != shape || t.stride != packed {
-            return Err(bad(&self.path, name));
+            return Err(bad(&self.path, self.title, name));
         }
         let size = t.dtype.size();
         let bytes = &self.storages[&t.storage];
         let from = t.offset * size;
         let raw = bytes
             .get(from..from + step * size)
-            .ok_or_else(|| bad(&self.path, name))?;
+            .ok_or_else(|| bad(&self.path, self.title, name))?;
         Ok(match t.dtype {
             Dtype::F32 => raw
                 .as_chunks::<4>()
