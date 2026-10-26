@@ -3,8 +3,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vidcut_core::model::{
-    ColorSpace, CompositeMode, Hdr, ScaleFactor, Sharpness, SubtitleStyle, SuperScale, Title,
-    Upscaler,
+    ColorSpace, CompositeMode, Hdr, Retime, ScaleFactor, Sharpness, SubtitleStyle, SuperScale,
+    Title, Upscaler,
 };
 use vidcut_core::place::Placing;
 use vidcut_core::render::{Image, Placed, Ramp, ShownTitle, VideoPiece, WHOLE, Wipe};
@@ -74,6 +74,8 @@ pub(crate) fn frame_ref(src: &frame::Video) -> Result<frame::Video> {
     Ok(dst)
 }
 
+type Rgb = (Option<i64>, (u32, u32), Vec<u8>);
+
 struct Source {
     reader: VideoReader,
     tick: f64,
@@ -81,6 +83,10 @@ struct Source {
     source_frame: i64,
     target: f64,
     current: Option<(frame::Video, f64)>,
+    prev: Option<(frame::Video, f64)>,
+    retime: Retime,
+    retimer: Option<crate::interpolate::User>,
+    rgb: Vec<Rgb>,
     dynamic: frame::Video,
     meter: Option<crate::light::Meter>,
     light: Option<crate::light::FrameLight>,
@@ -184,6 +190,10 @@ impl Source {
             source_frame,
             target,
             current: None,
+            prev: None,
+            retime: Retime::Nearest,
+            retimer: None,
+            rgb: Vec::new(),
             dynamic: frame::Video::empty(),
             meter: measure.then(crate::light::Meter::new),
             light: None,
@@ -240,6 +250,10 @@ impl Source {
             source_frame: 0,
             target: 0.0,
             current: None,
+            prev: None,
+            retime: Retime::Nearest,
+            retimer: None,
+            rgb: Vec::new(),
             dynamic: frame::Video::empty(),
             meter: measure.then(crate::light::Meter::new),
             light: None,
@@ -265,6 +279,7 @@ impl Source {
         self.queued.clear();
         self.target = target;
         self.current = None;
+        self.prev = None;
         self.light = None;
         self.normalized = None;
         Ok(())
@@ -302,6 +317,9 @@ impl Source {
                         dolby_vision: true,
                     };
                     crate::hdr::copy_dynamic(&f, &mut self.dynamic, all)?;
+                    if !self.retime.is_nearest() {
+                        self.prev = self.current.take();
+                    }
                     self.current = Some((f, t));
                     self.light = None;
                     changed = true;
@@ -373,6 +391,8 @@ impl Source {
         }
         self.run = None;
         self.ai = None;
+        self.retimer = None;
+        self.rgb.clear();
     }
 
     fn back(&mut self) {
@@ -380,6 +400,44 @@ impl Source {
         if self.ai.is_none() {
             self.ai = crate::ai::User::of(self.scale);
         }
+        if self.retimer.is_none() {
+            self.retimer = crate::interpolate::User::of(self.retime);
+        }
+    }
+
+    fn set_retime(&mut self, retime: Retime) {
+        if self.retime == retime {
+            return;
+        }
+        self.retime = retime;
+        self.retimer = crate::interpolate::User::of(retime);
+        self.prev = None;
+        self.rgb.clear();
+    }
+
+    fn rgb_of(
+        &mut self,
+        prev: bool,
+        size: (u32, u32),
+        reading: Reading,
+    ) -> Result<(Option<i64>, Vec<u8>)> {
+        let rotation = self.reader.rotation();
+        let (f, _) = match prev {
+            true => self.prev.as_ref(),
+            false => self.current.as_ref(),
+        }
+        .expect("a frame");
+        let pts = f.pts();
+        if let Some((_, _, rgb)) = self.rgb.iter().find(|(p, s, _)| *p == pts && *s == size) {
+            return Ok((pts, rgb.clone()));
+        }
+        let rgb = shown_rgb(f, rotation, size, reading)?;
+        self.rgb.retain(|(p, s, _)| *s == size && *p != pts);
+        if self.rgb.len() >= 2 {
+            self.rgb.remove(0);
+        }
+        self.rgb.push((pts, size, rgb.clone()));
+        Ok((pts, rgb))
     }
 
     fn resume(&mut self, origin: f64, source_frame: i64, target: f64) -> Result<()> {
@@ -925,6 +983,28 @@ impl Source {
         }
         run.missed.push(in_memory(f)?);
         Ok(())
+    }
+}
+
+fn between_size(f: &frame::Video, rotation: u16, aim: (u32, u32)) -> (u32, u32) {
+    let shown = super::normalize::shown_size(f, rotation, aim);
+    let sar = f.aspect_ratio();
+    let across = if sar.numerator() > 0 && sar.denominator() > 0 {
+        f64::from(sar.numerator()) / f64::from(sar.denominator())
+    } else {
+        1.0
+    };
+    let (dw, dh) = (f64::from(f.width()) * across, f64::from(f.height()));
+    let (dw, dh) = if rotation % 180 == 90 {
+        (dh, dw)
+    } else {
+        (dw, dh)
+    };
+    let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
+    if f64::from(shown.0) > dw + 0.5 || f64::from(shown.1) > dh + 0.5 {
+        (even(dw), even(dh))
+    } else {
+        (even(f64::from(shown.0)), even(f64::from(shown.1)))
     }
 }
 
@@ -1727,6 +1807,7 @@ impl VideoFrames {
                     image,
                     pace,
                     placed,
+                    retime,
                     ..
                 } = layer
                 else {
@@ -1772,6 +1853,8 @@ impl VideoFrames {
                 };
                 let mut frame = if backward {
                     self.reversed_frame(i, s, layer, k)?
+                } else if !retime.is_nearest() && !still && pace.speed > 0.0 {
+                    self.retimed_frame(i, s, layer, k)?
                 } else {
                     self.source_frame(i, s, layer, k)?
                 };
@@ -2084,6 +2167,7 @@ impl VideoFrames {
                 pace,
                 color_space,
                 super_scale,
+                retime,
                 ..
             } = layer
             else {
@@ -2151,6 +2235,7 @@ impl VideoFrames {
                 }
             };
             taken[s] = true;
+            self.open[s].set_retime(*retime);
             if !(pace.speed < 0.0 && !still) {
                 self.open[s].reversed.clear();
             }
@@ -2389,6 +2474,95 @@ impl VideoFrames {
         layer: &VideoPiece,
     ) -> Result<frame::Video> {
         let fps = self.fps;
+        let src = &mut self.open[s];
+        let changed = src.advance(target(fps, src.origin, pos))?;
+        self.shown(i, s, layer, changed)
+    }
+
+    fn retimed_frame(
+        &mut self,
+        i: usize,
+        s: usize,
+        layer: &VideoPiece,
+        k: i64,
+    ) -> Result<frame::Video> {
+        let VideoPiece::Source {
+            placed,
+            super_scale,
+            retime,
+            ..
+        } = layer
+        else {
+            return self.source_frame(i, s, layer, k);
+        };
+        let fps = self.fps;
+        let first = self.open[s].source_frame;
+        let exact = first as f64 + (layer.exact(k) - layer.position(0) as f64);
+        let src = &mut self.open[s];
+        let at = src.origin + exact * fps.frames_to_secs(1);
+        let mut changed = src.advance(at)?;
+        let later = src.current.as_ref().is_some_and(|(_, t)| *t > at + 1e-6);
+        if later && src.prev.is_none() {
+            src.seek((at - 1.0).max(0.0))?;
+            src.advance(at)?;
+            changed = true;
+        }
+        let weight = match (&src.prev, &src.current) {
+            (Some((_, tp)), Some((_, tc))) if *tc > at + 1e-6 && *tp <= at && tc > tp => {
+                Some((at - tp) / (tc - tp))
+            }
+            _ => None,
+        };
+        let Some(weight) = weight.filter(|w| *w > 1e-6) else {
+            return self.shown(i, s, layer, changed);
+        };
+        let decoded = matches!(self.maker.output(), Output::Decoded { .. });
+        let up = (!self.maker.mixing() || self.gpu_mixes()) && placed.is_empty();
+        let (w, h, _) = self.maker.out();
+        let reading = self.open[s].pictures.reading(self.maker.reading());
+        let src = &mut self.open[s];
+        let rotation = src.reader.rotation();
+        let (cur, _) = src.current.as_ref().expect("a frame");
+        let wanted = (!(placed.is_empty() || decoded))
+            .then(|| layer_size((w, h), cur, rotation, placed, super_scale.factor));
+        let size = between_size(cur, rotation, wanted.unwrap_or((w, h)));
+        let (pa, a) = src.rgb_of(true, size, reading)?;
+        let (pb, b) = src.rgb_of(false, size, reading)?;
+        let key = (
+            src.reader.path().to_path_buf(),
+            pa.unwrap_or(0),
+            pb.unwrap_or(0),
+        );
+        let clock = Instant::now();
+        let rgb = crate::interpolate::between(*retime, &key, &a, &b, size, weight)?;
+        crate::debug!(
+            "interpolate",
+            "{}: {}x{} at {weight:.3} in {:.1} ms",
+            retime.title(),
+            size.0,
+            size.1,
+            clock.elapsed().as_secs_f64() * 1e3
+        );
+        let big = big_picture(&rgb, size, pb);
+        self.maker.size_layer(i, wanted);
+        self.maker.sharpen_layer(i, sharpness(*super_scale));
+        let src = &mut self.open[s];
+        let made = self
+            .maker
+            .make_layer(i, &mut src.fitting, &big, 0, src.reader.path(), reading)?
+            .ok_or_else(no_picture)?;
+        src.normalized = None;
+        src.upright = true;
+        self.finished_layer(s, up, made)
+    }
+
+    fn shown(
+        &mut self,
+        i: usize,
+        s: usize,
+        layer: &VideoPiece,
+        changed: bool,
+    ) -> Result<frame::Video> {
         let (placed, super_scale) = match layer {
             VideoPiece::Source {
                 placed,
@@ -2400,7 +2574,6 @@ impl VideoFrames {
         let decoded = matches!(self.maker.output(), Output::Decoded { .. });
         let up = (!self.maker.mixing() || self.gpu_mixes()) && placed.is_empty();
         let src = &mut self.open[s];
-        let changed = src.advance(target(fps, src.origin, pos))?;
         let (w, h, _) = self.maker.out();
         let wanted = match (&src.current, placed.is_empty() || decoded) {
             (Some((f, _)), false) => Some(layer_size(
@@ -2472,6 +2645,16 @@ impl VideoFrames {
             }
         }
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
+        self.finished_layer(s, up, picture)
+    }
+
+    fn finished_layer(
+        &mut self,
+        s: usize,
+        up: bool,
+        picture: frame::Video,
+    ) -> Result<frame::Video> {
+        let src = &mut self.open[s];
         let mut out = match self.maker.output() {
             Output::Cuda { frames, .. } if up && Place::of(&picture) == Place::Memory => {
                 frames.upload(&picture)?

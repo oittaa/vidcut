@@ -21,6 +21,7 @@ pub mod flashvsr;
 pub mod gpus;
 pub mod hdr;
 pub mod hw;
+pub mod interpolate;
 pub mod isolate;
 pub mod light;
 pub mod macos;

@@ -425,7 +425,11 @@ impl Torch {
             packed[i] = step;
             step *= d;
         }
-        if t.shape != shape || t.stride != packed {
+        let packed_as = shape
+            .iter()
+            .zip(t.stride.iter().zip(&packed))
+            .all(|(d, (s, p))| *d == 1 || s == p);
+        if t.shape != shape || !packed_as {
             return Err(bad(&self.path, self.title, name));
         }
         let size = t.dtype.size();

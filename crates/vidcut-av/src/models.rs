@@ -128,6 +128,17 @@ pub fn inspect(
                 loaded: Some("vidcut, on the GPU"),
             })
         }
+        id if crate::interpolate::of(id).is_some() => {
+            crate::interpolate::inspect(
+                dir,
+                crate::interpolate::of(id).expect("listed"),
+                download,
+            )?;
+            Ok(Inspected {
+                found,
+                loaded: Some("vidcut, on the GPU"),
+            })
+        }
         _ => Err(Error::Invalid(format!(
             "vidcut has no check for {}",
             model.title

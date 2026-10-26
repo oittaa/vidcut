@@ -537,6 +537,13 @@ pub fn export_media(
         params.download,
     )
     .map_err(|e| export::av_error(&e, ErrorCode::Export, String::new()))?;
+    vidcut_av::interpolate::check(
+        p,
+        prepared.outputs.iter().map(|o| &o.plan),
+        &crate::paths::models_dir(),
+        params.download,
+    )
+    .map_err(|e| export::av_error(&e, ErrorCode::Export, String::new()))?;
     if prepared.settings.audio.is_some() {
         let env = AvEnv::for_project(path);
         for o in &mut prepared.outputs {

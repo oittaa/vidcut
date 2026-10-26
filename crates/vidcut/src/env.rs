@@ -329,6 +329,10 @@ impl Env for AvEnv {
         vidcut_av::ai::get_ready(&paths::models_dir(), upscaler, download).map_err(av_error)
     }
 
+    fn interpolator(&self, retime: vidcut_core::model::Retime, download: bool) -> Result<()> {
+        vidcut_av::interpolate::get_ready(&paths::models_dir(), retime, download).map_err(av_error)
+    }
+
     fn voice_activity(
         &self,
         media: &Media,

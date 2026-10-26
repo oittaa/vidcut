@@ -748,7 +748,64 @@ pub static FLASHVSR: Model = Model {
     price: None,
 };
 
-pub static ALL: [&Model; 11] = [
+pub const RIFE_WEIGHTS: File = File {
+    name: "rife-4.25/flownet.pkl",
+    title: "RIFE 4.25 frame interpolation",
+    url: "https://huggingface.co/Upsampler/rife-4-25/resolve/f0fcc3b4c1d3a536baef3b496a235b7128a497c6/flownet.pkl",
+    bytes: 24_636_301,
+    sha256: "6615790efd627772917205db291f51cd392528a157ecbb2ecaeec3bff8eb6de2",
+};
+
+pub static RIFE: Model = Model {
+    id: "rife",
+    times: None,
+    title: "RIFE 4.25",
+    files: &[RIFE_WEIGHTS],
+    service: None,
+    languages: &[],
+    limits: &[limit(Measure::HdrPictures, 0.0, Kind::Hard, Source::Vidcut)],
+    price: None,
+};
+
+pub const EMA_VFI_WEIGHTS: File = File {
+    name: "ema-vfi/ours_t.pkl",
+    title: "EMA-VFI frame interpolation",
+    url: "https://huggingface.co/xmanifold/emavfi/resolve/f851d08d1f995fc1bbbdd0cba3752ec80a97529b/ours_t.pkl",
+    bytes: 263_760_209,
+    sha256: "c09e82d193e303d7b91f1e36bf535886b820cb56105574355211d60a6b557a99",
+};
+
+pub static EMA_VFI: Model = Model {
+    id: "ema-vfi",
+    times: None,
+    title: "EMA-VFI",
+    files: &[EMA_VFI_WEIGHTS],
+    service: None,
+    languages: &[],
+    limits: &[limit(Measure::HdrPictures, 0.0, Kind::Hard, Source::Vidcut)],
+    price: None,
+};
+
+pub const VFIMAMBA_WEIGHTS: File = File {
+    name: "vfimamba/VFIMamba.pkl",
+    title: "VFIMamba frame interpolation",
+    url: "https://huggingface.co/MCG-NJU/VFIMamba_ckpts/resolve/7c383874883191d240bcc9435590eecc573f1055/ckpt/VFIMamba.pkl",
+    bytes: 264_414_373,
+    sha256: "c1dac5b08f4c41e95452f7a41b35347409fc58b0e25b3ba8de899144ff28a350",
+};
+
+pub static VFIMAMBA: Model = Model {
+    id: "vfimamba",
+    times: None,
+    title: "VFIMamba",
+    files: &[VFIMAMBA_WEIGHTS],
+    service: None,
+    languages: &[],
+    limits: &[limit(Measure::HdrPictures, 0.0, Kind::Hard, Source::Vidcut)],
+    price: None,
+};
+
+pub static ALL: [&Model; 14] = [
     &PARAKEET_ULTRA,
     &QWEN3_ASR,
     &WHISPER_LARGE_V3,
@@ -760,6 +817,9 @@ pub static ALL: [&Model; 11] = [
     &DPDFNET,
     &NANOVSR,
     &FLASHVSR,
+    &RIFE,
+    &EMA_VFI,
+    &VFIMAMBA,
 ];
 
 pub fn speech(model: SpeechModel) -> &'static Model {
