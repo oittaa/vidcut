@@ -1974,10 +1974,15 @@ impl Workspace {
                     return;
                 };
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(name(&p, first)).strong());
-                    if chosen.len() > 1 {
-                        ui.label(dim(format!("{} clips selected", chosen.len())));
-                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if chosen.len() > 1 {
+                            ui.label(dim(format!("{} clips selected", chosen.len())));
+                        }
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            let text = RichText::new(name(&p, first)).strong();
+                            ui.add(egui::Label::new(text).truncate());
+                        });
+                    });
                 });
                 if !chosen.is_empty() {
                     let boxes = self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom);
