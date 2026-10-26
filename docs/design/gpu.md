@@ -212,6 +212,10 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - Stats for Nerds and Preferences show the smaller budget while a loan holds.
   - A loan is only for the GPU of the viewer (`gpus::in_use`). An AI upscaler on another GPU takes no pictures.
   - Why: the AI work and the kept pictures must fit on the GPU together. Otherwise the driver moves GPU memory to main memory, and one picture can take minutes.
+  - AI Best also borrows main memory for its caches in main memory (`player::lend_memory`).
+    - Each loan (`store::LentMemory`) makes the main-memory budget of the kept pictures smaller by the size of those caches. The oldest pictures go first.
+    - The stream renews its loan when `Stream::fit` moves a cache to main memory. The loan ends with the stream.
+    - Why: the AI caches and the kept pictures must fit in main memory together.
 - **AI Fast** (`upscale`):
   - Before an export starts, `upscale::check` refuses media that AI Fast cannot take (`upscale::unfit`). It also refuses AI Fast without the weights or without a GPU that can run it.
   - A run is a chunk of 15 frames (`upscale::FRAMES`). The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
@@ -269,7 +273,15 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - The KV cache of each block is a ring of windows (`Cache`).
     - `run::plan` keeps the caches on the GPU while all of the work fits in the room of AI work (`player::room_on`). The caches of the other blocks stay in main memory between chunks (`Keys::Host`). Each comes back to the GPU just before its block runs, and its new windows go back after it.
       - The new windows go to a mapped buffer in the first submission of the block. The block reads them at its end, while the GPU runs its feed-forward part.
+      - A cache comes back through `queue.write_buffer`. wgpu first copies the data into upload buffers. With resizable BAR, these buffers are in GPU memory.
+      - Thus the plan counts the upload buffers of one cache, in addition to the GPU buffers that the cache comes back into.
+      - A block with a cache in main memory first waits for the upload of the block before it. Thus the upload buffers of only one cache are in use at a time.
+    - Before each chunk, `Stream::fit` measures the room again. When the work of the chunk and its uploads do not fit, more caches go to main memory, from the last block back.
+      - Why: other work takes GPU memory after the plan. An example is the encoder, which opens after the first frames.
     - The results are the same in both places.
+    - The device of AI Best uses the `MemoryUsage` hint of wgpu. Its memory blocks are small, so the free parts of the blocks stay small.
+      - Why: the plan can fill the room. With larger blocks, the free parts of the blocks went past the room by gigabytes at 4K output.
+      - On Windows, the driver then moves GPU memory to main memory. On Linux, the allocation fails.
     - Without a room, all caches stay on the GPU. This occurs when the system gives neither the GPU's free memory nor its size.
     - A size that does not fit even with every cache in main memory is refused. So is a size whose caches need more than half of main memory.
     - The TC decoder gives 4 frames for each latent frame. Its memory blocks keep the features of the previous frame. Its full-size stage runs in bands of 64 rows.

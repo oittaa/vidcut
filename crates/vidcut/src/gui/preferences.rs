@@ -714,6 +714,14 @@ fn memory(
                     Some(0) | None => video_auto,
                     Some(mb) => mb,
                 };
+                let viewer_set = match player["memory_mb"].as_u64() {
+                    Some(0) | None => auto_mb,
+                    Some(mb) => mb,
+                };
+                let viewer_about = state["player_memory_lent_mb"]
+                    .as_u64()
+                    .filter(|&mb| mb < viewer_set)
+                    .map(|mb| format!("{} GB now, while AI Super Scale works", about_gb(mb)));
                 let video_about = if gpu_decodes {
                     state["player_video_memory_lent_mb"]
                         .as_u64()
@@ -728,7 +736,7 @@ fn memory(
                         "Viewer Pictures",
                         &mut ui_state.player_memory,
                         viewer,
-                        None,
+                        viewer_about,
                     ),
                     (
                         "video_memory_mb",

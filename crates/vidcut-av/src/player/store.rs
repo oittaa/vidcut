@@ -62,6 +62,7 @@ struct Inner {
     loans: u64,
     cap: Option<usize>,
     lent_need: usize,
+    memory_lent: usize,
 }
 
 struct Loan {
@@ -110,6 +111,28 @@ pub(crate) fn lend(need: usize, room: usize) -> Lent {
 
 pub(crate) fn lent_cap() -> Option<usize> {
     GLOBAL.lock().cap
+}
+
+pub(crate) struct LentMemory(usize);
+
+impl Drop for LentMemory {
+    fn drop(&mut self) {
+        GLOBAL.lock().memory_lent -= self.0;
+    }
+}
+
+pub(crate) fn lend_memory(bytes: usize) -> LentMemory {
+    let mut inner = GLOBAL.lock();
+    inner.memory_lent += bytes;
+    let down = inner.evict(Kind::Memory, None);
+    drop(inner);
+    GLOBAL.bring_down(down, None);
+    LentMemory(bytes)
+}
+
+pub(crate) fn memory_cap() -> Option<usize> {
+    let inner = GLOBAL.lock();
+    (inner.memory_lent > 0).then(|| inner.limit(Kind::Memory))
 }
 
 static GLOBAL: LazyLock<Store> = LazyLock::new(|| Store::new(super::GB, super::GB));
@@ -201,6 +224,7 @@ impl Store {
                 loans: 0,
                 cap: None,
                 lent_need: 0,
+                memory_lent: 0,
             }),
             landed: Condvar::new(),
             down: Picture::copied_down,
@@ -447,7 +471,10 @@ impl Inner {
     }
 
     fn limit(&self, pool: Kind) -> usize {
-        let budget = self.budget[pool.index()];
+        let mut budget = self.budget[pool.index()];
+        if pool == Kind::Memory {
+            budget = budget.saturating_sub(self.memory_lent);
+        }
         if pool != self.pool(Kind::Video) {
             return budget;
         }

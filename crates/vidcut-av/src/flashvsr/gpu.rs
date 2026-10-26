@@ -133,6 +133,7 @@ impl Gpu {
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("vidcut-flashvsr"),
             required_limits: limits,
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
             ..Default::default()
         }))
         .map_err(|e| format!("the GPU did not open for the AI Best upscaler: {e}"))?;
@@ -353,6 +354,16 @@ impl Gpu {
         self.flush();
         self.queue.submit([enc.finish()]);
         self.fetch(&staging, size, None)
+    }
+
+    pub(super) fn wait_for(&self, done: wgpu::SubmissionIndex) -> Result<()> {
+        self.device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(done),
+                timeout: None,
+            })
+            .map_err(gpu_error)?;
+        Ok(())
     }
 
     pub(super) fn wait(&self) -> Result<()> {

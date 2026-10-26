@@ -40,11 +40,15 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
         return Ok(());
     }
     if !download {
+        let one = missing.len() == 1;
         return Err(Error::Missing(format!(
-            "{} isn't on this computer yet: pass download (--download) to download it into {}, \
-             checked against its SHA-256",
+            "{} {} on this computer yet: pass download (--download) to download {} into {}, \
+             {}checked against its SHA-256",
             models::listed(&missing),
-            dir.display()
+            if one { "isn't" } else { "aren't" },
+            if one { "it" } else { "them" },
+            dir.display(),
+            if one { "" } else { "each " }
         )));
     }
     models::network();
