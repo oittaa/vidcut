@@ -21,6 +21,8 @@ pub struct VoiceActivity {
     pub speech: Vec<f32>,
 }
 
+pub const SCENE_SCORE: f64 = 10.0;
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PictureStats {
     pub pts: Vec<f64>,

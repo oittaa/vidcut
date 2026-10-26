@@ -3353,7 +3353,7 @@ fn silence_min() -> TimeSpec {
 }
 
 fn scene_threshold() -> f64 {
-    10.0
+    crate::analysis::SCENE_SCORE
 }
 
 fn black_share() -> f64 {

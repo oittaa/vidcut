@@ -84,6 +84,8 @@ struct Source {
     target: f64,
     current: Option<(frame::Video, f64)>,
     prev: Option<(frame::Video, f64)>,
+    prev2: Option<(frame::Video, f64)>,
+    lumas: Vec<(Option<i64>, Vec<u8>)>,
     retime: Retime,
     retimer: Option<crate::interpolate::User>,
     rgb: Vec<Rgb>,
@@ -191,6 +193,8 @@ impl Source {
             target,
             current: None,
             prev: None,
+            prev2: None,
+            lumas: Vec::new(),
             retime: Retime::Nearest,
             retimer: None,
             rgb: Vec::new(),
@@ -251,6 +255,8 @@ impl Source {
             target: 0.0,
             current: None,
             prev: None,
+            prev2: None,
+            lumas: Vec::new(),
             retime: Retime::Nearest,
             retimer: None,
             rgb: Vec::new(),
@@ -280,6 +286,7 @@ impl Source {
         self.target = target;
         self.current = None;
         self.prev = None;
+        self.prev2 = None;
         self.light = None;
         self.normalized = None;
         Ok(())
@@ -318,6 +325,7 @@ impl Source {
                     };
                     crate::hdr::copy_dynamic(&f, &mut self.dynamic, all)?;
                     if !self.retime.is_nearest() {
+                        self.prev2 = self.prev.take();
                         self.prev = self.current.take();
                     }
                     self.current = Some((f, t));
@@ -412,7 +420,37 @@ impl Source {
         self.retime = retime;
         self.retimer = crate::interpolate::User::of(retime);
         self.prev = None;
+        self.prev2 = None;
         self.rgb.clear();
+        self.lumas.clear();
+    }
+
+    fn luma_of(&mut self, f: &frame::Video) -> Result<Vec<u8>> {
+        let pts = f.pts();
+        if let Some((_, l)) = self.lumas.iter().find(|(p, _)| *p == pts) {
+            return Ok(l.clone());
+        }
+        let l = crate::analysis::small_luma(&mut None, f)?;
+        if self.lumas.len() >= 3 {
+            self.lumas.remove(0);
+        }
+        self.lumas.push((pts, l.clone()));
+        Ok(l)
+    }
+
+    fn cut(&mut self) -> Result<bool> {
+        let (Some((a, _)), Some((b, _))) = (&self.prev, &self.current) else {
+            return Ok(false);
+        };
+        let (a, b) = (frame_ref(a)?, frame_ref(b)?);
+        let z = self.prev2.as_ref().map(|(z, _)| frame_ref(z)).transpose()?;
+        let (la, lb) = (self.luma_of(&a)?, self.luma_of(&b)?);
+        let before = match z {
+            Some(z) => crate::analysis::mafd(&self.luma_of(&z)?, &la),
+            None => 0.0,
+        };
+        let score = crate::analysis::scene_score(crate::analysis::mafd(&la, &lb), before);
+        Ok(f64::from(score) >= vidcut_core::analysis::SCENE_SCORE)
     }
 
     fn rgb_of(
@@ -2534,15 +2572,25 @@ impl VideoFrames {
             pb.unwrap_or(0),
         );
         let clock = Instant::now();
-        let rgb = crate::interpolate::between(*retime, &key, &a, &b, size, weight)?;
-        crate::debug!(
-            "interpolate",
-            "{}: {}x{} at {weight:.3} in {:.1} ms",
-            retime.title(),
-            size.0,
-            size.1,
-            clock.elapsed().as_secs_f64() * 1e3
-        );
+        let rgb = if src.cut()? {
+            crate::debug!(
+                "interpolate",
+                "{}: a cut between the frames at {weight:.3}",
+                retime.title()
+            );
+            if weight < 0.5 { a } else { b }
+        } else {
+            let made = crate::interpolate::between(*retime, &key, &a, &b, size, weight)?;
+            crate::debug!(
+                "interpolate",
+                "{}: {}x{} at {weight:.3} in {:.1} ms",
+                retime.title(),
+                size.0,
+                size.1,
+                clock.elapsed().as_secs_f64() * 1e3
+            );
+            made
+        };
         let big = big_picture(&rgb, size, pb);
         self.maker.size_layer(i, wanted);
         self.maker.sharpen_layer(i, sharpness(*super_scale));
