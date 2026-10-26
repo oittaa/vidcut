@@ -173,7 +173,7 @@ enum State {
     Rife(Box<rife::Pair>),
     Ema(Box<EmaState>),
     Mamba(Box<MambaState>),
-    Blend(View),
+    Blend(View, View),
 }
 
 fn motion_scale((w, h): (u32, u32)) -> f32 {
@@ -418,7 +418,7 @@ impl Engine {
                     o.load(&ua, size, (0, 0), false, &img.frame(0));
                     o.load(&ub, size, (0, 0), false, &img.frame(1));
                 });
-                State::Blend(img)
+                State::Blend(img, tensor(gpu, 1, h, w, 3))
             }
             (_, Some(Net::Rife(net))) => {
                 let scale = if w >= UHD.0 || h >= UHD.1 { 0.5 } else { 1.0 };
@@ -488,10 +488,9 @@ impl Engine {
         let held = self.held.as_ref().expect("held");
         let size = held.size;
         self.submit(|o| match (&held.state, self.loaded(r)) {
-            (State::Blend(img), _) => {
-                let mixed = tensor(o.gpu, 1, size.1, size.0, 3);
-                o.combine(&img.frame(0), &img.frame(1), &mixed, 1.0 - t, t);
-                o.store(&mixed, (0, 0), size, &held.out);
+            (State::Blend(img, mixed), _) => {
+                o.combine(&img.frame(0), &img.frame(1), mixed, 1.0 - t, t);
+                o.store(mixed, (0, 0), size, &held.out);
             }
             (State::Rife(pair), Some(Net::Rife(net))) => {
                 net.frame(o, pair, t);
