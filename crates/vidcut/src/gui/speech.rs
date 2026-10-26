@@ -95,7 +95,7 @@ fn split_list(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn hearing(s: &Settings, params: &mut serde_json::Value, send: bool) {
+fn hearing(s: &Settings, params: &mut serde_json::Value, send: bool, transcribing: bool) {
     params["find"] = json!(s.find);
     if s.find == FindSpeech::Sound && s.sound_db != vidcut_core::transcript::SOUND_DB {
         params["sound_db"] = json!(s.sound_db);
@@ -113,6 +113,7 @@ fn hearing(s: &Settings, params: &mut serde_json::Value, send: bool) {
         SpeechModel::Xai => {
             let xai = XaiOptions {
                 keyterm: split_list(&s.keyterms),
+                multichannel: s.xai.multichannel && transcribing,
                 ..s.xai.clone()
             };
             if xai != XaiOptions::default() {
@@ -955,7 +956,7 @@ impl Workspace {
         if again {
             params["again"] = json!(true);
         }
-        hearing(s, &mut params, go.send);
+        hearing(s, &mut params, go.send, true);
         if go.download {
             params["download"] = json!(true);
         }
@@ -988,7 +989,7 @@ impl Workspace {
         if let Some(l) = &s.language {
             params["language"] = json!(l);
         }
-        hearing(s, &mut params, go.send);
+        hearing(s, &mut params, go.send, false);
         if !s.plain() {
             params["look"] = json!(s.look);
         }
