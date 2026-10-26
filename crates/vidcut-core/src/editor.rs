@@ -1707,7 +1707,8 @@ fn channels_of(asked: &transcript::Asked, m: &Media, stream: u32) -> Result<u16>
     );
     if let Some(o) = verdict.refusals.first() {
         return Err(Error::invalid(format!(
-            "{} has {channels} channels, over the {:.0} that xAI takes with each channel on its own",
+            "{} has {channels} channels, over the {:.0} that xAI takes one by one: untick Each \
+             Separately (multichannel)",
             m.name, o.limit.value
         )));
     }
