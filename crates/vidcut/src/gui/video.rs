@@ -255,7 +255,7 @@ impl Drop for Viewer {
     }
 }
 
-fn kernel(sharp: Option<vidcut_core::model::Sharpness>) -> u32 {
+pub(super) fn kernel(sharp: Option<vidcut_core::model::Sharpness>) -> u32 {
     use vidcut_core::model::Sharpness;
     match sharp {
         None => 0,
